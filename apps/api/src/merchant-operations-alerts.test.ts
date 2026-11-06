@@ -237,6 +237,8 @@ describe("a merchant's projection of its own board", () => {
       "monitor.source",
       "channel.delivery",
       "supervisor.silent",
+      // Only clean-up chores failing: the owner can do nothing about it, and no order is waiting.
+      "service.chores",
       // Each is BOP's to renew or set up, by a tool, before any guest notices.
       "installation.validity",
       "settlement.not_covered",
@@ -273,6 +275,7 @@ describe("a merchant's projection of its own board", () => {
     ];
     const bopOnly = [
       "supervisor.silent",
+      "service.chores",
       "backup.failed",
       "backup.stale",
       "backup.restore_check",
@@ -307,6 +310,17 @@ describe("a merchant's projection of its own board", () => {
       projectOperationsAlertBoard({ ...board(), active: [] }, at, { audience: "Merchant" })
         .checksIncompleteSince,
     ).toBe(null);
+    // The board's own record of when the checks last stopped comes first, also after the raise
+    // (they ran again and stopped again before it cleared); one after the board was written is no
+    // board's.
+    const dated = (since: string) =>
+      projectOperationsAlertBoard({ ...incomplete, checksIncompleteSince: since }, at, {
+        audience: "Merchant",
+      }).checksIncompleteSince;
+    expect(dated("2026-10-15T05:00:00.000Z")).toBe("2026-10-15T05:00:00.000Z");
+    expect(dated("2026-10-15T06:00:00.000Z")).toBe("2026-10-15T06:00:00.000Z");
+    expect(dated("2026-10-15T08:00:01.000Z")).toBe("2026-10-15T05:05:00.000Z");
+    expect(() => dated("five past five")).toThrow("MERCHANT_OPERATIONS_ALERTS_UNAVAILABLE");
     // The board that says it in words keeps saying it.
     const installation = projectOperationsAlertBoard(incomplete, at);
     expect(installation.active.map((item) => item.key)).toEqual(["monitor.source"]);
@@ -417,7 +431,8 @@ describe("a merchant's projection of its own board", () => {
     );
     expect(view.active.map((item) => item.key)).toEqual(["payment.updates"]);
     expect(view.active[0]?.action).toContain("Do not take a second payment");
-    expect(view.checksIncompleteSince).toBe(observedAt);
+    // When the scan first could not run, not when that was raised five minutes later.
+    expect(view.checksIncompleteSince).toBe(new Date(started).toISOString());
   });
   it("still refuses a board that is not one, whatever the audience", () => {
     const value = everything();
@@ -471,22 +486,49 @@ describe('AGENTS.md "Warn before timeouts": what any of the Store\'s staff read'
     transactions: { run: async <T>(work: (tx: unknown) => Promise<T>) => work({ tx: 1 }) },
   } as never;
   const endsAt = "2026-10-16T07:00:00.000Z";
+  const AT = "2026-10-15T08:01:00.000Z";
   it("carries only when ordering stops and who to call", () => {
     const support = { phone: "+14165550100", testOnly: true };
     expect(
-      projectOrderingEndingNotice({ ...board(), orderingEndsAt: endsAt, support }),
+      projectOrderingEndingNotice({ ...board(), orderingEndsAt: endsAt, support }, AT),
     ).toStrictEqual({ endsAt, support });
     // No number set: the notice still says it, with nothing to call.
-    expect(projectOrderingEndingNotice({ ...board(), orderingEndsAt: endsAt })).toStrictEqual({
+    expect(projectOrderingEndingNotice({ ...board(), orderingEndsAt: endsAt }, AT)).toStrictEqual({
       endsAt,
       support: null,
     });
     // Nothing to say: not even who to call.
-    expect(projectOrderingEndingNotice({ ...board(), support })).toStrictEqual({
+    expect(projectOrderingEndingNotice({ ...board(), support }, AT)).toStrictEqual({
       endsAt: null,
       support: null,
     });
-    expect(projectOrderingEndingNotice(null)).toStrictEqual({ endsAt: null, support: null });
+    expect(projectOrderingEndingNotice(null, AT)).toStrictEqual({ endsAt: null, support: null });
+  });
+  it("a board the monitor stopped writing says nothing about ordering ending", () => {
+    // The monitor stopped in ordering's last day, and BOP has renewed since: staff must not be
+    // sent to paper by an old board, before or after the instant it named.
+    const stale = { ...board(), orderingEndsAt: "2026-10-15T07:00:00.000Z" };
+    expect(projectOrderingEndingNotice(stale, "2026-10-15T09:00:00.000Z")).toStrictEqual({
+      endsAt: null,
+      support: null,
+    });
+    expect(
+      projectOrderingEndingNotice(
+        { ...board(), orderingEndsAt: endsAt },
+        "2026-10-15T08:05:01.000Z",
+      ),
+    ).toStrictEqual({ endsAt: null, support: null });
+    // Up to the Home's own Silent limit it still stands.
+    expect(
+      projectOrderingEndingNotice(
+        { ...board(), orderingEndsAt: endsAt },
+        "2026-10-15T08:05:00.000Z",
+      ),
+    ).toStrictEqual({ endsAt, support: null });
+    // A board whose write time is not an instant is no board.
+    expect(() =>
+      projectOrderingEndingNotice({ ...board(), observedAt: "now", orderingEndsAt: endsAt }, AT),
+    ).toThrow("MERCHANT_OPERATIONS_ALERTS_UNAVAILABLE");
   });
   it("refuses a board that is not one", () => {
     for (const bad of [
@@ -496,7 +538,7 @@ describe('AGENTS.md "Warn before timeouts": what any of the Store\'s staff read'
       { schemaVersion: 1, orderingEndsAt: "tomorrow" },
       { schemaVersion: 1, orderingEndsAt: endsAt, support: { phone: "call us", testOnly: false } },
     ])
-      expect(() => projectOrderingEndingNotice(bad)).toThrow(
+      expect(() => projectOrderingEndingNotice(bad, AT)).toThrow(
         "MERCHANT_OPERATIONS_ALERTS_UNAVAILABLE",
       );
   });
@@ -552,6 +594,7 @@ describe('AGENTS.md "Warn before timeouts": what any of the Store\'s staff read'
             backup: null,
             audience: "Merchant",
           }),
+          new Date(now).toISOString(),
         ),
       };
     };

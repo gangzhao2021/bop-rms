@@ -793,13 +793,18 @@ describe("WP-2423 Q13 observations", () => {
           ...change,
         },
       });
-    const before = await read({ readOwnerPublishedSetup: async () => false });
+    const held = vi.fn(async () => ({ openCount: 1, endedCount: 0, oldestAt: null }));
+    const before = await read({
+      readOwnerPublishedSetup: async () => false,
+      readHeldStockOrders: held,
+    });
+    expect(held).not.toHaveBeenCalled();
     expect(before).toMatchObject({
       receiptTemplate: null,
       quoteTax: null,
       pickupCapacity: null,
-      // Stock held by real orders is real before and after opening.
-      heldStock: { count: 1 },
+      // No order can hold stock before opening; earlier days' holds are read once it opens.
+      heldStock: null,
       settlementExceptions: null,
       settlementCovered: false,
       closedBusinessDay: false,
@@ -815,6 +820,7 @@ describe("WP-2423 Q13 observations", () => {
       receiptTemplate: "unreadable",
       quoteTax: "unreadable",
       pickupCapacity: "unreadable",
+      heldStock: "unreadable",
       // Nor a guess that no day has closed: that would clear what BOP was told.
       closedBusinessDay: "unreadable",
     });
@@ -845,6 +851,7 @@ describe("WP-2423 Q13 observations", () => {
     expect(reportCheck.mock.calls).toEqual([["closedDay", refusedDay]]);
     const after = await read({ readOwnerPublishedSetup: async () => true });
     expect(after).toMatchObject({
+      heldStock: { count: 1 },
       receiptTemplate: { ready: false, reason: "TemplateNotProven" },
       pickupCapacity: { coveredMs: 0 },
       closedBusinessDay: true,

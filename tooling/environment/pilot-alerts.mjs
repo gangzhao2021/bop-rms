@@ -319,6 +319,18 @@ export const ALERT_CATALOG = Object.freeze({
       "Some background work has stopped. Check Orders and Exceptions for waiting work; BOP support has to restart it.",
     runbook: "alert-service-attention",
   },
+  // On a Store's board when only its clean-up chores keep failing. BOP's alone: the merchant can do
+  // nothing about it and no order, guest or payment is affected, so it is not on their Home.
+  "service.chores": {
+    severity: "warning",
+    raiseAfterMs: 0,
+    title: () => "A clean-up task keeps failing",
+    summary: (p) =>
+      `${list(p.services)} ${p.services.length === 1 ? "has" : "have"} kept failing and will not fix ${p.services.length === 1 ? "itself" : "themselves"}.`,
+    action: () =>
+      "BOP support: find out why the named task failed and restart it today. Orders, guests and payments are not affected, but customer contacts or old card payment messages are kept past their deletion date until it runs.",
+    runbook: "alert-service-chores",
+  },
   "payment.updates": {
     severity: "critical",
     raiseAfterMs: 0,
@@ -917,7 +929,7 @@ export function uncheckedAlertKeys(observations) {
 
 /** A raised alert stays while the read behind it cannot run: no read is not an all-clear. */
 const HELD_WHILE_UNREADABLE = Object.freeze({
-  supervisor: ["service.attention"],
+  supervisor: ["service.attention", "service.chores"],
   business: [
     "payment.updates",
     "updates.retrying",
@@ -965,9 +977,10 @@ function storeAttention(attention, store) {
   return services.size === 0 ? null : { services: [...services].sort(), sharedHost };
 }
 /**
- * Clean-up chores no guest, cook or server notices while they fail. On a restaurant's Home they
- * are for today, not Urgent: an owner who calls BOP at 8 p.m. about one learns to ignore Urgent.
- * BOP hears them as before.
+ * Clean-up chores no guest, cook or server notices while they fail, and the owner cannot fix. When
+ * they are all that fails they are "service.chores": BOP hears them by name and the root names the
+ * Store, but they are not on the restaurant's Home, where an owner who searched Orders for nothing
+ * and called BOP at lunch would learn to ignore the next background row.
  */
 const STORE_CHORES = new Set(["contactRetention", "webhookEvidenceRetention"]);
 const onlyChores = (services) =>
@@ -1014,7 +1027,7 @@ export function evaluateStoreConditions(observations, thresholds = DEFAULT_THRES
   if (!noReport) {
     const attention = storeAttention(supervisor.attention, observations.store);
     if (attention !== null)
-      raise("service.attention", attention, onlyChores(attention.services) ? "warning" : undefined);
+      raise(onlyChores(attention.services) ? "service.chores" : "service.attention", attention);
   }
   const business = observations.business;
   evaluateBusinessConditions(business, {
@@ -1050,6 +1063,7 @@ export function evaluateStoreConditions(observations, thresholds = DEFAULT_THRES
  */
 const STORE_OUTBOUND_KEYS = new Set([
   "service.attention",
+  "service.chores",
   "payment.updates",
   "updates.retrying",
   "receipts.template",
@@ -1097,7 +1111,10 @@ export function rootOutboundNotifications(notifications) {
  * an Urgent row that fixes itself teaches an owner to ignore Urgent. A sample without it starts the
  * wait again. The root board is read by BOP and raises at once, as it always did.
  */
-export const STORE_RAISE_AFTER_MS = Object.freeze({ "service.attention": 5 * MINUTE });
+export const STORE_RAISE_AFTER_MS = Object.freeze({
+  "service.attention": 5 * MINUTE,
+  "service.chores": 5 * MINUTE,
+});
 
 export const DEFAULT_POLICY = Object.freeze({
   clearAfterMs: 2 * MINUTE,
@@ -1131,6 +1148,7 @@ export const PLANNED_MAINTENANCE_HELD_KEYS = Object.freeze([
   "entry.merchant",
   "supervisor.silent",
   "service.attention",
+  "service.chores",
 ]);
 
 export function advanceAlertState(
@@ -1163,6 +1181,10 @@ export function advanceAlertState(
       notifiedAt: null,
       notifiedSeverity: null,
     };
+    // Since when it has held without a break: a raised alert that went away and came back before
+    // it cleared is still the same alert, but it did not hold in between.
+    if (entry.heldSince === undefined || (entry.absentSince ?? null) !== null)
+      entry.heldSince = stamp;
     entry.severity = condition.severity;
     entry.params = condition.params;
     entry.lastSeenAt = stamp;
@@ -1375,6 +1397,7 @@ export function buildAlertBoard(
   // Store's staff, on their own screens.
   const shown = (key) => audience === "Merchant" || key !== "ordering.ending";
   const ending = state.alerts["ordering.ending"];
+  const incomplete = state.alerts["monitor.source"];
   const active = Object.entries(state.alerts)
     .filter(([key, entry]) => entry.raisedAt !== null && shown(key))
     .map(([key, entry]) => ({
@@ -1414,6 +1437,12 @@ export function buildAlertBoard(
     // staff read this one fact on the screen they work in, never the rest of this board.
     ...(typeof ending?.raisedAt === "string" && typeof ending.params?.endsAt === "string"
       ? { orderingEndsAt: ending.params.endsAt }
+      : {}),
+    // When some checks last stopped running, not when that was raised minutes later: a merchant's
+    // Home dates "last checked" and the rows found before it by this. A state written before this
+    // was recorded gives its first sighting.
+    ...(typeof incomplete?.raisedAt === "string"
+      ? { checksIncompleteSince: incomplete.heldSince ?? incomplete.firstSeenAt }
       : {}),
   };
 }

@@ -18,6 +18,7 @@ export const operationsAlertKeys = Object.freeze([
   "entry.merchant",
   "supervisor.silent",
   "service.attention",
+  "service.chores",
   "payment.updates",
   "updates.retrying",
   "receipts.template",
@@ -187,16 +188,18 @@ export function projectOperationsAlertBoard(
   ];
   // A board written before planned updates existed has no `maintenance` entry; one with no support
   // contact configured has no `support` entry; `orderingEndsAt` is only there in ordering's last day,
-  // for the staff's own read below.
+  // for the staff's own read below; `checksIncompleteSince` only while some checks cannot run.
   const board = record(value, [
     ...boardKeys,
-    ...["maintenance", "support", "orderingEndsAt"].filter(
+    ...["maintenance", "support", "orderingEndsAt", "checksIncompleteSince"].filter(
       (optional) => value !== null && typeof value === "object" && Object.hasOwn(value, optional),
     ),
   ]);
   if (board.schemaVersion !== 1) return unavailable();
   const observedAt = instant(board.observedAt);
   if (board.orderingEndsAt !== undefined) instant(board.orderingEndsAt);
+  const incompleteSince =
+    board.checksIncompleteSince === undefined ? undefined : instant(board.checksIncompleteSince);
   if (!Array.isArray(board.active) || board.active.length > operationsAlertKeys.length)
     return unavailable();
   if (!Array.isArray(board.recentlyCleared) || board.recentlyCleared.length > 10)
@@ -278,8 +281,17 @@ export function projectOperationsAlertBoard(
         }),
     lastSuccessfulBackupAt: merchant ? null : lastSuccessfulBackupAt,
     plannedUpdate: silent ? null : plannedUpdate,
+    // When the checks last stopped running (after the raise, when they ran again in between and
+    // stopped again before it cleared); a board written before it said so gives the raise.
     checksIncompleteSince: merchant
-      ? (active.find((item) => item.key === "monitor.source")?.raisedAt ?? null)
+      ? (() => {
+          const raised = active.find((item) => item.key === "monitor.source")?.raisedAt;
+          if (raised === undefined) return null;
+          return incompleteSince !== undefined &&
+            Date.parse(incompleteSince) <= Date.parse(observedAt)
+            ? incompleteSince
+            : raised;
+        })()
       : null,
     support,
   });
@@ -296,14 +308,24 @@ export interface OrderingEndingNotice {
 }
 const noOrderingEnding: OrderingEndingNotice = Object.freeze({ endsAt: null, support: null });
 
-export function projectOrderingEndingNotice(value: unknown): OrderingEndingNotice {
+/**
+ * `at` is now. A board the monitor has not rewritten for longer than the Home calls Silent says
+ * nothing about ordering ending: BOP may have renewed since, and "Ordering at this Store has
+ * stopped" would send staff to paper while guests can still order. The Home already says the
+ * checks have gone quiet, to those who handle them.
+ */
+export function projectOrderingEndingNotice(value: unknown, at: string): OrderingEndingNotice {
   if (value === null) return noOrderingEnding;
   if (!value || typeof value !== "object" || Array.isArray(value)) return unavailable();
   const board = value as Record<string, unknown>;
   if (board.schemaVersion !== 1) return unavailable();
   if (board.orderingEndsAt === undefined) return noOrderingEnding;
+  const observedAt = instant(board.observedAt),
+    endsAt = instant(board.orderingEndsAt);
+  if (Date.parse(instant(at)) - Date.parse(observedAt) > operationsAlertMonitorSilentMs)
+    return noOrderingEnding;
   return Object.freeze({
-    endsAt: instant(board.orderingEndsAt),
+    endsAt,
     support: supportOf(board.support),
   });
 }
@@ -386,6 +408,6 @@ export function createPersistentMerchantOrderingEnding(options: {
     } catch {
       return unavailable();
     }
-    return projectOrderingEndingNotice(board);
+    return projectOrderingEndingNotice(board, persistence.now());
   };
 }

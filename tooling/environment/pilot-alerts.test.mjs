@@ -1196,6 +1196,34 @@ describe("a Store's own conditions", () => {
     installation: { validUntil: new Date(T0 + 30 * 86400_000).toISOString() },
     ...change,
   });
+  it("dates the checks that could not run from when they stopped, not from the raise", () => {
+    const channels = { email: false, webhooks: 0, heartbeat: false };
+    const failing = (now) =>
+      store({ now, business: { ...healthy().business, heldStock: "unreadable" } });
+    let state = emptyAlertState();
+    const at = (minute, observations) => {
+      const now = T0 + minute * MIN;
+      ({ state } = advanceAlertState(state, evaluateStoreConditions(observations(now)), now));
+      return buildAlertBoard(state, {
+        observedAt: new Date(now).toISOString(),
+        channels,
+        backup: null,
+        audience: "Merchant",
+      });
+    };
+    for (const minute of [0, 1, 2, 3, 4])
+      expect(at(minute, failing)).not.toHaveProperty("checksIncompleteSince");
+    // Raised at minute 5; the checks stopped at minute 0.
+    expect(at(5, failing).checksIncompleteSince).toBe(new Date(T0).toISOString());
+    // They ran again at minute 6 and stopped again at 7, before the row cleared: from 7.
+    at(6, (now) => store({ now }));
+    const again = at(7, failing);
+    expect(again.active.map((item) => item.key)).toContain("monitor.source");
+    expect(again.checksIncompleteSince).toBe(new Date(T0 + 7 * MIN).toISOString());
+    // Cleared: nothing to date.
+    for (const minute of [8, 9, 10]) at(minute, (now) => store({ now }));
+    expect(at(11, (now) => store({ now }))).not.toHaveProperty("checksIncompleteSince");
+  });
   it("raises nothing about the installation: no backup, certificate, disk or channel", () => {
     expect(keys(evaluateStoreConditions(store()))).toEqual([]);
     // The same observations that the root would raise on.
@@ -1384,24 +1412,49 @@ describe("a Store's own conditions", () => {
     });
     expect(keys(none)).toEqual([]);
   });
-  it("background chores no guest notices are for today on a Store's board, not Urgent", () => {
+  it("background chores the owner cannot fix are BOP's alone, never on the restaurant's Home", () => {
     const flagged = (...attention) =>
       evaluateStoreConditions(
         store({ supervisor: { maintenance: false, reportAgeMs: 1000, attention } }),
-      ).get("service.attention").severity;
-    expect(flagged("stores/tea:business-worker:contactRetention")).toBe("warning");
+      );
+    const only = flagged("stores/tea:business-worker:contactRetention");
+    expect(keys(only)).toEqual(["service.chores"]);
+    expect(only.get("service.chores").severity).toBe("warning");
     expect(
-      flagged(
-        "stores/tea:business-worker:contactRetention",
-        "stores/tea:business-worker:webhookEvidenceRetention",
+      keys(
+        flagged(
+          "stores/tea:business-worker:contactRetention",
+          "stores/tea:business-worker:webhookEvidenceRetention",
+        ),
       ),
-    ).toBe("warning");
-    // Anything guests or staff would notice keeps it Urgent.
-    expect(
-      flagged("stores/tea:business-worker:contactRetention", "stores/tea:business-worker:events"),
-    ).toBe("critical");
-    expect(flagged("stores/tea")).toBe("critical");
-    expect(flagged("store-workers")).toBe("critical");
+    ).toEqual(["service.chores"]);
+    // BOP hears it for that Store, by name.
+    const sent = storeOutboundNotifications(
+      [
+        {
+          id: "c",
+          kind: "raised",
+          key: "service.chores",
+          severity: "warning",
+          params: only.get("service.chores").params,
+          at: "x",
+        },
+      ],
+      "tea",
+    );
+    expect(sent.map((entry) => [entry.key, entry.store])).toEqual([["service.chores", "tea"]]);
+    expect(renderAlert("service.chores", only.get("service.chores").params).summary).toBe(
+      "Order processing (customer contact deletion) has kept failing and will not fix itself.",
+    );
+    // Anything guests or staff would notice is Urgent, and names the chores with it.
+    const mixed = flagged(
+      "stores/tea:business-worker:contactRetention",
+      "stores/tea:business-worker:events",
+    );
+    expect(keys(mixed)).toEqual(["service.attention"]);
+    expect(mixed.get("service.attention").severity).toBe("critical");
+    expect(flagged("stores/tea").get("service.attention").severity).toBe("critical");
+    expect(flagged("store-workers").get("service.attention").severity).toBe("critical");
     // BOP's own board is unchanged.
     expect(
       evaluateAlertConditions({
@@ -1465,6 +1518,7 @@ describe("a Store's own conditions", () => {
       "entry.merchant": { sent: false, stays: false },
       "supervisor.silent": { sent: false, stays: false },
       "service.attention": { sent: true, stays: true },
+      "service.chores": { sent: true, stays: true },
       "payment.updates": { sent: true, stays: true },
       "updates.retrying": { sent: true, stays: true },
       "receipts.template": { sent: true, stays: true },

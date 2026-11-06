@@ -406,9 +406,10 @@ export async function readBusinessSignals({
     }
 
   // WP-2423 (2026-10-16 v15 stock leak): Orders of earlier business days still holding stock.
-  // null when not composed; "unreadable" when the check itself failed.
-  let heldStock = null;
-  if (typeof dependencies.readHeldStockOrders === "function")
+  // null when not composed; "unreadable" when the check itself failed. Before its Owner has opened
+  // a Store has taken no order that could hold stock, and its business day is not set up to read.
+  let heldStock = beforeOpening;
+  if (opened === true && typeof dependencies.readHeldStockOrders === "function")
     try {
       const held = await dependencies.readHeldStockOrders(resources);
       heldStock = {

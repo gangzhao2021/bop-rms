@@ -5934,6 +5934,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Staff screens are not loading": "员工页面打不开",
   "Background services are not being watched": "后台服务无人监控",
   "A background service needs a person": "有后台服务需要人工处理",
+  "A clean-up task keeps failing": "有清理任务一直出错",
   "Order or payment updates are stuck": "订单或付款更新卡住了",
   "Some order updates are being retried": "部分订单更新正在重试",
   "Orders from earlier days are still holding stock": "较早营业日的订单仍占用库存",
@@ -7498,6 +7499,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "继续用店里自己的收银机或纸单点单，用刷卡机收款。请 BOP 技术支持检查门店系统。",
   "Pause online ordering if staff screens still work. Keep taking orders on your own POS or on paper, and take payment on the card machine. Ask BOP support to restart the store system.":
     "如果员工页面还能用，就暂停线上点单。继续用店里自己的收银机或纸单点单，用刷卡机收款。请 BOP 技术支持重启门店系统。",
+  "BOP support: find out why the named task failed and restart it today. Orders, guests and payments are not affected, but customer contacts or old card payment messages are kept past their deletion date until it runs.":
+    "BOP 技术支持：查明出错任务失败的原因，今天内重启。订单、客人和付款不受影响，但在它恢复之前，客人联系方式或旧的刷卡付款消息会超过删除期限仍被保留。",
   "Some background work has stopped. Check Orders and Exceptions for waiting work; BOP support has to restart it.":
     "部分后台工作已停止。请到“订单”和“异常”页查看有没有待处理的工作；需要 BOP 技术支持重启。",
   "Background work": "后台工作",

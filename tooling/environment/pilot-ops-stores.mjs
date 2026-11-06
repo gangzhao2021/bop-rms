@@ -260,7 +260,8 @@ export function createStoreMonitors({
         if (now - (monitor.lastWrittenAt ?? monitor.firstSeenAt) > STORE_BOARD_STALE_MS)
           summary.unchecked.push(name);
         if (monitor.raised.has("monitor.source")) summary.checksFailing.push(name);
-        if (monitor.raised.has("service.attention")) summary.background.push(name);
+        if (monitor.raised.has("service.attention") || monitor.raised.has("service.chores"))
+          summary.background.push(name);
         if (monitor.raised.has("settlement.not_covered")) summary.settlementNotCovered.push(name);
         if (monitor.raised.has("installation.validity")) summary.setupEnding.push(name);
         // Their screens say "Call BOP support": BOP finds out before a merchant does.

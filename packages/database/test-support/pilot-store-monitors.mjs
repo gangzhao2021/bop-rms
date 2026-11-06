@@ -351,9 +351,10 @@ export async function exercisePilotStoreMonitors(context) {
     assert.match(bySummary(await boardOf("first"), "payment.updates"), /^2 updates /u);
 
     // Before its Owner publishes, a merchant on the TEST tool's first configuration is not checked
-    // for receipts, pricing or pickup times: the real gate, under the role, says not opened. Run on
-    // a timeline of its own, well past the 5 minutes "Some checks could not run" takes: without the
-    // gate those reads would run on settings it has not finished, and that row would rise.
+    // for receipts, pricing, pickup times or held stock: the real gate, under the role, says not
+    // opened. Run on a timeline of its own, well past the 5 minutes "Some checks could not run"
+    // takes, beside the merchant with no configuration at all: without the gate those reads would
+    // run on settings and business days not set up yet, and that row would rise at both.
     const openedOf = async (of) =>
       (
         await composeBusinessDependencies({
@@ -363,19 +364,22 @@ export async function exercisePilotStoreMonitors(context) {
         })
       ).readOwnerPublishedSetup(resourcesOf(of));
     assert.equal(await openedOf(unopened), false);
+    assert.equal(await openedOf(never), false);
     assert.equal(await openedOf(second), true);
     assert.equal(await openedOf(first), true);
     const aside = await mkdtemp(path.join(tmpdir(), "store-monitors-unopened-"));
     try {
       await chmod(aside, 0o700);
-      await mkdir(path.join(aside, "stores", "unopened"), { recursive: true, mode: 0o700 });
-      await writeFile(
-        path.join(aside, "stores", "unopened", "internal-test-profile.json"),
-        JSON.stringify({ binding: { validUntil: "2027-11-26T02:26:31.000Z" } }),
-      );
+      for (const name of ["unopened", "never"]) {
+        await mkdir(path.join(aside, "stores", name), { recursive: true, mode: 0o700 });
+        await writeFile(
+          path.join(aside, "stores", name, "internal-test-profile.json"),
+          JSON.stringify({ binding: { validUntil: "2027-11-26T02:26:31.000Z" } }),
+        );
+      }
       await writeFile(
         path.join(aside, "stores.json"),
-        JSON.stringify({ schemaVersion: 1, stores: ["stores/unopened"] }),
+        JSON.stringify({ schemaVersion: 1, stores: ["stores/unopened", "stores/never"] }),
       );
       const alone = createStoreMonitors({
         runtimeDirectory: aside,
@@ -384,7 +388,7 @@ export async function exercisePilotStoreMonitors(context) {
         clock: () => 0,
         load: loadStore,
       });
-      for (let minute = 0; minute <= 6; minute += 1)
+      for (let minute = 0; minute <= 7; minute += 1)
         await alone.run({
           now: T0 + minute * 60_000,
           probes,
@@ -392,12 +396,14 @@ export async function exercisePilotStoreMonitors(context) {
           maintenance: null,
           config: null,
         });
-      const quiet = JSON.parse(
-        await readFile(path.join(aside, "stores", "unopened", "ops", "alert-board.json"), "utf8"),
-      );
-      // What the gate holds back: receipts, pricing and pickup times are neither read nor raised.
-      // (Its stock check runs whatever the gate says; this seed has no live-gate evidence for it.)
-      const gated = ["receipts", "quoteTax", "pickupCapacity"];
+      const boardAside = async (name) =>
+        JSON.parse(
+          await readFile(path.join(aside, "stores", name, "ops", "alert-board.json"), "utf8"),
+        );
+      const quiet = await boardAside("unopened");
+      // What the gate holds back: receipts, pricing, pickup times and held stock are neither read
+      // nor raised.
+      const gated = ["receipts", "quoteTax", "pickupCapacity", "heldStock"];
       assert.deepEqual(
         logs
           .filter((entry) => entry.aside === true && entry.event === "store_check_failed")
@@ -410,6 +416,7 @@ export async function exercisePilotStoreMonitors(context) {
         "receipts.template",
         "pricing.tax_configuration",
         "pickup.capacity_horizon",
+        "orders.held_stock",
       ];
       assert.deepEqual(
         quiet.active.map((item) => item.key).filter((key) => readiness.includes(key)),
@@ -419,8 +426,16 @@ export async function exercisePilotStoreMonitors(context) {
         "the receipt template check",
         "the check that orders can be priced",
         "the check for pickup times",
+        "the check for orders holding stock",
       ])
         assert.ok(!JSON.stringify(quiet.active).includes(source), source);
+      // Past the 5 minutes "Some checks could not run" takes, neither new merchant is told so.
+      for (const name of ["unopened", "never"])
+        assert.deepEqual(
+          (await boardAside(name)).active.map((item) => item.key),
+          [],
+          `${name}: nothing raised before its Owner has opened`,
+        );
     } finally {
       await rm(aside, { recursive: true, force: true });
     }
@@ -502,7 +517,8 @@ export async function exercisePilotStoreMonitors(context) {
     });
     assert.ok(merchantHome.active.some((item) => item.key === "payment.updates"));
     assert.ok(merchantHome.active.every((item) => item.key !== "monitor.source"));
-    assert.notEqual(merchantHome.checksIncompleteSince, null);
+    // "Last checked" is when the scan was first refused (minute 20), not its raise at minute 25.
+    assert.equal(merchantHome.checksIncompleteSince, new Date(T0 + 20 * 60_000).toISOString());
 
     await admin.query(`REVOKE SELECT ON rms_payment.payment_reconciliation_exception FROM ${api}`);
     for (const minute of [31, 32, 33, 34, 35, 36]) await run(T0 + minute * 60_000);
@@ -519,9 +535,11 @@ export async function exercisePilotStoreMonitors(context) {
 
     // What any staff member's screen reads, from the real board and through the real reader: the
     // end of ordering in its last day, and nothing before it.
+    let staffNow = T0 + 36 * 60_000;
     const staffRead = async () =>
       projectOrderingEndingNotice(
         await createPilotAlertBoardReader(path.join(directory, "stores", "second"))(),
+        new Date(staffNow).toISOString(),
       );
     assert.deepEqual(await staffRead(), { endsAt: null, support: null });
     const profileOf = path.join(directory, "stores", "second", "internal-test-profile.json");
@@ -529,12 +547,16 @@ export async function exercisePilotStoreMonitors(context) {
       const validUntil = new Date(T0 + minute * 60_000 + hours * 3600_000).toISOString();
       await writeFile(profileOf, JSON.stringify({ binding: { validUntil } }));
       await run(T0 + minute * 60_000);
+      staffNow = T0 + minute * 60_000 + 30_000;
       return validUntil;
     };
     await endingIn(25, 40);
     assert.deepEqual(await staffRead(), { endsAt: null, support: null });
     const validEnd = await endingIn(23, 41);
     assert.deepEqual(await staffRead(), { endsAt: validEnd, support: null });
+    // The monitor stops after that and BOP renews: an old board never tells staff ordering stopped.
+    staffNow = Date.parse(validEnd) + 60_000;
+    assert.deepEqual(await staffRead(), { endsAt: null, support: null });
   } finally {
     await pool.end().catch(() => undefined);
     await rm(directory, { recursive: true, force: true });

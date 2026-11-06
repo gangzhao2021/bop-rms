@@ -142,6 +142,10 @@ export function alertAction(english: string): string {
       t(
         "Pause online ordering if staff screens still work. Keep taking orders on your own POS or on paper, and take payment on the card machine. Ask BOP support to restart the store system.",
       ),
+    "BOP support: find out why the named task failed and restart it today. Orders, guests and payments are not affected, but customer contacts or old card payment messages are kept past their deletion date until it runs.":
+      t(
+        "BOP support: find out why the named task failed and restart it today. Orders, guests and payments are not affected, but customer contacts or old card payment messages are kept past their deletion date until it runs.",
+      ),
     "Some background work has stopped. Check Orders and Exceptions for waiting work; BOP support has to restart it.":
       t(
         "Some background work has stopped. Check Orders and Exceptions for waiting work; BOP support has to restart it.",

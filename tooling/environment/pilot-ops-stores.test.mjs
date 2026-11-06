@@ -277,22 +277,29 @@ describe("one alert board per served Store", () => {
 });
 
 describe("a new Store must not cry wolf", () => {
-  it("a Store not yet owner-published raises no receipt, pricing or pickup alert", async () => {
+  it("a Store not yet owner-published raises no receipt, pricing, pickup or stock alert", async () => {
+    // Before opening its business day is not set up, so the stock read would fail every minute.
+    const notSetUp = Error("STORE_BUSINESS_DATE_UNAVAILABLE");
     const facts = {
       tea: fact({
         opened: false,
         receipt: { ready: false, reason: "TemplateNotProven" },
         quoteTax: { ready: false, reason: "TaxConfigurationMismatch" },
         pickup: 0,
+        held: notSetUp,
       }),
     };
-    const { directory, cycle } = await monitorsFor(facts);
-    for (const minute of [0, 2, 3, 6]) await cycle(minute);
+    const { directory, cycle, logs, monitors } = await monitorsFor(facts);
+    for (const minute of [0, 2, 3, 6, 7]) await cycle(minute);
     expect((await boardOf(directory, "tea")).active).toEqual([]);
-    // Once it opens, the same facts are real problems.
+    expect(logs.filter((entry) => entry.event === "store_check_failed")).toEqual([]);
+    expect(monitors.pending()).toEqual([]);
+    // Once it opens, the same facts are real problems; earlier days' held stock is read then.
     facts.tea.opened = true;
-    for (const minute of [7, 9]) await cycle(minute);
+    facts.tea.held = { openCount: 1, endedCount: 0, oldestAt: new Date(T0).toISOString() };
+    for (const minute of [8, 10]) await cycle(minute);
     expect(keysOf(await boardOf(directory, "tea"))).toEqual([
+      "orders.held_stock",
       "pickup.capacity_horizon",
       "pricing.tax_configuration",
       "receipts.template",

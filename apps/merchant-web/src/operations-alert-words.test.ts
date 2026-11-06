@@ -43,6 +43,10 @@ const VARIANTS: Readonly<Record<string, readonly unknown[]>> = {
     { services: ["store-background"] },
     { services: ["store-workers"] },
   ],
+  "service.chores": [
+    { services: ["business-worker:contactRetention"] },
+    { services: ["business-worker:contactRetention", "business-worker:webhookEvidenceRetention"] },
+  ],
   "payment.updates": [
     { count: 1, oldestAgeMs: 5 * MIN },
     { count: 3, oldestAgeMs: 70 * MIN },
