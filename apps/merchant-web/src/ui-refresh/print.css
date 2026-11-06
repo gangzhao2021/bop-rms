@@ -1,0 +1,20 @@
+/* M50 (WP-2423): only a region printed through printRegion() hides the rest of the page. Any other
+   print (Today's summary, the browser's own Print) prints the page as it is shown. */
+@media print {
+  body[data-printing] * {
+    visibility: hidden;
+  }
+  body[data-printing] [data-print-root],
+  body[data-printing] [data-print-root] * {
+    visibility: visible;
+  }
+  body[data-printing] [data-print-root] {
+    position: absolute;
+    inset: 0 auto auto 0;
+    width: 100%;
+  }
+  body[data-printing] [data-print-root] button,
+  body[data-printing] [data-print-root] [data-print-hide] {
+    display: none;
+  }
+}

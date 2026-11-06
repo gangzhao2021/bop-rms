@@ -21,3 +21,5 @@
 @import "./kitchen-v3.css";
 /* Payment and refund v3 (2026-11-04). */
 @import "./refund-payment.css";
+/* M50: printing one region (print-region.ts) without blanking other pages. */
+@import "./print.css";

@@ -21,6 +21,7 @@ import { compedText } from "./ItemCompAction.js";
 import { TableHeldRounds } from "./TablePhones.js";
 import { TableSplitControls } from "./TableSplit.js";
 import { notConfirmedPressAgainText, paymentNotConfirmedText } from "./failure-words.js";
+import { printRegion } from "./print-region.js";
 
 const cad = (minor: string | bigint) =>
   orderMoney({ amountMinor: String(minor), currencyCode: "CAD" });
@@ -1154,6 +1155,7 @@ function TableReceipt({
             paid: entry.payment as NonNullable<typeof entry.payment>,
           }))
         : [];
+  const region = useRef<HTMLDivElement>(null);
   if (payments.length === 0) return null;
   const add = (pick: (paid: (typeof payments)[number]["paid"]) => string) =>
     payments.reduce((sum, entry) => sum + BigInt(pick(entry.paid)), 0n);
@@ -1163,6 +1165,7 @@ function TableReceipt({
   const tax = bill.rounds.reduce((sum, round) => sum + BigInt(round.taxMinor), 0n) - rounding;
   return (
     <div
+      ref={region}
       className="table-receipt"
       aria-label={t("Receipt for table {table}", { table: saidTable(tableLabel) })}
     >
@@ -1226,9 +1229,18 @@ function TableReceipt({
           </Fragment>
         ))}
       </dl>
-      <p role="status">{t("Paid in full. Close the table when the guests have left.")}</p>
-      <button type="button" onClick={() => window.print()}>
-        {t("Print receipt")}
+      <p role="status" data-print-hide="">
+        {t("Paid in full. Close the table when the guests have left.")}
+      </p>
+      {/* M50: only this paid bill prints, never the staff panel around it. It is not yet a tax
+          receipt (no business number), so it is not called one (M48 is still open). */}
+      <button
+        type="button"
+        onClick={() => {
+          if (region.current !== null) printRegion(region.current, "table-bill");
+        }}
+      >
+        {t("Print paid bill")}
       </button>
     </div>
   );

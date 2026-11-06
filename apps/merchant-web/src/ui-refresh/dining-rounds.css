@@ -340,22 +340,6 @@
   font: inherit;
   text-decoration: underline;
 }
-@media print {
-  body * {
-    visibility: hidden;
-  }
-  .table-checkout,
-  .table-checkout * {
-    visibility: visible;
-  }
-  .table-checkout {
-    position: absolute;
-    inset: 0 auto auto 0;
-  }
-  .table-checkout button {
-    display: none;
-  }
-}
 
 /* WP-2423 item 8 ⑥ part 4: a combo's dishes, each served on its own. */
 .dining-round-item__combo {

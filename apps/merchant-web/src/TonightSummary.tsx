@@ -1,10 +1,11 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import { useBrowserOffline } from "./stale-read.js";
 import { countOf, t, saidTable } from "./i18n/i18n.js";
 import { orderMoney } from "./order-money.js";
 import { storeTime } from "./StoreTime.js";
 import { businessDateText, useStoreBusinessDay } from "./StoreBusinessDay.js";
+import { printRegion } from "./print-region.js";
 import {
   StoreReportsClientError,
   type StoreReportChannel,
@@ -196,8 +197,9 @@ export function TonightSummaryView({
   // M117: past the Store's closing time the business day is still open in the books only.
   const closedForTheNight =
     closesAt !== null && Date.parse(report.generatedAt) >= Date.parse(closesAt);
+  const region = useRef<HTMLDivElement>(null);
   return (
-    <div className="tonight">
+    <div className="tonight" ref={region}>
       <header className="tonight__head">
         <h2>{t("Today's summary · {date}", { date: businessDateText(report.from) })}</h2>
         <p>
@@ -491,7 +493,13 @@ export function TonightSummaryView({
         </p>
         <p className="tonight__links">
           <Link to="/app/operations/payment-reconciliation">{t("Settlement")}</Link>
-          <button type="button" onClick={() => window.print()}>
+          <button
+            type="button"
+            onClick={() => {
+              // M50: the summary prints alone, never a white page.
+              if (region.current !== null) printRegion(region.current, "tonight-summary");
+            }}
+          >
             {t("Print")}
           </button>
         </p>

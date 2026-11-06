@@ -6157,7 +6157,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Total paid": "实付合计",
   "Paid by": "付款方式",
   "Paid in full. Close the table when the guests have left.": "已全部付清。客人离开后关台。",
-  "Print receipt": "打印收据",
+  "Print paid bill": "打印已付账单",
   "Cash payments could not be read.": "现金收款读取失败。",
   "Cash totals": "现金合计",
   "Cash refunds": "现金退款",

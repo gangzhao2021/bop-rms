@@ -293,7 +293,7 @@ test("@production DEC-DINE-IN-PAY-LATER: staff start checkout, take cash rounded
   await expect(receipt).toContainText("Cash rounding");
   await expect(receipt).toContainText("$38.45");
   await expect(receipt).toContainText("$11.55");
-  await expect(checkout.getByRole("button", { name: "Print receipt" })).toBeVisible();
+  await expect(checkout.getByRole("button", { name: "Print paid bill" })).toBeVisible();
   // A paid table never goes back to ordering: no Cancel checkout.
   await expect(checkout.getByRole("button", { name: "Cancel checkout" })).toHaveCount(0);
   // Paid in full and every dish served: the table can now be closed as usual.
