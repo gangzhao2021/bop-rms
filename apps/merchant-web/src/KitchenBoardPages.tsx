@@ -758,6 +758,13 @@ export function KitchenAllergenLine({ item }: { readonly item: KitchenBoardItem 
       </p>
     );
   const none = allergens.contains.length === 0 && allergens.mayContain.length === 0;
+  // WP-2423 live minor 9: a combo dish on its own line carries the whole combo's disclosure (the
+  // menu declares allergens per combo, not per dish in it), so it is named as the combo's.
+  const part = item.comboPartOf !== undefined;
+  const contains = (value: string) =>
+    part ? t("Whole combo contains {value}", { value }) : t("Contains {value}", { value });
+  const mayContain = (value: string) =>
+    part ? t("Whole combo may contain {value}", { value }) : t("May contain {value}", { value });
   return (
     <p
       className="kitchen-work-item__allergens"
@@ -768,10 +775,10 @@ export function KitchenAllergenLine({ item }: { readonly item: KitchenBoardItem 
           ? t("No menu allergens declared")
           : [
               allergens.contains.length > 0
-                ? t("Contains {value}", { value: allergens.contains.join(listSeparator()) })
+                ? contains(allergens.contains.join(listSeparator()))
                 : "",
               allergens.mayContain.length > 0
-                ? t("May contain {value}", { value: allergens.mayContain.join(listSeparator()) })
+                ? mayContain(allergens.mayContain.join(listSeparator()))
                 : "",
             ]
               .filter(Boolean)
@@ -783,10 +790,18 @@ export function KitchenAllergenLine({ item }: { readonly item: KitchenBoardItem 
       ) : (
         <>
           {allergens.contains.length > 0 ? (
-            <strong>{t("Contains: {value}", { value: allergens.contains.join(", ") })}</strong>
+            <strong>
+              {part
+                ? t("Whole combo contains: {value}", { value: allergens.contains.join(", ") })
+                : t("Contains: {value}", { value: allergens.contains.join(", ") })}
+            </strong>
           ) : null}
           {allergens.mayContain.length > 0 ? (
-            <span>{t("May contain: {value}", { value: allergens.mayContain.join(", ") })}</span>
+            <span>
+              {part
+                ? t("Whole combo may contain: {value}", { value: allergens.mayContain.join(", ") })
+                : t("May contain: {value}", { value: allergens.mayContain.join(", ") })}
+            </span>
           ) : null}
         </>
       )}

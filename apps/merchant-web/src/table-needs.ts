@@ -228,15 +228,20 @@ export function tableNeed(
     return table.guestStart != null
       ? {
           // A guest's own table: the kitchen finishing it is the last step anyone has to take.
+          // DEC-DINING-GUEST-TABLE-START point 9 (Owner default item 4): finished paid dishes
+          // count as handed over — the guest collects them at the counter — so the row offers no
+          // Serve all (a staff member who carries one still can, inside the table).
           tone: "progress",
           rank: order.inKitchen ? 51 : warned(51),
           words:
             order.readyToServe === 1
-              ? t("1 dish ready to serve")
-              : t("{count} dishes ready to serve", { count: String(order.readyToServe) }),
+              ? t("1 dish ready for the guest to collect")
+              : t("{count} dishes ready for the guests to collect", {
+                  count: String(order.readyToServe),
+                }),
           // The System records these as served when it frees the table; say so before it does.
           detail: order.inKitchen ? null : freesItself(table, now),
-          step: "ServeAll",
+          step: null,
         }
       : {
           tone: "action",

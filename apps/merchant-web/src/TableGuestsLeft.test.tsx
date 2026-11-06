@@ -1,5 +1,10 @@
 import { expect, it, vi } from "vitest";
-import { guestsLeftRoundText, kitchenMayHaveStartedRound } from "./TableGuestsLeft.js";
+import {
+  guestsLeftRoundText,
+  kitchenMayHaveStartedRound,
+  nothingRefundedText,
+} from "./TableGuestsLeft.js";
+import { setLanguageForTest } from "./i18n/i18n.js";
 import { kitchenMayHaveStartedText } from "./kitchen-cancel-warning.js";
 import {
   createTableClosePlanClient,
@@ -334,4 +339,32 @@ it("v15 2026-11-06 (Fireside Table 5): a round waiting for staff OK is never 'ca
   expect(await client.resolve(plan, plan.rounds[0] as TableCloseRound, id(45), csrf)).toBe(
     "Changed",
   );
+it("WP-2423 live minor 21: closing out rounds that took no money says so, and never claims no money for an unfinished payment", () => {
+  const notPaid = round({ state: "NotPaid", refund: null });
+  const paying = round({ state: "PaymentInProgress", refund: null });
+  const refunded = round({
+    state: "AlreadyRefunded",
+    refund: { method: "Online", amountMinor: "0" },
+  });
+  expect(nothingRefundedText([notPaid])).toBe("refunds nothing: no money was taken");
+  expect(nothingRefundedText([paying])).toBe("refunds nothing: no payment has finished");
+  expect(nothingRefundedText([notPaid, paying])).toBe("refunds nothing: no payment has finished");
+  expect(nothingRefundedText([notPaid, refunded])).toBe(
+    "refunds nothing more: the unpaid rounds took no money, and what was paid has already been refunded",
+  );
+  expect(nothingRefundedText([paying, refunded])).toBe(
+    "refunds nothing more: no payment has finished for the unpaid rounds, and what was paid has already been refunded",
+  );
+  expect(nothingRefundedText([refunded])).toBe(
+    "refunds nothing more: what was paid has already been refunded",
+  );
+  for (const text of [nothingRefundedText([paying]), nothingRefundedText([paying, refunded])])
+    expect(text).not.toMatch(/no money was taken|took no money/u);
+  setLanguageForTest("zh-Hans");
+  try {
+    expect(nothingRefundedText([notPaid])).toBe("不退款：没有收过钱");
+    expect(nothingRefundedText([paying])).toBe("不退款：还没有完成的付款");
+  } finally {
+    setLanguageForTest("en");
+  }
 });

@@ -247,18 +247,27 @@ describe("DEC-DINING-GUEST-TABLE-START: a table a guest started", () => {
       "action",
     );
   });
-  it("dishes ready aren't a job for staff either, but stay one tap away", () => {
+  it("WP-2423 live minor 14: dishes ready are the guests' to collect, so the row offers no Serve all", () => {
     const need = tableNeed(table(1, { guestStart: closes(80) }), facts({ readyToServe: 2 }), now);
-    expect([need.tone, need.step]).toEqual(["progress", "ServeAll"]);
-    expect(tableNeed(table(1), facts({ readyToServe: 2 }), now).tone).toBe("action");
+    expect([need.tone, need.step, need.words]).toEqual([
+      "progress",
+      null,
+      "2 dishes ready for the guests to collect",
+    ]);
+    // A staff-opened table: serving them is staff's job, one tap away.
+    expect(tableNeed(table(1), facts({ readyToServe: 2 }), now)).toMatchObject({
+      tone: "action",
+      step: "ServeAll",
+      words: "2 dishes ready to serve",
+    });
   });
   it("a dish nobody marked served warns too: the System records it served when it frees the table", () => {
     const ready = facts({ readyToServe: 1 });
     expect(tableNeed(table(1, { guestStart: closes(5) }), ready, now)).toMatchObject({
       tone: "progress",
-      words: "1 dish ready to serve",
+      words: "1 dish ready for the guest to collect",
       detail: "frees itself in 5 min",
-      step: "ServeAll",
+      step: null,
     });
     expect(tableNeed(table(1, { guestStart: closes(80) }), ready, now).detail).toBeNull();
     // Something else still being made: the table isn't going anywhere yet.

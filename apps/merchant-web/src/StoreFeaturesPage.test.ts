@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { waitingPickupOrders } from "./StoreFeaturesPage.js";
+import { fullServiceSetupText, waitingPickupOrders } from "./StoreFeaturesPage.js";
+import { setLanguageForTest } from "./i18n/i18n.js";
 import { PickupClientError, type PickupClient } from "./pickup.js";
 
 describe("WP-2423 item 8 ⑦: pickup orders still waiting before pickup is turned off", () => {
@@ -33,4 +34,14 @@ describe("WP-2423 item 8 ⑦: pickup orders still waiting before pickup is turne
       }),
     ).toBeNull();
   });
+});
+
+it("WP-2423 live minor 32: the full-service setup names points for guests among what it turns off", () => {
+  expect(fullServiceSetupText()).toContain("inventory and recipes, and points for guests");
+  setLanguageForTest("zh-Hans");
+  try {
+    expect(fullServiceSetupText()).toContain("客人积分");
+  } finally {
+    setLanguageForTest("en");
+  }
 });

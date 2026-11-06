@@ -28,6 +28,32 @@ const startedText = (started: number, ready: number) =>
         });
 
 /**
+ * WP-2423 live minor 21: what closing out refunds when no money is left to refund, said from the
+ * rounds themselves. A round never paid took no money; a round whose online payment hasn't
+ * finished may still finish (it then stays open, see "PaymentInProgress" below), so for it staff
+ * are told only that no payment has finished — never that no money was taken.
+ */
+export function nothingRefundedText(actionable: readonly TableCloseRound[]): string {
+  const inProgress = actionable.some((round) => round.state === "PaymentInProgress");
+  const paid = actionable.some(
+    (round) => round.state !== "NotPaid" && round.state !== "PaymentInProgress",
+  );
+  if (!paid)
+    return inProgress
+      ? t("refunds nothing: no payment has finished")
+      : t("refunds nothing: no money was taken");
+  if (actionable.every((round) => round.state !== "NotPaid" && round.state !== "PaymentInProgress"))
+    return t("refunds nothing more: what was paid has already been refunded");
+  return inProgress
+    ? t(
+        "refunds nothing more: no payment has finished for the unpaid rounds, and what was paid has already been refunded",
+      )
+    : t(
+        "refunds nothing more: the unpaid rounds took no money, and what was paid has already been refunded",
+      );
+}
+
+/**
  * DEC-TABLE-CLOSE-GUESTS-LEFT: one round of a table whose guests left, in staff words — what it is
  * and what closing the table does with it. `partlyRefund`: the line refund the item cancellation
  * previewed (PartlyStarted).
@@ -404,7 +430,7 @@ export function TableGuestsLeft({
             ) : machine > 0n ? (
               t("leaves {machine} to refund on the card machine", { machine: cad(machine) })
             ) : (
-              t("refunds nothing more: what was paid has already been refunded")
+              nothingRefundedText(actionable)
             )}
             {t(". The reason recorded is “Guests left”.")}
           </p>

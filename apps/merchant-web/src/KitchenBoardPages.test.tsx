@@ -30,6 +30,7 @@ import {
   kitchenComboDishNote,
   kitchenLineKey,
   kitchenScreenLines,
+  KitchenAllergenLine,
   newKitchenCancellations,
   newQueuedReferences,
   unansweredArrivals,
@@ -55,6 +56,8 @@ import { StoreBusinessDayContext } from "./StoreBusinessDay.js";
 import { StoreTimeZoneContext } from "./StoreTime.js";
 import { findInternalText, staticText } from "../e2e/internal-text-patterns.js";
 import { earlierDayTickets, fromEarlierKitchenDay, kitchenWaitText } from "./KitchenEarlierDays.js";
+import { elapsedText } from "./DiningSessionWorkspace.js";
+import { setLanguageForTest } from "./i18n/i18n.js";
 const noSteps = {
   pendingLines: new Map(),
   onStep: () => undefined,
@@ -1415,6 +1418,17 @@ describe("DEC-KITCHEN-STALE-TICKETS earlier business days on the kitchen board",
     expect(kitchenWaitText(60 * 24)).toBe("1 day");
     expect(kitchenWaitText(60 * 24 * 5 + 30)).toBe("5 days");
   });
+  it("WP-2423 live minor 29: waits and open times read in Chinese without a Latin h", () => {
+    setLanguageForTest("zh-Hans");
+    try {
+      expect(kitchenWaitText(345)).toBe("5 小时 45 分钟");
+      expect(kitchenWaitText(120)).toBe("2 小时");
+      expect(elapsedText(540)).toBe("9 小时");
+    } finally {
+      setLanguageForTest("en");
+    }
+    expect(elapsedText(540)).toBe("9 h");
+  });
   it("applies one order search to today's lanes, remakes, earlier days and finished work", () => {
     const six = (item: Record<string, unknown>, n: string) => ({
       ...item,
@@ -1799,6 +1813,39 @@ describe("combos by section: what each kitchen section's screen shows", () => {
     });
     expect(lines("Snacks", combo()).map((line) => line.displayName)).toEqual(["薯条"]);
     expect(lines("Grill", combo())).toEqual([]);
+  });
+  it("WP-2423 live minor 9: a combo dish's line names the allergens as the whole combo's", () => {
+    const declared = combo({
+      allergens: {
+        status: "Declared",
+        contains: ["Milk"],
+        mayContain: ["Sesame"],
+        forChoices: true,
+      },
+    });
+    const [drink] = lines("Drinks", declared);
+    if (drink === undefined) throw new Error("no line");
+    const html = renderToStaticMarkup(<KitchenAllergenLine item={drink} />);
+    expect(html).toContain("<strong>Whole combo contains: Milk</strong>");
+    expect(html).toContain("<span>Whole combo may contain: Sesame</span>");
+    expect(html).toContain(
+      'aria-label="Whole combo contains Milk. Whole combo may contain Sesame"',
+    );
+    expect(html).not.toContain(">Contains:");
+    // The combo's own card (All sections) is the combo itself.
+    const [card] = lines("All", declared);
+    if (card === undefined) throw new Error("no card");
+    expect(renderToStaticMarkup(<KitchenAllergenLine item={card} />)).toContain(
+      "<strong>Contains: Milk</strong>",
+    );
+    setLanguageForTest("zh-Hans");
+    try {
+      expect(renderToStaticMarkup(<KitchenAllergenLine item={drink} />)).toContain(
+        "整个套餐含有：Milk",
+      );
+    } finally {
+      setLanguageForTest("en");
+    }
   });
   it("gives each dish line its own key, so focus and arrivals follow the line", () => {
     const [drink] = lines("Drinks", combo());

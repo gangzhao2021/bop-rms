@@ -857,6 +857,20 @@ export function onlinePaymentText(
       : t(" · partly refunded"))
   );
 }
+/**
+ * WP-2423 live minor 11: the rounds of an order read whose own payment already refunded part of
+ * it — a line of that round taken off with a refund. Per round, never from the order-wide
+ * refund totals: at a table another round's refund says nothing about this round's payment.
+ */
+export function batchesRefundedEarlier(detail: CurrentOrderDetail): ReadonlySet<string> {
+  return new Set(
+    detail.lines.items
+      .filter((line) => line.cancellation !== null && line.cancellation.refund.amountMinor !== "0")
+      .map((line) => line.orderBatchReference),
+  );
+}
+const sameSet = (a: ReadonlySet<string> | undefined, b: ReadonlySet<string>) =>
+  a !== undefined && a.size === b.size && [...a].every((value) => b.has(value));
 /** WP-2423: the exact refunds of an online payment on the order detail, when Payment has any. */
 function OnlineRefundNote({
   order,
@@ -1690,6 +1704,7 @@ function OrderDetailBody({
   timeZone,
   today,
   position,
+  refundedBatches,
   detail,
   action,
 }: {
@@ -1701,6 +1716,8 @@ function OrderDetailBody({
   readonly timeZone?: string | undefined;
   readonly today: string | null;
   readonly position: CurrentOrderDetail["paymentPosition"] | undefined;
+  /** WP-2423 live minor 11: this order's rounds with an item refunded from their own payment. */
+  readonly refundedBatches?: ReadonlySet<string> | undefined;
   readonly detail?:
     | ((
         order: QueuedOrder,
@@ -1763,7 +1780,7 @@ function OrderDetailBody({
                     value:
                       batch.staffCancellation.refundStatus === "Refunded"
                         ? t("Refunded")
-                        : "Refunding",
+                        : t("Refunding"),
                     value2: orderMoney({
                       amountMinor: batch.staffCancellation.refundAmountMinor,
                       currencyCode: "CAD",
@@ -1771,7 +1788,12 @@ function OrderDetailBody({
                   })
                 : batch.staffCancellation.refundStatus === "Refunded"
                   ? t("The payment, including any tip, was refunded in full.")
-                  : t("The payment, including any tip, is being refunded in full.")}
+                  : refundedBatches?.has(batch.orderBatchReference) === true
+                    ? // WP-2423 live minor 11: part of this round's own payment was refunded
+                      // earlier (an item taken off), so what is refunded now is the rest; until
+                      // Payment opens the refund its amount is not known here.
+                      t("What is left of the payment, including any tip left, is being refunded.")
+                    : t("The payment, including any tip, is being refunded in full.")}
           </span>
         </p>
       ) : batch.acceptanceStatus === "Cancelled" ? (
@@ -2048,6 +2070,7 @@ export function CurrentOrderQueueRows({
   now,
   paymentPosition,
   paymentPositions,
+  itemRefunds,
   expanded,
   rowAction,
   before,
@@ -2061,6 +2084,8 @@ export function CurrentOrderQueueRows({
   readonly paymentPosition?: CurrentOrderDetail["paymentPosition"] | undefined;
   /** WP-2423: on the list, the refund positions of the orders whose detail was read (opened). */
   readonly paymentPositions?: ReadonlyMap<string, CurrentOrderDetail["paymentPosition"]>;
+  /** WP-2423 live minor 11: by order read, its rounds with an item refunded (`batchesRefundedEarlier`). */
+  readonly itemRefunds?: ReadonlyMap<string, ReadonlySet<string>> | undefined;
   /**
    * Orders v2: the order open in the panel, kept by the page so a refresh after an action (a
    * recorded card-machine refund) never closes it. Omitted: the rows keep it themselves.
@@ -2144,6 +2169,7 @@ export function CurrentOrderQueueRows({
           timeZone={timeZone}
           today={today}
           position={positionOf(selected)}
+          refundedBatches={itemRefunds?.get(selected.orderReference)}
           detail={detail}
           action={action}
         />
@@ -2334,6 +2360,7 @@ export function CurrentOrderQueueRows({
             timeZone={timeZone}
             today={today}
             position={positionOf(selected)}
+            refundedBatches={itemRefunds?.get(selected.orderReference)}
             detail={detail}
             action={action}
           />
@@ -2684,6 +2711,9 @@ export function CurrentOrderQueuePage({
   const [positions, setPositions] = useState<
     ReadonlyMap<string, CurrentOrderDetail["paymentPosition"]>
   >(new Map());
+  const [itemRefunds, setItemRefunds] = useState<ReadonlyMap<string, ReadonlySet<string>>>(
+    new Map(),
+  );
   const [linesRevision, setLinesRevision] = useState(0);
   const background = useRef<AbortController | null>(null);
   const [soundOn, setSoundOn] = useState(false);
@@ -3038,6 +3068,11 @@ export function CurrentOrderQueuePage({
             now={now}
             paymentPosition={detail?.paymentPosition}
             paymentPositions={positions}
+            itemRefunds={
+              detail === undefined
+                ? itemRefunds
+                : new Map([[detail.order.orderReference, batchesRefundedEarlier(detail)]])
+            }
             expanded={expanded}
             visibleOrderReferences={visibleOrderReferences}
             before={
@@ -3347,13 +3382,19 @@ export function CurrentOrderQueuePage({
                         timeZone={timeZone}
                         today={businessDay}
                         batches={order.batches}
-                        onDetail={(read) =>
+                        onDetail={(read) => {
                           setPositions((current) =>
                             current.get(order.orderReference) === read.paymentPosition
                               ? current
                               : new Map(current).set(order.orderReference, read.paymentPosition),
-                          )
-                        }
+                          );
+                          const refunded = batchesRefundedEarlier(read);
+                          setItemRefunds((current) =>
+                            sameSet(current.get(order.orderReference), refunded)
+                              ? current
+                              : new Map(current).set(order.orderReference, refunded),
+                          );
+                        }}
                         refundCheck={{
                           orderReference: order.orderReference,
                           csrf,

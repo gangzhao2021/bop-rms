@@ -83,7 +83,7 @@ export function elapsedText(minutes: number): string {
   if (hours < 24) {
     const rest = minutes % 60;
     return rest === 0
-      ? `${String(hours)} h`
+      ? t("{hours} h", { hours: String(hours) })
       : t("{hours} h {rest} min", { hours: String(hours), rest: String(rest) });
   }
   const days = Math.floor(hours / 24);

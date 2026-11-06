@@ -55,6 +55,15 @@ const modulesOf = (view: StoreFeatures): Modules => ({
   loyalty: view.modules.loyalty,
   alcohol: view.modules.alcohol,
 });
+/**
+ * WP-2423 live minor 32: everything the full-service setup turns off that staff can turn back on
+ * below (`fullServiceTemplate`, Owner 2026-10-28 decision 6), points for guests included.
+ */
+export function fullServiceSetupText() {
+  return t(
+    "For a sit-down restaurant: turns off counter ordering, pickup orders from guests, inventory and recipes, and points for guests. You can turn any of them back on below.",
+  );
+}
 const rows: readonly { key: keyof Modules; name: () => string; detail: () => string }[] = [
   {
     key: "counterOrder",
@@ -340,9 +349,7 @@ export function StoreFeaturesPage({
           <p>
             {fullService
               ? t("This store uses the full-service restaurant setup.")
-              : t(
-                  "For a sit-down restaurant: turns off counter ordering, pickup orders from guests, and inventory and recipes. You can turn any of them back on below.",
-                )}
+              : fullServiceSetupText()}
           </p>
           {fullService ? null : (
             <button

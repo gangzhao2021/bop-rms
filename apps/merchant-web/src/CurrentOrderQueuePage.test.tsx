@@ -39,6 +39,7 @@ import {
   orderWhen,
   handoverReady,
   orderAmountNote,
+  batchesRefundedEarlier,
 } from "./CurrentOrderQueuePage.js";
 import {
   ordersAwaitingAcceptance,
@@ -819,6 +820,102 @@ it("WP-2423 Q6: offers cancellation only where allowed and shows the Store's can
   expect(diningHtml).not.toContain("cancel:1");
   expect(diningHtml).not.toContain("cancel:2");
   expect(diningHtml).not.toContain("SOLD_OUT");
+});
+
+it("WP-2423 live minor 11: a round refunded in part before Can't make it is refunded the rest, not in full", () => {
+  const id = (n: number) => `01909968-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
+  const pending = {
+    reasonCode: "SOLD_OUT",
+    cancelledAt: "2026-10-11T12:05:00.000Z",
+    refundStatus: "Pending",
+    refundMethod: "Online",
+    refundAmountMinor: null,
+  };
+  const batch = (n: number, extra: object) => ({
+    orderBatchReference: id(90 + n),
+    sequence: n,
+    acceptanceStatus: "Accepted",
+    canRequestAcceptance: false,
+    canCancel: false,
+    staffCancellation: null,
+    canCancelItems: false,
+    ...extra,
+  });
+  const pickup = {
+    orderReference: id(1),
+    orderNumber: "ORD-1001",
+    orderType: "Pickup",
+    sourceChannel: "Qr",
+    submittedAt: "2026-10-11T12:00:00.000Z",
+    observedAt: "2026-10-11T12:10:00.000Z",
+    initialBatchReference: id(91),
+    batches: [batch(1, { staffCancellation: pending })],
+    canRequestAcceptance: false,
+    unfulfillable: null,
+    pickupNotCollected: false,
+    acceptBy: null,
+    awaitingPayment: false,
+    currentPhase: "Cancelled",
+    currentVersion: 4,
+  };
+  const render = (order: object, refunded: string[], language: "en" | "zh-Hans" = "en") => {
+    setLanguageForTest(language);
+    try {
+      return renderToStaticMarkup(
+        <CurrentOrderQueueRows
+          view={parseCurrentOrderQueue({ items: [order], nextAfterOrderReference: null })}
+          paymentPositions={new Map([[id(1), { refundedMinor: "890", refundPendingMinor: "0" }]])}
+          itemRefunds={new Map([[id(1), new Set(refunded)]])}
+        />,
+      );
+    } finally {
+      setLanguageForTest("en");
+    }
+  };
+  // Pickup: $8.90 of one item refunded first, then Can't make it while its refund is not open.
+  const partly = render(pickup, [id(91)]);
+  expect(partly).toContain(
+    "What is left of the payment, including any tip left, is being refunded.",
+  );
+  expect(partly).not.toContain("in full");
+  const zh = render(pickup, [id(91)], "zh-Hans");
+  expect(zh).toContain("正在退回付款剩余的全部金额，包括剩余小费。");
+  expect(render(pickup, [])).toContain("is being refunded in full");
+  // The amount once Payment opens it: the Chinese line never says "Refunding".
+  const opened = render(
+    {
+      ...pickup,
+      batches: [batch(1, { staffCancellation: { ...pending, refundAmountMinor: "1240" } })],
+    },
+    [id(91)],
+    "zh-Hans",
+  );
+  expect(opened).toContain("正在退款");
+  expect(opened).not.toContain("Refunding");
+  // A table: round 1 had an item refunded from its own payment (an order-wide refund total
+  // above zero); round 2's Can't make it refunds its own untouched payment in full.
+  const table = {
+    ...pickup,
+    orderType: "DineIn",
+    currentPhase: "InProgress",
+    batches: [
+      batch(1, {}),
+      batch(2, { staffCancellation: pending, acceptanceStatus: "Cancelled" }),
+    ],
+  };
+  const tableHtml = render(table, [id(91)]);
+  expect(tableHtml).toContain("is being refunded in full");
+  expect(tableHtml).not.toContain("What is left of the payment");
+  // Which rounds an order read shows refunded in part: lines taken off with a refund.
+  const line = (batchN: number, refund: string | null) => ({
+    orderBatchReference: id(90 + batchN),
+    cancellation: refund === null ? null : { refund: { amountMinor: refund, currencyCode: "CAD" } },
+  });
+  expect(
+    batchesRefundedEarlier({
+      lines: { items: [line(1, "890"), line(2, null), line(3, "0")] },
+    } as unknown as Parameters<typeof batchesRefundedEarlier>[0]),
+  ).toEqual(new Set([id(91)]));
 });
 
 it("WP-2423 Q6 step 2: marks cancelled items, their refund and the refund total", () => {

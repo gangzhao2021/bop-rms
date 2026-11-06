@@ -30,7 +30,8 @@ export function kitchenWaitText(minutes: number): string {
   if (minutes < 60) return t("{minutes} min", { minutes: minutes });
   if (minutes < 24 * 60) {
     const rest = minutes % 60;
-    return `${Math.floor(minutes / 60)} h${rest ? t(" {rest} min", { rest: rest }) : ""}`;
+    // WP-2423 live minor 29: the hours in the staff language too ("5 小时 45 分钟").
+    return `${t("{hours} h", { hours: Math.floor(minutes / 60) })}${rest ? t(" {rest} min", { rest: rest }) : ""}`;
   }
   const days = Math.floor(minutes / (24 * 60));
   return days === 1 ? t("1 day") : t("{days} days", { days: days });

@@ -215,11 +215,7 @@ export function ItemCompAction({
     );
   return (
     <div role="group" aria-label={t("Comp or discount")} className="item-comp order-cancel-actions">
-      <p>
-        {t(
-          "For dishes the kitchen started or the table was served. It comes off the bill before the table pays and stays in the reports.",
-        )}
-      </p>
+      <p>{compIntroText()}</p>
       <ul className="pay-later-remove__lines">
         {offered.map((line) => (
           <li key={line.orderItemReference}>
@@ -341,6 +337,16 @@ export function ItemCompAction({
 }
 
 /** What came off the table's dishes so far, in staff words. */
+/**
+ * WP-2423 live minor 10: what the panel is for. Any dish still on the table's bill is offered
+ * (one the kitchen hasn't started with its own warning), so the intro names no kitchen state.
+ */
+export function compIntroText() {
+  return t(
+    "Comp or discount dishes on this table's bill. It comes off the bill before the table pays and stays in the reports.",
+  );
+}
+
 export function compedText(kind: "Comp" | "Percent" | "Amount", percent: number | null) {
   return kind === "Comp"
     ? t("Comped")

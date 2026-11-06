@@ -1041,6 +1041,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "请先在刷卡机上收款 {amount}，再在此记录。记录后后厨才开始制作这一单。",
   "Charge {amount} on the card machine first, then record it here. The kitchen starts this round once it is recorded.":
     "请先在刷卡机上收款 {amount}，再在此记录。记录后后厨才开始制作这一轮。",
+  "Charge {amount} on the card machine first, then record it here. The kitchen starts this round once it is recorded.":
+    "请先在刷卡机上收款 {amount}，再在此记录。记录后后厨才开始制作这一轮。",
+  "Charge {amount} on the card machine first, then record it here. The kitchen starts this order once it is recorded.":
+    "请先在刷卡机上收款 {amount}，再在此记录。记录后后厨才开始制作这一单。",
   "Charge {totalMinor} on the card machine": "在刷卡机上收款 {totalMinor}",
   "Charged by the payment provider": "支付方已扣款",
   "Charged twice": "重复扣款",
@@ -1265,6 +1269,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   Contains: "含有",
   "Contains {value}": "含有 {value}",
   "Contains: {value}": "含有：{value}",
+  "Whole combo contains {value}": "整个套餐含有 {value}",
+  "Whole combo contains: {value}": "整个套餐含有：{value}",
+  "Whole combo may contain {value}": "整个套餐可能含有 {value}",
+  "Whole combo may contain: {value}": "整个套餐可能含有：{value}",
   "Continue draft": "继续编辑草稿",
   "Continue draft {code}": "继续编辑草稿 {code}",
   "Continue the {value} count ({lineCount} lines)": "继续 {value} 盘点（{lineCount} 行）",
@@ -3217,6 +3225,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Refund {value} on the store's card machine, then record it here.":
     "请在门店刷卡机上退款 {value}，再在此记录。",
   Refunded: "已退款",
+  Refunding: "正在退款",
   "Refunded (ours / provider)": "已退款（本店 / 支付方）",
   "Refunded in full on the store's card machine, including any tip.":
     "已在门店刷卡机上全额退款，包括小费。",
@@ -4462,6 +4471,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "The payment was refunded automatically; this order cannot be accepted.":
     "付款已自动退回；这笔订单不能接单。",
   "The payment, including any tip, is being refunded in full.": "付款（包括小费）正在全额退回。",
+  "What is left of the payment, including any tip left, is being refunded.":
+    "正在退回付款剩余的全部金额，包括剩余小费。",
   "The payment, including any tip, was refunded in full.": "付款（包括小费）已全额退回。",
   "The person who made it": "提出更改的人",
   "The person who recorded the waste cannot review it.": "记录报损的人不能审核它。",
@@ -5462,6 +5473,12 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   refund: "笔退款",
   refunds: "笔退款",
   "refunds nothing more: what was paid has already been refunded": "不再退款：已付的款项已经退回",
+  "refunds nothing: no money was taken": "不退款：没有收过钱",
+  "refunds nothing: no payment has finished": "不退款：还没有完成的付款",
+  "refunds nothing more: no payment has finished for the unpaid rounds, and what was paid has already been refunded":
+    "不再退款：未付的轮次还没有完成的付款，已付的款项已经退回",
+  "refunds nothing more: the unpaid rounds took no money, and what was paid has already been refunded":
+    "不再退款：未付的轮次没有收过钱，已付的款项已经退回",
   "refunds {online} to the guest online{value}{value2}": "在线向顾客退款 {online}{value}{value2}",
   rejected: "已拒绝",
   "rename-{classificationReference}": "rename-{classificationReference}",
@@ -6319,6 +6336,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Paid round to accept": "有已付的轮次待接单",
   "Payment not confirmed": "付款未确认",
   "Round not paid yet": "有轮次还没付款",
+  "1 dish ready for the guest to collect": "1 道菜已做好，等客人到柜台取",
+  "{count} dishes ready for the guests to collect": "{count} 道菜已做好，等客人到柜台取",
   "1 dish ready to serve": "1 道做好待上",
   "{count} dishes ready to serve": "{count} 道做好待上",
   "Paid · close when the guests leave": "已付清 · 客人走后关台",
@@ -6345,8 +6364,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "This table changed since it was shown. Refresh it, then try again.":
     "这桌在显示后有变化。请刷新后再试。",
   "Comp or discount": "免单或折让",
-  "For dishes the kitchen started or the table was served. It comes off the bill before the table pays and stays in the reports.":
-    "用于后厨已开做或已上桌的菜。付款前从账单减掉，并保留在报表里。",
+  "Comp or discount dishes on this table's bill. It comes off the bill before the table pays and stays in the reports.":
+    "为这桌账单上的菜免单或折让。付款前从账单减掉，并保留在报表里。",
   "How much": "减多少",
   "Comp (free)": "免单",
   "Percent off": "打折",
@@ -6758,8 +6777,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Pickup orders from guests": "客人自取下单",
   "Guests order ahead from the pickup QR code and collect at the counter. Turned off, a guest who scans it is told the store takes dine-in orders only.":
     "客人扫自取二维码提前下单，到柜台取餐。关掉后，扫码的客人会看到本店只做堂食。",
-  "For a sit-down restaurant: turns off counter ordering, pickup orders from guests, and inventory and recipes. You can turn any of them back on below.":
-    "适合堂食正餐：关掉柜台点单、客人自取下单和库存与配方。需要时可以在下面重新打开。",
+  "For a sit-down restaurant: turns off counter ordering, pickup orders from guests, inventory and recipes, and points for guests. You can turn any of them back on below.":
+    "适合堂食正餐：关掉柜台点单、客人自取下单、库存与配方，以及客人积分。需要时可以在下面逐项重新打开。",
   "Guests will no longer be able to order pickup. Pickup orders already placed are still handed over on the Pickup page.":
     "客人将不能再下自取单。已经下的自取单仍在“取餐”页交付。",
   "Guests will no longer be able to order pickup, and the Pickup page will be hidden. Hand over any pickup orders still waiting first.":
