@@ -1198,6 +1198,23 @@ export async function createInternalMerchant(
     persistence,
     authentication: service,
     references: { next: () => resources.credentials.reference() },
+    // WP-2423 role presets: who else at the Store approves roles, so a sole owner may approve
+    // their own role change alone (each member read as an approval would be).
+    soleOperator: {
+      resolveContext: (tx, scope) =>
+        createInternalRefundWorkforceContext({
+          expected: {
+            tenantReference: scope.selected.tenantReference,
+            brandReference: scope.context.brand.brandReference,
+            storeReference: scope.store.storeReference,
+          },
+          persistence,
+          sessionActorReference: String(scope.actorReference),
+          sessionContext: async () => scope.context,
+          current: async (t) => t === tx && (await scope.allowed()),
+          permissions: ["identity.role.approve"],
+        }),
+    },
   });
   const staffAdministration = createMerchantStaffAdministration({
     persistence,

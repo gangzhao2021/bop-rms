@@ -273,6 +273,13 @@ export function installMerchantOrganizationRoutes(
     InUse: 409,
     Invalid: 400,
     Unavailable: 503,
+    // WP-2423 role presets.
+    NameTaken: 409,
+    SoleOperatorNotInEffect: 409,
+    NeedsReverification: 409,
+    WouldWidenOwnAccess: 409,
+    ApproverLacksAccess: 409,
+    PresetChanged: 409,
   } as const;
   const roleAdministrationFailure = (response: express.Response, error: unknown) => {
     noteFailure(response, error);
@@ -334,6 +341,33 @@ export function installMerchantOrganizationRoutes(
     }
     void options.roleAdministration
       .command({ sessionCookie, csrf, body: request.body })
+      .then((result) => response.json(result))
+      .catch((error: unknown) => roleAdministrationFailure(response, error));
+  });
+  // WP-2423 role presets: role changes waiting for the signed-in person (Approvals and its badge).
+  router.post("/organization/roles/waiting", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const csrf = exactHeader(request, "x-bop-csrf");
+    const body = request.body as Record<string, unknown> | undefined;
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0 ||
+      body === undefined ||
+      body === null ||
+      typeof body !== "object" ||
+      Object.keys(body).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.roleAdministration) {
+      response.status(503).json({ error: "role_administration_unavailable" });
+      return;
+    }
+    void options.roleAdministration
+      .waiting({ sessionCookie, csrf })
       .then((result) => response.json(result))
       .catch((error: unknown) => roleAdministrationFailure(response, error));
   });

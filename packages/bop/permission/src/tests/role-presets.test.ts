@@ -1,6 +1,11 @@
 import { createBrand, createStore, createTenantContext } from "@bop/tenant";
 import { describe, expect, it } from "vitest";
 import {
+  flaggedPermissionCodes,
+  ownerNamedRiskOrder,
+  permissionGroupLabels,
+  permissionWarning,
+  storePermissionCatalog,
   createRoleAdministrationVersion,
   executeRoleAdministration,
   planRoleAdministrationChange,
@@ -298,5 +303,28 @@ describe("WP-2423 role presets", () => {
   it("creates a blank role as a draft of a new role", async () => {
     const { result } = await run("Create", null, { actions: ["merchant.access"] });
     expect(result).toMatchObject({ version: 1, lifecycle: "Draft", code: "custom_0123456789ab" });
+  });
+  it("words every permission for staff and warns on every flagged one", () => {
+    for (const entry of storePermissionCatalog()) {
+      expect(permissionGroupLabels[entry.module], entry.module).toBeDefined();
+      if (flaggedPermissionCodes.has(entry.code))
+        expect(permissionWarning(entry.code)).toBeTruthy();
+    }
+    for (const code of ownerNamedRiskOrder) expect(flaggedPermissionCodes.has(code)).toBe(true);
+  });
+  it("offers no permission that hides, deletes or rewrites a sale (AGENTS.md, Owner 2026-10-25)", () => {
+    const money = /^(ordering|payment|reporting|audit|operations)\./u;
+    const suppress = /(^|[._])(delete|purge|hide|erase|suppress|remove|rewrite)([._]|$)/u;
+    expect(
+      storePermissionCatalog()
+        .map((entry) => entry.code)
+        .filter((code) => money.test(code) && suppress.test(code)),
+    ).toEqual([]);
+  });
+  it("keeps reports, settlement and activity records in the Owner preset, which is never edited", () => {
+    const owner = storeRoleTemplateActions("owner");
+    for (const code of ["reporting.sales.read", "payment.settlement.read"])
+      expect(owner).toContain(code);
+    expect(owner.some((code) => code.startsWith("audit."))).toBe(true);
   });
 });
