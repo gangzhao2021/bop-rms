@@ -244,6 +244,111 @@ async function readChecks(tx, { scope, at, gates, requiredCodes, policy }) {
   return { at, roster, launchGate, tax };
 }
 
+const TEST_LABEL = /not production/iu;
+const TEST_SUPPORT_NAME = /^TEST /u;
+const ownerRowsSql = `SELECT 'Membership' type,membership_id::text id,lifecycle,effective_until
+  FROM bop_membership.membership WHERE brand_id=$1 AND actor_id=$3
+UNION ALL SELECT 'StoreAssignment',assignment_id::text,lifecycle,effective_until
+  FROM bop_membership.store_assignment WHERE brand_id=$1 AND store_id=$2 AND actor_id=$3
+UNION ALL SELECT 'RoleAssignment',assignment_id::text,lifecycle,effective_until
+  FROM bop_permission.role_assignment WHERE brand_id=$1 AND (store_id IS NULL OR store_id=$2) AND actor_id=$3
+ORDER BY 1,2`;
+const isoOrNull = (value) => (value instanceof Date ? value.toISOString() : null);
+
+/**
+ * v15 2026-11-06: the TEST people the installation's staff file names besides the DEMO fixtures,
+ * proven from the database as the services' role sees it (no renewal privilege needed):
+ * - a TEST merchant's Owner: their merchant's Brand and Store are both labelled "not production"
+ *   (the store-open tooling refuses any other name), and they are an Active member placed at that
+ *   Store. Their membership, Store assignment and role assignments are listed with their end; one
+ *   ending at the installation's expiry refuses (it would lapse unrenewed: such rows come only
+ *   from the DEMO fixtures, never from opening a merchant, which writes them without an end);
+ * - TEST platform support staff: their current record is named "TEST …" and ends exactly when the
+ *   staff file says (their own end, kept as it is).
+ */
+export async function verifyInternalTestActors(tx, { testActors, from }) {
+  const verified = [];
+  for (const actor of testActors) {
+    if (actor.kind === "TestPlatformSupport") {
+      const [row] = (
+        await tx.query(
+          "SELECT display_name,lifecycle,effective_until FROM bop_permission.platform_support_person WHERE actor_id=$1 ORDER BY version DESC LIMIT 1",
+          [actor.actorReference],
+        )
+      ).rows;
+      if (row === undefined || !TEST_SUPPORT_NAME.test(String(row.display_name)))
+        unavailable("test-support-not-labelled");
+      if (isoOrNull(row.effective_until) !== actor.validUntil)
+        unavailable("test-support-window-mismatch");
+      verified.push({
+        kind: actor.kind,
+        selector: actor.selector,
+        actorReference: actor.actorReference,
+        lifecycle: String(row.lifecycle),
+        effectiveUntil: actor.validUntil,
+      });
+      continue;
+    }
+    if (actor.kind !== "TestMerchantOwner") unavailable("identity-not-synthetic");
+    const scoped = (store) =>
+      tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+        actor.brandReference,
+        store,
+      ]);
+    // Brand facts are read without a Store (brand_scope_policy).
+    await scoped("");
+    const [brand] = (
+      await tx.query("SELECT display_name FROM bop_tenant.brand WHERE brand_id=$1", [
+        actor.brandReference,
+      ])
+    ).rows;
+    await scoped(actor.storeReference);
+    const [store] = (
+      await tx.query(
+        "SELECT display_name FROM bop_tenant.store WHERE brand_id=$1 AND store_id=$2",
+        [actor.brandReference, actor.storeReference],
+      )
+    ).rows;
+    if (
+      brand === undefined ||
+      store === undefined ||
+      !TEST_LABEL.test(String(brand.display_name)) ||
+      !TEST_LABEL.test(String(store.display_name))
+    )
+      unavailable("test-owner-merchant-not-labelled");
+    const rows = (
+      await tx.query(ownerRowsSql, [
+        actor.brandReference,
+        actor.storeReference,
+        actor.actorReference,
+      ])
+    ).rows.map((row) => ({
+      targetType: String(row.type),
+      targetId: String(row.id),
+      lifecycle: String(row.lifecycle),
+      effectiveUntil: isoOrNull(row.effective_until),
+    }));
+    const active = rows.filter((row) => row.lifecycle === "Active");
+    if (
+      !active.some((row) => row.targetType === "Membership") ||
+      !active.some((row) => row.targetType === "StoreAssignment")
+    )
+      unavailable("test-owner-not-member");
+    if (active.some((row) => row.effectiveUntil === from))
+      unavailable("test-owner-validity-shares-expiry");
+    verified.push({
+      kind: actor.kind,
+      selector: actor.selector,
+      actorReference: actor.actorReference,
+      store: actor.store,
+      brandReference: actor.brandReference,
+      storeReference: actor.storeReference,
+      rows,
+    });
+  }
+  return verified;
+}
+
 /**
  * Instants before the renewal at which the read paths must be unchanged by it: just before it,
  * one business day earlier, and one minute after the launch gate history starts (the oldest
@@ -276,8 +381,11 @@ export async function renewInternalTestDatabase(
     evidence,
     dryRun,
     nextReference = () => uuidV7(),
+    /** TEST Owners and support staff named by the staff file (pilot-internal-test-renew.mjs). */
+    testActors = [],
   },
 ) {
+  if (!Array.isArray(testActors) || testActors.length > 16) return unavailable("roster-invalid");
   // The read checks run as the services' database role, so they see what the services see.
   if (typeof readRole !== "string" || !IDENTIFIER.test(readRole))
     return unavailable("read-role-invalid");
@@ -337,6 +445,12 @@ export async function renewInternalTestDatabase(
         Promise.resolve([]),
       );
     await asReader();
+    // Before anything changes: the TEST people the staff file names are what they claim.
+    const testActorsVerified = await verifyInternalTestActors(tx, { testActors, from });
+    await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+      scope.brandReference,
+      scope.storeReference,
+    ]);
     const before = await readChecks(tx, {
       scope,
       at: checkAt,
@@ -412,6 +526,7 @@ export async function renewInternalTestDatabase(
       liveGates: liveGates.renewed,
       tax,
       taxConfigurationVersion,
+      testActors: testActorsVerified,
       alreadyRenewed:
         membership.alreadyRenewed + permission.alreadyRenewed + liveGates.alreadyRenewed,
       checks: {

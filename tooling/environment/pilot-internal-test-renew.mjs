@@ -23,7 +23,12 @@ import { pathToFileURL } from "node:url";
  *
  * It refuses unless every file it reads is InternalTest, matches the expected database and Store
  * binding, and carries only synthetic (DEMO) identities, and every database row it would move is
- * labelled synthetic; it never changes any other value. The previous files are kept as hard links
+ * labelled synthetic; it never changes any other value. Since v15 2026-11-06 the staff file may
+ * also name TEST people the InternalTest tooling added: a TEST merchant's Owner (`owner-<name>`,
+ * proven by its served `stores/<name>/` and, in the database, by its merchant's "not production"
+ * labels; their file end moves with the installation, their database rows have no end) and TEST
+ * platform support staff (`support-<n>`, named "TEST …", kept at their own end). Anyone else
+ * still refuses everything. The previous files are kept as hard links
  * in a new owner-only `internal-test-renewal-<time>` directory with a `renewal.json` record (who
  * approved, why, from → to, before/after SHA-256, the database changes), each database change is
  * in the platform audit, and each completed renewal appends one line to
@@ -172,6 +177,85 @@ function requireScope(scope, binding) {
     return unavailable("scope-mismatch");
 }
 
+/**
+ * v15 2026-11-06: who a staff roster entry is. A synthetic fixture identity is DEMO staff. A
+ * generated (UUIDv7, not fixture) identity is accepted only in the two shapes the InternalTest
+ * tooling writes, and only as a candidate the caller must still prove:
+ * - `owner-<name>`: a TEST merchant's Owner, added by `pilot-internal-test-store-open.mjs
+ *   directory --merchant` together with the served Store directory `stores/<name>/`;
+ * - `support-<n>`: TEST platform support staff, added by `pilot-internal-test-support.mjs add`
+ *   with their own end (`platform_support_person.effective_until`, labelled "TEST …").
+ * Anything else (a real-looking person, another selector) refuses the whole renewal.
+ */
+const UUID_V7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+const TEST_OWNER_SELECTOR = /^owner-([a-z0-9][a-z0-9-]{0,62})$/u;
+const TEST_SUPPORT_SELECTOR = /^support-[1-9][0-9]{0,2}$/u;
+function rosterActorKind(actor) {
+  const reference = actor?.actorReference;
+  if (typeof reference === "string" && SYNTHETIC_REFERENCE.test(reference)) return "Demo";
+  if (
+    typeof reference !== "string" ||
+    !UUID_V7.test(reference) ||
+    typeof actor.selector !== "string" ||
+    !isInstant(actor.validUntil)
+  )
+    return unavailable("identity-not-synthetic");
+  if (TEST_OWNER_SELECTOR.test(actor.selector)) return "TestMerchantOwner";
+  if (TEST_SUPPORT_SELECTOR.test(actor.selector)) return "TestPlatformSupport";
+  return unavailable("identity-not-synthetic");
+}
+
+/**
+ * Proves a TEST merchant's Owner from the files the store-open tooling wrote with them: the root
+ * `stores.json` serves `stores/<name>`; that owner-only directory is an InternalTest Store of the
+ * same database whose own merchant (not this installation's Brand) has exactly this Owner on its
+ * staff page. Returns the merchant scope for the database check (labels and rows).
+ */
+async function proveTestMerchantOwner(directory, database, binding, entry) {
+  const name = TEST_OWNER_SELECTOR.exec(entry.selector)[1];
+  const relative = "stores/" + name;
+  const names = await readdir(directory);
+  if (!names.includes("stores.json")) return unavailable("test-owner-store-not-served");
+  const list = parseExact(await readPrivateFile(join(directory, "stores.json"))).value;
+  if (list?.schemaVersion !== 1 || !Array.isArray(list.stores))
+    return unavailable("stores-list-invalid");
+  if (!list.stores.includes(relative)) return unavailable("test-owner-store-not-served");
+  await privateDirectory(join(directory, "stores"));
+  const store = join(directory, relative);
+  await privateDirectory(store);
+  const read = async (file) => parseExact(await readPrivateFile(join(store, file))).value;
+  requireInternalTest(await read("installation.json"), database);
+  const profile = await read("internal-test-profile.json");
+  requireInternalTest(profile, database);
+  const own = profile.binding ?? {};
+  if (SCOPE_KEYS.some((key) => typeof own[key] !== "string" || !UUID_V7.test(own[key])))
+    return unavailable("test-owner-not-own-merchant");
+  // A new merchant has its own tenant and Brand; never the installation's DEMO merchant.
+  if (
+    own.brandReference === binding.brandReference ||
+    own.tenantReference === binding.tenantReference
+  )
+    return unavailable("test-owner-not-own-merchant");
+  const roster = await read("internal-test-merchant.json");
+  requireInternalTest(roster, database);
+  requireScope(roster.scope, own);
+  if (
+    roster.schemaVersion !== 2 ||
+    !Array.isArray(roster.actors) ||
+    roster.actors.length !== 1 ||
+    roster.actors[0]?.selector !== entry.selector ||
+    roster.actors[0]?.actorReference !== entry.actorReference
+  )
+    return unavailable("test-owner-not-in-store-roster");
+  return Object.fromEntries([
+    ["kind", "TestMerchantOwner"],
+    ["selector", entry.selector],
+    ["actorReference", entry.actorReference],
+    ["store", relative],
+    ...SCOPE_KEYS.map((key) => [key, own[key]]),
+  ]);
+}
+
 /** Validates labels and identities; returns the window paths the renewal may move. */
 const artefactRules = {
   profile(value, database) {
@@ -205,8 +289,15 @@ const artefactRules = {
     if (value.schemaVersion === 2) {
       if (!Array.isArray(value.actors) || value.actors.length < 1 || value.actors.length > 16)
         return unavailable("roster-invalid");
-      requireSynthetic(...value.actors.map((actor) => actor?.actorReference));
-      return value.actors.map((_, index) => ["actors", index, "validUntil"]);
+      const paths = [],
+        testActors = [];
+      for (const [index, actor] of value.actors.entries()) {
+        const kind = rosterActorKind(actor);
+        if (kind === "Demo") paths.push(["actors", index, "validUntil"]);
+        else testActors.push({ index, kind, entry: actor });
+      }
+      // TEST Owners move with the installation once proven (readArtefacts); support never does.
+      return Object.assign(paths, { testActors });
     }
     if (value.schemaVersion !== undefined) return unavailable("roster-invalid");
     if (typeof value.warning !== "string" || !value.warning.includes("DEMO"))
@@ -243,7 +334,7 @@ const artefactRules = {
   },
 };
 
-async function readArtefacts(directory, database) {
+async function readArtefacts(directory, database, until) {
   const names = (await readdir(directory)).sort();
   const read = async (name) => ({
     name,
@@ -269,7 +360,9 @@ async function readArtefacts(directory, database) {
   requireInternalTest(menu.value, database);
   const profile = await read("internal-test-profile.json");
   const binding = profile.value.binding ?? {};
-  const artefacts = [];
+  const artefacts = [],
+    testActors = [],
+    retainedRosterEntries = [];
   // The profile is replaced last so an interrupted renewal is resumed by running it again.
   for (const [name, rule] of [
     ["internal-test-merchant.json", "roster"],
@@ -277,10 +370,38 @@ async function readArtefacts(directory, database) {
     ["internal-test-task-queue.json", "queue"],
   ]) {
     const artefact = await read(name);
-    artefacts.push({ ...artefact, paths: artefactRules[rule](artefact.value, database, binding) });
+    const checked = artefactRules[rule](artefact.value, database, binding);
+    const paths = [...checked];
+    for (const { index, kind, entry } of checked.testActors ?? []) {
+      const moves =
+        kind === "TestMerchantOwner" &&
+        (entry.validUntil === binding.validUntil || entry.validUntil === until);
+      if (kind === "TestMerchantOwner")
+        testActors.push(await proveTestMerchantOwner(directory, database, binding, entry));
+      else
+        testActors.push({
+          kind,
+          selector: entry.selector,
+          actorReference: entry.actorReference,
+          validUntil: entry.validUntil,
+        });
+      // Only the installation's common expiry moves; a later (or earlier) own end stays.
+      if (moves) paths.push(["actors", index, "validUntil"]);
+      else
+        retainedRosterEntries.push({
+          selector: entry.selector,
+          kind,
+          validUntil: entry.validUntil,
+        });
+    }
+    // Roster entries keep their file order (actors[i]).
+    if (checked.testActors) paths.sort((left, right) => left[1] - right[1]);
+    artefacts.push({ ...artefact, paths });
   }
   artefacts.push({ ...profile, paths: artefactRules.profile(profile.value, database) });
   return {
+    testActors,
+    retainedRosterEntries,
     artefacts,
     profile: profile.value,
     menu: menu.value,
@@ -417,10 +538,16 @@ export async function renewInternalTestInstallation({
     replaced = 0,
     recordName;
   try {
-    const { artefacts, profile, menu, readRole, current, historicalCopies } = await readArtefacts(
-      directory,
-      expectedDatabaseName,
-    );
+    const {
+      artefacts,
+      profile,
+      menu,
+      readRole,
+      current,
+      historicalCopies,
+      testActors,
+      retainedRosterEntries,
+    } = await readArtefacts(directory, expectedDatabaseName, until);
     // Validates the files before the database is touched.
     planRenewal({ artefacts, current, until, now });
     const operatorAccount = operatorAccountName();
@@ -435,6 +562,8 @@ export async function renewInternalTestInstallation({
       now,
       dryRun,
       evidence: { renewalReference, approvedBy, approval, reason, operatorAccount },
+      // TEST Owners and support staff the files name: the database proves their TEST labels.
+      testActors,
     });
     const { changes, files } = planRenewal({
       artefacts,
@@ -455,6 +584,7 @@ export async function renewInternalTestInstallation({
         afterSha256,
       })),
       historicalCopiesUnchanged: historicalCopies,
+      retainedRosterEntries,
       renewalReference,
       databaseRenewal,
       databaseArtefactsNotRenewed,
@@ -605,6 +735,19 @@ export function formatRenewal(result) {
       lines.push(
         `    check at ${check.at} ${label}: ${staff(check.roster)}, launch gate ${check.launchGate}, tax ${check.tax}`,
       );
+    for (const actor of db.testActors ?? [])
+      lines.push(
+        actor.kind === "TestMerchantOwner"
+          ? `    TEST merchant Owner ${actor.selector} (${actor.store}, labelled "not production"): ` +
+              actor.rows
+                .map(
+                  (row) =>
+                    `${row.targetType} ${row.lifecycle} ${row.effectiveUntil === null ? "no end" : "ends " + row.effectiveUntil}`,
+                )
+                .join(", ") +
+              " (nothing to renew in the database)"
+          : `    TEST platform support ${actor.selector} (${actor.lifecycle}): own end ${actor.effectiveUntil}, unchanged`,
+      );
     for (const check of db.checks.history?.after ?? [])
       lines.push(
         `    earlier check at ${check.at} (unchanged by the renewal): ${staff(check.roster)}, launch gate ${check.launchGate}, tax ${check.tax}`,
@@ -614,6 +757,10 @@ export function formatRenewal(result) {
     lines.push(`  ${change.file}  ${change.path}  ${change.from} -> ${change.to}`);
   for (const file of result.files)
     lines.push(`  sha256 ${file.file}  ${file.beforeSha256} -> ${file.afterSha256}`);
+  for (const entry of result.retainedRosterEntries ?? [])
+    lines.push(
+      `  internal-test-merchant.json  ${entry.selector} (${entry.kind}) kept at its own end ${entry.validUntil}`,
+    );
   if (result.record) lines.push(`  previous files and record: ${result.record}/`);
   if (result.historicalCopiesUnchanged.length)
     lines.push(
@@ -662,7 +809,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       "PILOT_INTERNAL_TEST_RENEWAL_UNAVAILABLE (" +
         reason +
         code +
-        "): requires development mode, an owner-only InternalTest runtime with the expected database, synthetic DEMO identities only, a common expiry and --until at most 30 days ahead." +
+        "): requires development mode, an owner-only InternalTest runtime with the expected database, synthetic DEMO identities (plus proven TEST merchant Owners and TEST support staff) only, a common expiry and --until at most 30 days ahead." +
         (error?.replaced > 0
           ? ` ${error.replaced} file(s) were already renewed (previous copies in ${error.record}/); run the same command again to finish.`
           : " Nothing was replaced."),

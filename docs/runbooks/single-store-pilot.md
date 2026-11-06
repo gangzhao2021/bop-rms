@@ -2605,12 +2605,25 @@ The database changes run as a dedicated NOLOGIN NOBYPASSRLS role
 privileges listed in `tooling/environment/pilot-internal-test-renew-database.mjs`.
 
 Then the files (validity only): `internal-test-profile.json` `binding.validUntil` and
-`taxConfigurationVersion` (the renewed tax version), every `actors[].validUntil` in
-`internal-test-merchant.json`, `validUntil` in each `internal-test-dining-table*.json`, and
+`taxConfigurationVersion` (the renewed tax version), the `actors[].validUntil` in
+`internal-test-merchant.json` of the DEMO staff and of each TEST merchant's Owner
+(`owner-<name>`), `validUntil` in each `internal-test-dining-table*.json`, and
 `effectiveUntil` plus `exceptionTaskPolicy.effectiveUntil` in `internal-test-task-queue.json`.
 Every value must equal the profile's current expiry (or already equal `--until` after an
 interrupted run); nothing else in any file changes. Historical copies (`*.v1-backup.json`,
 `*.before-*.json`) stay untouched.
+
+Besides the DEMO fixtures, the staff file may name only the TEST people the InternalTest tooling
+added; anyone else refuses everything (`identity-not-synthetic`). A TEST merchant's Owner
+(`owner-<name>`, added by `directory --merchant`) is accepted only when `stores.json` serves
+`stores/<name>/`, that owner-only directory is an InternalTest Store of the same database with
+its own tenant and Brand and exactly this Owner on its staff file, and in the database its Brand
+and Store are both named "… not production" and the Owner is an Active member placed there.
+Their membership, Store assignment and role assignments have no end (opening a merchant writes
+none); the dry run lists them, and one ending at the installation's expiry refuses
+(`test-owner-validity-shares-expiry`). TEST platform support staff (`support-<n>`) must be named
+"TEST …" with the same end as in the file; they keep their own end and are listed as kept. The
+Store directories under `stores/` are not touched: step 5 renews them.
 
 It deliberately leaves alone: the Pickup capacity slots (the business worker's
 `pickupCapacitySchedule` loop creates them after deploy; it needs the api INSERT grants on

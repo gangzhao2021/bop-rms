@@ -161,6 +161,69 @@ it("renews only the synthetic DEMO facts, refuses real rows, audits and is idemp
         `GRANT SELECT,UPDATE ON TABLE bop_membership.membership,bop_permission.role,rms_pricing.tax_configuration TO "${renewalRoleName}"`,
       );
 
+      // v15 2026-11-06: a TEST merchant opened from nothing (its own Brand and Store, both
+      // "… - not production") whose Owner holds rows without an end, and TEST support staff.
+      const testBrand = "01a1b000-1111-7aaa-8bbb-ccccdddd0011",
+        testStore = "01a1b000-1111-7aaa-8bbb-ccccdddd0012",
+        owner = "01a1b000-1111-7aaa-8bbb-ccccdddd0001",
+        support = "01a1b000-1111-7aaa-8bbb-ccccdddd0020",
+        supportUntil = iso(now + 80 * DAY);
+      const testRef = (n) => `01a1b000-1111-7aaa-8bbb-cccc${n.toString(16).padStart(8, "0")}`;
+      await q(
+        "INSERT INTO bop_tenant.brand(brand_id,code,display_name,default_locale,currency_code,lifecycle,version,created_at,updated_at) VALUES ($1,'TEAT','Half Sugar Tea TEST - not production','en-CA','CAD','Active',1,$2,$2)",
+        [testBrand, createdAt],
+      );
+      await q(
+        "INSERT INTO bop_tenant.store(store_id,brand_id,code,display_name,time_zone,locale,currency_code,lifecycle,version,created_at,updated_at) VALUES ($1,$2,'MAIN','Half Sugar Tea TEST Main - not production','America/Toronto','en-CA','CAD','Active',1,$3,$3)",
+        [testStore, testBrand, createdAt],
+      );
+      await q(
+        "INSERT INTO bop_membership.membership VALUES ($1,$2,$3,$4,'Active',$5,NULL,1,$5,$5)",
+        [testRef(0x100), owner, testBrand, testRef(0x101), createdAt],
+      );
+      await q(
+        "INSERT INTO bop_membership.store_assignment VALUES ($1,$2,$3,$4,$5,'Active',$6,NULL,1,$6,$6)",
+        [testRef(0x102), testRef(0x100), owner, testBrand, testStore, createdAt],
+      );
+      await q(
+        "INSERT INTO bop_permission.role VALUES ($1,$2,$3,'store_owner','Active',$4,NULL,1,$4,$4)",
+        [testRef(0x103), testBrand, testStore, createdAt],
+      );
+      await q(
+        "INSERT INTO bop_permission.role_assignment VALUES ($1,$2,$3,$4,$5,$6,$7,'Active',$8,NULL,1,$8,$8)",
+        [
+          testRef(0x104),
+          testRef(0x103),
+          testRef(0x100),
+          testRef(0x102),
+          owner,
+          testBrand,
+          testStore,
+          createdAt,
+        ],
+      );
+      await q(
+        "INSERT INTO bop_permission.platform_support_person (actor_id,version,display_name,lifecycle,actions,effective_until,recorded_by_reason,recorded_at) VALUES ($1,1,'TEST Support Sam','Active',ARRAY['platform.support.view'],$2,'acceptance',$3)",
+        [support, supportUntil, createdAt],
+      );
+      const testActors = [
+        {
+          kind: "TestPlatformSupport",
+          selector: "support-1",
+          actorReference: support,
+          validUntil: supportUntil,
+        },
+        {
+          kind: "TestMerchantOwner",
+          selector: "owner-tea",
+          actorReference: owner,
+          store: "stores/tea",
+          tenantReference: testRef(0x10),
+          brandReference: testBrand,
+          storeReference: testStore,
+        },
+      ];
+
       const evidence = {
         renewalReference: "01a14000-0000-7000-8000-000000000001",
         approvedBy: "Test Owner",
@@ -179,6 +242,7 @@ it("renews only the synthetic DEMO facts, refuses real rows, audits and is idemp
           now: Date.now(),
           evidence,
           dryRun: false,
+          testActors,
           ...extra,
         });
       const state = async () => ({
@@ -232,6 +296,90 @@ it("renews only the synthetic DEMO facts, refuses real rows, audits and is idemp
       assert.equal(planned.checks.history.before.length, 3);
       assert.equal(accepted(planned.checks.history.before), true);
       assert.deepEqual(planned.checks.history.after, planned.checks.history.before);
+      assert.deepEqual(await state(), initial);
+      // The TEST people are proven and reported; their rows have no end and nothing moves.
+      assert.deepEqual(planned.testActors, [
+        {
+          kind: "TestPlatformSupport",
+          selector: "support-1",
+          actorReference: support,
+          lifecycle: "Active",
+          effectiveUntil: supportUntil,
+        },
+        {
+          kind: "TestMerchantOwner",
+          selector: "owner-tea",
+          actorReference: owner,
+          store: "stores/tea",
+          brandReference: testBrand,
+          storeReference: testStore,
+          rows: [
+            {
+              targetType: "Membership",
+              targetId: testRef(0x100),
+              lifecycle: "Active",
+              effectiveUntil: null,
+            },
+            {
+              targetType: "RoleAssignment",
+              targetId: testRef(0x104),
+              lifecycle: "Active",
+              effectiveUntil: null,
+            },
+            {
+              targetType: "StoreAssignment",
+              targetId: testRef(0x102),
+              lifecycle: "Active",
+              effectiveUntil: null,
+            },
+          ],
+        },
+      ]);
+      assert.equal(
+        planned.membership.some((change) => change.targetId === testRef(0x100)),
+        false,
+      );
+
+      // A TEST person that is not what the staff file claims stops everything.
+      const realBrand = testRef(0x200),
+        realStore = testRef(0x201);
+      await q(
+        "INSERT INTO bop_tenant.brand(brand_id,code,display_name,default_locale,currency_code,lifecycle,version,created_at,updated_at) VALUES ($1,'GOLD','Golden Dragon','en-CA','CAD','Active',1,$2,$2)",
+        [realBrand, createdAt],
+      );
+      await q(
+        "INSERT INTO bop_tenant.store(store_id,brand_id,code,display_name,time_zone,locale,currency_code,lifecycle,version,created_at,updated_at) VALUES ($1,$2,'MAIN','Golden Dragon Main','America/Toronto','en-CA','CAD','Active',1,$3,$3)",
+        [realStore, realBrand, createdAt],
+      );
+      const ownerOf = (extra) => [testActors[0], { ...testActors[1], ...extra }];
+      await assert.rejects(
+        renew({ testActors: ownerOf({ brandReference: realBrand, storeReference: realStore }) }),
+        { reason: "test-owner-merchant-not-labelled" },
+      );
+      await assert.rejects(renew({ testActors: ownerOf({ actorReference: realLooking }) }), {
+        reason: "test-owner-not-member",
+      });
+      await q("UPDATE bop_membership.membership SET effective_until=$2 WHERE membership_id=$1", [
+        testRef(0x100),
+        old,
+      ]);
+      await assert.rejects(renew(), { reason: "test-owner-validity-shares-expiry" });
+      await q("UPDATE bop_membership.membership SET effective_until=NULL WHERE membership_id=$1", [
+        testRef(0x100),
+      ]);
+      await assert.rejects(
+        renew({ testActors: [{ ...testActors[0], validUntil: until }, testActors[1]] }),
+        { reason: "test-support-window-mismatch" },
+      );
+      await q(
+        "INSERT INTO bop_permission.platform_support_person (actor_id,version,display_name,lifecycle,actions,effective_until,recorded_by_reason,recorded_at) VALUES ($1,2,'Sam Support','Active',ARRAY['platform.support.view'],$2,'acceptance',$3)",
+        [support, supportUntil, createdAt],
+      );
+      await assert.rejects(renew(), { reason: "test-support-not-labelled" });
+      await q(
+        "INSERT INTO bop_permission.platform_support_person (actor_id,version,display_name,lifecycle,actions,effective_until,recorded_by_reason,recorded_at) VALUES ($1,3,'TEST Support Sam','Active',ARRAY['platform.support.view'],$2,'acceptance',$3)",
+        [support, supportUntil, createdAt],
+      );
       assert.deepEqual(await state(), initial);
 
       // Refusals: a real-looking member or a real role with the same expiry stops everything.
