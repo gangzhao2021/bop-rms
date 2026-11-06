@@ -930,3 +930,57 @@ test("@production a screen keeps counting down when the read fails, and the noti
   await page.clock.runFor(5 * 60_000);
   await expect(orderingNotice(page)).toHaveCount(0);
 });
+
+// WP-2423 (settlement-coverage): v15 Homes said "Store system: all good" while no closed day had
+// been compared with the payment provider. The row says what it is, that nothing changes in the
+// store, and opens Settlement; in English and Chinese, at every width.
+test("@production Home lists a closed day not compared with the payment provider, never all good", async ({
+  page,
+}) => {
+  const board = {
+    ...merchantBoard,
+    active: [
+      {
+        key: "settlement.not_run",
+        severity: "warning",
+        title: "Day-end check with the payment provider has not run",
+        summary:
+          "1 closed business day has not been compared with the payment provider (closed 13 hours ago).",
+        action:
+          "Nothing to change in the store: online payments are taken as usual. The check runs by itself once it is fixed; BOP support can see this.",
+        raisedAt: "2026-10-15T15:56:00.000Z",
+      },
+    ],
+  };
+  await pilotHome(page, "owner", () => board);
+  await page.goto("/app");
+  const needs = page.getByRole("region", { name: "Needs attention" });
+  const card = page.getByRole("region", { name: "Store system" });
+  await expect(
+    needs.getByText("Day-end check with the payment provider has not run"),
+  ).toBeVisible();
+  await expect(needs.getByText("Nothing to change in the store", { exact: false })).toBeVisible();
+  // The alert row's own button (the day's settlement row of this Home links to a dated day).
+  const open = needs.locator('a[href="/app/operations/payment-reconciliation"]');
+  await expect(open).toHaveText("Go to Settlement");
+  await expect(card.getByText("all good")).toHaveCount(0);
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expect(open).toBeVisible();
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await expectNoInternalText(page);
+  await page.evaluate(() => window.localStorage.setItem("bop.merchant.language", "zh-Hans"));
+  await page.reload();
+  // The region's own name is in Chinese now.
+  await expect(page.getByText("日结还没有和支付方核对", { exact: true })).toBeVisible();
+  await expect(
+    page.getByText(
+      "店里不用做什么，线上付款照常收。修好后核对会自动补做；BOP 技术支持能看到这条提醒。",
+    ),
+  ).toBeVisible();
+  await expectNoInternalText(page);
+});
