@@ -520,7 +520,7 @@ it("the tool writes a lost or second Store's binding, and refuses to move one th
       );
       let n = 0;
       const brand = id(2);
-      const install = (workflow, output, store = id(3)) =>
+      const install = (workflow, output, store = id(3), operation = operationAt(Date.now(), ++n)) =>
         installWorkflowRelease(
           Object.entries({
             "--env-file": envFile,
@@ -533,15 +533,16 @@ it("the tool writes a lost or second Store's binding, and refuses to move one th
             "--operator": id(5),
             "--approved-by": id(6),
             "--approval-evidence": id(7),
-            "--operation": operationAt(Date.now(), ++n),
+            "--operation": operation,
             "--output": output,
           }).flat(),
         );
       const file = (folder, name) => join(directory, folder, name);
+      const firstOperation = operationAt(Date.now(), ++n);
       await mkdir(join(directory, "first"));
       await mkdir(join(directory, "second"));
       const first = file("first", "internal-test-workflow-Pickup.json");
-      const installed = await install("OrderFulfillmentPickup", first);
+      const installed = await install("OrderFulfillmentPickup", first, id(3), firstOperation);
       assert.equal(installed.status, "Applied");
       // Services read the file when they start, so the operator is told when one needs a restart.
       assert.equal(installed.bindingFile, "Written");
@@ -697,6 +698,41 @@ it("the tool writes a lost or second Store's binding, and refuses to move one th
       const cancellation = await installLegacy("UnpaidDineInBatchCancellation", cancellationFile);
       assert.equal(cancellation.status, "Applied");
       assert.equal(cancellation.bindingFile, "Written");
+
+      // The runbook's rerun after an interruption replays the same operation: a lost file returns.
+      await mkdir(join(directory, "replay"));
+      await mkdir(join(directory, "replay-duplicated"));
+      const replayFile = file("replay", "internal-test-workflow-Pickup.json");
+      const replayed = await install("OrderFulfillmentPickup", replayFile, id(3), firstOperation);
+      assert.equal(replayed.status, "AlreadyApplied");
+      assert.equal(replayed.bindingFile, "Written");
+      assert.equal(named(await readFile(replayFile, "utf8")), installed.versionReference);
+      // Once the Brand holds two families (crafted as on v15), that replay is refused like a new
+      // operation, and names no binding the resolver would refuse at the Store's next restart.
+      const { definition_json: published } = (
+        await admin.query(
+          "SELECT definition_json FROM bop_workflow.workflow_definition_version WHERE version_id=$1",
+          [installed.versionReference],
+        )
+      ).rows[0];
+      await admin.query(
+        "ALTER TABLE bop_workflow.workflow_definition_version DISABLE TRIGGER workflow_definition_append",
+      );
+      await rawInsert(
+        { run: (work) => work(admin) },
+        { ...published, workflowReference: id(320), versionReference: id(321) },
+        322,
+      );
+      await admin.query(
+        "ALTER TABLE bop_workflow.workflow_definition_version ENABLE TRIGGER workflow_definition_append",
+      );
+      const duplicatedBefore = await counts(admin);
+      const lostAgain = file("replay-duplicated", "internal-test-workflow-Pickup.json");
+      await assert.rejects(install("OrderFulfillmentPickup", lostAgain, id(3), firstOperation), {
+        message: "WORKFLOW_RELEASE_DUPLICATE_FAMILIES",
+      });
+      await assert.rejects(stat(lostAgain), { code: "ENOENT" });
+      assert.deepEqual(await counts(admin), duplicatedBefore);
     } finally {
       await rm(directory, { recursive: true, force: true });
       await roles.drop();
@@ -902,6 +938,13 @@ it("a family that cannot serve the release is refused; an older one still binds;
         rerun(withdrawnBrand, 8),
         /WORKFLOW_RELEASE_ALREADY_INSTALLED_DIFFERENT/u,
       );
+      // Replaying the operation that installed it is no way round: refused at this instant.
+      const withdrawnBefore = await counts(admin);
+      await assert.rejects(
+        rerun(withdrawnBrand, 7),
+        /WORKFLOW_RELEASE_ALREADY_INSTALLED_DIFFERENT/u,
+      );
+      assert.deepEqual(await counts(admin), withdrawnBefore);
       await assert.rejects(resolvePickup(resolver(restricted, withdrawnBrand)), {
         code: "WORKFLOW_DEFINITION_UNAVAILABLE",
         rule: "BrandVersionNotActive",
@@ -925,6 +968,10 @@ it("a family that cannot serve the release is refused; an older one still binds;
         "ALTER TABLE bop_workflow.workflow_definition_version ENABLE TRIGGER workflow_definition_append",
       );
       await assert.rejects(rerun(duplicated, 10), /WORKFLOW_RELEASE_DUPLICATE_FAMILIES/u);
+      // The same for a replay of the operation that wrote the first family.
+      const duplicatedBefore = await counts(admin);
+      await assert.rejects(rerun(duplicated, 9), /WORKFLOW_RELEASE_DUPLICATE_FAMILIES/u);
+      assert.deepEqual(await counts(admin), duplicatedBefore);
       assert.equal(await families(admin, duplicated), 2);
 
       // Reading what is already there still works under the guard: the history is intact.

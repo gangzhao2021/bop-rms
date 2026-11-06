@@ -32,7 +32,8 @@ import { uuidV7 } from "./permission-catalog-install.mjs";
  *     --output <path>
  *
  * Every reference and instant derives from `--operation`, so rerunning the same operation replays
- * it exactly. A new operation must be fresh (issued within 15 minutes). `--approved-by` is the
+ * it exactly, provided the Brand's family still serves that version now (otherwise refused as
+ * below, nothing written). A new operation must be fresh (issued within 15 minutes). `--approved-by` is the
  * independent Platform approver (never the operator). `--store` only binds the runtime file the
  * worker loads; the Workflow itself is Brand-wide. Prints only the purpose, version and status.
  *
@@ -427,14 +428,22 @@ export async function applyWorkflowRelease(client, options, now = () => Date.now
     age = now() - Date.parse(plan.at);
   if (!replay && (age < 0 || age > freshnessMs))
     throw new Error("WORKFLOW_RELEASE_OPERATION_NOT_FRESH");
+  // Under the purpose lock, and before anything is written or a file is named: what the Brand holds
+  // now. A replay (the runbook's rerun after an interruption or for a lost file) is held to the same
+  // rule as a new operation, at this instant rather than the plan's: a Brand with two families, or
+  // whose family has been withdrawn, expired or moved past the replayed version, is refused.
+  const installed = await installedFamily(
+    brandWorkflows(client, options),
+    options,
+    new Date(now()).toISOString(),
+  );
   if (!replay) {
-    const installed = await installedFamily(
-      brandWorkflows(client, options),
-      options,
-      new Date(now()).toISOString(),
-    );
     if (installed !== null) return installed;
-  }
+  } else if (
+    installed === null ||
+    installed.plan.published.versionReference !== plan.published.versionReference
+  )
+    throw new Error("WORKFLOW_RELEASE_ALREADY_INSTALLED_DIFFERENT");
   return commitPlannedRelease(client, plan, options);
 }
 
