@@ -50,7 +50,7 @@ export function payLaterRemoveFailureText(failure: Failure) {
       );
     case "Comped":
       return t(
-        "A manager comped or discounted this dish, so it stays on the bill at that price. If the guests don't want it, tell the kitchen. Once the table pays, a manager can give the money back from the payment; it is recorded.",
+        "A manager comped or discounted this dish, so it stays on the bill at that price and on the kitchen's board. If the guests don't want it, tell the kitchen. Once the table pays, a manager can give the money back from the payment; it is recorded.",
       );
     case "Unknown":
       return t(

@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { t } from "./i18n/i18n.js";
+import { listSeparator, t } from "./i18n/i18n.js";
 import type { CurrentOrderLine, CurrentOrderQueue } from "./current-order-queue-client.js";
 import { FullSignInPrompt } from "./FullSignInPrompt.js";
 import { FULL_SIGN_IN_REQUIRED_TEXT, isFullSignInRequired } from "./full-sign-in.js";
@@ -143,6 +143,10 @@ export function ItemCompAction({
   const offered = lines.filter((line) => compable.has(line.orderItemReference));
   if (offered.length === 0) return null;
   const chosen = offered.filter((line) => selected.has(line.orderItemReference));
+  // A dish that can still come off the bill (the kitchen has not marked it started) can't once it
+  // is comped or discounted: say so before, while taking it off is still the better choice.
+  const removable = new Set(order.batches.flatMap((batch) => batch.unpaidRemovableItems));
+  const stillRemovable = chosen.filter((line) => removable.has(line.orderItemReference));
   const percentValue = /^[1-9][0-9]?$/u.test(percent.trim()) ? Number(percent.trim()) : null;
   const amountOffMinor = dollarsToMinor(amountOff);
   const amounts = chosen.map((line) =>
@@ -292,6 +296,14 @@ export function ItemCompAction({
           </label>
         ))}
       </fieldset>
+      {stillRemovable.length > 0 ? (
+        <p role="note">
+          {t(
+            "The kitchen hasn't marked {dishes} started. Once comped or discounted, a dish can't come off the bill. If the guests may not want it, take it off the bill instead, so the kitchen stops it.",
+            { dishes: stillRemovable.map((line) => line.name).join(listSeparator()) },
+          )}
+        </p>
+      ) : null}
       {choice === "Amount" && chosen.length > 1 ? (
         <p role="note">{t("An amount off is for one dish at a time.")}</p>
       ) : null}

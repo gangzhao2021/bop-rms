@@ -114,9 +114,10 @@ test("@production a manager discounts a started dish from the Tables page; only 
         canCancel: false,
         staffCancellation: null,
         canCancelItems: false,
-        unpaidRemovableItems: [],
+        // The kitchen started the fish; the tofu reached it but nobody marked it started, so it
+        // can still come off the bill as well as be comped.
+        unpaidRemovableItems: discounted ? [] : [id(201)],
         unpaidRemovedItems: [],
-        // The kitchen started both dishes: comps and discounts, not removal.
         compableItems: discounted ? [id(201)] : [id(201), id(202)],
         compedItems: discounted
           ? [{ orderItemReference: id(202), kind: "Percent", percent: 15, amountMinor: "170" }]
@@ -184,6 +185,15 @@ test("@production a manager discounts a started dish from the Tables page; only 
   await details.getByRole("button", { name: "Comp or discount" }).click();
   const group = details.getByRole("group", { name: "Comp or discount" });
   await group.getByLabel(/Synthetic boiled fish/u).check();
+  const removableNote = group.getByRole("note").filter({ hasText: "hasn't marked" });
+  await expect(removableNote).toHaveCount(0);
+  // A comped dish can't come off the bill afterwards: said before, while removal is still open.
+  await group.getByLabel(/Synthetic mapo tofu/u).check();
+  await expect(removableNote).toContainText(
+    "The kitchen hasn't marked Synthetic mapo tofu started. Once comped or discounted, a dish can't come off the bill.",
+  );
+  await group.getByLabel(/Synthetic mapo tofu/u).uncheck();
+  await expect(removableNote).toHaveCount(0);
   // Nothing is sent without a reason; the amount is shown exactly before it is recorded.
   await group.getByRole("radio", { name: "Percent off" }).check();
   await group.getByRole("textbox", { name: "Percent off (1–99)" }).fill("15");

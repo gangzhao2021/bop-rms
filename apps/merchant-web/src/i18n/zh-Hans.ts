@@ -450,8 +450,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "约 {value}，未含税和小费。发送后显示最终合计。",
   "Start cooking": "开始做",
   "Remake: {dish}": "重做：{dish}",
-  "In a combo with no section yet: {dishes}. They show on every section's screen until someone finishes them. Give each its section on the menu.":
-    "这些套餐里的菜还没有档口：{dishes}。在有人做好之前，每个档口的屏幕上都会显示。请在菜单上给每道菜选档口。",
+  "In a combo with no section yet: {dishes}. They show only on a screen set to No section. Give each its section on the menu.":
+    "这些套餐里的菜还没有档口：{dishes}。它们只显示在选了“未分档口”的屏幕上。请在菜单上给每道菜选档口。",
   "A combo's dishes go to their own sections.": "套餐里的每道菜去各自的档口。",
   "The kitchen got this {minutes} min ago and may already be making it. Ask them first.":
     "后厨收到已 {minutes} 分钟，可能已经在做了，先问一声后厨。",
@@ -464,8 +464,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Marked started": "已开始",
   "Not recorded yet": "还没记上",
   "Never mind": "不用了",
-  "The board lost touch. That step was not recorded. Tap it again.":
-    "网络断了，没记上，请再点一次。",
+  "{orderLabel} · {displayName} is not recorded yet. The board lost touch; tap Try again on its ticket.":
+    "{orderLabel} · {displayName} 还没记上：网络断了，请在这张单上点重试。",
+  "{displayName} is not recorded yet. The board lost touch; tap Try again on its ticket.":
+    "{displayName} 还没记上：网络断了，请在这张单上点重试。",
   "{orderLabel} · {displayName} started.": "{orderLabel} · {displayName} 开始做了",
   "{orderLabel} · {displayName} done.": "{orderLabel} · {displayName} 做好了",
   "{orderLabel} · {displayName} ready.": "{orderLabel} · {displayName} 可以上了",
@@ -6189,8 +6191,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "这张订单在显示后有变动。请刷新后再试。",
   "These dishes were already made or served, so they stay on the bill. To not charge the table for them, comp them with a reason instead; the comp is recorded.":
     "这些菜已经做好或上桌，所以留在账单上。如果不想向这桌收这些菜的钱，请改为填写原因免单，免单会被记录。",
-  "A manager comped or discounted this dish, so it stays on the bill at that price. If the guests don't want it, tell the kitchen. Once the table pays, a manager can give the money back from the payment; it is recorded.":
-    "店长已为这道菜免单或打折，它按那个价格留在账单上。客人不要了，请告诉后厨。这桌付款后，店长可以从付款里退钱给客人，退款会被记录。",
+  "A manager comped or discounted this dish, so it stays on the bill at that price and on the kitchen's board. If the guests don't want it, tell the kitchen. Once the table pays, a manager can give the money back from the payment; it is recorded.":
+    "店长已为这道菜免单或打折，它按那个价格留在账单上，也留在后厨屏幕上。客人不要了，请告诉后厨。这桌付款后，店长可以从付款里退钱给客人，退款会被记录。",
+  "The kitchen hasn't marked {dishes} started. Once comped or discounted, a dish can't come off the bill. If the guests may not want it, take it off the bill instead, so the kitchen stops it.":
+    "后厨还没标记开始做{dishes}。免单或打折后，这道菜就不能从账单取消了。客人可能不要的话，请改为从账单取消，后厨就会停做。",
   "This table has paid, so dishes can't come off its bill. A manager gives the guest money back from the table's payment instead; it is recorded.":
     "这桌已经付款，菜不能再从账单删除。请店长改为从这桌的付款里退钱给客人，退款会被记录。",
   "Comp these dishes": "为这些菜免单",
