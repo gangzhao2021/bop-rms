@@ -194,3 +194,4 @@ export function createCheckoutSessionController(
     },
   });
 }
+export type CheckoutSessionController = ReturnType<typeof createCheckoutSessionController>;

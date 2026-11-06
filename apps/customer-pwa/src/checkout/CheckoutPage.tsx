@@ -1,6 +1,9 @@
 import { AlreadyOrdered } from "./AlreadyOrdered.js";
 import { createCheckoutSessionClient } from "./session-client.js";
-import { createCheckoutSessionController } from "./session-controller.js";
+import {
+  createCheckoutSessionController,
+  type CheckoutSessionController,
+} from "./session-controller.js";
 import { v7 as uuidv7 } from "uuid";
 import { parseTipAmount } from "./tip-amount.js";
 import {
@@ -72,11 +75,14 @@ export function CheckoutPage({
   menuClient,
   diningClient,
   sendClient,
+  sessionController: providedSession,
 }: {
   /** DEC-DINE-IN-PAY-LATER: the table's payment timing (tests pass their own). */
   readonly diningClient?: DiningSessionClient;
   readonly sendClient?: Pick<ReturnType<typeof createSessionPaymentClient>, "sendToKitchen">;
   readonly controller?: CheckoutController;
+  /** The checkout-session start (tests pass their own). */
+  readonly sessionController?: CheckoutSessionController;
   readonly now?: () => number;
   readonly store?: CustomerStoreContext | undefined;
   /** The published menu prices each line as the guest saw it, when it agrees with the quote. */
@@ -95,8 +101,8 @@ export function CheckoutPage({
   const [detailsLocked, setDetailsLocked] = useState(false);
   const [confirmedQuote, setConfirmedQuote] = useState<string | null>(null);
   const navigate = useNavigate();
-  const [sessionController] = useState(() =>
-    createCheckoutSessionController(createCheckoutSessionClient()),
+  const [sessionController] = useState(
+    () => providedSession ?? createCheckoutSessionController(createCheckoutSessionClient()),
   );
   const sessionState = useSyncExternalStore(
     sessionController.subscribe,
@@ -283,9 +289,13 @@ export function CheckoutPage({
   const tipPresets = [0, ...tips.tierPercents];
   // Nothing in the cart (v15 live check): nothing to pay for, so no tip is asked either.
   const asksTip = !payLater && tips.enabled && cart !== null && cart.cart.items.length > 0;
-  // WP-2423 live minor 22: a dish in the cart can't be ordered now; the way on is the cart, so no
-  // tip is asked (a tip would read as what unblocks it).
-  const refusedItem = state.status === "item-unavailable";
+  // WP-2423 live minor 22: a dish in the cart can't be ordered now (refused when pricing, or when
+  // the checkout starts); the way on is the cart, so no tip is asked (a tip would read as what
+  // unblocks it) and the main action is Change your cart, never a payment that is refused again.
+  const refusedItem =
+    state.status === "item-unavailable" ||
+    sessionState.status === "item_unavailable" ||
+    sessionState.status === "item_short";
   // A percentage the Store no longer offers (the quote was read again) is chosen again.
   useEffect(() => {
     if (typeof tipChoice === "number" && tipChoice !== 0 && !tips.tierPercents.includes(tipChoice))

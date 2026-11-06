@@ -7,6 +7,7 @@ import {
   setTablePaymentTiming,
 } from "../session/customer-transaction-context.js";
 import type { CheckoutController } from "./checkout-client.js";
+import type { CheckoutSessionController } from "./session-controller.js";
 import type { CheckoutQuote, CheckoutState } from "./types.js";
 import type { CartView } from "../cart/types.js";
 
@@ -172,6 +173,41 @@ describe("CUST-CHECKOUT page contract", () => {
     );
     expect(html).not.toMatch(/<button[^>]*class="checkout-continue__button"/u);
   });
+
+  it.each(["item_unavailable", "item_short"] as const)(
+    "WP-2423 live minor 22 review: a checkout start refused with %s leads to the cart, with no tip asked",
+    (status) => {
+      const session: CheckoutSessionController = {
+        getState: () => ({ status, canRetry: false, line: null }),
+        subscribe: () => () => undefined,
+        start: async () => undefined,
+        retry: async () => undefined,
+        reset: () => undefined,
+        setOnline: () => undefined,
+      };
+      const html = renderToStaticMarkup(
+        <MemoryRouter>
+          <CheckoutPage
+            controller={controller({
+              status: "ready",
+              cart,
+              quote: { ...quote, blockingReasons: [], priceChange: null },
+            })}
+            sessionController={session}
+            now={() => Date.parse("2026-08-12T00:01:00.000Z")}
+          />
+        </MemoryRouter>,
+      );
+      expect(html).toContain('role="alert"');
+      expect(html).not.toContain('aria-label="Tip amount"');
+      expect(html).not.toContain("Choose a tip to continue");
+      expect(html).not.toContain("Continue to payment");
+      expect(html).toMatch(
+        /<a[^>]*class="checkout-continue__button"[^>]*href="\/cart"[^>]*>Change your cart<\/a>/u,
+      );
+      expect(html).not.toMatch(/<button[^>]*class="checkout-continue__button"/u);
+    },
+  );
 
   it("v15 live check: an empty cart asks for no tip", () => {
     expect(render({ status: "empty" })).not.toContain('aria-label="Tip amount"');
