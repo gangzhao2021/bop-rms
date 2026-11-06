@@ -176,7 +176,17 @@ export async function seedDining({ admin, context, sessionRole, sessionTransacti
       expectedAggregateVersion: 1,
       observedAt: at,
     });
-    return published;
+    // The table's printed code is turned on, as at a real Store: its version (1) is the one the
+    // guest entry carries, so Dining sees the phone's joined code as current.
+    const issued = transitionDiningTable(published, "IssueQr", at);
+    await tableService.executeTable({
+      action: "IssueQr",
+      operationReference: id(++sequence),
+      candidate: issued,
+      expectedAggregateVersion: 2,
+      observedAt: at,
+    });
+    return issued;
   }
   const brand = createBrand({
     brandReference: id(1),
@@ -361,10 +371,10 @@ export async function seedDining({ admin, context, sessionRole, sessionTransacti
       const table = 6 + browsers * 10;
       const publicTable = 5 + browsers * 10;
       const qr = 3 + browsers * 10;
-      await configure(table);
+      const configured = await configure(table);
       const started = await staffService.start({
         tableReference: id(table),
-        expectedAssignmentVersion: 2,
+        expectedAssignmentVersion: configured.aggregateVersion,
         operationReference: id(++sequence),
         joinKind: "Invitation",
         requestedAt: at,
