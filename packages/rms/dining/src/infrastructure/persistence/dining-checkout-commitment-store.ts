@@ -92,6 +92,11 @@ function normalize(error: unknown): never {
  * DEC-DINING-ANY-PARTICIPANT-SUBMIT: the latest deadline among other participants' commitments
  * that still hold this exact Cart version for checkout, or null. Each commitment is read at its
  * latest version; the caller supplies scope context and any locks it needs.
+ * WP-2423 (table-move-send): `seated` is the table the party sits at now. A round still being
+ * prepared at a table staff moved the party off can never be sent from there, so it holds nothing
+ * (a round already sent follows its party and still holds). Ordering clears the Cart and moves its
+ * version on in the Order's own transaction, so a Cart version already ordered is never current
+ * again and cannot be checked out twice whatever this says.
  */
 async function heldUntil(
   tx: DiningTableTransaction,
@@ -103,6 +108,7 @@ async function heldUntil(
     participantReference: string;
     observedAt: string;
   }>,
+  seated: Readonly<{ tableReference: string; tableAssignmentVersion: number }> | null,
 ): Promise<string | null> {
   const found = rows(
     await tx.query(
@@ -130,10 +136,26 @@ async function heldUntil(
     )
       return fail();
     if (record.participantReference === input.participantReference) continue;
+    if (
+      record.state === "Prepared" &&
+      seated !== null &&
+      (record.tableReference !== seated.tableReference ||
+        record.tableAssignmentVersion !== seated.tableAssignmentVersion)
+    )
+      continue;
     const until = diningCheckoutHeldUntil(record, input.observedAt);
     if (until !== null && (latest === null || until > latest)) latest = until;
   }
   return latest;
+}
+function seatedOf(value: unknown) {
+  const session = parseDiningSession(value);
+  return session.phase === "Active"
+    ? Object.freeze({
+        tableReference: session.tableReference,
+        tableAssignmentVersion: session.tableAssignmentVersion,
+      })
+    : null;
 }
 const same = (left: DiningCheckoutCommitment, right: DiningCheckoutCommitment) =>
   JSON.stringify(left) === JSON.stringify(right);
@@ -649,6 +671,8 @@ export function createPostgresDiningCheckoutCommitmentStore(
                   participantReference: record.participantReference,
                   observedAt,
                 },
+                // The locked current session: the new round is prepared at its table.
+                seatedOf(context.session),
               );
               if (held !== null) throw new DiningCheckoutHeldError(parseDiningInstant(held));
               result = prepareDiningCheckoutCommitment(preparation(record), context);
@@ -752,7 +776,18 @@ export function createPostgresDiningCheckoutHoldSource(
             "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
             [ids.brand, ids.store],
           );
-          return heldUntil(tx, ids, input);
+          const sessions = rows(
+            await tx.query(
+              "SELECT session_snapshot AS session FROM rms_dining.dining_session WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND session_id=$4",
+              [ids.tenant, ids.brand, ids.store, input.diningSessionReference],
+            ),
+          );
+          return heldUntil(
+            tx,
+            ids,
+            input,
+            sessions.length === 1 ? seatedOf(closed(sessions[0], ["session"]).session) : null,
+          );
         });
         return held === null ? null : Object.freeze({ heldUntil: held });
       } catch (error) {

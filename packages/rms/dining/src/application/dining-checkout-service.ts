@@ -10,6 +10,8 @@ import {
   parseDiningCheckoutCommitment,
   assertDiningCheckoutPreparedForOrdering,
   assertDiningCheckoutCommitmentUsable,
+  diningCheckoutPartyMovedOff,
+  DiningCheckoutCommitmentError,
   isDiningCheckoutHeld,
   prepareDiningCheckoutCommitment,
   type DiningCheckoutCommitment,
@@ -28,7 +30,10 @@ export class DiningCheckoutServiceError extends Error {
       | "DINING_CHECKOUT_PERMISSION_DENIED"
       | "DINING_CHECKOUT_INTENT_CONFLICT"
       | "DINING_CHECKOUT_SOURCE_EXPIRED"
-      | "DINING_CHECKOUT_DEPENDENCY_UNAVAILABLE",
+      | "DINING_CHECKOUT_DEPENDENCY_UNAVAILABLE"
+      // WP-2423 (table-move-send): staff moved the party off the table this round was prepared
+      // at; it cannot be sent from there. Nothing was written; the guest checks out again.
+      | "DINING_CHECKOUT_TABLE_MOVED",
   ) {
     super("dining checkout preparation is unavailable");
     this.name = "DiningCheckoutServiceError";
@@ -261,16 +266,27 @@ export function createDiningCheckoutService(options: DiningCheckoutServiceOption
         const authority = await authorize();
         const context = await current(authority);
         await authorize();
-        (forPayment
-          ? assertDiningCheckoutCommitmentUsable
-          : assertDiningCheckoutPreparedForOrdering)(
-          result.record,
-          {
-            session: context.snapshot.session,
-            participant: context.snapshot.participant,
-          },
-          now(),
-        );
+        const seated = {
+          session: context.snapshot.session,
+          participant: context.snapshot.participant,
+        };
+        try {
+          (forPayment
+            ? assertDiningCheckoutCommitmentUsable
+            : assertDiningCheckoutPreparedForOrdering)(result.record, seated, now());
+        } catch (error) {
+          // WP-2423 (table-move-send): a round about to be sent from a table its party was moved
+          // off says so, instead of an unavailable checkout retried until it lapses. Payment of a
+          // round already sent follows the party (its context carries the recorded Move).
+          if (
+            !forPayment &&
+            error instanceof DiningCheckoutCommitmentError &&
+            error.code === "DINING_CHECKOUT_CONTEXT_CHANGED" &&
+            diningCheckoutPartyMovedOff(result.record, seated)
+          )
+            return fail("DINING_CHECKOUT_TABLE_MOVED");
+          throw error;
+        }
         return Object.freeze(result);
       }
       await authorize();

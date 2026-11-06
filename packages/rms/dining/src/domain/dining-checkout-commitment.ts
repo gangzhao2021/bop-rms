@@ -397,6 +397,37 @@ export function assertDiningCheckoutPreparedForOrdering(
   });
 }
 
+/**
+ * WP-2423 (table-move-send, v15 fabf0261 2026-11-06): whether staff moved the party off the table
+ * this round was prepared at, while the party itself is still seated and this participant is still
+ * at it. An Active session's table and assignment number change only through a recorded Move
+ * (`moveActiveDiningSession`), so another table, or the same table under another assignment (A to B
+ * and back to A), is a move. A round prepared at the old table can no longer be sent from it: the
+ * guest starts checkout again at the table the party sits at now. Any other change (the table
+ * closing, the participant leaving, another session) is not a move.
+ */
+export function diningCheckoutPartyMovedOff(value: unknown, context: unknown): boolean {
+  try {
+    const commitment = parseDiningCheckoutCommitment(value);
+    const raw = closed(context, ["session", "participant"]);
+    const session = parseDiningSession(raw.session),
+      participant = parseDiningParticipant(raw.participant);
+    return (
+      session.phase === "Active" &&
+      session.brandReference === commitment.brandReference &&
+      session.storeReference === commitment.storeReference &&
+      session.diningSessionReference === commitment.diningSessionReference &&
+      participant.diningSessionReference === session.diningSessionReference &&
+      participant.participantReference === commitment.participantReference &&
+      participant.status === "Active" &&
+      (session.tableReference !== commitment.tableReference ||
+        session.tableAssignmentVersion !== commitment.tableAssignmentVersion)
+    );
+  } catch {
+    return false;
+  }
+}
+
 /** DEC-DINING-ANY-PARTICIPANT-SUBMIT: another participant holds this Cart version for checkout
  * until `heldUntil`. Nothing was changed; the caller may try again after it.
  */

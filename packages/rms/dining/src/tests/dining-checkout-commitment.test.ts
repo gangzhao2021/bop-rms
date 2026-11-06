@@ -10,6 +10,7 @@ import {
   DiningCheckoutHeldError,
   diningCheckoutHeldUntil,
   isDiningCheckoutHeld,
+  diningCheckoutPartyMovedOff,
 } from "../domain/dining-checkout-commitment.js";
 
 const id = (n: number) => "01900000-0000-7000-8000-" + n.toString().padStart(12, "0");
@@ -421,5 +422,38 @@ describe("DEC-DINING-ANY-PARTICIPANT-SUBMIT checkout hold of a Cart version", ()
         Object.assign(new Error(), { code: "DINING_CHECKOUT_HELD", heldUntil: "soon" }),
       ),
     ).toBe(false);
+  });
+});
+
+/** WP-2423 table-move-send: only a Move of the still-seated party off the round's table counts. */
+describe("diningCheckoutPartyMovedOff", () => {
+  const { input, context } = fixture();
+  const record = prepareDiningCheckoutCommitment(input, context);
+  const seated = (session: object = {}, participant: object = {}) => ({
+    session: { ...context.session, version: 6, ...session },
+    participant: { ...context.participant, ...participant },
+  });
+  it.each([
+    ["moved to another table", seated({ tableReference: id(60), tableAssignmentVersion: 1 }), true],
+    ["moved away and back (A to B to A)", seated({ tableAssignmentVersion: 8 }), true],
+    ["still at its table", seated(), false],
+    ["the table is closing", seated({ tableReference: id(60), phase: "Closing" }), false],
+    [
+      "the participant left",
+      seated(
+        { tableReference: id(60) },
+        { status: "Left", version: 2, leftAt: "2026-09-10T12:01:00.000Z" },
+      ),
+      false,
+    ],
+    [
+      "another participant",
+      seated({ tableReference: id(60) }, { participantReference: id(80) }),
+      false,
+    ],
+    ["another session", seated({ tableReference: id(60), diningSessionReference: id(40) }), false],
+    ["a malformed context", { session: context.session }, false],
+  ])("%s", (_name, current, expected) => {
+    expect(diningCheckoutPartyMovedOff(record, current)).toBe(expected);
   });
 });

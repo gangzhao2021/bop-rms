@@ -652,3 +652,78 @@ it("DEC-DINING-ANY-PARTICIPANT-SUBMIT: passes on another participant's hold of t
     heldUntil: "2026-08-02T12:20:00.000Z",
   });
 });
+
+/**
+ * WP-2423 table-move-send (v15 fabf0261, 2026-11-06): staff moved the party between a guest
+ * preparing a round and sending it. Sending it answered "payment unavailable" 14 times; it now says
+ * the table moved, so the phone checks out again at the party's table. Nothing is written.
+ */
+function movedFixture(
+  move: "OtherTable" | "SameTableAgain" | "ParticipantLeft",
+): ReturnType<typeof fixture> {
+  const f = fixture(),
+    read = f.options.current.readCurrent,
+    authorize = f.options.authorization.authorize;
+  const table = move === "OtherTable" ? id(60) : id(6);
+  f.options.authorization.authorize = async (request) => {
+    const value = await authorize(request);
+    return value === null ? null : { ...value, tableReference: table };
+  };
+  f.options.current.readCurrent = async (request) => {
+    const value = await read(request);
+    if (value === null) return value;
+    return {
+      ...value,
+      session: {
+        ...value.session,
+        version: 6,
+        ...(move === "ParticipantLeft" ? {} : { tableReference: table, tableAssignmentVersion: 8 }),
+      },
+      participant:
+        move === "ParticipantLeft"
+          ? { ...value.participant, status: "Left", version: 2, leftAt: request.observedAt }
+          : value.participant,
+      table: { ...value.table, tableReference: table, assignmentVersion: 8 },
+      // The guest's binding follows its party through Dining's recorded Move (as the store reads it).
+      ...(move === "ParticipantLeft"
+        ? {}
+        : { followedMove: { fromTableReference: id(6), movedAt: request.observedAt } }),
+    } as never;
+  };
+  return f;
+}
+it.each(["OtherTable", "SameTableAgain"] as const)(
+  "WP-2423 table-move-send: a round prepared before staff moved its party is refused as table moved (%s)",
+  async (move) => {
+    const original = fixture();
+    const prepared = await original.service().prepare(original.input);
+    const f = movedFixture(move);
+    f.options.repository.load = async () => prepared.record;
+    f.options.repository.append = async () => {
+      throw new Error("must not write");
+    };
+    await expect(f.service().prepareForOrdering(f.input)).rejects.toMatchObject({
+      name: "DiningCheckoutServiceError",
+      code: "DINING_CHECKOUT_TABLE_MOVED",
+    });
+    // History recovery (no new Batch) is unchanged.
+    expect((await f.service().prepare(f.input)).record).toEqual(prepared.record);
+  },
+);
+it("WP-2423 table-move-send: a participant who left is not a move and keeps its old answer", async () => {
+  const original = fixture();
+  const prepared = await original.service().prepare(original.input);
+  const f = movedFixture("ParticipantLeft");
+  f.options.repository.load = async () => prepared.record;
+  await expect(f.service().prepareForOrdering(f.input)).rejects.toMatchObject({
+    code: expect.not.stringMatching(/TABLE_MOVED/u),
+  });
+});
+it("WP-2423 table-move-send: payment of a round after a move keeps its own answer", async () => {
+  const paid = await paymentFixture();
+  const f = movedFixture("OtherTable");
+  f.options.repository.load = async () => paid.sealed;
+  await expect(f.service().authorizePayment(f.input)).rejects.toMatchObject({
+    code: "DINING_CHECKOUT_DEPENDENCY_UNAVAILABLE",
+  });
+});
