@@ -117,7 +117,9 @@ for (const width of widths)
       await page.goto("/orders/" + orderReference + "/receipt");
       const panel = page.getByRole("region", { name: "Join and earn 45 points on this order" });
       await expect(panel).toBeVisible();
-      await expect(panel).toContainText("only on orders you place by scanning the QR code");
+      await expect(panel).toContainText(
+        "Points can be used only when you pay a table’s bill at the end",
+      );
       await expect(panel).toContainText("only to text you a sign-in code");
       await expect(panel.getByRole("checkbox")).not.toBeChecked();
       await page.screenshot({

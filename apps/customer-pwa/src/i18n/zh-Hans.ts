@@ -1472,8 +1472,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Code from the text": "短信里的验证码",
   "Text me a code": "发验证码给我",
   "Send another code": "再发一次验证码",
-  "Points are earned and used only on orders you place by scanning the QR code.":
-    "只有扫码点的单才能积分和使用积分。",
   "You’re a member": "您已是会员",
   "{points} points added for this order.": "这单已加 {points} 分。",
   "You’re signed in.": "您已登录。",
@@ -1640,4 +1638,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Enter a mobile number, like 416 555 0123": "请填写手机号，例如 416 555 0123",
   "Enter an email address, like name@example.com": "请填写邮箱，例如 name@example.com",
   "Tick this to continue": "勾选后才能继续",
+  "You earn points on every order you scan to place. Points can be used only when you pay a table’s bill at the end, not on pickup or pay-first tables.":
+    "扫码下单都能攒积分；积分只能在餐后结账的桌台账单上使用，自取和先付款的桌台不能用。",
 });

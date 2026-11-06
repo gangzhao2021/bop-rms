@@ -4,8 +4,14 @@ import { t, useLanguage } from "../i18n/i18n.js";
 import { memberCodeProblem, MemberSignIn } from "./MemberSignIn.js";
 import { memberClient, type MemberClient, type MemberState } from "./member-client.js";
 
+/**
+ * WP-2423 M58 (Owner #13): where points are earned and where they can be used. Every order placed by
+ * scanning earns; points are used only on a table's bill paid at the end.
+ */
 export const scanToOrderOnlyText = () =>
-  t("Points are earned and used only on orders you place by scanning the QR code.");
+  t(
+    "You earn points on every order you scan to place. Points can be used only when you pay a table’s bill at the end, not on pickup or pay-first tables.",
+  );
 
 /**
  * On a receipt: join and earn on this order. Nothing here can get in the way of the receipt: a read
