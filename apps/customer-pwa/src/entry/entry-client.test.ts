@@ -799,3 +799,32 @@ describe("M02 replay of a waiting scan", () => {
     }
   });
 });
+
+describe("M104/M105: the entry answers that this phone's visit goes on", () => {
+  const pickup = {
+    ...established,
+    publicTableReference: null,
+    channel: "Pickup",
+    availableServiceModes: ["Pickup"],
+  };
+  it("takes a 200 resumed pickup visit, even while the Store takes no new guests", async () => {
+    for (const body of [
+      { ...pickup, resumed: true },
+      { ...pickup, resumed: true, operatingState: "Closed", availableServiceModes: [] },
+    ]) {
+      const answer = await client(async () => response(200, body)).start();
+      expect(answer).toMatchObject({ kind: "Established", context: { resumed: true } });
+    }
+  });
+  it("refuses a resumed answer with the wrong status or at a table, and reads a previous visit", async () => {
+    expect(
+      (await client(async () => response(201, { ...pickup, resumed: true })).start()).kind,
+    ).not.toBe("Established");
+    expect(
+      (await client(async () => response(200, { ...established, resumed: true })).start()).kind,
+    ).not.toBe("Established");
+    expect(
+      await client(async () => response(201, { ...pickup, previousVisit: "EndedReceiptsKept" })).start(),
+    ).toMatchObject({ kind: "Established", context: { previousVisit: "EndedReceiptsKept" } });
+  });
+});

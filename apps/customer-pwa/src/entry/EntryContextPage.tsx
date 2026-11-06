@@ -124,6 +124,12 @@ export function EntryContextPage({
         const next = await (fresh && client.startNew ? client.startNew() : client[action]());
         if (!active) return;
         setResult({ client, state: next });
+        // M104: "Order more" at a pickup visit goes straight back to its menu and cart.
+        if (fresh && next.kind === "Resumed" && next.context.channel === "Pickup") {
+          established.current?.(next.context);
+          void navigate("/menu");
+          return;
+        }
         if (
           next.kind === "Established" ||
           next.kind === "Resumed" ||
@@ -378,9 +384,10 @@ export function CurrentOrderView({
           </div>
           {onStartNew ? (
             <>
+              {/* M104: ordering more keeps this order; nothing on this phone is closed. */}
               <p>
                 {t(
-                  "Starting a new order here closes this order on this phone. The store still has it.",
+                  "Your earlier orders and receipts stay on this phone for 24 hours from your visit.",
                 )}
               </p>
               <button
@@ -390,7 +397,7 @@ export function CurrentOrderView({
                 type="button"
                 onClick={onStartNew}
               >
-                {t("Start a new order")}
+                {order.orderType === "Pickup" ? t("Order more") : t("Start a new order")}
               </button>
             </>
           ) : (
@@ -957,8 +964,28 @@ function EntryState({
           })}
         </p>
       )}
+      {/* M104/M105: said by its real reason; never that nothing was ordered. */}
+      {context.previousVisit === undefined ? null : (
+        <p className="entry-context" role="status">
+          {context.previousVisit === "EndedReceiptsKept"
+            ? t(
+                "Your earlier cart here has ended, so this is a new cart. Orders you placed stay on this phone, with their receipts, for 24 hours from your visit.",
+              )
+            : t("Your earlier cart here has ended, so this is a new cart.")}
+        </p>
+      )}
       {/* Open now, today's hours and the address are stated once, in the store card below. */}
-      {locationOpen ? (
+      {context.resumed === true && !locationOpen && onContinue ? (
+        // M104 (Owner 2026-11-05): a visit already under way finishes as usual.
+        <>
+          <p className="entry-closed" role="status">
+            {t("The store isn’t taking new orders right now. Your cart and orders are still here.")}
+          </p>
+          <button className="entry-action" type="button" onClick={onContinue}>
+            {t("Continue")}
+          </button>
+        </>
+      ) : locationOpen ? (
         onContinue ? (
           <EntryNextSteps
             joining={

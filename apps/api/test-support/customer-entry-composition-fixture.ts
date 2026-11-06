@@ -270,6 +270,10 @@ export function fixture(observedAt = now) {
         hashCredential: hash,
         hashOperationIntent: (intent) => hash("Intent", intent),
         equals: (a, b) => a === b,
+        deriveForegroundCsrf: (credential) =>
+          parseGuestRawCredential(
+            createHmac("sha256", pepper).update(`Foreground:${credential}`).digest("base64url"),
+          ),
       },
       binding: { validate: async () => "Current" },
       store: {
@@ -277,7 +281,24 @@ export function fixture(observedAt = now) {
         resolveOperation: async (operation) => records.get(operation) ?? null,
         resolve: async (selector) =>
           [...records.values()].find((record) => record.sessionSelectorHash === selector) ?? null,
-        touchInteractive: unexpected,
+        // M104/M105: a resumed visit is renewed as any interactive use is.
+        touchInteractive: vi.fn(async (command) => {
+          const found = [...records.values()].find(
+            (record) => record.sessionSelectorHash === command.selectorHash,
+          );
+          if (found === undefined || found.session.version !== command.expectedVersion) return null;
+          const touched = {
+            ...found,
+            session: {
+              ...found.session,
+              version: found.session.version + 1,
+              lastSeenAt: command.observedAt,
+              idleExpiresAt: command.idleExpiresAt,
+            },
+          } as GuestSessionRecord;
+          records.set(found.operationReference, touched);
+          return touched;
+        }),
         rotate: unexpected,
         revoke: unexpected,
       },

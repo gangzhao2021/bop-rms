@@ -914,3 +914,64 @@ describe("WP-2423 Q10 Guest cookie continuity", () => {
       expect(() => serializeGuestSessionCookie(value as never)).toThrow(GuestSessionError);
   });
 });
+
+describe("M104/M105 a rescan resumes this phone's visit", () => {
+  it("resumes a usable visit, renewing it as any interactive use does, with its CSRF", async () => {
+    const f = await recoveryFixture();
+    const result = await f.service.resumeForEntry({ sessionCredential, observedAt: now });
+    expect(result).toMatchObject({
+      status: "Usable",
+      session: { sessionReference: ids.session },
+      csrfCredential: f.credentials.deriveForegroundCsrf?.(sessionCredential),
+    });
+    expect(f.store.touches).toBe(1);
+  });
+
+  it("says Ended for an idle or closed visit, and whether its receipts can still be read", async () => {
+    const idle = await recoveryFixture({}, "Current", "2026-07-29T20:00:00.000Z");
+    expect(await idle.service.resumeForEntry({ sessionCredential })).toMatchObject({
+      status: "Ended",
+      receiptsReadable: true,
+    });
+    expect(idle.store.touches).toBe(0);
+    const revoked = await recoveryFixture(
+      { status: "Revoked", revocationReason: "Logout", revokedAt: now, version: 2 },
+      "Current",
+      now,
+    );
+    expect(await revoked.service.resumeForEntry({ sessionCredential })).toMatchObject({
+      status: "Ended",
+      receiptsReadable: false,
+    });
+  });
+
+  it("says Unknown for a credential this Store has no record of, or a malformed one", async () => {
+    const f = await recoveryFixture();
+    expect(
+      await f.service.resumeForEntry({ sessionCredential: nextSessionCredential }),
+    ).toEqual({ status: "Unknown" });
+    expect(await f.service.resumeForEntry({ sessionCredential: "short" })).toEqual({
+      status: "Unknown",
+    });
+  });
+
+  it("throws a dependency failure, never Unknown, when the store can't answer", async () => {
+    const f = await recoveryFixture();
+    const fault = Object.assign(new Error("acquire"), { code: "TENANT_DATABASE_ACQUIRE_FAILED" });
+    const service = new GuestSessionService({
+      store: {
+        ...f.store,
+        resolve: async () => {
+          throw fault;
+        },
+      } as never,
+      credentials: f.credentials,
+      admission: { consume: async () => null },
+      binding: { validate: async () => "Current" },
+      now: () => now,
+    });
+    await expect(service.resumeForEntry({ sessionCredential })).rejects.toMatchObject({
+      dependencyFailure: true,
+    });
+  });
+});

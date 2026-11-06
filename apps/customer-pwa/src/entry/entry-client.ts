@@ -106,10 +106,17 @@ function parseSuccess(value: unknown): CustomerEntryEstablishedContext {
     "locale",
     "contextExpiresAt",
     "csrfToken",
-    ...(value !== null && typeof value === "object" && Object.hasOwn(value, "tableOpen")
-      ? ["tableOpen"]
-      : []),
+    ...(["tableOpen", "resumed", "previousVisit"] as const).filter(
+      (key) => value !== null && typeof value === "object" && Object.hasOwn(value, key),
+    ),
   ]);
+  if (
+    (raw.resumed !== undefined && (raw.resumed !== true || raw.channel !== "Pickup")) ||
+    (raw.previousVisit !== undefined &&
+      raw.previousVisit !== "Ended" &&
+      raw.previousVisit !== "EndedReceiptsKept")
+  )
+    throw new TypeError("malformed entry result");
   if (
     (raw.tableOpen !== undefined &&
       (typeof raw.tableOpen !== "boolean" || raw.channel !== "DineIn")) ||
@@ -137,7 +144,8 @@ function parseSuccess(value: unknown): CustomerEntryEstablishedContext {
   );
   if (
     new Set(modes).size !== modes.length ||
-    (raw.operatingState === "Open") !== modes.includes(raw.channel) ||
+    // M104/M105: a resumed visit goes on whatever the Store takes from new guests now.
+    (raw.resumed !== true && (raw.operatingState === "Open") !== modes.includes(raw.channel)) ||
     (raw.operatingState !== "Open" && modes.length !== 0)
   )
     throw new TypeError("operating context conflict");
@@ -153,6 +161,10 @@ function parseSuccess(value: unknown): CustomerEntryEstablishedContext {
     contextExpiresAt: instant(raw.contextExpiresAt),
     csrfToken: raw.csrfToken,
     ...(raw.tableOpen === undefined ? {} : { tableOpen: raw.tableOpen as boolean }),
+    ...(raw.resumed === true ? { resumed: true as const } : {}),
+    ...(raw.previousVisit === undefined
+      ? {}
+      : { previousVisit: raw.previousVisit as "Ended" | "EndedReceiptsKept" }),
   });
 }
 
@@ -552,10 +564,17 @@ export function createCustomerEntryClient(
       }
       const { status, body, retryAfter } = answer;
       if (!online() || !current()) throw new Error("entry unavailable");
-      if (status === 201) {
+      // M104/M105: 200 is this phone's visit going on (nothing new started), 201 a new visit.
+      const resumedAnswer =
+        status === 200 &&
+        body !== null &&
+        typeof body === "object" &&
+        (body as { resumed?: unknown }).resumed === true;
+      if (status === 201 || resumedAnswer) {
         const context = parseSuccess(body);
+        if ((status === 200) !== (context.resumed === true)) throw new Error("entry unavailable");
         if (!online() || !current()) throw new Error("entry unavailable");
-        if (replay) setPaymentOperationReference(null);
+        if (replay && context.resumed !== true) setPaymentOperationReference(null);
         setCustomerCsrfCredential(context.csrfToken);
         return Object.freeze({ kind: "Established", context });
       }

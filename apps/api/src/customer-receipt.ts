@@ -22,8 +22,17 @@ export interface CustomerReceiptItemNames {
   /** The item's chosen options' names, in the order the receipt line lists them. */
   readonly options: readonly string[];
 }
+type ReceiptView = NonNullable<Awaited<ReturnType<NonNullable<ReceiptPort["readView"]>>>>;
 interface ReceiptPort {
   read(input: CustomerReceiptInput): Promise<DigitalReceiptChain>;
+  /**
+   * M104/M105: an order placed by an earlier visit this phone keeps (absent: none are read). Its
+   * credential is from the phone's earlier-visits cookie; the read checks it as its owner does.
+   */
+  readEarlierView?(
+    input: { sessionCredential: string; orderReference: string },
+    displayLocale?: string,
+  ): Promise<ReceiptView>;
   /** `displayLocale` (Owner 2026-10-23): the guest's chosen language for item names. */
   readView?(
     input: CustomerReceiptInput,
@@ -83,6 +92,28 @@ function financialJson(value: CustomerReceiptFinancialView | null) {
   };
 }
 const credential = /^[A-Za-z0-9_-]{43}$/u;
+/** The receipt is not this visit's to read (or no such order): a 404, never an outage. */
+function notOwned(error: unknown): boolean {
+  return (
+    error instanceof GuestSessionError ||
+    (error instanceof DigitalReceiptError &&
+      ["DIGITAL_RECEIPT_PERMISSION_DENIED", "DIGITAL_RECEIPT_NOT_FOUND"].includes(error.code))
+  );
+}
+/** M104/M105: the earlier visits this phone keeps (the entry's `__Host-bop-visits` cookie). */
+function earlierVisitCredentials(header: unknown): string[] {
+  if (typeof header !== "string" || header.length > 8192) return [];
+  const values = header
+    .split(";")
+    .map((part) => part.trim())
+    .filter((part) => part.startsWith("__Host-bop-visits="))
+    .map((part) => part.slice("__Host-bop-visits=".length));
+  if (values.length !== 1) return [];
+  return (values[0] ?? "")
+    .split(".")
+    .slice(0, 2)
+    .filter((value) => credential.test(value));
+}
 const reference = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 function protect(response: Response) {
   response.setHeader("Cache-Control", "no-store");
@@ -116,6 +147,7 @@ export class CustomerReceiptHandler {
       protect(response);
       let input: CustomerReceiptInput;
       let displayLocale: string | null;
+      let earlier: string[] = [];
       try {
         if (
           (request.get("origin") !== undefined && request.get("origin") !== this.#origin) ||
@@ -145,16 +177,37 @@ export class CustomerReceiptHandler {
           csrfCredential: csrf,
           orderReference: id,
         };
+        earlier = earlierVisitCredentials(request.headers.cookie).filter(
+          (value) => value !== input.sessionCredential,
+        );
       } catch {
         reject(response, 400);
         return;
       }
       try {
-        const view = this.#port.readView
-          ? displayLocale === null
-            ? await this.#port.readView(input)
-            : await this.#port.readView(input, displayLocale)
-          : null;
+        const readCurrent = () =>
+          this.#port.readView
+            ? displayLocale === null
+              ? this.#port.readView(input)
+              : this.#port.readView(input, displayLocale)
+            : Promise.resolve(null);
+        const view = await readCurrent().catch(async (error: unknown) => {
+          // M104/M105: not this visit's order: an earlier visit this phone keeps may have placed
+          // it (its receipt stays readable on this phone for 24 hours from that visit).
+          const readEarlier = this.#port.readEarlierView;
+          if (!notOwned(error) || readEarlier === undefined || earlier.length === 0) throw error;
+          for (const sessionCredential of earlier) {
+            try {
+              const target = { sessionCredential, orderReference: input.orderReference };
+              return displayLocale === null
+                ? await readEarlier(target)
+                : await readEarlier(target, displayLocale);
+            } catch (next) {
+              if (!notOwned(next)) throw next;
+            }
+          }
+          throw error;
+        });
         // A name for the guest's language when one was frozen with the item; else as issued.
         const itemName = (lineReference: string, issued: string) =>
           view?.itemNames?.get(lineReference)?.displayName ?? issued;
@@ -307,12 +360,7 @@ export class CustomerReceiptHandler {
         };
         response.status(200).json({ schemaVersion: 1, receipt });
       } catch (error) {
-        const status =
-          error instanceof GuestSessionError ||
-          (error instanceof DigitalReceiptError &&
-            ["DIGITAL_RECEIPT_PERMISSION_DENIED", "DIGITAL_RECEIPT_NOT_FOUND"].includes(error.code))
-            ? 404
-            : 503;
+        const status = notOwned(error) ? 404 : 503;
         if (status === 503) markRequestFailure(request, customerFailureCode(error));
         reject(response, status);
       }

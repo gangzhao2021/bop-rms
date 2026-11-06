@@ -268,6 +268,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "This table is settled. Thank you for dining with us.": "这桌已结账，谢谢光临",
   "Table {table} has paid and closed.": "桌号 {table}，已付清。",
   "From table {table}": "来自 {table} 桌",
+  "Order more": "再点一些",
   "Order at this table": "在这张桌点餐",
   "You pay on your phone each time you order. No account needed.":
     "每次点餐在手机上付款，不用注册。",
@@ -696,8 +697,14 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Start an empty cart": "开一个空购物车",
   "Start secure payment": "开始安全付款",
   "Start your order": "开始点单",
-  "Starting a new order here closes this order on this phone. The store still has it.":
-    "在这里开始新订单会在这部手机上结束当前订单，门店仍保留着它。",
+  "Your earlier orders and receipts stay on this phone for 24 hours from your visit.":
+    "之前的订单和收据在这部手机上保留，从到店起 24 小时内都能查看。",
+  "Your earlier cart here has ended, so this is a new cart. Orders you placed stay on this phone, with their receipts, for 24 hours from your visit.":
+    "你之前在这里的购物车已结束，这是一个新的购物车。已下的订单和收据仍保留在这部手机上，从到店起 24 小时内都能查看。",
+  "Your earlier cart here has ended, so this is a new cart.":
+    "你之前在这里的购物车已结束，这是一个新的购物车。",
+  "The store isn’t taking new orders right now. Your cart and orders are still here.":
+    "门店现在不接新订单。你的购物车和订单仍在这里。",
   "Starting your cart…": "正在创建购物车…",
   Status: "状态",
   "Status may be delayed": "状态可能延迟",

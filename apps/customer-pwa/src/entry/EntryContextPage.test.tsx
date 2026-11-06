@@ -312,7 +312,7 @@ describe("WP-2423 Q10 continue the order in progress", () => {
         <CurrentOrderView {...props} />
       </MemoryRouter>,
     );
-  it("offers the pickup order first and says what a new order does to it", () => {
+  it("offers the pickup order first, and ordering more keeps it on this phone (M104)", () => {
     const html = view({
       order,
       onStartNew: vi.fn(),
@@ -323,8 +323,9 @@ describe("WP-2423 Q10 continue the order in progress", () => {
     expect(html).not.toContain("Scan the location QR code to begin");
     expect(html).toContain(`href="/orders/${order.orderReference}"`);
     expect(html).toContain("View order 12");
-    expect(html).toContain("Start a new order");
-    expect(html).toContain("closes this order on this phone");
+    expect(html).toContain("Order more");
+    expect(html).toContain("stay on this phone for 24 hours");
+    expect(html).not.toContain("closes this order");
     expect(html).not.toContain("Your table");
   });
   it("links a dine-in guest to the table and asks for a QR scan when no code was scanned", () => {
@@ -487,5 +488,51 @@ describe("M02 resumed visit", () => {
     } finally {
       setSettledTable(null);
     }
+  });
+});
+
+describe("M104/M105: a rescan says what happened to the visit on this phone", () => {
+  const pickupContext = {
+    brandDisplayName: "BOP Test Kitchen",
+    storeDisplayName: "Harbour Test Store",
+    publicStoreReference: "018f2a1b-7c3d-7a4e-8b5c-1234567890ab",
+    publicTableReference: null,
+    channel: "Pickup" as const,
+    operatingState: "Open" as const,
+    availableServiceModes: ["Pickup" as const],
+    locale: "en-CA",
+    contextExpiresAt: "2026-08-11T20:00:00.000Z",
+    csrfToken: "A".repeat(43),
+  };
+  const render = (context: object) =>
+    renderToStaticMarkup(
+      <MemoryRouter>
+        <EntryContextView
+          onContinue={vi.fn()}
+          onRetry={vi.fn()}
+          state={{ kind: "Established", context: context as never }}
+        />
+      </MemoryRouter>,
+    );
+  it("says an ended earlier cart by its reason, and never that nothing was ordered", () => {
+    const kept = render({ ...pickupContext, previousVisit: "EndedReceiptsKept" });
+    expect(kept).toContain("Your earlier cart here has ended");
+    expect(kept).toContain("Orders you placed stay on this phone");
+    const ended = render({ ...pickupContext, previousVisit: "Ended" });
+    expect(ended).toContain("Your earlier cart here has ended");
+    for (const html of [kept, ended]) {
+      expect(html).not.toMatch(/nothing was ordered|\b4 hours|wasn.t used/iu);
+    }
+  });
+  it("lets a resumed visit go on while the Store takes no new orders", () => {
+    const html = render({
+      ...pickupContext,
+      resumed: true,
+      operatingState: "Closed",
+      availableServiceModes: [],
+    });
+    expect(html).toContain("Your cart and orders are still here");
+    expect(html).toContain(">Continue<");
+    expect(html).not.toContain("This location is not accepting orders");
   });
 });

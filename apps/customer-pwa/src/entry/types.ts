@@ -14,6 +14,10 @@ export interface CustomerEntryEstablishedContext {
   readonly csrfToken: string;
   /** Coordinator 2026-10-30: at a table, whether staff seated a party there (absent: unknown). */
   readonly tableOpen?: boolean;
+  /** M104/M105: this phone's pickup visit at this Store goes on (its cart and orders are kept). */
+  readonly resumed?: true;
+  /** M104/M105: the visit this phone had here ended; whether its receipts are still on the phone. */
+  readonly previousVisit?: "Ended" | "EndedReceiptsKept";
 }
 
 /** What the menu needs when no visit has started: the Store, never a table or a Session. */

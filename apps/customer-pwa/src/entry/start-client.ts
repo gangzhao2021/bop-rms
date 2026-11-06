@@ -144,18 +144,13 @@ export function createCustomerStartClient(input: CustomerStartClientInput): Cust
     async startNew() {
       if (source.kind === "Code") {
         const token = await source.load();
-        // The same table again keeps its visit; anything else, the new code.
-        if (
-          token !== undefined &&
-          resumed !== null &&
-          restored?.channel === "DineIn" &&
-          isRestoredVisitCode(token, restored)
-        )
+        // The same table or pickup poster again keeps its visit; anything else, the new code.
+        if (token !== undefined && resumed !== null && restored && isRestoredVisitCode(token, restored))
           return resumed;
         return enterCode(token);
       }
-      if (restored?.channel === "Pickup")
-        return enterCode(await pickupCode(restored.publicStoreReference));
+      // M104: "Order more" at a pickup visit goes on with that visit (one per Store on a phone),
+      // so the orders, receipts and pickup codes it has stay reachable; a table stays the same.
       return resumed ?? run();
     },
   });

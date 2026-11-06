@@ -9,6 +9,7 @@ import type {
 // M02 (v15 07b7a1b7): a reloaded Lane Dessert page opened DEMO Café (the installation's first
 // Store) and emptied the guest's cart. A phone now stays at the Store and table it scanned.
 const STORE_B = "0190aa21-0000-7000-8000-00000000000b";
+const STORE_A = "0190aa21-0000-7000-8000-00000000000a";
 const TABLE_T = "0190aa21-0000-7000-8000-0000000000a1";
 const code = (payload: object) =>
   "h." + Buffer.from(JSON.stringify(payload)).toString("base64url") + ".s";
@@ -132,11 +133,13 @@ describe("M02 the start page stays at this phone's own Store and table", () => {
     expect(f.forCode).toHaveBeenCalledWith(other);
   });
 
-  it("'Start a new order' starts at the restored Store, or stays at the same table", async () => {
+  it("'Order more' goes on with the same pickup visit, or stays at the same table (M104)", async () => {
     const pickup = setup({ restored: restoredPickup, pickup: pickupB });
     expect(pickup.client.startsNewVisit).toBe(true);
-    expect(await pickup.client.startNew?.()).toBe(established);
-    expect(pickup.pickupCode).toHaveBeenCalledWith(STORE_B);
+    // The same visit goes on: its orders, receipts and pickup codes stay on this phone.
+    expect(await pickup.client.startNew?.()).toEqual({ kind: "Resumed", context: restoredPickup });
+    expect(pickup.pickupCode).not.toHaveBeenCalled();
+    expect(pickup.forCode).not.toHaveBeenCalled();
     // Where this installation hands out no pickup codes, the guest is told to scan instead.
     expect(
       createCustomerStartClient({
@@ -152,13 +155,21 @@ describe("M02 the start page stays at this phone's own Store and table", () => {
     expect(table.client.startsNewVisit).toBe(false);
     expect(await table.client.startNew?.()).toEqual({ kind: "Resumed", context: restoredTable });
     expect(table.pickupCode).not.toHaveBeenCalled();
-    // A poster scanned while an order is open: asked for, a new order there.
+    // The same Store's poster scanned while an order is open: that visit goes on too.
     const scanned = setup({
       source: { kind: "Code", load: async () => pickupB },
       restored: restoredPickup,
     });
-    expect(await scanned.client.startNew?.()).toBe(established);
-    expect(scanned.forCode).toHaveBeenCalledWith(pickupB);
+    expect(await scanned.client.startNew?.()).toEqual({ kind: "Resumed", context: restoredPickup });
+    expect(scanned.forCode).not.toHaveBeenCalled();
+    // Another Store's code is a new scan there (the visit here is kept on the phone).
+    const other = code({ publicStoreReference: STORE_A, publicTableReference: null });
+    const elsewhere = setup({
+      source: { kind: "Code", load: async () => other },
+      restored: restoredPickup,
+    });
+    expect(await elsewhere.client.startNew?.()).toBe(established);
+    expect(elsewhere.forCode).toHaveBeenCalledWith(other);
   });
 
   it("an address that is no code asks to scan and fetches nothing", async () => {

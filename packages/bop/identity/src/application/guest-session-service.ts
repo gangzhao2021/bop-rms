@@ -332,6 +332,63 @@ export class GuestSessionService {
     }
   }
 
+  /**
+   * M104/M105: what a credential this phone presents at entry is to this Store: a visit it can go
+   * on with (renewed as any interactive use is, with its foreground CSRF), a visit of this Store
+   * that has ended (and whether its receipts can still be read), or one this Store has no record
+   * of. A store that can't answer throws with `dependencyFailure`, so the entry asks the guest to
+   * retry and never silently replaces a visit it could not check.
+   */
+  async resumeForEntry(input: {
+    readonly sessionCredential: unknown;
+    readonly observedAt?: unknown;
+  }): Promise<
+    | {
+        readonly status: "Usable";
+        readonly session: GuestSession;
+        readonly csrfCredential: GuestRawCredential;
+      }
+    | { readonly status: "Ended"; readonly session: GuestSession; readonly receiptsReadable: boolean }
+    | { readonly status: "Unknown" }
+  > {
+    const raw = command(input, ["sessionCredential"], ["observedAt"]);
+    const observedAt = this.#at(raw.observedAt);
+    let credential: GuestRawCredential;
+    try {
+      credential = parseGuestRawCredential(raw.sessionCredential);
+    } catch {
+      return Object.freeze({ status: "Unknown" as const });
+    }
+    const record = await this.#storeCall(() =>
+      this.#store.resolve(this.#selector("Session", credential)),
+    );
+    if (record === null) return Object.freeze({ status: "Unknown" as const });
+    const found = this.#record(record).session;
+    try {
+      const session = await this.resolve({
+        sessionCredential: credential,
+        activity: "Interactive",
+        observedAt,
+      });
+      if (!this.#credentials.deriveForegroundCsrf)
+        throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
+      return Object.freeze({
+        status: "Usable" as const,
+        session,
+        csrfCredential: parseGuestRawCredential(this.#credentials.deriveForegroundCsrf(credential)),
+      });
+    } catch (error) {
+      if ((error as { dependencyFailure?: unknown }).dependencyFailure === true) throw error;
+    }
+    let receiptsReadable = true;
+    try {
+      assertGuestSessionReceiptReadable(found, observedAt);
+    } catch {
+      receiptsReadable = false;
+    }
+    return Object.freeze({ status: "Ended" as const, session: found, receiptsReadable });
+  }
+
   /** Read-only bootstrap for a same-origin foreground request; does not renew idle expiry. */
   async recoverForegroundCsrf(input: {
     readonly sessionCredential: unknown;

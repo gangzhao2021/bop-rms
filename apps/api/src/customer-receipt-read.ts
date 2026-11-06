@@ -231,5 +231,32 @@ export function createCustomerReceiptRead(
   return Object.freeze({
     read: async (value: unknown) => (await readView(value, false)).chain,
     readView: (value: unknown, displayLocale?: string) => readView(value, true, displayLocale),
+    /**
+     * M104/M105: the receipt of an order an earlier visit on this phone placed (a visit the entry
+     * kept when it replaced it). The same owner checks as the current visit's read, with that
+     * visit's own foreground CSRF, derived here (the page holds only the current visit's).
+     */
+    readEarlierView: (
+      value: { sessionCredential: string; orderReference: string },
+      displayLocale?: string,
+    ) => {
+      const derive = options.credentials.deriveForegroundCsrf;
+      if (!derive) throw new DigitalReceiptError("DIGITAL_RECEIPT_PERMISSION_DENIED");
+      let csrfCredential: string;
+      try {
+        csrfCredential = derive(parseGuestRawCredential(value.sessionCredential));
+      } catch {
+        throw new DigitalReceiptError("DIGITAL_RECEIPT_PERMISSION_DENIED");
+      }
+      return readView(
+        {
+          sessionCredential: value.sessionCredential,
+          csrfCredential,
+          orderReference: value.orderReference,
+        },
+        true,
+        displayLocale,
+      );
+    },
   });
 }

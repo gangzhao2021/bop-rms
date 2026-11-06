@@ -1,5 +1,6 @@
 import {
   GuestSessionService,
+  guestSessionCookie,
   parseCanonicalInstant,
   parseGuestAdmissionEvidence,
   parseGuestEntryRequestReference,
@@ -102,6 +103,57 @@ export interface CustomerEntryTableReader {
 
 const unavailable = Object.freeze({ status: "EntryUnavailable" } as const);
 
+/** At most this many earlier visits are kept on a phone besides its current one. */
+export const customerEntryEarlierVisitLimit = 2;
+type PresentedVisit = {
+  readonly source: "Current" | "Earlier";
+  readonly credential: string;
+  readonly result: Awaited<ReturnType<GuestSessionService["resumeForEntry"]>>;
+};
+async function presentedVisits(
+  session: CustomerEntryCompositionOptions["session"],
+  input: CustomerEntryPortInput,
+  observedAt: string,
+): Promise<readonly PresentedVisit[]> {
+  const presented = input.presentedCredentials ?? [];
+  if (presented.length === 0) return [];
+  const identity = new GuestSessionService({
+    ...session,
+    admission: { consume: async () => null },
+  });
+  const visits: PresentedVisit[] = [];
+  for (const { source, credential } of presented) {
+    try {
+      visits.push({
+        source,
+        credential,
+        result: await identity.resumeForEntry({ sessionCredential: credential, observedAt }),
+      });
+    } catch (error) {
+      // The store could not say: a retry, never a new visit that would replace this one.
+      if ((error as { dependencyFailure?: unknown }).dependencyFailure === true)
+        throw new CustomerEntryServiceUnavailableError();
+      visits.push({ source, credential, result: Object.freeze({ status: "Unknown" as const }) });
+    }
+  }
+  return visits;
+}
+/**
+ * The earlier visits kept on the phone: one it can go on with, one whose receipts can still be
+ * read, and one this Store can't see (it may be another Store's); never one that has fully ended.
+ */
+function keptCredentials(visits: readonly PresentedVisit[]): string[] {
+  const kept: string[] = [];
+  for (const visit of visits) {
+    const worth =
+      visit.result.status === "Usable" ||
+      visit.result.status === "Unknown" ||
+      (visit.result.status === "Ended" && visit.result.receiptsReadable);
+    if (worth && !kept.includes(visit.credential)) kept.push(visit.credential);
+  }
+  return kept.slice(0, customerEntryEarlierVisitLimit);
+}
+
 /**
  * WP-2423: the database could not answer a read Entry needs (a lost connection, a timeout, a missing
  * grant). It is an outage, so the guest is asked to retry (503), never told the code is unusable.
@@ -172,6 +224,29 @@ export function createCustomerEntryComposition(
           },
         }).getPublicStore({ ...query, requestedLocale: qr.context.locale });
         if (profile.status !== "Available") return unavailable;
+        // M104/M105: what each credential this phone presented is to this Store, read before the
+        // Store's hours and pause (an existing visit finishes as usual; only a new one is refused).
+        const visits = await presentedVisits(options.session, input, requestedAt);
+        const publicContextFor = () => ({
+          brandDisplayName: profile.profile.brandDisplayName,
+          storeDisplayName: profile.profile.storeDisplayName,
+          publicStoreReference: String(qr.context.publicStoreReference),
+          locale: String(qr.context.locale),
+        });
+        // A pickup code scanned again at the Store this phone already has a pickup visit at goes
+        // on with that visit: the same cart, orders, receipts and pickup codes, no new visit.
+        const resumable =
+          qr.context.channel === "Pickup" && input.intent === undefined
+            ? visits.find(
+                (visit) =>
+                  visit.result.status === "Usable" &&
+                  sameScope(visit.result.session) &&
+                  String(visit.result.session.publicStoreReference) ===
+                    String(qr.context.publicStoreReference) &&
+                  visit.result.session.channel === "Pickup" &&
+                  visit.result.session.publicTableReference === null,
+              )
+            : undefined;
         let operatingStatus: Pick<StoreOperatingStatus, "state" | "availableServiceModes">;
         let todayHours: readonly {
           startLocalTime: string;
@@ -210,6 +285,32 @@ export function createCustomerEntryComposition(
           }).getStoreOperatingStatus(query);
           if (operating.status !== "Available") return unavailable;
           operatingStatus = operating.operatingStatus;
+        }
+        if (resumable !== undefined && resumable.result.status === "Usable") {
+          const session = resumable.result.session;
+          return Object.freeze({
+            status: "Established" as const,
+            ...publicContextFor(),
+            publicTableReference: null,
+            channel: "Pickup" as const,
+            operatingState: operatingStatus.state,
+            availableServiceModes: operatingStatus.availableServiceModes,
+            contextExpiresAt: new Date(
+              Math.min(
+                Date.parse(qr.context.expiresAt),
+                Date.parse(evidence.validUntil),
+                Date.parse(session.idleExpiresAt),
+                Date.parse(session.absoluteExpiresAt),
+              ),
+            ).toISOString(),
+            sessionCredential: resumable.credential as never,
+            csrfCredential: resumable.result.csrfCredential,
+            cookie: guestSessionCookie,
+            resumed: true as const,
+            earlierCredentials: Object.freeze(
+              keptCredentials(visits.filter((visit) => visit !== resumable)),
+            ),
+          });
         }
         // WP-2423 item 8 ⑦ 1b: a pickup code at a Store that turned pickup off.
         if (turnedOff.includes(qr.context.channel))
@@ -342,6 +443,15 @@ export function createCustomerEntryComposition(
           },
         }).create({ entryRequestReference, operationReference, requestedAt });
         if (session.status !== "Issued") return unavailable;
+        // Every visit this phone had that is still worth something (one it can go on with, or
+        // one whose receipts can still be read, here or at another Store) is kept on the phone.
+        const current = visits.find((visit) => visit.source === "Current");
+        const endedHere =
+          current !== undefined &&
+          current.result.status === "Ended" &&
+          sameScope(current.result.session) &&
+          String(current.result.session.publicStoreReference) ===
+            String(qr.context.publicStoreReference);
         const contextExpiresAt = new Date(
           Math.min(
             Date.parse(qr.context.expiresAt),
@@ -366,6 +476,14 @@ export function createCustomerEntryComposition(
           sessionCredential: session.sessionCredential,
           csrfCredential: session.csrfCredential,
           cookie: session.cookie,
+          ...(visits.length === 0 ? {} : { earlierCredentials: Object.freeze(keptCredentials(visits)) }),
+          ...(endedHere && current.result.status === "Ended"
+            ? {
+                previousVisit: current.result.receiptsReadable
+                  ? ("EndedReceiptsKept" as const)
+                  : ("Ended" as const),
+              }
+            : {}),
         });
       } catch (error) {
         if (error instanceof CustomerEntryServiceUnavailableError) throw error;

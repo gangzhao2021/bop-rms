@@ -610,3 +610,171 @@ describe("WP-2423 item 13 ② (Owner 2026-11-05): a merchant the platform paused
     expect(f.create).toHaveBeenCalledOnce();
   });
 });
+
+describe("M104/M105: a rescan goes on with this phone's visit", () => {
+  const pickup = (f: ReturnType<typeof fixture>) => {
+    f.payload.channel = f.context.channel = "Pickup";
+    f.payload.publicTableReference =
+      f.context.publicTableReference =
+      f.context.tableReference =
+        null;
+    f.context.tableLifecycle = f.context.assignmentState = null;
+    return f;
+  };
+  const first = async (f: ReturnType<typeof fixture>) => {
+    const result = await createCustomerEntryComposition(f.options).establish(f.input());
+    if (result.status !== "Established") throw new Error("synthetic entry unavailable");
+    return result;
+  };
+  const again = (
+    f: ReturnType<typeof fixture>,
+    presented: readonly { source: "Current" | "Earlier"; credential: string }[],
+    options = f.options,
+  ) =>
+    createCustomerEntryComposition(options).establish({
+      ...f.input(),
+      presentedCredentials: presented,
+    });
+
+  it("a pickup code scanned again resumes the same visit: no new Session, no admission", async () => {
+    const f = pickup(fixture());
+    const visit = await first(f);
+    const result = await again(f, [{ source: "Current", credential: visit.sessionCredential }]);
+    expect(result).toMatchObject({
+      status: "Established",
+      resumed: true,
+      channel: "Pickup",
+      sessionCredential: visit.sessionCredential,
+      earlierCredentials: [],
+    });
+    expect(f.create).toHaveBeenCalledOnce();
+    expect(f.admission).toHaveBeenCalledOnce();
+    expect(f.records.size).toBe(1);
+  });
+
+  it("resumes an existing visit while the Store is paused for new guests (it finishes as usual)", async () => {
+    const f = pickup(fixture());
+    const visit = await first(f);
+    const result = await again(f, [{ source: "Current", credential: visit.sessionCredential }], {
+      qr: f.options.qr,
+      profile: f.options.profile,
+      admission: f.options.admission,
+      session: f.options.session,
+      operatingReader: {
+        readCurrent: async () => ({
+          brandReference: id(1),
+          storeReference: id(2),
+          evaluatedAt: now,
+          state: "Closed" as const,
+          availableServiceModes: [],
+          newGuestsPaused: true,
+        }),
+      },
+    } as never);
+    expect(result).toMatchObject({ status: "Established", resumed: true, operatingState: "Closed" });
+    expect(f.create).toHaveBeenCalledOnce();
+    // A phone with no visit here is still refused.
+    expect(
+      await again(f, [], {
+        qr: f.options.qr,
+        profile: f.options.profile,
+        admission: f.options.admission,
+        session: f.options.session,
+        operatingReader: {
+          readCurrent: async () => ({
+            brandReference: id(1),
+            storeReference: id(2),
+            evaluatedAt: now,
+            state: "Open" as const,
+            availableServiceModes: ["Pickup"],
+            newGuestsPaused: true,
+          }),
+        },
+      } as never),
+    ).toMatchObject({ status: "NotAccepting", newGuestsPaused: true });
+  });
+
+  it("an ended visit here starts a new one, says so, and keeps the old one for its receipts", async () => {
+    const f = pickup(fixture());
+    const visit = await first(f);
+    const [key, record] = [...f.records.entries()][0] as [string, never];
+    const old = record as { session: Record<string, unknown> };
+    const createdAt = new Date(Date.parse(now) - 5 * 3_600_000).toISOString();
+    f.records.set(key, {
+      ...old,
+      session: {
+        ...old.session,
+        createdAt,
+        lastSeenAt: createdAt,
+        idleExpiresAt: new Date(Date.parse(createdAt) + 4 * 3_600_000).toISOString(),
+        absoluteExpiresAt: new Date(Date.parse(createdAt) + 24 * 3_600_000).toISOString(),
+      },
+    } as never);
+    const result = await again(f, [{ source: "Current", credential: visit.sessionCredential }]);
+    expect(result).toMatchObject({
+      status: "Established",
+      previousVisit: "EndedReceiptsKept",
+      earlierCredentials: [visit.sessionCredential],
+    });
+    expect(result).not.toHaveProperty("resumed");
+    if (result.status !== "Established") throw new Error("expected a visit");
+    expect(result.sessionCredential).not.toBe(visit.sessionCredential);
+    expect(f.create).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps a table visit here, and a visit this Store can't see, when a pickup code starts a new one", async () => {
+    const f = fixture();
+    const table = await first(f);
+    pickup(f);
+    const elsewhere = "E".repeat(43);
+    const result = await again(f, [
+      { source: "Current", credential: table.sessionCredential },
+      { source: "Earlier", credential: elsewhere },
+    ]);
+    expect(result).toMatchObject({
+      status: "Established",
+      channel: "Pickup",
+      earlierCredentials: [table.sessionCredential, elsewhere],
+    });
+    expect(result).not.toHaveProperty("resumed");
+    expect(result).not.toHaveProperty("previousVisit");
+  });
+
+  it("goes back to a kept earlier pickup visit when this Store's code is scanned again", async () => {
+    const f = pickup(fixture());
+    const visit = await first(f);
+    const other = "O".repeat(43);
+    const result = await again(f, [
+      { source: "Current", credential: other },
+      { source: "Earlier", credential: visit.sessionCredential },
+    ]);
+    expect(result).toMatchObject({
+      status: "Established",
+      resumed: true,
+      sessionCredential: visit.sessionCredential,
+      earlierCredentials: [other],
+    });
+    expect(f.create).toHaveBeenCalledOnce();
+  });
+
+  it("answers a retry, never a new visit, when the visit can't be checked", async () => {
+    const f = pickup(fixture());
+    const visit = await first(f);
+    const failing = {
+      ...f.options,
+      session: {
+        ...f.options.session,
+        store: {
+          ...f.options.session.store,
+          resolve: async () => {
+            throw Object.assign(new Error("acquire"), { code: "TENANT_DATABASE_ACQUIRE_FAILED" });
+          },
+        },
+      },
+    };
+    await expect(
+      again(f, [{ source: "Current", credential: visit.sessionCredential }], failing),
+    ).rejects.toBeInstanceOf(CustomerEntryServiceUnavailableError);
+    expect(f.create).toHaveBeenCalledOnce();
+  });
+});

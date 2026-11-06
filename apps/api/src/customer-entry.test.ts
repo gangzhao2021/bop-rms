@@ -663,7 +663,11 @@ describe("WP-1004 Customer-entry contract", () => {
       NEXT_OPERATION_REFERENCE,
     ]);
     expect(JSON.stringify(port.calls)).not.toContain("x-operation-reference");
-    expect(JSON.stringify(port.calls)).not.toContain("X".repeat(43));
+    // M104/M105: the phone's own visit cookie is passed on, only as the visit it presents.
+    expect(port.calls.map((call) => call.presentedCredentials)).toEqual([
+      [{ source: "Current", credential: "X".repeat(43) }],
+      [{ source: "Current", credential: "X".repeat(43) }],
+    ]);
   });
 
   it("fails closed for malformed or reused server reference generation", async () => {
@@ -936,5 +940,106 @@ describe("M02 waiting scan: a reload asks the same Store about the same code", (
     expect(response.status).toBe(503);
     expect(await response.text()).not.toContain(TOKEN);
     expect(response.headers.getSetCookie()).toEqual([]);
+  });
+});
+
+describe("M104/M105: a rescan goes on with this phone's visit", () => {
+  const EARLIER = "E".repeat(43);
+  const visits = (response: Response) =>
+    response.headers.getSetCookie().filter((cookie) => cookie.startsWith("__Host-bop-visits="));
+
+  it("passes the current and earlier visits (exact cookie names, well-formed only) to the port", async () => {
+    const port = new MutablePort();
+    const serverPort = await listen(customerEntry(port));
+    await post(
+      serverPort,
+      { qrToken: TOKEN },
+      requestHeaders({
+        cookie: `__Host-bop-guest-x=${"Y".repeat(43)}; __Host-bop-guest=${SESSION_CREDENTIAL}; __Host-bop-visits=${EARLIER}.bad.${"F".repeat(43)}.${"G".repeat(43)}`,
+      }),
+    );
+    expect(port.calls[0]?.presentedCredentials).toEqual([
+      { source: "Current", credential: SESSION_CREDENTIAL },
+      { source: "Earlier", credential: EARLIER },
+    ]);
+  });
+
+  it("a resumed current visit answers 200 and sets no visit cookie", async () => {
+    const port = new MutablePort();
+    port.result = established({
+      channel: "Pickup",
+      publicTableReference: null,
+      resumed: true,
+      earlierCredentials: [],
+    });
+    const response = await post(
+      await listen(customerEntry(port)),
+      { qrToken: TOKEN },
+      requestHeaders({ cookie: `__Host-bop-guest=${SESSION_CREDENTIAL}` }),
+    );
+    expect(response.status).toBe(200);
+    expect(visitCookies(response)).toEqual([]);
+    expect(visits(response)).toEqual([]);
+    const body = await response.json();
+    expect(body).toMatchObject({ status: "Established", resumed: true, csrfToken: CSRF_CREDENTIAL });
+    expect(JSON.stringify(body)).not.toContain(SESSION_CREDENTIAL);
+  });
+
+  it("going back to an earlier visit swaps the cookies and keeps the replaced one", async () => {
+    const port = new MutablePort();
+    port.result = established({
+      channel: "Pickup",
+      publicTableReference: null,
+      sessionCredential: EARLIER as GuestRawCredential,
+      resumed: true,
+      earlierCredentials: [SESSION_CREDENTIAL],
+    });
+    const response = await post(
+      await listen(customerEntry(port)),
+      { qrToken: TOKEN },
+      requestHeaders({
+        cookie: `__Host-bop-guest=${SESSION_CREDENTIAL}; __Host-bop-visits=${EARLIER}`,
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(visitCookies(response)).toEqual([
+      `__Host-bop-guest=${EARLIER}; Path=/; Max-Age=86400; Secure; HttpOnly; SameSite=Lax`,
+    ]);
+    expect(visits(response)).toEqual([
+      `__Host-bop-visits=${SESSION_CREDENTIAL}; Max-Age=86400; Path=/; Secure; HttpOnly; SameSite=Strict`,
+    ]);
+  });
+
+  it("a new visit keeps the replaced one and says an earlier visit here ended", async () => {
+    const port = new MutablePort();
+    port.result = established({
+      channel: "Pickup",
+      publicTableReference: null,
+      sessionCredential: "N".repeat(43) as GuestRawCredential,
+      earlierCredentials: [SESSION_CREDENTIAL],
+      previousVisit: "EndedReceiptsKept",
+    });
+    const response = await post(
+      await listen(customerEntry(port)),
+      { qrToken: TOKEN },
+      requestHeaders({ cookie: `__Host-bop-guest=${SESSION_CREDENTIAL}` }),
+    );
+    expect(response.status).toBe(201);
+    expect(visits(response)).toEqual([
+      `__Host-bop-visits=${SESSION_CREDENTIAL}; Max-Age=86400; Path=/; Secure; HttpOnly; SameSite=Strict`,
+    ]);
+    expect(await response.json()).toMatchObject({ previousVisit: "EndedReceiptsKept" });
+  });
+
+  it("refuses a port answer that resumes a table visit or keeps too many visits", async () => {
+    for (const result of [
+      established({ resumed: true }),
+      established({ earlierCredentials: ["A".repeat(43), "B".repeat(43), "C".repeat(43)] }),
+      established({ earlierCredentials: ["short"] }),
+    ]) {
+      const port = new MutablePort();
+      port.result = result;
+      expect((await post(await listen(customerEntry(port)))).status).toBe(503);
+    }
   });
 });

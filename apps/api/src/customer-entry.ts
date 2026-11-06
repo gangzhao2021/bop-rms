@@ -33,6 +33,15 @@ export interface CustomerEntryPortInput {
    * choice: start this free table, join the people here, or start after them. Absent: a scan.
    */
   readonly intent?: CustomerEntryIntent;
+  /**
+   * M104/M105: the guest credentials this phone sent (its current visit's cookie, then the earlier
+   * visits it keeps), so a rescan goes on with a visit instead of replacing it. Never logged.
+   */
+  readonly presentedCredentials?: readonly CustomerEntryPresentedCredential[];
+}
+export interface CustomerEntryPresentedCredential {
+  readonly source: "Current" | "Earlier";
+  readonly credential: string;
 }
 export type CustomerEntryIntent = "Start" | "Join" | "NewParty";
 
@@ -56,6 +65,15 @@ export interface CustomerEntryEstablished {
   readonly sessionCredential: GuestRawCredential;
   readonly csrfCredential: GuestRawCredential;
   readonly cookie: GuestSessionCookieDescriptor;
+  /** M104/M105: this phone's existing visit goes on (no new visit was started). */
+  readonly resumed?: true;
+  /**
+   * M104/M105: the earlier visits this phone keeps after this answer (absent: unchanged), so a
+   * visit replaced here, at this Store or another, can be gone back to, and its receipts read.
+   */
+  readonly earlierCredentials?: readonly string[];
+  /** The visit this phone had at this Store has ended; whether its receipts can still be read. */
+  readonly previousVisit?: "Ended" | "EndedReceiptsKept";
 }
 
 /** WP-2423 Q4: the Store is closed or not taking this service now; no Session is issued. */
@@ -272,6 +290,47 @@ export function scannedCode(header: unknown): string | null {
     : null;
 }
 
+/**
+ * M104/M105: the earlier visits this phone keeps (a visit at another Store, or one replaced here
+ * whose receipts can still be read), so scanning that Store's code again goes back to it. Only the
+ * entry writes it and only the entry and the receipt read it; never logged.
+ */
+export const earlierVisitsCookieName = "__Host-bop-visits";
+const earlierVisitLimit = 2;
+const earlierVisitsAttributes = "Path=/; Secure; HttpOnly; SameSite=Strict";
+export function serializeEarlierVisits(credentials: readonly string[]): string {
+  if (credentials.length === 0) return `${earlierVisitsCookieName}=; Max-Age=0; ${earlierVisitsAttributes}`;
+  return `${earlierVisitsCookieName}=${credentials
+    .map((credential) => parseGuestRawCredential(credential))
+    .join(".")}; Max-Age=86400; ${earlierVisitsAttributes}`;
+}
+/** The one well-formed value of the exactly named cookie, or null. */
+function exactCookie(header: unknown, name: string): string | null {
+  if (typeof header !== "string" || header.length > 8192) return null;
+  const values = header
+    .split(";")
+    .map((part) => part.trim())
+    .filter((part) => part.startsWith(name + "="))
+    .map((part) => part.slice(name.length + 1));
+  return values.length === 1 && values[0] !== undefined ? values[0] : null;
+}
+/** The guest credentials this phone sent: its current visit's, then the earlier visits it keeps. */
+export function presentedGuestCredentials(header: unknown): CustomerEntryPresentedCredential[] {
+  const presented: CustomerEntryPresentedCredential[] = [];
+  const current = exactCookie(header, "__Host-bop-guest");
+  if (current !== null && rawCredentialPattern.test(current))
+    presented.push({ source: "Current", credential: current });
+  const earlier = exactCookie(header, earlierVisitsCookieName);
+  if (earlier !== null)
+    for (const credential of earlier.split(".").slice(0, earlierVisitLimit))
+      if (
+        rawCredentialPattern.test(credential) &&
+        !presented.some((visit) => visit.credential === credential)
+      )
+        presented.push({ source: "Earlier", credential });
+  return presented;
+}
+
 type EntryBody =
   | { readonly qrToken: string; readonly intent: CustomerEntryIntent | undefined }
   | { readonly resume: true; readonly intent: CustomerEntryIntent | undefined };
@@ -378,7 +437,31 @@ function parseEstablished(
     "sessionCredential",
     "csrfCredential",
     "cookie",
+    ...(["resumed", "earlierCredentials", "previousVisit"] as const).filter((key) =>
+      Object.hasOwn(value as object, key),
+    ),
   ]);
+  if (result.resumed !== undefined && (result.resumed !== true || result.channel !== "Pickup"))
+    throw new TypeError("only a pickup visit resumes");
+  if (
+    result.previousVisit !== undefined &&
+    (result.resumed !== undefined ||
+      (result.previousVisit !== "Ended" && result.previousVisit !== "EndedReceiptsKept"))
+  )
+    throw new TypeError("invalid previous visit");
+  const earlierCredentials =
+    result.earlierCredentials === undefined
+      ? undefined
+      : (() => {
+          if (
+            !Array.isArray(result.earlierCredentials) ||
+            result.earlierCredentials.length > earlierVisitLimit
+          )
+            throw new TypeError("invalid earlier visits");
+          return Object.freeze(
+            result.earlierCredentials.map((credential) => parseGuestRawCredential(credential)),
+          );
+        })();
   if (
     result.tableOpen !== undefined &&
     (typeof result.tableOpen !== "boolean" || result.channel !== "DineIn")
@@ -427,7 +510,9 @@ function parseEstablished(
   );
   if (
     new Set(availableServiceModes).size !== availableServiceModes.length ||
-    (result.operatingState === "Open") !== availableServiceModes.includes(result.channel) ||
+    // A resumed visit goes on whatever the Store takes from new guests now.
+    (result.resumed !== true &&
+      (result.operatingState === "Open") !== availableServiceModes.includes(result.channel)) ||
     (result.operatingState !== "Open" && availableServiceModes.length !== 0)
   ) {
     throw new TypeError("operating state and service modes conflict");
@@ -450,6 +535,11 @@ function parseEstablished(
     sessionCredential: parseGuestRawCredential(result.sessionCredential),
     csrfCredential: parseGuestRawCredential(result.csrfCredential),
     cookie: parseCookie(result.cookie),
+    ...(result.resumed === true ? { resumed: true as const } : {}),
+    ...(earlierCredentials === undefined ? {} : { earlierCredentials }),
+    ...(result.previousVisit === undefined
+      ? {}
+      : { previousVisit: result.previousVisit as "Ended" | "EndedReceiptsKept" }),
   });
 }
 
@@ -725,6 +815,7 @@ export class CustomerEntryHandler {
         if (entryRequestReference === operationReference) {
           throw new TypeError("fresh references must differ");
         }
+        const presented = presentedGuestCredentials(request.get("cookie"));
         const result = parsePortResult(
           await this.#port.establish(
             Object.freeze({
@@ -733,6 +824,7 @@ export class CustomerEntryHandler {
               qrToken,
               requestedAt,
               ...(intent === undefined ? {} : { intent }),
+              ...(presented.length === 0 ? {} : { presentedCredentials: Object.freeze(presented) }),
             }),
           ),
           requestedAt,
@@ -847,12 +939,25 @@ export class CustomerEntryHandler {
           });
           return;
         }
-        // Both cookies on the one answer: the new visit's, and forgetting the waiting scan.
-        response.setHeader("Set-Cookie", serializeCookie(result.sessionCredential));
+        const current = presented.find((visit) => visit.source === "Current")?.credential;
+        const earlier = presented
+          .filter((visit) => visit.source === "Earlier")
+          .map((visit) => visit.credential);
+        // The visit's cookie only when it changed (a resumed current visit keeps its own), the
+        // earlier visits only when they changed, and forgetting the waiting scan.
+        if (result.sessionCredential !== current)
+          response.append("Set-Cookie", serializeCookie(result.sessionCredential));
+        if (
+          result.earlierCredentials !== undefined &&
+          result.earlierCredentials.join(".") !== earlier.join(".")
+        )
+          response.append("Set-Cookie", serializeEarlierVisits(result.earlierCredentials));
         forget();
-        response.status(201).json({
+        response.status(result.resumed === true ? 200 : 201).json({
           schemaVersion: 2,
           status: "Established",
+          ...(result.resumed === true ? { resumed: true } : {}),
+          ...(result.previousVisit === undefined ? {} : { previousVisit: result.previousVisit }),
           brandDisplayName: result.brandDisplayName,
           storeDisplayName: result.storeDisplayName,
           publicStoreReference: result.publicStoreReference,
