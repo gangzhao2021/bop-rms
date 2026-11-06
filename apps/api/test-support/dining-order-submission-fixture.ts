@@ -211,6 +211,34 @@ export function fixture(observedAt = at) {
     revoke: () => {
       available = false;
     },
+    /**
+     * WP-2423 table-move-send: staff move the party to table id(66). The guest's phone follows it
+     * (its QR context and Dining binding name the new table, through the recorded Move).
+     */
+    moveParty: () => {
+      const table = id(66);
+      options.contexts.resolve = async () => ({ ...context, tableReference: table as never });
+      options.dining.current.readCurrent = async (request) => ({
+        session: parseDiningSession({
+          ...session,
+          tableReference: table,
+          tableAssignmentVersion: 1,
+          version: 6,
+        }),
+        participant,
+        admission,
+        table: parseDiningTableStartEvidence({
+          brandReference: id(2),
+          storeReference: id(3),
+          tableReference: table,
+          assignmentVersion: 1,
+          tableState: "Eligible",
+          activeDiningSessionReference: id(4),
+          observedAt: request.observedAt,
+        }),
+        followedMove: { fromTableReference: session.tableReference, movedAt: request.observedAt },
+      });
+    },
     service: () => createCustomerDiningCheckoutComposition(options),
   };
 }

@@ -145,6 +145,67 @@ it("denies Dining Closing and Identity revocation during a tip Audit wait", asyn
   expect(other.tipWrites()).toBe(0);
 });
 
+/** The parent Order as Ordering's preparation source reads it (an additional round). */
+function parentTransaction(
+  record: NonNullable<
+    Awaited<
+      ReturnType<
+        ReturnType<
+          Awaited<ReturnType<typeof fixture>>["options"]["repository"]
+        >["resolveSubmission"]
+      >
+    >
+  >,
+  calls: string[],
+) {
+  const batch = record.order.batches[0];
+  const transaction: ConsumerTransaction = {
+    async query<Row = Record<string, unknown>>(sql: string) {
+      calls.push(sql);
+      const rows = sql.startsWith("SELECT h.order_type")
+        ? [
+            {
+              order_type: "DineIn",
+              dining_session_id: record.order.diningSessionReference,
+              order_batch_id: batch.orderBatchReference,
+            },
+          ]
+        : sql.startsWith("SELECT r.revision_id")
+          ? [
+              {
+                revision_id: record.submissionReference,
+                version: 1,
+                expected_version: 0,
+                previous_revision_id: null,
+                initial_submission_id: record.submissionReference,
+                kind: "Initial",
+                occurred_at: record.createdAt,
+                operation_bound: true,
+              },
+            ]
+          : sql.startsWith("SELECT h.aggregate_version")
+            ? [
+                {
+                  aggregate_version: 1,
+                  canonical_phase: "Submitted",
+                  submission_id: record.submissionReference,
+                  submitted_at: record.createdAt,
+                },
+              ]
+            : sql.startsWith("SELECT revision_id")
+              ? [
+                  {
+                    revision_id: record.submissionReference,
+                    version: 1,
+                    occurred_at: record.createdAt,
+                  },
+                ]
+              : [];
+      return { rows: rows as Row[], rowCount: rows.length };
+    },
+  };
+  return transaction;
+}
 it.each([1, 2])(
   "checks the actual parent reader for pre-submission tip (expected=%s)",
   async (expectedOrderVersion) => {
@@ -153,53 +214,8 @@ it.each([1, 2])(
     if (!link) throw new Error("missing synthetic linkage");
     const record = await f.options.repository(link).resolveSubmission(link.submissionReference);
     if (!record) throw new Error("missing synthetic parent");
-    const batch = record.order.batches[0];
     const calls: string[] = [];
-    const transaction: ConsumerTransaction = {
-      async query<Row = Record<string, unknown>>(sql: string) {
-        calls.push(sql);
-        const rows = sql.startsWith("SELECT h.order_type")
-          ? [
-              {
-                order_type: "DineIn",
-                dining_session_id: record.order.diningSessionReference,
-                order_batch_id: batch.orderBatchReference,
-              },
-            ]
-          : sql.startsWith("SELECT r.revision_id")
-            ? [
-                {
-                  revision_id: record.submissionReference,
-                  version: 1,
-                  expected_version: 0,
-                  previous_revision_id: null,
-                  initial_submission_id: record.submissionReference,
-                  kind: "Initial",
-                  occurred_at: record.createdAt,
-                  operation_bound: true,
-                },
-              ]
-            : sql.startsWith("SELECT h.aggregate_version")
-              ? [
-                  {
-                    aggregate_version: 1,
-                    canonical_phase: "Submitted",
-                    submission_id: record.submissionReference,
-                    submitted_at: record.createdAt,
-                  },
-                ]
-              : sql.startsWith("SELECT revision_id")
-                ? [
-                    {
-                      revision_id: record.submissionReference,
-                      version: 1,
-                      occurred_at: record.createdAt,
-                    },
-                  ]
-                : [];
-        return { rows: rows as Row[], rowCount: rows.length };
-      },
-    };
+    const transaction = parentTransaction(record, calls);
     const service = createPersistentAdditionalDiningTipSelection({
       preparation: f.options.preparation,
       tip: f.tip,
@@ -235,4 +251,75 @@ it("WP-2423 Q10: an internal failure after valid input is retryable, not a missi
     code: "DEPENDENCY_UNAVAILABLE",
   });
   expect(f.tipWrites()).toBe(0);
+});
+
+/**
+ * WP-2423 table-move-send (v15 fabf0261, 2026-11-06): staff moved the party after the guest
+ * started checkout. Choosing the tip answered "payment unavailable" (503) until the checkout lapsed;
+ * it now answers that the table moved, with no tip selection built or written.
+ */
+it("WP-2423 table-move-send: a tip for a round whose party was moved answers table moved, writing nothing", async () => {
+  const f = await fixture(),
+    audit = vi.spyOn(f.tip.audit, "create");
+  f.moveParty();
+  await expect(f.service().select(f.input)).rejects.toMatchObject({
+    name: "OrderCreationError",
+    code: "ORDER_CREATE_TABLE_MOVED",
+  });
+  expect(audit).not.toHaveBeenCalled();
+  expect(f.tipWrites()).toBe(0);
+});
+it("WP-2423 table-move-send: a move landing between Payment's two checks still writes nothing", async () => {
+  const f = await fixture(),
+    audit = f.tip.audit.create;
+  // Payment builds its audit record (in memory) between its two authorizations.
+  f.tip.audit.create = async (record) => {
+    f.moveParty();
+    return audit(record);
+  };
+  await expect(f.service().select(f.input)).rejects.toMatchObject({
+    code: "ORDER_CREATE_TABLE_MOVED",
+  });
+  expect(f.tipWrites()).toBe(0);
+});
+it("WP-2423 table-move-send: an additional round's tip after a move answers table moved", async () => {
+  const f = await fixture();
+  const link = f.savedLink();
+  if (!link) throw new Error("missing synthetic linkage");
+  const record = await f.options.repository(link).resolveSubmission(link.submissionReference);
+  if (!record) throw new Error("missing synthetic parent");
+  const transaction = parentTransaction(record, []);
+  const service = createPersistentAdditionalDiningTipSelection({
+    preparation: f.options.preparation,
+    tip: f.tip,
+    transactions: { run: async (work) => work(transaction) },
+    authorizeOrder: async (tx) => tx === transaction,
+  });
+  f.moveParty();
+  await expect(
+    service.select({
+      ...f.input,
+      orderReference: record.order.orderReference,
+      expectedOrderVersion: 1,
+    }),
+  ).rejects.toMatchObject({ name: "OrderCreationError", code: "ORDER_CREATE_TABLE_MOVED" });
+  expect(f.tipWrites()).toBe(0);
+});
+it("WP-2423 table-move-send: one composition serving two requests keeps each request's own answer", async () => {
+  const f = await fixture(),
+    service = f.service();
+  const read = f.options.preparation.dining.current.readCurrent,
+    resolve = f.options.preparation.contexts.resolve;
+  f.moveParty();
+  await expect(service.select(f.input)).rejects.toMatchObject({ code: "ORDER_CREATE_TABLE_MOVED" });
+  // The party is back where the round was prepared, and the next request fails for another reason.
+  f.options.preparation.dining.current.readCurrent = read;
+  f.options.preparation.contexts.resolve = resolve;
+  vi.spyOn(f.options.preparation.submissions, "loadSubmission").mockRejectedValue(
+    new Error("synthetic lock wait"),
+  );
+  await expect(service.select(f.input)).rejects.toMatchObject({
+    name: "CheckoutSessionServiceError",
+    code: "DEPENDENCY_UNAVAILABLE",
+  });
 });

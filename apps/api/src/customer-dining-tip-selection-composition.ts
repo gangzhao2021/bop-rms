@@ -1,6 +1,7 @@
 import { readPublishedStoreTipOff } from "@rms/store";
 import { rethrowTipSelectionFailure } from "./customer-tip-selection-failure.js";
 import { createPersistentAdditionalDiningPreparation } from "./customer-additional-dining-preparation.js";
+import { createTableMovedLatch } from "./customer-dining-table-moved.js";
 import {
   GuestSessionError,
   parseCanonicalInstant,
@@ -56,6 +57,8 @@ function createVersionedCustomerDiningTipSelectionComposition<V extends 1 | 2>(
     async select(value: unknown) {
       // Malformed caller input is a refusal; failures after it are classified below.
       let inputAccepted = false;
+      // WP-2423 table-move-send: this request's own latch (see createTableMovedLatch).
+      const tableMoved = createTableMovedLatch();
       try {
         const raw = readClosedRecord(value, [
           "sessionCredential",
@@ -152,23 +155,28 @@ function createVersionedCustomerDiningTipSelectionComposition<V extends 1 | 2>(
                 original.state !== "Prepared"
               )
                 return null;
+              // Staff moved the party since this round was prepared: Payment refuses before it
+              // builds or writes anything, and the outer catch answers that the table moved.
               const prepared =
                 request.action === "SelectPaymentTip"
-                  ? additional
-                    ? await additional.prepareForOrdering({
-                        ...credentials,
-                        intent: {
-                          submissionReference: original.submissionReference,
-                          cartReference: original.cartReference,
-                          cartVersion: original.cartVersion,
-                          quoteReference: original.quoteReference,
-                          sourceValidUntil: original.preparationValidUntil,
-                        },
-                        orderReference,
-                        expectedOrderVersion,
-                      })
-                    : await owner.prepareForOrdering({ ...credentials, intent })
+                  ? await tableMoved.watchOrNull(() =>
+                      additional
+                        ? additional.prepareForOrdering({
+                            ...credentials,
+                            intent: {
+                              submissionReference: original.submissionReference,
+                              cartReference: original.cartReference,
+                              cartVersion: original.cartVersion,
+                              quoteReference: original.quoteReference,
+                              sourceValidUntil: original.preparationValidUntil,
+                            },
+                            orderReference,
+                            expectedOrderVersion,
+                          })
+                        : owner.prepareForOrdering({ ...credentials, intent }),
+                    )
                   : await owner.prepare({ ...credentials, intent });
+              if (prepared === null) return null;
               if (
                 additional &&
                 request.action === "SelectPaymentTip" &&
@@ -218,7 +226,8 @@ function createVersionedCustomerDiningTipSelectionComposition<V extends 1 | 2>(
         });
       } catch (error) {
         // WP-2423 Q10: an internal failure is retryable; only owner refusals keep their meaning.
-        return inputAccepted ? rethrowTipSelectionFailure(error) : unavailable();
+        if (!inputAccepted) return unavailable();
+        return rethrowTipSelectionFailure(tableMoved.classify(error));
       }
     },
   });

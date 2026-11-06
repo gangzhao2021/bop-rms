@@ -5,6 +5,7 @@ import {
   readClosedRecord,
 } from "@bop/identity";
 import { parseDiningCheckoutCommitment, type DiningCheckoutClockOptions } from "@rms/dining";
+import { createTableMovedLatch } from "./customer-dining-table-moved.js";
 import {
   createCheckoutValidationService,
   createConfiguredCheckoutValidationService,
@@ -62,6 +63,8 @@ function createVersionedCustomerDiningOrderSubmissionComposition<V extends 1 | 2
     storeReference: parseOrderingReference(options.preparation.scope.storeReference),
   });
   async function create(value: unknown) {
+    // WP-2423 table-move-send: this request's own latch (see createTableMovedLatch).
+    const tableMoved = createTableMovedLatch();
     try {
       const raw = readClosedRecord(value, [
         "sessionCredential",
@@ -169,7 +172,11 @@ function createVersionedCustomerDiningOrderSubmissionComposition<V extends 1 | 2
                 authorization: { authorize },
                 fulfillment: {
                   async validate(request) {
-                    const current = await preparation.prepareForOrdering(prepareInput);
+                    // Staff moved the party since this round was prepared: Ordering refuses
+                    // with nothing written, and the outer catch answers that the table moved.
+                    const current = await tableMoved.watch(() =>
+                      preparation.prepareForOrdering(prepareInput),
+                    );
                     if (JSON.stringify(current.link) !== JSON.stringify(link)) return unavailable();
                     const at = now();
                     if (
@@ -231,7 +238,8 @@ function createVersionedCustomerDiningOrderSubmissionComposition<V extends 1 | 2
         quoteReference,
         requestedAt: now(),
       });
-    } catch (error) {
+    } catch (caught) {
+      const error = tableMoved.classify(caught);
       if (error instanceof OrderCreationError || error instanceof CheckoutValidationError)
         throw error;
       return unavailable();
