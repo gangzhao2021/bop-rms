@@ -8158,6 +8158,28 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "This form changed after saving stopped. Close it and open the item again to change it; nothing is lost.":
     "保存停止后这份表单又改动过。请关闭后重新打开这一项再改，已保存的内容不会丢。",
   // WP-2423 item 13 ② (Owner 2026-11-05): the platform paused this merchant's new guests.
+  "Can't read whether it takes new guests": "暂时读不到是否接新客",
+  "{merchant} takes new guests again.": "{merchant} 已恢复接待新客人。",
+  "New guests are paused at {merchant}.": "{merchant} 已暂停接待新客人。",
+  "Someone else changed this merchant just now. It has been read again: check it first.":
+    "刚才有人改过这个商家，已重新读取，请先核对。",
+  "Your support account can't pause merchants. Ask the platform owner.":
+    "你的支持账号不能暂停商家，请找平台负责人。",
+  "No answer. Send it again: it is never done twice.": "没有收到回复。请再发一次，不会重复执行。",
+  "New guests paused since": "暂停接新客，开始于",
+  "Takes new guests": "正常接待新客人",
+  "Resume new guests": "恢复接新客",
+  "Pause new guests": "暂停接新客",
+  "Guests can scan and order at every store of {merchant} again.":
+    "{merchant} 的所有门店将重新允许客人扫码下单。",
+  "No new guest can start at any store of {merchant}: no scan, counter order or newly seated table. Tables already seated, orders already placed and refunds carry on as usual. Nothing is hidden or deleted.":
+    "{merchant} 的所有门店将不能接待新客人：不能扫码点单、柜台接新单或开新桌。已入座的桌、已下的单和退款照常进行。不会隐藏或删除任何记录。",
+  "Reason (the merchant's staff see this)": "原因（商家员工会看到）",
+  "New guests": "新客人",
+  "New guests are paused for this restaurant by the platform": "平台已暂停本店接待新客人",
+  "Reason: {reason}": "原因：{reason}",
+  "Guests can't scan to order, the counter can't take new orders and no new table can be opened. Tables already seated and orders already placed carry on: serve, take payment and refund as usual. Ask BOP support about it.":
+    "客人不能扫码点单，柜台不能接新单，也不能开新桌。已入座的桌和已下的单照常进行：上菜、收款、退款都不受影响。有疑问请联系 BOP 支持。",
   "New guests are paused for this restaurant by the platform, so no new table can be opened. Tables already seated carry on as usual: serve, take payment and refund. Ask the owner about it.":
     "平台已暂停本店接待新客人，暂时不能开新桌。已入座的桌照常上菜、收款和退款。有疑问请问店主。",
   "New guests are paused for this restaurant by the platform, so the counter can't take a new order. Nothing was sent or charged. Orders already placed carry on as usual: prepare, hand over and refund them. Ask the owner about it.":

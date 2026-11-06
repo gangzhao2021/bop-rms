@@ -2,6 +2,7 @@ import { currentAllergenRegistry, listBrandMenus } from "@rms/catalog";
 import { listStoreMembers } from "@bop/membership";
 import { currentStoreTaxConfigurationReference } from "@rms/pricing";
 import { hasOwnerPublishedStoreSetup } from "@rms/store";
+import { readBrandGuestIntake } from "@bop/tenant";
 import type { MerchantBffService } from "./merchant-bff-contract.js";
 import { businessTransaction } from "./merchant-ordinary-refund-approval.js";
 import {
@@ -109,5 +110,23 @@ export function createMerchantOpeningChecklist(options: {
         });
       });
     },
+    /**
+     * WP-2423 item 13 ② (Owner 2026-11-05): whether the platform paused this merchant's new guests,
+     * for the banner every staff member sees on Home: since when and the reason support gave.
+     */
+    guestIntake: (input: { readonly sessionCookie: unknown }) =>
+      options.persistence.transactions.run(async (transaction) => {
+        const scope = await resolveScope(transaction, input.sessionCookie, "merchant.access");
+        if ((await scope.allowed()) !== true) throw new Error("MERCHANT_GUEST_INTAKE_DENIED");
+        const intake = await readBrandGuestIntake(
+          businessTransaction(transaction) as never,
+          String(scope.context.brand.brandReference),
+        );
+        return Object.freeze({
+          paused: intake.state === "Paused",
+          since: intake.state === "Paused" ? intake.since : null,
+          reason: intake.state === "Paused" ? intake.reason : null,
+        });
+      }),
   });
 }

@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { t } from "./i18n/i18n.js";
+import { newOperationReference } from "./operation-reference.js";
 import {
   storeSupportClient,
   StoreSupportClientError,
+  type StoreSupportGuestIntake,
   type StoreSupportOverview,
   type StoreSupportSession,
   type StoreSupportView,
@@ -51,6 +53,147 @@ const storeReadiness = (store: StoreSupportOverview["merchants"][number]["stores
   if (!store.kitchenSetUp) return t("Still setting up: no kitchen");
   return t("Guests can order");
 };
+
+/**
+ * WP-2423 item 13 ② (Owner 2026-11-05 "就按这个做"): pause or resume one merchant's new guests. A
+ * reason is required and shown to the merchant's staff; guests already seated, orders already placed
+ * and refunds carry on. One request per form: sending again after no answer repeats it, never twice.
+ */
+function MerchantGuestIntake({
+  csrf,
+  brandReference,
+  merchantName,
+  timeZone,
+  intake,
+  canPause,
+  onChanged,
+}: {
+  readonly csrf: string;
+  readonly brandReference: string;
+  readonly merchantName: string;
+  readonly timeZone: string | null;
+  readonly intake: StoreSupportGuestIntake | null | undefined;
+  readonly canPause: boolean;
+  readonly onChanged: () => Promise<void>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState("");
+  const [operation, setOperation] = useState(newOperationReference);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  if (intake === undefined) return null;
+  if (intake === null)
+    return <p className="store-support__intake">{t("Can't read whether it takes new guests")}</p>;
+  const paused = intake.state === "Paused";
+  const send = async () => {
+    if (busy || reason.trim() === "") return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      await storeSupportClient.changeGuestIntake(
+        csrf,
+        brandReference,
+        intake.version,
+        paused ? "Open" : "Paused",
+        reason.trim(),
+        operation,
+      );
+      setOpen(false);
+      setReason("");
+      setOperation(newOperationReference());
+      setMessage(
+        paused
+          ? t("{merchant} takes new guests again.", { merchant: merchantName })
+          : t("New guests are paused at {merchant}.", { merchant: merchantName }),
+      );
+      await onChanged();
+    } catch (error) {
+      const code = error instanceof StoreSupportClientError ? error.code : "Unavailable";
+      if (code === "Changed") {
+        setOpen(false);
+        setOperation(newOperationReference());
+        setMessage(
+          t("Someone else changed this merchant just now. It has been read again: check it first."),
+        );
+        await onChanged();
+      } else
+        setMessage(
+          code === "Denied"
+            ? t("Your support account can't pause merchants. Ask the platform owner.")
+            : t("No answer. Send it again: it is never done twice."),
+        );
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="store-support__intake">
+      <p>
+        {paused ? (
+          <>
+            {t("New guests paused since")}{" "}
+            <StoreTimeZoneContext.Provider value={timeZone ?? undefined}>
+              <SourceTime instant={intake.since ?? ""} />
+            </StoreTimeZoneContext.Provider>
+            {intake.reason === null ? null : <> — {intake.reason}</>}
+          </>
+        ) : (
+          t("Takes new guests")
+        )}
+      </p>
+      {canPause && !open ? (
+        <button
+          type="button"
+          onClick={() => {
+            setOpen(true);
+            setMessage(null);
+          }}
+        >
+          {paused ? t("Resume new guests") : t("Pause new guests")}
+        </button>
+      ) : null}
+      {open ? (
+        <form
+          className="store-support__intake-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void send();
+          }}
+        >
+          <p>
+            {paused
+              ? t("Guests can scan and order at every store of {merchant} again.", {
+                  merchant: merchantName,
+                })
+              : t(
+                  "No new guest can start at any store of {merchant}: no scan, counter order or newly seated table. Tables already seated, orders already placed and refunds carry on as usual. Nothing is hidden or deleted.",
+                  { merchant: merchantName },
+                )}
+          </p>
+          <label>
+            {t("Reason (the merchant's staff see this)")}
+            <textarea
+              value={reason}
+              maxLength={300}
+              required
+              rows={2}
+              onChange={(event) => setReason(event.currentTarget.value)}
+            />
+          </label>
+          <div className="card-actions">
+            <button type="submit" disabled={busy || reason.trim() === ""}>
+              {paused ? t("Resume new guests") : t("Pause new guests")}
+            </button>
+            <button type="button" disabled={busy} onClick={() => setOpen(false)}>
+              {t("Cancel")}
+            </button>
+          </div>
+        </form>
+      ) : null}
+      {message === null ? null : <p role="status">{message}</p>}
+    </div>
+  );
+}
 
 export function StoreSupportPage() {
   const [session, setSession] = useState<StoreSupportSession | null>(null);
@@ -178,6 +321,15 @@ export function StoreSupportPage() {
           overview.merchants.map((merchant) => (
             <div key={merchant.brandReference}>
               <h3>{merchant.name}</h3>
+              <MerchantGuestIntake
+                csrf={session.csrf}
+                brandReference={merchant.brandReference}
+                merchantName={merchant.name}
+                timeZone={merchant.stores[0]?.timeZone ?? null}
+                intake={merchant.guestIntake}
+                canPause={session.canPause === true}
+                onChanged={() => loadOverview(session.csrf)}
+              />
               <table className="support-access__log store-support__merchant-stores">
                 <thead>
                   <tr>

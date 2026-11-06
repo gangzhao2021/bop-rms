@@ -15,4 +15,11 @@ it("adds only a person named as TEST, and takes nothing it doesn't know", () => 
   ])
     expect(() => parseSupportArguments(bad)).toThrow();
   expect(parseSupportArguments(["end", ".local/x", ...common, "--actor", "a"]).actor).toBe("a");
+  // WP-2423 item 13 ②: allowing pause names the person; a name is not taken there.
+  expect(parseSupportArguments(["allow-pause", ".local/x", ...common, "--actor", "a"]).actor).toBe(
+    "a",
+  );
+  expect(() =>
+    parseSupportArguments(["allow-pause", ".local/x", ...common, "--name", "TEST Support Sam"]),
+  ).toThrow();
 });

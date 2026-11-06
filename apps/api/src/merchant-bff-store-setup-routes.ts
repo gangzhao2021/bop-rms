@@ -756,6 +756,7 @@ export function installMerchantStoreSetupRoutes(
     else if (error.code === "NotAllowedByOwner")
       response.status(403).json({ error: "not_allowed_by_owner" });
     else if (error.code === "Invalid") response.status(422).json({ error: "invalid_command" });
+    else if (error.code === "Changed") response.status(409).json({ error: "changed" });
     else response.status(503).set("Retry-After", "5").json({ error: "support_unavailable" });
   };
   router.get("/support/session", safeRead(options), (request, response) => {
@@ -812,6 +813,23 @@ export function installMerchantStoreSetupRoutes(
       .then((result) => response.set("Cache-Control", NO_STORE).json(result))
       .catch((error: unknown) => supportFailure(response, error));
   });
+  // WP-2423 item 13 ②: pause or resume a merchant's new guests (platform support only).
+  router.post(
+    "/support/merchant/guest-intake",
+    sameOriginMutation(options),
+    (request, response) => {
+      const sessionCookie = cookie(request, "__Host-bop-merchant"),
+        csrf = exactHeader(request, "x-bop-csrf");
+      if (sessionCookie === null || csrf === null || !options.storeSupport) {
+        denied(response);
+        return;
+      }
+      void options.storeSupport
+        .changeGuestIntake({ sessionCookie, csrf, command: request.body })
+        .then((result) => response.set("Cache-Control", NO_STORE).json(result))
+        .catch((error: unknown) => supportFailure(response, error));
+    },
+  );
   router.get("/store/support-access", safeRead(options), (request, response) => {
     const sessionCookie = cookie(request, "__Host-bop-merchant");
     if (sessionCookie === null || !options.storeSupportAccess) {
@@ -851,6 +869,25 @@ export function installMerchantStoreSetupRoutes(
     }
     void options.openingChecklist
       .read({ sessionCookie })
+      .then((view) => response.set("Cache-Control", NO_STORE).json(view))
+      .catch((error: unknown) => failed(response, error));
+  });
+  // WP-2423 item 13 ②: whether the platform paused this merchant's new guests (Home banner).
+  router.get("/store/guest-intake", safeRead(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    if (
+      request.method !== "GET" ||
+      request.body !== undefined ||
+      sessionCookie === null ||
+      Object.keys(request.query).length !== 0 ||
+      !options.openingChecklist
+    ) {
+      denied(response);
+      return;
+    }
+    const port = options.openingChecklist;
+    void Promise.resolve()
+      .then(() => port.guestIntake({ sessionCookie }))
       .then((view) => response.set("Cache-Control", NO_STORE).json(view))
       .catch((error: unknown) => failed(response, error));
   });

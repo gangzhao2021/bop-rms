@@ -98,6 +98,12 @@ async function pilotHome(
   role: PilotRole,
   board: () => unknown,
   ownName: "Recorded" | "Missing" = "Recorded",
+  /** WP-2423 item 13 ②: whether the platform paused this merchant's new guests. */
+  intake: { paused: boolean; since: string | null; reason: string | null } = {
+    paused: false,
+    since: null,
+    reason: null,
+  },
 ) {
   const alertReads: string[] = [];
   const nameSaves: unknown[] = [];
@@ -107,6 +113,9 @@ async function pilotHome(
     unexpected.push(new URL(route.request().url()).pathname);
     return route.fulfill({ status: 404, headers, json: { error: "not_found" } });
   });
+  await page.route("**/merchant/store/guest-intake", (route) =>
+    route.fulfill({ headers, json: intake }),
+  );
   // The Owner's opening list on Home: a Store with every step done shows no list.
   await page.route("**/merchant/store/opening-list", (route) =>
     route.fulfill({
@@ -707,6 +716,25 @@ test("@production Home shows front of house no store system card and does not ke
   await expect(page.getByRole("region", { name: "Right now" })).toBeVisible();
   expect(home.alertReads).toHaveLength(1);
   await expect(page.getByRole("region", { name: "Store system" })).toHaveCount(0);
+  expect(home.errors).toEqual([]);
+  expect(home.unexpected).toEqual([]);
+});
+
+// WP-2423 item 13 ② (Owner 2026-11-05): while the platform paused the merchant's new guests, every
+// staff member sees it on Home with the reason, and what still works.
+test("@production Home tells staff the platform paused new guests, and what carries on", async ({
+  page,
+}) => {
+  const home = await pilotHome(page, "front-of-house", () => problem, "Recorded", {
+    paused: true,
+    since: "2026-11-05T18:00:00.000Z",
+    reason: "TEST: account review",
+  });
+  await page.goto("/app");
+  const notice = page.getByRole("region", { name: "New guests" });
+  await expect(notice).toContainText("New guests are paused for this restaurant by the platform");
+  await expect(notice).toContainText("Reason: TEST: account review");
+  await expect(notice).toContainText("Tables already seated and orders already placed carry on");
   expect(home.errors).toEqual([]);
   expect(home.unexpected).toEqual([]);
 });

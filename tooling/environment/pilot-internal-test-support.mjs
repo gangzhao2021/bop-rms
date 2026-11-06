@@ -16,13 +16,17 @@ import { pathToFileURL } from "node:url";
  *     --database <name> --migration-env <file> --name "TEST Support Sam" --reason "<why>"
  *
  * Ending someone's access is `end` with --actor <reference> and --reason.
+ *
+ * WP-2423 item 13 ②: `allow-pause` with --actor and --reason records their next version with the
+ * permission to pause and resume a merchant's new guests, keeping what they already hold.
  */
 const fail = (reason) => {
   throw Object.assign(new Error("PILOT_INTERNAL_TEST_SUPPORT_UNAVAILABLE"), { reason });
 };
 export function parseSupportArguments(args) {
   const [command, directory, ...rest] = args;
-  if (!["add", "end"].includes(command) || typeof directory !== "string") fail("arguments-invalid");
+  if (!["add", "end", "allow-pause"].includes(command) || typeof directory !== "string")
+    fail("arguments-invalid");
   const options = { command, directory };
   const known = { "--database": "database", "--migration-env": "envFile", "--reason": "reason" };
   if (command === "add") known["--name"] = "name";
@@ -55,6 +59,29 @@ async function run(options) {
   try {
     const at = new Date().toISOString();
     const until = new Date(Date.now() + 90 * 86_400_000).toISOString();
+    if (options.command === "allow-pause") {
+      const latest = (
+        await client.query(
+          "SELECT version,display_name,lifecycle,actions,effective_until FROM bop_permission.platform_support_person WHERE actor_id=$1 ORDER BY version DESC LIMIT 1",
+          [options.actor],
+        )
+      ).rows[0];
+      if (latest === undefined || latest.lifecycle !== "Active") fail("not-support");
+      const actions = [...new Set([...latest.actions, "platform.merchant.pause"])];
+      await client.query(
+        "INSERT INTO bop_permission.platform_support_person (actor_id,version,display_name,lifecycle,actions,effective_until,recorded_by_reason,recorded_at) VALUES ($1,$2,$3,'Active',$4,$5,$6,$7)",
+        [
+          options.actor,
+          Number(latest.version) + 1,
+          latest.display_name,
+          actions,
+          latest.effective_until,
+          options.reason,
+          at,
+        ],
+      );
+      return { status: "PauseAllowed", actorReference: options.actor };
+    }
     if (options.command === "end") {
       const latest = (
         await client.query(

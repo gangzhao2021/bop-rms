@@ -6,6 +6,16 @@ const mock = vi.hoisted(() => ({
   start: vi.fn(),
   table: vi.fn(),
   session: vi.fn(),
+  intake: vi.fn(async () => ({
+    version: 0,
+    state: "Open" as "Open" | "Paused",
+    since: null as string | null,
+    reason: null as string | null,
+  })),
+}));
+vi.mock("@bop/tenant", async (original) => ({
+  ...(await original<typeof import("@bop/tenant")>()),
+  readBrandGuestIntake: mock.intake,
 }));
 vi.mock("./merchant-store-scope.js", () => ({ createMerchantStoreScope: () => mock.resolve }));
 vi.mock("@rms/dining", async (original) => ({
@@ -165,4 +175,16 @@ it("WP-2423: the staff callback takes the run's guard, builds scoped evidence an
   const ports = mock.service.mock.calls[0]?.[0];
   expect(await ports.staff.authorize(request)).toBeNull();
   expect(mock.table).not.toHaveBeenCalled();
+});
+
+it("WP-2423 item 13 ②: seats no party at a free table while the platform paused new guests", async () => {
+  const { read, input } = setup();
+  mock.intake.mockResolvedValueOnce({
+    version: 1,
+    state: "Paused" as const,
+    since: at,
+    reason: "TEST",
+  });
+  await expect(read(input)).rejects.toThrow("DINING_SESSION_START_NEW_GUESTS_PAUSED");
+  expect(mock.start).not.toHaveBeenCalled();
 });

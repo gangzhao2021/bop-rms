@@ -4,6 +4,8 @@ export interface StoreSupportSession {
   readonly csrf: string;
   readonly name: string;
   readonly canChange: boolean;
+  /** WP-2423 item 13 ②: may pause and resume a merchant's new guests. */
+  readonly canPause?: boolean;
   readonly stores: readonly { readonly storeReference: string; readonly name: string }[];
 }
 /** WP-2423 item 13 ②: every merchant here, Store by Store. */
@@ -21,7 +23,15 @@ export interface StoreSupportOverview {
       readonly kitchenSetUp: boolean;
       readonly lastOrderAt: string | null;
     }[];
+    /** WP-2423 item 13 ②: whether it takes new guests now; null when it can't be read. */
+    readonly guestIntake?: StoreSupportGuestIntake | null;
   }[];
+}
+export interface StoreSupportGuestIntake {
+  readonly version: number;
+  readonly state: "Open" | "Paused";
+  readonly since: string | null;
+  readonly reason: string | null;
 }
 export interface StoreSupportView {
   readonly name: string;
@@ -57,7 +67,7 @@ export interface StoreSupportAccessView {
   readonly log: readonly StoreSupportLogEntry[];
 }
 export type StoreSupportErrorCode =
-  "Denied" | "OwnerOnly" | "NotAllowedByOwner" | "Invalid" | "Unavailable";
+  "Denied" | "OwnerOnly" | "NotAllowedByOwner" | "Invalid" | "Changed" | "Unavailable";
 export class StoreSupportClientError extends Error {
   constructor(readonly code: StoreSupportErrorCode) {
     super("store support " + code);
@@ -69,6 +79,7 @@ const errorCodes: Readonly<Record<string, StoreSupportErrorCode>> = {
   owner_only: "OwnerOnly",
   not_allowed_by_owner: "NotAllowedByOwner",
   invalid_command: "Invalid",
+  changed: "Changed",
 };
 async function send<T>(path: string, csrf: string | null, body?: unknown): Promise<T> {
   let response: Response;
@@ -114,6 +125,22 @@ export const storeSupportClient = Object.freeze({
         expectedVersion,
         ...(value === undefined ? {} : { value }),
       },
+    }),
+  /** WP-2423 item 13 ②: pause or resume a merchant's new guests, with the reason staff see. */
+  changeGuestIntake: (
+    csrf: string,
+    brandReference: string,
+    expectedVersion: number,
+    state: "Open" | "Paused",
+    reason: string,
+    operationReference: string,
+  ) =>
+    send<StoreSupportGuestIntake>("/merchant/support/merchant/guest-intake", csrf, {
+      brandReference,
+      operationReference,
+      expectedVersion,
+      state,
+      reason,
     }),
   access: () => send<StoreSupportAccessView>("/merchant/store/support-access", null),
   changeAccess: (

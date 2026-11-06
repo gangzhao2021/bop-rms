@@ -2,6 +2,7 @@ import { systemText, countOf, t } from "./i18n/i18n.js";
 import { useApprovalsWaiting, type ApprovalsWaiting } from "./approvals-waiting.js";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { OpeningList } from "./OpeningList.js";
+import { GuestIntakeNotice } from "./GuestIntakeNotice.js";
 import { createStoreKitchenSetupClient } from "./store-kitchen-setup-client.js";
 import { useStaffSessionLive } from "./staff-session-reads.js";
 import { Link } from "react-router";
@@ -1218,6 +1219,8 @@ export function StoreOverview({
   const system = useOperationsAlerts(fetcher);
   return (
     <>
+      {/* WP-2423 item 13 ②: the platform paused this merchant's new guests (shown only then). */}
+      <GuestIntakeNotice fetcher={fetcher} />
       <NeedsAttention
         state={state}
         approvals={approvals}

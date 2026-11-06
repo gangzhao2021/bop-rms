@@ -1,5 +1,10 @@
 import { readClosedRecord } from "@bop/identity";
-import { createPostgresMerchantOrganizationSource } from "@bop/tenant";
+import {
+  BrandGuestIntakeError,
+  createPostgresMerchantOrganizationSource,
+  readBrandGuestIntake,
+  recordBrandGuestIntake,
+} from "@bop/tenant";
 import {
   changeStoreSupportPermission,
   listStoreSupportAccess,
@@ -32,7 +37,14 @@ import { onlyRefusal } from "./merchant-failure.js";
  */
 export class MerchantStoreSupportError extends Error {
   constructor(
-    readonly code: "Denied" | "NotAllowedByOwner" | "OwnerOnly" | "Invalid" | "Unavailable",
+    readonly code:
+      | "Denied"
+      | "NotAllowedByOwner"
+      | "OwnerOnly"
+      | "Invalid"
+      /** Someone else paused or resumed the merchant since this was read: read it again. */
+      | "Changed"
+      | "Unavailable",
   ) {
     super("store support " + code);
     this.name = "MerchantStoreSupportError";
@@ -83,7 +95,7 @@ export function createMerchantStoreSupport(options: {
   const person = async (
     transaction: Parameters<typeof readActivePlatformSupportPerson>[0],
     actorReference: string | null,
-    action: "platform.support.view" | "platform.support.change",
+    action: "platform.support.view" | "platform.support.change" | "platform.merchant.pause",
   ) => {
     if (actorReference === null) return denied();
     const found = await readActivePlatformSupportPerson(transaction, actorReference, now());
@@ -135,6 +147,8 @@ export function createMerchantStoreSupport(options: {
             csrf: String(current.csrf),
             name: found.displayName,
             canChange: found.actions.includes("platform.support.change"),
+            // WP-2423 item 13 ②: may pause and resume a merchant's new guests.
+            canPause: found.actions.includes("platform.merchant.pause"),
             stores,
           });
         });
@@ -218,10 +232,28 @@ export function createMerchantStoreSupport(options: {
             merchant.stores.push(store);
             merchants.set(scope.brandReference, merchant);
           }
+          // WP-2423 item 13 ②: whether each merchant takes new guests now (null: can't be read).
+          const intakes = new Map<string, Readonly<Record<string, unknown>> | null>();
+          for (const brandReference of merchants.keys()) {
+            await tx.query("SAVEPOINT support_overview_intake", []);
+            try {
+              const intake = await readBrandGuestIntake(tx as never, brandReference);
+              await tx.query("RELEASE SAVEPOINT support_overview_intake", []);
+              intakes.set(brandReference, Object.freeze({ ...intake }));
+            } catch {
+              await tx.query("ROLLBACK TO SAVEPOINT support_overview_intake", []);
+              await tx.query("RELEASE SAVEPOINT support_overview_intake", []);
+              intakes.set(brandReference, null);
+            }
+          }
           return Object.freeze({
             observedAt: at,
             merchants: [...merchants.entries()].map(([brandReference, merchant]) =>
-              Object.freeze({ brandReference, ...merchant }),
+              Object.freeze({
+                brandReference,
+                ...merchant,
+                guestIntake: intakes.get(brandReference) ?? null,
+              }),
             ),
           });
         });
@@ -435,6 +467,71 @@ export function createMerchantStoreSupport(options: {
         if ("refused" in outcome) throw new MerchantStoreSupportError(outcome.refused);
         return Object.freeze({ status: outcome.status });
       } catch (error) {
+        return mapped(error);
+      }
+    },
+    /**
+     * WP-2423 item 13 ② (Owner 2026-11-05 "就按这个做"): pause or resume a merchant's new guests,
+     * against the version the support person saw, with a reason the merchant's staff see. Only a
+     * support person holding `platform.merchant.pause`; recorded in the merchant's own append-only
+     * record and in each of its Stores' support access log, in one transaction.
+     */
+    async changeGuestIntake(input: { sessionCookie: unknown; csrf: unknown; command: unknown }) {
+      const raw = readClosedRecord(input.command, [
+        "brandReference",
+        "operationReference",
+        "expectedVersion",
+        "state",
+        "reason",
+      ]);
+      const brandReference = reference(raw.brandReference);
+      const operationReference = reference(raw.operationReference);
+      const reason = typeof raw.reason === "string" ? raw.reason.trim() : "";
+      if (
+        (raw.state !== "Paused" && raw.state !== "Open") ||
+        reason.length < 1 ||
+        reason.length > 300 ||
+        !Number.isSafeInteger(raw.expectedVersion) ||
+        (raw.expectedVersion as number) < 0
+      )
+        throw new MerchantStoreSupportError("Invalid");
+      try {
+        const authenticated = await options.authentication
+          .authorize(input)
+          .catch(onlyRefusal(denied));
+        const stores = options.stores().filter((store) => store.brandReference === brandReference);
+        const first = stores[0] ?? denied();
+        return await options.persistence.transactions.run(async (transaction) => {
+          const tx = businessTransaction(transaction);
+          const found = await person(
+            tx as never,
+            authenticated.actor.actorReference,
+            "platform.merchant.pause",
+          );
+          const at = now();
+          const recorded = await recordBrandGuestIntake(tx as never, {
+            tenantReference: first.tenantReference,
+            brandReference,
+            expectedVersion: raw.expectedVersion as number,
+            operationReference,
+            state: raw.state as "Paused" | "Open",
+            reason,
+            actorReference: found.actorReference,
+            recordedAt: at,
+          });
+          for (const store of stores)
+            await recordStoreSupportAccess(tx as never, store, {
+              logReference: options.nextReference(),
+              supportActorReference: found.actorReference,
+              kind: "Changed",
+              subjectCode: "MerchantGuestIntake",
+              occurredAt: at,
+            });
+          return Object.freeze({ ...recorded });
+        });
+      } catch (error) {
+        if (error instanceof BrandGuestIntakeError && error.code !== "Unavailable")
+          throw new MerchantStoreSupportError(error.code === "Changed" ? "Changed" : "Invalid");
         return mapped(error);
       }
     },

@@ -764,12 +764,125 @@ export async function exercisePilotPlatformSupport(context) {
         "storeReference",
         "timeZone",
       ]);
+      // WP-2423 item 13 ②: a merchant never paused takes new guests.
+      assert.deepEqual(overview.body.merchants[0].guestIntake, {
+        version: 0,
+        state: "Open",
+        since: null,
+        reason: null,
+      });
+      assert.equal((await send("support/session")).body.canPause, false);
     },
     routes,
   );
 
+  // WP-2423 item 13 ② (Owner 2026-11-05 "就按这个做"): pausing a merchant's new guests needs its own
+  // permission and a reason; it is recorded for the merchant and in each Store's support log, and
+  // every staff member sees it on Home. Viewing and changing settings never reach it.
+  const pause = (changes = {}) => ({
+    brandReference: brand,
+    operationReference: ref(),
+    expectedVersion: 0,
+    state: "Paused",
+    reason: "TEST: account review",
+    ...changes,
+  });
+  const intakeRows = async () =>
+    Number(
+      (
+        await admin.query(
+          "SELECT count(*) n FROM bop_tenant.brand_guest_intake WHERE brand_id=$1",
+          [brand],
+        )
+      ).rows[0].n,
+    );
+  await listen(
+    support,
+    async (send) => {
+      assert.equal((await send("support/merchant/guest-intake", pause())).status, 403);
+    },
+    routes,
+  );
+  // The Owner is not support: refused too.
+  await listen(
+    session,
+    async (send) => {
+      assert.equal((await send("support/merchant/guest-intake", pause())).status, 403);
+      assert.deepEqual((await send("store/guest-intake")).body, {
+        paused: false,
+        since: null,
+        reason: null,
+      });
+    },
+    routes,
+  );
+  assert.equal(await intakeRows(), 0);
+  await addPerson(2, "Active", ["platform.support.view", "platform.merchant.pause"], until);
+  let pausedAt;
+  await listen(
+    support,
+    async (send) => {
+      assert.equal((await send("support/session")).body.canPause, true);
+      // A blank reason, or a merchant this installation doesn't serve: nothing recorded.
+      assert.equal(
+        (await send("support/merchant/guest-intake", pause({ reason: " " }))).status,
+        422,
+      );
+      assert.equal(
+        (await send("support/merchant/guest-intake", pause({ brandReference: id(0x9e02) }))).status,
+        403,
+      );
+      const changedBefore = await logRows("Changed");
+      const command = pause();
+      const paused = await send("support/merchant/guest-intake", command);
+      assert.equal(paused.status, 200, JSON.stringify(paused.body));
+      assert.equal(paused.body.state, "Paused");
+      assert.equal(paused.body.version, 1);
+      pausedAt = paused.body.since;
+      // The same request again (an answer lost) records nothing more.
+      assert.deepEqual((await send("support/merchant/guest-intake", command)).body, paused.body);
+      assert.equal(await intakeRows(), 1);
+      assert.ok((await logRows("Changed")) > changedBefore);
+      // A second person's stale screen: told to read again.
+      assert.equal((await send("support/merchant/guest-intake", pause())).status, 409);
+      assert.equal(
+        (await send("support/overview", {})).body.merchants[0].guestIntake.state,
+        "Paused",
+      );
+    },
+    routes,
+  );
+  await listen(
+    session,
+    async (send) => {
+      assert.deepEqual((await send("store/guest-intake")).body, {
+        paused: true,
+        since: pausedAt,
+        reason: "TEST: account review",
+      });
+    },
+    routes,
+  );
+  await listen(
+    support,
+    async (send) => {
+      const resumed = await send(
+        "support/merchant/guest-intake",
+        pause({ expectedVersion: 1, state: "Open", reason: "TEST: review finished" }),
+      );
+      assert.equal(resumed.status, 200, JSON.stringify(resumed.body));
+      assert.equal(resumed.body.version, 2);
+    },
+    routes,
+  );
+  await listen(
+    session,
+    async (send) => assert.equal((await send("store/guest-intake")).body.paused, false),
+    routes,
+  );
+
   // Support ended: at once, nothing.
-  await addPerson(2, "Ended", [], until);
+  await addPerson(3, "Ended", [], until);
   await listen(
     support,
     async (send) => assert.equal((await send("support/session")).status, 403),

@@ -545,7 +545,7 @@ describe("WP-2423 item 13 ② (Owner 2026-11-05): a merchant the platform paused
       profile: f.options.profile,
       admission: f.options.admission,
       session: f.options.session,
-      ...(table === undefined ? {} : { table }),
+      ...(table === undefined ? {} : { table: table as never }),
       operatingReader: {
         readCurrent: async () => ({
           brandReference: id(1),

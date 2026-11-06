@@ -425,7 +425,9 @@ describe("WP-1004 Customer-entry contract", () => {
     });
     // WP-2423 item 13 ②: the platform paused this merchant's new guests; the page is told.
     port.result = { ...(port.result as object), newGuestsPaused: true };
-    expect((await (await post(await listen(customerEntry(port)))).json()).store).toMatchObject({
+    expect(
+      ((await (await post(await listen(customerEntry(port)))).json()) as { store: unknown }).store,
+    ).toMatchObject({
       newGuestsPaused: true,
     });
     port.result = { ...(port.result as object), newGuestsPaused: false };
