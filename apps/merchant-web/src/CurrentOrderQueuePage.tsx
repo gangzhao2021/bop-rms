@@ -2300,11 +2300,17 @@ export function CurrentOrderQueueRows({
                         >
                           {orderLabel(order, today)}
                         </button>
+                        {/* The heading stays the order number; the word is said with the row. */}
                         {fresh?.has(order.orderReference) === true ? (
-                          <span className="order-row__new">{t("New order")}</span>
+                          <span className="order-row__new" aria-hidden="true">
+                            {t("New order")}
+                          </span>
                         ) : null}
                       </h3>
                       <span className="order-row__what">
+                        {fresh?.has(order.orderReference) === true ? (
+                          <span className="visually-hidden">{t("New order")} </span>
+                        ) : null}
                         {/* Orders v2: what it is (its items), then who and when. */}
                         <span className="order-workbench-type">
                           {orderItemsText(order.summary) ??
