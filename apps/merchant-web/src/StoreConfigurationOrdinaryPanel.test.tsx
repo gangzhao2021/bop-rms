@@ -8,7 +8,9 @@ import {
   executeStoreConfigurationOriginal,
   StoreConfigurationHistoryView,
   appendStoreConfigurationHistory,
+  storeConfigurationPendingText,
 } from "./StoreConfigurationOrdinaryPanel.js";
+import { setLanguageForTest } from "./i18n/i18n.js";
 import {
   parseStoreConfigurationOrdinaryHistory,
   createStoreConfigurationOrdinaryClient,
@@ -534,4 +536,20 @@ it("dispatches the Owner's own approval as sole operator only when asked (WP-242
   );
   await run();
   expect(execute).toHaveBeenLastCalledWith(prepared, expect.objectContaining({ csrf }), undefined);
+});
+
+it("WP-2423 store-service-controls (v15 M33): names the unconfirmed step in the staff's language", () => {
+  try {
+    setLanguageForTest("zh-Hans");
+    expect(storeConfigurationPendingText("Publish")).toBe(
+      "之前的发布请求未确认。再做其他更改前请先恢复它；已保存的设置会保留。",
+    );
+    expect(storeConfigurationPendingText("Approve")).toContain("之前的批准请求");
+    expect(storeConfigurationPendingText("Publish")).not.toMatch(/[A-Za-z]/u);
+  } finally {
+    setLanguageForTest("en");
+  }
+  expect(storeConfigurationPendingText("Submit")).toBe(
+    "An earlier send for approval request was not confirmed. Recover it before making another change; the saved setup is kept.",
+  );
 });

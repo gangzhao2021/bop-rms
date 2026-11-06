@@ -50,13 +50,21 @@ const actionLabel: Record<string, string> = {
   Approve: t("Approved"),
   Publish: t("Published"),
 };
-const requestLabel: Record<string, string> = {
-  Materialize: "create-from-setup",
-  Validate: "check",
-  Submit: "send-for-approval",
-  Approve: "approval",
-  Publish: "publish",
-};
+/** WP-2423 store-service-controls (v15 M33): the step's name in the staff's language. */
+const requestLabel = (action: string): string | undefined =>
+  ({
+    Materialize: t("create"),
+    Validate: t("check"),
+    Submit: t("send for approval"),
+    Approve: t("approve"),
+    Publish: t("publish"),
+  })[action];
+/** The notice for a request whose result is not known yet, in the staff's language. */
+export const storeConfigurationPendingText = (action: string): string =>
+  t(
+    "An earlier {value} request was not confirmed. Recover it before making another change; the saved setup is kept.",
+    { value: requestLabel(action) ?? t("configuration") },
+  );
 const doneText: Record<string, string> = {
   Materialize: t("Configuration created from the saved setup."),
   Validate: t("Configuration checked."),
@@ -711,12 +719,7 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
       {notice && <p role="status">{notice}</p>}
       {pending && (
         <>
-          <p>
-            {t(
-              "An earlier {value} request was not confirmed. Recover it before making another change; the saved setup is kept.",
-              { value: requestLabel[pending.action] ?? t("configuration") },
-            )}
-          </p>
+          <p>{storeConfigurationPendingText(pending.action)}</p>
           <button type="button" disabled={busy} onClick={() => void recover()}>
             {t("Recover original configuration request")}
           </button>

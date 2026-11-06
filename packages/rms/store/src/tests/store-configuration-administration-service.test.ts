@@ -433,6 +433,30 @@ describe("fresh server preparation", () => {
   });
 });
 
+describe("WP-2423 store-service-controls (v15 M33) cause of an unavailable write", () => {
+  it("keeps the failed commit's error as a hidden cause, with the same answer", async () => {
+    const h = ports();
+    const refusal = Object.assign(new Error("canceling statement due to lock timeout"), {
+      code: "55P03",
+    });
+    const service = createStoreConfigurationAdministrationService({
+      ...h.value,
+      repository: {
+        ...h.value.repository,
+        async commit() {
+          throw refusal;
+        },
+      },
+    });
+    const error = await service.saveDraft(command(configuration("Draft"))).catch((e) => e);
+    expect(error).toMatchObject({ code: "STORE_CONFIGURATION_DEPENDENCY_UNAVAILABLE" });
+    expect(error.message).toBe("Store configuration administration operation is unavailable");
+    expect(error.cause).toBe(refusal);
+    expect(Object.keys(error)).not.toContain("cause");
+    expect(JSON.stringify(error)).not.toContain("lock timeout");
+  });
+});
+
 describe("WP-2423 (v15 D2/D3) open changes and withdrawals", () => {
   const pending = () => createStoreConfigurationVersion(configuration("PendingApproval"));
   const next = (actor: string) =>

@@ -61,10 +61,25 @@ export const isStoreConfigurationReferenceUnavailable = (
   ["Address", "Contact", "Payment", "Receipt"].includes(
     String((error as { setting?: unknown }).setting),
   );
+/**
+ * WP-2423 store-service-controls (v15 M33): the owner failure behind "unavailable" rides along as
+ * the error's non-enumerable `cause`, so the operator's log line names its code and SQLSTATE
+ * (codes only, never text or references; tooling/environment/pilot-unexpected.mjs). The answer to
+ * the caller is unchanged.
+ */
 const dependency = (error: unknown): never => {
   if (error instanceof StoreConfigurationAdministrationServiceError) throw error;
   if (isStoreConfigurationReferenceUnavailable(error)) throw error;
-  return fail("STORE_CONFIGURATION_DEPENDENCY_UNAVAILABLE");
+  const wrapped = new StoreConfigurationAdministrationServiceError(
+    "STORE_CONFIGURATION_DEPENDENCY_UNAVAILABLE",
+  );
+  if (error !== undefined)
+    Object.defineProperty(wrapped, "cause", {
+      value: error,
+      enumerable: false,
+      configurable: true,
+    });
+  throw wrapped;
 };
 const CODE = /^[A-Z][A-Z0-9_.:-]{0,63}$/u;
 

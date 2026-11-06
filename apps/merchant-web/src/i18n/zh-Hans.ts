@@ -685,6 +685,11 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "再次保存或选择模板前，需先恢复之前的模板草稿保存。",
   "An earlier {value} request was not confirmed. Recover it before making another change; the saved setup is kept.":
     "之前的{value}请求未确认。再做其他更改前请先恢复它；已保存的设置会保留。",
+  create: "创建",
+  check: "检查",
+  "send for approval": "提交",
+  approve: "批准",
+  publish: "发布",
   "An earlier {value} save must be recovered before another save.":
     "再次保存前，需先恢复之前的{value}保存。",
   "An ingredient": "一种配料",
