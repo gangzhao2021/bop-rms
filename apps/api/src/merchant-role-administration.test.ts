@@ -2,7 +2,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createMerchantRoleAdministration,
   generatedRoleCode,
+  parsePresetOfferDecline,
   parseRoleCommandInput,
+  presetUpdateOf,
   roleCommandIntentDigest,
 } from "./merchant-role-administration.js";
 
@@ -141,8 +143,8 @@ const roleView = (overrides: Record<string, unknown> = {}) => ({
 function setup() {
   // The Store's naming lock is free unless a test says otherwise.
   const tx = {
-    query: vi.fn(async (_sql: string, _values?: unknown) => ({
-      rows: [{ locked: true }] as unknown[],
+    query: vi.fn<(sql: string, values?: unknown) => Promise<{ rows: unknown[] }>>(async () => ({
+      rows: [{ locked: true }],
     })),
   };
   const allowed = vi.fn(async () => true);
@@ -457,5 +459,69 @@ describe("WP-2423 role administration authorization", () => {
       f.service.command({ ...f.input, body: command({ operation: "Activate" }) }),
     ).rejects.toMatchObject({ code: "PresetChanged" });
     expect(d.execute).not.toHaveBeenCalled();
+  });
+});
+
+describe("WP-2423 role presets: what BOP changed in a preset since the Store made it its own", () => {
+  const version = (overrides: Record<string, unknown>) => ({
+    ...record,
+    code: "inventory_manager",
+    lifecycle: "Active",
+    ...overrides,
+  });
+  const selected = (...codes: string[]) => codes.map((action) => ({ action }));
+  // The Inventory Manager preset now: stock codes and recipe.read (no orders).
+  const preset = version({
+    roleType: "System",
+    version: 3,
+    selections: selected("inventory.item.read", "merchant.access", "ordering.order.read"),
+  });
+  const mine = version({
+    roleType: "Custom",
+    version: 5,
+    selections: selected("inventory.item.read", "merchant.access", "ordering.order.read"),
+  });
+  const view = (overrides: Record<string, unknown> = {}) =>
+    roleView({ record: mine, effective: mine, opening: null, presetVersion: preset, ...overrides });
+  it("offers what the preset gained and no longer has, minus what the Store kept without", () => {
+    const offer = presetUpdateOf(view() as never);
+    expect(offer?.added).toContain("recipe.read");
+    expect(offer?.added).not.toContain("inventory.item.read");
+    expect(offer?.removed).toEqual(["ordering.order.read"]);
+    const kept = presetUpdateOf(
+      view({
+        declinedOffers: [
+          ...(offer?.added ?? []).map((action) => ({ kind: "Add", action })),
+          { kind: "Remove", action: "ordering.order.read" },
+        ],
+      }) as never,
+    );
+    expect(kept).toBeNull();
+  });
+  it("offers nothing on a preset, while a change waits, or once the Store has it", () => {
+    expect(presetUpdateOf(view({ presetVersion: null }) as never)).toBeNull();
+    expect(
+      presetUpdateOf(view({ record: { ...mine, version: 6, lifecycle: "Draft" } }) as never),
+    ).toBeNull();
+    expect(
+      presetUpdateOf(view({ record: { ...mine, code: "custom_0123456789ab" } }) as never),
+    ).toBeNull();
+  });
+  it("accepts a closed decline only", () => {
+    const body = {
+      roleReference: id(1),
+      expectedVersion: 5,
+      operationReference: id(2),
+      kind: "Add",
+      actions: ["recipe.read"],
+    };
+    expect(parsePresetOfferDecline(body).kind).toBe("Add");
+    for (const bad of [
+      { ...body, kind: "Delete" },
+      { ...body, actions: [] },
+      { ...body, actions: ["anything.at.all"] },
+      { ...body, extra: true },
+    ])
+      expect(() => parsePresetOfferDecline(bad)).toThrow(/Invalid/u);
   });
 });

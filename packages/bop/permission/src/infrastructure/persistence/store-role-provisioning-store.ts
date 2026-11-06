@@ -4,6 +4,7 @@ import {
   storePermissionCatalogVersion,
   storeRoleTemplateCodes,
   storeRoleTemplateProfiles,
+  withLegacyEquivalents,
   type StoreRoleTemplateCode,
 } from "../../catalog/store-permission-catalog.js";
 import {
@@ -65,7 +66,14 @@ export interface StoreRoleProvisioningResult {
   readonly customizedRoleCount?: number;
   /** Presets that had a change waiting: withdrawn, upgraded, and sent back to its author. */
   readonly rebasedRoleCount?: number;
+  /**
+   * A Store's own versions of presets that held a permission BOP no longer offers: each gets a
+   * recorded new version without it (its grant revoked), shown on the Roles page.
+   */
+  readonly retiredFromCustomCount?: number;
 }
+/** Reason of the version BOP writes when it takes a permission it no longer offers off a role. */
+export const rolePermissionRetiredReason = "ROLE_PERMISSION_RETIRED";
 
 const conflict = (): never => {
   throw new StoreRoleProvisioningError("STORE_ROLE_PROVISIONING_CONFLICT");
@@ -90,7 +98,8 @@ const scopeSql =
 const templateRolesSql = `SELECT r.role_id::text role_reference,r.role_code,v.administration_reference::text administration_reference,
    v.version::int version,v.role_type,v.lifecycle,v.display_name,v.description,v.authored_by_reference::text authored_by,
    v.submitted_by_reference::text submitted_by,v.source_policy_version::int source_policy_version,
-   e.role_type effective_type,e.lifecycle effective_lifecycle
+   e.role_type effective_type,e.lifecycle effective_lifecycle,e.version::int effective_version,
+   e.display_name effective_name,e.description effective_description
  FROM bop_permission.role r
  JOIN LATERAL (SELECT * FROM bop_permission.role_administration_version x WHERE x.brand_id=r.brand_id AND x.role_id=r.role_id
    ORDER BY x.version DESC LIMIT 1) v ON true
@@ -98,6 +107,16 @@ const templateRolesSql = `SELECT r.role_id::text role_reference,r.role_code,v.ad
    AND x.lifecycle IN ('Active','Deactivated') ORDER BY x.version DESC LIMIT 1) e ON true
  WHERE r.brand_id=$1 AND r.store_id=$2 AND r.role_code=ANY($3::text[])`;
 const waitingLifecycles = new Set(["Draft", "InReview", "Approved"]);
+const storeCatalogCodes: ReadonlySet<string> = new Set(
+  storePermissionCatalog().map((entry) => entry.code),
+);
+/**
+ * The codes of `selected` the current catalog still offers, with the legacy codes they fully
+ * cover (as a role selection is built): what a role keeps when BOP retires a permission.
+ */
+export function currentCatalogSelection(selected: readonly string[]): readonly string[] {
+  return withLegacyEquivalents(selected.filter((code) => storeCatalogCodes.has(code)));
+}
 
 /**
  * Owner-repository read for the release tool: the Store's latest provisioned catalog version and its
@@ -198,6 +217,7 @@ export async function provisionStoreRoles(
       policyVersion: Number(same.policy_version),
       customizedRoleCount: 0,
       rebasedRoleCount: 0,
+      retiredFromCustomCount: 0,
     });
   }
   const latest = history.at(-1)?.catalog_version ?? null;
@@ -313,7 +333,36 @@ export async function provisionStoreRoles(
     addedCount = 0,
     revokedCount = 0,
     customizedRoleCount = 0,
-    rebasedRoleCount = 0;
+    rebasedRoleCount = 0,
+    retiredFromCustomCount = 0;
+  /** Active definitions for codes outside the plan (a kept or rebuilt selection). */
+  const definitionIds = async (codes: readonly string[]) => {
+    const missing = codes.filter((code) => !permissions.has(code));
+    if (missing.length > 0)
+      for (const row of (
+        await tx.query(
+          "SELECT action_code,permission_id::text id FROM bop_permission.permission_definition WHERE lifecycle='Active' AND action_code=ANY($1::text[])",
+          [missing],
+        )
+      ).rows)
+        permissions.set(String(row.action_code), String(row.id));
+  };
+  /**
+   * A selection rebuilt against the current catalog: codes BOP no longer offers (or never
+   * installed) are left out, every kept code gets its current definition, group and risk.
+   */
+  const rebuild = async (rows: readonly Record<string, unknown>[]) => {
+    const kept = currentCatalogSelection(rows.map((item) => String(item.action_code)));
+    await definitionIds(kept);
+    const usable = kept.filter((code) => permissions.has(code));
+    return usable.map((code) => ({
+      permission: permissions.get(code),
+      action_code: code,
+      group_code: groupCode(code),
+      high_risk: highRisk.has(code),
+      dependency_actions: [],
+    }));
+  };
   const selectionsOf = async (administrationReference: string, version: number) =>
     (
       await tx.query(
@@ -322,6 +371,31 @@ export async function provisionStoreRoles(
         [plan.brandReference, administrationReference, version],
       )
     ).rows;
+  const insertSelections = async (
+    role: StoreRoleProvisioningRole,
+    version: number,
+    selections: readonly Record<string, unknown>[],
+  ) => {
+    if (selections.length > 0)
+      await tx.query(
+        `INSERT INTO bop_permission.role_administration_permission(selection_reference,brand_id,store_id,administration_reference,administration_version,
+           permission_id,action_code,group_code,high_risk,dependency_actions,data_classification)
+         SELECT s,$1,$2,$3,$4,p,a,g,h,d,'ConfigurationMetadata'
+         FROM unnest($5::uuid[],$6::uuid[],$7::text[],$8::text[],$9::boolean[],$10::jsonb[]) AS t(s,p,a,g,h,d)`,
+        [
+          plan.brandReference,
+          plan.storeReference,
+          role.administrationReference,
+          version,
+          selections.map(() => options.nextReference()),
+          selections.map((item) => item.permission),
+          selections.map((item) => item.action_code),
+          selections.map((item) => item.group_code),
+          selections.map((item) => item.high_risk === true),
+          selections.map((item) => JSON.stringify(item.dependency_actions ?? [])),
+        ],
+      );
+  };
   /** A copy of a waiting change's content as another version (withdrawn, or the rebased draft). */
   const copyWaiting = async (
     role: StoreRoleProvisioningRole,
@@ -358,24 +432,134 @@ export async function provisionStoreRoles(
         at,
       ],
     );
-    if (selections.length > 0)
+    await insertSelections(role, version, selections);
+  };
+  const decide = async (
+    role: StoreRoleProvisioningRole,
+    version: number,
+    decisions: readonly (readonly [string, string])[],
+    reasonCode: string,
+  ) => {
+    for (const [decision, actor] of decisions)
       await tx.query(
-        `INSERT INTO bop_permission.role_administration_permission(selection_reference,brand_id,store_id,administration_reference,administration_version,
-           permission_id,action_code,group_code,high_risk,dependency_actions,data_classification)
-         SELECT s,$1,$2,$3,$4,p,a,g,h,d,'ConfigurationMetadata'
-         FROM unnest($5::uuid[],$6::uuid[],$7::text[],$8::text[],$9::boolean[],$10::jsonb[]) AS t(s,p,a,g,h,d)`,
+        `INSERT INTO bop_permission.role_administration_decision(decision_reference,brand_id,store_id,administration_reference,administration_version,
+           decision,actor_reference,reason_code,evidence_reference,occurred_at,data_classification)
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'ConfigurationMetadata')`,
         [
+          options.nextReference(),
           plan.brandReference,
           plan.storeReference,
           role.administrationReference,
           version,
-          selections.map(() => options.nextReference()),
-          selections.map((item) => item.permission),
-          selections.map((item) => item.action_code),
-          selections.map((item) => item.group_code),
-          selections.map((item) => item.high_risk === true),
-          selections.map((item) => JSON.stringify(item.dependency_actions ?? [])),
+          decision,
+          actor,
+          reasonCode,
+          approval.approvalEvidenceReference,
+          at,
         ],
+      );
+  };
+  /**
+   * A Store's own version keeps everything it chose, except a permission BOP no longer offers:
+   * that one comes off as a recorded new version of the Store's role (same name and description,
+   * still the Store's), its grant is revoked, and a change waiting on it is withdrawn and sent back
+   * to its author rebuilt the same way. Nothing else of the Store's version changes.
+   */
+  const retireFromCustom = async (
+    role: StoreRoleProvisioningRole,
+    row: Record<string, unknown>,
+  ) => {
+    const held = await selectionsOf(role.administrationReference, Number(row.effective_version));
+    const kept = await rebuild(held);
+    const keptCodes = new Set(kept.map((item) => item.action_code));
+    const retired = held.filter((item) => !keptCodes.has(String(item.action_code)));
+    if (retired.length === 0) return;
+    let version = Number(row.version) + 1;
+    let waiting: readonly Record<string, unknown>[] | null = null;
+    if (waitingLifecycles.has(String(row.lifecycle))) {
+      waiting = await selectionsOf(role.administrationReference, Number(row.version));
+      const evidence = options.nextReference();
+      await copyWaiting(
+        role,
+        row,
+        version,
+        {
+          lifecycle: "Withdrawn",
+          submittedBy: row.submitted_by === null ? null : String(row.submitted_by),
+          evidence,
+          reasonCode: "ROLE_CHANGE_WITHDRAWN_FOR_PRESET_UPDATE",
+          sourcePolicyVersion: Number(row.source_policy_version),
+        },
+        waiting,
+      );
+      await tx.query(
+        `INSERT INTO bop_permission.role_administration_decision(decision_reference,brand_id,store_id,administration_reference,administration_version,
+           decision,actor_reference,reason_code,evidence_reference,occurred_at,data_classification)
+         VALUES($1,$2,$3,$4,$5,'Withdrawn',$6,'ROLE_CHANGE_WITHDRAWN_FOR_PRESET_UPDATE',$7,$8,'ConfigurationMetadata')`,
+        [
+          options.nextReference(),
+          plan.brandReference,
+          plan.storeReference,
+          role.administrationReference,
+          version,
+          plan.operatorReference,
+          evidence,
+          at,
+        ],
+      );
+      rebasedRoleCount += 1;
+      version += 1;
+    }
+    const lifecycle = String(row.effective_lifecycle);
+    await tx.query(
+      `INSERT INTO bop_permission.role_administration_version(administration_reference,role_id,version,brand_id,store_id,role_code,display_name,description,
+         role_type,lifecycle,source_policy_version,authored_by_reference,submitted_by_reference,approved_by_reference,decision_evidence_reference,reason_code,changed_at,data_classification)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,'Custom',$9,$10,$11,$11,$12,$13,$14,$15,'ConfigurationMetadata')`,
+      [
+        role.administrationReference,
+        role.roleReference,
+        version,
+        plan.brandReference,
+        plan.storeReference,
+        role.roleCode,
+        row.effective_name,
+        row.effective_description,
+        lifecycle,
+        policyVersion,
+        plan.operatorReference,
+        approval.approvedByReference,
+        approval.approvalEvidenceReference,
+        rolePermissionRetiredReason,
+        at,
+      ],
+    );
+    await insertSelections(role, version, kept);
+    const decisions: (readonly [string, string])[] = [
+      ["Submitted", plan.operatorReference],
+      ["Approved", approval.approvedByReference],
+    ];
+    if (lifecycle === "Active") decisions.push(["Activated", plan.operatorReference]);
+    await decide(role, version, decisions, rolePermissionRetiredReason);
+    const revoked = await tx.query(
+      `UPDATE bop_permission.permission_grant SET lifecycle='Revoked',version=version+1,updated_at=$3
+       WHERE role_id=$1 AND brand_id=$2 AND lifecycle='Active' AND permission_id=ANY($4::uuid[]) RETURNING 1`,
+      [role.roleReference, plan.brandReference, at, retired.map((item) => item.permission)],
+    );
+    revokedCount += revoked.rows.length;
+    retiredFromCustomCount += 1;
+    if (waiting !== null)
+      await copyWaiting(
+        role,
+        row,
+        version + 1,
+        {
+          lifecycle: "Draft",
+          submittedBy: null,
+          evidence: null,
+          reasonCode: "ROLE_DRAFT_REBASED",
+          sourcePolicyVersion: policyVersion,
+        },
+        await rebuild(waiting),
       );
   };
   for (const role of plan.roles) {
@@ -384,6 +568,7 @@ export async function provisionStoreRoles(
     // and history stay as they are; the Roles page shows what the preset now has.
     if (row !== undefined && row.effective_type === "Custom") {
       customizedRoleCount += 1;
+      await retireFromCustom(role, row);
       continue;
     }
     let version = row === undefined ? 1 : Number(row.version) + 1;
@@ -540,7 +725,9 @@ export async function provisionStoreRoles(
           reasonCode: "ROLE_DRAFT_REBASED",
           sourcePolicyVersion: policyVersion,
         },
-        rebase.selections,
+        // Rebuilt against the catalog it now waits on: a permission BOP retired is left out (the
+        // editor shows the author what was dropped).
+        await rebuild(rebase.selections),
       );
   }
   if (plan.ownerAssignment !== null) {
@@ -591,6 +778,7 @@ export async function provisionStoreRoles(
       revokedCount,
       customizedRoleCount,
       rebasedRoleCount,
+      retiredFromCustomCount,
       ownerAssigned: plan.ownerAssignment !== null,
       approvedBy: approval.approvedByReference,
       approvalEvidence: approval.approvalEvidenceReference,
@@ -660,5 +848,6 @@ export async function provisionStoreRoles(
     policyVersion,
     customizedRoleCount,
     rebasedRoleCount,
+    retiredFromCustomCount,
   });
 }

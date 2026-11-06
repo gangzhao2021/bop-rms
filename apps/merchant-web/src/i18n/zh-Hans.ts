@@ -8407,6 +8407,23 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "你的改动等待期间 BOP 更新了这个预设，请核对后重新提交。",
   "{name} goes back to the BOP preset: removes {removed}, adds {added}. BOP updates will apply to it again.":
     "“{name}”将恢复为 BOP 预设：去掉 {removed} 项、增加 {added} 项。之后 BOP 的更新会自动用在它上面。",
+  "Permissions BOP no longer offers were left out of this draft ({count}). Nothing else of your change was altered.":
+    "BOP 已停用的权限没有放进这份草稿（{count} 项），你的改动其余部分保持不变。",
+  "Permissions BOP no longer offers were taken off your version ({count}). Staff with this role no longer hold them; everything else you chose stays.":
+    "BOP 已停用的权限已从本店版本中去掉（{count} 项），持有这个角色的员工不再拥有；你选的其余权限保持不变。",
+  "BOP updated the preset this role is based on": "BOP 更新了这个角色所基于的预设",
+  "The BOP preset now also includes: {list}. Add it to your version?":
+    "BOP 预设现在还包括：{list}。要加到本店的版本里吗？",
+  "What the preset added": "预设新增的内容",
+  "Add to my version": "加到本店版本",
+  "Keep mine without it": "保持本店版本，不加",
+  "No longer in the BOP preset: {list}. Remove it from your version?":
+    "BOP 预设已不再包括：{list}。要从本店的版本里去掉吗？",
+  "What the preset no longer has": "预设去掉的内容",
+  "Remove from my version": "从本店版本去掉",
+  "Keep mine with it": "保持本店版本，不去掉",
+  "Adding or removing goes through approval like any change. Until it is on, staff keep what they have now.":
+    "加上或去掉都和其他改动一样需要批准；启用前，员工保持现在的权限。",
   "Written by {by}": "由 {by} 编写",
   "Sent by {by}": "由 {by} 提交",
   "New name: {name}": "新名称：{name}",

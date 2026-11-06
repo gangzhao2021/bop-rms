@@ -63,6 +63,8 @@ export interface RoleChangeView {
   readonly restore: boolean;
   /** Sent back by a BOP preset update while it was waiting. */
   readonly rebased: boolean;
+  /** Permissions BOP no longer offers that were left out of the draft it sent back. */
+  readonly droppedByBop: number;
   readonly by: string;
   readonly at: string;
   readonly approvedAlone: boolean;
@@ -72,6 +74,18 @@ export interface RoleChangeView {
     /** Flagged permissions the change adds that the viewer does not hold. */
     readonly needsHolderOf: readonly string[];
   } | null;
+}
+export interface RolePresetUpdateView {
+  readonly added: readonly string[];
+  readonly removed: readonly string[];
+}
+/** WP-2423 role presets: "Keep mine without it" for what a BOP preset update offered. */
+export interface RolePresetOfferDeclineRequest {
+  readonly roleReference: string;
+  readonly expectedVersion: number;
+  readonly operationReference: string;
+  readonly kind: "Add" | "Remove";
+  readonly actions: readonly string[];
 }
 export interface RoleAdministrationItemView {
   readonly roleReference: string;
@@ -85,6 +99,13 @@ export interface RoleAdministrationItemView {
   readonly memberCount: number;
   readonly waitingAssignments: number;
   readonly permissions: readonly string[];
+  /** Permissions BOP no longer offers that it took off this role's version (staff no longer hold). */
+  readonly retiredByBop: number;
+  /**
+   * What BOP changed in the preset since this Store made it its own: offered to add or remove
+   * (through approval), or to keep the Store's version as it is. Null when nothing is offered.
+   */
+  readonly presetUpdate: RolePresetUpdateView | null;
   readonly change: RoleChangeView | null;
   readonly lastOutcome: "Rejected" | "Withdrawn" | null;
   /** Operations the current viewer may perform now; the server re-authorizes every command. */
@@ -161,6 +182,7 @@ export interface RoleAdministrationPageClient {
   loadRoles(): Promise<unknown>;
   loadRole(roleReference: string): Promise<unknown>;
   command?(request: RoleCommandRequest): Promise<{ readonly roleReference: string }>;
+  declineOffer?(request: RolePresetOfferDeclineRequest): Promise<void>;
 }
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
   instant = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u,
@@ -217,6 +239,7 @@ function change(value: unknown): RoleChangeView | null {
     "removed",
     "restore",
     "rebased",
+    "droppedByBop",
     "by",
     "at",
     "approvedAlone",
@@ -248,11 +271,17 @@ function change(value: unknown): RoleChangeView | null {
     removed: actions(input.removed),
     restore: input.restore as boolean,
     rebased: input.rebased as boolean,
+    droppedByBop: count(input.droppedByBop),
     by: typeof input.by === "string" && input.by.length <= 120 ? input.by : invalid(),
     at: when(input.at),
     approvedAlone: input.approvedAlone as boolean,
     approval,
   });
+}
+function presetUpdate(value: unknown): RolePresetUpdateView | null {
+  if (value === null) return null;
+  const input = closed(value, ["added", "removed"]);
+  return Object.freeze({ added: actions(input.added), removed: actions(input.removed) });
 }
 function role(value: unknown): RoleAdministrationItemView {
   const input = closed(value, [
@@ -267,6 +296,8 @@ function role(value: unknown): RoleAdministrationItemView {
     "memberCount",
     "waitingAssignments",
     "permissions",
+    "retiredByBop",
+    "presetUpdate",
     "change",
     "lastOutcome",
     "operations",
@@ -300,6 +331,8 @@ function role(value: unknown): RoleAdministrationItemView {
     memberCount: count(input.memberCount),
     waitingAssignments: count(input.waitingAssignments),
     permissions: actions(input.permissions),
+    retiredByBop: count(input.retiredByBop),
+    presetUpdate: presetUpdate(input.presetUpdate),
     change: change(input.change),
     lastOutcome: input.lastOutcome as RoleAdministrationItemView["lastOutcome"],
     operations: Object.freeze([...(input.operations as RoleAdministrationOperation[])]),
@@ -434,6 +467,7 @@ export function createRoleAdministrationPageClient(
   fetcher: typeof fetch = fetch,
 ): RoleAdministrationPageClient & {
   command(request: RoleCommandRequest): Promise<{ readonly roleReference: string }>;
+  declineOffer(request: RolePresetOfferDeclineRequest): Promise<void>;
   waiting(): Promise<readonly RoleChangeWaitingView[]>;
 } {
   const post = async (path: string, body: unknown) => {
@@ -467,6 +501,9 @@ export function createRoleAdministrationPageClient(
         roleReference?: unknown;
       };
       return { roleReference: parseRoleAdministrationRouteReference(result.roleReference) };
+    },
+    async declineOffer(request) {
+      await post("/merchant/organization/roles/offer-decline", request);
     },
     waiting: async () =>
       parseRoleChangesWaiting(await post("/merchant/organization/roles/waiting", {})),

@@ -37,6 +37,8 @@ const role = {
   memberCount: 3,
   waitingAssignments: 0,
   permissions: ["ordering.order.read"],
+  retiredByBop: 0,
+  presetUpdate: null,
   change: {
     status: "InReview",
     name: "Front of House",
@@ -46,6 +48,7 @@ const role = {
     removed: [],
     restore: false,
     rebased: false,
+    droppedByBop: 0,
     by: "Ana",
     at: "2026-11-06T16:39:00.000Z",
     approvedAlone: false,

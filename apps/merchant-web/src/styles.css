@@ -10188,3 +10188,20 @@ tr[data-drop-target="true"] {
   gap: var(--bop-space-3);
   max-width: 28rem;
 }
+/* A BOP preset update offered to a Store's own version: plain text under the row, no box. */
+.role-preset-update {
+  display: grid;
+  gap: var(--bop-space-2);
+  max-width: 44rem;
+}
+.role-row > .role-preset-update {
+  grid-column: 1 / -1;
+}
+.role-preset-update p {
+  margin: 0;
+}
+.role-preset-update [role="group"] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--bop-space-2);
+}

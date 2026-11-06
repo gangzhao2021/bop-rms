@@ -542,6 +542,35 @@ it("role presets: edit, approve alone, remove, create, upgrade, restore and the 
         },
       });
       await send("ana", "Submit", kitchen);
+      // A permission BOP has since stopped offering, still on Ana's version of Front of House (and
+      // granted) and in her change waiting on Kitchen.
+      const retiredPermission = next();
+      await admin.query(
+        "INSERT INTO bop_permission.permission_definition(permission_id,action_code,lifecycle,version,created_at,updated_at) VALUES($1,'ordering.order.retired-probe','Active',1,now(),now())",
+        [retiredPermission],
+      );
+      for (const [roleReference, lifecycle] of [
+        [foh, "Active"],
+        [kitchen, "InReview"],
+      ]) {
+        const head = (
+          await admin.query(
+            "SELECT administration_reference,version FROM bop_permission.role_administration_version WHERE role_id=$1 AND lifecycle=$2 ORDER BY version DESC LIMIT 1",
+            [roleReference, lifecycle],
+          )
+        ).rows[0];
+        await admin.query(
+          `INSERT INTO bop_permission.role_administration_permission(selection_reference,brand_id,store_id,administration_reference,administration_version,
+             permission_id,action_code,group_code,high_risk,dependency_actions,data_classification)
+           VALUES($1,$2,$3,$4,$5,$6,'ordering.order.retired-probe','ordering',false,'[]','ConfigurationMetadata')`,
+          [next(), brand, storeA, head.administration_reference, head.version, retiredPermission],
+        );
+      }
+      await admin.query(
+        "INSERT INTO bop_permission.permission_grant(grant_id,role_id,permission_id,brand_id,store_id,lifecycle,effective_from,effective_until,version,created_at,updated_at) VALUES($1,$2,$3,$4,$5,'Active',now(),NULL,1,now(),now())",
+        [next(), foh, retiredPermission, brand, storeA],
+      );
+      assert.ok((await grantsOf(storeA, foh)).includes("ordering.order.retired-probe"));
       const upgraded = await upgradeSyntheticStoreRoles(admin, {
         tenant,
         brand,
@@ -551,15 +580,52 @@ it("role presets: edit, approve alone, remove, create, upgrade, restore and the 
         at: new Date().toISOString(),
         next,
       });
-      assert.deepEqual([upgraded.customizedRoleCount, upgraded.rebasedRoleCount], [1, 1]);
-      // Ana's version of Front of House kept its grants; Prep cook is not a preset.
-      assert.ok((await grantsOf(storeA, foh)).includes("ordering.order.comp"));
+      assert.deepEqual(
+        [upgraded.customizedRoleCount, upgraded.rebasedRoleCount, upgraded.retiredFromCustomCount],
+        [1, 1, 1],
+      );
+      // Ana's version of Front of House kept everything she chose, except the permission BOP no
+      // longer offers: that came off as a recorded new version of her role, and she is told.
+      const fohGrants = await grantsOf(storeA, foh);
+      assert.ok(fohGrants.includes("ordering.order.comp"));
+      assert.ok(!fohGrants.includes("ordering.order.retired-probe"));
+      item = await detail("ana", foh);
+      assert.deepEqual(
+        [item.kind, item.name, item.state, item.retiredByBop, item.change],
+        ["YourVersion", "Servers", "InUse", 1, null],
+      );
+      assert.ok(item.permissions.includes("ordering.order.comp"));
+      const fohHead = (
+        await admin.query(
+          "SELECT role_type,lifecycle,reason_code,display_name FROM bop_permission.role_administration_version WHERE role_id=$1 ORDER BY version DESC LIMIT 1",
+          [foh],
+        )
+      ).rows[0];
+      assert.deepEqual(fohHead, {
+        role_type: "Custom",
+        lifecycle: "Active",
+        reason_code: "ROLE_PERMISSION_RETIRED",
+        display_name: "Servers",
+      });
       item = await detail("ana", kitchen);
       assert.deepEqual(
         [item.kind, item.change.status, item.change.rebased],
         ["Preset", "Draft", true],
       );
       assert.deepEqual(item.change.added, ["ordering.order.read"]);
+      // The draft sent back was rebuilt against the catalog: the retired permission was left out,
+      // and Ana is told one was.
+      assert.equal(item.change.droppedByBop, 1);
+      const rebasedCodes = (
+        await admin.query(
+          `SELECT p.action_code FROM bop_permission.role_administration_permission p JOIN bop_permission.role_administration_version v
+             ON v.brand_id=p.brand_id AND v.administration_reference=p.administration_reference AND v.version=p.administration_version
+           WHERE v.role_id=$1 AND v.reason_code='ROLE_DRAFT_REBASED'`,
+          [kitchen],
+        )
+      ).rows.map((row) => row.action_code);
+      assert.ok(rebasedCodes.includes("ordering.order.read"));
+      assert.ok(!rebasedCodes.includes("ordering.order.retired-probe"));
       const kitchenHistory = await asApi(
         storeA,
         async (client) =>
@@ -673,6 +739,144 @@ it("role presets: edit, approve alone, remove, create, upgrade, restore and the 
         withLegacyEquivalents(fohActions).filter((code) => !code.endsWith(".operate")),
         fohActions,
       );
+
+      // ── BOP changed Inventory Manager after Ana made it her own: the Roles page offers what
+      // the preset gained (recipes) and no longer has (orders), and "keep mine" is recorded.
+      const inventoryNow = (await detail("ana", inventory)).permissions;
+      assert.ok(
+        inventoryNow.includes("recipe.read") && !inventoryNow.includes("ordering.order.read"),
+      );
+      const olderPreset = [
+        ...inventoryNow.filter((code) => code !== "recipe.read"),
+        "ordering.order.read",
+      ].sort();
+      {
+        // The preset as an earlier catalog had it (test set-up: a System version as BOP writes one).
+        const head = (
+          await admin.query(
+            "SELECT * FROM bop_permission.role_administration_version WHERE role_id=$1 ORDER BY version DESC LIMIT 1",
+            [inventory],
+          )
+        ).rows[0];
+        const version = Number(head.version) + 1;
+        await admin.query(
+          `INSERT INTO bop_permission.role_administration_version(administration_reference,role_id,version,brand_id,store_id,role_code,display_name,description,
+             role_type,lifecycle,source_policy_version,authored_by_reference,submitted_by_reference,approved_by_reference,decision_evidence_reference,reason_code,changed_at,data_classification)
+           VALUES($1,$2,$3,$4,$5,$6,$7,$8,'System','Active',$9,$10,$10,$11,$12,'STORE_ROLE_TEMPLATE_UPGRADE',now(),'ConfigurationMetadata')`,
+          [
+            head.administration_reference,
+            inventory,
+            version,
+            brand,
+            storeA,
+            head.role_code,
+            head.display_name,
+            head.description,
+            head.source_policy_version,
+            operator,
+            approver,
+            next(),
+          ],
+        );
+        const codes = withLegacyEquivalents(olderPreset);
+        const ids = (
+          await admin.query(
+            "SELECT action_code,permission_id::text id FROM bop_permission.permission_definition WHERE action_code=ANY($1::text[])",
+            [codes],
+          )
+        ).rows;
+        for (const row of ids)
+          await admin.query(
+            `INSERT INTO bop_permission.role_administration_permission(selection_reference,brand_id,store_id,administration_reference,administration_version,
+               permission_id,action_code,group_code,high_risk,dependency_actions,data_classification)
+             VALUES($1,$2,$3,$4,$5,$6,$7,$8,false,'[]','ConfigurationMetadata')`,
+            [
+              next(),
+              brand,
+              storeA,
+              head.administration_reference,
+              version,
+              row.id,
+              row.action_code,
+              row.action_code.split(".")[0],
+            ],
+          );
+      }
+      assert.equal((await detail("ana", inventory)).presetUpdate, null);
+      await send("ana", "Revise", inventory, {
+        draft: { displayName: "Stock", description: "Stock and counts", actions: olderPreset },
+      });
+      await send("ana", "Submit", inventory);
+      await send("ana", "ApproveAlone", inventory);
+      await send("ana", "Activate", inventory);
+      item = await detail("ana", inventory);
+      assert.deepEqual([item.kind, item.name], ["YourVersion", "Stock"]);
+      assert.deepEqual(item.presetUpdate, {
+        added: ["recipe.read"],
+        removed: ["ordering.order.read"],
+      });
+      // Sam (no role permissions) is never offered anything.
+      await assert.rejects(
+        roles.declineOffer({
+          ...as("sam"),
+          body: {
+            roleReference: inventory,
+            expectedVersion: item.version,
+            operationReference: fresh(),
+            kind: "Add",
+            actions: ["recipe.read"],
+          },
+        }),
+        refused("PermissionDenied"),
+      );
+      const keepMine = {
+        roleReference: inventory,
+        expectedVersion: item.version,
+        operationReference: fresh(),
+        kind: "Add",
+        actions: ["recipe.read"],
+      };
+      assert.equal((await roles.declineOffer({ ...as("ana"), body: keepMine })).status, "Recorded");
+      assert.equal(
+        (await roles.declineOffer({ ...as("ana"), body: keepMine })).status,
+        "AlreadyRecorded",
+      );
+      await assert.rejects(
+        roles.declineOffer({ ...as("ana"), body: { ...keepMine, kind: "Remove" } }),
+        refused("Conflict"),
+      );
+      // Declined once is not offered again (nor declined again) for this preset version.
+      await assert.rejects(
+        roles.declineOffer({ ...as("ana"), body: { ...keepMine, operationReference: fresh() } }),
+        refused("Conflict"),
+      );
+      item = await detail("ana", inventory);
+      assert.deepEqual(item.presetUpdate, { added: [], removed: ["ordering.order.read"] });
+      const declines = await admin.query(
+        "SELECT offer_kind,action_code,actor_id::text actor,decision FROM bop_permission.role_preset_offer_decision",
+      );
+      assert.deepEqual(declines.rows, [
+        { offer_kind: "Add", action_code: "recipe.read", actor: ana, decision: "Declined" },
+      ]);
+      await assert.rejects(
+        admin.query("UPDATE bop_permission.role_preset_offer_decision SET decision='Declined'"),
+        (error) => error.code === "55000",
+      );
+      // Taking the removal is an ordinary change through approval; then nothing is offered.
+      await send("ana", "Revise", inventory, {
+        draft: {
+          displayName: "Stock",
+          description: "Stock and counts",
+          actions: olderPreset.filter((code) => code !== "ordering.order.read"),
+        },
+      });
+      assert.equal((await detail("ana", inventory)).presetUpdate, null);
+      await send("ana", "Submit", inventory);
+      await send("ana", "ApproveAlone", inventory);
+      await send("ana", "Activate", inventory);
+      item = await detail("ana", inventory);
+      assert.equal(item.presetUpdate, null);
+      assert.ok(!(await grantsOf(storeA, inventory)).includes("ordering.order.read"));
 
       // ── Mia joins as Store Manager: the two-person rule is back.
       await assign(mia, "store_manager");

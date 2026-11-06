@@ -48,7 +48,25 @@ export interface RoleAdministrationRoleView {
   readonly memberCount: number;
   /** Staff role requests still waiting that would give this role. */
   readonly openAssignmentChanges: number;
+  /**
+   * Codes BOP took off the version staff hold because it no longer offers them (the version
+   * before it had them), or none.
+   */
+  readonly retiredByBop?: readonly string[];
+  /** Codes left out of a draft BOP sent back (it no longer offers them), or none. */
+  readonly droppedFromRebase?: readonly string[];
+  /**
+   * While staff hold the Store's own version of a role: the last BOP preset version before it
+   * (what the preset was when the Store made it its own), else null.
+   */
+  readonly presetVersion?: RoleAdministrationVersionRecord | null;
+  /** What the Store chose to keep without, against that preset version. */
+  readonly declinedOffers?: readonly RolePresetOfferDecline[];
   readonly decisions: readonly RoleAdministrationDecisionView[];
+}
+export interface RolePresetOfferDecline {
+  readonly kind: "Add" | "Remove";
+  readonly action: string;
 }
 export class RoleAdministrationStoreError extends Error {
   constructor(
@@ -168,6 +186,152 @@ async function versionsAround(
         : await toRecord(tx, openingRow);
   return { effective, opening };
 }
+/** Codes of the latest `lifecycles` version below `below` (with `reason`, if given) that `kept` lacks. */
+async function lostSince(
+  tx: RoleAdministrationTransaction,
+  kept: RoleAdministrationVersionRecord,
+  lifecycles: readonly string[],
+  reason: string | null,
+): Promise<readonly string[]> {
+  const row = (
+    await tx.query(
+      `SELECT v.version::int version FROM bop_permission.role_administration_version v WHERE v.brand_id=$1 AND v.administration_reference=$2
+       AND v.version<$3 AND v.lifecycle=ANY($4::text[]) AND ($5::text IS NULL OR v.reason_code=$5) ORDER BY v.version DESC LIMIT 1`,
+      [kept.brandReference, kept.administrationReference, kept.version, lifecycles, reason],
+    )
+  ).rows[0];
+  if (row === undefined) return [];
+  const now = new Set(kept.selections.map((item) => String(item.action)));
+  return (
+    await selections(tx, kept.brandReference, kept.administrationReference, Number(row.version))
+  )
+    .map((item) => item.action)
+    .filter((action) => !now.has(action));
+}
+/** The latest BOP preset version (System, Active or Deactivated) below `version`, or null. */
+async function presetBelow(
+  tx: RoleAdministrationTransaction,
+  version: RoleAdministrationVersionRecord,
+): Promise<RoleAdministrationVersionRecord | null> {
+  const row = (
+    await tx.query(
+      `SELECT v.* FROM bop_permission.role_administration_version v WHERE v.brand_id=$1 AND v.administration_reference=$2
+       AND v.version<$3 AND v.role_type='System' AND v.lifecycle IN ('Active','Deactivated') ORDER BY v.version DESC LIMIT 1`,
+      [version.brandReference, version.administrationReference, version.version],
+    )
+  ).rows[0];
+  return row === undefined ? null : toRecord(tx, row);
+}
+async function declinedOffers(
+  tx: RoleAdministrationTransaction,
+  scope: RoleAdministrationScope,
+  preset: RoleAdministrationVersionRecord,
+): Promise<readonly RolePresetOfferDecline[]> {
+  return (
+    await tx.query(
+      `SELECT offer_kind,action_code FROM bop_permission.role_preset_offer_decision
+       WHERE brand_id=$1 AND store_id=$2 AND administration_reference=$3 AND preset_version=$4 ORDER BY action_code COLLATE "C"`,
+      [scope.brandReference, scope.storeReference, preset.administrationReference, preset.version],
+    )
+  ).rows.map((row) => ({
+    kind: String(row.offer_kind) as RolePresetOfferDecline["kind"],
+    action: String(row.action_code),
+  }));
+}
+/**
+ * WP-2423 role presets: the Store keeps its own version of a preset without what a BOP preset
+ * update offered ("Keep mine"). Append-only, one row per permission, against the preset version
+ * the offer was made from; a retry under the same operation reference changes nothing. The caller
+ * has authorized identity.role.change and checked the offer is current.
+ */
+export async function declineRolePresetOffer(
+  tx: RoleAdministrationTransaction,
+  scope: RoleAdministrationScope,
+  input: {
+    readonly role: RoleAdministrationRoleView;
+    readonly kind: RolePresetOfferDecline["kind"];
+    readonly actions: readonly string[];
+    /** Whether these permissions are still offered now (a first attempt must find them so). */
+    readonly stillOffered: boolean;
+    readonly catalogVersion: number;
+    readonly actorReference: string;
+    readonly operationReference: string;
+    readonly at: string;
+    readonly auditId: string;
+    readonly nextReference: () => string;
+  },
+): Promise<"Recorded" | "AlreadyRecorded"> {
+  const preset = input.role.presetVersion ?? null;
+  if (preset === null || input.actions.length === 0)
+    throw new RoleAdministrationStoreError("ROLE_ADMIN_VERSION_CONFLICT");
+  await tx.query(scopeSql, [scope.brandReference, scope.storeReference]);
+  await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+    "bop_permission.role_administration:" + preset.administrationReference,
+  ]);
+  const prior = (
+    await tx.query(
+      `SELECT offer_kind,action_code,actor_id::text actor FROM bop_permission.role_preset_offer_decision
+       WHERE brand_id=$1 AND operation_reference=$2 ORDER BY action_code COLLATE "C"`,
+      [scope.brandReference, input.operationReference],
+    )
+  ).rows;
+  if (prior.length > 0) {
+    const same =
+      prior.every(
+        (row) =>
+          String(row.offer_kind) === input.kind && String(row.actor) === input.actorReference,
+      ) &&
+      prior.map((row) => String(row.action_code)).join(",") === [...input.actions].sort().join(",");
+    if (!same) throw new RoleAdministrationStoreError("ROLE_ADMIN_IDEMPOTENCY_CONFLICT");
+    return "AlreadyRecorded";
+  }
+  if (!input.stillOffered) throw new RoleAdministrationStoreError("ROLE_ADMIN_VERSION_CONFLICT");
+  const actions = [...input.actions].sort();
+  await tx.query(
+    `INSERT INTO bop_permission.role_preset_offer_decision(decision_id,brand_id,store_id,role_id,administration_reference,preset_version,
+       catalog_version,offer_kind,action_code,decision,actor_id,operation_reference,decided_at,audit_id,data_classification)
+     SELECT d,$1,$2,$3,$4,$5,$6,$7,a,'Declined',$8,$9,$10,$11,'ConfigurationMetadata'
+     FROM unnest($12::uuid[],$13::text[]) AS t(d,a)`,
+    [
+      scope.brandReference,
+      scope.storeReference,
+      input.role.record.roleReference,
+      preset.administrationReference,
+      preset.version,
+      input.catalogVersion,
+      input.kind,
+      input.actorReference,
+      input.operationReference,
+      input.at,
+      input.auditId,
+      actions.map(() => input.nextReference()),
+      actions,
+    ],
+  );
+  await appendAuditRecordInTransaction(tx, {
+    auditId: input.auditId,
+    brandId: scope.brandReference,
+    storeId: scope.storeReference,
+    actor: { type: "User", reference: input.actorReference },
+    actionCode: "ROLE_PRESET_OFFER_DECLINED",
+    targetType: "Role",
+    targetId: input.role.record.roleReference,
+    afterSummary: {
+      kind: input.kind,
+      actions,
+      presetVersion: preset.version,
+      catalogVersion: input.catalogVersion,
+    },
+    reasonCode: "ROLE_PRESET_OFFER_DECLINED",
+    correlationId: input.operationReference,
+    occurredAt: input.at,
+    sourceChannel: "MERCHANT_WEB",
+    dataClassification: "Internal",
+    retentionPolicyCode: "AUDIT_SECURITY",
+    retentionPolicyVersion: 1,
+  });
+  return "Recorded";
+}
 async function openAssignmentChanges(
   tx: RoleAdministrationTransaction,
   brandReference: string,
@@ -190,9 +354,27 @@ async function roleView(
   at: string,
 ): Promise<RoleAdministrationRoleView> {
   const record = await toRecord(tx, row);
+  const around = await versionsAround(tx, record);
+  const presetVersion =
+    around.effective?.roleType === "Custom" ? await presetBelow(tx, around.effective) : null;
   return {
+    presetVersion,
+    declinedOffers: presetVersion === null ? [] : await declinedOffers(tx, scope, presetVersion),
     record,
-    ...(await versionsAround(tx, record)),
+    ...around,
+    retiredByBop:
+      around.effective?.reasonCode === "ROLE_PERMISSION_RETIRED"
+        ? await lostSince(tx, around.effective, ["Active", "Deactivated"], null)
+        : [],
+    droppedFromRebase:
+      around.opening?.reasonCode === "ROLE_DRAFT_REBASED"
+        ? await lostSince(
+            tx,
+            around.opening,
+            ["Withdrawn"],
+            "ROLE_CHANGE_WITHDRAWN_FOR_PRESET_UPDATE",
+          )
+        : [],
     memberCount: await memberCount(tx, scope.brandReference, record.roleReference, at),
     openAssignmentChanges: await openAssignmentChanges(
       tx,

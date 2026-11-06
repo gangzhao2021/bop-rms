@@ -100,7 +100,7 @@ async function session(page: Page, approvals = false) {
 
 type Role = Record<string, unknown> & { roleReference: string; version: number };
 /** A stateful Store with the BOP presets, as the role pages read and change it. */
-function store() {
+function store(options: { readonly presetUpdated?: boolean } = {}) {
   const fohActions = ["merchant.access", "ordering.order.read"];
   const roles: Role[] = [
     {
@@ -115,6 +115,8 @@ function store() {
       memberCount: 3,
       waitingAssignments: 0,
       permissions: fohActions,
+      retiredByBop: 0,
+      presetUpdate: null,
       change: null,
       lastOutcome: null,
       operations: ["Revise", "Duplicate"],
@@ -132,13 +134,25 @@ function store() {
       memberCount: 0,
       waitingAssignments: 0,
       permissions: ["merchant.access"],
+      retiredByBop: 0,
+      presetUpdate: null,
       change: null,
       lastOutcome: null,
       operations: ["Revise", "Deactivate", "Duplicate"],
       history: [],
     },
   ];
+  if (options.presetUpdated)
+    // BOP's Inventory Manager preset now also lets staff view orders; this Store's own version
+    // (made before) does not.
+    Object.assign(roles[1] as Role, {
+      name: "Stock",
+      kind: "YourVersion",
+      operations: ["Revise", "RestoreDefault", "Deactivate", "Duplicate"],
+      presetUpdate: { added: ["ordering.order.read"], removed: [] },
+    });
   const commands: Record<string, unknown>[] = [];
+  const declines: Record<string, unknown>[] = [];
   const find = (reference: unknown) => roles.find((role) => role.roleReference === reference);
   const held = () => (roles[0]?.permissions as string[]) ?? fohActions;
   const change = (status: string, permissions: string[], extra: Record<string, unknown> = {}) => ({
@@ -150,6 +164,7 @@ function store() {
     removed: held().filter((a) => !permissions.includes(a)),
     restore: false,
     rebased: false,
+    droppedByBop: 0,
     by: "You",
     at: now(),
     approvedAlone: false,
@@ -233,7 +248,19 @@ function store() {
   });
   return {
     commands,
+    declines,
     async install(page: Page) {
+      await page.route("**/merchant/organization/roles/offer-decline", (route: Route) => {
+        const input = route.request().postDataJSON() as Record<string, unknown>;
+        declines.push(input);
+        const role = find(input.roleReference) as Role;
+        role.presetUpdate = null;
+        role.version += 1;
+        return route.fulfill({
+          headers,
+          json: { roleReference: role.roleReference, status: "Recorded" },
+        });
+      });
       await page.route("**/merchant/organization/roles/query", (route: Route) => {
         const reference = (route.request().postDataJSON() as { roleReference: string | null })
           .roleReference;
@@ -407,4 +434,63 @@ test("@production a Store Manager finds a role change on Approvals and in its ba
   await page.reload();
   await expect(page.getByRole("heading", { name: "等待你批准的角色改动" })).toBeVisible();
   await checkScreen(page, "manager-approvals-zh");
+});
+
+test("@production BOP updated a preset this store made its own: the owner keeps theirs, or adds it through approval, in English and Chinese", async ({
+  page,
+}) => {
+  await session(page);
+  const state = store({ presetUpdated: true });
+  await state.install(page);
+  await page.goto("/app/organization/roles");
+  const row = page.locator("li.role-row").filter({ hasText: "Stock" });
+  await expect(row.getByText("BOP updated the preset this role is based on")).toBeVisible();
+  await expect(
+    row.getByText("The BOP preset now also includes: View orders. Add it to your version?"),
+  ).toBeVisible();
+  await checkScreen(page, "preset-update-list");
+  await row.getByRole("button", { name: "Keep mine without it" }).click();
+  await expect(row.getByText("BOP updated the preset this role is based on")).toHaveCount(0);
+  expect(state.declines).toEqual([
+    expect.objectContaining({
+      roleReference: inventory,
+      kind: "Add",
+      actions: ["ordering.order.read"],
+    }),
+  ]);
+  expect(state.commands).toEqual([]);
+
+  // Another store's owner adds it instead: a draft with it ticked, sent through approval.
+  const other = store({ presetUpdated: true });
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+  await session(page);
+  await other.install(page);
+  await page.goto("/app/organization/roles/" + inventory);
+  await expect(page.getByText("BOP updated the preset this role is based on")).toBeVisible();
+  await checkScreen(page, "preset-update-editor");
+  await page.getByRole("button", { name: "Add to my version" }).click();
+  await expect(page.getByRole("heading", { name: "Change not sent yet" })).toBeVisible();
+  expect(other.commands).toEqual([
+    expect.objectContaining({
+      operation: "Revise",
+      roleReference: inventory,
+      draft: {
+        displayName: "Stock",
+        description: "Stock",
+        actions: ["merchant.access", "ordering.order.read"],
+      },
+    }),
+  ]);
+  await expect(page.getByRole("button", { name: "Send for approval" })).toBeVisible();
+
+  const chinese = store({ presetUpdated: true });
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+  await session(page);
+  await chinese.install(page);
+  await page.addInitScript(() => localStorage.setItem("bop.merchant.language", "zh-Hans"));
+  await page.goto("/app/organization/roles/" + inventory);
+  await expect(page.getByText("BOP 更新了这个角色所基于的预设")).toBeVisible();
+  await expect(page.getByRole("button", { name: "加到本店版本" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "保持本店版本，不加" })).toBeVisible();
+  await checkScreen(page, "preset-update-zh");
 });

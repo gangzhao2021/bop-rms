@@ -57,6 +57,7 @@ export const fullSignInMutationPaths: ReadonlySet<string> = new Set([
   "/tax-config/authoring/resolve-original",
   "/commerce/tax-classifications/command",
   "/organization/roles/command",
+  "/organization/roles/offer-decline",
   "/organization/staff/command",
   "/organization/sole-operator",
   "/store-setup/payment-configuration",

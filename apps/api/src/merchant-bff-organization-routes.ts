@@ -344,6 +344,32 @@ export function installMerchantOrganizationRoutes(
       .then((result) => response.json(result))
       .catch((error: unknown) => roleAdministrationFailure(response, error));
   });
+  // WP-2423 role presets: "Keep mine without it" for what a BOP preset update offered.
+  router.post(
+    "/organization/roles/offer-decline",
+    sameOriginMutation(options),
+    (request, response) => {
+      const sessionCookie = cookie(request, "__Host-bop-merchant");
+      const csrf = exactHeader(request, "x-bop-csrf");
+      if (
+        sessionCookie === null ||
+        csrf === null ||
+        csrf.length === 0 ||
+        Object.keys(request.query).length !== 0
+      ) {
+        denied(response);
+        return;
+      }
+      if (!options.roleAdministration) {
+        response.status(503).json({ error: "role_administration_unavailable" });
+        return;
+      }
+      void options.roleAdministration
+        .declineOffer({ sessionCookie, csrf, body: request.body })
+        .then((result) => response.json(result))
+        .catch((error: unknown) => roleAdministrationFailure(response, error));
+    },
+  );
   // WP-2423 role presets: role changes waiting for the signed-in person (Approvals and its badge).
   router.post("/organization/roles/waiting", sameOriginMutation(options), (request, response) => {
     const sessionCookie = cookie(request, "__Host-bop-merchant");

@@ -6065,6 +6065,24 @@
       "privilege": "INSERT",
       "principal": "api",
       "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); WP-2423 role presets (Owner request 2026-11-06): a sole owner's own approval of a role change, recorded as approved alone (append-only)"
+    },
+    {
+      "type": "table",
+      "schema": "bop_permission",
+      "object": "role_preset_offer_decision",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); WP-2423 role presets (Owner request 2026-11-06): a Store keeps its own version of a preset without what a BOP preset update offered (append-only)"
+    },
+    {
+      "type": "table",
+      "schema": "bop_permission",
+      "object": "role_preset_offer_decision",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); WP-2423 role presets (Owner request 2026-11-06): a Store keeps its own version of a preset without what a BOP preset update offered (append-only)"
     }
   ]
 }

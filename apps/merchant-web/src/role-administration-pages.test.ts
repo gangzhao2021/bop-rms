@@ -55,3 +55,45 @@ describe("WP-2423 role command refusals", () => {
     await expect(client.command(request)).rejects.toMatchObject({ code: "NameTaken" });
   });
 });
+
+describe("WP-2423 role presets: keep mine", () => {
+  it("records a decline with the session token, and a changed offer reads as someone changed it", async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ roleReference: "x", status: "Recorded" }))
+      .mockResolvedValueOnce(Response.json({ error: "Conflict" }, { status: 409 }));
+    const client = createRoleAdministrationPageClient("c".repeat(43), fetcher);
+    const request = {
+      roleReference: "01909974-0000-7000-8000-000000000001",
+      expectedVersion: 4,
+      operationReference: "01909974-0000-7000-8000-000000000002",
+      kind: "Add",
+      actions: ["recipe.read"],
+    } as const;
+    await client.declineOffer(request);
+    const [path, init] = fetcher.mock.calls[0] ?? [];
+    expect(path).toBe("/merchant/organization/roles/offer-decline");
+    expect((init?.headers as Record<string, string>)["x-bop-csrf"]).toBe("c".repeat(43));
+    expect(JSON.parse(String(init?.body))).toEqual(request);
+    await expect(client.declineOffer(request)).rejects.toMatchObject({ code: "Conflict" });
+  });
+  it("reads what BOP changed in the preset, and refuses an offer with codes it cannot name", () => {
+    const role = {
+      ...roleEditorFixture.roles[0],
+      presetUpdate: { added: ["recipe.read"], removed: [] },
+    };
+    expect(
+      parseRoleAdministrationPageView({ ...roleEditorFixture, roles: [role] }, "IAM-ROLE-EDITOR")
+        .roles[0]?.presetUpdate,
+    ).toEqual({ added: ["recipe.read"], removed: [] });
+    expect(() =>
+      parseRoleAdministrationPageView(
+        {
+          ...roleEditorFixture,
+          roles: [{ ...role, presetUpdate: { added: ["Recipe read"], removed: [] } }],
+        },
+        "IAM-ROLE-EDITOR",
+      ),
+    ).toThrow("ROLE_ADMIN_PAGE_INVALID");
+  });
+});

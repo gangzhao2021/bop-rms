@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { expect, it } from "vitest";
+import { setLanguageForTest } from "./i18n/i18n.js";
 import { RoleAdministrationScreen } from "./RoleAdministrationPages.js";
 import { roleEditorFixture, roleListFixture } from "./role-administration-pages.fixtures.js";
 import {
@@ -128,4 +129,50 @@ it("WP-2423 role presets: a Store's version offers Restore default; the Owner ro
   );
   expect(owner).toContain("cannot be edited or removed");
   expect(owner).not.toContain("Remove role");
+});
+
+it("WP-2423 role presets: a Store's version is offered what BOP changed in the preset, in Chinese too, and told what BOP retired", () => {
+  const offered = {
+    kind: "YourVersion",
+    operations: ["Revise", "RestoreDefault", "Duplicate"],
+    presetUpdate: { added: ["ordering.order.comp"], removed: ["payment.refund.approve"] },
+    retiredByBop: 1,
+  };
+  const editor = render(withRole(offered, null), "IAM-ROLE-EDITOR");
+  expect(editor).toContain("BOP updated the preset this role is based on");
+  expect(editor).toContain(
+    "The BOP preset now also includes: Comp or discount dishes before the table pays. Add it to your version?",
+  );
+  expect(editor).toContain(">Add to my version</button>");
+  expect(editor).toContain(">Keep mine without it</button>");
+  expect(editor).toContain("No longer in the BOP preset: Approve a refund above the requester");
+  expect(editor).toContain(">Remove from my version</button>");
+  expect(editor).toContain(">Keep mine with it</button>");
+  expect(editor).toContain("Permissions BOP no longer offers were taken off your version (1)");
+  noInternals(editor);
+  // The Roles list offers it on the role's row too.
+  const list = structuredClone(roleListFixture) as unknown as { roles: Record<string, unknown>[] };
+  list.roles = list.roles.map((role, index) =>
+    index === 0 ? { ...role, ...offered, change: null } : role,
+  );
+  const rows = render(list, "IAM-ROLE-LIST");
+  expect(rows).toContain(">Add to my version</button>");
+  noInternals(rows);
+  // Someone who may not change roles is offered nothing.
+  expect(
+    render(withRole({ ...offered, operations: ["Duplicate"] }, null), "IAM-ROLE-EDITOR"),
+  ).not.toContain("Add to my version");
+  // A draft BOP sent back says what it left out.
+  expect(render(withRole({}, { rebased: true, droppedByBop: 2 }), "IAM-ROLE-EDITOR")).toContain(
+    "Permissions BOP no longer offers were left out of this draft (2)",
+  );
+  setLanguageForTest("zh-Hans");
+  try {
+    const zh = render(withRole(offered, null), "IAM-ROLE-EDITOR");
+    expect(zh).toContain("BOP 更新了这个角色所基于的预设");
+    expect(zh).toContain("加到本店版本");
+    expect(zh).toContain("保持本店版本，不加");
+  } finally {
+    setLanguageForTest("en");
+  }
 });

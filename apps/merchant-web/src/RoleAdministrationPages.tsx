@@ -319,6 +319,130 @@ function request(
     ...(operation === "ApproveAlone" ? { confirmed: true as const } : {}),
   };
 }
+/**
+ * WP-2423 role presets: BOP changed the preset after this Store made it its own. The Store's
+ * version is never written over: here it adds or removes what changed (an ordinary change through
+ * approval) or keeps its version as it is (recorded, not offered again for this preset update).
+ */
+function PresetUpdateOffer({
+  role,
+  catalog,
+  client,
+  csrf,
+  reload,
+  openAfterChange,
+}: {
+  readonly role: RoleAdministrationItemView;
+  readonly catalog: readonly RoleCatalogEntryView[];
+  readonly client: RoleAdministrationPageClient;
+  readonly csrf: string;
+  readonly reload: () => void;
+  /** From the Roles list: open the role to check the draft and send it. */
+  readonly openAfterChange: boolean;
+}) {
+  const state = useRun(client, reload);
+  const [declining, setDeclining] = useState(false),
+    [declineError, setDeclineError] = useState<RoleAdministrationPageErrorCode | null>(null);
+  const offer = role.presetUpdate;
+  if (offer === null || !role.operations.includes("Revise")) return null;
+  const draftWith = (actions: readonly string[]) =>
+    request(role, "Revise", {
+      displayName: role.name,
+      description: role.description,
+      actions: [...actions].sort(),
+    });
+  const keep = async (kind: "Add" | "Remove", actions: readonly string[]) => {
+    if (!client.declineOffer) return;
+    setDeclining(true);
+    setDeclineError(null);
+    try {
+      await client.declineOffer({
+        roleReference: role.roleReference,
+        expectedVersion: role.version,
+        operationReference: newOperationReference(),
+        kind,
+        actions,
+      });
+      reload();
+    } catch (failure) {
+      setDeclineError(
+        failure instanceof RoleAdministrationPageError ? failure.code : "Unavailable",
+      );
+    } finally {
+      setDeclining(false);
+    }
+  };
+  const busy = state.busy || declining;
+  return (
+    <div className="role-preset-update" role="note">
+      <p>
+        <strong>{t("BOP updated the preset this role is based on")}</strong>
+      </p>
+      {offer.added.length > 0 ? (
+        <>
+          <p>
+            {t("The BOP preset now also includes: {list}. Add it to your version?", {
+              list: listOf(catalog, offer.added),
+            })}
+          </p>
+          <div role="group" aria-label={t("What the preset added")}>
+            <button
+              data-variant="primary"
+              disabled={busy}
+              onClick={() =>
+                void state.run(
+                  [draftWith([...new Set([...role.permissions, ...offer.added])])],
+                  openAfterChange,
+                )
+              }
+            >
+              {t("Add to my version")}
+            </button>{" "}
+            <button disabled={busy} onClick={() => void keep("Add", offer.added)}>
+              {t("Keep mine without it")}
+            </button>
+          </div>
+        </>
+      ) : null}
+      {offer.removed.length > 0 ? (
+        <>
+          <p>
+            {t("No longer in the BOP preset: {list}. Remove it from your version?", {
+              list: listOf(catalog, offer.removed),
+            })}
+          </p>
+          <div role="group" aria-label={t("What the preset no longer has")}>
+            <button
+              disabled={busy}
+              onClick={() =>
+                void state.run(
+                  [draftWith(role.permissions.filter((action) => !offer.removed.includes(action)))],
+                  openAfterChange,
+                )
+              }
+            >
+              {t("Remove from my version")}
+            </button>{" "}
+            <button disabled={busy} onClick={() => void keep("Remove", offer.removed)}>
+              {t("Keep mine with it")}
+            </button>
+          </div>
+        </>
+      ) : null}
+      <p>
+        {t(
+          "Adding or removing goes through approval like any change. Until it is on, staff keep what they have now.",
+        )}
+      </p>
+      {declineError !== null ? (
+        <p role="alert">
+          {copy[declineError]} <button onClick={reload}>{t("Refresh")}</button>
+        </p>
+      ) : null}
+      <Failure csrf={csrf} state={state} reload={reload} />
+    </div>
+  );
+}
 function Editor({
   view,
   role,
@@ -360,6 +484,14 @@ function Editor({
             <p role="note">
               {t(
                 "BOP updated this preset while your change was waiting. Check it and send it again.",
+              )}
+            </p>
+          ) : null}
+          {change.droppedByBop > 0 ? (
+            <p role="note">
+              {t(
+                "Permissions BOP no longer offers were left out of this draft ({count}). Nothing else of your change was altered.",
+                { count: change.droppedByBop },
               )}
             </p>
           ) : null}
@@ -483,6 +615,16 @@ function Editor({
           </div>
         </StatePanel>
       ) : null}
+      {!editing && change === null && role.presetUpdate !== null ? (
+        <PresetUpdateOffer
+          role={role}
+          catalog={catalog}
+          client={client}
+          csrf={csrf}
+          reload={reload}
+          openAfterChange={false}
+        />
+      ) : null}
       {editing ? (
         <StatePanel heading={role.kind === "Custom" ? t("Edit role") : t("Edit this preset")}>
           <label>
@@ -529,6 +671,14 @@ function Editor({
           )}
           {role.locked ? (
             <p>{t("The owner role always holds everything, so it cannot be edited or removed.")}</p>
+          ) : null}
+          {role.retiredByBop > 0 ? (
+            <p role="note">
+              {t(
+                "Permissions BOP no longer offers were taken off your version ({count}). Staff with this role no longer hold them; everything else you chose stays.",
+                { count: role.retiredByBop },
+              )}
+            </p>
           ) : null}
           <div role="group" aria-label={t("Role actions")}>
             {may("Revise") ? (
@@ -708,7 +858,19 @@ function NewRole({
     </div>
   );
 }
-function RoleRow({ role }: { readonly role: RoleAdministrationItemView }) {
+function RoleRow({
+  role,
+  catalog,
+  client,
+  csrf,
+  reload,
+}: {
+  readonly role: RoleAdministrationItemView;
+  readonly catalog: readonly RoleCatalogEntryView[];
+  readonly client: RoleAdministrationPageClient;
+  readonly csrf: string;
+  readonly reload: () => void;
+}) {
   return (
     <li className="role-row">
       <div>
@@ -723,6 +885,16 @@ function RoleRow({ role }: { readonly role: RoleAdministrationItemView }) {
         {role.change ? <span> · {roleChangeStatusLabels[role.change.status]}</span> : null}
       </div>
       <Link to={`/app/organization/roles/${role.roleReference}`}>{t("Open")}</Link>
+      {role.change === null && role.presetUpdate !== null ? (
+        <PresetUpdateOffer
+          role={role}
+          catalog={catalog}
+          client={client}
+          csrf={csrf}
+          reload={reload}
+          openAfterChange
+        />
+      ) : null}
     </li>
   );
 }
@@ -811,7 +983,14 @@ export function RoleAdministrationScreen({
                 {roles
                   .filter((item) => item.state !== "Removed")
                   .map((item) => (
-                    <RoleRow key={item.roleReference} role={item} />
+                    <RoleRow
+                      key={item.roleReference}
+                      role={item}
+                      catalog={view.catalog}
+                      client={client}
+                      csrf={csrf}
+                      reload={reload}
+                    />
                   ))}
               </ul>
             )}
@@ -824,7 +1003,14 @@ export function RoleAdministrationScreen({
                 {roles
                   .filter((item) => item.state === "Removed")
                   .map((item) => (
-                    <RoleRow key={item.roleReference} role={item} />
+                    <RoleRow
+                      key={item.roleReference}
+                      role={item}
+                      catalog={view.catalog}
+                      client={client}
+                      csrf={csrf}
+                      reload={reload}
+                    />
                   ))}
               </ul>
             </section>

@@ -818,6 +818,7 @@ describe("migration catalog", () => {
       "2000_260_create_payment_intent_prepared_index",
       "2000_320_alter_role_administration_revisions",
       "2000_321_create_role_administration_sole_operator_approval",
+      "2000_322_create_role_preset_offer_decision",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),
@@ -2056,6 +2057,8 @@ describe("migration catalog", () => {
         "@bop/permission",
         "bop_permission",
       ],
+      // A Store keeping its version without what a BOP preset update offered.
+      ["2000_322_create_role_preset_offer_decision", "@bop/permission", "bop_permission"],
     ]);
     const permission = migrations.find(
       (migration) => migration.id === "0300_001_create_permission",

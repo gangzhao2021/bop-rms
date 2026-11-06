@@ -3,6 +3,7 @@ import { canonicalizeRfc8785 } from "@bop/audit";
 import { listStoreMembers, type MemberDirectoryTransaction } from "@bop/membership";
 import {
   createPostgresRoleAdministrationPorts,
+  declineRolePresetOffer,
   planRoleAdministrationChange,
   executeRoleAdministration,
   findRoleAdministrationOperation,
@@ -21,7 +22,9 @@ import {
   RoleAdministrationContractError,
   RoleAdministrationServiceError,
   RoleAdministrationStoreError,
+  legacyPermissionReplacements,
   storePermissionCatalog,
+  storePermissionCatalogVersion,
   storePermissionCodes,
   type RoleAdministrationRoleView,
   type RoleAdministrationTransaction,
@@ -238,6 +241,10 @@ const actionsOf = (record: RoleAdministrationVersionRecord | null) =>
         .filter((action) => catalog.has(action))
         .sort();
 const pendingLifecycles = new Set(["Draft", "InReview", "Approved"]);
+/** How many permissions in `codes` BOP no longer offers (legacy codes are not counted again). */
+const noLongerOffered = (codes: readonly string[] | undefined) =>
+  (codes ?? []).filter((code) => !catalog.has(code) && !(code in legacyPermissionReplacements))
+    .length;
 const sameName = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 /** What staff hold now and what a waiting change would add or take away. */
 function changeOf(role: RoleAdministrationRoleView) {
@@ -253,6 +260,8 @@ function changeOf(role: RoleAdministrationRoleView) {
       role.opening?.reasonCode === rolePresetRestoreReason &&
       equalsPreset(actionsOf(role.opening), actionsOf(pending)),
     rebased: role.opening?.reasonCode === "ROLE_DRAFT_REBASED",
+    // Permissions BOP no longer offers, left out of the draft it sent back.
+    droppedByBop: noLongerOffered(role.droppedFromRebase),
   };
 }
 const presetOf = (record: RoleAdministrationVersionRecord) =>
@@ -260,6 +269,48 @@ const presetOf = (record: RoleAdministrationVersionRecord) =>
 /** A preset's current content as catalog codes (its legacy codes are added back on selection). */
 const presetCatalogCodes = (record: RoleAdministrationVersionRecord) =>
   (presetOf(record) ?? []).filter((action) => catalog.has(action));
+/**
+ * WP-2423 role presets: what BOP changed in a preset since the Store made it its own. `added`: the
+ * preset now has it, the preset did not when the Store made its version, and the Store's version
+ * lacks it. `removed`: the preset no longer has it and the Store's version still does. Minus what
+ * the Store chose to keep without. Null when nothing is offered, while a change waits, or for any
+ * role that is not the Store's own version of a preset it holds now.
+ */
+export function presetUpdateOf(
+  role: RoleAdministrationRoleView,
+): { readonly added: readonly string[]; readonly removed: readonly string[] } | null {
+  const { record, effective } = role;
+  const preset = role.presetVersion ?? null;
+  if (
+    preset === null ||
+    effective === null ||
+    effective !== record ||
+    effective.roleType !== "Custom" ||
+    effective.lifecycle !== "Active" ||
+    record.storeReference === null ||
+    lockedRoleCodes.has(record.code) ||
+    presetOf(record) === null
+  )
+    return null;
+  const template = presetCatalogCodes(record);
+  const then = new Set(actionsOf(preset)),
+    mine = new Set(actionsOf(effective));
+  const declined = (kind: "Add" | "Remove") =>
+    new Set(
+      (role.declinedOffers ?? []).filter((item) => item.kind === kind).map((item) => item.action),
+    );
+  const keepAdd = declined("Add"),
+    keepRemove = declined("Remove");
+  const added = orderByRisk(
+    template.filter((code) => !then.has(code) && !mine.has(code) && !keepAdd.has(code)).sort(),
+  );
+  const removed = orderByRisk(
+    [...then]
+      .filter((code) => !template.includes(code) && mine.has(code) && !keepRemove.has(code))
+      .sort(),
+  );
+  return added.length === 0 && removed.length === 0 ? null : { added, removed };
+}
 
 export function createMerchantRoleAdministration(options: {
   persistence: PersistentMerchantBffOptions;
@@ -483,6 +534,10 @@ export function createMerchantRoleAdministration(options: {
           memberCount,
           waitingAssignments: openAssignmentChanges,
           permissions: actionsOf(effective),
+          // Permissions BOP no longer offers that it took off the version staff hold.
+          retiredByBop: noLongerOffered(role.retiredByBop),
+          // What BOP changed in the preset since the Store made it its own (add / keep mine).
+          presetUpdate: allowed.get("identity.role.change") === true ? presetUpdateOf(role) : null,
           change:
             change === null
               ? null
@@ -495,6 +550,7 @@ export function createMerchantRoleAdministration(options: {
                   removed: change.removed,
                   restore: change.restore,
                   rebased: change.rebased,
+                  droppedByBop: change.droppedByBop,
                   by:
                     label(
                       change.record.lifecycle === "Draft"
@@ -936,5 +992,107 @@ export function createMerchantRoleAdministration(options: {
       ),
     );
   };
-  return { list, detail, command, waiting };
+  /**
+   * WP-2423 role presets: "Keep mine without it" for what a BOP preset update offered. Recorded
+   * append-only against the preset version the offer came from; adding or removing instead is an
+   * ordinary Revise through approval.
+   */
+  const declineOffer = async (input: { sessionCookie: unknown; csrf: unknown; body: unknown }) => {
+    const request = parsePresetOfferDecline(input.body);
+    const current0 = await session(input);
+    return retryTransactionConflict(() =>
+      options.persistence.transactions.run((tx) =>
+        authorizedRun(
+          tx,
+          input.sessionCookie,
+          current0.sessionReference,
+          ["identity.role.change"],
+          ["identity.role.change"],
+          async (scope, decisions, guard) => {
+            if (decisions.get("identity.role.change")?.effect !== "Allow")
+              return fail("PermissionDenied");
+            const ownerScope = ownerScopeOf(scope);
+            const now = options.persistence.now();
+            let role: RoleAdministrationRoleView;
+            try {
+              role = await loadRoleAdministration(
+                asRoleTx(tx),
+                ownerScope,
+                request.roleReference,
+                now,
+              );
+            } catch (error) {
+              if (error instanceof RoleAdministrationStoreError) return fail("NotFound");
+              throw error;
+            }
+            if (role.record.storeReference === null) return fail("PermissionDenied");
+            const offered = presetUpdateOf(role);
+            const list = request.kind === "Add" ? offered?.added : offered?.removed;
+            const stillOffered =
+              role.record.version === request.expectedVersion &&
+              request.actions.every((action) => list?.includes(action) === true);
+            let status: "Recorded" | "AlreadyRecorded";
+            try {
+              status = await declineRolePresetOffer(asRoleTx(tx), ownerScope, {
+                role,
+                kind: request.kind,
+                actions: request.actions,
+                stillOffered,
+                catalogVersion: storePermissionCatalogVersion,
+                actorReference: String(scope.actorReference),
+                operationReference: request.operationReference,
+                at: now,
+                auditId: options.references.next(),
+                nextReference: () => options.references.next(),
+              });
+            } catch (error) {
+              if (error instanceof RoleAdministrationStoreError) return fail("Conflict");
+              throw error;
+            }
+            if (!(await guard(tx))) return fail("PermissionDenied");
+            return { roleReference: role.record.roleReference, status };
+          },
+        ),
+      ),
+    );
+  };
+  return { list, detail, command, waiting, declineOffer };
+}
+
+export interface PresetOfferDeclineInput {
+  readonly roleReference: string;
+  readonly expectedVersion: number;
+  readonly operationReference: string;
+  readonly kind: "Add" | "Remove";
+  readonly actions: readonly string[];
+}
+export function parsePresetOfferDecline(value: unknown): PresetOfferDeclineInput {
+  const r = value as Record<string, unknown> | null;
+  if (
+    r === null ||
+    typeof r !== "object" ||
+    Array.isArray(r) ||
+    Object.keys(r).sort().join(",") !==
+      "actions,expectedVersion,kind,operationReference,roleReference" ||
+    typeof r.roleReference !== "string" ||
+    !uuid.test(r.roleReference) ||
+    !Number.isSafeInteger(r.expectedVersion) ||
+    (r.expectedVersion as number) < 1 ||
+    typeof r.operationReference !== "string" ||
+    !uuid.test(r.operationReference) ||
+    (r.kind !== "Add" && r.kind !== "Remove") ||
+    !Array.isArray(r.actions) ||
+    r.actions.length === 0 ||
+    r.actions.length > 512 ||
+    r.actions.some((action) => typeof action !== "string" || !storePermissionCodes.has(action)) ||
+    new Set(r.actions).size !== r.actions.length
+  )
+    return fail("Invalid");
+  return {
+    roleReference: r.roleReference,
+    expectedVersion: r.expectedVersion as number,
+    operationReference: r.operationReference,
+    kind: r.kind,
+    actions: r.actions as string[],
+  };
 }
