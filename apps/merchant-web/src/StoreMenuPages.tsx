@@ -5,11 +5,11 @@ import { WorkspacePage } from "./WorkspacePage.js";
 import { SourceTime, StaffTime } from "./StoreTime.js";
 import type { AvailabilityClient } from "./store-availability-page.js";
 import { useCallback, useEffect, useState } from "react";
-import { Link, useParams } from "react-router";
+import { Link, useLocation, useNavigate, useParams } from "react-router";
 import { newOperationReference } from "./operation-reference.js";
 import { moveTo, useDragReorder } from "./reorder.js";
 import { SoleOperatorSelfApproval } from "./SoleOperatorSelfApproval.js";
-import { OneStoreMenuPage } from "./OneStoreMenuPage.js";
+import { OneStoreMenuPage, type MenuApplyIntent } from "./OneStoreMenuPage.js";
 import {
   MenuPageError,
   channelText,
@@ -181,10 +181,27 @@ export function StoreMenuListPage({
   const { state } = useMenuView(client, null, parseMenuListView);
   const [multiStore, setMultiStore] = useState(false);
   const showList = useCallback(() => setMultiStore(true), []);
+  const location = useLocation();
+  const navigate = useNavigate();
+  // WP-2423 item 3 setup: a new choice from Option sets. The one-page menu opens the first dish
+  // using it; with several menus that page is not shown, so this list says what to do instead.
+  const [newChoice] = useState(
+    () => (location.state as Partial<MenuApplyIntent> | null)?.applyChoice ?? null,
+  );
+  const onePage =
+    state.kind === "Found" &&
+    state.view.menus.length === 1 &&
+    availability !== undefined &&
+    !multiStore;
+  const listShown = state.kind === "Found" && !onePage;
+  useEffect(() => {
+    // Once: a reload does not say it again.
+    if (listShown && newChoice !== null) void navigate(".", { replace: true, state: null });
+  }, [listShown, newChoice, navigate]);
   if (state.kind !== "Found") return <Failure code={state.kind} />;
   const view: MenuListView = state.view;
   const only = view.menus.length === 1 ? view.menus[0] : undefined;
-  if (only !== undefined && availability !== undefined && !multiStore)
+  if (only !== undefined && onePage)
     return (
       <OneStoreMenuPage
         menuReference={only.menuReference}
@@ -207,6 +224,18 @@ export function StoreMenuListPage({
           "A menu lists what customers can order, by section. Changes are reviewed by someone else before they are published; a published menu is changed through a revision.",
         )}
       </p>
+      {newChoice !== null ? (
+        <p role="status">
+          {newChoice.groupName === undefined
+            ? t("{choice} is not on any dish yet. Open a dish that uses its group and tick it.", {
+                choice: newChoice.names.join(t(", ")),
+              })
+            : t("{choice} is not on any dish yet. Open a dish that uses {group} and tick it.", {
+                choice: newChoice.names.join(t(", ")),
+                group: newChoice.groupName,
+              })}
+        </p>
+      ) : null}
       <table>
         <thead>
           <tr>

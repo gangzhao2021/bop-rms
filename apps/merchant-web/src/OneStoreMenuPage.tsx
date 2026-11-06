@@ -79,6 +79,8 @@ export interface MenuApplyIntent {
     readonly optionSetReference: string;
     readonly optionReferences: readonly string[];
     readonly names: readonly string[];
+    /** The group's name as staff read it (for the menu list's instruction). */
+    readonly groupName?: string;
   };
 }
 

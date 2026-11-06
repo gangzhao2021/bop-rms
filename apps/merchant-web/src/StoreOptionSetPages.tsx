@@ -306,6 +306,7 @@ function OptionSetEditor({
               optionSetReference: result.optionSet.optionSetReference,
               optionReferences: added.map((option) => option.optionReference),
               names: added.map((option) => option.name),
+              groupName: result.optionSet.name,
             }
           : null,
       );

@@ -4355,6 +4355,16 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "The kitchen has started one of these items. Close to refresh; use a refund for items already started.":
     "后厨已开始制作其中一项。关闭以刷新；已开始制作的商品请改用退款。",
   "The kitchen has started — use a refund instead.": "后厨已开始制作 — 请改用退款。",
+  "{choice} is not on any dish yet. Open a dish that uses {group} and tick it.":
+    "{choice} 还没有加到任何菜品上。请打开使用「{group}」的菜品，勾选它。",
+  "{choice} is not on any dish yet. Open a dish that uses its group and tick it.":
+    "{choice} 还没有加到任何菜品上。请打开使用这个规格组的菜品，勾选它。",
+  Required: "必选",
+  Optional: "可选",
+  "Optional · up to {max}": "可选 · 最多 {max} 项",
+  "Required · choose {max}": "必选 · 选 {max} 项",
+  "Choose {min} to {max}": "请选择 {min} 到 {max} 项",
+  "{name} allows at most {max}. Choose fewer.": "{name} 最多可选 {max} 份，请减少。",
   "Nothing to prepare: hand it over or refund it.": "这单无需后厨制作：请直接交给顾客，或退款。",
   "The kitchen hasn't finished recording this order yet. Check again in a minute.":
     "后厨尚未完成这笔订单的记录。请一分钟后再查看。",

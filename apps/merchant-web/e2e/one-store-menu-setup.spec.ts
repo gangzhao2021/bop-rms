@@ -61,6 +61,8 @@ interface Fixture {
   explicitMarks: Map<string, boolean>;
   alcohol: Set<string>;
   kitchenSection: Map<string, string>;
+  /** A Brand with a second menu (lunch and dinner): the plain menu list shows. */
+  secondMenu?: boolean;
 }
 
 let nextDish = 500;
@@ -345,6 +347,20 @@ async function setUp(page: Page, overrides: Partial<Fixture> = {}): Promise<Fixt
             publication: null,
             latestRelease: null,
           },
+          ...(f.secondMenu === true
+            ? [
+                {
+                  menuReference: id(3),
+                  internalCode: "DINNER",
+                  aggregateVersion: 1,
+                  currentVersionReference: id(4),
+                  localizedNames: { "en-CA": "TEST dinner" },
+                  placements: 1,
+                  publication: null,
+                  latestRelease: null,
+                },
+              ]
+            : []),
         ],
       },
     });
@@ -1215,6 +1231,31 @@ test("@production no dish uses the group yet: the menu says what to do", async (
       exact: false,
     }),
   ).toBeVisible();
+});
+
+test("@production with two menus, a new choice says which dishes to open instead of a blank list", async ({
+  page,
+}) => {
+  await setUp(page, { secondMenu: true });
+  await page.goto("/app/commerce/option-sets/" + toppings);
+  await page.getByRole("button", { name: "Add option" }).click();
+  await page.getByRole("textbox", { name: "Option 4 name" }).fill("Coconut jelly");
+  await page.getByRole("button", { name: "Save changes" }).click();
+  await page.getByRole("link", { name: "Add it to dishes" }).click();
+  await expect(page.getByRole("link", { name: "TEST dinner" })).toBeVisible();
+  await expect(
+    page.getByText(
+      "Coconut jelly is not on any dish yet. Open a dish that uses Toppings and tick it.",
+    ),
+  ).toBeVisible();
+  await expectNoInternalText(page);
+  // Said once: a reload shows the plain list.
+  expect(new URL(page.url()).search).toBe("");
+  await page.reload();
+  await expect(page.getByRole("link", { name: "TEST dinner" })).toBeVisible();
+  await expect(
+    page.getByText("Coconut jelly is not on any dish yet.", { exact: false }),
+  ).toHaveCount(0);
 });
 
 test("@production a listing stopped by a dish with no allergens points to those dishes", async ({
