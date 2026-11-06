@@ -11,6 +11,13 @@ import {
   type PaymentProviderAdapter,
 } from "@rms/payment";
 import { createDiningTableOnlineRefundSender } from "./dining-table-online-refund.js";
+import { createStaffLabels } from "./merchant-staff-labels.js";
+import {
+  listStoreMembers,
+  memberDisplayNames,
+  type MemberDirectoryTransaction,
+} from "@bop/membership";
+import type { RoleAssignmentTransaction } from "@bop/permission";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import { runMerchantSnapshotRead } from "./merchant-snapshot-read.js";
@@ -67,6 +74,7 @@ async function view(
   scope: Scope,
   orderReference: string,
   allowed: () => Promise<boolean>,
+  viewer: string | null = null,
 ) {
   const store = createPostgresDiningTableSettlementStore({
     scope,
@@ -77,6 +85,42 @@ async function view(
   const allRefunds = await store.listCashRefundsByOrders(tx, [orderReference]);
   const allOnlineRefunds = await store.listOnlineRefundsByOrders(tx, [orderReference]);
   const allCardRefunds = await store.listCardRefundsByOrders(tx, [orderReference]);
+  // v15 M177: who gave each refund, by name ("You" for the viewer) or role; never an identifier.
+  const approvers = [
+    ...new Set(
+      [...allRefunds, ...allCardRefunds, ...allOnlineRefunds].map(
+        (refund) => refund.approvedByActorReference,
+      ),
+    ),
+  ];
+  const by =
+    approvers.length === 0
+      ? null
+      : await (async () => {
+          const owner = {
+            brandReference: scope.brandReference,
+            storeReference: scope.storeReference,
+          };
+          const directory = tx as unknown as MemberDirectoryTransaction;
+          const names = new Map<string, string | null>(
+            (await listStoreMembers(directory, owner)).map((member) => [
+              member.actorReference,
+              member.displayName,
+            ]),
+          );
+          for (const [actor, name] of await memberDisplayNames(
+            directory,
+            owner,
+            approvers.filter((actor) => !names.has(actor)),
+          ))
+            names.set(actor, name);
+          return createStaffLabels(tx as unknown as RoleAssignmentTransaction, owner, {
+            viewer,
+            at: new Date().toISOString(),
+            names,
+          });
+        })().catch(() => null);
+  const byLabel = (actor: string) => (by === null ? null : by(actor));
   // WP-2423 item 8 ④: each payment of the table — the whole table's, or one per part of a split
   // bill — with its own cash refunds; a refund comes from one payment's cash.
   const describe = (settlement: (typeof settlements)[number]) => {
@@ -111,6 +155,7 @@ async function view(
             amountMinor: refund.amountMinor.toString(),
             reasonCode: refund.reasonCode,
             refundedAt: refund.refundedAt,
+            byLabel: byLabel(refund.approvedByActorReference),
           }),
         ),
       ),
@@ -121,6 +166,7 @@ async function view(
             amountMinor: refund.amountMinor.toString(),
             reasonCode: refund.reasonCode,
             refundedAt: refund.refundedAt,
+            byLabel: byLabel(refund.approvedByActorReference),
           }),
         ),
       ),
@@ -130,6 +176,7 @@ async function view(
             amountMinor: refund.amountMinor.toString(),
             reasonCode: refund.reasonCode,
             requestedAt: refund.requestedAt,
+            byLabel: byLabel(refund.approvedByActorReference),
             state:
               refund.outcome === null
                 ? ("Sending" as const)
@@ -196,6 +243,7 @@ export function createMerchantDiningTablePaymentRead(options: {
             scopeOf(authority.scope),
             orderReference,
             () => authority.guard(),
+            String(authority.scope.actorReference),
           );
           const decisions = await authority.scope.authorizeActions([tableCashRefundPermission]);
           return Object.freeze({
@@ -251,6 +299,9 @@ export function createMerchantDiningTableCashRefund(options: {
         !diningTableCashRefundReasons.includes(raw.reasonCode as DiningTableCashRefundReason)
       )
         throw new Error();
+      // v15 M131: cash goes back in whole nickels (no pennies since 2013); the screen rounds the
+      // amount before it is sent and says so. 2000_433 holds the same rule in the database.
+      if (BigInt(raw.amountMinor) % 5n !== 0n) throw new Error();
       command = {
         orderReference: reference(raw.orderReference),
         operationReference: reference(raw.operationReference),
@@ -335,7 +386,13 @@ export function createMerchantDiningTableCashRefund(options: {
             });
             return Object.freeze({
               status: recorded.status,
-              ...(await view(tx, scope, command.orderReference, guard)),
+              ...(await view(
+                tx,
+                scope,
+                command.orderReference,
+                guard,
+                String(authority.scope.actorReference),
+              )),
             });
           },
         ),
@@ -516,7 +573,13 @@ export function createMerchantDiningTableOnlineRefund(options: {
       return await authorized(async (tx, scope, _actor, guard) =>
         Object.freeze({
           status: approved.recorded.status,
-          ...(await view(tx, scope, command.orderReference, guard)),
+          ...(await view(
+            tx,
+            scope,
+            command.orderReference,
+            guard,
+            String(authority.scope.actorReference),
+          )),
         }),
       );
     } catch (error) {
@@ -667,7 +730,13 @@ export function createMerchantDiningTableCardRefund(options: {
             });
             return Object.freeze({
               status: recorded.status,
-              ...(await view(tx, scope, command.orderReference, guard)),
+              ...(await view(
+                tx,
+                scope,
+                command.orderReference,
+                guard,
+                String(authority.scope.actorReference),
+              )),
             });
           },
         ),

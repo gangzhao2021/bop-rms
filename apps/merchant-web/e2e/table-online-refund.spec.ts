@@ -150,7 +150,7 @@ test("@production a manager refunds a table paid on a guest's phone to the card"
   await page.getByRole("button", { name: /^Confirm: refund/u }).click();
   await expect(page.getByText(/^Refunded to the card/u)).toBeVisible();
   await expect(page.getByText(/few days/u)).toBeVisible();
-  await expect(page.getByText("Left to refund", { exact: true })).toBeVisible();
+  await expect(page.getByText("Can still be refunded", { exact: true })).toBeVisible();
   expect(bodies).toHaveLength(1);
   expect(bodies[0]).toMatchObject({
     orderReference: id(1),
@@ -272,7 +272,7 @@ test("@production a manager records a refund made on the card machine of a table
   await page.getByRole("button", { name: /10\.00 refunded on the card machine$/u }).click();
   await page.getByRole("button", { name: /^Confirm: record/u }).click();
   await expect(page.getByText(/^Refunded on the card machine/u)).toBeVisible();
-  await expect(page.getByText("Left to refund", { exact: true })).toBeVisible();
+  await expect(page.getByText("Can still be refunded", { exact: true })).toBeVisible();
   expect(bodies[0]).toMatchObject({
     orderReference: id(1),
     amountMinor: "1000",

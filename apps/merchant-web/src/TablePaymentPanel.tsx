@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useContext, useEffect, useMemo, useRef, useState } from "react";
+import { StoreTimeZoneContext, storeTime } from "./StoreTime.js";
 import { t } from "./i18n/i18n.js";
 import { isFullSignInRequired } from "./full-sign-in.js";
 import { FullSignInPrompt } from "./FullSignInPrompt.js";
@@ -11,6 +12,15 @@ import { browserOffline } from "./stale-read.js";
 const cad = (minor: string | bigint) =>
   orderMoney({ amountMinor: String(minor), currencyCode: "CAD" });
 const minor = /^-?(?:0|[1-9][0-9]{0,18})$/u;
+/**
+ * v15 M131: cash goes back in whole nickels, rounded the Canadian way (1–2¢ down, 3–4¢ up); never
+ * above what is left of the cash taken (then down to the nickel below it).
+ */
+export function cashRefundNickel(amountMinor: bigint, leftMinor: bigint): bigint {
+  const rest = amountMinor % 5n;
+  const rounded = amountMinor - rest + (rest >= 3n ? 5n : 0n);
+  return rounded <= leftMinor ? rounded : leftMinor - (leftMinor % 5n);
+}
 
 export type CashRefundReason = "FOOD_ISSUE" | "CUSTOMER_REQUEST" | "OVERCHARGED" | "STORE_ERROR";
 export interface TablePayment {
@@ -27,18 +37,22 @@ export interface TablePayment {
     readonly amountMinor: string;
     readonly reasonCode: CashRefundReason;
     readonly refundedAt: string;
+    /** v15 M177: who gave it back (a name, "You", or their role; null when not known). */
+    readonly byLabel: string | null;
   }[];
   /** WP-2423 DEC-TABLE-ONLINE-REFUND: refunds made on the card machine. */
   readonly cardRefunds: readonly {
     readonly amountMinor: string;
     readonly reasonCode: CashRefundReason;
     readonly refundedAt: string;
+    readonly byLabel: string | null;
   }[];
   /** WP-2423 DEC-TABLE-ONLINE-REFUND: money going back to the guest's card. */
   readonly onlineRefunds: readonly {
     readonly amountMinor: string;
     readonly reasonCode: CashRefundReason;
     readonly requestedAt: string;
+    readonly byLabel: string | null;
     readonly state: "Sending" | "Refunded" | "Refused";
   }[];
   readonly refundableMinor: string;
@@ -75,6 +89,8 @@ const parseOne = (value: unknown): TablePayment => {
   const amount = (v: unknown) => (typeof v === "string" && minor.test(v) ? v : fail());
   const reason = (v: unknown) =>
     reasons.includes(v as CashRefundReason) ? (v as CashRefundReason) : fail();
+  const by = (v: unknown) =>
+    v === undefined || v === null ? null : typeof v === "string" && v.length <= 120 ? v : fail();
   if (
     (p.method !== "Cash" && p.method !== "CardMachine" && p.method !== "Online") ||
     typeof p.takenAt !== "string" ||
@@ -98,6 +114,7 @@ const parseOne = (value: unknown): TablePayment => {
           amountMinor: amount(r.amountMinor),
           reasonCode: reason(r.reasonCode),
           refundedAt: typeof r.refundedAt === "string" ? r.refundedAt : fail(),
+          byLabel: by(r.byLabel),
         }),
       ),
     ),
@@ -107,6 +124,7 @@ const parseOne = (value: unknown): TablePayment => {
           amountMinor: amount(r.amountMinor),
           reasonCode: reason(r.reasonCode),
           refundedAt: typeof r.refundedAt === "string" ? r.refundedAt : fail(),
+          byLabel: by(r.byLabel),
         }),
       ),
     ),
@@ -116,6 +134,7 @@ const parseOne = (value: unknown): TablePayment => {
           amountMinor: amount(r.amountMinor),
           reasonCode: reason(r.reasonCode),
           requestedAt: typeof r.requestedAt === "string" ? r.requestedAt : fail(),
+          byLabel: by(r.byLabel),
           state:
             r.state === "Sending" || r.state === "Refunded" || r.state === "Refused"
               ? r.state
@@ -246,13 +265,29 @@ function TablePaymentBlock({
   // On a PIN sign-in the server asks who it is first; their role is fine.
   const [confirmIdentity, setConfirmIdentity] = useState(false);
   const operation = useRef<{ key: string; reference: string } | null>(null);
-  const amountMinor = useMemo(() => dollarsToMinor(amount), [amount]);
+  const typedMinor = useMemo(() => dollarsToMinor(amount), [amount]);
   const online = payment.method === "Online";
   const onMachine = payment.method === "CardMachine";
+  const timeZone = useContext(StoreTimeZoneContext);
   const [slip, setSlip] = useState("");
   const slipValid = slip.trim() === "" || /^[A-Za-z0-9][A-Za-z0-9 #./-]{0,39}$/u.test(slip.trim());
 
   const refundable = BigInt(payment.refundableMinor);
+  // v15 M131: cash is handed over in nickels; the amount sent is the one handed over.
+  const amountMinor =
+    typedMinor === null || online || onMachine || typedMinor > refundable
+      ? typedMinor
+      : cashRefundNickel(typedMinor, refundable);
+  const roundedCash = amountMinor !== null && typedMinor !== null && amountMinor !== typedMinor;
+  /** v15 M177: when and by whom ("22:42 by Mei"), on every refund line. */
+  const when = (at: string, byLabel: string | null) =>
+    " · " +
+    (byLabel === null
+      ? storeTime(at, timeZone, true)
+      : t("{time} by {person}", {
+          time: storeTime(at, timeZone, true),
+          person: byLabel === "You" ? t("You") : byLabel,
+        }));
   const give = async () => {
     if (
       busy ||
@@ -402,7 +437,10 @@ function TablePaymentBlock({
         </div>
         {payment.cashRefunds.map((refund, index) => (
           <div key={index}>
-            <dt>{t("Cash given back · {reason}", { reason: reasonText(refund.reasonCode) })}</dt>
+            <dt>
+              {t("Cash given back · {reason}", { reason: reasonText(refund.reasonCode) }) +
+                when(refund.refundedAt, refund.byLabel)}
+            </dt>
             <dd>−{cad(refund.amountMinor)}</dd>
           </div>
         ))}
@@ -411,14 +449,14 @@ function TablePaymentBlock({
             <dt>
               {t("Refunded on the card machine · {reason}", {
                 reason: reasonText(refund.reasonCode),
-              })}
+              }) + when(refund.refundedAt, refund.byLabel)}
             </dt>
             <dd>−{cad(refund.amountMinor)}</dd>
           </div>
         ))}
         {payment.onlineRefunds.map((refund, index) => (
           <div key={index}>
-            <dt>{onlineRefundLabel(refund)}</dt>
+            <dt>{onlineRefundLabel(refund) + when(refund.requestedAt, refund.byLabel)}</dt>
             <dd>
               {refund.state === "Refused" ? cad(refund.amountMinor) : "−" + cad(refund.amountMinor)}
             </dd>
@@ -426,7 +464,8 @@ function TablePaymentBlock({
         ))}
         {refundable !== BigInt(payment.totalMinor) ? (
           <div>
-            <dt>{t("Left to refund")}</dt>
+            {/* v15 M177: what may still go back, said plainly (not something owed). */}
+            <dt>{t("Can still be refunded")}</dt>
             <dd>{cad(refundable)}</dd>
           </div>
         ) : null}
@@ -455,10 +494,18 @@ function TablePaymentBlock({
               <input
                 inputMode="decimal"
                 value={amount}
-                aria-invalid={amount !== "" && (amountMinor === null || amountMinor > refundable)}
+                aria-invalid={
+                  amount !== "" &&
+                  (amountMinor === null || amountMinor <= 0n || amountMinor > refundable)
+                }
                 onChange={(event) => setAmount(event.currentTarget.value)}
               />
               <small>{t("Up to {amount}", { amount: cad(refundable) })}</small>
+              {roundedCash && amountMinor !== null ? (
+                <small role="note">
+                  {t("Hand over {cash} (rounded to 5¢)", { cash: cad(amountMinor) })}
+                </small>
+              ) : null}
             </label>
             <label className="table-checkout__field">
               {t("Reason")}

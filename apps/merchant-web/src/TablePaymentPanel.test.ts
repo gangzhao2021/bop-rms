@@ -1,5 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { parseTablePayments } from "./TablePaymentPanel.js";
+import { cashRefundNickel, parseTablePayments } from "./TablePaymentPanel.js";
+
+describe("v15 M131: cash goes back in whole nickels", () => {
+  it("rounds the Canadian way and never above what is left of the cash", () => {
+    expect(
+      [451n, 452n, 453n, 454n, 455n, 456n, 458n].map((v) => cashRefundNickel(v, 10_000n)),
+    ).toEqual([450n, 450n, 455n, 455n, 455n, 455n, 460n]);
+    expect(cashRefundNickel(1_003n, 1_000n)).toBe(1_000n);
+    expect(cashRefundNickel(999n, 997n)).toBe(995n);
+    expect(cashRefundNickel(2n, 10_000n)).toBe(0n);
+  });
+});
 
 const payment = {
   partNumber: null,
@@ -16,6 +27,7 @@ const payment = {
       amountMinor: "1000",
       reasonCode: "FOOD_ISSUE",
       requestedAt: "2026-11-02T20:10:00.000Z",
+      byLabel: "Mei",
       state: "Sending",
     },
   ],

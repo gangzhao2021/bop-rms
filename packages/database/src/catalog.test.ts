@@ -820,6 +820,7 @@ describe("migration catalog", () => {
       "2000_320_alter_role_administration_revisions",
       "2000_321_create_role_administration_sole_operator_approval",
       "2000_322_create_role_preset_offer_decision",
+      "2000_433_alter_dining_table_cash_refund_nickel",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),
@@ -2060,6 +2061,8 @@ describe("migration catalog", () => {
       ],
       // A Store keeping its version without what a BOP preset update offered.
       ["2000_322_create_role_preset_offer_decision", "@bop/permission", "bop_permission"],
+      // v15 M131: new table cash refunds hand back whole nickels.
+      ["2000_433_alter_dining_table_cash_refund_nickel", "@rms/payment", "rms_payment"],
     ]);
     const permission = migrations.find(
       (migration) => migration.id === "0300_001_create_permission",

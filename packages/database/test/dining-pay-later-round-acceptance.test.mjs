@@ -7197,6 +7197,17 @@ async function journey(journeyEnding) {
         await assert.rejects(cashRefund(manager, String(due + rounding)), {
           code: "TABLE_PAYMENT_TOO_MUCH",
         });
+        // v15 M131: cash goes back in whole nickels; an odd cent amount is refused by the command
+        // and, written straight to the table, by the database (2000_433).
+        await assert.rejects(cashRefund(manager, "501"), { code: "TABLE_PAYMENT_INPUT_INVALID" });
+        assert.deepEqual(
+          (
+            await admin.query(
+              "SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conname='dining_table_cash_refund_nickel'",
+            )
+          ).rows.map((row) => row.def),
+          ["CHECK (((amount_minor % (5)::bigint) = 0)) NOT VALID"],
+        );
         assert.deepEqual(
           (
             await createMerchantDiningTablePaymentRead({
