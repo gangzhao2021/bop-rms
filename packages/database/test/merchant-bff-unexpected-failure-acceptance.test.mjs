@@ -15,13 +15,16 @@ import { createMerchantDiningSessionStart } from "../../../apps/api/src/merchant
 import { createMerchantDiningTables } from "../../../apps/api/src/merchant-dining-tables.ts";
 import { refusalsStayReal } from "../../../apps/api/src/merchant-failure.ts";
 import { createMerchantInventoryItems } from "../../../apps/api/src/merchant-inventory-items.ts";
+import { createPersistentMerchantOrderExceptions } from "../../../apps/api/src/persistent-merchant-order-exceptions.ts";
 import { createMerchantBffRouter } from "../../../apps/api/dist/merchant-bff.js";
 import { renderPilotAclSql } from "../../../tooling/environment/pilot-acl-render.mjs";
+import { createInternalExceptionSnapshotTransactions } from "../../../tooling/environment/pilot-exception-snapshot.mjs";
 import { createMerchantRequestReporter } from "../../../tooling/environment/pilot-unexpected.mjs";
 import { createTenantTransactionRunner } from "../src/transaction-runner.ts";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 import { seedMerchantAcceptanceSession } from "../test-support/merchant-acceptance-session.mjs";
 import { syntheticMerchantBrandScope } from "../test-support/merchant-brand-scope.mjs";
+import { seedJourneyStorePublication } from "../test-support/dine-in-journey-seed.mjs";
 import { seedOrdinaryRefundStorePublication } from "../test-support/ordinary-refund-store-publication.mjs";
 
 const { Client, Pool } = pg;
@@ -179,7 +182,35 @@ async function serve(options) {
       outgoing.once("error", reject);
       outgoing.end(JSON.stringify(body));
     });
-  return { server, post };
+  const get = (path, session) =>
+    new Promise((resolve, reject) => {
+      const outgoing = httpRequest(
+        new URL("/merchant" + path, "http://127.0.0.1:" + server.address().port),
+        {
+          method: "GET",
+          headers: {
+            host: "merchant.invalid",
+            "sec-fetch-site": "same-origin",
+            cookie: "__Host-bop-merchant=" + session.sessionCookie,
+          },
+        },
+        (response) => {
+          const chunks = [];
+          response.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+          response.once("error", reject);
+          response.once("end", () =>
+            resolve({
+              status: response.statusCode,
+              headers: response.headers,
+              body: JSON.parse(Buffer.concat(chunks).toString("utf8") || "null"),
+            }),
+          );
+        },
+      );
+      outgoing.once("error", reject);
+      outgoing.end();
+    });
+  return { server, post, get };
 }
 
 const logLines = () => {
@@ -604,6 +635,156 @@ it("WP-2423 item 10: a business-day read PostgreSQL refuses answers try again an
       assert.equal(logged[0].table, "store_configuration_version", JSON.stringify(logged[0]));
       await admin.query("GRANT SELECT ON " + table + " TO " + api);
       assert.equal((await command({ action: "SoldOut", until: "EndOfDay" })).status, 200);
+    } finally {
+      await new Promise((resolve) => (listening ? listening.close(resolve) : resolve()));
+      await harness?.pool.end();
+      await admin.end();
+    }
+  });
+});
+
+/**
+ * WP-2423 item 10: the Exceptions page runs on its own snapshot host
+ * (tooling/environment/pilot-exception-snapshot.mjs), composed as the pilot does it, under the
+ * rendered pilot ACL. Its catch blocks used to write every failure over as
+ * INTERNAL_EXCEPTION_SNAPSHOT_UNAVAILABLE: a missing grant was logged with no SQLSTATE or table, and
+ * someone without the permission was told "try again" (503) for ever instead of "no permission".
+ */
+it("WP-2423 item 10: the Exceptions page says no permission when it is so, and logs what failed when not", async () => {
+  vi.stubEnv("NODE_ENV", "development");
+  await withIsolatedDatabase({ caseId: "wp2423_uf_exceptions" }, async (context) => {
+    const admin = new Client(context.clientConfig);
+    await admin.connect();
+    let harness;
+    let listening;
+    try {
+      harness = await restricted(context, admin);
+      const { api, pool } = harness;
+      const honest = refusalsStayReal(harness.runner);
+      const now = () => new Date().toISOString();
+      const session = await seedMerchantAcceptanceSession({
+        admin,
+        runner: honest,
+        scope,
+        actor: id(10),
+        at: now(),
+        extraPermissions: ["operations.order-exception.manage"],
+      });
+      await seedJourneyStorePublication({
+        client: admin,
+        scope,
+        publishedAt: new Date(Date.now() - 36 * 3_600_000).toISOString(),
+        businessDayStart: "04:00:00",
+        prefix: "01a7e600",
+      });
+      const opened = new Date(Date.now() - 600_000).toISOString();
+      await admin.query(
+        "INSERT INTO platform_projection.order_exception_source (tenant_id,brand_id,store_id,source_id,source_version,checkpoint_id,record_json) VALUES ($1,$2,$3,$4,'1',$5,$6::jsonb)",
+        [
+          tenant,
+          brand,
+          store,
+          id(0x7001),
+          id(0x7900),
+          JSON.stringify({
+            sourceReference: id(0x7001),
+            ...scope,
+            orderReference: id(0x7002),
+            paymentReference: id(0x7003),
+            diningReference: null,
+            kind: "PaidWithoutFulfillableOrder",
+            severity: "Critical",
+            sourceOwner: "Payment",
+            sourceStatus: "Open",
+            providerState: "Pending",
+            compensationStatus: "Pending",
+            sourceVersion: "1",
+            sourceDigest: "sha256:" + "1".repeat(64),
+            createdAt: opened,
+            updatedAt: opened,
+            resolutionEvidenceReference: null,
+          }),
+        ],
+      );
+      // The pilot's snapshot host, its connections as the restricted API role.
+      const snapshot = createInternalExceptionSnapshotTransactions({
+        publicProfile: {
+          binding: {
+            tenantReference: tenant,
+            brandReference: brand,
+            storeReference: store,
+            validUntil: new Date(Date.now() + 3_600_000).toISOString(),
+          },
+        },
+        scope: { brandReference: brand, storeReference: store },
+        now,
+        database: {
+          async acquire() {
+            const client = await pool.connect();
+            return {
+              async query(sql, values) {
+                const result = await client.query(sql, values);
+                if (/^BEGIN\b/u.test(sql)) await client.query("SET LOCAL ROLE " + api);
+                return result;
+              },
+              release: () => client.release(),
+            };
+          },
+        },
+      });
+      const orderExceptions = createPersistentMerchantOrderExceptions({
+        persistence: {
+          ...session.persistence,
+          transactions: refusalsStayReal(snapshot),
+          now,
+          publication: {
+            configurationType: "STORE_CONFIGURATION",
+            purposeCode: "STORE_CONFIGURATION",
+            requiredLiveGateRequirementCodes: ["SYNTHETIC_STORE_READY"],
+          },
+        },
+        // Test-only: the coverage the pilot reads from the owners is out of scope here.
+        metadata: async (_tx, { storeLabel }) => ({
+          storeLabel,
+          businessDate: "2026-11-05",
+          checkpointReference: id(0x7900),
+          projectedAt: now(),
+          freshnessStatus: "Stale",
+        }),
+      });
+      const app = await serve({ service: session.authentication, orderExceptions });
+      listening = app.server;
+      const lines = logLines();
+
+      const fine = await app.get("/order-exceptions", session);
+      assert.equal(fine.status, 200, JSON.stringify(fine.body));
+      assert.equal(fine.body.items.length, 1);
+      assert.deepEqual(lines.take(), []);
+
+      // A grant missing from a deploy: a fault, logged with what failed, and "try again".
+      await admin.query("REVOKE SELECT ON platform_projection.order_exception_source FROM " + api);
+      const fault = await app.get("/order-exceptions", session);
+      assert.equal(fault.status, 503, JSON.stringify(fault.body));
+      assert.deepEqual(fault.body, { error: "retry_later" });
+      const logged = lines.take();
+      assert.equal(logged.length, 1, JSON.stringify(logged));
+      assert.equal(logged[0].event, "MERCHANT_REQUEST_UNEXPECTED");
+      assert.equal(logged[0].route, "/order-exceptions");
+      assert.equal(logged[0].sqlState, "42501", JSON.stringify(logged[0]));
+      assert.equal(logged[0].table, "order_exception_source", JSON.stringify(logged[0]));
+      assert.ok(!JSON.stringify(logged[0]).includes("permission denied"));
+      await admin.query("GRANT SELECT ON platform_projection.order_exception_source TO " + api);
+      assert.equal((await app.get("/order-exceptions", session)).status, 200);
+      lines.take();
+
+      // Someone whose role does not hold the permission: no permission, and nothing logged.
+      await admin.query(
+        "UPDATE bop_permission.permission_grant SET lifecycle='Revoked',version=version+1 WHERE permission_id=(SELECT permission_id FROM bop_permission.permission_definition WHERE action_code='operations.order-exception.manage')",
+      );
+      const refused = await app.get("/order-exceptions", session);
+      assert.equal(refused.status, 403, JSON.stringify(refused.body));
+      assert.deepEqual(refused.body, { error: "request_denied" });
+      assert.deepEqual(lines.take(), []);
     } finally {
       await new Promise((resolve) => (listening ? listening.close(resolve) : resolve()));
       await harness?.pool.end();

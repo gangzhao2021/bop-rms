@@ -48,21 +48,79 @@ it.each([
   expect(f.client.query.mock.calls.some(([query]) => query === sql)).toBe(false);
   expect(f.client.release).toHaveBeenCalledOnce();
 });
-it("rolls back caught query failures and callback failures", async () => {
+const failureOf = (error) => error[Symbol.for("bop.database.failure")];
+const refusedGrant = () =>
+  Object.assign(new Error("permission denied for table reconciliation_case"), { code: "42501" });
+it("WP-2423 item 10: a failed read says what failed, and rolls back", async () => {
   const f = fixture();
-  await expect(
-    f.runner.run(async (tx) => {
-      f.client.query.mockRejectedValueOnce(Error("private"));
+  f.client.query.mockImplementation(async (sql) => {
+    if (sql === "SELECT 1") throw refusedGrant();
+    return { rows: [] };
+  });
+  // Swallowed by the work: still the transaction's failure, with its SQLSTATE and table.
+  const swallowed = await f.runner
+    .run(async (tx) => {
       await tx.query("SELECT 1", []).catch(() => undefined);
-    }),
-  ).rejects.toThrow("INTERNAL_EXCEPTION_SNAPSHOT_UNAVAILABLE");
+      return "read";
+    })
+    .catch((error) => error);
+  expect(swallowed.code).toBe("TENANT_DATABASE_TRANSACTION_FAILED");
+  expect(swallowed.diagnostic).toMatchObject({ sqlState: "42501", table: "reconciliation_case" });
+  expect(String(swallowed.message)).not.toContain("permission denied");
+  expect(f.client.query.mock.calls.at(-1)[0]).toBe("ROLLBACK");
+  expect(f.client.release).toHaveBeenCalledOnce();
+  // Thrown on: the query's own error says it.
+  const thrown = await f.runner.run((tx) => tx.query("SELECT 1", [])).catch((error) => error);
+  expect(thrown.code).toBe("TENANT_DATABASE_TRANSACTION_FAILED");
+  expect(thrown.diagnostic.sqlState).toBe("42501");
+  // Rewritten by the work into a refusal: the refusal carries what failed, so it is not believed.
+  const rewritten = await f.runner
+    .run(async (tx) => {
+      await tx.query("SELECT 1", []).catch(() => {
+        throw new Error("MERCHANT_ORDER_EXCEPTION_DENIED");
+      });
+    })
+    .catch((error) => error);
+  expect(rewritten.message).toBe("MERCHANT_ORDER_EXCEPTION_DENIED");
+  expect(failureOf(rewritten)).toMatchObject({ sqlState: "42501", table: "reconciliation_case" });
+  // A lock wait is busy, not a fault.
   const g = fixture();
+  g.client.query.mockImplementation(async (sql) => {
+    if (sql === "SELECT 1") throw Object.assign(new Error("lock"), { code: "55P03" });
+    return { rows: [] };
+  });
+  const busy = await g.runner.run((tx) => tx.query("SELECT 1", [])).catch((error) => error);
+  expect(busy.code).toBe("TENANT_DATABASE_TRANSACTION_CONFLICT");
+});
+it("WP-2423 item 10: a refusal decided by the work stays that refusal, unmarked", async () => {
+  const f = fixture();
+  const refused = await f.runner
+    .run(async (tx) => {
+      await tx.query("SELECT 1", []);
+      throw new Error("MERCHANT_ORDER_EXCEPTION_DENIED");
+    })
+    .catch((error) => error);
+  expect(refused.message).toBe("MERCHANT_ORDER_EXCEPTION_DENIED");
+  expect(failureOf(refused)).toBeUndefined();
+  expect(f.client.query.mock.calls.at(-1)[0]).toBe("ROLLBACK");
+  expect(f.client.release).toHaveBeenCalledOnce();
+});
+it("a failed BEGIN or connection says so, and a swallowed guard refusal stays the guard's", async () => {
+  const f = fixture();
+  f.client.query.mockRejectedValueOnce(Object.assign(new Error("gone"), { code: "57P01" }));
+  const begin = await f.runner.run(async () => 1).catch((error) => error);
+  expect(begin.code).toBe("TENANT_DATABASE_TRANSACTION_FAILED");
+  expect(begin.diagnostic.sqlState).toBe("57P01");
+  const g = fixture();
+  g.resources.database.acquire.mockRejectedValueOnce(new Error("timeout exceeded"));
+  const acquire = await g.runner.run(async () => 1).catch((error) => error);
+  expect(acquire.code).toBe("TENANT_DATABASE_ACQUIRE_FAILED");
+  const h = fixture();
   await expect(
-    g.runner.run(() => {
-      throw Error("private");
+    h.runner.run(async (tx) => {
+      await tx.query("DELETE FROM x", []).catch(() => undefined);
     }),
   ).rejects.toThrow("INTERNAL_EXCEPTION_SNAPSHOT_UNAVAILABLE");
-  expect(g.client.release).toHaveBeenCalledOnce();
 });
 it("denies scope mismatch and expiry before acquiring a connection", async () => {
   const f = fixture();

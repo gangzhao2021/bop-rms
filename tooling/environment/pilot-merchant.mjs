@@ -312,7 +312,8 @@ export async function createInternalMerchant(
   const orderExceptions = createPersistentMerchantOrderExceptions({
     persistence: {
       ...persistence,
-      transactions: createInternalExceptionSnapshotTransactions(resources),
+      // WP-2423 item 10: its own host, so it is wrapped here as well as the shared one above.
+      transactions: refusalsStayReal(createInternalExceptionSnapshotTransactions(resources)),
     },
     // WP-2423 D3: an unreadable reconciliation detail is logged (code and frames only).
     onUnexpected: (error) =>
