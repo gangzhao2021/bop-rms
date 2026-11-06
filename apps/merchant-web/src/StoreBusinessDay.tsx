@@ -126,7 +126,8 @@ export const BUSINESS_DAY_RETRY_MS = 60_000;
 
 /**
  * Reads the Store's business day now, again one second after it ends (the next day has begun),
- * at least every BUSINESS_DAY_RECHECK_MS, and after a failure every BUSINESS_DAY_RETRY_MS.
+ * at least every BUSINESS_DAY_RECHECK_MS, and after a failure, or an answer whose day has already
+ * ended by the device's clock, every BUSINESS_DAY_RETRY_MS.
  * recheck() reads at once when the known day has ended (a screen woken after the night).
  */
 export function trackStoreBusinessDay(options: {
@@ -169,7 +170,11 @@ export function trackStoreBusinessDay(options: {
           ...(value.closedToday === undefined ? {} : { closedToday: value.closedToday }),
         }),
       );
-      schedule(Date.parse(value.endsAt) - now() + 1_000);
+      // A day the Store says has already ended by this device's clock (a device clock running
+      // ahead, or the Store not yet past its turnover) is read again like a failure, not every
+      // second: a screen left open must never ask the Store once a second all day.
+      const untilEnd = Date.parse(value.endsAt) - now();
+      schedule(untilEnd <= 0 ? BUSINESS_DAY_RETRY_MS : untilEnd + 1_000);
     } catch {
       if (active && !current.signal.aborted) schedule(BUSINESS_DAY_RETRY_MS);
     }

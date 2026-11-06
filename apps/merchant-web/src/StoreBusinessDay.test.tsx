@@ -121,6 +121,20 @@ describe("WP-2423 Q21: the day turns over at the Store's business-day start", ()
     expect(seen.at(-1)).toBe("2026-10-15");
     tracker.stop();
   });
+
+  it("asks once a minute, not every second, while the Store's answer is a day already ended here", async () => {
+    // The device's clock runs a day ahead of the Store's answer.
+    vi.setSystemTime(new Date("2026-10-17T05:30:00.000Z"));
+    const load = vi.fn(async () => next);
+    const tracker = trackStoreBusinessDay({ load, onDay: () => undefined });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(load).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(59_000);
+    expect(load).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(load.mock.calls.length).toBeLessThanOrEqual(12);
+    tracker.stop();
+  });
 });
 
 describe("WP-2423 Q21: Orders are grouped by the Store business day", () => {
