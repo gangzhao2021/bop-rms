@@ -128,6 +128,7 @@ export async function readTonightFacts(
               Object.freeze({
                 kind: event.kind,
                 orderNumber: event.orderNumber,
+                orderBusinessDate: event.orderBusinessDate,
                 ...(event.roundSequence === null ? {} : { roundSequence: event.roundSequence }),
                 staffName:
                   event.actorReference === null ? null : (names.get(event.actorReference) ?? null),

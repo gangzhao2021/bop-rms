@@ -642,6 +642,14 @@ it("a table round made on paper is said Making it by hand too, and leaves the ki
         facts.paidOrderEvents.map((event) => [event.kind, event.roundSequence]),
         [["RoundMadeByHand", 1]],
       );
+      // WP-2423 live minor 13: named with the business day its Order belongs to (order numbers
+      // restart each day; a table opened the evening before is that day's), read under the
+      // restricted role. The Order's business day never changes (order_header_identity_no_update).
+      const [{ business_date: today }] = await query(
+        "SELECT business_date::text FROM rms_ordering.order_header WHERE order_id=$1",
+        [round.orderReference],
+      );
+      assert.equal(facts.paidOrderEvents[0].orderBusinessDate, today);
     },
   );
 });
@@ -888,6 +896,13 @@ it("what the manager sees: every refund and keep named on tonight's summary, the
         ],
       );
       assert.match(facts.paidOrderEvents[0].orderNumber, /\d/u);
+      // Both kinds of event (refunds and keeps) carry the business day of their Order.
+      const days = await world.query(
+        "SELECT DISTINCT business_date::text FROM rms_ordering.order_header WHERE brand_id=$1 AND store_id=$2",
+        [ownerScope.brandReference, ownerScope.storeReference],
+      );
+      for (const event of facts.paidOrderEvents)
+        assert.ok(days.some((day) => day.business_date === event.orderBusinessDate));
       // Turned off because of this: the count stays, and the board keeps saying what waits.
       await world.setting.change({ pickup: false, dineIn: false });
       const watch = await worker().run((tx) => readPaidOrderWatch(tx, scope, world.now()));

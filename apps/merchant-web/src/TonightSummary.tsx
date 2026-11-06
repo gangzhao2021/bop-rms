@@ -15,6 +15,7 @@ import {
 } from "./store-reports-client.js";
 import type { StaffCancellationReason } from "./current-order-queue-client.js";
 import { staffCancellationReasonLabel } from "./StaffOrderCancelAction.js";
+import { orderLabel } from "./CurrentOrderQueuePage.js";
 
 const money = (minor: string | bigint) =>
   orderMoney({ amountMinor: String(minor), currencyCode: "CAD" });
@@ -85,24 +86,33 @@ export function tonightProblems(summary: TonightSummary): readonly string[] {
   return problems;
 }
 
-/** "Order 12 · Can't make it · refunded": one line per decision nobody senior was asked about. */
-export function tonightPaidOrderEventText(event: TonightPaidOrderEvent): string {
+/**
+ * "Order 12 · Can't make it · refunded": one line per decision nobody senior was asked about. An
+ * Order of an earlier business day (a table opened the evening before) carries its date, as on
+ * Orders ("Order 11/4 · 16 · …"): order numbers restart each day. `today`: the summary's day.
+ */
+export function tonightPaidOrderEventText(
+  event: TonightPaidOrderEvent,
+  today: string | null = null,
+): string {
+  const orderNumber = orderLabel(
+    { orderNumber: event.orderNumber, businessDate: event.orderBusinessDate },
+    today,
+  );
   switch (event.kind) {
     case "CantMake":
-      return t("Order {orderNumber} · Can't make it · refunded", {
-        orderNumber: event.orderNumber,
-      });
+      return t("Order {orderNumber} · Can't make it · refunded", { orderNumber });
     case "AutomaticRefund":
       return t("Order {orderNumber} · refunded automatically · the kitchen never started it", {
-        orderNumber: event.orderNumber,
+        orderNumber,
       });
     case "KeptByHand":
       return t("Order {orderNumber} · made by hand · not refunded automatically", {
-        orderNumber: event.orderNumber,
+        orderNumber,
       });
     case "RoundMadeByHand":
       return t("Order {orderNumber} · round {sequence} · made by hand", {
-        orderNumber: event.orderNumber,
+        orderNumber,
         sequence: event.roundSequence ?? 1,
       });
   }
@@ -412,7 +422,7 @@ export function TonightSummaryView({ summary }: { readonly summary: TonightSumma
             {summary.paidOrderEvents.map((event) => (
               <Row
                 key={event.kind + event.orderNumber + event.at}
-                label={tonightPaidOrderEventText(event)}
+                label={tonightPaidOrderEventText(event, report.from)}
                 detail={tonightPaidOrderEventDetail(event)}
                 value={storeTime(event.at, report.timeZone)}
               />

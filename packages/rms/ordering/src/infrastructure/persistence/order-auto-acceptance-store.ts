@@ -521,6 +521,11 @@ export async function keepOrderAutoAcceptedPickup(
 export interface OrderAutoAcceptanceEvent {
   readonly kind: "CantMake" | "AutomaticRefund" | "KeptByHand" | "RoundMadeByHand";
   readonly orderNumber: string;
+  /**
+   * WP-2423 live minor 13: the Store business day the Order belongs to (order numbers restart each
+   * day), so an earlier day's order named tonight reads with its date.
+   */
+  readonly orderBusinessDate: string;
   /** The table round, for RoundMadeByHand only (one Order has several); else null. */
   readonly roundSequence: number | null;
   /** Null for the System. */
@@ -538,14 +543,14 @@ export async function listStoreOrderAutoAcceptanceEvents(
   const { brand, store } = await scoped(tx, scope);
   const rows = (
     await tx.query(
-      "SELECT kind,order_number,round_sequence,actor,reason_code," +
+      "SELECT kind,order_number,order_business_date,round_sequence,actor,reason_code," +
         asInstant("at") +
         " AS at FROM (" +
-        "SELECT CASE WHEN t.actor_type='System' THEN 'AutomaticRefund' ELSE 'CantMake' END AS kind,h.order_number,NULL::int AS round_sequence,CASE WHEN t.actor_type='System' THEN NULL ELSE c.actor_id::text END AS actor,c.reason_code,c.cancelled_at AS at " +
+        "SELECT CASE WHEN t.actor_type='System' THEN 'AutomaticRefund' ELSE 'CantMake' END AS kind,h.order_number,h.business_date::text AS order_business_date,NULL::int AS round_sequence,CASE WHEN t.actor_type='System' THEN NULL ELSE c.actor_id::text END AS actor,c.reason_code,c.cancelled_at AS at " +
         "FROM rms_ordering.order_staff_cancellation c JOIN rms_ordering.order_header h ON h.brand_id=c.brand_id AND h.store_id=c.store_id AND h.order_id=c.order_id " +
         "LEFT JOIN rms_ordering.order_termination_record t ON t.brand_id=c.brand_id AND t.store_id=c.store_id AND t.termination_id=c.cancellation_id " +
         "WHERE c.brand_id=$1 AND c.store_id=$2 AND c.cancelled_at>=$3::timestamptz AND c.cancelled_at<$4::timestamptz AND (c.permission_code='ordering.order.accept' OR t.actor_type='System') " +
-        "UNION ALL SELECT CASE WHEN h.order_type='Pickup' THEN 'KeptByHand' ELSE 'RoundMadeByHand' END,h.order_number," +
+        "UNION ALL SELECT CASE WHEN h.order_type='Pickup' THEN 'KeptByHand' ELSE 'RoundMadeByHand' END,h.order_number,h.business_date::text," +
         "CASE WHEN h.order_type='Pickup' THEN NULL ELSE coalesce((SELECT r.batch_sequence FROM rms_ordering.additional_dining_batch_record r WHERE r.brand_id=d.brand_id AND r.store_id=d.store_id AND r.order_id=d.order_id AND r.order_batch_id=d.order_batch_id),1) END," +
         "d.actor_id::text,NULL,d.decided_at " +
         "FROM rms_ordering.order_auto_acceptance_decision d JOIN rms_ordering.order_header h ON h.brand_id=d.brand_id AND h.store_id=d.store_id AND h.order_id=d.order_id " +
@@ -556,6 +561,7 @@ export async function listStoreOrderAutoAcceptanceEvents(
   ).rows as readonly {
     kind: OrderAutoAcceptanceEvent["kind"];
     order_number: unknown;
+    order_business_date: unknown;
     round_sequence: number | null;
     actor: string | null;
     reason_code: string | null;
@@ -566,6 +572,7 @@ export async function listStoreOrderAutoAcceptanceEvents(
       Object.freeze({
         kind: row.kind,
         orderNumber: String(row.order_number),
+        orderBusinessDate: String(row.order_business_date),
         roundSequence: row.kind === "RoundMadeByHand" ? Number(row.round_sequence) : null,
         actorReference: row.actor,
         reasonCode: row.reason_code,

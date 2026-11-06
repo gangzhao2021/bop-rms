@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { describe, expect, it } from "vitest";
+import { setLanguageForTest } from "./i18n/i18n.js";
 import { closingReminderPhase, inClosingWindow } from "./ClosingReminder.js";
 import { parseTonightSummary } from "./store-reports-client.js";
 import { tonightProblems, TonightSummaryView } from "./TonightSummary.js";
@@ -58,6 +59,40 @@ describe("DEC-PAID-ORDER-AUTO-ACCEPT: decisions nobody senior was asked about, n
     expect(html).not.toContain("SOLD_OUT");
     expect(html).not.toContain("STORE_ERROR");
     expect(html).not.toContain("KeptByHand");
+  });
+  it("WP-2423 live minor 13: an earlier day's order is named with its date, today's without", () => {
+    const html = render({
+      ...tonightSummaryFixture(),
+      paidOrderEvents: [
+        { ...events[3], orderNumber: "16", orderBusinessDate: "2026-10-26" },
+        { ...events[2], orderNumber: "17", orderBusinessDate: "2026-10-27" },
+      ],
+    });
+    // The summary is for 2026-10-27; order 16 belongs to the table opened the evening before.
+    expect(html).toContain("Order 10/26 · 16 · round 2 · made by hand");
+    expect(html).toContain("Order 17 · made by hand · not refunded automatically");
+    setLanguageForTest("zh-Hans");
+    try {
+      expect(
+        render({
+          ...tonightSummaryFixture(),
+          paidOrderEvents: [{ ...events[3], orderNumber: "16", orderBusinessDate: "2026-10-26" }],
+        }),
+      ).toContain("10/26 · 16");
+    } finally {
+      setLanguageForTest("en");
+    }
+    // A wrong day is refused; an older server without it still reads.
+    expect(() =>
+      parseTonightSummary({
+        ...tonightSummaryFixture(),
+        paidOrderEvents: [{ ...events[0], orderBusinessDate: "yesterday" }],
+      }),
+    ).toThrow();
+    expect(
+      parseTonightSummary({ ...tonightSummaryFixture(), paidOrderEvents: [events[0]] })
+        .paidOrderEvents[0]?.orderBusinessDate,
+    ).toBeNull();
   });
   it("a Store without any sees nothing new, and a wrong entry is refused", () => {
     expect(parseTonightSummary(tonightSummaryFixture()).paidOrderEvents).toEqual([]);

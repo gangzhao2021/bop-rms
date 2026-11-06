@@ -396,6 +396,11 @@ export function parseStoreReportsView(value: unknown): StoreReportsView {
 export interface TonightPaidOrderEvent {
   readonly kind: "CantMake" | "AutomaticRefund" | "KeptByHand" | "RoundMadeByHand";
   readonly orderNumber: string;
+  /**
+   * WP-2423 live minor 13: the business day the Order belongs to (order numbers restart each
+   * day); null from an older server without it.
+   */
+  readonly orderBusinessDate: string | null;
   /** RoundMadeByHand: which table round; null otherwise. */
   readonly roundSequence: number | null;
   /** Null for the System, or a person no longer on the staff list. */
@@ -439,9 +444,12 @@ export function parseTonightSummary(value: unknown): TonightSummary {
     ? list(raw.paidOrderEvents, 100, (entry) => {
         const round =
           entry !== null && typeof entry === "object" && Object.hasOwn(entry, "roundSequence");
+        const withDay =
+          entry !== null && typeof entry === "object" && Object.hasOwn(entry, "orderBusinessDate");
         const event = exact(entry, [
           "kind",
           "orderNumber",
+          ...(withDay ? ["orderBusinessDate"] : []),
           ...(round ? ["roundSequence"] : []),
           "staffName",
           "reasonCode",
@@ -465,6 +473,7 @@ export function parseTonightSummary(value: unknown): TonightSummary {
         return Object.freeze({
           kind,
           orderNumber: text(event.orderNumber, 20),
+          orderBusinessDate: withDay ? date(event.orderBusinessDate) : null,
           roundSequence: round ? (event.roundSequence as number) : null,
           staffName: event.staffName === null ? null : text(event.staffName, 200),
           reasonCode: event.reasonCode === null ? null : text(event.reasonCode, 80),
