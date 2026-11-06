@@ -149,6 +149,12 @@ export interface KitchenPreparation {
    * and today's round of an older table is never shown as an earlier day's. Null when unknown.
    */
   readonly businessDate: string | null;
+  /**
+   * merchant-outage-recovery M120: when the item's round was sent (Ordering's submittedAt), so
+   * the kitchen counts the wait from the order, not from acceptance. Null when unknown (a remake,
+   * an item without a round, or a round this read could not see).
+   */
+  readonly placedAt: string | null;
   /** Restricted (DEC-KDS-CUSTOMER-NOTE): displayed only; never logged or evented. */
   readonly customerNote: string | null;
   /** WP-2423 item 8 ⑧ (decision 5): the dish's kitchen section (档口); null: no section. */
@@ -164,6 +170,7 @@ const noPreparation: KitchenPreparation = Object.freeze({
   allergens: unavailableAllergens,
   orderLabel: null,
   businessDate: null,
+  placedAt: null,
   customerNote: null,
   kitchenSection: null,
 });
@@ -204,6 +211,8 @@ const itemView = (
   allergens: preparation.allergens,
   orderLabel: preparation.orderLabel,
   businessDate: preparation.businessDate,
+  // Only when known: an item without it reads as before (the board counts from creation).
+  ...(preparation.placedAt === null ? {} : { placedAt: preparation.placedAt }),
   customerNote: preparation.customerNote,
   kitchenSection: preparation.kitchenSection,
   ...(preparation.takenOnPaper === true ? { takenOnPaper: true as const } : {}),
@@ -232,7 +241,9 @@ export async function kitchenPreparation(
   roundBusinessDates?: (
     transaction: ConsumerTransaction,
     orderBatchReferences: readonly string[],
-  ) => Promise<ReadonlyMap<string, string>>,
+  ) => Promise<
+    ReadonlyMap<string, string> & { readonly submittedAt?: ReadonlyMap<string, string> }
+  >,
 ): Promise<ReadonlyMap<string, KitchenPreparation>> {
   const allergens = await kitchenAllergens(
     transaction,
@@ -266,7 +277,9 @@ export async function kitchenPreparation(
       ),
     ),
   ];
-  const roundDates =
+  const roundDates: ReadonlyMap<string, string> & {
+    readonly submittedAt?: ReadonlyMap<string, string>;
+  } =
     roundBusinessDates === undefined || rounds.length === 0
       ? new Map<string, string>()
       : await roundBusinessDates(transaction, rounds);
@@ -320,6 +333,10 @@ export async function kitchenPreparation(
               : roundDates.get(item.orderBatchReference)) ??
             businessDates.get(item.orderReference) ??
             null,
+          placedAt:
+            (item.orderBatchReference === undefined
+              ? undefined
+              : roundDates.submittedAt?.get(item.orderBatchReference)) ?? null,
           orderLabel:
             order === undefined
               ? null

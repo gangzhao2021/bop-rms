@@ -52,6 +52,19 @@ export async function withOptionalRead<T>(
 }
 
 /**
+ * Each round's business date by its reference, and (merchant-outage-recovery M120) when the
+ * guest or staff sent it, from the same Ordering read: the kitchen counts a ticket's wait from
+ * then, not from when it was accepted.
+ */
+export interface RoundBusinessDates extends ReadonlyMap<string, string> {
+  readonly submittedAt: ReadonlyMap<string, string>;
+}
+const withSubmittedAt = (
+  dates: ReadonlyMap<string, string>,
+  submittedAt: ReadonlyMap<string, string>,
+): RoundBusinessDates => Object.assign(new Map(dates), { submittedAt });
+
+/**
  * WP-2423 D4: each given round's business date, from Ordering's record of when it was submitted
  * and the Store owner's published IANA time zone and business-day start — the same as-published
  * resolution the day-end settlement and the sales reports use (merchant-business-day-window). The
@@ -77,7 +90,7 @@ export function createMerchantRoundBusinessDates(options: {
   return async (
     tx: ConsumerTransaction,
     orderBatchReferences: readonly string[],
-  ): Promise<ReadonlyMap<string, string>> => {
+  ): Promise<RoundBusinessDates> => {
     const unique = [...new Set(orderBatchReferences)];
     const rounds = new Map<string, StoreOrderRoundSubmission>();
     for (let start = 0; start < unique.length; start += 100)
@@ -87,10 +100,11 @@ export function createMerchantRoundBusinessDates(options: {
         unique.slice(start, start + 100),
       ))
         rounds.set(batch, round);
+    const submittedAt = new Map([...rounds].map(([batch, round]) => [batch, round.submittedAt]));
     const dates = new Map<string, string>();
     for (const [batch, round] of rounds)
       if (round.initial) dates.set(batch, round.orderBusinessDate);
-    if (dates.size === rounds.size) return dates;
+    if (dates.size === rounds.size) return withSubmittedAt(dates, submittedAt);
     // Later rounds: by the Store's published business day. If it cannot be read, those rounds
     // are left out and callers show the Order's own business date (the earlier behaviour).
     return withOptionalRead(
@@ -106,9 +120,9 @@ export function createMerchantRoundBusinessDates(options: {
               (await days.today(tx, round.submittedAt)).businessDate,
           );
         }
-        return resolved;
+        return withSubmittedAt(resolved, submittedAt);
       },
-      dates,
+      withSubmittedAt(dates, submittedAt),
     );
   };
 }

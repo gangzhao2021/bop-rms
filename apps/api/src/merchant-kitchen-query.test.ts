@@ -234,6 +234,43 @@ it("WP-2423 D4: a round added today to a table opened on an earlier day is today
   const fallback = (await f.operation(f.input)) as typeof result;
   expect(fallback.items.map((item) => item.businessDate)).toEqual(["2026-10-11", "2026-10-11"]);
 });
+it("merchant-outage-recovery M120: a ticket counts its wait from when the round was sent, read with its business date", async () => {
+  const f = setup();
+  doubles.scope.mockResolvedValue({
+    actorReference: id(2),
+    selected: { tenantReference: id(1) },
+    context: { brand: { brandReference: id(3) } },
+    store: { storeReference: id(4), timeZone: "America/Toronto" },
+    allowed: f.allowed,
+    authorizeAction: f.authorizeAction,
+  });
+  doubles.list.mockResolvedValue({
+    items: [
+      { workItemReference: id(5), ticketReference: id(7), orderBatchReference: id(20) },
+      // No round known for this one: it reads as before, with no placedAt.
+      { workItemReference: id(8), ticketReference: id(10) },
+    ].map((item) => ({
+      ...item,
+      orderReference: id(6),
+      ticketAggregateVersion: 3n,
+      workItemVersion: 2n,
+    })),
+  });
+  doubles.roundDates.mockResolvedValue(
+    Object.assign(new Map([[id(20), "2026-10-15"]]), {
+      submittedAt: new Map([[id(20), "2026-10-15T17:00:00.000Z"]]),
+    }),
+  );
+  const result = (await f.operation(f.input)) as {
+    items: { workItemReference: string; placedAt?: string; businessDate: string | null }[];
+  };
+  expect(doubles.roundDates).toHaveBeenCalledTimes(1);
+  expect(result.items.map((item) => [item.workItemReference, item.placedAt])).toEqual([
+    [id(5), "2026-10-15T17:00:00.000Z"],
+    [id(8), undefined],
+  ]);
+  expect(Object.hasOwn(result.items[1] ?? {}, "placedAt")).toBe(false);
+});
 it("WP-2423 Q3: serves the published menu disclosure per work item and restores Store scope", async () => {
   const f = setup();
   const disclosure = {

@@ -1,4 +1,5 @@
 import { t, saidTable, listSeparator } from "./i18n/i18n.js";
+import { SlowWaitNotice } from "./slow-wait.js";
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { StatePanel } from "@bop-rms/ui";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -1471,6 +1472,7 @@ export function StaffOrderEntryPage({
                 >
                   {phase === "Sending" ? t("Sending…") : t("Send order")}
                 </button>
+                <SlowWaitNotice busy={phase === "Sending"} />
               </div>
             ) : null}
           </div>

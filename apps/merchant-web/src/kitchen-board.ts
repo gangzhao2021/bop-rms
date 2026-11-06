@@ -71,6 +71,11 @@ export interface KitchenBoardItem {
   readonly requiredQuantity: number;
   readonly completedQuantity: number;
   readonly createdAt: string;
+  /**
+   * merchant-outage-recovery M120: when the guest or staff sent the item's round (absent from an
+   * older server, or unknown). The wait counts from here, not from acceptance.
+   */
+  readonly placedAt?: string;
   readonly allergenCue: "None" | "ReviewRequired" | "Acknowledged" | "Unavailable";
   readonly exceptionStatus: "None" | "Reported" | "Unavailable";
   readonly selectedOptions: readonly KitchenSelectedOption[];
@@ -389,6 +394,8 @@ function item(value: unknown): KitchenBoardItem {
     value !== null && typeof value === "object" && Object.hasOwn(value, "kitchenSection");
   const hasPartSections =
     value !== null && typeof value === "object" && Object.hasOwn(value, "comboPartSections");
+  const hasPlacedAt =
+    value !== null && typeof value === "object" && Object.hasOwn(value, "placedAt");
   const input = closed(value, [
     "workItemReference",
     "ticketReference",
@@ -413,6 +420,7 @@ function item(value: unknown): KitchenBoardItem {
     ...(hasPaper ? ["takenOnPaper"] : []),
     ...(hasSection ? ["kitchenSection"] : []),
     ...(hasPartSections ? ["comboPartSections"] : []),
+    ...(hasPlacedAt ? ["placedAt"] : []),
   ]);
   if (
     hasSection &&
@@ -464,6 +472,7 @@ function item(value: unknown): KitchenBoardItem {
     requiredQuantity: Number(input.requiredQuantity),
     completedQuantity: Number(input.completedQuantity),
     createdAt: instant(input.createdAt),
+    ...(hasPlacedAt ? { placedAt: instant(input.placedAt) } : {}),
     allergenCue: input.allergenCue as KitchenBoardItem["allergenCue"],
     exceptionStatus: input.exceptionStatus as KitchenBoardItem["exceptionStatus"],
     selectedOptions: selectedOptions(input.selectedOptions),
@@ -684,4 +693,14 @@ export function kitchenOrderText(
     t(" · Order ") +
     label.orderNumber
   );
+}
+
+/**
+ * merchant-outage-recovery M120: when an item's wait started: when its round was sent, or (an
+ * older server, a remake) when the kitchen received it.
+ */
+export function kitchenWaitStart(item: Pick<KitchenBoardItem, "createdAt" | "placedAt">): string {
+  return item.placedAt !== undefined && item.placedAt < item.createdAt
+    ? item.placedAt
+    : item.createdAt;
 }

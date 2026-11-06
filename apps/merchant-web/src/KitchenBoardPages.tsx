@@ -71,7 +71,7 @@ export function kitchenTicketAge(
   if (open.length === 0) return { minutes: null, tier: "done" };
   const minutes = Math.max(
     ...open.map((item) =>
-      Math.max(0, Math.floor((Date.parse(at) - Date.parse(item.createdAt)) / 60_000)),
+      Math.max(0, Math.floor((Date.parse(at) - Date.parse(kitchenWaitStart(item))) / 60_000)),
     ),
   );
   return { minutes, tier: kitchenAgeTier(minutes) };
@@ -98,7 +98,7 @@ export function kitchenTicketRounds(items: readonly KitchenBoardItem[]) {
     else rounds.set(item.ticketReference, [item]);
   }
   const oldest = (round: readonly KitchenBoardItem[]) =>
-    Math.min(...round.map((item) => Date.parse(item.createdAt)));
+    Math.min(...round.map((item) => Date.parse(kitchenWaitStart(item))));
   return [...rounds.entries()]
     .map(([ticketReference, round]) => ({
       ticketReference,
@@ -232,6 +232,8 @@ export function kitchenTicketState(
     : "ToMake";
 }
 
+import { useRememberedAlertSound } from "./alert-sound.js";
+import { SlowWaitNotice } from "./slow-wait.js";
 import { playKitchenChime } from "./alert-chime.js";
 export { playKitchenChime };
 import { KitchenPaidOrderNotices } from "./KitchenPaidOrderNotices.js";
@@ -318,7 +320,7 @@ export function groupKitchenItemsByOrder(items: readonly KitchenBoardItem[]) {
     else groups.set(item.orderReference, [item]);
   }
   const oldest = (group: readonly KitchenBoardItem[]) =>
-    Math.min(...group.map((item) => Date.parse(item.createdAt)));
+    Math.min(...group.map((item) => Date.parse(kitchenWaitStart(item))));
   return [...groups.entries()]
     .map(([orderReference, group]) => ({ orderReference, items: group }))
     .sort((a, b) => oldest(a.items) - oldest(b.items));
@@ -863,20 +865,6 @@ export function kitchenArrivalsUnattended(
 }
 
 const KITCHEN_SOUND_KEY = "bop.kitchen.sound";
-function storedKitchenSound(): boolean {
-  try {
-    return globalThis.localStorage?.getItem(KITCHEN_SOUND_KEY) === "on";
-  } catch {
-    return false;
-  }
-}
-function storeKitchenSound(on: boolean): void {
-  try {
-    globalThis.localStorage?.setItem(KITCHEN_SOUND_KEY, on ? "on" : "off");
-  } catch {
-    // Private browsing: the choice holds until this page reloads.
-  }
-}
 
 /**
  * WP-2423 item 8 ⑧ (Owner decision 5): the kitchen section (档口) this screen shows, kept on this
@@ -1148,6 +1136,7 @@ import {
   type KitchenBoardView,
   type KitchenOrderLabel,
   type KitchenWorkItemDetailView,
+  kitchenWaitStart,
 } from "./kitchen-board.js";
 import { StaffSignInLink, StaffSwitchButton } from "./StaffSession.js";
 import { floorServerProblemHeading, kitchenServerProblemText } from "./failure-words.js";
@@ -1469,7 +1458,7 @@ function WorkCard({
 }) {
   const age = Math.max(
     0,
-    Math.floor((Date.parse(ageAt ?? observedAt) - Date.parse(item.createdAt)) / 60_000),
+    Math.floor((Date.parse(ageAt ?? observedAt) - Date.parse(kitchenWaitStart(item))) / 60_000),
   );
   const allergenLabel = {
     None: t("No allergen cue"),
@@ -2453,8 +2442,14 @@ export function KitchenBoardScreen({
   );
   const arrivalLabels = [
     ...new Set(
+      // merchant-outage-recovery M120: only this screen's station, and only dishes not started.
       screenLines
-        .filter((item) => arrivals.includes(kitchenLineKey(item)))
+        .filter(
+          (item) =>
+            arrivals.includes(kitchenLineKey(item)) &&
+            (activeStation === "All" || item.stationLabel === activeStation) &&
+            waitingToBeMade(item),
+        )
         .map((item) => kitchenOrderLabel(item)),
     ),
   ];
@@ -2710,6 +2705,8 @@ export function KitchenBoardScreen({
           onRing={() => onRing?.()}
         />
         {pauseOrdering}
+        {/* merchant-outage-recovery M68: a tap still waiting after a few seconds says so. */}
+        <SlowWaitNotice busy={(pendingLines?.size ?? 0) > 0} />
         {workspaceFrame ? null : filterToggle}
         {!stale && readOnly && !(view.operatorStatus === "Named") ? (
           <KitchenBoardLock
@@ -3243,6 +3240,9 @@ export function KitchenWorkItemScreen({
   const queueState = restoredQueueScope(location.state);
   const readOnly = view.freshnessStatus !== "Fresh" || view.operatorStatus !== "Named";
   const milestones = [
+    ...(view.item.placedAt === undefined
+      ? []
+      : [{ label: t("Order placed"), at: view.item.placedAt }]),
     { label: t("Work item created"), at: view.item.createdAt },
     ...(view.item.execution?.acceptedAt
       ? [{ label: t("Taken by the kitchen"), at: view.item.execution.acceptedAt }]
@@ -3426,49 +3426,15 @@ function KitchenBoardContent(
     manualRefresh.current = true;
     setRevision((value) => value + 1);
   };
-  const [soundOn, setSoundOn] = useState(false);
+  // WP-2423 Q33: this display remembers that the cook wanted sound (alert-sound.ts).
+  const {
+    soundOn,
+    soundResumes,
+    toggle: toggleSound,
+    audio,
+  } = useRememberedAlertSound(KITCHEN_SOUND_KEY);
   const soundOnRef = useRef(soundOn);
   soundOnRef.current = soundOn;
-  // WP-2423 Q33: this display remembers that the cook wanted sound. Browsers only allow audio
-  // after a tap, so after a reload the sound comes back at the next tap anywhere on the board.
-  const [soundResumes, setSoundResumes] = useState(() => storedKitchenSound());
-  const audio = useRef<AudioContext | null>(null);
-  const startAudio = () => {
-    // Created inside the operator's tap so the browser allows it to play later.
-    try {
-      const Audio = (globalThis as { AudioContext?: typeof AudioContext }).AudioContext;
-      audio.current ??= Audio ? new Audio() : null;
-      void audio.current?.resume().catch(() => undefined);
-    } catch {
-      audio.current = null;
-    }
-  };
-  const toggleSound = () => {
-    setSoundResumes(false);
-    setSoundOn((value) => {
-      const next = !value;
-      storeKitchenSound(next);
-      if (next) {
-        startAudio();
-        if (audio.current) playKitchenChime(audio.current);
-      }
-      return next;
-    });
-  };
-  useEffect(() => {
-    if (!soundResumes || typeof document === "undefined") return;
-    const resume = () => {
-      startAudio();
-      setSoundResumes(false);
-      setSoundOn(true);
-    };
-    document.addEventListener("pointerdown", resume, { once: true, capture: true });
-    document.addEventListener("keydown", resume, { once: true, capture: true });
-    return () => {
-      document.removeEventListener("pointerdown", resume, { capture: true });
-      document.removeEventListener("keydown", resume, { capture: true });
-    };
-  }, [soundResumes]);
   const load = useCallback(() => client.loadQueue().then(parseKitchenBoardView), [client]);
   const state = useLoad(load, t("queue:{revision}", { revision: revision }), true);
   const stale = state.kind === "Found" ? state.stale : undefined;
