@@ -485,6 +485,38 @@ it("role presets: edit, approve alone, remove, create, upgrade, restore and the 
         send("ana", "Create", null, { draft: { ...blank, displayName: "Prep Cook " } }),
         refused("NameTaken"),
       );
+      // Two people creating the same name at the same moment: exactly one role takes it.
+      const together = await Promise.allSettled(
+        [0, 1, 2].map(() =>
+          send("ana", "Create", null, { draft: { ...blank, displayName: "Night lead" } }),
+        ),
+      );
+      assert.equal(together.filter((result) => result.status === "fulfilled").length, 1);
+      for (const result of together.filter((item) => item.status === "rejected"))
+        assert.ok(refused("NameTaken")(result.reason));
+      assert.equal(
+        (
+          await admin.query(
+            "SELECT count(DISTINCT role_id)::int n FROM bop_permission.role_administration_version WHERE store_id=$1 AND display_name='Night lead'",
+            [storeA],
+          )
+        ).rows[0].n,
+        1,
+      );
+      // Two drafts renamed to the same name at the same moment: exactly one keeps it.
+      const bars = [];
+      for (const displayName of ["Bar one", "Bar two"])
+        bars.push(
+          (await send("ana", "Create", null, { draft: { ...blank, displayName } })).roleReference,
+        );
+      const renamed = await Promise.allSettled(
+        bars.map((bar) =>
+          send("ana", "SaveDraft", bar, { draft: { ...blank, displayName: "Bar lead" } }),
+        ),
+      );
+      assert.equal(renamed.filter((result) => result.status === "fulfilled").length, 1);
+      for (const result of renamed.filter((item) => item.status === "rejected"))
+        assert.ok(refused("NameTaken")(result.reason));
       const prep = created.roleReference;
       assert.match(
         (await admin.query("SELECT role_code FROM bop_permission.role WHERE role_id=$1", [prep]))

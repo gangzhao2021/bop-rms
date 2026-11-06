@@ -106,6 +106,14 @@ export class MerchantRoleAdministrationError extends Error {
     this.name = "MerchantRoleAdministrationError";
   }
 }
+/** Another naming at this Store is being saved: the whole run is retried ("busy, try again"). */
+class RoleNamingBusy extends Error {
+  readonly code = "TENANT_DATABASE_TRANSACTION_CONFLICT";
+  constructor() {
+    super("role naming busy");
+    this.name = "RoleNamingBusy";
+  }
+}
 const fail = (code: MerchantRoleAdministrationError["code"]): never => {
   throw new MerchantRoleAdministrationError(code);
 };
@@ -720,6 +728,22 @@ export function createMerchantRoleAdministration(options: {
             const current = role?.record ?? null;
             // A name is unique among this Store's roles in use or waiting (removed ones keep theirs).
             if (command.draft !== null) {
+              // One naming at a time per Store, so two Creates or Revises never commit one name.
+              // The run already holds the Brand's permission fence shared (authorization) and a
+              // Create later takes it exclusive, so waiting here would deadlock: a second naming
+              // backs off instead, and its rerun reads the first one's name.
+              const free = (
+                await asRoleTx(tx).query(
+                  "SELECT pg_try_advisory_xact_lock(hashtextextended($1,0)) locked",
+                  [
+                    "bop_permission.role_name:" +
+                      ownerScope.brandReference +
+                      ":" +
+                      ownerScope.storeReference,
+                  ],
+                )
+              ).rows[0]?.locked;
+              if (free !== true) throw new RoleNamingBusy();
               const name = command.draft.displayName;
               const others = (await listRoleAdministration(asRoleTx(tx), ownerScope, now)).filter(
                 (other) =>

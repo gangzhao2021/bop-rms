@@ -139,7 +139,12 @@ const roleView = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 function setup() {
-  const tx = { query: vi.fn() };
+  // The Store's naming lock is free unless a test says otherwise.
+  const tx = {
+    query: vi.fn(async (_sql: string, _values?: unknown) => ({
+      rows: [{ locked: true }] as unknown[],
+    })),
+  };
   const allowed = vi.fn(async () => true);
   const authorizeActions = vi.fn(
     async (actions: readonly string[]) =>
@@ -286,6 +291,15 @@ describe("WP-2423 role administration authorization", () => {
     ).rejects.toMatchObject({ code: "NameTaken" });
     expect(d.execute).not.toHaveBeenCalled();
   });
+  it("a naming while another is being saved at the Store backs off and is retried, never waited on", async () => {
+    const f = setup();
+    f.tx.query.mockResolvedValue({ rows: [{ locked: false }] });
+    await expect(
+      f.service.command({ ...f.input, body: command({ operation: "SaveDraft", draft }) }),
+    ).rejects.toMatchObject({ code: "TENANT_DATABASE_TRANSACTION_CONFLICT" });
+    expect(f.tx.query.mock.calls[0]?.[0]).toMatch(/pg_try_advisory_xact_lock/u);
+    expect(d.list).not.toHaveBeenCalled();
+  }, 10_000);
   const waitingChange = (submittedBy: string) => {
     const pending = {
       ...record,
