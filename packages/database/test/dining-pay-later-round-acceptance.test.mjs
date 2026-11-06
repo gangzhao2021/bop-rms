@@ -215,6 +215,11 @@ it("a table comped in full owes nothing and closes without a payment", () =>
 // difference is recorded by the system rule as the bill's tax rounding, paid exactly, part by part.
 it("a table's bill is charged its whole-bill tax; the rounding is recorded and paid exactly", () =>
   journey("TaxRounding"));
+// v15 2026-11-06 (Fireside Table 2): a guest's phone payment that was cancelled took no money, so
+// it never fixes the bill's tax rounding: a comp after it still gives the whole-bill tax, and the
+// panel, checkout, the Order's detail, the payment and the reports agree to the cent.
+it("a cancelled phone payment never fixes the bill's tax rounding; a later comp still rounds", () =>
+  journey("TaxRoundingCancelled"));
 
 // WP-2423 item 8 ④ DEC-DINE-IN-SPLIT-BILL: the table splits the bill evenly in three; each part is
 // paid once, by its own method, with its own tip and cash rounding; a whole-table payment, a
@@ -1054,33 +1059,35 @@ async function journey(journeyEnding) {
             ? "wp2423_plwo"
             : ending === "TaxRounding"
               ? "wp2423_pltaxr"
-              : ending === "Comped"
-                ? "wp2423_plcomp"
-                : ending === "CompedWhole"
-                  ? "wp2423_plcwhole"
-                  : ending === "MemberPointsOnline"
-                    ? "wp2423_plmembon"
-                    : ending === "MemberPointsPickup"
-                      ? "wp2423_plmembpk"
-                      : ending === "MemberPoints"
-                        ? "wp2423_plmember"
-                        : ending === "MemberPointsSplit"
-                          ? "wp2423_plmembsp"
-                          : ending === "MemberPointsWrittenOff"
-                            ? "wp2423_plmembwo"
-                            : ending === "PaidSplit"
-                              ? "wp2423_plsplit"
-                              : ending === "SplitWrittenOff"
-                                ? "wp2423_plsplwo"
-                                : ending === "Held"
-                                  ? "wp2423_plheld"
-                                  : ending === "TipsOff"
-                                    ? "wp2423_pltips"
-                                    : ending === "Moved"
-                                      ? "wp2423_plmove"
-                                      : ending === "Merged"
-                                        ? "wp2423_plmerge"
-                                        : "wp2423_plon",
+              : ending === "TaxRoundingCancelled"
+                ? "wp2423_pltaxrc"
+                : ending === "Comped"
+                  ? "wp2423_plcomp"
+                  : ending === "CompedWhole"
+                    ? "wp2423_plcwhole"
+                    : ending === "MemberPointsOnline"
+                      ? "wp2423_plmembon"
+                      : ending === "MemberPointsPickup"
+                        ? "wp2423_plmembpk"
+                        : ending === "MemberPoints"
+                          ? "wp2423_plmember"
+                          : ending === "MemberPointsSplit"
+                            ? "wp2423_plmembsp"
+                            : ending === "MemberPointsWrittenOff"
+                              ? "wp2423_plmembwo"
+                              : ending === "PaidSplit"
+                                ? "wp2423_plsplit"
+                                : ending === "SplitWrittenOff"
+                                  ? "wp2423_plsplwo"
+                                  : ending === "Held"
+                                    ? "wp2423_plheld"
+                                    : ending === "TipsOff"
+                                      ? "wp2423_pltips"
+                                      : ending === "Moved"
+                                        ? "wp2423_plmove"
+                                        : ending === "Merged"
+                                          ? "wp2423_plmerge"
+                                          : "wp2423_plon",
     },
     async (context) => {
       const admin = new Client(context.clientConfig);
@@ -3088,7 +3095,11 @@ async function journey(journeyEnding) {
           );
         }
         // The Comped ending keeps round 2 on the bill: its one dish is comped instead (v15 case).
-        if (ending !== "Comped" && ending !== "TaxRounding" && !ending.startsWith("MemberPoints")) {
+        if (
+          ending !== "Comped" &&
+          !ending.startsWith("TaxRounding") &&
+          !ending.startsWith("MemberPoints")
+        ) {
           const removeOperation = fresh();
           const beforeRemoval = await versionNow();
           // Without the cancel permission nothing is written.
@@ -3166,7 +3177,9 @@ async function journey(journeyEnding) {
         // Round 2's only dish came off: the whole round is off the bill (it owes nothing).
         assert.equal(items2.length, 1);
         const removedMinor =
-          ending === "Comped" || ending === "TaxRounding" || ending.startsWith("MemberPoints")
+          ending === "Comped" ||
+          ending.startsWith("TaxRounding") ||
+          ending.startsWith("MemberPoints")
             ? 0n
             : items2[0].pricing.total.amountMinor;
         // Paying before checkout started is refused: rounds can still be added.
@@ -3179,7 +3192,11 @@ async function journey(journeyEnding) {
         const round1Minor = items1.reduce((sum, item) => sum + item.pricing.total.amountMinor, 0n);
         const round2Minor =
           items2.reduce((sum, item) => sum + item.pricing.total.amountMinor, 0n) - removedMinor;
-        if (ending !== "Comped" && ending !== "TaxRounding" && !ending.startsWith("MemberPoints"))
+        if (
+          ending !== "Comped" &&
+          !ending.startsWith("TaxRounding") &&
+          !ending.startsWith("MemberPoints")
+        )
           assert.equal(round2Minor, 0n);
         const open = await bill();
         assert.equal(open.paymentTiming, "PayLater");
@@ -3563,7 +3580,7 @@ async function journey(journeyEnding) {
           const served = await progress();
           if (
             ending !== "Comped" &&
-            ending !== "TaxRounding" &&
+            !ending.startsWith("TaxRounding") &&
             !ending.startsWith("MemberPoints") &&
             ending !== "Merged" &&
             cooked === orderReference
@@ -4638,6 +4655,150 @@ async function journey(journeyEnding) {
           assert.equal(closed.status, "Committed");
           assert.equal((await closing(server, "Finalize")).phase, "Closed");
           await detailAgreesWithCheckout(lines[0].rounds);
+        }
+
+        /**
+         * v15 2026-11-06 (Fireside Table 2): a guest started paying the whole table on their phone
+         * and it was cancelled — no money moved. A manager then took $0.50 off each dish, which
+         * makes the whole-bill tax 1¢ more than the rounds were charged. The cancelled attempt must
+         * not fix the rounding at what it was (0): checkout, the Orders panel's "To pay after
+         * comps", the Order's detail and the guest's bill all read the same figure, the card
+         * machine payment records it as a new rounding version, and the reports agree.
+         */
+        async function taxRoundingCancelledEnding() {
+          await cookAndServeRound1([round1, round2]);
+          const dish1 = String(items1[0].orderItemReference),
+            dish2 = String(items2[0].orderItemReference);
+          const recorded = () =>
+            rows(
+              "SELECT version,total_minor::text AS total FROM rms_ordering.order_tax_rounding_adjustment WHERE bill_order_id=$1 ORDER BY version",
+              [orderReference],
+            );
+          const before = await bill();
+          assert.equal(before.taxRoundingMinor, "0");
+          // A guest starts paying the whole table on their phone (TEST Provider stand-in), then
+          // gives up: the Provider cancels it. Nothing was charged.
+          const intents = new Map();
+          const answer = (request, intent) => ({
+            kind: "Snapshot",
+            context: request.context,
+            providerIntentReference: intent.reference,
+            providerTransactionReference: null,
+            paymentMethod: "OnlineCard",
+            captureMode: "Automatic",
+            status: intent.status,
+            requestedAmount: intent.amount,
+            authorizedAmount: { amountMinor: 0n, currencyCode: "CAD" },
+            capturedAmount: { amountMinor: 0n, currencyCode: "CAD" },
+            refundedAmount: { amountMinor: 0n, currencyCode: "CAD" },
+            observedAt: new Date().toISOString(),
+            evidenceDigest: sha256("intent:" + intent.reference + ":" + intent.status),
+          });
+          const phone = createDiningTableOnlinePayments({
+            scope: ownerScope,
+            providerAccountReference: provider,
+            environment: "Test",
+            provider: {
+              async createIntent(request) {
+                const intent = intents.get(request.idempotencyKey) ?? {
+                  reference: "pi_TESTTAXC" + String(intents.size + 1).padStart(4, "0"),
+                  status: "RequiresCustomerAction",
+                  amount: request.amount,
+                };
+                intents.set(request.idempotencyKey, intent);
+                intents.set(intent.reference, intent);
+                return answer(request, intent);
+              },
+              async retrieveIntent(request) {
+                return answer(request, intents.get(String(request.providerIntentReference)));
+              },
+              async cancelIntent(request) {
+                const intent = intents.get(String(request.providerIntentReference));
+                intent.status = "Cancelled";
+                return answer(request, intent);
+              },
+            },
+            transactions: transactions(),
+            now,
+            nextReference: fresh,
+          });
+          const guest = {
+            diningSessionReference: sessionReference,
+            guestSessionReference: guestSession,
+            allowed: async () => true,
+          };
+          const paying = await phone.start(guest, {
+            operationReference: fresh(),
+            tip: { kind: "None" },
+          });
+          assert.equal(paying.attempt.totalMinor, before.owed.totalMinor);
+          const stopped = await phone.stop(guest, id(0x700));
+          assert.equal(stopped.attempt, null);
+          assert.equal((await bill()).onlinePayment.status, "Cancelled");
+          // $0.50 off each dish (as in the TaxRounding case): the whole-bill tax is now 1¢ more.
+          for (const dish of [dish1, dish2])
+            await comp(manager, {
+              orderItemReferences: [dish],
+              kind: "Amount",
+              amountOffMinor: "50",
+              reasonCode: "GOODWILL",
+            });
+          const after = await bill();
+          const taxable = after.rounds.reduce((sum, r) => sum + BigInt(r.subtotalMinor), 0n);
+          const charged = after.rounds.reduce(
+            (sum, r) => sum + BigInt(r.taxMinor) - BigInt(r.taxRoundingMinor),
+            0n,
+          );
+          assert.equal((taxable * 13n + 50n) / 100n - charged, 1n);
+          assert.equal(after.taxRoundingMinor, "1", "the cancelled attempt fixed the rounding");
+          assert.equal(after.consistent, true);
+          const owed = after.owed.totalMinor;
+          assert.equal(BigInt(owed), taxable + (taxable * 13n + 50n) / 100n);
+          // The Orders panel's "To pay after comps" and the Order's detail read the same figure.
+          const detail = await createPersistentMerchantOrderQueue({
+            persistence: persistenceOf(server),
+            quoteVersion: 1,
+            acceptanceConfigured: true,
+          })({ sessionCookie: server.sessionCookie, afterOrderReference: null, orderReference });
+          const comps = detail.items[0].batches
+            .flatMap((batch) => batch.compedItems)
+            .reduce((sum, item) => sum + BigInt(item.amountMinor), 0n);
+          assert.equal(detail.items[0].tableBill.totalMinor, owed);
+          assert.equal(detail.lines.totals.taxRounding.amountMinor, "1");
+          assert.equal((BigInt(detail.lines.totals.total.amountMinor) - comps).toString(), owed);
+          // The guest's own phone bill too.
+          await pageFacts();
+          // Paid on the card machine: it records the rounding (version 1, 1¢) and takes exactly it.
+          const paid = await settleWith(server, {
+            method: "CardMachine",
+            tip: { kind: "None" },
+            tenderedMinor: null,
+            slipReference: "TEST 0003",
+          });
+          assert.equal(paid.status, "Recorded");
+          assert.equal(paid.bill.settlement.roundsMinor, owed);
+          assert.deepEqual(
+            (await recorded()).map((row) => [row.version, row.total]),
+            [[1, "1"]],
+          );
+          const reported = await transactions().run((tx) =>
+            listOrdersTaxRoundingLines(tx, scope, [orderReference]),
+          );
+          assert.equal(
+            reported.reduce((sum, line) => sum + line.amountMinor, 0n),
+            1n,
+          );
+          // Paid: the detail still reads what the payment took.
+          const paidDetail = await createPersistentMerchantOrderQueue({
+            persistence: persistenceOf(server),
+            quoteVersion: 1,
+            acceptanceConfigured: true,
+          })({ sessionCookie: server.sessionCookie, afterOrderReference: null, orderReference });
+          assert.equal(paidDetail.lines.totals.taxRounding.amountMinor, "1");
+          assert.equal(
+            (BigInt(paidDetail.lines.totals.total.amountMinor) - comps).toString(),
+            owed,
+          );
         }
 
         async function compedWholeEnding() {
@@ -5887,6 +6048,11 @@ async function journey(journeyEnding) {
         }
         if (ending === "TaxRounding") {
           await taxRoundingEnding();
+          await assertSalesCountEveryRoundOnce();
+          return;
+        }
+        if (ending === "TaxRoundingCancelled") {
+          await taxRoundingCancelledEnding();
           await assertSalesCountEveryRoundOnce();
           return;
         }

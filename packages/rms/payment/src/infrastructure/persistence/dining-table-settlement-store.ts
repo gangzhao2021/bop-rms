@@ -397,6 +397,15 @@ export interface DiningTableOnlinePaymentRecord {
     readonly recordedAt: string;
   };
 }
+/**
+ * WP-2423 DEC-TAX-WHOLE-RECEIPT: whether a guest's online attempt holds the table's bill as it was
+ * when it started — while it is open (no Provider outcome yet) or once it captured (its settlement
+ * follows). A Failed or Cancelled attempt took no money, so the bill (its tax rounding, merging,
+ * rounds waiting for staff) moves on as if it never started.
+ */
+export const onlinePaymentHoldsBill = (
+  payment: Pick<DiningTableOnlinePaymentRecord, "outcome">,
+): boolean => payment.outcome === null || payment.outcome.status === "Captured";
 const onlinePaymentSelect = `SELECT p.online_payment_id::text AS payment,p.tenant_id::text AS tenant,
  p.operation_id::text AS operation,p.intent_digest,p.dining_session_id::text AS session,p.order_id::text AS "order",
  p.guest_session_id::text AS guest,p.rounds_minor::text AS rounds,p.tip_minor::text AS tip,

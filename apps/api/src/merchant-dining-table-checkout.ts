@@ -31,6 +31,7 @@ import {
   createPostgresDiningTableSettlementStore,
   DiningTableSettlementError,
   DiningTableSettlementStoreError,
+  onlinePaymentHoldsBill,
   splitDiningTableBill,
   type DiningTableSplitDish,
   type DiningTableSettlementRecord,
@@ -433,7 +434,9 @@ export async function readDiningTableBill(
   // a share of it on each round. Recorded by the system rule before a payment is taken, and the
   // recorded version is kept once anything is paid (bills paid before the rule have none).
   let recordedRounding = await loadBillTaxRounding(tx, owner, orderReference);
-  const anyPayment = settlements.length > 0 || onlinePayments.length > 0 || writeOff !== undefined;
+  // A Failed or Cancelled online attempt took no money: it never fixes the rounding.
+  const anyPayment =
+    settlements.length > 0 || onlinePayments.some(onlinePaymentHoldsBill) || writeOff !== undefined;
   let taxRoundingLines: readonly { orderBatchReference: string; amountMinor: bigint }[] =
     recordedRounding?.lines ?? [];
   if (!anyPayment) {
@@ -879,7 +882,7 @@ export async function readOrderTaxRoundingShare(
   // The same test as readDiningTableBill: anything paid, being paid online, or written off.
   const anyPayment =
     (await payments.listByOrders(tx, [billOrder])).length > 0 ||
-    (await payments.listOnlinePaymentsByOrders(tx, [billOrder])).length > 0 ||
+    (await payments.listOnlinePaymentsByOrders(tx, [billOrder])).some(onlinePaymentHoldsBill) ||
     (await payments.listWriteOffsByOrders(tx, [billOrder])).length > 0;
   if (anyPayment)
     return ((await loadBillTaxRounding(tx, owner, billOrder))?.lines ?? [])

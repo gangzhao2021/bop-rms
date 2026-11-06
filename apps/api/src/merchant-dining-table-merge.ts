@@ -262,7 +262,10 @@ export function createMerchantDiningTableMerge(options: {
               if (
                 entry.settlement !== null ||
                 entry.writeOff !== null ||
-                entry.onlinePayment !== null ||
+                // A guest's attempt that failed or was cancelled took nothing (DEC-TAX-WHOLE-RECEIPT).
+                (entry.onlinePayment !== null &&
+                  (entry.onlinePayment.status === "InProgress" ||
+                    entry.onlinePayment.status === "Captured")) ||
                 entry.split !== null ||
                 entry.rounds.some((round) => round.paid)
               )

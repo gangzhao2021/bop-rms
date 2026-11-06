@@ -29,6 +29,7 @@ import {
   createPostgresCardMachinePaymentStore,
   createPostgresDiningTableSettlementStore,
   listStoreOrderBatchesPaidOnline,
+  onlinePaymentHoldsBill,
 } from "@rms/payment";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
@@ -361,7 +362,10 @@ export function createMerchantDiningTables(options: {
               ? []
               : [
                   ...(await tablePayments.listByOrders(tx as never, billOrders)),
-                  ...(await tablePayments.listOnlinePaymentsByOrders(tx as never, billOrders)),
+                  // A failed or cancelled guest attempt took nothing: the table can still merge.
+                  ...(
+                    await tablePayments.listOnlinePaymentsByOrders(tx as never, billOrders)
+                  ).filter(onlinePaymentHoldsBill),
                   ...(await tablePayments.listWriteOffsByOrders(tx as never, billOrders)),
                   ...(await tablePayments.listSplitPlans(tx as never, billOrders)).filter(
                     (plan) => plan.mode !== "Whole",
