@@ -8217,4 +8217,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "asked by you, you may approve it on your own": "由你申请，你可以自行批准",
   "asked by {name}": "{name} 申请",
   "Open their page": "打开其页面",
+  "Staff roles waiting for approval could not be loaded": "无法载入等待批准的员工角色",
+  "Loading approvals": "正在载入待批准事项",
+  "Checking staff roles waiting for approval…": "正在检查等待批准的员工角色…",
+  "No staff role is waiting for your approval.": "没有等待你批准的员工角色。",
 });

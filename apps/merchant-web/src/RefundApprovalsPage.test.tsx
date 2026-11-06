@@ -1,5 +1,12 @@
-import { expect, it } from "vitest";
-import { waitingText } from "./RefundApprovalsPage.js";
+import { renderToStaticMarkup } from "react-dom/server";
+import { MemoryRouter } from "react-router";
+import { describe, expect, it } from "vitest";
+import { noAccessHeading } from "./access-denied.js";
+import {
+  StaffRoleRequestsSection,
+  waitingText,
+  type StaffRoleRead,
+} from "./RefundApprovalsPage.js";
 
 it("Owner 2026-10-25: says how long a refund has waited, in the unit that reads naturally", () => {
   const at = Date.parse("2026-10-25T12:00:00.000Z");
@@ -10,4 +17,52 @@ it("Owner 2026-10-25: says how long a refund has waited, in the unit that reads 
   expect(waitingText(ago(10 * 24 * 60 + 30), at)).toBe("Waiting 10 days");
   // A clock slightly behind the server never reads as negative.
   expect(waitingText(new Date(at + 60_000).toISOString(), at)).toBe("Waiting 0 min");
+});
+
+describe("WP-2423 M07: staff roles on Approvals for a viewer without refund approval", () => {
+  const render = (read: StaffRoleRead, refundsDenied = true) =>
+    renderToStaticMarkup(
+      <MemoryRouter>
+        <StaffRoleRequestsSection
+          read={read}
+          refundsDenied={refundsDenied}
+          onRetry={() => undefined}
+        />
+      </MemoryRouter>,
+    );
+  it("says it is still loading, never 'no access'", () => {
+    const html = render({ state: "Loading" });
+    expect(html).toContain("Checking staff roles waiting for approval");
+    expect(html).not.toContain(noAccessHeading);
+  });
+  it("shows a failed read as could-not-load with a retry, never 'no access'", () => {
+    const html = render({ state: "Unavailable" });
+    expect(html).toContain("could not be loaded");
+    expect(html).toMatch(/<button[^>]*>Try again<\/button>/u);
+    expect(html).not.toContain(noAccessHeading);
+  });
+  it("says there is nothing to approve when the read is empty, not a blank page", () => {
+    expect(render({ state: "Ready", requests: [] })).toContain("Nothing to approve");
+    // With refund approval the refund section says it; nothing is shown twice.
+    expect(render({ state: "Ready", requests: [] }, false)).toBe("");
+    expect(render({ state: "Loading" }, false)).toBe("");
+  });
+  it("lists a waiting role with a link to the person's page", () => {
+    const html = render({
+      state: "Ready",
+      requests: [
+        {
+          actorReference: "0190a5a0-0000-7000-8000-000000000001",
+          person: "Mia",
+          roleName: "Cashier",
+          scope: "Store",
+          requestedBy: "You",
+          requestedAt: "2026-11-06T12:00:00.000Z",
+          action: "ApproveAlone",
+        },
+      ],
+    });
+    expect(html).toContain("Staff roles waiting for you");
+    expect(html).toContain("/app/organization/users/0190a5a0-0000-7000-8000-000000000001");
+  });
 });

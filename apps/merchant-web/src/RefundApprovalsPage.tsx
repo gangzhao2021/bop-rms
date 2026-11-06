@@ -25,7 +25,11 @@ import { createCurrentOrderQueueClient } from "./current-order-queue-client.js";
 import { FullSignInPrompt } from "./FullSignInPrompt.js";
 import { needsFullSignIn } from "./full-sign-in.js";
 import type { SoleOperatorStatus } from "./refund-approval-client.js";
-import { createStaffPageClient, type StaffRoleRequestView } from "./staff-administration-pages.js";
+import {
+  createStaffPageClient,
+  StaffPageError,
+  type StaffRoleRequestView,
+} from "./staff-administration-pages.js";
 
 const pollIntervalMs = 3000,
   pollLimit = 40;
@@ -676,44 +680,93 @@ function ApprovalCard({
   );
 }
 
+/** WP-2423 M07: the staff-role read on Approvals; an outage is never shown as "no access". */
+export type StaffRoleRead =
+  | { readonly state: "Loading" }
+  | { readonly state: "Ready"; readonly requests: readonly StaffRoleRequestView[] }
+  | { readonly state: "Denied" }
+  | { readonly state: "Unavailable" };
+
 /**
  * WP-2423 M07: staff roles waiting for the signed-in person — another person's request they may
  * decide, or their own they may approve alone now (sole operator). Each row opens the person's
- * page, where the decision is made. Hidden when nothing waits or the read fails (null).
+ * page, where the decision is made. A refused read is Denied; any other failure is Unavailable.
  */
 export function useStaffRoleRequests(
   csrf: string,
   refresh: number,
   fetcher?: typeof fetch,
-): readonly StaffRoleRequestView[] | null {
-  const [requests, setRequests] = useState<readonly StaffRoleRequestView[] | null>(null);
+): StaffRoleRead {
+  const [read, setRead] = useState<StaffRoleRead>({ state: "Loading" });
   useEffect(() => {
     let current = true;
+    setRead({ state: "Loading" });
     void createStaffPageClient(csrf, fetcher ?? fetch)
       .roleRequests()
-      .then((value) => {
-        if (current) setRequests(value);
+      .then((requests) => {
+        if (current) setRead({ state: "Ready", requests });
       })
-      .catch(() => {
-        if (current) setRequests(null);
+      .catch((error: unknown) => {
+        if (!current) return;
+        setRead(
+          error instanceof StaffPageError && error.code === "PermissionDenied"
+            ? { state: "Denied" }
+            : { state: "Unavailable" },
+        );
       });
     return () => {
       current = false;
     };
   }, [csrf, refresh, fetcher]);
-  return requests;
+  return read;
 }
+
+/**
+ * WP-2423 M07: the staff-role part of Approvals. With refund approval the refund section carries
+ * the page's loading and empty states, so only waiting roles or a failed read show here. Without
+ * refund approval (a Store Manager who approves roles) this section is the page: loading, a
+ * failed read with a retry, "Nothing to approve", or the waiting roles.
+ */
 export function StaffRoleRequestsSection({
-  requests,
+  read,
+  refundsDenied,
+  onRetry,
 }: {
-  readonly requests: readonly StaffRoleRequestView[] | null;
+  readonly read: StaffRoleRead;
+  readonly refundsDenied: boolean;
+  readonly onRetry: () => void;
 }) {
-  if (requests === null || requests.length === 0) return null;
+  if (read.state === "Denied") return null;
+  if (read.state === "Unavailable")
+    return (
+      <StatePanel
+        heading={t("Staff roles waiting for approval could not be loaded")}
+        tone="error"
+        status
+      >
+        <p>{t("Check your connection, then try again.")}</p>
+        <button type="button" onClick={onRetry}>
+          {t("Try again")}
+        </button>
+      </StatePanel>
+    );
+  if (read.state === "Loading")
+    return refundsDenied ? (
+      <StatePanel heading={t("Loading approvals")} status>
+        <p>{t("Checking staff roles waiting for approval…")}</p>
+      </StatePanel>
+    ) : null;
+  if (read.requests.length === 0)
+    return refundsDenied ? (
+      <StatePanel heading={t("Nothing to approve")} status>
+        <p>{t("No staff role is waiting for your approval.")}</p>
+      </StatePanel>
+    ) : null;
   return (
     <section aria-labelledby="role-approvals-heading" className="role-approvals">
       <h2 id="role-approvals-heading">{t("Staff roles waiting for you")}</h2>
       <ul className="role-approval-list">
-        {requests.map((item) => (
+        {read.requests.map((item) => (
           <li key={item.actorReference + ":" + item.roleName + ":" + item.requestedAt}>
             <strong>{item.person}</strong> · {systemText(item.roleName)}
             {item.scope === "Brand" ? t(" (all Stores of the Brand)") : ""} ·{" "}
@@ -721,7 +774,9 @@ export function StaffRoleRequestsSection({
               ? t("asked by you, you may approve it on your own")
               : t("asked by {name}", { name: item.requestedBy })}{" "}
             <StaffTime instant={item.requestedAt} /> ·{" "}
-            <Link to={"/app/organization/users/" + item.actorReference}>{t("Open their page")}</Link>
+            <Link to={"/app/organization/users/" + item.actorReference}>
+              {t("Open their page")}
+            </Link>
           </li>
         ))}
       </ul>
@@ -794,9 +849,13 @@ export function RefundApprovalsPage({
         </button>
       }
     >
-      <StaffRoleRequestsSection requests={roleRequests} />
+      <StaffRoleRequestsSection
+        read={roleRequests}
+        refundsDenied={state === "Denied"}
+        onRetry={reload}
+      />
       {/* A role approver without refund approval (a Store Manager) sees only the staff roles. */}
-      {state === "Denied" && roleRequests !== null ? null : (
+      {state === "Denied" && roleRequests.state !== "Denied" ? null : (
         <section aria-labelledby="refund-approvals-heading" data-screen-id="APPROVAL-INBOX">
           <h2 id="refund-approvals-heading">{t("Refunds awaiting approval")}</h2>
           {/* Owner 2026-10-25: one line; the rule itself behind "Why approval?". */}
