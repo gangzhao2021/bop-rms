@@ -20,7 +20,7 @@ import {
 } from "@rms/catalog";
 import {
   listOptionRecipeChanges,
-  lockOptionRecipeTables,
+  takeOptionRecipeFence,
   OptionRecipeChangeError,
   optionRecipesCovered,
   parseOptionRecipeChangeContent,
@@ -337,7 +337,7 @@ export function createMerchantOptionRecipes(options: {
   /**
    * What publishing a change asks about its reviewers, answered in this transaction. Each answer
    * is remembered for the rest of the transaction: a dish save publishes many changes by the same
-   * reviewers, and these reads have no business inside its hold on the recipe tables.
+   * reviewers, and these reads have no business inside its hold on the recipe fence.
    */
   function publishChecks(tx: Tx, s: Scope, at: string) {
     const { gateInput, singleStore } = reviewGates(tx, s, at);
@@ -698,7 +698,7 @@ export function createMerchantOptionRecipes(options: {
             );
             if (reviewing && !s.permissions.mayReview) fail("PermissionDenied");
             if (!s.permissions.mayPublish) fail("PermissionDenied");
-            // Every read that can wait comes before the hold on the recipe tables. Publishing asks
+            // Every read that can wait comes before the hold on the Brand's recipe fence. Publishing asks
             // these again, of the same people, and gets the answers remembered here.
             const { singleStore } = reviewGates(tx, s, at);
             const listingMode = reviewing ? await singleStore(s.actor) : null;
@@ -722,7 +722,7 @@ export function createMerchantOptionRecipes(options: {
             const items = adding
               ? (await recipeIngredientItems(tx, s, at, { staffDeclared: true })).facts
               : new Map();
-            await lockOptionRecipeTables(rtx(tx));
+            await takeOptionRecipeFence(rtx(tx), scope.brandReference);
             for (const { row, change, save } of plan) {
               const key = row.target.optionReference.slice(-12);
               let version = change?.changeVersionReference ?? null;
@@ -920,7 +920,7 @@ export function createMerchantOptionRecipes(options: {
         const checks = publishChecks(tx, s, at);
         await checks.reviewersAuthorized([s.actor]);
         await checks.singleStoreListingEffective(s.actor);
-        await lockOptionRecipeTables(rtx(tx));
+        await takeOptionRecipeFence(rtx(tx), scope.brandReference);
         for (const { target, change } of plan) {
           const key = derivedReference(
             input.operationReference,

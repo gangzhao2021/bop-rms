@@ -67,7 +67,7 @@ const scopeSql = "SELECT set_config('bop.brand_id',$1,true),set_config('bop.stor
  * timeout is restored afterwards.
  */
 const RECIPE_WRITER_FENCE_WAIT = "300ms";
-async function takeRecipeReferenceFenceBounded(
+export async function takeRecipeReferenceFenceBounded(
   tx: RecipeAuthoringTransaction,
   brand: string,
 ): Promise<void> {

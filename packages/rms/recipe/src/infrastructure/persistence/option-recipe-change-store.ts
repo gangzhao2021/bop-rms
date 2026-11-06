@@ -16,7 +16,11 @@ import {
   type IngredientRequirement,
   type RecipeSnapshot,
 } from "../../domain/recipe.js";
-import type { RecipeAuthoringScope, RecipeAuthoringTransaction } from "./recipe-authoring-store.js";
+import {
+  takeRecipeReferenceFenceBounded,
+  type RecipeAuthoringScope,
+  type RecipeAuthoringTransaction,
+} from "./recipe-authoring-store.js";
 import { createPostgresRecipeModifierWriteStore } from "./recipe-modifier-write-store.js";
 import { createPostgresRecipePreparationContentStore } from "./recipe-preparation-content-store.js";
 
@@ -64,16 +68,19 @@ const iso = (value: unknown) =>
   value instanceof Date ? value.toISOString() : new Date(String(value)).toISOString();
 const scopeSql = "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)";
 /**
- * WP-2423 item 3: an option recipe write takes both tables at once, in the order every reader of
- * them asks. A publish holds ROW EXCLUSIVE on the modifier versions until it commits and its
- * kitchen content then asks SHARE on both, so two publishes would each wait for the other (a
- * deadlock, across merchants on this database). Taken first, they queue instead. Guests' orders and
- * kitchen intake take SHARE on the same tables with a 2 s lock timeout: writers keep the hold short.
+ * WP-2423 item 3 / DEC-MERCHANT-LOCK-SCOPE: an option recipe write takes its Brand's recipe fence
+ * (RecipeCatalogReferenceV1:<brand>) exclusive before the reads it writes from, the same bounded way
+ * as every Recipe writer: at once if free, else at most 300 ms, then 55P03 for the route's retry.
+ * Taken first, two publishes of one Brand queue instead of each holding rows the other's kitchen
+ * content then asks for; the a0_merchant_fence triggers on recipe and recipe_modifier_version take
+ * the same key on every row, so no write path skips it. Guests' orders and kitchen intake hold the
+ * key shared: they wait for this Brand's change to commit whole, and another Brand never waits.
  */
-const optionRecipeWriteLockSql =
-  "LOCK TABLE rms_recipe.recipe,rms_recipe.recipe_modifier_version IN SHARE ROW EXCLUSIVE MODE";
-export async function lockOptionRecipeTables(tx: RecipeAuthoringTransaction): Promise<void> {
-  await tx.query(optionRecipeWriteLockSql, []);
+export async function takeOptionRecipeFence(
+  tx: RecipeAuthoringTransaction,
+  brandReference: string,
+): Promise<void> {
+  await takeRecipeReferenceFenceBounded(tx, brandReference);
 }
 /** A stable UUIDv7-shaped reference derived from another one (keeps its timestamp). */
 export function derivedRecipeReference(base: string, purpose: string): string {
@@ -595,7 +602,7 @@ export async function saveOptionRecipeChange(
       fail("OPTION_RECIPE_CONFLICT");
     return { status: "AlreadyApplied", changeVersionReference: String(recorded.id) };
   }
-  await lockOptionRecipeTables(tx);
+  await takeOptionRecipeFence(tx, brand);
   const changeReference = derivedRecipeReference(
     input.target.bindingReference,
     "option-recipe-change:" + input.target.optionReference,
@@ -927,7 +934,7 @@ export async function publishOptionRecipeChange(
         }
       : {}),
   }));
-  await lockOptionRecipeTables(tx);
+  await takeOptionRecipeFence(tx, brand);
   await tx.query(scopeSql, [brand, ""]);
   const writer = createPostgresRecipeModifierWriteStore(runnerOf(tx), brand);
   const content = createPostgresRecipePreparationContentStore({

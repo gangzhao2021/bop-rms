@@ -8,6 +8,7 @@ import { menuOptionsWithoutRecipes } from "../../../apps/api/src/menu-option-gat
 import { MerchantOneStoreDishError } from "../../../apps/api/src/merchant-one-store-dishes.ts";
 import {
   createPostgresRecipeModifierSource,
+  createPostgresSubmissionRecipeDemandSource,
   listOptionRecipeChanges,
   optionRecipeCovered,
   optionRecipesCovered,
@@ -16,7 +17,7 @@ import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 import {
   createOneStoreMenuFixture,
   menuOwnerGrants,
-  optionRecipeWriteLock,
+  isRecipeFenceTake,
 } from "../test-support/one-store-menu-fixture.mjs";
 import {
   createPilotApiRole,
@@ -35,8 +36,9 @@ const printMeasured = () => process.stdout.write(measured.splice(0).join("\n") +
  * NOBYPASSRLS role with the rendered pilot API grants, through the real one-page menu commands and
  * the real tenant transaction runner: the same records in a few transactions; a retry and a failure
  * part-way continue without duplicates; a dish whose allergens are not declared yet saves and is
- * covered later; a second store still refuses; two merchants saving at once queue instead of
- * deadlocking, and a guest's SHARE lock gets through inside its 2 s.
+ * covered later; a second store still refuses; one merchant's save mid-write holds neither another
+ * merchant's save nor its guests, its own guests wait for the whole change (DEC-MERCHANT-LOCK-SCOPE),
+ * and a page's Publish beside a batch queues instead of deadlocking.
  */
 const toppingNames = [
   "Pearls",
@@ -100,17 +102,6 @@ const auditCounts = async (admin, brand) =>
       )
     ).rows.map((row) => [row.action_code, row.n]),
   );
-const waitingForLock = async (admin, table, mode) => {
-  for (let i = 0; i < 400; i += 1) {
-    const { rows } = await admin.query(
-      "SELECT count(*)::int n FROM pg_locks l JOIN pg_class c ON c.oid=l.relation WHERE NOT l.granted AND c.relname=$1 AND l.mode=$2",
-      [table, mode],
-    );
-    if (rows[0].n > 0) return;
-    await new Promise((resolve) => setTimeout(resolve, 25));
-  }
-  assert.fail("no one came to wait for " + table);
-};
 const deadlocks = async (admin) => {
   // The counter is flushed when a backend goes idle.
   await new Promise((resolve) => setTimeout(resolve, 1200));
@@ -290,15 +281,13 @@ it("a 19-choice drink saves in a few transactions with the same records; retries
   });
 });
 
-it("two merchants saving at once queue, a guest's lock gets through, and a page's Publish does not deadlock with a batch", async () => {
+it("one merchant's choice recipe save holds neither another merchant's save nor its guests; its own guests wait for the whole change; a page's Publish does not deadlock with a batch", async () => {
   await withIsolatedDatabase({ caseId: "wp2423_batch_locks" }, async (context) => {
     const admin = new Client(context.clientConfig);
     await admin.connect();
     const role = await createPilotApiRole(admin, context, "wp2423_bl");
     const a = await createOneStoreMenuFixture(admin, context, { role, base: 0 });
     const b = await createOneStoreMenuFixture(admin, context, { role, base: 1 });
-    const guest = new Client(context.clientConfig);
-    await guest.connect();
     // Whatever goes wrong, no paused transaction outlives the test.
     let release = () => undefined;
     const released = new Promise((resolve) => {
@@ -308,9 +297,54 @@ it("two merchants saving at once queue, a guest's lock gets through, and a page'
     const unblocked = new Promise((resolve) => {
       unblock = resolve;
     });
+    /** A guest's order or kitchen intake of one merchant's recipe, as the restricted API role. */
+    const guestRead = (f) =>
+      f.asApi(async (tx) => {
+        await createPostgresSubmissionRecipeDemandSource(
+          { run: (work) => work(tx) },
+          f.brandReference,
+        )
+          .resolve({
+            storeReference: f.storeReference,
+            skuReference: f.id(900),
+            occurredAt: new Date().toISOString(),
+            saleUnitCode: "EACH",
+            unitQuantity: "1",
+            saleQuantity: 1,
+            selections: [],
+          })
+          .catch(() => undefined);
+        // What the guest then reads of the merchant's option recipes, under the fence it holds.
+        return (
+          await tx.query(
+            "SELECT count(*)::int n FROM rms_recipe.recipe_modifier_version WHERE brand_id=$1",
+            [f.brandReference],
+          )
+        ).rows[0].n;
+      });
+    const rulesOf = async (f) =>
+      (
+        await admin.query(
+          "SELECT count(*)::int n FROM rms_recipe.recipe_modifier_version WHERE brand_id=$1",
+          [f.brandReference],
+        )
+      ).rows[0].n;
+    const fenceWaiters = async () =>
+      (
+        await admin.query(
+          "SELECT count(*)::int n FROM pg_locks WHERE locktype='advisory' AND NOT granted",
+        )
+      ).rows[0].n;
+    const untilFenceWaiter = async () => {
+      for (let i = 0; i < 400; i += 1) {
+        if ((await fenceWaiters()) > 0) return;
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      assert.fail("no one came to wait for the recipe fence");
+    };
     try {
       // Both dishes exist with their allergens declared, so the next save only covers choices
-      // (declaring allergens takes these tables too, and would wait at the same place).
+      // (declaring allergens takes the recipe fence too, and would wait at the same place).
       const sugarOf = async (f) => ({
         sugar: await f.makeGroup("Sugar (TEST)", "One", ["0%", "30%", "50%", "70%", "100%"], {
           minimum: 1,
@@ -321,11 +355,12 @@ it("two merchants saving at once queue, a guest's lock gets through, and a page'
       const aDish = await a.saveDish({ name: "Oolong (TEST)" });
       const bDish = await b.saveDish({ name: "Pu-erh (TEST)" });
       const deadlocksBefore = await deadlocks(admin);
+      const aRulesBefore = await rulesOf(a);
 
-      // A holds the lock until the others wait behind it.
+      // A stops half-way through writing its choices' recipe rules, holding what it took.
       let paused = false;
       a.hooks.afterStatement = async (sql) => {
-        if (sql === optionRecipeWriteLock && !paused) {
+        if (!paused && sql.startsWith("INSERT INTO rms_recipe.recipe_modifier_version")) {
           paused = true;
           await released;
         }
@@ -336,36 +371,66 @@ it("two merchants saving at once queue, a guest's lock gets through, and a page'
         allergens: null,
         choiceGroups: aGroups,
       });
+      let aSettled = false;
+      first.then(
+        () => (aSettled = true),
+        () => (aSettled = true),
+      );
       while (!paused) await new Promise((resolve) => setTimeout(resolve, 5));
+
+      // (a) Another merchant's save and its guests go straight through while A is still writing.
+      const bStarted = performance.now();
       const second = b.saveDish({
         productReference: bDish.productReference,
         name: "Pu-erh (TEST)",
         allergens: null,
         choiceGroups: bGroups,
       });
-      await waitingForLock(admin, "recipe", "ShareRowExclusiveLock");
-      // A guest's order or kitchen intake at a third merchant, with the runner's 2 s lock limit.
-      await guest.query("BEGIN");
-      await guest.query("SET LOCAL lock_timeout='2s'");
-      const guestAsked = performance.now();
-      const guestLock = guest.query(
-        "LOCK TABLE rms_recipe.recipe,rms_recipe.recipe_scope_binding,rms_recipe.recipe_modifier_version IN SHARE MODE",
+      const bOutcome = await Promise.race([
+        second.then(
+          (saved) => saved.status,
+          (error) => "failed " + (error?.code ?? error),
+        ),
+        new Promise((resolve) => setTimeout(() => resolve("still waiting"), 4000)),
+      ]);
+      const bWaited = Math.round(performance.now() - bStarted);
+      measured.push(
+        "another merchant's save beside a held one: " + bOutcome + " in " + bWaited + " ms",
       );
-      await waitingForLock(admin, "recipe", "ShareLock");
+      assert.equal(bOutcome, "Saved", "another merchant's save waited for A's");
+      // A's transaction is still open mid-write (its runner's limits would end it after a few s).
+      assert.equal(aSettled, false, "another merchant's save finished only after A's ended");
+      const bGuestAsked = performance.now();
+      const bGuestRules = await guestRead(b);
+      const bGuestWaited = Math.round(performance.now() - bGuestAsked);
+      measured.push("another merchant's guest read beside a held save: " + bGuestWaited + " ms");
+      assert.ok(bGuestWaited < 500, "the other merchant's guest waited " + bGuestWaited + " ms");
+      assert.equal(bGuestRules, await rulesOf(b));
+
+      // (b) A's own guest waits for A's change and then reads all of it, never a part.
+      assert.equal(await fenceWaiters(), 0);
+      const aGuestAsked = performance.now();
+      const aGuest = guestRead(a);
+      await untilFenceWaiter();
       release();
-      await guestLock;
-      const guestWaited = Math.round(performance.now() - guestAsked);
-      await guest.query("ROLLBACK");
-      measured.push("a guest's SHARE lock behind two batches waited " + guestWaited + " ms");
-      assert.ok(guestWaited < 2000, "the guest waited " + guestWaited + " ms");
+      const aGuestRules = await aGuest;
+      const aGuestWaited = Math.round(performance.now() - aGuestAsked);
+      measured.push("the merchant's own guest behind its held save waited " + aGuestWaited + " ms");
       a.hooks.afterStatement = null;
-      const [one, two] = await Promise.all([first, second]);
+      const one = await first;
       assert.equal(one.status, "Saved");
-      assert.equal(two.status, "Saved");
+      const aRulesAfter = await rulesOf(a);
+      assert.ok(aRulesAfter > aRulesBefore, "A's save wrote its rules");
+      // The guest asked while A had written part of its rules: it waited for A's commit and read
+      // A's change, not the rules from before it beside a change still being written.
+      assert.ok(
+        aGuestRules > aRulesBefore && aGuestRules <= aRulesAfter,
+        "the guest read " + aGuestRules + " rules of " + aRulesBefore + "→" + aRulesAfter,
+      );
       assert.equal((await recordsOf(admin, a.brandReference)).publications, 5);
       assert.equal((await recordsOf(admin, b.brandReference)).publications, 5);
 
-      // A page's single Publish, against a batch (each takes the same lock first).
+      // A page's single Publish, against a batch of the same merchant (each takes the fence first).
       const made = await a.makeGroup("Spice (TEST)", "One", ["Mild", "Hot"], { minimum: 1 });
       const spice = {
         optionSetReference: made.optionSetReference,
@@ -419,19 +484,23 @@ it("two merchants saving at once queue, a guest's lock gets through, and a page'
             approvalMode: "SingleStoreListing",
           },
         });
+      const aIce = choiceGroups({
+        ice: await a.makeGroup("Ice (TEST)", "One", ["No ice", "Less", "Regular"], { minimum: 1 }),
+      });
       let holding = false;
-      b.hooks.afterStatement = async (sql) => {
-        if (sql === optionRecipeWriteLock && !holding) {
+      a.hooks.afterStatement = async (sql, values) => {
+        if (!holding && isRecipeFenceTake(sql, values, a.brandReference)) {
           holding = true;
           await unblocked;
         }
       };
-      const batch = b.saveDish({
+      const batch = a.saveDish({
         name: "Plum tea (TEST)",
         nameZh: "梅子茶",
-        choiceGroups: bGroups,
+        choiceGroups: aIce,
       });
       while (!holding) await new Promise((resolve) => setTimeout(resolve, 5));
+      a.hooks.afterStatement = null;
       const page = a.optionRecipes.command({
         ...a.session,
         body: {
@@ -440,9 +509,8 @@ it("two merchants saving at once queue, a guest's lock gets through, and a page'
           changeVersionReference: change.changeVersionReference,
         },
       });
-      await waitingForLock(admin, "recipe", "ShareRowExclusiveLock");
+      await untilFenceWaiter();
       unblock();
-      b.hooks.afterStatement = null;
       const [published, batched] = await Promise.all([page, batch]);
       assert.equal(published.status, "Applied");
       assert.equal(batched.status, "Saved");
@@ -453,7 +521,6 @@ it("two merchants saving at once queue, a guest's lock gets through, and a page'
       unblock();
       await a.close();
       await b.close();
-      await guest.end();
       await admin.end();
     }
   });
@@ -601,8 +668,9 @@ it("permissions, a second store, a sole operator's reviews, 20 of each, the cloc
       // One instant per round, read before the lock: the database's clock_timestamp of each audit
       // record stays after it even when the API's clock runs 20 ms ahead (occurred_at<=recorded_at).
       f.clock.offsetMs = 20;
-      f.hooks.beforeStatement = async (sql) => {
-        if (sql === optionRecipeWriteLock) await new Promise((resolve) => setTimeout(resolve, 30));
+      f.hooks.beforeStatement = async (sql, values) => {
+        if (isRecipeFenceTake(sql, values, f.brandReference))
+          await new Promise((resolve) => setTimeout(resolve, 30));
       };
       const beforeRound = f.clock.nowCalls;
       f.counts.transactions = 0;

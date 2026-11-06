@@ -26,8 +26,13 @@ import { dbNow, seedBrandMember, seedBrandRole } from "./sole-operator-brand-gat
  * statement memo and conflict mapping) as the restricted pilot API role; only this setup is written
  * as owner. A database can hold several of these Brands (`base`), each with its own `id`.
  */
-export const optionRecipeWriteLock =
-  "LOCK TABLE rms_recipe.recipe,rms_recipe.recipe_modifier_version IN SHARE ROW EXCLUSIVE MODE";
+/**
+ * DEC-MERCHANT-LOCK-SCOPE: an option recipe write takes its Brand's recipe fence exclusive (first a
+ * try, takeRecipeReferenceFenceBounded); a Recipe save takes the same key the same way.
+ */
+export const recipeFenceTry = "SELECT pg_try_advisory_xact_lock(hashtextextended($1,0)) taken";
+export const isRecipeFenceTake = (sql, values, brandReference) =>
+  sql === recipeFenceTry && values?.[0] === "RecipeCatalogReferenceV1:" + brandReference;
 export const menuOwnerActions = Object.freeze([
   "recipe.read",
   "recipe.update",
@@ -292,7 +297,8 @@ export async function createOneStoreMenuFixture(
               counts.statements += 1;
               await hooks.beforeStatement?.(sql, values);
               const result = await inner.query(sql, values);
-              if (lockedAt === null && sql === optionRecipeWriteLock) lockedAt = performance.now();
+              if (lockedAt === null && isRecipeFenceTake(sql, values, brandReference))
+                lockedAt = performance.now();
               await hooks.afterStatement?.(sql, values);
               return result;
             },
