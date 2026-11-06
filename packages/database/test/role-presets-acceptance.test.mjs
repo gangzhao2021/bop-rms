@@ -528,6 +528,16 @@ it("role presets: edit, approve alone, remove, create, upgrade, restore and the 
       await send("ana", "ApproveAlone", prep);
       await send("ana", "Activate", prep);
       await send("ana", "Deactivate", prep);
+      // A removed role's name is free for a new role, so bringing the removed one back while that
+      // new role carries its name is refused: two roles in use are never called the same.
+      const prepAgain = (
+        await send("ana", "Create", null, { draft: { ...blank, displayName: "prep cook" } })
+      ).roleReference;
+      await assert.rejects(send("ana", "Activate", prep), refused("NameTaken"));
+      assert.equal((await detail("ana", prep)).state, "Removed");
+      await send("ana", "SaveDraft", prepAgain, {
+        draft: { ...blank, displayName: "Prep cook (mornings)" },
+      });
       await send("ana", "Activate", prep);
       assert.equal((await detail("ana", prep)).state, "InUse");
       assert.ok((await roles.list(as("ana"))).roles.some((row) => row.name === "Prep cook"));
@@ -721,7 +731,18 @@ it("role presets: edit, approve alone, remove, create, upgrade, restore and the 
       );
       await assert.rejects(admin.query("COMMIT"), /needs a sole operator approval/u);
 
-      // ── Restore Front of House: back to the preset, so BOP upgrades apply to it again.
+      // ── Restore Front of House: back to the preset, so BOP upgrades apply to it again. The
+      // restore takes back the preset's own name, so it is refused while another role has it.
+      const fohNamed = (
+        await send("ana", "Create", null, {
+          draft: { ...blank, displayName: "Front of House" },
+        })
+      ).roleReference;
+      await assert.rejects(send("ana", "RestoreDefault", foh), refused("NameTaken"));
+      assert.equal((await detail("ana", foh)).change, null);
+      await send("ana", "SaveDraft", fohNamed, {
+        draft: { ...blank, displayName: "Front desk" },
+      });
       await send("ana", "RestoreDefault", foh);
       item = await detail("ana", foh);
       assert.equal(item.change.restore, true);

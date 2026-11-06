@@ -783,7 +783,28 @@ export function createMerchantRoleAdministration(options: {
             }
             const current = role?.record ?? null;
             // A name is unique among this Store's roles in use or waiting (removed ones keep theirs).
-            if (command.draft !== null) {
+            // Bringing a removed role back and restoring a preset change the name without a draft:
+            // they carry the removed role's name and the preset's own name.
+            const restoring = command.operation === "RestoreDefault" && current !== null;
+            const bringingBack =
+              command.operation === "Activate" &&
+              current !== null &&
+              current.lifecycle !== "Approved";
+            const name =
+              command.draft !== null
+                ? command.draft.displayName
+                : restoring
+                  ? rolePresetProfile(
+                      current.code,
+                      current.storeReference === null ? "Brand" : "Store",
+                    )?.displayName
+                  : bringingBack
+                    ? (current.lifecycle === "Rejected" || current.lifecycle === "Withdrawn") &&
+                      role?.effective != null
+                      ? role.effective.displayName
+                      : current.displayName
+                    : undefined;
+            if (name !== undefined) {
               // One naming at a time per Store, so two Creates or Revises never commit one name.
               // The run already holds the Brand's permission fence shared (authorization) and a
               // Create later takes it exclusive, so waiting here would deadlock: a second naming
@@ -800,7 +821,6 @@ export function createMerchantRoleAdministration(options: {
                 )
               ).rows[0]?.locked;
               if (free !== true) throw new RoleNamingBusy();
-              const name = command.draft.displayName;
               const others = (await listRoleAdministration(asRoleTx(tx), ownerScope, now)).filter(
                 (other) =>
                   other.record.roleReference !==
