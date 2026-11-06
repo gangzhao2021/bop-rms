@@ -1,7 +1,6 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
-import { createPostgresMerchantOrganizationSource } from "../../packages/bop/tenant/src/index.ts";
 import { planPilotConnections } from "./pilot-connection-budget.mjs";
 /**
  * DEC-BRAND-MULTI-STORE-ONE-INSTALLATION: the Stores this installation serves, as Tenant/Brand/Store
@@ -87,6 +86,10 @@ export async function servedStoreIsOpen(tx, store, at) {
       [],
     )
   ).rows;
+  // Loaded here, not at the top: pilot-ops imports this file, and its maintenance command runs under
+  // plain node (runbook "Planned updates"), which cannot load the TypeScript source.
+  const { createPostgresMerchantOrganizationSource } =
+    await import("../../packages/bop/tenant/src/index.ts");
   const organizations = createPostgresMerchantOrganizationSource(tx, {
     brandReference: store.brandReference,
     storeReference: store.storeReference,
