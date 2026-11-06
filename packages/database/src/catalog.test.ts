@@ -815,6 +815,7 @@ describe("migration catalog", () => {
       "2000_181_alter_platform_support_merchant_pause",
       "2000_210_alter_ordering_cart_ordered_once",
       "2000_240_create_role_assignment_sole_operator_approval",
+      "2000_260_create_payment_intent_prepared_index",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),
