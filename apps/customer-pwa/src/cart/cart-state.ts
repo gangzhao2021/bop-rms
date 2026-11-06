@@ -229,6 +229,8 @@ export function createCartStateController({
     createOperation: (cart: CartView) => PendingOperation,
     retry = false,
     cartItemReference?: string,
+    /** WP-2423 (guest-cart-503): Remove of another phone's line the Store marked not sold now. */
+    removal = false,
   ): Promise<void> => {
     if (commandFlight !== null) return commandFlight;
     if (pending !== null && !retry) return Promise.resolve();
@@ -245,7 +247,12 @@ export function createCartStateController({
       cart.cart.items.some(
         (item) =>
           item.cartItemReference === cartItemReference &&
-          item.warnings.includes("OTHER_PARTICIPANT_ITEM"),
+          item.warnings.includes("OTHER_PARTICIPANT_ITEM") &&
+          !(
+            removal &&
+            (item.warnings.includes("ITEM_UNAVAILABLE") ||
+              item.warnings.includes("ITEM_OPTIONS_CHANGED"))
+          ),
       )
     )
       return Promise.resolve();
@@ -296,6 +303,7 @@ export function createCartStateController({
         }),
         false,
         cartItemReference,
+        true,
       ),
     retry: () => {
       if (pending === null) return Promise.resolve();

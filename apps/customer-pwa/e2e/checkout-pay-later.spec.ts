@@ -98,6 +98,10 @@ interface TableOptions {
   readonly moreDishes?: number;
   /** The status a placed round is read with (default: sent to the kitchen). */
   readonly roundStatus?: string;
+  /** WP-2423 (guest-cart-503): the extra dishes' line marks (e.g. another phone's, not sold now). */
+  readonly moreDishWarnings?: readonly string[];
+  /** The extra dishes are other dishes (their own sellable), not more lines of the first one. */
+  readonly otherDishes?: boolean;
 }
 
 interface Table {
@@ -138,9 +142,11 @@ async function stubTable(
   });
   let dishes = [
     dish(2, "Synthetic noodles"),
-    ...Array.from({ length: options.moreDishes ?? 0 }, (_, index) =>
-      dish(60 + index, `Synthetic dish ${index + 1}`),
-    ),
+    ...Array.from({ length: options.moreDishes ?? 0 }, (_, index) => ({
+      ...dish(60 + index, `Synthetic dish ${index + 1}`),
+      ...(options.otherDishes === true ? { sellableReference: id(160 + index) } : {}),
+      warnings: [...(options.moreDishWarnings ?? [])],
+    })),
   ];
   const cartView = () => ({
     schemaVersion: 1,
@@ -210,6 +216,11 @@ async function stubTable(
     route.fulfill({ status: 200, json: cartView() }),
   );
   await page.route("**/api/v1/carts/*/items/*", (route) => {
+    if (route.request().method() === "DELETE") {
+      dishes = dishes.filter((item) => !route.request().url().includes(item.cartItemReference));
+      cartVersion += 1;
+      return route.fulfill({ status: 200, json: cartView() });
+    }
     const change = route.request().postDataJSON() as { quantity: number };
     dishes = dishes.map((item) =>
       route.request().url().includes(item.cartItemReference)
@@ -1533,3 +1544,134 @@ test.describe("@production a merged party's phone", () => {
     expect(failures).toEqual([]);
   });
 });
+
+// WP-2423 guest-cart-503 (v15 M06, live 07b7a1b7): a dish staff marked sold out is named at once
+// (one quote, no busy wait), the guest removes it and the round goes; a mark on the cart says it
+// before anyone taps, and anyone at the table can remove it; an open cart learns within one poll
+// that staff started checkout.
+for (const screen of [
+  { name: "desktop", width: 1440, height: 900, touch: false },
+  { name: "tablet", width: 1024, height: 768, touch: false },
+  { name: "narrow touch", width: 390, height: 844, touch: true },
+]) {
+  test.describe("@production Pay-later table, a dish not sold now " + screen.name, () => {
+    test.use({
+      viewport: { width: screen.width, height: screen.height },
+      hasTouch: screen.touch,
+      isMobile: screen.touch,
+      serviceWorkers: "block",
+    });
+    const press = async (locator: Locator) => {
+      if (screen.touch) await locator.tap();
+      else await locator.click();
+    };
+    test("names the dish on Place order, removes it, and the next tap sends", async ({ page }) => {
+      const failures: string[] = [];
+      page.on("pageerror", () => failures.push("page error"));
+      const sent: { body: unknown; key: string | undefined }[] = [];
+      const table = await stubTable(page, sent, {
+        moreDishes: 1,
+        otherDishes: true,
+        quote: (route, call) =>
+          call === 1
+            ? route.fulfill({
+                status: 409,
+                json: {
+                  schemaVersion: 1,
+                  error: {
+                    code: "quote_item_unavailable",
+                    messageKey: "customer.quote.item_unavailable",
+                    line: { cartItemReference: id(60) },
+                  },
+                },
+              })
+            : undefined,
+      });
+      await openCart(page);
+      await press(placeOrder(page));
+      const alert = page.getByRole("alert").filter({ hasText: "Synthetic dish 1" });
+      await expect(alert).toHaveText(
+        "Synthetic dish 1 isn’t available right now, so this round hasn’t been sent. Remove Synthetic dish 1, then tap Place order.",
+      );
+      // One quote, no busy wait and nothing sent.
+      expect(table.calls.filter((call) => call === "quote")).toHaveLength(1);
+      expect(sent).toEqual([]);
+      await expect(page.getByRole("main")).not.toContainText("hasn’t been charged");
+      const line = page.locator(`article[aria-labelledby="cart-item-${id(60)}"]`);
+      await press(line.getByRole("button", { name: "Remove" }));
+      await expect(line).toHaveCount(0);
+      await press(placeOrder(page));
+      await expect.poll(() => sent.length).toBe(1);
+      await expectNoInternalText(page);
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true);
+      expect(failures).toEqual([]);
+    });
+
+    test("marks another guest's dish not sold now; this phone removes it, then orders", async ({
+      page,
+    }) => {
+      const failures: string[] = [];
+      page.on("pageerror", () => failures.push("page error"));
+      const sent: { body: unknown; key: string | undefined }[] = [];
+      await stubTable(page, sent, {
+        moreDishes: 1,
+        otherDishes: true,
+        moreDishWarnings: ["OTHER_PARTICIPANT_ITEM", "ITEM_UNAVAILABLE"],
+      });
+      await openCart(page);
+      const line = page.locator(`article[aria-labelledby="cart-item-${id(60)}"]`);
+      await expect(line).toContainText("Not available right now. Remove it to order the rest.");
+      await expect(line).toContainText(
+        "Added by another guest. Anyone at the table can remove it now.",
+      );
+      await expect(
+        line.getByRole("button", { name: "Increase Synthetic dish 1 quantity" }),
+      ).toBeDisabled();
+      await expect(placeOrder(page)).toBeDisabled();
+      await expect(page.getByRole("main")).toContainText(
+        "Remove the dishes that aren’t available right now, then order.",
+      );
+      await press(line.getByRole("button", { name: "Remove" }));
+      await expect(line).toHaveCount(0);
+      await expect(placeOrder(page)).toBeEnabled();
+      await press(placeOrder(page));
+      await expect.poll(() => sent.length).toBe(1);
+      await expectNoInternalText(page);
+      expect(failures).toEqual([]);
+    });
+
+    test("an open cart says the table is checking out within one poll", async ({ page }) => {
+      const failures: string[] = [];
+      page.on("pageerror", () => failures.push("page error"));
+      await page.clock.install();
+      await stubTable(page);
+      await openCart(page);
+      await expect(placeOrder(page)).toBeEnabled();
+      // Staff start checkout: every later cart read answers 409, never 503.
+      let reads = 0;
+      await page.route(/\/bff\/customer\/cart(?:\?.*)?$/u, (route) => {
+        reads += 1;
+        return route.fulfill({
+          status: 409,
+          json: {
+            schemaVersion: 1,
+            error: {
+              code: "cart_table_checking_out",
+              messageKey: "customer.cart.table_checking_out",
+            },
+          },
+        });
+      });
+      await page.clock.runFor(16_000);
+      await expect(page.getByRole("main")).toContainText(
+        "New dishes can’t be sent while the bill is being settled.",
+      );
+      await expect(page.getByRole("region", { name: "Your table is checking out" })).toBeVisible();
+      expect(reads).toBeGreaterThanOrEqual(1);
+      await expectNoInternalText(page);
+      expect(failures).toEqual([]);
+    });
+  });
+}

@@ -188,6 +188,33 @@ describe("WP-1205 in-memory Cart state", () => {
     expect(f.controller.getState()).toMatchObject({ status });
   });
 
+  it("WP-2423 guest-cart-503: removes another phone's line only once the Store marks it", async () => {
+    for (const [warnings, removed] of [
+      [["OTHER_PARTICIPANT_ITEM"], false],
+      [["OTHER_PARTICIPANT_ITEM", "ITEM_UNAVAILABLE"], true],
+      [["OTHER_PARTICIPANT_ITEM", "ITEM_OPTIONS_CHANGED"], true],
+    ] as const) {
+      const f = fixture();
+      const base = cart();
+      const item = base.cart.items[0];
+      if (item === undefined) throw new Error("synthetic item missing");
+      f.setCurrent({
+        ...base,
+        cart: { ...base.cart, items: [{ ...item, warnings: [...warnings] }] },
+      });
+      await f.controller.load();
+      // Any other change of that line stays the adder's.
+      await f.controller.updateItem(item.cartItemReference, {
+        quantity: 3,
+        optionSelections: [],
+        customerNote: null,
+      });
+      expect(f.calls.some((call) => call.name === "update")).toBe(false);
+      await f.controller.removeItem(item.cartItemReference);
+      expect(f.calls.some((call) => call.name === "remove")).toBe(removed);
+    }
+  });
+
   it("WP-2423 item 6: with nothing on screen yet a quiet read is a load", async () => {
     const f = fixture();
     f.failLoad(new CartClientError("cart_service_unavailable"));
