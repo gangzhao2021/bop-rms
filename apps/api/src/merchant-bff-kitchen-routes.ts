@@ -5,6 +5,7 @@ import {
   denied,
   exactHeader,
   failed,
+  NO_STORE,
   noteFailure,
   sameOriginMutation,
 } from "./merchant-bff-http.js";
@@ -114,8 +115,9 @@ export function installMerchantKitchenRoutes(
       .kitchenStep({ sessionCookie, csrf, body: request.body })
       .then((result) => response.set("Cache-Control", NO_STORE).json(result))
       .catch((error: unknown) => {
+        noteFailure(response, error);
         if (!(error instanceof KitchenWorkLifecycleError)) {
-          if (!kitchenDatabaseRetryLater(response, error)) denied(response);
+          failed(response, error);
           return;
         }
         const status = {
