@@ -165,7 +165,18 @@ test("v15 2026-10-31: a served Store that cannot start is logged and skipped; th
       loadInternalPickupQr: async () => ({ token: () => "synthetic.pickup.token" }),
       diningEntries: [],
       createInternalTestResources: async () => ({
-        scope: { storeReference: "store-1" },
+        scope: {
+          storeReference: "0190aa21-0000-7000-8000-000000000001",
+          brandReference: "0190aa21-0000-7000-8000-000000000002",
+        },
+        publicProfile: {
+          binding: {
+            tenantReference: "0190aa21-0000-7000-8000-000000000003",
+            publicStoreReference: "0190aa21-0000-7000-8000-000000000005",
+          },
+        },
+        transactions: {},
+        credentials: { sessions: { hashCredential: () => "selector" } },
         close: vi.fn(async () => undefined),
       }),
       createInternalSimulatedProvider: async () => ({ close: vi.fn() }),
@@ -236,6 +247,58 @@ test("v15 2026-10-31: a served Store that cannot start is logged and skipped; th
     const bare = await get("/bff/customer/pickup-entry");
     expect(bare.status).toBe(404);
     expect(JSON.parse(bare.body)).toEqual({ code: "PICKUP_ENTRY_UNKNOWN_STORE" });
+    // M02: a table scanned at one of the Stores that failed to start (or a reload replaying it)
+    // is a retryable outage, never this Store's refusal of a code it doesn't own.
+    const enter = (payload, cookie) =>
+      new Promise((resolve, reject) => {
+        const body = JSON.stringify(payload);
+        const call = request(
+          {
+            host: "127.0.0.1",
+            port: server.address().port,
+            path: "/bff/customer/entry",
+            method: "POST",
+            servername: "order.store-pilot.ca",
+            ca: [certificates.root],
+            headers: {
+              host: "order.store-pilot.ca",
+              origin: "https://order.store-pilot.ca",
+              "sec-fetch-site": "same-origin",
+              "content-type": "application/json",
+              "content-length": Buffer.byteLength(body),
+              ...(cookie === undefined ? {} : { cookie }),
+            },
+          },
+          (response) => {
+            let text = "";
+            response.on("data", (chunk) => (text += String(chunk)));
+            response.on("end", () =>
+              resolve({
+                status: response.statusCode,
+                cache: response.headers["cache-control"],
+                text,
+              }),
+            );
+          },
+        );
+        call.on("error", reject);
+        call.end(body);
+      });
+    const failedStoreCode =
+      "x." +
+      Buffer.from(
+        JSON.stringify({ publicStoreReference: "0190aa21-0000-7000-8000-000000000006" }),
+      ).toString("base64url") +
+      ".y";
+    for (const [payload, cookie] of [
+      [{ qrToken: failedStoreCode }, undefined],
+      [{ resume: true }, "__Secure-bop-scan=" + failedStoreCode],
+    ]) {
+      const answer = await enter(payload, cookie);
+      expect(answer.status, JSON.stringify(payload)).toBe(503);
+      expect(answer.cache).toBe("no-store");
+      expect(JSON.parse(answer.text)).toEqual({ code: "CUSTOMER_STORE_UNAVAILABLE" });
+    }
     // Each failed Store is logged with its code; the one whose resources opened has them closed.
     expect(
       logged.mock.calls

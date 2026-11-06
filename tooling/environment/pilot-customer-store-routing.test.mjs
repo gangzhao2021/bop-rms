@@ -41,7 +41,9 @@ it("DEC-MULTI-MERCHANT-ONE-INSTALLATION: a request no merchant owns reaches no m
   const storeOf = routing([store(1, 1), store(2, 2)]);
   const unknown = ref(999);
   expect(await storeOf(menu(unknown))).toBeNull();
-  expect(await storeOf(entry(unknown))).toBeNull();
+  // M02: a well-formed code of a Store not served now may be a Store that failed to load: a
+  // retryable outage (no merchant answers it either way).
+  await expect(storeOf(entry(unknown))).rejects.toThrow("CUSTOMER_STORE_UNAVAILABLE");
   expect(await storeOf({ ...entry("not-a-reference") })).toBeNull();
   expect(await storeOf(other)).toBeNull();
   expect(await storeOf({ ...other, cookie: cookieOf(credential) })).toBeNull();
@@ -108,7 +110,9 @@ it("Stores of one Tenant still fall back to the installation's first Store", asy
   const storeOf = routing([first, store(2, 1)]);
   expect(await storeOf(other)).toBe(first);
   expect(await storeOf(menu(ref(999)))).toBe(first);
-  expect(await storeOf(entry(ref(999)))).toBe(first);
+  // M02: a scan naming a Store not served now is an outage, not the first Store's refusal.
+  await expect(storeOf(entry(ref(999)))).rejects.toThrow("CUSTOMER_STORE_UNAVAILABLE");
+  expect(await storeOf(entry("not-a-reference"))).toBe(first);
 });
 
 // M02 (v15 07b7a1b7): a reload replays the scan that started no visit yet; it must reach the
@@ -148,4 +152,37 @@ it("M02: a scan of a Store not served now is unavailable, never another Store (o
   expect(await storeOf(resume())).toBe(a);
   // A scan in the body still goes by its own code.
   expect(await storeOf({ ...entry(b.publicStoreReference), cookie: down })).toBe(b);
+});
+
+it("M02: a fresh scan of a Store not served now is unavailable, never 'no merchant' (several Tenants)", async () => {
+  const a = store(1, 1),
+    b = store(2, 2);
+  const storeOf = routing([a, b]);
+  await expect(storeOf(entry(ref(103)))).rejects.toThrow("CUSTOMER_STORE_UNAVAILABLE");
+  expect(await storeOf(entry(b.publicStoreReference))).toBe(b);
+  // A code that names no Store at all is still no merchant's.
+  expect(await storeOf(entry("not-a-reference"))).toBeNull();
+});
+
+it("M02: with only one Store of several served, a scan or replay of another is still unavailable", async () => {
+  const a = store(1, 1);
+  const resolve = vi.fn(async () => null);
+  const storeOf = createCustomerStoreRouting({
+    stores: [a],
+    multiStore: true,
+    createSessions: () => ({ resolve }),
+  });
+  const down = "__Secure-bop-scan=" + token(ref(103));
+  await expect(storeOf(resume(down))).rejects.toThrow("CUSTOMER_STORE_UNAVAILABLE");
+  await expect(storeOf(entry(ref(103)))).rejects.toThrow("CUSTOMER_STORE_UNAVAILABLE");
+  expect(await storeOf(resume("__Secure-bop-scan=" + token(a.publicStoreReference)))).toBe(a);
+  expect(await storeOf(entry(a.publicStoreReference))).toBe(a);
+  // No waiting scan: this Store asks the guest to scan. Everything else is this Store's, unread.
+  expect(await storeOf(resume())).toBe(a);
+  expect(await storeOf({ ...other, cookie: cookieOf(credential) })).toBe(a);
+  expect(resolve).not.toHaveBeenCalled();
+  // One Store and no other in stores.json: everything is its own, as before.
+  const alone = createCustomerStoreRouting({ stores: [a], createSessions: () => ({ resolve }) });
+  expect(await alone(resume(down))).toBe(a);
+  expect(await alone(entry(ref(103)))).toBe(a);
 });

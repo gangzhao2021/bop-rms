@@ -11,8 +11,10 @@ import { createPostgresGuestSessionEntryStore } from "../../packages/bop/identit
  * - the table or pickup entry: the public Store reference in the signed QR token (decoded only to
  *   choose the Store; that Store's runtime verifies the signature and the table); for a replay of a
  *   scan that started no visit yet (`{resume:true}`, M02), the token in the `__Secure-bop-scan`
- *   cookie, and a Store not served right now answers 503 CUSTOMER_STORE_UNAVAILABLE (never another
- *   Store, which would refuse the code and lose the guest's place);
+ *   cookie. At an installation whose stores.json names several Stores (`multiStore`, even when
+ *   only one of them is served now), a scan or replay naming a Store not served right now (it
+ *   failed to load) answers 503 CUSTOMER_STORE_UNAVAILABLE: a retryable outage, never another
+ *   Store (which would refuse the code and lose the guest's place) nor "scan the code";
  * - every other guest request: the Store whose own records hold the guest's Session (the guest
  *   cookie, hashed with the installation's guest key, looked up through Identity's Store-scoped
  *   owner read in each Store in turn; a found answer is remembered for that Session);
@@ -89,6 +91,8 @@ function scanCookiePublicStore(header) {
  */
 export function createCustomerStoreRouting({
   stores,
+  // M02 (v15 07b7a1b7): stores.json names more than one Store, whichever of them are served now.
+  multiStore = Array.isArray(stores) && stores.length > 1,
   cacheLimit = 10_000,
   createSessions = createPostgresGuestSessionEntryStore,
 }) {
@@ -110,24 +114,27 @@ export function createCustomerStoreRouting({
     }),
   }));
   /** The Store a request goes to (its `target`). */
+  /** The Store a scanned (or replayed) code names; null when the code names none. */
+  const scannedStore = (reference) => {
+    if (reference === null || !UUID_V7.test(reference)) return null;
+    const store = byPublic.get(reference);
+    // The Store the guest scanned isn't being served now (it failed to start): say so, keep the
+    // scan for when it is back, and never hand it to a Store that would refuse it.
+    if (store === undefined && multiStore) throw new Error("CUSTOMER_STORE_UNAVAILABLE");
+    return store ?? null;
+  };
   return async function storeOf({ method, url, cookie, body }) {
+    const entry = isBodyRouted(method, url) && body !== undefined;
+    if (entry && multiStore)
+      return (
+        scannedStore(isResume(body) ? scanCookiePublicStore(cookie) : qrTokenPublicStore(body)) ??
+        unowned
+      );
     if (stores.length === 1) return primary;
     const nobody = typeof url === "string" && BEFORE_ANY_STORE.test(url) ? primary : unowned;
     const menu = typeof url === "string" ? MENU.exec(url) : null;
     if (menu) return byPublic.get(decodeURIComponent(menu[1])) ?? unowned;
-    if (isBodyRouted(method, url) && body !== undefined && isResume(body)) {
-      const reference = scanCookiePublicStore(cookie);
-      if (reference === null || !UUID_V7.test(reference)) return unowned;
-      const store = byPublic.get(reference);
-      // The Store the guest scanned isn't being served now (it failed to start): say so, keep the
-      // scan for when it is back, and never hand it to a Store that would refuse it.
-      if (store === undefined) throw new Error("CUSTOMER_STORE_UNAVAILABLE");
-      return store;
-    }
-    if (isBodyRouted(method, url) && body !== undefined) {
-      const reference = qrTokenPublicStore(body);
-      return (reference !== null && UUID_V7.test(reference) && byPublic.get(reference)) || unowned;
-    }
+    if (entry) return scannedStore(qrTokenPublicStore(body)) ?? unowned;
     const credential = guestCookie(cookie);
     if (credential === null) return nobody;
     // Each Store's own hash of the cookie, in its own records (merchants don't share a guest key).

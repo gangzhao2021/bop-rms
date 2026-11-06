@@ -403,22 +403,28 @@ export async function startInternalCustomerServer({
     );
     const merchantRouter = createMerchantBffRouter(merchant.bff);
     let staffRoutes = merchantRouter;
+    const routedStore = (storeResources) => ({
+      storeReference: storeResources.scope.storeReference,
+      brandReference: storeResources.scope.brandReference,
+      tenantReference: storeResources.publicProfile.binding.tenantReference,
+      publicStoreReference: storeResources.publicProfile.binding.publicStoreReference,
+      port: storeResources === resources ? apiPort : ports.get(storeResources.scope.storeReference),
+      transactions: storeResources.transactions,
+      hashSession: (credential) =>
+        storeResources.credentials.sessions.hashCredential("Session", credential),
+    });
+    // M02 (v15 07b7a1b7): every other Store in stores.json failed to start, so only this one is
+    // served; a scan of one of the others is still a retryable outage, never this Store's refusal.
+    if (served.length === 0 && multiStore)
+      customerStore = createStoreRouting({ stores: [routedStore(resources)], multiStore });
     if (served.length > 0) {
       routers.set(resources.scope.storeReference, merchantRouter);
       ports.set(resources.scope.storeReference, apiPort);
       // DEC-BRAND-MULTI-STORE-ONE-INSTALLATION segment 4: guest requests go to their Store's
       // customer API (the next local ports, in stores.json order).
       customerStore = createStoreRouting({
-        stores: [resources, ...additionalResources].map((storeResources) => ({
-          storeReference: storeResources.scope.storeReference,
-          brandReference: storeResources.scope.brandReference,
-          tenantReference: storeResources.publicProfile.binding.tenantReference,
-          publicStoreReference: storeResources.publicProfile.binding.publicStoreReference,
-          port: ports.get(storeResources.scope.storeReference),
-          transactions: storeResources.transactions,
-          hashSession: (credential) =>
-            storeResources.credentials.sessions.hashCredential("Session", credential),
-        })),
+        stores: [resources, ...additionalResources].map(routedStore),
+        multiStore,
       });
       // A request goes to the composition of the Store its Session is bound to (server-side).
       const reportRouting = createMerchantRequestReporter({
@@ -442,7 +448,8 @@ export async function startInternalCustomerServer({
     app.use("/merchant", staffContentLocaleMiddleware(), staffRoutes);
 
     app.use(async (req, res, next) => {
-      if (customerStore === null) return primaryPayments(req, res, next);
+      // One Store served (alone, or the others failed to start): its payments, as before.
+      if (customerStore === null || served.length === 0) return primaryPayments(req, res, next);
       if (!isStorePaymentRoute(req.method, req.path)) return next();
       let store;
       try {
