@@ -8227,4 +8227,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "自定义角色不能由创建者本人批准，即使开启了“独立经营者”也不行。如果你的商家没有其他人能批准角色，请给员工分配一个现成的模板角色：开启“独立经营者”后，你可以在员工页面自行批准。",
   "See the ready-made roles": "查看现成的模板角色",
   "Open staff": "打开员工列表",
+  "Staff roles waiting for approval": "等待批准的员工角色",
+  "Staff roles could not be counted": "无法统计员工角色",
+  "{count} waiting; staff roles could not be counted": "{count} 项等待中；无法统计员工角色",
 });

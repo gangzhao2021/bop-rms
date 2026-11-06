@@ -255,8 +255,22 @@ export function WorkspaceLayout({
     "APPROVAL-INBOX": approvalsBadgeCount(approvals, staffRoles),
     "DIN-FLOOR-BOARD": staffCalls ?? 0,
   };
+  // WP-2423 M07: a failed staff-role read marks the Approvals count as possibly short.
+  const incomplete = (screenId: string) =>
+    screenId === "APPROVAL-INBOX" && staffRoles === "Unavailable";
   const badge = (screenId: string) => {
     const count = badges[screenId] ?? 0;
+    if (incomplete(screenId))
+      return (
+        <span className="workspace-nav__badge" title={t("Staff roles could not be counted")}>
+          <span className="visually-hidden">
+            {count > 0
+              ? t("{count} waiting; staff roles could not be counted", { count })
+              : t("Staff roles could not be counted")}
+          </span>
+          <span aria-hidden="true">{count > 0 ? String(count) + "+" : "?"}</span>
+        </span>
+      );
     return count > 0 ? (
       <span className="workspace-nav__badge">
         <span className="visually-hidden">{t("{count} waiting", { count })}</span>

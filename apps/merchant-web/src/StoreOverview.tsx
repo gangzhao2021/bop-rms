@@ -1,5 +1,10 @@
 import { systemText, countOf, t } from "./i18n/i18n.js";
-import { useApprovalsWaiting, type ApprovalsWaiting } from "./approvals-waiting.js";
+import {
+  useApprovalsWaiting,
+  useStaffRolesWaiting,
+  type ApprovalsWaiting,
+  type StaffRolesWaiting,
+} from "./approvals-waiting.js";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { OpeningList } from "./OpeningList.js";
 import { GuestIntakeNotice } from "./GuestIntakeNotice.js";
@@ -436,6 +441,7 @@ export function attentionItems(
   dayStartsAt: string | null = null,
   kitchenSetupHref: string | null = null,
   settlement: SettlementStatusRead = { kind: "Hidden" },
+  staffRoles: StaffRolesWaiting = null,
 ): readonly AttentionItem[] {
   const items: AttentionItem[] = [];
   const unread = [
@@ -444,6 +450,7 @@ export function attentionItems(
     ...(state.tables.kind === "Unavailable" ? [t("Tables")] : []),
     ...(state.exceptions.kind === "Unavailable" ? [t("Exceptions")] : []),
     ...(settlement.kind === "Unavailable" ? [t("Settlement")] : []),
+    ...(staffRoles === "Unavailable" ? [t("Staff roles waiting for approval")] : []),
   ];
   // WP-2423 item 11: first, since no guest can order until this is done.
   if (kitchenSetupHref !== null)
@@ -563,6 +570,18 @@ export function attentionItems(
         .filter((part) => part !== null)
         .join(" · "),
       state: approvals.awaiting > 0 ? t("To approve") : t("Not sent yet"),
+      tone: "warning",
+      href: "/app/approvals",
+      action: t("Review approvals"),
+      backlog: true,
+    });
+  // WP-2423 M07: staff roles waiting for this person, the same count as the Approvals badge.
+  if (typeof staffRoles === "number" && staffRoles > 0)
+    items.push({
+      key: "staff-roles",
+      title: t("Staff roles waiting for approval"),
+      detail: t("{count} to approve", { count: staffRoles }),
+      state: t("To approve"),
       tone: "warning",
       href: "/app/approvals",
       action: t("Review approvals"),
@@ -698,6 +717,7 @@ function AttentionRow({
 export function NeedsAttention({
   state,
   approvals = null,
+  staffRoles = null,
   kitchenSetupHref = null,
   settlement = { kind: "Hidden" },
   system = { kind: "NotPermitted" },
@@ -709,6 +729,7 @@ export function NeedsAttention({
 }: {
   readonly state: OverviewTodayState;
   readonly approvals?: ApprovalsWaiting | null;
+  readonly staffRoles?: StaffRolesWaiting;
   readonly kitchenSetupHref?: string | null;
   readonly settlement?: SettlementStatusRead;
   /** The store system's board: a real problem is a row here, not only in the status line. */
@@ -734,7 +755,7 @@ export function NeedsAttention({
     reads.every((read) => read.kind === "Hidden")
   )
     return <>{reminder}</>;
-  const work = attentionItems(state, approvals, null, kitchenSetupHref, settlement);
+  const work = attentionItems(state, approvals, null, kitchenSetupHref, settlement, staffRoles);
   const items = [
     ...urgent,
     ...work.filter((item) => item.backlog !== true),
@@ -1220,6 +1241,11 @@ export function StoreOverview({
   // v15 cbff9d6f: no reads once this screen's sign-in has ended; again at once if it is live.
   const live = useStaffSessionLive();
   const approvals = useApprovalsWaiting(screenKey.split("|").includes("APPROVAL-INBOX"), fetcher);
+  const staffRoles = useStaffRolesWaiting(
+    csrf,
+    screenKey.split("|").includes("APPROVAL-INBOX"),
+    fetcher,
+  );
   useEffect(() => {
     if (!live) return;
     if (!permitted.orders && !permitted.pickups && !permitted.exceptions && !permitted.tables)
@@ -1244,6 +1270,7 @@ export function StoreOverview({
       <NeedsAttention
         state={state}
         approvals={approvals}
+        staffRoles={staffRoles}
         kitchenSetupHref={kitchenSetupHref}
         settlement={settlement}
         system={system.read}

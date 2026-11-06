@@ -45,3 +45,25 @@ it("WP-2423 M07: the Approvals badge adds staff roles waiting, and only refunds 
   expect(approvalsBadgeCount(null, 1)).toBe(1);
   expect(approvalsBadgeCount(null, null)).toBe(0);
 });
+
+it("WP-2423 M07: Home lists staff roles waiting like the badge, and says when they could not be read", () => {
+  const render = (staffRoles: number | "Unavailable" | null) =>
+    renderToStaticMarkup(
+      createElement(
+        MemoryRouter,
+        null,
+        createElement(NeedsAttention, { state: initialOverviewState, approvals: null, staffRoles }),
+      ),
+    );
+  const waiting = render(2);
+  expect(waiting).toContain("Staff roles waiting for approval");
+  expect(waiting).toContain("2 to approve");
+  expect(waiting).toContain('href="/app/approvals"');
+  expect(render(0)).not.toContain("Staff roles waiting for approval");
+  expect(render(null)).not.toContain("Staff roles waiting for approval");
+  // A failed read is never a silent zero.
+  const failed = render("Unavailable");
+  expect(failed).toContain("This list may be missing something");
+  expect(failed).toContain("Staff roles waiting for approval");
+  expect(approvalsBadgeCount(null, "Unavailable")).toBe(0);
+});

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createRefundApprovalClient } from "./refund-approval-client.js";
 import { useStaffSessionLive } from "./staff-session-reads.js";
 import { createDiningSessionClient } from "./dining-session-client.js";
-import { createStaffPageClient } from "./staff-administration-pages.js";
+import { createStaffPageClient, StaffPageError } from "./staff-administration-pages.js";
 
 /** WP-2423 Q35: how often the waiting refund approvals are read while a page is visible. */
 export const APPROVALS_WAITING_REFRESH_MS = 60_000;
@@ -66,29 +66,36 @@ export function useApprovalsWaiting(
 }
 
 /**
+ * WP-2423 M07: how many staff role requests wait for the signed-in person. `null` until read or
+ * when not permitted; "Unavailable" when the read failed, so the count is never silently short.
+ */
+export type StaffRolesWaiting = number | "Unavailable" | null;
+
+/**
  * WP-2423 M07: the Approvals badge counts refunds to approve or send plus staff roles waiting for
- * the signed-in person. A read that failed (null) adds nothing; nothing is guessed.
+ * the signed-in person. A read that failed adds nothing; nothing is guessed.
  */
 export function approvalsBadgeCount(
   approvals: ApprovalsWaiting | null,
-  staffRoles: number | null,
+  staffRoles: StaffRolesWaiting,
 ): number {
   return (
-    (approvals === null ? 0 : approvals.awaiting + approvals.approvedNotSent) + (staffRoles ?? 0)
+    (approvals === null ? 0 : approvals.awaiting + approvals.approvedNotSent) +
+    (typeof staffRoles === "number" ? staffRoles : 0)
   );
 }
 
 /**
  * WP-2423 M07: how many staff role requests wait for the signed-in person (to decide, or their own
- * to approve alone), read with the refunds. `null` until read, when not permitted or on failure.
+ * to approve alone), read with the refunds. See `StaffRolesWaiting`.
  */
 export function useStaffRolesWaiting(
   csrf: string | null,
   enabled: boolean,
   fetcher?: typeof fetch,
-): number | null {
+): StaffRolesWaiting {
   const live = useStaffSessionLive();
-  const [waiting, setWaiting] = useState<number | null>(null);
+  const [waiting, setWaiting] = useState<StaffRolesWaiting>(null);
   useEffect(() => {
     if (!enabled || csrf === null || !live || typeof window === "undefined") {
       setWaiting(null);
@@ -102,8 +109,13 @@ export function useStaffRolesWaiting(
         .then((requests) => {
           if (current) setWaiting(requests.length);
         })
-        .catch(() => {
-          if (current) setWaiting(null);
+        .catch((error: unknown) => {
+          if (!current) return;
+          setWaiting(
+            error instanceof StaffPageError && error.code === "PermissionDenied"
+              ? null
+              : "Unavailable",
+          );
         });
     };
     read();
