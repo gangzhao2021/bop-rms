@@ -277,6 +277,18 @@ it("WP-2423: says staff moved the table while the round was being sent (nothing 
   });
 });
 
+it("WP-2423 table-move-send: a pay-later round sent after staff moved the table says so too", async () => {
+  const f = await setup();
+  f.sendToKitchen.mockRejectedValueOnce(new OrderCreationError("ORDER_CREATE_TABLE_MOVED"));
+  const response = await f.send({ sendToKitchen: true });
+  expect(response.status).toBe(409);
+  expect(await response.json()).toEqual({
+    schemaVersion: 1,
+    error: { code: "payment_table_moved", messageKey: "customer.payment.table_moved" },
+  });
+  expect(f.create).not.toHaveBeenCalled();
+});
+
 it.each([
   [new CheckoutValidationError("CHECKOUT_REQUOTE_REQUIRED"), 422],
   [new CheckoutSessionServiceError("REQUOTE_REQUIRED"), 409],

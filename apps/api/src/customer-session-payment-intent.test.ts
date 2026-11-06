@@ -1,7 +1,10 @@
 import { expect, it, vi } from "vitest";
 import { createPaymentIntentCreationService } from "@rms/payment";
-import { parseCheckoutSession } from "@rms/ordering";
-import { createCustomerSessionPaymentIntent } from "./customer-session-payment-intent.js";
+import { OrderCreationError, parseCheckoutSession } from "@rms/ordering";
+import {
+  createCustomerSessionPaymentIntent,
+  submitCustomerSessionRound,
+} from "./customer-session-payment-intent.js";
 import type { CustomerCheckoutSessionAuthorizationOptions } from "./customer-checkout-session-authorization.js";
 import {
   at,
@@ -336,3 +339,64 @@ it("WP-2423 Q20: opens another card on the existing payment without preparing an
     code: "INPUT_INVALID",
   });
 });
+
+/**
+ * WP-2423 table-move-send: staff moved the party after the guest's later round was prepared. The
+ * tip is chosen before the round is placed; its "table moved" reaches the route (409
+ * payment_table_moved) with no round placed, no payment clock and no Provider call, for a round
+ * paid now and for a round of a pay-later table.
+ */
+it.each(["PayFirst", "PayLater"] as const)(
+  "WP-2423 table-move-send: a later round whose party moved is refused before it is placed (%s)",
+  async (timing) => {
+    const f = await fixture();
+    const session = parseCheckoutSession({
+      ...f.session,
+      validation: {
+        ...f.session.validation,
+        orderType: "DineIn",
+        fulfillment: { ...f.session.validation.fulfillment, orderType: "DineIn" },
+      },
+    });
+    mocks.read.mockResolvedValue(session);
+    const create = vi.fn(),
+      preparePaymentClock = vi.fn();
+    const select = vi.fn(async () => {
+      throw new OrderCreationError("ORDER_CREATE_TABLE_MOVED");
+    });
+    const options = {
+      access: {
+        scope: { brandReference: refs.brand, storeReference: refs.store },
+      } as CustomerCheckoutSessionAuthorizationOptions,
+      tenantReference: id(40),
+      submissionKind: "Additional" as const,
+      orders: { create, preparePaymentClock },
+      tips: { select },
+      inventory: { load: f.unused },
+      history: { resolveOperation: async () => null },
+      nextPreparationReference: () => refs.preparation,
+      payment: () => f.h.ports,
+    };
+    const refused = { name: "OrderCreationError", code: "ORDER_CREATE_TABLE_MOVED" };
+    if (timing === "PayFirst")
+      await expect(
+        createCustomerSessionPaymentIntent(options).create(f.input),
+      ).rejects.toMatchObject(refused);
+    else
+      await expect(
+        submitCustomerSessionRound(options, {
+          input: {
+            sessionCredential: f.input.sessionCredential,
+            csrfCredential: f.input.csrfCredential,
+            checkoutSessionReference: f.input.checkoutSessionReference,
+          },
+          session,
+          selectionReference: f.input.selectionReference,
+        }),
+      ).rejects.toMatchObject(refused);
+    expect(select).toHaveBeenCalledOnce();
+    expect(create).not.toHaveBeenCalled();
+    expect(preparePaymentClock).not.toHaveBeenCalled();
+    expect(f.h.providerCalls()).toBe(0);
+  },
+);
