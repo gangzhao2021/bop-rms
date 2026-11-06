@@ -26,7 +26,7 @@ import {
   allergenText,
   unitText,
 } from "./recipe-pages.js";
-import { serverProblemText } from "./failure-words.js";
+import { serverProblemText, offlineCheckBeforeRepeatText } from "./failure-words.js";
 import { PageDidNotLoad, readingAgain } from "./PageDidNotLoad.js";
 
 /** WP-2423 / DEC-RECIPE-AUTHORING: Brand recipes — drafts, independent review, publication, SKUs. */
@@ -59,7 +59,7 @@ const copy: Record<RecipeErrorCode | "Loading", string> = {
   Invalid: t(
     "The recipe is not valid. A name, a code (capital letters, digits, hyphen), a yield, at least one ingredient and one kitchen step are required.",
   ),
-  Offline: t("Offline. Nothing was confirmed; retry sends the same request again."),
+  Offline: offlineCheckBeforeRepeatText,
   Unavailable: serverProblemText,
 };
 const lifecycleText: Record<string, string> = {

@@ -18,7 +18,7 @@ import {
   type StoreWasteView,
   type WasteRecordView,
 } from "./store-waste-pages.js";
-import { serverProblemText } from "./failure-words.js";
+import { serverProblemText, offlineCheckBeforeRepeatText } from "./failure-words.js";
 import { PageDidNotLoad, readingAgain } from "./PageDidNotLoad.js";
 
 /** WP-2423 / DEC-INV-WASTE: record waste as it happens; managers review high-value records. */
@@ -36,7 +36,7 @@ const copy: Record<StoreWasteErrorCode | "Loading", string> = {
     "The highlighted line is not valid: check item, location, lot, quantity precision and reason (a note is needed for Other).",
   ),
   Invalid: t("The waste record is not valid."),
-  Offline: t("Offline. Nothing was confirmed; retry sends the same request again."),
+  Offline: offlineCheckBeforeRepeatText,
   Unavailable: serverProblemText,
 };
 /**

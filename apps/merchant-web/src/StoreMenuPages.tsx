@@ -41,7 +41,7 @@ import {
   type MenuDraftContent,
   type StoredMenuDraft,
 } from "./store-menu-pages.js";
-import { serverProblemText } from "./failure-words.js";
+import { serverProblemText, offlineCheckBeforeRepeatText } from "./failure-words.js";
 import { PageDidNotLoad, readingAgain } from "./PageDidNotLoad.js";
 
 /** WP-2423 / DEC-MENU-REVISION: Brand menus — edit, review, publish and revise. */
@@ -82,7 +82,7 @@ export const menuErrorText: Record<MenuErrorCode | "Loading", string> = {
   Invalid: t(
     "The menu is not valid. Each section needs a distinct name, and an item may appear once per section.",
   ),
-  Offline: t("Offline. Nothing was confirmed; retry sends the same request again."),
+  Offline: offlineCheckBeforeRepeatText,
   Unavailable: serverProblemText,
   SoleOperatorNotInEffect: t(
     "Someone else now holds menu approval, so they must approve this version. Refresh to see who.",

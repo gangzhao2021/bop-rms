@@ -15,7 +15,7 @@ import {
   type StockLocationView,
   type TemperatureZone,
 } from "./stock-location-pages.js";
-import { serverProblemText } from "./failure-words.js";
+import { serverProblemText, offlineCheckBeforeRepeatText } from "./failure-words.js";
 import { PageDidNotLoad, readingAgain } from "./PageDidNotLoad.js";
 
 const copy: Record<StockLocationErrorCode | "Loading", string> = {
@@ -30,7 +30,7 @@ const copy: Record<StockLocationErrorCode | "Loading", string> = {
     "Stock is still held, reserved or expected at this location. Move or count it out first.",
   ),
   Invalid: t("Some values are not valid. Codes use capital letters, digits, - or _."),
-  Offline: t("Offline. The change was not confirmed; retry sends the same request again."),
+  Offline: offlineCheckBeforeRepeatText,
   Unavailable: serverProblemText,
 };
 const zones: readonly (readonly [TemperatureZone, string])[] = [

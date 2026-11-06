@@ -20,7 +20,7 @@ import {
   type OptionPriceRow,
   type OptionPriceView,
 } from "./store-option-prices-page.js";
-import { serverProblemText } from "./failure-words.js";
+import { serverProblemText, offlineCheckBeforeRepeatText } from "./failure-words.js";
 import { PageDidNotLoad, readingAgain } from "./PageDidNotLoad.js";
 
 /** WP-2423 slice 4.3: what each option costs on each product; another approver publishes, or the
@@ -39,7 +39,7 @@ const copy: Record<OptionPriceErrorCode | "Loading", string> = {
     "Someone else now holds price approval, so they must publish these prices. Refresh to see who.",
   ),
   NeedsReverification: t("Confirm it is you with your authenticator code, then publish again."),
-  Offline: t("Offline. Nothing was confirmed; retry sends the same request again."),
+  Offline: offlineCheckBeforeRepeatText,
   Unavailable: serverProblemText,
 };
 const key = (binding: string, option: string) => binding + ":" + option;

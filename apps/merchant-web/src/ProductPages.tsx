@@ -38,7 +38,7 @@ import {
   type ProductOptionSetInput,
   type ProductTaxClass,
 } from "./product-pages.js";
-import { serverProblemText } from "./failure-words.js";
+import { serverProblemText, offlineCheckBeforeRepeatText } from "./failure-words.js";
 import { menuReviewProblemText } from "./store-menu-pages.js";
 import { PageDidNotLoad, readingAgain } from "./PageDidNotLoad.js";
 
@@ -62,7 +62,7 @@ const copy: Record<ProductErrorCode | "Loading", string> = {
   ChoiceGroup: t(
     "One of this product's choice groups no longer fits it: a choice was removed, or the choice guests start with is no longer offered. Check the group under Option sets, then save again.",
   ),
-  Offline: t("Offline. Nothing was confirmed; retry sends the same request again."),
+  Offline: offlineCheckBeforeRepeatText,
   Unavailable: serverProblemText,
 };
 const lifecycleText: Record<string, string> = {

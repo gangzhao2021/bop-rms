@@ -1,4 +1,5 @@
 import { systemText, t } from "./i18n/i18n.js";
+import { offlineCheckBeforeRepeatText } from "./failure-words.js";
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { SourceTime, StaffTime, StoreDate } from "./StoreTime.js";
@@ -39,7 +40,7 @@ const copy: Record<StockCountErrorCode | "Loading", string> = {
   State: t("This step is not possible in the count's current state."),
   LineInvalid: t("The highlighted count is not valid for the item's unit precision."),
   Invalid: t("The request is not valid."),
-  Offline: t("Offline. Nothing was confirmed; retry sends the same request again."),
+  Offline: offlineCheckBeforeRepeatText,
   Unavailable: t(
     "This could not be done right now and nothing was changed. Try again in a moment; if it keeps failing, keep your count sheet and tell the manager.",
   ),

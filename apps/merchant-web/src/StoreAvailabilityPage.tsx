@@ -38,7 +38,7 @@ import {
   type StorePricesClient,
   type StorePricesView,
 } from "./store-prices-client.js";
-import { serverProblemText } from "./failure-words.js";
+import { serverProblemText, offlineCheckBeforeRepeatText } from "./failure-words.js";
 import { PageDidNotLoad, readingAgain } from "./PageDidNotLoad.js";
 
 /** WP-2423 8.5: which items this Store sells now — offer, sold out, back in stock. */
@@ -52,7 +52,7 @@ const copy: Record<AvailabilityErrorCode | "Loading", string> = {
     "The item changed since you opened the page, or is not offered here. Refresh and check.",
   ),
   Invalid: t("That request is not valid."),
-  Offline: t("Offline. Nothing was confirmed; retry sends the same request again."),
+  Offline: offlineCheckBeforeRepeatText,
   Unavailable: serverProblemText,
 };
 const statusText = {

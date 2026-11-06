@@ -1,4 +1,5 @@
 import { countOf, t } from "./i18n/i18n.js";
+import { browserOffline } from "./stale-read.js";
 import { StatePanel } from "@bop-rms/ui";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router";
@@ -15,6 +16,8 @@ import {
   menuRows,
   readListingMarker,
   writeListingMarker,
+  readListingAttempt,
+  writeListingAttempt,
   newSectionCode,
   orderKey,
   sectionInputs,
@@ -91,6 +94,11 @@ export interface MenuApplyIntent {
  * take effect at once (the Store's item availability); a new order is saved to the menu draft and
  * shows to guests when the menu is listed.
  */
+/** merchant-outage-recovery M155: Save order with no network; the arrangement is kept. */
+const saveOrderOfflineText = t(
+  "The network dropped, so the new order wasn't saved. Your arrangement is still here; tap Save order again once you're connected.",
+);
+
 export function OneStoreMenuPage({
   menuReference,
   client,
@@ -147,6 +155,8 @@ export function OneStoreMenuPage({
   const [newSection, setNewSection] = useState<{ name: string; nameZh: string } | null>(null);
   // One listing reference per intended listing, kept until it is answered (a retry continues it).
   const [listing, setListing] = useState<string | null>(null);
+  // The menu version `listing` lists (M103): a changed menu is a new listing.
+  const listingVersion = useRef<string | null>(null);
   const newListing = () => {
     const reference = newOperationReference();
     setListing(reference);
@@ -291,6 +301,13 @@ export function OneStoreMenuPage({
     return undefined;
   }, [listingBusy, listingSince]);
   useEffect(() => {
+    // M103: the server says listed: a kept listing reference has done its work.
+    if (view !== null && !listingBusy && !listingPending(view) && listing !== null) {
+      setListing(null);
+      writeListingAttempt(menuReference, null);
+    }
+  }, [view, listingBusy, listing, menuReference]);
+  useEffect(() => {
     // Finished elsewhere (the server says listed): stop showing progress.
     if (view !== null && listingSince !== null && !listingBusy && !listingPending(view)) {
       setListingSince(null);
@@ -364,12 +381,19 @@ export function OneStoreMenuPage({
   };
   const saveOrder = async (done = t("New order saved. Guests see it when the menu is listed.")) => {
     if (client.command === undefined || blocked) return;
+    // merchant-outage-recovery M155: with no network nothing is sent; the arrangement stays.
+    if (browserOffline()) {
+      setProblem(saveOrderOfflineText);
+      return;
+    }
     setBusy(true);
     setProblem(null);
     try {
-      let current = view;
+      // M155: each save starts from the menu as it is now, so a retry after a lost answer (the new
+      // draft made, its save not answered) neither opens a second draft nor meets a Conflict.
+      let current = parseMenuBuilderView(await client.load(menuReference));
       // A listed menu is changed through a new draft (the published one stays for guests).
-      if (stage !== "Editing") {
+      if (menuStage(current.publication) !== "Editing") {
         await client.command({
           action: "Revise",
           operationReference: newOperationReference(),
@@ -393,10 +417,15 @@ export function OneStoreMenuPage({
       setProblem(done);
       reload();
     } catch (error) {
+      // The arrangement on screen is kept (no reread): staff press Save order again.
       setProblem(
         error instanceof MenuPageError && error.code === "Conflict"
           ? t("Someone changed the menu meanwhile. Read it again, then move the dishes again.")
-          : t("That didn't go through. Read the menu again and retry."),
+          : (error instanceof MenuPageError && error.code === "Offline") || browserOffline()
+            ? saveOrderOfflineText
+            : t(
+                "The new order wasn't saved. Your arrangement is still here; tap Save order again.",
+              ),
       );
     } finally {
       setBusy(false);
@@ -407,18 +436,35 @@ export function OneStoreMenuPage({
   // WP-2423 item 8 ⑥ part 2: "List it" — the menu as saved takes effect for guests, no review.
   const listMenu = async () => {
     if (client.command === undefined || blocked) return;
+    // merchant-outage-recovery M103: with no network nothing is sent and nothing shows as listing.
+    if (browserOffline()) {
+      setProblem(
+        t("You're offline, so the menu wasn't listed. List it again once you're connected."),
+      );
+      return;
+    }
     setListingBusy(true);
     setProblem(null);
     const started = Date.now();
     setListingSince(started);
     writeListingMarker(menuReference, started);
+    const version = view.menu.versionReference;
+    // The same listing of the same menu version continues (also after a reload); a menu changed
+    // since starts a new listing.
+    const operationReference =
+      (listing !== null && listingVersion.current === version ? listing : null) ??
+      readListingAttempt(menuReference, version, started) ??
+      newListing();
+    setListing(operationReference);
+    listingVersion.current = version;
+    writeListingAttempt(menuReference, { reference: operationReference, version, at: started });
     try {
-      const operationReference = listing ?? newListing();
       // The open price book and waiting choice prices are listed with the menu.
       if (client.oneStore !== undefined)
         await client.oneStore({ action: "ListAll", operationReference, menuReference });
       else await client.command({ action: "List", operationReference, menuReference });
       setListing(null);
+      writeListingAttempt(menuReference, null);
       setListingSince(null);
       writeListingMarker(menuReference, null);
       setProblem(t("Listed. Guests see the menu as it is now."));
@@ -432,13 +478,15 @@ export function OneStoreMenuPage({
       const stopped = code === "Unavailable" || code === "StoppedPartWay";
       // Stopped before anything was listed: the same listing goes again and finishes it.
       const notListed = code === "ChoiceRecipesStopped";
-      // No answer (offline, or the page is going away): the listing may still be running on the
-      // server, so it stays shown in progress until the menu says listed (or three minutes pass).
-      if (code !== "Offline") {
-        if (!stopped && !notListed) setListing(null);
-        setListingSince(null);
-        writeListingMarker(menuReference, null);
+      // merchant-outage-recovery M103: no answer (the network dropped). The List button comes
+      // back at once, with the same listing reference kept: the next tap continues this listing
+      // and the server never lists it twice.
+      if (!stopped && !notListed && code !== "Offline") {
+        setListing(null);
+        writeListingAttempt(menuReference, null);
       }
+      setListingSince(null);
+      writeListingMarker(menuReference, null);
       // WP-2423 item 3: no recipe for a dish on this menu that declares nothing either: the owner
       // declares its allergens here (the refusal names a Store for a recipe assigned elsewhere).
       const undeclared =
@@ -455,11 +503,15 @@ export function OneStoreMenuPage({
             ? menuReviewProblemText(
                 undeclared ? { ...error.problem, storeName: null } : error.problem,
               )
-            : stopped
+            : code === "Offline"
               ? t(
-                  "Listing stopped part-way. New prices may already be showing to guests; the menu is not updated yet. List it again to finish.",
+                  "The network dropped, so we can't tell whether the menu was listed. Tap List it again once you're connected; it won't be listed twice.",
                 )
-              : menuErrorText[error.code]
+              : stopped
+                ? t(
+                    "Listing stopped part-way. New prices may already be showing to guests; the menu is not updated yet. List it again to finish.",
+                  )
+                : menuErrorText[error.code]
           : t("That didn't go through. Read the menu again and retry."),
       );
       setProblemFixHref(

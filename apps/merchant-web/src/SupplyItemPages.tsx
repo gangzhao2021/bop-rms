@@ -19,7 +19,7 @@ import {
   type SupplyItemPageView,
   type SupplyItemView,
 } from "./supply-item-pages.js";
-import { serverProblemText } from "./failure-words.js";
+import { serverProblemText, offlineCheckBeforeRepeatText } from "./failure-words.js";
 import { PageDidNotLoad, readingAgain } from "./PageDidNotLoad.js";
 
 const copy: Record<SupplyItemErrorCode | "Loading", string> = {
@@ -36,7 +36,7 @@ const copy: Record<SupplyItemErrorCode | "Loading", string> = {
     "Stock has been recorded for this item, so its base unit cannot change and tracking changes need a migration plan.",
   ),
   Invalid: t("Some values are not valid. Check the code, name and tracking settings."),
-  Offline: t("Offline. The change was not confirmed; retry sends the same request again."),
+  Offline: offlineCheckBeforeRepeatText,
   Unavailable: serverProblemText,
 };
 const itemTypes = [

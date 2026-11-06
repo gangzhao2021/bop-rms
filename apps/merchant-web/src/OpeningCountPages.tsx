@@ -16,7 +16,7 @@ import {
   type OpeningCountPageView,
   type OpeningLine,
 } from "./opening-count-pages.js";
-import { serverProblemText } from "./failure-words.js";
+import { serverProblemText, offlineCheckBeforeRepeatText } from "./failure-words.js";
 import { PageDidNotLoad, readingAgain } from "./PageDidNotLoad.js";
 
 const copy: Record<OpeningCountErrorCode | "Loading", string> = {
@@ -34,7 +34,7 @@ const copy: Record<OpeningCountErrorCode | "Loading", string> = {
     "The highlighted line is not valid: check the item, location, quantity precision, lot and expiry.",
   ),
   Invalid: t("The count is not valid. A count needs at least one line before it is submitted."),
-  Offline: t("Offline. The change was not confirmed; retry sends the same request again."),
+  Offline: offlineCheckBeforeRepeatText,
   Unavailable: serverProblemText,
 };
 type State =

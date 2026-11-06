@@ -25,7 +25,7 @@ import {
   type OptionSetListView,
   type OptionSetRow,
 } from "./store-option-set-page.js";
-import { serverProblemText } from "./failure-words.js";
+import { serverProblemText, offlineCheckBeforeRepeatText } from "./failure-words.js";
 import { PageDidNotLoad, readingAgain } from "./PageDidNotLoad.js";
 
 /**
@@ -41,7 +41,7 @@ const copy: Record<OptionSetErrorCode | "Loading", string> = {
     "The option set is not valid. It needs a name, at least one option, different option names, and limits that customers can meet with the options offered.",
   ),
   OptionSet: serverProblemText,
-  Offline: t("Offline. Nothing was confirmed; retry sends the same request again."),
+  Offline: offlineCheckBeforeRepeatText,
   Unavailable: serverProblemText,
 };
 type State<V> =

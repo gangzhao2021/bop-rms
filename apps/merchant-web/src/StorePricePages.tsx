@@ -25,7 +25,7 @@ import {
   type PriceErrorCode,
   type PriceSellable,
 } from "./store-price-pages.js";
-import { serverProblemText } from "./failure-words.js";
+import { serverProblemText, offlineCheckBeforeRepeatText } from "./failure-words.js";
 import { PageDidNotLoad, readingAgain } from "./PageDidNotLoad.js";
 
 /** WP-2423 / DEC-PRICE-STORE-ASSIGNMENT: Brand price books and the price book this Store charges. */
@@ -50,7 +50,7 @@ const copy: Record<PriceErrorCode | "Loading", string> = {
   ),
   NeedsReverification: t("Confirm it is you with your authenticator code, then publish again."),
   FullSignInRequired: FULL_SIGN_IN_REQUIRED_TEXT,
-  Offline: t("Offline. Nothing was confirmed; retry sends the same request again."),
+  Offline: offlineCheckBeforeRepeatText,
   Unavailable: serverProblemText,
 };
 const lifecycleText: Record<string, string> = {

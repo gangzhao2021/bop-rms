@@ -22,7 +22,7 @@ import {
   type OptionRecipeView,
 } from "./store-option-recipes-page.js";
 import { unitText } from "./recipe-pages.js";
-import { serverProblemText } from "./failure-words.js";
+import { serverProblemText, offlineCheckBeforeRepeatText } from "./failure-words.js";
 import { PageDidNotLoad, readingAgain } from "./PageDidNotLoad.js";
 
 /** WP-2423 slice 4.4: what each option does to a product's recipes, reviewed and published. */
@@ -54,7 +54,7 @@ const copy: Record<OptionRecipeErrorCode | "Loading", string> = {
   ),
   NeedsReverification: t("Confirm it is you with your authenticator code, then review again."),
   Invalid: t("The change is not valid. Check the amounts."),
-  Offline: t("Offline. Nothing was confirmed; retry sends the same request again."),
+  Offline: offlineCheckBeforeRepeatText,
   Unavailable: serverProblemText,
 };
 const statusText: Record<OptionRecipeStatus, string> = {

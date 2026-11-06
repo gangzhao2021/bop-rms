@@ -283,3 +283,42 @@ export function writeListingMarker(menuReference: string, started: number | null
     // Not kept: the server's state still shows the later steps.
   }
 }
+
+/**
+ * merchant-outage-recovery M103: the listing reference of a "List it" whose answer was lost, kept
+ * for the menu version it listed, so a tap after a reload continues that same listing (never a
+ * second one). A different version (the menu was changed since) starts a new listing. Kept at most
+ * ten minutes; best effort.
+ */
+export const listingAttemptMaximumMs = 10 * 60_000;
+const attemptKey = (menuReference: string) => `bop.menu-listing-attempt.${menuReference}`;
+export function readListingAttempt(
+  menuReference: string,
+  versionReference: string,
+  now: number,
+): string | null {
+  try {
+    const raw = globalThis.localStorage?.getItem(attemptKey(menuReference));
+    if (raw === null || raw === undefined) return null;
+    const value = JSON.parse(raw) as { reference?: unknown; version?: unknown; at?: unknown };
+    return typeof value.reference === "string" &&
+      value.version === versionReference &&
+      typeof value.at === "number" &&
+      now - value.at < listingAttemptMaximumMs
+      ? value.reference
+      : null;
+  } catch {
+    return null;
+  }
+}
+export function writeListingAttempt(
+  menuReference: string,
+  attempt: { readonly reference: string; readonly version: string; readonly at: number } | null,
+): void {
+  try {
+    if (attempt === null) globalThis.localStorage?.removeItem(attemptKey(menuReference));
+    else globalThis.localStorage?.setItem(attemptKey(menuReference), JSON.stringify(attempt));
+  } catch {
+    // Not kept: a tap after a reload starts a new listing reference.
+  }
+}
