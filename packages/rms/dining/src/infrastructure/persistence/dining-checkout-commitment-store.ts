@@ -273,11 +273,21 @@ export function createPostgresDiningCheckoutCommitmentStore(
     // reading; after three tries the caller gets a conflict. A caller whose clock is fixed (the
     // payment admission at its request time) cannot follow a Move made after that time: it is
     // refused and the guest's next confirm, retry or resume (or the worker's next pass) follows it.
+    // Each try runs under a savepoint. A try that finds the party moved again gives back its table
+    // and session locks before the next try locks the table the party sits at now: a Move locks
+    // its tables before the session, so holding the session while waiting for a table could
+    // deadlock with a Move in progress.
     let observedAt = at;
     for (let attempt = 0; attempt < 3; attempt += 1) {
       if (attempt > 0) observedAt = now(observedAt);
+      await tx.query("SAVEPOINT dining_checkout_follow_party", []);
       const found = await followedOnce(tx, record, observedAt);
-      if (found !== null) return found;
+      if (found !== null) {
+        await tx.query("RELEASE SAVEPOINT dining_checkout_follow_party", []);
+        return found;
+      }
+      await tx.query("ROLLBACK TO SAVEPOINT dining_checkout_follow_party", []);
+      await tx.query("RELEASE SAVEPOINT dining_checkout_follow_party", []);
     }
     return fail("DINING_CHECKOUT_STORE_CONFLICT");
   }

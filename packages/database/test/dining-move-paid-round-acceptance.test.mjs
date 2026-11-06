@@ -688,11 +688,15 @@ it.each([
           // ── The move, per case.
           let event1;
           if (variant === "PaymentOpenDuringMove") {
-            // The guest's payment sheet was opened at table A; staff move the party to B before
-            // the guest confirms. A second Move lands inside the gate itself (after its first read
-            // of where the party sits, before its locks): the gate reads again and follows it.
-            await move(tableA, tableB);
-            let raced = false;
+            // The guest's payment sheet was opened at table A; staff move the party while the
+            // guest confirms, inside the gate itself. A to B lands after the gate's first read of
+            // where the party sits and before its locks: the gate locks A and the session, finds
+            // the party gone and reads again. B to C then starts as the gate's second read is
+            // answered and takes table B before waiting for the session: the gate gives back A and
+            // the session before it locks B (a Move locks table before session), so neither waits
+            // on the other (review 2026-11-06: holding the session here deadlocked with the Move).
+            let reads = 0;
+            let second = null;
             const racing = {
               run: (work) =>
                 transactions().run((tx) =>
@@ -700,12 +704,25 @@ it.each([
                     async query(sql, values) {
                       const result = await tx.query(sql, values);
                       if (
-                        !raced &&
                         sql.startsWith("SELECT session_snapshot AS session") &&
                         !sql.includes("FOR UPDATE")
                       ) {
-                        raced = true;
-                        await move(tableB, tableC);
+                        reads += 1;
+                        if (reads === 1) await move(tableA, tableB);
+                        if (reads === 2) {
+                          let settled = false;
+                          second = move(tableB, tableC).finally(() => {
+                            settled = true;
+                          });
+                          // Until the Move has finished or waits for a lock (holding table B).
+                          for (let wait = 0; !settled && wait < 200; wait += 1) {
+                            const [{ waiting }] = await one(
+                              "SELECT count(*)::int AS waiting FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock'",
+                            );
+                            if (waiting > 0) break;
+                            await new Promise((resolve) => setTimeout(resolve, 25));
+                          }
+                        }
                       }
                       return result;
                     },
@@ -713,7 +730,8 @@ it.each([
                 ),
             };
             const current = await paymentGate(racing);
-            assert.equal(raced, true);
+            await second;
+            assert.equal(reads, 3);
             assert.equal(current.commitmentReference, commitment1);
             assert.equal(current.tableReference, tableA);
             assert.equal(current.state, "PaymentPending");
