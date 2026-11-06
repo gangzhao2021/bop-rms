@@ -62,6 +62,7 @@ const allowlist = [
     uuid,
   ],
   ["packages/database/test/recipe-reference-source-acceptance.test.mjs", "brand_id", uuid],
+  ["packages/database/test/staff-round-soldout-acceptance.test.mjs", "sku", uuid],
   ["packages/database/test/tenant-context-acceptance.test.mjs", "table_name", "table name text"],
   [
     "packages/rms/dining/src/infrastructure/persistence/dining-exception-task-store.ts",
