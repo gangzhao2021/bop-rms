@@ -1,4 +1,4 @@
-import { listSeparator, t } from "./i18n/i18n.js";
+import { listSeparator, saidTable, t } from "./i18n/i18n.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { KitchenWorkClientError, createKitchenWorkClient } from "./kitchen-work-client.js";
 import {
@@ -275,11 +275,34 @@ export function useKitchenActions(input: {
         );
       },
       onNotSent: (unsent) => {
-        for (const tap of unsent) bodies.current.delete(tap.id);
-        sayRef.current(
-          "Problem",
-          t("The board lost touch. That step was not recorded. Tap it again."),
-        );
+        // The bodies stay: Try again sends the same one once the board is fresh.
+        for (const tap of unsent) {
+          const first = tap.targets[0];
+          const name = first === undefined ? "" : kitchenTargetName(first);
+          // Named with its table, so the cook finds the ticket among several.
+          const label = first?.item.orderLabel;
+          const order =
+            label === undefined || label === null
+              ? ""
+              : label.orderType === "DineIn" && label.tableLabel
+                ? t("Order {orderNumber} (table {tableLabel})", {
+                    orderNumber: label.orderNumber,
+                    tableLabel: saidTable(label.tableLabel),
+                  })
+                : t("Order {orderNumber}", { orderNumber: label.orderNumber });
+          sayRef.current(
+            "Problem",
+            order === ""
+              ? t(
+                  "{displayName} is not recorded yet. The board lost touch; tap Try again on its ticket.",
+                  { displayName: name },
+                )
+              : t(
+                  "{orderLabel} · {displayName} is not recorded yet. The board lost touch; tap Try again on its ticket.",
+                  { orderLabel: order, displayName: name },
+                ),
+          );
+        }
       },
     });
     queueRef.current = queue;
@@ -289,7 +312,7 @@ export function useKitchenActions(input: {
       queueRef.current = null;
     };
   }, []);
-  // The connection or authority going sends every unsent tap back to the cook at once.
+  // The connection or authority going stops every unsent tap on its card, for the cook to retry.
   useEffect(() => {
     if (!authority) queueRef.current?.authorityLost();
   }, [authority]);

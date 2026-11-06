@@ -309,8 +309,15 @@ test("@production a tap that could not be recorded keeps the ticket's name whole
   await page.goto("/operations/kitchen");
   const ticket = page.locator(".kitchen-ticket");
   await ticket.locator(".kitchen-ticket__next").click();
-  // The hold, then the same body again at 3, 8 and 20 seconds; then the cook decides.
-  for (const wait of [5_100, 3_100, 8_100, 20_100, 1_000]) await page.clock.runFor(wait);
+  // The hold, then the same body again at 3, 8 and 20 seconds; then the cook decides. Each failed
+  // answer arrives in real time, so wait for it before moving the clock on.
+  const line = ticket.locator(".kitchen-work-item").first();
+  await page.clock.runFor(5_100);
+  for (const wait of [3_100, 8_100, 20_100]) {
+    await expect(line).toHaveAttribute("data-pending", "Retrying");
+    await page.clock.runFor(wait);
+  }
+  await expect(line).toHaveAttribute("data-pending", "Failed");
   const top = ticket.locator(".kitchen-ticket__top");
   await expect(top).toContainText("Not recorded yet");
   await expect(top.getByRole("button", { name: "Try again" })).toBeVisible();
@@ -515,4 +522,46 @@ test("@production the kitchen's own targets are large enough for wet fingers", a
     const box = await target.boundingBox();
     expect(box?.height ?? 0).toBeGreaterThanOrEqual(48);
   }
+});
+
+test("@production a board read that fails during the hold keeps the Done on its ticket to send again", async ({
+  page,
+}) => {
+  await page.clock.install({ time: new Date(at) });
+  const table = { orderNumber: "5", orderType: "DineIn", tableLabel: "12" };
+  const { taps } = await mockBoard(page, [dish(1, "TEST fish", { orderLabel: table })]);
+  await page.goto("/operations/kitchen");
+  const ticket = page.locator(".kitchen-ticket");
+  let failing = false;
+  // Registered last, so it answers first: a busy server for as long as failing is set.
+  await page.route("**/merchant/kitchen/query", (route) =>
+    failing ? route.fulfill({ status: 503, headers, json: {} }) : route.fallback(),
+  );
+  await ticket.locator(".kitchen-ticket__next").click();
+  await expect(ticket.locator(".kitchen-ticket__top")).toContainText("Marked done");
+  failing = true;
+  await page.getByRole("button", { name: "Refresh" }).first().click();
+  // The failed read arrives in real time: the board says so before the hold runs out.
+  await expect(page.getByText(/Read-only until reconnected/u)).toBeVisible();
+  await page.clock.runFor(holdMs + 500);
+  // Nothing was sent, and the cook's Done is still on the ticket, named, instead of gone.
+  const top = ticket.locator(".kitchen-ticket__top");
+  await expect(top).toContainText("Not recorded yet");
+  await expect(top.getByRole("button", { name: "Try again" })).toBeDisabled();
+  // The board's own state leads the status row; the dish and its table are named under it.
+  await page.getByRole("button", { name: "Details" }).click();
+  await expect(
+    page
+      .locator(".kitchen-status-row__detail")
+      .getByText("Order 5 (table 12) · TEST fish is not recorded yet.", { exact: false }),
+  ).toBeVisible();
+  expect(taps).toEqual([]);
+  // The next read is fresh: Try again sends that same Done.
+  failing = false;
+  await page.clock.runFor(60_000);
+  await expect(top.getByRole("button", { name: "Try again" })).toBeEnabled();
+  await top.getByRole("button", { name: "Try again" }).click();
+  await expect.poll(() => taps.length).toBe(1);
+  expect(taps[0]?.step).toBe("Finish");
+  expect(taps[0]?.lines.map((line) => line.workItemReference)).toEqual([id(1)]);
 });

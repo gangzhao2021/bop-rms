@@ -33,7 +33,10 @@ export interface KitchenStepQueueOptions<Target> {
   onConfirmed(tap: KitchenTap<Target>, reply: KitchenStepReply): void;
   /** The server refused the body outright: nothing was recorded and sending again cannot help. */
   onRefused(tap: KitchenTap<Target>, code: "PermissionDenied" | "Invalid"): void;
-  /** Taps that were never sent went back to the cook. */
+  /**
+   * Taps that were never sent when authority went: each stays on its card as Failed, so the cook
+   * sees which dish is not recorded and sends it again (Try again) once the board is fresh.
+   */
   onNotSent(taps: readonly KitchenTap<Target>[]): void;
   holdMs?: number;
   retryDelaysMs?: readonly number[];
@@ -44,7 +47,8 @@ export interface KitchenStepQueueOptions<Target> {
  * (undo sends nothing), then the bodies go one at a time in the order tapped. A lost answer blocks
  * only its own lines: it goes again by itself, and other taps keep going, because each step follows
  * current state under the ticket's lock. Handoff 87.11.1 / IDR-0039: nothing is ever sent later than
- * the connection allows; when authority goes, unsent taps return to the cook, never queued.
+ * the connection allows; when authority goes, unsent taps stop on their own card as Failed and go
+ * only when the cook taps Try again on a fresh board. A passing stale read never loses a tap.
  */
 export function createKitchenStepQueue<Target>(options: KitchenStepQueueOptions<Target>) {
   const holdMs = options.holdMs ?? kitchenStepHoldMs;
@@ -115,14 +119,20 @@ export function createKitchenStepQueue<Target>(options: KitchenStepQueueOptions<
         pump();
       });
   };
-  /** The connection or authority went: unsent taps go back; what may have been sent stays open. */
+  /**
+   * The connection or authority went: nothing more goes on its own. Unsent taps and lost answers both
+   * wait on their card as Failed for the cook's Try again, which needs authority back.
+   */
   function authorityLost() {
     const unsent = entries.filter(
       (entry) => entry.tap.phase === "Holding" || entry.tap.phase === "Waiting",
     );
-    for (const entry of unsent) remove(entry);
     for (const entry of entries)
-      if (entry.tap.phase === "Retrying") {
+      if (
+        entry.tap.phase === "Holding" ||
+        entry.tap.phase === "Waiting" ||
+        entry.tap.phase === "Retrying"
+      ) {
         if (entry.timer !== null) clearTimeout(entry.timer);
         entry.timer = null;
         setPhase(entry, "Failed");

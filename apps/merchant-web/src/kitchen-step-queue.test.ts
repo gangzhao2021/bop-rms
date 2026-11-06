@@ -130,18 +130,45 @@ describe("DEC-KITCHEN-ONE-TAP between a tap and the server", () => {
     s.queue.dismiss(s.taps()[0]?.id ?? 0);
     expect(s.taps()).toEqual([]);
   });
-  it("a queued tap is not sent after the board goes stale", async () => {
+  it("a held tap is not sent after the board goes stale, and stays on its card to retry", async () => {
     const s = setup();
     s.queue.tap("Finish", ["held"]);
     await vi.advanceTimersByTimeAsync(10);
     s.lose();
     await vi.advanceTimersByTimeAsync(kitchenStepHoldMs);
     expect(s.send).not.toHaveBeenCalled();
-    expect(s.taps()).toEqual([]);
+    // One failed read must not lose the cook's Done: it waits on the card, never sent on its own.
+    expect(s.taps().map((tap) => [tap.targets[0], tap.phase])).toEqual([["held", "Failed"]]);
     expect(s.onNotSent).toHaveBeenCalledTimes(1);
     expect(s.onNotSent.mock.calls[0]?.[0][0].targets).toEqual(["held"]);
+    await vi.advanceTimersByTimeAsync(600_000);
+    s.queue.retry(s.taps()[0]?.id ?? 0);
+    expect(s.send).not.toHaveBeenCalled();
+    // The next read is fresh: Try again sends the same tap.
+    s.gain();
+    s.queue.retry(s.taps()[0]?.id ?? 0);
+    await flush();
+    expect(s.send).toHaveBeenCalledTimes(1);
+    expect(s.send.mock.calls[0]?.[0].targets).toEqual(["held"]);
+    s.pending[0]?.resolve(reply);
+    await flush();
+    expect(s.onConfirmed).toHaveBeenCalledTimes(1);
+    expect(s.taps()).toEqual([]);
   });
-  it("when the connection goes, unsent taps return at once and a lost answer waits for the cook", async () => {
+  it("a stale read during the hold stops the tap without sending, even once the board is back", async () => {
+    const s = setup();
+    s.queue.tap("Finish", ["held"]);
+    await vi.advanceTimersByTimeAsync(10);
+    s.lose();
+    s.queue.authorityLost();
+    s.gain();
+    await vi.advanceTimersByTimeAsync(kitchenStepHoldMs * 2);
+    expect(s.send).not.toHaveBeenCalled();
+    expect(s.taps().map((tap) => tap.phase)).toEqual(["Failed"]);
+    s.queue.dismiss(s.taps()[0]?.id ?? 0);
+    expect(s.taps()).toEqual([]);
+  });
+  it("when the connection goes, unsent taps and a lost answer both wait for the cook", async () => {
     const s = setup();
     s.queue.tap("Finish", ["lost"]);
     await vi.advanceTimersByTimeAsync(kitchenStepHoldMs);
@@ -151,7 +178,10 @@ describe("DEC-KITCHEN-ONE-TAP between a tap and the server", () => {
     s.lose();
     s.queue.authorityLost();
     expect(s.onNotSent.mock.calls[0]?.[0][0].targets).toEqual(["unsent"]);
-    expect(s.taps().map((tap) => [tap.targets[0], tap.phase])).toEqual([["lost", "Failed"]]);
+    expect(s.taps().map((tap) => [tap.targets[0], tap.phase])).toEqual([
+      ["lost", "Failed"],
+      ["unsent", "Failed"],
+    ]);
     // Never sent minutes later on its own, and not on demand while there is no connection.
     await vi.advanceTimersByTimeAsync(600_000);
     s.queue.retry(s.taps()[0]?.id ?? 0);
