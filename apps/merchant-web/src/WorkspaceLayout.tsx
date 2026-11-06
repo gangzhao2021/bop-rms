@@ -1,6 +1,11 @@
 import { t } from "./i18n/i18n.js";
 import { LanguageSwitch } from "./i18n/LanguageSwitch.js";
-import { useApprovalsWaiting, useStaffCallsWaiting } from "./approvals-waiting.js";
+import {
+  approvalsBadgeCount,
+  useApprovalsWaiting,
+  useStaffCallsWaiting,
+  useStaffRolesWaiting,
+} from "./approvals-waiting.js";
 import { SkipLinkProvidedContext, WorkspaceFrameContext } from "@bop-rms/ui";
 import {
   useEffect,
@@ -236,13 +241,18 @@ export function WorkspaceLayout({
   const sections = workspaceNavigationSections(items);
   // WP-2423 Q35: refunds waiting for an approver are counted beside "Approvals" on every page.
   const approvals = useApprovalsWaiting(items.some((item) => item.screenId === "APPROVAL-INBOX"));
+  // WP-2423 M07: and staff roles waiting for this person.
+  const staffRoles = useStaffRolesWaiting(
+    csrf,
+    items.some((item) => item.screenId === "APPROVAL-INBOX"),
+  );
   // WP-2423 Q28: guests waiting for staff are counted beside "Tables" on every page.
   const staffCalls = useStaffCallsWaiting(
     csrf,
     items.some((item) => item.screenId === "DIN-FLOOR-BOARD"),
   );
   const badges: Partial<Record<string, number>> = {
-    "APPROVAL-INBOX": approvals === null ? 0 : approvals.awaiting + approvals.approvedNotSent,
+    "APPROVAL-INBOX": approvalsBadgeCount(approvals, staffRoles),
     "DIN-FLOOR-BOARD": staffCalls ?? 0,
   };
   const badge = (screenId: string) => {

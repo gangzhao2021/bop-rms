@@ -818,8 +818,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   Assign: "指派",
   "Assign a Store task": "指派门店任务",
   "Assign payment difference": "指派付款差异",
-  "Assign role (takes effect after another administrator approves)":
-    "分配角色（需另一位管理员批准后生效）",
   "Assign to": "指派给",
   "Assign to me": "指派给我",
   Assigned: "已指派",
@@ -1639,8 +1637,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Follow-up: {value} · last changed": "跟进：{value} · 最近更改",
   "Food safety": "食品安全",
   "Food-safety review recorded.": "已记录食品安全审核。",
-  "For a business run by one owner with no one else who can approve. When it is on and you are the only person who can approve, you may approve your own changes: refunds that need approval (over $100, from an earlier business day or more than 24 hours after payment), new prices (price books and option prices), menus, recipes (including option recipes) and the allergen list, and the Store’s configuration (Store setup, opening hours and the receipt template) before you publish it. You still confirm with your authenticator code, every approval is recorded as approved by you alone, and the day-end settlement shows your own refund approvals for your review.":
-    "适用于由一位店主经营、没有其他人可以批准的店。开启后，如果你是唯一可以批准的人，可以批准自己的更改：需要批准的退款（超过 $100、来自较早营业日或付款超过 24 小时）、新价格（价目表和选项价格）、菜单、配方（包括选项配方）和过敏原清单，以及发布前的门店配置（门店设置、营业时间和收据模板）。你仍需用验证器验证码确认，每次批准都会记录为由你单独批准，日结会显示你自己批准的退款供你核对。",
+  "For a business run by one owner with no one else who can approve. When it is on and you are the only person who can approve, you may approve your own changes: refunds that need approval (over $100, from an earlier business day or more than 24 hours after payment), new prices (price books and option prices), menus, recipes (including option recipes) and the allergen list, staff roles (giving someone a role), and the Store’s configuration (Store setup, opening hours and the receipt template) before you publish it. You still confirm with your authenticator code, every approval is recorded as approved by you alone, and the day-end settlement shows your own refund approvals for your review.":
+    "适用于由一位店主经营、没有其他人可以批准的店。开启后，如果你是唯一可以批准的人，可以批准自己的更改：需要批准的退款（超过 $100、来自较早营业日或付款超过 24 小时）、新价格（价目表和选项价格）、菜单、配方（包括选项配方）和过敏原清单、员工角色（给员工分配角色），以及发布前的门店配置（门店设置、营业时间和收据模板）。你仍需用验证器验证码确认，每次批准都会记录为由你单独批准，日结会显示你自己批准的退款供你核对。",
   "For example “Maple Noodle House – King Street”.": '例如"枫叶面馆 – King Street"。',
   "For security, this screen signs out after {value} minutes without use.":
     "为了安全，此屏幕在 {value} 分钟无人使用后会退出登录。",
@@ -3926,8 +3924,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   Started: "已开始",
   "Started {startedAt}. If guests or staff screens still can’t order after {expiresAt}, this page shows an urgent alert.":
     "开始于 {startedAt}。如果 {expiresAt} 后顾客或员工屏幕仍无法点单，这个页面会显示紧急提醒。",
-  "Starts after {label} accepts the invitation and another manager approves it.":
-    "在{label}接受邀请并由另一位店长批准后开始。",
   "Starts at (Store time)": "开始时间（门店时间）",
   "State differs": "状态不一致",
   Statement: "对账单",
@@ -4527,7 +4523,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     '无法准备审核。每件商品都需要一个已发布的配方，且其所有配料都有有效的过敏原申报（见"过敏原"和"配方"），品牌过敏原清单也需已批准。',
   "The role or policy changed, or the role is still assigned. Refresh and try again.":
     "角色或策略已变更，或角色仍被分配。请刷新后重试。",
-  "The role starts after another manager approves it.": "角色需另一位店长批准后才开始生效。",
   "The save could not be confirmed. Recover the original save before making another change.":
     "无法确认保存。再做其他更改前，请先恢复原来的保存。",
   "The save could not be confirmed. Recover the original save before saving again.":
@@ -8202,4 +8197,24 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Needs you": "需要处理",
   "{subject} was accepted but hasn't reached the kitchen yet — make it from its dishes on Orders.":
     "{subject}已接单，但还没进后厨 — 请按订单页上的菜品制作。",
+  // WP-2423 M07: a sole owner approves a staff role alone; staff roles on Approvals.
+  "Someone else can now approve staff roles here, so they must approve this.":
+    "现在本店还有其他人可以批准员工角色，因此需要由其批准。",
+  "Sole operator is off, so someone else who holds staff role approval must approve this. If you run this business on your own, the brand owner can turn on Sole operator in Store setup.":
+    "独立经营者未开启，因此需要由另一位持有员工角色批准权限的人批准。如果你独自经营，品牌所有者可以在门店设置中开启“独立经营者”。",
+  "Brand, all Stores": "品牌所有门店",
+  "This role can: {value}": "此角色可以：{value}",
+  "The role starts after they sign in and it is approved.": "对方登录且角色获批后生效。",
+  "{person} now has {role}. Approved by you alone.": "{person} 已获得{role}角色。由你单独批准。",
+  " · approved alone (sole operator)": " · 单独批准（独立经营者）",
+  "Assign role (takes effect once approved)": "分配角色（批准后生效）",
+  "this role": "这个角色",
+  "staff role approval": "员工角色批准权限",
+  "You asked for this role": "你申请了这个角色",
+  "Starts after {label} accepts the invitation and the role is approved.":
+    "{label} 接受邀请且角色获批后生效。",
+  "Staff roles waiting for you": "等待你批准的员工角色",
+  "asked by you, you may approve it on your own": "由你申请，你可以自行批准",
+  "asked by {name}": "{name} 申请",
+  "Open their page": "打开其页面",
 });

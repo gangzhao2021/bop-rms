@@ -24,6 +24,7 @@ import {
 import { actionAccessDeniedText, noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { serverProblemText } from "./failure-words.js";
 import { PageDidNotLoad, readingAgain } from "./PageDidNotLoad.js";
+import { SoleOperatorSelfApproval } from "./SoleOperatorSelfApproval.js";
 
 const copy: Record<StaffPageErrorCode | "Loading", string> = {
   Loading: t("Loading Store staff…"),
@@ -43,9 +44,52 @@ const copy: Record<StaffPageErrorCode | "Loading", string> = {
   EmailMismatch: t(
     "That's not the email this invitation was sent to. Cancel this invitation and invite again with the new address.",
   ),
+  // WP-2423 M07: approving a staff role alone.
+  SoleOperatorNotInEffect: t(
+    "Someone else can now approve staff roles here, so they must approve this.",
+  ),
+  NeedsReverification: t("Confirm it is you with your authenticator code, then try again."),
   Offline: t("Offline. Your change was not confirmed; retry sends the same request again."),
   Unavailable: serverProblemText,
 };
+/** WP-2423 M07: why approving alone was refused, in staff words. */
+export function soleOperatorRefusalText(reason: "Off" | "OtherApprovers" | null): string {
+  return reason === "Off"
+    ? t(
+        "Sole operator is off, so someone else who holds staff role approval must approve this. If you run this business on your own, the brand owner can turn on Sole operator in Store setup.",
+      )
+    : copy.SoleOperatorNotInEffect;
+}
+/** WP-2423 M07: what the owner checks before approving a role alone. */
+export function StaffRoleSummary({
+  person,
+  roleName,
+  scope,
+  highRiskPermissions,
+}: {
+  readonly person: string;
+  readonly roleName: string;
+  readonly scope: "Store" | "Brand";
+  readonly highRiskPermissions: readonly string[];
+}) {
+  return (
+    <>
+      <p>
+        <strong>
+          {person} · {systemText(roleName)} ·{" "}
+          {scope === "Brand" ? t("Brand, all Stores") : t("This Store")}
+        </strong>
+      </p>
+      {highRiskPermissions.length > 0 ? (
+        <p>
+          {t("This role can: {value}", {
+            value: highRiskPermissions.map((item) => systemText(item)).join(listSeparator()),
+          })}
+        </p>
+      ) : null}
+    </>
+  );
+}
 type State =
   | { readonly kind: "Loading" | StaffPageErrorCode }
   | { readonly kind: "Found"; readonly view: StaffPageView };
@@ -59,7 +103,7 @@ export function membershipText(status: string): string {
 }
 
 export const INVITE_NAME_HELP = t("Required — orders, refunds and records show who did what.");
-export const INVITE_ROLE_NOTE = t("The role starts after another manager approves it.");
+export const INVITE_ROLE_NOTE = t("The role starts after they sign in and it is approved.");
 export function inviteSentText(delivery: StaffInvitationView["delivery"]): string {
   return delivery === "Unknown"
     ? t(
@@ -511,6 +555,8 @@ function Member({
     [pending, setPending] = useState<StaffCommandRequest | null>(null),
     [busy, setBusy] = useState(false),
     [error, setError] = useState<StaffPageErrorCode | null>(null),
+    [reason, setReason] = useState<"Off" | "OtherApprovers" | null>(null),
+    [done, setDone] = useState<string | null>(null),
     [confirmRemoval, setConfirmRemoval] = useState(false);
   const navigate = useNavigate();
   const run = useCallback(
@@ -519,19 +565,37 @@ function Member({
       setPending(request);
       setBusy(true);
       setError(null);
+      setReason(null);
+      setDone(null);
       try {
         await client.command(request);
         setPending(null);
+        if (request.operation === "ApproveAlone") {
+          const item = member.pending.find(
+            (entry) => entry.changeReference === request.changeReference,
+          );
+          if (item)
+            setDone(
+              t("{person} now has {role}. Approved by you alone.", {
+                person: member.label,
+                role: systemText(item.roleName),
+              }),
+            );
+        }
         // A removed person is no longer on this Store's list.
         if (request.operation === "RemoveFromStore") void navigate("/app/organization/users");
         else reload();
       } catch (failure) {
         setError(failure instanceof StaffPageError ? failure.code : "Unavailable");
+        setReason(failure instanceof StaffPageError ? failure.reason : null);
+        // Who else may approve now is read again, so the page names them.
+        if (failure instanceof StaffPageError && failure.code === "SoleOperatorNotInEffect")
+          reload();
       } finally {
         setBusy(false);
       }
     },
-    [client, reload],
+    [client, reload, member],
   );
   const held = new Set(member.assignments.map((item) => item.roleReference));
   const requestable = view.roles.filter((item) => !held.has(item.roleReference));
@@ -592,7 +656,8 @@ function Member({
                 value:
                   item.scope === "Brand" ? t(" (all Stores of the Brand)") : t(" (this Store)"),
               })}{" "}
-              <StaffTime instant={item.since} />{" "}
+              <StaffTime instant={item.since} />
+              {item.approvedAlone ? t(" · approved alone (sole operator)") : null}{" "}
               {item.mayRevoke ? (
                 <button
                   disabled={busy}
@@ -625,7 +690,7 @@ function Member({
             }}
           >
             <label>
-              {t("Assign role (takes effect after another administrator approves)")}
+              {t("Assign role (takes effect once approved)")}
               <select value={role} onChange={(event) => setRole(event.currentTarget.value)}>
                 <option value="">{t("Choose a role")}</option>
                 {requestable.map((item) => (
@@ -641,6 +706,7 @@ function Member({
         ) : null}
       </StatePanel>
       <StatePanel heading={t("Pending approval")}>
+        {done ? <p role="status">{done}</p> : null}
         {member.pending.length === 0 ? <p>{t("No pending change.")}</p> : null}
         <ul>
           {member.pending.map((item) => (
@@ -651,7 +717,38 @@ function Member({
                 requestedBy: item.requestedBy,
               })}{" "}
               <StaffTime instant={item.requestedAt} />{" "}
-              {item.mayDecide ? (
+              {item.soleOperator !== null && item.mayWithdraw ? (
+                <div className="staff-sole-operator">
+                  <SoleOperatorSelfApproval
+                    gate={item.soleOperator}
+                    csrf={csrf}
+                    summary={
+                      <StaffRoleSummary
+                        person={member.label}
+                        roleName={item.roleName}
+                        scope={item.scope}
+                        highRiskPermissions={item.highRiskPermissions}
+                      />
+                    }
+                    what={t("this role")}
+                    permissionName={t("staff role approval")}
+                    yourPart={t("You asked for this role")}
+                    actionLabel={t("Approve on my own")}
+                    busy={busy}
+                    onApprove={() =>
+                      void run({ operation: "ApproveAlone", changeReference: item.changeReference })
+                    }
+                  />{" "}
+                  <button
+                    disabled={busy}
+                    onClick={() =>
+                      void run({ operation: "Withdraw", changeReference: item.changeReference })
+                    }
+                  >
+                    {t("Withdraw request")}
+                  </button>
+                </div>
+              ) : item.mayDecide ? (
                 <>
                   <button
                     disabled={busy}
@@ -682,10 +779,9 @@ function Member({
               ) : (
                 <span>
                   {member.membershipStatus === "PendingActivation"
-                    ? t(
-                        "Starts after {label} accepts the invitation and another manager approves it.",
-                        { label: member.label },
-                      )
+                    ? t("Starts after {label} accepts the invitation and the role is approved.", {
+                        label: member.label,
+                      })
                     : t("Waiting for another administrator.")}
                 </span>
               )}
@@ -740,7 +836,9 @@ function Member({
         </StatePanel>
       ) : error ? (
         <StatePanel heading={t("Change not applied")} tone="error" status>
-          <p>{copy[error]}</p>
+          <p>
+            {error === "SoleOperatorNotInEffect" ? soleOperatorRefusalText(reason) : copy[error]}
+          </p>
           {pending && error === "Offline" ? (
             <button disabled={busy} onClick={() => void run(pending)}>
               {t("Retry")}

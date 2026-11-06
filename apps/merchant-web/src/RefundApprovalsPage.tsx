@@ -1,10 +1,10 @@
-import { t } from "./i18n/i18n.js";
+import { systemText, t } from "./i18n/i18n.js";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import { StatePanel } from "@bop-rms/ui";
 import { WorkspacePage } from "./WorkspacePage.js";
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
-import { SourceTime } from "./StoreTime.js";
+import { SourceTime, StaffTime } from "./StoreTime.js";
 import { StepUpVerification } from "./StepUpVerification.js";
 import {
   createRefundApprovalClient,
@@ -25,6 +25,7 @@ import { createCurrentOrderQueueClient } from "./current-order-queue-client.js";
 import { FullSignInPrompt } from "./FullSignInPrompt.js";
 import { needsFullSignIn } from "./full-sign-in.js";
 import type { SoleOperatorStatus } from "./refund-approval-client.js";
+import { createStaffPageClient, type StaffRoleRequestView } from "./staff-administration-pages.js";
 
 const pollIntervalMs = 3000,
   pollLimit = 40;
@@ -676,6 +677,59 @@ function ApprovalCard({
 }
 
 /**
+ * WP-2423 M07: staff roles waiting for the signed-in person — another person's request they may
+ * decide, or their own they may approve alone now (sole operator). Each row opens the person's
+ * page, where the decision is made. Hidden when nothing waits or the read fails (null).
+ */
+export function useStaffRoleRequests(
+  csrf: string,
+  refresh: number,
+  fetcher?: typeof fetch,
+): readonly StaffRoleRequestView[] | null {
+  const [requests, setRequests] = useState<readonly StaffRoleRequestView[] | null>(null);
+  useEffect(() => {
+    let current = true;
+    void createStaffPageClient(csrf, fetcher ?? fetch)
+      .roleRequests()
+      .then((value) => {
+        if (current) setRequests(value);
+      })
+      .catch(() => {
+        if (current) setRequests(null);
+      });
+    return () => {
+      current = false;
+    };
+  }, [csrf, refresh, fetcher]);
+  return requests;
+}
+export function StaffRoleRequestsSection({
+  requests,
+}: {
+  readonly requests: readonly StaffRoleRequestView[] | null;
+}) {
+  if (requests === null || requests.length === 0) return null;
+  return (
+    <section aria-labelledby="role-approvals-heading" className="role-approvals">
+      <h2 id="role-approvals-heading">{t("Staff roles waiting for you")}</h2>
+      <ul className="role-approval-list">
+        {requests.map((item) => (
+          <li key={item.actorReference + ":" + item.roleName + ":" + item.requestedAt}>
+            <strong>{item.person}</strong> · {systemText(item.roleName)}
+            {item.scope === "Brand" ? t(" (all Stores of the Brand)") : ""} ·{" "}
+            {item.action === "ApproveAlone"
+              ? t("asked by you, you may approve it on your own")
+              : t("asked by {name}", { name: item.requestedBy })}{" "}
+            <StaffTime instant={item.requestedAt} /> ·{" "}
+            <Link to={"/app/organization/users/" + item.actorReference}>{t("Open their page")}</Link>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+/**
  * WP-2423 Q5 (Section 88 APPROVAL-INBOX, /app/approvals): refunds at the selected Store that need
  * an Owner/Finance approval. Approval happens in person: both people confirm it is them with
  * their authenticator code (valid 15 minutes), then the refund is sent at once.
@@ -708,6 +762,7 @@ export function RefundApprovalsPage({
     return () => controller.abort();
   }, [refresh]);
   const reload = useCallback(() => setRefresh((value) => value + 1), []);
+  const roleRequests = useStaffRoleRequests(csrf, refresh, fetcher);
   useEffect(() => {
     const controller = new AbortController();
     setState("Loading");
@@ -739,57 +794,61 @@ export function RefundApprovalsPage({
         </button>
       }
     >
-      <section aria-labelledby="refund-approvals-heading" data-screen-id="APPROVAL-INBOX">
-        <h2 id="refund-approvals-heading">{t("Refunds awaiting approval")}</h2>
-        {/* Owner 2026-10-25: one line; the rule itself behind "Why approval?". */}
-        <details className="approvals-why">
-          <summary>
-            {t("Large or late refunds need a second person.")} {t("Why approval?")}
-          </summary>
-          <p>
-            {t(
-              "Refunds above $100 for an order, from an earlier business day or more than 24 hours after payment need an owner or finance member who did not ask for them. Approve in person: both of you confirm with your authenticator code, then the refund is sent.",
-            )}
-          </p>
-        </details>
-        {state === "Loading" ? (
-          <StatePanel heading={t("Loading refunds")} status>
-            <p>{t("Checking refunds awaiting approval…")}</p>
-          </StatePanel>
-        ) : state === "Denied" ? (
-          <StatePanel heading={noAccessHeading} tone="error" status>
-            <p>{pageAccessDeniedText}</p>
-          </StatePanel>
-        ) : state === "Unavailable" ? (
-          <StatePanel heading={t("Refunds could not be loaded")} tone="error" status>
-            <p>{t("Check your connection, then refresh.")}</p>
-          </StatePanel>
-        ) : view && view.entries.length === 0 ? (
-          <StatePanel heading={t("Nothing to approve")} status>
-            <p>{t("No refund at this store is waiting for approval.")}</p>
-          </StatePanel>
-        ) : view ? (
-          <>
+      <StaffRoleRequestsSection requests={roleRequests} />
+      {/* A role approver without refund approval (a Store Manager) sees only the staff roles. */}
+      {state === "Denied" && roleRequests !== null ? null : (
+        <section aria-labelledby="refund-approvals-heading" data-screen-id="APPROVAL-INBOX">
+          <h2 id="refund-approvals-heading">{t("Refunds awaiting approval")}</h2>
+          {/* Owner 2026-10-25: one line; the rule itself behind "Why approval?". */}
+          <details className="approvals-why">
+            <summary>
+              {t("Large or late refunds need a second person.")} {t("Why approval?")}
+            </summary>
             <p>
-              {t("Last checked")} <SourceTime instant={view.observedAt} />.
+              {t(
+                "Refunds above $100 for an order, from an earlier business day or more than 24 hours after payment need an owner or finance member who did not ask for them. Approve in person: both of you confirm with your authenticator code, then the refund is sent.",
+              )}
             </p>
-            <ul className="refund-approval-list">
-              {view.entries.map((entry) => (
-                <ApprovalCard
-                  key={entry.requestReference + ":" + (entry.approvalReference ?? "")}
-                  entry={entry}
-                  csrf={csrf}
-                  viewerVerifiedUntil={viewerVerifiedUntil}
-                  onViewerVerified={setViewerVerifiedUntil}
-                  onChanged={reload}
-                  fetcher={fetcher}
-                  soleOperator={view.soleOperator}
-                />
-              ))}
-            </ul>
-          </>
-        ) : null}
-      </section>
+          </details>
+          {state === "Loading" ? (
+            <StatePanel heading={t("Loading refunds")} status>
+              <p>{t("Checking refunds awaiting approval…")}</p>
+            </StatePanel>
+          ) : state === "Denied" ? (
+            <StatePanel heading={noAccessHeading} tone="error" status>
+              <p>{pageAccessDeniedText}</p>
+            </StatePanel>
+          ) : state === "Unavailable" ? (
+            <StatePanel heading={t("Refunds could not be loaded")} tone="error" status>
+              <p>{t("Check your connection, then refresh.")}</p>
+            </StatePanel>
+          ) : view && view.entries.length === 0 ? (
+            <StatePanel heading={t("Nothing to approve")} status>
+              <p>{t("No refund at this store is waiting for approval.")}</p>
+            </StatePanel>
+          ) : view ? (
+            <>
+              <p>
+                {t("Last checked")} <SourceTime instant={view.observedAt} />.
+              </p>
+              <ul className="refund-approval-list">
+                {view.entries.map((entry) => (
+                  <ApprovalCard
+                    key={entry.requestReference + ":" + (entry.approvalReference ?? "")}
+                    entry={entry}
+                    csrf={csrf}
+                    viewerVerifiedUntil={viewerVerifiedUntil}
+                    onViewerVerified={setViewerVerifiedUntil}
+                    onChanged={reload}
+                    fetcher={fetcher}
+                    soleOperator={view.soleOperator}
+                  />
+                ))}
+              </ul>
+            </>
+          ) : null}
+        </section>
+      )}
       {/* Owner 2026-10-25: the sole-operator setting lives with the Store's settings. */}
       <p className="approvals-sole-link">
         {t("Sole operator (approving your own refunds) is set in")}{" "}

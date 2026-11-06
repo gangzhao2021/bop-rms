@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createRefundApprovalClient } from "./refund-approval-client.js";
 import { useStaffSessionLive } from "./staff-session-reads.js";
 import { createDiningSessionClient } from "./dining-session-client.js";
+import { createStaffPageClient } from "./staff-administration-pages.js";
 
 /** WP-2423 Q35: how often the waiting refund approvals are read while a page is visible. */
 export const APPROVALS_WAITING_REFRESH_MS = 60_000;
@@ -61,6 +62,59 @@ export function useApprovalsWaiting(
       controller?.abort();
     };
   }, [client, enabled, live]);
+  return waiting;
+}
+
+/**
+ * WP-2423 M07: the Approvals badge counts refunds to approve or send plus staff roles waiting for
+ * the signed-in person. A read that failed (null) adds nothing; nothing is guessed.
+ */
+export function approvalsBadgeCount(
+  approvals: ApprovalsWaiting | null,
+  staffRoles: number | null,
+): number {
+  return (
+    (approvals === null ? 0 : approvals.awaiting + approvals.approvedNotSent) + (staffRoles ?? 0)
+  );
+}
+
+/**
+ * WP-2423 M07: how many staff role requests wait for the signed-in person (to decide, or their own
+ * to approve alone), read with the refunds. `null` until read, when not permitted or on failure.
+ */
+export function useStaffRolesWaiting(
+  csrf: string | null,
+  enabled: boolean,
+  fetcher?: typeof fetch,
+): number | null {
+  const live = useStaffSessionLive();
+  const [waiting, setWaiting] = useState<number | null>(null);
+  useEffect(() => {
+    if (!enabled || csrf === null || !live || typeof window === "undefined") {
+      setWaiting(null);
+      return;
+    }
+    const client = createStaffPageClient(csrf, fetcher ?? fetch);
+    let current = true;
+    const read = () => {
+      client
+        .roleRequests()
+        .then((requests) => {
+          if (current) setWaiting(requests.length);
+        })
+        .catch(() => {
+          if (current) setWaiting(null);
+        });
+    };
+    read();
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") read();
+    }, APPROVALS_WAITING_REFRESH_MS);
+    return () => {
+      current = false;
+      window.clearInterval(timer);
+    };
+  }, [csrf, enabled, live, fetcher]);
   return waiting;
 }
 

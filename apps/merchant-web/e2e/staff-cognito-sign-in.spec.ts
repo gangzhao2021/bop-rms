@@ -297,7 +297,9 @@ test("@production a manager invites a staff member by email; a name is required"
   await expect(
     panel.getByText("Required — orders, refunds and records show who did what."),
   ).toBeVisible();
-  await expect(panel.getByText("The role starts after another manager approves it.")).toBeVisible();
+  await expect(
+    panel.getByText("The role starts after they sign in and it is approved."),
+  ).toBeVisible();
   const send = panel.getByRole("button", { name: "Send invitation" });
   await panel.getByLabel("Work email").fill("ana@example.com");
   await panel.getByLabel("Role").selectOption({ label: "Counter staff — this Store" });
@@ -410,9 +412,7 @@ test("@production a manager resends and cancels an invitation", async ({ page })
   await expect(panel).toContainText("Invitation expired · sent to a•••@example.com");
   await expect(page.getByText("Membership Invited (not signed in yet)")).toBeVisible();
   await expect(
-    page.getByText(
-      "Starts after Ana Lopez accepts the invitation and another manager approves it.",
-    ),
+    page.getByText("Starts after Ana Lopez accepts the invitation and the role is approved."),
   ).toBeVisible();
   await expect(page.getByText("Waiting for another administrator.")).toHaveCount(0);
   await checkScreen(page, "invitation-detail");

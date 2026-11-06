@@ -7,6 +7,7 @@ import {
   parseStaffPageView,
   parseStaffResendResult,
   parseStaffRevokeResult,
+  parseStaffRoleRequests,
 } from "./staff-administration-pages.js";
 import {
   INVITE_NAME_HELP,
@@ -14,6 +15,8 @@ import {
   inviteReady,
   inviteSentText,
   membershipText,
+  soleOperatorRefusalText,
+  StaffRoleSummary,
 } from "./StaffAdministrationPages.js";
 import { StoreTimeZoneContext } from "./StoreTime.js";
 
@@ -191,6 +194,123 @@ describe("DEC-BRAND-MULTI-STORE-ONE-INSTALLATION segment 8: people from the Bran
         { ...view(), otherStoresStaff: [{ actorReference: id(77), label: "Kai", email: "x" }] },
         "IAM-USER-LIST",
       ),
+    ).toThrow();
+  });
+});
+
+describe("WP-2423 M07 a sole owner approves a staff role alone", () => {
+  const pending = {
+    changeReference: id(9),
+    roleName: "Front of House",
+    scope: "Store",
+    requestedBy: "You",
+    requestedAt: "2026-11-06T14:00:00.000Z",
+    mayDecide: false,
+    mayWithdraw: true,
+  };
+  const gate = { status: "Effective", otherApprovers: [], verifiedUntil: null };
+  it("reads the requester's gate and the role's high-risk permissions (none from older servers)", () => {
+    const older = parseStaffPageView(
+      view({ staff: [{ ...member, pending: [pending] }] }),
+      "IAM-USER-LIST",
+    );
+    expect(older.staff[0]?.pending[0]?.soleOperator).toBeNull();
+    expect(older.staff[0]?.pending[0]?.highRiskPermissions).toEqual([]);
+    const read = parseStaffPageView(
+      view({
+        staff: [
+          {
+            ...member,
+            assignments: [
+              {
+                assignmentReference: id(10),
+                roleReference: id(11),
+                roleName: "Kitchen",
+                scope: "Store",
+                since: "2026-11-06T13:00:00.000Z",
+                mayRevoke: true,
+                approvedAlone: true,
+              },
+            ],
+            pending: [
+              {
+                ...pending,
+                highRiskPermissions: ["Approve or reject a Store role change"],
+                soleOperator: gate,
+              },
+            ],
+          },
+        ],
+      }),
+      "IAM-USER-LIST",
+    );
+    expect(read.staff[0]?.pending[0]?.soleOperator?.status).toBe("Effective");
+    expect(read.staff[0]?.assignments[0]?.approvedAlone).toBe(true);
+    // A gate that names an approver by a code, or an unknown key, is refused.
+    expect(() =>
+      parseStaffPageView(
+        view({
+          staff: [{ ...member, pending: [{ ...pending, soleOperator: { ...gate, who: id(3) } }] }],
+        }),
+        "IAM-USER-LIST",
+      ),
+    ).toThrow();
+  });
+  it("lists the role's high-risk permissions by name, never by code", () => {
+    const html = renderToStaticMarkup(
+      <StaffRoleSummary
+        person="Sam"
+        roleName="Store Manager"
+        scope="Store"
+        highRiskPermissions={["Approve or reject a Store role change"]}
+      />,
+    );
+    expect(html).toContain("Sam · Store Manager · This Store");
+    expect(html).toContain("This role can: Approve or reject a Store role change");
+    expect(html).not.toMatch(/identity\.role|[a-z]+\.[a-z_]+\.[a-z_]+/u);
+  });
+  it("says why approving alone was refused, and carries the reason from the server", async () => {
+    expect(soleOperatorRefusalText("Off")).toContain("Sole operator is off");
+    expect(soleOperatorRefusalText("OtherApprovers")).toBe(
+      "Someone else can now approve staff roles here, so they must approve this.",
+    );
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        Response.json(
+          { error: "SoleOperatorNotInEffect", reason: "OtherApprovers" },
+          { status: 409 },
+        ),
+      )
+      .mockResolvedValueOnce(Response.json({ error: "NeedsReverification" }, { status: 409 }));
+    const client = createStaffPageClient("c".repeat(43), fetcher);
+    const request = { operation: "ApproveAlone", changeReference: id(9) } as const;
+    await expect(client.command(request)).rejects.toMatchObject({
+      code: "SoleOperatorNotInEffect",
+      reason: "OtherApprovers",
+    });
+    await expect(client.command(request)).rejects.toMatchObject({
+      code: "NeedsReverification",
+      reason: null,
+    });
+  });
+  it("reads the staff roles waiting for the signed-in person and refuses anything else", () => {
+    const item = {
+      actorReference: id(5),
+      person: "Sam",
+      roleName: "Front of House",
+      scope: "Store",
+      requestedBy: "Ana",
+      requestedAt: "2026-11-06T14:00:00.000Z",
+      action: "Decide",
+    };
+    const body = { screenId: "APPROVAL-INBOX", sourceAsOf: "2026-11-06T14:01:00.000Z" };
+    expect(parseStaffRoleRequests({ ...body, requests: [item] })[0]?.action).toBe("Decide");
+    expect(() =>
+      parseStaffRoleRequests({ ...body, requests: [{ ...item, requestedByReference: id(4) }] }),
+    ).toThrow();
+    expect(() =>
+      parseStaffRoleRequests({ ...body, requests: [{ ...item, action: "Approve" }] }),
     ).toThrow();
   });
 });

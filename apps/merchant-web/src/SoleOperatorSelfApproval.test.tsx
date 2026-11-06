@@ -55,3 +55,13 @@ describe("WP-2423 Q19 self-approval at Brand gates", () => {
     ).toBe("A, B and C");
   });
 });
+
+it("WP-2423 M07: an approver without a recorded name is 'another staff member', never a code", () => {
+  expect(
+    soleOperatorOtherNames({
+      status: "OtherApprovers",
+      otherApprovers: [{ displayName: null }],
+      verifiedUntil: null,
+    }),
+  ).toBe("another staff member");
+});

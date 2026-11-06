@@ -265,6 +265,12 @@ export function parseOwnNameCommand(value: unknown): OwnNameCommand {
   };
 }
 
+/** WP-2423 M07: the staff role gate as the requester sees it. */
+export interface SoleOperatorView {
+  readonly status: "Effective" | "NotSet" | "OtherApprovers";
+  readonly otherApprovers: readonly { readonly displayName: string | null }[];
+  readonly verifiedUntil: string | null;
+}
 type StaffScope = Awaited<ReturnType<ReturnType<typeof createMerchantStoreScope>>>;
 /** WP-2423 M07: the role's high-risk permissions in staff words (catalog descriptions). */
 const catalogDescriptions = new Map(
@@ -361,11 +367,6 @@ export function createMerchantStaffAdministration(options: {
           at,
         });
   /** WP-2423 M07: the staff role gate at a scope, for the requester (null when not wired). */
-  interface SoleOperatorView {
-    readonly status: "Effective" | "NotSet" | "OtherApprovers";
-    readonly otherApprovers: readonly { readonly displayName: string | null }[];
-    readonly verifiedUntil: string | null;
-  }
   const gateInput = (
     tx: Tx,
     scope: StaffScope,

@@ -1,6 +1,7 @@
 import { t } from "./i18n/i18n.js";
 /** WP-2423: Section 88 IAM-USER-LIST / IAM-USER-DETAIL view contract and same-origin client. */
 import { FULL_SIGN_IN_REQUIRED, isFullSignInRequired } from "./full-sign-in.js";
+import { parseSoleOperatorGate, type SoleOperatorGateView } from "./SoleOperatorSelfApproval.js";
 
 export type StaffPageErrorCode =
   | "PermissionDenied"
@@ -15,10 +16,17 @@ export type StaffPageErrorCode =
   | "AlreadyInvited"
   /** A resend's email is not the one the invitation was sent to. */
   | "EmailMismatch"
+  /** WP-2423 M07: approving alone is not in effect now (`reason` says why). */
+  | "SoleOperatorNotInEffect"
+  /** The second factor is older than 15 minutes. */
+  | "NeedsReverification"
   | "Offline"
   | "Unavailable";
 export class StaffPageError extends Error {
-  constructor(readonly code: StaffPageErrorCode) {
+  constructor(
+    readonly code: StaffPageErrorCode,
+    readonly reason: "Off" | "OtherApprovers" | null = null,
+  ) {
     super(t("Staff administration is unavailable"));
     this.name = "StaffPageError";
   }
@@ -31,6 +39,8 @@ export interface StaffAssignmentView {
   readonly scope: "Store" | "Brand";
   readonly since: string;
   readonly mayRevoke: boolean;
+  /** WP-2423 M07: approved by its requester alone, as sole operator. */
+  readonly approvedAlone: boolean;
 }
 export interface StaffPendingView {
   readonly changeReference: string;
@@ -40,6 +50,10 @@ export interface StaffPendingView {
   readonly requestedAt: string;
   readonly mayDecide: boolean;
   readonly mayWithdraw: boolean;
+  /** WP-2423 M07: the role's high-risk permissions in staff words (catalog descriptions). */
+  readonly highRiskPermissions: readonly string[];
+  /** WP-2423 M07: for the requester only, whether they may approve it alone now (and why not). */
+  readonly soleOperator: SoleOperatorGateView | null;
 }
 /** WP-2423 DEC-COGNITO-STORE-STAFF: an invitation to sign in with their own account. */
 export interface StaffInvitationView {
@@ -110,7 +124,10 @@ export type StaffCommandRequest =
       readonly roleReference: string;
       readonly operationReference: string;
     }
-  | { readonly operation: "Approve" | "Reject" | "Withdraw"; readonly changeReference: string }
+  | {
+      readonly operation: "Approve" | "Reject" | "Withdraw" | "ApproveAlone";
+      readonly changeReference: string;
+    }
   | {
       readonly operation: "Revoke";
       readonly assignmentReference: string;
@@ -160,6 +177,8 @@ export interface StaffRevokeResult {
 export interface StaffPageClient {
   load(actorReference: string | null): Promise<unknown>;
   command?(request: StaffCommandRequest): Promise<unknown>;
+  /** WP-2423 M07: staff role requests waiting for the signed-in person. */
+  roleRequests?(): Promise<readonly StaffRoleRequestView[]>;
 }
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
@@ -238,6 +257,14 @@ function invitation(value: unknown): StaffInvitationView | null {
 const list = <T>(value: unknown, map: (item: unknown) => T): readonly T[] =>
   Array.isArray(value) ? Object.freeze(value.map(map)) : invalid();
 
+const gate = (value: unknown) => {
+  try {
+    return parseSoleOperatorGate(value);
+  } catch {
+    return invalid();
+  }
+};
+
 export function parseStaffRouteReference(value: unknown): string {
   return ref(value);
 }
@@ -291,14 +318,11 @@ export function parseStaffPageView(
       storeAssignmentStatus: text(m.storeAssignmentStatus),
       profileVersion: m.profileVersion as number,
       assignments: list(m.assignments, (a) => {
-        const x = closed(a, [
-          "assignmentReference",
-          "roleReference",
-          "roleName",
-          "scope",
-          "since",
-          "mayRevoke",
-        ]);
+        const x = closedWith(
+          a,
+          ["assignmentReference", "roleReference", "roleName", "scope", "since", "mayRevoke"],
+          ["approvedAlone"],
+        );
         return Object.freeze({
           assignmentReference: ref(x.assignmentReference),
           roleReference: ref(x.roleReference),
@@ -306,18 +330,23 @@ export function parseStaffPageView(
           scope: level(x.scope),
           since: time(x.since),
           mayRevoke: flag(x.mayRevoke),
+          approvedAlone: Object.hasOwn(x, "approvedAlone") ? flag(x.approvedAlone) : false,
         });
       }),
       pending: list(m.pending, (p) => {
-        const x = closed(p, [
-          "changeReference",
-          "roleName",
-          "scope",
-          "requestedBy",
-          "requestedAt",
-          "mayDecide",
-          "mayWithdraw",
-        ]);
+        const x = closedWith(
+          p,
+          [
+            "changeReference",
+            "roleName",
+            "scope",
+            "requestedBy",
+            "requestedAt",
+            "mayDecide",
+            "mayWithdraw",
+          ],
+          ["highRiskPermissions", "soleOperator"],
+        );
         return Object.freeze({
           changeReference: ref(x.changeReference),
           roleName: text(x.roleName),
@@ -326,6 +355,10 @@ export function parseStaffPageView(
           requestedAt: time(x.requestedAt),
           mayDecide: flag(x.mayDecide),
           mayWithdraw: flag(x.mayWithdraw),
+          highRiskPermissions: Object.hasOwn(x, "highRiskPermissions")
+            ? list(x.highRiskPermissions, text)
+            : Object.freeze([]),
+          soleOperator: Object.hasOwn(x, "soleOperator") ? gate(x.soleOperator) : null,
         });
       }),
       mayRequest: flag(m.mayRequest),
@@ -379,7 +412,47 @@ const codes: Record<string, StaffPageErrorCode> = {
   Invalid: "Invalid",
   AlreadyInvited: "AlreadyInvited",
   EmailMismatch: "EmailMismatch",
+  SoleOperatorNotInEffect: "SoleOperatorNotInEffect",
+  NeedsReverification: "NeedsReverification",
 };
+
+/** WP-2423 M07: a staff role request waiting for the signed-in person (Approvals page). */
+export interface StaffRoleRequestView {
+  readonly actorReference: string;
+  readonly person: string;
+  readonly roleName: string;
+  readonly scope: "Store" | "Brand";
+  readonly requestedBy: string;
+  readonly requestedAt: string;
+  /** Another person's request to decide, or the viewer's own to approve alone now. */
+  readonly action: "Decide" | "ApproveAlone";
+}
+export function parseStaffRoleRequests(value: unknown): readonly StaffRoleRequestView[] {
+  const r = closed(value, ["screenId", "sourceAsOf", "requests"]);
+  if (r.screenId !== "APPROVAL-INBOX") invalid();
+  time(r.sourceAsOf);
+  return list(r.requests, (item) => {
+    const x = closed(item, [
+      "actorReference",
+      "person",
+      "roleName",
+      "scope",
+      "requestedBy",
+      "requestedAt",
+      "action",
+    ]);
+    if (x.action !== "Decide" && x.action !== "ApproveAlone") invalid();
+    return Object.freeze({
+      actorReference: ref(x.actorReference),
+      person: text(x.person),
+      roleName: text(x.roleName),
+      scope: level(x.scope),
+      requestedBy: text(x.requestedBy),
+      requestedAt: time(x.requestedAt),
+      action: x.action as StaffRoleRequestView["action"],
+    });
+  });
+}
 
 /** The answer to `Invite`; anything else is not trusted as sent. */
 export function parseStaffInviteResult(value: unknown): StaffInviteResult {
@@ -422,12 +495,16 @@ export function createStaffPageClient(csrf: string, fetcher: typeof fetch = fetc
       throw new StaffPageError("Offline");
     }
     if (!response.ok) {
-      const payload = (await response.json().catch(() => null)) as { error?: unknown } | null;
+      const payload = (await response.json().catch(() => null)) as {
+        error?: unknown;
+        reason?: unknown;
+      } | null;
       if (isFullSignInRequired(response.status, payload))
         throw new StaffPageError(FULL_SIGN_IN_REQUIRED);
       throw new StaffPageError(
         codes[String(payload?.error)] ??
           (response.status === 403 ? "PermissionDenied" : "Unavailable"),
+        payload?.reason === "Off" || payload?.reason === "OtherApprovers" ? payload.reason : null,
       );
     }
     return response.json() as Promise<unknown>;
@@ -437,5 +514,8 @@ export function createStaffPageClient(csrf: string, fetcher: typeof fetch = fetc
       post("/merchant/organization/staff/query", { actorReference }),
     command: (request: StaffCommandRequest) =>
       post("/merchant/organization/staff/command", request),
+    /** WP-2423 M07: staff role requests waiting for the signed-in person. */
+    roleRequests: async () =>
+      parseStaffRoleRequests(await post("/merchant/organization/staff/role-requests", {})),
   } satisfies StaffPageClient;
 }
