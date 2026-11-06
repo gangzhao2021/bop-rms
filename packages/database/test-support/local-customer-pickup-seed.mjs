@@ -7,6 +7,7 @@ import { createEffectivePeriod } from "../../bop/effective-period/src/index.ts";
 import { createPriceQuote } from "../../rms/pricing/src/index.ts";
 import { input as quoteInput } from "../../rms/pricing/src/tests/price-quote.fixture.ts";
 import { prepareEntryPickupItems } from "./entry-pickup-items.mjs";
+import { grantPilotApiAcl } from "./pilot-api-acl.mjs";
 import { id } from "../../../apps/api/test-support/customer-entry-composition-fixture.ts";
 
 const { Client } = pg;
@@ -46,6 +47,9 @@ export async function seedPickup({ admin, context, sessionRole, observedAt }) {
       sessionRole,
   );
   await admin.query("GRANT USAGE ON SCHEMA rms_ordering TO " + orderingRole);
+  // WP-2423 M03: the Cart reads the Order already made from it. Ordering's whole deployed api
+  // grants, so the next Ordering read on the cart path does not leave this lab behind the pilot.
+  await grantPilotApiAcl(admin, orderingRole, { schemas: ["rms_ordering"] });
   await admin.query("GRANT SELECT,INSERT,UPDATE ON rms_ordering.cart TO " + orderingRole);
   await admin.query(
     "GRANT SELECT,INSERT,UPDATE,DELETE ON rms_ordering.cart_line TO " + orderingRole,

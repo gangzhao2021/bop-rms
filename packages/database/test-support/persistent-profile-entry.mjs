@@ -526,7 +526,14 @@ export async function exercisePersistentProfileEntry({
           nextOpening: { localDate: "2026-01-16", startLocalTime: "00:00:00" },
         },
       });
-      assert.equal(closed.headers.getSetCookie().length, 0);
+      // M02: a closed Store keeps only the scan the guest already holds (a reload asks the same Store
+      // again once it opens); no visit (Session) cookie, no admission and nothing recorded.
+      const closedCookies = closed.headers.getSetCookie();
+      assert.equal(closedCookies.length, 1);
+      assert.match(
+        closedCookies[0],
+        /^__Secure-bop-scan=[^;]+; Max-Age=1800; Path=[^;]+; Secure; HttpOnly; SameSite=Strict$/u,
+      );
       assert.equal(admissionAttempts, admissionsBeforeClosure);
       assert.deepEqual(await count(), saved);
       currentTime = at;

@@ -194,10 +194,13 @@ export async function verifyPickupQuoteLab(origin, pickup) {
             );
           });
         await continueButton.click();
+        // WP-2423 (bf91ff03): no card was offered in this tab yet, so the guest is told this order
+        // hasn't been charged; the retry below must reuse the same checkout (one session, no charge).
         await expect(
-          page.getByText("We couldn’t confirm checkout. Retry to recover the same checkout.", {
-            exact: true,
-          }),
+          page.getByText(
+            "We couldn’t start your checkout. This order hasn’t been charged. Try again.",
+            { exact: true },
+          ),
         ).toBeVisible();
         await page.getByRole("button", { name: "Retry checkout", exact: true }).click();
         await expect(page.getByRole("heading", { name: "Secure payment", exact: true }))

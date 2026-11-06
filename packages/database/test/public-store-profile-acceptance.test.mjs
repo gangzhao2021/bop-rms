@@ -1,3 +1,4 @@
+import { grantPilotApiAcl } from "../test-support/pilot-api-acl.mjs";
 import { createTenantTransactionRunner } from "../src/transaction-runner.ts";
 import {
   pilotApiRoleConnectionLimit,
@@ -36,6 +37,8 @@ it("persists immutable scoped public profiles without treating saved evidence as
     const role = "profile_" + env.runId;
     try {
       await client.query("CREATE ROLE " + role + " NOLOGIN NOSUPERUSER NOBYPASSRLS");
+      // The entry reads composed since (guest intake pause, cart ordered-once): the deployed api ACL.
+      await grantPilotApiAcl(client, role);
       await client.query(
         "GRANT EXECUTE ON FUNCTION platform_helpers.current_brand_id(),platform_helpers.current_store_id(),platform_helpers.is_uuid_v7(uuid) TO " +
           role,
@@ -566,6 +569,8 @@ it.each([
       const role = "current_profile_" + env.runId;
       try {
         await client.query("CREATE ROLE " + role + " NOLOGIN NOSUPERUSER NOBYPASSRLS");
+        // The entry reads composed since (guest intake pause, cart ordered-once): the deployed api ACL.
+        await grantPilotApiAcl(client, role);
         await client.query(
           "GRANT EXECUTE ON FUNCTION platform_helpers.current_brand_id(),platform_helpers.current_store_id(),platform_helpers.is_uuid_v7(uuid) TO " +
             role,

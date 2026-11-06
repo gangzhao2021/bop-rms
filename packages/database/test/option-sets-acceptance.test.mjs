@@ -326,7 +326,8 @@ it("creates and edits option sets, keeps saved options and binds them to a produ
         ],
       );
       // An option from another set, or a product edit that leaves options out, keeps bindings safe.
-      await rejects(
+      // WP-2423 (2322202b): refused as a choice group that cannot be kept, naming the group.
+      await assert.rejects(
         products.command({
           ...session,
           body: {
@@ -341,7 +342,11 @@ it("creates and edits option sets, keeps saved options and binds them to a produ
             ],
           },
         }),
-        "Invalid",
+        (error) =>
+          (error.code === "ChoiceGroup" &&
+            error.problem?.reason === "ChoiceGroupOption" &&
+            error.problem?.optionName === "Milk") ||
+          assert.fail(String(error.code) + " " + JSON.stringify(error.problem ?? null)),
       );
       const withoutOptions = Object.fromEntries(
         Object.entries(bind).filter(([key]) => key !== "optionSets"),

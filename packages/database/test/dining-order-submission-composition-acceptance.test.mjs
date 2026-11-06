@@ -1,3 +1,4 @@
+import { grantPilotApiAcl } from "../test-support/pilot-api-acl.mjs";
 import { exerciseConfiguredJourneyQuote } from "../test-support/customer-configured-journey-quote.mjs";
 import { exerciseAdditionalDiningPayment } from "../test-support/additional-dining-payment.mjs";
 import { exerciseDiningSecondBatchSubmission } from "../test-support/dining-second-batch-submission.mjs";
@@ -259,6 +260,8 @@ it.each([
         await admin.query(
           "GRANT SELECT,INSERT,UPDATE ON rms_ordering.order_number_counter TO " + roles[2],
         );
+        // Ordering's reads added since (M03 cart-ordered-once, closures): the deployed api grants.
+        await grantPilotApiAcl(admin, roles[2], { schemas: ["rms_ordering"] });
         await admin.query("GRANT USAGE ON SCHEMA rms_payment,platform_audit TO " + roles[3]);
         await admin.query(
           "GRANT SELECT,INSERT ON rms_payment.payment_tip_selection TO " +

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import pg from "pg";
+import { grantPilotApiAcl } from "../test-support/pilot-api-acl.mjs";
 import { it } from "vitest";
 import { createMerchantAllergens } from "../../../apps/api/src/merchant-allergens.ts";
 import { listInventoryRecipeIngredientFacts } from "../../rms/inventory/src/index.ts";
@@ -81,6 +82,8 @@ it("approves the allergen list, records declarations and makes recipes carry the
         "CREATE ROLE " + role + " NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE",
       );
       for (const sql of allergenApiGrants) await admin.query(sql.replaceAll("ROLE_", role));
+      // The save also passes the sole-operator gate (Brand setting, MFA): the deployed api ACL.
+      await grantPilotApiAcl(admin, role);
       const brandScope = syntheticMerchantBrandScope({
         ...scope,
         policyReference: id(300),
