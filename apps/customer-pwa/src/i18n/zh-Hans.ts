@@ -634,7 +634,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "同桌有人下单后，各轮点单会显示在这里。",
   "Rounds that weren’t paid aren’t included.": "未付款的轮次不计入。",
   "Safe reason:": "原因：",
-  "Save details": "保存信息",
   "Saving checkout details…": "正在保存结账信息…",
   "Saving your details…": "正在保存你的信息…",
   "Scan again": "重新扫描",
@@ -780,7 +779,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "这个链接尝试次数太多，请一小时后再试或询问门店。",
   "There’s no receipt for this order on this phone. A receipt shows on the phone that placed the order once it’s paid. Ask a staff member if you need a copy.":
     "这部手机上没有这笔订单的收据。订单付款后，收据会显示在下单的手机上。需要副本请问店员。",
-  "These prices expired. Refresh to price your order again.": "这些价格已过期，请刷新重新计价。",
   "These prices have expired. Checkout will price your order again.":
     "这些价格已过期，结账时会重新计价。",
   "This cart can’t accept more items. Ask staff for help continuing your order.":
@@ -1620,4 +1618,26 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "这单还未付款。请在 {time} 前付款，否则会取消，不会扣款。",
   "This order was cancelled because it wasn’t paid in time. You weren’t charged.":
     "这单因未按时付款已取消，没有扣款。",
+  "Price hold ended. Tap Refresh prices. Your details are kept.":
+    "价格保留已结束。请点“刷新价格”，已填信息会保留。",
+  "Prices held for {left}": "价格保留 {left}",
+  "Your prices are held for 1 more minute. Continue now, or we’ll check them again.":
+    "价格只再保留 1 分钟。请现在继续，否则会重新核价。",
+  "New total {total}": "新合计 {total}",
+  "I accept the new prices": "我接受新价格",
+  "A tip can’t be more than the order itself ({subtotal}). Ask staff if you’d like to leave more.":
+    "小费不能超过订单金额（{subtotal}）。如想多给，请告诉店员。",
+  "Tip {tip} on a {subtotal} order?": "确定给 {subtotal} 的订单付 {tip} 小费吗？",
+  "Yes, tip {tip}": "确定，付 {tip} 小费",
+  "Change tip": "修改小费",
+  "Getting your total…": "正在计算总价…",
+  "{dish}: {old} → {new}": "{dish}：{old} → {new}",
+  "{dish}: now {new}, was {old}": "{dish}：现价 {new}，原价 {old}",
+  "Prices changed since you added these:": "以下菜品在你加入后改了价：",
+  "A dish": "一道菜",
+  "Checkout asks you to accept the new prices before you pay.": "结账时会请你先确认新价格再付款。",
+  "Enter your name": "请填写姓名",
+  "Enter a mobile number, like 416 555 0123": "请填写手机号，例如 416 555 0123",
+  "Enter an email address, like name@example.com": "请填写邮箱，例如 name@example.com",
+  "Tick this to continue": "勾选后才能继续",
 });

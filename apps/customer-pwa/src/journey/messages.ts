@@ -258,6 +258,13 @@ export const cartText = Object.freeze({
   orderComesTo: (total: string) => t("This order comes to {total} with tax.", { total }),
   orderComesToWithFees: (total: string) =>
     t("This order comes to {total} with tax and fees.", { total }),
+  /** WP-2423 M74: dishes whose price changed since they were added. */
+  get pricesChangedSinceAdded() {
+    return t("Prices changed since you added these:");
+  },
+  get acceptAtCheckout() {
+    return t("Checkout asks you to accept the new prices before you pay.");
+  },
   get someonePlacedIt() {
     return t("Someone at your table just placed this order.");
   },
@@ -582,7 +589,35 @@ export const checkoutText = Object.freeze({
     return t("Tip");
   },
   get pricesExpired() {
-    return t("These prices expired. Refresh to price your order again.");
+    return t("Price hold ended. Tap Refresh prices. Your details are kept.");
+  },
+  /** WP-2423 M125: the countdown of the confirmed prices (m:ss). */
+  pricesHeldFor: (left: string) => t("Prices held for {left}", { left }),
+  get pricesHeldLastMinute() {
+    return t("Your prices are held for 1 more minute. Continue now, or we’ll check them again.");
+  },
+  /** WP-2423 M74: after the dishes whose price changed. */
+  newTotal: (total: string) => t("New total {total}", { total }),
+  get acceptNewPrices() {
+    return t("I accept the new prices");
+  },
+  /** WP-2423 M132: a typed tip above the order, and one above 30 % of it. */
+  tipTooLarge: (subtotal: string) =>
+    t(
+      "A tip can’t be more than the order itself ({subtotal}). Ask staff if you’d like to leave more.",
+      {
+        subtotal,
+      },
+    ),
+  confirmLargeTip: (tip: string, subtotal: string) =>
+    t("Tip {tip} on a {subtotal} order?", { tip, subtotal }),
+  yesTip: (tip: string) => t("Yes, tip {tip}", { tip }),
+  get changeTip() {
+    return t("Change tip");
+  },
+  /** WP-2423 M114: the button while the order is being priced. */
+  get gettingYourTotal() {
+    return t("Getting your total…");
   },
   get refreshPrices() {
     return t("Refresh prices");
@@ -859,8 +894,18 @@ export const checkoutText = Object.freeze({
   get retrySavingDetails() {
     return t("Retry saving details");
   },
-  get saveDetails() {
-    return t("Save details");
+  /** WP-2423 M112: under the field Continue found a problem with. */
+  get enterYourName() {
+    return t("Enter your name");
+  },
+  get enterMobileNumber() {
+    return t("Enter a mobile number, like 416 555 0123");
+  },
+  get enterEmail() {
+    return t("Enter an email address, like name@example.com");
+  },
+  get acceptPoliciesToContinue() {
+    return t("Tick this to continue");
   },
 });
 // --- end checkout page ---

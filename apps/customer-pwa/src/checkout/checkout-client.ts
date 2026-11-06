@@ -62,6 +62,9 @@ function parseQuote(value: unknown, expectedCartVersion: number): CheckoutQuote 
       : ["schemaVersion", "quote"],
   );
   const tips = root.tips === undefined ? undefined : parseTips(root.tips);
+  // WP-2423 M74: each line's price before tax, absent from an older server.
+  const withLines =
+    root.quote !== null && typeof root.quote === "object" && Object.hasOwn(root.quote, "lines");
   const raw = exact(root.quote, [
     "quoteReference",
     "quoteVersion",
@@ -76,6 +79,7 @@ function parseQuote(value: unknown, expectedCartVersion: number): CheckoutQuote 
     "warnings",
     "blockingReasons",
     "priceChange",
+    ...(withLines ? ["lines"] : []),
   ]);
   const quoteCurrency = text(raw.currency, currency);
   if (root.schemaVersion !== 1 || raw.cartVersion !== expectedCartVersion)
@@ -143,7 +147,28 @@ function parseQuote(value: unknown, expectedCartVersion: number): CheckoutQuote 
             evaluatedAt: evaluatedAt as string,
           }),
     ...(tips === undefined ? {} : { tips }),
+    ...(withLines ? { lines: quoteLines(raw.lines, quoteCurrency) } : {}),
   });
+}
+/** WP-2423 M74: one entry per cart line, each line once, in the quote's currency. */
+function quoteLines(value: unknown, quoteCurrency: string): NonNullable<CheckoutQuote["lines"]> {
+  if (!Array.isArray(value) || value.length > 200) throw new Error("invalid");
+  const seen = new Set<string>();
+  return Object.freeze(
+    value.map((entry: unknown) => {
+      const line = exact(entry, ["cartItemReference", "quantity", "subtotal"]);
+      const cartItemReference = text(line.cartItemReference, uuidV7);
+      const subtotal = money(line.subtotal);
+      if (
+        seen.has(cartItemReference) ||
+        subtotal.currency !== quoteCurrency ||
+        subtotal.amountMinor.startsWith("-")
+      )
+        throw new Error("invalid");
+      seen.add(cartItemReference);
+      return Object.freeze({ cartItemReference, quantity: integer(line.quantity), subtotal });
+    }),
+  );
 }
 /** WP-2423 item 8 ⑦: tips on or off, and three ascending whole percentages (1–50). */
 function parseTips(value: unknown) {

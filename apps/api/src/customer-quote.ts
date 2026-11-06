@@ -201,6 +201,13 @@ function publicQuote(
       expiresAt: quote.expiresAt,
       warnings: [...quote.warnings],
       blockingReasons: [...quote.blockingReasons],
+      // WP-2423 M74: each cart line's price before tax (options included), so the guest's page can
+      // show what each dish costs now and which prices changed since it was added.
+      lines: quote.lines.map((line) => ({
+        cartItemReference: line.lineReference,
+        quantity: line.quantity,
+        subtotal: money(line.subtotal),
+      })),
       priceChange:
         requote === undefined
           ? null

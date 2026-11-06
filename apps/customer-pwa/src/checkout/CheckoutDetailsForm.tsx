@@ -39,6 +39,42 @@ export interface CheckoutDetailsFormHandle {
    * Store acknowledged, or null when nothing was saved (the form shows why and how to recover).
    */
   save(): Promise<CheckoutFormSelection | null>;
+  /**
+   * WP-2423 M112: check the details before saving. On a problem the field is marked, explained,
+   * scrolled into view and focused, and its name is returned; null when nothing needs fixing.
+   */
+  validate(): DetailsField | null;
+}
+
+/** WP-2423 M112: the fields Continue can send the guest to. */
+export type DetailsField = "name" | "value" | "receiptEmail" | "policies";
+
+const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u;
+const phonePattern = /^\+[1-9][0-9]{6,14}$/u;
+
+/**
+ * WP-2423 M112: the first field that would be refused (the same rules the Store applies), or null.
+ */
+export function firstDetailsProblem(
+  draft: Pick<CheckoutDetailsDraft, "pickupContact" | "receipt">,
+  policiesToAccept: number,
+  accepted: boolean,
+): DetailsField | null {
+  const contact = draft.pickupContact;
+  if (contact !== null) {
+    const name = contact.name.trim();
+    if (name.length < 1 || name.length > 120) return "name";
+    if (contact.channel === "Phone" && !phonePattern.test(normalizePhoneNumber(contact.value)))
+      return "value";
+    if (contact.channel === "Email" && !emailPattern.test(contact.value.trim())) return "value";
+  }
+  if (
+    draft.receipt.choice === "TransactionalEmail" &&
+    !emailPattern.test(draft.receipt.email.trim())
+  )
+    return "receiptEmail";
+  if (policiesToAccept > 0 && !accepted) return "policies";
+  return null;
 }
 
 /**
@@ -124,6 +160,8 @@ export function CheckoutDetailsForm({
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
   const [dirty, setDirty] = useState(true);
+  /** WP-2423 M112: the field Continue found a problem with (marked until the guest edits it). */
+  const [problem, setProblem] = useState<DetailsField | null>(null);
   const [online, setOnline] = useState(
     () => typeof navigator === "undefined" || navigator.onLine !== false,
   );
@@ -238,14 +276,7 @@ export function CheckoutDetailsForm({
     return () => onReadyChange?.(null);
   }, [onReadyChange, ready, selection]);
   const submittable =
-    draft !== null &&
-    policy !== null &&
-    !expired &&
-    online &&
-    authorized &&
-    !busy &&
-    !failed &&
-    (policy.documents.length === 0 || confirmed);
+    draft !== null && policy !== null && !expired && online && authorized && !busy && !failed;
   useEffect(() => {
     onSubmittableChange?.(submittable);
     return () => onSubmittableChange?.(false);
@@ -253,6 +284,7 @@ export function CheckoutDetailsForm({
 
   const edit = (patch: Partial<Pick<CheckoutDetailsDraft, "pickupContact" | "receipt">>) => {
     if (busy || !authorized || !online || expired) return;
+    setProblem(null);
     setDraft((value) => (value === null ? null : { ...value, ...patch }));
     if (patch.pickupContact !== undefined) onUnsavedContactChange?.(patch.pickupContact);
     setDirty(true);
@@ -297,7 +329,39 @@ export function CheckoutDetailsForm({
     });
     return savedRevision() ? selection : null;
   };
-  useImperativeHandle(ref, () => ({ save: submit }));
+  const showProblem = (field: DetailsField) => {
+    setProblem(field);
+    // After the marked field renders: bring it into view and put the cursor in it.
+    window.setTimeout(() => {
+      const element = document.getElementById("checkout-details-" + field);
+      element?.scrollIntoView({ block: "center" });
+      element?.focus();
+    }, 0);
+  };
+  const validate = (): DetailsField | null => {
+    if (draft === null || policy === null) return null;
+    const field = firstDetailsProblem(draft, policy.documents.length, confirmed);
+    if (field !== null) showProblem(field);
+    return field;
+  };
+  useImperativeHandle(ref, () => ({ save: submit, validate }));
+  // A server "invalid" answer goes to the field too (the first one the rules find, else the name).
+  useEffect(() => {
+    if (save.status !== "invalid" || draft === null || policy === null) return;
+    showProblem(firstDetailsProblem(draft, policy.documents.length, confirmed) ?? "name");
+    // Once per answer.
+  }, [save.status]);
+  const fieldProps = (field: DetailsField) => ({
+    id: "checkout-details-" + field,
+    "aria-invalid": problem === field ? (true as const) : undefined,
+    "aria-describedby": problem === field ? "checkout-details-" + field + "-error" : undefined,
+  });
+  const fieldError = (field: DetailsField, text: string) =>
+    problem === field ? (
+      <span className="checkout-details-form__error" id={"checkout-details-" + field + "-error"}>
+        {text}
+      </span>
+    ) : null;
   if (loading)
     return (
       <section className="checkout-details-form" aria-label={checkoutText.detailsLabel}>
@@ -407,6 +471,7 @@ export function CheckoutDetailsForm({
               <label>
                 {checkoutText.pickupName}
                 <input
+                  {...fieldProps("name")}
                   required
                   maxLength={120}
                   value={draft.pickupContact.name}
@@ -419,6 +484,7 @@ export function CheckoutDetailsForm({
                     })
                   }
                 />
+                {fieldError("name", checkoutText.enterYourName)}
               </label>
               <label>
                 {checkoutText.contactMethod}
@@ -443,6 +509,7 @@ export function CheckoutDetailsForm({
                   ? checkoutText.mobileNumber
                   : checkoutText.pickupEmail}
                 <input
+                  {...fieldProps("value")}
                   required
                   type={draft.pickupContact.channel === "Phone" ? "tel" : "email"}
                   autoComplete={draft.pickupContact.channel === "Phone" ? "tel" : "email"}
@@ -462,6 +529,12 @@ export function CheckoutDetailsForm({
                     })
                   }
                 />
+                {fieldError(
+                  "value",
+                  draft.pickupContact.channel === "Phone"
+                    ? checkoutText.enterMobileNumber
+                    : checkoutText.enterEmail,
+                )}
               </label>
             </>
           ) : (
@@ -489,6 +562,7 @@ export function CheckoutDetailsForm({
                   <label>
                     {checkoutText.receiptEmail}
                     <input
+                      {...fieldProps("receiptEmail")}
                       required
                       type="email"
                       autoComplete="email"
@@ -500,6 +574,7 @@ export function CheckoutDetailsForm({
                         })
                       }
                     />
+                    {fieldError("receiptEmail", checkoutText.enterEmail)}
                   </label>
                 </>
               ) : (
@@ -518,20 +593,23 @@ export function CheckoutDetailsForm({
           {policy.documents.length > 0 ? (
             <label>
               <input
+                {...fieldProps("policies")}
                 type="checkbox"
                 checked={confirmed}
                 onChange={(event) => {
+                  setProblem(null);
                   setConfirmed(event.target.checked);
                   setDirty(true);
                 }}
               />
               {checkoutText.agreePolicies}
+              {fieldError("policies", checkoutText.acceptPoliciesToContinue)}
             </label>
           ) : null}
         </fieldset>
-        {expired ? <p role="alert">{checkoutText.detailsExpired}</p> : null}
+        {/* WP-2423 M125: once the hold ended, the page's one message says so; never "saved". */}
         {save.status === "pending" ? <p role="status">{checkoutText.savingDetails}</p> : null}
-        {save.status === "saved" && !dirty ? (
+        {save.status === "saved" && !dirty && !expired ? (
           <p role="status">{checkoutText.detailsSaved}</p>
         ) : null}
         {save.status === "invalid" ? <p role="alert">{checkoutText.detailsInvalid}</p> : null}
@@ -551,25 +629,7 @@ export function CheckoutDetailsForm({
             </button>
           </>
         ) : null}
-        {save.status === "pending" ? null : (
-          <button
-            type="submit"
-            className="checkout-details-form__save"
-            disabled={
-              busy || !online || expired || !dirty || (policy.documents.length > 0 && !confirmed)
-            }
-          >
-            {checkoutText.saveDetails}
-          </button>
-        )}
-        <button
-          type="button"
-          className="checkout-details-form__reload"
-          disabled={busy || !online}
-          onClick={() => void load()}
-        >
-          {checkoutText.reloadDetails}
-        </button>
+        {/* WP-2423 M113: Continue saves the details; no separate Save or Reload here. */}
       </form>
     </section>
   );

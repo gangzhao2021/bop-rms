@@ -10,6 +10,7 @@ import type { CheckoutController } from "./checkout-client.js";
 import type { CheckoutSessionController } from "./session-controller.js";
 import type { CheckoutQuote, CheckoutState } from "./types.js";
 import type { CartView } from "../cart/types.js";
+import { clearSeenPrices, recordFirstSeenPrices } from "../cart/seen-prices.js";
 
 const id = (n: number) => `018f7800-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 const cart: CartView = {
@@ -218,7 +219,7 @@ describe("CUST-CHECKOUT page contract", () => {
 
   it("marks an expired Quote and offers a fresh idempotent request", () => {
     const html = render({ status: "ready", cart, quote }, Date.parse("2026-08-12T00:06:00.000Z"));
-    expect(html).toContain("These prices expired");
+    expect(html).toContain("Price hold ended. Tap Refresh prices. Your details are kept.");
     expect(html).toContain("Refresh prices");
   });
 
@@ -307,7 +308,7 @@ describe("WP-2423 item 6: a table that pays at the end reaches this page only fo
     expect(html).toContain('<h2 id="page-heading">Place order</h2>');
     expect(html).toContain("Place order · $1.13");
     expect(html).not.toContain("checkout-progress");
-    expect(html).not.toContain("Prices confirmed for");
+    expect(html).not.toContain("Prices held for");
     expect(html).not.toContain("checkout-tip");
     expect(html).not.toContain(">Checkout<");
     expect(html).toContain("Nothing is charged now.");
@@ -318,7 +319,78 @@ describe("WP-2423 item 6: a table that pays at the end reaches this page only fo
       "PayFirst",
     );
     expect(html).toContain("checkout-progress");
-    expect(html).toContain("Prices confirmed for");
+    expect(html).toContain("Prices held for 4:00");
     expect(html).not.toContain("Place order");
+  });
+});
+
+describe("WP-2423 guest-payment-state: what the guest pays, and until when", () => {
+  const priced = (amountMinor: string): CheckoutQuote => ({
+    ...quote,
+    subtotal: { amountMinor, currency: "CAD" },
+    total: { amountMinor, currency: "CAD" },
+    warnings: [],
+    blockingReasons: [],
+    priceChange: null,
+    lines: [{ cartItemReference: id(2), quantity: 1, subtotal: { amountMinor, currency: "CAD" } }],
+  });
+  afterEach(() => clearSeenPrices());
+
+  it("M114: while the order is being priced, no tip choice flashes and the button says so", () => {
+    const html = render({ status: "pending", cart });
+    expect(html).not.toContain('aria-label="Tip amount"');
+    expect(html).not.toContain("Choose a tip to continue");
+    expect(html).toContain("Getting your total…");
+  });
+
+  it("M74: a dish whose price rose since it was added is listed by name and must be accepted", () => {
+    recordFirstSeenPrices(id(1), [
+      { cartItemReference: id(2), quantity: 1, amountMinor: 549n, currency: "CAD" },
+    ]);
+    // The cart showed the new price first; that is not the guest accepting it.
+    recordFirstSeenPrices(id(1), [
+      { cartItemReference: id(2), quantity: 1, amountMinor: 599n, currency: "CAD" },
+    ]);
+    const html = render({ status: "ready", cart, quote: priced("599") });
+    expect(html).toContain("Prices changed since you added these:");
+    expect(html).toContain("Synthetic tea: $5.49 → $5.99");
+    expect(html).toContain("New total $5.99");
+    expect(html).toContain("I accept the new prices");
+    expect(html).toMatch(/<button[^>]*class="checkout-continue__button"[^>]*disabled=""/u);
+    // The line itself shows the Store's price for it, never a blank.
+    expect(html).toContain('<span class="checkout-items__amount">$5.99</span>');
+  });
+
+  it("M74: a decrease is listed without asking anything", () => {
+    recordFirstSeenPrices(id(1), [
+      { cartItemReference: id(2), quantity: 1, amountMinor: 549n, currency: "CAD" },
+    ]);
+    const html = render({ status: "ready", cart, quote: priced("499") });
+    expect(html).toContain("Synthetic tea: now $4.99, was $5.49");
+    expect(html).not.toContain("I accept the new prices");
+  });
+
+  it("M165: back from the payment page after a menu update, the page says why it priced again", () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter initialEntries={[{ pathname: "/checkout", state: { menuUpdated: true } }]}>
+        <CheckoutPage
+          controller={controller({ status: "ready", cart, quote: priced("599") })}
+          now={() => Date.parse("2026-08-12T00:01:00.000Z")}
+        />
+      </MemoryRouter>,
+    );
+    expect(html).toContain("The restaurant just updated its menu, so we priced your order again.");
+  });
+
+  it("M125: the prices are held with a countdown, and the last minute is announced", () => {
+    expect(render({ status: "ready", cart, quote: priced("599") })).toContain(
+      "Prices held for 4:00",
+    );
+    const late = render(
+      { status: "ready", cart, quote: priced("599") },
+      Date.parse("2026-08-12T00:04:10.000Z"),
+    );
+    expect(late).toContain("Prices held for 0:50");
+    expect(late).toContain("Your prices are held for 1 more minute.");
   });
 });

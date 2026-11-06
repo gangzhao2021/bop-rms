@@ -141,13 +141,18 @@ function CheckoutReturnLink({
   to,
   cartPath,
   cartText,
+  menuUpdated = false,
 }: {
   readonly to: CheckoutReturn;
   readonly cartPath: string;
   readonly cartText: string;
+  /** WP-2423 M165: checkout then says it priced the order again because the menu changed. */
+  readonly menuUpdated?: boolean;
 }) {
   return to === "cart" ? (
-    <Link to={cartPath}>{cartText}</Link>
+    <Link to={cartPath} state={menuUpdated ? { menuUpdated: true } : undefined}>
+      {cartText}
+    </Link>
   ) : (
     <Link to="/dine-in/session">
       {to === "table-saved" ? t("See your table") : t("Back to your table")}
@@ -599,7 +604,12 @@ function PreparedSessionPaymentPage({
                 )}
           </p>
           <SavedOnTable to={back} />
-          <CheckoutReturnLink to={back} cartPath="/checkout" cartText={t("Back to checkout")} />
+          <CheckoutReturnLink
+            to={back}
+            cartPath="/checkout"
+            cartText={t("Back to checkout")}
+            menuUpdated
+          />
         </section>
       ) : null}
       {status === "table_moved" ? (

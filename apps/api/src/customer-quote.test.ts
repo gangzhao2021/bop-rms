@@ -170,7 +170,12 @@ describe("WP-1103/1104 Customer Quote API", () => {
       quote: { total: { amountMinor: string }; lines?: unknown[] };
     };
     expect(body.quote.total.amountMinor).toBe("1130");
-    expect(body.quote.lines).toBeUndefined();
+    // WP-2423 M74: each cart line's price before tax, and nothing of how it was priced.
+    expect(body.quote.lines).toEqual([
+      { cartItemReference: id(6), quantity: 1, subtotal: { amountMinor: "1000", currency: "CAD" } },
+    ]);
+    expect(JSON.stringify(body)).not.toContain(id(10));
+    expect(JSON.stringify(body)).not.toContain(id(8));
   });
 
   it("returns the exact current Quote without recalculating its snapshot", async () => {

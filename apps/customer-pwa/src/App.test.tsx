@@ -84,7 +84,8 @@ describe("customer PWA shell", () => {
     expect(html).toContain(">Checkout</h2>");
     expect(html).toContain("Loading checkout");
     // WP-2423 item 8 ⑦: while the cart is still being read nothing is asked, not even a tip.
-    expect(html).toContain("Continue to payment");
+    // WP-2423 M114: before the order is priced, the button says the total is coming.
+    expect(html).toContain("Getting your total…");
     expect(html).not.toContain('id="checkout-tip"');
     expect(html).toContain('disabled=""');
   });

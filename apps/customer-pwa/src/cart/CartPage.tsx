@@ -43,6 +43,13 @@ import {
   type CartLinePrice,
 } from "../menu/menu-line-prices.js";
 import type { CustomerMenuClient, MenuJourneyContext, MenuView } from "../menu/types.js";
+import {
+  recordFirstSeenPrices,
+  seenPriceChanges,
+  type LinePriceChange,
+  type PricedLine,
+} from "./seen-prices.js";
+import { PriceChangeList } from "../checkout/PriceChangeList.js";
 import { comboLineAllergenText } from "../menu/combo-allergens.js";
 import {
   cartIssueMessage,
@@ -508,6 +515,31 @@ function LastOrderPlaced({
   );
 }
 
+/**
+ * WP-2423 M74: the cart's priced lines, recorded the first time the guest sees them, and the lines
+ * whose price changed since. Showing a line again never replaces what the guest first saw.
+ */
+export function cartPriceChanges(
+  cart: CartView["cart"],
+  prices: ReadonlyMap<string, CartLinePrice | null>,
+): readonly LinePriceChange[] {
+  const lines: PricedLine[] = cart.items.flatMap((item) => {
+    const price = prices.get(item.cartItemReference);
+    return price == null
+      ? []
+      : [
+          {
+            cartItemReference: item.cartItemReference,
+            quantity: item.quantity,
+            amountMinor: price.amountMinor,
+            currency: price.currency,
+          },
+        ];
+  });
+  recordFirstSeenPrices(cart.cartReference, lines);
+  return seenPriceChanges(cart.cartReference, lines);
+}
+
 function CartContent({
   state,
   controller,
@@ -619,6 +651,7 @@ function CartContent({
       ? cart.cart.quote.subtotal
       : null;
   const prices = quoteConsistentLinePrices(cart.cart.items, menu, currentQuote);
+  const priceChanges = cartPriceChanges(cart.cart, prices);
   // WP-2423 M03 review: these dishes are already in an order (a cart filled before pickup carts
   // were emptied on ordering); their checkout is refused, so say so instead of offering it.
   const alreadyOrdered =
@@ -627,6 +660,12 @@ function CartContent({
     <>
       {alreadyOrdered !== null ? (
         <AlreadyOrdered placedOrder={alreadyOrdered} dishesInCart />
+      ) : null}
+      {priceChanges.length > 0 && !terminal ? (
+        <section className="cart-price-changes" role="status">
+          <PriceChangeList changes={priceChanges} items={cart.cart.items} />
+          <p>{cartText.acceptAtCheckout}</p>
+        </section>
       ) : null}
       {terminal ? (
         <StateMessage
@@ -911,6 +950,16 @@ export function CartPage({
       (item) => item.lineEstimate.status !== "Available" || item.configuration.length > 0,
     ) ?? false,
   );
+  const cartShowsPriceChanges =
+    cart !== null &&
+    cartPriceChanges(
+      cart,
+      quoteConsistentLinePrices(
+        cart.items,
+        menu,
+        cart.quote !== null && cart.quote.cartVersion === cart.version ? cart.quote.subtotal : null,
+      ),
+    ).length > 0;
   const [menuWaitOver, setMenuWaitOver] = useState(false);
   useEffect(() => {
     const timer = window.setTimeout(() => setMenuWaitOver(true), menuPriceWaitMs);
@@ -1065,7 +1114,10 @@ export function CartPage({
           ? cartText.someonePlacedIt
           : roundState.status === "cart-changed" && state.status === "empty"
             ? cartText.someonePlacedIt
-            : cartText.stateAnnouncement[state.status]}
+            : state.status === "ready" && cartShowsPriceChanges
+              ? // WP-2423 M74: never "up to date" while a dish's price changed since it was added.
+                cartText.pricesChangedSinceAdded
+              : cartText.stateAnnouncement[state.status]}
       </div>
     </CustomerPage>
   );

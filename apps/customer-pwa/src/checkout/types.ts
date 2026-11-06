@@ -24,6 +24,15 @@ export interface CheckoutQuote {
    * subtotal before tax, or tips off. Absent from an older server: 10 / 15 / 18 %.
    */
   readonly tips?: { readonly enabled: boolean; readonly tierPercents: readonly number[] };
+  /**
+   * WP-2423 M74: each cart line's price before tax with its options, for the quoted quantity.
+   * Absent from an older server.
+   */
+  readonly lines?: readonly {
+    readonly cartItemReference: string;
+    readonly quantity: number;
+    readonly subtotal: CartMoney;
+  }[];
 }
 
 export type CheckoutState =

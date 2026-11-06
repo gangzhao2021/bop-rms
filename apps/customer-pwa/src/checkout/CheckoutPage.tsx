@@ -19,7 +19,16 @@ import {
   type PickupContactDraft,
 } from "./CheckoutDetailsForm.js";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { Link, useNavigate } from "react-router";
+import { Link, useLocation, useNavigate } from "react-router";
+import {
+  checkoutTips,
+  customTipCheck,
+  priceChangesNeedAcceptance,
+  priceHold,
+  quotePricedLines,
+} from "./checkout-decisions.js";
+import { acceptSeenPrices, recordFirstSeenPrices, seenPriceChanges } from "../cart/seen-prices.js";
+import { PriceChangeList } from "./PriceChangeList.js";
 import { createBrowserCustomerCartClient, type CustomerCartClient } from "../cart/cart-client.js";
 import { startTableCartPoll } from "../cart/table-cart-poll.js";
 import { tableCartChange, type TableCartChange } from "../cart/table-cart-change.js";
@@ -33,12 +42,7 @@ import { paymentConfiguration } from "../payment/payment-configuration.js";
 import { quoteConsistentLinePrices, usePublishedMenu } from "../menu/menu-line-prices.js";
 import type { CustomerMenuClient, MenuJourneyContext } from "../menu/types.js";
 import { CustomerPage, PageHeading, type CustomerStoreContext } from "../journey/CustomerPage.js";
-import {
-  currencySymbol,
-  formatMinutesUntil,
-  formatMoney,
-  percentOfMinor,
-} from "../journey/format.js";
+import { currencySymbol, formatMoney, percentOfMinor } from "../journey/format.js";
 import {
   cartText,
   checkoutText,
@@ -61,8 +65,6 @@ import {
 
 /** A tip percentage of the subtotal before tax (0: no tip), or an amount the guest types. */
 type TipChoice = number | "custom";
-/** WP-2423 item 8 ⑦: what a Store never set offers (an older server sends no tips). */
-const defaultTips = Object.freeze({ enabled: true, tierPercents: [10, 15, 18] });
 
 /** Dollars-and-cents text for a minor-unit amount, for the custom tip field. */
 function minorToText(minor: string): string {
@@ -107,6 +109,7 @@ export function CheckoutPage({
   const [detailsLocked, setDetailsLocked] = useState(false);
   const [confirmedQuote, setConfirmedQuote] = useState<string | null>(null);
   const navigate = useNavigate();
+  const location = useLocation();
   const [sessionController] = useState(
     () => providedSession ?? createCheckoutSessionController(createCheckoutSessionClient()),
   );
@@ -141,7 +144,13 @@ export function CheckoutPage({
   // WP-2423: the restaurant updated its menu while this guest was checking out; nothing was placed
   // or charged. The page prices the cart again once and says why, and the guest checks the total
   // and presses again. What was chosen for the old price goes with it.
-  const [menuUpdated, setMenuUpdated] = useState(false);
+  // WP-2423 M165: also when the payment page found the menu updated and sent the guest back here
+  // (the notice used to be lost on that round trip, so the new price looked silent).
+  const [menuUpdated, setMenuUpdated] = useState(
+    () => (location.state as { menuUpdated?: unknown } | null | undefined)?.menuUpdated === true,
+  );
+  /** WP-2423 M132: the large typed tip the guest confirmed (its amount), if any. */
+  const [confirmedTip, setConfirmedTip] = useState<string | null>(null);
   const priceAgainAfterMenuUpdate = () => {
     selectedTip.current = null;
     setMenuUpdated(true);
@@ -289,10 +298,34 @@ export function CheckoutPage({
   );
   // Each line at a price that adds up to the quote's subtotal; a line that can't be priced that
   // way shows no amount while the quote's total is beside it, never a contradicting label.
+  // WP-2423 M74: the quote's own line prices when it sends them (every line, adding up to its
+  // subtotal), so no line is left blank after a re-price.
+  const quoteLines = quotePricedLines(quote);
   const linePrices =
     cart === null
       ? null
-      : quoteConsistentLinePrices(cart.cart.items, menu, quote?.subtotal ?? null);
+      : quote?.lines !== undefined
+        ? new Map(
+            quoteLines.map(
+              (line) =>
+                [
+                  line.cartItemReference,
+                  { amountMinor: line.amountMinor, currency: line.currency },
+                ] as const,
+            ),
+          )
+        : quoteConsistentLinePrices(cart.cart.items, menu, quote?.subtotal ?? null);
+  // WP-2423 M74: dishes whose price changed since the guest added them (first prices are kept).
+  if (cart !== null && quote?.lines !== undefined)
+    recordFirstSeenPrices(cart.cart.cartReference, quoteLines);
+  const priceChanges =
+    cart === null || quote?.lines === undefined
+      ? []
+      : seenPriceChanges(cart.cart.cartReference, quoteLines);
+  const pricesNeedAcceptance =
+    quote !== null &&
+    (priceChangesNeedAcceptance(priceChanges) ||
+      quote.priceChange?.requiresReconfirmation === true);
   // U1: the Store prices the order as soon as the cart is known (and again after a reconnect);
   // no "get a quote" tap. A failed attempt leaves a non-ready state, so this cannot loop.
   useEffect(() => {
@@ -340,10 +373,12 @@ export function CheckoutPage({
     return () => window.clearTimeout(timer);
   }, [now, quote, quoteExpired]);
   // The Store's tip percentages; with tips off the guest is asked nothing and pays no tip.
-  const tips = quote?.tips ?? defaultTips;
-  const tipPresets = [0, ...tips.tierPercents];
+  // WP-2423 M114: unknown until the order is priced; nothing about tips is shown before that.
+  const tips = checkoutTips(quote);
+  const tipPresets = tips === null ? [] : [0, ...tips.tierPercents];
   // Nothing in the cart (v15 live check): nothing to pay for, so no tip is asked either.
-  const asksTip = !payLater && tips.enabled && cart !== null && cart.cart.items.length > 0;
+  const asksTip =
+    !payLater && tips !== null && tips.enabled && cart !== null && cart.cart.items.length > 0;
   // WP-2423 live minor 22: a dish in the cart can't be ordered now (refused when pricing, or when
   // the checkout starts); the way on is the cart, so no tip is asked (a tip would read as what
   // unblocks it) and the main action is Change your cart, never a payment that is refused again.
@@ -353,7 +388,12 @@ export function CheckoutPage({
     sessionState.status === "item_short";
   // A percentage the Store no longer offers (the quote was read again) is chosen again.
   useEffect(() => {
-    if (typeof tipChoice === "number" && tipChoice !== 0 && !tips.tierPercents.includes(tipChoice))
+    if (
+      tips !== null &&
+      typeof tipChoice === "number" &&
+      tipChoice !== 0 &&
+      !tips.tierPercents.includes(tipChoice)
+    )
       setTipChoice(null);
   }, [tipChoice, tips]);
   const tipAmount = !asksTip
@@ -365,6 +405,13 @@ export function CheckoutPage({
         : quote === null
           ? "0"
           : percentOfMinor(quote.subtotal.amountMinor, tipChoice);
+  // WP-2423 M132: a typed tip above 30 % of the order is confirmed first; above the order, refused.
+  const tipCheck =
+    tipChoice === "custom" && tipAmount !== null && quote !== null
+      ? customTipCheck(tipAmount, quote.subtotal.amountMinor)
+      : "ok";
+  const tipBlocked =
+    tipCheck === "too_large" || (tipCheck === "confirm" && confirmedTip !== tipAmount);
   const detailsReady =
     readyDetails !== null &&
     detailsSelection !== null &&
@@ -376,18 +423,19 @@ export function CheckoutPage({
     sessionState.status === "idle" &&
     state.status === "ready" &&
     tipAmount !== null &&
+    !tipBlocked &&
     !quoteExpired &&
     quote !== null &&
     quote.blockingReasons.length === 0 &&
-    !(
-      quote.priceChange?.requiresReconfirmation === true && confirmedQuote !== quote.quoteReference
-    ) &&
+    !(pricesNeedAcceptance && confirmedQuote !== quote.quoteReference) &&
     detailsSelection !== null;
   const sessionAlert = checkoutSessionAlert(sessionState, state.status === "offline");
   const canContinue =
     paymentOpen && !detailsLocked && (detailsReady || detailsSubmittable) && tableChange === null;
   const startPayment = () => {
     if (!detailsSelection || quoteExpired || tipAmount === null) return;
+    // The guest has now seen (and, for a rise, accepted) these prices.
+    acceptSeenPrices(detailsSelection.cartReference, quoteLines);
     selectedTip.current ??= { selectionReference: uuidv7(), amountMinor: tipAmount };
     void sessionController.start(detailsSelection);
   };
@@ -410,6 +458,8 @@ export function CheckoutPage({
       startPayment();
       return;
     }
+    // WP-2423 M112: a field that would be refused is shown and focused; nothing is sent.
+    if ((detailsForm.current?.validate() ?? null) !== null) return;
     setContinueRequested(true);
     try {
       const saved = (await detailsForm.current?.save()) ?? null;
@@ -444,7 +494,16 @@ export function CheckoutPage({
           serviceMode: cart.cart.orderType,
         }
       : undefined);
-  const remaining = quote === null ? null : formatMinutesUntil(quote.expiresAt, now());
+  // WP-2423 M125: how long the prices are held, updated every 30 s, then every second.
+  const hold = quote === null ? null : priceHold(quote.expiresAt, now());
+  useEffect(() => {
+    if (hold?.nextUpdateMs == null) return;
+    const timer = window.setTimeout(
+      () => setClockRevision((revision) => revision + 1),
+      Math.min(hold.nextUpdateMs + 20, 2_147_483_647),
+    );
+    return () => window.clearTimeout(timer);
+  });
   // WP-2423 M03: these dishes are an order already (Back from the paid page, an old bookmark, a
   // second tab): open that order; there is nothing here to pay.
   if (state.status === "empty" && state.placedOrder)
@@ -616,11 +675,34 @@ export function CheckoutPage({
                   </button>
                 </div>
               ) : payLater ? null : (
-                <p className="checkout-totals__validity">
-                  {remaining === null ? "" : commonText.pricesConfirmedFor(remaining)}
-                </p>
+                <>
+                  <p className="checkout-totals__validity">
+                    {hold === null ? "" : checkoutText.pricesHeldFor(hold.left)}
+                  </p>
+                  {hold?.phase === "last-minute" ? (
+                    <p role="alert">{checkoutText.pricesHeldLastMinute}</p>
+                  ) : null}
+                </>
               )}
-              {quote.priceChange?.requiresReconfirmation ? (
+              {priceChanges.length > 0 && cart !== null ? (
+                <div role="alert" className="checkout-price-change">
+                  <PriceChangeList changes={priceChanges} items={cart.cart.items} />
+                  <p>{checkoutText.newTotal(formatCartMoney(quote.total))}</p>
+                  {pricesNeedAcceptance ? (
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={confirmedQuote === quote.quoteReference}
+                        disabled={sessionState.status !== "idle"}
+                        onChange={(event) =>
+                          setConfirmedQuote(event.target.checked ? quote.quoteReference : null)
+                        }
+                      />{" "}
+                      {checkoutText.acceptNewPrices}
+                    </label>
+                  ) : null}
+                </div>
+              ) : quote.priceChange?.requiresReconfirmation ? (
                 <div role="alert">
                   <p>{checkoutText.priceChanged}</p>
                   <label>
@@ -833,6 +915,35 @@ export function CheckoutPage({
                   ? checkoutText.tipInvalid
                   : checkoutText.tipHelp}
               </p>
+              {tipCheck === "too_large" && quote !== null ? (
+                <p role="alert">{checkoutText.tipTooLarge(formatCartMoney(quote.subtotal))}</p>
+              ) : null}
+              {tipCheck === "confirm" && quote !== null && tipAmount !== null ? (
+                <div role="alert" className="checkout-tip__confirm">
+                  <p>
+                    {checkoutText.confirmLargeTip(
+                      formatMoney(tipAmount, quote.subtotal.currency),
+                      formatCartMoney(quote.subtotal),
+                    )}
+                  </p>
+                  <button
+                    type="button"
+                    aria-pressed={confirmedTip === tipAmount}
+                    onClick={() => setConfirmedTip(tipAmount)}
+                  >
+                    {checkoutText.yesTip(formatMoney(tipAmount, quote.subtotal.currency))}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setConfirmedTip(null);
+                      document.getElementById("checkout-tip")?.focus();
+                    }}
+                  >
+                    {checkoutText.changeTip}
+                  </button>
+                </div>
+              ) : null}
             </section>
           )}
         </div>
@@ -935,22 +1046,24 @@ export function CheckoutPage({
               }
               onClick={() => void requestContinue()}
             >
-              {payLater
-                ? quote
-                  ? checkoutText.placeOrderWithTotal(
-                      formatMoney(quote.total.amountMinor, quote.total.currency),
-                    )
-                  : checkoutText.placeOrder
-                : asksTip && tipChoice === null
-                  ? checkoutText.chooseTipToContinue
-                  : quote && tipAmount !== null
-                    ? checkoutText.continueToPaymentWithTotal(
-                        formatMoney(
-                          (BigInt(quote.total.amountMinor) + BigInt(tipAmount)).toString(),
-                          quote.total.currency,
-                        ),
+              {quote === null && (state.status === "loading" || state.status === "pending")
+                ? checkoutText.gettingYourTotal
+                : payLater
+                  ? quote
+                    ? checkoutText.placeOrderWithTotal(
+                        formatMoney(quote.total.amountMinor, quote.total.currency),
                       )
-                    : checkoutText.continueToPayment}
+                    : checkoutText.placeOrder
+                  : asksTip && tipChoice === null
+                    ? checkoutText.chooseTipToContinue
+                    : quote && tipAmount !== null
+                      ? checkoutText.continueToPaymentWithTotal(
+                          formatMoney(
+                            (BigInt(quote.total.amountMinor) + BigInt(tipAmount)).toString(),
+                            quote.total.currency,
+                          ),
+                        )
+                      : checkoutText.continueToPayment}
             </button>
           )}
           <p className="checkout-continue__note">
