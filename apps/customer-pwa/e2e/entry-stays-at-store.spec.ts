@@ -301,6 +301,42 @@ test.describe("@production M02 a phone stays at the Store and table it scanned",
     expect(scannedEntries(state)).toEqual([{ qrToken: lanePickup }]);
   });
 
+  test("a reload on the menu stays at Lane Dessert's menu, never 'which location'", async ({
+    page,
+  }) => {
+    const state = await installation(page, {
+      bootstrap: { schemaVersion: 1, csrfToken: csrf, menuContext: laneContext("Pickup") },
+    });
+    for (const load of [() => page.goto("/menu"), () => page.reload()]) {
+      await load();
+      await expect(page).toHaveURL(/\/menu$/u);
+      await expect(page.getByText("Lane Dessert").first()).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Scan the location QR code" })).toHaveCount(0);
+      await expect(page.getByText("DEMO Café")).toHaveCount(0);
+    }
+    expect(scannedEntries(state)).toEqual([]);
+    expect(state.pickupRequests).toEqual([]);
+    await expectNoInternalText(page);
+    await noHorizontalOverflow(page);
+  });
+
+  test("on the menu with no visit yet, 'Return to entry' asks the scanned table again", async ({
+    page,
+  }) => {
+    const state = await installation(page, {
+      waiting: () => ({ status: 409, body: notOpen }),
+    });
+    await page.goto("/menu");
+    const main = page.getByRole("main");
+    await expect(main.getByRole("heading", { name: "Scan the location QR code" })).toBeVisible();
+    await main.getByRole("link", { name: "Return to entry" }).click();
+    await expect(main.getByRole("heading", { name: "This table isn’t open yet" })).toBeVisible();
+    await expect(page.getByText("DEMO Café")).toHaveCount(0);
+    expect(scannedEntries(state)).toEqual([]);
+    expect(state.entries).toEqual([{ resume: true }]);
+    expect(state.pickupRequests).toEqual([]);
+  });
+
   test("the outage page's Try again comes back with the scanned table code", async ({ page }) => {
     const front = (await import(
       pathToFileURL(path.resolve("../../tooling/environment/pilot-front.mjs")).href

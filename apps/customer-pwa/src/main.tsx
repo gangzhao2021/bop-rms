@@ -121,8 +121,11 @@ async function start() {
   const fetcher = window.fetch.bind(window);
   // M02 (v15 07b7a1b7): where this phone is comes from its own scan or its own visit, never from
   // a default Store (the start sequence is in entry/start-client.ts).
+  // Opened at another page (a reload on the menu): the entry page reached from there reads no
+  // address, only this browser's waiting scan or its visit.
+  const openedAtEntry = entryLocation.pathname === "/";
   const source: CustomerEntryStartSource =
-    hash === ""
+    hash === "" || !openedAtEntry
       ? { kind: "None" }
       : scannedCode !== null
         ? { kind: "Code", load: async () => scannedCode }
@@ -152,15 +155,15 @@ async function start() {
   const boundary = {
     fetch: fetcher,
     hash: "",
-    pathname: entryLocation.pathname,
-    search: entryLocation.search,
+    pathname: openedAtEntry ? entryLocation.pathname : "/",
+    search: openedAtEntry ? entryLocation.search : "",
     // The address was cleaned above; nothing to replace again.
     replaceState: () => undefined,
     online: () => window.navigator.onLine,
   };
   const entryClient =
-    // As it was opened (the address was cleaned above): a query is no entry.
-    entryLocation.pathname === "/" && entryLocation.search === ""
+    // As it was opened (the address was cleaned above): a query on the entry page is no entry.
+    !openedAtEntry || entryLocation.search === ""
       ? createCustomerStartClient({
           source,
           restored,
