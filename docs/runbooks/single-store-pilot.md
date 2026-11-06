@@ -3370,7 +3370,11 @@ through reads "The automatic refund didn't go through" (自动退款没有完成
 - A table moved after a round was paid keeps that round: staff accept it at the new table as usual
   and the kitchen ticket names the new table. A guest who was still paying when the table moved is
   charged and sent normally, and a round sent before the move and not paid yet is paid from the
-  same phone at the new table, for the same amount (table-move-payment, 2026-11-06).
+  same phone at the new table, for the same amount (table-move-payment, 2026-11-06). A guest who
+  was sending a round at the moment of the move is told "Your table was changed … you haven't
+  been charged" and checks out again on the same phone; nothing was sent or charged for the first
+  try. A payment confirm that lands while a move is being recorded asks the phone to try again by
+  itself; it is never told the payment is not theirs.
 - Pilot operator: the business worker's health is `paymentWait` `attention_required` while any paid
   wait keeps failing; `business-worker.log` has one `INTERNAL_PAYMENT_WAIT_FAILED` line per attempt
   with its safe `code`, `failures` and `stuckWaits` (a count, never which order). The failing order
