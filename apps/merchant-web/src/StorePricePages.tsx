@@ -431,17 +431,17 @@ export function StorePriceList({
                     {book.stableCode}
                   </Link>
                 </td>
-                <td>
+                <td data-label={t("Status")}>
                   {priceBookStatus(
                     book.lifecycle,
                     book.priceBookReference === current?.priceBookReference,
                   )}
                 </td>
-                <td>{book.entries}</td>
-                <td>
+                <td data-label={t("Prices")}>{book.entries}</td>
+                <td data-label={t("Updated")}>
                   <SourceTime instant={book.updatedAt} />
                 </td>
-                <td>
+                <td data-label={t("Next step")}>
                   {book.lifecycle === "Draft" &&
                   (view.permissions.mayEdit || view.permissions.mayApprove) ? (
                     <Link
@@ -712,9 +712,9 @@ function PriceBookEditor({
                   data-missing={highlight.has(item.sellableReference) ? "true" : undefined}
                 >
                   <td>{item.productName}</td>
-                  <td>{item.sizeName}</td>
-                  <td>{item.skuCode}</td>
-                  <td>
+                  <td data-label={t("Size")}>{item.sizeName}</td>
+                  <td data-label={t("Code")}>{item.skuCode}</td>
+                  <td data-label={t("Price")}>
                     {editable ? (
                       <>
                         <span aria-hidden="true">{currencyPrefix(view.currencyCode)}</span>
@@ -740,7 +740,9 @@ function PriceBookEditor({
                       currencyPrefix(view.currencyCode) + text
                     )}
                   </td>
-                  <td>{onMenu.has(item.sellableReference) ? t("Yes") : "—"}</td>
+                  <td data-label={t("On this Store's menu")}>
+                    {onMenu.has(item.sellableReference) ? t("Yes") : "—"}
+                  </td>
                 </tr>
               );
             })}

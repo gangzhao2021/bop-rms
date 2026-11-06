@@ -171,14 +171,16 @@ export function RecipeListPage({
                     ? t(" (revision {familyRevision})", { familyRevision: recipe.familyRevision })
                     : ""}
                 </td>
-                <td>{recipe.code}</td>
-                <td>{lifecycleText[recipe.lifecycle]}</td>
-                <td>
+                <td data-label={t("Code")}>{recipe.code}</td>
+                <td data-label={t("Status")}>{lifecycleText[recipe.lifecycle]}</td>
+                <td data-label={t("Yield")}>
                   {recipe.yieldQuantity} {unitText(recipe.yieldUnit)}
                 </td>
-                <td>${centsText(recipe.standardCostCents)}</td>
-                <td>{recipe.kitchenInstructions === "Published" ? t("Published") : "—"}</td>
-                <td>
+                <td data-label={t("Standard cost")}>${centsText(recipe.standardCostCents)}</td>
+                <td data-label={t("Kitchen instructions")}>
+                  {recipe.kitchenInstructions === "Published" ? t("Published") : "—"}
+                </td>
+                <td data-label={t("Used by")}>
                   {recipe.bindings
                     .map(
                       (binding) =>
@@ -687,7 +689,7 @@ function ReadOnlyRecipe({
                   ? (items.get(item.sourceReference)?.name ?? t("Inactive item"))
                   : (subs.get(item.sourceReference)?.name ?? t("Sub-recipe"))}
               </td>
-              <td>
+              <td data-label={t("Quantity")}>
                 {item.quantity}{" "}
                 {unitText(
                   item.kind === "InventoryItem"
@@ -695,13 +697,13 @@ function ReadOnlyRecipe({
                     : subs.get(item.sourceReference)?.yieldUnit,
                 )}
               </td>
-              <td>{item.lossPercent}</td>
-              <td>
+              <td data-label={t("Loss %")}>{item.lossPercent}</td>
+              <td data-label={t("Standard cost per unit")}>
                 {item.kind === "InventoryItem"
                   ? "$" + centsToDollarsText(item.unitCostCents ?? "0")
                   : "—"}
               </td>
-              <td>{lineAllergens(recipe, index + 1)}</td>
+              <td data-label={t("Allergens (this version)")}>{lineAllergens(recipe, index + 1)}</td>
             </tr>
           ))}
         </tbody>

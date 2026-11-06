@@ -184,20 +184,26 @@ export function ProductListPage({
                     {product.name}
                   </Link>
                 </td>
-                <td>
+                <td data-label={t("Section")}>
                   {(product.sections ?? []).length === 0
                     ? t("Not on a menu")
                     : (product.sections ?? []).join(listSeparator())}
                 </td>
-                <td className="product-code">{product.internalCode}</td>
-                <td>{lifecycleText[product.lifecycle] ?? product.lifecycle}</td>
-                <td>
+                <td data-label={t("Code")} className="product-code">
+                  {product.internalCode}
+                </td>
+                <td data-label={t("Status")}>
+                  {lifecycleText[product.lifecycle] ?? product.lifecycle}
+                </td>
+                <td data-label={t("Sizes selling")}>
                   {t("{activeSizes} of {sizes}", {
                     activeSizes: product.activeSizes,
                     sizes: product.sizes,
                   })}
                 </td>
-                <td>{taxLabel(view.taxClasses, product.taxClassificationReference)}</td>
+                <td data-label={t("Tax")}>
+                  {taxLabel(view.taxClasses, product.taxClassificationReference)}
+                </td>
               </tr>
             ))}
           </tbody>
@@ -603,7 +609,7 @@ function ProductEditor({
                       }
                     />
                   </td>
-                  <td>
+                  <td data-label={t("Chinese name")}>
                     <input
                       lang="zh-Hans"
                       aria-label={t("Size {value} Chinese name", { value: index + 1 })}
@@ -618,7 +624,7 @@ function ProductEditor({
                       }
                     />
                   </td>
-                  <td>
+                  <td data-label={t("Size code")}>
                     <input
                       aria-label={t("Size {value} code", { value: index + 1 })}
                       value={size.skuCode}
@@ -635,7 +641,9 @@ function ProductEditor({
                       }
                     />
                   </td>
-                  <td>{lifecycleText[size.lifecycle] ?? size.lifecycle}</td>
+                  <td data-label={t("Status")}>
+                    {lifecycleText[size.lifecycle] ?? size.lifecycle}
+                  </td>
                   <td>
                     {size.lifecycle === "Draft" && sizes.length > 1 ? (
                       <button

@@ -396,12 +396,19 @@ export function PickupQueueScreen({
   const activeClaim = claimFilterAvailable ? claimFilter : "All";
   const activeException = exceptionFilterAvailable ? exceptionFilter : "All";
   const query = orderQuery.trim().toLocaleLowerCase();
+  // WP-2423 M121: a number finds that order only ("3" never also shows 13 or 30); other text
+  // still finds any order whose number contains it.
+  const numberQuery = /^#?\d+$/u.test(query) ? query.replace(/^#/u, "") : null;
   const items = view.items.filter(
     (item) =>
       (!query ||
-        (item.publicOrderNumber ?? item.execution?.publicOrderReference ?? "")
-          .toLocaleLowerCase()
-          .includes(query)) &&
+        (numberQuery === null
+          ? (item.publicOrderNumber ?? item.execution?.publicOrderReference ?? "")
+              .toLocaleLowerCase()
+              .includes(query)
+          : (item.publicOrderNumber ?? item.execution?.publicOrderReference ?? "")
+              .toLocaleLowerCase()
+              .replace(/^#/u, "") === numberQuery)) &&
       (filter === "All" ||
         (filter === "Waiting" ? item.phase !== "Completed" : item.phase === filter)) &&
       (activeClaim === "All" || item.claimStatus === activeClaim) &&

@@ -520,3 +520,35 @@ it("v15 2026-11-03: an earlier day's handed-over order is not one to check and c
   // Handed over: no code left to check.
   expect(html).not.toContain("Pickup code");
 });
+
+it("WP-2423 M121: ?order=3 finds order 3 only, never 13 or 30", () => {
+  const fixture = pickupQueueFixture();
+  const base = fixture.items[0]!;
+  const view = parsePickupQueueView({
+    ...fixture,
+    items: ["3", "13", "30"].map((number, index) => ({
+      ...base,
+      fulfillmentReference: base.fulfillmentReference.slice(0, -1) + String(index + 1),
+      orderReference: base.orderReference.slice(0, -1) + String(index + 5),
+      publicOrderNumber: number,
+    })),
+  });
+  const host = globalThis as { location?: { search?: string } | undefined };
+  const previous = host.location;
+  host.location = { search: "?order=3" };
+  try {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <PickupQueueScreen view={view} />
+      </MemoryRouter>,
+    );
+    const shown = html
+      .split("<article ")
+      .slice(1)
+      .filter((card) => !/^[^>]*hidden/u.test(card))
+      .map((card) => /pickup-queue__number-value">([^<]*)</u.exec(card)?.[1]);
+    expect(shown).toEqual(["3"]);
+  } finally {
+    host.location = previous;
+  }
+});
