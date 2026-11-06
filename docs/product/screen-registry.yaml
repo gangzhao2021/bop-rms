@@ -7212,6 +7212,9 @@ screens:
       - WP-2116
     handoff_section: "88.10"
     route_intent: OPS-ORDER-ENTRY /operations/order-entry
+    # WP-2423 M08: the table-mode address /operations/order-entry?table=<ref> is served wherever the
+    # Tables read offers table rounds (canTakeTableRounds), whatever the counter-ordering switch says;
+    # only the walk-up address follows that switch.
     navigation_targets: []
     canonical_route: /operations/order-entry
     navigation_level_1: Operations
