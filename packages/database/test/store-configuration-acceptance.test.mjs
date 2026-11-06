@@ -24,6 +24,8 @@ import {
   createPostgresStoreBusinessDateConfigurationSource,
 } from "../../rms/store/src/index.ts";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { renderPilotAclSql } from "../../../tooling/environment/pilot-acl-render.mjs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
@@ -480,6 +482,28 @@ async function prove(context) {
     await admin.query("GRANT USAGE ON SCHEMA bop_tenant TO " + role);
     await admin.query("GRANT SELECT ON bop_tenant.brand,bop_tenant.store TO " + role);
     await admin.query("GRANT UPDATE(lifecycle) ON bop_tenant.brand,bop_tenant.store TO " + role);
+    // WP-2423 item 13 ②: the guest entry reads whether the platform paused this merchant's new
+    // guests. That privilege is taken from the pilot ACL as the pilot API holds it, not granted here.
+    const pilotAcl = JSON.parse(
+      await readFile(path.join(root, "docs/spec/pilot-acl-additions.json"), "utf8"),
+    );
+    await admin.query(
+      renderPilotAclSql(
+        [
+          {
+            ...pilotAcl,
+            entries: pilotAcl.entries.filter(
+              (entry) =>
+                entry.principal === "api" &&
+                entry.schema === "bop_tenant" &&
+                entry.object === "brand_guest_intake" &&
+                entry.privilege === "SELECT",
+            ),
+          },
+        ],
+        { api: role, worker: role + "_unused_worker" },
+      ),
+    );
     await seedStoreKitchenInEffect({
       admin,
       role,
