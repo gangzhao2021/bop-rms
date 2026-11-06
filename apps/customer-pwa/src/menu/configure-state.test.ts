@@ -562,6 +562,38 @@ describe("WP-2423: continuing past a timed-out table cart", () => {
     await g.controller.submit(id(3), draft);
     expect(g.controller.getState().status).toBe("expired");
   });
+  it("M99: adds again from the current cart with a new operation when someone else changed it first", async () => {
+    // Staff saved the party size (the tea charge) between this phone's read and its add.
+    const f = client({
+      current: cart(4),
+      create: [],
+      add: [() => new CartClientError("cart_version_conflict")],
+    });
+    await f.controller.submit(id(3), draft);
+    expect(f.calls.map((call) => call.name)).toEqual(["load", "add", "load", "add"]);
+    const adds = f.calls.filter((call) => call.name === "add");
+    expect(adds[0]?.key).not.toBe(adds[1]?.key);
+    expect(f.waits).toHaveLength(1);
+    expect(f.waits[0]).toBeGreaterThanOrEqual(150);
+    expect(f.waits[0]).toBeLessThanOrEqual(400);
+    expect(f.controller.getState().status).toBe("added");
+  });
+  it("M99: tries at most twice more, then says the cart changed", async () => {
+    const conflict = () => new CartClientError("cart_version_conflict");
+    const f = client({ current: cart(4), create: [], add: [conflict, conflict, conflict] });
+    await f.controller.submit(id(3), draft);
+    expect(f.calls.filter((call) => call.name === "add")).toHaveLength(3);
+    expect(f.controller.getState().status).toBe("conflict");
+    // An idempotency conflict (the same operation with other content) is never retried.
+    const g = client({
+      current: cart(4),
+      create: [],
+      add: [() => new CartClientError("cart_idempotency_conflict")],
+    });
+    await g.controller.submit(id(3), draft);
+    expect(g.calls.filter((call) => call.name === "add")).toHaveLength(1);
+    expect(g.controller.getState().status).toBe("conflict");
+  });
 });
 
 it("WP-2423: waits once for the table's last order, then says it is still being processed", async () => {

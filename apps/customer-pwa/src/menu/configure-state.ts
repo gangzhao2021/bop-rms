@@ -53,12 +53,16 @@ interface AddPlan {
   retried?: boolean;
   restarted?: boolean;
   earlierCartCleared?: boolean;
+  /** WP-2423 M99: adds tried again after someone at the table changed the cart first. */
+  conflictRetries?: number;
 }
 
 /** WP-2423: cart warning set once when the table's timed-out cart held unordered items. */
 export const EARLIER_CART_ITEMS_CLEARED = "EARLIER_CART_ITEMS_CLEARED";
 /** WP-2423: longest server-requested pause before the one automatic retry of cart creation. */
 const MAX_AUTOMATIC_RETRY_SECONDS = 10;
+/** WP-2423 M99: how many times an Add is tried again after a cart version conflict. */
+const MAX_CONFLICT_RETRIES = 2;
 
 export interface ConfigureController {
   getState(): ConfigureState;
@@ -267,6 +271,33 @@ export function createConfigureController({
           cart: null,
           outcomeUnknown: false,
           restarted: true,
+        });
+        return;
+      }
+      // WP-2423 M99: someone at the table (or staff saving the party size) changed the cart between
+      // this phone's read and its add. The refused add wrote nothing (the version is checked
+      // first), so add the same dish again to the current cart, with a new operation, after a short
+      // jittered pause. Never for an unknown outcome or an idempotency conflict.
+      if (
+        parsed.code === "cart_version_conflict" &&
+        plan.stage === "add" &&
+        !plan.outcomeUnknown &&
+        (plan.conflictRetries ?? 0) < MAX_CONFLICT_RETRIES
+      ) {
+        await wait(150 + Math.floor(Math.random() * 251));
+        if (!online) {
+          pending = null;
+          publish({ status: "offline", canRetry: false });
+          return;
+        }
+        await execute({
+          ...plan,
+          createOperationReference: keyFactory(),
+          addOperationReference: keyFactory(),
+          stage: "locate",
+          cart: null,
+          outcomeUnknown: false,
+          conflictRetries: (plan.conflictRetries ?? 0) + 1,
         });
         return;
       }
