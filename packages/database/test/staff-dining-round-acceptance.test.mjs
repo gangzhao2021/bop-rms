@@ -1567,16 +1567,36 @@ it("the real staff round command takes a round from table entry to the card mach
         await rows("SELECT count(*)::int AS n FROM rms_payment.card_machine_payment"),
         paymentsBefore,
       );
+      // WP-2423 (v15 fabf0261): the first round was sent live in the system, so it is paid as it
+      // is recorded. A back-dated paid-at for it (the counter and Orders never send one) is
+      // refused and nothing is written; only a round taken on paper has an earlier paid-at.
+      const [{ at: firstEnteredAt }] = await rows(
+        "SELECT min(created_at) AS at FROM rms_ordering.staff_dining_round_entry",
+      );
+      const earlier = new Date(
+        Math.max(Date.parse(opening) + 1000, firstEnteredAt.getTime() - 60_000),
+      ).toISOString();
+      await assert.rejects(pay({ takenAt: earlier }), { code: "CARD_MACHINE_INPUT_INVALID" });
+      assert.deepEqual(
+        await rows("SELECT count(*)::int AS n FROM rms_payment.card_machine_payment"),
+        paymentsBefore,
+      );
       const operationReference = reference();
       const paid = await pay({ operationReference });
       assert.deepEqual([paid.status, paid.amountMinor], ["Recorded", "1664"]);
       assert.equal((await pay({ operationReference })).status, "AlreadyRecorded");
 
+      // The paper round was paid on paper during the outage, before it was entered: recorded at
+      // that time, as recorded after the outage.
       const paidLater = await pay({
         orderBatchReference: second.orderBatchReference,
         expectedTotalMinor: second.totalMinor,
+        takenAt: earlier,
       });
-      assert.deepEqual([paidLater.status, paidLater.amountMinor], ["Recorded", "735"]);
+      assert.deepEqual(
+        [paidLater.status, paidLater.amountMinor, paidLater.recordingReason, paidLater.takenAt],
+        ["Recorded", "735", "RecordedAfterOutage", earlier],
+      );
 
       assert.deepEqual(
         await rows(

@@ -154,6 +154,7 @@ async function resolveStaffEntry(
     return {
       kind: "CounterPickup" as const,
       submissionReference: String(order.submissionReference),
+      recordedAfterOutage: entry.recordedAfterOutage,
       current,
     };
   }
@@ -190,6 +191,7 @@ async function resolveStaffEntry(
   return {
     kind: current?.additional === true ? ("DiningAdditional" as const) : ("DiningInitial" as const),
     submissionReference: String(batch.submissionReference),
+    recordedAfterOutage: round.entry.recordedAfterOutage,
     current,
   };
 }
@@ -334,6 +336,12 @@ export function createMerchantCardMachinePayment(options: {
               nextReference: options.nextReference,
             });
             if (staffEntry === null) return fail("CARD_MACHINE_NOT_FOUND");
+            // WP-2423 (v15 fabf0261): only an order or round taken on paper during an outage is
+            // paid at an earlier time. One sent live in the system is paid as it is recorded
+            // (the counter and Orders never send a time for it), so a back-dated time for it is
+            // refused before anything is written.
+            if (command.takenAt !== null && !staffEntry.recordedAfterOutage)
+              return fail("CARD_MACHINE_INPUT_INVALID");
             const order = { submissionReference: staffEntry.submissionReference };
             const current = staffEntry.current;
             if (current === null) return fail("CARD_MACHINE_NOT_PAYABLE");
