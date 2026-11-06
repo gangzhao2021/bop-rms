@@ -92,7 +92,7 @@ const storeNames = (names) => {
 const STORE_ATTENTION_PARTS = Object.freeze([
   ["checksFailing", "Some checks could not run"],
   ["background", "Background work needs a person"],
-  ["settlementNotCovered", "Closed business days with no day-end settlement"],
+  ["settlementNotRun", "Closed business days whose day-end settlement has not run"],
   ["setupEnding", "Ordering setup ending soon"],
   ["noSupportNumber", "No support number to call"],
 ]);
@@ -102,7 +102,7 @@ const CHECKS_NOT_RUNNING_STEP =
 const STORE_ATTENTION_STEPS = Object.freeze([
   ["checksFailing", CHECKS_NOT_RUNNING_STEP],
   ["background", "restart the background work named here"],
-  ["settlementNotCovered", "record the first closed business day of those with no settlement"],
+  ["settlementNotRun", "check the day-end settlement worker of those Stores"],
   [
     "setupEnding",
     "renew those named as ending soon, right after the installation itself (their owners hear only in the last day)",
@@ -465,8 +465,25 @@ export const ALERT_CATALOG = Object.freeze({
     action: () => "Open Settlement, review the listed business day and resolve each item.",
     runbook: "alert-settlement-exceptions",
   },
-  // DEC-PILOT-ALERTS-BACKUP correction 2: what only BOP can act on at another Store. Coverage is
-  // recorded by BOP once a Store's first business day has closed; never shown to the merchant.
+  // WP-2423 (settlement-coverage): a closed business day with no day-end settlement run 6 h after it
+  // ended. The merchant has nothing to change (payments are taken as usual) and BOP fixes the worker;
+  // the backlog then settles every missed day by itself. Shown to the merchant and to BOP.
+  "settlement.not_run": {
+    severity: "warning",
+    raiseAfterMs: 0,
+    title: () => "Day-end check with the payment provider has not run",
+    summary: (p) =>
+      p.count === 1
+        ? `1 closed business day has not been compared with the payment provider (closed ${formatDuration(p.oldestAgeMs)} ago).`
+        : `${p.count} closed business days have not been compared with the payment provider (the oldest closed ${formatDuration(p.oldestAgeMs)} ago).`,
+    action: () =>
+      "Nothing to change in the store: online payments are taken as usual. The check runs by itself once it is fixed; BOP support can see this.",
+    clearedTitle: () => "Day-end check with the payment provider has run again",
+    runbook: "alert-settlement-not-run",
+  },
+  // DEC-PILOT-ALERTS-BACKUP correction 2 (retired by WP-2423 settlement-coverage): no longer raised,
+  // every Store is covered from its own first business day. Kept so a state written before the
+  // change still renders its clearing.
   "settlement.not_covered": {
     severity: "warning",
     raiseAfterMs: 0,
@@ -649,7 +666,6 @@ const SOURCE_NAMES = Object.freeze({
   workflow: "the check of the store's order rules",
   reconciliation: "the check for payment differences",
   settlement: "the day-end settlement check",
-  closedDay: "the check for closed business days",
 });
 
 const PROBE_KEYS = Object.freeze({
@@ -785,12 +801,20 @@ export function evaluateBusinessConditions(
       },
       business.reconciliationDifferences.oldestAgeMs > 24 * HOUR ? "critical" : "warning",
     );
-  if (business.settlementExceptions === "unreadable") unreadable.push("settlement");
-  else if (pick(business.settlementExceptions))
-    raise("settlement.exceptions", {
-      count: business.settlementExceptions.count,
-      oldestAgeMs: business.settlementExceptions.oldestAgeMs,
-    });
+  if (business.settlementExceptions === "unreadable" || business.settlementNotRun === "unreadable")
+    unreadable.push("settlement");
+  else {
+    if (pick(business.settlementExceptions))
+      raise("settlement.exceptions", {
+        count: business.settlementExceptions.count,
+        oldestAgeMs: business.settlementExceptions.oldestAgeMs,
+      });
+    if (pick(business.settlementNotRun))
+      raise("settlement.not_run", {
+        count: business.settlementNotRun.count,
+        oldestAgeMs: business.settlementNotRun.oldestAgeMs,
+      });
+  }
 }
 
 function evaluateInstallationValidity(installation, now, { raise, unreadable, thresholds }) {
@@ -941,7 +965,7 @@ const HELD_WHILE_UNREADABLE = Object.freeze({
     "pickup.capacity_horizon",
     "reconciliation.differences",
     "settlement.exceptions",
-    "settlement.not_covered",
+    "settlement.not_run",
   ],
   receipts: ["receipts.template"],
   quoteTax: ["pricing.tax_configuration"],
@@ -949,8 +973,7 @@ const HELD_WHILE_UNREADABLE = Object.freeze({
   heldStock: ["orders.held_stock"],
   pickupCapacity: ["pickup.capacity_horizon"],
   reconciliation: ["reconciliation.differences"],
-  settlement: ["settlement.exceptions", "settlement.not_covered"],
-  closedDay: ["settlement.not_covered"],
+  settlement: ["settlement.exceptions", "settlement.not_run"],
 });
 
 /** The name a Store's own background work goes by on its board. */
@@ -1036,9 +1059,6 @@ export function evaluateStoreConditions(observations, thresholds = DEFAULT_THRES
     thresholds,
     configurationUnreadable: true,
   });
-  if (business?.settlementCovered === false && business.closedBusinessDay === true)
-    raise("settlement.not_covered");
-  else if (business?.closedBusinessDay === "unreadable") unreadable.push("closedDay");
   evaluateInstallationValidity(observations.installation, observations.now, {
     raise,
     unreadable,
@@ -1074,7 +1094,7 @@ const STORE_OUTBOUND_KEYS = new Set([
   "pickup.capacity_horizon",
   "reconciliation.differences",
   "settlement.exceptions",
-  "settlement.not_covered",
+  "settlement.not_run",
   "installation.validity",
   "monitor.source",
 ]);

@@ -1,6 +1,7 @@
 // WP-2423 Q13: the daily settlement status for the operations monitor, wired exactly as the
 // existing status command (pilot-daily-settlement-status-cli.mjs) over the owner run source.
 import { createPostgresPaymentReconciliationRunSource } from "../../packages/rms/payment/src/index.ts";
+import { resolveDailySettlementCoverage } from "./pilot-daily-settlement-coverage.mjs";
 import { readPilotDailySettlementStatus } from "./pilot-daily-settlement-status.mjs";
 import { matchesPilotEnvironment } from "./pilot-environment.mjs";
 import { createInternalSettlementDays } from "./pilot-settlement-window.mjs";
@@ -18,39 +19,12 @@ const activeInstallation =
     );
   };
 
-/** The read's own "no closed day yet": no published hours before today's business day began. */
-const NO_CLOSED_DAY = new Set([
-  "STORE_BUSINESS_DATE_UNAVAILABLE",
-  "SIMULATION_SETTLEMENT_WINDOW_UNAVAILABLE",
-]);
-/** Set by the transaction runner when a query of the transaction failed (packages/database). */
-const DATABASE_FAILURE = Symbol.for("bop.database.failure");
-
 /**
- * DEC-PILOT-ALERTS-BACKUP correction 2: whether this Store has a closed business day to settle (its
- * published hours were in force before today's business day began). Only the read's own answer
- * says no. A read that was refused or failed throws: otherwise a grant a migration left out would
- * hide for good that this Store's payments are not compared with the Provider.
+ * WP-2423 (settlement-coverage): every closed business day from where the Store's settlement
+ * starts (its own first business day, or a Pilot Store's issued record), each Recorded or Missing.
+ * No closed day yet is an empty list. A read that was refused or failed throws: a grant a migration
+ * left out must never read as "every day settled".
  */
-export async function readPilotHasClosedBusinessDay({ resources, installation }) {
-  const days = createInternalSettlementDays({
-    resources,
-    active: activeInstallation({ resources, installation }),
-  });
-  try {
-    await days.bounds();
-    return true;
-  } catch (error) {
-    if (
-      error instanceof Error &&
-      NO_CLOSED_DAY.has(error.message) &&
-      Object.getOwnPropertyDescriptor(error, DATABASE_FAILURE) === undefined
-    )
-      return false;
-    throw error;
-  }
-}
-
 export async function readPilotSettlementProblems({ resources, installation }) {
   const active = activeInstallation({ resources, installation });
   const read = createPostgresPaymentReconciliationRunSource({
@@ -58,8 +32,10 @@ export async function readPilotSettlementProblems({ resources, installation }) {
     authorize: active,
   });
   const days = createInternalSettlementDays({ resources, active });
+  const coverage = await resolveDailySettlementCoverage({ installation, days });
+  if (coverage.kind === "NotYet") return Object.freeze({ days: Object.freeze([]) });
   return readPilotDailySettlementStatus({
-    coverage: await installation.loadDailySettlementCoverage(),
+    coverage,
     scope: resources.scope,
     now: resources.now,
     readWindow: days.window,

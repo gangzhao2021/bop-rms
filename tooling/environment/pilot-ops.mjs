@@ -261,7 +261,7 @@ function createIo(runtimeDirectory, opsDirectory, config, log) {
  * The reads behind one Store's business signals. `store`: a Store below `stores/`, with what differs
  * on its own board (DEC-PILOT-ALERTS-BACKUP correction 2); the installation's own Store has none of it.
  */
-export async function composeBusinessDependencies({ directory, installation, store = false }) {
+export async function composeBusinessDependencies({ installation, store = false }) {
   // Loaded lazily: these modules need the workspace TypeScript loader and the database.
   const [
     reconciliation,
@@ -273,7 +273,6 @@ export async function composeBusinessDependencies({ directory, installation, sto
     pricing,
     workflow,
     storeModule,
-    environment,
   ] = await Promise.all([
     import("./pilot-reconciliation-exceptions.mjs"),
     import("./pilot-ops-settlement.mjs"),
@@ -284,10 +283,7 @@ export async function composeBusinessDependencies({ directory, installation, sto
     import("./pilot-pricing-policy.mjs"),
     import("./pilot-workflow-readiness.mjs"),
     import("../../packages/rms/store/src/index.ts"),
-    import("./pilot-environment.mjs"),
   ]);
-  // Once a closed business day exists it stays closed: this read need not run again.
-  let closedBusinessDay = false;
   return {
     createReconciliationExceptions: reconciliation.createInternalReconciliationExceptions,
     readSettlementStatus: status.readPilotSettlementProblems,
@@ -310,24 +306,6 @@ export async function composeBusinessDependencies({ directory, installation, sto
             current.transactions.run((tx) =>
               storeModule.hasOwnerPublishedStoreSetup(tx, current.scope),
             ),
-          // A real Store always has this file; without it its checks read as unreadable.
-          isSettlementCovered: () =>
-            environment.isPilotStore()
-              ? true
-              : fs.lstat(path.join(directory, "daily-settlement-coverage.json")).then(
-                  () => true,
-                  (error) => {
-                    if (error.code === "ENOENT") return false;
-                    throw error;
-                  },
-                ),
-          readClosedBusinessDay: async (current) => {
-            closedBusinessDay ||= await status.readPilotHasClosedBusinessDay({
-              resources: current,
-              installation,
-            });
-            return closedBusinessDay;
-          },
           // Asked only when pickup times run short, so an ordinary minute costs nothing more.
           readPickupCapacityHorizon: async (current) => {
             const horizon = await pickupCapacity.readInternalPickupCapacityHorizon(current);

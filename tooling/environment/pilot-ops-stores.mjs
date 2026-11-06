@@ -162,8 +162,8 @@ export function createStoreMonitors({
         // Which Workflow refused and by which rule (fixed words): for BOP's log only.
         ...(typeof item.params?.refused === "string" ? { refused: item.params.refused } : {}),
       });
-      if (item.kind === "raised" && item.key === "settlement.not_covered")
-        await log({ event: "store_settlement_not_covered", store: name });
+      if (item.kind === "raised" && item.key === "settlement.not_run")
+        await log({ event: "store_settlement_not_run", store: name });
     }
     const unsent = [
       ...(previous.unsent ?? []).filter(
@@ -252,7 +252,7 @@ export function createStoreMonitors({
         unchecked: [],
         checksFailing: [],
         background: [],
-        settlementNotCovered: [],
+        settlementNotRun: [],
         setupEnding: [],
         noSupportNumber: [],
       };
@@ -262,7 +262,7 @@ export function createStoreMonitors({
         if (monitor.raised.has("monitor.source")) summary.checksFailing.push(name);
         if (monitor.raised.has("service.attention") || monitor.raised.has("service.chores"))
           summary.background.push(name);
-        if (monitor.raised.has("settlement.not_covered")) summary.settlementNotCovered.push(name);
+        if (monitor.raised.has("settlement.not_run")) summary.settlementNotRun.push(name);
         if (monitor.raised.has("installation.validity")) summary.setupEnding.push(name);
         // Their screens say "Call BOP support": BOP finds out before a merchant does.
         if (support === null) summary.noSupportNumber.push(name);

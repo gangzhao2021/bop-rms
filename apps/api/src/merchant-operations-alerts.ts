@@ -29,6 +29,7 @@ export const operationsAlertKeys = Object.freeze([
   "pickup.capacity_horizon",
   "reconciliation.differences",
   "settlement.exceptions",
+  "settlement.not_run",
   "backup.failed",
   "backup.stale",
   "backup.restore_check",
@@ -70,6 +71,9 @@ export const merchantOperationsAlertKeys: ReadonlySet<OperationsAlertKey> = new 
   "pickup.capacity_horizon",
   "reconciliation.differences",
   "settlement.exceptions",
+  // WP-2423 (settlement-coverage): a closed day not compared with the payment provider yet; the
+  // merchant must not read "all good" while it is so.
+  "settlement.not_run",
   "ordering.ending",
 ]);
 
