@@ -78,6 +78,9 @@ export function parseTableClosePlan(value: unknown, expected: { order: string; s
   if (orderVersion < 1) return fail();
   const seen = new Set<string>();
   const rounds = raw.rounds.map((value: unknown) => {
+    // DEC-KITCHEN-ONE-TAP: absent from an older server (no "may have started" note then).
+    const withKitchenReceived =
+      value !== null && typeof value === "object" && Object.hasOwn(value, "kitchenReceivedAt");
     const round = exact(value, [
       "orderBatchReference",
       "sequence",
@@ -88,7 +91,7 @@ export function parseTableClosePlan(value: unknown, expected: { order: string; s
       "cancellableItemReferences",
       "refund",
       "cancelsAt",
-      "kitchenReceivedAt",
+      ...(withKitchenReceived ? ["kitchenReceivedAt"] : []),
     ]);
     const batch = reference(round.orderBatchReference);
     if (seen.has(batch)) return fail();
@@ -124,7 +127,10 @@ export function parseTableClosePlan(value: unknown, expected: { order: string; s
       cancellableItemReferences: Object.freeze(cancellable),
       refund,
       cancelsAt: round.cancelsAt === null ? null : instant(round.cancelsAt),
-      kitchenReceivedAt: round.kitchenReceivedAt === null ? null : instant(round.kitchenReceivedAt),
+      kitchenReceivedAt:
+        !withKitchenReceived || round.kitchenReceivedAt === null
+          ? null
+          : instant(round.kitchenReceivedAt),
     });
   });
   const totals = exact(raw.totals, ["onlineMinor", "cardMachineMinor"]);

@@ -1,5 +1,6 @@
 import { expect, it, vi } from "vitest";
-import { guestsLeftRoundText } from "./TableGuestsLeft.js";
+import { guestsLeftRoundText, kitchenMayHaveStartedRound } from "./TableGuestsLeft.js";
+import { kitchenMayHaveStartedText } from "./kitchen-cancel-warning.js";
 import {
   createTableClosePlanClient,
   parseTableClosePlan,
@@ -251,4 +252,47 @@ it("v15 2026-10-28 (b): a table that pays at the end says to serve its dishes, n
       now,
     ),
   ).toContain("paid with the table, 2 items not served yet");
+});
+
+it("v15 2026-11-06: a reply from an older server without kitchenReceivedAt still reads, strictly", () => {
+  const expected = { order: id(3), session: id(2) };
+  const [first, second] = wire.rounds as unknown as [Record<string, unknown>, unknown];
+  const older = Object.fromEntries(
+    Object.entries(first).filter(([key]) => key !== "kitchenReceivedAt"),
+  );
+  const plan = parseTableClosePlan({ ...wire, rounds: [older, second] }, expected);
+  expect(plan.rounds.map((r) => r.kitchenReceivedAt)).toEqual([null, null]);
+  expect(
+    parseTableClosePlan(
+      { ...wire, rounds: [{ ...first, kitchenReceivedAt: "2026-10-15T18:55:00.000Z" }] },
+      expected,
+    ).rounds.map((r) => r.kitchenReceivedAt),
+  ).toEqual(["2026-10-15T18:55:00.000Z"]);
+  expect(() =>
+    parseTableClosePlan({ ...wire, rounds: [{ ...first, kitchenReceivedAt: "bad" }] }, expected),
+  ).toThrow();
+  expect(() =>
+    parseTableClosePlan({ ...wire, rounds: [{ ...older, unexpected: 1 }] }, expected),
+  ).toThrow();
+});
+
+it("v15 2026-11-06: the kitchen note names the round the kitchen has had a while, not the first one", () => {
+  const now = Date.parse("2026-10-15T19:00:00.000Z");
+  const fresh = round({
+    orderBatchReference: id(40),
+    state: "NotStarted",
+    kitchenReceivedAt: "2026-10-15T18:59:00.000Z",
+  });
+  const waiting = round({
+    orderBatchReference: id(41),
+    state: "NotStarted",
+    kitchenReceivedAt: "2026-10-15T18:55:00.000Z",
+  });
+  const found = kitchenMayHaveStartedRound([fresh, waiting], now);
+  expect(found?.orderBatchReference).toBe(id(41));
+  expect(kitchenMayHaveStartedText(found?.kitchenReceivedAt, now)).toContain("5 min ago");
+  expect(kitchenMayHaveStartedRound([fresh, round({ state: "NotStarted" })], now)).toBeUndefined();
+  expect(
+    kitchenMayHaveStartedRound([round({ ...waiting, state: "BeingMade", refund: null })], now),
+  ).toBeUndefined();
 });

@@ -22,10 +22,13 @@ export function kitchenMayHaveStartedText(
 
 export function KitchenMayHaveStartedNote({
   receivedAt,
+  now,
 }: {
   readonly receivedAt: string | null | undefined;
+  /** The clock the caller already decided with, so the note and that decision agree. */
+  readonly now?: number | undefined;
 }) {
-  const text = kitchenMayHaveStartedText(receivedAt, Date.now());
+  const text = kitchenMayHaveStartedText(receivedAt, now ?? Date.now());
   return text === null ? null : (
     <p className="kitchen-may-have-started" role="note">
       {text}

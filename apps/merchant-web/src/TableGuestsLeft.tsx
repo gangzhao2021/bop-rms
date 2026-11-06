@@ -168,6 +168,21 @@ type Run = null | "Running" | "Unknown" | "Refused" | "Denied" | "FullSignInRequ
  * and the refunds before confirming. Each round keeps one operation, so a lost answer is retried
  * without doing anything twice; the plan is read again after each step.
  */
+/**
+ * DEC-KITCHEN-ONE-TAP: the not-started round the kitchen has had long enough that it may already be
+ * making it, so the note names that round's wait (not the first round's, which may be fresh).
+ */
+export function kitchenMayHaveStartedRound(
+  rounds: readonly TableCloseRound[],
+  now: number,
+): TableCloseRound | undefined {
+  return rounds.find(
+    (round) =>
+      (round.state === "NotStarted" || round.state === "PartlyStarted") &&
+      kitchenMayHaveStartedText(round.kitchenReceivedAt, now) !== null,
+  );
+}
+
 export function TableGuestsLeft({
   orderReference,
   diningSessionReference,
@@ -289,6 +304,7 @@ export function TableGuestsLeft({
     );
   const now = Date.now();
   const actionable = plan.rounds.filter(resolvesOnConfirm);
+  const kitchenHasIt = kitchenMayHaveStartedRound(actionable, now);
   const partly = plan.rounds
     .filter((round) => round.state === "PartlyStarted")
     .map((round) => previews.get(round.orderBatchReference) ?? null);
@@ -358,18 +374,8 @@ export function TableGuestsLeft({
           </li>
         ))}
       </ul>
-      {actionable.some(
-        (round) =>
-          kitchenMayHaveStartedText(round.kitchenReceivedAt, Date.now()) !== null &&
-          (round.state === "NotStarted" || round.state === "PartlyStarted"),
-      ) ? (
-        <KitchenMayHaveStartedNote
-          receivedAt={
-            actionable.find(
-              (round) => round.state === "NotStarted" || round.state === "PartlyStarted",
-            )?.kitchenReceivedAt
-          }
-        />
+      {kitchenHasIt ? (
+        <KitchenMayHaveStartedNote receivedAt={kitchenHasIt.kitchenReceivedAt} now={now} />
       ) : null}
       {actionable.length > 0 ? (
         <>
