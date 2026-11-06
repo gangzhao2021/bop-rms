@@ -1,4 +1,4 @@
-import { createPostgresDiningCheckoutCommitmentStore } from "@rms/dining";
+import { createPostgresDiningCheckoutCommitmentStore, DiningCheckoutStoreError } from "@rms/dining";
 import { createPostgresAsapCapacityStore } from "@rms/fulfillment";
 import { parseOrderingReference } from "@rms/ordering";
 import {
@@ -71,9 +71,18 @@ export function createCustomerCapacityPaymentClaimAdmission(
             ([key, expectedValue]) => Reflect.get(current, key) === expectedValue,
           );
         if (owner === "Dining") {
+          // WP-2423 (table-move-payment review, 2026-11-06): Dining reads where the party sits at
+          // the clock's current reading, never before the request's time, so a Move recorded after
+          // the request was made is followed in this gate instead of refusing every retry.
+          let last: string = observedAt;
+          const diningNow = () => {
+            const wall = new Date().toISOString();
+            if (wall > last) last = wall;
+            return last;
+          };
           return (
             (await createPostgresDiningCheckoutCommitmentStore(bound, scope, {
-              now: () => observedAt,
+              now: diningNow,
             }).withPaymentPending(p.capacityAllocationReference, async (_transaction, current) => {
               if (!matches(current)) return false;
               return admitInventory();
@@ -103,7 +112,16 @@ export function createCustomerCapacityPaymentClaimAdmission(
             return admitInventory();
           })) ?? false
         );
-      } catch {
+      } catch (error) {
+        // A busy or failed Dining read (a Move in progress, a lock or connection failure) is
+        // retryable: Payment answers it as a dependency failure the guest's phone retries, never
+        // as "this payment is not yours". Everything else is a refusal, as before.
+        if (
+          error instanceof DiningCheckoutStoreError &&
+          (error.code === "DINING_CHECKOUT_STORE_CONFLICT" ||
+            error.code === "DINING_CHECKOUT_STORE_UNAVAILABLE")
+        )
+          throw error;
         return false;
       }
     },
