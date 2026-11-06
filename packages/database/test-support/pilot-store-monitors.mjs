@@ -10,6 +10,8 @@ import {
 import { readInternalQuoteTaxReadiness } from "../../../tooling/environment/pilot-configured-quote.mjs";
 import { createPilotAlertBoardReader } from "../../../tooling/environment/pilot-ops-files.mjs";
 import { createInternalSettlementDays } from "../../../tooling/environment/pilot-settlement-window.mjs";
+import { coverageWindowOf } from "../../../tooling/environment/pilot-daily-settlement-coverage.mjs";
+import { readPilotSettlementProblems } from "../../../tooling/environment/pilot-ops-settlement.mjs";
 import { createStoreMonitors } from "../../../tooling/environment/pilot-ops-stores.mjs";
 import { composeBusinessDependencies } from "../../../tooling/environment/pilot-ops.mjs";
 import { withTransactionConflictWait } from "../../../tooling/environment/pilot-transaction-conflict-wait.mjs";
@@ -56,7 +58,8 @@ export async function exercisePilotStoreMonitors(context) {
     );
     await work();
   };
-  // Three days old: the second merchant has closed business days and no settlement coverage.
+  // Three days old: the second merchant has closed business days, no coverage file and no
+  // settlement run (WP-2423 settlement-coverage: covered from its own first day all the same).
   await asOwner(second, () =>
     seedJourneyStorePublication({
       client: admin,
@@ -180,18 +183,21 @@ export async function exercisePilotStoreMonitors(context) {
   const reported = [];
   const loaded = [];
   const coverage = new Map();
+  const installationOf = (of) => ({
+    database: "isolated",
+    loadProfile: async () => ({
+      environment: "InternalTest",
+      database: "isolated",
+      binding: resourcesOf(of).publicProfile.binding,
+    }),
+    loadRecordedDailySettlementCoverage: async () => coverage.get(of.name) ?? null,
+  });
   const loadStore = async (storeDirectory) => {
     loaded.push(path.relative(directory, storeDirectory));
     const of = [...stores, unopened].find((each) => each.name === path.basename(storeDirectory));
     assert.ok(of, "a Store's reads load from that Store's own directory");
     const installation = {
-      database: "isolated",
-      loadProfile: async () => ({
-        environment: "InternalTest",
-        database: "isolated",
-        binding: resourcesOf(of).publicProfile.binding,
-      }),
-      loadDailySettlementCoverage: async () => coverage.get(of.name),
+      ...installationOf(of),
       // No Store here has a Workflow binding file in its directory: the real installation
       // (pilot-installation.mjs) refuses to load one that is not there.
       loadWorkflow: async () => {
@@ -257,6 +263,14 @@ export async function exercisePilotStoreMonitors(context) {
     assert.match(bySummary(secondBoard, "payment.updates"), /^1 update /u);
     assert.match(bySummary(secondBoard, "reconciliation.differences"), /^1 difference /u);
     assert.equal(bySummary(secondBoard, "settlement.exceptions"), undefined);
+    // Its closed days have no day-end run: told to the merchant and BOP, never "not set up".
+    assert.match(
+      bySummary(secondBoard, "settlement.not_run"),
+      /closed business days? (?:has|have) not been compared with the payment provider/u,
+    );
+    assert.equal(bySummary(secondBoard, "settlement.not_covered"), undefined);
+    // The first merchant opened today: no closed day, nothing to say.
+    assert.equal(bySummary(firstBoard, "settlement.not_run"), undefined);
     // A merchant with no published configuration at all says nothing false about receipts or
     // pricing; only what could not be read is held back from "all good" later.
     const neverBoard = await boardOf("never");
@@ -281,7 +295,7 @@ export async function exercisePilotStoreMonitors(context) {
       });
       return readBusinessSignals({
         resources: resourcesOf(of),
-        installation: {},
+        installation: installationOf(of),
         now: Date.now(),
         dependencies: {
           ...dependencies,
@@ -296,41 +310,29 @@ export async function exercisePilotStoreMonitors(context) {
     const signals = await signalsOf(first);
     for (const field of ["receiptTemplate", "quoteTax", "heldStock", "pickupCapacity"])
       assert.notEqual(signals[field], "unreadable", field);
-    assert.equal(signals.settlementCovered, false);
-    assert.equal(signals.settlementExceptions, null);
+    assert.deepEqual(signals.settlementExceptions, { count: 0, oldestAgeMs: 0 });
+    assert.deepEqual(signals.settlementNotRun, { count: 0, oldestAgeMs: 0 });
     // Its published tax configuration is not the file policy's: a real answer, from a real read.
     assert.deepEqual(signals.quoteTax, { ready: false, reason: "TaxConfigurationMismatch" });
 
-    // The closed-day read under the role: the three-day-old Store has one, the one with no
-    // configuration has none.
-    const closedDay = async (of) =>
-      (
-        await composeBusinessDependencies({
-          directory: path.join(directory, "stores", of.name),
-          installation: {
-            database: "isolated",
-            loadProfile: async () => ({
-              environment: "InternalTest",
-              database: "isolated",
-              binding: resourcesOf(of).publicProfile.binding,
-            }),
-          },
-          store: true,
-        })
-      ).readClosedBusinessDay(resourcesOf(of));
-    assert.equal(await closedDay(second), true);
-    assert.equal(await closedDay(never), false);
+    // The settlement read under the role: the three-day-old Store is covered from its own first
+    // day, with every closed day listed as not run; the one with no configuration has no day.
+    const settlementOf = (of) =>
+      readPilotSettlementProblems({ resources: resourcesOf(of), installation: installationOf(of) });
+    const secondDays = (await settlementOf(second)).days;
+    assert.ok(secondDays.length >= 2, "the second merchant's closed days are listed");
+    assert.ok(secondDays.every((day) => day.state === "Missing"));
+    assert.deepEqual((await settlementOf(never)).days, []);
     // Refused, as by a grant a migration left out, it is no "none yet": it fails with the code, so
-    // the monitor says the check could not run and keeps telling BOP there is no settlement.
+    // the monitor says the check could not run and keeps what it said.
     await admin.query(`REVOKE SELECT ON rms_store.store_configuration_version FROM ${api}`);
-    const refusedDay = await closedDay(second).then(
+    const refusedDay = await settlementOf(second).then(
       () => null,
       (error) => error,
     );
     await admin.query(`GRANT SELECT ON rms_store.store_configuration_version TO ${api}`);
-    assert.notEqual(refusedDay, null, "a refused closed-day read is not 'no closed day'");
+    assert.notEqual(refusedDay, null, "a refused settlement read is not 'no closed day'");
     assert.equal(sqlStateOf(refusedDay), "42501");
-    assert.equal(await closedDay(second), true);
 
     // What the merchant's Home reads: its own board through the real reader and projection.
     const home = projectOperationsAlertBoard(
@@ -342,7 +344,9 @@ export async function exercisePilotStoreMonitors(context) {
     assert.equal(home.monitor, "Reporting");
     assert.equal(home.lastSuccessfulBackupAt, null);
     assert.ok(home.active.some((item) => item.key === "payment.updates"));
-    assert.ok(home.active.every((item) => !item.key.startsWith("settlement.not")));
+    // The merchant reads that its closed days are not compared yet, never "all good".
+    assert.ok(home.active.some((item) => item.key === "settlement.not_run"));
+    assert.ok(home.active.every((item) => item.key !== "settlement.not_covered"));
 
     // A stuck update resolved at one merchant leaves that board only. Another read a minute later.
     await asOwner(second, async () => {
@@ -494,17 +498,23 @@ export async function exercisePilotStoreMonitors(context) {
     // payment" on the merchant's Home while the rest of the read cannot run. The second merchant's
     // first closed day is recorded here, so its settlement is really scanned under the grants.
     const keysOf = (board) => board.active.map((item) => item.key).sort();
+    // An explicit record of where its settlement starts: its own first business day (never the
+    // latest closed day), equal to what is derived, so the scan is the same.
     const closedDays = createInternalSettlementDays({
       resources: resourcesOf(second),
       active: async () => true,
     });
-    coverage.set(second.name, { firstWindow: await closedDays.window() });
-    await writeFile(
-      path.join(directory, "stores", "second", "daily-settlement-coverage.json"),
-      JSON.stringify({ schemaVersion: 1 }),
-    );
+    coverage.set(second.name, {
+      scope: second,
+      firstWindow: coverageWindowOf(await closedDays.first()),
+    });
+    // The published settings refused at minute 13 stopped this scan too (its days are read from
+    // them); the next scan, 5 minutes on, runs under the grants and reports nothing.
+    const settlementFailuresBefore = failedChecks("second", "settlement").length;
     await run(T0 + 14 * 60_000);
-    assert.equal(failedChecks("second", "settlement").length, 0);
+    await run(T0 + 19 * 60_000);
+    assert.equal(failedChecks("second", "settlement").length, settlementFailuresBefore);
+    assert.ok(keysOf(await boardOf("second")).includes("settlement.not_run"));
     await asOwner(second, async () => {
       await deadLetter(second, second.storeReference);
     });
@@ -517,8 +527,8 @@ export async function exercisePilotStoreMonitors(context) {
     assert.ok(keysOf(noScan).includes("payment.updates"), "stuck updates stay in view");
     assert.ok(keysOf(noScan).includes("reconciliation.differences"));
     assert.match(bySummary(noScan, "monitor.source"), /the day-end settlement check/u);
-    assert.equal(failedChecks("second", "settlement").length, 1);
-    const scan = reported.find(
+    assert.equal(failedChecks("second", "settlement").length, settlementFailuresBefore + 1);
+    const scan = reported.findLast(
       (item) => item.step === "settlement" && item.store === "stores/second",
     );
     assert.equal(sqlStateOf(scan.error), "42501");
