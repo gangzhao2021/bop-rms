@@ -527,6 +527,7 @@ export function installMerchantOrderRoutes(
             CARD_MACHINE_PAYMENT_WINDOW_CLOSED: [409, "payment_window_closed"],
             CARD_MACHINE_ALREADY_PAID: [409, "already_paid"],
             CARD_MACHINE_IDEMPOTENCY_CONFLICT: [409, "card_machine_conflict"],
+            CARD_MACHINE_TAKEN_BEFORE_RECORDS: [409, "taken_before_records"],
             CARD_MACHINE_UNAVAILABLE: [503, "card_machine_payment_unavailable"],
           } as const
         )[error.code];

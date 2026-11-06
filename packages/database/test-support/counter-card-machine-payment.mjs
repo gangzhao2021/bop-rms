@@ -65,6 +65,13 @@ export async function exerciseCounterCardMachinePayment({
   );
   // WP-2423 Q7 slice 2: the staff record of a dine-in round (pilot-acl-additions, api SELECT).
   await admin.query("GRANT SELECT ON rms_ordering.staff_dining_round_entry TO " + role);
+  // WP-2423 M160: a back-entered paid-at time is checked against when the Store's records begin
+  // (pilot api SELECT grants).
+  await admin.query("GRANT USAGE ON SCHEMA rms_store TO " + role);
+  await admin.query(
+    "GRANT SELECT ON rms_store.store_configuration_version,rms_store.store_configuration_publication_content TO " +
+      role,
+  );
   // DEC-DINE-IN-PAY-LATER: the order queue reads which rounds were sent unpaid (pilot ACL: api
   // SELECT on order_pay_later_confirmation, docs/spec/pilot-acl-additions.json).
   await admin.query("GRANT SELECT ON rms_ordering.order_pay_later_confirmation TO " + role);

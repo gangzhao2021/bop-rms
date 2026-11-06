@@ -107,6 +107,7 @@ import { seedSubmissionInventoryRecipe } from "../test-support/submission-invent
 import { seedSubmissionInventoryWorkflow } from "../test-support/submission-inventory-workflow.mjs";
 import { seedMerchantAcceptanceSession } from "../test-support/merchant-acceptance-session.mjs";
 import { prepareRealStaffRoundStore } from "../test-support/real-staff-round-store.mjs";
+import { readStoreFirstConfigurationGoverningFrom } from "../../rms/store/src/index.ts";
 import { createPilotApiRole } from "../test-support/sole-operator-brand-gate.mjs";
 import {
   journeyRound,
@@ -1544,6 +1545,28 @@ it("the real staff round command takes a round from table entry to the card mach
         code: "CARD_MACHINE_AMOUNT_CHANGED",
         totalMinor: first.totalMinor,
       });
+      // WP-2423 M160: a paid-at time entered after an outage from before the Store started using
+      // the system would be in no report or settlement (an outage is always after that): it is
+      // refused and nothing is written; a time after it is taken (below, at the counter now).
+      const [owner] = await rows(
+        "SELECT brand_id::text AS brand,store_id::text AS store FROM rms_ordering.order_header WHERE order_id=$1",
+        [first.orderReference],
+      );
+      const opening = await readStoreFirstConfigurationGoverningFrom(
+        { query: (sql, values) => admin.query(sql, [...values]) },
+        { brandReference: owner.brand, storeReference: owner.store },
+      );
+      assert.ok(opening !== null && Date.now() - Date.parse(opening) < 71 * 3_600_000);
+      const paymentsBefore = await rows(
+        "SELECT count(*)::int AS n FROM rms_payment.card_machine_payment",
+      );
+      await assert.rejects(pay({ takenAt: new Date(Date.parse(opening) - 1).toISOString() }), {
+        code: "CARD_MACHINE_TAKEN_BEFORE_RECORDS",
+      });
+      assert.deepEqual(
+        await rows("SELECT count(*)::int AS n FROM rms_payment.card_machine_payment"),
+        paymentsBefore,
+      );
       const operationReference = reference();
       const paid = await pay({ operationReference });
       assert.deepEqual([paid.status, paid.amountMinor], ["Recorded", "1664"]);

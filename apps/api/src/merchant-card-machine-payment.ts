@@ -19,6 +19,7 @@ import {
   type CardMachinePaymentRecord,
   type PaymentIntentClaimAdmission,
 } from "@rms/payment";
+import { readStoreFirstConfigurationGoverningFrom } from "@rms/store";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import type { MerchantBffService } from "./merchant-bff.js";
@@ -37,6 +38,11 @@ export const cardMachinePaymentCommandErrorCodes = [
   "CARD_MACHINE_PAYMENT_WINDOW_CLOSED",
   "CARD_MACHINE_ALREADY_PAID",
   "CARD_MACHINE_IDEMPOTENCY_CONFLICT",
+  /**
+   * WP-2423 M160: a paid-at time entered after an outage that is before the Store started using
+   * the system (its first configuration governed). Nothing was recorded; the slip time is checked.
+   */
+  "CARD_MACHINE_TAKEN_BEFORE_RECORDS",
   "CARD_MACHINE_UNAVAILABLE",
 ] as const;
 export type CardMachinePaymentCommandErrorCode =
@@ -303,6 +309,16 @@ export function createMerchantCardMachinePayment(options: {
               Date.parse(recordedAt) - Date.parse(takenAt) > cardMachineBackEntryWindowMs
             )
               return fail("CARD_MACHINE_INPUT_INVALID");
+            // WP-2423 M160: the Store's reports and settlement begin when it started using the
+            // system; a payment entered with an earlier time would be in no day. An outage is
+            // always after that, so such a time is a mistake: refuse it before anything is written.
+            if (command.takenAt !== null) {
+              const opening = await readStoreFirstConfigurationGoverningFrom(tx, scope);
+              // A Store with no published configuration has no business day yet; its readers
+              // refuse until one exists, so there is nothing to compare with here.
+              if (opening !== null && takenAt < opening)
+                return fail("CARD_MACHINE_TAKEN_BEFORE_RECORDS");
+            }
             if (
               (await payments.loadByBatch(
                 tx,

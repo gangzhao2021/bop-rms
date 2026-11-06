@@ -36,6 +36,7 @@ import {
   type DiningTableSettlementRecord,
   type DiningTableSplitPlanRecord,
 } from "@rms/payment";
+import { readStoreFirstConfigurationGoverningFrom } from "@rms/store";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import { runMerchantSnapshotRead } from "./merchant-snapshot-read.js";
@@ -78,6 +79,11 @@ export const diningTableCheckoutErrorCodes = [
   "TABLE_CHECKOUT_TIPS_OFF",
   /** The tip percentage is not one the Store offers now: read the bill again. */
   "TABLE_CHECKOUT_TIP_CHOICES_CHANGED",
+  /**
+   * WP-2423 M160: a paid-at time entered after an outage that is before the Store started using
+   * the system (its first configuration governed). Nothing was recorded; the slip time is checked.
+   */
+  "TABLE_CHECKOUT_TAKEN_BEFORE_RECORDS",
   "TABLE_CHECKOUT_UNAVAILABLE",
 ] as const;
 export type DiningTableCheckoutErrorCode = (typeof diningTableCheckoutErrorCodes)[number];
@@ -1104,6 +1110,16 @@ export function createMerchantDiningTableSettle(options: {
                 displayLocales: staffNameLocales(options.locale ?? "en-CA"),
               });
               return Object.freeze({ status: "AlreadyRecorded" as const, bill: publicBill(bill) });
+            }
+            // WP-2423 M160: the Store's reports and settlement begin when it started using the
+            // system; a table paid at an earlier time (entered after an outage) would be in no
+            // day. An outage is always after that, so such a time is a mistake: refuse it.
+            if (command.takenAt !== null) {
+              const opening = await readStoreFirstConfigurationGoverningFrom(tx, scope);
+              // A Store with no published configuration has no business day yet; its readers
+              // refuse until one exists, so there is nothing to compare with here.
+              if (opening !== null && command.takenAt < opening)
+                return fail("TABLE_CHECKOUT_TAKEN_BEFORE_RECORDS");
             }
             const bill = await readDiningTableBill(tx, scope, {
               diningSessionReference: command.diningSessionReference,

@@ -129,6 +129,7 @@ import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 import { seedAcceptanceOrderHistory } from "../test-support/acceptance-order-history.mjs";
 import { seedAdditionalDiningGuest } from "../test-support/additional-dining-guest.mjs";
 import { seedSubmissionCart } from "../test-support/dining-order-submission-seed.mjs";
+import { readStoreFirstConfigurationGoverningFrom } from "../../rms/store/src/index.ts";
 import { seedSubmissionInventoryStock } from "../test-support/submission-inventory-stock.mjs";
 import { seedSubmissionInventoryRecipe } from "../test-support/submission-inventory-recipe.mjs";
 import { seedSubmissionInventoryWorkflow } from "../test-support/submission-inventory-workflow.mjs";
@@ -795,24 +796,51 @@ async function realTeaRounds() {
         ).phase,
         "Closing",
       );
-      const paid = await createMerchantDiningTableSettle({
+      const settle = createMerchantDiningTableSettle({
         persistence: store.persistenceOf(server),
         authentication: server.authentication,
         environment: "Test",
         nextReference: fresh,
-      })({
-        ...as(server),
-        command: {
-          operationReference: fresh(),
-          diningSessionReference: sessionReference,
-          method: "Cash",
-          tip: { kind: "None" },
-          tenderedMinor: "100000",
-          slipReference: null,
-          recordedAfterOutage: false,
-          takenAt: null,
-        },
       });
+      const cash = (overrides = {}) =>
+        settle({
+          ...as(server),
+          command: {
+            operationReference: fresh(),
+            diningSessionReference: sessionReference,
+            method: "Cash",
+            tip: { kind: "None" },
+            tenderedMinor: "100000",
+            slipReference: null,
+            recordedAfterOutage: false,
+            takenAt: null,
+            ...overrides,
+          },
+        });
+      // WP-2423 M160: a table paid "after an outage" at a time before the Store started using
+      // the system would be in no report or settlement (an outage is always after that): it is
+      // refused and nothing is written.
+      const [owner] = await rows(
+        "SELECT brand_id::text AS brand,store_id::text AS store FROM rms_ordering.order_header WHERE order_id=$1",
+        [orderReference],
+      );
+      const opening = await readStoreFirstConfigurationGoverningFrom(
+        { query: (sql, values) => admin.query(sql, [...values]) },
+        { brandReference: owner.brand, storeReference: owner.store },
+      );
+      assert.ok(opening !== null);
+      const tableSettlements = () =>
+        rows("SELECT count(*)::int AS n FROM rms_payment.dining_table_settlement");
+      const settledBefore = await tableSettlements();
+      await assert.rejects(
+        cash({
+          recordedAfterOutage: true,
+          takenAt: new Date(Date.parse(opening) - 1).toISOString(),
+        }),
+        { code: "TABLE_CHECKOUT_TAKEN_BEFORE_RECORDS" },
+      );
+      assert.deepEqual(await tableSettlements(), settledBefore);
+      const paid = await cash();
       assert.equal(paid.bill.settlement.roundsMinor, before.owed.totalMinor);
       assert.equal(paid.bill.owed.totalMinor, "0");
       // A paid table's tea no longer moves: a change is a refund or adjustment.
