@@ -236,6 +236,8 @@ it("persists Dining commitments with atomic audit, original clocks, scope and cu
         [id(8), id(1), id(2), id(3), id(4), 1, "Active", JSON.stringify(context.participant)],
       );
       await admin.query("GRANT SELECT ON rms_dining.dining_identity_admission TO " + role);
+      // WP-2423 table-move-payment: the guest binding follows a recorded Move (pilot API role grant).
+      await admin.query("GRANT SELECT ON rms_dining.dining_session_move_operation TO " + role);
       const admission = parseDiningIdentityAdmission({
         admissionReference: id(50),
         diningSessionReference: id(4),

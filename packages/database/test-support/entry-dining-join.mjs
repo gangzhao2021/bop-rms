@@ -102,6 +102,8 @@ export async function exerciseEntryDiningJoin({
     "GRANT SELECT,INSERT,UPDATE ON rms_dining.dining_session,rms_dining.dining_join_capability,rms_dining.dining_participant,rms_dining.dining_identity_admission TO " +
       role,
   );
+  // WP-2423 table-move-payment: the guest binding follows a recorded Move (pilot API role grant).
+  await admin.query("GRANT SELECT ON rms_dining.dining_session_move_operation TO " + role);
   await admin.query(
     "GRANT SELECT,INSERT ON rms_dining.dining_session_start_operation,rms_dining.dining_session_join_operation,rms_dining.dining_admission_consumption_operation TO " +
       role,

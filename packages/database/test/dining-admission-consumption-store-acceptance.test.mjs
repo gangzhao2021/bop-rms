@@ -1288,7 +1288,10 @@ it("consumes exact Guest admissions atomically with current Dining fences and im
         participantReference: a.joined.participant.participantReference,
       });
       assert.equal(cartFacts, null);
-      // Original admission assignment is essential even when a Move returns to the original Table.
+      // WP-2423 table-move-payment (was: the original admission assignment is essential even when
+      // a Move returns to the original Table): the phone follows its party's recorded Move, to
+      // another table and back to the original one; recovering the completed binding answers the
+      // same activation and records nothing new.
       await configure(35);
       await move(mJoin, 35, 125, 9);
       const completionInput = {
@@ -1296,10 +1299,10 @@ it("consumes exact Guest admissions atomically with current Dining fences and im
         sessionCredential: prepared.sessionCredential,
         csrfCredential: prepared.csrfCredential,
       };
-      await assert.rejects(
-        createCustomerDiningBindingComposition(compositionOptions).complete(completionInput),
-        { code: "GUEST_SESSION_UNAVAILABLE" },
-      );
+      const followed =
+        await createCustomerDiningBindingComposition(compositionOptions).complete(completionInput);
+      assert.equal(followed.status, "Activated");
+      assert.equal(followed.sessionCredential, prepared.sessionCredential);
       await move(mJoin, 34, 126, 9);
       const movedBack = await reader.loadSession(mJoin.sessionId);
       assert.equal(movedBack.tableReference, id(34));
@@ -1307,9 +1310,10 @@ it("consumes exact Guest admissions atomically with current Dining fences and im
         movedBack.tableAssignmentVersion,
         mJoin.joined.admission.tableAssignmentVersion,
       );
-      await assert.rejects(
-        createCustomerDiningBindingComposition(compositionOptions).complete(completionInput),
-        { code: "GUEST_SESSION_UNAVAILABLE" },
+      assert.equal(
+        (await createCustomerDiningBindingComposition(compositionOptions).complete(completionInput))
+          .status,
+        "Activated",
       );
       assert.deepEqual(await counts(), { operations: 9, audits: 9 });
       assert.equal(

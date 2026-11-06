@@ -241,6 +241,10 @@ it.each([
             roles[1],
         );
         await admin.query("GRANT SELECT ON rms_dining.dining_identity_admission TO " + roles[1]);
+        // WP-2423 table-move-payment: the guest binding follows a recorded Move (pilot API role grant).
+        await admin.query(
+          "GRANT SELECT ON rms_dining.dining_session_move_operation TO " + roles[1],
+        );
         await admin.query(
           "GRANT SELECT,INSERT ON rms_dining.dining_checkout_commitment TO " + roles[1],
         );
@@ -687,7 +691,7 @@ it.each([
         // context remains the existing explicitly synthetic fixture binding.
         await admin.query("GRANT USAGE ON SCHEMA bop_identity,rms_dining TO " + roles[2]);
         await admin.query(
-          "GRANT SELECT ON bop_identity.guest_session,rms_dining.dining_table,rms_dining.dining_session,rms_dining.dining_participant,rms_dining.dining_identity_admission TO " +
+          "GRANT SELECT ON bop_identity.guest_session,rms_dining.dining_table,rms_dining.dining_session,rms_dining.dining_participant,rms_dining.dining_identity_admission,rms_dining.dining_session_move_operation TO " +
             roles[2],
         );
         await admin.query(
