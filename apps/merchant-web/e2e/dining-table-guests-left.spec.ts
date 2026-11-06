@@ -1,6 +1,15 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 import { expectNoInternalText } from "./internal-text-guard";
+import type {
+  TableClosePlan,
+  TableCloseRound,
+  TableCloseRoundState,
+} from "../../../apps/api/src/merchant-dining-table-close-plan.js";
+import {
+  tableClosePlanResponse,
+  tableCloseRoundResponse,
+} from "../../../apps/api/src/merchant-dining-table-close-plan-response.js";
 
 /**
  * DEC-TABLE-CLOSE-GUESTS-LEFT (WP-2423): a manager closes a table whose guests left. The close
@@ -100,23 +109,42 @@ const progress = (phase: string, items: unknown[], orderVersion = 19) => ({
   observedAt: "2026-10-15T19:00:00.000Z",
   items,
 });
+// v15 2026-11-06: replies are built with the route's own serializer from a typed plan, so the
+// browser reads the shape the server really sends (the route once dropped kitchenReceivedAt).
 const planRound = (
   batch: number,
   sequence: number,
-  state: string,
-  refund: null | { method: string; amountMinor: string },
-) => ({
-  orderBatchReference: id(batch),
-  sequence,
-  state,
-  openItemCount: 1,
-  startedItemCount: 0,
-  readyItemCount: 0,
-  cancellableItemReferences: [],
-  refund,
-  cancelsAt: null,
-  kitchenReceivedAt: null,
-});
+  state: TableCloseRoundState,
+  refund: TableCloseRound["refund"],
+  kitchenReceivedAt: string | null = null,
+) =>
+  tableCloseRoundResponse({
+    orderBatchReference: id(batch),
+    sequence,
+    state,
+    openItemCount: 1,
+    startedItemCount: 0,
+    readyItemCount: 0,
+    cancellableItemReferences: [],
+    refund,
+    cancelsAt: null,
+    kitchenReceivedAt,
+  });
+const planReply = (
+  rounds: readonly TableCloseRound[],
+  orderVersion = 19,
+  totals: TableClosePlan["totals"] = { onlineMinor: "0", cardMachineMinor: "0" },
+  closeBlockers: readonly string[] = [],
+) =>
+  tableClosePlanResponse({
+    orderReference: id(3),
+    diningSessionReference: id(2),
+    orderVersion,
+    observedAt: "2026-10-15T19:00:00.000Z",
+    rounds,
+    totals,
+    closeBlockers,
+  });
 
 test("@production a manager closes out a table whose guests left: rounds cancelled with refunds shown first, then the table closes", async ({
   page,
@@ -169,20 +197,10 @@ test("@production a manager closes out a table whose guests left: rounds cancell
     const left = rounds();
     return route.fulfill({
       headers,
-      json: {
-        orderReference: id(3),
-        diningSessionReference: id(2),
-        orderVersion,
-        observedAt: "2026-10-15T19:00:00.000Z",
-        rounds: left,
-        closeBlockers: [],
-        totals: {
-          onlineMinor: left.some((round) => round.state === "PaidNotSent") ? "1130" : "0",
-          cardMachineMinor: left.some((round) => round.orderBatchReference === id(29))
-            ? "593"
-            : "0",
-        },
-      },
+      json: planReply(left, orderVersion, {
+        onlineMinor: left.some((round) => round.state === "PaidNotSent") ? "1130" : "0",
+        cardMachineMinor: left.some((round) => round.orderBatchReference === id(29)) ? "593" : "0",
+      }),
     });
   });
   await page.route("**/merchant/orders/cancel", (route) => {
@@ -345,15 +363,7 @@ test("@production B759: a table left in Closing names what still stops it, then 
   await page.route("**/merchant/dining/table-close-plan", (route) =>
     route.fulfill({
       headers,
-      json: {
-        orderReference: id(3),
-        diningSessionReference: id(2),
-        orderVersion: 38,
-        observedAt: "2026-10-15T19:00:00.000Z",
-        rounds: [],
-        closeBlockers: blockers,
-        totals: { onlineMinor: "0", cardMachineMinor: "0" },
-      },
+      json: planReply([], 38, undefined, blockers),
     }),
   );
   await page.route("**/merchant/orders/close", (route) => {
@@ -418,4 +428,96 @@ test("@production B759: a table left in Closing names what still stops it, then 
     "Finalize",
   ]);
   expect(closing[2]).toMatchObject({ expectedSessionVersion: 20 });
+});
+
+async function openRounds(page: Page, reply: unknown, items: unknown[]) {
+  await page.route("**/merchant/dining/order-progress", (route) =>
+    route.fulfill({ headers, json: progress("Accepted", items) }),
+  );
+  await page.route("**/merchant/dining/table-close-plan", (route) =>
+    route.fulfill({ headers, json: reply }),
+  );
+  await page.goto("/operations/dining");
+  await page.getByRole("button", { name: "Select T2", exact: true }).click();
+  return page.getByRole("region", { name: "Close this table" });
+}
+
+test("@production v15 2026-11-06: a pay-later table with a dish still to serve shows its round, not a read failure", async ({
+  page,
+}) => {
+  // Live repro (Fireside Hotpot): one staff round on the table bill, a dish not yet served.
+  await floor(page);
+  const dialog = await openRounds(
+    page,
+    planReply([planRound(21, 1, "OnTableBill", null, "2026-10-15T18:50:00.000Z")]),
+    [progressItem(1, 21, 1, "Accepted")],
+  );
+  const serve = dialog.getByRole("region", { name: "Dishes still to serve" });
+  await expect(serve).toContainText("Round 1:");
+  await expect(serve).toContainText("Serve them when they're ready");
+  await expect(page.getByText("Couldn't check the table's open rounds. Try again.")).toHaveCount(0);
+  await expect(dialog.getByRole("region", { name: "Guests have left" })).toHaveCount(0);
+  await expectNoInternalText(page, ["Temporarily unavailable"]);
+});
+
+test("@production v15 2026-11-06: the kitchen note names the round the kitchen has had a while", async ({
+  page,
+}) => {
+  await page.clock.setFixedTime(new Date("2026-10-15T19:00:00.000Z"));
+  await floor(page);
+  const dialog = await openRounds(
+    page,
+    planReply(
+      [
+        // Received a minute ago: no warning of its own.
+        planRound(
+          21,
+          1,
+          "NotStarted",
+          { method: "Online", amountMinor: "500" },
+          "2026-10-15T18:59:00.000Z",
+        ),
+        // Received five minutes ago: the kitchen may already be making it.
+        planRound(
+          22,
+          2,
+          "NotStarted",
+          { method: "Online", amountMinor: "700" },
+          "2026-10-15T18:55:00.000Z",
+        ),
+      ],
+      19,
+      { onlineMinor: "1200", cardMachineMinor: "0" },
+    ),
+    [progressItem(1, 21, 1, "Accepted"), progressItem(2, 22, 2, "Accepted")],
+  );
+  const guests = dialog.getByRole("region", { name: "Guests have left" });
+  await expect(guests).toContainText("Round 2:");
+  await expect(guests.getByRole("note")).toHaveText(
+    "The kitchen got this 5 min ago and may already be making it. Ask them first.",
+  );
+  await expect(page.getByText("Couldn't check the table's open rounds. Try again.")).toHaveCount(0);
+});
+
+test("@production v15 2026-11-06: a reply from an older server without the kitchen time still shows the rounds", async ({
+  page,
+}) => {
+  await page.clock.setFixedTime(new Date("2026-10-15T19:00:00.000Z"));
+  await floor(page);
+  const reply = planReply(
+    [planRound(21, 1, "NotStarted", { method: "Online", amountMinor: "500" })],
+    19,
+    { onlineMinor: "500", cardMachineMinor: "0" },
+  );
+  const older = {
+    ...reply,
+    rounds: reply.rounds.map((round) =>
+      Object.fromEntries(Object.entries(round).filter(([key]) => key !== "kitchenReceivedAt")),
+    ),
+  };
+  const dialog = await openRounds(page, older, [progressItem(1, 21, 1, "Accepted")]);
+  const guests = dialog.getByRole("region", { name: "Guests have left" });
+  await expect(guests).toContainText("Round 1: 1 item not marked started in the kitchen");
+  await expect(guests.getByText(/may already be making it/u)).toHaveCount(0);
+  await expect(page.getByText("Couldn't check the table's open rounds. Try again.")).toHaveCount(0);
 });
