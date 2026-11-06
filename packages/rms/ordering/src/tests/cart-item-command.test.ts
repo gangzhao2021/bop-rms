@@ -10,6 +10,7 @@ import type {
 } from "../application/ports/cart-item-command-ports.js";
 import {
   CartError,
+  cartItemUnavailableReason,
   parseCartAggregate,
   readCartSelectionRejected,
   type CartAggregate,
@@ -640,6 +641,24 @@ describe("Cart Item Add / Update / Remove commands", () => {
         .catch((caught: unknown) => caught);
       expect(readCartSelectionRejected(error)).toBe("NotAvailable");
     }
+    // WP-2423 (M154): sold out (the Store's mark or no stock) says so.
+    for (const rejectReason of ["RULE_UNSATISFIED", "SELLABLE_UNAVAILABLE"])
+      await expect(
+        fixture({
+          catalogMode: "Rejected",
+          rejectReason,
+          explainMany: async () => ["SoldOut"],
+        }).service.add(addInput()),
+      ).rejects.toMatchObject({ code: "CART_SELECTION_INVALID", reason: "SoldOut" });
+    // WP-2423 (M154): the dish is sold but its choice rules changed (a new required group).
+    await expect(
+      fixture({
+        catalogMode: "Rejected",
+        rejectReason: "RULE_UNSATISFIED",
+        explainMany: async () => ["OptionsChanged"],
+      }).service.add(addInput()),
+    ).rejects.toMatchObject({ code: "CART_SELECTION_INVALID", reason: "ChoicesChanged" });
+    expect(cartItemUnavailableReason("SoldOut")).toBe("Unavailable");
     // Without a stable standing it stays a plain refusal.
     await expect(
       fixture({

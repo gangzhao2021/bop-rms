@@ -76,6 +76,8 @@ it("WP-2423 (cart-unsellable-dishes): a hidden dish or a default choice turned o
       await admin.query(renderPilotAclSql(matrices, { api, worker }));
       await seed(admin);
       const now = minute(10);
+      // WP-2423 (M154): stock that cannot make one (synthetic Inventory evidence).
+      let stockShort = false;
       const safety = {
         clock: { now: () => now },
         killSwitch: {
@@ -92,10 +94,10 @@ it("WP-2423 (cart-unsellable-dishes): a hidden dish or a default choice turned o
           loadEvidence: async (request) => ({
             kind: "Inventory",
             ...pick(request),
-            status: "Available",
+            status: stockShort ? "Unavailable" : "Available",
             observedAt: request.observedAt,
             expiresAt: minute(1000),
-            reasonCode: "SYNTHETIC_STOCK",
+            reasonCode: stockShort ? "STOCK_DEPLETED" : "SYNTHETIC_STOCK",
           }),
         },
       };
@@ -144,6 +146,22 @@ it("WP-2423 (cart-unsellable-dishes): a hidden dish or a default choice turned o
         "UPDATE rms_catalog.availability_rule SET lifecycle='Active' WHERE availability_rule_id=$1",
         [id(60)],
       );
+      assert.deepEqual(await standing.explainMany([line(hot)]), ["Available"]);
+
+      // WP-2423 (M154): sold out is named as sold out — the Store's mark, or stock that cannot
+      // make one — so the guest is told "just sold out", not only "can't be ordered".
+      await admin.query(
+        "INSERT INTO rms_catalog.availability_rule(availability_rule_id,brand_id,internal_code,aggregate_version,lifecycle,sku_id,store_id,channel_codes_json,order_type_codes_json,effective_from,effective_until,decision,priority,reason_code,created_at,created_by_actor_id,updated_at) VALUES($1,$2,'SYNTHETIC_SOLD_OUT',1,'Active',$3,$4,'[]'::jsonb,'[]'::jsonb,$5,NULL,'Unavailable',900,'SOLD_OUT',$5,$6,$5)",
+        [id(61), brand, sku, store, at, id(3)],
+      );
+      assert.deepEqual(await standing.explainMany([line(hot)]), ["SoldOut"]);
+      await admin.query(
+        "UPDATE rms_catalog.availability_rule SET lifecycle='Inactive' WHERE availability_rule_id=$1",
+        [id(61)],
+      );
+      stockShort = true;
+      assert.deepEqual(await standing.explainMany([line(hot)]), ["SoldOut"]);
+      stockShort = false;
       assert.deepEqual(await standing.explainMany([line(hot)]), ["Available"]);
 
       // Pay first: the order's lines are captured when it is submitted, before any payment starts.

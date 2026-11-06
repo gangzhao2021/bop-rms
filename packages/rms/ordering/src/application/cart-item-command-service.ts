@@ -325,16 +325,18 @@ export async function validatedCatalogEvidence(
    * Catalog standing only; null when there is none (or no standing source) so the caller keeps
    * its own answer.
    */
-  const standing = async (): Promise<"NotAvailable" | "OptionNotOffered" | null> => {
+  const standing = async (): Promise<"NotAvailable" | "SoldOut" | "OptionsChanged" | null> => {
     if (catalog.explainMany === undefined) return null;
     try {
       const found = await catalog.explainMany([selection]);
       if (!Array.isArray(found) || found.length !== 1) return null;
+      // WP-2423 (M154): the guest is told it is sold out, not only "can't be ordered".
+      if (found[0] === "SoldOut") return "SoldOut";
       const reason = cartItemUnavailableReason(found[0]);
       return reason === null
         ? null
         : reason === "OptionsChanged"
-          ? "OptionNotOffered"
+          ? "OptionsChanged"
           : "NotAvailable";
     } catch {
       return null;
@@ -354,7 +356,10 @@ export async function validatedCatalogEvidence(
   } catch {
     // A stable reason (the dish's setup broke, it was hidden) names it; an outage stays retry.
     const reason = await standing();
-    if (reason !== null) throw new CartSelectionRejectedError(reason);
+    if (reason !== null)
+      throw new CartSelectionRejectedError(
+        reason === "OptionsChanged" ? "OptionNotOffered" : reason,
+      );
     throw new CartError("CART_DEPENDENCY_UNAVAILABLE");
   }
   let rejectedReason: string | null = null;
@@ -422,6 +427,10 @@ export async function validatedCatalogEvidence(
       if (rejectedReason === "SELLABLE_UNAVAILABLE" || rejectedReason === "RULE_UNSATISFIED") {
         const reason = await standing();
         if (reason === "NotAvailable") throw new CartSelectionRejectedError("NotAvailable");
+        if (reason === "SoldOut") throw new CartSelectionRejectedError("SoldOut");
+        // WP-2423 (M154): the dish is sold but its choice rules changed under the guest.
+        if (reason === "OptionsChanged" && rejectedReason === "RULE_UNSATISFIED")
+          throw new CartSelectionRejectedError("ChoicesChanged");
       }
       throw new CartSelectionRejectedError("Other");
     }

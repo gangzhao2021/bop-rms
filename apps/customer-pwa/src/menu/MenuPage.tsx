@@ -9,7 +9,11 @@ import { createBrowserPickupCartClient } from "../cart/pickup-cart-client.js";
 import { CustomerPage } from "../journey/CustomerPage.js";
 import { SlowAddNotice } from "../slow-wait.js";
 import { formatDecimalMoney, formatMoney } from "../journey/format.js";
-import { cartIssueMessage, participationEndedText } from "../journey/messages.js";
+import {
+  cartIssueMessage,
+  participationEndedText,
+  specificCartIssues,
+} from "../journey/messages.js";
 import {
   createContext,
   useCallback,
@@ -1510,15 +1514,25 @@ export function ConfigureStatus({
     unavailable: t("We couldn’t add this right now. Please try again."),
     "outcome-unknown": t("The connection dropped before we could confirm. Retry to check."),
   } as const;
+  // WP-2423 (M154): a refusal that says exactly what happened is the headline; the general
+  // sentence is left out. A dish that can't be had offers the way back to the menu.
+  const issueCodes = "issueCodes" in state ? state.issueCodes : [];
+  const specific = issueCodes.some((code) => specificCartIssues.includes(code));
+  const backToMenu = issueCodes.some(
+    (code) => code === "CATALOG_ITEM_UNAVAILABLE" || code === "CATALOG_ITEM_SOLD_OUT",
+  );
   return (
     <div className="configure-status configure-status--error" role="alert">
-      <p>{copy[state.status]}</p>
-      {"issueCodes" in state
-        ? state.issueCodes
-            .map(cartIssueMessage)
-            .filter((issue): issue is string => issue !== null)
-            .map((issue) => <p key={issue}>{issue}</p>)
-        : null}
+      {state.status === "validation" && specific ? null : <p>{copy[state.status]}</p>}
+      {issueCodes
+        .map(cartIssueMessage)
+        .filter((issue): issue is string => issue !== null)
+        .map((issue) => (
+          <p key={issue}>{issue}</p>
+        ))}
+      {state.status === "validation" && backToMenu ? (
+        <Link to="/menu">{t("Back to menu")}</Link>
+      ) : null}
       {state.canRetry ? (
         <button
           type="button"
@@ -1651,9 +1665,7 @@ export function SellableConfigurator({
     if (
       state.status === "validation" &&
       refreshedFor.current !== state &&
-      state.issueCodes.some(
-        (code) => code === "CATALOG_OPTION_NOT_OFFERED" || code === "CATALOG_ITEM_UNAVAILABLE",
-      )
+      state.issueCodes.some((code) => specificCartIssues.includes(code))
     ) {
       refreshedFor.current = state;
       onRefresh?.();

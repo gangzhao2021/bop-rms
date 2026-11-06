@@ -176,7 +176,8 @@ export const cartItemUnavailableReasons: readonly CartItemUnavailableReason[] = 
 
 /** WP-2423 (guest-cart-503): a stable Catalog standing as the guest's reason, or null (retry). */
 export function cartItemUnavailableReason(standing: unknown): CartItemUnavailableReason | null {
-  return standing === "Unavailable" || standing === "NotOnMenu"
+  // WP-2423 (M154): "SoldOut" is Catalog's Unavailable with its reason (sold out or no stock).
+  return standing === "Unavailable" || standing === "NotOnMenu" || standing === "SoldOut"
     ? "Unavailable"
     : standing === "OptionsChanged" || standing === "SetupIncomplete"
       ? standing
@@ -201,10 +202,19 @@ export class CartItemUnavailableError extends CartError {
  * the dish itself can't be had now (hidden, sold out, every choice of a required group off, or its
  * menu setup broken); `Other`: the choices don't fit the dish's rules.
  */
-export type CartSelectionRejectedReason = "OptionNotOffered" | "NotAvailable" | "Other";
+export type CartSelectionRejectedReason =
+  | "OptionNotOffered"
+  | "NotAvailable"
+  /** WP-2423 (M154): the dish is sold out now (the Store's mark, or stock cannot make one). */
+  | "SoldOut"
+  /** WP-2423 (M154): the dish's choices changed (a new required group or new limits). */
+  | "ChoicesChanged"
+  | "Other";
 const cartSelectionRejectedReasons: readonly CartSelectionRejectedReason[] = Object.freeze([
   "OptionNotOffered",
   "NotAvailable",
+  "SoldOut",
+  "ChoicesChanged",
   "Other",
 ]);
 /** WP-2423 (cart-unsellable-dishes): a refused selection, with why (still CART_SELECTION_INVALID). */

@@ -1700,4 +1700,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Tick this to continue": "勾选后才能继续",
   "You earn points on every order you scan to place. Points can be used only when you pay a table’s bill at the end, not on pickup or pay-first tables.":
     "扫码下单都能攒积分；积分只能在餐后结账的桌台账单上使用，自取和先付款的桌台不能用。",
+  // WP-2423 sold-out-and-allergen-safety (M154)
+  "This dish just sold out.": "这道菜刚刚售罄了。",
+  "This dish was just updated. Check the choices again.": "这道菜刚刚更新了，请重新看一下选项。",
 });

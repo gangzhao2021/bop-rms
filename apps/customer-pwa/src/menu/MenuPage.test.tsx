@@ -8,7 +8,7 @@ import {
 } from "../session/customer-transaction-context.js";
 import { MemoryRouter } from "react-router";
 import { describe, expect, it, vi } from "vitest";
-import { MenuScreen, SellableConfigurator } from "./MenuPage.js";
+import { ConfigureStatus, MenuScreen, SellableConfigurator } from "./MenuPage.js";
 import { TableOrderedProvider } from "../dining/table-ordered.js";
 import type { ConfigureController } from "./configure-state.js";
 import type { MenuJourneyContext, MenuSellable, MenuView } from "./types.js";
@@ -905,5 +905,37 @@ describe("WP-2423 (cart-unsellable-dishes): a choice the Store does not offer no
     const html = render(serve(true));
     expect(html).toContain("Soy milk isn&#x27;t available right now.");
     expect(/<button[^>]*type="submit"[^>]*disabled/u.test(html)).toBe(true);
+  });
+});
+
+describe("WP-2423 (M154) a refused add says the real reason", () => {
+  const status = (issueCodes: readonly string[]) =>
+    renderToStaticMarkup(
+      createElement(
+        MemoryRouter,
+        null,
+        createElement(ConfigureStatus, {
+          state: { status: "validation", issueCodes, retryAfterSeconds: null, canRetry: false },
+          controller: {} as ConfigureController,
+        }),
+      ),
+    );
+  it("leads with sold out and offers the way back to the menu", () => {
+    const html = status(["CATALOG_ITEM_SOLD_OUT"]);
+    expect(html).toContain("This dish just sold out.");
+    expect(html).not.toContain("can’t be ordered as selected");
+    expect(html).toContain('href="/menu"');
+    expect(html).toContain("Back to menu");
+  });
+  it("says the dish changed, without the general sentence or the way back", () => {
+    const html = status(["CATALOG_CHOICES_CHANGED"]);
+    expect(html).toContain("This dish was just updated. Check the choices again.");
+    expect(html).not.toContain("can’t be ordered as selected");
+    expect(html).not.toContain("Back to menu");
+  });
+  it("keeps the general sentence for a refusal with no specific reason", () => {
+    expect(status(["CATALOG_SELECTION_REJECTED"])).toContain(
+      "This item can’t be ordered as selected. Review your choices.",
+    );
   });
 });

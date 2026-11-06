@@ -129,6 +129,17 @@ export function lineEstimateLabel(reasonCode: string): string {
   return lineEstimateReasons[reasonCode] ?? t("Priced at checkout");
 }
 
+/**
+ * WP-2423 (M154): refusals that say exactly what happened; shown as the headline in place of the
+ * general "can't be ordered as selected".
+ */
+export const specificCartIssues: readonly string[] = Object.freeze([
+  "CATALOG_OPTION_NOT_OFFERED",
+  "CATALOG_ITEM_UNAVAILABLE",
+  "CATALOG_ITEM_SOLD_OUT",
+  "CATALOG_CHOICES_CHANGED",
+]);
+
 /** Reasons the cart service gives for a rejected change, in customer words. */
 export function cartIssueMessage(code: string): string | null {
   const known: Readonly<Record<string, string>> = {
@@ -143,6 +154,9 @@ export function cartIssueMessage(code: string): string | null {
       "One of your choices isn’t available right now. Please choose another.",
     ),
     CATALOG_ITEM_UNAVAILABLE: t("This item isn’t available right now."),
+    // WP-2423 (M154): the real reason, said as the headline.
+    CATALOG_ITEM_SOLD_OUT: t("This dish just sold out."),
+    CATALOG_CHOICES_CHANGED: t("This dish was just updated. Check the choices again."),
     // WP-2423: the store's stock can't make the quantity asked.
     ITEM_SHORT: t("We can’t make that many right now. Choose fewer."),
     NOTE_TOO_LONG: t("Your note is too long."),

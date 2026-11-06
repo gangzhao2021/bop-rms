@@ -202,6 +202,9 @@ describe("Pickup add/update HTTP composition", () => {
   it.each([
     ["OptionNotOffered", "CATALOG_OPTION_NOT_OFFERED"],
     ["NotAvailable", "CATALOG_ITEM_UNAVAILABLE"],
+    // WP-2423 (M154)
+    ["SoldOut", "CATALOG_ITEM_SOLD_OUT"],
+    ["ChoicesChanged", "CATALOG_CHOICES_CHANGED"],
     ["Other", "CATALOG_SELECTION_REJECTED"],
   ] as const)(
     "WP-2423 (cart-unsellable-dishes): names why the selection was refused (%s)",

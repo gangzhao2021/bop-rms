@@ -35,6 +35,11 @@ import { resolveCurrentCatalogSelectionRules } from "../../application/current-s
 export type CatalogLineStanding =
   | "Available"
   | "Unavailable"
+  /**
+   * WP-2423 (M154): unavailable because it is sold out — a Store sold-out mark, or stock that
+   * cannot make one. Every reader that does not need the difference treats it as `Unavailable`.
+   */
+  | "SoldOut"
   | "NotOnMenu"
   | "OptionsChanged"
   | "SetupIncomplete"
@@ -406,7 +411,11 @@ export function createPostgresCatalogLineStandingSource(
               observedAt,
             });
             if (available.status === "Unavailable") {
-              standings.push("Unavailable");
+              const reason = String((available as { reasonCode?: unknown }).reasonCode ?? "");
+              standings.push(
+                // The Store's sold-out mark (soldOutReasonCode) or Inventory's "cannot make one".
+                reason === "SOLD_OUT" || reason === "STOCK_DEPLETED" ? "SoldOut" : "Unavailable",
+              );
               continue;
             }
             if (available.status !== "Available") {

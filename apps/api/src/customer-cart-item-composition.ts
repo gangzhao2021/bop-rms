@@ -109,7 +109,12 @@ export function createCustomerCartItemPort(options: {
             ? "CATALOG_OPTION_NOT_OFFERED"
             : rejected === "NotAvailable"
               ? "CATALOG_ITEM_UNAVAILABLE"
-              : "CATALOG_SELECTION_REJECTED",
+              : // WP-2423 (M154): the guest is told the real reason.
+                rejected === "SoldOut"
+                ? "CATALOG_ITEM_SOLD_OUT"
+                : rejected === "ChoicesChanged"
+                  ? "CATALOG_CHOICES_CHANGED"
+                  : "CATALOG_SELECTION_REJECTED",
         ],
       };
     if (error instanceof CartCheckoutInProgressError)
