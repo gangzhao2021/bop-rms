@@ -241,6 +241,8 @@ export function TableCheckout({
   // merchant-outage-recovery M100: why the bill could not be read again, apart from what an action
   // said. The next read that works clears it.
   const [readProblem, setReadProblem] = useState<string | null>(null);
+  // M89: said once a phone payment was stopped, until the next action.
+  const [stoppedPhone, setStoppedPhone] = useState(false);
   const [busy, setBusy] = useState(false);
   // WP-2423 item 8 ① (Owner 2026-10-27): no tip is chosen for the guests; staff ask and choose.
   const [tip, setTip] = useState<Tip | null>(null);
@@ -483,7 +485,10 @@ export function TableCheckout({
     setBusy(true);
     setProblem(null);
     try {
-      setBill(await client.stopOnlinePayment(csrf, sessionReference));
+      const stopped = await client.stopOnlinePayment(csrf, sessionReference);
+      if (stopped === null) setReload((value) => value + 1);
+      else setBill(stopped);
+      setStoppedPhone(true);
       onChanged();
     } catch (error) {
       setProblem(errorText(error));
@@ -1136,6 +1141,9 @@ export function TableCheckout({
           </button>{" "}
           <small>{t("The table can order again; checkout is started again later.")}</small>
         </p>
+      ) : null}
+      {stoppedPhone && bill?.onlinePayment?.status !== "InProgress" && bill?.settlement === null ? (
+        <p role="status">{t("Phone payment stopped. Take the payment here.")}</p>
       ) : null}
       {problem && !(paper && paidAtRefused) ? <p role="alert">{problem}</p> : null}
     </section>

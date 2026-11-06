@@ -59,24 +59,31 @@ export function createMerchantDiningTableOnlinePaymentStop(options: {
       return { scope: scopeOf(current), actorReference: String(current.actorReference) };
     });
     if (first === null) throw new DiningTableCheckoutError("TABLE_CHECKOUT_PERMISSION_DENIED");
+    // M89: one staff resolve per transaction, re-checked with its own allowed() (as every other
+    // checkout route does): dozens of fresh resolves per bill read were dozens of chances to turn
+    // a stop that already happened into a refusal.
+    const resolved = new WeakMap<object, ReturnType<typeof staffIn>>();
+    const authority = {
+      diningSessionReference: session,
+      guestSessionReference: null,
+      displayLocale: staffContentLocale(),
+      allowed: async (tx: ConsumerTransaction) => {
+        let found = resolved.get(tx as object);
+        if (found === undefined) {
+          found = staffIn(tx);
+          resolved.set(tx as object, found);
+        }
+        const current = await found.catch(onlyRefusal(() => null));
+        return (
+          current !== null &&
+          String(current.actorReference) === first.actorReference &&
+          (await current.allowed()) === true
+        );
+      },
+    };
+    const payments = options.payments(first.scope);
     try {
-      const view = await options.payments(first.scope).stop(
-        {
-          diningSessionReference: session,
-          guestSessionReference: null,
-          displayLocale: staffContentLocale(),
-          allowed: async (tx) => {
-            const current = await staffIn(tx).catch(onlyRefusal(() => null));
-            return (
-              current !== null &&
-              String(current.actorReference) === first.actorReference &&
-              (await current.allowed()) === true
-            );
-          },
-        },
-        first.actorReference,
-      );
-      return Object.freeze({ status: "Stopped" as const, bill: view.bill });
+      await payments.stopAndRecord(authority, first.actorReference);
     } catch (error) {
       if (
         error instanceof DiningTableOnlinePaymentError &&
@@ -87,5 +94,12 @@ export function createMerchantDiningTableOnlinePaymentStop(options: {
         ? error
         : withCause(new DiningTableCheckoutError("TABLE_CHECKOUT_UNAVAILABLE"), error);
     }
+    // The stop is recorded. A failure of the reply's bill read never reports it as failed or
+    // refused: the answer is Stopped without a bill, and the screen reads the bill again.
+    const bill = await payments
+      .read(authority)
+      .then((view) => view.bill)
+      .catch(() => null);
+    return Object.freeze({ status: "Stopped" as const, bill });
   };
 }

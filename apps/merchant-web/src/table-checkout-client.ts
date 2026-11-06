@@ -646,6 +646,8 @@ export function createTableCheckoutClient(fetcher: typeof fetch = fetch) {
         diningSessionReference,
       })) as { status?: unknown; bill?: unknown } | null;
       if (raw?.status !== "Stopped") return invalid();
+      // M89: the stop was recorded but the bill could not be read with the answer: read it again.
+      if (raw.bill === null) return null;
       return parseTableBill(raw.bill);
     },
     async leftWithoutPaying(

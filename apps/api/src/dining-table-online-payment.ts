@@ -99,6 +99,11 @@ export interface DiningTableOnlinePaymentView {
     /** WP-2423 item 8 ④: the part of a split bill this payment is for (null: the whole table). */
     readonly partNumber: number | null;
   };
+  /**
+   * M92: this guest's latest finished phone payment, when it was declined (null otherwise), and
+   * which part it was for (null: the whole table) — so a declined part is said, not silent.
+   */
+  readonly lastOwnDeclined?: null | { readonly partNumber: number | null };
 }
 
 const sha = (value: unknown) =>
@@ -181,7 +186,19 @@ export function createDiningTableOnlinePayments(options: DiningTableOnlinePaymen
     };
     void settlementRecord;
     void splitPlanRecord;
+    const lastOwn = attempts
+      .filter(
+        (attempt) =>
+          attempt.outcome !== null &&
+          authority.guestSessionReference !== null &&
+          attempt.guestSessionReference === authority.guestSessionReference,
+      )
+      .sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0))[0];
     return Object.freeze({
+      lastOwnDeclined:
+        lastOwn?.outcome?.status === "Failed"
+          ? Object.freeze({ partNumber: lastOwn.part?.partNumber ?? null })
+          : null,
       bill: publicBill,
       attempt:
         open === undefined
@@ -562,7 +579,15 @@ export function createDiningTableOnlinePayments(options: DiningTableOnlinePaymen
       await refreshOpen(authority, null);
       return read(authority);
     },
-    /** Staff stop the attempt a guest gave up on (recording a payment the guest did finish). */
+    /**
+     * Staff stop the attempt a guest gave up on (recording a payment the guest did finish). M89:
+     * only the record; it resolves once what the Provider said is recorded, so a caller can tell
+     * a stop that was recorded from one that was not before it reads the bill again.
+     */
+    async stopAndRecord(authority: TableOnlinePaymentAuthority, actorReference: string) {
+      await refreshOpen(authority, { actor: { type: "User", reference: actorReference } });
+    },
+    /** The record, then the bill. */
     async stop(authority: TableOnlinePaymentAuthority, actorReference: string) {
       await refreshOpen(authority, { actor: { type: "User", reference: actorReference } });
       return read(authority);
