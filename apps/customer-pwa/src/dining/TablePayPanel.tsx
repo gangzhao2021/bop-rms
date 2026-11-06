@@ -451,7 +451,9 @@ export function TablePayPanel({
           />
           {view.state === "Failed" ? (
             <p role="alert">
-              {t("The payment didn’t go through. You can try again with another card.")}
+              {t(
+                "The payment didn’t go through and nothing was charged. Try again, use another card, or ask a staff member.",
+              )}
             </p>
           ) : null}
           {view.split !== null ? (
@@ -530,7 +532,7 @@ export function TablePayPanel({
               {/* WP-2423 DEC-TAX-WHOLE-RECEIPT: the bill's tax is rounded once. */}
               {view.owed.taxRoundingMinor !== "0" ? (
                 <div>
-                  <dt>{t("Tax rounding")}</dt>
+                  <dt>{t("Rounding (tax worked out on the whole bill)")}</dt>
                   <dd>{money(view.owed.taxRoundingMinor)}</dd>
                 </div>
               ) : null}

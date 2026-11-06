@@ -287,3 +287,46 @@ it("Owner 2026-11-03: a settled receipt says what went back, and says nothing wh
   });
   expect(customerSettledTableReceiptBody(view()).receipt).not.toHaveProperty("refundedMinor");
 });
+
+it("M92: a declined phone payment for a part says it failed, while that part is still unpaid", () => {
+  const part = (partNumber: number, paid: boolean) => ({
+    partNumber,
+    amountMinor: "2346",
+    subtotalMinor: "2076",
+    taxMinor: "270",
+    roundNumbers: [1],
+    dishes: [],
+    guestPaying: false,
+    payment: paid
+      ? { method: "Online", tipMinor: "0", roundingMinor: "0", totalMinor: "2346" }
+      : null,
+  });
+  const view = (lastOwnDeclined: unknown, paid = false) =>
+    ({
+      attempt: null,
+      lastOwnDeclined,
+      bill: {
+        tableLabel: "T1",
+        sessionPhase: "Closing",
+        tips: { enabled: false, tierPercents: [] },
+        consistent: true,
+        owed: { subtotalMinor: "4152", taxMinor: "540", taxRoundingMinor: "0", totalMinor: "4692" },
+        settlement: null,
+        writeOff: null,
+        onlinePayment: null,
+        split: {
+          mode: "Even",
+          stale: false,
+          dishChoices: [],
+          paidParts: paid ? 1 : 0,
+          remainingMinor: paid ? "2346" : "4692",
+          parts: [part(1, paid), part(2, false)],
+        },
+        rounds: [],
+      },
+    }) as never;
+  expect(customerTablePaymentBody(view({ partNumber: 1 })).payment.state).toBe("Failed");
+  // Paid since (another card worked), or nothing was declined: not a failure.
+  expect(customerTablePaymentBody(view({ partNumber: 1 }, true)).payment.state).toBe("NotPaid");
+  expect(customerTablePaymentBody(view(null)).payment.state).toBe("NotPaid");
+});

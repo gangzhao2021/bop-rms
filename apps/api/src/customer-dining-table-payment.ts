@@ -190,6 +190,19 @@ export function createCustomerDiningTablePayment(options: CustomerDiningTablePay
 }
 
 /** The guest's view, in public fields only: no references, Provider identifiers or codes. */
+/**
+ * M92: this guest's last phone payment was declined and what it was for is still unpaid (the whole
+ * table, or that part of a split bill), so the guest is told — a declined part was silent before.
+ */
+function ownDeclinedStillOwed(view: DiningTableOnlinePaymentView): boolean {
+  const declined = view.lastOwnDeclined;
+  if (declined === undefined || declined === null) return false;
+  if (view.bill.settlement !== null) return false;
+  if (declined.partNumber === null) return view.bill.split === null;
+  const part = view.bill.split?.parts.find((entry) => entry.partNumber === declined.partNumber);
+  return part !== undefined && part.payment === null && !part.guestPaying;
+}
+
 export function customerTablePaymentBody(view: DiningTableOnlinePaymentView) {
   const bill = view.bill;
   const paid = bill.settlement;
@@ -230,7 +243,7 @@ export function customerTablePaymentBody(view: DiningTableOnlinePaymentView) {
                 : bill.split === null
                   ? "AnotherGuestPaying"
                   : "NotPaid"
-              : bill.onlinePayment?.status === "Failed"
+              : bill.onlinePayment?.status === "Failed" || ownDeclinedStillOwed(view)
                 ? "Failed"
                 : "NotPaid",
       attempt:
