@@ -65,7 +65,12 @@ import {
   counterPayByText,
   counterPayByTier,
 } from "./counter-payment.js";
-import { businessDateLabel, openedEarlierText, useStoreBusinessDay } from "./StoreBusinessDay.js";
+import {
+  businessDateLabel,
+  openedEarlierText,
+  orderWhenText,
+  useStoreBusinessDay,
+} from "./StoreBusinessDay.js";
 import { WorkspacePage } from "./WorkspacePage.js";
 export { storeTime } from "./StoreTime.js";
 export { counterAwaitingCardMachine, counterPayByText, counterPayByTier };
@@ -2464,8 +2469,8 @@ export function CurrentOrderQueueRows({
                     ? { amountMinor: order.tableBill.totalMinor, currencyCode: "CAD" }
                     : null;
               const age = now === undefined ? null : orderAgeText(order, now);
-              const earlier =
-                order.businessDate !== null && today !== null && order.businessDate !== today;
+              // WP-2423 M175: an order placed after midnight says its own date and the day it counts for.
+              const when = orderWhenText(order.submittedAt, order.businessDate, today, timeZone);
               return (
                 <Fragment key={order.orderReference}>
                   {dayHeadings.has(order.orderReference) ? (
@@ -2531,9 +2536,7 @@ export function CurrentOrderQueueRows({
                               ]
                                 .filter((part) => part !== null)
                                 .join(" · ") + " · "}
-                          {earlier && order.businessDate !== null
-                            ? businessDateLabel(order.businessDate, today) + " "
-                            : ""}
+                          {when.before}
                           <time
                             className="order-workbench-time"
                             dateTime={order.submittedAt}
@@ -2541,8 +2544,9 @@ export function CurrentOrderQueueRows({
                           >
                             {storeTime(order.submittedAt, timeZone)}
                           </time>
+                          {when.after}
                           {age === null ? null : (
-                            <>
+                            <span className="order-row__age">
                               {" · "}
                               <span
                                 className="order-workbench-age"
@@ -2554,7 +2558,7 @@ export function CurrentOrderQueueRows({
                               >
                                 {age}
                               </span>
-                            </>
+                            </span>
                           )}
                         </span>
                       </span>

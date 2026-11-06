@@ -8761,4 +8761,12 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "本门店仍使用自己的价格 {own}。要让本门店也使用新价格，请选择“仅限本门店”，或在“价格”页改回品牌价格。",
   "You can't change this dish's price. Ask the owner or the Store's manager.":
     "你不能修改这道菜的价格。请联系店主或本门店店长。",
+  " · counts for {businessDate}": " · 计入 {businessDate}",
+  "Already paid on paper. Enter what the slip or cash record shows, then record it. Don't charge again.":
+    "纸单已付款。按小票或现金记录填写后录入，请勿重复收款。",
+  "Sent. This paper order was paid during the outage: don't charge again, record it below.":
+    "已发送。此纸单已在停电期间付款，请勿重复收款，在下方录入。",
+  "Paper order {orderNumber}: record the payment taken during the outage":
+    "纸单 {orderNumber}：录入停电期间已收的款",
+  "Record the paper order's payment": "录入纸单的付款",
 });

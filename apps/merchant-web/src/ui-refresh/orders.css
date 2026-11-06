@@ -956,6 +956,16 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* WP-2423 M121: on a tablet or beside the panel the dishes wrap to two lines, never cut to "…"
+   after the first dish. */
+@media (max-width: 68.75rem) {
+  .orders-page .order-workbench-type {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    white-space: normal;
+  }
+}
 .orders-page .order-row__when,
 .orders-page .order-row__when .order-workbench-time {
   font-size: 14px;
@@ -1169,7 +1179,8 @@
     min-height: 0;
     padding: 10px 0;
   }
-  .orders-page .order-row__when {
+  /* WP-2423 M121: a phone still says who and when ("Table 5 · 18:42"); only the age is left out. */
+  .orders-page .order-row__age {
     display: none;
   }
   .orders-page .order-workbench-type {

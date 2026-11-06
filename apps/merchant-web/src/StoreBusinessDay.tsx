@@ -291,3 +291,44 @@ export function openedEarlierText(
     listedOn: businessDateLabel(listedOn, today),
   });
 }
+
+/** The Store-local calendar date ("2026-11-05") an instant falls on; UTC when the zone is unknown. */
+function storeCalendarDate(instant: string, timeZone: string | undefined): string {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-CA", {
+      timeZone: timeZone ?? "UTC",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    })
+      .formatToParts(new Date(instant))
+      .map((part) => [part.type, part.value]),
+  );
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
+/**
+ * WP-2423 M175: the date around an order's time on Orders and Pickup. An order placed at 00:08 on
+ * Nov 5 that counts for Nov 4 reads "Thu, Nov 5 00:08 · counts for Wed, Nov 4", never
+ * "Wed, Nov 4 00:08" (a time that day never had). An earlier day's order keeps its date before the
+ * time; today's order placed today shows the time alone.
+ */
+export function orderWhenText(
+  submittedAt: string,
+  businessDate: string | null,
+  today: string | null | undefined,
+  timeZone: string | undefined,
+): { readonly before: string; readonly after: string } {
+  if (businessDate === null) return { before: "", after: "" };
+  const calendarDate = storeCalendarDate(submittedAt, timeZone);
+  if (calendarDate !== businessDate)
+    return {
+      before: businessDateLabel(calendarDate, today) + " ",
+      after: t(" · counts for {businessDate}", {
+        businessDate: businessDateLabel(businessDate, today),
+      }),
+    };
+  if (today !== null && today !== undefined && businessDate !== today)
+    return { before: businessDateLabel(businessDate, today) + " ", after: "" };
+  return { before: "", after: "" };
+}

@@ -6,6 +6,7 @@ import { parseCurrentOrderQueue } from "./current-order-queue-client.js";
 import { currentOrderQueueFixture } from "./current-order-queue.fixtures.js";
 import {
   businessDateLabel,
+  orderWhenText,
   parseStoreBusinessDay,
   StoreBusinessDayContext,
   trackStoreBusinessDay,
@@ -263,4 +264,29 @@ it("WP-2423 D4: an older table's Order with a round today is under Today, not it
   expect(markup).toContain(
     "<dt>Business day</dt><dd>Opened Mon, Oct 12 · ordered again Today · Wed, Oct 14</dd>",
   );
+});
+
+describe("WP-2423 M175: an order's date around its time", () => {
+  const zone = "America/Toronto";
+  it("says the date an after-midnight order was placed and the day it counts for", () => {
+    // 00:08 on Thu Nov 5 in Toronto, counted for Wed Nov 4 (the day starts at 04:00).
+    expect(orderWhenText("2026-11-05T05:08:00.000Z", "2026-11-04", "2026-11-04", zone)).toEqual({
+      before: "Thu, Nov 5 ",
+      after: " · counts for Today · Wed, Nov 4",
+    });
+    expect(orderWhenText("2026-11-05T05:08:00.000Z", "2026-11-04", "2026-11-08", zone)).toEqual({
+      before: "Thu, Nov 5 ",
+      after: " · counts for Wed, Nov 4",
+    });
+  });
+  it("keeps an earlier day's date before the time, and today's time alone", () => {
+    expect(orderWhenText("2026-11-04T18:30:00.000Z", "2026-11-04", "2026-11-05", zone)).toEqual({
+      before: "Yesterday · Wed, Nov 4 ",
+      after: "",
+    });
+    expect(orderWhenText("2026-11-04T18:30:00.000Z", "2026-11-04", "2026-11-04", zone)).toEqual({
+      before: "",
+      after: "",
+    });
+  });
 });
