@@ -918,6 +918,7 @@ describe("Figma v1 (2026-10-25): Home lists what needs attention now", () => {
       tables: ready({ tables: [], canClose: true, more: false }),
     };
     const board = {
+      audience: "Installation",
       monitor: "Reporting",
       observedAt: "2026-11-07T01:10:00.000Z",
       active: [],
@@ -931,6 +932,8 @@ describe("Figma v1 (2026-10-25): Home lists what needs attention now", () => {
       outbound: { email: true, webhooks: 0, heartbeat: false },
       lastSuccessfulBackupAt: null,
       plannedUpdate: null,
+      checksIncompleteSince: null,
+      support: null,
     } as const;
     const html = renderToStaticMarkup(
       <MemoryRouter>
