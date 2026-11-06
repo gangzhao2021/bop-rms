@@ -187,10 +187,23 @@ function WaitingRoundsAtCheckout({
  * on the card machine after it approved, or in cash (rounded to 5 cents, with the change). A manager
  * can record that the guests left without paying. The table is then closed as usual.
  */
-/** The exact amount, then the next bills a guest is likely to hand over. */
+/**
+ * The exact amount, then what a guest is likely to hand over (M146): the next $5, $10 and $20, two
+ * twenties more, the next $50 and the next $100 above the amount due — up to four, smallest first.
+ * $57.55 offers $60, $80 and $100, not only $100.
+ */
 export function cashQuickAmounts(due: bigint): readonly bigint[] {
-  const bills = [500n, 1000n, 2000n, 5000n, 10000n].filter((bill) => bill > due).slice(0, 3);
-  return [due, ...bills];
+  const above = (step: bigint) => (due / step + 1n) * step;
+  const candidates = [
+    above(500n),
+    above(1000n),
+    above(2000n),
+    above(2000n) + 2000n,
+    above(5000n),
+    above(10000n),
+  ];
+  const distinct = [...new Set(candidates)].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  return [due, ...distinct.slice(0, 4)];
 }
 
 export function TableCheckout({
