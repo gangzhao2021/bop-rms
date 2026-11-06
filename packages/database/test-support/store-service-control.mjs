@@ -140,4 +140,30 @@ export async function verifyStoreServiceControl({ admin, role, id, currentConfig
   assert.deepEqual(await run((tx) => read(tx, now)), []);
   now = "2026-08-16T10:00:00.000Z";
   assert.deepEqual(await write(pause), { status: "AlreadyApplied", resultingVersion: 3 });
+  // WP-2423 store-service-controls (v15 M30): a new pause lasts at most 4 hours from now; anything
+  // longer is closing early tonight or turning the service off (a 100000-minute pause was taken).
+  const long = {
+    ...pause,
+    operationReference: id(306),
+    auditReference: id(307),
+    expectedVersion: 4,
+    content: { effectiveUntil: "2026-08-16T14:00:00.001Z", serviceModes: ["Pickup"] },
+  };
+  await assert.rejects(write(long), /STORE_SERVICE_PAUSE_TOO_LONG/u);
+  assert.equal(
+    (
+      await admin.query(
+        "SELECT * FROM rms_store.store_configuration_operation WHERE operation_id=$1",
+        [id(306)],
+      )
+    ).rowCount,
+    0,
+  );
+  assert.deepEqual(
+    await write({
+      ...long,
+      content: { ...long.content, effectiveUntil: "2026-08-16T14:00:00.000Z" },
+    }),
+    { status: "Applied", resultingVersion: 5 },
+  );
 }

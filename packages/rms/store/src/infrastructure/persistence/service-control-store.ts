@@ -10,6 +10,8 @@ import { storeServiceModes } from "../../contracts/store-operating-status.js";
 interface Transaction {
   query(sql: string, values: readonly unknown[]): Promise<unknown>;
 }
+/** WP-2423 store-service-controls (v15 M30): the longest new pause; longer is closing early. */
+export const storeServicePauseLimitMs = 4 * 60 * 60_000;
 const fail = (code: string): never => {
   throw new Error(code);
 };
@@ -183,6 +185,10 @@ export function createPostgresStoreServiceControl(options: {
       )
         return fail("STORE_SERVICE_CONFIGURATION_UNAVAILABLE");
       if (command.command === "PauseService") {
+        // WP-2423 store-service-controls (v15 M30): a new pause lasts at most 4 hours from now.
+        // Pauses recorded before this rule keep their own end (reads are unchanged).
+        if (Date.parse(command.content.effectiveUntil) > Date.parse(at) + storeServicePauseLimitMs)
+          return fail("STORE_SERVICE_PAUSE_TOO_LONG");
         if (
           command.content.effectiveUntil <= at ||
           command.content.serviceModes?.some(
