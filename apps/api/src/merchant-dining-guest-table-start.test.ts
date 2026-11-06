@@ -16,6 +16,8 @@ import {
   createMerchantGuestTableStartOff,
   guestTableStartOffPermission,
 } from "./merchant-dining-guest-table-start.js";
+// Loaded with the file, not inside a test: the module graph takes seconds under a busy run.
+import { storeFeaturesPermission } from "./merchant-store-features.js";
 
 const id = (n: number) => "0190fad7-0000-7000-8000-" + String(n).padStart(12, "0");
 function setup(allowed = true) {
@@ -63,8 +65,7 @@ it("whoever may pause ordering stops guests starting tables, keeping every other
   });
 });
 
-it("turning it on stays with the owner: only the Store features command can, under its own permission", async () => {
-  const { storeFeaturesPermission } = await import("./merchant-store-features.js");
+it("turning it on stays with the owner: only the Store features command can, under its own permission", () => {
   expect(storeFeaturesPermission).toBe("organization.manage");
   expect(guestTableStartOffPermission).not.toBe(storeFeaturesPermission);
 });
