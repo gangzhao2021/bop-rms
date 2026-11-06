@@ -7,6 +7,9 @@ import { fileURLToPath } from "node:url";
 import { loadEnvironment, runtimeFile } from "./config.mjs";
 import { processMatches } from "./process.mjs";
 
+// The Worker starts with the workspace TypeScript loader; its status check must expect the same.
+const workerNodeOptions = ["--import", "./tooling/environment/register-workspace-typescript.mjs"];
+
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const [command, ...args] = process.argv.slice(2);
 let envFile = ".env";
@@ -159,8 +162,7 @@ async function start(config) {
       },
     );
     const worker = spawnService("Worker", process.execPath, [
-      "--import",
-      "./tooling/environment/register-workspace-typescript.mjs",
+      ...workerNodeOptions,
       "apps/worker/dist/index.js",
       ...(config.workerConfiguration === undefined
         ? []
@@ -267,7 +269,13 @@ async function status(config) {
   const supervisor = stateMatches && processAlive(state.supervisorPid) ? "running" : "stopped";
   const worker =
     supervisor === "running" &&
-    processMatches(state.childPids?.Worker, root, "apps/worker/dist/index.js")
+    processMatches(
+      state.childPids?.Worker,
+      root,
+      "apps/worker/dist/index.js",
+      undefined,
+      workerNodeOptions,
+    )
       ? "running"
       : "stopped";
   let postgres = "stopped";

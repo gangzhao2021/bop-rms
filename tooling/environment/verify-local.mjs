@@ -14,6 +14,10 @@ const temp = path.join(root, ".local", `wp0006-verify-${process.pid}`);
 const secret = path.join(temp, "postgres-password");
 const envFile = path.join(temp, "environment.env");
 const logFile = path.join(temp, "supervisor.log");
+// The Worker refuses to start without a workload (fail closed, so a real installation never runs a
+// Worker that does nothing). This proof starts the root environment, so it gives the Worker a
+// synthetic workload that only waits to be stopped.
+const workerConfiguration = path.join(temp, "idle-worker.mjs");
 const projectName = "bop-rms-wp0006-verify";
 const ports = { api: 53001, customerPwa: 53003, merchantWeb: 53002, postgres: 55433 };
 const healthyStatusTimeoutMs = 360_000;
@@ -131,6 +135,18 @@ try {
   fs.mkdirSync(temp, { mode: 0o700, recursive: true });
   fs.writeFileSync(secret, `wp0006-synthetic-${process.pid}`, { mode: 0o600 });
   fs.writeFileSync(
+    workerConfiguration,
+    [
+      "let timer;",
+      "export const workload = {",
+      "  async start() { timer = setInterval(() => {}, 60_000); },",
+      "  async stop() { clearInterval(timer); },",
+      "};",
+      "",
+    ].join("\n"),
+    { mode: 0o600 },
+  );
+  fs.writeFileSync(
     envFile,
     [
       `BOP_RMS_COMPOSE_PROJECT=${projectName}`,
@@ -144,6 +160,7 @@ try {
       `BOP_RMS_API_PORT=${ports.api}`,
       `BOP_RMS_MERCHANT_WEB_PORT=${ports.merchantWeb}`,
       `BOP_RMS_CUSTOMER_PWA_PORT=${ports.customerPwa}`,
+      `BOP_RMS_WORKER_CONFIGURATION=${path.relative(root, workerConfiguration)}`,
       "",
     ].join("\n"),
     { mode: 0o600 },
