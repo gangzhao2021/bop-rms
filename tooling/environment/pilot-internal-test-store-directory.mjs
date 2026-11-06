@@ -120,8 +120,8 @@ const isTableFile = (name) => /^internal-test-dining-table.*\.json$/u.test(name)
 /** Historical copies and records the new Store never had. */
 /**
  * The day-end settlement coverage names the installation Store's first closed business day; the
- * new Store records its own once its first day has closed (`pilot-internal-test-store-open.mjs
- * settlement`), and its settlement worker starts then.
+ * new Store's settlement starts on its own first business day without a file (WP-2423
+ * settlement-coverage). `pilot-internal-test-store-open.mjs settlement` may record that start.
  */
 const isOwnSettlementCoverage = (name) => name === "daily-settlement-coverage.json";
 const isHistory = (name) =>

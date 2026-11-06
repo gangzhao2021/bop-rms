@@ -32,7 +32,6 @@ const options = (services, overrides = {}) => ({
   directory: "/install",
   stores: ["stores/a", "stores/b"],
   services,
-  exists: async () => true,
   wait: quick,
   report: vi.fn(),
   ...overrides,
@@ -113,9 +112,10 @@ it("a Store that can't start is logged and retried, without marking the process 
   expect(report.mock.calls[0][2]).toEqual({ store: "stores/a:business-worker" });
 });
 
-it("a Store's settlement starts once its first closed day is recorded", async () => {
+// WP-2423 (settlement-coverage): no Store waits for a coverage file nobody writes; the worker
+// itself waits until the Store's first business day has closed.
+it("a Store's settlement worker starts on the first pass, with no coverage file", async () => {
   const log = [];
-  let covered = false;
   const host = createStoreWorkersWorkload(
     options(
       {
@@ -123,14 +123,12 @@ it("a Store's settlement starts once its first closed day is recorded", async ()
           await startRuntime({ workload: workload(log, directory) });
         },
       },
-      { stores: ["stores/a"], exists: async () => covered },
+      { stores: ["stores/a"], directory: "/no-such-install" },
     ),
   );
   await host.start();
-  await new Promise((r) => setTimeout(r, 20));
-  expect(log).toEqual([]);
-  covered = true;
   await settle(() => log.length === 1);
+  expect(log).toEqual(["start /no-such-install/stores/a"]);
   await host.stop();
 });
 

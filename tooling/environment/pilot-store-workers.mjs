@@ -1,5 +1,4 @@
 import console from "node:console";
-import { lstat } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { setTimeout as delay } from "node:timers/promises";
@@ -20,10 +19,10 @@ import { startPilotBusinessWorker, startPilotKitchenWorker } from "./pilot-worke
  * DEC-MULTI-MERCHANT-ONE-INSTALLATION A5: the workers of every Store after the installation's first,
  * in one process and one connection pool. Each Store's memory and connections no longer pay for five
  * processes. One Store's workload failing is logged and restarted on its own; the others carry on.
- * A Store's day-end settlement starts once its first closed business day is recorded.
+ * Every service starts for every admitted Store: a Store's day-end settlement worker waits on its
+ * own until the Store's first business day has closed (WP-2423), it is never left unstarted.
  */
 const RESTART_MS = 30_000,
-  COVERAGE_CHECK_MS = 60_000,
   STAGGER_MS = 250;
 const starters = Object.freeze({
   "business-worker": ({ directory, startRuntime }) =>
@@ -53,21 +52,14 @@ const starters = Object.freeze({
   "dining-exception-worker": ({ directory, startRuntime }) =>
     startConfiguredDiningExceptionWorker({ directory, startRuntime }),
 });
-const fileExists = (file) =>
-  lstat(file).then(
-    () => true,
-    () => false,
-  );
 
 export function createStoreWorkersWorkload({
   directory,
   stores,
   services = starters,
-  exists = fileExists,
   wait = delay,
   report = reportUnexpected,
   restartMs = RESTART_MS,
-  coverageCheckMs = COVERAGE_CHECK_MS,
   staggerMs = STAGGER_MS,
 }) {
   const stopping = new globalThis.AbortController();
@@ -81,13 +73,6 @@ export function createStoreWorkersWorkload({
     const storeDirectory = path.join(directory, relative);
     const details = { store: relative + ":" + service };
     while (!stopping.signal.aborted) {
-      if (
-        service === "daily-settlement-worker" &&
-        !(await exists(path.join(storeDirectory, "daily-settlement-coverage.json")))
-      ) {
-        await pause(coverageCheckMs);
-        continue;
-      }
       let workload = null;
       // A worker's start reports its own failure on the process; this process keeps serving.
       const exitCode = process.exitCode;

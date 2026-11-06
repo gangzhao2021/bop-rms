@@ -545,48 +545,60 @@ export async function loadPilotInstallation(directory) {
           return unavailable();
         }
       },
-      loadDailySettlementCoverage: async () => {
-        const value = await load("daily-settlement-coverage.json"),
-          profile = await load("internal-test-profile.json");
-        if (
-          !exact(value, ["schemaVersion", "environment", "database", "scope", "firstWindow"]) ||
-          value.schemaVersion !== 1 ||
-          !exact(value.scope, ["tenantReference", "brandReference", "storeReference"]) ||
-          Object.entries(value.scope).some(
-            ([key, reference]) => reference !== profile.binding?.[key],
-          ) ||
-          !exact(value.firstWindow, [
-            "businessDate",
-            "startsAt",
-            "endsAt",
-            "configurationReference",
-            "configurationVersion",
-            "contentDigest",
-          ]) ||
-          !/^\d{4}-\d{2}-\d{2}$/u.test(value.firstWindow.businessDate) ||
-          !Number.isSafeInteger(value.firstWindow.configurationVersion) ||
-          value.firstWindow.configurationVersion < 1 ||
-          !/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(
-            value.firstWindow.configurationReference,
-          ) ||
-          !/^sha256:[a-f0-9]{64}$/u.test(value.firstWindow.contentDigest) ||
-          [value.firstWindow.startsAt, value.firstWindow.endsAt].some(
-            (at) =>
-              typeof at !== "string" ||
-              !Number.isFinite(Date.parse(at)) ||
-              new Date(at).toISOString() !== at,
-          ) ||
-          value.firstWindow.startsAt >= value.firstWindow.endsAt
-        )
+      loadDailySettlementCoverage: () => loadCoverage(),
+      // WP-2423: an explicit recorded start, or null when no record exists (no such file only);
+      // a record that exists is validated exactly as loadDailySettlementCoverage does.
+      loadRecordedDailySettlementCoverage: async () => {
+        try {
+          await lstat(join(directory, "daily-settlement-coverage.json"));
+        } catch (error) {
+          if (error?.code === "ENOENT") return null;
           return unavailable();
-        return Object.freeze({
-          scope: Object.freeze({ ...value.scope }),
-          firstWindow: Object.freeze({ ...value.firstWindow }),
-        });
+        }
+        return loadCoverage();
       },
       loadProfile: () => load("internal-test-profile.json"),
       loadMenu: () => load("internal-test-menu.json"),
     });
+    async function loadCoverage() {
+      const value = await load("daily-settlement-coverage.json"),
+        profile = await load("internal-test-profile.json");
+      if (
+        !exact(value, ["schemaVersion", "environment", "database", "scope", "firstWindow"]) ||
+        value.schemaVersion !== 1 ||
+        !exact(value.scope, ["tenantReference", "brandReference", "storeReference"]) ||
+        Object.entries(value.scope).some(
+          ([key, reference]) => reference !== profile.binding?.[key],
+        ) ||
+        !exact(value.firstWindow, [
+          "businessDate",
+          "startsAt",
+          "endsAt",
+          "configurationReference",
+          "configurationVersion",
+          "contentDigest",
+        ]) ||
+        !/^\d{4}-\d{2}-\d{2}$/u.test(value.firstWindow.businessDate) ||
+        !Number.isSafeInteger(value.firstWindow.configurationVersion) ||
+        value.firstWindow.configurationVersion < 1 ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(
+          value.firstWindow.configurationReference,
+        ) ||
+        !/^sha256:[a-f0-9]{64}$/u.test(value.firstWindow.contentDigest) ||
+        [value.firstWindow.startsAt, value.firstWindow.endsAt].some(
+          (at) =>
+            typeof at !== "string" ||
+            !Number.isFinite(Date.parse(at)) ||
+            new Date(at).toISOString() !== at,
+        ) ||
+        value.firstWindow.startsAt >= value.firstWindow.endsAt
+      )
+        return unavailable();
+      return Object.freeze({
+        scope: Object.freeze({ ...value.scope }),
+        firstWindow: Object.freeze({ ...value.firstWindow }),
+      });
+    }
   } catch {
     return unavailable();
   }
