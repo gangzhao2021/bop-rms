@@ -404,7 +404,11 @@ it("offers manual refresh and does not claim unavailable operator or safety fact
   expect(html).toContain("Kitchen display paused");
   expect(html).toContain("sign-in can no longer be confirmed");
   // WP-2423 Q3: no menu disclosure is said plainly; sourceless cues are not shown as placeholders.
-  expect(html).toContain("Allergens not available · check the recipe");
+  // WP-2423: the kitchen sign-in cannot open recipes, so the line says what a cook can do.
+  expect(html).toContain(
+    "Allergens not on file. Ask the manager before serving anyone with an allergy.",
+  );
+  expect(html).not.toContain("check the recipe");
   expect(html).not.toContain("Allergen / exception cues unavailable");
   expect(html).not.toContain("Exception status unavailable");
   expect(html).not.toContain("Filters apply only");

@@ -687,7 +687,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Allergens (this version)": "过敏原（此版本）",
   "Allergens are unavailable": "过敏原信息暂不可用",
   "Allergens from ingredients:": "来自配料的过敏原：",
-  "Allergens not available · check the recipe": "过敏原信息不可用 · 请查看配方",
+  "Allergens not on file. Ask the manager before serving anyone with an allergy.":
+    "没有过敏原记录。客人有过敏时，先问经理再上菜。",
   "Allergens · Brand": "过敏原 · 品牌",
   "Allergens · Ingredient": "过敏原 · 配料",
   "Allergens: {value}": "过敏原：{value}",

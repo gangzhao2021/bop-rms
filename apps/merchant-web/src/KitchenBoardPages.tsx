@@ -756,7 +756,7 @@ export function KitchenAllergenLine({ item }: { readonly item: KitchenBoardItem 
   if (allergens === undefined || allergens.status === "Unavailable")
     return (
       <p className="kitchen-work-item__allergens" data-kind="unavailable" role="note">
-        {t("Allergens not available · check the recipe")}
+        {t("Allergens not on file. Ask the manager before serving anyone with an allergy.")}
       </p>
     );
   const none = allergens.contains.length === 0 && allergens.mayContain.length === 0;
