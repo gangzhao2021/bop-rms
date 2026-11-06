@@ -888,6 +888,61 @@ describe("Figma v1 (2026-10-25): Home lists what needs attention now", () => {
       ),
     ).toBe("");
   });
+  it("WP-2423 item 9: a cleared order-rules row keeps its place, never 'nothing needs attention'", () => {
+    const quiet: OverviewTodayState = {
+      ...state,
+      orders: ready({ ...orders, awaitingAcceptance: 0 }),
+      pickups: ready({ waiting: 0, earlierDays: 0, remaking: 0, more: false }),
+      exceptions: ready({ open: 0, overdue: 0 }),
+      tables: ready({ tables: [], canClose: true, more: false }),
+    };
+    const board = {
+      monitor: "Reporting",
+      observedAt: "2026-11-07T01:10:00.000Z",
+      active: [],
+      recentlyCleared: [
+        {
+          key: "orders.workflow",
+          title: "Order rules check passes again: stay on paper until BOP support says it is fixed",
+          clearedAt: "2026-11-07T01:08:00.000Z",
+        },
+      ],
+      outbound: { email: true, webhooks: 0, heartbeat: false },
+      lastSuccessfulBackupAt: null,
+      plannedUpdate: null,
+    } as const;
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <NeedsAttention
+          state={quiet}
+          system={{ kind: "Ready", value: board }}
+          timeZone="America/Toronto"
+          dayStartsAt="2026-11-06T08:00:00.000Z"
+        />
+      </MemoryRouter>,
+    );
+    expect(html).not.toContain("Nothing needs attention right now.");
+    expect(html).toContain(
+      "Order rules check passes again: stay on paper until BOP support says it is fixed",
+    );
+    expect(html).toContain("do not resume ordering yet");
+    expect(html).toContain("when today&#x27;s business day ends");
+    expect(html).toContain("Check passed Nov 6, 2026, 8:08 PM");
+    expect(html).toContain("Wait for BOP support");
+    // The next business day it is gone, and Home is quiet again.
+    const nextDay = renderToStaticMarkup(
+      <MemoryRouter>
+        <NeedsAttention
+          state={quiet}
+          system={{ kind: "Ready", value: board }}
+          timeZone="America/Toronto"
+          dayStartsAt="2026-11-07T08:00:00.000Z"
+        />
+      </MemoryRouter>,
+    );
+    expect(nextDay).toContain("Nothing needs attention right now.");
+    expect(nextDay).not.toContain("passes again");
+  });
   it("gives each row its state in words and one link to the page that settles it", () => {
     const html = renderToStaticMarkup(
       <MemoryRouter>

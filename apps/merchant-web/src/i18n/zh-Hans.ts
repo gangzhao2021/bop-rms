@@ -5824,6 +5824,12 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "门店订单规则的检查又通过了：在 BOP 技术支持确认修好之前，请继续用纸质点单",
   "Unpaid rounds check passes again: keep the noted tables until BOP support says it is fixed":
     "未付款轮次的检查又通过了：在 BOP 技术支持确认修好之前，请先不要关闭记下的桌子",
+  "Keep seating new parties at other tables, and close the noted tables once BOP support says it is fixed. This line goes when BOP support finishes the update that fixes it, or when today's business day ends.":
+    "新来的客人继续安排到别的桌子；等 BOP 技术支持确认修好后，再关闭记下的桌子。BOP 技术支持完成修复更新后，或今天的营业日结束时，这一条会消失。",
+  "Keep taking orders on paper and payment on the card machine, and do not resume ordering yet: the store's services can still use the old order rules until BOP support restarts them. This line goes when BOP support finishes the update that fixes it, or when today's business day ends.":
+    "继续用纸质点单、用刷卡机收款，先不要恢复点单：在 BOP 技术支持重启之前，门店系统可能还在用旧的订单规则。BOP 技术支持完成修复更新后，或今天的营业日结束时，这一条会消失。",
+  "Check passed {clearedAt}": "{clearedAt} 检查通过",
+  "Wait for BOP support": "等 BOP 技术支持确认",
   "Payment differences need checking": "付款差异需要核对",
   "Day-end settlement has open problems": "日结还有未解决的问题",
   "Last night's backup failed": "昨晚备份失败",
@@ -7092,10 +7098,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "客人暂时不受影响。今天内请 BOP 技术支持检查自取时间；如果只剩最后一小时，自取订单改记在纸上。",
   "Tell guests who ask that their receipt will appear on their order page once this is fixed. Owner: in Store setup choose a receipt template that is published (step 5), then send, approve and publish the setup (step 8). Receipts for orders paid meanwhile then follow automatically; if this lasted over 30 minutes, ask BOP support to send stuck updates again.":
     "有客人问起，告诉他们修好后收据会显示在订单页面上。店主：在“门店设置”里选择一个已发布的收据模板（第 5 步），然后发送、批准并发布设置（第 8 步）。这段时间已付款订单的收据之后会自动补上；如果持续超过 30 分钟，请 BOP 技术支持重新发送卡住的更新。",
-  "Pause all services in Hours & ordering until closing (can resume early). Tell seated tables to order with staff. New orders: paper slip, card machine. A guest who paid: no second payment; kitchen slip with order number. Call BOP support now; stay on paper until they say it is fixed. Then enter the paper orders; for a slip with an order number, accept that order, mark it ready, do not remake it.":
-    "请在“营业时间与点单”里暂停所有服务，一直到打烊（可以提前恢复）；已入座的客人请找员工点单。新订单：写纸条，用刷卡机收款。客人已经付过款的，不要再收一次；写一张给后厨的纸条，注明订单号。请立即联系 BOP 技术支持，在他们确认修好之前继续用纸质点单。之后把纸质订单录入系统；纸条上有订单号的不要录入，在系统里接单并标记做好，不要重做。",
-  "Pause pickup in Hours & ordering until closing (can resume early). New pickup orders: paper slip, card machine. A guest who paid: no second payment; kitchen slip with order number. The order refunds itself if not accepted. Call BOP support now; stay on paper until they say it is fixed. Then enter the paper orders; for a slip with an order number, accept that order, mark it ready, do not remake it.":
-    "请在“营业时间与点单”里暂停自取，一直到打烊（可以提前恢复）。新的自取订单：写纸条，用刷卡机收款。客人已经付过款的，不要再收一次；写一张给后厨的纸条，注明订单号。这种订单如果没人接单，会自动退款。请立即联系 BOP 技术支持，在他们确认修好之前继续用纸质点单。之后把纸质订单录入系统；纸条上有订单号的不要录入，在系统里接单并标记做好，不要重做。",
+  "Pause all services in Hours & ordering until closing (can resume early). Tell seated tables to order with staff. New orders: paper slip, card machine. A guest who paid: no second payment; kitchen slip with order number. Call BOP support now; stay on paper until they say it is fixed. Then enter paper orders, refunded ones too; a slip whose order is open: accept it, mark it ready, don't remake it.":
+    "请在“营业时间与点单”里暂停所有服务，一直到打烊（可以提前恢复）；已入座的客人请找员工点单。新订单：写纸条，用刷卡机收款。客人已经付过款的，不要再收一次；写一张给后厨的纸条，注明订单号。请立即联系 BOP 技术支持，在他们确认修好之前继续用纸质点单。之后把纸质订单录入系统，已自动退款的也要录入；纸条上的订单没有退款的，不要录入，在系统里接单并标记做好，不要重做。",
+  "Pause pickup in Hours & ordering until closing (can resume early). New pickup orders: paper slip, card machine. A guest who paid: no second payment; kitchen slip with order number. An unaccepted order refunds itself. Call BOP support now; stay on paper until they say it is fixed. Then enter paper orders, refunded ones too; a slip whose order is open: accept it, mark it ready, don't remake it.":
+    "请在“营业时间与点单”里暂停自取，一直到打烊（可以提前恢复）。新的自取订单：写纸条，用刷卡机收款。客人已经付过款的，不要再收一次；写一张给后厨的纸条，注明订单号。这种订单如果没人接单，会自动退款。请立即联系 BOP 技术支持，在他们确认修好之前继续用纸质点单。之后把纸质订单录入系统，已自动退款的也要录入；纸条上的订单没有退款的，不要录入，在系统里接单并标记做好，不要重做。",
   "Pause dine-in in Hours & ordering until closing (can resume early). Tell seated tables to order with staff. New rounds: paper slip, card machine. A guest who paid: no second payment; kitchen slip with order number. Call BOP support now; stay on paper until they say it is fixed. Then enter the paper orders; for a slip with an order number, accept that order, mark it ready, do not remake it.":
     "请在“营业时间与点单”里暂停堂食，一直到打烊（可以提前恢复）；已入座的客人请找员工点单。新的轮次：写纸条，用刷卡机收款。客人已经付过款的，不要再收一次；写一张给后厨的纸条，注明订单号。请立即联系 BOP 技术支持，在他们确认修好之前继续用纸质点单。之后把纸质订单录入系统；纸条上有订单号的不要录入，在系统里接单并标记做好，不要重做。",
   "Tables that pay before each round order further rounds with staff: paper slip, card machine. Tables that pay at the end carry on as usual. A guest who paid: no second payment; kitchen slip with order number. Call BOP support now; stay on paper until they say it is fixed. Then enter the paper orders; for a slip with an order number, accept that order, mark it ready, do not remake it.":

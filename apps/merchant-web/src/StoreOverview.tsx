@@ -657,6 +657,7 @@ export function NeedsAttention({
   settlement = { kind: "Hidden" },
   system = { kind: "NotPermitted" },
   timeZone,
+  dayStartsAt,
   reminder = null,
   onRefresh,
   onCheckSystem,
@@ -668,13 +669,20 @@ export function NeedsAttention({
   /** The store system's board: a real problem is a row here, not only in the status line. */
   readonly system?: OperationsAlertsRead;
   readonly timeZone?: string | undefined;
+  /** The store's current business day; from the Store's business-day read when not given. */
+  readonly dayStartsAt?: string | null | undefined;
   /** The evening reminder, which reads for itself: a row above the rest when it shows. */
   readonly reminder?: ReactNode;
   readonly onRefresh?: (() => void) | undefined;
   readonly onCheckSystem?: (() => void) | undefined;
 }) {
   const reads = [state.orders, state.pickups, state.exceptions, state.tables];
-  const { urgent, later } = systemAttentionItems(system, timeZone);
+  const businessDay = useStoreBusinessDay();
+  const { urgent, later } = systemAttentionItems(
+    system,
+    timeZone,
+    dayStartsAt ?? businessDay?.startsAt ?? null,
+  );
   if (
     kitchenSetupHref === null &&
     urgent.length + later.length === 0 &&

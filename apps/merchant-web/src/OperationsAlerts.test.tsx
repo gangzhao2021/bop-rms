@@ -184,33 +184,93 @@ describe("WP-2423 Q13 store system alerts on the Home", () => {
     });
     expect(html.indexOf("No recent backup")).toBeLessThan(html.indexOf("Store system is not"));
   });
-  it("WP-2423 item 9: a cleared order-rules row says to wait for BOP support, in view, never resolved", async () => {
+  it("WP-2423 item 9: a cleared order-rules row says to wait for BOP support in Needs attention, never resolved", async () => {
     const { clearedAlertTitle } = (await import(/* @vite-ignore */ catalogFile)) as {
-      readonly clearedAlertTitle: (key: string) => string;
+      readonly clearedAlertTitle: (key: string, params?: unknown) => string;
     };
     const clearedAt = "2026-10-15T08:31:00.000Z";
+    const wait = clearedAlertTitle("orders.workflow", { state: "Pickup" });
     const value = view({
-      recentlyCleared: [
-        { key: "orders.workflow", title: clearedAlertTitle("orders.workflow"), clearedAt },
-      ],
+      recentlyCleared: [{ key: "orders.workflow", title: wait, clearedAt }],
     });
-    const html = line({ kind: "Ready", value });
-    expect(html).toContain(
+    expect(wait).toBe(
       "Order rules check passes again: stay on paper until BOP support says it is fixed",
     );
-    expect(html).not.toContain("Resolved recently");
-    // Not folded away under System details.
-    expect(html.indexOf("stay on paper")).toBeLessThan(
-      html.indexOf("<details") === -1 ? Infinity : html.indexOf("<details"),
-    );
+    const html = rows({ kind: "Ready", value });
+    expect(html).toContain(wait);
+    expect(html).toContain("overview-attention__state--warning");
+    expect(html).toContain("Wait for BOP support");
+    // The line at the foot of Home sends staff up to it, and never calls it resolved.
+    expect(line({ kind: "Ready", value })).not.toContain("stay on paper");
+    expect(line({ kind: "Ready", value })).not.toContain("Resolved recently");
+    expect(line({ kind: "Ready", value })).toContain("needs attention, see the list above");
     setLanguageForTest("zh-Hans");
     try {
-      const zh = line({ kind: "Ready", value });
+      const zh = rows({ kind: "Ready", value });
       expect(zh).toContain("门店订单规则的检查又通过了");
-      expect(zh).not.toContain("最近已解决");
+      expect(zh).toContain("等 BOP 技术支持确认");
+      expect(zh).not.toContain("Check passed");
+      expect(line({ kind: "Ready", value })).not.toContain("最近已解决");
     } finally {
       setLanguageForTest("en");
     }
+  });
+  it("WP-2423 item 9: the wait line is not shown beside the same row raised again, nor after the business day", () => {
+    const wait = {
+      key: "orders.workflow",
+      title: "Order rules check passes again: stay on paper until BOP support says it is fixed",
+      clearedAt: "2026-10-15T08:31:00.000Z",
+    };
+    const raisedAgain = {
+      ...critical,
+      key: "orders.workflow",
+      title: "Paid pickup orders may not reach the kitchen and may be refunded automatically",
+      raisedAt: "2026-10-15T08:45:00.000Z",
+    };
+    const both = rows({
+      kind: "Ready",
+      value: view({ active: [raisedAgain], recentlyCleared: [wait] }),
+    });
+    expect(both).toContain("Paid pickup orders may not reach the kitchen");
+    expect(both).not.toContain("passes again");
+    const value = view({ recentlyCleared: [wait] });
+    const markup = (dayStartsAt: string) =>
+      renderToStaticMarkup(
+        <MemoryRouter>
+          <NeedsAttention
+            state={initialOverviewState}
+            system={{ kind: "Ready", value }}
+            timeZone="America/Toronto"
+            dayStartsAt={dayStartsAt}
+          />
+        </MemoryRouter>,
+      );
+    expect(markup("2026-10-15T08:00:00.000Z")).toContain("passes again");
+    expect(markup("2026-10-16T08:00:00.000Z")).not.toContain("passes again");
+    expect(
+      renderToStaticMarkup(
+        <StoreSystemLine
+          read={{ kind: "Ready", value }}
+          timeZone="America/Toronto"
+          dayStartsAt="2026-10-16T08:00:00.000Z"
+        />,
+      ),
+    ).toContain("Store system: all good");
+  });
+  it("WP-2423 item 9: a cleared 'cannot be turned on yet' row is an ordinary resolved line", async () => {
+    const { clearedAlertTitle } = (await import(/* @vite-ignore */ catalogFile)) as {
+      readonly clearedAlertTitle: (key: string, params?: unknown) => string;
+    };
+    const title = clearedAlertTitle("orders.workflow", { state: "PickupNotOffered" });
+    expect(title).toBe("Pickup cannot be turned on yet");
+    const value = view({
+      recentlyCleared: [{ key: "orders.workflow", title, clearedAt: "2026-10-15T08:31:00.000Z" }],
+    });
+    expect(rows({ kind: "Ready", value })).not.toContain("Pickup cannot be turned on yet");
+    const html = line({ kind: "Ready", value });
+    expect(html).toContain("Resolved recently: Pickup cannot be turned on yet");
+    expect(html).toContain("Store system: all good");
+    expect(html).not.toContain("paper");
   });
   it("WP-2423 (2026-10-18): a planned update shows a calm notice, not an outage", () => {
     const plannedUpdate = {

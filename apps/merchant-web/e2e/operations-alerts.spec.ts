@@ -473,13 +473,13 @@ test("@production Home says what a refused order Workflow stops and what staff d
 });
 
 // WP-2423 item 9: the row can clear before the fix reaches the running services, so its clearing
-// stays in view and tells staff to wait for BOP support, never "Resolved".
+// stays in "Needs attention", where the urgent row was, and tells staff to wait for BOP support.
 test("@production Home keeps staff on paper when the order rules row clears (WP-2423 item 9)", async ({
   page,
 }) => {
   const catalog = new URL("../../../tooling/environment/pilot-alerts.mjs", import.meta.url).href;
   const { clearedAlertTitle } = (await import(catalog)) as {
-    readonly clearedAlertTitle: (key: string) => string;
+    readonly clearedAlertTitle: (key: string, params?: unknown) => string;
   };
   const board = {
     ...problem,
@@ -487,18 +487,21 @@ test("@production Home keeps staff on paper when the order rules row clears (WP-
     recentlyCleared: [
       {
         key: "orders.workflow",
-        title: clearedAlertTitle("orders.workflow"),
+        title: clearedAlertTitle("orders.workflow", { state: "Pickup" }),
         clearedAt: "2026-10-15T15:58:00.000Z",
       },
     ],
   };
   const home = await pilotHome(page, "owner", () => board);
   await page.goto("/app");
+  const needs = page.getByRole("region", { name: "Needs attention" });
   await expect(
-    page.getByText(
+    needs.getByText(
       /Order rules check passes again: stay on paper until BOP support says it is fixed/u,
     ),
   ).toBeVisible();
+  await expect(needs.getByText("Wait for BOP support")).toBeVisible();
+  await expect(page.getByText("Nothing needs attention right now.")).toHaveCount(0);
   await expect(page.getByText(/Resolved recently/u)).toHaveCount(0);
   await expectNoInternalText(page);
   for (const width of [1440, 390, 320]) {

@@ -2,6 +2,7 @@ import { t } from "./i18n/i18n.js";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { alertAction, alertSummary } from "./operations-alert-words.js";
 import { useStaffSessionLive } from "./staff-session-reads.js";
+import { useStoreBusinessDay } from "./StoreBusinessDay.js";
 import { storeTime } from "./StoreTime.js";
 import type { AttentionItem } from "./StoreOverview.js";
 
@@ -36,12 +37,40 @@ export interface OperationsAlertView {
   /** WP-2423 (2026-10-18): a planned update in progress; store-down alerts wait during it. */
   readonly plannedUpdate: { readonly startedAt: string; readonly expiresAt: string } | null;
 }
-/** Owner 2026-11-03 walkthrough: the watcher writes English titles; staff read their language. */
-/** Keys whose clearing still waits for BOP support (pilot-alerts `clearedTitle`). */
-const clearedWaitsForSupport: ReadonlySet<string> = new Set([
-  "orders.workflow",
-  "orders.unpaid_rounds",
+/**
+ * The cleared titles that still keep staff waiting for BOP support (pilot-alerts `clearedTitle`).
+ * Matched by title, not key: an order-rules row that only said an order type cannot be turned on
+ * yet clears under its own title, as resolved.
+ */
+const WAIT_FOR_SUPPORT_TITLES: ReadonlySet<string> = new Set([
+  "Order rules check passes again: stay on paper until BOP support says it is fixed",
+  "Unpaid rounds check passes again: keep the noted tables until BOP support says it is fixed",
 ]);
+type ClearedAlert = OperationsAlertView["recentlyCleared"][number];
+const waitsForSupport = (item: ClearedAlert) => WAIT_FOR_SUPPORT_TITLES.has(item.title);
+/**
+ * WP-2423 item 9: the "check passes again, wait for BOP support" lines Home still shows. The newest
+ * per row, never while that row is raised again, and only from the store's current business day
+ * (the monitor itself ends one when the planned update BOP fixes it in ends).
+ */
+export function waitingForSupport(
+  view: OperationsAlertView,
+  dayStartsAt: string | null = null,
+): readonly ClearedAlert[] {
+  const active = new Set(view.active.map((item) => item.key));
+  const newest = new Map<string, ClearedAlert>();
+  for (const item of view.recentlyCleared)
+    if (
+      waitsForSupport(item) &&
+      !active.has(item.key) &&
+      (dayStartsAt === null || item.clearedAt >= dayStartsAt) &&
+      (newest.get(item.key)?.clearedAt ?? "") <= item.clearedAt
+    )
+      newest.set(item.key, item);
+  return [...newest.values()].sort((a, b) => b.clearedAt.localeCompare(a.clearedAt));
+}
+
+/** Owner 2026-11-03 walkthrough: the watcher writes English titles; staff read their language. */
 
 export function alertTitle(title: string): string {
   const words: Readonly<Record<string, string>> = {
@@ -273,6 +302,7 @@ function outboundNote(outbound: OperationsAlertView["outbound"]): string {
 export function systemAttentionItems(
   read: OperationsAlertsRead,
   timeZone?: string,
+  dayStartsAt: string | null = null,
 ): { readonly urgent: readonly AttentionItem[]; readonly later: readonly AttentionItem[] } {
   const at = (iso: string) => storeTime(iso, timeZone, true);
   if (read.kind === "Loading" || read.kind === "NotPermitted") return { urgent: [], later: [] };
@@ -361,17 +391,37 @@ export function systemAttentionItems(
             } satisfies AttentionItem,
           ]),
       ...view.active.filter((item) => item.severity === "critical").map(row),
+      // In the place the urgent row had: its clearing is not yet the all clear.
+      ...waitingForSupport(view, dayStartsAt).map((item): AttentionItem => ({
+        key: `system-wait-${item.key}`,
+        title: alertTitle(item.title),
+        detailLabel: t("What to do:"),
+        detail:
+          item.key === "orders.unpaid_rounds"
+            ? t(
+                "Keep seating new parties at other tables, and close the noted tables once BOP support says it is fixed. This line goes when BOP support finishes the update that fixes it, or when today's business day ends.",
+              )
+            : t(
+                "Keep taking orders on paper and payment on the card machine, and do not resume ordering yet: the store's services can still use the old order rules until BOP support restarts them. This line goes when BOP support finishes the update that fixes it, or when today's business day ends.",
+              ),
+        since: t("Check passed {clearedAt}", { clearedAt: at(item.clearedAt) }),
+        state: t("Wait for BOP support"),
+        tone: "warning",
+        href: null,
+        action: null,
+      })),
     ],
     later: view.active.filter((item) => item.severity !== "critical").map(row),
   };
 }
 
-function systemStatusWords(read: OperationsAlertsRead): string {
+function systemStatusWords(read: OperationsAlertsRead, dayStartsAt: string | null): string {
   if (read.kind === "Unavailable") return t("Store system: could not be checked");
   if (read.kind !== "Ready") return t("Checking the store system…");
   const view = read.value;
   if (view.monitor !== "Reporting") return t("Store system: problems are not being checked");
-  if (view.active.length > 0) return t("Store system: needs attention, see the list above");
+  if (view.active.length > 0 || waitingForSupport(view, dayStartsAt).length > 0)
+    return t("Store system: needs attention, see the list above");
   if (view.plannedUpdate !== null) return t("Store system: update in progress");
   return t("Store system: all good");
 }
@@ -383,28 +433,32 @@ function systemStatusWords(read: OperationsAlertsRead): string {
 export function StoreSystemLine({
   read,
   timeZone,
+  dayStartsAt,
   busy = false,
   onRefresh,
 }: {
   readonly read: OperationsAlertsRead;
   readonly timeZone?: string | undefined;
+  /** The store's current business day; from the Store's business-day read when not given. */
+  readonly dayStartsAt?: string | null | undefined;
   readonly busy?: boolean;
   readonly onRefresh?: (() => void) | undefined;
 }) {
+  const businessDay = useStoreBusinessDay();
+  const startsAt = dayStartsAt ?? businessDay?.startsAt ?? null;
   if (read.kind === "NotPermitted") return null;
   const at = (iso: string) => storeTime(iso, timeZone, true);
   // Only a monitor that reports can vouch for the backup and alert facts.
   const view = read.kind === "Ready" && read.value.monitor === "Reporting" ? read.value : null;
   const cleared = view?.recentlyCleared ?? [];
-  // A cleared order-rules row is not all clear: staff wait for BOP support (its title says so).
-  const waiting = cleared.filter((item) => clearedWaitsForSupport.has(item.key));
-  const resolved = cleared.filter((item) => !clearedWaitsForSupport.has(item.key));
+  // A cleared order-rules row is not all clear: it stays in "Needs attention", never "Resolved".
+  const resolved = cleared.filter((item) => !waitsForSupport(item));
   const moreToTell = view !== null && (resolved.length > 0 || !alertsOnlyHere(view.outbound));
   return (
     <section className="overview-system" aria-label={t("Store system")}>
       <div className="overview-system__line">
         <p aria-live="polite">
-          <span>{systemStatusWords(read)}</span>
+          <span>{systemStatusWords(read, startsAt)}</span>
           {view === null ? null : (
             <span>
               {" · "}
@@ -432,15 +486,6 @@ export function StoreSystemLine({
           </button>
         ) : null}
       </div>
-      {/* In view, not under details: the row that told staff to go on paper has just gone. */}
-      {waiting
-        .slice(-2)
-        .reverse()
-        .map((item) => (
-          <p key={item.key + item.clearedAt} className="overview-system__note">
-            {`${alertTitle(item.title)} (${at(item.clearedAt)})`}
-          </p>
-        ))}
       {view !== null && alertsOnlyHere(view.outbound) ? (
         <p className="overview-system__note">{outboundNote(view.outbound)}</p>
       ) : null}
