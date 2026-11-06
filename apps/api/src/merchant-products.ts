@@ -367,6 +367,26 @@ const catalogErrors: Partial<Record<CatalogError["code"], MerchantProductError["
   CATALOG_UNAVAILABLE: "NotFound",
 };
 
+/**
+ * WP-2423 (review 2026-11-06): the choices a save keeps for one group. A choice removed (archived)
+ * from the group since the dish was saved comes back from the stored binding on every save, so it
+ * is dropped rather than refused: no reopening of the editor can clear it. A choice ticked now that
+ * is no longer in the group (the editor read the group before it was removed) is refused (null).
+ */
+export function keptEnabledOptions(
+  sent: readonly string[],
+  stored: readonly string[],
+  usable: ReadonlySet<string>,
+): readonly string[] | null {
+  const before = new Set(stored);
+  const kept: string[] = [];
+  for (const reference of sent) {
+    if (usable.has(reference)) kept.push(reference);
+    else if (!before.has(reference)) return null;
+  }
+  return kept;
+}
+
 function optionSetsView(product: ProductAggregate) {
   return product.draft.optionBindings.map((binding) => ({
     optionSetReference: binding.optionSetReference,
@@ -769,9 +789,14 @@ export function createMerchantProducts(options: {
                   .filter((option) => option.lifecycle !== "Archived")
                   .map((option) => String(option.optionReference)),
               );
-              // A choice removed (archived) since the editor read the group.
-              if (input.enabledOptionReferences.some((reference) => !usable.has(reference)))
-                choiceGroup(set, "ChoiceGroupOption");
+              // A choice removed (archived) since the editor read the group is refused; one that
+              // was already on the saved dish is dropped.
+              const enabled =
+                keptEnabledOptions(
+                  input.enabledOptionReferences,
+                  (existing?.enabledOptionReferences ?? []).map(String),
+                  usable,
+                ) ?? choiceGroup(set, "ChoiceGroupOption");
               // One rule (Catalog's): the set's offered default choices among those enabled.
               const binding = rebuiltProductOptionBinding(
                 {
@@ -784,7 +809,7 @@ export function createMerchantProducts(options: {
                   optionSetVersionReference: set.draft.versionReference,
                   purpose: existing?.purpose ?? parseCatalogCode("CUSTOMER_CHOICE"),
                   sortOrder,
-                  enabledOptionReferences: input.enabledOptionReferences.map(parseCatalogReference),
+                  enabledOptionReferences: enabled.map(parseCatalogReference),
                   defaultSelections: [],
                   minimumSelectionOverride: null,
                   maximumSelectionOverride: null,

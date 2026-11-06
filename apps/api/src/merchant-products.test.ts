@@ -3,6 +3,7 @@ import type { ProductImageRecord } from "@bop/media";
 import type { ProductAggregate } from "@rms/catalog";
 import {
   derivedReference,
+  keptEnabledOptions,
   parseProductCommandBody,
   presentationView,
 } from "./merchant-products.js";
@@ -262,5 +263,22 @@ describe("Owner 2026-10-23 Chinese names", () => {
       "zh-Hans-CA": "拿铁",
     });
     expect(chineseOf(names)).toBe("");
+  });
+});
+
+describe("WP-2423 choices removed from a group since the dish was saved", () => {
+  const [hot, iced, warm, oatTopping] = [id(301), id(302), id(303), id(304)];
+  // The group now offers Hot and Iced; Warm was removed (archived) after the dish was saved.
+  const usable = new Set([hot, iced]);
+  it("drops a removed choice that the saved dish still holds, so a name-only save goes through", () => {
+    // The editor loads the stored binding and sends it back unchanged with a new dish name.
+    expect(keptEnabledOptions([hot, warm], [hot, warm], usable)).toEqual([hot]);
+    // Every choice of the group removed: the group keeps none, it is not refused.
+    expect(keptEnabledOptions([warm], [warm], usable)).toEqual([]);
+    expect(keptEnabledOptions([hot, iced], [hot], usable)).toEqual([hot, iced]);
+  });
+  it("refuses a choice ticked now that the group no longer has", () => {
+    expect(keptEnabledOptions([hot, oatTopping], [hot], usable)).toBeNull();
+    expect(keptEnabledOptions([warm], [], usable)).toBeNull();
   });
 });
