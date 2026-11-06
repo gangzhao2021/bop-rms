@@ -11,6 +11,7 @@ import {
   sameOriginMutation,
 } from "./merchant-bff-http.js";
 import type { MerchantBffRouterOptions } from "./merchant-bff-contract.js";
+import { tableClosePlanResponse } from "./merchant-dining-table-close-plan-response.js";
 import { DiningServeReadyError } from "./merchant-dining-serve-ready-command.js";
 import { DiningClosingError } from "@rms/dining";
 import { DiningCheckoutAlreadyPaidError } from "./merchant-dining-closing-command.js";
@@ -1068,25 +1069,7 @@ export function installMerchantDiningRoutes(
           response.status(404).json({ error: "dining_table_close_plan_not_found" });
           return;
         }
-        response.json({
-          orderReference: plan.orderReference,
-          diningSessionReference: plan.diningSessionReference,
-          orderVersion: plan.orderVersion,
-          observedAt: plan.observedAt,
-          rounds: plan.rounds.map((round) => ({
-            orderBatchReference: round.orderBatchReference,
-            sequence: round.sequence,
-            state: round.state,
-            openItemCount: round.openItemCount,
-            startedItemCount: round.startedItemCount,
-            readyItemCount: round.readyItemCount,
-            cancellableItemReferences: round.cancellableItemReferences,
-            refund: round.refund,
-            cancelsAt: round.cancelsAt,
-          })),
-          totals: plan.totals,
-          closeBlockers: plan.closeBlockers,
-        });
+        response.json(tableClosePlanResponse(plan));
       })
       .catch((error: unknown) => {
         noteFailure(response, error);

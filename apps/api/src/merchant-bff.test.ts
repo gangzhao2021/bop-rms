@@ -2356,6 +2356,104 @@ it("protects Dining progress transport and returns only operational fields", asy
   ).toBe(503);
 });
 
+// v15 2026-11-06: the route copied each round by hand and dropped kitchenReceivedAt, so the Tables
+// panel refused every reply with an open round ("Couldn't check the table's open rounds").
+it("protects the table close plan and returns every round field the panel reads", async () => {
+  type Reader = NonNullable<MerchantBffRouterOptions["diningTableClosePlan"]>;
+  const onTable = {
+    orderBatchReference: "018f7f9a-ad3e-7a11-8d01-000000000011",
+    sequence: 1,
+    state: "OnTableBill" as const,
+    openItemCount: 2,
+    startedItemCount: 1,
+    readyItemCount: 0,
+    cancellableItemReferences: [],
+    refund: null,
+    cancelsAt: null,
+    kitchenReceivedAt: "2026-07-29T11:55:00.000Z",
+  };
+  const notStarted = {
+    ...onTable,
+    orderBatchReference: "018f7f9a-ad3e-7a11-8d01-000000000012",
+    sequence: 2,
+    state: "NotStarted" as const,
+    startedItemCount: 0,
+    refund: { method: "Online" as const, amountMinor: "1250" },
+    kitchenReceivedAt: null,
+  };
+  const plan = {
+    orderReference: storeReference,
+    diningSessionReference: "018f7f9a-ad3e-7a11-8d01-000000000013",
+    orderVersion: 3,
+    observedAt: serverTime,
+    rounds: [{ ...onTable, auditReference: "private-audit" }, notStarted],
+    totals: { onlineMinor: "1250", cardMachineMinor: "0" },
+    closeBlockers: ["ITEMS_NOT_SERVED"],
+    brandReference: "private-brand",
+  };
+  const read = vi.fn<Reader>().mockResolvedValue(plan as unknown as Awaited<ReturnType<Reader>>);
+  const app = express();
+  app.use(
+    "/merchant",
+    createMerchantBffRouter({
+      service: fakeService(),
+      diningTableClosePlan: read,
+      exactOrigin: "https://merchant.invalid",
+      acceptedHost: "merchant.invalid",
+    }),
+  );
+  const server = app.listen(0, "127.0.0.1");
+  servers.push(server);
+  await new Promise<void>((resolve) => server.once("listening", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("listener unavailable");
+  const root = `http://127.0.0.1:${address.port}`;
+  const headers = {
+    ...safeHeaders,
+    Cookie: "__Host-bop-merchant=" + sessionCookie,
+    "X-BOP-CSRF": csrf,
+    "Content-Type": "application/json",
+  };
+  const body = {
+    orderReference: storeReference,
+    diningSessionReference: plan.diningSessionReference,
+  };
+  const submit = (extra: Record<string, string> = {}, path = "/merchant/dining/table-close-plan") =>
+    request(root, path, {
+      method: "POST",
+      body: JSON.stringify(body),
+      headers: { ...headers, ...extra },
+    });
+  expect((await submit({ Origin: "https://foreign.invalid" })).status).toBe(403);
+  expect((await submit({ Cookie: "" })).status).toBe(403);
+  expect((await submit({}, "/merchant/dining/table-close-plan?store=other")).status).toBe(403);
+  expect(read).not.toHaveBeenCalled();
+  const response = await submit();
+  expect(response.status).toBe(200);
+  expect(response.headers.get("cache-control")).toBe("no-store");
+  const wire = (await response.json()) as { rounds: Record<string, unknown>[] };
+  expect(wire.rounds.map((round) => round.kitchenReceivedAt)).toEqual([
+    "2026-07-29T11:55:00.000Z",
+    null,
+  ]);
+  expect(wire).toEqual({
+    orderReference: storeReference,
+    diningSessionReference: plan.diningSessionReference,
+    orderVersion: 3,
+    observedAt: serverTime,
+    rounds: [onTable, notStarted],
+    totals: { onlineMinor: "1250", cardMachineMinor: "0" },
+    closeBlockers: ["ITEMS_NOT_SERVED"],
+  });
+  expect(read).toHaveBeenCalledWith({ sessionCookie, csrf, query: body });
+  read.mockResolvedValueOnce(null);
+  expect((await submit()).status).toBe(404);
+  read.mockRejectedValueOnce(new Error("private failure"));
+  const failed = await submit();
+  expect(failed.status).toBe(503);
+  expect(JSON.stringify(await failed.json())).not.toContain("private");
+});
+
 it("protects the minimal Dining serve command and keeps private facts out of responses", async () => {
   const command = vi
     .fn<NonNullable<MerchantBffRouterOptions["diningServe"]>>()
