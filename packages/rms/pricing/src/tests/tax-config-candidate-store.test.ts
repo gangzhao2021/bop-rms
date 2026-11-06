@@ -1336,7 +1336,7 @@ it("pages twenty actual immutable candidates and retains full child guards witho
   expect(tail.entries).toHaveLength(1);
   expect(tail.nextAfterCandidate).toBeNull();
   expect(must(tail.entries[0]).targetVersionReference > last.targetVersionReference).toBe(true);
-});
+}, 30_000); // Twenty full candidates: CPU work that a shared CI runner slows past the default.
 
 it("reads the actual latest candidate for a null selector while retaining exact selected history and scoped absence", async () => {
   const s = await seeded(),
