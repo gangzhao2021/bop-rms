@@ -931,6 +931,7 @@ const settlementView = {
     captured: { count: 0, amountMinor: "0", currencyCode: "CAD" },
     refunded: { count: 0, amountMinor: "0", currencyCode: "CAD" },
   },
+  dayEndCheck: null,
   projectedAt: at(30),
 } satisfies Output<"settlement">;
 
