@@ -16,6 +16,7 @@ import type {
   CustomerEntryServiceNotOffered,
   CustomerEntryTableNotOpen,
   CustomerEntryTableOffer,
+  CustomerEntryAlreadyAtTable,
   CustomerEntryPort,
   CustomerEntryPortInput,
 } from "./customer-entry.js";
@@ -102,6 +103,7 @@ export function createPersistentCustomerEntryComposition(
       | CustomerEntryServiceNotOffered
       | CustomerEntryTableNotOpen
       | CustomerEntryTableOffer
+      | CustomerEntryAlreadyAtTable
       | null = null;
     let retired: RetiredTableQrError | null = null;
     let askAt: string | null = null;
@@ -195,7 +197,8 @@ export function createPersistentCustomerEntryComposition(
           result.status === "TableNotOpen" ||
           result.status === "TableMayStart" ||
           result.status === "TableBeingCleaned" ||
-          result.status === "TableAskNewParty"
+          result.status === "TableAskNewParty" ||
+          result.status === "AlreadyAtTable"
         )
           notAccepting = result;
         if (result.status !== "Established") throw new Error("CUSTOMER_ENTRY_ROLLBACK");

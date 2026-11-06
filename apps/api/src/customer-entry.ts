@@ -38,10 +38,35 @@ export interface CustomerEntryPortInput {
    * visits it keeps), so a rescan goes on with a visit instead of replacing it. Never logged.
    */
   readonly presentedCredentials?: readonly CustomerEntryPresentedCredential[];
+  /**
+   * WP-2423 shared-table-checkout (b): the table this browser's own Guest Session is already
+   * seated at, read before the entry (a current dining-bound session only). A scan of that same
+   * table code answers AlreadyAtTable instead of starting a second visit for the same phone.
+   */
+  readonly presentedTable?: CustomerEntryPresentedTable;
 }
 export interface CustomerEntryPresentedCredential {
   readonly source: "Current" | "Earlier";
   readonly credential: string;
+}
+export interface CustomerEntryPresentedTable {
+  readonly publicStoreReference: string;
+  readonly publicTableReference: string;
+  readonly qrReference: string;
+  readonly qrRevocationVersion: number;
+}
+/**
+ * WP-2423 shared-table-checkout (b): this phone's own current Guest Session is already at the
+ * scanned table (same Store, table and code version, its participant still at the table). No
+ * Session, cookie or participant is created; the app opens the menu.
+ */
+export interface CustomerEntryAlreadyAtTable {
+  readonly status: "AlreadyAtTable";
+  readonly brandDisplayName: string;
+  readonly storeDisplayName: string;
+  readonly publicStoreReference: string;
+  readonly publicTableReference: string;
+  readonly locale: string;
 }
 export type CustomerEntryIntent = "Start" | "Join" | "NewParty";
 
@@ -159,6 +184,7 @@ export type CustomerEntryPortResult =
   | CustomerEntryTableNotOpen
   | CustomerEntryTableOffer
   | CustomerEntryQrRetired
+  | CustomerEntryAlreadyAtTable
   | { readonly status: "InvalidRequest" }
   | { readonly status: "EntryUnavailable" };
 
@@ -184,6 +210,32 @@ export interface CustomerEntryHandlerOptions {
   readonly now?: () => string;
   readonly port: CustomerEntryPort;
   readonly uuidV7Factory: () => string;
+  /**
+   * WP-2423 shared-table-checkout (b): the table the presented Guest cookie is currently seated
+   * at (a current dining-bound Session whose participant is still at the table), or null. Any
+   * failure is treated as null: the scan goes on as an ordinary entry, so an outage never strands
+   * a guest.
+   */
+  readonly presentedTable?: (
+    sessionCredential: string,
+    observedAt: string,
+  ) => Promise<CustomerEntryPresentedTable | null>;
+}
+
+const guestCookieName = "__Host-bop-guest";
+const guestCredentialPattern = /^[A-Za-z0-9_-]{43}$/u;
+/** The browser's own Guest credential, when exactly one well-formed one is presented. */
+export function presentedGuestCredential(header: unknown): string | null {
+  if (typeof header !== "string" || header.length > 8192) return null;
+  const values = header
+    .split(";")
+    .map((part) => part.trim())
+    .filter((part) => part.startsWith(guestCookieName + "="))
+    .map((part) => part.slice(guestCookieName.length + 1));
+  const [value] = values;
+  return values.length === 1 && value !== undefined && guestCredentialPattern.test(value)
+    ? value
+    : null;
 }
 
 type ErrorCode =
@@ -568,6 +620,7 @@ function parsePortResult(
   | CustomerEntryServiceNotOffered
   | CustomerEntryTableNotOpen
   | CustomerEntryTableOffer
+  | CustomerEntryAlreadyAtTable
   | CustomerEntryEstablished {
   const statusRecord =
     typeof value === "object" && value !== null
@@ -589,6 +642,34 @@ function parsePortResult(
     if (raw.reason !== "Replaced" && raw.reason !== "TurnedOff")
       throw new TypeError("invalid retired result");
     return Object.freeze({ status: "QrRetired", reason: raw.reason });
+  }
+  if (status === "AlreadyAtTable") {
+    const raw = closedRecord(value, [
+      "status",
+      "brandDisplayName",
+      "storeDisplayName",
+      "publicStoreReference",
+      "publicTableReference",
+      "locale",
+    ]);
+    const label = (text: unknown) =>
+      typeof text === "string" &&
+      /^[^\p{Cc}\p{Cf}<>{}[\]`*_#]{1,120}$/u.test(text) &&
+      text === text.trim()
+        ? text
+        : (() => {
+            throw new TypeError("invalid already-at-table result");
+          })();
+    if (typeof raw.locale !== "string" || !localePattern.test(raw.locale))
+      throw new TypeError("invalid already-at-table result");
+    return Object.freeze({
+      status,
+      brandDisplayName: label(raw.brandDisplayName),
+      storeDisplayName: label(raw.storeDisplayName),
+      publicStoreReference: parseUuidV7(raw.publicStoreReference),
+      publicTableReference: parseUuidV7(raw.publicTableReference),
+      locale: raw.locale,
+    });
   }
   if (
     status === "TableNotOpen" ||
@@ -759,6 +840,7 @@ export class CustomerEntryHandler {
   readonly #uuidV7Factory: () => string;
   readonly #requestAdmission: CustomerEntryRequestAdmission | undefined;
   readonly #codeCheck: ((qrToken: string) => Promise<boolean>) | undefined;
+  readonly #presentedTable: CustomerEntryHandlerOptions["presentedTable"];
 
   constructor({
     allowedOrigin,
@@ -767,6 +849,7 @@ export class CustomerEntryHandler {
     uuidV7Factory,
     requestAdmission,
     codeCheck,
+    presentedTable,
   }: CustomerEntryHandlerOptions) {
     this.#allowedOrigin = parseOrigin(allowedOrigin);
     this.#now = now;
@@ -774,6 +857,7 @@ export class CustomerEntryHandler {
     this.#uuidV7Factory = uuidV7Factory;
     this.#requestAdmission = requestAdmission;
     this.#codeCheck = codeCheck;
+    this.#presentedTable = presentedTable;
   }
 
   handler(): RequestHandler {
@@ -858,6 +942,12 @@ export class CustomerEntryHandler {
           throw new TypeError("fresh references must differ");
         }
         const presented = presentedGuestCredentials(request.get("cookie"));
+        // WP-2423 shared-table-checkout (b): the table this browser is already seated at, if any.
+        const presentedCredential = presentedGuestCredential(request.get("cookie"));
+        const presentedTable =
+          presentedCredential === null || this.#presentedTable === undefined
+            ? null
+            : await this.#presentedTable(presentedCredential, requestedAt).catch(() => null);
         const result = parsePortResult(
           await this.#port.establish(
             Object.freeze({
@@ -867,6 +957,7 @@ export class CustomerEntryHandler {
               requestedAt,
               ...(intent === undefined ? {} : { intent }),
               ...(presented.length === 0 ? {} : { presentedCredentials: Object.freeze(presented) }),
+              ...(presentedTable === null ? {} : { presentedTable }),
             }),
           ),
           requestedAt,
@@ -945,6 +1036,22 @@ export class CustomerEntryHandler {
               publicStoreReference: result.publicStoreReference,
               locale: result.locale,
             },
+          });
+          return;
+        }
+        // WP-2423 shared-table-checkout (b): this phone is already at this table. No new visit,
+        // no cookie: the app opens the menu with "You're already at this table."
+        if (result.status === "AlreadyAtTable") {
+          forget();
+          response.status(200).json({
+            schemaVersion: 2,
+            status: "AlreadyAtTable",
+            brandDisplayName: result.brandDisplayName,
+            storeDisplayName: result.storeDisplayName,
+            publicStoreReference: result.publicStoreReference,
+            publicTableReference: result.publicTableReference,
+            channel: "DineIn",
+            locale: result.locale,
           });
           return;
         }

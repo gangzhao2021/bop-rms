@@ -676,3 +676,23 @@ describe("M109: a pickup guest's help names the store, not a staff member beside
     expect(at("DineIn")).toContain("Tell staff about allergies before ordering");
   });
 });
+
+describe("WP-2423 shared-table-checkout (b): already at this table", () => {
+  const resumed = {
+    publicStoreReference: context.publicStoreReference,
+    channel: "DineIn" as const,
+    locale: "en-CA",
+    brandDisplayName: context.brandDisplayName,
+    storeDisplayName: context.storeDisplayName,
+    publicTableReference: context.publicTableReference,
+    joined: true,
+    alreadyAtTable: true as const,
+  };
+  it("says the phone is already at this table and continues ordering; no join is offered", () => {
+    const html = render({ kind: "Resumed", context: resumed });
+    expect(html).toContain("You’re already at this table.");
+    expect(html).toContain("Continue ordering");
+    expect(html).not.toContain("Join this table");
+    expect(zh["You’re already at this table."]).toBe("你已在这一桌。");
+  });
+});

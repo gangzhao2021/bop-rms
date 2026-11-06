@@ -1,3 +1,4 @@
+import { createCustomerEntryPresentedTable } from "./customer-entry-presented-table.js";
 import { createCustomerPickupCartRestore } from "./customer-pickup-cart-restore.js";
 import { loadDiningTeaChargeSetting, type DiningParticipantDepartureSource } from "@rms/dining";
 import { guestCartWithoutTea, guestMenuWithoutTea } from "./customer-cart-tea-guard.js";
@@ -871,6 +872,26 @@ export function createLocalCustomerRuntime(options: LocalCustomerRuntimeOptions)
       ...(options.entryRequestAdmission === undefined
         ? {}
         : { requestAdmission: options.entryRequestAdmission }),
+      // WP-2423 shared-table-checkout (b): a re-scan on a phone already seated at that table.
+      ...(options.diningAdmission === undefined
+        ? {}
+        : {
+            presentedTable: createCustomerEntryPresentedTable(
+              new GuestSessionService({
+                ...entry.session,
+                store,
+                admission: { consume: async () => null },
+                now,
+                binding: createCustomerDiningSessionBinding({
+                  scope,
+                  binding: entry.session.binding,
+                  repository: options.diningAdmission.binding.dining.binding,
+                  contexts: options.diningAdmission.binding.contexts,
+                  now,
+                }),
+              }),
+            ),
+          }),
       ...(options.entryCodeCheck === undefined ? {} : { codeCheck: options.entryCodeCheck }),
       port: customerEntry,
       allowedOrigin: options.allowedOrigin,

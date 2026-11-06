@@ -13,6 +13,7 @@ import {
   setPaymentOperationReference,
   setUnseatedTableScan,
 } from "../session/customer-transaction-context.js";
+import { restoreCustomerSession } from "../session/session-bootstrap.js";
 
 const scanRetryWaitsMs = Object.freeze([
   ...guestReadRetryWaitsMs,
@@ -167,6 +168,50 @@ function parseSuccess(value: unknown): CustomerEntryEstablishedContext {
       ? {}
       : { previousVisit: raw.previousVisit as "Ended" | "EndedReceiptsKept" }),
   });
+}
+
+/**
+ * WP-2423 shared-table-checkout (b): this phone is already seated at the scanned table; the server
+ * started nothing and set no cookie. The visit's own CSRF comes back through the session bootstrap.
+ */
+function parseAlreadyAtTable(value: unknown) {
+  const raw = exact(value, [
+    "schemaVersion",
+    "status",
+    "brandDisplayName",
+    "storeDisplayName",
+    "publicStoreReference",
+    "publicTableReference",
+    "channel",
+    "locale",
+  ]);
+  if (
+    raw.schemaVersion !== 2 ||
+    raw.status !== "AlreadyAtTable" ||
+    raw.channel !== "DineIn" ||
+    typeof raw.locale !== "string" ||
+    !localePattern.test(raw.locale)
+  )
+    throw new TypeError("malformed entry result");
+  return Object.freeze({
+    publicStoreReference: reference(raw.publicStoreReference),
+    channel: "DineIn" as const,
+    locale: raw.locale,
+    brandDisplayName: publicLabel(raw.brandDisplayName),
+    storeDisplayName: publicLabel(raw.storeDisplayName),
+    publicTableReference: reference(raw.publicTableReference),
+    joined: true,
+    alreadyAtTable: true as const,
+  });
+}
+
+function alreadyAtTableOrNull(value: unknown) {
+  try {
+    return parseAlreadyAtTable(value);
+  } catch {
+    // Anything else on a 200 is no answer this app knows: the store couldn't be reached properly.
+    return null;
+  }
 }
 
 /** WP-2423 Q4: a closed or paused Store, with today's published hours. */
@@ -609,6 +654,15 @@ export function createCustomerEntryClient(
         if (replay && context.resumed !== true) setPaymentOperationReference(null);
         setCustomerCsrfCredential(context.csrfToken);
         return Object.freeze({ kind: "Established", context });
+      }
+      const already = status === 200 ? alreadyAtTableOrNull(body) : null;
+      if (already !== null) {
+        const context = already;
+        // The scan cleared this page's CSRF; the visit it is already in gives it back.
+        // (Restoring it starts a new CSRF context, so only the connection is checked after.)
+        if (!(await restoreCustomerSession(fetcher))) throw new Error("entry unavailable");
+        if (!online()) throw new Error("entry unavailable");
+        return Object.freeze({ kind: "Resumed", context });
       }
       const error = parseError(status, body, retryAfter, replay);
       retryUntil =

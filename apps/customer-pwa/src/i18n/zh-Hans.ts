@@ -663,6 +663,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Retry saving details": "重新保存信息",
   "Retry the same operation": "重试同一操作",
   "Try this again": "再试一次",
+  "You’re already at this table.": "你已在这一桌。",
   "We couldn’t confirm this change": "还没确认这次修改",
   "The network or the store’s system was busy. Trying again won’t change it twice.":
     "可能是网络或店里系统忙。再试一次不会重复修改。",

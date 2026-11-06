@@ -406,6 +406,26 @@ export function createCustomerEntryComposition(
           publicStoreReference: String(qr.context.publicStoreReference),
           locale: String(qr.context.locale),
         };
+        // WP-2423 shared-table-checkout (b): this browser's own Session is already seated at this
+        // very table (same Store, table, code and code version, read as current before the entry):
+        // a re-scan opens the menu again. It never makes a second participant for the same phone.
+        const presented = input.presentedTable;
+        if (
+          presented !== undefined &&
+          qr.context.channel === "DineIn" &&
+          tableOpen === true &&
+          input.intent !== "NewParty" &&
+          qr.context.publicTableReference !== null &&
+          presented.publicStoreReference === String(qr.context.publicStoreReference) &&
+          presented.publicTableReference === String(qr.context.publicTableReference) &&
+          presented.qrReference === String(qr.context.qrReference) &&
+          presented.qrRevocationVersion === qr.context.revocationVersion
+        )
+          return Object.freeze({
+            status: "AlreadyAtTable" as const,
+            ...publicContext,
+            publicTableReference: String(qr.context.publicTableReference),
+          });
         // Nobody can join or order at a table no party is seated at: start no visit (an earlier
         // one on this browser, e.g. of a guest whose table was just settled, stays as it is).
         // WP-2423 DEC-DINING-GUEST-TABLE-START: where guests start tables a scan alone still starts

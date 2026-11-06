@@ -891,3 +891,68 @@ describe("M104/M105: the entry answers that this phone's visit goes on", () => {
     ).toMatchObject({ kind: "Established", context: { previousVisit: "EndedReceiptsKept" } });
   });
 });
+
+describe("WP-2423 shared-table-checkout (b): a re-scan on a phone already at the table", () => {
+  const already = Object.freeze({
+    schemaVersion: 2,
+    status: "AlreadyAtTable",
+    brandDisplayName: "BOP Test Kitchen",
+    storeDisplayName: "Harbour Test Store",
+    publicStoreReference: "018f2a1b-7c3d-7a4e-8b5c-1234567890ab",
+    publicTableReference: "018f2a1b-7c3d-7a4e-9b5c-1234567890ab",
+    channel: "DineIn",
+    locale: "en-CA",
+  });
+  afterEach(() => setCustomerCsrfCredential(null));
+
+  it("keeps the visit it is in: the CSRF comes back from the session, no join is offered", async () => {
+    const urls: string[] = [];
+    const fetch = vi.fn(async (input: RequestInfo | URL) => {
+      urls.push(String(input));
+      if (String(input) === "/api/v1/customer/session/csrf")
+        return response(200, { schemaVersion: 1, csrfToken: "B".repeat(43) });
+      return response(200, already);
+    });
+    const client = createCustomerEntryClient({
+      fetch,
+      hash: "#qr=aaa.bbb.ccc",
+      pathname: "/",
+      search: "",
+      replaceState: () => undefined,
+      online: () => true,
+    });
+    const state = await client.start();
+    expect(state).toEqual({
+      kind: "Resumed",
+      context: {
+        publicStoreReference: already.publicStoreReference,
+        channel: "DineIn",
+        locale: "en-CA",
+        brandDisplayName: already.brandDisplayName,
+        storeDisplayName: already.storeDisplayName,
+        publicTableReference: already.publicTableReference,
+        joined: true,
+        alreadyAtTable: true,
+      },
+    });
+    expect(urls).toEqual(["/bff/customer/entry", "/api/v1/customer/session/csrf"]);
+    expect(getCustomerCsrfCredential()).toBe("B".repeat(43));
+  });
+
+  it("if the visit's CSRF can't be read back, says the step failed (a retry asks again)", async () => {
+    const fetch = vi.fn(async (input: RequestInfo | URL) =>
+      String(input) === "/api/v1/customer/session/csrf"
+        ? new Response(null, { status: 204, headers: { "cache-control": "no-store" } })
+        : response(200, already),
+    );
+    const client = createCustomerEntryClient({
+      fetch,
+      hash: "#qr=aaa.bbb.ccc",
+      pathname: "/",
+      search: "",
+      replaceState: () => undefined,
+      online: () => true,
+    });
+    expect((await client.start()).kind).toBe("CommandFailed");
+  });
+});

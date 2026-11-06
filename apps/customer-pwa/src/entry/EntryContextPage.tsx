@@ -870,9 +870,11 @@ function EntryState({
     return (
       <div>
         <StateHeading headingRef={headingRef}>
-          {context.channel === "DineIn"
-            ? t("Welcome to {storeDisplayName}", { storeDisplayName: context.storeDisplayName })
-            : t("Ready to order")}
+          {context.alreadyAtTable === true
+            ? t("You’re already at this table.")
+            : context.channel === "DineIn"
+              ? t("Welcome to {storeDisplayName}", { storeDisplayName: context.storeDisplayName })
+              : t("Ready to order")}
         </StateHeading>
         {context.channel === "DineIn" ? null : (
           <p className="entry-context">

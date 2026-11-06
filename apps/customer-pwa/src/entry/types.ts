@@ -53,6 +53,8 @@ export type CustomerEntryResumedContext = Readonly<{
   /** At a table: which one, and whether this phone joined the party there. */
   publicTableReference: string | null;
   joined: boolean;
+  /** WP-2423 shared-table-checkout (b): the server said this phone is already at the table. */
+  alreadyAtTable?: true;
 }>;
 
 export type CustomerEntryScreenState =
