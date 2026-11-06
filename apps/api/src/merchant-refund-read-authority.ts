@@ -25,9 +25,18 @@ export async function refundReadAccess(
   profileAllows: (action: string) => boolean,
   /** WP-2423 Q19: an Owner may also request while sole operator is in effect for them. */
   soleOperatorEffective?: () => Promise<boolean>,
-): Promise<{ readonly canRead: boolean; readonly canRequest: boolean }> {
+): Promise<{
+  readonly canRead: boolean;
+  readonly canRequest: boolean;
+  /**
+   * WP-2423 M13 (DEC-OWNER-DEFAULTS-2026-11-06 item 1, two people kept): why this reader may not
+   * record a request, so the page names the way forward. SoleOperatorOff: an Owner whose sole
+   * operator is not in effect. null when they may request, or only approve (Finance).
+   */
+  readonly requestBlocked: "SoleOperatorOff" | null;
+}> {
   if (!profileAllows("payment.refund.request") || !profileAllows("payment.refund.approve"))
-    return Object.freeze({ canRead: false, canRequest: false });
+    return Object.freeze({ canRead: false, canRequest: false, requestBlocked: null });
   const request = await workforce(tx, { ...base, permissionCode: "payment.refund.request" });
   const requestRole =
     request.decision.effect === "Allow"
@@ -38,12 +47,13 @@ export async function refundReadAccess(
     (requestRole === "Owner" &&
       soleOperatorEffective !== undefined &&
       (await soleOperatorEffective()));
-  if (canRequest) return Object.freeze({ canRead: true, canRequest });
+  if (canRequest) return Object.freeze({ canRead: true, canRequest, requestBlocked: null });
   const approve = await workforce(tx, { ...base, permissionCode: "payment.refund.approve" });
   const approver = role("payment.refund.approve", approve.activeRoleCodes);
   return Object.freeze({
     canRead:
       approve.decision.effect === "Allow" && (approver === "Owner" || approver === "Finance"),
     canRequest: false,
+    requestBlocked: requestRole === "Owner" ? "SoleOperatorOff" : null,
   });
 }

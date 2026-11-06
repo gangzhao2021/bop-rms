@@ -93,6 +93,16 @@ it("WP-2423 D1: reads why the server did not accept (409) instead of a permissio
       createOrderAcceptanceClient(fetcher).prepare(command).execute(csrf),
     ).rejects.toMatchObject({ code: "Conflict", conflict });
   }
+  // WP-2423 M10: every dish was refunded; the page says to close it with Can't make it.
+  const refunded = vi.fn<typeof fetch>(
+    async () =>
+      new Response(JSON.stringify({ error: "order_not_acceptable", reason: "fully_refunded" }), {
+        status: 409,
+      }),
+  );
+  await expect(
+    createOrderAcceptanceClient(refunded).prepare(command).execute(csrf),
+  ).rejects.toMatchObject({ code: "Conflict", conflict: "FullyRefunded" });
   const denied = vi.fn<typeof fetch>(async () => new Response("{}", { status: 403 }));
   await expect(
     createOrderAcceptanceClient(denied).prepare(command).execute(csrf),

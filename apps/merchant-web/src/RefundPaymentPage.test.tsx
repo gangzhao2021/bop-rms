@@ -1,3 +1,4 @@
+import { MemoryRouter } from "react-router";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, expect, it, vi } from "vitest";
 import { cardMachineRefundRecordedText } from "./CardMachineRequestRefund.js";
@@ -12,6 +13,7 @@ import {
   paymentStateLabel,
   refundEverythingQuantities,
   refundWizardSections,
+  requestBlockedMessage,
   requestFinished,
   requestProgressLabel,
 } from "./RefundPaymentPage.js";
@@ -35,6 +37,7 @@ const context = {
   confirmedRefundMinor: "0",
   pendingRefundMinor: "593",
   canRequest: true,
+  requestBlocked: null as "SoleOperatorOff" | null,
 };
 
 it("WP-2423: the payment summary says Paid, never the internal Captured state", () => {
@@ -352,4 +355,20 @@ it("M126 I.5: another store's payment and a role that can't refund say why, with
   expect(paymentLoadFailure(new OrdinaryRefundClientError("Denied")).message).toBe(
     "你的角色不能退款，请找店主或店长。",
   );
+});
+
+it("WP-2423 M13: an owner whose sole operator is off is told how a refund gets recorded", () => {
+  const owner = { ...context, pendingRefundMinor: "0", canRequest: false };
+  const blocked = renderToStaticMarkup(
+    <MemoryRouter>
+      {requestBlockedMessage({ ...owner, requestBlocked: "SoleOperatorOff" })}
+    </MemoryRouter>,
+  );
+  expect(blocked).toContain("turn on Sole operator in Store setup");
+  expect(blocked).toContain("Store Manager role in Staff");
+  expect(blocked).not.toContain("Only a store manager records refund requests");
+  // Finance (approve only) keeps the Approvals pointer.
+  expect(
+    renderToStaticMarkup(<MemoryRouter>{requestBlockedMessage(owner)}</MemoryRouter>),
+  ).toContain("Only a store manager records refund requests");
 });

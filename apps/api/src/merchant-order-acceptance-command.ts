@@ -1,4 +1,10 @@
 import { createMerchantPaidAdditionalOrderAcceptance } from "./merchant-paid-additional-order-acceptance.js";
+import { observeOrdinaryRefundOrderAfterFence } from "@rms/payment";
+import {
+  everyBatchUnitClaimed,
+  readBatchUnits,
+  readClaimedRefundUnits,
+} from "./order-batch-refund-coverage.js";
 import type { ConsumerTransaction } from "@bop/eventing";
 import type { AppendAuditRecordInput } from "@bop/audit";
 import { readClosedRecord, parseOpaqueUuidV7 } from "@bop/identity";
@@ -35,10 +41,13 @@ export const merchantOrderAcceptanceErrorCodes = [
  */
 export class MerchantOrderAcceptanceError extends Error {
   readonly code: (typeof merchantOrderAcceptanceErrorCodes)[number];
-  constructor(code: MerchantOrderAcceptanceError["code"]) {
+  /** WP-2423 M10: not acceptable because every dish of it was refunded. */
+  readonly reason: "FullyRefunded" | null;
+  constructor(code: MerchantOrderAcceptanceError["code"], reason: "FullyRefunded" | null = null) {
     super("order acceptance did not happen");
     this.name = "MerchantOrderAcceptanceError";
     this.code = code;
+    this.reason = reason;
   }
 }
 
@@ -245,6 +254,43 @@ export function createMerchantOrderAcceptanceCommand(options: {
             throw new MerchantOrderAcceptanceError("ORDER_ACCEPTANCE_VERSION_CONFLICT");
           if (current.acceptance === null && expectedOrderVersion !== current.orderVersion)
             throw new MerchantOrderAcceptanceError("ORDER_ACCEPTANCE_VERSION_CONFLICT");
+          // WP-2423 M10: an order whose every dish was refunded is never accepted (the kitchen would
+          // make food nobody paid for); it is closed with Can't make it. Counted in units, so a
+          // refund of every dish that left the tip captured counts. Ordering was read above, before
+          // Payment's refund fence (the canonical lock order).
+          if (current.acceptance === null) {
+            const units = await readBatchUnits(
+              businessTransaction,
+              scope,
+              {
+                orderReference: named.orderReference,
+                orderBatchReference: named.orderBatchReference,
+                observedAt: String(context.resolvedAt),
+              },
+              async () => (await allowed()) === true,
+            );
+            const claimed = await readClaimedRefundUnits(
+              businessTransaction,
+              scope,
+              {
+                orderReference: named.orderReference,
+                observedAt: await observeOrdinaryRefundOrderAfterFence(
+                  businessTransaction,
+                  scope,
+                  named.orderReference,
+                  String(context.resolvedAt),
+                  options.persistence.now,
+                ),
+                operationReference: named.operationReference,
+              },
+              async () => (await allowed()) === true,
+            );
+            if (everyBatchUnitClaimed(units, claimed))
+              throw new MerchantOrderAcceptanceError(
+                "ORDER_ACCEPTANCE_NOT_ACCEPTABLE",
+                "FullyRefunded",
+              );
+          }
           const command: Named = Object.freeze({ ...references, expectedOrderVersion });
           if (command.expectedOrderVersion !== named.expectedOrderVersion)
             built = await build(command);

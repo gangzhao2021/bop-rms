@@ -8,7 +8,12 @@ export interface OrderAcceptanceCommand {
 }
 /** WP-2423 D1: why the server did not accept (409): the order changed since it was read, someone
  * accepted it already, or it can no longer be accepted as it is. */
-export type OrderAcceptanceConflict = "Changed" | "AlreadyAccepted" | "NotAcceptable";
+export type OrderAcceptanceConflict =
+  | "Changed"
+  | "AlreadyAccepted"
+  | "NotAcceptable"
+  /** WP-2423 M10: every dish of it was refunded; close it with Can't make it. */
+  | "FullyRefunded";
 export class OrderAcceptanceClientError extends Error {
   constructor(
     readonly code: "PermissionDenied" | "Conflict" | "Unavailable" | "OutcomeUnknown",
@@ -29,7 +34,9 @@ async function conflictReason(response: Response): Promise<OrderAcceptanceConfli
     return error === "already_accepted"
       ? "AlreadyAccepted"
       : error === "order_not_acceptable"
-        ? "NotAcceptable"
+        ? (value as Record<string, unknown>).reason === "fully_refunded"
+          ? "FullyRefunded"
+          : "NotAcceptable"
         : "Changed";
   } catch {
     return "Changed";

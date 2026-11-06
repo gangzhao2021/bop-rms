@@ -122,7 +122,10 @@ export function createMerchantRefundPaymentContext(options: {
         }),
       });
       const role = createOrdinaryRefundRoleResolver(configuration.roleMapping);
-      const viewer = { canRequest: false as boolean };
+      const viewer = {
+        canRequest: false as boolean,
+        requestBlocked: null as "SoleOperatorOff" | null,
+      };
       // WP-2423 Q19: read once per request (display only; the request command rechecks).
       let soleOperatorStatus: Promise<string> | null = null;
       const soleOperator = options.soleOperator;
@@ -157,6 +160,7 @@ export function createMerchantRefundPaymentContext(options: {
           soleOperatorEffective,
         );
         viewer.canRequest = access.canRequest;
+        viewer.requestBlocked = access.requestBlocked;
         return access.canRead;
       };
       if (!(await readAccess())) return deny();
@@ -226,6 +230,7 @@ export function createMerchantRefundPaymentContext(options: {
           confirmedRefundMinor: confirmed.toString(),
           pendingRefundMinor: pending.toString(),
           canRequest: viewer.canRequest,
+          requestBlocked: viewer.requestBlocked,
         });
       }
       const binding = await createPostgresPaymentIntentBindingSource({
@@ -267,6 +272,7 @@ export function createMerchantRefundPaymentContext(options: {
           confirmedRefundMinor: null,
           pendingRefundMinor: null,
           canRequest: viewer.canRequest,
+          requestBlocked: viewer.requestBlocked,
         });
       }
       if (
@@ -300,6 +306,7 @@ export function createMerchantRefundPaymentContext(options: {
         pendingRefundMinor: position.pendingMinor.toString(),
         // WP-2423 Q5: only a Manager records a refund request; Owners/Finance read and approve.
         canRequest: viewer.canRequest,
+        requestBlocked: viewer.requestBlocked,
       });
     }
   };

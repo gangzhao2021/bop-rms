@@ -2943,6 +2943,11 @@ export function CurrentOrderDetails({
           fetcher={fetcher}
           paidAsTable={order.tableBill?.paid != null}
         />
+      ) : order.paidOnline !== null || order.counter?.paidOnCardMachine != null ? (
+        // WP-2423 M14: someone who can't read payments is told who refunds, not shown nothing.
+        <p className="order-panel__hint" role="note">
+          {t("Ask the manager or owner for refunds.")}
+        </p>
       ) : null}
     </>
   );
@@ -4511,7 +4516,19 @@ export function CurrentOrderQueuePage({
                         <>
                           {acceptAction(order, batch)}
                           {/* v15 2026-11-01: a Store that can't make it refuses and refunds here. */}
-                          {batch.canCancel ? (
+                          {/* WP-2423 M10/M14: whoever may accept may decline it, refunded in full. */}
+                          {batch.canCantMake && !batch.canCancel ? (
+                            <div className="order-cancel-actions">
+                              <CantMakeRefundAction
+                                key={"cant-make-" + batch.orderBatchReference}
+                                order={order}
+                                batch={batch}
+                                csrf={csrf}
+                                fetcher={fetcher}
+                                onSettled={settledWith(batch.orderBatchReference)}
+                              />
+                            </div>
+                          ) : batch.canCancel ? (
                             <div className="order-cancel-actions">
                               <StaffOrderCancelAction
                                 key={batch.orderBatchReference + ":" + String(order.currentVersion)}

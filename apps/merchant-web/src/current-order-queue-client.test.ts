@@ -1228,6 +1228,21 @@ it("DEC-PAID-ORDER-AUTO-ACCEPT: reads a batch sent straight to the kitchen, made
   expect(() => read({ ...sent, kept: "yes" })).toThrow();
   expect(() => read({ reachedKitchen: false })).toThrow();
 });
+it("WP-2423 M10/M14: reads Can't make it on a paid batch not accepted yet, with no automatic facts", () => {
+  const batch = row().batches[0];
+  const read = (extra: Record<string, unknown>) =>
+    parseCurrentOrderQueue({
+      items: [{ ...row(), batches: [{ ...batch, ...extra }] }],
+      nextAfterOrderReference: null,
+    }).items[0]?.batches[0];
+  expect(read({ canCantMake: true })).toMatchObject({
+    acceptedAutomaticallyAt: null,
+    canCantMake: true,
+    reachedKitchen: true,
+  });
+  expect(read({})).toMatchObject({ canCantMake: false });
+  expect(() => read({ canCantMake: "yes" })).toThrow();
+});
 
 // WP-2423 M04: a paid round staff accepted that the kitchen has not received yet.
 it("reads a paid round still on its way to the kitchen, and counts it for Home once a minute late", () => {

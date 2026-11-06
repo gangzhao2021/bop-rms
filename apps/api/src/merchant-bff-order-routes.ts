@@ -1479,6 +1479,8 @@ export function installMerchantOrderRoutes(
                 ORDER_ACCEPTANCE_NOT_ACCEPTABLE: "order_not_acceptable",
               } as const
             )[error.code],
+            // WP-2423 M10: every dish was refunded; the page offers Can't make it.
+            ...(error.reason === "FullyRefunded" ? { reason: "fully_refunded" } : {}),
           });
       });
   });

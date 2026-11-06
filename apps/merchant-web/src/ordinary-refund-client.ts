@@ -14,6 +14,8 @@ export class OrdinaryRefundClientError extends Error {
       | FullSignInRequired
       | "Conflict"
       | "Changed"
+      /** WP-2423 M10: every dish of an order nobody accepted yet: use Can't make it instead. */
+      | "OrderNotAccepted"
       | "Unavailable"
       | "OutcomeUnknown"
       | "NotFound",
@@ -255,7 +257,11 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
         const error = await replyError(response);
         if (response.status === 409)
           throw new OrdinaryRefundClientError(
-            error === "changed_while_loading" ? "Changed" : "Conflict",
+            error === "changed_while_loading"
+              ? "Changed"
+              : error === "refund_order_not_accepted"
+                ? "OrderNotAccepted"
+                : "Conflict",
           );
         if (error === "retry_later") throw new RetryLater();
         return fail();
@@ -302,6 +308,7 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
             error.code === "NotFound" ||
             error.code === FULL_SIGN_IN_REQUIRED ||
             error.code === "Conflict" ||
+            error.code === "OrderNotAccepted" ||
             (!mutation && error.code === "Changed"))
         )
           throw error;
@@ -313,30 +320,33 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
     async context(paymentIntentReference: string, csrf: string, signal?: AbortSignal) {
       ref(paymentIntentReference);
       return boundary(async () => {
-        const data = exact(
-          await send(
-            "/merchant/payments/refunds/context",
-            JSON.stringify({ paymentIntentReference }),
-            csrf,
-            200,
-            signal,
-          ),
-          [
-            "paymentIntentReference",
-            "paymentAttemptReference",
-            "orderReference",
-            "orderBatchReference",
-            "observedAt",
-            "paymentState",
-            "paymentMethod",
-            "currencyCode",
-            "capturedAmountMinor",
-            "confirmedRefundMinor",
-            "pendingRefundMinor",
-            "canRequest",
-          ],
+        const reply = await send(
+          "/merchant/payments/refunds/context",
+          JSON.stringify({ paymentIntentReference }),
+          csrf,
+          200,
+          signal,
         );
+        const withBlocked = Object.hasOwn(reply, "requestBlocked");
+        const data = exact(reply, [
+          "paymentIntentReference",
+          "paymentAttemptReference",
+          "orderReference",
+          "orderBatchReference",
+          "observedAt",
+          "paymentState",
+          "paymentMethod",
+          "currencyCode",
+          "capturedAmountMinor",
+          "confirmedRefundMinor",
+          "pendingRefundMinor",
+          "canRequest",
+          ...(withBlocked ? ["requestBlocked"] : []),
+        ]);
         if (typeof data.canRequest !== "boolean") return fail();
+        // WP-2423 M13: why they may not record a request (absent from an older server).
+        const requestBlocked = withBlocked ? data.requestBlocked : null;
+        if (requestBlocked !== null && requestBlocked !== "SoleOperatorOff") return fail();
         // WP-2423 item 4: a payment taken on the store's card machine is refunded on that machine.
         if (
           data.paymentMethod !== "Online" &&
@@ -390,6 +400,8 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
           pendingRefundMinor,
           /** WP-2423 Q5: only a Store Manager records refund requests. */
           canRequest: data.canRequest,
+          /** WP-2423 M13: an Owner whose sole operator is off approves, and is told how to record. */
+          requestBlocked: requestBlocked as "SoleOperatorOff" | null,
         });
       }, false);
     },

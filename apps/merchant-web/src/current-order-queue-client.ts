@@ -779,6 +779,12 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
         Object.hasOwn(value, "acceptedAutomaticallyAt");
       const withNotSent =
         value !== null && typeof value === "object" && Object.hasOwn(value, "notSentAutomatically");
+      // WP-2423 M10/M14: "Can't make it" on a paid batch not accepted yet (no automatic facts).
+      const withCantMakeOnly =
+        !withAutomatic &&
+        value !== null &&
+        typeof value === "object" &&
+        Object.hasOwn(value, "canCantMake");
       // Whether it reached the kitchen and "Making it by hand": absent from an earlier server.
       const automaticExtras = withAutomatic
         ? (["reachedKitchen", "kept", "canKeep"] as const).filter((key) =>
@@ -800,6 +806,7 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
         "orderBatchReference",
         "sequence",
         ...(withAutomatic ? ["acceptedAutomaticallyAt", "canCantMake", ...automaticExtras] : []),
+        ...(withCantMakeOnly ? ["canCantMake"] : []),
         ...(withNotSent ? ["notSentAutomatically"] : []),
         ...(withSubmittedAt ? ["submittedAt"] : []),
         "acceptanceStatus",
@@ -1003,7 +1010,7 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
         ? exact(batch.notSentAutomatically, ["reason", "itemCount"])
         : null;
       if (
-        (withAutomatic && typeof batch.canCantMake !== "boolean") ||
+        ((withAutomatic || withCantMakeOnly) && typeof batch.canCantMake !== "boolean") ||
         automaticExtras.some((key) => typeof batch[key] !== "boolean") ||
         (notSent !== null &&
           (typeof notSent.reason !== "string" ||
@@ -1016,7 +1023,7 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
         /** DEC-PAID-ORDER-AUTO-ACCEPT: the System accepted it; null otherwise. */
         acceptedAutomaticallyAt: withAutomatic ? instant(batch.acceptedAutomaticallyAt) : null,
         /** Whoever can accept may give it back while the kitchen has not started it. */
-        canCantMake: withAutomatic && batch.canCantMake === true,
+        canCantMake: (withAutomatic || withCantMakeOnly) && batch.canCantMake === true,
         /** False only when it was sent but no ticket reached the kitchen. */
         reachedKitchen: !withAutomatic || batch.reachedKitchen !== false,
         /** Someone said it is being made by hand: a pickup's automatic refund is stopped. */

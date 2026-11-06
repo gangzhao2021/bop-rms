@@ -281,6 +281,19 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   " · paper order": " · 纸质订单",
   " · partly refunded": " · 部分退款",
   " · refund not sent yet": " · 退款未发出",
+  "Ask the manager or owner for refunds.": "退款请找店长或店主。",
+  "Only a store manager or the owner can close an uncollected order.":
+    "只有店长或店主可以把未取的单结束。",
+  "The guest is not refunded automatically. To refund, a store manager records it from the order's payments; an owner who runs the store alone turns on Sole operator first.":
+    "顾客不会自动收到退款。要退款，由店长在这单的付款里记录；一个人经营的店主先打开“独立经营者”。",
+  "Refunds are recorded by a store manager, and then you approve them. If you run the store alone, turn on Sole operator in Store setup (it applies to every store of this brand), or give someone the Store Manager role in Staff.":
+    "退款由店长记录，再由你批准。如果你一个人经营，请在“门店设置”里打开“独立经营者”（对本品牌所有门店生效），或在“员工”里给一位员工店长角色。",
+  "This order was refunded in full. Close it with Can't make it.":
+    "这单已全额退款。请按“做不了”结束。",
+  "This order hasn't been accepted. Use Can't make it to refund it in full.":
+    "这单还没接。请用“做不了”全额退款。",
+  "This order was paid on the card machine. Refund these items from the order's payment under Payments and refunds: refund on the machine, then record the slip.":
+    "这单是刷卡机付的。请在“付款与退款”里从这笔付款退这些菜：先在刷卡机上退款，再登记小票。",
   "Cancelled. Earlier refunds cover the whole payment; {value} of them is not sent yet.":
     "已取消。之前的退款已覆盖全部付款，其中 {value} 还没发出。",
   "Cancelled. Earlier refunds cover the whole payment; {value} of them is on its way.":
@@ -2616,7 +2629,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "只有已发布菜单的、不在审核中的草稿才能放弃。请刷新后再核对。",
   "Only a manager can cancel it, here or on the Orders page.": "只有店长可以取消，在此或在订单页。",
   "Only a manager can close an earlier day's ticket.": "只有店长可以关闭较早营业日的票据。",
-  "Only a manager can close an uncollected order.": "只有店长可以关闭未取餐的订单。",
   "Only a published price book can be used at a Store.": "只有已发布的价目表才能在门店使用。",
   "Only a store manager or owner can cancel a round. Refresh if your session changed.":
     "只有店长或店主可以取消轮次。如果你的登录有变化，请刷新。",
@@ -4402,8 +4414,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "The customer": "顾客本人",
   "The customer did not leave a name or phone for this order.":
     "顾客没有为这笔订单留下名字或手机号。",
-  "The customer is not refunded automatically. If the Store decides to refund, a manager does it from the order's payments.":
-    "顾客不会自动获得退款。如果门店决定退款，由店长在订单的付款中操作。",
   "The customer is refunded in full, {refundMinor} including tip.":
     "顾客会获得全额退款 {refundMinor}，包括小费。",
   "The customer's contact was removed on {value} (contacts are kept only for a limited time).":

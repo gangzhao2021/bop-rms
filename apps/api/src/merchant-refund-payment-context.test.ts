@@ -115,6 +115,7 @@ it("binds actual captured payment and returns distinct confirmed and pending ref
     confirmedRefundMinor: "100",
     pendingRefundMinor: "1130",
     canRequest: true,
+    requestBlocked: null,
   });
   expect(d.position.mock.calls[0]?.[1]).toEqual({
     orderReference: id(9),
@@ -139,6 +140,7 @@ it.each([null, { ...terminal, outcome: "Failed" }])(
       confirmedRefundMinor: null,
       pendingRefundMinor: null,
       canRequest: true,
+      requestBlocked: null,
     });
     expect(d.position).not.toHaveBeenCalled();
   },

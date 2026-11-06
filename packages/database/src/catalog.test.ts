@@ -820,6 +820,7 @@ describe("migration catalog", () => {
       "2000_320_alter_role_administration_revisions",
       "2000_321_create_role_administration_sole_operator_approval",
       "2000_322_create_role_preset_offer_decision",
+      "2000_420_alter_staff_cancellation_cant_make_unaccepted",
       "2000_433_alter_dining_table_cash_refund_nickel",
       "2000_450_alter_checkout_contact_redaction_staff_request",
       "2000_460_alter_pickup_not_collected_store_closing",

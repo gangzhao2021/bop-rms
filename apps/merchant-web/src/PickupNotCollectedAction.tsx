@@ -92,7 +92,8 @@ export function PickupNotCollectedAction({
   const message: Record<Exclude<Outcome, "Idle">, string> = {
     Pending: "Closing…",
     Closed: t("Closed as not collected."),
-    Denied: t("Only a manager can close an uncollected order."),
+    // WP-2423 M13: an owner may close it too.
+    Denied: t("Only a store manager or the owner can close an uncollected order."),
     NotEligible: t("This order can no longer be closed. Refresh the queue."),
     Unknown: t("Result unknown. Retry the same close to recover its result."),
   };
@@ -124,7 +125,7 @@ export function PickupNotCollectedAction({
         </p>
         <p>
           {t(
-            "The customer is not refunded automatically. If the Store decides to refund, a manager does it from the order's payments.",
+            "The guest is not refunded automatically. To refund, a store manager records it from the order's payments; an owner who runs the store alone turns on Sole operator first.",
           )}
         </p>
         {item.remakeQuantity ? (

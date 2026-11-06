@@ -505,3 +505,19 @@ describe("M147: a stale serve answers 409, never a refusal", () => {
     expect(app.reported).toEqual([]);
   });
 });
+
+// WP-2423 M10: refunding every dish of a paid order nobody accepted is answered so the page offers
+// Can't make it, on the preview and on the request, never logged as a fault.
+it.each(["/payments/refunds/preview", "/payments/refunds/request"])(
+  "POST %s refusing a full refund before acceptance answers 409",
+  async (path) => {
+    const key = path.endsWith("preview") ? "ordinaryRefundPreview" : "ordinaryRefundRequest";
+    const refused = await serve({
+      [key]: rejecting(new Error("ORDINARY_REFUND_ORDER_NOT_ACCEPTED")),
+    } as never);
+    const response = await refused.post(path);
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: "refund_order_not_accepted" });
+    expect(refused.reported).toEqual([]);
+  },
+);

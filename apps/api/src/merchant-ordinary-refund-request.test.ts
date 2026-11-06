@@ -11,6 +11,19 @@ const d = vi.hoisted(() => ({
   record: vi.fn(),
   capture: vi.fn(),
   cancelledRound: vi.fn(),
+  accepted: vi.fn(),
+  units: vi.fn(),
+  claimed: vi.fn(),
+}));
+vi.mock("@rms/ordering", async (original) => ({
+  ...(await original<object>()),
+  createPostgresOrderAcceptanceReader: () => ({ loadByBatch: d.accepted }),
+}));
+// WP-2423 M10: the units of a round nobody accepted, and the units refunds claim.
+vi.mock("./order-batch-refund-coverage.js", async (original) => ({
+  ...(await original<object>()),
+  readBatchUnits: d.units,
+  readClaimedRefundUnits: d.claimed,
 }));
 vi.mock("./merchant-round-cancellation-refund.js", () => ({
   createRoundCancellationRefundSource: () => d.cancelledRound,
@@ -25,6 +38,12 @@ vi.mock("@rms/payment", async (original) => ({
   createPostgresCardMachinePaymentStore: () => d.cards(),
   createPostgresOrdinaryRefundRequestRuntime: d.compose,
   createPostgresCapturedBatchPaymentSource: () => ({ load: d.capture }),
+  observeOrdinaryRefundOrderAfterFence: async (
+    _tx: unknown,
+    _s: unknown,
+    _o: unknown,
+    at: string,
+  ) => at,
 }));
 const id = (n: number) => "01909974-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 type Options = Parameters<typeof createMerchantOrdinaryRefundRequest>[0];
@@ -72,6 +91,10 @@ function setup() {
 beforeEach(() => {
   vi.clearAllMocks();
   d.cancelledRound.mockResolvedValue(false);
+  // Accepted unless a test says otherwise.
+  d.accepted.mockResolvedValue({ acceptedOrderVersion: 2 });
+  d.units.mockResolvedValue(new Map([[id(12), 1]]));
+  d.claimed.mockResolvedValue(new Map());
   d.capture.mockResolvedValue({
     paymentEvent: { eventId: id(14) },
     paymentIntentReference: id(15),
@@ -288,4 +311,51 @@ it("WP-2423: refuses an item refund on a round its cancellation refunds whole", 
     paymentEventReference: id(14),
   });
   expect(d.record).not.toHaveBeenCalled();
+});
+
+it("WP-2423 M10: refunding every dish of a paid order nobody accepted is refused, a part is not", async () => {
+  const f = setup();
+  d.accepted.mockResolvedValue(null);
+  d.units.mockResolvedValue(
+    new Map([
+      [id(12), 1],
+      [id(16), 1],
+    ]),
+  );
+  d.record.mockImplementation(async (_tx, value) => ({
+    status: "Created",
+    claimVersion: 1,
+    request: {
+      ...value,
+      requestedAt: at,
+      currencyCode: "CAD",
+      amountMinor: 1130n,
+      payments: [
+        {
+          paymentAttemptReference: id(13),
+          items: [
+            {
+              orderItemReference: id(12),
+              refundUnitOrdinals: [1],
+              components: {
+                netAmountMinor: 1000n,
+                taxAmountMinor: 130n,
+                tipAmountMinor: 0n,
+                serviceChargeAmountMinor: 0n,
+                serviceChargeTaxAmountMinor: 0n,
+              },
+            },
+          ],
+        },
+      ],
+    },
+  }));
+  // One of two dishes: the order goes ahead.
+  await expect(f.operation(f.input)).resolves.toMatchObject({ status: "Created" });
+  // The other one was refunded earlier: this makes it every dish, tip or not.
+  d.claimed.mockResolvedValue(new Map([[id(16), new Set([1])]]));
+  await expect(f.operation(f.input)).rejects.toThrow("ORDINARY_REFUND_ORDER_NOT_ACCEPTED");
+  // Accepted: a full refund is an ordinary refund.
+  d.accepted.mockResolvedValue({ acceptedOrderVersion: 2 });
+  await expect(f.operation(f.input)).resolves.toMatchObject({ status: "Created" });
 });

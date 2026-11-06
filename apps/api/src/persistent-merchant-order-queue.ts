@@ -1012,8 +1012,20 @@ export function createPersistentMerchantOrderQueue(options: {
                       ?.amountMinor ?? null,
                 });
             }
+            // WP-2423 M51: a batch paid on the card machine is not cancelled item by item (the
+            // refund is made on the machine and its slip recorded, from the order's payment), so
+            // Cancel items is never offered for it.
+            const machineBatches = new Set<string>();
             if (cancelAllowed)
-              for (const batch of [...confirmed].filter((value) => !cancellations.has(value)))
+              for (const recorded of (
+                await cardPayments.listByOrders(businessTransaction, orderReferences)
+              ).values())
+                for (const { payment } of recorded)
+                  machineBatches.add(String(payment.orderBatchReference));
+            if (cancelAllowed)
+              for (const batch of [...confirmed].filter(
+                (value) => !cancellations.has(value) && !machineBatches.has(value),
+              ))
                 for (const [line, state] of await listStoreKitchenOrderItemStates(
                   businessTransaction,
                   scoped,
@@ -1852,6 +1864,17 @@ export function createPersistentMerchantOrderQueue(options: {
                           : ["Submitted", "Accepted", "InProgress", "Ready"].includes(
                               String(item.currentPhase),
                             ));
+                      // WP-2423 M10/M14 (DEC-OWNER-DEFAULTS-2026-11-06 item 2): paid and waiting
+                      // for acceptance, whoever may accept may decline it ("Can't make it"); a
+                      // manager has the general cancel there already. A batch held through an
+                      // outage is decided on its hold (DEC-OUTAGE-ACCEPTANCE-HOLD).
+                      const canCantMakeUnaccepted =
+                        canRequestAcceptance &&
+                        !cancelAllowed &&
+                        automatic?.kind !== "Accepted" &&
+                        !uncollected.has(item.orderReference) &&
+                        !cancellations.has(batch.orderBatchReference) &&
+                        !held.has(item.orderReference);
                       const automaticKeys: {
                         acceptedAutomaticallyAt?: string;
                         canCantMake?: boolean;
@@ -1874,15 +1897,18 @@ export function createPersistentMerchantOrderQueue(options: {
                               // A table round made on paper too: it leaves the warnings.
                               canKeep: canCantMake && !automatic.kept,
                             }
-                          : automatic?.kind === "Skipped" &&
+                          : {
+                              ...(automatic?.kind === "Skipped" &&
                               batch.acceptanceStatus === "NotAccepted"
-                            ? {
-                                notSentAutomatically: Object.freeze({
-                                  reason: automatic.reason,
-                                  itemCount: automatic.itemCount,
-                                }),
-                              }
-                            : {};
+                                ? {
+                                    notSentAutomatically: Object.freeze({
+                                      reason: automatic.reason,
+                                      itemCount: automatic.itemCount,
+                                    }),
+                                  }
+                                : {}),
+                              ...(canCantMakeUnaccepted ? { canCantMake: true } : {}),
+                            };
                       return Object.freeze({
                         ...batch,
                         ...automaticKeys,

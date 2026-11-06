@@ -18,6 +18,21 @@ import { retryTransactionConflict } from "./transaction-conflict-retry.js";
 import { failureNamed } from "./merchant-failure.js";
 import type { MerchantBffRouterOptions } from "./merchant-bff-contract.js";
 
+/**
+ * WP-2423 M10: a refund of every dish of a paid order nobody accepted yet is answered 409, so the
+ * page offers Can't make it (the recorded refusal) instead; anything else as any other failure.
+ */
+function refundRequestFailed(response: express.Response, error: unknown) {
+  if (failureNamed(error, "ORDINARY_REFUND_ORDER_NOT_ACCEPTED")) {
+    response
+      .status(409)
+      .set("Cache-Control", NO_STORE)
+      .json({ error: "refund_order_not_accepted" });
+    return;
+  }
+  failed(response, error);
+}
+
 /** WP-2423 Q5: why an approval or decline was refused, without internal detail. */
 function refundDecisionFailure(response: express.Response, error: MerchantRefundApprovalError) {
   // A role refusal is not a session problem: the browser says who may decide, not "sign in".
@@ -326,6 +341,8 @@ export function installMerchantRefundRoutes(
           confirmedRefundMinor: result.confirmedRefundMinor,
           pendingRefundMinor: result.pendingRefundMinor,
           canRequest: result.canRequest,
+          // WP-2423 M13: why they may not record a request (the page names the way forward).
+          requestBlocked: result.requestBlocked,
         }),
       )
       .catch((error: unknown) => {
@@ -441,7 +458,7 @@ export function installMerchantRefundRoutes(
           },
         }),
       )
-      .catch((error: unknown) => failed(response, error));
+      .catch((error: unknown) => refundRequestFailed(response, error));
   });
 
   router.post("/payments/refunds/request", sameOriginMutation(options), (request, response) => {
@@ -477,7 +494,7 @@ export function installMerchantRefundRoutes(
           replayed: result.status === "AlreadyCommitted",
         });
       })
-      .catch((error: unknown) => failed(response, error));
+      .catch((error: unknown) => refundRequestFailed(response, error));
   });
 
   router.post("/payments/refunds/prepare", sameOriginMutation(options), (request, response) => {

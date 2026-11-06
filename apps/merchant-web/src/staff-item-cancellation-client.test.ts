@@ -140,6 +140,8 @@ it("WP-2423 Q6 step 2: maps every refusal to a clear outcome", () => {
   expect(itemCancelFailure(403, "order_cancellation_permission_denied")).toBe("Denied");
   expect(itemCancelFailure(409, "order_preparation_started")).toBe("PreparationStarted");
   expect(itemCancelFailure(409, "order_nothing_to_prepare")).toBe("NothingToPrepare");
+  // WP-2423 M51: a card-machine order is refunded from its payment, never "refresh".
+  expect(itemCancelFailure(409, "order_paid_on_card_machine")).toBe("CardMachine");
   expect(itemCancelFailure(409, "order_version_conflict")).toBe("VersionConflict");
   expect(itemCancelFailure(409, "order_item_stock_legacy")).toBe("LegacyStock");
   expect(itemCancelFailure(409, "order_not_cancellable")).toBe("NotCancellable");

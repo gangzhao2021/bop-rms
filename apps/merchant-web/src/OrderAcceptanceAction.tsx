@@ -105,6 +105,8 @@ export function OrderAcceptanceAction({
         </p>
       ) : state === "AlreadyAccepted" ? (
         <p role="status">{t("Already accepted by someone else. It is in the kitchen.")}</p>
+      ) : state === "FullyRefunded" ? (
+        <p role="status">{t("This order was refunded in full. Close it with Can't make it.")}</p>
       ) : state === "NotAcceptable" ? (
         <p role="status">
           {t(

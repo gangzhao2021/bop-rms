@@ -5,8 +5,16 @@ import {
   createPostgresCardMachinePaymentStore,
   createPostgresOrdinaryRefundRequestRuntime,
   createOrdinaryRefundRoleResolver,
+  observeOrdinaryRefundOrderAfterFence,
 } from "@rms/payment";
+import { createPostgresOrderAcceptanceReader } from "@rms/ordering";
 import { cardMachineWholeRefundSource } from "./merchant-card-machine-refund.js";
+import {
+  everyBatchUnitClaimed,
+  readBatchUnits,
+  readClaimedRefundUnits,
+  type BatchUnits,
+} from "./order-batch-refund-coverage.js";
 import { createRoundCancellationRefundSource } from "./merchant-round-cancellation-refund.js";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
@@ -62,6 +70,13 @@ export function createMerchantOrdinaryRefundRequest(options: {
   /** Refused like any other denial; the message names the cause for logs and tests only. */
   const roundRefunded = (): never => {
     throw new Error("ORDINARY_REFUND_ROUND_REFUNDED_BY_CANCELLATION");
+  };
+  /**
+   * WP-2423 M10: every dish of a paid order nobody accepted yet would be refunded. That is a
+   * refusal of the order, recorded as one ("Can't make it"), so the kitchen never gets it.
+   */
+  const notAccepted = (): never => {
+    throw new Error("ORDINARY_REFUND_ORDER_NOT_ACCEPTED");
   };
   const resolveCommand = async (
     input: { sessionCookie: unknown; csrf: unknown; command: unknown },
@@ -242,6 +257,14 @@ export function createMerchantOrdinaryRefundRequest(options: {
             },
             authorize: async (_tx, query) => query.orderReference === orderReference,
           });
+          // WP-2423 M10: paid rounds nobody accepted yet, with their units (Ordering is read before
+          // Payment's refund fence, the canonical cross-owner lock order).
+          const acceptances = createPostgresOrderAcceptanceReader({
+            brandReference: scope.brandReference,
+            storeReference: scope.storeReference,
+            authorize: async (_tx, query) => query.orderReference === orderReference && allowed(),
+          });
+          const unaccepted: BatchUnits[] = [];
           for (const batch of batches) {
             const orderBatchReference = String(parseOpaqueUuidV7(batch, "ACTOR_REFERENCE_INVALID"));
             const card = await cards.loadByBatch(
@@ -267,6 +290,26 @@ export function createMerchantOrdinaryRefundRequest(options: {
               }))
             )
               return roundRefunded();
+            if (
+              (payment !== null || card !== null) &&
+              (await acceptances.loadByBatch({
+                transaction: businessTransaction,
+                orderReference,
+                orderBatchReference,
+              })) === null
+            )
+              unaccepted.push(
+                await readBatchUnits(
+                  businessTransaction,
+                  scope,
+                  {
+                    orderReference,
+                    orderBatchReference,
+                    observedAt: String(current.context.resolvedAt),
+                  },
+                  allowed,
+                ),
+              );
           }
           const runtime = createPostgresOrdinaryRefundRequestRuntime({
             scope: {
@@ -286,6 +329,34 @@ export function createMerchantOrdinaryRefundRequest(options: {
             orderReference,
             actorReference: String(current.actorReference),
           });
+          if (unaccepted.length > 0 && result.status !== "AlreadyCommitted") {
+            // The units still claimed after this request (recorded in this transaction, or only
+            // previewed), counted in units: refunding every dish but not the tip is all of it.
+            const claimed = await readClaimedRefundUnits(
+              businessTransaction,
+              scope,
+              {
+                orderReference,
+                observedAt: await observeOrdinaryRefundOrderAfterFence(
+                  businessTransaction,
+                  scope,
+                  orderReference,
+                  String(result.request.requestedAt),
+                  options.persistence.now,
+                ),
+                operationReference: String(result.request.operationReference),
+              },
+              allowed,
+            );
+            const asked = result.request.payments.flatMap((payment) =>
+              payment.items.map((item) => ({
+                orderItemReference: String(item.orderItemReference),
+                refundUnitOrdinals: item.refundUnitOrdinals,
+              })),
+            );
+            if (unaccepted.some((units) => everyBatchUnitClaimed(units, claimed, asked)))
+              return notAccepted();
+          }
           const components = {
             netAmountMinor: 0n,
             taxAmountMinor: 0n,

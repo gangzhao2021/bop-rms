@@ -237,6 +237,7 @@ const context = {
   confirmedRefundMinor: "0",
   pendingRefundMinor: "1130",
   canRequest: true,
+  requestBlocked: null,
 };
 it("payment context preserves separate capture, confirmed and pending amounts", async () => {
   const fetcher = vi.fn<typeof fetch>().mockResolvedValue(response(context));
@@ -254,6 +255,23 @@ it("M126 I.5: another store's payment is NotFound, a role without refunds Denied
   // Any other 404 (not this route's answer) is no claim about the payment.
   await expect(client.context(id(6), csrf)).rejects.toMatchObject({ code: "Unavailable" });
   expect(fetcher).toHaveBeenCalledTimes(3);
+});
+it("WP-2423 M13: reads why an owner may not record, and an older server's answer as no reason", async () => {
+  const { requestBlocked: _omitted, ...older } = context;
+  const fetcher = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(
+      response({ ...context, canRequest: false, requestBlocked: "SoleOperatorOff" }),
+    )
+    .mockResolvedValueOnce(response(older))
+    .mockResolvedValueOnce(response({ ...context, requestBlocked: "Other" }));
+  const client = createOrdinaryRefundClient(fetcher);
+  await expect(client.context(id(6), csrf)).resolves.toMatchObject({
+    canRequest: false,
+    requestBlocked: "SoleOperatorOff",
+  });
+  await expect(client.context(id(6), csrf)).resolves.toEqual(context);
+  await expect(client.context(id(6), csrf)).rejects.toThrow();
 });
 it("payment context preserves unknown amounts rather than inventing zero", async () => {
   const unknown = {
@@ -665,4 +683,18 @@ it("WP-2423 item 4: shows a recorded card-machine slip reference, never a card n
   delete missing.cardMachineSlipReference;
   fetcher.mockResolvedValueOnce(response({ ...status({}), payments: [missing] }));
   await expect(client.status(id(1), id(3), csrf)).rejects.toMatchObject({ code: "Unavailable" });
+});
+
+it("WP-2423 M10: a full refund of an order nobody accepted is told to use Can't make it", async () => {
+  const fetcher = vi
+    .fn<typeof fetch>()
+    .mockResolvedValue(response({ error: "refund_order_not_accepted" }, 409));
+  const error = await createOrdinaryRefundClient(fetcher)
+    .prepareRequest(command())
+    .preview(csrf)
+    .catch((e: unknown) => e);
+  expect(error).toMatchObject({ code: "OrderNotAccepted" });
+  expect(refundErrorText(error)).toBe(
+    "This order hasn't been accepted. Use Can't make it to refund it in full.",
+  );
 });

@@ -62,7 +62,7 @@ function refundableMinor(context: Context): bigint {
   );
 }
 /** WP-2423 Q5: why no new refund request can be recorded on this payment, or null. */
-function requestBlockedMessage(context: Context): ReactNode {
+export function requestBlockedMessage(context: Context): ReactNode {
   if (refundableMinor(context) <= 0n) {
     const pending = BigInt(context.pendingRefundMinor ?? "0");
     return (
@@ -85,7 +85,16 @@ function requestBlockedMessage(context: Context): ReactNode {
     );
   }
   if (!context.canRequest)
-    return (
+    return context.requestBlocked === "SoleOperatorOff" ? (
+      // WP-2423 M13 (DEC-OWNER-DEFAULTS-2026-11-06 item 1): two people stay the default; the
+      // owner running the store alone is told how to record one.
+      <p>
+        {t(
+          "Refunds are recorded by a store manager, and then you approve them. If you run the store alone, turn on Sole operator in Store setup (it applies to every store of this brand), or give someone the Store Manager role in Staff.",
+        )}{" "}
+        <Link to="/app/approvals">{t("Open Approvals")}</Link>
+      </p>
+    ) : (
       <p>
         {t("Only a store manager records refund requests. To approve or decline a refund:")}{" "}
         <Link to="/app/approvals">{t("Open Approvals")}</Link>

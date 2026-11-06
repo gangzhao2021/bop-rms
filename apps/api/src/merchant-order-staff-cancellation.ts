@@ -258,19 +258,28 @@ function databaseCode(error: unknown) {
  * guest's hand), so it is not theirs to give back; it stays with a manager's refund. Past that, the
  * command needs no phase of its own: any kitchen step is refused by the Kitchen cancel, a completed
  * or closed Order by the Ordering fence, whichever the queue happened to show.
+ *
+ * WP-2423 M10/M14 (DEC-OWNER-DEFAULTS-2026-11-06 item 2): a person's "Can't make it" is also for a
+ * batch paid and not accepted yet, at any Store (accepted by hand or automatically): whoever may
+ * accept may decline. It needs no automatic acceptance fact. The Ordering fence and the database
+ * (2000_420) keep it to a batch with its payment wait and no acceptance or disposition, so a batch
+ * the acceptance deadline or an outage hold's refund already closed is never refunded again. The
+ * System close (`bySystem`) stays with automatically accepted batches.
  */
 async function autoAcceptedOnlyRefusal(
   tx: ConsumerTransaction,
   selected: { tenantReference: string; brandReference: string; storeReference: string },
   plan: StaffOrderCancellationPlan,
+  bySystem = false,
 ): Promise<StaffOrderCancellationErrorCode | null> {
   const orderReference = String(plan.orderReference);
   const orderBatchReference = String(plan.orderBatchReference);
+  if (plan.previousPhase === "Submitted")
+    return bySystem ? "ORDER_CANCELLATION_NOT_CANCELLABLE" : null;
   const fact = (await listStoreOrderAutoAcceptanceFacts(tx, selected, [orderReference])).get(
     orderBatchReference,
   );
-  if (fact?.kind !== "Accepted" || plan.previousPhase === "Submitted")
-    return "ORDER_CANCELLATION_NOT_CANCELLABLE";
+  if (fact?.kind !== "Accepted") return "ORDER_CANCELLATION_NOT_CANCELLABLE";
   const served = await listStoreKitchenBatchesNotPrepared(tx, selected, [orderBatchReference]);
   return served.has(orderBatchReference) ? "ORDER_CANCELLATION_NOT_CANCELLABLE" : null;
 }
@@ -353,7 +362,7 @@ export async function cancelPaidBatch(
     position?.remainingMinor === 0n ? "AlreadyRefunded" : "Refund";
   if (position !== null) input.onRefundDecided?.(position.remainingMinor);
   if (input.autoAcceptedOnly === true) {
-    const refusal = await autoAcceptedOnlyRefusal(tx, selected, plan);
+    const refusal = await autoAcceptedOnlyRefusal(tx, selected, plan, input.bySystem === true);
     if (refusal !== null) return fail(refusal);
   }
   const cancellationReference = String(parseOrderingReference(options.nextReference()));

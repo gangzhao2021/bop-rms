@@ -22,9 +22,12 @@ export const refundErrorText = (error: unknown) =>
       ? DENIED_TEXT
       : error instanceof OrdinaryRefundClientError && error.code === "Changed"
         ? t("This order changed while it was loading. Refresh to see the latest.")
-        : error instanceof OrdinaryRefundClientError && error.code === "Conflict"
-          ? t("The payment or refund selection changed. Refresh before trying again.")
-          : t("Unable to refresh this information. Try again.");
+        : error instanceof OrdinaryRefundClientError && error.code === "OrderNotAccepted"
+          ? // WP-2423 M10: refunding every dish before acceptance is a refusal of the order.
+            t("This order hasn't been accepted. Use Can't make it to refund it in full.")
+          : error instanceof OrdinaryRefundClientError && error.code === "Conflict"
+            ? t("The payment or refund selection changed. Refresh before trying again.")
+            : t("Unable to refresh this information. Try again.");
 
 export function OrderPaymentLinks({
   orderReference,

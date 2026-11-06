@@ -186,6 +186,8 @@ export type ItemCancelFailure =
   | "NothingToPrepare"
   | "VersionConflict"
   | "LegacyStock"
+  /** WP-2423 M51: paid on the card machine; refunded from the order's payment instead. */
+  | "CardMachine"
   | "NotCancellable"
   | "Denied"
   /** Refused because the person signed in with a PIN; they confirm it is them and retry. */
@@ -204,7 +206,9 @@ export function itemCancelFailure(status: number, error: string | null): ItemCan
           ? "VersionConflict"
           : error === "order_item_stock_legacy"
             ? "LegacyStock"
-            : "NotCancellable";
+            : error === "order_paid_on_card_machine"
+              ? "CardMachine"
+              : "NotCancellable";
   if (status === 400 || status === 404) return "NotCancellable";
   return "Unknown";
 }

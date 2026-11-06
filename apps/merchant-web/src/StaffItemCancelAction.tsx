@@ -92,6 +92,10 @@ export function itemCancelFailureText(order: Order, failure: ItemCancelFailure) 
         : t(
             "This round's stock was reserved before per-item tracking, so its items cannot be cancelled one by one. Cancel the whole round instead.",
           );
+    case "CardMachine":
+      return t(
+        "This order was paid on the card machine. Refund these items from the order's payment under Payments and refunds: refund on the machine, then record the slip.",
+      );
     case "NotCancellable":
       return t("These items can no longer be cancelled. Close to refresh the order.");
     case "Denied":
