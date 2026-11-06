@@ -95,6 +95,56 @@ describe("WP-2423 Q13 monitor cycle", () => {
     ).toEqual(["orders.unpaid_rounds", "orders.workflow"]);
     expect(JSON.stringify(sent)).not.toContain("TwoBrandVersions");
   });
+  it("WP-2423 item 9: an order rules check that times out never tells the owner it passes", async () => {
+    const sent = [];
+    const channel = { id: "email", kind: "email", send: vi.fn(async (m) => sent.push(m)) };
+    const io = fakeIo({ channels: [channel] });
+    const observeBusiness = io.observeBusiness;
+    let workflow = {
+      ready: false,
+      refusals: [{ binding: "Pickup", rule: "TwoBrandVersions" }],
+      orderTypes: ["DineIn", "Pickup"],
+    };
+    io.observeBusiness = async () => ({ ...(await observeBusiness()), workflow });
+    let state = fresh();
+    for (const m of [0, 1, 2, 3])
+      state = await runMonitorCycle({ now: T0 + m * MIN, state, config, io });
+    workflow = "unreadable";
+    for (const m of [4, 5, 6, 7, 8])
+      state = await runMonitorCycle({ now: T0 + m * MIN, state, config, io });
+    expect(io.logs.filter((line) => line.event === "alert_cleared")).toEqual([]);
+    expect(JSON.stringify(sent)).not.toContain("passes again");
+    expect(io.boards.at(-1).active.map(({ key }) => key)).toContain("orders.workflow");
+    expect(io.boards.at(-1).recentlyCleared).toEqual([]);
+  });
+  it("WP-2423 item 9: the wait-for-BOP line goes when the planned update BOP fixed it in ends", async () => {
+    const io = fakeIo();
+    const observeBusiness = io.observeBusiness;
+    let workflow = {
+      ready: false,
+      refusals: [{ binding: "Pickup", rule: "TwoBrandVersions" }],
+      orderTypes: ["DineIn", "Pickup"],
+    };
+    io.observeBusiness = async () => ({ ...(await observeBusiness()), workflow });
+    let marker = null;
+    io.observeMaintenance = async () => marker;
+    let state = fresh();
+    for (const m of [0, 1, 2])
+      state = await runMonitorCycle({ now: T0 + m * MIN, state, config, io });
+    marker = {
+      schemaVersion: 1,
+      startedAt: new Date(T0 + 3 * MIN).toISOString(),
+      expiresAt: new Date(T0 + 15 * MIN).toISOString(),
+    };
+    workflow = { ready: true, refusals: [], orderTypes: ["DineIn", "Pickup"] };
+    for (const m of [3, 4, 5, 6])
+      state = await runMonitorCycle({ now: T0 + m * MIN, state, config, io });
+    expect(io.boards.at(-1).maintenance).not.toBeNull();
+    expect(io.boards.at(-1).recentlyCleared.map(({ key }) => key)).toEqual(["orders.workflow"]);
+    marker = null;
+    await runMonitorCycle({ now: T0 + 7 * MIN, state, config, io });
+    expect(io.boards.at(-1).recentlyCleared).toEqual([]);
+  });
   it("raises a down entry once on each channel, survives a restart without re-sending and clears", async () => {
     let down = true;
     const sent = [];

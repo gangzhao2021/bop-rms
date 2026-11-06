@@ -11,6 +11,7 @@ import {
   recordChannelDelivery,
   renderAlert,
   renderMessage,
+  uncheckedAlertKeys,
 } from "./pilot-alerts.mjs";
 
 const T0 = Date.parse("2026-10-15T03:00:00.000Z");
@@ -416,11 +417,23 @@ describe("WP-2423 Q13 alert rules", () => {
         for (const state of states) {
           const { action } = words(state);
           expect(action, state).toContain("card machine");
-          expect(action, state).toContain("Then enter the paper orders");
+          expect(action, state).toMatch(/Then enter (the )?paper orders/u);
           // Made from a slip, waiting on Orders: it would otherwise be cooked twice, or entered twice.
-          expect(action, state).toContain(
-            "for a slip with an order number, accept that order, mark it ready, do not remake it",
+          expect(action, state).toMatch(
+            floor[state].pickup
+              ? /a slip whose order is open: accept it, mark it ready, don't remake it/u
+              : /for a slip with an order number, accept that order, mark it ready, do not remake it/u,
           );
+        }
+      });
+      it("a refunded pickup order's slip is entered, never skipped as one to accept", () => {
+        // Its slip carries an order number, but the order cannot be accepted any more: skipping it
+        // would leave the card-machine payment out of the books.
+        for (const [state, { pickup }] of Object.entries(floor)) {
+          if (!pickup) continue;
+          const { action } = words(state);
+          expect(action, state).toContain("Then enter paper orders, refunded ones too;");
+          expect(action, state).not.toMatch(/slip with an order number/u);
         }
       });
       it("a pause is long enough and can end early, because it ends by itself with no warning", () => {
@@ -466,7 +479,7 @@ describe("WP-2423 Q13 alert rules", () => {
         }
         // Where only pickup is at stake, it is in what staff read without opening anything.
         for (const state of ["Pickup", "PaidPickup", "PickupStore", "PaidPickupStore"])
-          expect(words(state).action, state).toContain("The order refunds itself if not accepted.");
+          expect(words(state).action, state).toContain("An unaccepted order refunds itself.");
         for (const state of ["PaidOrders", "PaidPickup", "PaidPickupStore"])
           expect(words(state).title, state).toContain("may be refunded automatically");
       });
@@ -580,6 +593,102 @@ describe("WP-2423 Q13 alert rules", () => {
         expect(sent.text).toContain("until BOP support says it is fixed");
       }
       expect(cleared.notifications.map(({ kind }) => kind)).toEqual(["cleared", "cleared"]);
+    });
+    const board = (state) =>
+      buildAlertBoard(state, {
+        observedAt: new Date(T0).toISOString(),
+        channels: [],
+        backup: null,
+      });
+    const WAIT = "Order rules check passes again: stay on paper until BOP support says it is fixed";
+    /** Raised at T0 + 2 min, absent from T0 + 3 min, cleared at T0 + 6 min. */
+    const raiseThenClear = (c, options = {}) => {
+      const seen = advanceAlertState(emptyAlertState(), c, T0);
+      const raised = advanceAlertState(seen.state, c, T0 + 2 * MIN);
+      const gone = advanceAlertState(raised.state, new Map(), T0 + 3 * MIN, undefined, options);
+      return advanceAlertState(gone.state, new Map(), T0 + 6 * MIN, undefined, options);
+    };
+    it("a row that only said an order type cannot be turned on clears as resolved, not as paper", () => {
+      // The dine-in-only hotpot was told "nothing to do in the store today"; it never went on paper.
+      const cleared = raiseThenClear(conditions([refused("Pickup")], ["DineIn"]));
+      expect(cleared.notifications.map(({ kind, key }) => [kind, key])).toEqual([
+        ["cleared", "orders.workflow"],
+      ]);
+      expect(board(cleared.state).recentlyCleared.map(({ title }) => title)).toEqual([
+        "Pickup cannot be turned on yet",
+      ]);
+      const sent = renderMessage(cleared.notifications, { siteLabel: "Main St", runbookBase: "x" });
+      expect(sent.subject).toBe("Main St: Resolved - Pickup cannot be turned on yet");
+      expect(sent.text).not.toMatch(/paper/u);
+      // The same refusal while pickup is offered sent staff to paper, and clears as a wait.
+      const urgent = raiseThenClear(conditions([refused("Pickup")]));
+      expect(board(urgent.state).recentlyCleared.map(({ title }) => title)).toEqual([WAIT]);
+    });
+    it("a check that could not run is neither a pass nor a clearing", () => {
+      const c = conditions([refused("Pickup"), refused("Cancellation")]);
+      const seen = advanceAlertState(emptyAlertState(), c, T0);
+      let { state } = advanceAlertState(seen.state, c, T0 + 2 * MIN);
+      const unreadable = healthy();
+      unreadable.business.workflow = "unreadable";
+      expect(uncheckedAlertKeys(unreadable)).toEqual(["orders.workflow", "orders.unpaid_rounds"]);
+      expect(uncheckedAlertKeys({ ...unreadable, business: "unreadable" })).toEqual([
+        "orders.workflow",
+        "orders.unpaid_rounds",
+      ]);
+      expect(uncheckedAlertKeys(healthy())).toEqual([]);
+      const timedOut = evaluateAlertConditions(unreadable);
+      expect(timedOut.has("orders.workflow")).toBe(false);
+      const all = [];
+      for (const minutes of [3, 4, 5, 6, 10]) {
+        const next = advanceAlertState(state, timedOut, T0 + minutes * MIN, undefined, {
+          unchecked: uncheckedAlertKeys(unreadable),
+        });
+        all.push(...next.notifications);
+        state = next.state;
+      }
+      expect(all.filter(({ kind }) => kind === "cleared")).toEqual([]);
+      // BOP hears that the check could not run; the rows stay as they were.
+      expect(Object.keys(state.alerts).sort()).toEqual([
+        "monitor.source",
+        "orders.unpaid_rounds",
+        "orders.workflow",
+      ]);
+      expect(JSON.stringify(board(state))).not.toContain("passes again");
+      expect(board(state).active.map(({ key }) => key)).toContain("orders.workflow");
+      // Once a check runs and finds it fixed, the usual two minutes still apply from then.
+      const passed = advanceAlertState(state, new Map(), T0 + 11 * MIN);
+      expect(passed.notifications.filter(({ key }) => key.startsWith("orders."))).toEqual([]);
+      expect(
+        advanceAlertState(passed.state, new Map(), T0 + 13 * MIN)
+          .notifications.filter(({ key }) => key.startsWith("orders."))
+          .map(({ kind }) => kind),
+      ).toEqual(["cleared", "cleared"]);
+    });
+    it("the wait line goes when the row is raised again, and when BOP's planned update ends", () => {
+      const c = conditions([stale("Pickup")]);
+      // (b) Cleared after the file changed, raised again by the restart: never both on Home.
+      const cleared = raiseThenClear(c);
+      expect(board(cleared.state).recentlyCleared.map(({ title }) => title)).toEqual([WAIT]);
+      const back = advanceAlertState(cleared.state, c, T0 + 20 * MIN);
+      const again = advanceAlertState(back.state, c, T0 + 22 * MIN);
+      expect(again.notifications.map(({ kind }) => kind)).toEqual(["raised"]);
+      expect(board(again.state).active.map(({ key }) => key)).toEqual(["orders.workflow"]);
+      expect(board(again.state).recentlyCleared).toEqual([]);
+      // (a) BOP fixes it inside a planned update: the line stays while it runs and goes after.
+      const during = raiseThenClear(c, { plannedUpdate: true });
+      expect(board(during.state).recentlyCleared.map(({ title }) => title)).toEqual([WAIT]);
+      const still = advanceAlertState(during.state, new Map(), T0 + 30 * MIN, undefined, {
+        plannedUpdate: true,
+      });
+      expect(board(still.state).recentlyCleared.map(({ title }) => title)).toEqual([WAIT]);
+      const after = advanceAlertState(still.state, new Map(), T0 + 40 * MIN);
+      expect(after.notifications).toEqual([]);
+      expect(board(after.state).recentlyCleared).toEqual([]);
+      // With no planned update it stays (Home ends it with the business day), and a resolved line
+      // of another kind is not touched by an update.
+      expect(
+        board(advanceAlertState(cleared.state, new Map(), T0 + 40 * MIN).state).recentlyCleared,
+      ).toHaveLength(1);
     });
     it("a rule that is not one fixed word never reaches the log", () => {
       expect(

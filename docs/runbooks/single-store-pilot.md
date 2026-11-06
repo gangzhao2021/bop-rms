@@ -3203,8 +3203,10 @@ machine and write it on the incident sheet now, otherwise write it there as a lo
 `Counter order` recorded after an outage only once BOP support says it is fixed, because a Counter
 pickup order goes through the same refused Workflow. The same for a guest who comes to collect after
 that. When BOP support says it is fixed: enter the paper orders
-(recovery steps 4 and 5), except slips with an order number: accept that order and mark it ready, do
-not make it again, and do not enter it. Further rounds: the same for tables that pay before each
+(recovery steps 4 and 5), refunded pickup orders included, except slips whose order is still open:
+accept that order and mark it ready, do not make it again, and do not enter it. A refunded order
+cannot be accepted, so its card-machine payment is entered as the `Counter order` above, never
+skipped. Further rounds: the same for tables that pay before each
 round, no pause; tables that pay at the end carry on. Cannot be turned on yet: nothing in the store;
 do not turn it on.
 

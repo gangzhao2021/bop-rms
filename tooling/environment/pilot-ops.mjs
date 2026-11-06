@@ -28,6 +28,7 @@ import {
   planChannelDelivery,
   recordChannelDelivery,
   renderMessage,
+  uncheckedAlertKeys,
 } from "./pilot-alerts.mjs";
 import {
   createAlertLog,
@@ -154,6 +155,8 @@ export async function runMonitorCycle({ now, state, config, io }) {
     });
   const advanced = advanceAlertState(state.alert, conditions, now, undefined, {
     held: maintenance === null ? [] : PLANNED_MAINTENANCE_HELD_KEYS,
+    unchecked: uncheckedAlertKeys(observations),
+    plannedUpdate: maintenance !== null,
   });
   for (const item of advanced.notifications)
     await io.log({

@@ -97,8 +97,12 @@ const list = (values) => {
 const PAID_ALREADY = "A guest who paid: no second payment; kitchen slip with order number.";
 const UNTIL_FIXED =
   "Call BOP support now; stay on paper until they say it is fixed. Then enter the paper orders; for a slip with an order number, accept that order, mark it ready, do not remake it.";
-const PAUSE_ALL = `Pause all services in Hours & ordering until closing (can resume early). Tell seated tables to order with staff. New orders: paper slip, card machine. ${PAID_ALREADY} ${UNTIL_FIXED}`;
-const PAUSE_PICKUP = `Pause pickup in Hours & ordering until closing (can resume early). New pickup orders: paper slip, card machine. ${PAID_ALREADY} The order refunds itself if not accepted. ${UNTIL_FIXED}`;
+// A refunded pickup order's slip carries an order number too, but that order cannot be accepted:
+// the card-machine payment taken for it is entered as a Counter order (REFUNDED), never skipped.
+const UNTIL_FIXED_PICKUP =
+  "Call BOP support now; stay on paper until they say it is fixed. Then enter paper orders, refunded ones too; a slip whose order is open: accept it, mark it ready, don't remake it.";
+const PAUSE_ALL = `Pause all services in Hours & ordering until closing (can resume early). Tell seated tables to order with staff. New orders: paper slip, card machine. ${PAID_ALREADY} ${UNTIL_FIXED_PICKUP}`;
+const PAUSE_PICKUP = `Pause pickup in Hours & ordering until closing (can resume early). New pickup orders: paper slip, card machine. ${PAID_ALREADY} An unaccepted order refunds itself. ${UNTIL_FIXED_PICKUP}`;
 const PAUSE_DINE_IN = `Pause dine-in in Hours & ordering until closing (can resume early). Tell seated tables to order with staff. New rounds: paper slip, card machine. ${PAID_ALREADY} ${UNTIL_FIXED}`;
 const REFUNDED =
   "A paid pickup order nobody can accept is refunded automatically about 30 minutes after payment (Orders shows the time), even if the guest has it. With their agreement take payment on the card machine and note it on the incident sheet now (a loss if they decline). Enter it as a Counter order recorded after an outage only once BOP support says it is fixed.";
@@ -359,9 +363,12 @@ export const ALERT_CATALOG = Object.freeze({
     summary: (p) => (ORDER_WORKFLOW_WORDS[p.state] ?? ORDER_WORKFLOW_WORDS.Orders).summary,
     action: (p) => (ORDER_WORKFLOW_WORDS[p.state] ?? ORDER_WORKFLOW_WORDS.Orders).action,
     // The row can clear before the fix reaches the running services (they hold the binding they
-    // loaded at start), so its clearing never reads as all clear.
-    clearedTitle:
-      "Order rules check passes again: stay on paper until BOP support says it is fixed",
+    // loaded at start), so a row that sent staff to paper never clears as all clear. One that only
+    // said an order type cannot be turned on yet (nothing to do in the store) clears as resolved.
+    clearedTitle: (p) =>
+      ORDER_WORKFLOW_NOT_OFFERED.includes(p.state)
+        ? null
+        : "Order rules check passes again: stay on paper until BOP support says it is fixed",
     runbook: "alert-orders-workflow",
   },
   // WP-2423 item 9: the cancellation Workflow refused. A manager's cancel and "Guests left" pass the
@@ -376,7 +383,7 @@ export const ALERT_CATALOG = Object.freeze({
       "At tables that pay before each round, unpaid rounds are not cancelled automatically and a manager cannot cancel them. They stay open and keep their ingredients set aside, so dishes can show as sold out to other guests, and the table cannot be closed for the next party. At a table that pays at the end, only a round waiting for staff is affected: it can be sent to the kitchen but not cancelled.",
     action: () =>
       "Tables that pay before each round: one with an unpaid round cannot be closed and that round cannot be cancelled here, so trying again will not help. Seat the next party at another table and note those tables. Tables that pay at the end carry on and close once they pay. Call BOP support now: they have to fix this. Close the noted tables once they say it is fixed.",
-    clearedTitle:
+    clearedTitle: () =>
       "Unpaid rounds check passes again: keep the noted tables until BOP support says it is fixed",
     runbook: "alert-orders-unpaid-rounds",
   },
@@ -736,6 +743,17 @@ export function evaluateAlertConditions(observations, thresholds = DEFAULT_THRES
   return conditions;
 }
 
+/**
+ * Rows whose check did not run this cycle. Absent from the conditions, they are neither raised nor
+ * cleared: a database read that times out must not read as "the check passes again" (item 9).
+ */
+export function uncheckedAlertKeys(observations) {
+  const business = observations.business;
+  return business === undefined || business === "unreadable" || business.workflow === "unreadable"
+    ? ["orders.workflow", "orders.unpaid_rounds"]
+    : [];
+}
+
 export const DEFAULT_POLICY = Object.freeze({
   clearAfterMs: 2 * MINUTE,
   remindAfterMs: Object.freeze({ critical: 3 * HOUR, warning: 24 * HOUR }),
@@ -773,9 +791,10 @@ export function advanceAlertState(
   conditions,
   now,
   policy = DEFAULT_POLICY,
-  { held = [] } = {},
+  { held = [], unchecked = [], plannedUpdate = false } = {},
 ) {
   const holding = new Set(held);
+  const notChecked = new Set(unchecked);
   const state = globalThis.structuredClone(previous ?? emptyAlertState());
   const notifications = [];
   const stamp = new Date(now).toISOString();
@@ -811,6 +830,8 @@ export function advanceAlertState(
         entry.notifiedAt = stamp;
         entry.notifiedSeverity = entry.severity;
         notify("raised", key, entry);
+        // Raised again: its "passes again, wait for BOP support" line is no longer true.
+        state.cleared = state.cleared.filter((item) => item.key !== key || !waitsForSupport(item));
       }
     } else if (SEVERITY_RANK[entry.severity] > SEVERITY_RANK[entry.notifiedSeverity]) {
       entry.notifiedAt = stamp;
@@ -825,6 +846,11 @@ export function advanceAlertState(
   const removed = new Set();
   for (const [key, entry] of Object.entries(state.alerts)) {
     if (conditions.has(key)) continue;
+    // Not checked is not absent: it stays as it was until a check runs again.
+    if (notChecked.has(key)) {
+      entry.absentSince = null;
+      continue;
+    }
     entry.absentSince ??= stamp;
     if (entry.raisedAt === null) {
       removed.add(key);
@@ -837,6 +863,10 @@ export function advanceAlertState(
         severity: entry.severity,
         raisedAt: entry.raisedAt,
         clearedAt: stamp,
+        // What the row said at the end decides how its clearing reads (never the BOP-only rule).
+        ...(typeof entry.params?.state === "string"
+          ? { params: { state: entry.params.state } }
+          : {}),
       });
       removed.add(key);
     }
@@ -844,9 +874,15 @@ export function advanceAlertState(
   state.alerts = Object.fromEntries(
     Object.entries(state.alerts).filter(([key]) => !removed.has(key)),
   );
-  state.cleared = state.cleared.filter(
-    (entry) => now - Date.parse(entry.clearedAt) < policy.clearedVisibleMs,
-  );
+  // A "wait for BOP support" line ends with the planned update BOP fixes it in (the runbook starts
+  // one for these rows): seen during an update, it goes once that update ends. Home also ends it
+  // with the store's business day.
+  state.cleared = state.cleared.filter((entry) => {
+    if (now - Date.parse(entry.clearedAt) >= policy.clearedVisibleMs) return false;
+    if (!waitsForSupport(entry)) return true;
+    if (plannedUpdate) entry.updateSeenAt ??= stamp;
+    return plannedUpdate || entry.updateSeenAt === undefined;
+  });
   return { state, notifications };
 }
 
@@ -894,11 +930,14 @@ const KIND_LABEL = Object.freeze({
  * What a cleared row is called. A key whose clearing does not mean the store can go back to normal
  * (orders.workflow: services keep what they loaded until restarted) says what staff still wait for.
  */
-export function clearedAlertTitle(key) {
+export function clearedAlertTitle(key, params = {}) {
   const catalog = ALERT_CATALOG[key];
-  return catalog.clearedTitle ?? catalog.title({ remainingMs: 1 });
+  return catalog.clearedTitle?.(params) ?? catalog.title({ remainingMs: 1, ...params });
 }
-const waitsForSupport = (item) => ALERT_CATALOG[item.key]?.clearedTitle !== undefined;
+function waitsForSupport(item) {
+  const title = ALERT_CATALOG[item.key]?.clearedTitle?.(item.params ?? {});
+  return typeof title === "string";
+}
 export function renderAlert(key, params) {
   const catalog = ALERT_CATALOG[key];
   return {
@@ -927,7 +966,7 @@ export function renderMessage(batch, { siteLabel, runbookBase, homeUrl = null })
     const text = renderAlert(item.key, item.params);
     if (item.kind === "cleared")
       return waitsForSupport(item)
-        ? `${clearedAlertTitle(item.key)}.`
+        ? `${clearedAlertTitle(item.key, item.params)}.`
         : `${KIND_LABEL.cleared}: ${text.title}.`;
     return `${KIND_LABEL[item.kind]} (${item.severity === "critical" ? "urgent" : "today"}): ${text.title}. ${text.summary} What to do: ${text.action} Runbook: ${runbookLink(runbookBase, text.runbook)}`;
   });
@@ -936,7 +975,7 @@ export function renderMessage(batch, { siteLabel, runbookBase, homeUrl = null })
   else if (ordered.length === 1)
     subject =
       top.kind === "cleared" && waitsForSupport(top)
-        ? `${siteLabel}: ${clearedAlertTitle(top.key)}`
+        ? `${siteLabel}: ${clearedAlertTitle(top.key, top.params)}`
         : `${siteLabel}: ${top.kind === "cleared" ? "Resolved - " : top.severity === "critical" ? "URGENT - " : ""}${renderAlert(top.key, top.params).title}`;
   else
     subject = `${siteLabel}: ${open.length > 0 ? `${count(open.length, "problem", "problems")}${open.some((item) => item.severity === "critical") ? " (urgent)" : ""}` : ordered.some(waitsForSupport) ? "checks pass again, wait for BOP support before going back to normal" : "problems resolved"}`;
@@ -980,7 +1019,7 @@ export function buildAlertBoard(state, { observedAt, channels, backup, maintenan
     recentlyCleared: state.cleared
       .map((entry) => ({
         key: entry.key,
-        title: clearedAlertTitle(entry.key),
+        title: clearedAlertTitle(entry.key, entry.params),
         clearedAt: entry.clearedAt,
       }))
       .slice(-10),
