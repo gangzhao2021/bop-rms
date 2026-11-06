@@ -20,7 +20,11 @@ import {
   createPostgresOrderPaymentOutcomeStore,
   listStorePaidOrderBatches,
 } from "../../rms/ordering/src/index.ts";
-import { createPostgresCapturedBatchPaymentSource } from "../../rms/payment/src/index.ts";
+import {
+  createPostgresCapturedBatchPaymentSource,
+  parsePaymentIntentCreationRecord,
+} from "../../rms/payment/src/index.ts";
+import { createCustomerCapacityPaymentClaimAdmission } from "../../../apps/api/src/customer-capacity-payment-admission.ts";
 import { createCustomerSubmissionInventoryFinalizer } from "../../../apps/api/src/customer-submission-inventory-finalizer.ts";
 import { createMerchantDiningTableMove } from "../../../apps/api/src/merchant-dining-table-move.ts";
 import { createMerchantDiningTableCommand } from "../../../apps/api/src/merchant-dining-table-command.ts";
@@ -696,6 +700,8 @@ it.each([
             // answered and takes table B before waiting for the session: the gate gives back A and
             // the session before it locks B (a Move locks table before session), so neither waits
             // on the other (review 2026-11-06: holding the session here deadlocked with the Move).
+            // The time the guest pressed confirm: before staff's moves below.
+            const confirmedAt = now();
             let reads = 0;
             let second = null;
             const racing = {
@@ -733,6 +739,61 @@ it.each([
             const current = await paymentGate(racing);
             await second;
             assert.equal(reads, 3);
+            // The confirm's own Dining gate inside Payment's claim (what confirm, retry and resume
+            // run), as the restricted role, for the payment started at A with the request's time
+            // before the moves: it admits the same payment at C for the same amount (review
+            // 2026-11-06: it read Dining at the request's time and refused, answered 404).
+            const intentRecord = parsePaymentIntentCreationRecord({
+              intent: {
+                paymentIntentReference: pay1.paymentIntent,
+                paymentOperationReference: sealed1.paymentOperationReference,
+                intentDigest: hash("synthetic move intent"),
+                preparation: {
+                  preparationReference: pay1.preparation,
+                  orderReference: sealed1.orderReference,
+                  orderBatchReference: sealed1.orderBatchReference,
+                  submissionReference: sealed1.submissionReference,
+                  sourceCartReference: sealed1.cartReference,
+                  sourceCartVersion: sealed1.cartVersion,
+                  brandReference: scope.brandReference,
+                  storeReference: scope.storeReference,
+                  guestSessionReference: sealed1.guestSessionReference,
+                  quoteReference: sealed1.quoteReference,
+                  capacityAllocationReference: commitment1,
+                  readiness: "PaymentPending",
+                  transactionBoundary: "OrderSubmissionPaymentPreparation",
+                  orderAllocation: { amountMinor: roundTotal, currencyCode: "CAD" },
+                  tip: { amountMinor: 0n, currencyCode: "CAD" },
+                  total: { amountMinor: roundTotal, currencyCode: "CAD" },
+                  committedAt: sealed1.paymentRequestedAt,
+                  capacityExpiresAt: sealed1.capacityExpiresAt,
+                  sourceDigest: hash("synthetic move preparation"),
+                },
+                paymentMethod: "OnlineCard",
+                captureMode: "Automatic",
+                aggregateVersion: 1,
+                creationStatus: "ProviderCreatePending",
+                createdAt: sealed1.paymentRequestedAt,
+              },
+              attempt: {
+                paymentAttemptReference: pay1.attempt,
+                paymentIntentReference: pay1.paymentIntent,
+                attemptNumber: 1,
+                provider: "Stripe",
+                providerEnvironment: "Test",
+                providerIdempotencyDigest: hash("synthetic move attempt"),
+                createdAt: sealed1.paymentRequestedAt,
+              },
+              providerOutcome: null,
+            });
+            const admitted = await transactions().run((tx) =>
+              createCustomerCapacityPaymentClaimAdmission({
+                scope: ownerScope,
+                owner: "Dining",
+                inventory: { admit: async () => true },
+              }).admit(tx, intentRecord, confirmedAt),
+            );
+            assert.deepEqual(admitted, { validUntil: sealed1.capacityExpiresAt });
             assert.equal(current.commitmentReference, commitment1);
             assert.equal(current.tableReference, tableA);
             assert.equal(current.state, "PaymentPending");
