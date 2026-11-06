@@ -44,9 +44,30 @@ export interface DiningGuestBindingEvidence {
   readonly participantVersion: number;
   readonly observedAt: DiningInstant;
 }
+/**
+ * WP-2423 (same-table-ordering): what Dining has recorded about a participant leaving its table.
+ * `Left`: the participant left or staff removed it. `Moved`: staff moved the party off the table
+ * this phone joined at before the phone joined, so the phone does not follow it. `Present`: Dining
+ * records neither. `joinedTableQr` is the current QR of the table the phone joined at (its version
+ * and whether it is turned on), so a caller can tell a replaced or turned-off code from an outage.
+ */
+export interface DiningParticipantDeparture {
+  readonly participantReference: DiningReference;
+  readonly departure: "Left" | "Moved" | "Present";
+  readonly joinedTableQr: { readonly version: number; readonly active: boolean };
+}
+export interface DiningParticipantDepartureSource {
+  /** Recorded facts only; a participant Dining has no row for is left out. Failures throw. */
+  readDepartures(input: {
+    readonly brandReference: DiningReference;
+    readonly storeReference: DiningReference;
+    readonly diningSessionReference: DiningReference;
+    readonly participantReferences: readonly DiningReference[];
+  }): Promise<readonly DiningParticipantDeparture[]>;
+}
 export interface DiningGuestBindingOptions {
   readonly scope: { readonly brandReference: string; readonly storeReference: string };
-  readonly repository: {
+  readonly repository: Partial<DiningParticipantDepartureSource> & {
     /** One coherent current owner snapshot; no cache or authority inferred from the locators. */
     readCurrent(input: {
       readonly brandReference: DiningReference;

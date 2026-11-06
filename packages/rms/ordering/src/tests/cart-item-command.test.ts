@@ -542,9 +542,11 @@ describe("Cart Item Add / Update / Remove commands", () => {
     });
     // The ordinary attributed remove: the remover's Guest Session, never the adder's.
     expect(gone.operation(ids.operation)?.guestSessionReference).toBe(ids.otherSession);
-    // Still at the table, an answer about someone else, a failure or no port: refused.
+    // Still at the table, could not be checked, an answer about someone else, a failure or no
+    // port: refused.
     for (const adders of [
       { standing: async () => [{ participantReference: ids.participant, standing: "AtTable" }] },
+      { standing: async () => [{ participantReference: ids.participant, standing: "Unknown" }] },
       { standing: async () => [{ participantReference: ids.otherParticipant, standing: "Gone" }] },
       { standing: async () => [] },
       {

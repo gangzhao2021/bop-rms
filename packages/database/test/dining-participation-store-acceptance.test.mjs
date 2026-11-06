@@ -15,7 +15,9 @@ import {
   createPostgresDiningSessionJoinStore,
   createPostgresDiningParticipationStore,
   createDiningCartParticipationQuery,
+  createPostgresDiningGuestBindingStore,
 } from "../../rms/dining/src/index.ts";
+import { grantPilotApiAcl } from "../test-support/pilot-api-acl.mjs";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 const { Client } = pg;
 const id = (n) => `01902280-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
@@ -485,6 +487,90 @@ it("reads coherent current Dining participation without writing authority or his
       );
       nowValue = at(8);
       assert.equal(await resolve(joined.participant.participantReference), null);
+      // WP-2423 (same-table-ordering): Dining's recorded departures, read as the restricted pilot
+      // API role (rendered pilot ACL, NOBYPASSRLS): the removed phone is Left, the other is still
+      // Present, each with the current QR of the table it joined at; an unknown participant is left
+      // out; another Store's scope is refused and sees no rows. Nothing is written.
+      const pilot = `wp2423_dep_${context.runId}`;
+      await admin.query(
+        `CREATE ROLE ${pilot} NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE`,
+      );
+      await grantPilotApiAcl(admin, pilot);
+      const pilotRunner = {
+        async run(action) {
+          const client = new Client(context.clientConfig);
+          await client.connect();
+          try {
+            await client.query("BEGIN READ ONLY");
+            await client.query(`SET LOCAL ROLE ${pilot}`);
+            const result = await action({
+              query: (sql, values) => client.query(sql, [...values]),
+            });
+            await client.query("COMMIT");
+            return result;
+          } catch (error) {
+            await client.query("ROLLBACK");
+            throw error;
+          } finally {
+            await client.end();
+          }
+        },
+      };
+      const beforeDepartures = await counts();
+      const departures = createPostgresDiningGuestBindingStore(pilotRunner, scope);
+      const joinedTable = await tableReader.loadTable(id(20));
+      const facts = await departures.readDepartures({
+        brandReference: id(2),
+        storeReference: id(3),
+        diningSessionReference: sessionId,
+        participantReferences: [
+          joined.participant.participantReference,
+          second.participant.participantReference,
+          id(999),
+        ],
+      });
+      assert.deepEqual(
+        [...facts].sort((a, b) => a.participantReference.localeCompare(b.participantReference)),
+        [
+          {
+            participantReference: joined.participant.participantReference,
+            departure: "Left",
+            joinedTableQr: {
+              version: joinedTable.qrVersion,
+              active: joinedTable.qrStatus === "Active",
+            },
+          },
+          {
+            participantReference: second.participant.participantReference,
+            departure: "Present",
+            joinedTableQr: {
+              version: joinedTable.qrVersion,
+              active: joinedTable.qrStatus === "Active",
+            },
+          },
+        ].sort((a, b) => a.participantReference.localeCompare(b.participantReference)),
+      );
+      await assert.rejects(
+        departures.readDepartures({
+          brandReference: id(2),
+          storeReference: id(90),
+          diningSessionReference: sessionId,
+          participantReferences: [second.participant.participantReference],
+        }),
+      );
+      assert.deepEqual(
+        await createPostgresDiningGuestBindingStore(pilotRunner, {
+          ...scope,
+          storeReference: id(90),
+        }).readDepartures({
+          brandReference: id(2),
+          storeReference: id(90),
+          diningSessionReference: sessionId,
+          participantReferences: [second.participant.participantReference],
+        }),
+        [],
+      );
+      assert.deepEqual(await counts(), beforeDepartures);
       assert.equal(
         (await resolve(second.participant.participantReference)).participantReference,
         second.participant.participantReference,

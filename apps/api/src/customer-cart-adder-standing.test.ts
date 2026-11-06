@@ -11,41 +11,74 @@ const session = (n: number, participant: string) =>
     diningParticipantReference: participant,
   }) as unknown as GuestSession;
 
+const brand = id(2),
+  store = id(3);
+const scope = { brandReference: brand, storeReference: store };
+const departure = (
+  participant: string,
+  kind: "Left" | "Moved" | "Present",
+  version = 2,
+  active = true,
+) => ({
+  participantReference: participant,
+  departure: kind,
+  joinedTableQr: { version, active },
+});
+const sessionAt = (n: number, participant: string, qrRevocationVersion: number) =>
+  ({ ...session(n, participant), qrRevocationVersion }) as unknown as GuestSession;
+
 describe("WP-2423 same-table-ordering: has the phone that added a line left the table", () => {
-  it("is AtTable while any live session of that phone passes the cart's own binding check", async () => {
+  it("is AtTable while any live session passes the cart's own binding check, Gone only on a recorded departure", async () => {
     const phoneA = id(41),
       phoneB = id(42),
-      phoneC = id(43);
+      phoneC = id(43),
+      phoneD = id(44);
     const listBound = vi.fn(async () => [
       // A: an older session that no longer passes (QR replaced) and its current one that does.
-      session(101, phoneA),
-      session(102, phoneA),
-      // B: removed by staff, so its only session fails the binding check (participant Left).
-      session(103, phoneB),
+      sessionAt(101, phoneA, 1),
+      sessionAt(102, phoneA, 2),
+      // B: removed by staff: its session fails the check and Dining records it Left.
+      sessionAt(103, phoneB, 2),
+      // D: its session fails the check, and Dining records nothing: an outage, not a departure.
+      sessionAt(104, phoneD, 2),
       // C has no live session at all (its session ended).
     ]);
     const validate = vi.fn(async (value: GuestSession, when: string) =>
       String(value.sessionReference) === id(102) && when === at ? "Current" : "Unavailable",
     );
+    const readDepartures = vi.fn(async () => [
+      departure(phoneB, "Left"),
+      departure(phoneD, "Present"),
+    ]);
     const port = createCustomerCartAdderStanding({
+      scope,
       sessions: { listBound },
       binding: { validate },
+      departures: { readDepartures } as never,
     });
     await expect(
       port.standing({
         diningSessionReference: id(30),
-        participantReferences: [phoneA, phoneB, phoneC, phoneA],
+        participantReferences: [phoneA, phoneB, phoneC, phoneD, phoneA],
         observedAt: at,
       }),
     ).resolves.toEqual([
       { participantReference: phoneA, standing: "AtTable" },
       { participantReference: phoneB, standing: "Gone" },
       { participantReference: phoneC, standing: "Gone" },
+      { participantReference: phoneD, standing: "Unknown" },
     ]);
     expect(listBound).toHaveBeenCalledWith({
       diningSessionReference: id(30),
-      participantReferences: [phoneA, phoneB, phoneC],
+      participantReferences: [phoneA, phoneB, phoneC, phoneD],
       observedAt: at,
+    });
+    // Only the phones not shown at the table are asked about, in this Store.
+    expect(readDepartures).toHaveBeenCalledWith({
+      brandReference: brand,
+      storeReference: store,
+      diningSessionReference: id(30),
+      participantReferences: [phoneB, phoneD],
     });
     // Each session is checked at the asked instant; A stops once one session passes.
     expect(
@@ -54,16 +87,109 @@ describe("WP-2423 same-table-ordering: has the phone that added a line left the 
       [id(101), at],
       [id(102), at],
       [id(103), at],
+      [id(104), at],
     ]);
   });
 
-  it("after a table move, a phone whose session still passes at the table keeps its lines", async () => {
-    // Whatever the move does, the answer follows the binding check: a phone that can still act
-    // at this table is AtTable; one that would have to scan again is Gone.
-    const moved = id(44);
+  it("a replaced or turned-off code, or a move the phone did not follow, is a departure", async () => {
+    const replaced = id(45),
+      turnedOff = id(46),
+      moved = id(47),
+      rescanned = id(48);
     const port = createCustomerCartAdderStanding({
+      scope,
+      sessions: {
+        listBound: async () => [
+          sessionAt(105, replaced, 1),
+          sessionAt(106, turnedOff, 2),
+          sessionAt(107, moved, 2),
+          // Scanned the current code (version 3) but the check failed for another reason.
+          sessionAt(108, rescanned, 3),
+        ],
+      },
+      binding: { validate: async () => "Unavailable" },
+      departures: {
+        readDepartures: async () => [
+          departure(replaced, "Present", 2),
+          departure(turnedOff, "Present", 2, false),
+          departure(moved, "Moved"),
+          departure(rescanned, "Present", 3),
+        ],
+      } as never,
+    });
+    await expect(
+      port.standing({
+        diningSessionReference: id(30),
+        participantReferences: [replaced, turnedOff, moved, rescanned],
+        observedAt: at,
+      }),
+    ).resolves.toEqual([
+      { participantReference: replaced, standing: "Gone" },
+      { participantReference: turnedOff, standing: "Gone" },
+      { participantReference: moved, standing: "Gone" },
+      { participantReference: rescanned, standing: "Unknown" },
+    ]);
+  });
+
+  it("a binding check that throws, or a departure read that fails, never makes a phone Gone", async () => {
+    const phone = id(49);
+    const throwing = createCustomerCartAdderStanding({
+      scope,
+      sessions: { listBound: async () => [sessionAt(109, phone, 2)] },
+      binding: {
+        validate: async () => {
+          throw new Error("synthetic lock timeout during a table move");
+        },
+      },
+      departures: { readDepartures: async () => [departure(phone, "Present")] } as never,
+    });
+    await expect(
+      throwing.standing({
+        diningSessionReference: id(30),
+        participantReferences: [phone],
+        observedAt: at,
+      }),
+    ).resolves.toEqual([{ participantReference: phone, standing: "Unknown" }]);
+    const unreadable = createCustomerCartAdderStanding({
+      scope,
+      sessions: { listBound: async () => [sessionAt(110, phone, 1)] },
+      binding: { validate: async () => "Unavailable" },
+      departures: {
+        readDepartures: async () => {
+          throw new Error("synthetic Dining outage");
+        },
+      } as never,
+    });
+    await expect(
+      unreadable.standing({
+        diningSessionReference: id(30),
+        participantReferences: [phone],
+        observedAt: at,
+      }),
+    ).resolves.toEqual([{ participantReference: phone, standing: "Unknown" }]);
+    // Without Dining's facts, a failed check alone is never a departure.
+    const blind = createCustomerCartAdderStanding({
+      scope,
+      sessions: { listBound: async () => [sessionAt(111, phone, 1)] },
+      binding: { validate: async () => "Unavailable" },
+    });
+    await expect(
+      blind.standing({
+        diningSessionReference: id(30),
+        participantReferences: [phone],
+        observedAt: at,
+      }),
+    ).resolves.toEqual([{ participantReference: phone, standing: "Unknown" }]);
+  });
+
+  it("after a table move, a phone whose session still passes at the table keeps its lines", async () => {
+    const moved = id(44);
+    const readDepartures = vi.fn();
+    const port = createCustomerCartAdderStanding({
+      scope,
       sessions: { listBound: async () => [session(104, moved)] },
       binding: { validate: async () => "Current" },
+      departures: { readDepartures } as never,
     });
     await expect(
       port.standing({
@@ -72,10 +198,12 @@ describe("WP-2423 same-table-ordering: has the phone that added a line left the 
         observedAt: at,
       }),
     ).resolves.toEqual([{ participantReference: moved, standing: "AtTable" }]);
+    expect(readDepartures).not.toHaveBeenCalled();
   });
 
   it("fails closed when the sessions can't be listed, and asks nothing for no lines", async () => {
     const failing = createCustomerCartAdderStanding({
+      scope,
       sessions: {
         listBound: async () => {
           throw new Error("synthetic Identity outage");
@@ -92,6 +220,7 @@ describe("WP-2423 same-table-ordering: has the phone that added a line left the 
     ).rejects.toThrow();
     const listBound = vi.fn(async () => []);
     const empty = createCustomerCartAdderStanding({
+      scope,
       sessions: { listBound },
       binding: { validate: async () => "Current" },
     });

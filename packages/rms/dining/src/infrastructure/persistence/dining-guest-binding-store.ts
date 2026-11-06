@@ -12,7 +12,11 @@ import {
   captureSessionData,
   sessionDependency,
 } from "../../application/dining-session-snapshot.js";
-import type { DiningGuestBindingOptions } from "../../application/dining-guest-binding-query.js";
+import type {
+  DiningGuestBindingOptions,
+  DiningParticipantDeparture,
+  DiningParticipantDepartureSource,
+} from "../../application/dining-guest-binding-query.js";
 import type { DiningTableStoreScope, DiningTableTransactionRunner } from "./dining-table-store.js";
 
 function closed(value: unknown, keys: readonly string[]) {
@@ -40,13 +44,117 @@ function rows(value: unknown): readonly unknown[] {
 export function createPostgresDiningGuestBindingStore(
   runner: DiningTableTransactionRunner,
   scopeInput: DiningTableStoreScope,
-): DiningGuestBindingOptions["repository"] {
+): DiningGuestBindingOptions["repository"] & DiningParticipantDepartureSource {
   const scope = closed(scopeInput, ["tenantReference", "brandReference", "storeReference"]);
   const tenant = parseDiningReference(scope.tenantReference);
   const brand = parseDiningReference(scope.brandReference);
   const store = parseDiningReference(scope.storeReference);
   return Object.freeze({
-    async readCurrent(value) {
+    /**
+     * WP-2423 (same-table-ordering): recorded departure facts for some participants of one
+     * session, read in one transaction under the Store's RLS context. Read only.
+     */
+    async readDepartures(value: Parameters<DiningParticipantDepartureSource["readDepartures"]>[0]) {
+      let requested;
+      try {
+        const raw = closed(value, [
+          "brandReference",
+          "storeReference",
+          "diningSessionReference",
+          "participantReferences",
+        ]);
+        if (
+          !Array.isArray(raw.participantReferences) ||
+          raw.participantReferences.length === 0 ||
+          raw.participantReferences.length > 50
+        )
+          throw new Error("bad participants");
+        requested = Object.freeze({
+          brand: parseDiningReference(raw.brandReference),
+          store: parseDiningReference(raw.storeReference),
+          session: parseDiningReference(raw.diningSessionReference),
+          participants: Object.freeze([
+            ...new Set(
+              raw.participantReferences.map((item: unknown) => parseDiningReference(item)),
+            ),
+          ]),
+        });
+      } catch {
+        throw new DiningSessionError("DINING_SESSION_INPUT_INVALID");
+      }
+      if (requested.brand !== brand || requested.store !== store) return sessionDependency();
+      const input = requested;
+      try {
+        return await runner.run(async (tx) => {
+          await tx.query(
+            "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+            [brand, store],
+          );
+          const result = await tx.query(
+            "SELECT s.session_snapshot AS session,p.participant_snapshot AS participant,a.admission_snapshot AS admission,jt.table_snapshot AS joined_table,(mv.occurred_at IS NOT NULL) AS followed FROM rms_dining.dining_session s JOIN rms_dining.dining_participant p ON p.tenant_id=s.tenant_id AND p.brand_id=s.brand_id AND p.store_id=s.store_id AND p.session_id=s.session_id JOIN rms_dining.dining_identity_admission a ON a.tenant_id=p.tenant_id AND a.brand_id=p.brand_id AND a.store_id=p.store_id AND a.session_id=p.session_id AND a.participant_id=p.participant_id JOIN rms_dining.dining_table jt ON jt.tenant_id=a.tenant_id AND jt.brand_id=a.brand_id AND jt.store_id=a.store_id AND jt.table_id=(a.admission_snapshot->>'tableReference')::uuid " +
+              "LEFT JOIN LATERAL (SELECT m.occurred_at FROM rms_dining.dining_session_move_operation m WHERE m.tenant_id=s.tenant_id AND m.brand_id=s.brand_id AND m.store_id=s.store_id AND m.session_id=s.session_id AND m.source_table_id=(a.admission_snapshot->>'tableReference')::uuid AND m.occurred_at>=(a.admission_snapshot->>'consumedAt')::timestamptz ORDER BY m.occurred_at LIMIT 1) mv ON true WHERE s.tenant_id=$1 AND s.brand_id=$2 AND s.store_id=$3 AND s.session_id=$4 AND p.participant_id=ANY($5::uuid[]) LIMIT 51",
+            [tenant, brand, store, input.session, input.participants],
+          );
+          const descriptor =
+            result !== null && typeof result === "object"
+              ? Object.getOwnPropertyDescriptor(result, "rows")
+              : undefined;
+          const found = captureSessionData(descriptor?.value);
+          if (!Array.isArray(found) || found.length > input.participants.length)
+            return sessionDependency();
+          const seen = new Set<string>();
+          return Object.freeze(
+            found.map((row: unknown): DiningParticipantDeparture => {
+              const raw = closed(row, [
+                "session",
+                "participant",
+                "admission",
+                "joined_table",
+                "followed",
+              ]);
+              const session = parseDiningSession(raw.session);
+              const participant = parseDiningParticipant(raw.participant);
+              const admission = parseDiningIdentityAdmission(raw.admission);
+              const joined = createDiningTable(raw.joined_table);
+              if (
+                session.brandReference !== brand ||
+                session.storeReference !== store ||
+                session.diningSessionReference !== input.session ||
+                participant.diningSessionReference !== input.session ||
+                !input.participants.includes(participant.participantReference) ||
+                seen.has(participant.participantReference) ||
+                admission.participantReference !== participant.participantReference ||
+                admission.diningSessionReference !== input.session ||
+                joined.tableReference !== admission.tableReference ||
+                joined.tenantReference !== tenant ||
+                joined.brandReference !== brand ||
+                joined.storeReference !== store ||
+                typeof raw.followed !== "boolean"
+              )
+                return sessionDependency();
+              seen.add(participant.participantReference);
+              const moved =
+                (session.tableReference !== admission.tableReference ||
+                  session.tableAssignmentVersion !== admission.tableAssignmentVersion) &&
+                raw.followed === false;
+              return Object.freeze({
+                participantReference: participant.participantReference,
+                departure: participant.status === "Left" ? "Left" : moved ? "Moved" : "Present",
+                joinedTableQr: Object.freeze({
+                  version: joined.qrVersion,
+                  active: joined.qrStatus === "Active",
+                }),
+              });
+            }),
+          );
+        });
+      } catch {
+        return sessionDependency();
+      }
+    },
+    async readCurrent(
+      value: Parameters<DiningGuestBindingOptions["repository"]["readCurrent"]>[0],
+    ) {
       let requested;
       try {
         const raw = closed(value, [

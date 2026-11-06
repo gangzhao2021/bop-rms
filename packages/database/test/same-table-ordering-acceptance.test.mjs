@@ -141,6 +141,7 @@ it("WP-2423 (same-table-ordering): a stranded line's phone is found Gone from it
 
       // The binding check stand-in: the table's QR is at version 2 now.
       const standing = createCustomerCartAdderStanding({
+        scope,
         sessions: source,
         binding: {
           validate: async (session) =>

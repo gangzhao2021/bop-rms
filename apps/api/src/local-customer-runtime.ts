@@ -1,5 +1,5 @@
 import { createCustomerPickupCartRestore } from "./customer-pickup-cart-restore.js";
-import { loadDiningTeaChargeSetting } from "@rms/dining";
+import { loadDiningTeaChargeSetting, type DiningParticipantDepartureSource } from "@rms/dining";
 import { guestCartWithoutTea, guestMenuWithoutTea } from "./customer-cart-tea-guard.js";
 import {
   CustomerPaymentIntentHandler,
@@ -261,6 +261,20 @@ export interface LocalCustomerRuntimeOptions {
 }
 
 // The caller owns the injected database resources; close them after runtime.shutdown().
+/** WP-2423 (same-table-ordering): Dining's recorded departures, when its store reads them. */
+function departuresOf(repository: { readonly readDepartures?: unknown }) {
+  const read = repository.readDepartures;
+  return typeof read === "function"
+    ? {
+        departures: {
+          readDepartures: (
+            input: Parameters<DiningParticipantDepartureSource["readDepartures"]>[0],
+          ) => (read as DiningParticipantDepartureSource["readDepartures"]).call(repository, input),
+        },
+      }
+    : {};
+}
+
 export function createLocalCustomerRuntime(options: LocalCustomerRuntimeOptions): ApiServerRuntime {
   if (!["development", "test"].includes(process.env.NODE_ENV ?? "development"))
     throw new Error("LOCAL_CUSTOMER_RUNTIME_UNAVAILABLE");
@@ -386,11 +400,13 @@ export function createLocalCustomerRuntime(options: LocalCustomerRuntimeOptions)
       options.diningAdmission === undefined
         ? undefined
         : createCustomerCartAdderStanding({
+            scope,
             sessions: createPostgresGuestParticipantSessionSource(
               options.sessionTransactions,
               scope,
             ),
             binding: sessionBinding,
+            ...departuresOf(options.diningAdmission.binding.dining.binding),
           });
     if (options.channelOrderSubmission !== undefined)
       orderSubmission = createCustomerOrderSubmissionChannel({
