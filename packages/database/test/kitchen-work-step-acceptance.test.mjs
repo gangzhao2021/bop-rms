@@ -860,10 +860,16 @@ it("a combo of only not-prepared dishes makes no kitchen work and does not hold 
         {
           orderItemReference: comboLine,
           productReference: f.id(0x950),
+          skuReference: f.id(0x951),
+          quantity: 1,
           optionReferences: combo.options,
         },
       ],
       comboChoices: combo.comboChoices,
+      // The combo's own size is no charge or tea item: only its dishes' marks keep it off the board.
+      notPreparedByDefault: async () => new Set(),
+      orderType: async () => "DineIn",
+      derive: f.validation.references.derive,
     });
     const result = await f.as((transaction) => adapter.accept({ receipt, transaction }));
     assert.equal(result.status, "Created");
