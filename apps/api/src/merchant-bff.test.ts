@@ -3465,6 +3465,17 @@ it("WP-2423 Q7: protects counter order and card-machine transport and maps refus
     error: "item_unavailable",
     lineIndex: 1,
     sharedStock: false,
+    optionsChanged: false,
+  });
+  // WP-2423 (staff-round-soldout): the dish's chosen options no longer fit the menu.
+  const changedOptions = new CounterOrderError("COUNTER_ORDER_ITEM_UNAVAILABLE", 0);
+  changedOptions.optionsChanged = true;
+  counterOrder.mockRejectedValueOnce(changedOptions);
+  expect(await (await submit("/counter/orders")).json()).toEqual({
+    error: "item_unavailable",
+    lineIndex: 0,
+    sharedStock: false,
+    optionsChanged: true,
   });
   // v15 run: too few in stock is a specific answer naming the line and how many are left.
   counterOrder.mockRejectedValueOnce(new CounterOrderError("COUNTER_ORDER_STOCK_SHORT", 0, 1));
@@ -3728,6 +3739,7 @@ it("WP-2423 Q7 slice 2: protects the staff table round transport and maps refusa
     error: "item_unavailable",
     lineIndex: 1,
     sharedStock: false,
+    optionsChanged: false,
   });
   // WP-2423: the round's short item, how many are left and whether it shares stock.
   staffDiningRound.mockRejectedValueOnce(
@@ -3746,22 +3758,61 @@ it("WP-2423 Q7 slice 2: protects the staff table round transport and maps refusa
   });
   staffDiningRound.mockRejectedValueOnce(
     new StaffDiningRoundError("STAFF_ROUND_TABLE_CART_HAS_ITEMS", null, [
-      { name: "Iced Latte", quantity: 1 },
+      {
+        cartItemReference: "0198a7c0-0000-7000-8000-000000000060",
+        name: "Iced Latte",
+        quantity: 1,
+        standing: "Available",
+      },
     ]),
   );
   expect(await (await submit()).json()).toEqual({
     error: "table_cart_has_items",
-    items: [{ name: "Iced Latte", quantity: 1 }],
+    items: [
+      {
+        cartItemReference: "0198a7c0-0000-7000-8000-000000000060",
+        name: "Iced Latte",
+        quantity: 1,
+        standing: "Available",
+      },
+    ],
   });
   // WP-2423 item 8 ⑦: with the cart version to add them against, and whether guests can send.
+  // WP-2423 (staff-round-soldout): each item's standing, and how many are left of a short one.
   const withCart = new StaffDiningRoundError("STAFF_ROUND_TABLE_CART_HAS_ITEMS", null, [
-    { name: "Iced Latte", quantity: 1 },
+    {
+      cartItemReference: "0198a7c0-0000-7000-8000-000000000060",
+      name: "Iced Latte",
+      quantity: 1,
+      standing: "Unavailable",
+    },
+    {
+      cartItemReference: "0198a7c0-0000-7000-8000-000000000061",
+      name: "Noodles",
+      quantity: 3,
+      standing: "Short",
+      available: 0,
+    },
   ]);
   withCart.tableCart = { cartVersion: 4, guestsCanSend: false };
   staffDiningRound.mockRejectedValueOnce(withCart);
   expect(await (await submit()).json()).toEqual({
     error: "table_cart_has_items",
-    items: [{ name: "Iced Latte", quantity: 1 }],
+    items: [
+      {
+        cartItemReference: "0198a7c0-0000-7000-8000-000000000060",
+        name: "Iced Latte",
+        quantity: 1,
+        standing: "Unavailable",
+      },
+      {
+        cartItemReference: "0198a7c0-0000-7000-8000-000000000061",
+        name: "Noodles",
+        quantity: 3,
+        standing: "Short",
+        available: 0,
+      },
+    ],
     cartVersion: 4,
     guestsCanSend: false,
   });

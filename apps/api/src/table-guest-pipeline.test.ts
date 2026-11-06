@@ -272,7 +272,21 @@ describe("staff table guest pipeline", () => {
               cartReference: id(43),
               version: 9,
               orderType: "DineIn",
-              items: [{ displayName: "Iced latte", quantity: 2 }],
+              items: [
+                { cartItemReference: id(60), displayName: "Iced latte", quantity: 2, warnings: [] },
+                {
+                  cartItemReference: id(61),
+                  displayName: "Plum juice",
+                  quantity: 1,
+                  warnings: ["ITEM_UNAVAILABLE"],
+                },
+                {
+                  cartItemReference: id(62),
+                  displayName: "Milk tea",
+                  quantity: 1,
+                  warnings: ["ITEM_OPTIONS_CHANGED"],
+                },
+              ],
             },
           },
         })),
@@ -342,7 +356,12 @@ describe("staff table guest pipeline", () => {
       status: "Selected",
       cartReference: id(43),
       cartVersion: 9,
-      pendingItems: [{ name: "Iced latte", quantity: 2 }],
+      // WP-2423 (staff-round-soldout): each line with its reference and whether it can be sold.
+      pendingItems: [
+        { cartItemReference: id(60), name: "Iced latte", quantity: 2, standing: "Available" },
+        { cartItemReference: id(61), name: "Plum juice", quantity: 1, standing: "Unavailable" },
+        { cartItemReference: id(62), name: "Milk tea", quantity: 1, standing: "OptionsChanged" },
+      ],
     });
     options.cart.createCart.mockResolvedValueOnce({ status: "CheckoutInProgress" } as never);
     expect(

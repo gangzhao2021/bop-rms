@@ -346,9 +346,20 @@ export function createStaffTableGuestPipeline(options: {
         status: "Selected" as const,
         cartReference: result.view.cart.cartReference,
         cartVersion: result.view.cart.version,
+        // WP-2423 (staff-round-soldout): each unsent line with whether it can be sold now, as the
+        // Cart view marks it for the guests' phones (a Catalog fact; unmarked when unread).
         pendingItems: Object.freeze(
           result.view.cart.items.map((item) =>
-            Object.freeze({ name: item.displayName, quantity: item.quantity }),
+            Object.freeze({
+              cartItemReference: String(item.cartItemReference),
+              name: item.displayName,
+              quantity: item.quantity,
+              standing: item.warnings.includes("ITEM_UNAVAILABLE")
+                ? ("Unavailable" as const)
+                : item.warnings.includes("ITEM_OPTIONS_CHANGED")
+                  ? ("OptionsChanged" as const)
+                  : ("Available" as const),
+            }),
           ),
         ),
       });

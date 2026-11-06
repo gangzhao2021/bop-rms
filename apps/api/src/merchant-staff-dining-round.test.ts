@@ -139,7 +139,12 @@ function setup(
             status: "Selected";
             cartReference: string;
             cartVersion: number;
-            pendingItems: { name: string; quantity: number }[];
+            pendingItems: {
+              cartItemReference: string;
+              name: string;
+              quantity: number;
+              standing: "Available" | "Unavailable" | "OptionsChanged" | "Short";
+            }[];
           }
         | { status: "CheckoutInProgress" }
       > => {
@@ -461,13 +466,17 @@ describe("staff dine-in round command — WP-2423 Q7 slice 2", () => {
       status: "Selected",
       cartReference: id(6),
       cartVersion: 3,
-      pendingItems: [{ name: "Iced latte", quantity: 1 }],
+      pendingItems: [
+        { cartItemReference: id(60), name: "Iced latte", quantity: 1, standing: "Available" },
+      ],
     });
     const error = await send().catch((value: unknown) => value);
     expect(error).toBeInstanceOf(StaffDiningRoundError);
     expect(error).toMatchObject({
       code: "STAFF_ROUND_TABLE_CART_HAS_ITEMS",
-      pendingItems: [{ name: "Iced latte", quantity: 1 }],
+      pendingItems: [
+        { cartItemReference: id(60), name: "Iced latte", quantity: 1, standing: "Available" },
+      ],
     });
     expect(pipeline.addItem).not.toHaveBeenCalled();
   });
@@ -477,7 +486,14 @@ describe("staff dine-in round command — WP-2423 Q7 slice 2", () => {
       status: "Selected" as const,
       cartReference: id(6),
       cartVersion,
-      pendingItems: [{ name: "Hong Kong milk tea", quantity: 1 }],
+      pendingItems: [
+        {
+          cartItemReference: id(60),
+          name: "Hong Kong milk tea",
+          quantity: 1,
+          standing: "Available" as const,
+        },
+      ],
     });
     // After last orders guests can't send: the refusal says so, with the cart version shown.
     const refused = setup();
@@ -755,6 +771,22 @@ describe("staff dine-in round command — WP-2423 Q7 slice 2", () => {
       sharedStock: false,
     } as never);
     Object.assign(f.pipeline, { removeItems: vi.fn(async () => "Kept" as const) });
+    // Read again, the Cart still holds the round's line at the version it went in at.
+    f.pipeline.selectCart
+      .mockResolvedValueOnce({
+        status: "Selected",
+        cartReference: id(6),
+        cartVersion: 3,
+        pendingItems: [],
+      })
+      .mockResolvedValueOnce({
+        status: "Selected",
+        cartReference: id(6),
+        cartVersion: 4,
+        pendingItems: [
+          { cartItemReference: id(40), name: "Soup", quantity: 2, standing: "Available" },
+        ],
+      });
     await expect(f.send()).rejects.toMatchObject({
       code: "STAFF_ROUND_ITEM_UNAVAILABLE",
       lineIndex: 0,
@@ -869,5 +901,328 @@ describe("staff dine-in round command — WP-2423 Q7 slice 2", () => {
       cartVersion: 4,
       cartItemReferences: [id(40)],
     });
+  });
+});
+
+/**
+ * WP-2423 (staff-round-soldout, v15 8911a4c1 M06): a guest's item in the table's shared Cart sold
+ * out or went off the menu. The Cart below behaves as the real one: one version per change, every
+ * line (guests' and the round's) in each answer, and the Ordering owner's remove rule (the round's
+ * own lines, or another guest's line only while the Catalog says it can't be sold now).
+ */
+describe("staff round with a guest item that can't be sold — WP-2423", () => {
+  beforeEach(() => {
+    state.entries.clear();
+    state.batches.clear();
+    state.tablePermission = "Allow";
+    state.allowed = true;
+    state.tips = { enabled: true, tierPercents: [10, 15, 18] };
+  });
+  type Standing = "Available" | "Unavailable" | "OptionsChanged" | "Short";
+  let operations = 0x900;
+  const fresh = () => id(operations++);
+  const plum = id(61),
+    noodles = id(62);
+  function sharedCart(
+    f: ReturnType<typeof setup>,
+    guests: { cartItemReference: string; name: string; quantity: number; standing: Standing }[],
+  ) {
+    const cart = { version: 3, lines: guests.map((line) => ({ ...line })) };
+    // What the Catalog says at the remove command's own instant (the Cart's marks may not say it).
+    const unsellable = new Set(
+      guests.filter((line) => line.standing !== "Available").map((line) => line.cartItemReference),
+    );
+    const staffLines = new Set<string>();
+    let next = 0x70;
+    const view = () => ({
+      status: "Selected" as const,
+      cartReference: id(6),
+      cartVersion: cart.version,
+      pendingItems: cart.lines.map((line) => ({ ...line })),
+    });
+    f.pipeline.selectCart.mockImplementation(async () => {
+      f.calls.push("selectCart");
+      return view();
+    });
+    f.pipeline.addItem.mockImplementation((async (
+      _c: unknown,
+      input: { expectedCartVersion: number; quantity: number },
+    ) => {
+      f.calls.push("addItem");
+      if (input.expectedCartVersion !== cart.version) throw new Error("CART_VERSION_CONFLICT");
+      const reference = id(next++);
+      staffLines.add(reference);
+      cart.lines.push({
+        cartItemReference: reference,
+        name: "Sliced potato",
+        quantity: input.quantity,
+        standing: "Available",
+      });
+      cart.version += 1;
+      return {
+        status: "Applied",
+        cartVersion: cart.version,
+        lines: cart.lines.map(({ cartItemReference, quantity }) => ({
+          cartItemReference,
+          quantity,
+        })),
+      };
+    }) as never);
+    const removeItems = vi.fn(
+      async (
+        _c: unknown,
+        input: { cartVersion: number; cartItemReferences: readonly string[] },
+      ): Promise<"Removed" | "Kept"> => {
+        f.calls.push("removeItems");
+        let version = input.cartVersion;
+        for (const reference of input.cartItemReferences) {
+          if (version !== cart.version) return "Kept";
+          if (!cart.lines.some((line) => line.cartItemReference === reference)) return "Kept";
+          if (!staffLines.has(reference) && !unsellable.has(reference)) return "Kept";
+          cart.lines = cart.lines.filter((line) => line.cartItemReference !== reference);
+          cart.version += 1;
+          version = cart.version;
+        }
+        return "Removed";
+      },
+    );
+    Object.assign(f.pipeline, { removeItems });
+    return { cart, unsellable, staffLines, removeItems, view };
+  }
+  const guestsAtTable = () => [
+    { cartItemReference: plum, name: "Plum juice", quantity: 1, standing: "Unavailable" as const },
+    { cartItemReference: noodles, name: "Noodles", quantity: 2, standing: "Available" as const },
+  ];
+  const including = (removeUnavailable?: string[], expectedCartVersion = 3) => ({
+    includeTableCart: {
+      expectedCartVersion,
+      ...(removeUnavailable === undefined ? {} : { removeUnavailable }),
+    },
+  });
+
+  it("(a) marks the sold-out guest item and sends nothing until staff decide on it", async () => {
+    const f = setup();
+    const table = sharedCart(f, guestsAtTable());
+    for (const command of [{}, including()])
+      await expect(f.send({ operationReference: fresh(), ...command })).rejects.toMatchObject({
+        code: "STAFF_ROUND_TABLE_CART_HAS_ITEMS",
+        pendingItems: [
+          { cartItemReference: plum, name: "Plum juice", quantity: 1, standing: "Unavailable" },
+          { cartItemReference: noodles, name: "Noodles", quantity: 2, standing: "Available" },
+        ],
+        tableCart: { cartVersion: 3, guestsCanSend: true },
+      });
+    expect(f.pipeline.quote).not.toHaveBeenCalled();
+    expect(f.pipeline.addItem).not.toHaveBeenCalled();
+    expect(table.removeItems).not.toHaveBeenCalled();
+    expect(f.onUnexpected).not.toHaveBeenCalled();
+  });
+
+  it("(b) removes it first, then sends the rest with the round at the Cart's new version", async () => {
+    const f = setup();
+    const table = sharedCart(f, guestsAtTable());
+    const placed = await f.send(including([plum]));
+    expect(placed).toMatchObject({ status: "Placed" });
+    expect(table.removeItems).toHaveBeenCalledTimes(1);
+    expect(table.removeItems).toHaveBeenCalledWith(guest, {
+      cartReference: id(6),
+      cartVersion: 3,
+      cartItemReferences: [plum],
+    });
+    expect(f.calls.indexOf("removeItems")).toBeLessThan(f.calls.indexOf("addItem"));
+    expect(f.pipeline.addItem).toHaveBeenCalledWith(
+      guest,
+      expect.objectContaining({ expectedCartVersion: 4 }),
+    );
+    // What is sent: the noodles and the round's own line, never the plum juice.
+    expect(table.cart.lines.map((line) => line.name)).toEqual(["Noodles", "Sliced potato"]);
+    expect(f.pipeline.quote).toHaveBeenCalledWith(
+      guest,
+      expect.objectContaining({ cartVersion: 5 }),
+    );
+    // The intent names the removed lines: another removal under the same operation conflicts.
+    await expect(f.send(including([noodles]))).rejects.toMatchObject({
+      code: "STAFF_ROUND_IDEMPOTENCY_CONFLICT",
+    });
+  });
+
+  it("(c) a dish guests can still have is never removed: the owner keeps it and staff see it again", async () => {
+    const f = setup();
+    const table = sharedCart(f, guestsAtTable());
+    await expect(f.send(including([plum, noodles]))).rejects.toMatchObject({
+      code: "STAFF_ROUND_TABLE_CART_HAS_ITEMS",
+      // The plum juice came out (it can't be sold); the noodles stay, read again.
+      pendingItems: [{ cartItemReference: noodles, standing: "Available" }],
+      tableCart: { cartVersion: 4 },
+    });
+    expect(table.cart.lines.map((line) => line.name)).toEqual(["Noodles"]);
+    expect(f.pipeline.addItem).not.toHaveBeenCalled();
+    // A line that is not in the Cart (a guest removed it): refused, nothing removed.
+    const g = setup();
+    const other = sharedCart(g, guestsAtTable());
+    await expect(
+      g.send({ operationReference: fresh(), ...including([plum, id(99)]) }),
+    ).rejects.toMatchObject({ code: "STAFF_ROUND_TABLE_CART_HAS_ITEMS" });
+    expect(other.removeItems).not.toHaveBeenCalled();
+    // Duplicates and more than 30 lines are not a command.
+    for (const removeUnavailable of [[plum, plum], Array.from({ length: 31 }, (_, n) => id(n))])
+      await expect(
+        g.send({ operationReference: fresh(), ...including(removeUnavailable) }),
+      ).rejects.toMatchObject({ code: "STAFF_ROUND_INPUT_INVALID" });
+  });
+
+  it("(d) a guest who changed the Cart during the removal: staff see the Cart as it is now", async () => {
+    const f = setup();
+    const table = sharedCart(f, guestsAtTable());
+    const real = table.removeItems.getMockImplementation();
+    table.removeItems.mockImplementationOnce(async (c, input) => {
+      const removed = (await real?.(c, input)) ?? "Kept";
+      // A guest adds another plum juice just after.
+      table.cart.lines.push({
+        cartItemReference: id(63),
+        name: "Plum juice",
+        quantity: 1,
+        standing: "Unavailable",
+      });
+      table.cart.version += 1;
+      return removed;
+    });
+    await expect(f.send(including([plum]))).rejects.toMatchObject({
+      code: "STAFF_ROUND_TABLE_CART_HAS_ITEMS",
+      pendingItems: [
+        { cartItemReference: noodles, standing: "Available" },
+        { cartItemReference: id(63), standing: "Unavailable" },
+      ],
+      tableCart: { cartVersion: 5 },
+    });
+    expect(f.pipeline.addItem).not.toHaveBeenCalled();
+  });
+
+  it("(e) a guest item the Cart did not mark but the quote refuses: the round's lines come out once and staff decide", async () => {
+    const f = setup();
+    // The Cart's marks could not be read (fail-open): everything shows as available.
+    const table = sharedCart(
+      f,
+      guestsAtTable().map((line) => ({ ...line, standing: "Available" as const })),
+    );
+    table.unsellable.add(plum);
+    f.pipeline.quote.mockResolvedValueOnce({
+      status: "ItemUnavailable",
+      cartItemReference: plum,
+      reason: "Unavailable",
+    } as never);
+    const refused = await f.send(including([])).catch((error: unknown) => error);
+    expect(refused).toMatchObject({
+      code: "STAFF_ROUND_TABLE_CART_HAS_ITEMS",
+      pendingItems: [
+        { cartItemReference: plum, standing: "Unavailable" },
+        { cartItemReference: noodles, standing: "Available" },
+      ],
+      tableCart: { cartVersion: 5 },
+    });
+    // Exactly the round's own line was taken out, once; the guests' Cart is as it was.
+    expect(table.removeItems).toHaveBeenCalledTimes(1);
+    expect(table.removeItems).toHaveBeenCalledWith(guest, {
+      cartReference: id(6),
+      cartVersion: 4,
+      cartItemReferences: [...table.staffLines],
+    });
+    expect(table.cart.lines.map((line) => line.cartItemReference)).toEqual([plum, noodles]);
+    expect(f.pipeline.startCheckout).not.toHaveBeenCalled();
+    expect(f.onUnexpected).not.toHaveBeenCalled();
+    // Staff remove it: the owner decides at that instant (the Cart still shows it available).
+    const again = await f.send({ operationReference: fresh(), ...including([plum], 5) });
+    expect(again).toMatchObject({ status: "Placed" });
+    expect(table.cart.lines.map((line) => line.name)).toEqual(["Noodles", "Sliced potato"]);
+  });
+
+  it("(f) the round's own line refused by the quote is named; the guests' items stay", async () => {
+    for (const [reason, optionsChanged] of [
+      ["Unavailable", false],
+      ["OptionsChanged", true],
+    ] as const) {
+      state.entries.clear();
+      const f = setup();
+      const table = sharedCart(f, [
+        { cartItemReference: noodles, name: "Noodles", quantity: 2, standing: "Available" },
+      ]);
+      f.pipeline.quote.mockImplementationOnce((async () => ({
+        status: "ItemUnavailable",
+        cartItemReference: [...table.staffLines][0],
+        reason,
+      })) as never);
+      await expect(f.send(including())).rejects.toMatchObject({
+        code: "STAFF_ROUND_ITEM_UNAVAILABLE",
+        lineIndex: 0,
+        optionsChanged,
+      });
+      expect(table.cart.lines.map((line) => line.name)).toEqual(["Noodles"]);
+      expect(f.onUnexpected).not.toHaveBeenCalled();
+    }
+  });
+
+  it("(g) the checkout finds a guest item short: staff are told how many are left, the round's line out", async () => {
+    for (const available of [2, 0]) {
+      state.entries.clear();
+      const f = setup();
+      const table = sharedCart(f, [
+        { cartItemReference: noodles, name: "Noodles", quantity: 3, standing: "Available" },
+      ]);
+      f.pipeline.startCheckout.mockResolvedValueOnce({
+        status: "ItemShort",
+        cartItemReference: noodles,
+        available,
+        sharedStock: false,
+      } as never);
+      await expect(f.send(including())).rejects.toMatchObject({
+        code: "STAFF_ROUND_TABLE_CART_HAS_ITEMS",
+        pendingItems: [{ cartItemReference: noodles, standing: "Short", available }],
+        tableCart: { cartVersion: 5 },
+      });
+      expect(table.cart.lines.map((line) => line.name)).toEqual(["Noodles"]);
+      expect(f.pipeline.preparePayment).not.toHaveBeenCalled();
+    }
+    // The round's own line short, with guests' lines in the Cart: still named by its line.
+    state.entries.clear();
+    const f = setup();
+    const table = sharedCart(f, [
+      { cartItemReference: noodles, name: "Noodles", quantity: 3, standing: "Available" },
+    ]);
+    f.pipeline.startCheckout.mockImplementationOnce((async () => ({
+      status: "ItemShort",
+      cartItemReference: [...table.staffLines][0],
+      available: 1,
+      sharedStock: false,
+    })) as never);
+    await expect(f.send(including())).rejects.toMatchObject({
+      code: "STAFF_ROUND_STOCK_SHORT",
+      lineIndex: 0,
+      available: 1,
+    });
+    expect(table.cart.lines.map((line) => line.name)).toEqual(["Noodles"]);
+  });
+
+  it("(h) a guest edit after the round's lines went in: they are still taken out of the Cart", async () => {
+    const f = setup();
+    const table = sharedCart(f, [
+      { cartItemReference: noodles, name: "Noodles", quantity: 2, standing: "Available" },
+    ]);
+    f.pipeline.quote.mockImplementationOnce((async () => {
+      // A guest changes the noodles meanwhile: the quote finds another Cart version.
+      table.cart.lines = table.cart.lines.map((line) =>
+        line.cartItemReference === noodles ? { ...line, quantity: 3 } : line,
+      );
+      table.cart.version += 1;
+      return { status: "NotPriced" };
+    }) as never);
+    await expect(f.send(including())).rejects.toMatchObject({ code: "STAFF_ROUND_NOT_PRICED" });
+    expect(table.removeItems).toHaveBeenCalledTimes(2);
+    expect(table.removeItems).toHaveBeenLastCalledWith(guest, {
+      cartReference: id(6),
+      cartVersion: 5,
+      cartItemReferences: [...table.staffLines],
+    });
+    expect(table.cart.lines.map((line) => line.name)).toEqual(["Noodles"]);
+    expect(f.onUnexpected).not.toHaveBeenCalled();
   });
 });

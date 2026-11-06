@@ -395,7 +395,12 @@ export function installMerchantOrderRoutes(
           .set("Cache-Control", NO_STORE)
           .json(
             error.code === "COUNTER_ORDER_ITEM_UNAVAILABLE"
-              ? { error: code, lineIndex: error.lineIndex, sharedStock: error.sharedStock }
+              ? {
+                  error: code,
+                  lineIndex: error.lineIndex,
+                  sharedStock: error.sharedStock,
+                  optionsChanged: error.optionsChanged,
+                }
               : error.code === "COUNTER_ORDER_STOCK_SHORT"
                 ? {
                     error: code,
@@ -469,7 +474,12 @@ export function installMerchantOrderRoutes(
           .set("Cache-Control", NO_STORE)
           .json(
             error.code === "STAFF_ROUND_ITEM_UNAVAILABLE"
-              ? { error: code, lineIndex: error.lineIndex, sharedStock: error.sharedStock }
+              ? {
+                  error: code,
+                  lineIndex: error.lineIndex,
+                  sharedStock: error.sharedStock,
+                  optionsChanged: error.optionsChanged,
+                }
               : error.code === "STAFF_ROUND_STOCK_SHORT"
                 ? {
                     error: code,
@@ -480,7 +490,15 @@ export function installMerchantOrderRoutes(
                 : error.code === "STAFF_ROUND_TABLE_CART_HAS_ITEMS"
                   ? {
                       error: code,
-                      items: error.pendingItems.slice(0, 30),
+                      // WP-2423 (staff-round-soldout): each item's Cart line (staff name it
+                      // to remove it) and whether it can be sold; names only, no notes or prices.
+                      items: error.pendingItems.slice(0, 30).map((item) => ({
+                        cartItemReference: item.cartItemReference,
+                        name: item.name,
+                        quantity: item.quantity,
+                        standing: item.standing,
+                        ...(item.available === undefined ? {} : { available: item.available }),
+                      })),
                       ...(error.tableCart === null
                         ? {}
                         : {
