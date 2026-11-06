@@ -330,7 +330,11 @@ it("a round prepared at a table the party then leaves is refused as table moved,
         retentionPolicyCode: "AUDIT_DEFAULT",
         retentionPolicyVersion: 1,
       });
-      const selectTip = async (participant, command, { duringAudit = async () => {} } = {}) => {
+      const selectTip = async (
+        participant,
+        command,
+        { duringAudit = async () => undefined } = {},
+      ) => {
         const tableMoved = createTableMovedLatch();
         try {
           return await createPaymentTipSelectionService({
