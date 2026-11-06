@@ -119,12 +119,102 @@ describe("Dining checkout commitment", () => {
       sealDiningCheckoutCommitment(prepared, f.context, f.link, requested, requested),
     ).toThrow(expect.objectContaining({ code: "DINING_CHECKOUT_CONTEXT_CHANGED" }));
   });
-  it("rejects a table move after sealing", () => {
+  it("rejects a table move after sealing that names no recorded Move", () => {
     const f = sealed();
     f.context.session.tableAssignmentVersion++;
     expect(() => assertDiningCheckoutCommitmentUsable(f.result, f.context, requested)).toThrow(
       expect.objectContaining({ code: "DINING_CHECKOUT_CONTEXT_CHANGED" }),
     );
+  });
+  /**
+   * WP-2423 table-move-payment (v15 fabf0261, 2026-11-06): a party staff moved keeps paying the
+   * round it sent before the move, on Dining's recorded Move off the round's table.
+   */
+  describe("after staff move the party", () => {
+    const later = "2026-09-10T12:00:03.000Z",
+      afterMove = "2026-09-10T12:00:04.000Z";
+    const movedContext = (
+      f: ReturnType<typeof sealed>,
+      move: unknown = { fromTableReference: id(6), movedAt: later },
+    ) => ({
+      session: { ...f.context.session, tableReference: id(60), tableAssignmentVersion: 2 },
+      participant: f.context.participant,
+      followedMove: move,
+    });
+    it("stays payable at the new table, and after moving back to the same table", () => {
+      const f = sealed();
+      expect(assertDiningCheckoutCommitmentUsable(f.result, movedContext(f), afterMove)).toEqual(
+        f.result,
+      );
+      const back = {
+        ...movedContext(f),
+        session: { ...f.context.session, tableAssignmentVersion: 9 },
+      };
+      expect(assertDiningCheckoutCommitmentUsable(f.result, back, afterMove)).toEqual(f.result);
+      // No move named: a context at the round's own table still works.
+      expect(
+        assertDiningCheckoutCommitmentUsable(f.result, { ...f.context, followedMove: null }, later),
+      ).toEqual(f.result);
+    });
+    it.each([
+      ["a move off another table", { fromTableReference: id(61), movedAt: later }],
+      [
+        "a move before the round was prepared",
+        { fromTableReference: id(6), movedAt: "2026-09-10T11:59:59.000Z" },
+      ],
+      [
+        "a move after this reading",
+        { fromTableReference: id(6), movedAt: "2026-09-10T12:00:05.000Z" },
+      ],
+      ["no recorded move", null],
+    ])("refuses %s", (_name, move) => {
+      const f = sealed();
+      expect(() =>
+        assertDiningCheckoutCommitmentUsable(f.result, movedContext(f, move), afterMove),
+      ).toThrow(expect.objectContaining({ code: "DINING_CHECKOUT_CONTEXT_CHANGED" }));
+    });
+    it("refuses a move named while the party is still at the round's table", () => {
+      const f = sealed();
+      expect(() =>
+        assertDiningCheckoutCommitmentUsable(
+          f.result,
+          { ...f.context, followedMove: { fromTableReference: id(6), movedAt: later } },
+          afterMove,
+        ),
+      ).toThrow(expect.objectContaining({ code: "DINING_CHECKOUT_CONTEXT_CHANGED" }));
+    });
+    it("still stops when the table is closing or the participant left", () => {
+      const f = sealed();
+      const closing = movedContext(f);
+      closing.session = { ...closing.session, phase: "Closing" };
+      expect(() => assertDiningCheckoutCommitmentUsable(f.result, closing, afterMove)).toThrow(
+        expect.objectContaining({ code: "DINING_CHECKOUT_CONTEXT_CHANGED" }),
+      );
+      const left = movedContext(f);
+      left.participant = {
+        ...left.participant,
+        status: "Left",
+        version: 2,
+        leftAt: later,
+      } as never;
+      expect(() => assertDiningCheckoutCommitmentUsable(f.result, left, afterMove)).toThrow(
+        expect.objectContaining({ code: "DINING_CHECKOUT_CONTEXT_CHANGED" }),
+      );
+    });
+    it("never lets preparing, sealing or the gate before Ordering follow a move", () => {
+      const f = fixture();
+      const prepared = prepareDiningCheckoutCommitment(f.input, f.context);
+      const named = { ...f.context, followedMove: null };
+      expect(() => prepareDiningCheckoutCommitment(f.input, named)).toThrow(
+        expect.objectContaining({ code: "DINING_CHECKOUT_INPUT_INVALID" }),
+      );
+      expect(() =>
+        sealDiningCheckoutCommitment(prepared, named, f.link, requested, requested),
+      ).toThrow(expect.objectContaining({ code: "DINING_CHECKOUT_INPUT_INVALID" }));
+      expect(() => assertDiningCheckoutPreparedForOrdering(prepared, named, at)).toThrow(
+        expect.objectContaining({ code: "DINING_CHECKOUT_INPUT_INVALID" }),
+      );
+    });
   });
   it("stays payable when someone else joins the session after sealing", () => {
     const f = sealed();

@@ -179,23 +179,62 @@ export function parseDiningCheckoutCommitment(value: unknown): DiningCheckoutCom
   });
 }
 
+/**
+ * WP-2423 (table-move-payment): staff moved the party off the table the round was sent from. The
+ * owner store reads it from Dining's append-only Move record of this session off that table; it is
+ * the only evidence that lets a round already sent follow its party.
+ */
+export interface DiningFollowedMove {
+  readonly fromTableReference: DiningReference;
+  readonly movedAt: DiningInstant;
+}
+
+function followedMove(value: unknown): DiningFollowedMove | null {
+  if (value === null) return null;
+  const raw = closed(value, ["fromTableReference", "movedAt"]);
+  return Object.freeze({
+    fromTableReference: parseDiningReference(raw.fromTableReference),
+    movedAt: parseDiningInstant(raw.movedAt),
+  });
+}
+
 function current(
   value: unknown,
   commitment: DiningCheckoutCommitment,
   observedAt: DiningInstant,
-  { sameSessionVersion = true }: { readonly sameSessionVersion?: boolean } = {},
+  {
+    sameSessionVersion = true,
+    followParty = false,
+  }: { readonly sameSessionVersion?: boolean; readonly followParty?: boolean } = {},
 ): void {
-  const raw = closed(value, ["session", "participant"]);
+  // Only current payment eligibility follows a moved party; preparing, sealing and the gate before
+  // Ordering stay at the table the round is being sent from (a context naming a move is refused).
+  const raw =
+    followParty &&
+    value !== null &&
+    typeof value === "object" &&
+    Object.hasOwn(value, "followedMove")
+      ? closed(value, ["session", "participant", "followedMove"])
+      : closed(value, ["session", "participant"]);
   const session = parseDiningSession(raw.session),
-    participant = parseDiningParticipant(raw.participant);
+    participant = parseDiningParticipant(raw.participant),
+    move = raw.followedMove === undefined ? null : followedMove(raw.followedMove);
+  const sameTable =
+    session.tableReference === commitment.tableReference &&
+    session.tableAssignmentVersion === commitment.tableAssignmentVersion;
+  const followed =
+    move !== null &&
+    !sameTable &&
+    move.fromTableReference === commitment.tableReference &&
+    time(move.movedAt) >= time(commitment.preparedAt) &&
+    time(move.movedAt) <= time(observedAt);
   if (
     session.phase !== "Active" ||
     session.brandReference !== commitment.brandReference ||
     session.storeReference !== commitment.storeReference ||
     session.diningSessionReference !== commitment.diningSessionReference ||
     (sameSessionVersion && session.version !== commitment.sessionVersion) ||
-    session.tableReference !== commitment.tableReference ||
-    session.tableAssignmentVersion !== commitment.tableAssignmentVersion ||
+    (move === null ? !sameTable : !followed) ||
     participant.diningSessionReference !== session.diningSessionReference ||
     participant.participantReference !== commitment.participantReference ||
     participant.version !== commitment.participantVersion ||
@@ -308,9 +347,12 @@ export function expireDiningCheckoutCommitment(
 
 /**
  * Current payment eligibility is distinct from immutable seal recovery. WP-2423 (2026-11-03): a
- * round already sent stays payable while its session is open at the same table and its participant
- * is still there. Someone else joining moves the session's version and must not stop it being paid
- * (a second guest scanning, or staff sending the next round); closing and moving tables still do.
+ * round already sent stays payable while its session is open and its participant is still there.
+ * Someone else joining moves the session's version and must not stop it being paid (a second guest
+ * scanning, or staff sending the next round). WP-2423 (table-move-payment, 2026-11-06): staff
+ * moving the party does not stop it either; the context then carries `followedMove`, Dining's
+ * recorded Move of this session off the table the round was sent from, after it was prepared.
+ * Closing the table, or the participant leaving, still stops it.
  */
 export function assertDiningCheckoutCommitmentUsable(
   value: unknown,
@@ -320,7 +362,7 @@ export function assertDiningCheckoutCommitmentUsable(
   return protect(() => {
     const commitment = parseDiningCheckoutCommitment(value),
       observedAt = parseDiningInstant(observedAtValue);
-    current(context, commitment, observedAt, { sameSessionVersion: false });
+    current(context, commitment, observedAt, { sameSessionVersion: false, followParty: true });
     if (
       commitment.state !== "PaymentPending" ||
       commitment.capacityExpiresAt === null ||

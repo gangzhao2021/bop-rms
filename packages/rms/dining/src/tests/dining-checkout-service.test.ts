@@ -605,6 +605,32 @@ it("denies payment when Dining enters Closing", async () => {
   await expect(f.service().authorizePayment(f.input)).rejects.toThrow();
   expect(f.writes()).toBe(1);
 });
+/**
+ * WP-2423 table-move-payment: this owner check has no runtime caller (the pilot admits a payment
+ * through the checkout store's `withPaymentPending`, which follows a recorded Move). It stays
+ * strict on purpose: a phone that follows its moved party is not, by itself, current payment
+ * authority for a round sent from the old table.
+ */
+it("WP-2423 table-move-payment: this owner check still refuses payment of a round after its party moved", async () => {
+  const f = await paymentFixture(),
+    read = f.options.current.readCurrent;
+  f.options.current.readCurrent = async (request) => {
+    const value = await read(request);
+    if (value === null) return value;
+    return {
+      ...value,
+      session: { ...value.session, tableReference: id(60), tableAssignmentVersion: 2 },
+      table: { ...value.table, tableReference: id(60), assignmentVersion: 2 },
+      followedMove: { fromTableReference: id(6), movedAt: request.observedAt },
+    } as never;
+  };
+  // The phone's binding follows the party (no PERMISSION_DENIED); the round's own context check
+  // refuses (the service reports a context refusal as a dependency failure).
+  await expect(f.service().authorizePayment(f.input)).rejects.toMatchObject({
+    code: "DINING_CHECKOUT_DEPENDENCY_UNAVAILABLE",
+  });
+  expect(f.writes()).toBe(1);
+});
 it("denies current payment after revocation during the owner read", async () => {
   const f = await paymentFixture(),
     read = f.options.current.readCurrent;

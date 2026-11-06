@@ -254,15 +254,34 @@ export function createPostgresDiningCheckoutCommitmentStore(
     };
   }
   /**
-   * WP-2423 M04: the Dining context of a round already paid, wherever its party sits now. Staff may
-   * move a party to another table after it paid a round and before that round is accepted; the
-   * round goes with the party. The session's current table is locked before the session (Move's
-   * table-before-session order). A table other than the one the round was paid at is accepted only
-   * when Dining recorded a Move of this session off that table after the round was prepared, and the
-   * session's table assignment moved on since: a party leaves a table only by a recorded Move (a
-   * Merge is refused while a round is paid or being paid).
+   * WP-2423 M04 and table-move-payment (2026-11-06): the Dining context of a round already sent,
+   * wherever its party sits now. Staff may move a party to another table after it sent or paid a
+   * round; the round goes with the party. The session's current table is locked before the session
+   * (Move's table-before-session order). The party counts as moved when it sits at another table or
+   * was seated again at the same one (A to B and back to A); it is then followed only when Dining
+   * recorded a Move of this session off the round's table after the round was prepared (a party
+   * leaves a table only by a recorded Move; a Merge is refused while a round is paid or being paid).
+   * A table assignment number belongs to a table, so it is never compared across tables.
    */
-  async function paidCurrent(
+  async function followedCurrent(
+    tx: DiningTableTransaction,
+    record: DiningCheckoutCommitment,
+    at: string,
+  ) {
+    // A Move landing between the unlocked read and the locks is followed by reading again in this
+    // transaction (the Move has committed once its session lock is released), at the clock's next
+    // reading; after three tries the caller gets a conflict. A caller whose clock is fixed (the
+    // payment admission at its request time) cannot follow a Move made after that time: it is
+    // refused and the guest's next confirm, retry or resume (or the worker's next pass) follows it.
+    let observedAt = at;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      if (attempt > 0) observedAt = now(observedAt);
+      const found = await followedOnce(tx, record, observedAt);
+      if (found !== null) return found;
+    }
+    return fail("DINING_CHECKOUT_STORE_CONFLICT");
+  }
+  async function followedOnce(
     tx: DiningTableTransaction,
     record: DiningCheckoutCommitment,
     at: string,
@@ -290,6 +309,21 @@ export function createPostgresDiningCheckoutCommitmentStore(
     );
     if (tables.length !== 1) return fail("DINING_CHECKOUT_STORE_CONFLICT");
     const table = createDiningTable(closed(tables[0], ["table"]).table);
+    const sessions = rows(
+      await tx.query(
+        "SELECT session_snapshot AS session FROM rms_dining.dining_session WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND session_id=$4 FOR UPDATE",
+        [tenant, brand, store, record.diningSessionReference],
+      ),
+    );
+    if (sessions.length !== 1) return fail("DINING_CHECKOUT_STORE_CONFLICT");
+    const session = closed(sessions[0], ["session"]).session;
+    const locked = parseDiningSession(session);
+    // Moved again between the unlocked read and the locks: read again.
+    if (
+      locked.tableReference !== tableReference ||
+      locked.tableAssignmentVersion !== before.tableAssignmentVersion
+    )
+      return null;
     if (
       table.tenantReference !== tenant ||
       table.brandReference !== brand ||
@@ -301,30 +335,21 @@ export function createPostgresDiningCheckoutCommitmentStore(
       table.observedAt > at
     )
       return fail("DINING_CHECKOUT_STORE_CONFLICT");
-    const sessions = rows(
-      await tx.query(
-        "SELECT session_snapshot AS session FROM rms_dining.dining_session WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND session_id=$4 FOR UPDATE",
-        [tenant, brand, store, record.diningSessionReference],
-      ),
-    );
     const participants = rows(
       await tx.query(
         "SELECT participant_snapshot AS participant FROM rms_dining.dining_participant WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND session_id=$4 AND participant_id=$5 FOR UPDATE",
         [tenant, brand, store, record.diningSessionReference, record.participantReference],
       ),
     );
-    if (sessions.length !== 1 || participants.length !== 1)
-      return fail("DINING_CHECKOUT_STORE_CONFLICT");
-    const session = closed(sessions[0], ["session"]).session;
-    // Moved again between the unlocked read and the locks: the caller retries.
-    if (parseDiningSession(session).tableReference !== tableReference)
-      return fail("DINING_CHECKOUT_STORE_CONFLICT");
-    if (tableReference !== record.tableReference) {
-      if (parseDiningSession(session).tableAssignmentVersion <= record.tableAssignmentVersion)
-        return fail("DINING_CHECKOUT_STORE_CONFLICT");
+    if (participants.length !== 1) return fail("DINING_CHECKOUT_STORE_CONFLICT");
+    let followedMove: Readonly<{ fromTableReference: string; movedAt: string }> | null = null;
+    if (
+      tableReference !== record.tableReference ||
+      locked.tableAssignmentVersion !== record.tableAssignmentVersion
+    ) {
       const moved = rows(
         await tx.query(
-          "SELECT 1 AS moved FROM rms_dining.dining_session_move_operation WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND session_id=$4 AND source_table_id=$5 AND occurred_at>=$6::timestamptz LIMIT 1",
+          "SELECT to_char(occurred_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') AS moved_at FROM rms_dining.dining_session_move_operation WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND session_id=$4 AND source_table_id=$5 AND occurred_at>=$6::timestamptz ORDER BY occurred_at LIMIT 1",
           [
             tenant,
             brand,
@@ -336,13 +361,25 @@ export function createPostgresDiningCheckoutCommitmentStore(
         ),
       );
       if (moved.length !== 1) return fail("DINING_CHECKOUT_STORE_CONFLICT");
+      followedMove = Object.freeze({
+        fromTableReference: record.tableReference,
+        movedAt: parseDiningInstant(closed(moved[0], ["moved_at"]).moved_at),
+      });
     }
-    return { session, participant: closed(participants[0], ["participant"]).participant };
+    return {
+      session,
+      participant: closed(participants[0], ["participant"]).participant,
+      followedMove,
+    };
   }
   /** One locked latest commitment and its parsed Dining context (shared by the current reads). */
   async function withFacts<T>(
     referenceValue: unknown,
-    locate: typeof current,
+    locate: (
+      tx: DiningTableTransaction,
+      record: DiningCheckoutCommitment,
+      at: string,
+    ) => Promise<{ readonly session: unknown; readonly participant: unknown }>,
     work: (
       transaction: DiningTableTransaction,
       facts: Readonly<{
@@ -411,8 +448,8 @@ export function createPostgresDiningCheckoutCommitmentStore(
     },
     /**
      * Paid-round history only (WP-2423 M04): the party may have moved to another table since it
-     * paid. Never permission to prepare, seal or start a payment (`withCurrentFacts` and
-     * `withPaymentPending` still hold a round to the table it was sent from).
+     * paid. Never permission to prepare, seal or start a payment (`withCurrentFacts` holds a round
+     * to the table it is being sent from; `withPaymentPending` checks payment eligibility).
      */
     async withPaidFacts<T>(
       referenceValue: unknown,
@@ -425,9 +462,13 @@ export function createPostgresDiningCheckoutCommitmentStore(
         }>,
       ) => Promise<T>,
     ): Promise<T | null> {
-      return withFacts(referenceValue, paidCurrent, work);
+      return withFacts(referenceValue, followedCurrent, work);
     },
-    /** Current payment eligibility with commitment and Dining context locked through caller work. */
+    /**
+     * Current payment eligibility with commitment and Dining context locked through caller work.
+     * WP-2423 (table-move-payment): a party staff moved keeps paying the rounds it sent before the
+     * move, for the amount they were sent at; closing the table or the participant leaving stops it.
+     */
     async withPaymentPending<T>(
       referenceValue: unknown,
       work: (transaction: DiningTableTransaction, record: DiningCheckoutCommitment) => Promise<T>,
@@ -442,7 +483,7 @@ export function createPostgresDiningCheckoutCommitmentStore(
           const record = (await history(tx, reference)).at(-1);
           if (record === undefined) return null;
           const observedAt = now();
-          const context = await current(tx, record, observedAt);
+          const context = await followedCurrent(tx, record, observedAt);
           const eligible = assertDiningCheckoutCommitmentUsable(record, context, now(observedAt));
           const result = await work(tx, eligible);
           assertDiningCheckoutCommitmentUsable(record, context, now(observedAt));

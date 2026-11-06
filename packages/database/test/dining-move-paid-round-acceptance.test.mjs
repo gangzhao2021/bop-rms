@@ -22,6 +22,7 @@ import {
 import { createPostgresCapturedBatchPaymentSource } from "../../rms/payment/src/index.ts";
 import { createCustomerSubmissionInventoryFinalizer } from "../../../apps/api/src/customer-submission-inventory-finalizer.ts";
 import { createMerchantDiningTableMove } from "../../../apps/api/src/merchant-dining-table-move.ts";
+import { createMerchantDiningTableCommand } from "../../../apps/api/src/merchant-dining-table-command.ts";
 import { createPersistentMerchantOrderQueue } from "../../../apps/api/src/persistent-merchant-order-queue.ts";
 import { createOrderPaidContextSource } from "../../../apps/api/src/order-paid-context-source.ts";
 import { createOrderPaidOutcomeSource } from "../../../apps/api/src/order-paid-outcome-source.ts";
@@ -72,8 +73,21 @@ const now = () => new Date().toISOString();
  * - staff accept the round from Orders (the pilot's acceptance command) at the new table, the
  *   worker's resume confirms it for the kitchen and the kitchen's Ordering source resolves it; the
  *   wait leaves the worker's queue; Orders and the kitchen ticket name the table the party sits at.
+ * WP-2423 table-move-payment (v15 fabf0261, 2026-11-06): accepting failed 5 of 5 times when the
+ * party moved to a table seated less often than the one it left (a table's assignment number was
+ * compared with another table's), and a payment open during the move could not complete. Also:
+ * - MovedToLowerVersionTable: the source table was seated 40 times, the target is fresh;
+ * - MovedAwayAndBack: A to B, A cleaned, B back to A;
+ * - PaymentOpenDuringMove: the payment started at A completes after the move (its admission
+ *   gate is current at B, for the same amount), including a Move landing inside that gate.
  */
-it.each(["CapturedBeforeMove", "MovedTwice", "CapturedAfterMove"])(
+it.each([
+  "CapturedBeforeMove",
+  "MovedTwice",
+  "MovedToLowerVersionTable",
+  "MovedAwayAndBack",
+  "PaymentOpenDuringMove",
+])(
   "a paid round not yet accepted goes with its party to another table and reaches the kitchen (%s)",
   async (variant) => {
     await withIsolatedDatabase(
@@ -104,7 +118,9 @@ it.each(["CapturedBeforeMove", "MovedTwice", "CapturedAfterMove"])(
             ).rows[0].at.toISOString(),
           );
           const time = (offset) => new Date(base + offset).toISOString();
-          const R1 = journeyRound({ at: time(-minutes(40)), prefix: "01a00001" });
+          // The payment still open during the move was asked for within its 30-minute window.
+          const r1At = variant === "PaymentOpenDuringMove" ? -12 : -40;
+          const R1 = journeyRound({ at: time(minutes(r1At)), prefix: "01a00001" });
           const staffGuest = id(0x602);
           const R2 = journeyRound({
             at: time(-minutes(5)),
@@ -180,6 +196,10 @@ it.each(["CapturedBeforeMove", "MovedTwice", "CapturedAfterMove"])(
             round: R1,
             startedAt: time(-minutes(50)),
             guestParticipant: id(0x601),
+            // v15 窗边 1 号 had been seated 40 times; the table the party moves to is fresh.
+            ...(variant === "MovedToLowerVersionTable"
+              ? { tableVersion: 40, assignmentVersion: 40 }
+              : {}),
           });
           await seedAdditionalDiningGuest({
             client: admin,
@@ -286,7 +306,7 @@ it.each(["CapturedBeforeMove", "MovedTwice", "CapturedAfterMove"])(
             providerIntent: "pi_SYNTHETICORDER1",
             providerEvent: "evt_SYNTHETICORDER1",
           };
-          const requested1 = time(-minutes(39));
+          const requested1 = time(minutes(r1At + 1));
           await dining.prepare(R1, { paymentOperationReference: pay1.paymentOperation });
           const commitments = createPostgresDiningCheckoutCommitmentStore(
             ownerRunner(),
@@ -496,7 +516,7 @@ it.each(["CapturedBeforeMove", "MovedTwice", "CapturedAfterMove"])(
               refs: pay1,
               outcome: "Succeeded",
               requestedAt: requested1,
-              occurredAt: time(-minutes(38)),
+              occurredAt: time(minutes(r1At + 2)),
               totalMinor: roundTotal,
             });
             const event = (
@@ -641,29 +661,84 @@ it.each(["CapturedBeforeMove", "MovedTwice", "CapturedAfterMove"])(
           );
           const unresolved = () => transactions().run((tx) => waits.listUnresolved(tx, 100, null));
 
+          /** Staff mark the table the party left as cleaned (Tables: "Cleaned"). */
+          const cleaned = async (table) =>
+            createMerchantDiningTableCommand({
+              persistence: { ...staffSession.persistence, now },
+              authentication: staffSession.authentication,
+              newReference: fresh,
+              retentionPolicyCode: "AUDIT_DEFAULT",
+              retentionPolicyVersion: 1,
+            })({
+              ...session,
+              command: {
+                action: "ClearBlock",
+                tableReference: table,
+                expectedAggregateVersion: await tableVersion(table),
+                operationReference: fresh(),
+                reasonCode: null,
+              },
+            });
+          /** The pilot's payment admission gate for round 1 (what confirm, resume and retry call). */
+          const paymentGate = (runner = transactions()) =>
+            createPostgresDiningCheckoutCommitmentStore(runner, ownerScope, {
+              now,
+            }).withPaymentPending(commitment1, async (_tx, current) => current);
+
           // ── The move, per case.
           let event1;
-          if (variant === "CapturedAfterMove") {
-            // The guest's payment was started at table A; staff move the party before it is
-            // captured. A new payment cannot start for the round any more (the round stays bound
-            // to the table it was sent from until it is paid) ...
+          if (variant === "PaymentOpenDuringMove") {
+            // The guest's payment sheet was opened at table A; staff move the party to B before
+            // the guest confirms. A second Move lands inside the gate itself (after its first read
+            // of where the party sits, before its locks): the gate reads again and follows it.
             await move(tableA, tableB);
-            const pending = await assert.rejects(
-              createPostgresDiningCheckoutCommitmentStore(transactions(), ownerScope, {
-                now,
-              }).withPaymentPending(commitment1, async () => "started"),
-              { code: "DINING_CHECKOUT_STORE_CONFLICT" },
-            );
-            assert.equal(pending, undefined);
-            // ... but the payment already started is captured, recorded and awaits acceptance.
+            let raced = false;
+            const racing = {
+              run: (work) =>
+                transactions().run((tx) =>
+                  work({
+                    async query(sql, values) {
+                      const result = await tx.query(sql, values);
+                      if (
+                        !raced &&
+                        sql.startsWith("SELECT session_snapshot AS session") &&
+                        !sql.includes("FOR UPDATE")
+                      ) {
+                        raced = true;
+                        await move(tableB, tableC);
+                      }
+                      return result;
+                    },
+                  }),
+                ),
+            };
+            const current = await paymentGate(racing);
+            assert.equal(raced, true);
+            assert.equal(current.commitmentReference, commitment1);
+            assert.equal(current.tableReference, tableA);
+            assert.equal(current.state, "PaymentPending");
+            // ... and the payment already started is captured once, recorded, awaits acceptance.
             event1 = await capture();
+            assert.equal((await paymentGate()).commitmentReference, commitment1);
           } else {
             event1 = await capture();
-            await move(tableA, tableB);
-            if (variant === "MovedTwice") await move(tableB, tableC);
+            if (variant === "MovedAwayAndBack") {
+              await move(tableA, tableB);
+              await cleaned(tableA);
+              await move(tableB, tableA);
+            } else {
+              await move(tableA, tableB);
+              if (variant === "MovedTwice") await move(tableB, tableC);
+            }
           }
-          const seatedAt = variant === "MovedTwice" ? tableC : tableB;
-          const seatedLabel = variant === "MovedTwice" ? "TEST-C" : "TEST-B";
+          const seatedAt =
+            variant === "MovedTwice" || variant === "PaymentOpenDuringMove"
+              ? tableC
+              : variant === "MovedAwayAndBack"
+                ? tableA
+                : tableB;
+          const seatedLabel =
+            seatedAt === tableC ? "TEST-C" : seatedAt === tableA ? "SYNTHETIC-JOURNEY" : "TEST-B";
           assert.deepEqual(
             (await unresolved()).map((value) => value),
             [event1.eventId],
@@ -771,9 +846,15 @@ it.each(["CapturedBeforeMove", "MovedTwice", "CapturedAfterMove"])(
           // The table the party left waits for cleaning and holds nobody.
           const [left] = await one(
             "SELECT table_snapshot->>'activeDiningSessionReference' AS seated FROM rms_dining.dining_table WHERE table_id=$1",
-            [tableA],
+            [variant === "MovedAwayAndBack" ? tableB : tableA],
           );
           assert.equal(left.seated, null);
+          // Money: the round was paid once, for what it was sent at; nothing refunded or adjusted.
+          const [paid] = await one(
+            "SELECT (SELECT count(*)::int FROM rms_payment.payment_intent WHERE order_id=$1) AS intents,(SELECT sum(total_minor)::text FROM rms_payment.payment_intent WHERE order_id=$1) AS total",
+            [orderReference],
+          );
+          assert.deepEqual(paid, { intents: 1, total: String(roundTotal) });
           assert.equal(
             (
               await one(

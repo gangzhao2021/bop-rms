@@ -128,6 +128,9 @@ export async function seedJourneyDining({
   startedAt,
   guestParticipant,
   tableVersion = 1,
+  // WP-2423 (table-move-payment): the table's assignment number when the party sat down (a table
+  // seated many times, as on v15, has a high one).
+  assignmentVersion = 1,
   // WP-2423 item 8 ⑨: another table in the same Store (its suffix, label and audit numbers).
   table: other = { suffix: "a001", label: "SYNTHETIC-JOURNEY", auditBase: 0xb000 },
 }) {
@@ -139,7 +142,7 @@ export async function seedJourneyDining({
     brandReference: scope.brandReference,
     storeReference: scope.storeReference,
     tableReference,
-    tableAssignmentVersion: 1,
+    tableAssignmentVersion: assignmentVersion,
     phase: "Active",
     version: 2,
     startedByActorReference: record.guestSessionReference,
@@ -266,7 +269,7 @@ export async function seedJourneyDining({
           // The session as it is now (a table whose checkout was started and cancelled moved on).
           sessionVersion: currentSession.version,
           tableReference,
-          tableAssignmentVersion: 1,
+          tableAssignmentVersion: currentSession.tableAssignmentVersion,
           participantReference: participant.participantReference,
           participantVersion: participant.version,
           guestSessionReference: r.guestSessionReference,

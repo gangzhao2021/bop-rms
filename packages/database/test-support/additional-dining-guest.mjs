@@ -100,7 +100,7 @@ export async function seedAdditionalDiningGuest({
     participantReference: dining.participant.participantReference,
     storeReference: f.scope.storeReference,
     tableReference: dining.table.tableReference,
-    tableAssignmentVersion: 1,
+    tableAssignmentVersion: dining.session.tableAssignmentVersion,
     operationReference: id(8),
     operationIntentHash: "a".repeat(64),
     status: "Consumed",
