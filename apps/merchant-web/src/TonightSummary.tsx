@@ -187,10 +187,19 @@ export function TonightSummaryView({
     cash = tonightChannel(summary, "Cash");
   const machineNet = machine === null ? 0n : BigInt(machine.netCollectedMinor);
   const drawer = cash === null ? 0n : BigInt(cash.netCollectedMinor);
-  // v15 2026-10-28 (a): a table paid in full whose guests are still seated owes nothing; it is
-  // listed apart, never as "not paid yet" at $0.00.
-  const open = summary.openTables.filter((table) => table.owedMinor !== "0");
-  const paidSeated = summary.openTables.filter((table) => table.owedMinor === "0");
+  // v15 2026-10-28 (a) and M40: a table is listed by where its money stands. "Paid, guests still
+  // seated" is only a table whose money was really taken and kept; a table that never ordered, or
+  // whose rounds all came off unpaid, is listed apart, and a walkout stays with the write-offs.
+  const open = summary.openTables.filter(
+    (table) => table.standing === "Owes" || table.standing === "RoundUnpaid",
+  );
+  const paidSeated = summary.openTables.filter((table) => table.standing === "Paid");
+  const nothingOrdered = summary.openTables.filter((table) => table.standing === "NothingOrdered");
+  const nothingToCollect = summary.openTables.filter(
+    (table) => table.standing === "NothingToCollect",
+  );
+  const tableNames = (tables: typeof open) =>
+    tables.map((table) => t("Table {table}", { table: saidTable(table.tableLabel) })).join(", ");
   const c = summary.cancelled;
   // Every payment taken is counted in sales and tax, and the money agrees with the settlement.
   const matches = report.reconciliation.matchesSettlement && s.unmatchedMinor === "0";
@@ -367,7 +376,8 @@ export function TonightSummaryView({
                   detail={
                     (table.phase === "Closing" ? t("Checking out") : t("Seated")) +
                     " · " +
-                    t("open {minutes} min", { minutes: String(table.openedMinutes) })
+                    t("open {minutes} min", { minutes: String(table.openedMinutes) }) +
+                    (table.standing === "RoundUnpaid" ? " · " + t("Round waiting for payment") : "")
                   }
                   value={money(table.owedMinor)}
                 />
@@ -388,9 +398,27 @@ export function TonightSummaryView({
             <Row
               label={t("Paid, guests still seated")}
               detail={countOf(paidSeated.length, "table")}
-              value={paidSeated
-                .map((table) => t("Table {table}", { table: saidTable(table.tableLabel) }))
-                .join(", ")}
+              value={tableNames(paidSeated)}
+              muted
+            />
+          </dl>
+        ) : null}
+        {nothingOrdered.length > 0 ? (
+          <dl>
+            <Row
+              label={t("Seated, nothing ordered")}
+              detail={countOf(nothingOrdered.length, "table")}
+              value={tableNames(nothingOrdered)}
+              muted
+            />
+          </dl>
+        ) : null}
+        {nothingToCollect.length > 0 ? (
+          <dl>
+            <Row
+              label={t("Cancelled, nothing to collect")}
+              detail={countOf(nothingToCollect.length, "table")}
+              value={tableNames(nothingToCollect)}
               muted
             />
           </dl>

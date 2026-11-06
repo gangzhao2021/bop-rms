@@ -2,7 +2,17 @@ import { createHash } from "node:crypto";
 import type { ConsumerTransaction } from "@bop/eventing";
 import { memberDisplayNames, type MemberDirectoryTransaction } from "@bop/membership";
 import { createPostgresDiningSessionReadStore, createPostgresDiningTableStore } from "@rms/dining";
-import { listStoreCancelledDishes, listStoreOrderAutoAcceptanceEvents } from "@rms/ordering";
+import {
+  listStoreCancelledDishes,
+  listStoreOrderAutoAcceptanceEvents,
+  listStoreUnpaidGuestDiningRounds,
+  readStaffOrderCancellations,
+} from "@rms/ordering";
+import {
+  createPostgresCardMachinePaymentStore,
+  listStoreOrderBatchPaymentOutcomes,
+  listStoreOrderBatchesPaidOnline,
+} from "@rms/payment";
 import { readDiningTableBill } from "./merchant-dining-table-checkout.js";
 
 /**
@@ -19,6 +29,33 @@ export interface TonightOpenTable {
   readonly owedMinor: string;
   /** Minutes since the table was opened. */
   readonly openedMinutes: number;
+  /** M40: where the table's money stands (never "paid" for a table that paid nothing). */
+  readonly standing: TonightTableStanding;
+}
+/**
+ * M40: Owes — its bill still owes money; RoundUnpaid — a pay-first round nobody has paid yet;
+ * Paid — money was really taken and kept (a table settlement, a paid split part, or a pay-first
+ * round paid and not cancelled for a refund); NothingOrdered — seated, no Order; NothingToCollect
+ * — rounds were ordered but all came off unpaid; WrittenOff — the guests left without paying.
+ */
+export type TonightTableStanding =
+  "Owes" | "RoundUnpaid" | "Paid" | "NothingOrdered" | "NothingToCollect" | "WrittenOff";
+
+export function tonightTableStanding(input: {
+  readonly writtenOff: boolean;
+  readonly owedMinor: bigint;
+  readonly unpaidRounds: number;
+  /** A table settlement or a paid split part. */
+  readonly tableMoneyTaken: boolean;
+  /** Pay-first rounds paid (online or on the card machine) and not cancelled for a refund. */
+  readonly keptPaidRounds: number;
+  readonly ordered: boolean;
+}): TonightTableStanding {
+  if (input.writtenOff) return "WrittenOff";
+  if (input.unpaidRounds > 0) return "RoundUnpaid";
+  if (input.owedMinor > 0n) return "Owes";
+  if (input.tableMoneyTaken || input.keptPaidRounds > 0) return "Paid";
+  return input.ordered ? "NothingToCollect" : "NothingOrdered";
 }
 /**
  * DEC-PAID-ORDER-AUTO-ACCEPT: what a closing manager should see named, because no manager was asked:
@@ -73,7 +110,12 @@ export async function readTonightFacts(
   });
   const sessions = createPostgresDiningSessionReadStore({ run: (work) => work(tx) }, input.scope);
   const observed = Date.parse(input.observedAt);
-  const open: TonightOpenTable[] = [];
+  const open: (Omit<TonightOpenTable, "standing"> & {
+    readonly diningSessionReference: string;
+    readonly orderReference: string | null;
+    readonly writtenOff: boolean;
+    readonly tableMoneyTaken: boolean;
+  })[] = [];
   let after: string | null = null;
   for (let page = 0; page < TONIGHT_TABLE_PAGES; page++) {
     const listed = await tables.listTables({
@@ -102,12 +144,19 @@ export async function readTonightFacts(
           paymentTiming: bill.paymentTiming,
           owedMinor: owed,
           openedMinutes: Math.floor((observed - startedAt) / 60_000),
+          diningSessionReference: bill.diningSessionReference,
+          orderReference: bill.orderReference,
+          writtenOff: bill.writeOff !== null,
+          tableMoneyTaken:
+            bill.settlement !== null ||
+            (bill.split?.parts.some((part) => part.payment !== null) ?? false),
         }),
       );
     }
     if (listed.nextAfterTableReference === null) break;
     after = listed.nextAfterTableReference;
   }
+  const standings = await payFirstRounds(tx, input.scope, open, allowed);
   const cancelled = await listStoreCancelledDishes(tx, input.scope, input.window);
   const events = await listStoreOrderAutoAcceptanceEvents(tx, input.scope, input.window);
   const names =
@@ -138,7 +187,26 @@ export async function readTonightFacts(
             ),
           ),
         }),
-    openTables: Object.freeze(open),
+    openTables: Object.freeze(
+      open.map((table) =>
+        Object.freeze({
+          tableLabel: table.tableLabel,
+          phase: table.phase,
+          paymentTiming: table.paymentTiming,
+          owedMinor: table.owedMinor,
+          openedMinutes: table.openedMinutes,
+          standing: tonightTableStanding({
+            writtenOff: table.writtenOff,
+            owedMinor: BigInt(table.owedMinor),
+            unpaidRounds: standings.unpaid.get(table.diningSessionReference) ?? 0,
+            tableMoneyTaken: table.tableMoneyTaken,
+            keptPaidRounds:
+              table.orderReference === null ? 0 : (standings.kept.get(table.orderReference) ?? 0),
+            ordered: table.orderReference !== null,
+          }),
+        }),
+      ),
+    ),
     openTablesOwedMinor: open.reduce((sum, table) => sum + BigInt(table.owedMinor), 0n).toString(),
     cancelled: Object.freeze({
       removedBeforePayment: Object.freeze({
@@ -156,4 +224,83 @@ export async function readTonightFacts(
       }),
     }),
   });
+}
+
+/**
+ * M40: for the pay-first tables, the rounds nobody has paid yet (by session) and the rounds paid
+ * online or on the card machine that were not cancelled for a refund (by Order). A round whose
+ * dishes were cancelled with "Can't make it · refund" was refunded in full, so it is not money kept.
+ * Read in the summary's own transaction; one read each for every open table.
+ */
+async function payFirstRounds(
+  tx: ConsumerTransaction,
+  scope: {
+    readonly tenantReference: string;
+    readonly brandReference: string;
+    readonly storeReference: string;
+  },
+  tables: readonly {
+    readonly paymentTiming: "PayFirst" | "PayLater";
+    readonly diningSessionReference: string;
+    readonly orderReference: string | null;
+  }[],
+  allowed: () => Promise<boolean>,
+): Promise<{ unpaid: ReadonlyMap<string, number>; kept: ReadonlyMap<string, number> }> {
+  const payFirst = tables.filter((table) => table.paymentTiming === "PayFirst");
+  const unpaid = new Map<string, number>();
+  const kept = new Map<string, number>();
+  if (payFirst.length === 0) return { unpaid, kept };
+  const owner = { brandReference: scope.brandReference, storeReference: scope.storeReference };
+  for (let start = 0; start < payFirst.length; start += 100) {
+    const chunk = payFirst.slice(start, start + 100);
+    const sessions = chunk.map((table) => table.diningSessionReference);
+    const orders = chunk.flatMap((table) =>
+      table.orderReference === null ? [] : [table.orderReference],
+    );
+    const waiting = await listStoreUnpaidGuestDiningRounds(
+      tx as unknown as Parameters<typeof listStoreUnpaidGuestDiningRounds>[0],
+      owner,
+      sessions,
+    );
+    // A payment that just arrived is paid, not waiting (Ordering records it seconds later).
+    const justPaid = await listStoreOrderBatchesPaidOnline(
+      tx as unknown as Parameters<typeof listStoreOrderBatchesPaidOnline>[0],
+      owner,
+      waiting.map((round) => round.orderBatchReference),
+    );
+    for (const round of waiting)
+      if (!justPaid.has(round.orderBatchReference))
+        unpaid.set(
+          round.diningSessionReference,
+          (unpaid.get(round.diningSessionReference) ?? 0) + 1,
+        );
+    if (orders.length === 0) continue;
+    const paidBatches = new Map<string, string>();
+    for (const outcome of await listStoreOrderBatchPaymentOutcomes(
+      tx as unknown as Parameters<typeof listStoreOrderBatchPaymentOutcomes>[0],
+      owner,
+      orders,
+    ))
+      if (outcome.status === "Succeeded")
+        paidBatches.set(outcome.orderBatchReference, outcome.orderReference);
+    const machine = await createPostgresCardMachinePaymentStore({
+      scope: owner,
+      authorize: async () => allowed(),
+    }).listByOrders(tx as never, orders);
+    for (const [order, entries] of machine)
+      for (const entry of entries)
+        paidBatches.set(String(entry.payment.orderBatchReference), order);
+    const refunded = new Set(
+      (
+        await readStaffOrderCancellations(
+          tx as unknown as Parameters<typeof readStaffOrderCancellations>[0],
+          owner,
+          orders,
+        )
+      ).map((record) => String(record.orderBatchReference)),
+    );
+    for (const [batch, order] of paidBatches)
+      if (!refunded.has(batch)) kept.set(order, (kept.get(order) ?? 0) + 1);
+  }
+  return { unpaid, kept };
 }

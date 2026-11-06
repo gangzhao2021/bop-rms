@@ -212,6 +212,64 @@ describe("WP-2423 item 8 ② tonight's closing summary", () => {
     expect(notPaid).not.toContain("Table 3");
     expect(notPaid).not.toContain("$0.00");
   });
+  it("M40: a table that paid nothing is never listed as paid", () => {
+    const fixture = tonightSummaryFixture();
+    const tables = fixture.openTables as Record<string, unknown>[];
+    tables.push(
+      {
+        tableLabel: "4",
+        phase: "Active",
+        paymentTiming: "PayFirst",
+        owedMinor: "0",
+        openedMinutes: 20,
+        standing: "NothingOrdered",
+      },
+      {
+        tableLabel: "5",
+        phase: "Active",
+        paymentTiming: "PayFirst",
+        owedMinor: "0",
+        openedMinutes: 30,
+        standing: "NothingToCollect",
+      },
+      {
+        tableLabel: "6",
+        phase: "Active",
+        paymentTiming: "PayFirst",
+        owedMinor: "0",
+        openedMinutes: 10,
+        standing: "RoundUnpaid",
+      },
+      {
+        tableLabel: "8",
+        phase: "Closing",
+        paymentTiming: "PayLater",
+        owedMinor: "0",
+        openedMinutes: 90,
+        standing: "WrittenOff",
+      },
+    );
+    const html = render(fixture);
+    const paid = html.slice(html.indexOf("Paid, guests still seated"));
+    const paidRow = paid.slice(0, paid.indexOf("</div>"));
+    expect(paidRow).toContain("Table 3");
+    for (const label of ["Table 4", "Table 5", "Table 6", "Table 8"])
+      expect(paidRow, label).not.toContain(label);
+    expect(html).toContain("Seated, nothing ordered");
+    expect(html).toContain("Cancelled, nothing to collect");
+    const notPaid = html.slice(
+      html.indexOf("Tables not paid yet"),
+      html.indexOf("Paid, guests still seated"),
+    );
+    expect(notPaid).toContain("Table 6");
+    expect(notPaid).toContain("Round waiting for payment");
+    // A standing the server never sends is refused.
+    const wrong = tonightSummaryFixture();
+    const first = (wrong.openTables as Record<string, unknown>[])[0];
+    if (first === undefined) throw new Error("fixture");
+    first.standing = "Settled";
+    expect(() => parseTonightSummary(wrong)).toThrow();
+  });
   it("times the closing reminder by the Store's published closing", () => {
     const endsAt = "2026-10-28T08:00:00.000Z"; // 04:00 the next morning, Toronto.
     const at = (instant: string) => Date.parse(instant);

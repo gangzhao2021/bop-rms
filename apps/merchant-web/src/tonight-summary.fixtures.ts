@@ -127,6 +127,7 @@ export function tonightSummaryFixture(): Record<string, unknown> {
       paymentTiming: "PayLater",
       owedMinor: "5210",
       openedMinutes: 48,
+      standing: "Owes",
     },
     {
       tableLabel: "7",
@@ -134,6 +135,7 @@ export function tonightSummaryFixture(): Record<string, unknown> {
       paymentTiming: "PayLater",
       owedMinor: "3430",
       openedMinutes: 160,
+      standing: "Owes",
     },
     // Paid in full, guests still at the table (v15 2026-10-28 finding a): listed apart.
     {
@@ -142,6 +144,7 @@ export function tonightSummaryFixture(): Record<string, unknown> {
       paymentTiming: "PayLater",
       owedMinor: "0",
       openedMinutes: 75,
+      standing: "Paid",
     },
   ];
   const byChannel = (["Online", "CardMachine", "Cash"] as const).map((channel) => ({

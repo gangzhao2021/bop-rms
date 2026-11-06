@@ -440,6 +440,9 @@ export interface TonightSummary {
     readonly paymentTiming: "PayFirst" | "PayLater";
     readonly owedMinor: string;
     readonly openedMinutes: number;
+    /** M40: where the table's money stands (paid only when money was really taken and kept). */
+    readonly standing:
+      "Owes" | "RoundUnpaid" | "Paid" | "NothingOrdered" | "NothingToCollect" | "WrittenOff";
   }[];
   readonly openTablesOwedMinor: string;
   readonly cancelled: {
@@ -512,6 +515,7 @@ export function parseTonightSummary(value: unknown): TonightSummary {
       "paymentTiming",
       "owedMinor",
       "openedMinutes",
+      "standing",
     ]);
     return Object.freeze({
       tableLabel: text(table.tableLabel, 120),
@@ -519,6 +523,14 @@ export function parseTonightSummary(value: unknown): TonightSummary {
       paymentTiming: oneOf(table.paymentTiming, ["PayFirst", "PayLater"] as const),
       owedMinor: minor(table.owedMinor),
       openedMinutes: count(table.openedMinutes),
+      standing: oneOf(table.standing, [
+        "Owes",
+        "RoundUnpaid",
+        "Paid",
+        "NothingOrdered",
+        "NothingToCollect",
+        "WrittenOff",
+      ] as const),
     });
   });
   const owed = minor(raw.openTablesOwedMinor);
