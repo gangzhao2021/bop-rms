@@ -36,6 +36,15 @@ export function createPilotDeliveryFailures(limit = 10_000) {
     },
   });
 }
+/**
+ * WP-2423 M04: the payment-wait workload's health says attention while any paid wait keeps failing
+ * (its siblings still run, so the cycle itself looks healthy). Never which wait.
+ */
+export function paymentWaitHealth(snapshot, stuckWaits) {
+  return stuckWaits > 0 && (snapshot.state === "running" || snapshot.state === "idle")
+    ? { ...snapshot, state: "attention_required" }
+    : snapshot;
+}
 export async function createInternalWorker(resources, observers = {}, options = {}, dependencies) {
   const {
     createInternalDiningCheckoutExpiryWorkload,
@@ -47,30 +56,34 @@ export async function createInternalWorker(resources, observers = {}, options = 
   } = dependencies;
   const services = await createInternalWorkerServices(resources, { persistentWaiting: true });
   const paid = await createInternalPaidOutcome(resources, { persistentWaiting: true });
+  // WP-2423 M04: one paid wait that keeps failing is retried on its own; the Store's other paid
+  // orders still reach the kitchen. While any fails, the health says attention (a count only).
+  const stuck = { count: () => 0 };
   const waiting = createPaymentAcceptanceWaitWorkload({
-    onSnapshot: observers.paymentWait,
+    onSnapshot:
+      observers.paymentWait === undefined
+        ? undefined
+        : (snapshot) => observers.paymentWait(paymentWaitHealth(snapshot, stuck.count())),
     discover: (limit, after) =>
       resources.transactions.run((tx) => paid.listUnresolved(tx, limit, after)),
-    resume: async (event) => {
-      try {
-        return await resources.transactions.run((tx) => paid.resume(tx, event));
-      } catch (error) {
-        console.error(
-          JSON.stringify({
-            event: "INTERNAL_PAYMENT_WAIT_FAILED",
-            code: /^[A-Z0-9_]{1,80}$/.test(String(error.code)) ? error.code : undefined,
-            name: /^[A-Za-z]{1,64}$/.test(String(error.name)) ? error.name : undefined,
-          }),
-        );
-        throw error;
-      }
-    },
+    resume: (event) => resources.transactions.run((tx) => paid.resume(tx, event)),
+    onWaitFailure: ({ failures, stuckWaits }, error) =>
+      console.error(
+        JSON.stringify({
+          event: "INTERNAL_PAYMENT_WAIT_FAILED",
+          code: /^[A-Z0-9_]{1,80}$/.test(String(error?.code)) ? error.code : undefined,
+          name: /^[A-Za-z]{1,64}$/.test(String(error?.name)) ? error.name : undefined,
+          failures,
+          stuckWaits,
+        }),
+      ),
     pageSize: 5,
     pollIntervalMs: 1000,
     drainDeadlineMs: 25000,
     // WP-2423 pilot resilience: a failed cycle retries; it never stops the other workloads.
     supervision: supervisedCycleFailures,
   });
+  stuck.count = waiting.stuckCount;
   const derive = (key) => {
     const d = createHash("sha256").update(key).digest("hex");
     return (

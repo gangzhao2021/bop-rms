@@ -1,6 +1,10 @@
 import { afterEach, expect, test } from "vitest";
 import process from "node:process";
-import { createInternalWorker, createPilotDeliveryFailures } from "./pilot-worker.mjs";
+import {
+  createInternalWorker,
+  createPilotDeliveryFailures,
+  paymentWaitHealth,
+} from "./pilot-worker.mjs";
 
 const brandReference = "0190fa46-0000-7000-8000-000000000001";
 const storeReference = "0190fa46-0000-7000-8000-000000000002";
@@ -119,4 +123,19 @@ test("v15 2026-11-01: a delivery failing with no error code makes the events hea
   // A stopped or failed workload keeps its own state.
   failing.failed("kitchen.confirmed-order:v1", "e3");
   expect(failing.health({ ...running, state: "failed" }).state).toBe("failed");
+});
+
+test("WP-2423 M04: the payment-wait health asks for attention while a paid wait keeps failing, a count only", () => {
+  const snapshot = {
+    state: "running",
+    cycleInFlight: false,
+    completedCycles: 3,
+    lastCycleStartedAt: "2026-11-06T04:33:17.000Z",
+    lastCycleCompletedAt: "2026-11-06T04:33:17.500Z",
+  };
+  expect(paymentWaitHealth(snapshot, 0)).toBe(snapshot);
+  expect(paymentWaitHealth(snapshot, 1)).toEqual({ ...snapshot, state: "attention_required" });
+  expect(paymentWaitHealth({ ...snapshot, state: "idle" }, 2).state).toBe("attention_required");
+  // Stopping or failed workloads keep their own state.
+  expect(paymentWaitHealth({ ...snapshot, state: "failed" }, 1).state).toBe("failed");
 });
