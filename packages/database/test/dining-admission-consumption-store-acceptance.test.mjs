@@ -2032,6 +2032,117 @@ it("consumes exact Guest admissions atomically with current Dining fences and im
         setCustomerCsrfCredential(null);
         await journeyRuntime.shutdown("SIGTERM");
       }
+
+      // ── WP-2423 table-move-payment review (2026-11-06): what a phone that follows its moved
+      // party must never reach, as the restricted role, through Dining's binding store and query.
+      const tableAction = async (n, action, minute) => {
+        const current = await tableReader.loadTable(id(n));
+        await tableService.executeTable({
+          action,
+          operationReference: id(++sequence),
+          candidate: transitionDiningTable(current, action, at(minute)),
+          expectedAggregateVersion: current.aggregateVersion,
+          observedAt: at(minute),
+        });
+      };
+      const bindingOf = (entry, tableNumber, bindingScope = scope) =>
+        createDiningGuestBindingQuery({
+          scope: {
+            brandReference: bindingScope.brandReference,
+            storeReference: bindingScope.storeReference,
+          },
+          repository: createPostgresDiningGuestBindingStore(
+            runner({ readOnly: true }),
+            bindingScope,
+          ),
+          now: () => at(30),
+        }).resolve({
+          purpose: "GuestSessionBinding",
+          diningSessionReference: entry.sessionId,
+          participantReference: entry.joined.participant.participantReference,
+          tableReference: id(tableNumber),
+        });
+      // P1 joins at table 50 and its phone is bound; staff move the party to table 51.
+      const p1 = await firstJoin(50, 150);
+      assert.equal((await consumption().consume(request(p1, 170, 3))).status, "Consumed");
+      await configure(51);
+      await move(p1, 51, 171, 4);
+      const followedP1 = await bindingOf(p1, 50);
+      assert.equal(followedP1.diningSessionReference, p1.sessionId);
+      assert.equal(followedP1.tableReference, id(51));
+      // (a) Table 50 is cleaned and its code replaced: P1's phone still follows P1 to table 51.
+      if ((await tableReader.loadTable(id(50))).operationalState === "TemporarilyBlocked")
+        await tableAction(50, "ClearBlock", 5);
+      await tableAction(50, "IssueQr", 5);
+      await tableAction(50, "IssueQr", 5);
+      assert.equal((await bindingOf(p1, 50)).tableReference, id(51));
+      assert.equal((await bindingOf(p1, 51)).tableReference, id(51));
+      // (b) A new party P2 is seated at table 50 and its phone is bound there.
+      guestTables.set(id(151), id(50));
+      const p2Start = await service().start({
+        ...command(50, ++sequence),
+        expectedAssignmentVersion: (await tableReader.loadTable(id(50))).aggregateVersion,
+        requestedAt: at(6),
+      });
+      const p2Joined = await service().join({
+        guestSessionReference: id(151),
+        joinCredential: p2Start.joinCredential,
+        expectedSessionVersion: 1,
+        expectedCapabilityVersion: 1,
+        operationReference: id(++sequence),
+        requestedAt: at(6),
+      });
+      assert.equal(p2Joined.status, "Joined");
+      const p2 = {
+        table: 50,
+        guest: 151,
+        joined: p2Joined,
+        sessionId: p2Start.session.diningSessionReference,
+      };
+      assert.notEqual(p2.sessionId, p1.sessionId);
+      assert.equal((await consumption().consume(request(p2, 172, 7))).status, "Consumed");
+      assert.equal((await bindingOf(p2, 50)).diningSessionReference, p2.sessionId);
+      // P1's phone, asking with table 50's code, still reaches P1 at table 51, never P2.
+      const p1Again = await bindingOf(p1, 50);
+      assert.equal(p1Again.diningSessionReference, p1.sessionId);
+      assert.equal(p1Again.tableReference, id(51));
+      // P2's phone never reaches P1's party, at either table, nor P1's phone P2's.
+      for (const tableNumber of [50, 51]) {
+        assert.equal(
+          await bindingOf({ ...p2, sessionId: p1.sessionId }, tableNumber),
+          null,
+          "P2's participant in P1's party at table " + tableNumber,
+        );
+        assert.equal(
+          await bindingOf({ ...p1, sessionId: p2.sessionId }, tableNumber),
+          null,
+          "P1's participant in P2's party at table " + tableNumber,
+        );
+      }
+      // P2 has not been moved: its phone is not followed to a table it was never at.
+      assert.equal(await bindingOf(p2, 51), null);
+      // (c) Only a Move after the phone was bound is followed, and only off the table it was bound
+      // at. Q's phone is bound at 52 and follows the party to 53, never to a table it was not at.
+      const q = await firstJoin(52, 152);
+      assert.equal((await consumption().consume(request(q, 173, 3))).status, "Consumed");
+      await configure(53);
+      await configure(54);
+      await move(q, 53, 174, 8);
+      assert.equal((await bindingOf(q, 52)).tableReference, id(53));
+      assert.equal(await bindingOf(q, 54), null);
+      // R's phone joined at 55 but was not yet bound when staff moved the party to 56: the Move
+      // came before its binding, so it follows nothing and cannot be bound afterwards.
+      const late = await firstJoin(55, 155);
+      await configure(56);
+      await move(late, 56, 176, 8);
+      await assert.rejects(consumption().consume(request(late, 177, 9)));
+      for (const tableNumber of [55, 56]) assert.equal(await bindingOf(late, tableNumber), null);
+      // (d) Another Store of the Brand, and another Brand, read nothing of P1 under RLS.
+      for (const other of [
+        { ...scope, storeReference: id(97) },
+        { ...scope, brandReference: id(98), storeReference: id(97) },
+      ])
+        assert.equal(await bindingOf(p1, 50, other), null);
       assert.equal(active, 0);
     } finally {
       await admin.end();
