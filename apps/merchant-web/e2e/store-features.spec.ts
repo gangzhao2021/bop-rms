@@ -604,6 +604,10 @@ test("@production the owner turns on guests starting tables; it is off where gue
   await expect(
     page.getByText("20 minutes after the last activity if nobody ordered"),
   ).toBeVisible();
+  // The owner is told, before turning it on, that the next party can end a quiet table.
+  await expect(
+    page.getByText("even if its guests are still sitting there", { exact: false }),
+  ).toBeVisible();
   const section = page.getByRole("group", { name: "Guests starting tables" });
 
   // Off by default; a change someone else made first is said, and nothing is claimed.
