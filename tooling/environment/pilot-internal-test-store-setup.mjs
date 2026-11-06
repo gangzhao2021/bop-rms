@@ -41,6 +41,8 @@ import {
  */
 const UUID_V7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const IDENTIFIER = /^[a-z_][a-z0-9_]{0,62}$/u;
+/** The installation's synthetic fixture identities (`xxxxxxxx-0000-7000-8000-…`). */
+const SYNTHETIC = /^[0-9a-f]{8}-0000-7000-8000-[0-9a-f]{12}$/u;
 const QUALIFIED = /^[a-z_][a-z0-9_]*\.[a-z_][a-z0-9_]*(?:\([a-z_, ]*\))?$/u;
 export const internalTestStoreLabel = /not production/iu;
 export class InternalTestStoreSetupError extends Error {
@@ -504,6 +506,79 @@ export async function setUpInternalTestStore(
 }
 
 /**
+ * v15 2026-11-06 (WP-2423 DEC-MULTI-MERCHANT-ONE-INSTALLATION): proves, as the services' role
+ * reads it, that a Store whose Brand is not the installation's synthetic one belongs to a TEST
+ * merchant the InternalTest tooling opened from nothing (`pilot-internal-test-store-open.mjs
+ * merchant`): its Brand and Store are both named "… not production", the Store was opened from
+ * nothing (no source Store), and the merchant opening's own audit records (`BRAND_CREATED` and
+ * `STORE_OPENED`, reason `MERCHANT_OPENED`) name this Brand and Store under one operation. Reads
+ * only, inside the caller's transaction (a savepoint, so its role and scope are restored).
+ */
+export async function proveInternalTestMerchant(
+  client,
+  { readRole, brandReference, storeReference },
+) {
+  if (
+    !IDENTIFIER.test(readRole) ||
+    ![brandReference, storeReference].every(
+      (value) => typeof value === "string" && UUID_V7.test(value),
+    )
+  )
+    return unavailable("input-invalid");
+  await client.query("SAVEPOINT internal_test_merchant_proof");
+  try {
+    await client.query(`SET LOCAL ROLE "${readRole}"`);
+    const scope = (store) =>
+      client.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+        brandReference,
+        store,
+      ]);
+    // Brand facts and the Brand's own audit chain are read without a Store.
+    await scope("");
+    const [brand] = (
+      await client.query("SELECT display_name FROM bop_tenant.brand WHERE brand_id=$1", [
+        brandReference,
+      ])
+    ).rows;
+    const brandOpened = (
+      await client.query(
+        "SELECT correlation_id::text c FROM platform_audit.audit_record WHERE brand_id=$1 AND store_id IS NULL AND action_code='BRAND_CREATED' AND reason_code='MERCHANT_OPENED' AND target_type='Brand' AND target_id::text=$1::text",
+        [brandReference],
+      )
+    ).rows.map((row) => row.c);
+    await scope(storeReference);
+    const [store] = (
+      await client.query(
+        "SELECT s.display_name,o.opened_from_store_id FROM bop_tenant.store s JOIN bop_tenant.store_opening o ON o.brand_id=s.brand_id AND o.store_id=s.store_id WHERE s.brand_id=$1 AND s.store_id=$2",
+        [brandReference, storeReference],
+      )
+    ).rows;
+    const storeOpened = (
+      await client.query(
+        "SELECT correlation_id::text c FROM platform_audit.audit_record WHERE brand_id=$1 AND store_id=$2 AND action_code='STORE_OPENED' AND reason_code='MERCHANT_OPENED' AND target_type='Store' AND target_id::text=$2::text",
+        [brandReference, storeReference],
+      )
+    ).rows.map((row) => row.c);
+    if (
+      brand === undefined ||
+      store === undefined ||
+      !internalTestStoreLabel.test(String(brand.display_name)) ||
+      !internalTestStoreLabel.test(String(store.display_name))
+    )
+      unavailable("merchant-not-labelled-test");
+    if (
+      store.opened_from_store_id !== null ||
+      brandOpened.length !== 1 ||
+      storeOpened.length !== 1 ||
+      brandOpened[0] !== storeOpened[0]
+    )
+      unavailable("merchant-not-opened-by-test-tooling");
+  } finally {
+    await client.query("ROLLBACK TO SAVEPOINT internal_test_merchant_proof");
+  }
+}
+
+/**
  * InternalTest renewal of a TEST Store opened in the product (after the installation's own
  * renewal, with the same window move): its synthetic launch gate's validity, through the
  * Publishing owner's renewal (an appended version, audited with the approval), committed only if
@@ -524,10 +599,18 @@ export async function renewInternalTestStore(
     evidence,
     dryRun = true,
     nextReference,
+    /**
+     * v15 2026-11-06: the caller proved from the installation's files that this Store is a TEST
+     * merchant's served Store (`stores.json`, its own directory and Owner). Needed, and then
+     * proven again in the database, when the Store's Brand is not a synthetic fixture.
+     */
+    servedTestMerchant = false,
   },
 ) {
   if (environment !== "InternalTest") return unavailable("internal-test-only");
   const at = now();
+  const merchant = !SYNTHETIC.test(binding?.brandReference ?? "");
+  if (merchant && servedTestMerchant !== true) return unavailable("merchant-not-served");
   if (
     ![
       binding?.tenantReference,
@@ -549,6 +632,12 @@ export async function renewInternalTestStore(
   try {
     if ((await client.query("SELECT current_database() db")).rows[0]?.db !== database)
       unavailable("database-mismatch");
+    if (merchant)
+      await proveInternalTestMerchant(client, {
+        readRole,
+        brandReference: brand,
+        storeReference: store,
+      });
     await client.query(`SET LOCAL ROLE "${setupRole}"`);
     await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
       brand,
@@ -574,6 +663,7 @@ export async function renewInternalTestStore(
         evidence,
         nextReference,
         testStoreOpenedInProduct: true,
+        ...(merchant ? { testMerchantOpened: true } : {}),
       },
       (transaction, record) => appendAuditRecordInTransaction(transaction, record),
     );
@@ -594,6 +684,7 @@ export async function renewInternalTestStore(
     return Object.freeze({
       status: renewed.renewed.length > 0 ? (dryRun ? "DryRun" : "Renewed") : "AlreadyRenewed",
       storeReference: store,
+      testMerchant: merchant,
       gates: renewed.renewed.length,
     });
   } catch (error) {

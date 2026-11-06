@@ -74,6 +74,15 @@ export interface InternalTestTaxEvidenceRenewalInput {
     readonly operatorAccount: string;
   };
   readonly nextReference: () => string;
+  /**
+   * WP-2423 DEC-MULTI-MERCHANT-ONE-INSTALLATION (InternalTest only, v15 2026-11-06): the Store
+   * belongs to a TEST merchant opened from nothing by the InternalTest tooling, which the caller
+   * confirmed (its Brand and Store named "… not production", its merchant-opening audit records,
+   * the Store served by the installation): its Brand is an ordinary reference. The configuration
+   * is still checked as for any Store (synthetic identities, `DEMO_…`, fixture suite digest, only
+   * `SYNTHETIC_…` components and receipt lines, no authoring or candidate provenance).
+   */
+  readonly testMerchantOpened?: true;
 }
 export type InternalTestTaxEvidenceRenewal =
   | {
@@ -108,7 +117,12 @@ export async function renewInternalTestTaxEvidence(
 ): Promise<InternalTestTaxEvidenceRenewal> {
   const next = input.next;
   if (
-    ![input.brandReference, input.configurationReference].every((value) => SYNTHETIC.test(value)) ||
+    !(
+      SYNTHETIC.test(input.brandReference) ||
+      (input.testMerchantOpened === true && UUID_V7.test(input.brandReference))
+    ) ||
+    (input.testMerchantOpened !== undefined && input.testMerchantOpened !== true) ||
+    !SYNTHETIC.test(input.configurationReference) ||
     // A TEST Store opened in the product has its own (not synthetic) reference; its configuration
     // stays synthetic (internal-test-store-tax-configuration-store).
     !UUID_V7.test(input.storeReference) ||

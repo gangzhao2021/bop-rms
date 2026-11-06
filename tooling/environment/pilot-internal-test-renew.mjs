@@ -190,7 +190,7 @@ function requireScope(scope, binding) {
 const UUID_V7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const TEST_OWNER_SELECTOR = /^owner-([a-z0-9][a-z0-9-]{0,62})$/u;
 const TEST_SUPPORT_SELECTOR = /^support-[1-9][0-9]{0,2}$/u;
-function rosterActorKind(actor) {
+export function rosterActorKind(actor) {
   const reference = actor?.actorReference;
   if (typeof reference === "string" && SYNTHETIC_REFERENCE.test(reference)) return "Demo";
   if (

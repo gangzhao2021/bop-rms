@@ -2453,7 +2453,21 @@ reference> --name demo-2`. It reads the Store's own default stock site as the se
 --migration-env .local/migrate-v14/migrate-v15.env --until <the same instant> --reason "…"
 --approved-by "Owner" --approval "<the approval wording>"` (dry run first with `--dry-run`).
    It moves the Store's synthetic launch gate and its own tax evidence (a new synthetic tax
-   version, both audited) and its files' common expiry; the Store's staff and roles have no end.
+   version, both audited) and its files' common expiry: the task queue, the entries of its staff
+   file (`internal-test-merchant.json`) that end then (any later end is kept and listed), and
+   the profile last; the Store's staff and roles in the database have no end. The files are
+   checked first: the Store must be served by `stores.json`, and each staff entry must be DEMO
+   staff on the installation's staff file or, at a TEST merchant's Store, its single Owner
+   `owner-<name>` (also on the installation's staff file); anyone else refuses
+   (`identity-not-synthetic`). The dry run prints the gate and tax status plus `rosterChanges`
+   and `retainedRosterEntries`.
+   **A TEST merchant's Store** (opened with `merchant`, its own Tenant and Brand) renews the same
+   way since v15 2026-11-06. The database half first proves, as the services' role, that its
+   Brand and Store are both named "… not production", that the Store was opened from nothing,
+   and that the merchant opening's own audit records (`BRAND_CREATED`, `STORE_OPENED`, reason
+   `MERCHANT_OPENED`) name both under one operation. Otherwise it refuses with
+   `merchant-not-labelled-test` or `merchant-not-opened-by-test-tooling`, and a Store directory
+   that `stores.json` does not serve refuses with `store-not-served`.
 
 ## Platform support staff
 
@@ -2677,8 +2691,9 @@ version until they restart: run the renewal inside a planned update window.
    and appends one line to `internal-test-renewal-log.jsonl`. If it stops part way, run the same
    command again; the database part reports `AlreadyRenewed` and the remaining files are
    finished.
-5. **Every Store in `stores.json`, with the same `--until`.** This command does not touch
-   `stores/`, so skipping this clears the root's alert and leaves each Store to stop at the old end:
+5. **Every Store in `stores.json`, with the same `--until`, in the order listed (DEMO-Brand Stores
+   and TEST merchants alike).** This command does not touch `stores/`, so skipping this clears the
+   root's alert and leaves each Store, and its staff sign-in, to stop at the old end:
    `pilot-internal-test-store-open.mjs renew /app/.local/pilot-v15/stores/<name> …`
    ([step 8 of opening a TEST Store](#opening-a-test-second-store-on-the-internal-test-installation)).
    A Pilot installation: `pilot-installation-issue prepare-renewal` → `sign` → `apply` with that
