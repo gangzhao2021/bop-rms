@@ -448,6 +448,7 @@ export function composeCustomerDiningSession(
       ordered.total += charged.reduce((sum, item) => sum + item.lineTotal.amountMinor, 0n);
     }
     const outcome = order.paymentOutcomes.get(reference);
+    const kitchenPending = order.kitchenPending?.has(reference) === true;
     const deadline = order.paymentDeadlines.get(reference) ?? null;
     let status: DiningRoundStatus;
     let payment: DiningRoundPayment;
@@ -517,7 +518,7 @@ export function composeCustomerDiningSession(
       else if (active.some((item) => item.phase === "InProgress" || item.phase === "Ready"))
         status = "Preparing";
       else if (active.some((item) => item.phase === "Accepted"))
-        status = order.kitchenPending?.has(reference) === true ? "Received" : "Queued";
+        status = kitchenPending ? "Received" : "Queued";
       else status = "Received";
       // WP-2423 Q26: a dish being made again is neither served nor ready yet.
       if (active.some((item) => item.beingRemade))

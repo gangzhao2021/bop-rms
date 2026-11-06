@@ -751,6 +751,8 @@ const kitchenView = {
       mergedFromTableLabel: null,
       acceptBy: at(40),
       notSent: { reason: "KitchenScreenOff", itemCount: 2 },
+      // WP-2423 M04: sent only when so; the type wants all.
+      acceptedNotInKitchen: true as const,
     },
     {
       orderNumber: "T7-13",
@@ -760,6 +762,7 @@ const kitchenView = {
       mergedFromTableLabel: null,
       acceptBy: null,
       notSent: { reason: "HasAlcohol", itemCount: 1 },
+      acceptedNotInKitchen: true as const,
     },
   ],
   paidOrderWatch: { ...paidOrderWatch, canAcceptOrders: false },
