@@ -1,5 +1,6 @@
 import { t } from "./i18n/i18n.js";
 import { orderMoney } from "./order-money.js";
+import { paidRoundUrgentMinutes } from "./paid-round-wait.js";
 import { isPaymentUnconfirmed } from "./UnpaidRoundCancelAction.js";
 import { longOpenSessionMinutes, type StaffDiningTable } from "./dining-session-client.js";
 import type { TableOrderFacts } from "./table-order-facts.js";
@@ -174,7 +175,7 @@ export function tableNeed(
     return {
       tone: "action",
       rank: 1,
-      urgent: waited >= 10,
+      urgent: waited >= paidRoundUrgentMinutes,
       since: oldestPaid.paidAt,
       words: t("Paid round to accept"),
       detail: t("paid {minutes} min ago", { minutes: String(waited) }),

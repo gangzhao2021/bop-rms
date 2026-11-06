@@ -2,12 +2,13 @@ import { countOf, t } from "./i18n/i18n.js";
 /**
  * WP-2423 (v15 2026-10-16, decision DEC-DINE-IN-PAID-ROUND-WAIT): a paid dine-in round reaches the
  * kitchen only when staff accept it, and it is never cancelled or refunded automatically — the
- * guest has paid and is at the table, so only staff decide (accept it, or accept it and have a
- * manager cancel it for a full refund). Orders, Tables and Home therefore say how long a paid
- * round has waited: a warning from 5 minutes, urgent from 10.
+ * guest has paid and is at the table, so only staff decide (accept it, or use "Can't make it ·
+ * refund" for a full refund). Orders, Tables and Home therefore say how long a paid round has
+ * waited: a warning from 3 minutes, urgent from 5 (Owner default 12, 2026-11-06: no automatic
+ * refund for tables; alert staff at 5 minutes).
  */
-export const paidRoundWarningMinutes = 5;
-export const paidRoundUrgentMinutes = 10;
+export const paidRoundWarningMinutes = 3;
+export const paidRoundUrgentMinutes = 5;
 
 export type PaidRoundWaitTier = "ok" | "warning" | "urgent";
 
@@ -31,7 +32,7 @@ export function paidRoundWaitText(paidAt: string, now: number): string {
       minutes: minutes,
     });
   return t(
-    "Paid {minutes} min ago and still not accepted · accept it now. It is never cancelled or refunded automatically; if it can't be made, accept it and a manager can cancel it for a full refund",
+    "Accept now · paid {minutes} min ago. It is never refunded automatically. If it can't be made, use Can't make it · refund: the guest gets a full refund.",
     { minutes: minutes },
   );
 }

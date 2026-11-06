@@ -157,7 +157,38 @@ const chargeTakenOff = (round: DiningRound) =>
   round.status === "StoreCancelled" &&
   round.payment === "NotCharged";
 
+/** M91: one dish's progress in the guest's words. */
+export function dishProgressText(item: DiningRound["items"][number]): string {
+  if (item.progress === "Served")
+    return item.quantity > 1
+      ? t("Served {value1} of {quantity}", {
+          value1: String(item.servedQuantity),
+          quantity: String(item.quantity),
+        })
+      : t("Served");
+  if (item.servedQuantity > 0)
+    return t("Served {value1} of {quantity}", {
+      value1: String(item.servedQuantity),
+      quantity: String(item.quantity),
+    });
+  if (item.progress === "Ready") return t("Ready");
+  if (item.progress === "Making") return t("Being made");
+  return t("Waiting");
+}
+
+/** M41 (Owner default 12): after this long unaccepted, the guest is told to let staff know. */
+export const paidRoundStillWaitingMinutes = 5;
+
 function RoundNote({ round }: { readonly round: DiningRound }) {
+  if (
+    round.awaitingStore === true &&
+    Date.now() - Date.parse(round.submittedAt) >= paidRoundStillWaitingMinutes * 60_000
+  )
+    return (
+      <p className="order-status__warning" role="status">
+        {t("Still waiting? Let a staff member know.")}
+      </p>
+    );
   if (round.status === "PaymentFailed")
     return (
       <p className="order-status__warning" role="status">
@@ -376,6 +407,9 @@ function RoundCard({
                     })
                   : t("Being remade · we'll bring it to your table shortly")}
               </span>
+            ) : item.progress !== undefined && !charge ? (
+              // M91: every round says where each dish is, not only a paid one.
+              <span className="order-status__item-progress">{dishProgressText(item)}</span>
             ) : round.payment === "Paid" && !charge ? (
               <span>
                 {t("Served")} {item.servedQuantity} {t("of")} {item.quantity}
@@ -501,7 +535,7 @@ function TableSummary({ view }: { readonly view: DiningSessionView }) {
           ) : null}
           {summary.taxRounding !== undefined ? (
             <div>
-              <dt>{t("Tax rounding")}</dt>
+              <dt>{t("Rounding (tax worked out on the whole bill)")}</dt>
               <dd>{money(summary.taxRounding)}</dd>
             </div>
           ) : null}

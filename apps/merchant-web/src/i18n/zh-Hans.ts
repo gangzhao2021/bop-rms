@@ -537,6 +537,36 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "改动只对之后新开的桌生效，已经开着的桌不变。",
   Accept: "接受",
   "Accept ": "接单 ",
+  "Recorded at {value}. Refresh phones to see which phone sends the cart.":
+    "已于 {value} 记录。刷新手机即可看到现在由哪部手机发送购物车。",
+  "Who can send the table's cart": "谁可以发送本桌购物车",
+  "One phone sends the table's shared cart to the kitchen. You can let another phone send it.":
+    "本桌共享购物车由一部手机发送到后厨。可以改由另一部手机发送。",
+  "Refresh phones": "刷新手机",
+  "Phone {value} · Joined {value2}{value3}": "手机 {value} · {value2} 加入{value3}",
+  " · Sends the cart": " · 发送购物车",
+  "Phone that sends the cart": "发送购物车的手机",
+  "Choose a phone": "选择手机",
+  "Phone {value} · Joined {value2}": "手机 {value} · {value2} 加入",
+  "I checked with the guest holding this phone": "我已和拿这部手机的客人确认",
+  "Let this phone send the cart": "改由这部手机发送购物车",
+  "No tables yet.": "还没有桌台。",
+  "Add your first table": "添加第一张桌台",
+  "Ask the owner to add tables.": "请让店主添加桌台。",
+  "No waste recorded yet.": "还没有报损记录。",
+  "Nothing is waiting for review.": "没有等待复核的记录。",
+  "The bill is being paid, so {item} can't change now.": "正在结账，{item}现在不能改。",
+  "{item} is already served for {count} guests. To charge fewer, comp the extra.":
+    "已为 {count} 位上了{item}。要少收，请把多出的免单。",
+  "Someone else changed the guest count. Check it again.": "别人刚改了人数，请再看一下。",
+  "Seated, nothing ordered": "已入座，还没点菜",
+  "Cancelled, nothing to collect": "已取消，无需收款",
+  "Round waiting for payment": "有一轮在等付款",
+  "Phone payment stopped. Take the payment here.": "已停止手机付款。请在这里收款。",
+  "Already served on another screen, or the dish changed. Updated, check it again.":
+    "已在另一台屏上上菜，或这道菜有变化。已刷新，请再看一下。",
+  "Accept now · paid {minutes} min ago. It is never refunded automatically. If it can't be made, use Can't make it · refund: the guest gets a full refund.":
+    "请立即接单 · {minutes} 分钟前已付款。不会自动退款。如果做不了，请用“做不了 · 退款”，客人会全额退款。",
   "Accept a Kitchen work item": "接受后厨工作项",
   "Accept a submitted order batch": "接受已提交的订单批次",
   "Accept or refund it by {decideBy}; otherwise it is refunded automatically.":
@@ -2814,8 +2844,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "门店离线时{value}已在线付款，没有自动退款。{value2}如果已按纸质小票做好，请先接单，再照常标记做好并交付。",
   "Paid online minus refunded": "在线付款减去已退款",
   "Paid without a fulfillable order": "已付款但订单无法完成",
-  "Paid {minutes} min ago and still not accepted · accept it now. It is never cancelled or refunded automatically; if it can't be made, accept it and a manager can cancel it for a full refund":
-    "{minutes} 分钟前已付款，仍未接单 · 请立即接单。它不会被自动取消或退款；如果无法制作，请先接单，再由店长取消并全额退款",
   "Paid {minutes} min ago · the guest is waiting. Accept it to send it to the kitchen":
     "{minutes} 分钟前已付款 · 顾客在等待。接单后会发送到后厨",
   "Paid · the kitchen gets it once you accept it": "已付款 · 接单后后厨才会收到",

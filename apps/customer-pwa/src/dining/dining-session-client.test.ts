@@ -331,3 +331,21 @@ describe("DEC-DINING-GUEST-TABLE-START: the table view", () => {
       expect(() => parseDiningSessionView(session({ movedFromTableLabel: bad }))).toThrow();
   });
 });
+
+describe("M91/M41: dish progress and a paid round the store has not accepted", () => {
+  it("decodes each dish's progress and the waiting round, and rejects anything else", () => {
+    const view = payload();
+    Object.assign(firstRound(view).items[0] as object, { progress: "Making" });
+    Object.assign(firstRound(view), { awaitingStore: true });
+    const round = parseDiningSessionView(view).rounds[0];
+    expect(round?.items[0]?.progress).toBe("Making");
+    expect(round?.awaitingStore).toBe(true);
+    expect(parseDiningSessionView(payload()).rounds[0]).not.toHaveProperty("awaitingStore");
+    const wrongProgress = payload();
+    Object.assign(firstRound(wrongProgress).items[0] as object, { progress: "Cooking" });
+    expect(() => parseDiningSessionView(wrongProgress)).toThrow(DiningSessionClientError);
+    const wrongWait = payload();
+    Object.assign(firstRound(wrongWait), { awaitingStore: false });
+    expect(() => parseDiningSessionView(wrongWait)).toThrow(DiningSessionClientError);
+  });
+});

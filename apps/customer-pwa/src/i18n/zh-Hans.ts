@@ -332,7 +332,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "You can order once staff seat you. Ask a staff member, then scan again.":
     "入座后才能点单。请让店员带位，然后再扫一次码。",
   Discounted: "已打折",
-  "Tax rounding": "税额取整",
+  "Rounding (tax worked out on the whole bill)": "取整（税额按整单计算）",
   "On the house": "店家赠送",
   "Part {number} paid by": "第 {number} 份付款方式",
   "We couldn’t load the receipt. Check your connection and try again.":
@@ -693,6 +693,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Selected option quantities must be positive whole numbers.": "所选选项的数量必须是正整数。",
   "Sent to the kitchen": "已送到厨房",
   Served: "已上",
+  "Still waiting? Let a staff member know.": "还在等？请告诉店员。",
+  "The payment didn’t go through and nothing was charged. Try again, use another card, or ask a staff member.":
+    "付款没有成功，没有扣款。可以重试、换一张卡，或请店员帮忙。",
+  Waiting: "等待中",
   "Served {value1} of {quantity}": "已上 {value1}/{quantity}",
   "Serving your order": "正在为你上菜",
   "Session expired": "会话已过期",

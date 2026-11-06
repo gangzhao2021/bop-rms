@@ -140,7 +140,7 @@ describe("WP-2423 P2 store overview", () => {
         rounds: summary.awaitingRounds,
         urgentRounds: summary.urgentRounds,
       }),
-    ).toBe("2 rounds awaiting acceptance in 1 order (1 paid 10+ min ago)");
+    ).toBe("2 rounds awaiting acceptance in 1 order (1 paid 5+ min ago)");
     expect(awaitingAcceptanceText({ orders: 2, rounds: 2, urgentRounds: 0 })).toBe(
       "2 awaiting acceptance",
     );
@@ -557,21 +557,22 @@ describe("v15 finding: the store system card follows the server's answer, not th
     expect(html).toContain("Store system");
     expect(html).toContain("Checking the store system");
   });
-  it("words a paid round's wait for staff: plain, then warning at 5 min, urgent at 10", () => {
+  it("words a paid round's wait for staff: plain, then warning at 3 min, urgent at 5 (Owner default 12)", () => {
     const paidAt = "2026-10-16T14:50:00.000Z";
     const at = (minute: number) => Date.parse(paidAt) + minute * 60_000;
     expect(paidRoundWaitText(paidAt, at(2))).toBe("Paid · the kitchen gets it once you accept it");
-    expect(paidRoundWaitText(paidAt, at(6))).toBe(
-      "Paid 6 min ago · the guest is waiting. Accept it to send it to the kitchen",
+    expect(paidRoundWaitText(paidAt, at(4))).toBe(
+      "Paid 4 min ago · the guest is waiting. Accept it to send it to the kitchen",
     );
-    expect(paidRoundWaitText(paidAt, at(12))).toMatch(
-      /^Paid 12 min ago and still not accepted · accept it now\. It is never cancelled or refunded automatically/u,
+    // M41: the urgent text names the control staff really have, never "a manager can cancel it".
+    expect(paidRoundWaitText(paidAt, at(5))).toBe(
+      "Accept now · paid 5 min ago. It is never refunded automatically. If it can't be made, use Can't make it · refund: the guest gets a full refund.",
     );
     expect(tableRoundWaitText(2, paidAt, at(0))).toBe(
       "Round 2 paid just now · accept it on the Orders page to send it to the kitchen",
     );
-    expect(tableRoundWaitText(2, paidAt, at(11))).toBe(
-      "Round 2 paid 11 min ago and still not accepted · accept it on the Orders page now",
+    expect(tableRoundWaitText(2, paidAt, at(6))).toBe(
+      "Round 2 paid 6 min ago and still not accepted · accept it on the Orders page now",
     );
   });
 });

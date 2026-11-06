@@ -275,6 +275,11 @@ export interface CustomerDiningSessionView {
     readonly tea?: true;
     /** WP-2423 item 8b: present (true) when every item of the round is a charge, not a dish. */
     readonly charge?: true;
+    /**
+     * M41: present (true) for a paid round the store has not accepted yet; the page tells the
+     * guest to let staff know when it waits (no automatic refund, Owner default 12).
+     */
+    readonly awaitingStore?: true;
     readonly items: readonly {
       readonly displayName: string;
       readonly quantity: number;
@@ -285,6 +290,11 @@ export interface CustomerDiningSessionView {
       readonly priceBeforeTax?: CustomerMoney;
       /** WP-2423 Q26: present (true) only while the kitchen is making this item again. */
       readonly beingRemade?: true;
+      /**
+       * M91: where this dish is — waiting for the kitchen, being made, ready or served (all of it).
+       * Absent for a cancelled dish and for a charge (tea, corkage), which the kitchen never makes.
+       */
+      readonly progress?: "Waiting" | "Making" | "Ready" | "Served";
       /** WP-2423 item 8 ③ (decision 13): what "Order again" adds, when it can be read. */
       readonly orderAgain?: CustomerDiningOrderAgain;
     }[];
@@ -430,15 +440,33 @@ export function composeCustomerDiningSession(
         delivery.phase === "Cancelled" ||
         delivery.phase === "Rejected" ||
         itemCancellation(item.orderItemReference) !== undefined;
+      const beingRemade = !cancelled && order.remakes?.has(item.orderItemReference) === true;
+      const charge =
+        order.chargeLines?.has(item.orderItemReference) === true ||
+        order.teaLines?.has(item.orderItemReference) === true;
+      const progress =
+        cancelled || charge
+          ? undefined
+          : delivery.deliveredQuantity >= item.quantity && !beingRemade
+            ? ("Served" as const)
+            : delivery.phase === "Ready" && !beingRemade
+              ? ("Ready" as const)
+              : delivery.phase === "InProgress" ||
+                  delivery.phase === "Ready" ||
+                  delivery.phase === "Fulfilled" ||
+                  beingRemade
+                ? ("Making" as const)
+                : ("Waiting" as const);
       return Object.freeze({
         displayName: item.displayName,
         quantity: item.quantity,
         servedQuantity: cancelled ? 0 : delivery.deliveredQuantity,
+        progress,
         cancelled,
         lineTotal: money(item.lineTotal.amountMinor),
         price: prices?.get(item.orderItemReference),
         phase: delivery.phase,
-        beingRemade: !cancelled && order.remakes?.has(item.orderItemReference) === true,
+        beingRemade,
         // WP-2423 item 8b: a line is offered again only if it is a dish a guest can order.
         orderAgain:
           order.chargeLines?.has(item.orderItemReference) === true
@@ -560,6 +588,11 @@ export function composeCustomerDiningSession(
       ...(batch.items.every((item) => order.chargeLines?.has(item.orderItemReference) === true)
         ? { charge: true as const }
         : {}),
+      ...(payment === "Paid" &&
+      status === "Received" &&
+      items.every((item) => item.cancelled || item.phase === "Submitted")
+        ? { awaitingStore: true as const }
+        : {}),
       items: Object.freeze(
         items.map((item) =>
           Object.freeze({
@@ -572,6 +605,7 @@ export function composeCustomerDiningSession(
               ? {}
               : { priceBeforeTax: money(item.price.subtotal.amountMinor) }),
             ...(item.beingRemade ? { beingRemade: true as const } : {}),
+            ...(item.progress === undefined ? {} : { progress: item.progress }),
             ...(item.orderAgain === undefined ? {} : { orderAgain: item.orderAgain }),
           }),
         ),

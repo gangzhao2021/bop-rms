@@ -832,3 +832,61 @@ describe("WP-2423 D5 item prices before tax at the table", () => {
     ).not.toHaveProperty("ordered");
   });
 });
+
+describe("M91/M41: each dish's progress and a paid round nobody accepted", () => {
+  const view = (entries: [number, string, number][], paid = true) =>
+    composeCustomerDiningSession(
+      facts({
+        batches: [
+          {
+            orderBatchReference: id(30),
+            submittedAt: at,
+            items: [
+              item(31, "Ramen", 2, 3000n),
+              item(32, "Tea", 1, 300n),
+              item(33, "Rice", 1, 200n),
+            ],
+          },
+        ],
+        authorship: new Map([[id(30), true]]),
+        delivery: new Map(
+          entries.map(([n, phase, delivered]) => [
+            id(n),
+            { phase: phase as never, deliveredQuantity: delivered },
+          ]),
+        ),
+        paymentOutcomes: paid ? new Map([[id(30), "Succeeded"]]) : new Map(),
+        paymentDeadlines: new Map(),
+      }),
+    ).rounds[0];
+  it("says per dish whether it is waiting, being made, ready or served", () => {
+    const round = view([
+      [31, "Ready", 1],
+      [32, "InProgress", 0],
+      [33, "Fulfilled", 1],
+    ]);
+    expect(round?.items.map((entry) => entry.progress)).toEqual(["Ready", "Making", "Served"]);
+    expect(
+      view([
+        [31, "Accepted", 0],
+        [32, "Submitted", 0],
+        [33, "Cancelled", 0],
+      ])?.items.map((entry) => entry.progress),
+    ).toEqual(["Waiting", "Waiting", undefined]);
+  });
+  it("marks a paid round the store has not accepted, and only that one", () => {
+    const waiting = view([
+      [31, "Submitted", 0],
+      [32, "Submitted", 0],
+      [33, "Submitted", 0],
+    ]);
+    expect(waiting?.status).toBe("Received");
+    expect(waiting?.awaitingStore).toBe(true);
+    const accepted = view([
+      [31, "Accepted", 0],
+      [32, "Submitted", 0],
+      [33, "Submitted", 0],
+    ]);
+    expect(accepted?.awaitingStore).toBeUndefined();
+  });
+});

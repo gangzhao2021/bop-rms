@@ -55,6 +55,8 @@ export interface DiningRound {
   readonly tea?: true;
   /** WP-2423 item 8b: every item of the round is a charge, not a dish (absent: not). */
   readonly charge?: true;
+  /** M41: a paid round the store has not accepted yet (absent: not). */
+  readonly awaitingStore?: true;
   readonly items: readonly {
     readonly displayName: string;
     readonly quantity: number;
@@ -65,6 +67,8 @@ export interface DiningRound {
     readonly priceBeforeTax?: DiningMoney;
     /** WP-2423 Q26: the kitchen is making this item again. */
     readonly beingRemade?: boolean;
+    /** M91: where the dish is (absent for a cancelled dish or a charge). */
+    readonly progress?: "Waiting" | "Making" | "Ready" | "Served";
     /**
      * WP-2423 item 8 ③ (Owner decision 13): the published menu item and options "Order again"
      * adds to this guest's own cart; absent when it can't be read.
@@ -301,8 +305,11 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
       value !== null && typeof value === "object" && Object.hasOwn(value, "waitingReason");
     const tea = value !== null && typeof value === "object" && Object.hasOwn(value, "tea");
     const charge = value !== null && typeof value === "object" && Object.hasOwn(value, "charge");
+    const awaitingStore =
+      value !== null && typeof value === "object" && Object.hasOwn(value, "awaitingStore");
     const round = record(value, [
       ...(priced ? ["subtotal", "tax"] : []),
+      ...(awaitingStore ? ["awaitingStore"] : []),
       ...(waiting ? ["waitingReason"] : []),
       ...(tea ? ["tea"] : []),
       ...(charge ? ["charge"] : []),
@@ -326,6 +333,8 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
           value !== null && typeof value === "object" && Object.hasOwn(value, "beingRemade");
         const again =
           value !== null && typeof value === "object" && Object.hasOwn(value, "orderAgain");
+        const progressed =
+          value !== null && typeof value === "object" && Object.hasOwn(value, "progress");
         const item = record(value, [
           "displayName",
           "quantity",
@@ -335,6 +344,7 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
           ...(priced ? ["priceBeforeTax"] : []),
           ...(remade ? ["beingRemade"] : []),
           ...(again ? ["orderAgain"] : []),
+          ...(progressed ? ["progress"] : []),
         ]);
         if (remade && item.beingRemade !== true) return invalid();
         const quantity = count(item.quantity, 1);
@@ -357,6 +367,11 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
           ...(priceBeforeTax === null ? {} : { priceBeforeTax }),
           ...(remade ? { beingRemade: true } : {}),
           ...(again ? { orderAgain: orderAgain(item.orderAgain) } : {}),
+          ...(progressed
+            ? {
+                progress: oneOf(item.progress, ["Waiting", "Making", "Ready", "Served"] as const),
+              }
+            : {}),
         });
       }),
     );
@@ -398,6 +413,9 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
         : {}),
       ...(tea ? { tea: round.tea === true ? (true as const) : invalid() } : {}),
       ...(charge ? { charge: round.charge === true ? (true as const) : invalid() } : {}),
+      ...(awaitingStore
+        ? { awaitingStore: round.awaitingStore === true ? (true as const) : invalid() }
+        : {}),
       items,
       ...(breakdown === null ? {} : breakdown),
       itemsTotal,

@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 
 /**
  * WP-2423 (DEC-DINE-IN-PAID-ROUND-WAIT): a paid dine-in round waits for staff to accept it and is
- * never refunded by a timer, so the Tables board says how long it has waited (urgent from 10
+ * never refunded by a timer, so the Tables board says how long it has waited (urgent from 5
  * minutes). Synthetic HTTP fixtures exercise the built page; the server read runs in the database
  * acceptance (dining-round-acceptance-order).
  */
@@ -65,7 +65,7 @@ test("@production WP-2423: Tables says how long a paid round has waited for acce
         canOperateTables: false,
         canCancelUnpaidRounds: false,
         items: [
-          table(1, "DEMO-01", [{ roundNumber: 1, paidAt: minutesAgo(6) }]),
+          table(1, "DEMO-01", [{ roundNumber: 1, paidAt: minutesAgo(3) }]),
           table(2, "DEMO-02", [
             { roundNumber: 2, paidAt: minutesAgo(12) },
             { roundNumber: 3, paidAt: minutesAgo(2) },
@@ -76,13 +76,13 @@ test("@production WP-2423: Tables says how long a paid round has waited for acce
     }),
   );
   await page.goto("/operations/dining");
-  // WP-2423 item 8 ①: the list row says how long the round has waited (red from 10 minutes);
+  // WP-2423 item 8 ①: the list row says how long the round has waited (red from 5 minutes, Owner default 12);
   // the table's panel says what to do.
   const tile = (label: string) =>
     page
       .locator(".table-row")
       .filter({ has: page.getByRole("button", { name: `Select ${label}`, exact: true }) });
-  await expect(tile("DEMO-01")).toContainText(/Paid round to accept\s*paid [56] min ago/u);
+  await expect(tile("DEMO-01")).toContainText(/Paid round to accept\s*paid [34] min ago/u);
   await expect(tile("DEMO-01")).toHaveAttribute("data-urgent", "false");
   await expect(tile("DEMO-02")).toContainText(/paid 1[23] min ago/u);
   await expect(tile("DEMO-02")).toHaveAttribute("data-urgent", "true");
