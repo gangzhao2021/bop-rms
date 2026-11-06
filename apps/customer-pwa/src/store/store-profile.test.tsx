@@ -1,5 +1,5 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createStoreProfileClient,
   STORE_PROFILE_SHARE_MS,
@@ -15,6 +15,8 @@ import {
   todayHoursText,
 } from "./StoreIdentity.js";
 import { formatStoreLocalTime } from "../journey/format.js";
+
+afterEach(() => vi.restoreAllMocks());
 
 const body = () => ({
   schemaVersion: 1,
@@ -113,6 +115,7 @@ describe("WP-2423 store status wording", () => {
     localDate: "2026-12-22",
     todayKind: null,
     lastOrdersAt: null,
+    pausedUntil: null,
     ordersStopped: false,
     nextOpening: null,
     upcoming: [],
@@ -194,6 +197,8 @@ describe("WP-2423 item 8 ③ follow-up: after last orders", () => {
     return Object.assign(async () => profile, { last: () => profile });
   };
   it("tells the guest the kitchen stopped taking orders and to ask staff", () => {
+    // 12:00 in Toronto: not within the 30-minute countdown before 17:30.
+    vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-12-22T17:00:00.000Z"));
     const stopped = renderToStaticMarkup(<OrdersStoppedNotice load={loaderOf(true)} />);
     expect(stopped).toContain(
       `The kitchen stopped taking orders at ${formatStoreLocalTime("17:30:00")}`,
@@ -246,5 +251,39 @@ describe("M117: after midnight in last night's overnight period", () => {
         },
       }),
     ).toThrow();
+  });
+});
+
+describe("WP-2423 store-service-controls (v15 M30/M34) the guest's own service", () => {
+  const loaderOf = (hours: Record<string, unknown>) => {
+    const parsed = parseStoreProfile(body());
+    const profile = {
+      ...parsed,
+      hours: parsed.hours === null ? null : { ...parsed.hours, ...hours },
+    };
+    return Object.assign(async () => profile, { last: () => profile });
+  };
+  it("a pickup pause says until when and offers the counter, never 'ask a staff member'", () => {
+    const pickup = renderToStaticMarkup(
+      <OrdersStoppedNotice
+        load={loaderOf({ status: "Paused", pausedUntil: "19:45:00" })}
+        channel="Pickup"
+      />,
+    );
+    expect(pickup).toContain(
+      `Online pickup ordering is paused until ${formatStoreLocalTime("19:45:00")}.`,
+    );
+    expect(pickup).toContain("You can order at the counter");
+    expect(pickup).not.toContain("staff");
+    const table = renderToStaticMarkup(
+      <OrdersStoppedNotice load={loaderOf({ status: "Paused", pausedUntil: "19:45:00" })} />,
+    );
+    expect(table).toContain("A staff member can take your order.");
+  });
+  it("counts down the last 30 minutes before last orders", () => {
+    vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-12-22T22:10:00.000Z")); // 17:10
+    expect(renderToStaticMarkup(<OrdersStoppedNotice load={loaderOf({})} />)).toContain(
+      `Last orders at ${formatStoreLocalTime("17:30:00")} — 20 min left.`,
+    );
   });
 });

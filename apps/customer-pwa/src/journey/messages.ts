@@ -769,6 +769,10 @@ export const checkoutText = Object.freeze({
   get changeYourCart() {
     return t("Change your cart");
   },
+  /** WP-2423 store-service-controls (v15 M30): said after why a new order was not taken. */
+  get notCharged() {
+    return t("This order hasn’t been charged.");
+  },
   get storeClosed() {
     return t(
       "The store isn’t taking new orders right now — it’s closed, or the kitchen has stopped taking orders for today — so this order hasn’t been charged. To add something, ask a staff member.",

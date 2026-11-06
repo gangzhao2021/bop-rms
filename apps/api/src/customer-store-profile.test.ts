@@ -32,6 +32,7 @@ describe("WP-2423 today's hours for the store identity", () => {
       localDate: null,
       todayKind: null,
       lastOrdersAt: null,
+      pausedUntil: null,
       ordersStopped: false,
       nextOpening: null,
       upcoming: [],
@@ -69,6 +70,27 @@ describe("WP-2423 today's hours for the store identity", () => {
         tonight: { startLocalTime: "11:00:00", endLocalTime: "02:00:00" },
       });
     }
+  });
+  it("WP-2423 store-service-controls (v15 M30): a pickup pause is a pause with its end, not closed", () => {
+    const input = { servesChannel: false, localTime: "18:30:00", todayHours: day };
+    expect(
+      describeCustomerStoreHours({ ...input, state: "Open", channelPausedUntil: "19:45:00" }),
+    ).toMatchObject({ status: "Paused", pausedUntil: "19:45:00", closesAt: null });
+    // The dine-in guest at the same Store is not paused.
+    expect(
+      describeCustomerStoreHours({ ...input, servesChannel: true, state: "Open" }),
+    ).toMatchObject({ status: "Open", pausedUntil: null });
+    // Outside hours a pause says nothing more than closed.
+    expect(
+      describeCustomerStoreHours({ ...input, state: "Closed", channelPausedUntil: "19:45:00" }),
+    ).toMatchObject({ status: "Closed", pausedUntil: null });
+    expect(
+      describeCustomerStoreHours({
+        ...input,
+        state: "TemporarilyClosed",
+        channelPausedUntil: null,
+      }),
+    ).toMatchObject({ status: "Paused", pausedUntil: null });
   });
   it("WP-2423 item 8 ③ decision 16: last orders only while open, the next opening only while not", () => {
     const upcoming = {
@@ -203,6 +225,7 @@ const view: CustomerStoreProfileView = {
     localDate: "2026-12-22",
     todayKind: null,
     lastOrdersAt: "10:30:00",
+    pausedUntil: null,
     ordersStopped: false,
     nextOpening: null,
     tonight: null,

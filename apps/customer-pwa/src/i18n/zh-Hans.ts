@@ -10,6 +10,17 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   " seconds.": " 秒后重试。",
   " · new on this version": " · 本版本新增",
   "(opens a map in a new tab)": "（在新标签页打开地图）",
+  "Last orders at {time} — {minutes} min left.": "最后点单 {time}，还剩 {minutes} 分钟。",
+  "Online pickup ordering is paused for a short while.": "线上自取暂停一会儿。",
+  "You can order at the counter, or try again in a few minutes.":
+    "可以到柜台点单，或过几分钟再试。",
+  "Online pickup ordering is paused until {time}.": "线上自取暂停至 {time}。",
+  "You can order at the counter, or come back after {time}.": "可以到柜台点单，或 {time} 后再来。",
+  "Ordering from your phone is paused for a short while.": "手机点单暂停一会儿。",
+  "Ordering from your phone is paused until {time}.": "手机点单暂停至 {time}。",
+  "A staff member can take your order.": "店员可以为你点单。",
+  "You can’t place a pickup order from your phone now.": "现在不能用手机下自取单。",
+
   "(opens in a new tab)": "（在新标签页打开）",
   "A refund on this order was updated.": "这笔订单的退款已更新。",
   "A refund was made to your original payment.": "已退款到你原来的付款方式。",

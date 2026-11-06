@@ -51,6 +51,14 @@ import {
 } from "./seen-prices.js";
 import { PriceChangeList } from "../checkout/PriceChangeList.js";
 import { comboLineAllergenText } from "../menu/combo-allergens.js";
+import { storeServiceNoticeText, useStoreService } from "../store/StoreIdentity.js";
+import { takesNewOrders } from "../store/store-service.js";
+import {
+  createStoreProfileClient,
+  type StoreProfileLoader,
+} from "../store/store-profile-client.js";
+
+const browserCartStoreProfile: StoreProfileLoader = createStoreProfileClient();
 import {
   cartIssueMessage,
   cartItemWarningMessage,
@@ -562,6 +570,7 @@ function CartContent({
   round,
   menuSettled,
   onPlace,
+  service = null,
 }: {
   readonly state: CartState;
   readonly controller: CartStateController;
@@ -573,6 +582,12 @@ function CartContent({
   /** Prices have been read, or that read took too long to wait for. */
   readonly menuSettled: boolean;
   readonly onPlace: (cart: CartView, seen: SeenSubtotal | null) => void;
+  /**
+   * WP-2423 store-service-controls (v15 M30/M34): the Store's live answer. Past last orders, while
+   * this guest's service is paused or when closed, no new order or round is offered (a bill or a
+   * payment already started is paid elsewhere and is never held here).
+   */
+  readonly service?: ReturnType<typeof useStoreService> | null;
 }) {
   if (state.status === "loading")
     return (
@@ -653,6 +668,17 @@ function CartContent({
   const terminal = cart.cart.lifecycle.status !== "Active";
   const count = cart.cart.items.reduce((total, item) => total + item.quantity, 0);
   const payLater = timing === "PayLater";
+  const serviceChannel = cart.cart.orderType === "Pickup" ? "Pickup" : "DineIn";
+  const stopped = service !== null && !takesNewOrders(service.phase);
+  const stoppedText =
+    service === null
+      ? null
+      : storeServiceNoticeText(
+          service.profile?.hours ?? null,
+          service.phase,
+          service.minutesLeft,
+          serviceChannel,
+        );
   // WP-2423 item 6: while a round is on its way the cart holds still: a change now would refuse the
   // round, and leaving would hide what it answers. So does a send whose answer got lost: the cart it
   // was about may have just been emptied by it.
@@ -782,6 +808,12 @@ function CartContent({
           payLater={payLater}
         />
       </div>
+      {stoppedText === null ? null : (
+        <p className="cart-next-actions__stopped" role="alert" id="cart-store-stopped">
+          <strong>{stoppedText.headline}</strong>
+          {stoppedText.detail === null ? null : <> {stoppedText.detail}</>}
+        </p>
+      )}
       <section className="cart-next-actions" aria-label={cartText.actionsLabel}>
         {sending ? (
           <Link
@@ -810,6 +842,7 @@ function CartContent({
               type="button"
               disabled={
                 held ||
+                stopped ||
                 unsellableLines ||
                 state.status !== "ready" ||
                 !menuSettled ||
@@ -837,7 +870,18 @@ function CartContent({
             />
             <p className="cart-next-actions__note">{checkoutText.sendToKitchenNote}</p>
           </div>
-        ) : alreadyOrdered !== null ? null : unsellableLines ? (
+        ) : alreadyOrdered !== null ? null : stopped ? (
+          <div className="cart-next-actions__place">
+            <button
+              className="cart-checkout-link"
+              type="button"
+              disabled
+              aria-describedby="cart-store-stopped"
+            >
+              {cartText.checkout}
+            </button>
+          </div>
+        ) : unsellableLines ? (
           <div className="cart-next-actions__place">
             <button
               className="cart-checkout-link"
@@ -910,6 +954,7 @@ export function CartPage({
   menuClient,
   sendRound,
   diningClient,
+  storeProfile,
 }: {
   readonly controller?: CartStateController;
   readonly store?: CustomerStoreContext | undefined;
@@ -921,6 +966,8 @@ export function CartPage({
   readonly sendRound?: SendRoundController | undefined;
   /** How the table pays, when it isn't known yet (tests inject). */
   readonly diningClient?: DiningSessionClient | undefined;
+  /** The Store's live service answer (tests inject; null reads nothing). */
+  readonly storeProfile?: StoreProfileLoader | null | undefined;
 }) {
   const [controller] = useState(
     () => provided ?? createCartStateController({ client: createBrowserCustomerCartClient() }),
@@ -1084,6 +1131,9 @@ export function CartPage({
     )
       round.reset();
   }, [round, roundState, state]);
+  const service = useStoreService(
+    storeProfile === undefined ? browserCartStoreProfile : storeProfile,
+  );
   const resolvedStore: CustomerStoreContext | undefined =
     store ??
     (cart
@@ -1124,6 +1174,7 @@ export function CartPage({
           round={roundState}
           menuSettled={settled || menuWaitOver}
           onPlace={place}
+          service={service}
         />
       </div>
       <div className="sr-only" role="status" aria-live="polite">

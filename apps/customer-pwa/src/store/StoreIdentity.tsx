@@ -8,16 +8,39 @@ import {
   type StoreProfileLoader,
 } from "./store-profile-client.js";
 import { dayKindLabel, intervalsText, nextOpeningText, storeDayName } from "./store-hours-text.js";
+import {
+  nextStoreBoundaryMs,
+  storeServicePhase,
+  storeServiceReadMs,
+  type StoreServicePhase,
+} from "./store-service.js";
 
-/** Reads the guest's Store once per mount; null until known and whenever it can't be read. */
+/**
+ * Reads the guest's Store; null until known and whenever it can't be read. WP-2423
+ * store-service-controls (v15 M34): an open page reads it again every minute and just after each
+ * moment the answer changes (last orders, the end of a pause, closing), so a menu left open across
+ * last orders says so by itself.
+ */
 export function useStoreProfile(load: StoreProfileLoader | null): StoreProfile | null {
+  return useStoreService(load).profile;
+}
+
+export function useStoreService(load: StoreProfileLoader | null): {
+  readonly profile: StoreProfile | null;
+  readonly phase: StoreServicePhase;
+  readonly minutesLeft: number | null;
+} {
   const [profile, setProfile] = useState<StoreProfile | null>(() => load?.last?.() ?? null);
+  const [reads, setReads] = useState(0);
+  const [at, setAt] = useState(() => Date.now());
   useEffect(() => {
     if (load === null) return;
     let active = true;
-    load()
+    load(reads === 0 ? undefined : { fresh: true })
       .then((value) => {
-        if (active) setProfile(value);
+        if (!active) return;
+        setProfile(value);
+        setAt(Date.now());
       })
       .catch(() => {
         if (active) setProfile(null);
@@ -25,8 +48,16 @@ export function useStoreProfile(load: StoreProfileLoader | null): StoreProfile |
     return () => {
       active = false;
     };
-  }, [load]);
-  return profile;
+  }, [load, reads]);
+  useEffect(() => {
+    if (load === null) return;
+    const boundary = nextStoreBoundaryMs(profile, Date.now());
+    const timer = setTimeout(() => setReads((value) => value + 1), boundary ?? storeServiceReadMs);
+    return () => clearTimeout(timer);
+    // `reads` too: a re-read answered from the shared read keeps the same profile object.
+  }, [load, profile, reads]);
+  const { phase, minutesLeft } = storeServicePhase(profile, at);
+  return { profile, phase, minutesLeft };
 }
 
 /**
@@ -40,8 +71,16 @@ export function storeStatusLine(
   readonly label: string;
   readonly detail: string | null;
 } {
+  // WP-2423 store-service-controls (v15 M30): until when, never "ask staff" (a pickup guest has
+  // no staff to ask); the page that refuses an order says what to do for its own service.
   if (hours.status === "Paused")
-    return { label: t("Online ordering paused"), detail: t("Ask staff to order in person") };
+    return {
+      label: t("Online ordering paused"),
+      detail:
+        hours.pausedUntil === null
+          ? null
+          : t("until {value1}", { value1: formatStoreLocalTime(hours.pausedUntil) }),
+    };
   if (hours.status === "Open")
     return {
       label: t("Open now"),
@@ -251,26 +290,89 @@ export function StoreIdentityCard({ load }: { readonly load: StoreProfileLoader 
 /**
  * WP-2423 item 8 ③ follow-up (v15 2026-10-28): after last orders the menu says so above the dishes
  * — guests can't send new orders or rounds now (checkout refuses them), and a staff member can
- * still add something for them. Nothing otherwise.
+ * still add something for them. WP-2423 store-service-controls (v15 M30/M34): read live, it also
+ * counts down the last 30 minutes before last orders and says when a pause of this guest's service
+ * ends — in words for this guest's service (a pickup guest has no staff member to ask).
  */
-export function OrdersStoppedNotice({ load }: { readonly load: StoreProfileLoader | null }) {
-  const profile = useStoreProfile(load);
+export function OrdersStoppedNotice({
+  load,
+  channel = "DineIn",
+}: {
+  readonly load: StoreProfileLoader | null;
+  readonly channel?: "DineIn" | "Pickup";
+}) {
+  const { profile, phase, minutesLeft } = useStoreService(load);
   const hours = profile?.hours ?? null;
-  if (hours === null || !hours.ordersStopped) return null;
+  const text = storeServiceNoticeText(hours, phase, minutesLeft, channel);
+  if (text === null) return null;
   return (
-    <section className="orders-stopped" role="status" aria-label={t("Last orders")}>
+    <section
+      className="orders-stopped"
+      role={phase === "Soon" ? "status" : "alert"}
+      aria-label={t("Last orders")}
+    >
       <p>
-        <strong>
-          {hours.lastOrdersAt === null
-            ? t("The kitchen has stopped taking orders for today.")
-            : endSentence(
-                t("The kitchen stopped taking orders at {time}", {
-                  time: formatStoreLocalTime(hours.lastOrdersAt),
-                }),
-              )}
-        </strong>{" "}
-        {t("You can’t send a new order from your phone now. To add something, ask a staff member.")}
+        <strong>{text.headline}</strong>
+        {text.detail === null ? null : <> {text.detail}</>}
       </p>
     </section>
   );
+}
+
+/** The notice's words for a service phase; null when there is nothing to say. */
+export function storeServiceNoticeText(
+  hours: StoreProfile["hours"] | null,
+  phase: StoreServicePhase,
+  minutesLeft: number | null,
+  channel: "DineIn" | "Pickup",
+): { readonly headline: string; readonly detail: string | null } | null {
+  if (hours === null) return null;
+  if (phase === "Soon" && hours.lastOrdersAt !== null && minutesLeft !== null)
+    return {
+      headline: t("Last orders at {time} — {minutes} min left.", {
+        time: formatStoreLocalTime(hours.lastOrdersAt),
+        minutes: minutesLeft,
+      }),
+      detail: null,
+    };
+  if (phase === "Paused") {
+    const until = hours.pausedUntil === null ? null : formatStoreLocalTime(hours.pausedUntil);
+    if (channel === "Pickup")
+      return until === null
+        ? {
+            headline: t("Online pickup ordering is paused for a short while."),
+            detail: t("You can order at the counter, or try again in a few minutes."),
+          }
+        : {
+            headline: t("Online pickup ordering is paused until {time}.", { time: until }),
+            detail: t("You can order at the counter, or come back after {time}.", { time: until }),
+          };
+    return {
+      headline:
+        until === null
+          ? t("Ordering from your phone is paused for a short while.")
+          : t("Ordering from your phone is paused until {time}.", { time: until }),
+      detail: t("A staff member can take your order."),
+    };
+  }
+  if (phase === "Stopped") {
+    const headline =
+      hours.lastOrdersAt === null
+        ? t("The kitchen has stopped taking orders for today.")
+        : endSentence(
+            t("The kitchen stopped taking orders at {time}", {
+              time: formatStoreLocalTime(hours.lastOrdersAt),
+            }),
+          );
+    return {
+      headline,
+      detail:
+        channel === "Pickup"
+          ? t("You can’t place a pickup order from your phone now.")
+          : t(
+              "You can’t send a new order from your phone now. To add something, ask a staff member.",
+            ),
+    };
+  }
+  return null;
 }

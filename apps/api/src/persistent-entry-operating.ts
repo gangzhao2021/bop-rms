@@ -129,6 +129,7 @@ export function createPersistentEntryOperatingReader(options: {
           localDate: String(status.localDate),
           upcomingHours: status.upcomingHours,
           servicesTurnedOff: status.servicesTurnedOff,
+          pausedModes: status.pausedModes,
           ...("kitchenNotSetUp" in status ? { notReadyForOrders: true } : {}),
           ...(paused ? { newGuestsPaused: true } : {}),
         });

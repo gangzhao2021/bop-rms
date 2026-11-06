@@ -37,6 +37,14 @@ import { checkoutInProgressMessage, orderProcessingMessage } from "../cart/types
 import { describeConfiguration } from "../cart/CartPage.js";
 import { checkoutItemRefusalMessage } from "./item-refusal-message.js";
 import { checkoutSessionAlert } from "./session-message.js";
+import { storeServiceNoticeText, useStoreService } from "../store/StoreIdentity.js";
+import { takesNewOrders } from "../store/store-service.js";
+import {
+  createStoreProfileClient,
+  type StoreProfileLoader,
+} from "../store/store-profile-client.js";
+
+const browserCheckoutStoreProfile: StoreProfileLoader = createStoreProfileClient();
 import { sendFailureState } from "./send-round.js";
 import { paymentConfiguration } from "../payment/payment-configuration.js";
 import { quoteConsistentLinePrices, usePublishedMenu } from "../menu/menu-line-prices.js";
@@ -82,7 +90,10 @@ export function CheckoutPage({
   sendClient,
   sessionController: providedSession,
   cartClient,
+  storeProfile,
 }: {
+  /** The Store's live service answer (tests inject; null reads nothing). */
+  readonly storeProfile?: StoreProfileLoader | null | undefined;
   /** WP-2423 (same-table-ordering): reads the table cart while this phone checks out. */
   readonly cartClient?: Pick<CustomerCartClient, "loadCurrent">;
   /** DEC-DINE-IN-PAY-LATER: the table's payment timing (tests pass their own). */
@@ -243,6 +254,9 @@ export function CheckoutPage({
     };
   }, [controller]);
   const cart = "cart" in state ? state.cart : null;
+  const service = useStoreService(
+    storeProfile === undefined ? browserCheckoutStoreProfile : storeProfile,
+  );
   const dineIn = cart?.cart.orderType === "DineIn";
   const quote = state.status === "ready" ? state.quote : null;
   // WP-2423 (same-table-ordering): before payment starts, a table checkout re-reads the cart every
@@ -429,9 +443,33 @@ export function CheckoutPage({
     quote.blockingReasons.length === 0 &&
     !(pricesNeedAcceptance && confirmedQuote !== quote.quoteReference) &&
     detailsSelection !== null;
-  const sessionAlert = checkoutSessionAlert(sessionState, state.status === "offline");
+  // WP-2423 store-service-controls (v15 M30/M34): past last orders, while this guest's service is
+  // paused or when closed, no new checkout starts; the refusal says why in this service's words.
+  // A checkout already started (a card offered) is never held here.
+  const serviceChannel = cart?.cart.orderType === "Pickup" ? "Pickup" : "DineIn";
+  const serviceText = storeServiceNoticeText(
+    service.profile?.hours ?? null,
+    service.phase,
+    service.minutesLeft,
+    serviceChannel,
+  );
+  const refusedText =
+    serviceText === null || service.phase === "Soon"
+      ? checkoutText.storeClosed
+      : [serviceText.headline, serviceText.detail, checkoutText.notCharged]
+          .filter((part) => part !== null)
+          .join(" ");
+  const sessionAlert =
+    sessionState.status === "store_closed"
+      ? refusedText
+      : checkoutSessionAlert(sessionState, state.status === "offline");
   const canContinue =
-    paymentOpen && !detailsLocked && (detailsReady || detailsSubmittable) && tableChange === null;
+    paymentOpen &&
+    !detailsLocked &&
+    (detailsReady || detailsSubmittable) &&
+    tableChange === null &&
+    // Only a checkout not started yet waits here (`paymentOpen` means none is).
+    takesNewOrders(service.phase);
   const startPayment = () => {
     if (!detailsSelection || quoteExpired || tipAmount === null) return;
     // The guest has now seen (and, for a rise, accepted) these prices.
@@ -978,11 +1016,19 @@ export function CheckoutPage({
             <p role="alert">{checkoutText.tablePaysAsItOrders}</p>
           ) : null}
           {/* Sending again can't help with these: say why and offer what can. */}
-          {sendState === "store_closed" ? <p role="alert">{checkoutText.storeClosed}</p> : null}
+          {sendState === "store_closed" ? <p role="alert">{refusedText}</p> : null}
           {sendState === "items_short" ? (
             <p role="alert">
               {checkoutItemRefusalMessage("item_short", null, cart?.cart.items ?? [])}{" "}
               <Link to="/cart">{checkoutText.changeYourCart}</Link>
+            </p>
+          ) : null}
+          {serviceText !== null &&
+          sessionState.status === "idle" &&
+          sendState !== "store_closed" ? (
+            <p role={service.phase === "Soon" ? "status" : "alert"} className="checkout-service">
+              <strong>{serviceText.headline}</strong>
+              {serviceText.detail === null ? null : <> {serviceText.detail}</>}
             </p>
           ) : null}
           {sessionState.status === "item_short" || sessionState.status === "item_unavailable" ? (

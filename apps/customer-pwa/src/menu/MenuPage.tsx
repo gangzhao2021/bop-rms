@@ -57,7 +57,13 @@ import {
   createStoreProfileClient,
   type StoreProfileLoader,
 } from "../store/store-profile-client.js";
-import { OrdersStoppedNotice, StoreInfoSection, StoreStatusStrip } from "../store/StoreIdentity.js";
+import {
+  OrdersStoppedNotice,
+  StoreInfoSection,
+  StoreStatusStrip,
+  useStoreService,
+} from "../store/StoreIdentity.js";
+import { takesNewOrders } from "../store/store-service.js";
 import { nextOpeningText } from "../store/store-hours-text.js";
 import { TableOrderedProvider, useTableOrderedCount } from "../dining/table-ordered.js";
 import type { DiningSessionClient } from "../dining/dining-session-client.js";
@@ -503,9 +509,15 @@ export function MenuScreen({
     return () => window.clearTimeout(timer);
   }, [quickMessage]);
   const channel = context?.channel;
+  // WP-2423 store-service-controls (v15 M34): read live, so a menu left open across last orders
+  // or into a pause stops offering the one-tap add by itself (the dish page still explains).
+  const service = useStoreService(
+    context === undefined ? null : storeProfile === undefined ? browserStoreProfile : storeProfile,
+  );
+  const taking = takesNewOrders(service.phase);
   const quickAdd = useMemo(
     () =>
-      channel === undefined || readOnlyNotice !== undefined
+      channel === undefined || readOnlyNotice !== undefined || !taking
         ? null
         : {
             channel,
@@ -514,7 +526,7 @@ export function MenuScreen({
               setCartReads((value) => value + 1);
             },
           },
-    [channel, readOnlyNotice],
+    [channel, readOnlyNotice, taking],
   );
   return (
     // WP-2423 item 8 ③ (decision 13): at a table, a dish the table already ordered says so.
@@ -550,6 +562,7 @@ export function MenuScreen({
               {mode !== "search" && context !== undefined ? (
                 <OrdersStoppedNotice
                   load={storeProfile === undefined ? browserStoreProfile : storeProfile}
+                  channel={context.channel === "Pickup" ? "Pickup" : "DineIn"}
                 />
               ) : null}
               {mode === "detail" ? (

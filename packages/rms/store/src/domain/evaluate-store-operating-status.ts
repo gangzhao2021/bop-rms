@@ -28,6 +28,11 @@ interface StoreTemporaryClosureValue {
 export interface StoreOperatingEvaluation {
   readonly state: StoreOperatingStateValue;
   readonly availableServiceModes: readonly StoreServiceModeValue[];
+  /**
+   * WP-2423 store-service-controls (v15 M30): each service the hours offer now that a pause holds,
+   * with the instant the pause (and any pause it runs straight into) ends.
+   */
+  readonly pausedModes: readonly { readonly mode: StoreServiceModeValue; readonly until: string }[];
 }
 
 function timeSeconds(value: string): number {
@@ -127,6 +132,32 @@ function suppressedModes(
   return suppressed;
 }
 
+/** The end of the pauses holding `mode` at `evaluatedAt`, following pauses that join on. */
+function pausedUntil(
+  closures: readonly StoreTemporaryClosureValue[],
+  mode: StoreServiceModeValue,
+  evaluatedAt: string,
+): string | null {
+  const covering = closures.filter((closure) =>
+    (closure.serviceModes ?? storeServiceModes).includes(mode),
+  );
+  let until = Date.parse(evaluatedAt),
+    held = false;
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const closure of covering) {
+      const from = Date.parse(closure.effectiveFrom),
+        end = Date.parse(closure.effectiveUntil);
+      if (from <= until && end > until && (held || from <= Date.parse(evaluatedAt))) {
+        until = end;
+        held = true;
+        changed = true;
+      }
+    }
+  }
+  return held ? new Date(until).toISOString() : null;
+}
+
 export function evaluateStoreOperatingStatus(input: {
   readonly evaluatedAt: string;
   readonly localDate: string;
@@ -147,5 +178,12 @@ export function evaluateStoreOperatingStatus(input: {
       : scheduled.size > 0 && [...scheduled].every((mode) => suppressed.has(mode))
         ? "TemporarilyClosed"
         : "Closed";
-  return Object.freeze({ state, availableServiceModes: available });
+  const pausedModes = Object.freeze(
+    storeServiceModes.flatMap((mode) => {
+      if (!scheduled.has(mode) || !suppressed.has(mode)) return [];
+      const until = pausedUntil(input.temporaryClosures, mode, input.evaluatedAt);
+      return until === null ? [] : [Object.freeze({ mode, until })];
+    }),
+  );
+  return Object.freeze({ state, availableServiceModes: available, pausedModes });
 }

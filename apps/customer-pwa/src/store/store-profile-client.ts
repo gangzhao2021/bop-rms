@@ -14,6 +14,8 @@ export interface StoreHoursInterval {
 
 export interface StoreProfile {
   readonly storeDisplayName: string;
+  /** The Store's IANA time zone: the clock its hours, last orders and pauses are written in. */
+  readonly timeZone: string;
   readonly address: {
     readonly addressLines: readonly string[];
     readonly locality: string;
@@ -35,6 +37,8 @@ export interface StoreProfile {
     readonly localDate: string | null;
     readonly todayKind: StoreDayKind | null;
     readonly lastOrdersAt: string | null;
+    /** WP-2423 store-service-controls (v15 M30): while paused, the local time ordering resumes. */
+    readonly pausedUntil: string | null;
     /** Open, but past last orders: guests can't send new orders now (staff still can). */
     readonly ordersStopped: boolean;
     readonly nextOpening: { readonly localDate: string; readonly startLocalTime: string } | null;
@@ -53,7 +57,10 @@ export interface StoreProfile {
  * the most recent profile read, so a page coming back shows it at once instead of moving the
  * menu when it arrives again; the read still follows.
  */
-export type StoreProfileLoader = (() => Promise<StoreProfile | null>) & {
+export type StoreProfileLoader = ((options?: {
+  /** WP-2423 store-service-controls (v15 M34): a timed re-read asks the server, not a cache. */
+  readonly fresh?: boolean;
+}) => Promise<StoreProfile | null>) & {
   readonly last?: () => StoreProfile | null;
 };
 
@@ -146,6 +153,8 @@ export function parseStoreProfile(value: unknown): StoreProfile {
   if (store.phone !== null && (typeof store.phone !== "string" || !e164.test(store.phone)))
     throw new TypeError("store profile invalid");
   const hours = nullable(store.hours, (raw) => {
+    // WP-2423 store-service-controls (v15 M30): `pausedUntil` is new; a server without it still reads.
+    const withPause = raw !== null && typeof raw === "object" && Object.hasOwn(raw, "pausedUntil");
     const value = record(raw, [
       "status",
       "todayHours",
@@ -154,6 +163,7 @@ export function parseStoreProfile(value: unknown): StoreProfile {
       "localDate",
       "todayKind",
       "lastOrdersAt",
+      ...(withPause ? ["pausedUntil"] : []),
       "ordersStopped",
       "nextOpening",
       "upcoming",
@@ -176,6 +186,8 @@ export function parseStoreProfile(value: unknown): StoreProfile {
       localDate: nullable(value.localDate, date),
       todayKind: nullable(value.todayKind, kind),
       lastOrdersAt: nullable(value.lastOrdersAt, time),
+      pausedUntil:
+        withPause && value.status === "Paused" ? nullable(value.pausedUntil, time) : null,
       ordersStopped: value.ordersStopped,
       nextOpening: nullable(value.nextOpening, (next) => {
         const entry = record(next, ["localDate", "startLocalTime"]);
@@ -207,9 +219,9 @@ export function parseStoreProfile(value: unknown): StoreProfile {
     });
   });
   text(store.brandDisplayName, 160);
-  text(store.timeZone, 64);
   return Object.freeze({
     storeDisplayName: text(store.storeDisplayName, 160),
+    timeZone: text(store.timeZone, 64),
     address: Object.freeze({
       addressLines: Object.freeze(address.addressLines.map((line: unknown) => text(line, 160))),
       locality: text(address.locality, 120),
@@ -238,10 +250,11 @@ export function createStoreProfileClient(
 ): StoreProfileLoader {
   let shared: { readonly at: number; readonly read: Promise<StoreProfile | null> } | null = null;
   let latest: StoreProfile | null = null;
-  const read = async (): Promise<StoreProfile | null> => {
+  const read = async (fresh: boolean): Promise<StoreProfile | null> => {
     try {
       const response = await boundedFetch(request, "/api/v1/customer/store", {
         method: "GET",
+        ...(fresh ? { cache: "no-cache" as const } : {}),
         credentials: "same-origin",
         redirect: "error",
         referrerPolicy: "no-referrer",
@@ -254,9 +267,10 @@ export function createStoreProfileClient(
       return null;
     }
   };
-  const load = () => {
+  const load = (options?: { readonly fresh?: boolean }) => {
     const at = now();
-    if (shared === null || at - shared.at >= STORE_PROFILE_SHARE_MS) shared = { at, read: read() };
+    if (shared === null || at - shared.at >= STORE_PROFILE_SHARE_MS)
+      shared = { at, read: read(options?.fresh === true) };
     return shared.read;
   };
   return Object.assign(load, { last: () => latest });

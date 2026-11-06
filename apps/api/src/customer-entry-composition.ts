@@ -59,6 +59,8 @@ export interface CustomerEntryOperatingReader {
         notReadyForOrders?: boolean;
         /** WP-2423 item 13 ②: the platform paused this merchant's new guests. */
         newGuestsPaused?: boolean;
+        /** WP-2423 store-service-controls (v15 M30): paused services and when each resumes. */
+        pausedModes?: readonly { readonly mode: string; readonly until: string }[];
       })
     | null
   >;

@@ -1,8 +1,10 @@
 import {
   createPublicStoreProfileService,
   parseGetPublicStoreRequest,
+  resolveStoreOperatingLocalFields,
   type StoreUpcomingHours,
 } from "@rms/store";
+import { parseCanonicalInstant } from "@bop/tenant";
 import {
   GuestSessionError,
   GuestSessionService,
@@ -56,6 +58,11 @@ export interface CustomerStoreHours {
   readonly todayKind: StoreUpcomingHours["todayKind"];
   readonly lastOrdersAt: string | null;
   /**
+   * WP-2423 store-service-controls (v15 M30): while this guest's service is paused, the Store's
+   * local time ("HH:MM:SS") it starts again; null otherwise or when not known.
+   */
+  readonly pausedUntil: string | null;
+  /**
    * Follow-up (v15 2026-10-28): open, but past last orders — guests can't send new orders or
    * rounds now (the checkout and payment gates refuse them); staff still can.
    */
@@ -103,6 +110,8 @@ export function describeCustomerStoreHours(input: {
   readonly todayHours: readonly CustomerStoreHoursInterval[];
   readonly localDate?: string | null;
   readonly upcoming?: StoreUpcomingHours | null;
+  /** The local time this guest's service starts again, when a pause holds it now. */
+  readonly channelPausedUntil?: string | null;
 }): CustomerStoreHours {
   const todayHours = Object.freeze(
     input.todayHours
@@ -120,8 +129,14 @@ export function describeCustomerStoreHours(input: {
       )
       .sort((a, b) => seconds(a.startLocalTime) - seconds(b.startLocalTime)),
   );
+  // WP-2423 store-service-controls (v15 M30): a pause of this guest's own service is a pause
+  // (with its end), not "closed", even while another service stays open.
+  const channelPaused =
+    input.channelPausedUntil !== undefined &&
+    input.channelPausedUntil !== null &&
+    localTimePattern.test(input.channelPausedUntil);
   const status =
-    input.state === "TemporarilyClosed"
+    input.state === "TemporarilyClosed" || (channelPaused && input.state === "Open")
       ? ("Paused" as const)
       : input.state === "Open" && input.servesChannel
         ? ("Open" as const)
@@ -146,6 +161,7 @@ export function describeCustomerStoreHours(input: {
     localDate: input.localDate ?? null,
     todayKind: ahead?.todayKind ?? null,
     lastOrdersAt: status === "Open" ? (ahead?.lastOrdersAt ?? null) : null,
+    pausedUntil: status === "Paused" && channelPaused ? (input.channelPausedUntil ?? null) : null,
     ordersStopped: status === "Open" && ahead?.pastLastOrders === true,
     nextOpening: status === "Open" ? null : (ahead?.nextOpening ?? null),
     upcoming: ahead?.upcoming ?? Object.freeze([]),
@@ -173,6 +189,16 @@ export function describeCustomerStoreHours(input: {
     opensAt: status === "Closed" && next !== undefined ? next.startLocalTime : null,
     ...known,
   });
+}
+
+/** An instant as the Store's local "HH:MM:SS"; null when absent or not readable. */
+function localPauseEnd(until: string | undefined, timeZone: string): string | null {
+  if (until === undefined || !Number.isFinite(Date.parse(until))) return null;
+  try {
+    return resolveStoreOperatingLocalFields(parseCanonicalInstant(until), timeZone).localTime;
+  } catch {
+    return null;
+  }
 }
 
 export interface CustomerStoreProfileReadOptions extends CustomerCheckoutSessionAuthorizationOptions {
@@ -241,6 +267,10 @@ export function createCustomerStoreProfileRead(options: CustomerStoreProfileRead
               todayHours: current.todayHours ?? [],
               localDate: current.localDate ?? null,
               upcoming: current.upcomingHours ?? null,
+              channelPausedUntil: localPauseEnd(
+                current.pausedModes?.find((paused) => paused.mode === guest.channel)?.until,
+                profile.profile.timeZone,
+              ),
             });
         } catch {
           hours = null;
@@ -296,6 +326,7 @@ export function customerStoreProfileJson(view: CustomerStoreProfileView) {
               localDate: view.hours.localDate,
               todayKind: view.hours.todayKind,
               lastOrdersAt: view.hours.lastOrdersAt,
+              pausedUntil: view.hours.pausedUntil,
               ordersStopped: view.hours.ordersStopped,
               nextOpening: view.hours.nextOpening,
               tonight: view.hours.tonight,
