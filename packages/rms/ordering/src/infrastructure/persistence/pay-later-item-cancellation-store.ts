@@ -480,12 +480,16 @@ export async function listStoreCancelledDishes(
     " AND NOT EXISTS (SELECT 1 FROM rms_ordering.order_item_staff_cancellation x WHERE x.brand_id=c.brand_id " +
     "AND x.store_id=c.store_id AND x.order_id=c.order_id AND x.order_batch_id=c.order_batch_id " +
     "AND i.order_item_id=ANY(x.order_item_ids))";
-  const items = (table: string, where: string) =>
-    "SELECT count(DISTINCT c.order_batch_id)::int AS rounds,COALESCE(sum(i.quantity),0)::int AS dishes," +
+  // Rounds are counted from the cancellation records themselves: a round stays a cancelled round
+  // even when every dish on it was already counted under an item record (itemWhere).
+  const inWindow = "c.brand_id=$1 AND c.store_id=$2 AND c.cancelled_at>=$3 AND c.cancelled_at<$4";
+  const items = (table: string, where: string, itemWhere = "") =>
+    `SELECT (SELECT count(DISTINCT c.order_batch_id)::int FROM rms_ordering.${table} c WHERE ${inWindow}${where}) AS rounds,` +
+    "COALESCE(sum(i.quantity),0)::int AS dishes," +
     "COALESCE(sum((i.transaction_snapshot_json->'pricing'->'total'->>'amountMinor')::bigint),0)::text AS amount " +
     `FROM rms_ordering.${table} c JOIN rms_ordering.order_item i ON i.brand_id=c.brand_id AND i.store_id=c.store_id ` +
     "AND i.order_id=c.order_id AND i.order_batch_id=c.order_batch_id AND i.order_item_id=ANY(c.order_item_ids) " +
-    `WHERE c.brand_id=$1 AND c.store_id=$2 AND c.cancelled_at>=$3 AND c.cancelled_at<$4${where}`;
+    `WHERE ${inWindow}${where}${itemWhere}`;
   const removed = sum(
     (
       await tx.query(items("order_item_staff_cancellation", " AND c.basis='PayLater'"), [
@@ -508,7 +512,7 @@ export async function listStoreCancelledDishes(
   );
   const paidRounds = sum(
     (
-      await tx.query(items("order_staff_cancellation", notTakenOffAlready), [
+      await tx.query(items("order_staff_cancellation", "", notTakenOffAlready), [
         brand,
         store,
         from,
@@ -518,7 +522,7 @@ export async function listStoreCancelledDishes(
   );
   const unpaid = sum(
     (
-      await tx.query(items("order_batch_checkout_cancellation", notTakenOffAlready), [
+      await tx.query(items("order_batch_checkout_cancellation", "", notTakenOffAlready), [
         brand,
         store,
         from,

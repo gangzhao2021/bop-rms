@@ -11,6 +11,7 @@ import {
   createPostgresOrderBatchCheckoutCancellationStore,
   createPostgresStaffDiningRoundEntryStore,
   diningCheckoutPaymentWindowMinutes,
+  listStoreCancelledDishes,
   loadOrderBatchCheckoutCancellation,
   orderBatchCheckoutCancellationDigest,
   orderCancelledEventMatchesRecord,
@@ -582,6 +583,52 @@ it("closes a never-paid staff round with an OrderCancelled event and refuses rou
       assert.equal(staffView.batches.length, 1);
       assert.equal(staffView.batches[0].cancellation?.reasonCode, "PAYMENT_NOT_STARTED");
       assert.equal(staffView.batches[0].acceptance, null);
+
+      // WP-2423 (review 2026-11-06): Tonight's summary counts the closed round and its dish.
+      const tonight = () =>
+        scoped((tx) =>
+          listStoreCancelledDishes(
+            tx,
+            { brandReference: brand, storeReference: store },
+            { startsAt: "2000-01-01T00:00:00.000Z", endsAt: "2100-01-01T00:00:00.000Z" },
+          ),
+        );
+      assert.deepEqual((await tonight()).cancelledUnpaid, {
+        roundCount: 1,
+        dishCount: 1,
+        amountMinor: 0n,
+      });
+      // A dish already counted under an item record is not counted again, and its round is still
+      // a cancelled round. Test-only seed: the database refuses this pair for real writes (an item
+      // record needs an accepted round, a round closed unpaid never was); it proves the reader only.
+      await admin.query("SET session_replication_role = replica");
+      try {
+        await admin.query(
+          "INSERT INTO rms_ordering.order_item_staff_cancellation (cancellation_id,operation_id,brand_id,store_id,order_id,order_batch_id,submission_id,order_type,expected_order_version,cancelled_order_version,expected_source_checkpoint,previous_phase,actor_id,permission_code,reason_code,order_item_ids,kitchen_evidence_digest,currency_code,source_digest,audit_id,cancelled_at,basis) VALUES ($1,$2,$3,$4,$5,$6,$7,'DineIn',2,3,$8,'Accepted',$9,'ordering.order.cancel','SOLD_OUT',$10,$11,'CAD',$11,$12,$13,'PayLater')",
+          [
+            id(170),
+            id(171),
+            brand,
+            store,
+            neverPaid.refs.order,
+            neverPaid.refs.batch,
+            neverPaid.refs.submission,
+            id(160),
+            staff,
+            [neverPaid.refs.item],
+            sha("c"),
+            id(172),
+            createdAt,
+          ],
+        );
+      } finally {
+        await admin.query("SET session_replication_role = origin");
+      }
+      assert.deepEqual((await tonight()).cancelledUnpaid, {
+        roundCount: 1,
+        dishCount: 0,
+        amountMinor: 0n,
+      });
 
       // Append-only history.
       await scoped(async (tx) => {
