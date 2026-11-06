@@ -35,6 +35,7 @@ import { listStoreKitchenOrderProgress } from "../../rms/kitchen/src/index.ts";
 import { readPaymentRemainingRefundable } from "../../rms/payment/src/index.ts";
 import { createCustomerDiningBindingComposition } from "../../../apps/api/src/customer-dining-binding-composition.ts";
 import { createCustomerDiningJoinComposition } from "../../../apps/api/src/customer-dining-join-composition.ts";
+import { markDiningTableNeedsCleaning } from "../../../apps/api/src/dining-table-needs-cleaning.ts";
 import { seedSubmissionCart } from "../test-support/dining-order-submission-seed.mjs";
 import { journeyRound } from "../test-support/dine-in-journey-seed.mjs";
 import {
@@ -53,6 +54,29 @@ import {
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 
 const { Client } = pg;
+
+/**
+ * A CLEANING block through the real table command under the API role. `byClose`: the block a close
+ * leaves (its operation correlates to the close); otherwise a person chose "Being cleaned" on
+ * Tables, whose operation correlates to itself as the merchant table command records it.
+ */
+async function blockForCleaning(transactions, n, at, byClose) {
+  const operationReference = fresh();
+  return transactions().run((tx) =>
+    markDiningTableNeedsCleaning(tx, {
+      scope,
+      actorReference: id(0x900),
+      tableReference: id(n),
+      operationReference,
+      correlationReference: byClose ? fresh() : operationReference,
+      observedAt: at.toISOString(),
+      retentionPolicyCode: "AUDIT_DEFAULT",
+      retentionPolicyVersion: 1,
+      newReference: fresh,
+      authorize: async () => true,
+    }),
+  );
+}
 
 /** A published table with an active code, owner-seeded (table configuration is not under test). */
 async function seedTable(admin, n, { blocked = null, at = new Date(Date.now() - 3_600_000) } = {}) {
@@ -750,7 +774,7 @@ it("a guest can't start a pay-later table: the switch and the timing refuse each
   });
 }, 180_000);
 
-it("a table being cleaned or blocked can't be started; a paused Store between scan and tap refuses; an unmarked cleaning stops refusing after 5 minutes", async () => {
+it("a table being cleaned or blocked can't be started; a paused Store between scan and tap refuses; cleaning a close left unmarked stops refusing after 5 minutes, a 'Being cleaned' block staff set never does", async () => {
   await withIsolatedDatabase({ caseId: "wp2423_gs_blocke" }, async (context) => {
     const { admin, transactions, credentials } = await setup(context);
     try {
@@ -759,7 +783,19 @@ it("a table being cleaned or blocked can't be started; a paused Store between sc
       await seedTable(admin, 20, { blocked: "CLEANING", at: recent });
       await seedTable(admin, 21, { blocked: "REPAIR", at: recent });
       await seedTable(admin, 22);
-      await seedTable(admin, 23, { blocked: "CLEANING", at: new Date(Date.now() - 6 * 60_000) });
+      const earlier = new Date(Date.now() - 2 * 3_600_000);
+      await seedTable(admin, 23, { at: earlier });
+      await seedTable(admin, 24, { at: earlier });
+      // Table 23: staff closed it 6 minutes ago and nobody tapped Cleaned. Table 24: an hour ago a
+      // manager chose "Being cleaned" on Tables (a broken glass) and hasn't cleared it.
+      assert.equal(
+        await blockForCleaning(transactions, 23, new Date(Date.now() - 6 * 60_000), true),
+        "Marked",
+      );
+      assert.equal(
+        await blockForCleaning(transactions, 24, new Date(Date.now() - 60 * 60_000), false),
+        "Marked",
+      );
       const identity = guests();
       const join = composeJoin({ transactions, credentials, identity });
       const offer = (table) =>
@@ -790,6 +826,19 @@ it("a table being cleaned or blocked can't be started; a paused Store between sc
       });
       assert.equal(
         await count(admin, "SELECT count(*)::int AS n FROM rms_dining.dining_session"),
+        0,
+      );
+      // A block a person set holds however long it has been: the scan and the tap both refuse.
+      assert.equal((await offer(24)).kind, "BeingCleaned");
+      assert.deepEqual(await tap(join, identity.scan(84, 24)), {
+        status: "Refused",
+        reason: "BeingCleaned",
+      });
+      assert.equal(
+        await count(
+          admin,
+          "SELECT count(*)::int AS n FROM platform_audit.audit_record WHERE action_code='DINING_TABLE_CLEARBLOCK'",
+        ),
         0,
       );
       // Staff closed it and nobody tapped Cleaned: the next guest starts it, with a System row.

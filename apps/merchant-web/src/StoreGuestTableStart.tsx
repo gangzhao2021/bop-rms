@@ -101,6 +101,10 @@ export function StoreGuestTableStart({
             {allowed
               ? t(
                   "A guest who scans a free table orders right away and pays each round on their phone. A finished table frees itself with no cleaning step: 20 minutes after the last activity if nobody ordered, 90 minutes if they did. The next party, or someone with a photo of the code, can also end a table quiet for 5 minutes with nothing owed, even if its guests are still sitting there. Nobody gets food without paying.",
+                ) +
+                " " +
+                t(
+                  "Finished dishes count as handed over: guests collect them at the counter by order number, and Home and Tables stop asking staff to serve them. A table staff mark “Being cleaned” stays closed to guests until staff clear it.",
                 )
               : t("Only for stores where guests pay each round first.")}
           </span>

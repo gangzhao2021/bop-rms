@@ -17,7 +17,11 @@ export const guestTableNewPartyGapMinutes = 5;
  * last changed: past that, nobody is composing it (the cart itself lives for an hour).
  */
 export const guestTableCartInUseMinutes = 20;
-/** Staff get this long to clean a table before the next guest may start it anyway. */
+/**
+ * Staff get this long to clean a table its last guests left before the next guest may start it
+ * anyway. Only the block a close, move or merge left behind: a "Being cleaned" block a person set
+ * on Tables (a broken glass) holds until staff clear it.
+ */
 export const guestTableCleaningGraceMinutes = 5;
 /** At a guest-started table, "just joined" is flagged only for this many phones in 10 minutes. */
 export const guestTableManyPhones = Object.freeze({ phones: 6, windowMinutes: 10 });
@@ -53,6 +57,11 @@ export interface GuestTableStartFacts {
   readonly blockReasonCode: string | null;
   /** When the table last changed (for a blocked table, when it was blocked). */
   readonly tableObservedAt: string;
+  /**
+   * The CLEANING block was left by closing, moving or merging the last party, not set by a person
+   * on Tables. Only that block expires after the grace time.
+   */
+  readonly cleaningLeftByClose: boolean;
   readonly occupied: boolean;
 }
 export type GuestTableStartDecision =
@@ -77,6 +86,8 @@ export function decideGuestTableStart(
     return Object.freeze({ kind: "MayStart", clearsCleaning: false });
   if (facts.operationalState !== "TemporarilyBlocked" || facts.blockReasonCode !== "CLEANING")
     return Object.freeze({ kind: "No" });
+  // A person blocked it to clean: nobody starts it until staff clear it.
+  if (!facts.cleaningLeftByClose) return Object.freeze({ kind: "BeingCleaned" });
   return at(now) - at(facts.tableObservedAt) >= guestTableCleaningGraceMinutes * minutes
     ? Object.freeze({ kind: "MayStart", clearsCleaning: true })
     : Object.freeze({ kind: "BeingCleaned" });

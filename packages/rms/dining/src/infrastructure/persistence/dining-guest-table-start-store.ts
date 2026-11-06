@@ -73,6 +73,50 @@ async function storeRule(tx: DiningTableTransaction, brand: string, store: strin
 }
 
 /**
+ * Which of these CLEANING-blocked tables got their block from closing, moving or merging the last
+ * party (its table operation correlates to that command), rather than from a person choosing
+ * "Being cleaned" on Tables (its own operation). Only the first expires for the next guest.
+ */
+export async function loadDiningCleaningLeftByClose(
+  tx: DiningTableTransaction,
+  scope: Pick<DiningTableStoreScope, "brandReference" | "storeReference">,
+  tables: readonly { readonly tableReference: string; readonly aggregateVersion: number }[],
+): Promise<ReadonlySet<string>> {
+  if (tables.length === 0) return new Set();
+  const { brand, store } = scoped(scope);
+  const found = rows(
+    await tx.query(
+      "SELECT o.table_id::text AS table FROM rms_dining.dining_table_operation o JOIN unnest($3::uuid[],$4::bigint[]) AS t(table_id,version) ON o.table_id=t.table_id AND o.result_version=t.version WHERE o.brand_id=$1 AND o.store_id=$2 AND o.record_json->'table'->>'operationalState'='TemporarilyBlocked' AND o.record_json->'table'->>'blockReasonCode'='CLEANING' AND o.record_json->'audit'->>'correlationId' IS DISTINCT FROM o.operation_id::text",
+      [
+        brand,
+        store,
+        tables.map((table) => String(parseDiningReference(table.tableReference))),
+        tables.map((table) => table.aggregateVersion),
+      ],
+    ),
+    tables.length,
+  );
+  return new Set(found.map((row) => String(row.table)));
+}
+
+const isCleaningBlock = (table: ReturnType<typeof createDiningTable>) =>
+  table.operationalState === "TemporarilyBlocked" && table.blockReasonCode === "CLEANING";
+
+async function cleaningLeftByClose(
+  tx: DiningTableTransaction,
+  scope: { brand: string; store: string },
+  table: ReturnType<typeof createDiningTable>,
+) {
+  if (!isCleaningBlock(table)) return false;
+  const left = await loadDiningCleaningLeftByClose(
+    tx,
+    { brandReference: scope.brand, storeReference: scope.store },
+    [{ tableReference: String(table.tableReference), aggregateVersion: table.aggregateVersion }],
+  );
+  return left.has(String(table.tableReference));
+}
+
+/**
  * What a scan of this free table offers, read only: MayStart, BeingCleaned or No. Nothing is written
  * and no row is locked, so a Store with the switch off pays one read at most.
  */
@@ -104,6 +148,7 @@ export async function loadDiningGuestTableStart(
       operationalState: current.operationalState,
       blockReasonCode: current.blockReasonCode,
       tableObservedAt: current.observedAt,
+      cleaningLeftByClose: await cleaningLeftByClose(tx, { brand, store }, current),
       occupied: current.activeDiningSessionReference !== null,
     },
     now,
@@ -434,6 +479,7 @@ export function createPostgresDiningGuestTableStartStore(
             operationalState: before.operationalState,
             blockReasonCode: before.blockReasonCode,
             tableObservedAt: before.observedAt,
+            cleaningLeftByClose: await cleaningLeftByClose(tx, { brand, store }, before),
             occupied: before.activeDiningSessionReference !== null,
           },
           startedAt,

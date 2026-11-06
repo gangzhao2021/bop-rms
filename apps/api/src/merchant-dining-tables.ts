@@ -10,6 +10,7 @@ import {
   guestTableActivity,
   guestTableManyPhones,
   listDiningSessionMergesInto,
+  loadDiningCleaningLeftByClose,
   loadDiningGuestTableActivity,
   loadDiningGuestTableStartPage,
   parseDiningInstant,
@@ -520,6 +521,24 @@ export function createMerchantDiningTables(options: {
             activeReferences.map((reference) => String(reference)),
             async () => authorize(),
           );
+          // Only the cleaning a close, move or merge left behind expires for the next guest; a
+          // "Being cleaned" block a person set holds until staff clear it.
+          const cleaningLeftByClose = guestPage.guestTableStart
+            ? await loadDiningCleaningLeftByClose(
+                tx as never,
+                ownerScope,
+                page.items
+                  .filter(
+                    (table) =>
+                      table.operationalState === "TemporarilyBlocked" &&
+                      table.blockReasonCode === "CLEANING",
+                  )
+                  .map((table) => ({
+                    tableReference: String(table.tableReference),
+                    aggregateVersion: table.aggregateVersion,
+                  })),
+              )
+            : new Set<string>();
           const codeUntil = (table: (typeof page.items)[number]) => {
             const issue = codes.get(table.tableReference);
             return table.qrStatus === "Active" && issue?.qrVersion === table.qrVersion
@@ -654,9 +673,7 @@ export function createMerchantDiningTables(options: {
                       }
                     : {}),
                   // How long a table has waited for cleaning, where guests can then start it.
-                  ...(guestPage.guestTableStart &&
-                  table.operationalState === "TemporarilyBlocked" &&
-                  table.blockReasonCode === "CLEANING"
+                  ...(cleaningLeftByClose.has(String(table.tableReference))
                     ? { blockedSince: table.observedAt }
                     : {}),
                 }),

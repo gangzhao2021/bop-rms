@@ -608,6 +608,13 @@ test("@production the owner turns on guests starting tables; it is off where gue
   await expect(
     page.getByText("even if its guests are still sitting there", { exact: false }),
   ).toBeVisible();
+  // ...that serving changes (guests collect by number), and that a staff "Being cleaned" holds.
+  await expect(
+    page.getByText("guests collect them at the counter by order number", { exact: false }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("stays closed to guests until staff clear it", { exact: false }),
+  ).toBeVisible();
   const section = page.getByRole("group", { name: "Guests starting tables" });
 
   // Off by default; a change someone else made first is said, and nothing is claimed.

@@ -20,6 +20,7 @@ describe("DEC-DINING-GUEST-TABLE-START: who may start a table", () => {
     operationalState: "Available",
     blockReasonCode: null,
     tableObservedAt: ago(60),
+    cleaningLeftByClose: true,
     occupied: false,
   };
   it.each([
@@ -51,6 +52,16 @@ describe("DEC-DINING-GUEST-TABLE-START: who may start a table", () => {
         tableObservedAt: ago(5),
       },
       { kind: "MayStart", clearsCleaning: true },
+    ],
+    [
+      "a 'Being cleaned' block a person set, even an hour later",
+      {
+        operationalState: "TemporarilyBlocked",
+        blockReasonCode: "CLEANING",
+        tableObservedAt: ago(60),
+        cleaningLeftByClose: false,
+      },
+      { kind: "BeingCleaned" },
     ],
   ])("%s", (_name, changes, expected) => {
     expect(decideGuestTableStart({ ...free, ...changes } as GuestTableStartFacts, now)).toEqual(

@@ -57,6 +57,9 @@ const timing = vi.hoisted(() => ({
 const guestStart = vi.hoisted(() => ({
   on: false,
   budgetSpent: false,
+  /** Tables whose CLEANING block a close, move or merge left (not a person on Tables). */
+  cleaningLeft: new Set<string>(),
+  cleaningAsked: [] as unknown[],
   started: new Map<string, { startedAt: string; endedLastParty?: boolean }>(),
   activity: new Map<
     string,
@@ -84,6 +87,10 @@ vi.mock("@rms/dining", async (original) => ({
     storeBudgetSpent: guestStart.budgetSpent,
   }),
   loadDiningGuestTableActivity: async () => guestStart.activity,
+  loadDiningCleaningLeftByClose: async (_tx: unknown, _scope: unknown, tables: unknown) => {
+    guestStart.cleaningAsked.push(tables);
+    return guestStart.cleaningLeft;
+  },
   createPostgresDiningStaffCallStore: vi.fn(() => ({ listOpen: mock.staffCalls })),
   loadDiningSessionsPhones: mock.phones,
   // DEC-DINE-IN-PAY-LATER: the Store opens tables pay first; no open table was opened otherwise.
@@ -807,6 +814,7 @@ it("DEC-DINING-GUEST-TABLE-START: says which table a guest started and when it f
   guestStart.on = true;
   const startedAt = "2026-09-25T11:55:00.000Z";
   guestStart.started = new Map([[id(5), { startedAt }]]);
+  guestStart.cleaningLeft = new Set([id(6)]);
   guestStart.activity = new Map([
     [
       id(5),
@@ -883,6 +891,16 @@ it("DEC-DINING-GUEST-TABLE-START: says which table a guest started and when it f
     expect(view.items[0]?.newPhones).toEqual([]);
     expect(view.items[1]?.guestStart).toBeUndefined();
     expect(view.items[1]?.blockedSince).toBe(startedAt);
+    // Only the CLEANING-blocked table is asked about, at its own version.
+    expect(guestStart.cleaningAsked.at(-1)).toEqual([
+      { tableReference: id(6), aggregateVersion: 3 },
+    ]);
+    // A "Being cleaned" block a person set never reads as one guests can start.
+    guestStart.cleaningLeft = new Set();
+    const manual = (await f.read(f.input)) as unknown as {
+      items: readonly { blockedSince?: string }[];
+    };
+    expect(Object.hasOwn(manual.items[1] ?? {}, "blockedSince")).toBe(false);
     // The Store's budget is spent: staff are told why guests at free tables are coming to them.
     guestStart.budgetSpent = true;
     const busy = (await f.read(f.input)) as unknown as {
@@ -891,6 +909,7 @@ it("DEC-DINING-GUEST-TABLE-START: says which table a guest started and when it f
     expect(busy.guestTableStart).toEqual({ version: 2, canTurnOff: true, startsBusy: true });
   } finally {
     guestStart.budgetSpent = false;
+    guestStart.cleaningLeft = new Set();
     guestStart.on = false;
     guestStart.started = new Map();
     guestStart.activity = new Map();
