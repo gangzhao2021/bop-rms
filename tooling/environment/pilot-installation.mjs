@@ -104,6 +104,7 @@ export async function loadPilotInstallation(directory) {
         },
       }),
       loadDiningExceptionWorker: async () => {
+        let business, config;
         try {
           const value = await load("dining-exception-worker.json");
           const profile = await load("internal-test-profile.json");
@@ -128,13 +129,19 @@ export async function loadPilotInstallation(directory) {
             )
           )
             return unavailable();
-          return Object.freeze({
+          business = await load("business-worker.json");
+          config = Object.freeze({
             providerAccountReference: value.providerAccountReference,
             scope: Object.freeze({ ...value.scope }),
           });
         } catch {
           return unavailable();
         }
+        // v15 2026-11-06: its points sweep and payment finality read the Store's own ledger. Another
+        // account's ledger holds none of this Store's captures, so it is refused at start.
+        if (business?.providerAccountReference !== config.providerAccountReference)
+          throw new Error("DINING_EXCEPTION_WORKER_PROVIDER_ACCOUNT_MISMATCH");
+        return config;
       },
       loadKitchenWorker: async () => {
         try {

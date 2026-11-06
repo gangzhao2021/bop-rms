@@ -122,6 +122,23 @@ it("loads explicit scoped Dining worker configuration lazily and rejects mismatc
     scope,
   };
   await save("dining-exception-worker.json", config);
+  // v15 2026-11-06: the same Provider account as the Store's business worker, or it is refused.
+  await expect(installation.loadDiningExceptionWorker()).rejects.toThrow(
+    "PILOT_INSTALLATION_UNAVAILABLE",
+  );
+  await save("business-worker.json", {
+    environment: "InternalTest",
+    database: "synthetic_pilot",
+    providerAccountReference: id(5),
+  });
+  await expect(installation.loadDiningExceptionWorker()).rejects.toThrow(
+    "DINING_EXCEPTION_WORKER_PROVIDER_ACCOUNT_MISMATCH",
+  );
+  await save("business-worker.json", {
+    environment: "InternalTest",
+    database: "synthetic_pilot",
+    providerAccountReference: id(4),
+  });
   expect(await installation.loadDiningExceptionWorker()).toEqual({
     providerAccountReference: id(4),
     scope,
