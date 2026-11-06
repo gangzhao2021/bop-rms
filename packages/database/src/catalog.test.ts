@@ -816,6 +816,8 @@ describe("migration catalog", () => {
       "2000_210_alter_ordering_cart_ordered_once",
       "2000_240_create_role_assignment_sole_operator_approval",
       "2000_260_create_payment_intent_prepared_index",
+      "2000_320_alter_role_administration_revisions",
+      "2000_321_create_role_administration_sole_operator_approval",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),
@@ -2044,6 +2046,13 @@ describe("migration catalog", () => {
       // WP-2423 M07: a sole owner's own approval of a staff role, marked SoleOperator.
       [
         "2000_240_create_role_assignment_sole_operator_approval",
+        "@bop/permission",
+        "bop_permission",
+      ],
+      // WP-2423 role presets: a Store's own version of a role, and a sole owner's own approval.
+      ["2000_320_alter_role_administration_revisions", "@bop/permission", "bop_permission"],
+      [
+        "2000_321_create_role_administration_sole_operator_approval",
         "@bop/permission",
         "bop_permission",
       ],

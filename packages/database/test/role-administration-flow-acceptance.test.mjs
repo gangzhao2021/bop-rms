@@ -225,10 +225,11 @@ it("runs duplicate, draft, independent approval, activation and guarded deactiva
       );
       assert.equal(policyAfter, policyBefore + 1);
 
-      // A role still held by staff is not deactivated; an unassigned one is, and can be reactivated.
+      // The Owner preset is never removed (WP-2423 role presets); a role still held by staff is
+      // not deactivated; an unassigned one is, and can be reactivated.
       await assert.rejects(
         run(owner, "Deactivate", byCode.get("store_owner").record.roleReference),
-        { code: "ROLE_ADMIN_ROLE_IN_USE" },
+        { code: "ROLE_ADMIN_MUTATION_INVALID" },
       );
       await run(owner, "Deactivate", lead);
       assert.equal(

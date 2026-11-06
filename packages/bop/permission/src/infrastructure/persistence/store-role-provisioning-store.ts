@@ -61,6 +61,10 @@ export interface StoreRoleProvisioningResult {
   readonly addedCount: number;
   readonly revokedCount: number;
   readonly policyVersion: number;
+  /** WP-2423 role presets: presets this Store keeps its own version of (left untouched). */
+  readonly customizedRoleCount?: number;
+  /** Presets that had a change waiting: withdrawn, upgraded, and sent back to its author. */
+  readonly rebasedRoleCount?: number;
 }
 
 const conflict = (): never => {
@@ -81,12 +85,19 @@ const highRisk = new Set(
 );
 const scopeSql =
   "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id',$3,true)";
+// WP-2423 role presets: the latest version (a change may be waiting on it) and the version staff
+// hold now (latest Active/Deactivated), which may be the Store's own version of the preset.
 const templateRolesSql = `SELECT r.role_id::text role_reference,r.role_code,v.administration_reference::text administration_reference,
-   v.version::int version,v.role_type,v.lifecycle
+   v.version::int version,v.role_type,v.lifecycle,v.display_name,v.description,v.authored_by_reference::text authored_by,
+   v.submitted_by_reference::text submitted_by,v.source_policy_version::int source_policy_version,
+   e.role_type effective_type,e.lifecycle effective_lifecycle
  FROM bop_permission.role r
  JOIN LATERAL (SELECT * FROM bop_permission.role_administration_version x WHERE x.brand_id=r.brand_id AND x.role_id=r.role_id
    ORDER BY x.version DESC LIMIT 1) v ON true
+ LEFT JOIN LATERAL (SELECT * FROM bop_permission.role_administration_version x WHERE x.brand_id=r.brand_id AND x.role_id=r.role_id
+   AND x.lifecycle IN ('Active','Deactivated') ORDER BY x.version DESC LIMIT 1) e ON true
  WHERE r.brand_id=$1 AND r.store_id=$2 AND r.role_code=ANY($3::text[])`;
+const waitingLifecycles = new Set(["Draft", "InReview", "Approved"]);
 
 /**
  * Owner-repository read for the release tool: the Store's latest provisioned catalog version and its
@@ -185,6 +196,8 @@ export async function provisionStoreRoles(
       addedCount: 0,
       revokedCount: 0,
       policyVersion: Number(same.policy_version),
+      customizedRoleCount: 0,
+      rebasedRoleCount: 0,
     });
   }
   const latest = history.at(-1)?.catalog_version ?? null;
@@ -253,8 +266,7 @@ export async function provisionStoreRoles(
       (plan.previousCatalogVersion === null ||
         row.role_reference !== role.roleReference ||
         row.administration_reference !== role.administrationReference ||
-        row.role_type !== "System" ||
-        !["Active", "Deactivated"].includes(String(row.lifecycle)))
+        !["Active", "Deactivated"].includes(String(row.effective_lifecycle)))
     )
       return conflict();
   }
@@ -299,11 +311,125 @@ export async function provisionStoreRoles(
         );
   let grantCount = 0,
     addedCount = 0,
-    revokedCount = 0;
+    revokedCount = 0,
+    customizedRoleCount = 0,
+    rebasedRoleCount = 0;
+  const selectionsOf = async (administrationReference: string, version: number) =>
+    (
+      await tx.query(
+        `SELECT permission_id::text permission,action_code,group_code,high_risk,dependency_actions
+         FROM bop_permission.role_administration_permission WHERE brand_id=$1 AND administration_reference=$2 AND administration_version=$3`,
+        [plan.brandReference, administrationReference, version],
+      )
+    ).rows;
+  /** A copy of a waiting change's content as another version (withdrawn, or the rebased draft). */
+  const copyWaiting = async (
+    role: StoreRoleProvisioningRole,
+    row: Record<string, unknown>,
+    version: number,
+    copy: {
+      readonly lifecycle: "Withdrawn" | "Draft";
+      readonly submittedBy: string | null;
+      readonly evidence: string | null;
+      readonly reasonCode: string;
+      readonly sourcePolicyVersion: number;
+    },
+    selections: readonly Record<string, unknown>[],
+  ) => {
+    await tx.query(
+      `INSERT INTO bop_permission.role_administration_version(administration_reference,role_id,version,brand_id,store_id,role_code,display_name,description,
+         role_type,lifecycle,source_policy_version,authored_by_reference,submitted_by_reference,approved_by_reference,decision_evidence_reference,reason_code,changed_at,data_classification)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,'Custom',$9,$10,$11,$12,NULL,$13,$14,$15,'ConfigurationMetadata')`,
+      [
+        role.administrationReference,
+        role.roleReference,
+        version,
+        plan.brandReference,
+        plan.storeReference,
+        role.roleCode,
+        row.display_name,
+        row.description,
+        copy.lifecycle,
+        copy.sourcePolicyVersion,
+        row.authored_by,
+        copy.submittedBy,
+        copy.evidence,
+        copy.reasonCode,
+        at,
+      ],
+    );
+    if (selections.length > 0)
+      await tx.query(
+        `INSERT INTO bop_permission.role_administration_permission(selection_reference,brand_id,store_id,administration_reference,administration_version,
+           permission_id,action_code,group_code,high_risk,dependency_actions,data_classification)
+         SELECT s,$1,$2,$3,$4,p,a,g,h,d,'ConfigurationMetadata'
+         FROM unnest($5::uuid[],$6::uuid[],$7::text[],$8::text[],$9::boolean[],$10::jsonb[]) AS t(s,p,a,g,h,d)`,
+        [
+          plan.brandReference,
+          plan.storeReference,
+          role.administrationReference,
+          version,
+          selections.map(() => options.nextReference()),
+          selections.map((item) => item.permission),
+          selections.map((item) => item.action_code),
+          selections.map((item) => item.group_code),
+          selections.map((item) => item.high_risk === true),
+          selections.map((item) => JSON.stringify(item.dependency_actions ?? [])),
+        ],
+      );
+  };
   for (const role of plan.roles) {
     const row = existing.get(role.roleCode);
-    const version = row === undefined ? 1 : Number(row.version) + 1,
-      lifecycle = row === undefined ? "Active" : String(row.lifecycle);
+    // WP-2423 role presets: a Store's own version of a preset is never written over. Its grants
+    // and history stay as they are; the Roles page shows what the preset now has.
+    if (row !== undefined && row.effective_type === "Custom") {
+      customizedRoleCount += 1;
+      continue;
+    }
+    let version = row === undefined ? 1 : Number(row.version) + 1;
+    const lifecycle = row === undefined ? "Active" : String(row.effective_lifecycle);
+    // A change waiting on the preset is withdrawn by the platform (its author keeps authorship),
+    // the preset is upgraded, and the same content comes back as a fresh draft for its author to
+    // check and send again: an approval is never carried over to content nobody approved.
+    let rebase: {
+      readonly row: Record<string, unknown>;
+      readonly selections: readonly Record<string, unknown>[];
+    } | null = null;
+    if (row !== undefined && waitingLifecycles.has(String(row.lifecycle))) {
+      const selections = await selectionsOf(role.administrationReference, Number(row.version));
+      const evidence = options.nextReference();
+      await copyWaiting(
+        role,
+        row,
+        version,
+        {
+          lifecycle: "Withdrawn",
+          submittedBy: row.submitted_by === null ? null : String(row.submitted_by),
+          evidence,
+          reasonCode: "ROLE_CHANGE_WITHDRAWN_FOR_PRESET_UPDATE",
+          sourcePolicyVersion: Number(row.source_policy_version),
+        },
+        selections,
+      );
+      await tx.query(
+        `INSERT INTO bop_permission.role_administration_decision(decision_reference,brand_id,store_id,administration_reference,administration_version,
+           decision,actor_reference,reason_code,evidence_reference,occurred_at,data_classification)
+         VALUES($1,$2,$3,$4,$5,'Withdrawn',$6,'ROLE_CHANGE_WITHDRAWN_FOR_PRESET_UPDATE',$7,$8,'ConfigurationMetadata')`,
+        [
+          options.nextReference(),
+          plan.brandReference,
+          plan.storeReference,
+          role.administrationReference,
+          version,
+          plan.operatorReference,
+          evidence,
+          at,
+        ],
+      );
+      rebase = { row, selections };
+      rebasedRoleCount += 1;
+      version += 1;
+    }
     if (row === undefined) {
       await tx.query(
         "INSERT INTO bop_permission.role(role_id,brand_id,store_id,role_code,lifecycle,effective_from,effective_until,version,created_at,updated_at) VALUES($1,$2,$3,$4,'Active',$5,NULL,1,$6,$6)",
@@ -402,6 +528,20 @@ export async function provisionStoreRoles(
           at,
         ],
       );
+    if (rebase !== null)
+      await copyWaiting(
+        role,
+        rebase.row,
+        version + 1,
+        {
+          lifecycle: "Draft",
+          submittedBy: null,
+          evidence: null,
+          reasonCode: "ROLE_DRAFT_REBASED",
+          sourcePolicyVersion: policyVersion,
+        },
+        rebase.selections,
+      );
   }
   if (plan.ownerAssignment !== null) {
     const owner = plan.roles.find((role) => role.template === "owner");
@@ -449,6 +589,8 @@ export async function provisionStoreRoles(
       grantCount,
       addedCount,
       revokedCount,
+      customizedRoleCount,
+      rebasedRoleCount,
       ownerAssigned: plan.ownerAssignment !== null,
       approvedBy: approval.approvedByReference,
       approvalEvidence: approval.approvalEvidenceReference,
@@ -516,5 +658,7 @@ export async function provisionStoreRoles(
     addedCount,
     revokedCount,
     policyVersion,
+    customizedRoleCount,
+    rebasedRoleCount,
   });
 }

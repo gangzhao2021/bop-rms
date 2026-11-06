@@ -76,5 +76,6 @@ export {
   type StorePermissionDefinition,
   type StoreRoleTemplateCode,
 } from "./catalog/store-permission-catalog.js";
+export * from "./catalog/role-presets.js";
 export * from "./infrastructure/persistence/internal-test-validity-store.js";
 export * from "./infrastructure/persistence/platform-support-store.js";

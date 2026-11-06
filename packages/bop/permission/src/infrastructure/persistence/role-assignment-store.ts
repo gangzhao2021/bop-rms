@@ -67,8 +67,11 @@ const ownerRole = (scope: RoleAssignmentScope) =>
   scope.storeReference === null ? "brand_owner" : "store_owner";
 const lockScope = (scope: RoleAssignmentScope) =>
   scope.storeReference ?? "brand:" + scope.brandReference;
+// WP-2423 role presets: the name staff hold now (latest Active/Deactivated version), never the
+// name in a change still waiting for approval; a role never turned on shows its latest name.
 const roleNameSql = `COALESCE((SELECT v.display_name FROM bop_permission.role_administration_version v
-   WHERE v.brand_id=r.brand_id AND v.role_id=r.role_id ORDER BY v.version DESC LIMIT 1),r.role_code)`;
+   WHERE v.brand_id=r.brand_id AND v.role_id=r.role_id
+   ORDER BY (v.lifecycle IN ('Active','Deactivated')) DESC,v.version DESC LIMIT 1),r.role_code)`;
 
 export async function listStoreRoleAssignments(
   tx: RoleAssignmentTransaction,

@@ -537,6 +537,11 @@ function validateSql(
           (file ===
             "migrations/2000-release-001/2000_240_create_role_assignment_sole_operator_approval.sql" &&
             metadata.owner === "@bop/permission" &&
+            metadata.schema === "bop_permission") ||
+          // WP-2423 role presets: a sole owner's own role change approval.
+          (file ===
+            "migrations/2000-release-001/2000_321_create_role_administration_sole_operator_approval.sql" &&
+            metadata.owner === "@bop/permission" &&
             metadata.schema === "bop_permission")) &&
         match[1] === "bop_tenant" &&
         (match[2] === "hold_brand_sole_operator_on" || match[2] === "brand_sole_operator_was_on") &&

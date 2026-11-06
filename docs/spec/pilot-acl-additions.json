@@ -6047,6 +6047,24 @@
       "privilege": "INSERT",
       "principal": "api",
       "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); WP-2423 M07 DEC-SOLE-OPERATOR-APPROVAL staff roles: a sole owner's own approval of a staff role, recorded as approved alone (append-only)"
+    },
+    {
+      "type": "table",
+      "schema": "bop_permission",
+      "object": "role_administration_sole_operator_approval",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); WP-2423 role presets (Owner request 2026-11-06): a sole owner's own approval of a role change, recorded as approved alone (append-only)"
+    },
+    {
+      "type": "table",
+      "schema": "bop_permission",
+      "object": "role_administration_sole_operator_approval",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); WP-2423 role presets (Owner request 2026-11-06): a sole owner's own approval of a role change, recorded as approved alone (append-only)"
     }
   ]
 }

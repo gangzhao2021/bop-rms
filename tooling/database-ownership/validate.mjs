@@ -3309,6 +3309,11 @@ async function scanUnsupported(root, module, diagnostics) {
             "role_administration_permission",
             "role_administration_decision",
             "role_administration_operation",
+            // WP-2423 role presets: the mark of a sole owner's own role change approval.
+            "role_administration_sole_operator_approval",
+            // WP-2423 role presets: a role is never removed while a staff role request waits on it.
+            "role_assignment_change",
+            "role_assignment_change_decision",
             "role",
             "role_assignment",
             "permission_definition",

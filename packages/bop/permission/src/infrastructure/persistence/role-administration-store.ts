@@ -35,8 +35,19 @@ export interface RoleAdministrationDecisionView {
   readonly occurredAt: string;
 }
 export interface RoleAdministrationRoleView {
+  /** The role's latest version: every command works on it and expects its version. */
   readonly record: RoleAdministrationVersionRecord;
+  /**
+   * WP-2423 role presets: the version staff hold now (latest Active or Deactivated), or null when
+   * the role was never turned on. Names, permissions and grants shown to staff come from it while
+   * a change waits.
+   */
+  readonly effective: RoleAdministrationVersionRecord | null;
+  /** The first version of the change waiting now (Draft/InReview/Approved head), else null. */
+  readonly opening: RoleAdministrationVersionRecord | null;
   readonly memberCount: number;
+  /** Staff role requests still waiting that would give this role. */
+  readonly openAssignmentChanges: number;
   readonly decisions: readonly RoleAdministrationDecisionView[];
 }
 export class RoleAdministrationStoreError extends Error {
@@ -110,7 +121,86 @@ async function toRecord(
     decisionEvidenceReference: ref(row.decision_evidence_reference),
     reasonCode: String(row.reason_code),
     changedAt: iso(row.changed_at),
+    // 2000_320/2000_321: a version approved by its own submitter stands only with the mark of a
+    // sole-operator approval, so equality here always means it was approved alone.
+    approvalMode:
+      row.approved_by_reference !== null &&
+      String(row.approved_by_reference) === String(row.submitted_by_reference)
+        ? "SoleOperator"
+        : "Independent",
   });
+}
+const pendingLifecycles = new Set(["Draft", "InReview", "Approved"]);
+/** The effective and opening versions of a role whose latest version is `head`. */
+async function versionsAround(
+  tx: RoleAdministrationTransaction,
+  head: RoleAdministrationVersionRecord,
+): Promise<{
+  readonly effective: RoleAdministrationVersionRecord | null;
+  readonly opening: RoleAdministrationVersionRecord | null;
+}> {
+  const effectiveRow = (
+    await tx.query(
+      `SELECT v.* FROM bop_permission.role_administration_version v WHERE v.brand_id=$1 AND v.administration_reference=$2
+       AND v.lifecycle IN ('Active','Deactivated') ORDER BY v.version DESC LIMIT 1`,
+      [head.brandReference, head.administrationReference],
+    )
+  ).rows[0];
+  const effective =
+    effectiveRow === undefined
+      ? null
+      : Number(effectiveRow.version) === head.version
+        ? head
+        : await toRecord(tx, effectiveRow);
+  if (!pendingLifecycles.has(head.lifecycle)) return { effective, opening: null };
+  const openingRow = (
+    await tx.query(
+      `SELECT v.* FROM bop_permission.role_administration_version v WHERE v.brand_id=$1 AND v.administration_reference=$2
+       AND v.version>$3 ORDER BY v.version LIMIT 1`,
+      [head.brandReference, head.administrationReference, effective?.version ?? 0],
+    )
+  ).rows[0];
+  const opening =
+    openingRow === undefined
+      ? null
+      : Number(openingRow.version) === head.version
+        ? head
+        : await toRecord(tx, openingRow);
+  return { effective, opening };
+}
+async function openAssignmentChanges(
+  tx: RoleAdministrationTransaction,
+  brandReference: string,
+  roleReference: string,
+): Promise<number> {
+  return Number(
+    (
+      await tx.query(
+        `SELECT count(*)::int n FROM bop_permission.role_assignment_change c WHERE c.brand_id=$1 AND c.role_id=$2 AND c.kind='Assign'
+         AND NOT EXISTS (SELECT 1 FROM bop_permission.role_assignment_change_decision d WHERE d.change_id=c.change_id)`,
+        [brandReference, roleReference],
+      )
+    ).rows[0]?.n ?? 0,
+  );
+}
+async function roleView(
+  tx: RoleAdministrationTransaction,
+  scope: RoleAdministrationScope,
+  row: Record<string, unknown>,
+  at: string,
+): Promise<RoleAdministrationRoleView> {
+  const record = await toRecord(tx, row);
+  return {
+    record,
+    ...(await versionsAround(tx, record)),
+    memberCount: await memberCount(tx, scope.brandReference, record.roleReference, at),
+    openAssignmentChanges: await openAssignmentChanges(
+      tx,
+      scope.brandReference,
+      record.roleReference,
+    ),
+    decisions: await decisions(tx, scope.brandReference, record.administrationReference),
+  };
 }
 async function memberCount(
   tx: RoleAdministrationTransaction,
@@ -162,14 +252,7 @@ export async function listRoleAdministration(
     ])
   ).rows;
   const result: RoleAdministrationRoleView[] = [];
-  for (const row of rows) {
-    const record = await toRecord(tx, row);
-    result.push({
-      record,
-      memberCount: await memberCount(tx, scope.brandReference, record.roleReference, at),
-      decisions: await decisions(tx, scope.brandReference, record.administrationReference),
-    });
-  }
+  for (const row of rows) result.push(await roleView(tx, scope, row, at));
   return result;
 }
 export async function loadRoleAdministration(
@@ -187,12 +270,42 @@ export async function loadRoleAdministration(
     ])
   ).rows[0];
   if (row === undefined) throw new RoleAdministrationStoreError("ROLE_ADMIN_NOT_FOUND");
-  const record = await toRecord(tx, row);
-  return {
-    record,
-    memberCount: await memberCount(tx, scope.brandReference, roleReference, at),
-    decisions: await decisions(tx, scope.brandReference, record.administrationReference),
-  };
+  return roleView(tx, scope, row, at);
+}
+/**
+ * WP-2423 role presets: a command already recorded under this operation reference (a retry), with
+ * the role it produced, or null.
+ */
+export async function findRoleAdministrationOperation(
+  tx: RoleAdministrationTransaction,
+  scope: RoleAdministrationScope,
+  operationReference: string,
+): Promise<{
+  readonly commandType: string;
+  readonly actorReference: string;
+  readonly roleReference: string;
+  readonly version: number;
+  readonly lifecycle: string;
+} | null> {
+  await tx.query(scopeSql, [scope.brandReference, scope.storeReference]);
+  const row = (
+    await tx.query(
+      `SELECT o.command_type,o.actor_reference::text actor,v.role_id::text role,v.version::int version,v.lifecycle
+       FROM bop_permission.role_administration_operation o
+       JOIN bop_permission.role_administration_version v ON v.brand_id=o.brand_id AND v.administration_reference=o.administration_reference AND v.version=o.resulting_version
+       WHERE o.brand_id=$1 AND o.operation_reference=$2`,
+      [scope.brandReference, operationReference],
+    )
+  ).rows[0];
+  return row === undefined
+    ? null
+    : {
+        commandType: String(row.command_type),
+        actorReference: String(row.actor),
+        roleReference: String(row.role),
+        version: Number(row.version),
+        lifecycle: String(row.lifecycle),
+      };
 }
 /** Active catalog definitions a role may select, keyed by action code. */
 export async function readPermissionDefinitionReferences(
@@ -239,12 +352,19 @@ export async function buildRolePermissionSelections(
 const decisionOf = {
   SaveDraft: null,
   Duplicate: null,
+  Create: null,
+  Revise: null,
+  RestoreDefault: null,
   Submit: "Submitted",
   Approve: "Approved",
+  ApproveAlone: "Approved",
   Reject: "Rejected",
+  Withdraw: "Withdrawn",
   Activate: "Activated",
   Deactivate: "Deactivated",
 } as const;
+const createsRole = (operation: keyof typeof decisionOf) =>
+  operation === "Duplicate" || operation === "Create";
 
 /** Postgres ports for executeRoleAdministration inside the caller's transaction. */
 export function createPostgresRoleAdministrationPorts(options: {
@@ -263,6 +383,8 @@ export function createPostgresRoleAdministrationPorts(options: {
     impact: {
       countActiveAssignments: (roleReference) =>
         memberCount(tx, options.scope.brandReference, roleReference, options.clock.now()),
+      countOpenAssignmentChanges: (roleReference) =>
+        openAssignmentChanges(tx, options.scope.brandReference, roleReference),
     },
     policy: {
       async currentVersion(brandReference) {
@@ -303,11 +425,15 @@ export function createPostgresRoleAdministrationPorts(options: {
             [next.brandReference, next.administrationReference],
           )
         ).rows[0]?.v;
-        const expectedHead = options.operation === "Duplicate" ? null : input.expectedVersion;
+        const expectedHead = createsRole(options.operation) ? null : input.expectedVersion;
         if ((head ?? null) !== expectedHead)
           throw new RoleAdministrationStoreError("ROLE_ADMIN_VERSION_CONFLICT");
         const at = next.changedAt;
-        if (options.operation === "Duplicate") {
+        // ApproveAlone: the sole-operator gate is read after the role's lock, inside the commit.
+        const soleOperator =
+          input.soleOperator === null ? null : await input.soleOperator.confirm();
+        const audit = input.audit(soleOperator?.actorMfaAt ?? null);
+        if (createsRole(options.operation)) {
           const taken = await tx.query(
             "SELECT 1 FROM bop_permission.role WHERE brand_id=$1 AND store_id IS NOT DISTINCT FROM $2 AND role_code=$3",
             [next.brandReference, next.storeReference, next.code],
@@ -382,6 +508,22 @@ export function createPostgresRoleAdministrationPorts(options: {
               at,
             ],
           );
+        if (soleOperator !== null)
+          await tx.query(
+            `INSERT INTO bop_permission.role_administration_sole_operator_approval(brand_id,store_id,administration_reference,approved_version,
+               approval_mode,actor_id,actor_mfa_at,approved_at,audit_id,data_classification)
+             VALUES($1,$2,$3,$4,'SoleOperator',$5,$6,$7,$8,'ConfigurationMetadata')`,
+            [
+              next.brandReference,
+              next.storeReference,
+              next.administrationReference,
+              next.version,
+              options.actorReference,
+              soleOperator.actorMfaAt,
+              at,
+              audit.auditId,
+            ],
+          );
         if (input.activatePolicy) await materialize(next, at);
         await tx.query(
           `INSERT INTO bop_permission.role_administration_operation(operation_reference,brand_id,store_id,administration_reference,command_type,
@@ -393,15 +535,15 @@ export function createPostgresRoleAdministrationPorts(options: {
             next.storeReference,
             next.administrationReference,
             options.operation,
-            input.expectedVersion,
+            input.expectedVersion ?? next.version,
             next.version,
             intentDigest,
             options.actorReference,
-            input.audit.auditId,
+            audit.auditId,
             at,
           ],
         );
-        await appendAuditRecordInTransaction(tx, input.audit);
+        await appendAuditRecordInTransaction(tx, audit);
       },
     },
   };
