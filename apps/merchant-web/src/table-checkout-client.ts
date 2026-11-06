@@ -23,6 +23,8 @@ export type TableCheckoutErrorCode =
   | "GuestPaying"
   /** WP-2423 item 8 ④: the split can't change once a part was paid or a guest started paying. */
   | "SplitLocked"
+  /** WP-2423 item 8 ⑤: a guest round still waits for staff OK; nothing was recorded. */
+  | "RoundsWaiting"
   | "NotReady"
   | "Unavailable"
   | "OutcomeUnknown"
@@ -84,6 +86,19 @@ export interface TableBill {
     readonly taxMinor: string;
     readonly totalMinor: string;
   };
+  /**
+   * WP-2423 item 8 ⑤: guest rounds waiting for staff OK — not on this bill until sent to the
+   * kitchen; no payment is taken while any waits (older server: none).
+   */
+  readonly waitingRounds: readonly {
+    readonly orderReference: string;
+    readonly orderBatchReference: string;
+    readonly heldAt: string;
+    readonly reason: "FirstOrder" | "PhoneRapid" | "TableRapid";
+    readonly itemCount: number;
+    readonly totalMinor: string;
+    readonly orderedBy: number | null;
+  }[];
   /**
    * WP-2423 DEC-TAX-WHOLE-RECEIPT: the bill's tax rounding (whole-bill tax less what the rounds
    * were charged; positive or negative), already in the rounds' tax (older server: 0).
@@ -269,6 +284,7 @@ export function parseTableBill(value: unknown): TableBill {
       totalMinor: amount(owed?.totalMinor),
     }),
     taxRoundingMinor: signed(raw.taxRoundingMinor),
+    waitingRounds: waitingRoundsOf(raw.waitingRounds),
     consistent: raw.consistent,
     settlement:
       settlement === null
@@ -435,6 +451,7 @@ const codes: Readonly<Record<string, TableCheckoutErrorCode>> = {
   already_paid: "AlreadyPaid",
   guest_paying: "GuestPaying",
   split_locked: "SplitLocked",
+  rounds_waiting: "RoundsWaiting",
   tips_off: "TipsOff",
   tip_choices_changed: "TipChoicesChanged",
   taken_before_records: "TakenBeforeRecords",
@@ -459,6 +476,43 @@ function tipsOf(value: unknown): TableBill["tips"] {
   )
     return invalid();
   return Object.freeze({ enabled: raw.enabled, tierPercents: Object.freeze(tiers.map(Number)) });
+}
+
+function waitingRoundsOf(value: unknown): TableBill["waitingRounds"] {
+  if (value === undefined) return Object.freeze([]);
+  if (!Array.isArray(value) || value.length > 200) return invalid();
+  return Object.freeze(
+    value.map((entry: unknown) => {
+      const round = (entry ?? {}) as Record<string, unknown>;
+      const ref = (candidate: unknown) =>
+        typeof candidate === "string" && reference.test(candidate) ? candidate : invalid();
+      return Object.freeze({
+        orderReference: ref(round.orderReference),
+        orderBatchReference: ref(round.orderBatchReference),
+        heldAt:
+          typeof round.heldAt === "string" && Number.isFinite(Date.parse(round.heldAt))
+            ? round.heldAt
+            : invalid(),
+        reason:
+          round.reason === "FirstOrder" ||
+          round.reason === "PhoneRapid" ||
+          round.reason === "TableRapid"
+            ? round.reason
+            : invalid(),
+        itemCount:
+          Number.isSafeInteger(round.itemCount) && (round.itemCount as number) >= 0
+            ? (round.itemCount as number)
+            : invalid(),
+        totalMinor: amount(round.totalMinor),
+        orderedBy:
+          round.orderedBy === null || round.orderedBy === undefined
+            ? null
+            : Number.isSafeInteger(round.orderedBy) && (round.orderedBy as number) >= 1
+              ? (round.orderedBy as number)
+              : invalid(),
+      });
+    }),
+  );
 }
 
 function reductionOf(value: unknown) {
@@ -541,6 +595,11 @@ export function createTableCheckoutClient(fetcher: typeof fetch = fetch) {
         readonly takenAt: string | null;
         /** WP-2423 item 8 ④: the part of a split bill this payment is (null: the whole table). */
         readonly partNumber?: number | null;
+        /**
+         * What the bill (or the part) came to on screen when staff took the payment: the server
+         * refuses it ("bill changed") when the bill changed meanwhile.
+         */
+        readonly owedMinor?: string;
       },
     ) {
       const { partNumber, ...rest } = command;

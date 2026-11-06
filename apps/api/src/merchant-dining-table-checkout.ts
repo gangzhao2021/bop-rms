@@ -209,6 +209,8 @@ export interface DiningTableBill {
     readonly orderReference: string;
     readonly orderBatchReference: string;
     readonly heldAt: string;
+    /** Why it waits (staff see it in words; never a code on screen). */
+    readonly reason: "FirstOrder" | "PhoneRapid" | "TableRapid";
     readonly itemCount: number;
     readonly totalMinor: string;
     /** The phone that sent it (as `rounds[].orderedBy`), or null when unknown. */
@@ -634,6 +636,7 @@ export async function readDiningTableBill(
         orderReference: String(hold.orderReference),
         orderBatchReference: batch,
         heldAt: String(hold.heldAt),
+        reason: hold.reason,
         itemCount: items.reduce((sum, item) => sum + item.quantity, 0),
         totalMinor: items
           .reduce(

@@ -246,7 +246,11 @@ export function TableHeldRounds({
       setProblem(
         error instanceof TablePhonesError && error.code === "OutcomeUnknown"
           ? t("We couldn't confirm the result. Press the button again: it is never recorded twice.")
-          : t("That didn't go through. Read the table again and retry."),
+          : error instanceof TablePhonesError && error.code === "TablePaid"
+            ? t(
+                "This table has already paid. Cancel this round instead, or take a new order for it.",
+              )
+            : t("That didn't go through. Read the table again and retry."),
       );
     } finally {
       setBusy(false);

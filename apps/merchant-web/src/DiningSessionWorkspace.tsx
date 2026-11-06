@@ -1549,7 +1549,8 @@ function TablePanel({
           }}
         />
       ) : null}
-      {seated ? (
+      {/* At checkout the waiting rounds are decided in Checkout itself, before the payment. */}
+      {seated && !(table.paymentTiming === "PayLater" && table.session?.phase === "Closing") ? (
         <TableHeldRounds
           rounds={table.heldRounds ?? []}
           csrf={csrf}

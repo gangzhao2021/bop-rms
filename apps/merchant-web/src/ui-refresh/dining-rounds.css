@@ -322,6 +322,14 @@
   color: var(--bop-color-text-muted);
   font-size: 14px;
 }
+/* WP-2423 item 8 ⑤: rounds waiting for staff OK, decided before the payment (no box). */
+.table-checkout__waiting {
+  margin: 12px 0 16px;
+}
+.table-checkout__waiting > p:first-child {
+  margin: 0;
+  font-weight: 600;
+}
 
 .table-checkout__secondary {
   justify-self: start;

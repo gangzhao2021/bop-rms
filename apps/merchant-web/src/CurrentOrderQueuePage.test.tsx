@@ -26,6 +26,7 @@ import {
   paymentDueTier,
   storeCancelledBatches,
   unpaidCancelledBatches,
+  waitingForStaffBatches,
   unpaidCancelledTotal,
   orderRefundRows,
   orderAgeText,
@@ -1177,6 +1178,91 @@ it("WP-2423: lines of a round cancelled for a failed payment are marked and not 
   expect(renderToStaticMarkup(<CurrentOrderLines lines={detail.lines} />)).not.toContain(
     "Cancelled unpaid rounds",
   );
+});
+it("WP-2423 item 8 ⑤: a round waiting for staff OK is listed apart and left out of the total", () => {
+  const line = (n: number, batch: number, amount: string) => ({
+    orderItemReference: unpaidId(300 + n),
+    orderBatchReference: unpaidId(batch),
+    name: "Synthetic dish " + n,
+    options: [],
+    quantity: 1,
+    customerNote: null,
+    unitPrice: { amountMinor: "1000", currencyCode: "CAD" },
+    subtotal: { amountMinor: "1000", currencyCode: "CAD" },
+    discount: { amountMinor: "0", currencyCode: "CAD" },
+    tax: { amountMinor: "130", currencyCode: "CAD" },
+    fee: { amountMinor: "0", currencyCode: "CAD" },
+    total: { amountMinor: amount, currencyCode: "CAD" },
+    canCancel: false,
+    cancellation: null,
+  });
+  const batch = {
+    orderBatchReference: unpaidId(90),
+    sequence: 1,
+    acceptanceStatus: "Accepted",
+    canRequestAcceptance: false,
+    canCancel: false,
+    staffCancellation: null,
+    canCancelItems: false,
+    paymentDue: null,
+  };
+  const detail = parseCurrentOrderDetail(
+    {
+      screenId: "OPS-ORDER-DETAIL",
+      pickupContact: null,
+      order: {
+        orderReference: unpaidId(1),
+        orderNumber: "ORD-1008",
+        orderType: "DineIn",
+        sourceChannel: "Qr",
+        submittedAt: "2026-09-14T00:00:00.000Z",
+        observedAt: "2026-09-14T00:40:00.000Z",
+        initialBatchReference: unpaidId(90),
+        batches: [
+          batch,
+          {
+            ...batch,
+            orderBatchReference: unpaidId(91),
+            sequence: 2,
+            acceptanceStatus: "NotAccepted",
+            // Held hours ago: no payment deadline, nothing "not confirmed by the card provider".
+            waitingForStaff: { heldAt: "2026-09-14T00:10:00.000Z" },
+          },
+        ],
+        canRequestAcceptance: false,
+        unfulfillable: null,
+        pickupNotCollected: false,
+        acceptBy: null,
+        awaitingPayment: false,
+        currentPhase: "Accepted",
+        currentVersion: 4,
+      },
+      lines: {
+        items: [line(1, 90, "1130"), line(2, 91, "1130")],
+        totals: {
+          subtotal: { amountMinor: "2000", currencyCode: "CAD" },
+          discount: { amountMinor: "0", currencyCode: "CAD" },
+          tax: { amountMinor: "260", currencyCode: "CAD" },
+          fee: { amountMinor: "0", currencyCode: "CAD" },
+          total: { amountMinor: "2260", currencyCode: "CAD" },
+        },
+      },
+    },
+    unpaidId(1),
+  );
+  const waiting = waitingForStaffBatches(detail.view);
+  expect([...waiting]).toEqual([unpaidId(91)]);
+  const html = renderToStaticMarkup(
+    <CurrentOrderLines lines={detail.lines} waitingBatches={waiting} />,
+  );
+  expect(html).toContain("Waiting for your OK · not on the bill");
+  // The total is the bill's (as checkout reads it); the waiting round is shown apart.
+  expect(html).toMatch(/<dt>Subtotal<\/dt><dd>\$10\.00<\/dd>/u);
+  expect(html).toMatch(/<dt>Tax<\/dt><dd>\$1\.30<\/dd>/u);
+  expect(html).toMatch(/<dt>Total<\/dt><dd>\$11\.30<\/dd>/u);
+  expect(html).toMatch(/Waiting for your OK · not on the bill yet<\/dt><dd>\$11\.30<\/dd>/u);
+  expect(html).not.toContain("Card payment not confirmed");
+  expect(html).not.toContain("cancelled automatically");
 });
 it("WP-2423: words an unpaid round's payment state for staff", () => {
   expect(paymentDueText({ status: "Awaiting", cancelsAt: null }, "UTC")).toBe("Awaiting payment");

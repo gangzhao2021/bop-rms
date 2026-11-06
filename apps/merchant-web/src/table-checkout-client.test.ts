@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { cashTotalMinor, parseTableBill } from "./table-checkout-client.js";
+import {
+  cashTotalMinor,
+  createTableCheckoutClient,
+  parseTableBill,
+} from "./table-checkout-client.js";
 import { dollarsToMinor } from "./TableCheckout.js";
 
 describe("DEC-DINE-IN-PAY-LATER table checkout amounts", () => {
@@ -41,5 +45,62 @@ describe("DEC-DINE-IN-PAY-LATER table checkout amounts", () => {
         settlement: { method: "Bitcoin" },
       }),
     ).toThrow();
+  });
+});
+
+describe("WP-2423 item 8 ⑤: rounds waiting for staff OK at checkout", () => {
+  const ref = (n: number) => "01909969-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+  const base = {
+    diningSessionReference: ref(2),
+    sessionPhase: "Closing",
+    sessionVersion: 7,
+    paymentTiming: "PayLater",
+    tableLabel: "T5",
+    orderReference: ref(3),
+    rounds: [],
+    owed: { subtotalMinor: "0", taxMinor: "0", totalMinor: "0" },
+    consistent: true,
+    settlement: null,
+  };
+  it("reads them strictly, and none from an older server", () => {
+    expect(parseTableBill(base).waitingRounds).toEqual([]);
+    const round = {
+      orderReference: ref(3),
+      orderBatchReference: ref(9),
+      heldAt: "2026-11-06T04:17:00.000Z",
+      reason: "PhoneRapid",
+      itemCount: 2,
+      totalMinor: "1495",
+      orderedBy: 2,
+    };
+    expect(parseTableBill({ ...base, waitingRounds: [round] }).waitingRounds).toEqual([round]);
+    for (const broken of [
+      { ...round, totalMinor: "14.95" },
+      { ...round, reason: "Other" },
+      { ...round, orderBatchReference: "nine" },
+    ])
+      expect(() => parseTableBill({ ...base, waitingRounds: [broken] })).toThrow();
+  });
+  it("sends the amount staff saw with the payment, and says when a round still waits", async () => {
+    const calls: { url: string; body: unknown }[] = [];
+    const fetcher = (async (url: string, init: RequestInit) => {
+      calls.push({ url, body: JSON.parse(String(init.body)) });
+      return new Response(JSON.stringify({ error: "rounds_waiting" }), { status: 409 });
+    }) as unknown as typeof fetch;
+    const client = createTableCheckoutClient(fetcher);
+    await expect(
+      client.settle("A".repeat(43), {
+        operationReference: ref(40),
+        diningSessionReference: ref(2),
+        method: "CardMachine",
+        tip: { kind: "None" },
+        tenderedMinor: null,
+        slipReference: null,
+        takenAt: null,
+        owedMinor: "9596",
+      }),
+    ).rejects.toMatchObject({ code: "RoundsWaiting" });
+    expect(calls[0]?.url).toBe("/merchant/dining/table-settle");
+    expect(calls[0]?.body).toMatchObject({ owedMinor: "9596", recordedAfterOutage: false });
   });
 });

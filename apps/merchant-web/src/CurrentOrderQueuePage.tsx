@@ -258,9 +258,15 @@ export function CurrentOrderLines({
   unpaidCancelledBatches,
   failedPaymentBatches,
   removedItems,
+  waitingBatches,
   refundRows,
   rounds,
 }: {
+  /**
+   * WP-2423 item 8 ⑤: guest rounds waiting for staff OK. Not on the bill until staff send them:
+   * listed with their tag, left out of the totals and shown apart under them.
+   */
+  readonly waitingBatches?: ReadonlySet<string> | undefined;
   /** A table's rounds: the items are listed under the round they were ordered in. */
   readonly rounds?: OrderLineRounds | undefined;
   readonly lines: CurrentOrderDetail["lines"];
@@ -294,12 +300,20 @@ export function CurrentOrderLines({
   const removedLine = (item: CurrentOrderDetail["lines"]["items"][number]) =>
     removedItems?.has(item.orderItemReference) === true;
   const removed = removedItemsTotal(lines, removedItems);
+  const waitingLine = (item: CurrentOrderDetail["lines"]["items"][number]) =>
+    item.cancellation === null &&
+    !removedLine(item) &&
+    waitingBatches?.has(item.orderBatchReference) === true;
+  // The same dishes the table's bill would add for them (a dish taken off is never on it).
+  const waitingMinor = lines.items
+    .filter(waitingLine)
+    .reduce((sum, item) => sum + BigInt(item.total.amountMinor), 0n);
   // v15 2026-10-29: the totals are what the order is charged — never the dishes taken off an
   // unpaid bill or the rounds cancelled for a failed payment (listed below as not charged), so staff
-  // read the same figure the payment takes.
+  // read the same figure the payment takes. v15 2026-11-06: nor a round waiting for staff OK.
   const shown = chargedTotals(
     lines,
-    lines.items.filter((item) => removedLine(item) || unpaidLine(item)),
+    lines.items.filter((item) => removedLine(item) || unpaidLine(item) || waitingLine(item)),
   );
   // One "Check refund" per pending cancellation, on its first line.
   const checkReferences = new Set<string>();
@@ -365,6 +379,10 @@ export function CurrentOrderLines({
           <span className="order-line-cancellation">
             <strong>{t("Taken off the bill · not charged")}</strong>
           </span>
+        ) : waitingLine(item) ? (
+          <span className="order-line-cancellation">
+            <strong>{t("Waiting for your OK · not on the bill")}</strong>
+          </span>
         ) : item.cancellation === null &&
           failedPaymentBatches?.has(item.orderBatchReference) === true ? (
           <span className="order-line-cancellation">
@@ -425,7 +443,8 @@ export function CurrentOrderLines({
                   (item) =>
                     item.cancellation === null &&
                     !cancelledBatches?.has(item.orderBatchReference) &&
-                    !unpaidLine(item),
+                    !unpaidLine(item) &&
+                    !waitingLine(item),
                 )
                 .reduce((sum, item) => sum + BigInt(item.subtotal.amountMinor), 0n);
               return (
@@ -505,6 +524,19 @@ export function CurrentOrderLines({
           <dd>{orderMoney(orderTotalWithTip(shown))}</dd>
         </div>
       </dl>
+      {waitingMinor > 0n ? (
+        <dl className="order-lines-totals order-lines-cancelled-refund">
+          <div>
+            <dt>{t("Waiting for your OK · not on the bill yet")}</dt>
+            <dd>
+              {orderMoney({
+                amountMinor: waitingMinor.toString(),
+                currencyCode: lines.totals.total.currencyCode,
+              })}
+            </dd>
+          </div>
+        </dl>
+      ) : null}
       {unpaid !== null ? (
         <dl className="order-lines-totals order-lines-cancelled-refund">
           <div>
@@ -681,6 +713,17 @@ export function removedItemsTotal(
 export function removedUnpaidItems(view: CurrentOrderQueue): ReadonlySet<string> {
   return new Set(
     view.items.flatMap((order) => order.batches.flatMap((batch) => batch.unpaidRemovedItems)),
+  );
+}
+
+/** WP-2423 item 8 ⑤: guest rounds waiting for staff OK (not on the bill until sent). */
+export function waitingForStaffBatches(view: CurrentOrderQueue): ReadonlySet<string> {
+  return new Set(
+    view.items.flatMap((order) =>
+      order.batches
+        .filter((batch) => batch.waitingForStaff !== null)
+        .map((batch) => batch.orderBatchReference),
+    ),
   );
 }
 
@@ -1228,6 +1271,7 @@ function QueuedOrderLines({
         unpaidCancelledBatches={unpaidCancelledBatches(state.detail.view)}
         failedPaymentBatches={failedPaymentBatches(state.detail.view)}
         removedItems={removedUnpaidItems(state.detail.view)}
+        waitingBatches={waitingForStaffBatches(state.detail.view)}
         refundRows={orderRefundRows(
           state.detail.order,
           state.detail.lines,
@@ -1453,7 +1497,12 @@ function OrderStatusNotes({
         <span className="order-staff-cancelled">{t("Cancelled before payment")}</span>
       ) : null}
       {order.batches.map((batch) =>
-        batch.paymentDue === null ? null : (
+        batch.waitingForStaff !== null ? (
+          <span key={batch.orderBatchReference} className="order-accept-by" data-tier="warning">
+            {order.batches.length > 1 ? t("Round {sequence}: ", { sequence: batch.sequence }) : ""}
+            {t("Waiting for your OK · not on the bill")}
+          </span>
+        ) : batch.paymentDue === null ? null : (
           <span
             key={batch.orderBatchReference}
             className="order-accept-by"
@@ -1739,6 +1788,15 @@ function OrderDetailBody({
                   : "",
             },
           )}
+        </p>
+      ) : batch.waitingForStaff !== null ? (
+        // WP-2423 item 8 ⑤: never "payment not confirmed" or "cancelled automatically".
+        <p className="order-workbench-closed" role="note">
+          <span className="order-accept-by" data-tier="warning">
+            {t(
+              "Waiting for your OK · send it to the kitchen or cancel it. It is never cancelled automatically.",
+            )}
+          </span>
         </p>
       ) : batch.paymentDue !== null ? (
         <p className="order-workbench-closed" role="note">
@@ -3252,6 +3310,7 @@ export function CurrentOrderQueuePage({
                             unpaidCancelledBatches={unpaidCancelledBatches(detail.view)}
                             failedPaymentBatches={failedPaymentBatches(detail.view)}
                             removedItems={removedUnpaidItems(detail.view)}
+                            waitingBatches={waitingForStaffBatches(detail.view)}
                             refundRows={orderRefundRows(
                               detail.order,
                               detail.lines,

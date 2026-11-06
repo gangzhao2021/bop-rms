@@ -1119,7 +1119,11 @@ it("WP-2423: reads one order's detail with its lines and hides other Stores' ord
   expect(response.status).toBe(200);
   expect(await response.json()).toEqual({
     screenId: "OPS-ORDER-DETAIL",
-    order: item,
+    // WP-2423 item 8 ⑤: every round says whether it waits for staff OK (null: it does not).
+    order: {
+      ...item,
+      batches: item.batches.map((batch) => ({ ...batch, waitingForStaff: null })),
+    },
     lines,
     paymentPosition: { refundedMinor: "500", refundPendingMinor: "0" },
     pickupContact,
@@ -1150,6 +1154,7 @@ it("WP-2423: reads one order's detail with its lines and hides other Stores' ord
   expect(((await warned.json()) as { order: typeof item }).order.batches[0]).toEqual({
     ...batch,
     paymentDue: due,
+    waitingForStaff: null,
   });
   // WP-2423: a list row carries its online payment's refund position (the detail's), so the row
   // says "partly refunded" after an item-cancellation refund as the detail does.
@@ -1164,6 +1169,7 @@ it("WP-2423: reads one order's detail with its lines and hides other Stores' ord
   const listed = await request(root, "/merchant/orders", { headers });
   expect(((await listed.json()) as { items: unknown[] }).items[0]).toEqual({
     ...item,
+    batches: item.batches.map((batch) => ({ ...batch, waitingForStaff: null })),
     paymentPosition: position,
   });
 });

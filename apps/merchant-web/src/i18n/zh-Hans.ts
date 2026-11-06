@@ -8287,4 +8287,21 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Orders cancelled and refunded in full · {orders}": "已取消并全额退款的订单 · {orders}",
   "The settlement's figures also include {orders} ({amount}) taken and given back the same day, which this report lists apart instead of as sales and refunds.":
     "日结的数字里还包括当天收款又全额退回的 {orders}（{amount}），本报表把它们单独列出，不算作销售和退款。",
+  "Waiting for your OK · not on the bill": "等你确认 · 未计入账单",
+  "Waiting for your OK · not on the bill yet": "等你确认 · 尚未计入账单",
+  "Waiting for your OK · send it to the kitchen or cancel it. It is never cancelled automatically.":
+    "等你确认 · 请送厨房或取消。系统不会自动取消。",
+  "A round is waiting for your OK and is not on this bill, so nothing was recorded. Send it to the kitchen or cancel it first. A round already served or charged is sent, never cancelled.":
+    "有一轮在等你确认，尚未计入本账单，所以没有记录这笔付款。请先送厨房或取消。客人已经吃到或已付款的轮次要送厨房，不要取消。",
+  "1 round is waiting for your OK and is not on this bill ({amount}). Send it to the kitchen or cancel it before taking payment.":
+    "有 1 轮等你确认，尚未计入本账单（{amount}）。收款前请先送厨房或取消。",
+  "{count} rounds are waiting for your OK and are not on this bill ({amount}). Send them to the kitchen or cancel them before taking payment.":
+    "有 {count} 轮等你确认，尚未计入本账单（{amount}）。收款前请先送厨房或取消。",
+  "A round the guests were already served or charged for (on paper during an outage too) is sent to the kitchen, so it is on the bill. Cancel only a round they did not get.":
+    "客人已经吃到或已付款的轮次（包括断网时记在纸上的），要送厨房，这样才计入账单。只取消客人没有拿到的轮次。",
+  "Decide the rounds waiting for your OK first": "请先处理等你确认的轮次",
+  "This table has already paid. Cancel this round instead, or take a new order for it.":
+    "这桌已经付款。请取消这一轮，或为它另开新单。",
+  "{name}: waiting for your OK, never sent to the kitchen, nothing paid. It will be cancelled now; nothing is refunded.":
+    "{name}：等你确认，未送厨房，未付款。现在将取消，无需退款。",
 });

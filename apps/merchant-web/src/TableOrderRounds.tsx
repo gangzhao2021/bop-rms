@@ -5,6 +5,7 @@ import {
   failedPaymentBatches,
   orderRefundRows,
   removedUnpaidItems,
+  waitingForStaffBatches,
   storeCancelledBatches,
   unpaidCancelledBatches,
 } from "./CurrentOrderQueuePage.js";
@@ -118,6 +119,7 @@ export function TableOrderRounds({
           cancelledBatches={storeCancelledBatches(detail.view)}
           unpaidCancelledBatches={unpaidCancelledBatches(detail.view)}
           removedItems={removedUnpaidItems(detail.view)}
+          waitingBatches={waitingForStaffBatches(detail.view)}
           failedPaymentBatches={failedPaymentBatches(detail.view)}
           refundRows={orderRefundRows(detail.order, detail.lines, detail.paymentPosition)}
           rounds={{

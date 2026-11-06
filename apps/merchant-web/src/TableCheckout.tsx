@@ -17,6 +17,7 @@ import {
 } from "./table-checkout-client.js";
 import type { StaffDiningTable, StaffDiningTableSession } from "./dining-session-client.js";
 import { compedText } from "./ItemCompAction.js";
+import { TableHeldRounds } from "./TablePhones.js";
 import { TableSplitControls } from "./TableSplit.js";
 import { notConfirmedPressAgainText, paymentNotConfirmedText } from "./failure-words.js";
 
@@ -79,6 +80,10 @@ function errorText(error: unknown): string {
       return t(
         "The bill changed (a round is still being sent, or something was changed). It has been read again: check it and try again.",
       );
+    case "RoundsWaiting":
+      return t(
+        "A round is waiting for your OK and is not on this bill, so nothing was recorded. Send it to the kitchen or cancel it first. A round already served or charged is sent, never cancelled.",
+      );
     case "TakenBeforeRecords":
       return t(
         "That paid-at time is before this store started recording sales in the system. Check when it was paid and enter it again.",
@@ -108,6 +113,70 @@ function errorText(error: unknown): string {
     default:
       return t("This couldn't be done right now. Try again.");
   }
+}
+
+/**
+ * WP-2423 item 8 ⑤ D4 (v15 Fireside Table 5): guest rounds waiting for staff OK are not on the
+ * bill, and no payment is taken until staff decide them — right here, with the same "Send to
+ * kitchen" / "Cancel this round" as on the table. A round already served or charged (on paper
+ * during an outage too) is sent, so it is on the bill: cancelling it would leave a sale unrecorded.
+ */
+function WaitingRoundsAtCheckout({
+  bill,
+  table,
+  csrf,
+  timeZone,
+  locked,
+  fetcher,
+  onChanged,
+}: {
+  readonly bill: TableBill;
+  readonly table: StaffDiningTable;
+  readonly csrf: string;
+  readonly timeZone: string | undefined;
+  readonly locked: boolean;
+  readonly fetcher?: typeof fetch | undefined;
+  readonly onChanged: () => void;
+}) {
+  const count = bill.waitingRounds.length;
+  const total = bill.waitingRounds.reduce((sum, round) => sum + BigInt(round.totalMinor), 0n);
+  const known = new Map(
+    (table.heldRounds ?? []).map((round) => [round.orderBatchReference, round.roundNumber]),
+  );
+  return (
+    <div className="table-checkout__waiting" role="alert">
+      <p>
+        {count === 1
+          ? t(
+              "1 round is waiting for your OK and is not on this bill ({amount}). Send it to the kitchen or cancel it before taking payment.",
+              { amount: cad(total) },
+            )
+          : t(
+              "{count} rounds are waiting for your OK and are not on this bill ({amount}). Send them to the kitchen or cancel them before taking payment.",
+              { count: String(count), amount: cad(total) },
+            )}
+      </p>
+      <p className="table-checkout__hint">
+        {t(
+          "A round the guests were already served or charged for (on paper during an outage too) is sent to the kitchen, so it is on the bill. Cancel only a round they did not get.",
+        )}
+      </p>
+      <TableHeldRounds
+        rounds={bill.waitingRounds.map((round) => ({
+          orderReference: round.orderReference,
+          orderBatchReference: round.orderBatchReference,
+          roundNumber: known.get(round.orderBatchReference) ?? null,
+          reason: round.reason,
+          heldAt: round.heldAt,
+        }))}
+        csrf={csrf}
+        timeZone={timeZone}
+        locked={locked}
+        onChanged={onChanged}
+        fetcher={fetcher}
+      />
+    </div>
+  );
 }
 
 /**
@@ -284,6 +353,8 @@ export function TableCheckout({
     bill !== null &&
     bill.settlement === null &&
     bill.consistent &&
+    // WP-2423 item 8 ⑤ D4: rounds waiting for staff OK are decided before any payment.
+    bill.waitingRounds.length === 0 &&
     (bill.split === null ||
       (selected !== null && selected.payment === null && !selected.guestPaying)) &&
     owed > 0n &&
@@ -429,6 +500,8 @@ export function TableCheckout({
         slipReference: method === "CardMachine" && slip.trim() !== "" ? slip.trim() : null,
         takenAt: paper ? paperInstant : null,
         partNumber: bill.split === null ? null : part,
+        // What staff saw and charged: refused if the bill changed meanwhile.
+        owedMinor: owed.toString(),
       });
       operation.current = null;
       setPaidAtRefused(false);
@@ -461,6 +534,7 @@ export function TableCheckout({
       if (
         error instanceof TableCheckoutError &&
         (error.code === "BillChanged" ||
+          error.code === "RoundsWaiting" ||
           error.code === "TipsOff" ||
           error.code === "TipChoicesChanged")
       )
@@ -596,6 +670,20 @@ export function TableCheckout({
             </div>
           ) : bill.settlement === null ? (
             <>
+              {bill.waitingRounds.length > 0 ? (
+                <WaitingRoundsAtCheckout
+                  bill={bill}
+                  table={table}
+                  csrf={csrf}
+                  timeZone={timeZone}
+                  locked={locked || busy}
+                  fetcher={fetcher}
+                  onChanged={() => {
+                    setReload((value) => value + 1);
+                    onChanged();
+                  }}
+                />
+              ) : null}
               <TableSplitControls
                 bill={bill}
                 csrf={csrf}
@@ -921,13 +1009,15 @@ export function TableCheckout({
                     >
                       {busy
                         ? t("Recording…")
-                        : chosenTip === null
-                          ? t("Choose a tip to take payment")
-                          : due === null
-                            ? t("Record payment")
-                            : method === "Cash"
-                              ? t("Cash received · {amount}", { amount: cad(cashDue ?? due) })
-                              : t("Paid on card machine · {amount}", { amount: cad(due) })}
+                        : bill.waitingRounds.length > 0
+                          ? t("Decide the rounds waiting for your OK first")
+                          : chosenTip === null
+                            ? t("Choose a tip to take payment")
+                            : due === null
+                              ? t("Record payment")
+                              : method === "Cash"
+                                ? t("Cash received · {amount}", { amount: cad(cashDue ?? due) })
+                                : t("Paid on card machine · {amount}", { amount: cad(due) })}
                     </button>
                   )}
                 </>

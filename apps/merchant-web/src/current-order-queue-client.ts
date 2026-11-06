@@ -727,6 +727,9 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
         value !== null && typeof value === "object" && Object.hasOwn(value, "kitchenRelease");
       const withRefundLate =
         value !== null && typeof value === "object" && Object.hasOwn(value, "automaticRefundLate");
+      // WP-2423 item 8 ⑤: a guest round waiting for staff OK (absent from an older server).
+      const withWaitingForStaff =
+        value !== null && typeof value === "object" && Object.hasOwn(value, "waitingForStaff");
       const batch = exact(value, [
         "orderBatchReference",
         "sequence",
@@ -747,6 +750,7 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
         ...(withKitchenReceived ? ["kitchenReceivedAt"] : []),
         ...(withKitchenRelease ? ["kitchenRelease"] : []),
         ...(withRefundLate ? ["automaticRefundLate"] : []),
+        ...(withWaitingForStaff ? ["waitingForStaff"] : []),
       ]);
       const references = (list: unknown) =>
         Array.isArray(list) && list.length <= 500
@@ -885,6 +889,21 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
             (item.orderType !== "Pickup" || batch.canRequestAcceptance !== true)))
       )
         return fail();
+      const waiting =
+        withWaitingForStaff && batch.waitingForStaff !== null
+          ? exact(batch.waitingForStaff, ["heldAt"])
+          : null;
+      // Only an unpaid guest round of a table not yet accepted waits for staff (no payment due).
+      if (
+        waiting !== null &&
+        (item.orderType !== "DineIn" ||
+          batch.acceptanceStatus !== "NotAccepted" ||
+          paymentDue !== null ||
+          staffCancellation !== null)
+      )
+        return fail();
+      const waitingForStaff =
+        waiting === null ? null : Object.freeze({ heldAt: instant(waiting.heldAt) });
       previousSequence = batch.sequence;
       seenBatches.add(orderBatchReference);
       const batchSubmittedAt = withSubmittedAt ? instant(batch.submittedAt) : null;
@@ -953,6 +972,11 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
         kitchenRelease,
         /** WP-2423 M04: a paid pickup past its deadline whose automatic refund has not happened. */
         automaticRefundLate: withRefundLate && batch.automaticRefundLate === true,
+        /**
+         * WP-2423 item 8 ⑤: a guest round waiting for staff OK — not in the kitchen and not on
+         * the bill until staff send it (never cancelled by time); null otherwise.
+         */
+        waitingForStaff,
         /** DEC-KITCHEN-ONE-TAP: when this round reached the kitchen; null: not yet or unknown. */
         kitchenReceivedAt:
           withKitchenReceived && typeof batch.kitchenReceivedAt === "string"

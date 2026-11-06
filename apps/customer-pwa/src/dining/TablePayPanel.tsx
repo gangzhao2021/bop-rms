@@ -65,6 +65,10 @@ function problemText(error: unknown) {
       );
     case "tip-choices-changed":
       return t("The tip choices just changed. Choose a tip again to pay.");
+    case "rounds-waiting":
+      return t(
+        "Some of your table’s dishes are waiting for staff to confirm them. Ask staff to confirm them, then pay.",
+      );
     default:
       return t("We couldn’t reach the payment service. Check your connection and try again.");
   }

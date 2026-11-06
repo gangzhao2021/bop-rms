@@ -3,7 +3,12 @@
  * no names), whether guests may join by scanning the table's QR code, and which phone sent each
  * round. Staff pause or resume joining by scan and take a phone off the table.
  */
-export type TablePhonesErrorCode = "PermissionDenied" | "Unavailable" | "OutcomeUnknown";
+export type TablePhonesErrorCode =
+  | "PermissionDenied"
+  | "Unavailable"
+  | "OutcomeUnknown"
+  /** WP-2423 item 8 ⑤: the table already paid; a waiting round can only be cancelled now. */
+  | "TablePaid";
 export class TablePhonesError extends Error {
   constructor(readonly code: TablePhonesErrorCode) {
     super("table phones " + code);
@@ -166,6 +171,11 @@ export function createHeldRoundClient(fetcher: typeof fetch = fetch) {
     }
     if (response.status === 401 || response.status === 403)
       throw new TablePhonesError("PermissionDenied");
+    if (response.status === 409) {
+      const body = (await response.json().catch(() => null)) as { error?: unknown } | null;
+      if (body?.error === "held_round_table_paid") throw new TablePhonesError("TablePaid");
+      throw new TablePhonesError("Unavailable");
+    }
     if (!response.ok || response.headers.get("cache-control") !== "no-store")
       throw new TablePhonesError(response.status >= 500 ? "OutcomeUnknown" : "Unavailable");
     return (await response.json().catch(() => null)) as unknown;

@@ -296,3 +296,42 @@ it("v15 2026-11-06: the kitchen note names the round the kitchen has had a while
     kitchenMayHaveStartedRound([round({ ...waiting, state: "BeingMade", refund: null })], now),
   ).toBeUndefined();
 });
+
+it("v15 2026-11-06 (Fireside Table 5): a round waiting for staff OK is never 'cancelled automatically'; closing cancels it with the held-round Cancel", async () => {
+  const now = Date.parse("2026-10-15T19:00:00.000Z");
+  const waiting = round({ state: "WaitingForStaff", refund: null, cancelsAt: null });
+  const text = guestsLeftRoundText(waiting, "America/Toronto", now);
+  expect(text).toBe(
+    "Round 4: waiting for your OK, never sent to the kitchen, nothing paid. It will be cancelled now; nothing is refunded.",
+  );
+  expect(text).not.toContain("automatically");
+  expect(resolvesOnConfirm(waiting)).toBe(true);
+  const plan = parseTableClosePlan(
+    {
+      ...wire,
+      rounds: [{ ...wire.rounds[0], state: "WaitingForStaff", refund: null }],
+      totals: { onlineMinor: "0", cardMachineMinor: "0" },
+    },
+    { order: id(3), session: id(2) },
+  );
+  expect(plan.rounds[0]?.state).toBe("WaitingForStaff");
+  const fetcher = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(new Response(JSON.stringify({ status: "Cancelled" }), { status: 200 }))
+    .mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: "held_round_not_waiting" }), { status: 409 }),
+    );
+  const client = createTableClosePlanClient(fetcher);
+  expect(await client.resolve(plan, plan.rounds[0] as TableCloseRound, id(44), csrf)).toBe("Done");
+  expect(fetcher.mock.calls[0]?.[0]).toBe("/merchant/dining/held-round");
+  expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body))).toEqual({
+    action: "Cancel",
+    orderReference: id(3),
+    orderBatchReference: id(20),
+    operationReference: id(44),
+  });
+  // Staff decided it meanwhile: the plan is read again.
+  expect(await client.resolve(plan, plan.rounds[0] as TableCloseRound, id(45), csrf)).toBe(
+    "Changed",
+  );
+});

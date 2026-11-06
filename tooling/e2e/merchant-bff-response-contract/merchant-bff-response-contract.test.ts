@@ -295,6 +295,8 @@ const dineIn = {
       compableItems: [],
       compedItems: [],
       submittedAt: at(1),
+      kitchenReceivedAt: null,
+      waitingForStaff: null,
     },
     {
       orderBatchReference: id(0x9032),
@@ -325,6 +327,8 @@ const dineIn = {
       compableItems: [],
       compedItems: [],
       submittedAt: at(2),
+      kitchenReceivedAt: null,
+      waitingForStaff: null,
     },
     {
       orderBatchReference: id(0x9033),
@@ -354,6 +358,8 @@ const dineIn = {
       compableItems: [],
       compedItems: [],
       submittedAt: at(3),
+      kitchenReceivedAt: null,
+      waitingForStaff: null,
     },
     {
       orderBatchReference: id(0x9034),
@@ -393,6 +399,8 @@ const dineIn = {
       compableItems: [],
       compedItems: [],
       submittedAt: at(4),
+      kitchenReceivedAt: null,
+      waitingForStaff: null,
     },
   ],
 } satisfies QueueItem;
@@ -472,6 +480,8 @@ const heldPickup = {
       compableItems: [],
       compedItems: [],
       submittedAt: at(5),
+      kitchenReceivedAt: null,
+      waitingForStaff: null,
     },
   ],
 } satisfies QueueItem;
@@ -557,6 +567,8 @@ const earlierCounterPickup = {
       compableItems: [],
       compedItems: [],
       submittedAt: at(6),
+      kitchenReceivedAt: null,
+      waitingForStaff: null,
     },
   ],
 } satisfies QueueItem;

@@ -159,10 +159,11 @@ function orderQueueRow(item: MerchantOrderQueueItem) {
       // WP-2423 item 8 ① segment 2: dishes a manager may comp or discount, and those comped.
       compableItems: batch.compableItems,
       compedItems: batch.compedItems,
-      // WP-2423 item 8 ⑤: a guest round waiting for staff OK, not on the bill (sent only then).
-      ...(batch.waitingForStaff === undefined || batch.waitingForStaff === null
-        ? {}
-        : { waitingForStaff: { heldAt: batch.waitingForStaff.heldAt } }),
+      // WP-2423 item 8 ⑤: a guest round waiting for staff OK, not on the bill (null otherwise).
+      waitingForStaff:
+        batch.waitingForStaff === undefined || batch.waitingForStaff === null
+          ? null
+          : { heldAt: batch.waitingForStaff.heldAt },
       // DEC-KITCHEN-ONE-TAP: how long the kitchen has had this round (null: it has not).
       ...(batch.kitchenReceivedAt === undefined
         ? {}

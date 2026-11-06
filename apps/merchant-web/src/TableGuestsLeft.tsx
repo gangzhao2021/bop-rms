@@ -54,6 +54,12 @@ export function guestsLeftRoundText(
               value: round.cancelsAt === null ? "" : " at " + storeTime(round.cancelsAt, timeZone),
             },
           );
+    case "WaitingForStaff":
+      // WP-2423 item 8 ⑤: never sent to the kitchen, never cancelled by time; closing cancels it.
+      return t(
+        "{name}: waiting for your OK, never sent to the kitchen, nothing paid. It will be cancelled now; nothing is refunded.",
+        { name: name },
+      );
     case "PaymentInProgress":
       // WP-2423 abandoned payment: the guest started paying online and didn't finish.
       return t(

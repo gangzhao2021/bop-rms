@@ -92,6 +92,8 @@ export type TablePaymentErrorCode =
   | "tips-off"
   /** The Store's tip percentages changed: the guest chooses again. */
   | "tip-choices-changed"
+  /** WP-2423 item 8 ⑤: some of the table's dishes wait for staff to confirm them first. */
+  | "rounds-waiting"
   | "unavailable";
 export class TablePaymentClientError extends Error {
   constructor(readonly code: TablePaymentErrorCode) {
@@ -275,6 +277,7 @@ const errorCodes: Readonly<Record<string, TablePaymentErrorCode>> = {
   table_not_found: "not-found",
   table_tips_turned_off: "tips-off",
   table_tip_choices_changed: "tip-choices-changed",
+  table_rounds_waiting: "rounds-waiting",
 };
 
 export function createTablePaymentClient(request: typeof fetch = globalThis.fetch) {

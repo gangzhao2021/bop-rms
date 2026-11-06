@@ -19,6 +19,8 @@ const minor = /^(0|[1-9][0-9]{0,17})$/u;
 const instantPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 export const tableCloseRoundStates = [
   "NotPaid",
+  // WP-2423 item 8 ⑤: a guest round waiting for staff OK (never sent, nothing paid, no deadline).
+  "WaitingForStaff",
   "PaymentInProgress",
   "PaidNotSent",
   "AlreadyRefunded",
@@ -160,6 +162,8 @@ export const resolvesOnConfirm = (round: TableCloseRound) =>
   // WP-2423 abandoned payment: an unpaid round (never paid, or paying never finished) is cancelled
   // with the unpaid round cancellation; nothing is refunded.
   round.state === "NotPaid" ||
+  // WP-2423 item 8 ⑤: cancelled with the held-round Cancel (its release; nothing is refunded).
+  round.state === "WaitingForStaff" ||
   round.state === "PaymentInProgress" ||
   round.state === "PaidNotSent" ||
   round.state === "AlreadyRefunded" ||
@@ -248,25 +252,33 @@ export function createTableClosePlanClient(fetcher: typeof fetch = fetch) {
       const unpaid = round.state === "NotPaid" || round.state === "PaymentInProgress";
       let response: Response;
       try {
-        response = unpaid
-          ? await post(fetcher, "/merchant/orders/cancel-unpaid-round", csrf, {
-              orderReference: plan.orderReference,
-              orderBatchReference: round.orderBatchReference,
-              operationReference,
-            })
-          : await post(
-              fetcher,
-              items ? "/merchant/orders/cancel-items" : "/merchant/orders/cancel",
-              csrf,
-              {
+        response =
+          round.state === "WaitingForStaff"
+            ? await post(fetcher, "/merchant/dining/held-round", csrf, {
+                action: "Cancel",
                 orderReference: plan.orderReference,
                 orderBatchReference: round.orderBatchReference,
-                ...(items ? { orderItemReferences: [...round.cancellableItemReferences] } : {}),
-                expectedOrderVersion: plan.orderVersion,
                 operationReference,
-                reasonCode: "GUEST_LEFT",
-              },
-            );
+              })
+            : unpaid
+              ? await post(fetcher, "/merchant/orders/cancel-unpaid-round", csrf, {
+                  orderReference: plan.orderReference,
+                  orderBatchReference: round.orderBatchReference,
+                  operationReference,
+                })
+              : await post(
+                  fetcher,
+                  items ? "/merchant/orders/cancel-items" : "/merchant/orders/cancel",
+                  csrf,
+                  {
+                    orderReference: plan.orderReference,
+                    orderBatchReference: round.orderBatchReference,
+                    ...(items ? { orderItemReferences: [...round.cancellableItemReferences] } : {}),
+                    expectedOrderVersion: plan.orderVersion,
+                    operationReference,
+                    reasonCode: "GUEST_LEFT",
+                  },
+                );
       } catch {
         return "Unknown";
       }
@@ -275,6 +287,8 @@ export function createTableClosePlanClient(fetcher: typeof fetch = fetch) {
       if (code === "full_sign_in_required") return "FullSignInRequired";
       if (response.status === 401 || response.status === 403) return "Denied";
       if (response.status === 409 && code === "order_version_conflict") return "Changed";
+      // Staff sent or cancelled the waiting round meanwhile: re-read the plan.
+      if (response.status === 409 && code === "held_round_not_waiting") return "Changed";
       // The guest's payment went through, or is still being confirmed: re-read the plan.
       if (
         response.status === 409 &&

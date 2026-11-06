@@ -1581,4 +1581,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "这些菜已经下过单（订单 {number}），这次没有新的扣款。",
   "These dishes were already ordered. Nothing new was charged.":
     "这些菜已经下过单，这次没有新的扣款。",
+  "Some of your table’s dishes are waiting for staff to confirm them. Ask staff to confirm them, then pay.":
+    "你这桌有菜品正在等店员确认。请先请店员确认，再付款。",
 });
