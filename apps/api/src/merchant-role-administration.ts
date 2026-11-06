@@ -15,6 +15,7 @@ import {
   permissionGroupLabel,
   permissionWarning,
   rolePresetActions,
+  rolePresetProfile,
   RoleAdministrationContractError,
   RoleAdministrationServiceError,
   RoleAdministrationStoreError,
@@ -782,6 +783,13 @@ export function createMerchantRoleAdministration(options: {
                 throw error;
               });
             const restore = command.operation === "RestoreDefault";
+            const presetProfile =
+              current === null
+                ? null
+                : rolePresetProfile(
+                    current.code,
+                    current.storeReference === null ? "Brand" : "Store",
+                  );
             if (restore && (current === null || presetOf(current) === null)) fail("Invalid");
             const draftActions = restore
               ? presetCatalogCodes(current as RoleAdministrationVersionRecord)
@@ -808,11 +816,12 @@ export function createMerchantRoleAdministration(options: {
                         ...(command.operation === "Create" || command.operation === "Duplicate"
                           ? { code: generatedRoleCode(command.operationReference) }
                           : {}),
+                        // A restore brings back the preset's own name and description too.
                         displayName: restore
-                          ? (current as RoleAdministrationVersionRecord).displayName
+                          ? (presetProfile?.displayName ?? "")
                           : (command.draft?.displayName ?? ""),
                         description: restore
-                          ? (current as RoleAdministrationVersionRecord).description
+                          ? (presetProfile?.description ?? "")
                           : (command.draft?.description ?? ""),
                         selections: await selections(draftActions),
                       },

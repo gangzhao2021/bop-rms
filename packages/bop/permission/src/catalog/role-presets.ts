@@ -27,6 +27,21 @@ export function rolePresetActions(
   return template === undefined ? null : brandRoleTemplateActions(template);
 }
 
+/** A preset's released name and description, or null when the code is not a preset. */
+export function rolePresetProfile(
+  roleCode: string,
+  scope: "Store" | "Brand",
+): { readonly displayName: string; readonly description: string } | null {
+  const profiles: readonly { roleCode: string; displayName: string; description: string }[] =
+    scope === "Store"
+      ? storeRoleTemplateCodes.map((code) => storeRoleTemplateProfiles[code])
+      : brandRoleTemplateCodes.map((code) => brandRoleTemplateProfiles[code]);
+  const profile = profiles.find((item) => item.roleCode === roleCode);
+  return profile === undefined
+    ? null
+    : { displayName: profile.displayName, description: profile.description };
+}
+
 /**
  * The Owner presets hold everything and are never edited, removed or restored, so an owner is
  * never locked out and never loses reports, settlement or audit.
