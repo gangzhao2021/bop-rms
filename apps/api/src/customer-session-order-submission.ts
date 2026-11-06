@@ -3,6 +3,8 @@ import { parseAsapCapacityCommitment } from "@rms/fulfillment";
 import { parseGuestRawCredential, readClosedRecord } from "@bop/identity";
 import {
   CheckoutSessionServiceError,
+  OrderCreationError,
+  createPostgresCartOrderLookup,
   parseCheckoutSession,
   parseOrderingReference,
   parseOrderCreationRecord,
@@ -37,6 +39,28 @@ function bindLink(session: CheckoutSession, link: OrderCapacityLink) {
     link.guestSessionReference !== v.guestSessionReference
   )
     throw new CheckoutSessionServiceError("INTENT_CONFLICT");
+}
+/**
+ * WP-2423 M03: one Cart version is ordered once. Another checkout of dishes already in an Order
+ * (a second tab, a stale page, a double tap) is refused before capacity, validation or payment
+ * start; the checkout that made the Order goes on (its retries, resume and payment).
+ */
+async function refuseOrderedElsewhere(
+  access: CustomerCheckoutSessionAuthorizationOptions,
+  session: CheckoutSession,
+) {
+  const v = session.validation;
+  const found = await createPostgresCartOrderLookup(access.transactions, access.scope).findVersion({
+    cartReference: v.cartReference,
+    cartVersion: v.cartVersion,
+  });
+  if (found === null || found.submissionReference === session.submissionReference) return;
+  throw new OrderCreationError("ORDER_CREATE_ALREADY_ORDERED", {
+    placedOrder:
+      found.guestSessionReference === v.guestSessionReference
+        ? { orderReference: found.orderReference, orderNumber: found.orderNumber }
+        : null,
+  });
 }
 /** Internal bridge; the browser supplies no submission/payment operation IDs. */
 function bridge(
@@ -75,6 +99,7 @@ function bridge(
       const v = session.validation;
       if (v.quoteVersion !== quoteVersion || v.orderType !== orderType)
         throw new CheckoutSessionServiceError("INTENT_CONFLICT");
+      await refuseOrderedElsewhere(access, session);
       const result = readClosedRecord(
         await submit(
           session,
@@ -137,6 +162,7 @@ function bridge(
         v = session.validation;
       if (v.quoteVersion !== quoteVersion || v.orderType !== orderType)
         throw new CheckoutSessionServiceError("INTENT_CONFLICT");
+      await refuseOrderedElsewhere(access, session);
       const result = readClosedRecord(
         await submit(
           session,

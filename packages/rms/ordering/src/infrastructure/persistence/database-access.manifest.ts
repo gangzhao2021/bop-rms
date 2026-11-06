@@ -1988,6 +1988,46 @@ const databaseAccessManifestInput = {
       readPattern: "owner-repository",
       source: "packages/rms/ordering/src/infrastructure/persistence/order-creation-query-store.ts",
     },
+    // WP-2423 M03: which Order already holds a Cart's dishes, and whether an unmade one can go back.
+    {
+      id: "order-creation-query.read.cart_line",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "cart_line" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: "owner-repository",
+      source: "packages/rms/ordering/src/infrastructure/persistence/order-creation-query-store.ts",
+    },
+    // WP-2423 M03: which Order already holds a Cart's dishes, and whether an unmade one can go back.
+    {
+      id: "order-creation-query.read.cart_operation_record",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "cart_operation_record" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: "owner-repository",
+      source: "packages/rms/ordering/src/infrastructure/persistence/order-creation-query-store.ts",
+    },
+    // WP-2423 M03: which Order already holds a Cart's dishes, and whether an unmade one can go back.
+    {
+      id: "order-creation-query.read.order_termination_record",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "order_termination_record" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: "owner-repository",
+      source: "packages/rms/ordering/src/infrastructure/persistence/order-creation-query-store.ts",
+    },
+    // WP-2423 M03: which Order already holds a Cart's dishes, and whether an unmade one can go back.
+    {
+      id: "order-creation-query.read.order_payment_failure_record",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "order_payment_failure_record" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: "owner-repository",
+      source: "packages/rms/ordering/src/infrastructure/persistence/order-creation-query-store.ts",
+    },
     {
       id: "merchant-item-labels.read.order_item",
       operation: "read",

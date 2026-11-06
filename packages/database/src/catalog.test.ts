@@ -813,6 +813,7 @@ describe("migration catalog", () => {
       "2000_173_create_dining_guest_table_start",
       "2000_180_create_brand_guest_intake",
       "2000_181_alter_platform_support_merchant_pause",
+      "2000_210_alter_ordering_cart_ordered_once",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),

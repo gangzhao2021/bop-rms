@@ -105,7 +105,8 @@ describe("WP-2402 inventory finalization at the Order boundary", () => {
     expect(statementsAtFinalization.some((sql) => sql.startsWith("INSERT"))).toBe(false);
     expect(auditCallsAtFinalization).toBe(0);
     expect(finalize).toHaveBeenCalledTimes(1);
-    expect(f.query.mock.calls.filter(([sql]) => sql.startsWith("WITH observed"))).toHaveLength(4);
+    // WP-2423 M03: one more fence check after the pickup Cart moved to its next version.
+    expect(f.query.mock.calls.filter(([sql]) => sql.startsWith("WITH observed"))).toHaveLength(5);
   });
 
   it("propagates finalization failure without creating an Order or exposing dependency details", async () => {
@@ -160,7 +161,7 @@ describe("WP-2352 atomic Order write boundary", () => {
     expect(mocks.audit).toHaveBeenCalledWith({ query: f.query }, f.request.audit);
     expect(mocks.outbox).toHaveBeenCalledTimes(1);
     expect(f.query.mock.calls[0]?.[0]).toBe("SET TRANSACTION ISOLATION LEVEL READ COMMITTED");
-    expect(f.query.mock.calls.filter(([s]) => s.startsWith("WITH observed"))).toHaveLength(3);
+    expect(f.query.mock.calls.filter(([s]) => s.startsWith("WITH observed"))).toHaveLength(4);
     expect(f.query.mock.calls.filter(([s]) => s.startsWith("INSERT"))).toHaveLength(7);
     expect(
       f.query.mock.calls.find(([s]) =>
@@ -173,6 +174,82 @@ describe("WP-2352 atomic Order write boundary", () => {
       f.expected.order.orderReference,
       f.expected.createdAt,
     ]);
+  });
+  it("WP-2423 M03: empties the pickup Cart and moves it to its next version with the Order", async () => {
+    const f = setup();
+    expect(f.cart.orderType).toBe("Pickup");
+    expect(await f.store.append(f.request)).toEqual({ status: "Created", record: f.expected });
+    const statements = f.query.mock.calls.map(([sql]) => sql);
+    const removed = f.query.mock.calls.find(([sql]) =>
+      sql.startsWith("DELETE FROM rms_ordering.cart_line"),
+    );
+    const advanced = f.query.mock.calls.find(([sql]) =>
+      sql.startsWith("UPDATE rms_ordering.cart SET aggregate_version"),
+    );
+    expect(removed?.[1]).toEqual([
+      f.scope.brandReference,
+      f.scope.storeReference,
+      f.cart.cartReference,
+    ]);
+    expect(advanced?.[1]?.[3]).toBe(f.cart.aggregateVersion + 1);
+    expect(advanced?.[1]?.[6]).toBe(f.cart.aggregateVersion);
+    // Cleared after the Order rows, Audit and Outbox, inside the same transaction.
+    expect(statements.indexOf(removed?.[0] as string)).toBeGreaterThan(
+      statements.findIndex((sql) => sql.startsWith("INSERT INTO rms_ordering.order_item")),
+    );
+    expect(f.enter).toHaveBeenCalledTimes(1);
+  });
+  it.each([
+    ["the Cart version is still current (a Cart filled before this fix)", true],
+    ["the Cart already moved on (a second tab that lost the race)", false],
+  ])("WP-2423 M03: refuses a second Order of the same dishes when %s", async (_case, current) => {
+    const f = setup();
+    const other = {
+      submission_id: "01902402-0000-7000-8000-00000000aa01",
+      order_id: "01902402-0000-7000-8000-00000000aa02",
+      order_number: "13",
+      source_cart_version: f.cart.aggregateVersion,
+    };
+    for (const own of [true, false]) {
+      f.query.mockImplementation(async (sql: string): Promise<unknown> => {
+        if (sql.startsWith("SELECT cart_id"))
+          return { rows: current ? [{ reference: f.cart.cartReference }] : [] };
+        if (sql.startsWith("SELECT s.submission_id"))
+          return {
+            rows: [
+              {
+                ...other,
+                guest_session_id: own
+                  ? f.request.record.guestSessionReference
+                  : "01902402-0000-7000-8000-00000000aa03",
+              },
+            ].map(
+              ({
+                submission_id,
+                order_id,
+                order_number,
+                guest_session_id,
+                source_cart_version,
+              }) => ({
+                submission_id,
+                order_id,
+                order_number,
+                guest_session_id,
+                source_cart_version,
+              }),
+            ),
+          };
+        return { rows: [], rowCount: 1 };
+      });
+      mocks.read.mockReset().mockResolvedValue(null);
+      await expect(f.store.append(f.request)).rejects.toMatchObject({
+        code: "ORDER_CREATE_ALREADY_ORDERED",
+        placedOrder: own ? { orderReference: other.order_id, orderNumber: "13" } : null,
+      });
+    }
+    expect(f.query.mock.calls.some(([sql]) => sql.startsWith("INSERT"))).toBe(false);
+    expect(f.query.mock.calls.some(([sql]) => sql.startsWith("DELETE"))).toBe(false);
+    expect(mocks.audit).not.toHaveBeenCalled();
   });
   it("recovers original expired history without touching Cart, counter, Audit or Outbox", async () => {
     const f = setup();

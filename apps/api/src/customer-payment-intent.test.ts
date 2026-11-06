@@ -283,6 +283,56 @@ it.each([
   },
 );
 
+it.each([
+  [
+    "a second checkout at the same Cart version",
+    () =>
+      new OrderCreationError("ORDER_CREATE_ALREADY_ORDERED", {
+        placedOrder: { orderReference: id(71), orderNumber: "13" },
+      }),
+  ],
+  [
+    "a checkout that lost the race to another tab",
+    () =>
+      new CheckoutSessionServiceError("ALREADY_ORDERED", null, null, {
+        orderReference: id(71),
+        orderNumber: "13",
+      }),
+  ],
+])("WP-2423 M03: refuses to pay again for dishes already ordered: %s", async (_case, error) => {
+  const f = await setup();
+  for (const send of [
+    () => {
+      f.create.mockRejectedValueOnce(error());
+      return f.send();
+    },
+    () => {
+      f.retry.mockRejectedValueOnce(error());
+      return f.sendRetry({ retry: true });
+    },
+    () => {
+      f.resume.mockRejectedValueOnce(error());
+      return f.sendRetry({ resume: true });
+    },
+  ]) {
+    const response = await send();
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      schemaVersion: 1,
+      error: {
+        code: "payment_already_ordered",
+        messageKey: "customer.payment.already_ordered",
+        order: { orderReference: id(71), orderNumber: "13" },
+      },
+    });
+  }
+  f.create.mockRejectedValueOnce(new OrderCreationError("ORDER_CREATE_ALREADY_ORDERED"));
+  expect(await (await f.send()).json()).toEqual({
+    schemaVersion: 1,
+    error: { code: "payment_already_ordered", messageKey: "customer.payment.already_ordered" },
+  });
+});
+
 it("WP-2423 abandoned payment: returns to the open payment for {resume:true} only", async () => {
   const f = await setup();
   const response = await f.sendRetry({ resume: true });

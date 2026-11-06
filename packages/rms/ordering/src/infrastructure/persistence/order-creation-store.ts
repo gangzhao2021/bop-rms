@@ -1,4 +1,5 @@
 import { clearSubmittedDiningCart } from "../../domain/dining-cart-continuation.js";
+import { clearSubmittedPickupCart } from "../../domain/pickup-cart-continuation.js";
 import { assertGuestSessionUsable, createGuestSession, type GuestSession } from "@bop/identity";
 import type { CapacityLinkedOrderCreationPorts } from "../../application/order-creation-service.js";
 import type { CheckoutDetailsPorts } from "../../application/checkout-details-service.js";
@@ -56,6 +57,7 @@ import { validateOrderSubmissionWriteFence } from "../../application/order-submi
 import { createPostgresCartQueryStore } from "./cart-query-store.js";
 import {
   readOrderCreationHistory,
+  readCartVersionOrder,
   createPostgresOrderCreationQueryStore,
   type OrderCreationQueryTransactionRunner,
   type OrderCreationQueryTransaction,
@@ -472,6 +474,23 @@ export function createPostgresOrderCreationStore<V extends 1 | 2 = 1>(
               [brandReference, storeReference, batch.sourceCartReference, batch.sourceCartVersion],
             ),
           );
+          // WP-2423 M03: one Cart version (and each of its lines) is ordered at most once. A second
+          // checkout of the same dishes (another tab, a stale page, a lost race on this lock, which
+          // finds the Cart already moved on) is refused here, before anything is written or charged.
+          const ordered = await readCartVersionOrder(tx, scoped, {
+            cartReference: batch.sourceCartReference,
+            cartVersion: batch.sourceCartVersion,
+          });
+          if (
+            ordered !== null &&
+            ordered.submissionReference !== request.record.submissionReference
+          )
+            throw new OrderCreationError("ORDER_CREATE_ALREADY_ORDERED", {
+              placedOrder:
+                ordered.guestSessionReference === request.record.guestSessionReference
+                  ? { orderReference: ordered.orderReference, orderNumber: ordered.orderNumber }
+                  : null,
+            });
           if (
             locked.length !== 1 ||
             closed(locked[0], ["reference"]).reference !== batch.sourceCartReference
@@ -790,15 +809,26 @@ export function createPostgresOrderCreationStore<V extends 1 | 2 = 1>(
               return fail();
             assertDetailsMatch(savedDetails, saved, quoteVersion);
           }
-          if (saved.order.orderType === "DineIn") {
-            const continuation = clearSubmittedDiningCart({
-              cart,
-              batch,
-              brandReference,
-              storeReference,
-              diningSessionReference: saved.order.diningSessionReference,
-              orderReference: saved.order.orderReference,
-            });
+          {
+            // WP-2423 M03: the ordered dishes leave the Cart in the Order's own transaction, for a
+            // pickup Cart as for a table's, so the same dishes can't be checked out and paid twice.
+            const continuation =
+              saved.order.orderType === "DineIn"
+                ? clearSubmittedDiningCart({
+                    cart,
+                    batch,
+                    brandReference,
+                    storeReference,
+                    diningSessionReference: saved.order.diningSessionReference,
+                    orderReference: saved.order.orderReference,
+                  })
+                : clearSubmittedPickupCart({
+                    cart,
+                    batch,
+                    brandReference,
+                    storeReference,
+                    orderReference: saved.order.orderReference,
+                  });
             const removed = count(
               await tx.query(
                 "DELETE FROM rms_ordering.cart_line WHERE brand_id=$1 AND store_id=$2 AND cart_id=$3",
@@ -831,6 +861,8 @@ export function createPostgresOrderCreationStore<V extends 1 | 2 = 1>(
       } catch (error) {
         if (error === conflict) throw new OrderCreationError("ORDER_CREATE_IDEMPOTENCY_CONFLICT");
         if (error === expired) throw new OrderCreationError("ORDER_CREATE_VALIDATION_EXPIRED");
+        if (error instanceof OrderCreationError && error.code === "ORDER_CREATE_ALREADY_ORDERED")
+          throw error;
         // WP-2423: the Inventory finalizer found too little stock; the transaction rolled back.
         if (error instanceof OrderCreationError && error.code === "ORDER_CREATE_STOCK_SHORT")
           throw error;

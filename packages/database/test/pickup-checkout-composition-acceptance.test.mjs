@@ -281,6 +281,8 @@ it.each([
           "GRANT SELECT ON rms_ordering.cart_line,rms_ordering.cart_quote_expiry_record TO " +
             roles[1],
         );
+        // WP-2423 M03: the Order empties its pickup Cart (as for a table), as the pilot API may.
+        await admin.query("GRANT DELETE ON rms_ordering.cart_line TO " + roles[1]);
         await admin.query(
           "GRANT SELECT,INSERT ON rms_ordering.cart_quote_attachment,rms_ordering.cart_quote_attachment_line TO " +
             roles[1],
@@ -864,6 +866,33 @@ it.each([
           "SELECT (SELECT count(*)::int FROM rms_ordering.checkout_session_allocation) AS allocations,(SELECT count(*)::int FROM rms_ordering.checkout_session_record) AS sessions,(SELECT count(*)::int FROM platform_audit.audit_record WHERE action_code IN ('ORDERING_CHECKOUT_SESSION_ALLOCATE','ORDERING_CHECKOUT_SESSION_CREATE')) AS audits",
         );
         assert.deepEqual(sessionCounts.rows[0], { allocations: 1, sessions: 1, audits: 2 });
+        // WP-2423 M03: a second tab opened its own checkout of the same dishes before the first
+        // one was ordered (its own submission and payment operation). Labelled test seed by the
+        // owner client: this fixture's capacity references are fixed to the first checkout.
+        const secondTab = {
+          session: {
+            ...createdSession.session,
+            checkoutSessionReference: id(99201),
+            createOperationReference: id(99202),
+            submissionReference: id(99203),
+            paymentOperationReference: id(99204),
+          },
+        };
+        await admin.query(
+          "INSERT INTO rms_ordering.checkout_session_record (brand_id,store_id,checkout_session_id,create_operation_id,submission_id,payment_operation_id,guest_session_id,cart_id,snapshot_json,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10)",
+          [
+            scope.brandReference,
+            scope.storeReference,
+            secondTab.session.checkoutSessionReference,
+            secondTab.session.createOperationReference,
+            secondTab.session.submissionReference,
+            secondTab.session.paymentOperationReference,
+            secondTab.session.validation.guestSessionReference,
+            cart.cartReference,
+            JSON.stringify(secondTab.session),
+            secondTab.session.createdAt,
+          ],
+        );
         await admin.query(
           "GRANT SELECT,INSERT ON rms_ordering.checkout_details_record TO " + roles[1],
         );
@@ -1092,10 +1121,54 @@ it.each([
           input: orderInput,
         });
         assert.equal(orderLost, true);
-        await checkoutDetails.replaceForRecovery();
+        // WP-2423 M03: the Order emptied its Cart and moved it on, so the ordered checkout's
+        // details can no longer be replaced; the recovery below still returns the original Order.
+        await assert.rejects(checkoutDetails.replaceForRecovery(), {
+          code: "CART_VERSION_CONFLICT",
+        });
         const recovered = await sessionOrders.create(sessionOrderInput);
         assert.deepEqual(recovered.session, createdSession.session);
         assert.equal(recovered.status, "AlreadyCreated");
+        // WP-2423 M03: the Order emptied its pickup Cart and moved it to the next version.
+        const emptied = await createPostgresCartQueryStore(runner(roles[1]), scope).load(
+          cart.cartReference,
+        );
+        assert.equal(emptied.aggregateVersion, cart.aggregateVersion + 1);
+        assert.deepEqual(emptied.items, []);
+        assert.equal(emptied.lifecycle.status, "Active");
+        const placed = {
+          orderReference: recovered.record.order.orderReference,
+          orderNumber: recovered.record.orderNumberAllocation.orderNumber,
+        };
+        // A stale page asks for another checkout of the ordered version: refused, naming the Order.
+        await assert.rejects(
+          sessionCreator.create({
+            ...sessionEnvelope,
+            command: { ...sessionRequest, createOperationReference: id(99205) },
+          }),
+          (error) => {
+            assert.equal(error.code, "ALREADY_ORDERED");
+            assert.deepEqual(error.placedOrder, placed);
+            return true;
+          },
+        );
+        // The second tab's payment start is refused before capacity, validation or payment.
+        for (const step of ["create", "preparePaymentClock"])
+          await assert.rejects(
+            sessionOrders[step]({
+              ...sessionOrderInput,
+              checkoutSessionReference: secondTab.session.checkoutSessionReference,
+            }),
+            (error) => {
+              assert.equal(error.code, "ORDER_CREATE_ALREADY_ORDERED");
+              assert.deepEqual(error.placedOrder, placed);
+              return true;
+            },
+          );
+        assert.equal(
+          (await admin.query("SELECT count(*)::int AS n FROM rms_ordering.order_header")).rows[0].n,
+          1,
+        );
         assert.equal(inventoryCalls, 3, "recovery must not reserve again");
         const inventoryAfterRecovery = await inventoryState();
         assert.equal(inventoryAfterRecovery.sets, 1);

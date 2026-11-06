@@ -5,6 +5,7 @@ import {
   type CheckoutSessionAllocation,
   type CheckoutSessionAllocationGates,
   createPostgresCheckoutSessionStore,
+  createPostgresCartOrderLookup,
   CheckoutSessionServiceError,
   type CheckoutSessionRequest,
   type CheckoutSessionStoreGates,
@@ -72,6 +73,23 @@ export function createCustomerCheckoutSessionComposition(options: CustomerChecko
           now: options.now,
           nextReference: options.nextReference,
           authorize: access.authorize,
+          // WP-2423 M03: dishes already ordered are refused before anything is allocated.
+          ordered: async (request, authority) => {
+            const found = await createPostgresCartOrderLookup(
+              options.transactions,
+              options.scope,
+            ).findVersion({
+              cartReference: request.cartReference,
+              cartVersion: request.cartVersion,
+            });
+            if (found === null) return null;
+            return {
+              placedOrder:
+                found.guestSessionReference === authority.guestSessionReference
+                  ? { orderReference: found.orderReference, orderNumber: found.orderNumber }
+                  : null,
+            };
+          },
           repository: { ...repository, allocate: allocations.allocate },
           validate: (request, allocation) =>
             options.validate({ ...credentials, request, allocation }),

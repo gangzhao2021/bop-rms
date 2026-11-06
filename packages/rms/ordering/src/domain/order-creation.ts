@@ -38,18 +38,38 @@ export const orderCreationErrorCodes = [
    * out after checkout). Nothing was written; no payment was started.
    */
   "ORDER_CREATE_STOCK_SHORT",
+  /**
+   * WP-2423 M03: these dishes (this Cart version, or a line of it) are already in an Order. One
+   * Cart version produces at most one Order; nothing was written and nothing will be charged.
+   */
+  "ORDER_CREATE_ALREADY_ORDERED",
   "ORDER_CREATE_DEPENDENCY_UNAVAILABLE",
 ] as const;
+
+/** WP-2423 M03: the Order that already holds a Cart version's dishes, for its own guest only. */
+export interface PlacedOrderReference {
+  readonly orderReference: string;
+  readonly orderNumber: string;
+}
 
 export type OrderCreationErrorCode = (typeof orderCreationErrorCodes)[number];
 
 export class OrderCreationError extends Error {
   readonly code: OrderCreationErrorCode;
+  /** ORDER_CREATE_ALREADY_ORDERED only: the requesting guest's own Order, otherwise null. */
+  readonly placedOrder: PlacedOrderReference | null;
 
-  constructor(code: OrderCreationErrorCode, options?: { readonly cause?: unknown }) {
-    super("order creation is unavailable", options);
+  constructor(
+    code: OrderCreationErrorCode,
+    options?: { readonly cause?: unknown; readonly placedOrder?: PlacedOrderReference | null },
+  ) {
+    super(
+      "order creation is unavailable",
+      options?.cause === undefined ? undefined : { cause: options.cause },
+    );
     this.name = "OrderCreationError";
     this.code = code;
+    this.placedOrder = options?.placedOrder ?? null;
   }
 }
 

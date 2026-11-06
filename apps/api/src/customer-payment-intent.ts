@@ -72,8 +72,34 @@ type ExplicitRejection =
   /** WP-2423 item 8 ⑦: the Store turned tips off; pay again with no tip. */
   | "tips_turned_off"
   /** WP-2423: an owner listed after this checkout began; nothing placed, the cart prices again. */
-  | "requote_required";
-function reject(response: Response, status: number, explicit?: ExplicitRejection) {
+  | "requote_required"
+  /** WP-2423 M03: these dishes are already in an Order; nothing new was placed or charged. */
+  | "already_ordered";
+/**
+ * WP-2423 M03: the guest's own Order that already holds these dishes, so the page can open it.
+ * Only references the guest already holds; never another guest's Order.
+ */
+function placedOrder(error: unknown) {
+  const found =
+    error instanceof OrderCreationError || error instanceof CheckoutSessionServiceError
+      ? error.placedOrder
+      : null;
+  return found === null
+    ? {}
+    : { order: { orderReference: found.orderReference, orderNumber: found.orderNumber } };
+}
+function alreadyOrdered(error: unknown): boolean {
+  return (
+    (error instanceof OrderCreationError && error.code === "ORDER_CREATE_ALREADY_ORDERED") ||
+    (error instanceof CheckoutSessionServiceError && error.code === "ALREADY_ORDERED")
+  );
+}
+function reject(
+  response: Response,
+  status: number,
+  explicit?: ExplicitRejection,
+  extra: Readonly<Record<string, unknown>> = {},
+) {
   const code =
     explicit ??
     (status === 400
@@ -88,7 +114,7 @@ function reject(response: Response, status: number, explicit?: ExplicitRejection
   if (status === 503) response.setHeader("Retry-After", "5");
   response.status(status).json({
     schemaVersion: 1,
-    error: { code: "payment_" + code, messageKey: "customer.payment." + code },
+    error: { code: "payment_" + code, messageKey: "customer.payment." + code, ...extra },
   });
 }
 function readCredentials(request: Request) {
@@ -217,6 +243,7 @@ function failure(error: unknown) {
         ITEM_UNAVAILABLE: 409,
         ITEM_SHORT: 409,
         REQUOTE_REQUIRED: 409,
+        ALREADY_ORDERED: 409,
       } as const
     )[error.code];
   if (error instanceof PaymentTipSelectionError)
@@ -250,6 +277,7 @@ function failure(error: unknown) {
       CHECKOUT_ITEM_UNAVAILABLE: 422,
       CHECKOUT_STOCK_SHORT: 409,
       ORDER_CREATE_STOCK_SHORT: 409,
+      ORDER_CREATE_ALREADY_ORDERED: 409,
       CHECKOUT_QUOTE_EXPIRED: 422,
       CHECKOUT_QUOTE_MISSING: 422,
       CHECKOUT_SELECTION_INVALID: 422,
@@ -357,6 +385,10 @@ export class CustomerPaymentIntentHandler {
             reject(response, 409, "store_closed");
             return;
           }
+          if (alreadyOrdered(error)) {
+            reject(response, 409, "already_ordered", placedOrder(error));
+            return;
+          }
           reject(response, failure(error), stockRejection(error));
           return;
         }
@@ -409,6 +441,11 @@ export class CustomerPaymentIntentHandler {
         // WP-2423 Q4: the Store stopped taking orders before payment started; nothing was charged.
         if (error instanceof CustomerStoreClosedError) {
           reject(response, 409, "store_closed");
+          return;
+        }
+        // WP-2423 M03: a second checkout of dishes already ordered (another tab, a stale page).
+        if (alreadyOrdered(error)) {
+          reject(response, 409, "already_ordered", placedOrder(error));
           return;
         }
         const explicit = retry ? retryRejection(error) : stockRejection(error);

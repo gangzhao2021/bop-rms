@@ -10,6 +10,7 @@ import {
   type CheckoutLineRefusal,
   type CheckoutValidationErrorCode,
 } from "../domain/checkout-validation.js";
+import type { PlacedOrderReference } from "../domain/order-creation.js";
 
 export interface CheckoutSessionRequest {
   readonly createOperationReference: string;
@@ -37,6 +38,14 @@ export interface CheckoutSessionPorts {
     request: CheckoutSessionRequest,
     allocation: CheckoutSessionAllocation,
   ) => Promise<unknown>;
+  /**
+   * WP-2423 M03: the Order already made from this Cart version (or from a line the Cart still
+   * holds); `placedOrder` is set only when it is the requesting guest's own. Null when none.
+   */
+  readonly ordered?: (
+    request: CheckoutSessionRequest,
+    authority: CheckoutSessionAuthority,
+  ) => Promise<{ readonly placedOrder: PlacedOrderReference | null } | null>;
   readonly repository: {
     allocate(
       candidate: CheckoutSessionAllocation,
@@ -73,9 +82,13 @@ export class CheckoutSessionServiceError extends Error {
       | "ITEM_SHORT"
       /** WP-2423: the menu moved on after this Cart was priced (an owner listed): the guest's
        * screen prices it again and sends. Nothing was created. */
-      | "REQUOTE_REQUIRED",
+      | "REQUOTE_REQUIRED"
+      /** WP-2423 M03: these dishes are already in an Order (`placedOrder` names the guest's
+       * own); nothing was created and nothing will be charged again. */
+      | "ALREADY_ORDERED",
     readonly heldUntil: string | null = null,
     readonly line: CheckoutLineRefusal | null = null,
+    readonly placedOrder: PlacedOrderReference | null = null,
   ) {
     super("checkout session is unavailable");
     this.name = "CheckoutSessionServiceError";
@@ -152,6 +165,13 @@ export function createCheckoutSessionService(ports: CheckoutSessionPorts) {
   return Object.freeze({
     async create(value: unknown) {
       const input = request(value);
+      let orderedAuthority: CheckoutSessionAuthority | undefined;
+      const refuseOrdered = async (authority: CheckoutSessionAuthority) => {
+        if (ports.ordered === undefined) return;
+        const found = await ports.ordered(input, authority);
+        if (found !== null)
+          throw new CheckoutSessionServiceError("ALREADY_ORDERED", null, null, found.placedOrder);
+      };
       try {
         let last: string | undefined;
         const now = () => {
@@ -211,6 +231,8 @@ export function createCheckoutSessionService(ports: CheckoutSessionPorts) {
           const session = bound(existing, await authorize());
           return Object.freeze({ status: "AlreadyCreated" as const, session });
         }
+        orderedAuthority = initial;
+        await refuseOrdered(initial);
         const proposed = parseCheckoutSessionAllocation({
           ...input,
           brandReference: initial.brandReference,
@@ -264,6 +286,19 @@ export function createCheckoutSessionService(ports: CheckoutSessionPorts) {
           return fail("DEPENDENCY_UNAVAILABLE");
         return Object.freeze({ status: result.status, session });
       } catch (error) {
+        // WP-2423 M03: the Cart moved on because its dishes were ordered meanwhile (another tab
+        // or a stale page): say so, instead of a conflict the guest can't act on.
+        const movedOn =
+          (error instanceof CheckoutSessionServiceError && error.code === "INTENT_CONFLICT") ||
+          (!(error instanceof CheckoutSessionServiceError) && cartMovedOn(error));
+        if (movedOn && orderedAuthority !== undefined) {
+          try {
+            await refuseOrdered(orderedAuthority);
+          } catch (ordered) {
+            if (ordered instanceof CheckoutSessionServiceError) throw ordered;
+            return fail("DEPENDENCY_UNAVAILABLE");
+          }
+        }
         if (error instanceof CheckoutSessionServiceError) throw error;
         const refusal = checkoutItemRefusal(error);
         if (refusal !== null) throw refusal;

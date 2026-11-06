@@ -409,3 +409,212 @@ export async function readOrderCreationQuoteVersion(
   if (versions.size !== 1 || (version !== 1 && version !== 2)) return unavailable();
   return version;
 }
+
+/** WP-2423 M03: an Order that already holds a Cart version's dishes. */
+export interface CartOrderedRecord {
+  readonly submissionReference: string;
+  readonly orderReference: string;
+  readonly orderNumber: string;
+  readonly guestSessionReference: string;
+  readonly sourceCartVersion: number;
+}
+function cartOrderedRows(result: unknown): CartOrderedRecord | null {
+  if (result === null || typeof result !== "object") return unavailable();
+  const d = Object.getOwnPropertyDescriptor(result, "rows");
+  if (!d?.enumerable || !("value" in d)) return unavailable();
+  const rows = capture(d.value);
+  if (!Array.isArray(rows) || rows.length > 1) return unavailable();
+  if (rows.length === 0) return null;
+  const row = exact(rows[0], [
+    "submission_id",
+    "order_id",
+    "order_number",
+    "guest_session_id",
+    "source_cart_version",
+  ]);
+  if (
+    typeof row.order_number !== "string" ||
+    !/^[1-9][0-9]{0,18}$/u.test(row.order_number) ||
+    !Number.isSafeInteger(row.source_cart_version) ||
+    (row.source_cart_version as number) < 1
+  )
+    return unavailable();
+  return Object.freeze({
+    submissionReference: parseOrderingReference(row.submission_id),
+    orderReference: parseOrderingReference(row.order_id),
+    orderNumber: row.order_number,
+    guestSessionReference: parseOrderingReference(row.guest_session_id),
+    sourceCartVersion: row.source_cart_version as number,
+  });
+}
+/**
+ * WP-2423 M03: the Order already made from this exact Cart version, or from a line the Cart still
+ * holds (a Cart filled before pickup Carts were emptied on ordering). Read on the caller's
+ * transaction with local Brand/Store context set; the caller authorizes and decides.
+ */
+export async function readCartVersionOrder(
+  transaction: OrderCreationQueryTransaction,
+  scope: Readonly<{ brandReference: string; storeReference: string }>,
+  value: Readonly<{ cartReference: string; cartVersion: number }>,
+): Promise<CartOrderedRecord | null> {
+  const brand = parseOrderingReference(scope.brandReference),
+    store = parseOrderingReference(scope.storeReference),
+    cart = parseOrderingReference(value.cartReference);
+  if (!Number.isSafeInteger(value.cartVersion) || value.cartVersion < 1) return unavailable();
+  return cartOrderedRows(
+    await transaction.query(
+      `SELECT s.submission_id,s.order_id,h.order_number,s.guest_session_id,s.source_cart_version
+       FROM rms_ordering.order_submission_record s
+       JOIN rms_ordering.order_header h ON h.order_id=s.order_id AND h.brand_id=$1 AND h.store_id=$2
+       WHERE s.brand_id=$1 AND s.store_id=$2 AND s.source_cart_id=$3
+         AND (s.source_cart_version=$4 OR EXISTS (
+           SELECT 1 FROM rms_ordering.order_item i
+           JOIN rms_ordering.cart_line l ON l.cart_line_id=i.source_cart_line_id AND l.brand_id=$1
+             AND l.store_id=$2 AND l.cart_id=$3
+           WHERE i.brand_id=$1 AND i.store_id=$2 AND i.order_id=s.order_id))
+       ORDER BY s.created_at DESC, s.submission_id DESC LIMIT 1`,
+      [brand, store, cart, value.cartVersion],
+    ),
+  );
+}
+/**
+ * WP-2423 M03: the guest's latest Order from this Cart while nothing was put in the Cart after it
+ * (no Cart item operation at a later version), so an emptied Cart can say "already ordered".
+ */
+export async function readLatestCartOrder(
+  transaction: OrderCreationQueryTransaction,
+  scope: Readonly<{ brandReference: string; storeReference: string }>,
+  value: Readonly<{ cartReference: string; guestSessionReference: string }>,
+): Promise<CartOrderedRecord | null> {
+  const brand = parseOrderingReference(scope.brandReference),
+    store = parseOrderingReference(scope.storeReference),
+    cart = parseOrderingReference(value.cartReference),
+    guest = parseOrderingReference(value.guestSessionReference);
+  return cartOrderedRows(
+    await transaction.query(
+      `SELECT s.submission_id,s.order_id,h.order_number,s.guest_session_id,s.source_cart_version
+       FROM (SELECT * FROM rms_ordering.order_submission_record
+             WHERE brand_id=$1 AND store_id=$2 AND source_cart_id=$3
+             ORDER BY source_cart_version DESC, created_at DESC LIMIT 1) s
+       JOIN rms_ordering.order_header h ON h.order_id=s.order_id AND h.brand_id=$1 AND h.store_id=$2
+       WHERE s.guest_session_id=$4 AND NOT EXISTS (
+         SELECT 1 FROM rms_ordering.cart_operation_record o
+         WHERE o.brand_id=$1 AND o.store_id=$2 AND o.cart_id=$3
+           AND o.result_aggregate_version>s.source_cart_version)`,
+      [brand, store, cart, guest],
+    ),
+  );
+}
+/** WP-2423 M03: one ordered dish as the guest chose it, to put back in the Cart. */
+export interface RestorableOrderLine {
+  readonly orderItemReference: string;
+  readonly sellableReference: string;
+  readonly quantity: number;
+  readonly optionSelections: readonly {
+    readonly optionReference: string;
+    readonly quantity: number;
+  }[];
+  readonly customerNote: string | null;
+}
+/**
+ * WP-2423 M03: a pickup Order made from this Cart that will not be made — closed or cancelled
+ * (a termination is recorded) or whose payment was cancelled unpaid — with its dishes as ordered,
+ * so the guest can put them back in the Cart instead of choosing everything again. Null for any
+ * other Order. Read on the caller's transaction with local Brand/Store context set.
+ */
+export async function readRestorableCartOrder(
+  transaction: OrderCreationQueryTransaction,
+  scope: Readonly<{ brandReference: string; storeReference: string }>,
+  value: Readonly<{ cartReference: string; orderReference: string }>,
+): Promise<{
+  readonly orderNumber: string;
+  readonly lines: readonly RestorableOrderLine[];
+} | null> {
+  const brand = parseOrderingReference(scope.brandReference),
+    store = parseOrderingReference(scope.storeReference),
+    cart = parseOrderingReference(value.cartReference),
+    order = parseOrderingReference(value.orderReference);
+  const result = await transaction.query(
+    `SELECT s.submission_id FROM rms_ordering.order_submission_record s
+     JOIN rms_ordering.order_header h ON h.order_id=s.order_id AND h.brand_id=$1 AND h.store_id=$2
+     WHERE s.brand_id=$1 AND s.store_id=$2 AND s.order_id=$3 AND s.source_cart_id=$4
+       AND s.submission_kind='Initial' AND h.order_type='Pickup'
+       AND (EXISTS (SELECT 1 FROM rms_ordering.order_termination_record t
+                    WHERE t.brand_id=$1 AND t.store_id=$2 AND t.order_id=s.order_id)
+         OR EXISTS (SELECT 1 FROM rms_ordering.order_payment_failure_record f
+                    WHERE f.brand_id=$1 AND f.store_id=$2 AND f.order_id=s.order_id
+                      AND f.reason='Cancelled'))`,
+    [brand, store, order, cart],
+  );
+  if (result === null || typeof result !== "object") return unavailable();
+  const d = Object.getOwnPropertyDescriptor(result, "rows");
+  if (!d?.enumerable || !("value" in d)) return unavailable();
+  const rows = capture(d.value);
+  if (!Array.isArray(rows) || rows.length > 1) return unavailable();
+  if (rows.length === 0) return null;
+  const submission = parseOrderingReference(exact(rows[0], ["submission_id"]).submission_id);
+  const quoteVersion = await readOrderCreationQuoteVersion(transaction, scope, submission);
+  if (quoteVersion === null) return unavailable();
+  const record = await readOrderCreationHistory(transaction, scope, submission, quoteVersion);
+  if (
+    record === null ||
+    record.order.orderReference !== order ||
+    record.order.orderType !== "Pickup" ||
+    record.order.batches[0]?.sourceCartReference !== cart
+  )
+    return unavailable();
+  return Object.freeze({
+    orderNumber: record.orderNumberAllocation.orderNumber,
+    lines: Object.freeze(
+      record.items.map((item) =>
+        Object.freeze({
+          orderItemReference: String(item.orderItemReference),
+          sellableReference: String(item.catalog.sellableReference),
+          quantity: item.quantity,
+          optionSelections: Object.freeze(
+            item.catalog.options.map((option) =>
+              Object.freeze({
+                optionReference: String(option.optionReference),
+                quantity: option.quantity,
+              }),
+            ),
+          ),
+          customerNote: item.customerNote,
+        }),
+      ),
+    ),
+  });
+}
+/** Dedicated read-only lookup of `readCartVersionOrder`; the caller authorizes the guest first. */
+export function createPostgresCartOrderLookup(
+  runner: OrderCreationQueryTransactionRunner,
+  scope: Readonly<{ brandReference: string; storeReference: string }>,
+) {
+  const fixed = exact(scope, ["brandReference", "storeReference"]);
+  const local = Object.freeze({
+    brandReference: parseOrderingReference(fixed.brandReference),
+    storeReference: parseOrderingReference(fixed.storeReference),
+  });
+  async function run<T>(work: (transaction: OrderCreationQueryTransaction) => Promise<T>) {
+    try {
+      return await runner.run(async (transaction) => {
+        await transaction.query("SET TRANSACTION READ ONLY", []);
+        await transaction.query(
+          "SELECT set_config('bop.brand_id', $1, true), set_config('bop.store_id', $2, true)",
+          [local.brandReference, local.storeReference],
+        );
+        return work(transaction);
+      });
+    } catch {
+      return unavailable();
+    }
+  }
+  return Object.freeze({
+    findVersion: (value: Readonly<{ cartReference: string; cartVersion: number }>) =>
+      run((transaction) => readCartVersionOrder(transaction, local, value)),
+    findLatest: (value: Readonly<{ cartReference: string; guestSessionReference: string }>) =>
+      run((transaction) => readLatestCartOrder(transaction, local, value)),
+    findRestorable: (value: Readonly<{ cartReference: string; orderReference: string }>) =>
+      run((transaction) => readRestorableCartOrder(transaction, local, value)),
+  });
+}

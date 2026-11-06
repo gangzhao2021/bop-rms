@@ -156,6 +156,7 @@ export class CustomerCheckoutSessionHandler {
                   ITEM_UNAVAILABLE: 409,
                   ITEM_SHORT: 409,
                   REQUOTE_REQUIRED: 409,
+                  ALREADY_ORDERED: 409,
                 } as const
               )[error.code]
             : 503;
@@ -173,6 +174,26 @@ export class CustomerCheckoutSessionHandler {
               code: "checkout_session_" + code,
               messageKey: "customer.checkoutSession." + code,
               ...(line === null ? {} : { line }),
+            },
+          });
+          return;
+        }
+        // WP-2423 M03: these dishes are already in an Order; the page opens it instead of paying
+        // again. The Order is named only to its own guest.
+        if (error instanceof CheckoutSessionServiceError && error.code === "ALREADY_ORDERED") {
+          response.status(409).json({
+            schemaVersion: 1,
+            error: {
+              code: "checkout_session_already_ordered",
+              messageKey: "customer.checkoutSession.already_ordered",
+              ...(error.placedOrder === null
+                ? {}
+                : {
+                    order: {
+                      orderReference: error.placedOrder.orderReference,
+                      orderNumber: error.placedOrder.orderNumber,
+                    },
+                  }),
             },
           });
           return;
@@ -291,6 +312,7 @@ export class CustomerCheckoutSessionReadHandler {
                   ITEM_UNAVAILABLE: 409,
                   ITEM_SHORT: 409,
                   REQUOTE_REQUIRED: 409,
+                  ALREADY_ORDERED: 409,
                 } as const
               )[error.code]
             : 503,

@@ -243,6 +243,72 @@ describe("Checkout Session creation", () => {
       expect(f.counts().writes).toBe(0);
     },
   );
+  it("WP-2423 M03: refuses a checkout of dishes already ordered before allocating anything", async () => {
+    const f = setup();
+    const asked: unknown[] = [];
+    let allocated = 0;
+    const ordered = createCheckoutSessionService({
+      ...f.ports,
+      ordered: async (request, authority) => {
+        asked.push([request.cartReference, request.cartVersion, authority.guestSessionReference]);
+        return { placedOrder: { orderReference: id(70), orderNumber: "13" } };
+      },
+      repository: {
+        ...f.ports.repository,
+        allocate: async (proposed) => {
+          allocated++;
+          return proposed;
+        },
+      },
+    });
+    await expect(ordered.create(f.input)).rejects.toMatchObject({
+      code: "ALREADY_ORDERED",
+      placedOrder: { orderReference: id(70), orderNumber: "13" },
+    });
+    expect(asked).toEqual([[id(3), 4, id(6)]]);
+    expect(allocated).toBe(0);
+    expect(f.counts()).toEqual({ writes: 0, validations: 0 });
+  });
+  it("WP-2423 M03: a Cart that moved on because its dishes were just ordered says so", async () => {
+    const f = setup();
+    let orderedYet = false;
+    const raced = createCheckoutSessionService({
+      ...f.ports,
+      ordered: async () => (orderedYet ? { placedOrder: null } : null),
+      validate: async () => {
+        orderedYet = true;
+        throw new CheckoutValidationError("CHECKOUT_CART_VERSION_CONFLICT");
+      },
+    });
+    await expect(raced.create(f.input)).rejects.toMatchObject({
+      code: "ALREADY_ORDERED",
+      placedOrder: null,
+    });
+    // The store's Cart lock found the version moved on (the other tab's Order won the race).
+    let lookups = 0;
+    const storeRaced = createCheckoutSessionService({
+      ...f.ports,
+      ordered: async () => (++lookups === 1 ? null : { placedOrder: null }),
+      repository: {
+        ...f.ports.repository,
+        create: async () => {
+          throw new CheckoutSessionServiceError("INTENT_CONFLICT");
+        },
+      },
+    });
+    await expect(storeRaced.create(f.input)).rejects.toMatchObject({ code: "ALREADY_ORDERED" });
+    expect(lookups).toBe(2);
+    expect(f.counts().writes).toBe(0);
+    // Nothing ordered: the original answer stands.
+    const plain = createCheckoutSessionService({
+      ...f.ports,
+      ordered: async () => null,
+      validate: async () => {
+        throw new CheckoutValidationError("CHECKOUT_CART_VERSION_CONFLICT");
+      },
+    });
+    await expect(plain.create(f.input)).rejects.toMatchObject({ code: "INTENT_CONFLICT" });
+  });
   it("WP-2423 item 6: knows the refusal when the pilot's entry loaded Ordering as a second copy", async () => {
     const f = setup();
     const copy = createCheckoutSessionService({

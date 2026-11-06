@@ -208,6 +208,31 @@ it("WP-2423: says the menu moved on after pricing, so the guest's page prices ag
     },
   });
 });
+it("WP-2423 M03: says these dishes are already ordered and names the guest's own Order", async () => {
+  const f = await setup();
+  const order = { orderReference: "018f5400-0000-7000-8000-000000000071", orderNumber: "13" };
+  f.create.mockRejectedValue(new CheckoutSessionServiceError("ALREADY_ORDERED", null, null, order));
+  const response = await f.send();
+  expect(response.status).toBe(409);
+  expect(response.headers.get("retry-after")).toBe(null);
+  expect(await response.json()).toEqual({
+    schemaVersion: 1,
+    error: {
+      code: "checkout_session_already_ordered",
+      messageKey: "customer.checkoutSession.already_ordered",
+      order,
+    },
+  });
+  // Another guest's Order is never named.
+  f.create.mockRejectedValue(new CheckoutSessionServiceError("ALREADY_ORDERED"));
+  expect(await (await f.send()).json()).toEqual({
+    schemaVersion: 1,
+    error: {
+      code: "checkout_session_already_ordered",
+      messageKey: "customer.checkoutSession.already_ordered",
+    },
+  });
+});
 it("WP-2423: names the short cart line and how many are left (409, nothing created)", async () => {
   const f = await setup();
   const line = "018f5400-0000-7000-8000-000000000070";

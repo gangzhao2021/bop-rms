@@ -4,7 +4,10 @@ import {
   createPostgresCartQueryStore,
   createPostgresCartQuoteReader,
   createPostgresConfiguredCartQuoteReader,
+  createPostgresOrderCreationQueryStore,
   resolveConfiguredPickupCapacityCartSource,
+  resolveConfiguredOrderedPickupCapacityCartSource,
+  resolveOrderedPickupCapacityCartSource,
   resolvePickupCapacityCartSource,
   parseOrderingReference,
   type CartQueryTransactionRunner,
@@ -41,6 +44,11 @@ function createVersionedCustomerPickupCapacitySources(
     quoteVersion === 2 ? createPostgresConfiguredCartQuoteReader : createPostgresCartQuoteReader
   )(options.orderingTransactions, scope);
   const capacity = createPostgresCurrentPickupCapacityStore(options.capacityTransactions, scope);
+  const orders = createPostgresOrderCreationQueryStore(
+    options.orderingTransactions,
+    scope,
+    quoteVersion,
+  );
   return Object.freeze({
     async resolve(value) {
       try {
@@ -69,11 +77,7 @@ function createVersionedCustomerPickupCapacitySources(
           cartVersion: input.cartVersion,
           observedAt: input.observedAt,
         });
-        const source = (
-          quoteVersion === 2
-            ? resolveConfiguredPickupCapacityCartSource
-            : resolvePickupCapacityCartSource
-        )({
+        const common = {
           cart,
           quote,
           ...scope,
@@ -82,7 +86,21 @@ function createVersionedCustomerPickupCapacitySources(
           cartVersion: input.cartVersion,
           quoteReference: input.quoteReference,
           observedAt: input.observedAt,
-        });
+        };
+        // WP-2423 M03: once this submission's Order exists its Cart is empty at a later version;
+        // the payment clock then binds to the recorded submission, not to the Cart as it is now.
+        const source =
+          cart !== null && cart.aggregateVersion > input.cartVersion
+            ? (quoteVersion === 2
+                ? resolveConfiguredOrderedPickupCapacityCartSource
+                : resolveOrderedPickupCapacityCartSource)({
+                ...common,
+                order: await orders.resolveSubmission(input.submissionReference),
+                submissionReference: input.submissionReference,
+              })
+            : (quoteVersion === 2
+                ? resolveConfiguredPickupCapacityCartSource
+                : resolvePickupCapacityCartSource)(common);
         const policy = await options.unitPolicy.resolve({ ...scope, observedAt: input.observedAt });
         const units = deriveDefaultPickupCapacityUnits(
           source,

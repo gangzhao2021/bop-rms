@@ -32,6 +32,8 @@ const failures = {
   order_version_conflict: 409,
   order_idempotency_conflict: 409,
   order_store_closed: 409,
+  /** WP-2423 M03: these dishes are already in an Order; nothing new was placed. */
+  order_already_ordered: 409,
   order_requote_required: 422,
   order_service_unavailable: 503,
 } as const;
@@ -98,6 +100,7 @@ function failure(error: unknown): Failure {
       ITEM_UNAVAILABLE: "order_requote_required",
       ITEM_SHORT: "order_requote_required",
       REQUOTE_REQUIRED: "order_requote_required",
+      ALREADY_ORDERED: "order_already_ordered",
     } as const;
     return codes[error.code];
   }
@@ -127,6 +130,7 @@ function failure(error: unknown): Failure {
     CHECKOUT_ITEM_UNAVAILABLE: "order_requote_required",
     CHECKOUT_STOCK_SHORT: "order_requote_required",
     ORDER_CREATE_STOCK_SHORT: "order_requote_required",
+    ORDER_CREATE_ALREADY_ORDERED: "order_already_ordered",
     CHECKOUT_QUOTE_EXPIRED: "order_requote_required",
     CHECKOUT_QUOTE_MISSING: "order_requote_required",
     CHECKOUT_SELECTION_INVALID: "order_requote_required",

@@ -145,6 +145,8 @@ export * from "./domain/order-item-snapshot-codec.js";
 export {
   createPostgresOrderCreationQueryStore,
   readOrderCreationQuoteVersion,
+  createPostgresCartOrderLookup,
+  type CartOrderedRecord,
   type OrderCreationQueryTransaction,
   type OrderCreationQueryTransactionRunner,
 } from "./infrastructure/persistence/order-creation-query-store.js";
@@ -281,6 +283,7 @@ export * from "./infrastructure/persistence/receipt-order-source.js";
 export * from "./domain/additional-dining-batch.js";
 
 export * from "./domain/dining-cart-continuation.js";
+export * from "./domain/pickup-cart-continuation.js";
 
 export * from "./domain/order-revision-chain.js";
 export * from "./domain/order-revision-kind.js";
