@@ -24,7 +24,18 @@ export interface CartView {
     readonly items: readonly CartItemView[];
     readonly quote: CartQuoteView | null;
     readonly warnings: readonly string[];
+    /**
+     * WP-2423 M03: the guest's own order these dishes went to, while the pickup cart is empty after
+     * it. Absent or null otherwise (always for a table).
+     */
+    readonly placedOrder?: CartPlacedOrder | null;
   };
+}
+
+/** WP-2423 M03: an order the guest already placed from this cart (its store number for display). */
+export interface CartPlacedOrder {
+  readonly orderReference: string;
+  readonly orderNumber: string;
 }
 
 export interface CartItemView {
@@ -91,6 +102,8 @@ export type CartErrorCode =
   | "cart_item_unavailable"
   /** WP-2423 (guest-cart-503): a named cart line's dish is sold, its options no longer fit. */
   | "cart_item_options_changed"
+  /** WP-2423 M03: no order of this cart whose dishes can go back (still open, or paid). */
+  | "cart_restore_not_available"
   | "cart_service_unavailable"
   | "quote_operation_expired"
   | "network_unknown";

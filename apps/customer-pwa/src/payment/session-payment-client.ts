@@ -41,7 +41,14 @@ export class SessionPaymentClientError extends Error {
       | "tips_off"
       /** WP-2423: the restaurant updated its menu after this checkout began; nothing was placed. */
       | "requote_required"
+      /** WP-2423 M03: these dishes are already in an order; nothing new was placed or charged. */
+      | "already_ordered"
       | "unknown",
+    /** already_ordered: the guest's own order that holds these dishes, when the server named it. */
+    readonly placedOrder: {
+      readonly orderReference: string;
+      readonly orderNumber: string;
+    } | null = null,
   ) {
     super("Payment unavailable.");
     this.name = "SessionPaymentClientError";
@@ -54,6 +61,24 @@ function errorCode(payload: unknown): string | null {
       ? (payload as { error?: { code?: unknown } }).error
       : undefined;
   return typeof error?.code === "string" ? error.code : null;
+}
+/** WP-2423 M03: the guest's own order a refusal names, or null when it names none. */
+export function placedOrderOf(
+  payload: unknown,
+): { readonly orderReference: string; readonly orderNumber: string } | null {
+  const order =
+    payload !== null && typeof payload === "object"
+      ? (payload as { error?: { order?: { orderReference?: unknown; orderNumber?: unknown } } })
+          .error?.order
+      : undefined;
+  if (
+    typeof order?.orderReference !== "string" ||
+    !uuid.test(order.orderReference) ||
+    typeof order.orderNumber !== "string" ||
+    !/^[1-9][0-9]{0,18}$/u.test(order.orderNumber)
+  )
+    return null;
+  return Object.freeze({ orderReference: order.orderReference, orderNumber: order.orderNumber });
 }
 function exact(value: unknown, fields: readonly string[]) {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error();
@@ -86,6 +111,7 @@ export function createSessionPaymentClient() {
     payment_pay_first_table: "pay_first_table",
     payment_tips_turned_off: "tips_off",
     payment_requote_required: "requote_required",
+    payment_already_ordered: "already_ordered",
   } as const;
   async function post(
     session: string,
@@ -121,6 +147,8 @@ export function createSessionPaymentClient() {
       );
       if (!current()) throw new SessionPaymentClientError("unknown");
       const named = errorCode(result.payload);
+      if (result.response.status === 409 && named === "payment_already_ordered")
+        throw new SessionPaymentClientError("already_ordered", placedOrderOf(result.payload));
       if (![200, 201, 202].includes(result.response.status))
         throw new SessionPaymentClientError(
           result.response.status === 400

@@ -49,6 +49,87 @@ describe("Customer Cart browser client", () => {
     );
   });
 
+  it("WP-2423 M03: reads the order an emptied cart went to, and never one beside dishes", async () => {
+    const placedOrder = { orderReference: id(13), orderNumber: "13" };
+    const emptied = { ...cart(), cart: { ...cart().cart, version: 4, placedOrder } };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify(emptied))),
+    );
+    expect((await createBrowserCustomerCartClient().loadCurrent())?.cart.placedOrder).toEqual(
+      placedOrder,
+    );
+    const withDishes = {
+      ...emptied,
+      cart: {
+        ...emptied.cart,
+        items: [
+          {
+            cartItemReference: id(2),
+            sellableReference: id(3),
+            displayName: "Synthetic noodles",
+            quantity: 1,
+            configuration: [],
+            customerNote: null,
+            lineEstimate: { status: "Unavailable", reasonCode: "LINE_ESTIMATE_UNAVAILABLE" },
+            warnings: [],
+          },
+        ],
+      },
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify(withDishes))),
+    );
+    await expect(createBrowserCustomerCartClient().loadCurrent()).rejects.toMatchObject({
+      code: "cart_service_unavailable",
+    });
+  });
+
+  it("WP-2423 M03: puts an unmade order's dishes back and reports what could not go back", async () => {
+    setCustomerCartCsrfCredential("c".repeat(43));
+    const fetch = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ ...cart(), restored: { added: 1, unavailable: 1 } }), {
+          status: 200,
+        }),
+    );
+    vi.stubGlobal("fetch", fetch);
+    const client = createBrowserCustomerCartClient();
+    const result = await client.restoreOrder?.({
+      orderReference: id(13),
+      operationReference: id(20),
+    });
+    expect(result).toEqual({ cart: cart(), added: 1, unavailable: 1 });
+    expect(fetch).toHaveBeenCalledWith(
+      "/bff/customer/cart/restore-order",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ orderReference: id(13) }),
+        headers: expect.objectContaining({
+          "idempotency-key": id(20),
+          "x-csrf-token": "c".repeat(43),
+        }),
+      }),
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              schemaVersion: 1,
+              error: { code: "cart_restore_not_available", messageKey: "x" },
+            }),
+            { status: 409 },
+          ),
+      ),
+    );
+    await expect(
+      client.restoreOrder?.({ orderReference: id(13), operationReference: id(20) }),
+    ).rejects.toMatchObject({ code: "cart_restore_not_available" });
+  });
+
   it("WP-2423: reads an explicit empty current Cart, and an older server's 404, as no Cart", async () => {
     vi.stubGlobal(
       "fetch",

@@ -1536,4 +1536,26 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Alcohol is served from 9 am to 2 am.": "酒水供应时间为 9:00 至次日 2:00。",
   "This contains alcohol. You must be 19 or older to order it, and staff may ask for ID when they serve it.":
     "含酒精。须年满 19 岁才能点，上酒时店员可能查看证件。",
+  // WP-2423 M03: dishes ordered once; an emptied cart says where they went.
+  "Already ordered": "已经下单",
+  "These dishes are in order {number}. Open it to see whether it’s paid and when it’s ready. To order something else, add dishes from the menu.":
+    "这些菜已经在订单 {number} 里。打开订单可查看是否已付款、何时可取。想再点别的，请从菜单添加。",
+  "It wasn’t sent to the kitchen.": "没有送去厨房。",
+  "Your dishes are back in your cart.": "菜已经放回购物车。",
+  "1 dish can’t be ordered right now, so it wasn’t put back.": "有 1 道菜现在不能点，没有放回。",
+  "{count} dishes can’t be ordered right now, so they weren’t put back.":
+    "有 {count} 道菜现在不能点，没有放回。",
+  "Go to your cart": "去购物车",
+  "Your cart is empty now. Put these dishes back to order them again, or choose from the menu.":
+    "购物车现在是空的。可以把这些菜放回去重新下单，或从菜单选择。",
+  "These dishes can’t be put back right now. Check the order’s status first.":
+    "这些菜现在不能放回。请先查看订单状态。",
+  "The dishes couldn’t be put back. Check your connection and try again.":
+    "菜没能放回。请检查网络后再试。",
+  "Putting dishes back…": "正在放回…",
+  "Put these dishes back in my cart": "把这些菜放回购物车",
+  "These dishes were already ordered (order {number}). You won’t be charged again.":
+    "这些菜已经下过单（订单 {number}），不会再次扣款。",
+  "These dishes were already ordered. You won’t be charged again.":
+    "这些菜已经下过单，不会再次扣款。",
 });

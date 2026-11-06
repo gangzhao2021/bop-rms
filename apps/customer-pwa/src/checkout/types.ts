@@ -1,5 +1,5 @@
 import type { CheckoutRefusedLine } from "./session-client.js";
-import type { CartMoney, CartView } from "../cart/types.js";
+import type { CartMoney, CartPlacedOrder, CartView } from "../cart/types.js";
 
 export interface CheckoutQuote {
   readonly quoteReference: string;
@@ -28,7 +28,8 @@ export interface CheckoutQuote {
 
 export type CheckoutState =
   | Readonly<{ status: "loading" }>
-  | Readonly<{ status: "empty" }>
+  /** WP-2423 M03: `placedOrder` names the guest's order when the cart is empty after it. */
+  | Readonly<{ status: "empty"; placedOrder?: CartPlacedOrder | null }>
   | Readonly<{ status: "ready"; cart: CartView; quote: CheckoutQuote | null }>
   | Readonly<{ status: "pending"; cart: CartView }>
   | Readonly<{

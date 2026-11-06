@@ -49,6 +49,8 @@ export type PaymentStartFailureState =
   | "unknown"
   /** WP-2423: the restaurant updated its menu after this checkout began; nothing was charged. */
   | "requote_required"
+  /** WP-2423 M03: these dishes are already in an order; nothing new was charged. */
+  | "already_ordered"
   /** The table pays at the end, so nothing here takes payment: back to its cart. */
   | "table_pays_later";
 
@@ -65,6 +67,8 @@ export function paymentStartFailureState(
 ): PaymentStartFailureState {
   const code = error instanceof SessionPaymentClientError ? error.code : "unknown";
   if (code === "pay_later_table") return "table_pays_later";
+  // The server made no order for this checkout, so no card offered here can have been charged.
+  if (code === "already_ordered") return "already_ordered";
   if (code === "denied" || code === "conflict") return "denied";
   if (cardOffered) return "unknown";
   switch (code) {
@@ -154,6 +158,8 @@ function PreparedSessionPaymentPage({
     | "tips_off"
     /** WP-2423: the restaurant updated its menu after this checkout began; nothing was charged. */
     | "requote_required"
+    /** WP-2423 M03: these dishes are already in an order; nothing new was charged. */
+    | "already_ordered"
     /** WP-2423 item 2: the payment couldn't start; no card was offered, so nothing was charged. */
     | "start_failed"
     /** WP-2423 item 2: the checkout's prices no longer hold; no card was offered. */
@@ -164,6 +170,7 @@ function PreparedSessionPaymentPage({
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [selectedTip] = useState(getCheckoutTipSelection);
   const [payment, setPayment] = useState<SessionPaymentView | null>(null);
+  const [placedOrder, setPlacedOrder] = useState<SessionPaymentClientError["placedOrder"]>(null);
   const [secret, setSecret] = useState<string | null>(null);
   const [firstOffer, setFirstOffer] = useState(false);
   const [online, setOnline] = useState(
@@ -275,6 +282,8 @@ function PreparedSessionPaymentPage({
         return;
       }
       const failure = paymentStartFailureState(error, wasCheckoutCardOffered());
+      if (failure === "already_ordered" && error instanceof SessionPaymentClientError)
+        setPlacedOrder(error.placedOrder);
       if (failure === "table_pays_later") {
         setTablePaymentTiming("PayLater");
         void navigate("/cart", { replace: true });
@@ -437,6 +446,30 @@ function PreparedSessionPaymentPage({
           </p>
           <SavedOnTable to={back} />
           <CheckoutReturnLink to={back} cartPath="/checkout" cartText={t("Back to checkout")} />
+        </section>
+      ) : null}
+      {status === "already_ordered" ? (
+        <section className="checkout-attention" role="alert">
+          <h2>{t("Already ordered")}</h2>
+          <p>
+            {placedOrder !== null
+              ? t(
+                  "These dishes were already ordered (order {number}). You won’t be charged again.",
+                  {
+                    number: placedOrder.orderNumber,
+                  },
+                )
+              : t("These dishes were already ordered. You won’t be charged again.")}
+          </p>
+          {placedOrder !== null ? (
+            <Link className="cart-primary-link" to={"/orders/" + placedOrder.orderReference}>
+              {t("View order status")}
+            </Link>
+          ) : (
+            <Link className="cart-primary-link" to="/menu">
+              {t("Back to menu")}
+            </Link>
+          )}
         </section>
       ) : null}
       {status === "requote_required" ? (

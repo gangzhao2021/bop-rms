@@ -262,6 +262,26 @@ it.each(["Pickup", "DineIn"] as const)(
     expect(state.cart.cart.cartReference).toBe(id(1));
   },
 );
+it("WP-2423 M03: an emptied pickup cart names the order its dishes went to", () => {
+  const empty = cart();
+  const html = renderPage({
+    status: "ready",
+    cart: {
+      ...empty,
+      cart: {
+        ...empty.cart,
+        items: [],
+        quote: null,
+        placedOrder: { orderReference: id(13), orderNumber: "13" },
+      },
+    },
+  });
+  expect(html).toContain("Already ordered");
+  expect(html).toContain("These dishes are in order 13.");
+  expect(html).toContain(`href="/orders/${id(13)}"`);
+  expect(html).not.toContain("Your cart is empty");
+  expect(html).not.toContain("cart-checkout-link");
+});
 it.each(["FEATURE_DISABLED", "PROJECTION_STALE"])(
   "preserves %s for an empty server Cart",
   (warning) => {

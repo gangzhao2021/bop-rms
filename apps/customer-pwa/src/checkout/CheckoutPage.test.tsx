@@ -124,6 +124,21 @@ describe("CUST-CHECKOUT page contract", () => {
     expect(off).toContain("Continue to payment · $1.13");
   });
 
+  it("WP-2423 M03: Back after paying lands on the order, never on a payable checkout", () => {
+    const html = render({
+      status: "empty",
+      placedOrder: { orderReference: "01902423-0000-7000-8000-000000000013", orderNumber: "13" },
+    });
+    expect(html).toContain("Already ordered");
+    expect(html).toContain("These dishes are in order 13.");
+    expect(html).toContain('href="/orders/01902423-0000-7000-8000-000000000013"');
+    expect(html).toContain("View order status");
+    expect(html).toContain('href="/menu"');
+    expect(html).not.toContain("Your cart is empty");
+    expect(html).not.toContain("Continue to payment");
+    expect(render({ status: "empty" })).toContain("Your cart is empty");
+  });
+
   it("v15 live check: an empty cart asks for no tip", () => {
     expect(render({ status: "empty" })).not.toContain('aria-label="Tip amount"');
     expect(

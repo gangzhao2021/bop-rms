@@ -1,5 +1,11 @@
 import { withReadRetry } from "../network/read-retry.js";
-import { CartClientError, type CartErrorCode, type CartItemDraft, type CartView } from "./types.js";
+import {
+  CartClientError,
+  type CartErrorCode,
+  type CartItemDraft,
+  type CartPlacedOrder,
+  type CartView,
+} from "./types.js";
 import {
   captureCustomerCsrfContext,
   getCustomerCsrfCredential,
@@ -25,6 +31,7 @@ const errorStatuses: Partial<Record<CartErrorCode, number>> = {
   cart_checkout_in_progress: 409,
   cart_table_checking_out: 409,
   cart_dining_not_seated: 409,
+  cart_restore_not_available: 409,
   cart_service_unavailable: 503,
 };
 const uuidV7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
@@ -143,7 +150,23 @@ function view(value: unknown): CartView {
       items: Object.freeze(items),
       quote,
       warnings: strings(cart.warnings),
+      // Present only while it names an order, so a cart view stays the same shape as before.
+      ...(() => {
+        const placed = placedOrder(cart.placedOrder, items.length);
+        return placed === null ? {} : { placedOrder: placed };
+      })(),
     }),
+  });
+}
+
+/** WP-2423 M03: only an empty cart names the order its dishes went to. */
+function placedOrder(value: unknown, itemCount: number): CartPlacedOrder | null {
+  if (value === undefined || value === null) return null;
+  const raw = record(value);
+  if (itemCount !== 0) throw new CartClientError("cart_service_unavailable");
+  return Object.freeze({
+    orderReference: string(raw.orderReference, uuidV7),
+    orderNumber: string(raw.orderNumber, /^[1-9][0-9]{0,18}$/u),
   });
 }
 
@@ -172,6 +195,14 @@ export interface CustomerCartClient {
     readonly cartItemReference: string;
     readonly operationReference: string;
   }): Promise<CartView>;
+  /**
+   * WP-2423 M03: puts the dishes of a pickup order that won't be made back in the cart (current
+   * menu and stock; a dish that can't be sold now is counted, not added). Never orders or charges.
+   */
+  restoreOrder?(input: {
+    readonly orderReference: string;
+    readonly operationReference: string;
+  }): Promise<{ readonly cart: CartView; readonly added: number; readonly unavailable: number }>;
 }
 
 export function setCustomerCartCsrfCredential(value: string | null): void {
@@ -495,6 +526,35 @@ export function createBrowserCustomerCartClient(): CustomerCartClient {
       if (!contextCurrent()) throw new CartClientError("network_unknown");
       if (result === null) throw new CartClientError("cart_not_found");
       return result;
+    },
+    async restoreOrder(input) {
+      const contextCurrent = captureCustomerCsrfContext();
+      let counts: { added: number; unavailable: number } | null = null;
+      const result = await request(
+        withNameLocale("/bff/customer/cart/restore-order"),
+        {
+          method: "POST",
+          headers: createHeaders(input.operationReference),
+          body: JSON.stringify({ orderReference: input.orderReference }),
+        },
+        (response, payload) => {
+          if (!response.ok) return parse(response, payload);
+          const restored = record(record(payload).restored);
+          const count = (value: unknown) => {
+            if (!Number.isSafeInteger(value) || Number(value) < 0 || Number(value) > 100)
+              throw new CartClientError("cart_service_unavailable");
+            return Number(value);
+          };
+          counts = { added: count(restored.added), unavailable: count(restored.unavailable) };
+          const { restored: _restored, ...cart } = record(payload);
+          void _restored;
+          return view(cart);
+        },
+      );
+      if (!contextCurrent()) throw new CartClientError("network_unknown");
+      if (result === null || counts === null) throw new CartClientError("cart_not_found");
+      const { added, unavailable } = counts;
+      return Object.freeze({ cart: result, added, unavailable });
     },
   };
   return Object.freeze(client);

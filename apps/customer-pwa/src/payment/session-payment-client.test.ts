@@ -118,6 +118,35 @@ it("WP-2423: tells a menu update after checkout began apart from other refusals"
   });
 });
 
+it("WP-2423 M03: says these dishes are already ordered, naming the guest's own order", async () => {
+  const order = { orderReference: id(13), orderNumber: "13" };
+  vi.stubGlobal(
+    "fetch",
+    vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json(
+          { schemaVersion: 1, error: { code: "payment_already_ordered", messageKey: "m", order } },
+          { status: 409 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        Response.json(
+          { schemaVersion: 1, error: { code: "payment_already_ordered", messageKey: "m" } },
+          { status: 409 },
+        ),
+      ),
+  );
+  await expect(createSessionPaymentClient().create(id(1), id(4), "200")).rejects.toMatchObject({
+    code: "already_ordered",
+    placedOrder: order,
+  });
+  await expect(createSessionPaymentClient().create(id(1), id(4), "200")).rejects.toMatchObject({
+    code: "already_ordered",
+    placedOrder: null,
+  });
+});
+
 it("WP-2423: tells items ran out after checkout apart from other refusals", async () => {
   vi.stubGlobal(
     "fetch",

@@ -8,6 +8,7 @@ import { createSessionPaymentResultController } from "./session-payment-result-c
 import { useCheckoutReturn } from "./checkout-return.js";
 import { RetryCardPanel } from "./RetryCardPanel.js";
 import { ResumePaymentPanel } from "./ResumePaymentPanel.js";
+import { RestoreDishesPanel } from "./RestoreDishesPanel.js";
 import { paymentConfiguration } from "./payment-configuration.js";
 import { createHttpOrderStatusClient } from "../order-status/order-status-client.js";
 import type { CustomerOrderStatusClient } from "../order-status/order-status-controller.js";
@@ -103,6 +104,9 @@ export function SessionPaymentResultPage({
   const back = useCheckoutReturn(unprepared, store?.serviceMode === "DineIn");
   // WP-2423 abandoned payment: a payment never finished (cancelled when its time ran out).
   const notCompleted = result?.status === "Failed" && result.failure === "NotCompleted";
+  // WP-2423 M03: a pickup order empties its cart when it is placed, so once a payment started
+  // there is no checkout to go back to (going back must never pay the same dishes twice).
+  const pickup = store?.serviceMode !== "DineIn";
   // The guest who started this payment can finish it here while its time is open.
   const resumable =
     result?.status === "Pending" &&
@@ -239,9 +243,10 @@ export function SessionPaymentResultPage({
                 : t("Your payment is still being confirmed. Don’t start another payment.")}
             </p>
           ) : null}
-          {notCompleted ? (
+          {notCompleted && !pickup ? (
             <p>{t("It wasn’t sent to the kitchen. Ask staff if you still want it.")}</p>
           ) : null}
+          {notCompleted && pickup ? <p>{t("It wasn’t sent to the kitchen.")}</p> : null}
           {result?.status === "Succeeded" ? (
             <>
               {result.total ? (
@@ -275,6 +280,9 @@ export function SessionPaymentResultPage({
             onSettled={() => void controller.refresh()}
           />
         ) : null}
+        {notCompleted && pickup && result?.orderReference ? (
+          <RestoreDishesPanel orderReference={result.orderReference} />
+        ) : null}
         {result?.status === "Failed" && !notCompleted ? (
           <RetryCardPanel
             checkoutSessionReference={result.checkoutSessionReference}
@@ -304,6 +312,10 @@ export function SessionPaymentResultPage({
       {unprepared && back !== "cart" ? (
         <Link className="payment-result-page__back cart-primary-link" to="/dine-in/session">
           {back === "table-saved" ? t("See your table") : t("Back to your table")}
+        </Link>
+      ) : pickup && !unprepared && result !== null ? (
+        <Link className="payment-result-page__back" to="/menu">
+          {t("Back to menu")}
         </Link>
       ) : (
         <Link

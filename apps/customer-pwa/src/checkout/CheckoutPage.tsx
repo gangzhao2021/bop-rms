@@ -1,3 +1,4 @@
+import { AlreadyOrdered } from "./AlreadyOrdered.js";
 import { createCheckoutSessionClient } from "./session-client.js";
 import { createCheckoutSessionController } from "./session-controller.js";
 import { v7 as uuidv7 } from "uuid";
@@ -372,6 +373,15 @@ export function CheckoutPage({
         }
       : undefined);
   const remaining = quote === null ? null : formatMinutesUntil(quote.expiresAt, now());
+  // WP-2423 M03: these dishes are an order already (Back from the paid page, an old bookmark, a
+  // second tab): open that order; there is nothing here to pay.
+  if (state.status === "empty" && state.placedOrder)
+    return (
+      <CustomerPage step="checkout" store={resolvedStore} className="checkout-page">
+        <PageHeading title={checkoutText.pageTitle} />
+        <AlreadyOrdered placedOrder={state.placedOrder} />
+      </CustomerPage>
+    );
   return (
     <CustomerPage step="checkout" store={resolvedStore} className="checkout-page">
       <PageHeading title={payLater ? checkoutText.placeOrder : checkoutText.pageTitle} />

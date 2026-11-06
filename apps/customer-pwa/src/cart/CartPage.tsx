@@ -1,3 +1,4 @@
+import { AlreadyOrdered } from "../checkout/AlreadyOrdered.js";
 import { listSeparator, useReloadOnLanguageChange } from "../i18n/i18n.js";
 import {
   getGuestTableStarter,
@@ -530,7 +531,9 @@ function CartContent({
       state.cart.cart.items.length === 0 &&
       state.cart.cart.warnings.length === 0)
   )
-    return round.status === "cart-changed" ? (
+    return state.status === "ready" && state.cart.cart.placedOrder ? (
+      <AlreadyOrdered placedOrder={state.cart.cart.placedOrder} />
+    ) : round.status === "cart-changed" ? (
       // A second phone tapped after the first sent: without this she'd add it all again.
       <StateMessage heading={cartText.someonePlacedIt}>
         <div className="cart-state__actions">

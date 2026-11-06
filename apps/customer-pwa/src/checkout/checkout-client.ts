@@ -585,7 +585,7 @@ export function createCheckoutController(
             !online
               ? { status: "offline", cart: refreshed, canRetry: false }
               : refreshed === null || refreshed.cart.items.length === 0
-                ? { status: "empty" }
+                ? { status: "empty", placedOrder: refreshed?.cart.placedOrder ?? null }
                 : { status: "quote-expired", cart: refreshed, canRetry: false },
           );
         } catch (refreshError) {
@@ -669,7 +669,7 @@ export function createCheckoutController(
         }
         publish(
           current === null || current.cart.items.length === 0
-            ? { status: "empty" }
+            ? { status: "empty", placedOrder: current?.cart.placedOrder ?? null }
             : { status: "ready", cart: current, quote: null },
         );
       } catch (error) {
@@ -730,7 +730,7 @@ export function createCheckoutController(
             ? { status: "empty" }
             : { status: "unavailable", cart: null, canRetry: false }
           : current.cart.items.length === 0
-            ? { status: "empty" }
+            ? { status: "empty", placedOrder: current.cart.placedOrder ?? null }
             : { status: "ready", cart: current, quote: null },
       );
     },

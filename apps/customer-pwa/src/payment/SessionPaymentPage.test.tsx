@@ -57,12 +57,17 @@ describe("WP-2423 item 2: what a failed payment start may say", () => {
     ["denied", "denied"],
     ["conflict", "denied"],
     ["pay_later_table", "table_pays_later"],
+    ["already_ordered", "already_ordered"],
     // Who knows what the result page knows: never a claim about money.
     ["already_paid", "unknown"],
     ["window_ended", "unknown"],
     ["retry_pending", "unknown"],
   ] as const)("before any card was offered, %s shows %s", (code, expected) => {
     expect(paymentStartFailureState(failure(code), false)).toBe(expected);
+  });
+
+  it("WP-2423 M03: dishes already ordered say so even after a card was offered (no new order)", () => {
+    expect(paymentStartFailureState(failure("already_ordered"), true)).toBe("already_ordered");
   });
 
   it("a thrown error that isn't the client's is an ordinary failure to start", () => {
