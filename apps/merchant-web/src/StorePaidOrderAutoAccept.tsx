@@ -91,12 +91,12 @@ export function StorePaidOrderAutoAccept({
             <strong>{t("Send paid orders straight to the kitchen")}</strong>
             <span className="store-features__detail">
               {t(
-                "Nobody needs to watch Orders: a paid order goes to the kitchen screen at once, unless the store is paused or closed, or the order has alcohol or is very large.",
+                "A paid order goes to the kitchen screen at once. It waits on Orders for Accept when the store is paused or closed, no kitchen screen has been open for 3 minutes, or the order has alcohol or is very large.",
               )}
             </span>
             <span className="store-features__detail">
               {t(
-                "Keep the kitchen screen on with sound. If you can't make one, tap Can't make it on Orders for a full refund.",
+                "Keep the kitchen screen on with sound, and tap a step on each ticket. A pickup the kitchen screen never marks is refunded 30 minutes after it was sent, unless someone taps Making it by hand on Orders. If you can't make one, tap Can't make it on Orders to refund what they paid.",
               )}
             </span>
           </span>

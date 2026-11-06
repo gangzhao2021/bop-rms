@@ -1404,10 +1404,11 @@ export function createPersistentMerchantOrderQueue(options: {
                                 batch.orderBatchReference,
                               ),
                               kept: automatic.kept,
-                              canKeep:
-                                canCantMake && item.orderType === "Pickup" && !automatic.kept,
+                              // A table round made on paper too: it leaves the warnings.
+                              canKeep: canCantMake && !automatic.kept,
                             }
-                          : automatic?.kind === "Skipped" && batch.acceptanceStatus === "NotAccepted"
+                          : automatic?.kind === "Skipped" &&
+                              batch.acceptanceStatus === "NotAccepted"
                             ? {
                                 notSentAutomatically: Object.freeze({
                                   reason: automatic.reason,

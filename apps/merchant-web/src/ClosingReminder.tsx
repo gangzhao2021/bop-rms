@@ -1,4 +1,5 @@
 import { PaidOrderWatchContext } from "./PaidOrderAlarm.js";
+import { paidOrderAlarmMinutes, paidOrdersStuck } from "./paid-order-watch.js";
 import { useEffect, useMemo, useState, useContext } from "react";
 import { Link } from "react-router";
 import { countOf, t } from "./i18n/i18n.js";
@@ -104,7 +105,7 @@ export function ClosingReminder({
     };
   }, [show, live, client]);
   if (!show) return null;
-  const neverStarted = watch?.waiting.length ?? 0;
+  const stuck = paidOrdersStuck(watch, now);
   const cantMake = watch?.cantMakeRefunds ?? 0;
   const open = summary?.openTables.filter((table) => table.owedMinor !== "0") ?? [];
   if (phase === "UnpaidTablesOnly" && open.length === 0) return null;
@@ -152,9 +153,12 @@ export function ClosingReminder({
           </p>
         )}
         {/* DEC-PAID-ORDER-AUTO-ACCEPT: what the shift should know before it goes home. */}
-        {neverStarted > 0 ? (
+        {stuck > 0 ? (
           <p className="closing-reminder__detail">
-            {t("Paid orders the kitchen never started: {count}", { count: neverStarted })}
+            {t("Paid orders the kitchen hasn't started for {minutes} min or more: {count}", {
+              minutes: paidOrderAlarmMinutes,
+              count: stuck,
+            })}
           </p>
         ) : null}
         {cantMake > 0 ? (

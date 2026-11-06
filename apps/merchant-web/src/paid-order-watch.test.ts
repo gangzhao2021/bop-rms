@@ -5,6 +5,7 @@ import {
   paidOrderAlarm,
   paidOrderAlarmLines,
   paidOrderRefundDeadlines,
+  paidOrdersStuck,
   parsePaidOrderWatch,
   type PaidOrderAlarm,
   type PaidOrderWatch,
@@ -187,6 +188,32 @@ describe("what staff are told", () => {
 
   it("names the size of a large order", () => {
     expect(notSentReasonText("LargeOrder", 22)).toContain("22");
+  });
+
+  it("never promises a full refund: Can't make it gives back what they paid, less anything returned", () => {
+    const alarm = paidOrderAlarm(watch({ waiting: [waiting(6, false), waiting(7, false)] }), now);
+    const one = paidOrderAlarm(watch({ waiting: [waiting(6, false)] }), now);
+    if (alarm === null || one === null) throw new Error("expected an alarm");
+    const lines = [...paidOrderAlarmLines(alarm), ...paidOrderAlarmLines(one)];
+    expect(lines.join(" ")).not.toMatch(/full refund/u);
+    for (const line of lines) {
+      expect(line).toContain("Making it by hand");
+      expect(line).toContain("refund what they paid");
+    }
+  });
+});
+
+describe("the closing list", () => {
+  it("counts what is stuck, not what was just sent or is being made by hand", () => {
+    expect(paidOrdersStuck(null, now)).toBe(0);
+    const kept = { ...waiting(20, false), kept: true };
+    const table = { ...waiting(9), orderType: "DineIn" as const, refundAt: null };
+    expect(
+      paidOrdersStuck(
+        watch({ waiting: [waiting(1), waiting(2, false), waiting(4), kept, waiting(6), table] }),
+        now,
+      ),
+    ).toBe(2);
   });
 });
 

@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { t } from "./i18n/i18n.js";
 import type { CurrentOrderQueue, StaffCancellationReason } from "./current-order-queue-client.js";
+import { orderMoney } from "./order-money.js";
 import { serviceOperationReference } from "./service-control-client.js";
 import {
   parseStaffCancelRefundPreview,
@@ -14,6 +15,35 @@ import {
 type Order = CurrentOrderQueue["items"][number];
 type Batch = Order["batches"][number];
 type State = "Idle" | "Pending" | "Done" | "Started" | "Changed" | "Failed" | "Denied" | "Unknown";
+
+/**
+ * What staff read last, and repeat to the guest: the amount the dialog showed, never "in full" when
+ * part of it was given back earlier, and plainly nothing when nothing was left.
+ */
+export function cantMakeDoneText(
+  preview: StaffCancelRefundPreview | "Checking" | "Failed",
+): string {
+  if (typeof preview !== "object")
+    return t(
+      "Done. What was left of the payment is refunded. The guest is told, and the items go back to stock.",
+    );
+  const amount = orderMoney({ amountMinor: preview.refundMinor, currencyCode: "CAD" });
+  if (preview.refundMinor === "0")
+    return t(
+      "Cancelled. It was already refunded in full, so nothing more was refunded. The guest is told.",
+    );
+  if (preview.refundMethod === "CardMachine")
+    return t("Cancelled. Refund {amount} on the card machine. The guest is told.", { amount });
+  return BigInt(preview.refundMinor) >= BigInt(preview.paidMinor)
+    ? t(
+        "Refunded {amount} in full to the card they paid with. The guest is told, and the items go back to stock.",
+        { amount },
+      )
+    : t(
+        "Refunded {amount}, what was left of the payment, to the card they paid with. The guest is told, and the items go back to stock.",
+        { amount },
+      );
+}
 
 /**
  * WP-2423 DEC-PAID-ORDER-AUTO-ACCEPT: whoever can accept may give back an automatically accepted
@@ -46,6 +76,8 @@ export function CantMakeRefundAction({
     "Checking",
   );
   const pickup = order.orderType === "Pickup";
+  // Already given back in full: it can still be cancelled (the kitchen can't make it), refunding nothing.
+  const nothingToRefund = typeof preview === "object" && preview.refundMinor === "0";
   // What it would give back, read each time the dialog opens (less if a dish was taken off since).
   const checkRefund = async () => {
     if (order.currentVersion === null) return;
@@ -128,7 +160,7 @@ export function CantMakeRefundAction({
     }
   };
   const message: Partial<Record<State, string>> = {
-    Done: t("Refunded in full. The guest is told, and the items go back to stock."),
+    Done: cantMakeDoneText(preview),
     Started: t("The kitchen has started it, so it can't be undone here. Ask a manager."),
     Changed: t("This order just changed. Check it again."),
     Failed: t("Not done. Check the connection and try again."),
@@ -185,7 +217,11 @@ export function CantMakeRefundAction({
               data-variant="destructive"
               disabled={state === "Pending" || (reason === "" && intent.current === null)}
             >
-              {state === "Pending" ? t("Refunding…") : t("Refund")}
+              {state === "Pending"
+                ? t("Refunding…")
+                : nothingToRefund
+                  ? t("Cancel without a refund")
+                  : t("Refund")}
             </button>
             <button type="button" onClick={() => dialog.current?.close()}>
               {t("Keep the order")}

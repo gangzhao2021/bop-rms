@@ -504,8 +504,10 @@ what staff do when something fails is different:
 - **Kitchen tablet dead, Orders still working:** new paid orders stop going to the kitchen within 3
   minutes of the last board read and wait on Orders, saying "Kitchen screen was off". Orders already
   sent show one warning on every screen after 3 minutes ("No kitchen screen has been open…"). Open
-  the board on another device, or work from Orders on paper: tap "Making it by hand" on each pickup
-  you make that way, so it is not refunded by itself, and turn the switch off.
+  the board on another device, or work from Orders on paper: tap "Making it by hand" on each order
+  you make that way (a pickup is then not refunded by itself; pickups and table rounds both leave the
+  warning), and turn the switch off. Turning the switch off stops new orders being sent; it does not
+  clear the warning for orders already sent.
 - **Store network down:** orders stop being sent within 3 minutes. Orders paid on mobile data wait on
   Orders and follow the outage hold below. When screens return, make what is on the kitchen list or
   tap "Can't make it · refund".
@@ -521,9 +523,13 @@ what staff do when something fails is different:
   time (an outage), nothing is refunded until staff are back, and then not for 15 minutes. A table
   round is never refunded by itself: it stays until someone acts.
 - **"did not reach the kitchen":** the order was accepted but its ticket never arrived. Make it from
-  the order details on Orders and tap "Making it by hand" (pickups), or tap "Can't make it · refund",
-  then tell the operator.
-- **At closing:** tonight's summary names every "Can't make it" refund, every automatic refund and
+  the order details on Orders and tap "Making it by hand" (pickups and table rounds), or tap "Can't
+  make it · refund", then tell the operator.
+- **What the guest is told after "Can't make it":** the amount the screen shows. It is what was left
+  of the payment, so less than they paid if a dish was taken off earlier, and nothing if it was
+  already refunded in full.
+- **At closing:** the closing reminder counts paid orders the kitchen has not started for 5 minutes
+  or more (not ones just sent or being made by hand); tonight's summary names every "Can't make it" refund, every automatic refund and
   every "Making it by hand", with who did it.
 
 ### Roles during an outage

@@ -223,16 +223,27 @@ export function paidOrderAlarmLines(alarm: PaidOrderAlarm): readonly string[] {
       : alarm.notReached === 1
         ? [
             t(
-              "1 paid order did not reach the kitchen · make it from the order details, or tap Can't make it for a full refund",
+              "1 paid order did not reach the kitchen · make it from the order details and tap Making it by hand, or tap Can't make it to refund what they paid",
             ),
           ]
         : [
             t(
-              "{count} paid orders did not reach the kitchen · make them from the order details, or tap Can't make it for a full refund",
+              "{count} paid orders did not reach the kitchen · make them from the order details and tap Making it by hand, or tap Can't make it to refund what they paid",
               { count: alarm.notReached },
             ),
           ]),
   ];
+}
+
+/**
+ * For the closing list: paid orders still stuck, not the ones just sent and queued. Being made by
+ * hand is not stuck; one the kitchen has not touched (or never received) counts once it is past the
+ * alarm's first time.
+ */
+export function paidOrdersStuck(watch: PaidOrderWatch | null, now: number): number {
+  return (watch?.waiting ?? []).filter(
+    (item) => !item.kept && now - Date.parse(item.acceptedAt) >= paidOrderAlarmMinutes * 60_000,
+  ).length;
 }
 
 /** Pickups refunded unless the kitchen starts them: the same countdown as a pickup nobody accepts. */

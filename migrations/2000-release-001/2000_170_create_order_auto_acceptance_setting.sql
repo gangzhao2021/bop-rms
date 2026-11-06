@@ -101,7 +101,8 @@ CREATE POLICY order_auto_acceptance_decision_scope ON rms_ordering.order_auto_ac
  WITH CHECK (brand_id=platform_helpers.current_brand_id() AND store_id=platform_helpers.current_store_id());
 REVOKE ALL ON TABLE rms_ordering.order_auto_acceptance_decision FROM PUBLIC;
 
--- Only a pickup the System accepted has an automatic refund to stop, and the row names that acceptance.
+-- Only a batch the System accepted is said to be made by hand (a pickup's automatic refund stops; a
+-- table round leaves the kitchen warnings), and the row names that acceptance.
 CREATE FUNCTION rms_ordering.validate_order_auto_accepted_kept() RETURNS trigger
 LANGUAGE plpgsql
 SET search_path = pg_catalog
@@ -111,8 +112,8 @@ BEGIN
    JOIN rms_ordering.order_header h ON h.brand_id=a.brand_id AND h.store_id=a.store_id AND h.order_id=a.order_id
   WHERE a.acceptance_id=NEW.acceptance_id AND a.brand_id=NEW.brand_id AND a.store_id=NEW.store_id
    AND a.order_id=NEW.order_id AND a.order_batch_id=NEW.order_batch_id
-   AND a.reason_code='STORE_AUTO_ACCEPT_PAID' AND h.order_type='Pickup') THEN
-  RAISE EXCEPTION 'only an automatically accepted pickup is kept' USING ERRCODE='23514';
+   AND a.reason_code='STORE_AUTO_ACCEPT_PAID') THEN
+  RAISE EXCEPTION 'only an automatically accepted batch is kept' USING ERRCODE='23514';
  END IF;
  RETURN NEW;
 END;

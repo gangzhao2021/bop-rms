@@ -171,10 +171,11 @@ export class PaidOrderKeepError extends Error {
 }
 
 /**
- * "Making it by hand": for a pickup being made without the kitchen screen (a dead board, or a ticket
- * that never arrived), whoever can accept says so and the automatic refund stops. The first name is
- * the one recorded, on the record and in the audit; no money moves. Without this, the System would
- * give away food the guest may already have.
+ * "Making it by hand": for a batch being made without the kitchen screen (a dead board, or a ticket
+ * that never arrived), whoever can accept says so. A pickup's automatic refund stops (without this,
+ * the System would give away food the guest may already have); a table round leaves the Store-level
+ * kitchen warnings, which would otherwise stay up all night. The first name is the one recorded, on
+ * the record and in the audit; no money moves.
  */
 export function createMerchantPaidOrderKeep(options: {
   persistence: PersistentMerchantBffOptions;

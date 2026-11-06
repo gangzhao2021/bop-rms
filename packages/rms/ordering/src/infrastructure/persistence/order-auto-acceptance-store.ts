@@ -427,10 +427,11 @@ export class OrderAutoAcceptedKeepError extends Error {
 }
 
 /**
- * "Making it by hand": a person says an automatically accepted pickup is being made without the
- * kitchen screen (a dead board, or a ticket that never arrived), so the automatic refund must not
- * give away food the guest may already have. Under the Order's fence, so it is settled against the
- * System close. Only an open pickup the System accepted; the first person's name stays. Moves no
+ * "Making it by hand": a person says an automatically accepted batch is being made without the
+ * kitchen screen (a dead board, or a ticket that never arrived). For a pickup the automatic refund
+ * must not give away food the guest may already have; a table round (never refunded on its own)
+ * leaves the Store-level kitchen warnings. Under the Order's fence, so it is settled against the
+ * System close. Only an open batch the System accepted; the first person's name stays. Moves no
  * money, and it can still be given back with "Can't make it" while the kitchen has not marked it.
  */
 export async function keepOrderAutoAcceptedPickup(
@@ -457,11 +458,12 @@ export async function keepOrderAutoAcceptedPickup(
     await tx.query(
       "SELECT d.acceptance_id::text AS acceptance,d.item_count::int AS item_count,d.setting_version::int AS setting_version FROM rms_ordering.order_auto_acceptance_decision d " +
         "JOIN rms_ordering.order_acceptance_record a ON a.acceptance_id=d.acceptance_id JOIN rms_ordering.order_header h ON h.brand_id=a.brand_id AND h.store_id=a.store_id AND h.order_id=a.order_id " +
-        "WHERE d.brand_id=$1 AND d.store_id=$2 AND d.order_id=$3 AND d.order_batch_id=$4 AND d.outcome='Accepted' AND h.order_type='Pickup' " +
+        "WHERE d.brand_id=$1 AND d.store_id=$2 AND d.order_id=$3 AND d.order_batch_id=$4 AND d.outcome='Accepted' " +
         stillOpen,
       [brand, store, order, batch],
     )
-  ).rows[0] as { acceptance: string; item_count: number | null; setting_version: number } | undefined;
+  ).rows[0] as
+    { acceptance: string; item_count: number | null; setting_version: number } | undefined;
   if (accepted === undefined) throw new OrderAutoAcceptedKeepError();
   const inserted = await tx.query(
     "INSERT INTO rms_ordering.order_auto_acceptance_decision (decision_id,brand_id,store_id,order_id,order_batch_id,outcome,reason_code,item_count,setting_version,acceptance_id,actor_id,decided_at) VALUES ($1,$2,$3,$4,$5,'Kept',NULL,$6,$7,$8,$9,$10) ON CONFLICT (brand_id,store_id,order_batch_id) WHERE outcome='Kept' DO NOTHING",

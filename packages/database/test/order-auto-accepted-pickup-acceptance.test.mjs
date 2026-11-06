@@ -150,9 +150,7 @@ it("the Store offline at a pickup's refund time: no refund, and a host back afte
       assert.equal(await expiry.close(await openBatch(world, first)), "NotDue");
       assert.deepEqual(await cancellationOf(world, first), []);
       // No countdown either while no screen can see it.
-      const watching = await world
-        .worker()
-        .run((tx) => readPaidOrderWatch(tx, scope, world.now()));
+      const watching = await world.worker().run((tx) => readPaidOrderWatch(tx, scope, world.now()));
       assert.deepEqual(
         watching.waiting.map((item) => item.refundAt),
         [null, null],
@@ -165,9 +163,9 @@ it("the Store offline at a pickup's refund time: no refund, and a host back afte
       // A minute after they came back: warnings on every screen, and nothing refunded yet.
       const justBack = new Date(Date.parse(backAt) + world.minutes(1)).toISOString();
       assert.deepEqual(
-        (
-          await world.worker().run((tx) => readPaidOrderRefundTimes(tx, scope, justBack))
-        ).map((item) => item.acceptBy),
+        (await world.worker().run((tx) => readPaidOrderRefundTimes(tx, scope, justBack))).map(
+          (item) => item.acceptBy,
+        ),
         [refundAt, refundAt],
       );
       const expiryThen = createOrderAutoAcceptedPickupExpiry({
@@ -271,10 +269,9 @@ it("on a real ticket: the System close says System, Can't make it says who, and 
     assert.equal(await expiry.close(due[0]), "Closed");
     // Every kitchen item cancelled, in the same transaction as the record the refund reads.
     assert.deepEqual(
-      await query(
-        "SELECT status FROM rms_kitchen.kitchen_work_item WHERE kitchen_ticket_id=$1",
-        [closingTicket.ticket],
-      ),
+      await query("SELECT status FROM rms_kitchen.kitchen_work_item WHERE kitchen_ticket_id=$1", [
+        closingTicket.ticket,
+      ]),
       [{ status: "Cancelled" }],
     );
     assert.equal((await cancellationOf(world, closing))[0].actor_id, systemActor);
@@ -361,7 +358,10 @@ it("nothing left to refund: Can't make it and the System close still end it, and
       );
       assert.equal(row.batches[0].canCantMake, true);
       assert.equal((await refuse(handGiven)).status, "Cancelled");
-      assert.equal((await cancellationOf(world, handGiven))[0].refund_disposition, "AlreadyRefunded");
+      assert.equal(
+        (await cancellationOf(world, handGiven))[0].refund_disposition,
+        "AlreadyRefunded",
+      );
       assert.equal(
         await transactions().run((transaction) =>
           createPostgresStaffOrderCancellationReader(scope).loadCompensationByPaymentEvent({
@@ -498,23 +498,93 @@ it("Making it by hand stops the automatic refund: recorded, in a name, and only 
     await assert.rejects(say(ordinary), { code: "PAID_ORDER_KEEP_NOT_KEEPABLE" });
     // The database holds the same line, whatever a caller asks of it.
     await assert.rejects(
-      world.worker().run((tx) =>
-        tx.query(
-          "INSERT INTO rms_ordering.order_auto_acceptance_decision (decision_id,brand_id,store_id,order_id,order_batch_id,outcome,setting_version,acceptance_id,actor_id,decided_at) VALUES ($1,$2,$3,$4,$5,'Kept',1,NULL,$6,$7)",
-          [
-            fresh(),
-            scope.brandReference,
-            scope.storeReference,
-            ordinary.orderReference,
-            ordinary.orderBatchReference,
-            staff.actor,
-            world.now(),
-          ],
+      world
+        .worker()
+        .run((tx) =>
+          tx.query(
+            "INSERT INTO rms_ordering.order_auto_acceptance_decision (decision_id,brand_id,store_id,order_id,order_batch_id,outcome,setting_version,acceptance_id,actor_id,decided_at) VALUES ($1,$2,$3,$4,$5,'Kept',1,NULL,$6,$7)",
+            [
+              fresh(),
+              scope.brandReference,
+              scope.storeReference,
+              ordinary.orderReference,
+              ordinary.orderBatchReference,
+              staff.actor,
+              world.now(),
+            ],
+          ),
         ),
-      ),
       { code: "23514" },
     );
   });
+});
+
+it("a table round made on paper is said Making it by hand too, and leaves the kitchen warnings", async () => {
+  await withAutoAcceptWorld(
+    { caseId: "wp2423_aap_keeptab", orderType: "DineIn" },
+    async (world) => {
+      const { assert, query, fresh } = world;
+      await world.setting.change({
+        pickup: false,
+        dineIn: true,
+        at: world.time(-world.minutes(60)),
+      });
+      await world.kitchenScreen.seenNow();
+      const round = await world.seedPaidTableRound({ paidMinutesAgo: 12 });
+      assert.equal(
+        (await world.transactions().run((tx) => world.paid.consume(tx, round.event))).result.status,
+        "OrderConfirmed",
+      );
+      await world.staffOnSince(8);
+      const staff = await world.session([], "01a6aa25");
+      const list = queueFor(world, staff);
+      const keep = createMerchantPaidOrderKeep({
+        persistence: { ...staff.persistence, now: world.now },
+        authentication: staff.authentication,
+        now: world.now,
+        nextReference: fresh,
+      });
+      const before = (await list()).items.find(
+        (item) => item.orderReference === round.orderReference,
+      );
+      // The kitchen tablet died: staff make it from paper, and there is a button for that.
+      assert.equal(before.batches[0].canKeep, true);
+      const watching = (await list()).paidOrderWatch.waiting.find(
+        (entry) => entry.orderNumber === before.orderNumber,
+      );
+      assert.equal(watching.kept, undefined);
+      assert.equal(watching.refundAt, null);
+      assert.deepEqual(
+        await keep({
+          sessionCookie: staff.sessionCookie,
+          csrf: staff.csrf,
+          command: {
+            orderReference: round.orderReference,
+            orderBatchReference: round.orderBatchReference,
+          },
+        }),
+        { status: "Kept" },
+      );
+      assert.deepEqual(
+        await query(
+          "SELECT actor_id FROM rms_ordering.order_auto_acceptance_decision WHERE order_batch_id=$1 AND outcome='Kept'",
+          [round.orderBatchReference],
+        ),
+        [{ actor_id: staff.actor }],
+      );
+      // Out of the Store-level alarm: the screens read it as being made by hand.
+      const after = await list();
+      const item = after.paidOrderWatch.waiting.find(
+        (entry) => entry.orderNumber === before.orderNumber,
+      );
+      assert.equal(item.kept, true);
+      const row = after.items.find((entry) => entry.orderReference === round.orderReference);
+      assert.equal(row.batches[0].kept, true);
+      assert.equal(row.batches[0].canKeep, false);
+      // Money never moves for it.
+      assert.deepEqual(await cancellationOf(world, round), []);
+    },
+  );
 });
 
 it("a marked dish waits for a person with a Store selected, and goes once the mark is cleared", async () => {
@@ -527,10 +597,9 @@ it("a marked dish waits for a person with a Store selected, and goes once the ma
     const consumed = await world.worker().run((tx) => paid.consume(tx, beer.event));
     assert.equal(consumed.result.status, "AwaitingOrderAcceptance");
     assert.deepEqual(
-      await query(
-        "SELECT 1 FROM rms_ordering.order_acceptance_record WHERE order_batch_id=$1",
-        [beer.orderBatchReference],
-      ),
+      await query("SELECT 1 FROM rms_ordering.order_acceptance_record WHERE order_batch_id=$1", [
+        beer.orderBatchReference,
+      ]),
       [],
     );
     assert.equal(
@@ -685,10 +754,7 @@ it("only the board's own read says a kitchen screen is open: the watch alone lea
     const read = presence.wrap(scope, async () => "read");
     // A kitchen sign-in on the sold-out page, its screen-wide warnings reading away.
     assert.equal(await read({ query: { kind: "Watch" } }), "read");
-    assert.equal(
-      await worker().run((tx) => loadKitchenScreenSeenAt(tx, scope)),
-      null,
-    );
+    assert.equal(await worker().run((tx) => loadKitchenScreenSeenAt(tx, scope)), null);
     const order = await seedPaidPickup();
     assert.equal(
       (await worker().run((tx) => paid.consume(tx, order.event))).result.status,
@@ -712,71 +778,70 @@ it("only the board's own read says a kitchen screen is open: the watch alone lea
 });
 
 it("what the manager sees: every refund and keep named on tonight's summary, the count surviving the switch", async () => {
-  await withAutoAcceptWorld({ caseId: "wp2423_aap_tonight", orderType: "Pickup" }, async (world) => {
-    const { assert, admin, fresh, scope, ownerScope, worker } = world;
-    await on(world);
-    const automatic = await sentAgo(world, 33);
-    await world.staffOnSince(8);
-    const refunded = await sentAgo(world, 1);
-    const kept = await sentAgo(world, 1);
-    const staff = await world.session([], "01a6aa26");
-    // TEST-ONLY profile: the name staff have in the Store's directory.
-    await admin.query(
-      "INSERT INTO bop_membership.member_profile_version (membership_id,version,brand_id,actor_id,display_name,operation_id,changed_by,changed_at,data_classification) SELECT membership_id,1,brand_id,actor_id,'Anna',$2,actor_id,$3,'PersonalData' FROM bop_membership.membership WHERE actor_id=$1",
-      [staff.actor, fresh(), world.now()],
-    );
-    const { refuse } = cantMakeFor(world, staff);
-    assert.equal((await refuse(refunded)).status, "Cancelled");
-    assert.equal(await expiryOf(world).close(await openBatch(world, automatic)), "Closed");
-    await createMerchantPaidOrderKeep({
-      persistence: { ...staff.persistence, now: world.now },
-      authentication: staff.authentication,
-      now: world.now,
-      nextReference: fresh,
-    })({
-      sessionCookie: staff.sessionCookie,
-      csrf: staff.csrf,
-      command: {
-        orderReference: kept.orderReference,
-        orderBatchReference: kept.orderBatchReference,
-      },
-    });
-    const facts = await worker().run((tx) =>
-      readTonightFacts(tx, {
-        scope: ownerScope,
-        window: {
-          startsAt: world.time(-world.minutes(600)),
-          endsAt: world.time(world.minutes(600)),
+  await withAutoAcceptWorld(
+    { caseId: "wp2423_aap_tonight", orderType: "Pickup" },
+    async (world) => {
+      const { assert, admin, fresh, scope, ownerScope, worker } = world;
+      await on(world);
+      const automatic = await sentAgo(world, 33);
+      await world.staffOnSince(8);
+      const refunded = await sentAgo(world, 1);
+      const kept = await sentAgo(world, 1);
+      const staff = await world.session([], "01a6aa26");
+      // TEST-ONLY profile: the name staff have in the Store's directory.
+      await admin.query(
+        "INSERT INTO bop_membership.member_profile_version (membership_id,version,brand_id,actor_id,display_name,operation_id,changed_by,changed_at,data_classification) SELECT membership_id,1,brand_id,actor_id,'Anna',$2,actor_id,$3,'PersonalData' FROM bop_membership.membership WHERE actor_id=$1",
+        [staff.actor, fresh(), world.now()],
+      );
+      const { refuse } = cantMakeFor(world, staff);
+      assert.equal((await refuse(refunded)).status, "Cancelled");
+      assert.equal(await expiryOf(world).close(await openBatch(world, automatic)), "Closed");
+      await createMerchantPaidOrderKeep({
+        persistence: { ...staff.persistence, now: world.now },
+        authentication: staff.authentication,
+        now: world.now,
+        nextReference: fresh,
+      })({
+        sessionCookie: staff.sessionCookie,
+        csrf: staff.csrf,
+        command: {
+          orderReference: kept.orderReference,
+          orderBatchReference: kept.orderBatchReference,
         },
-        observedAt: world.now(),
-        authorize: async () => true,
-      }),
-    );
-    assert.deepEqual(
-      facts.paidOrderEvents.map((event) => [event.kind, event.staffName, event.reasonCode]),
-      [
-        ["CantMake", "Anna", "SOLD_OUT"],
-        ["AutomaticRefund", null, "STORE_ERROR"],
-        ["KeptByHand", "Anna", null],
-      ],
-    );
-    assert.match(facts.paidOrderEvents[0].orderNumber, /\d/u);
-    // Turned off because of this: the count stays, and the board keeps saying what waits.
-    await world.setting.change({ pickup: false, dineIn: false });
-    const watch = await worker().run((tx) => readPaidOrderWatch(tx, scope, world.now()));
-    assert.equal(watch.on, false);
-    assert.equal(watch.recentlyOn, true);
-    assert.equal(watch.cantMakeRefunds, 1);
-    assert.equal(watch.waiting.length, 1);
-    // A day later it is only the count of what happened in that day: no more banner.
-    const later = await worker().run((tx) =>
-      readPaidOrderWatch(
-        tx,
-        scope,
-        new Date(Date.now() + world.minutes(25 * 60)).toISOString(),
-      ),
-    );
-    assert.equal(later.recentlyOn, false);
-    assert.equal(later.cantMakeRefunds, 0);
-  });
+      });
+      const facts = await worker().run((tx) =>
+        readTonightFacts(tx, {
+          scope: ownerScope,
+          window: {
+            startsAt: world.time(-world.minutes(600)),
+            endsAt: world.time(world.minutes(600)),
+          },
+          observedAt: world.now(),
+          authorize: async () => true,
+        }),
+      );
+      assert.deepEqual(
+        facts.paidOrderEvents.map((event) => [event.kind, event.staffName, event.reasonCode]),
+        [
+          ["CantMake", "Anna", "SOLD_OUT"],
+          ["AutomaticRefund", null, "STORE_ERROR"],
+          ["KeptByHand", "Anna", null],
+        ],
+      );
+      assert.match(facts.paidOrderEvents[0].orderNumber, /\d/u);
+      // Turned off because of this: the count stays, and the board keeps saying what waits.
+      await world.setting.change({ pickup: false, dineIn: false });
+      const watch = await worker().run((tx) => readPaidOrderWatch(tx, scope, world.now()));
+      assert.equal(watch.on, false);
+      assert.equal(watch.recentlyOn, true);
+      assert.equal(watch.cantMakeRefunds, 1);
+      assert.equal(watch.waiting.length, 1);
+      // A day later it is only the count of what happened in that day: no more banner.
+      const later = await worker().run((tx) =>
+        readPaidOrderWatch(tx, scope, new Date(Date.now() + world.minutes(25 * 60)).toISOString()),
+      );
+      assert.equal(later.recentlyOn, false);
+      assert.equal(later.cantMakeRefunds, 0);
+    },
+  );
 });

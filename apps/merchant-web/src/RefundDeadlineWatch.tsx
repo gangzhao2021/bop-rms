@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Link } from "react-router";
 import { playKitchenChime } from "./alert-chime.js";
+import { t } from "./i18n/i18n.js";
 import type { CurrentOrderQueue } from "./current-order-queue-client.js";
 import {
   refundAlertsDue,
@@ -14,6 +15,70 @@ import {
 } from "./refund-deadline-warning.js";
 import { storeTime } from "./StoreTime.js";
 import { pinnedHeightRef } from "./pinned-warnings.js";
+
+type Warning = ReturnType<typeof refundWarnings>[number];
+
+/**
+ * What a person does about the countdown, in staff words. An ordinary pickup waits for Accept; one
+ * sent straight to the kitchen has no Accept: a step on its ticket stops it, or "Making it by hand"
+ * on Orders (the only way when its ticket never arrived). Mixed lists get one line for each.
+ */
+export function refundActionLines(
+  warnings: readonly Warning[],
+  where: {
+    readonly signedOut: boolean;
+    readonly unsure: boolean;
+    readonly canAccept: boolean;
+    /** Signed in: whether this person accepts on Orders (false on a kitchen-only screen). */
+    readonly onOrders: boolean;
+  },
+): { readonly accept: string | null; readonly kitchen: string | null } {
+  const accepting = warnings.filter((warning) => !warning.kitchenStart);
+  const kitchen = warnings.filter((warning) => warning.kitchenStart);
+  const one = (list: readonly Warning[]) => list.length === 1;
+  const acceptLine =
+    accepting.length === 0
+      ? null
+      : where.signedOut
+        ? where.unsure
+          ? where.canAccept
+            ? t("Sign in to check.")
+            : t("Ask someone at the counter to check Orders.")
+          : where.canAccept
+            ? one(accepting)
+              ? t("Sign in to accept it.")
+              : t("Sign in to accept them.")
+            : one(accepting)
+              ? t("Ask someone at the counter to accept it on Orders.")
+              : t("Ask someone at the counter to accept them on Orders.")
+        : where.onOrders
+          ? null
+          : one(accepting)
+            ? t("Ask someone at the counter to accept it on Orders.")
+            : t("Ask someone at the counter to accept them on Orders.");
+  const lost = kitchen.some((warning) => warning.notReached);
+  const kitchenLine =
+    kitchen.length === 0 || (where.signedOut && where.unsure && accepting.length > 0)
+      ? null
+      : lost
+        ? where.onOrders
+          ? null
+          : where.signedOut && where.canAccept
+            ? t("Sign in and tap Making it by hand on Orders if it is being made.")
+            : t(
+                "Ask someone at the counter to tap Making it by hand on Orders if it is being made.",
+              )
+        : where.signedOut
+          ? where.canAccept
+            ? t(
+                "Tap a step on the ticket on the kitchen screen, or sign in and tap Making it by hand on Orders.",
+              )
+            : t("Tap a step on the ticket on the kitchen screen.")
+          : where.onOrders
+            ? null
+            : t("Tap a step on the ticket to keep it.");
+  return { accept: acceptLine, kitchen: kitchenLine };
+}
 
 /** How often the warning re-reads the Store's paid orders waiting for acceptance. */
 export const REFUND_WATCH_READ_MS = 15_000;
@@ -218,20 +283,33 @@ export function RefundDeadlineWatch({
     if (due.chime) playKitchenChime(audio.current ?? undefined);
   });
   if (warnings.length === 0) return null;
-  const them = warnings.length === 1 ? "it" : "them";
   const checked =
     checkedAt === null
       ? ""
-      : ` Last checked at ${storeTime(new Date(checkedAt).toISOString(), timeZone)}${
-          checkedSignedOut ? "." : ", before this screen signed out."
-        }`;
+      : " " +
+        (checkedSignedOut
+          ? t("Last checked at {time}.", {
+              time: storeTime(new Date(checkedAt).toISOString(), timeZone),
+            })
+          : t("Last checked at {time}, before this screen signed out.", {
+              time: storeTime(new Date(checkedAt).toISOString(), timeZone),
+            }));
+  // Signed in on Orders, a person accepts or taps Making it by hand right there; elsewhere a person
+  // who can accept gets the link, and a kitchen-only screen says who can.
+  const lines = refundActionLines(warnings, {
+    signedOut,
+    unsure,
+    canAccept,
+    onOrders: !signedOut && ordersHref !== null,
+  });
+  const anyLost = warnings.some((warning) => warning.kitchenStart && warning.notReached);
   const section = (
     <section
       ref={pinWarning}
       className="refund-deadline-warning"
       data-tier={unsure ? "unsure" : warnings[0]?.tier}
       data-signed-out={signedOut ? "true" : undefined}
-      aria-label="Orders about to be refunded"
+      aria-label={t("Orders about to be refunded")}
     >
       {/* Heard once per new step (5 min, 2 min, 30 s); the countdown itself stays quiet. */}
       <p className="visually-hidden" role="alert">
@@ -245,24 +323,27 @@ export function RefundDeadlineWatch({
         ))}
       </ul>
       {signedOut ? (
-        <p>
-          {unsure
-            ? canAccept
-              ? "Sign in to check."
-              : "Ask someone at the counter to check Orders."
-            : canAccept
-              ? `Sign in to accept ${them}.`
-              : `Ask someone at the counter to accept ${them} on Orders.`}
-          {checked}
-        </p>
-      ) : warnings.every(
-          (warning) => warning.kitchenStart && !warning.notReached,
-        ) ? null : ordersHref === null ? (
-        <p>Ask someone at the counter to accept {them} on Orders.</p>
-      ) : onOrdersPage ? null : (
-        <Link className="shell-action" to={ordersHref}>
-          Accept on Orders
-        </Link>
+        lines.accept === null && lines.kitchen === null && checked === "" ? null : (
+          <p>
+            {[lines.accept, lines.kitchen].filter((line) => line !== null).join(" ")}
+            {checked}
+          </p>
+        )
+      ) : (
+        <>
+          {lines.accept === null && lines.kitchen === null ? null : (
+            <p>{[lines.accept, lines.kitchen].filter((line) => line !== null).join(" ")}</p>
+          )}
+          {ordersHref === null ||
+          onOrdersPage ||
+          warnings.every((warning) => warning.kitchenStart && !warning.notReached) ? null : (
+            <Link className="shell-action" to={ordersHref}>
+              {warnings.some((warning) => !warning.kitchenStart) || !anyLost
+                ? t("Accept on Orders")
+                : t("Making it by hand on Orders")}
+            </Link>
+          )}
+        </>
       )}
     </section>
   );

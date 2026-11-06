@@ -7526,24 +7526,33 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Not sent automatically · check the order": "没有自动送后厨 · 看一下这张单",
   "The kitchen hasn't touched anything for {minutes} min and {count} paid orders are waiting · check the kitchen screen":
     "后厨已经 {minutes} 分钟没动过，有 {count} 张已付款的单在等 · 看一下后厨屏幕",
-  "{count} paid orders did not reach the kitchen · make them from the order details, or tap Can't make it for a full refund":
-    "{count} 张已付款的单没到后厨 · 按订单详情来做，或点“做不了”全额退款",
+  "{count} paid orders did not reach the kitchen · make them from the order details and tap Making it by hand, or tap Can't make it to refund what they paid":
+    "{count} 张已付款的单没到后厨 · 按订单详情来做并点“正在手工做”，或点“做不了”退还客人付的钱",
   "Saved. Paid orders now go straight to the kitchen.": "已保存。已付款的订单现在直接进后厨。",
   "Saved. Paid orders wait for Accept on Orders again.": "已保存。已付款的订单又要在订单页接单了。",
   "Paid orders": "已付款的订单",
   "Send paid orders straight to the kitchen": "已付款的订单直接进后厨",
-  "Nobody needs to watch Orders: a paid order goes to the kitchen screen at once, unless the store is paused or closed, or the order has alcohol or is very large.":
-    "不用盯着订单页：已付款的订单马上到后厨屏幕；门店暂停或打烊、单里有酒水或单子很大时除外。",
-  "Keep the kitchen screen on with sound. If you can't make one, tap Can't make it on Orders for a full refund.":
-    "后厨屏幕要开着，并打开声音。做不了的单，在订单页点“做不了”全额退款。",
+  "A paid order goes to the kitchen screen at once. It waits on Orders for Accept when the store is paused or closed, no kitchen screen has been open for 3 minutes, or the order has alcohol or is very large.":
+    "已付款的订单马上到后厨屏幕。门店暂停或打烊、后厨屏幕已经 3 分钟没开、单里有酒水或单子很大时，会留在订单页等人接单。",
+  "Keep the kitchen screen on with sound, and tap a step on each ticket. A pickup the kitchen screen never marks is refunded 30 minutes after it was sent, unless someone taps Making it by hand on Orders. If you can't make one, tap Can't make it on Orders to refund what they paid.":
+    "后厨屏幕要开着并打开声音，每张单都要点一下步骤。自取单如果后厨屏幕一直没点，送出 30 分钟后会自动退款，除非有人在订单页点“正在手工做”。做不了的单，在订单页点“做不了”退还客人付的钱。",
   "Save paid orders": "保存已付款订单设置",
   "Paid orders now wait for Accept on Orders.": "已付款的订单现在要在订单页接单。",
   "Paid orders go straight to the kitchen": "已付款的订单直接进后厨",
   "Yes, turn off": "确定关闭",
   "Keep it on": "继续开着",
   "Someone else changed this just now. Check it again.": "刚才有人改过了，请再看一下。",
-  "Refunded in full. The guest is told, and the items go back to stock.":
-    "已全额退款。客人会收到通知，菜品库存已退回。",
+  "Done. What was left of the payment is refunded. The guest is told, and the items go back to stock.":
+    "办好了。付款剩下的部分已退回。客人会收到通知，菜品库存已退回。",
+  "Cancelled. It was already refunded in full, so nothing more was refunded. The guest is told.":
+    "已取消。之前已经全额退过款，这次没有再退钱。客人会收到通知。",
+  "Cancelled. Refund {amount} on the card machine. The guest is told.":
+    "已取消。请在刷卡机上退 {amount}。客人会收到通知。",
+  "Refunded {amount} in full to the card they paid with. The guest is told, and the items go back to stock.":
+    "已全额退款 {amount} 到客人付款的卡上。客人会收到通知，菜品库存已退回。",
+  "Refunded {amount}, what was left of the payment, to the card they paid with. The guest is told, and the items go back to stock.":
+    "已把付款剩下的 {amount} 退到客人付款的卡上。客人会收到通知，菜品库存已退回。",
+  "Cancel without a refund": "取消，不退钱",
   "The kitchen has started it, so it can't be undone here. Ask a manager.":
     "后厨已经开始做了，这里不能退。请找经理。",
   "This order just changed. Check it again.": "这张单刚有变化，请再看一下。",
@@ -7569,17 +7578,36 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Paid, needs a person": "已付款，需要人来处理",
   "Accept on Orders": "去订单页接单",
   "Ask someone at the counter to accept it on Orders.": "请前台的同事在订单页接单。",
+  "Ask someone at the counter to accept them on Orders.": "请前台的同事在订单页接单。",
+  "Sign in to check.": "请登录后查看。",
+  "Ask someone at the counter to check Orders.": "请前台的同事看一下订单页。",
+  "Sign in to accept it.": "请登录后接单。",
+  "Sign in to accept them.": "请登录后接单。",
+  "Sign in and tap Making it by hand on Orders if it is being made.":
+    "如果正在做，请登录后在订单页点“正在手工做”。",
+  "Ask someone at the counter to tap Making it by hand on Orders if it is being made.":
+    "如果正在做，请前台的同事在订单页点“正在手工做”。",
+  "Tap a step on the ticket on the kitchen screen, or sign in and tap Making it by hand on Orders.":
+    "在后厨屏幕上点一下这张单的步骤，或登录后在订单页点“正在手工做”。",
+  "Tap a step on the ticket on the kitchen screen.": "在后厨屏幕上点一下这张单的步骤。",
+  "Tap a step on the ticket to keep it.": "点一下这张单的步骤，就不会退款。",
+  "Last checked at {time}.": "最后查看时间 {time}。",
+  "Last checked at {time}, before this screen signed out.":
+    "最后查看时间 {time}，是在这个屏幕退出登录之前。",
+  "Orders about to be refunded": "即将自动退款的订单",
+  "Making it by hand on Orders": "去订单页点“正在手工做”",
   "Accepted automatically · sent {minutes} min ago": "已自动接单 · {minutes} 分钟前送后厨",
   "Accepted automatically": "已自动接单",
-  "Paid orders the kitchen never started: {count}": "后厨没开始做的已付款单：{count}",
+  "Paid orders the kitchen hasn't started for {minutes} min or more: {count}":
+    "已付款但后厨 {minutes} 分钟以上还没开始的单：{count}",
   "Refunded with Can't make it in the last 24 hours: {count}":
     "过去 24 小时点“做不了”退款：{count}",
   "Order {orderNumber} will be refunded automatically {when} unless the kitchen starts it.":
     "{orderNumber} 号单将在{when}自动退款，除非后厨开始做。",
   "The kitchen hasn't touched anything for {minutes} min and 1 paid order is waiting · check the kitchen screen":
     "后厨已经 {minutes} 分钟没动过，有 1 张已付款的单在等 · 看一下后厨屏幕",
-  "1 paid order did not reach the kitchen · make it from the order details, or tap Can't make it for a full refund":
-    "1 张已付款的单没到后厨 · 按订单详情来做，或点“做不了”全额退款",
+  "1 paid order did not reach the kitchen · make it from the order details and tap Making it by hand, or tap Can't make it to refund what they paid":
+    "1 张已付款的单没到后厨 · 按订单详情来做并点“正在手工做”，或点“做不了”退还客人付的钱",
   // DEC-PAID-ORDER-AUTO-ACCEPT (fix-up): made by hand, never reached, tonight's list.
   "The money goes back to the card they paid with, and they are told why. Your name is recorded.":
     "钱退回客人付款的那张卡，并告诉客人原因。会记下你的名字。",
@@ -7602,4 +7630,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Noted. It won't be refunded automatically. If you can't make it after all, tap Can't make it.":
     "记下了，不会自动退款。如果最后还是做不了，点“做不了”。",
   "Making it by hand": "正在手工做",
+  "Noted. It no longer shows as waiting for the kitchen. If you can't make it after all, tap Can't make it.":
+    "记下了，不再显示为等后厨。如果最后还是做不了，点“做不了”。",
 });

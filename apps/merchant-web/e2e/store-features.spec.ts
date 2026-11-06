@@ -436,7 +436,9 @@ test("@production the owner applies the full-service setup, turns a module back 
   });
 });
 
-test("@production the owner sends paid orders straight to the kitchen, and back", async ({ page }) => {
+test("@production the owner sends paid orders straight to the kitchen, and back", async ({
+  page,
+}) => {
   await session(page);
   let current = {
     version: 0,
@@ -500,8 +502,13 @@ test("@production the owner sends paid orders straight to the kitchen, and back"
   const box = page.getByRole("checkbox", { name: /Send paid orders straight to the kitchen/u });
   // Off until the owner turns it on; the row says what it means in two sentences.
   await expect(box).not.toBeChecked();
-  await expect(page.getByText(/Nobody needs to watch Orders/u)).toBeVisible();
+  await expect(page.getByText(/no kitchen screen has been open for 3 minutes/u)).toBeVisible();
   await expect(page.getByText(/Keep the kitchen screen on with sound/u)).toBeVisible();
+  // The owner reads the refund rule here, and no promise of a full refund.
+  await expect(
+    page.getByText(/A pickup the kitchen screen never marks is refunded 30 minutes after/u),
+  ).toBeVisible();
+  await expect(page.getByText(/full refund/u)).toBeHidden();
   const save = page.getByRole("button", { name: "Save paid orders" });
   await expect(save).toBeDisabled();
   await box.check();

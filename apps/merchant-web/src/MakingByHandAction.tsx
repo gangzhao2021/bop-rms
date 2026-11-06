@@ -18,7 +18,7 @@ export function makingByHandOutcome(status: number): Exclude<State, "Idle" | "Pe
  * WP-2423 DEC-PAID-ORDER-AUTO-ACCEPT: a pickup sent straight to the kitchen is refunded on its own
  * when the kitchen never marks it. When it is being made without the kitchen screen (the screen is
  * dead, or the ticket never arrived), whoever can accept says so here and the automatic refund
- * stops. No money moves; their name is recorded and the manager sees it tonight. Saying it twice is
+ * stops; a table round made from paper leaves the kitchen warnings the same way. No money moves; their name is recorded and the manager sees it tonight. Saying it twice is
  * harmless, so a retry needs no reference of its own.
  */
 export function MakingByHandAction({
@@ -59,9 +59,14 @@ export function MakingByHandAction({
     if (next === "Done" || next === "Changed") onSettled();
   };
   const message: Partial<Record<State, string>> = {
-    Done: t(
-      "Noted. It won't be refunded automatically. If you can't make it after all, tap Can't make it.",
-    ),
+    Done:
+      order.orderType === "Pickup"
+        ? t(
+            "Noted. It won't be refunded automatically. If you can't make it after all, tap Can't make it.",
+          )
+        : t(
+            "Noted. It no longer shows as waiting for the kitchen. If you can't make it after all, tap Can't make it.",
+          ),
     Changed: t("This order just changed. Check it again."),
     Failed: t("Not saved. Check the connection and try again."),
     Denied: t("You can't do this. Ask a manager."),
