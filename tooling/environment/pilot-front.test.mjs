@@ -269,13 +269,15 @@ it("v15 2026-10-29: one failed connect to the entry is tried again before the up
   expect(updating.body).toContain("We're updating");
 });
 
-it("DEC-PILOT-MAINTENANCE-PAGE: the page has no internal terms, no scripts and answers HEAD without a body", () => {
+it("DEC-PILOT-MAINTENANCE-PAGE: the page has no internal terms, one hashed script and answers HEAD without a body", () => {
   const html = renderUnavailable(Buffer.from("GET / HTTP/1.1\r\nHost: x\r\n\r\n"), {
     updating: true,
   }).toString("utf8");
   expect(html).toMatch(/^HTTP\/1\.1 503 /u);
   const body = html.slice(html.indexOf("<!doctype"));
-  expect(body).not.toMatch(/<script|pilot|InternalTest|supervisor|container|503|error/iu);
+  expect(body.replace(/<script>[^<]*<\/script>/u, "")).not.toMatch(
+    /<script|pilot|InternalTest|supervisor|container|503|error/iu,
+  );
   expect(html).toContain("default-src 'none'");
   const head = renderUnavailable(Buffer.from("HEAD / HTTP/1.1\r\nHost: x\r\n\r\n"), {
     updating: false,
@@ -307,4 +309,62 @@ it("WP-2423: with clientAddress set, the entry learns the guest's address from f
     client.on("error", resolve);
   });
   expect(seen[0]).toMatch(/^PROXY TCP4 127\.0\.0\.1 127\.0\.0\.1 \d+ \d+$/u);
+});
+
+const page = (headers = "") => {
+  const text = renderUnavailable(
+    Buffer.from("GET / HTTP/1.1\r\nHost: x\r\nAccept: text/html\r\n" + headers + "\r\n"),
+    { updating: false },
+  ).toString("utf8");
+  const split = text.indexOf("\r\n\r\n");
+  return { head: text.slice(0, split), body: text.slice(split + 4) };
+};
+
+// M02 (v15 07b7a1b7): "Try again" was <a href="">, which drops the fragment, so a guest who
+// scanned a table during an outage came back to the bare address (then the first Store).
+it("M02: Try again and the automatic retry reload the same address, fragment included", async () => {
+  const { head, body } = page();
+  const scripts = [...body.matchAll(/<script>([^<]*)<\/script>/gu)].map((match) => match[1]);
+  expect(scripts).toHaveLength(1);
+  expect(scripts[0]).toContain("location.reload()");
+  expect(scripts[0]).toContain('getElementById("again")');
+  expect(scripts[0]).toContain("preventDefault()");
+  // The only script allowed is exactly this one, by its hash; nothing else may run.
+  const { createHash } = await import("node:crypto");
+  const hash = createHash("sha256").update(scripts[0], "utf8").digest("base64");
+  const csp = /\r\nContent-Security-Policy: ([^\r\n]*)/u.exec("\r\n" + head)?.[1] ?? "";
+  expect(csp).toContain(`script-src 'sha256-${hash}'`);
+  expect(csp).toContain("default-src 'none'");
+  expect(csp).not.toContain("unsafe-inline' 'sha");
+  expect(csp).not.toMatch(/script-src[^;]*unsafe-inline/u);
+  expect(body).toContain('<a id="again" href="">');
+  // Without scripts the page still refreshes itself (a refresh keeps the address).
+  expect(body).toContain('<noscript><meta http-equiv="refresh" content="20"></noscript>');
+  expect(body.replace(/<noscript>.*?<\/noscript>/u, "")).not.toContain('http-equiv="refresh"');
+});
+
+it("M02: guests of Chinese restaurants read the page in Chinese; French and English unchanged", () => {
+  const zh = page("Accept-Language: zh-CN,zh;q=0.9,en;q=0.8\r\n").body;
+  expect(zh).toContain('<html lang="zh-Hans">');
+  expect(zh).toContain("点单暂时停顿");
+  expect(zh).toContain("我们暂时打不开点单页面，很快就会恢复。");
+  expect(zh).toContain("本页会自动重试，已下的订单不会丢失。");
+  expect(zh).toContain("在餐桌？店员可以先帮你点单。");
+  expect(zh).toContain(">重试</a>");
+  expect(page("Accept-Language: zh-Hant-TW\r\n").body).toContain("点单暂时停顿");
+  const fr = page("Accept-Language: fr-CA,fr;q=0.9\r\n").body;
+  expect(fr).toContain('<html lang="fr">');
+  expect(fr).toContain("Commande en pause pour un instant");
+  const en = page("Accept-Language: en-CA\r\n").body;
+  expect(en).toContain('<html lang="en">');
+  expect(en).toContain("Ordering is paused for a moment");
+  expect(page().body).toContain('<html lang="en">');
+  const staff = renderUnavailable(
+    Buffer.from(
+      "GET /app/operations/orders HTTP/1.1\r\nHost: x\r\nAccept: text/html\r\nAccept-Language: zh-CN\r\n\r\n",
+    ),
+    { updating: true },
+  ).toString("utf8");
+  expect(staff).toContain("系统正在更新");
+  expect(staff).toContain("店员：在页面恢复前，请继续在柜台或用纸质单（停机单）接单。");
 });

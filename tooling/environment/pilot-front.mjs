@@ -15,6 +15,7 @@
 // their files change (renewals need no restart). Nothing of a request is logged.
 import { Buffer } from "node:buffer";
 import console from "node:console";
+import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import { clearInterval, clearTimeout, setInterval, setTimeout } from "node:timers";
 import net from "node:net";
@@ -62,7 +63,31 @@ const COPY = {
       "Personnel : continuez de prendre les commandes au comptoir ou sur papier (fiche de panne) jusqu'au retour de cette page.",
     again: "Réessayer",
   },
+  // M02: the guests are customers of Chinese restaurants.
+  zh: {
+    updating: {
+      title: "系统正在更新",
+      lead: "点单系统正在更新，一两分钟后就会恢复。",
+    },
+    paused: {
+      title: "点单暂时停顿",
+      lead: "我们暂时打不开点单页面，很快就会恢复。",
+    },
+    retry: "本页会自动重试，已下的订单不会丢失。",
+    guest: "在餐桌？店员可以先帮你点单。",
+    staff: "店员：在页面恢复前，请继续在柜台或用纸质单（停机单）接单。",
+    again: "重试",
+  },
 };
+const HTML_LANG = { en: "en", fr: "fr", zh: "zh-Hans" };
+/**
+ * M02 (v15 07b7a1b7): "Try again" and the automatic retry reload the same address, fragment
+ * included (a table or pickup code scanned during the outage is still there afterwards); an
+ * empty link or a refresh header would drop it. Allowed by its own hash, nothing else runs.
+ */
+const RELOAD_SCRIPT =
+  'document.getElementById("again").addEventListener("click",function(e){e.preventDefault();location.reload()});setTimeout(function(){location.reload()},20000)';
+const RELOAD_SCRIPT_HASH = createHash("sha256").update(RELOAD_SCRIPT, "utf8").digest("base64");
 
 /** The 503 answer for one request head (`null` when it is not an HTTP/1 request). */
 export function renderUnavailable(head, { updating }) {
@@ -87,14 +112,15 @@ export function renderUnavailable(head, { updating }) {
   ];
   let type, body;
   if (wantsHtml) {
-    const lang = /^\s*fr\b/iu.test(header("accept-language")) ? "fr" : "en";
+    const language = header("accept-language");
+    const lang = /^\s*zh\b/iu.test(language) ? "zh" : /^\s*fr\b/iu.test(language) ? "fr" : "en";
     const copy = COPY[lang],
       state = updating ? copy.updating : copy.paused;
     type = "text/html; charset=utf-8";
     common.push(
-      "Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+      `Content-Security-Policy: default-src 'none'; script-src 'sha256-${RELOAD_SCRIPT_HASH}'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
     );
-    body = `<!doctype html><html lang="${lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="20"><title>${state.title}</title><style>body{margin:0;font:17px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#111;background:#fff}main{max-width:32rem;margin:0 auto;padding:18vh 1.5rem 2rem}h1{font-size:1.6rem;font-weight:600;margin:0 0 .75rem}p{margin:0 0 .9rem;color:#333}a{display:inline-block;margin-top:.75rem;padding:.7rem 1.4rem;border:1px solid #111;color:#111;text-decoration:none}</style></head><body><main><h1>${state.title}</h1><p>${state.lead}</p><p>${copy.retry}</p><p>${staff ? copy.staff : copy.guest}</p><a href="">${copy.again}</a></main></body></html>`;
+    body = `<!doctype html><html lang="${HTML_LANG[lang]}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><noscript><meta http-equiv="refresh" content="20"></noscript><title>${state.title}</title><style>body{margin:0;font:17px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#111;background:#fff}main{max-width:32rem;margin:0 auto;padding:18vh 1.5rem 2rem}h1{font-size:1.6rem;font-weight:600;margin:0 0 .75rem}p{margin:0 0 .9rem;color:#333}a{display:inline-block;margin-top:.75rem;padding:.7rem 1.4rem;border:1px solid #111;color:#111;text-decoration:none}</style></head><body><main><h1>${state.title}</h1><p>${state.lead}</p><p>${copy.retry}</p><p>${staff ? copy.staff : copy.guest}</p><a id="again" href="">${copy.again}</a></main><script>${RELOAD_SCRIPT}</script></body></html>`;
   } else {
     type = "application/json";
     body = JSON.stringify({
