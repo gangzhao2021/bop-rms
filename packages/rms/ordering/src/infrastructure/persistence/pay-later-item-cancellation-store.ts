@@ -473,6 +473,13 @@ export async function listStoreCancelledDishes(
       amountMinor: BigInt(String(row.amount ?? "0")),
     };
   };
+  // An order-level record (whole order, or a round cancelled unpaid) lists every item the round
+  // held, including dishes an earlier item cancellation already took off. Those dishes are
+  // counted once, under the item record that took them off first, whenever that was.
+  const notTakenOffAlready =
+    " AND NOT EXISTS (SELECT 1 FROM rms_ordering.order_item_staff_cancellation x WHERE x.brand_id=c.brand_id " +
+    "AND x.store_id=c.store_id AND x.order_id=c.order_id AND x.order_batch_id=c.order_batch_id " +
+    "AND i.order_item_id=ANY(x.order_item_ids))";
   const items = (table: string, where: string) =>
     "SELECT count(DISTINCT c.order_batch_id)::int AS rounds,COALESCE(sum(i.quantity),0)::int AS dishes," +
     "COALESCE(sum((i.transaction_snapshot_json->'pricing'->'total'->>'amountMinor')::bigint),0)::text AS amount " +
@@ -500,12 +507,24 @@ export async function listStoreCancelledDishes(
     ).rows as Record<string, unknown>[],
   );
   const paidRounds = sum(
-    (await tx.query(items("order_staff_cancellation", ""), [brand, store, from, to]))
-      .rows as Record<string, unknown>[],
+    (
+      await tx.query(items("order_staff_cancellation", notTakenOffAlready), [
+        brand,
+        store,
+        from,
+        to,
+      ])
+    ).rows as Record<string, unknown>[],
   );
   const unpaid = sum(
-    (await tx.query(items("order_batch_checkout_cancellation", ""), [brand, store, from, to]))
-      .rows as Record<string, unknown>[],
+    (
+      await tx.query(items("order_batch_checkout_cancellation", notTakenOffAlready), [
+        brand,
+        store,
+        from,
+        to,
+      ])
+    ).rows as Record<string, unknown>[],
   );
   return Object.freeze({
     removedBeforePayment: Object.freeze({

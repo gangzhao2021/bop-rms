@@ -27,6 +27,7 @@ import {
   createPostgresOrderKitchenSourceStore,
   createPostgresOrderPaymentDispositionReader,
   createPostgresStaffOrderCancellationReader,
+  listStoreCancelledDishes,
   parseFulfillmentCompletedEnvelope,
 } from "../../rms/ordering/src/index.ts";
 import {
@@ -1766,6 +1767,36 @@ it("staff cancel item lines of a paid order before the kitchen starts them, refu
         assert.equal(whole[0].expected_order_version, 3);
         assert.equal(whole[0].cancelled_order_version, 4);
         assert.ok(whole[0].items.includes(pickup.batch.items[1]));
+        // Tonight's summary (restricted role, rendered pilot ACL): the order record holds line A
+        // too, but line A was already counted under its own item cancellation. Each dish once.
+        {
+          const counted = await scoped((tx) =>
+            listStoreCancelledDishes(
+              tx,
+              { brandReference: brand, storeReference: store },
+              { startsAt: "2000-01-01T00:00:00.000Z", endsAt: "2100-01-01T00:00:00.000Z" },
+            ),
+          );
+          // Every dish cancelled after payment in this Store, each order item once.
+          const distinct = (
+            await admin.query(
+              "SELECT COALESCE(sum(i.quantity),0)::int AS dishes,COALESCE(sum((i.transaction_snapshot_json->'pricing'->'total'->>'amountMinor')::bigint),0)::text AS amount FROM rms_ordering.order_item i WHERE i.store_id=$1 AND (EXISTS (SELECT 1 FROM rms_ordering.order_item_staff_cancellation c WHERE c.store_id=i.store_id AND c.order_id=i.order_id AND c.basis='Paid' AND i.order_item_id=ANY(c.order_item_ids)) OR EXISTS (SELECT 1 FROM rms_ordering.order_staff_cancellation c WHERE c.store_id=i.store_id AND c.order_id=i.order_id AND i.order_item_id=ANY(c.order_item_ids)))",
+              [store],
+            )
+          ).rows[0];
+          assert.equal(counted.cancelledAfterPayment.dishCount, distinct.dishes);
+          assert.equal(counted.cancelledAfterPayment.amountMinor, BigInt(distinct.amount));
+          // This order: line A (4) and line B (2), once each.
+          const thisOrder = (
+            await admin.query(
+              "SELECT COALESCE(sum(quantity),0)::int AS dishes,COALESCE(sum((transaction_snapshot_json->'pricing'->'total'->>'amountMinor')::bigint),0)::text AS amount FROM rms_ordering.order_item WHERE order_id=$1",
+              [pickup.order],
+            )
+          ).rows[0];
+          assert.equal(thisOrder.dishes, LINES[0].quantity + LINES[1].quantity);
+          assert.equal(BigInt(thisOrder.amount), LINE_A_MINOR + LINE_B_MINOR);
+          assert.ok(counted.cancelledAfterPayment.dishCount >= thisOrder.dishes);
+        }
         assert.deepEqual(
           (
             await admin.query(
