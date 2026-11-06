@@ -37,9 +37,9 @@ it("says a paid round is being sent, then that it has not reached the kitchen, i
   ).toContain("正在发送到后厨…");
   expect(renderToStaticMarkup(<AutomaticRefundLateNotice late />)).toContain("自动退款没有完成");
 });
-it("tells staff to reject a pickup whose automatic refund did not go through", () => {
+it("tells staff to refuse and refund a pickup whose automatic refund did not go through", () => {
   const html = renderToStaticMarkup(<AutomaticRefundLateNotice late />);
   expect(html).toContain("The automatic refund didn&#x27;t go through.");
-  expect(html).toContain("Reject the order to refund the guest in full.");
+  expect(html).toContain("Press Refuse and refund to give the guest their money back in full.");
   expect(renderToStaticMarkup(<AutomaticRefundLateNotice late={false} />)).toBe("");
 });

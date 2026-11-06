@@ -49,7 +49,7 @@ export function AutomaticRefundLateNotice({ late }: { readonly late: boolean }) 
       <span className="order-accept-by" data-tier="urgent">
         {t("The automatic refund didn't go through.")}
       </span>{" "}
-      {t("Reject the order to refund the guest in full.")}
+      {t("Press Refuse and refund to give the guest their money back in full.")}
     </p>
   );
 }

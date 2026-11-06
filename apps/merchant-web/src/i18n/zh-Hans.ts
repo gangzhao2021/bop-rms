@@ -8190,7 +8190,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Paid and accepted {minutes} min ago, but the kitchen hasn't received it. Make it from the dishes listed here and tell the manager.":
     "已付款，{minutes} 分钟前已接单，但后厨还没收到。请按这里列出的菜品制作，并告诉经理。",
   "The automatic refund didn't go through.": "自动退款没有完成。",
-  "Reject the order to refund the guest in full.": "请拒单，给客人全额退款。",
+  "Press Refuse and refund to give the guest their money back in full.":
+    "请点“拒单并退款”，给客人全额退款。",
   "Paid orders that need you": "需要你处理的已付订单",
   "{orders} paid but not in the kitchen, or not refunded as it should be. Open each on Orders to see what to do.":
     "{orders}已付款，但没进后厨或没有按规定退款。请在“订单”里逐一打开查看怎么处理。",
