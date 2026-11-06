@@ -12,6 +12,7 @@ import {
   StaffOrderEntryPage,
   TableCartOfferActions,
   paymentWindowNotice,
+  rebindLines,
 } from "./StaffOrderEntryPage.js";
 import { setLanguageForTest } from "./i18n/i18n.js";
 import {
@@ -164,6 +165,34 @@ describe("counter order (OPS-ORDER-ENTRY) — WP-2423 Q7", () => {
     ).toBe(1050n);
     expect(choicesComplete(item, { [id(7)]: [] })).toBe(false);
     expect(choicesComplete(item, { [id(7)]: [id(9)] })).toBe(true);
+  });
+
+  it("WP-2423 M165: a price raised mid-ticket moves the ticket to the new price and says what changed", () => {
+    const menu = parseCounterMenu(counterMenuResponse());
+    const item = menu.sections[0]?.items[0];
+    if (!item?.priceMinor) throw new Error("fixture");
+    const line = {
+      key: "a",
+      item,
+      quantity: 2,
+      options: [{ optionReference: id(10), name: "Oat milk", quantity: 1 }],
+    };
+    const raised = {
+      ...menu,
+      sections: menu.sections.map((section) => ({
+        ...section,
+        items: section.items.map((candidate) =>
+          candidate.sellableReference === item.sellableReference
+            ? { ...candidate, priceMinor: String(BigInt(candidate.priceMinor ?? "0") + 50n) }
+            : candidate,
+        ),
+      })),
+    };
+    const rebound = rebindLines([line], raised);
+    expect(estimatedLineMinor(rebound.lines[0] ?? line)).toBe(1150n);
+    expect(rebound.repriced).toEqual([{ name: item.name, beforeMinor: 1050n, afterMinor: 1150n }]);
+    // The same menu read again changes nothing and says nothing.
+    expect(rebindLines([line], menu).repriced).toEqual([]);
   });
 
   it("WP-2423 item 3b: a choice repeated at the table counts each repeat, and prices each", () => {

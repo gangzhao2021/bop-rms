@@ -8615,4 +8615,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "这个账号在太多块屏幕上登录了，最早使用的这块屏幕已被退出。请重新登录继续工作。",
   "One account works on a limited number of screens. Signing in here may sign out the screen used longest ago.":
     "一个账号能同时登录的屏幕有限，在这里登录可能会让最早使用的屏幕退出。",
+  "Prices updated: {changes}. Subtotal now {subtotal}.":
+    "价格已更新：{changes}。小计现为 {subtotal}。",
+  "{dish} {old} → {new}": "{dish} {old} → {new}",
 });

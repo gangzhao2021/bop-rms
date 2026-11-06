@@ -62,6 +62,49 @@ export function estimatedLineMinor(line: Line): bigint | null {
   return each * BigInt(line.quantity);
 }
 
+/** WP-2423 M165: a ticket line whose price moved when the menu was read again. */
+export interface RepricedLine {
+  readonly name: string;
+  readonly beforeMinor: bigint;
+  readonly afterMinor: bigint;
+}
+
+/**
+ * WP-2423 M165: the ticket's lines on the menu just read, so the subtotal staff see is the price
+ * the order is charged at. Each line takes its item's current price and options; a chosen option
+ * that is no longer offered is dropped (the server then names the line). A line whose item left
+ * the menu keeps its last item, and the send refuses it by name as before.
+ */
+export function rebindLines<L extends Line>(
+  lines: readonly L[],
+  menu: CounterMenu,
+): { readonly lines: readonly L[]; readonly repriced: readonly RepricedLine[] } {
+  const items = new Map(
+    menu.sections.flatMap((section) =>
+      section.items.map((item) => [item.sellableReference, item] as const),
+    ),
+  );
+  const repriced: RepricedLine[] = [];
+  const next = lines.map((line) => {
+    const item = items.get(line.item.sellableReference);
+    if (item === undefined) return line;
+    const offered = new Set(
+      item.rules.flatMap((rule) => rule.options.map((option) => option.optionReference)),
+    );
+    const rebound = {
+      ...line,
+      item,
+      options: line.options.filter((option) => offered.has(option.optionReference)),
+    };
+    const before = estimatedLineMinor(line),
+      after = estimatedLineMinor(rebound);
+    if (before !== null && after !== null && before !== after)
+      repriced.push({ name: item.name, beforeMinor: before, afterMinor: after });
+    return rebound;
+  });
+  return { lines: next, repriced };
+}
+
 /** How many of each option chosen by default (a choice guests can repeat, such as double pearls). */
 function defaultCounts(item: CounterMenuItem) {
   return Object.fromEntries(
@@ -490,6 +533,10 @@ export function StaffOrderEntryPage({
   >({ kind: "Loading" });
   const [reload, setReload] = useState(0);
   const [lines, setLines] = useState<readonly Line[]>([]);
+  /** WP-2423 M165: ticket lines whose price changed on the last menu read (until the next edit). */
+  const [repriced, setRepriced] = useState<readonly RepricedLine[]>([]);
+  const linesNow = useRef(lines);
+  linesNow.current = lines;
   const [choosing, setChoosing] = useState<{
     item: CounterMenuItem;
     choices: Record<string, string[]>;
@@ -514,6 +561,8 @@ export function StaffOrderEntryPage({
   const [phase, setPhase] = useState<
     "Building" | "Sending" | "Charge" | "Recording" | "Paid" | "Accepted" | "Sent"
   >("Building");
+  const phaseNow = useRef(phase);
+  phaseNow.current = phase;
   const [problem, setProblem] = useState<string | null>(null);
   const [problemNeedsTableCode, setProblemNeedsTableCode] = useState(false);
   // WP-2423 item 8 ⑦: the guests' unsent items the server named, to add to this round.
@@ -646,10 +695,16 @@ export function StaffOrderEntryPage({
     client
       .loadMenu(controller.signal, tableMode ? "DineIn" : "Pickup")
       .then((value) => {
-        if (!controller.signal.aborted)
-          setMenu((current) =>
-            current.kind === "Ready" ? { kind: "Ready", menu: value } : current,
-          );
+        if (controller.signal.aborted) return;
+        setMenu((current) => (current.kind === "Ready" ? { kind: "Ready", menu: value } : current));
+        // WP-2423 M165: the ticket follows the menu just read; staff see what changed before
+        // anything is sent, and a changed ticket is a new order intent.
+        const rebound = rebindLines(linesNow.current, value);
+        if (rebound.repriced.length > 0 && phaseNow.current === "Building") {
+          placeOperation.current = null;
+          setLines(rebound.lines);
+          setRepriced(rebound.repriced);
+        } else if (phaseNow.current === "Building") setLines(rebound.lines);
       })
       .catch(() => undefined);
   }, [client, tableMode]);
@@ -675,6 +730,7 @@ export function StaffOrderEntryPage({
   // Any change to what is ordered is a new order intent.
   const changeLines = (next: readonly Line[]) => {
     placeOperation.current = null;
+    setRepriced([]);
     setProblem(null);
     setProblemNeedsTableCode(false);
     setLines(next);
@@ -1319,6 +1375,25 @@ export function StaffOrderEntryPage({
             </ul>
           )}
           <div className="counter-order__ticket-foot">
+            {repriced.length > 0 &&
+            estimate !== null &&
+            lines.length > 0 &&
+            phase === "Building" ? (
+              <p className="order-accept-by" data-tier="warning" role="alert">
+                {t("Prices updated: {changes}. Subtotal now {subtotal}.", {
+                  changes: repriced
+                    .map((line) =>
+                      t("{dish} {old} → {new}", {
+                        dish: line.name,
+                        old: cad(line.beforeMinor.toString()),
+                        new: cad(line.afterMinor.toString()),
+                      }),
+                    )
+                    .join(listSeparator()),
+                  subtotal: cad(estimate.toString()),
+                })}
+              </p>
+            ) : null}
             {estimate !== null && lines.length > 0 ? (
               <div className="counter-order__totals">
                 <p className="counter-order__subtotal">
