@@ -116,7 +116,10 @@ import { createMerchantProducts } from "../../apps/api/dist/merchant-products.js
 import { createPilotProductImages } from "../../apps/api/dist/product-image-route.js";
 import { createMerchantPrices } from "../../apps/api/dist/merchant-prices.js";
 import { createMerchantStorePrices } from "../../apps/api/dist/merchant-store-prices.js";
-import { createPilotWorkspaceListing } from "./pilot-merchant-workspace.mjs";
+import {
+  createPilotWorkspaceListing,
+  staffTableRoundsComposed,
+} from "./pilot-merchant-workspace.mjs";
 import { createMerchantAllergens } from "../../apps/api/dist/merchant-allergens.js";
 import { createMerchantMenus } from "../../apps/api/dist/merchant-menus.js";
 import { createMerchantAvailability } from "../../apps/api/dist/merchant-availability.js";
@@ -1099,10 +1102,22 @@ export async function createInternalMerchant(
     retentionPolicyCode: "AUDIT_DEFAULT",
     retentionPolicyVersion: 1,
   });
+  // WP-2423 Q7: counter pickup orders, card-machine payments and staff-entered table rounds. Built
+  // before Tables, which offers "Take order for table" only when the round and its menu are here.
+  const internalCounter =
+    createInternalCounterOrder === undefined
+      ? undefined
+      : await createInternalCounterOrder(resources, persistence, service, {
+          diningClosing,
+          // WP-2423 (v15 3cd0f8dd M4): a machine refund of a cancelled round is on the receipt.
+          issueRefundReceipt: issueOrderRefundReceipt,
+        });
   const diningTables = createMerchantDiningTables({
     persistence,
     authentication: service,
     tableAvailabilityCommandEnabled: true,
+    // WP-2423 M08: table rounds follow what is composed, never the counter-ordering switch.
+    staffDiningRoundEnabled: staffTableRoundsComposed(internalCounter),
   });
   // WP-2423 Q28 DEC-DINING-STAFF-CALL: guests waiting for staff, and answering a call.
   const diningStaffCallCount = createMerchantDiningStaffCallCount({
@@ -1558,19 +1573,10 @@ export async function createInternalMerchant(
       endedOrderStockRelease,
       ...(orderItemStaffCancellation === undefined ? {} : { orderItemStaffCancellation }),
       // WP-2423 Q7: counter pickup orders and card-machine payments and refunds.
-      ...(createInternalCounterOrder === undefined
+      ...(internalCounter === undefined
         ? {}
-        : await (async () => {
-            const { diningPayLaterRound, ...counter } = await createInternalCounterOrder(
-              resources,
-              persistence,
-              service,
-              {
-                diningClosing,
-                // WP-2423 (v15 3cd0f8dd M4): a machine refund of a cancelled round is on the receipt.
-                issueRefundReceipt: issueOrderRefundReceipt,
-              },
-            );
+        : (() => {
+            const { diningPayLaterRound, ...counter } = internalCounter;
             return {
               ...counter,
               // WP-2423 item 8 ⑤: staff send a guest round that waited for them to the kitchen,

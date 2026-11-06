@@ -1,6 +1,9 @@
 import { expect, it } from "vitest";
 import { parseMerchantWorkspaceSnapshot } from "../../apps/api/dist/merchant-bff-workspace.js";
-import { createPilotWorkspaceListing } from "./pilot-merchant-workspace.mjs";
+import {
+  createPilotWorkspaceListing,
+  staffTableRoundsComposed,
+} from "./pilot-merchant-workspace.mjs";
 
 /**
  * v15 2026-10-31: switching to DEMO Store 2 was denied. The switch is answered by the composition
@@ -36,4 +39,22 @@ it("lists the workspace of the session's Store, whichever Store's composition an
       store2,
     ]);
   }
+});
+
+it("WP-2423 M08: offers table rounds only when the staff round and its DineIn menu are composed", () => {
+  const round = async () => ({}),
+    menu = async () => ({});
+  expect(staffTableRoundsComposed({ staffDiningRound: round, counterMenu: menu })).toBe(true);
+  // Either piece missing: the order page would only fail, so Tables offers no link.
+  expect(staffTableRoundsComposed({ counterMenu: menu })).toBe(false);
+  expect(staffTableRoundsComposed({ staffDiningRound: round })).toBe(false);
+  expect(staffTableRoundsComposed(undefined)).toBe(false);
+  // The walk-up counter command is not part of it (counter ordering off still takes table rounds).
+  expect(
+    staffTableRoundsComposed({
+      staffDiningRound: round,
+      counterMenu: menu,
+      counterOrder: undefined,
+    }),
+  ).toBe(true);
 });

@@ -776,6 +776,8 @@ const tablesView = {
   canTransferHost: true,
   canCancelUnpaidRounds: true,
   canWriteOff: true,
+  // WP-2423 M08: "Take order for table" follows the Tables read, not the counter switch.
+  canTakeTableRounds: true,
   items: [
     {
       tableReference: id(0x501),
@@ -1048,6 +1050,7 @@ describe("merchant BFF responses carry every read-model field the browser parses
     stub("diningTables").mockResolvedValue(tablesView);
     const tables = await throughClient(() => createDiningSessionClient(fetcher).tables(csrf));
     expect(dropped(tablesView)).toEqual([]);
+    expect(tables.canTakeTableRounds).toBe(true);
     expect(tables.items[0]?.roundsAwaitingAcceptance).toEqual([{ roundNumber: 2, paidAt: at(14) }]);
   });
 

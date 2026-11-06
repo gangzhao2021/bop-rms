@@ -246,6 +246,32 @@ it("does not expose table command affordances when the BFF command is unconfigur
   });
   expect((await read(f.input)).canOperateTables).toBe(false);
 });
+it("WP-2423 M08: offers a table round to staff who may enter one, whatever the counter switch says", async () => {
+  const f = setup();
+  const read = (staffDiningRoundEnabled?: boolean) =>
+    createMerchantDiningTables({
+      ...(staffDiningRoundEnabled === undefined ? {} : { staffDiningRoundEnabled }),
+      persistence: {
+        transactions: { run: async (work: (tx: unknown) => unknown) => work(f.tx) },
+        now: () => "2026-09-25T12:00:00.000Z",
+      } as unknown as Options["persistence"],
+      authentication: { authorize: f.authorize } as unknown as Options["authentication"],
+    })(f.input);
+  // Composed and allowed: offered, from the page's one permission read.
+  expect((await read(true)).canTakeTableRounds).toBe(true);
+  expect(f.authorizeActions).toHaveBeenCalledOnce();
+  expect(f.authorizeActions.mock.calls[0]?.[0]).toContain("ordering.order.create_staff");
+  // Store features (the walk-up counter switch) are never read here.
+  expect(JSON.stringify(f.tx.query.mock.calls)).not.toMatch(/store_feature/u);
+  // Not composed in this deployment: never offered.
+  expect((await read(false)).canTakeTableRounds).toBe(false);
+  expect((await read()).canTakeTableRounds).toBe(false);
+  // A kitchen-only role (no staff round permission): not offered.
+  f.authorizeAction.mockImplementation(async (action?: string) => ({
+    effect: action === "ordering.order.create_staff" ? "Deny" : "Allow",
+  }));
+  expect((await read(true)).canTakeTableRounds).toBe(false);
+});
 it("adds elapsed minutes from the current scoped Active Session", async () => {
   const f = setup();
   mock.list.mockResolvedValueOnce({

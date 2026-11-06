@@ -49,6 +49,9 @@ const tablePageActions = Object.freeze([
   "ordering.order.write_off",
   // DEC-DINING-GUEST-TABLE-START: stopping guests starting tables, from this page.
   "operations.ordering.pause",
+  // WP-2423 M08: "Take order for table" is offered to staff who may enter a staff round. Store
+  // features (the walk-up counter switch) never decide it; only the walk-up command refuses.
+  "ordering.order.create_staff",
 ]);
 
 /** WP-2423 item 8 ⑤ decision 3: a phone that joined in the last 3 minutes is pointed out. */
@@ -58,6 +61,8 @@ export function createMerchantDiningTables(options: {
   persistence: PersistentMerchantBffOptions;
   authentication: Pick<MerchantBffService, "authorize">;
   tableAvailabilityCommandEnabled?: boolean;
+  /** WP-2423 M08: this deployment composes the staff round command and its DineIn menu. */
+  staffDiningRoundEnabled?: boolean;
 }) {
   const resolve = createMerchantStoreScope(options.persistence);
   return async (input: { sessionCookie: unknown; csrf: unknown; query: unknown }) => {
@@ -113,6 +118,9 @@ export function createMerchantDiningTables(options: {
               canCancelUnpaidRounds: decisions.get("ordering.order.cancel")?.effect === "Allow",
               canWriteOff: decisions.get("ordering.order.write_off")?.effect === "Allow",
               canStopGuestStarts: decisions.get("operations.ordering.pause")?.effect === "Allow",
+              canTakeTableRounds:
+                options.staffDiningRoundEnabled === true &&
+                decisions.get("ordering.order.create_staff")?.effect === "Allow",
             });
           },
           recheck: async ({ current }) => (await current.allowed()) === true,
@@ -127,6 +135,7 @@ export function createMerchantDiningTables(options: {
             canCancelUnpaidRounds,
             canWriteOff,
             canStopGuestStarts,
+            canTakeTableRounds,
           } = authority.scope;
           const authorize = () => authority.guard();
           const store = createPostgresDiningTableStore(
@@ -551,6 +560,7 @@ export function createMerchantDiningTables(options: {
             canTransferHost,
             canCancelUnpaidRounds,
             canWriteOff,
+            canTakeTableRounds,
             // DEC-DINING-GUEST-TABLE-START: sent only while on, with the version to turn it off.
             ...(guestPage.guestTableStart
               ? {

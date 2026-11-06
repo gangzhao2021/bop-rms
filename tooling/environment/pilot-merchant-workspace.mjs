@@ -278,3 +278,12 @@ export function createPilotWorkspaceListing({ served, optionSets = () => false, 
     };
   };
 }
+
+/**
+ * WP-2423 M08: Tables offers "Take order for table" only when this composition has both the staff
+ * round command and the DineIn counter menu its order page reads; without either, the page could
+ * only fail. The counter-ordering switch (walk-up orders) never decides it.
+ */
+export function staffTableRoundsComposed(counter) {
+  return counter?.staffDiningRound !== undefined && counter?.counterMenu !== undefined;
+}

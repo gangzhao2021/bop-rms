@@ -440,6 +440,15 @@ it("composes the staff table round from the dine-in customer path, without the g
   seen.operating = { state: "Closed", availableServiceModes: [] };
   expect(await p.takesOrder({ recordedAfterOutage: false })).toBe(false);
   expect(await p.takesOrder({ recordedAfterOutage: true })).toBe(true);
+  // WP-2423 M08 (regression guard): after last orders guests stop, staff still send the table's
+  // round (the last-orders banner's promise); the walk-up counter switch is not part of this rule.
+  seen.operating = {
+    state: "Open",
+    availableServiceModes: ["DineIn"],
+    upcomingHours: { pastLastOrders: true },
+  };
+  expect(await p.takesOrder({ recordedAfterOutage: false })).toBe(true);
+  expect(await p.guestsCanSend()).toBe(false);
   // Starting a session or issuing a fresh code goes through the Dining owner's staff commands.
   await seen.tableCode.start({ sessionCookie: "c", csrf: "x" }, { tableReference: "table-1" });
   expect(owner.start).toHaveBeenCalledWith({
