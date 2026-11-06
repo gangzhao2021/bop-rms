@@ -255,3 +255,40 @@ it("WP-2423 Q10: returns the Session's latest order so a reopened app can contin
     expect((await f.request()).status).toBe(503);
   }
 });
+
+it("M02: passes a dine-in visit's table and joined state, whitelisted, and refuses a malformed one", async () => {
+  const f = await setup();
+  const menuContext = {
+    publicStoreReference: "0190fa21-0000-7000-8000-000000000001",
+    channel: "DineIn",
+    locale: "en-CA",
+    brandDisplayName: "DEMO Brand",
+    storeDisplayName: "DEMO Store",
+  };
+  const visit = { publicTableReference: "0190fa21-0000-7000-8000-000000000009", joined: true };
+  f.read.mockResolvedValue({
+    csrfToken: "B".repeat(43),
+    menuContext,
+    visit: { ...visit, diningSessionReference: "must-not-leak" },
+  });
+  expect(await (await f.request()).json()).toEqual({
+    schemaVersion: 1,
+    csrfToken: "B".repeat(43),
+    menuContext,
+    visit,
+  });
+  for (const malformed of [
+    { ...visit, joined: "yes" },
+    { ...visit, publicTableReference: "table-1" },
+  ]) {
+    f.read.mockResolvedValue({ csrfToken: "B".repeat(43), menuContext, visit: malformed });
+    expect((await f.request()).status).toBe(503);
+  }
+  // Only at a table.
+  f.read.mockResolvedValue({
+    csrfToken: "B".repeat(43),
+    menuContext: { ...menuContext, channel: "Pickup" },
+    visit,
+  });
+  expect((await f.request()).status).toBe(503);
+});

@@ -110,3 +110,32 @@ it("WP-2423 Q10: returns this Guest Session's latest order, looked up by the con
     observedAt: options.now(),
   });
 });
+
+// M02 (v15 07b7a1b7): a reloaded table page stays at its own table, joined or not.
+it("M02: a dine-in Session says its table and whether this phone joined it; pickup says none", async () => {
+  f.factory.mockClear();
+  f.resolve.mockResolvedValue({
+    ...guest,
+    channel: "DineIn",
+    publicTableReference: ref(8),
+    diningState: "ContextOnly",
+  });
+  expect(await createCustomerSessionBootstrapRead(options).read("A".repeat(43))).toMatchObject({
+    visit: { publicTableReference: ref(8), joined: false },
+  });
+  f.factory.mockClear();
+  f.resolve.mockResolvedValue({
+    ...guest,
+    channel: "DineIn",
+    publicTableReference: ref(8),
+    diningState: "DiningBound",
+  });
+  expect(await createCustomerSessionBootstrapRead(options).read("A".repeat(43))).toMatchObject({
+    visit: { publicTableReference: ref(8), joined: true },
+  });
+  f.factory.mockClear();
+  f.resolve.mockResolvedValue({ ...guest, publicTableReference: null, diningState: "ContextOnly" });
+  expect(await createCustomerSessionBootstrapRead(options).read("A".repeat(43))).not.toHaveProperty(
+    "visit",
+  );
+});

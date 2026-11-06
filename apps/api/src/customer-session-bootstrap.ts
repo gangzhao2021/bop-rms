@@ -100,6 +100,16 @@ export function createCustomerSessionBootstrapRead(
             brandDisplayName: profile.profile.brandDisplayName,
             storeDisplayName: profile.profile.storeDisplayName,
           },
+          // M02 (v15 07b7a1b7): the table this Session is at and whether this phone joined its
+          // party (Identity's own binding state, confirmed above), so a reload stays at it.
+          ...(guest.channel === "DineIn" && guest.publicTableReference !== null
+            ? {
+                visit: {
+                  publicTableReference: String(guest.publicTableReference),
+                  joined: guest.diningState === "DiningBound",
+                },
+              }
+            : {}),
         };
       });
     },
@@ -266,6 +276,8 @@ export function createCustomerSessionBootstrapHandler(options?: {
             brandDisplayName: string;
             storeDisplayName: string;
           };
+          /** M02: a dine-in Session's table, and whether this phone joined its party. */
+          visit?: { publicTableReference: string; joined: boolean };
         }
     >;
     /** WP-2423 (v15 3cd0f8dd M5): receipt-only access for a visit that ended (absent: none). */
@@ -397,6 +409,19 @@ export function createCustomerSessionBootstrapHandler(options?: {
                         throw new Error("invalid order type");
                       })(),
             };
+      const rawVisit = typeof result === "string" ? undefined : result.visit;
+      const visit =
+        rawVisit === undefined
+          ? undefined
+          : menuContext?.channel === "DineIn" &&
+              typeof rawVisit.joined === "boolean" &&
+              /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(
+                rawVisit.publicTableReference,
+              )
+            ? { publicTableReference: rawVisit.publicTableReference, joined: rawVisit.joined }
+            : (() => {
+                throw new Error("invalid visit");
+              })();
       const checkoutSessionReference =
         typeof result === "string" || result.checkoutSessionReference === undefined
           ? undefined
@@ -417,6 +442,7 @@ export function createCustomerSessionBootstrapHandler(options?: {
               },
             }
           : {}),
+        ...(visit ? { visit } : {}),
       });
     } catch (error) {
       // WP-2423: a visit that ended or expired (or a cookie no Session matches) has nothing to
