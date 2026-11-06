@@ -339,6 +339,8 @@ it("v15 2026-11-06 (Fireside Table 5): a round waiting for staff OK is never 'ca
   expect(await client.resolve(plan, plan.rounds[0] as TableCloseRound, id(45), csrf)).toBe(
     "Changed",
   );
+});
+
 it("WP-2423 live minor 21: closing out rounds that took no money says so, and never claims no money for an unfinished payment", () => {
   const notPaid = round({ state: "NotPaid", refund: null });
   const paying = round({ state: "PaymentInProgress", refund: null });

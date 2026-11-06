@@ -366,7 +366,10 @@ describe("Option Set / Option / Product Binding minimum model", () => {
     });
     expect(
       productOptionBindingRule(
-        { ...rebuilt, enabledOptionReferences: [ids.oat] },
+        {
+          ...rebuilt,
+          enabledOptionReferences: rebuilt.enabledOptionReferences.filter((r) => r === ids.oat),
+        },
         hotArchived,
         "Draft",
       ),

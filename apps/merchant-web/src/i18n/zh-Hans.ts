@@ -1043,10 +1043,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "请先在刷卡机上收款 {amount}，再在此记录。记录后后厨才开始制作这一单。",
   "Charge {amount} on the card machine first, then record it here. The kitchen starts this round once it is recorded.":
     "请先在刷卡机上收款 {amount}，再在此记录。记录后后厨才开始制作这一轮。",
-  "Charge {amount} on the card machine first, then record it here. The kitchen starts this round once it is recorded.":
-    "请先在刷卡机上收款 {amount}，再在此记录。记录后后厨才开始制作这一轮。",
-  "Charge {amount} on the card machine first, then record it here. The kitchen starts this order once it is recorded.":
-    "请先在刷卡机上收款 {amount}，再在此记录。记录后后厨才开始制作这一单。",
   "Charge {totalMinor} on the card machine": "在刷卡机上收款 {totalMinor}",
   "Charged by the payment provider": "支付方已扣款",
   "Charged twice": "重复扣款",

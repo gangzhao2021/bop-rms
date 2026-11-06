@@ -140,14 +140,15 @@ export async function exerciseEntryPickupItems({ base, pickup, admin, chineseNam
     available: 50,
   });
   assert.deepEqual(await facts(), before);
-  // A refusal that is not about stock keeps its own answer.
+  // A refusal that is not about stock keeps its own answer. A choice the dish doesn't offer (a page
+  // older than the menu) is "not offered now": the guest reads the menu again and chooses again.
   const unoffered = await add(1, id(59005), pickup.cookie, [
     { optionReference: id(79999), quantity: 1 },
   ]);
   assert.equal(unoffered.status, 422);
   assert.deepEqual(stockAnswer(await unoffered.json()), {
     code: "cart_selection_invalid",
-    issueCodes: ["CATALOG_SELECTION_REJECTED"],
+    issueCodes: ["CATALOG_OPTION_NOT_OFFERED"],
   });
   assert.deepEqual(await facts(), before);
   const accepted = await add(2, id(59003));

@@ -1609,7 +1609,8 @@ export function StaffOrderEntryPage({
                         name={rule.bindingReference}
                         checked={picked.includes(option.optionReference)}
                         disabled={
-                          (option.offeredNow === false && !picked.includes(option.optionReference)) ||
+                          (option.offeredNow === false &&
+                            !picked.includes(option.optionReference)) ||
                           (!single &&
                             !picked.includes(option.optionReference) &&
                             total >= rule.maximumSelections)

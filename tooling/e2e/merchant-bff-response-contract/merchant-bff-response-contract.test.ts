@@ -295,7 +295,6 @@ const dineIn = {
       compableItems: [],
       compedItems: [],
       submittedAt: at(1),
-      kitchenReceivedAt: null,
       waitingForStaff: null,
     },
     {
@@ -327,7 +326,6 @@ const dineIn = {
       compableItems: [],
       compedItems: [],
       submittedAt: at(2),
-      kitchenReceivedAt: null,
       waitingForStaff: null,
     },
     {
@@ -358,7 +356,6 @@ const dineIn = {
       compableItems: [],
       compedItems: [],
       submittedAt: at(3),
-      kitchenReceivedAt: null,
       waitingForStaff: null,
     },
     {
@@ -399,7 +396,6 @@ const dineIn = {
       compableItems: [],
       compedItems: [],
       submittedAt: at(4),
-      kitchenReceivedAt: null,
       waitingForStaff: null,
     },
   ],
@@ -480,7 +476,6 @@ const heldPickup = {
       compableItems: [],
       compedItems: [],
       submittedAt: at(5),
-      kitchenReceivedAt: null,
       waitingForStaff: null,
     },
   ],
@@ -567,7 +562,6 @@ const earlierCounterPickup = {
       compableItems: [],
       compedItems: [],
       submittedAt: at(6),
-      kitchenReceivedAt: null,
       waitingForStaff: null,
     },
   ],
