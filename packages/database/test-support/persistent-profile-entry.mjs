@@ -774,7 +774,14 @@ export async function exercisePersistentProfileEntry({
     // starts no visit (no cookie, nothing recorded) and gives only the menu's public context.
     const notOpen = await request();
     assert.equal(notOpen.status, 409);
-    assert.equal(notOpen.headers.getSetCookie().length, 0);
+    // M02: the only cookie is the scan the guest already holds, kept so a reload asks the same Store
+    // about the same table; no visit (Session) cookie and nothing recorded.
+    const notOpenCookies = notOpen.headers.getSetCookie();
+    assert.equal(notOpenCookies.length, 1);
+    assert.match(
+      notOpenCookies[0],
+      /^__Secure-bop-scan=[^;]+; Max-Age=1800; Path=[^;]+; Secure; HttpOnly; SameSite=Strict$/u,
+    );
     const notOpenBody = await notOpen.json();
     assert.equal(notOpenBody.code, "entry_table_not_open");
     assert.equal(notOpenBody.store.publicStoreReference, f.payload.publicStoreReference);
