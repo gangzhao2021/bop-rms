@@ -73,7 +73,8 @@ export async function startConfiguredPilotHttps(
   // v15 2026-10-31: one Store that cannot be loaded never stops the others; it is logged (its
   // code) and not served until it is fixed and the service restarts.
   const additionalStores = [];
-  for (const [index, relative] of (await loadAdmittedServedStores(directory)).entries()) {
+  const admitted = await loadAdmittedServedStores(directory);
+  for (const [index, relative] of admitted.entries()) {
     try {
       const storeDirectory = path.join(directory, relative);
       const storeInstallation = await loadInstallation(storeDirectory),
@@ -140,6 +141,8 @@ export async function startConfiguredPilotHttps(
   return startServer({
     ...customer,
     additionalStores,
+    // M02: several Stores configured, even when one of them could not be loaded.
+    multiStore: admitted.length > 0,
     createInternalMerchant: merchant,
     loadInternalPickupQr: qr.loadInternalPickupQr,
     diningEntries,

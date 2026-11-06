@@ -158,7 +158,10 @@ test("v15 2026-10-31: a served Store that cannot start is logged and skipped; th
       apiPort: 4300,
       keyFile: certificates.keyFile,
       certificateFile: certificates.certificateFile,
-      loadProfile: async () => ({ environment: "Pilot" }),
+      loadProfile: async () => ({
+        environment: "Pilot",
+        binding: { publicStoreReference: "0190aa21-0000-7000-8000-000000000005" },
+      }),
       loadInternalPickupQr: async () => ({ token: () => "synthetic.pickup.token" }),
       diningEntries: [],
       createInternalTestResources: async () => ({
@@ -206,25 +209,33 @@ test("v15 2026-10-31: a served Store that cannot start is logged and skipped; th
     });
     if (!server.listening) await new Promise((resolve) => server.once("listening", resolve));
     const { request } = await import("node:https");
-    const entry = await new Promise((resolve, reject) => {
-      const call = request(
-        {
-          host: "127.0.0.1",
-          port: server.address().port,
-          path: "/bff/customer/pickup-entry",
-          servername: "order.store-pilot.ca",
-          ca: [certificates.root],
-          headers: { host: "order.store-pilot.ca", "sec-fetch-site": "same-origin" },
-        },
-        (response) => {
-          response.resume();
-          response.on("end", () => resolve(response.statusCode));
-        },
-      );
-      call.on("error", reject);
-      call.end();
-    });
-    expect(entry).toBe(200);
+    const get = (path) =>
+      new Promise((resolve, reject) => {
+        const call = request(
+          {
+            host: "127.0.0.1",
+            port: server.address().port,
+            path,
+            servername: "order.store-pilot.ca",
+            ca: [certificates.root],
+            headers: { host: "order.store-pilot.ca", "sec-fetch-site": "same-origin" },
+          },
+          (response) => {
+            let body = "";
+            response.on("data", (chunk) => (body += chunk));
+            response.on("end", () => resolve({ status: response.statusCode, body }));
+          },
+        );
+        call.on("error", reject);
+        call.end();
+      });
+    const own = await get("/bff/customer/pickup-entry?store=0190aa21-0000-7000-8000-000000000005");
+    expect(own.status).toBe(200);
+    // M02 (v15 07b7a1b7): stores.json names more than one Store, so the bare address belongs to
+    // none of them, even while the others are down: never the installation's first merchant.
+    const bare = await get("/bff/customer/pickup-entry");
+    expect(bare.status).toBe(404);
+    expect(JSON.parse(bare.body)).toEqual({ code: "PICKUP_ENTRY_UNKNOWN_STORE" });
     // Each failed Store is logged with its code; the one whose resources opened has them closed.
     expect(
       logged.mock.calls

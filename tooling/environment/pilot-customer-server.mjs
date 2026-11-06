@@ -199,6 +199,8 @@ function paymentRoutes({
 export async function startInternalCustomerServer({
   createInternalMerchant,
   additionalStores = [],
+  // M02 (v15 07b7a1b7): whether stores.json names more than one Store, whichever of them started.
+  multiStore = additionalStores.length > 0,
   loadInternalPickupQr,
   diningEntries = [],
   createInternalTestResources,
@@ -268,7 +270,15 @@ export async function startInternalCustomerServer({
     )
       return res.status(400).json({ code: "INTERNAL_ENTRY_UNAVAILABLE" });
     // 2026-11-01: a Store's own pickup link names it (a Store not served here: not found).
-    const qr = keys.length === 0 ? pickupQr : pickupByStore.get(String(req.query.store));
+    // M02 (v15 07b7a1b7): at an installation of several Stores the bare address names none of
+    // them, so it never opens the first Store for another merchant's guest (who is asked to scan).
+    // One Store: its bare-origin posters keep working.
+    const qr =
+      keys.length === 0
+        ? multiStore
+          ? undefined
+          : pickupQr
+        : pickupByStore.get(String(req.query.store));
     if (qr === undefined) return res.status(404).json({ code: "PICKUP_ENTRY_UNKNOWN_STORE" });
     res.json({ schemaVersion: 1, qrToken: qr.token() });
   };
