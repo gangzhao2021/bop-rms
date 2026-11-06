@@ -52,7 +52,15 @@ it("WP-2423 M03: a pickup Cart version produces one Order, its Cart is emptied, 
           }
         },
       };
-      const f = orderWriteFixture({ namespace: "01902423" });
+      const at = new Date(Date.now() - 1000).toISOString();
+      const f = orderWriteFixture({ namespace: "01902423", at });
+      // Review: another, different submission of the same Cart version (a second tab, a stale page).
+      const second = orderWriteFixture({ namespace: "01902423", at, submission: 1 });
+      assert.notEqual(
+        second.request.record.submissionReference,
+        f.request.record.submissionReference,
+      );
+      assert.equal(second.cart.aggregateVersion, f.cart.aggregateVersion);
       assert.equal(f.cart.orderType, "Pickup");
       await seedSubmissionCart(admin, f);
       const version = f.cart.aggregateVersion;
@@ -112,6 +120,7 @@ it("WP-2423 M03: a pickup Cart version produces one Order, its Cart is emptied, 
           orderNumber,
           guestSessionReference: guest,
           sourceCartVersion: version,
+          notMade: false,
         },
       );
       assert.equal(
@@ -143,6 +152,20 @@ it("WP-2423 M03: a pickup Cart version produces one Order, its Cart is emptied, 
         await otherStore.findVersion({ cartReference: f.cart.cartReference, cartVersion: version }),
         null,
       );
+
+      // 3b. Review: the Order store itself refuses a second, different submission of this Cart
+      // version (the second of two tabs that lost the race finds the Cart already moved on) with
+      // "already ordered" naming the guest's Order: never an outage, nothing written.
+      const before = await counts();
+      await assert.rejects(store.append(second.request), (error) => {
+        assert.equal(error.code, "ORDER_CREATE_ALREADY_ORDERED");
+        assert.deepEqual(error.placedOrder, {
+          orderReference: created.record.order.orderReference,
+          orderNumber,
+        });
+        return true;
+      });
+      assert.deepEqual(await counts(), before);
 
       // 4. The database refuses a second submission of the same Cart version from any writer.
       const insertSubmission = (submission, cartVersion) =>
@@ -202,7 +225,79 @@ it("WP-2423 M03: a pickup Cart version produces one Order, its Cart is emptied, 
         )?.orderReference,
         created.record.order.orderReference,
       );
+
+      // 5b. Review: the same legacy Cart still at the ordered version (it was never moved on). A
+      // second, different submission locks the Cart and is refused by the store, naming the Order.
+      await admin.query("UPDATE rms_ordering.cart SET aggregate_version=$2 WHERE cart_id=$1", [
+        f.cart.cartReference,
+        version,
+      ]);
+      const legacy = await counts();
+      assert.equal(legacy.version, version);
+      await assert.rejects(store.append(second.request), (error) => {
+        assert.equal(error.code, "ORDER_CREATE_ALREADY_ORDERED");
+        assert.equal(error.placedOrder?.orderNumber, orderNumber);
+        return true;
+      });
+      assert.deepEqual(await counts(), legacy);
+      await admin.query("UPDATE rms_ordering.cart SET aggregate_version=$2 WHERE cart_id=$1", [
+        f.cart.cartReference,
+        version + 1,
+      ]);
+
+      // 5c. Review: once that Order will not be made (its payment closed unpaid), its dishes still
+      // in the Cart may be ordered again from the moved-on Cart, and the emptied Cart says the
+      // Order closed (so the page offers its dishes back), while the exact version stays ordered.
+      await admin.query(
+        `INSERT INTO rms_ordering.order_payment_failure_record
+         (failure_record_id,brand_id,store_id,order_id,payment_transaction_id,payment_intent_id,
+          payment_attempt_id,payment_event_id,reason,retry_disposition,terminal_occurred_at,event_digest)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'Cancelled','Never',date_trunc('milliseconds',now()),$9)`,
+        [
+          id(30),
+          f.cart.brandReference,
+          f.cart.storeReference,
+          created.record.order.orderReference,
+          id(31),
+          id(32),
+          id(33),
+          id(34),
+          "sha256:" + "b".repeat(64),
+        ],
+      );
+      assert.equal(
+        await lookup.findVersion({ cartReference: f.cart.cartReference, cartVersion: version + 1 }),
+        null,
+      );
+      assert.equal(
+        (await lookup.findVersion({ cartReference: f.cart.cartReference, cartVersion: version }))
+          ?.notMade,
+        true,
+      );
       await admin.query("DELETE FROM rms_ordering.cart_line WHERE cart_line_id=$1", [line]);
+      assert.deepEqual(
+        await lookup.findLatest({
+          cartReference: f.cart.cartReference,
+          guestSessionReference: guest,
+        }),
+        {
+          submissionReference: f.request.record.submissionReference,
+          orderReference: created.record.order.orderReference,
+          orderNumber,
+          guestSessionReference: guest,
+          sourceCartVersion: version,
+          notMade: true,
+        },
+      );
+      assert.equal(
+        (
+          await lookup.findRestorable({
+            cartReference: f.cart.cartReference,
+            orderReference: created.record.order.orderReference,
+          })
+        )?.orderNumber,
+        orderNumber,
+      );
 
       // 6. Once the guest puts something in the Cart again, it no longer claims the Order.
       await admin.query(

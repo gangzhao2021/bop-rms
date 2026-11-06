@@ -109,23 +109,43 @@ function fixture() {
 describe("authorized Pickup reads", () => {
   it("WP-2423 M03: an empty Cart names the guest's Order its dishes went to; a full one never asks", async () => {
     const f = fixture();
-    const latest = vi.fn(async () => ({ orderReference: id(50), orderNumber: "13" }));
+    const latest = vi.fn(async () => ({
+      orderReference: id(50),
+      orderNumber: "13",
+      notMade: false,
+    }));
+    const holding = vi.fn(
+      async (): Promise<{
+        orderReference: string;
+        orderNumber: string;
+        notMade: boolean;
+      } | null> => null,
+    );
     const service = createPickupCartReadService({
       sessions: { resolve: f.resolve },
       binding: { current: f.current },
       now: f.now,
       scope: { brandReference: ids.brand, storeReference: ids.store },
-      orders: { latest },
+      orders: { latest, holding },
     });
     expect((await service.read({ sessionCredential: credential }))?.placedOrder).toEqual({
       orderReference: id(50),
       orderNumber: "13",
+      notMade: false,
+    });
+    expect(holding).not.toHaveBeenCalled();
+    // Review: an Order that closed unpaid is named as such, so the page offers its dishes back.
+    latest.mockResolvedValueOnce({ orderReference: id(50), orderNumber: "13", notMade: true });
+    expect((await service.read({ sessionCredential: credential }))?.placedOrder).toEqual({
+      orderReference: id(50),
+      orderNumber: "13",
+      notMade: true,
     });
     expect(latest).toHaveBeenCalledWith({
       cartReference: ids.cart,
       guestSessionReference: ids.session,
     });
-    latest.mockResolvedValueOnce({ orderReference: id(50), orderNumber: "13A" });
+    latest.mockResolvedValueOnce({ orderReference: id(50), orderNumber: "13A", notMade: false });
     await expect(service.read({ sessionCredential: credential })).rejects.toMatchObject({
       code: "CART_DEPENDENCY_UNAVAILABLE",
     });
@@ -150,6 +170,19 @@ describe("authorized Pickup reads", () => {
     );
     expect((await service.read({ sessionCredential: credential }))?.placedOrder).toBeNull();
     expect(latest).not.toHaveBeenCalled();
+    expect(holding).toHaveBeenCalledWith({
+      cartReference: ids.cart,
+      cartVersion: 1,
+      guestSessionReference: ids.session,
+    });
+    // Review: a Cart filled before pickup Carts were emptied on ordering still holds dishes that
+    // are already in order 13; the page names it instead of offering a checkout that is refused.
+    holding.mockResolvedValueOnce({ orderReference: id(50), orderNumber: "13", notMade: false });
+    expect((await service.read({ sessionCredential: credential }))?.placedOrder).toEqual({
+      orderReference: id(50),
+      orderNumber: "13",
+      notMade: false,
+    });
   });
 
   it("resolves live credentials twice without interactive renewal and returns an internal snapshot", async () => {

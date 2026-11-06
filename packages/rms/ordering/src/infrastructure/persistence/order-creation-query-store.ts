@@ -417,7 +417,17 @@ export interface CartOrderedRecord {
   readonly orderNumber: string;
   readonly guestSessionReference: string;
   readonly sourceCartVersion: number;
+  /**
+   * The Order will not be made: closed or cancelled (a termination is recorded) or its payment was
+   * cancelled unpaid. The same rule as `readRestorableCartOrder`.
+   */
+  readonly notMade: boolean;
 }
+/** WP-2423 M03: the Order `s` will not be made (as `readRestorableCartOrder`); $1/$2 scope it. */
+const notMadeSql = `(EXISTS (SELECT 1 FROM rms_ordering.order_termination_record t
+   WHERE t.brand_id=$1 AND t.store_id=$2 AND t.order_id=s.order_id)
+ OR EXISTS (SELECT 1 FROM rms_ordering.order_payment_failure_record f
+   WHERE f.brand_id=$1 AND f.store_id=$2 AND f.order_id=s.order_id AND f.reason='Cancelled'))`;
 function cartOrderedRows(result: unknown): CartOrderedRecord | null {
   if (result === null || typeof result !== "object") return unavailable();
   const d = Object.getOwnPropertyDescriptor(result, "rows");
@@ -431,8 +441,10 @@ function cartOrderedRows(result: unknown): CartOrderedRecord | null {
     "order_number",
     "guest_session_id",
     "source_cart_version",
+    "not_made",
   ]);
   if (
+    typeof row.not_made !== "boolean" ||
     typeof row.order_number !== "string" ||
     !/^[1-9][0-9]{0,18}$/u.test(row.order_number) ||
     !Number.isSafeInteger(row.source_cart_version) ||
@@ -445,11 +457,13 @@ function cartOrderedRows(result: unknown): CartOrderedRecord | null {
     orderNumber: row.order_number,
     guestSessionReference: parseOrderingReference(row.guest_session_id),
     sourceCartVersion: row.source_cart_version as number,
+    notMade: row.not_made,
   });
 }
 /**
  * WP-2423 M03: the Order already made from this exact Cart version, or from a line the Cart still
- * holds (a Cart filled before pickup Carts were emptied on ordering). Read on the caller's
+ * holds (a Cart filled before pickup Carts were emptied on ordering) unless that Order will not be
+ * made (its dishes may then be ordered again from a changed Cart). Read on the caller's
  * transaction with local Brand/Store context set; the caller authorizes and decides.
  */
 export async function readCartVersionOrder(
@@ -463,15 +477,17 @@ export async function readCartVersionOrder(
   if (!Number.isSafeInteger(value.cartVersion) || value.cartVersion < 1) return unavailable();
   return cartOrderedRows(
     await transaction.query(
-      `SELECT s.submission_id,s.order_id,h.order_number,s.guest_session_id,s.source_cart_version
+      `SELECT s.submission_id,s.order_id,h.order_number,s.guest_session_id,s.source_cart_version,
+         ${notMadeSql} AS not_made
        FROM rms_ordering.order_submission_record s
        JOIN rms_ordering.order_header h ON h.order_id=s.order_id AND h.brand_id=$1 AND h.store_id=$2
        WHERE s.brand_id=$1 AND s.store_id=$2 AND s.source_cart_id=$3
-         AND (s.source_cart_version=$4 OR EXISTS (
+         AND (s.source_cart_version=$4 OR (EXISTS (
            SELECT 1 FROM rms_ordering.order_item i
            JOIN rms_ordering.cart_line l ON l.cart_line_id=i.source_cart_line_id AND l.brand_id=$1
              AND l.store_id=$2 AND l.cart_id=$3
-           WHERE i.brand_id=$1 AND i.store_id=$2 AND i.order_id=s.order_id))
+           WHERE i.brand_id=$1 AND i.store_id=$2 AND i.order_id=s.order_id)
+           AND NOT ${notMadeSql}))
        ORDER BY s.created_at DESC, s.submission_id DESC LIMIT 1`,
       [brand, store, cart, value.cartVersion],
     ),
@@ -492,7 +508,8 @@ export async function readLatestCartOrder(
     guest = parseOrderingReference(value.guestSessionReference);
   return cartOrderedRows(
     await transaction.query(
-      `SELECT s.submission_id,s.order_id,h.order_number,s.guest_session_id,s.source_cart_version
+      `SELECT s.submission_id,s.order_id,h.order_number,s.guest_session_id,s.source_cart_version,
+         ${notMadeSql} AS not_made
        FROM (SELECT * FROM rms_ordering.order_submission_record
              WHERE brand_id=$1 AND store_id=$2 AND source_cart_id=$3
              ORDER BY source_cart_version DESC, created_at DESC LIMIT 1) s
@@ -538,12 +555,7 @@ export async function readRestorableCartOrder(
     `SELECT s.submission_id FROM rms_ordering.order_submission_record s
      JOIN rms_ordering.order_header h ON h.order_id=s.order_id AND h.brand_id=$1 AND h.store_id=$2
      WHERE s.brand_id=$1 AND s.store_id=$2 AND s.order_id=$3 AND s.source_cart_id=$4
-       AND s.submission_kind='Initial' AND h.order_type='Pickup'
-       AND (EXISTS (SELECT 1 FROM rms_ordering.order_termination_record t
-                    WHERE t.brand_id=$1 AND t.store_id=$2 AND t.order_id=s.order_id)
-         OR EXISTS (SELECT 1 FROM rms_ordering.order_payment_failure_record f
-                    WHERE f.brand_id=$1 AND f.store_id=$2 AND f.order_id=s.order_id
-                      AND f.reason='Cancelled'))`,
+       AND s.submission_kind='Initial' AND h.order_type='Pickup' AND ${notMadeSql}`,
     [brand, store, order, cart],
   );
   if (result === null || typeof result !== "object") return unavailable();

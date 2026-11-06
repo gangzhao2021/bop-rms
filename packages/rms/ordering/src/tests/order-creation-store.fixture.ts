@@ -20,6 +20,11 @@ export function orderWriteFixture(
     pos?: boolean;
     /** Portions of the one line (default 2), its amounts following. */
     quantity?: number;
+    /**
+     * WP-2423 M03: another, different submission of the same Cart (second tab, stale page): its
+     * own Order, batch, item, submission, audit and event references (offset by this number).
+     */
+    submission?: number;
   } = {},
 ) {
   const original = orderSnapshotInput();
@@ -72,8 +77,22 @@ export function orderWriteFixture(
       }),
     };
   };
-  const shifted = portions(shift(original) as typeof original);
   const id = (n: number) => namespace + "-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+  const other = options.submission ?? 0;
+  const own = (n: number) => id(n + other * 0x10000);
+  const base = portions(shift(original) as typeof original);
+  const shifted =
+    other === 0
+      ? base
+      : {
+          ...base,
+          orderReference: own(50),
+          orderBatchReference: own(51),
+          lines: base.lines.map((line, index) => ({
+            ...line,
+            orderItemReference: own(52 + index),
+          })),
+        };
   const counter = (value: unknown): unknown => {
     if (Array.isArray(value)) return value.map(counter);
     if (value !== null && typeof value === "object")
@@ -119,7 +138,7 @@ export function orderWriteFixture(
   const order = createOrderAggregate({
     orderReference: input.orderReference,
     orderBatchReference: input.orderBatchReference,
-    submissionReference: id(503),
+    submissionReference: own(503),
     diningSessionReference: cart.diningSessionReference,
     createdByActorReference: cart.createdByActorReference,
     submittedByActorReference: evidence.guestSessionReference,
@@ -150,7 +169,7 @@ export function orderWriteFixture(
     submissionIntentHash: hash(
       "CreateOrder:" +
         JSON.stringify({
-          submissionReference: id(503),
+          submissionReference: own(503),
           cartReference: cart.cartReference,
           expectedCartVersion: cart.aggregateVersion,
           quoteReference: evidence.quoteReference,
@@ -166,7 +185,7 @@ export function orderWriteFixture(
     businessDateResolution: resolution,
     checkoutValidationEvidence: evidence,
     audit: {
-      auditId: id(500),
+      auditId: own(500),
       brandId: order.brandReference,
       storeId: order.storeReference,
       actor: { type: "System" },
@@ -174,7 +193,7 @@ export function orderWriteFixture(
       targetType: "OrderingOrder",
       targetId: order.orderReference,
       reasonCode: "AUTHORIZED_ORDER_CREATE",
-      correlationId: id(502),
+      correlationId: own(502),
       occurredAt: at,
       sourceChannel: "CUSTOMER_PWA",
       dataClassification: "Restricted",
@@ -182,8 +201,8 @@ export function orderWriteFixture(
       retentionPolicyVersion: 1,
     },
     event: createOrderCreatedEnvelope({
-      eventReference: id(501),
-      correlationReference: id(502),
+      eventReference: own(501),
+      correlationReference: own(502),
       sourceSnapshotDigest: hash(orderCreatedSourceInput(record, resolution)),
       businessDate: resolution.businessDate,
       record,

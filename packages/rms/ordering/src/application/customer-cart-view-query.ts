@@ -67,10 +67,16 @@ export interface CustomerCartDisplayView {
     readonly warnings: readonly string[];
     /**
      * WP-2423 M03: the guest's Order these dishes went to, while the pickup Cart is empty after it
-     * (so Back from the paid page shows "already ordered", never a payable checkout). Always null
-     * for a table's Cart.
+     * (so Back from the paid page shows "already ordered", never a payable checkout), or while the
+     * Cart still holds dishes already in it (a Cart filled before pickup Carts were emptied on
+     * ordering; their checkout is refused). `notMade`: that Order will not be made, so its
+     * dishes can be put back or ordered again. Always null for a table's Cart.
      */
-    readonly placedOrder: { readonly orderReference: string; readonly orderNumber: string } | null;
+    readonly placedOrder: {
+      readonly orderReference: string;
+      readonly orderNumber: string;
+      readonly notMade: boolean;
+    } | null;
   };
 }
 export interface CustomerCartViewPorts {
@@ -180,11 +186,11 @@ function snapshot(value: PickupCartReadResult | DiningCartReadResult, mode: "Pic
       ? "Expired"
       : cart.lifecycle.status;
   if (raw.effectiveStatus !== effectiveStatus) return unavailable();
-  let placedOrder: { readonly orderReference: string; readonly orderNumber: string } | null = null;
+  let placedOrder: CustomerCartDisplayView["cart"]["placedOrder"] = null;
   if (mode === "Pickup" && raw.placedOrder !== null) {
-    const placed = closed(raw.placedOrder, ["orderReference", "orderNumber"]);
+    const placed = closed(raw.placedOrder, ["orderReference", "orderNumber", "notMade"]);
     if (
-      cart.items.length !== 0 ||
+      typeof placed.notMade !== "boolean" ||
       typeof placed.orderNumber !== "string" ||
       !/^[1-9][0-9]{0,18}$/u.test(placed.orderNumber)
     )
@@ -192,6 +198,7 @@ function snapshot(value: PickupCartReadResult | DiningCartReadResult, mode: "Pic
     placedOrder = Object.freeze({
       orderReference: String(parseOrderingReference(placed.orderReference)),
       orderNumber: placed.orderNumber,
+      notMade: placed.notMade,
     });
   }
   return { cart, storeRequest, observedAt, effectiveStatus, viewer: currentViewer, placedOrder };

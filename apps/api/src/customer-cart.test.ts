@@ -359,7 +359,7 @@ describe("WP-1205 Customer Cart HTTP contract", () => {
   });
 
   it("WP-2423 M03: an emptied pickup Cart names the guest's Order its dishes went to", async () => {
-    const placedOrder = { orderReference: id(9), orderNumber: "13" };
+    const placedOrder = { orderReference: id(9), orderNumber: "13", notMade: false };
     port.result = {
       status: "Found",
       view: view({ version: 4, items: [], quote: null, placedOrder }),
@@ -367,13 +367,26 @@ describe("WP-1205 Customer Cart HTTP contract", () => {
     const response = await request("/bff/customer/cart", { headers: headers() });
     expect(response.status).toBe(200);
     expect(((await response.json()) as CustomerCartView).cart.placedOrder).toEqual(placedOrder);
-    // A Cart with dishes in it, or a table's Cart, never claims an Order.
+    // Review: an Order that closed unpaid, and a Cart still holding dishes already in an Order
+    // (filled before pickup Carts were emptied on ordering), are named too.
     for (const overrides of [
+      { items: [], quote: null, placedOrder: { ...placedOrder, notMade: true } },
       { placedOrder },
-      { orderType: "DineIn" as const, items: [], quote: null, placedOrder },
-      { items: [], quote: null, placedOrder: { orderReference: id(9), orderNumber: "13A" } },
     ]) {
       port.result = { status: "Found", view: view(overrides) };
+      const named = await request("/bff/customer/cart", { headers: headers() });
+      expect(named.status).toBe(200);
+      expect(((await named.json()) as CustomerCartView).cart.placedOrder).toEqual(
+        overrides.placedOrder,
+      );
+    }
+    // A table's Cart never claims an Order; a malformed one is refused.
+    for (const overrides of [
+      { orderType: "DineIn" as const, items: [], quote: null, placedOrder },
+      { items: [], quote: null, placedOrder: { ...placedOrder, orderNumber: "13A" } },
+      { items: [], quote: null, placedOrder: { orderReference: id(9), orderNumber: "13" } },
+    ]) {
+      port.result = { status: "Found", view: view(overrides as never) };
       expect((await request("/bff/customer/cart", { headers: headers() })).status).toBe(503);
     }
     port.result = { status: "Found", view: view() };
@@ -387,6 +400,7 @@ describe("WP-1205 Customer Cart HTTP contract", () => {
       status: "Restored",
       view: view({ version: 5 }),
       added: 1,
+      alreadyPutBack: 0,
       unavailable: 1,
     };
     restore = {
@@ -405,7 +419,7 @@ describe("WP-1205 Customer Cart HTTP contract", () => {
     const response = await send();
     expect(response.status).toBe(200);
     const body = (await response.json()) as { restored: unknown; cart: { version: number } };
-    expect(body.restored).toEqual({ added: 1, unavailable: 1 });
+    expect(body.restored).toEqual({ added: 1, alreadyPutBack: 0, unavailable: 1 });
     expect(body.cart.version).toBe(5);
     expect(calls).toEqual([
       [

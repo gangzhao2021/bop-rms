@@ -21,8 +21,13 @@ export type CustomerCartRestoreResult =
   | {
       readonly status: "Restored";
       readonly view: CustomerCartView;
-      /** Dishes put back now or by an earlier press. */
+      /** Dishes put back by this press (or its lost answer, replayed). */
       readonly added: number;
+      /**
+       * Dishes an earlier press already put back (the Cart has moved on since, so this press adds
+       * nothing for them; the guest may have ordered, changed or removed them meanwhile).
+       */
+      readonly alreadyPutBack: number;
       /** Dishes the Store can't sell now (off the menu, sold out, stock short). */
       readonly unavailable: number;
     }
@@ -101,6 +106,7 @@ export function createCustomerPickupCartRestore(
       let version = current.view.cart.version;
       let view = current.view;
       let added = 0,
+        alreadyPutBack = 0,
         unavailable = 0;
       for (const line of order.lines) {
         const result = await options.cart.addItem(
@@ -127,8 +133,9 @@ export function createCustomerPickupCartRestore(
           version = result.view.cart.version;
           added++;
         } else if (result.status === "IdempotencyConflict") {
-          // Put back by an earlier press; the guest may since have changed or removed it.
-          added++;
+          // Put back by an earlier press; the guest may since have ordered, changed or removed it,
+          // so it is not counted as added now.
+          alreadyPutBack++;
         } else if (result.status === "SelectionInvalid") unavailable++;
         else if (result.status === "SessionExpired") return { status: "SessionExpired" };
         else return { status: "Unavailable" };
@@ -136,7 +143,7 @@ export function createCustomerPickupCartRestore(
       const latest = await options.cart.getCurrentCart(context, ...locale);
       if (latest.status === "Found" || latest.status === "Applied" || latest.status === "Current")
         view = latest.view;
-      return { status: "Restored", view, added, unavailable };
+      return { status: "Restored", view, added, alreadyPutBack, unavailable };
     },
   });
 }

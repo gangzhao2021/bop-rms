@@ -280,6 +280,21 @@ describe("safe Customer Cart display", () => {
     expect(result?.cart.quote?.quoteVersion).toBe(2);
     expect(result?.cart.quote?.total).toEqual({ amountMinor: "9007199254740993", currency: "CAD" });
   });
+  it("WP-2423 M03 review: a Cart still holding dishes already in an Order names that Order", async () => {
+    const f = fixture();
+    const placedOrder = { orderReference: id(30), orderNumber: "13", notMade: false };
+    f.read.mockResolvedValue({ ...snapshot(), placedOrder });
+    const result = await f.query.read(request);
+    expect(result?.cart.items).toHaveLength(1);
+    expect(result?.cart.placedOrder).toEqual(placedOrder);
+    f.read.mockResolvedValue({
+      ...snapshot(),
+      placedOrder: { ...placedOrder, notMade: "yes" } as never,
+    });
+    await expect(f.query.read(request)).rejects.toMatchObject({
+      code: "CART_DEPENDENCY_UNAVAILABLE",
+    });
+  });
   it("returns uniform absence without querying dependent owners", async () => {
     const f = fixture();
     f.read.mockResolvedValue(null);

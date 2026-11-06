@@ -79,9 +79,14 @@ export interface CustomerCartView {
     readonly warnings: readonly string[];
     /**
      * WP-2423 M03: the guest's own Order these dishes went to, while the pickup Cart is empty
-     * after it; null otherwise and always null for a table.
+     * after it or still holds dishes already in it (their checkout is refused); `notMade`
+     * when that Order will not be made. Null otherwise and always null for a table.
      */
-    readonly placedOrder: { readonly orderReference: string; readonly orderNumber: string } | null;
+    readonly placedOrder: {
+      readonly orderReference: string;
+      readonly orderNumber: string;
+      readonly notMade: boolean;
+    } | null;
   };
 }
 
@@ -528,21 +533,22 @@ function publicView(value: unknown): CustomerCartView {
       items,
       quote,
       warnings: codes(cart.warnings),
-      placedOrder: placedOrderView(cart.placedOrder, cart.orderType, items.length),
+      placedOrder: placedOrderView(cart.placedOrder, cart.orderType),
     }),
   });
 }
 function placedOrderView(
   value: unknown,
   orderType: "DineIn" | "Pickup",
-  itemCount: number,
 ): CustomerCartView["cart"]["placedOrder"] {
   if (value === undefined || value === null) return null;
-  const raw = closed(value, ["orderReference", "orderNumber"]);
-  if (orderType !== "Pickup" || itemCount !== 0) throw new TypeError("invalid placed order");
+  const raw = closed(value, ["orderReference", "orderNumber", "notMade"]);
+  if (orderType !== "Pickup" || typeof raw.notMade !== "boolean")
+    throw new TypeError("invalid placed order");
   return Object.freeze({
     orderReference: scalar(raw.orderReference, uuidV7),
     orderNumber: scalar(raw.orderNumber, /^[1-9][0-9]{0,18}$/u),
+    notMade: raw.notMade,
   });
 }
 
@@ -745,6 +751,7 @@ export class CustomerCartHandler {
           ...view,
           restored: {
             added: count(result.added, 100),
+            alreadyPutBack: count(result.alreadyPutBack, 100),
             unavailable: count(result.unavailable, 100),
           },
         });

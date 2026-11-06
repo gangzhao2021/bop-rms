@@ -124,11 +124,18 @@ describe("WP-2423 M03: put an unmade pickup Order's dishes back in the Cart", ()
   });
   it("leaves out a dish the Store can't sell now and counts it; a second press adds nothing twice", async () => {
     const f = setup([{ status: "SelectionInvalid", issueCodes: ["SELLABLE_UNAVAILABLE"] }]);
-    expect(await f.restore.restore(input)).toMatchObject({ added: 1, unavailable: 1 });
+    expect(await f.restore.restore(input)).toMatchObject({
+      added: 1,
+      alreadyPutBack: 0,
+      unavailable: 1,
+    });
+    // Review: after the dishes were put back, ordered again and the Cart emptied, a second press
+    // adds nothing and must not say they are back in the Cart.
     const again = setup([{ status: "IdempotencyConflict" }, { status: "IdempotencyConflict" }]);
     expect(await again.restore.restore(input)).toMatchObject({
       status: "Restored",
-      added: 2,
+      added: 0,
+      alreadyPutBack: 2,
       unavailable: 0,
     });
   });

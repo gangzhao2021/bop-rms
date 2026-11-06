@@ -28,15 +28,31 @@ export interface PickupCartReadPorts {
   readonly scope: { readonly brandReference: string; readonly storeReference: string };
   readonly now: () => string;
   /**
-   * WP-2423 M03: the guest's latest Order from this Cart while nothing was put in it since, read
-   * only when the Cart is empty, so the page can say "already ordered" instead of an empty Cart.
+   * WP-2423 M03: which of this guest's Orders the Cart's dishes went to, so the page says "already
+   * ordered" (or that the Order closed unpaid) instead of an empty Cart or a payable checkout.
+   * `latest`: the latest Order from this Cart while nothing was put in it since (read when the Cart
+   * is empty). `holding`: the Order that already holds the Cart's current dishes (a Cart filled
+   * before pickup Carts were emptied on ordering; read when the Cart has dishes), the same rule
+   * that refuses their checkout. Each answers only with the guest's own Order.
    */
   readonly orders?: {
     latest(input: {
       readonly cartReference: string;
       readonly guestSessionReference: string;
-    }): Promise<{ readonly orderReference: string; readonly orderNumber: string } | null>;
+    }): Promise<PlacedOrderAnswer | null>;
+    holding?(input: {
+      readonly cartReference: string;
+      readonly cartVersion: number;
+      readonly guestSessionReference: string;
+    }): Promise<PlacedOrderAnswer | null>;
   };
+}
+
+export interface PlacedOrderAnswer {
+  readonly orderReference: string;
+  readonly orderNumber: string;
+  /** The Order will not be made (closed, cancelled, or its payment closed unpaid). */
+  readonly notMade: boolean;
 }
 
 // Restricted owner-internal read result. A separate safe display DTO is required for HTTP.
@@ -45,8 +61,11 @@ export interface PickupCartReadResult {
   readonly cart: CartAggregate;
   readonly effectiveStatus: "Active" | "Abandoned" | "Expired";
   readonly observedAt: OrderingInstant;
-  /** WP-2423 M03: set only while the Cart is empty after this guest's Order from it. */
-  readonly placedOrder: { readonly orderReference: string; readonly orderNumber: string } | null;
+  /**
+   * WP-2423 M03: this guest's Order the Cart's dishes went to: while the Cart is empty after it, or
+   * while the Cart still holds dishes that are already in it (they can't be checked out again).
+   */
+  readonly placedOrder: PlacedOrderAnswer | null;
 }
 
 function closed(value: unknown): Readonly<Record<string, unknown>> {
@@ -174,22 +193,36 @@ export function createPickupCartReadService(ports: PickupCartReadPorts) {
           ? "Expired"
           : lifecycle.status;
       let placedOrder: PickupCartReadResult["placedOrder"] = null;
-      if (cart.items.length === 0 && ports.orders !== undefined) {
+      const orders = ports.orders;
+      const guestSessionReference = String(session.sessionReference);
+      const lookup =
+        orders === undefined
+          ? undefined
+          : cart.items.length === 0
+            ? () => orders.latest({ cartReference: cart.cartReference, guestSessionReference })
+            : orders.holding === undefined
+              ? undefined
+              : () =>
+                  orders.holding?.({
+                    cartReference: cart.cartReference,
+                    cartVersion: cart.aggregateVersion,
+                    guestSessionReference,
+                  }) ?? Promise.resolve(null);
+      if (lookup !== undefined) {
         try {
-          const found = await ports.orders.latest({
-            cartReference: cart.cartReference,
-            guestSessionReference: String(session.sessionReference),
-          });
+          const found = await lookup();
+          if (
+            found !== null &&
+            (!/^[1-9][0-9]{0,18}$/u.test(found.orderNumber) || typeof found.notMade !== "boolean")
+          )
+            throw new Error("invalid placed order");
           placedOrder =
             found === null
               ? null
               : Object.freeze({
                   orderReference: parseOrderingReference(found.orderReference),
-                  orderNumber: /^[1-9][0-9]{0,18}$/u.test(found.orderNumber)
-                    ? found.orderNumber
-                    : (() => {
-                        throw new Error("invalid order number");
-                      })(),
+                  orderNumber: found.orderNumber,
+                  notMade: found.notMade,
                 });
         } catch {
           throw new CartError("CART_DEPENDENCY_UNAVAILABLE");

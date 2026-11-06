@@ -421,13 +421,32 @@ export function createLocalCustomerRuntime(options: LocalCustomerRuntimeOptions)
         binding: createPostgresPickupCartBindingReader(options.cartTransactions, scope),
         scope,
         now,
-        // WP-2423 M03: an emptied Cart says which Order its dishes went to.
+        // WP-2423 M03: an emptied Cart says which Order its dishes went to (and whether it closed
+        // unpaid); a Cart still holding dishes already in an Order says so, by the same rule that
+        // refuses their checkout. Only the guest's own Order is named.
         orders: {
           latest: async (input) => {
             const found = await cartOrders.findLatest(input);
             return found === null
               ? null
-              : { orderReference: found.orderReference, orderNumber: found.orderNumber };
+              : {
+                  orderReference: found.orderReference,
+                  orderNumber: found.orderNumber,
+                  notMade: found.notMade,
+                };
+          },
+          holding: async (input) => {
+            const found = await cartOrders.findVersion({
+              cartReference: input.cartReference,
+              cartVersion: input.cartVersion,
+            });
+            return found === null || found.guestSessionReference !== input.guestSessionReference
+              ? null
+              : {
+                  orderReference: found.orderReference,
+                  orderNumber: found.orderNumber,
+                  notMade: found.notMade,
+                };
           },
         },
       }),
