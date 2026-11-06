@@ -774,9 +774,12 @@ test("@production a table payment the server failed goes again as the same reque
       exact: false,
     }),
   ).toBeVisible();
+  // The payment may already be recorded: never "card machine for payment" here.
+  await expect(checkout.getByText("do not charge them again", { exact: false })).toBeVisible();
   const words = (await checkout.innerText()).toLowerCase();
   expect(words).not.toContain("connection");
   expect(words).not.toContain("permission");
+  expect(words).not.toContain("card machine for payment");
   failing = false;
   await pay();
   await expect(checkout.getByLabel("Receipt for table T2")).toContainText("$33.95");
