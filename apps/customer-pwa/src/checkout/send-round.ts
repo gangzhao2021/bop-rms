@@ -414,12 +414,11 @@ export function createSendRoundController(
         case "items_short":
           plan = null;
           return { status: "refused", refusal: "item_short", line: null };
-        // The restaurant updated its menu since this round was priced: nothing was placed or
-        // charged, so it is priced again once (a changed total asks the guest first).
+        // The restaurant updated its menu since this round was priced, or staff moved the table
+        // while it was being sent: nothing was placed or charged, so it is priced and sent again
+        // once, from the table the party sits at now (a changed total asks the guest first).
         case "not_ready":
         case "requote_required":
-        // Staff moved the table while it was being sent: nothing was placed or charged, and it is
-        // sent again from the table the party sits at now.
         case "table_moved":
           return "restart";
         case "denied":

@@ -570,6 +570,29 @@ test("@production a table's order that needs checking again after its round was 
   await expect(main.getByRole("link", { name: "Back to checkout" })).toHaveCount(0);
 });
 
+test("@production staff moving the table while the round is sent says so, with the way back to check out again", async ({
+  page,
+}) => {
+  // WP-2423 table-move-payment review (2026-11-06): the party was moved between preparing and
+  // sending the round. Nothing was placed or charged; the guest checks out again at the new table.
+  const { intentCalls } = await checkout(page, {
+    channel: "DineIn",
+    intents: refused(409, "payment_table_moved"),
+  });
+  await goToPayment(page);
+  const main = page.getByRole("main");
+  await expect(main.getByRole("heading", { name: "Your table was changed" })).toBeVisible();
+  await expect(main).toContainText(
+    "Staff moved your party to another table while you were paying, so you haven’t been charged.",
+  );
+  await expect(main).not.toContainText("The restaurant updated its menu");
+  await expectNoInternalText(page);
+  // Back to where the dishes are, to check out again (a new checkout, at the new table).
+  await expect(main.getByRole("link", { name: /^Back to (your cart|checkout)$/u })).toBeVisible();
+  await expect(main.getByRole("button", { name: "Try again", exact: true })).toHaveCount(0);
+  expect(intentCalls).toHaveLength(1);
+});
+
 test("@production a table that turns out to pay at the end goes back to its cart", async ({
   page,
 }) => {
