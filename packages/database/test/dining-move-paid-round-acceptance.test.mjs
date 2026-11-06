@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash, createHmac, randomBytes, randomInt } from "node:crypto";
 import { readFile } from "node:fs/promises";
+import { setTimeout as sleep } from "node:timers/promises";
 import { URL } from "node:url";
 import pg from "pg";
 import { it, vi } from "vitest";
@@ -720,7 +721,7 @@ it.each([
                               "SELECT count(*)::int AS waiting FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock'",
                             );
                             if (waiting > 0) break;
-                            await new Promise((resolve) => setTimeout(resolve, 25));
+                            await sleep(25);
                           }
                         }
                       }

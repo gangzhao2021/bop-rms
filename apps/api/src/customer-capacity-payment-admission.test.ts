@@ -82,13 +82,14 @@ it("lets Dining read where the party sits now, never before the request's time",
   const { record, admission } = fixture(requestAt);
   const seen: string[] = [];
   mocks.withPaymentPending.mockImplementation(async () => {
-    const clock = mocks.factory.mock.calls[0]![2] as { now(): string };
+    const clock = mocks.factory.mock.calls[0]?.[2] as { now(): string };
     seen.push(clock.now(), clock.now());
     return true;
   });
   await expect(admission.admit({ query: vi.fn() } as never, record, requestAt)).resolves.toBe(true);
-  expect(seen[0]! > requestAt).toBe(true);
-  expect(seen[1]! >= seen[0]!).toBe(true);
+  const [first = "", second = ""] = seen;
+  expect(first > requestAt).toBe(true);
+  expect(second >= first).toBe(true);
 });
 
 it("never reads Dining earlier than the request, whatever the machine clock says", async () => {
@@ -96,7 +97,7 @@ it("never reads Dining earlier than the request, whatever the machine clock says
   const { record, admission } = fixture(requestAt);
   let seen = "";
   mocks.withPaymentPending.mockImplementation(async () => {
-    seen = (mocks.factory.mock.calls[0]![2] as { now(): string }).now();
+    seen = (mocks.factory.mock.calls[0]?.[2] as { now(): string }).now();
     return true;
   });
   await admission.admit({ query: vi.fn() } as never, record, requestAt);
