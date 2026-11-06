@@ -3,6 +3,10 @@ import { createRefundApprovalClient } from "./refund-approval-client.js";
 import { useStaffSessionLive } from "./staff-session-reads.js";
 import { createDiningSessionClient } from "./dining-session-client.js";
 import { createStaffPageClient, StaffPageError } from "./staff-administration-pages.js";
+import {
+  createRoleAdministrationPageClient,
+  RoleAdministrationPageError,
+} from "./role-administration-pages.js";
 
 /** WP-2423 Q35: how often the waiting refund approvals are read while a page is visible. */
 export const APPROVALS_WAITING_REFRESH_MS = 60_000;
@@ -86,8 +90,18 @@ export function approvalsBadgeCount(
 }
 
 /**
- * WP-2423 M07: how many staff role requests wait for the signed-in person (to decide, or their own
- * to approve alone), read with the refunds. See `StaffRolesWaiting`.
+ * WP-2423 role presets: staff role requests plus role changes. A failed read makes the whole count
+ * "Unavailable" (never silently short); reads not permitted add nothing.
+ */
+export function combineRolesWaiting(parts: readonly StaffRolesWaiting[]): StaffRolesWaiting {
+  if (parts.includes("Unavailable")) return "Unavailable";
+  const numbers = parts.filter((part): part is number => typeof part === "number");
+  return numbers.length === 0 ? null : numbers.reduce((sum, part) => sum + part, 0);
+}
+
+/**
+ * WP-2423 M07: how many staff role requests and role changes wait for the signed-in person (to
+ * decide, approve alone or turn on), read with the refunds. See `StaffRolesWaiting`.
  */
 export function useStaffRolesWaiting(
   csrf: string | null,
@@ -102,21 +116,28 @@ export function useStaffRolesWaiting(
       return;
     }
     const client = createStaffPageClient(csrf, fetcher ?? fetch);
+    const roles = createRoleAdministrationPageClient(csrf, fetcher ?? fetch);
     let current = true;
     const read = () => {
-      client
-        .roleRequests()
-        .then((requests) => {
-          if (current) setWaiting(requests.length);
-        })
-        .catch((error: unknown) => {
-          if (!current) return;
-          setWaiting(
+      // WP-2423 role presets: staff role requests and role changes waiting for this person.
+      void Promise.all([
+        client.roleRequests().then(
+          (requests): StaffRolesWaiting => requests.length,
+          (error: unknown): StaffRolesWaiting =>
             error instanceof StaffPageError && error.code === "PermissionDenied"
               ? null
               : "Unavailable",
-          );
-        });
+        ),
+        roles.waiting().then(
+          (changes): StaffRolesWaiting => changes.length,
+          (error: unknown): StaffRolesWaiting =>
+            error instanceof RoleAdministrationPageError && error.code === "PermissionDenied"
+              ? null
+              : "Unavailable",
+        ),
+      ]).then((parts) => {
+        if (current) setWaiting(combineRolesWaiting(parts));
+      });
     };
     read();
     const timer = window.setInterval(() => {

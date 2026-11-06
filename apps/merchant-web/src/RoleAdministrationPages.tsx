@@ -1,6 +1,6 @@
-import { systemText, t } from "./i18n/i18n.js";
+import { listSeparator, systemText, t } from "./i18n/i18n.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
-import { SourceTime } from "./StoreTime.js";
+import { SourceTime, StaffTime } from "./StoreTime.js";
 import { newOperationReference } from "./operation-reference.js";
 import { FullSignInPrompt } from "./FullSignInPrompt.js";
 import { FULL_SIGN_IN_REQUIRED_TEXT, needsFullSignIn } from "./full-sign-in.js";
@@ -11,10 +11,11 @@ import {
   parseRoleAdministrationPageView,
   parseRoleAdministrationRouteReference,
   unavailableRoleAdministrationPageClient,
+  roleChangeStatusLabels,
+  roleDecisionLabels,
+  roleKindLabels,
   rolePermissionLabel,
   roleScopeLabels,
-  roleStatusLabels,
-  roleTypeLabels,
   type RoleAdministrationItemView,
   type RoleAdministrationOperation,
   type RoleAdministrationPageClient,
@@ -23,41 +24,55 @@ import {
   type RoleCatalogEntryView,
   type RoleCommandRequest,
 } from "./role-administration-pages.js";
+import { SoleOperatorSelfApproval } from "./SoleOperatorSelfApproval.js";
 import { actionAccessDeniedText, noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { serverProblemText } from "./failure-words.js";
 import { PageDidNotLoad, readingAgain } from "./PageDidNotLoad.js";
 type State =
   | { readonly kind: "Loading" | RoleAdministrationPageErrorCode }
   | { readonly kind: "Found"; readonly view: RoleAdministrationPageView };
-const copy = {
-  Loading: t("Loading authorized role metadata…"),
+const copy: Record<Exclude<State["kind"], "Found">, string> = {
+  Loading: t("Loading roles…"),
   PermissionDenied: actionAccessDeniedText,
   FullSignInRequired: FULL_SIGN_IN_REQUIRED_TEXT,
-  NotFound: t("The requested role is unavailable in this scope."),
+  NotFound: t("This role is not available at this store."),
   FeatureDisabled: t("Role administration is disabled."),
-  Stale: t("The projection is stale. Refresh before acting."),
-  Conflict: t("The role or policy changed, or the role is still assigned. Refresh and try again."),
-  CommandFailed: t("The change was refused. No role or permission outcome was inferred."),
+  Stale: t("This page may be out of date. Refresh before changing anything."),
+  Conflict: t("Someone changed this role meanwhile. Refresh and check it again."),
+  CommandFailed: t("The change was refused. Nothing was changed."),
   Offline: t("Offline. Your change was not confirmed; retry sends the same request again."),
   Unavailable: serverProblemText,
-} as const;
-const operationLabels: Record<RoleAdministrationOperation, string> = {
-  Duplicate: t("Duplicate as custom role"),
-  SaveDraft: t("Save draft"),
-  Submit: t("Submit for approval"),
-  Approve: t("Approve"),
-  Reject: t("Reject"),
-  Activate: t("Activate"),
-  Deactivate: t("Deactivate"),
+  InUse: t(
+    "Staff hold this role, or a staff role request waiting for approval would give it. Give them another role first.",
+  ),
+  NameTaken: t("Another role here already has this name. Choose another name."),
+  SoleOperatorNotInEffect: t(
+    "You cannot approve this on your own now: someone else also approves roles, or Sole operator is off.",
+  ),
+  NeedsReverification: t("Confirm it's you again (valid 15 minutes), then approve."),
+  WouldWidenOwnAccess: t(
+    "This change gives the role something you don't hold yourself. Someone who holds it must approve.",
+  ),
+  ApproverLacksAccess: t(
+    "This change adds permissions you don't hold yourself, so someone who holds them must approve it.",
+  ),
+  PresetChanged: t(
+    "BOP updated this preset after the change was approved. Withdraw it and restore again, so you approve what it is now.",
+  ),
 };
 const reasonCodes: Record<RoleAdministrationOperation, string> = {
+  Create: "ROLE_CREATED",
   Duplicate: "ROLE_CREATED",
   SaveDraft: "ROLE_DRAFT_SAVED",
+  Revise: "ROLE_CHANGE_STARTED",
+  RestoreDefault: "ROLE_PRESET_RESTORE",
   Submit: "ROLE_SUBMITTED",
+  Withdraw: "ROLE_CHANGE_WITHDRAWN",
   Approve: "ROLE_APPROVED",
+  ApproveAlone: "ROLE_APPROVED",
   Reject: "ROLE_REJECTED",
   Activate: "ROLE_ACTIVATED",
-  Deactivate: "ROLE_DEACTIVATED",
+  Deactivate: "ROLE_REMOVED",
 };
 function Status({
   state,
@@ -75,7 +90,7 @@ function Status({
           ? t("Loading roles")
           : state === "PermissionDenied"
             ? noAccessHeading
-            : t("Role administration unavailable")
+            : t("Roles are not available")
       }
       tone={state === "Loading" ? "neutral" : "error"}
       status
@@ -84,6 +99,18 @@ function Status({
     </StatePanel>
   );
 }
+const labelOf = (catalog: readonly RoleCatalogEntryView[], action: string) =>
+  systemText(rolePermissionLabel(action, catalog));
+const listOf = (catalog: readonly RoleCatalogEntryView[], actions: readonly string[]) =>
+  actions.map((action) => labelOf(catalog, action)).join(listSeparator());
+/** Flagged permissions first (the Owner's six in their order), then the rest as given. */
+const flaggedFirst = (catalog: readonly RoleCatalogEntryView[], actions: readonly string[]) => {
+  const rank = new Map(catalog.map((entry) => [entry.action, entry.riskRank]));
+  const ranked = actions
+    .filter((action) => (rank.get(action) ?? null) !== null)
+    .sort((a, b) => (rank.get(a) ?? 0) - (rank.get(b) ?? 0));
+  return [...ranked, ...actions.filter((action) => (rank.get(action) ?? null) === null)];
+};
 function PermissionPicker({
   catalog,
   selected,
@@ -95,8 +122,10 @@ function PermissionPicker({
 }) {
   const [query, setQuery] = useState("");
   const groups = useMemo(() => {
+    const words = query.trim().toLowerCase();
+    // Staff search the words they read (in their language), never the codes.
     const matching = catalog.filter((entry) =>
-      `${entry.action} ${entry.description}`.toLowerCase().includes(query.trim().toLowerCase()),
+      `${systemText(entry.description)} ${systemText(entry.group)}`.toLowerCase().includes(words),
     );
     return [...new Set(matching.map((entry) => entry.group))].map((group) => ({
       group,
@@ -104,61 +133,191 @@ function PermissionPicker({
     }));
   }, [catalog, query]);
   return (
-    <fieldset>
-      <legend>{t("Permissions ({size} selected)", { size: selected.size })}</legend>
+    <fieldset className="role-permission-picker">
+      <legend>{t("What this role can do ({size} ticked)", { size: selected.size })}</legend>
       <label>
-        {t("Search permissions")}
-        <input value={query} onChange={(event) => setQuery(event.currentTarget.value)} />
+        {t("Search")}
+        <input
+          type="search"
+          value={query}
+          onChange={(event) => setQuery(event.currentTarget.value)}
+        />
       </label>
       {groups.map(({ group, entries }) => (
         <fieldset key={group}>
-          <legend>{group}</legend>
+          <legend>{systemText(group)}</legend>
           {entries.map((entry) => (
-            <label key={entry.action} style={{ display: "block" }}>
-              <input
-                type="checkbox"
-                checked={selected.has(entry.action)}
-                onChange={(event) => {
-                  const next = new Set(selected);
-                  if (event.currentTarget.checked) next.add(entry.action);
-                  else next.delete(entry.action);
-                  onChange(next);
-                }}
-              />{" "}
-              {systemText(entry.description)}
-              {entry.highRisk ? <strong> {t("· High risk")}</strong> : null}
-            </label>
+            <div key={entry.action} className="role-permission">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={selected.has(entry.action)}
+                  onChange={(event) => {
+                    const next = new Set(selected);
+                    if (event.currentTarget.checked) next.add(entry.action);
+                    else next.delete(entry.action);
+                    onChange(next);
+                  }}
+                />{" "}
+                {systemText(entry.description)}
+              </label>
+              {selected.has(entry.action) && entry.warning !== null ? (
+                <p role="note" className="role-permission-warning">
+                  {systemText(entry.warning)}
+                </p>
+              ) : null}
+            </div>
           ))}
         </fieldset>
       ))}
     </fieldset>
   );
 }
-/**
- * WP-2423 M07 (coordinator decision 2026-11-06, Owner may overrule): a custom role always needs a
- * second person who approves roles; Sole operator does not cover it. A one-owner store is told so
- * before and after submitting and sent to the ready-made roles, which they can assign and approve
- * on their own on the person's page once Sole operator is on — never left waiting with no way on.
- */
-export function CustomRoleApprovalNote({ submitted }: { readonly submitted: boolean }) {
+/** "This role can: approve refunds, comp dishes…" with the flagged ones first. */
+function RoleSummary({
+  catalog,
+  selected,
+  memberCount,
+}: {
+  readonly catalog: readonly RoleCatalogEntryView[];
+  readonly selected: readonly string[];
+  readonly memberCount: number;
+}) {
+  const ranked = new Set(catalog.filter((e) => e.riskRank !== null).map((e) => e.action));
+  const risky = flaggedFirst(catalog, selected).filter((action) => ranked.has(action));
   return (
-    <div className="role-approval-note">
+    <div className="role-summary">
       <p>
-        {submitted
-          ? t("Another administrator must approve this change.")
-          : t("Submitting sends this role to another administrator who approves roles.")}
+        {risky.length === 0
+          ? t("This role has no money or approval powers.")
+          : t("This role can: {list}", { list: listOf(catalog, risky) })}
       </p>
-      <p>
-        {t(
-          "A custom role cannot be approved by the person who made it, even with Sole operator on. If nobody else at your business approves roles, give staff one of the ready-made roles instead: with Sole operator on, you can approve those on your own on the person's page.",
-        )}
-      </p>
-      <p>
-        <Link to="/app/organization/roles">{t("See the ready-made roles")}</Link> ·{" "}
-        <Link to="/app/organization/users">{t("Open staff")}</Link>
-      </p>
+      {memberCount > 0 ? (
+        <p>
+          {t(
+            "Your changes apply to the {count} staff who hold it once approved and turned on. Until then they keep what they have now.",
+            { count: memberCount },
+          )}
+        </p>
+      ) : null}
     </div>
   );
+}
+function PermissionList({
+  catalog,
+  actions,
+}: {
+  readonly catalog: readonly RoleCatalogEntryView[];
+  readonly actions: readonly string[];
+}) {
+  const byGroup = new Map<string, string[]>();
+  for (const action of flaggedFirst(catalog, actions)) {
+    const group = catalog.find((entry) => entry.action === action)?.group ?? "";
+    byGroup.set(group, [...(byGroup.get(group) ?? []), action]);
+  }
+  return (
+    <dl className="role-permission-list">
+      {[...byGroup.entries()].map(([group, items]) => (
+        <div key={group}>
+          <dt>{systemText(group)}</dt>
+          <dd>{items.map((action) => labelOf(catalog, action)).join(listSeparator())}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+function useRun(client: RoleAdministrationPageClient, reload: () => void) {
+  const navigate = useNavigate();
+  const [pending, setPending] = useState<readonly RoleCommandRequest[] | null>(null),
+    [busy, setBusy] = useState(false),
+    [error, setError] = useState<RoleAdministrationPageErrorCode | null>(null),
+    [partial, setPartial] = useState(false);
+  /** Sends the commands in order; a later one failing leaves what the first did, said honestly. */
+  const run = useCallback(
+    async (requests: readonly RoleCommandRequest[], open?: boolean) => {
+      if (!client.command) return;
+      setPending(requests);
+      setBusy(true);
+      setError(null);
+      setPartial(false);
+      let done = 0;
+      try {
+        let roleReference: string | null = null;
+        for (const request of requests) {
+          roleReference = (await client.command(request)).roleReference;
+          done += 1;
+        }
+        setPending(null);
+        if (open && roleReference !== null) navigate(`/app/organization/roles/${roleReference}`);
+        else reload();
+      } catch (failure) {
+        if (done > 0) {
+          setPending(requests.slice(done));
+          setPartial(true);
+        }
+        setError(failure instanceof RoleAdministrationPageError ? failure.code : "Unavailable");
+      } finally {
+        setBusy(false);
+      }
+    },
+    [client, navigate, reload],
+  );
+  return { run, pending, busy, error, partial };
+}
+function Failure({
+  csrf,
+  state,
+  reload,
+}: {
+  readonly csrf: string;
+  readonly state: ReturnType<typeof useRun>;
+  readonly reload: () => void;
+}) {
+  const { error, pending, busy, run, partial } = state;
+  if (error === null) return null;
+  if (needsFullSignIn(error))
+    return (
+      <StatePanel heading={t("Confirm it's you")} status>
+        <FullSignInPrompt csrf={csrf} />
+        {pending ? (
+          <button disabled={busy} onClick={() => void run(pending)}>
+            {t("Try again")}
+          </button>
+        ) : null}
+      </StatePanel>
+    );
+  return (
+    <StatePanel
+      heading={partial ? t("Approved, not on yet") : t("Change not made")}
+      tone="error"
+      status
+    >
+      <p>{copy[error]}</p>
+      {pending && (error === "Offline" || partial) ? (
+        <button disabled={busy} onClick={() => void run(pending)}>
+          {partial ? t("Turn on") : t("Retry")}
+        </button>
+      ) : (
+        <button onClick={reload}>{t("Refresh")}</button>
+      )}
+    </StatePanel>
+  );
+}
+function request(
+  role: RoleAdministrationItemView,
+  operation: RoleAdministrationOperation,
+  draft: RoleCommandRequest["draft"] = null,
+  version = role.version,
+): RoleCommandRequest {
+  return {
+    operation,
+    roleReference: role.roleReference,
+    expectedVersion: version,
+    operationReference: newOperationReference(),
+    reasonCode: reasonCodes[operation],
+    draft,
+    ...(operation === "ApproveAlone" ? { confirmed: true as const } : {}),
+  };
 }
 function Editor({
   view,
@@ -173,216 +332,397 @@ function Editor({
   readonly csrf: string;
   readonly reload: () => void;
 }) {
-  const navigate = useNavigate();
-  const catalogActions = useMemo(() => new Set(view.catalog.map((entry) => entry.action)), [view]);
-  const current = useMemo(
-    () => new Set(role.permissions.map((item) => item.action).filter((a) => catalogActions.has(a))),
-    [role, catalogActions],
-  );
-  const [name, setName] = useState(role.name),
-    [description, setDescription] = useState(role.description),
-    [selected, setSelected] = useState<ReadonlySet<string>>(current),
-    [duplicate, setDuplicate] = useState<{ code: string; name: string } | null>(null),
-    [pending, setPending] = useState<RoleCommandRequest | null>(null),
-    [busy, setBusy] = useState(false),
-    [error, setError] = useState<RoleAdministrationPageErrorCode | null>(null);
-  const run = useCallback(
-    async (request: RoleCommandRequest) => {
-      if (!client.command) return;
-      setPending(request);
-      setBusy(true);
-      setError(null);
-      try {
-        const result = await client.command(request);
-        setPending(null);
-        if (request.operation === "Duplicate")
-          navigate(`/app/organization/roles/${result.roleReference}`);
-        else reload();
-      } catch (failure) {
-        setError(failure instanceof RoleAdministrationPageError ? failure.code : "Unavailable");
-      } finally {
-        setBusy(false);
-      }
-    },
-    [client, navigate, reload],
-  );
-  const request = (operation: RoleAdministrationOperation): RoleCommandRequest => ({
-    operation,
-    roleReference: role.roleReference,
-    expectedVersion: role.version,
-    operationReference: newOperationReference(),
-    reasonCode: reasonCodes[operation],
-    draft:
-      operation === "SaveDraft"
-        ? { displayName: name, description, actions: [...selected].sort() }
-        : operation === "Duplicate" && duplicate
-          ? {
-              code: duplicate.code,
-              displayName: duplicate.name,
-              description: t("Custom role based on {name}", { name: role.name }),
-              actions: [...selected].sort(),
-            }
-          : null,
+  const state = useRun(client, reload);
+  const { run, busy } = state;
+  const { catalog } = view;
+  const change = role.change;
+  const draftSource = change ?? null;
+  const [editing, setEditing] = useState<"Revise" | "SaveDraft" | null>(null);
+  const [copying, setCopying] = useState(false);
+  const [name, setName] = useState(draftSource?.name ?? role.name),
+    [description, setDescription] = useState(draftSource?.description ?? role.description),
+    [selected, setSelected] = useState<ReadonlySet<string>>(
+      new Set(draftSource?.permissions ?? role.permissions),
+    ),
+    [copyName, setCopyName] = useState("");
+  const may = (operation: RoleAdministrationOperation) => role.operations.includes(operation);
+  const draft = () => ({
+    displayName: name.trim(),
+    description: description.trim() || name.trim(),
+    actions: [...selected].sort(),
   });
-  const editable = role.operations.includes("SaveDraft");
-  const canDuplicate = role.operations.includes("Duplicate");
+  const removeBlocked = role.state === "InUse" && !role.locked && !may("Deactivate");
   return (
     <div className="detail-section-grid">
-      {editable || duplicate ? (
-        <StatePanel heading={duplicate ? t("New custom role") : t("Edit draft")}>
-          {duplicate ? (
-            <>
-              <label>
-                {t("Role code (lowercase, e.g. shift_lead)")}
-                <input
-                  value={duplicate.code}
-                  pattern="[a-z][a-z0-9_]{1,62}[a-z0-9]"
-                  onChange={(event) =>
-                    setDuplicate({ ...duplicate, code: event.currentTarget.value })
-                  }
-                />
-              </label>
-              <label>
-                {t("Role name")}
-                <input
-                  value={duplicate.name}
-                  onChange={(event) =>
-                    setDuplicate({ ...duplicate, name: event.currentTarget.value })
-                  }
-                />
-              </label>
-            </>
-          ) : (
-            <>
-              <label>
-                {t("Role name")}
-                <input value={name} onChange={(event) => setName(event.currentTarget.value)} />
-              </label>
-              <label>
-                {t("Description")}
-                <input
-                  value={description}
-                  onChange={(event) => setDescription(event.currentTarget.value)}
-                />
-              </label>
-            </>
-          )}
-          <PermissionPicker catalog={view.catalog} selected={selected} onChange={setSelected} />
-          <p>
-            {t(
-              "Legacy combined permissions are added automatically when every permission they cover is selected.",
-            )}
-          </p>
-          {duplicate ? (
-            <>
-              <button
-                disabled={
-                  busy ||
-                  !/^[a-z][a-z0-9_]{1,62}[a-z0-9]$/u.test(duplicate.code) ||
-                  !duplicate.name.trim()
-                }
-                onClick={() => void run(request("Duplicate"))}
-              >
-                {t("Create draft role")}
-              </button>{" "}
-              <button disabled={busy} onClick={() => setDuplicate(null)}>
-                {t("Cancel")}
-              </button>
-            </>
+      {change ? (
+        <StatePanel heading={roleChangeStatusLabels[change.status]}>
+          {change.rebased ? (
+            <p role="note">
+              {t(
+                "BOP updated this preset while your change was waiting. Check it and send it again.",
+              )}
+            </p>
           ) : null}
+          {change.restore ? (
+            <p>
+              {t(
+                "{name} goes back to the BOP preset: removes {removed}, adds {added}. BOP updates will apply to it again.",
+                { name: role.name, removed: change.removed.length, added: change.added.length },
+              )}
+            </p>
+          ) : null}
+          <p>
+            {change.status === "Draft"
+              ? t("Written by {by}", { by: change.by })
+              : t("Sent by {by}", { by: change.by })}{" "}
+            · <StaffTime instant={change.at} />
+          </p>
+          {change.name !== role.name ? <p>{t("New name: {name}", { name: change.name })}</p> : null}
+          {change.added.length > 0 ? (
+            <p>{t("Adds: {list}", { list: listOf(catalog, change.added) })}</p>
+          ) : null}
+          {change.removed.length > 0 ? (
+            <p>{t("Takes away: {list}", { list: listOf(catalog, change.removed) })}</p>
+          ) : null}
+          {change.added.length === 0 && change.removed.length === 0 && change.name === role.name ? (
+            <p>{t("No permission changes.")}</p>
+          ) : null}
+          {role.memberCount > 0 ? (
+            <p>
+              {t(
+                "Applies to the {count} staff who hold {name} once approved and turned on. Until then they keep what they have now.",
+                { count: role.memberCount, name: role.name },
+              )}
+            </p>
+          ) : null}
+          {change.status === "InReview" && change.approval?.mine === true ? (
+            may("ApproveAlone") ? (
+              <SoleOperatorSelfApproval
+                gate={change.approval.soleOperator}
+                csrf={csrf}
+                summary={
+                  <RoleSummary
+                    catalog={catalog}
+                    selected={change.permissions}
+                    memberCount={role.memberCount}
+                  />
+                }
+                what={t("this role change")}
+                permissionName={t("role approval")}
+                actionLabel={t("Approve on my own and turn on")}
+                busy={busy}
+                // Two commands: a failed second step says "Approved, not on yet" with Turn on.
+                onApprove={() =>
+                  void run([
+                    request(role, "ApproveAlone"),
+                    request(role, "Activate", null, role.version + 1),
+                  ])
+                }
+              />
+            ) : (
+              <p>{t("Someone else who approves roles must approve this change.")}</p>
+            )
+          ) : null}
+          {change.status === "InReview" &&
+          change.approval?.mine === false &&
+          change.approval.needsHolderOf.length > 0 ? (
+            <p role="note">
+              {t(
+                "This change adds {list}, which you don't hold yourself, so someone who holds them must approve it.",
+                { list: listOf(catalog, change.approval.needsHolderOf) },
+              )}
+            </p>
+          ) : null}
+          {change.status === "InReview" && change.approval?.mine === false ? (
+            <RoleSummary catalog={catalog} selected={change.permissions} memberCount={0} />
+          ) : null}
+          {change.approvedAlone ? <p>{t("Approved by the owner alone (sole operator).")}</p> : null}
+          <div role="group" aria-label={t("Change actions")}>
+            {may("SaveDraft") ? (
+              <button disabled={busy} onClick={() => setEditing("SaveDraft")}>
+                {t("Edit change")}
+              </button>
+            ) : null}
+            {may("Submit") ? (
+              <button
+                data-variant="primary"
+                disabled={busy}
+                onClick={() => void run([request(role, "Submit")])}
+              >
+                {t("Send for approval")}
+              </button>
+            ) : null}
+            {may("Approve") ? (
+              <button
+                data-variant="primary"
+                disabled={busy || (change.approval?.needsHolderOf.length ?? 0) > 0}
+                onClick={() => void run([request(role, "Approve")])}
+              >
+                {t("Approve")}
+              </button>
+            ) : null}
+            {may("Reject") ? (
+              <button disabled={busy} onClick={() => void run([request(role, "Reject")])}>
+                {t("Reject")}
+              </button>
+            ) : null}
+            {may("Activate") && change.status === "Approved" ? (
+              <button
+                data-variant="primary"
+                disabled={busy}
+                onClick={() => void run([request(role, "Activate")])}
+              >
+                {t("Turn on")}
+              </button>
+            ) : null}
+            {may("Withdraw") ? (
+              <button disabled={busy} onClick={() => void run([request(role, "Withdraw")])}>
+                {t("Withdraw change")}
+              </button>
+            ) : null}
+          </div>
+        </StatePanel>
+      ) : null}
+      {editing ? (
+        <StatePanel heading={role.kind === "Custom" ? t("Edit role") : t("Edit this preset")}>
+          <label>
+            {t("Role name")}
+            <input
+              value={name}
+              maxLength={80}
+              onChange={(event) => setName(event.currentTarget.value)}
+            />
+          </label>
+          <label>
+            {t("Description")}
+            <input
+              value={description}
+              maxLength={180}
+              onChange={(event) => setDescription(event.currentTarget.value)}
+            />
+          </label>
+          <PermissionPicker catalog={catalog} selected={selected} onChange={setSelected} />
+          <RoleSummary catalog={catalog} selected={[...selected]} memberCount={role.memberCount} />
+          <button
+            data-variant="primary"
+            disabled={busy || !name.trim()}
+            onClick={() => void run([request(role, editing, draft())])}
+          >
+            {t("Save change")}
+          </button>{" "}
+          <button disabled={busy} onClick={() => setEditing(null)}>
+            {t("Cancel")}
+          </button>
         </StatePanel>
       ) : (
-        <StatePanel heading={t("Permission groups")}>
-          <ul>
-            {role.permissions.map((permission) => (
-              <li key={permission.action}>
-                <strong>
-                  {rolePermissionLabel(permission.action, view.catalog, permission.group)}
-                </strong>
-                {rolePermissionLabel(permission.action, view.catalog, permission.group) ===
-                permission.group
-                  ? ""
-                  : ` · ${permission.group}`}
-                {permission.highRisk ? t(" · High risk") : ""}
+        <StatePanel heading={t("What staff with this role can do now")}>
+          {role.state === "NotOn" ? (
+            <p>
+              {t(
+                "Not turned on yet: nobody can be given this role until it is approved and turned on.",
+              )}
+            </p>
+          ) : role.permissions.length === 0 ? (
+            <p>{t("Nothing yet.")}</p>
+          ) : (
+            <PermissionList catalog={catalog} actions={role.permissions} />
+          )}
+          {role.locked ? (
+            <p>{t("The owner role always holds everything, so it cannot be edited or removed.")}</p>
+          ) : null}
+          <div role="group" aria-label={t("Role actions")}>
+            {may("Revise") ? (
+              <button disabled={busy} onClick={() => setEditing("Revise")}>
+                {role.kind === "Custom" ? t("Edit") : t("Edit this preset")}
+              </button>
+            ) : null}
+            {may("RestoreDefault") ? (
+              <button disabled={busy} onClick={() => void run([request(role, "RestoreDefault")])}>
+                {t("Restore default")}
+              </button>
+            ) : null}
+            {may("Deactivate") ? (
+              <button disabled={busy} onClick={() => void run([request(role, "Deactivate")])}>
+                {t("Remove role")}
+              </button>
+            ) : null}
+            {may("Activate") && role.state === "Removed" && change === null ? (
+              <button disabled={busy} onClick={() => void run([request(role, "Activate")])}>
+                {t("Bring back")}
+              </button>
+            ) : null}
+            {may("Duplicate") && !copying ? (
+              <button disabled={busy} onClick={() => setCopying(true)}>
+                {t("Make a copy")}
+              </button>
+            ) : null}
+          </div>
+          {removeBlocked && role.memberCount > 0 ? (
+            <p>
+              {t("{count} staff hold this role. Give them another role first.", {
+                count: role.memberCount,
+              })}
+            </p>
+          ) : removeBlocked && role.waitingAssignments > 0 ? (
+            <p>
+              {t(
+                "A staff role request waiting for approval would give this role. Decide it first.",
+              )}
+            </p>
+          ) : null}
+          {copying ? (
+            <div className="role-copy">
+              <label>
+                {t("Name of the copy")}
+                <input
+                  value={copyName}
+                  maxLength={80}
+                  onChange={(event) => setCopyName(event.currentTarget.value)}
+                />
+              </label>{" "}
+              <button
+                data-variant="primary"
+                disabled={busy || !copyName.trim()}
+                onClick={() =>
+                  void run(
+                    [
+                      request(role, "Duplicate", {
+                        displayName: copyName.trim(),
+                        description: t("Based on {name}", { name: role.name }),
+                        actions: [...role.permissions],
+                      }),
+                    ],
+                    true,
+                  )
+                }
+              >
+                {t("Make the copy")}
+              </button>{" "}
+              <button disabled={busy} onClick={() => setCopying(false)}>
+                {t("Cancel")}
+              </button>
+            </div>
+          ) : null}
+        </StatePanel>
+      )}
+      <StatePanel heading={t("History")}>
+        {role.history.length === 0 ? (
+          <p>{t("No decisions yet.")}</p>
+        ) : (
+          <ul className="role-history">
+            {role.history.map((item, index) => (
+              <li key={index}>
+                {roleDecisionLabels[item.decision] ?? t("Changed")} ·{" "}
+                {item.by === "BOP" ? t("BOP update") : item.by} · <StaffTime instant={item.at} />
               </li>
             ))}
           </ul>
-        </StatePanel>
-      )}
-      <StatePanel heading={t("Approval and history")}>
-        <p>{t("Submitted by {value}", { value: role.submittedBy ?? t("Not submitted") })}</p>
-        <p>
-          {t("Approved by {value}", {
-            value: role.approvedBy ?? t("Independent approval pending"),
-          })}
-        </p>
-        <ul>
-          {role.history.map((item) => (
-            <li key={item}>{item}</li>
-          ))}
-        </ul>
-        {role.type === "System" ? (
-          <p>{t("System template role: its permissions follow the released template.")}</p>
-        ) : null}
-        {role.memberCount > 0 && role.status === "Active" ? (
-          <p>
-            {t("Reassign the {memberCount} staff holding this role before deactivating it.", {
-              memberCount: role.memberCount,
-            })}
-          </p>
-        ) : null}
-        {role.status === "InReview" && !role.operations.includes("Approve") ? (
-          <CustomRoleApprovalNote submitted />
-        ) : role.status === "Draft" && role.operations.includes("Submit") ? (
-          <CustomRoleApprovalNote submitted={false} />
-        ) : null}
-        <div role="group" aria-label={t("Role actions")}>
-          {role.operations
-            .filter((operation) => operation !== "Duplicate")
-            .map((operation) => (
-              <button
-                key={operation}
-                disabled={busy || duplicate !== null}
-                onClick={() => void run(request(operation))}
-              >
-                {operationLabels[operation]}
-              </button>
-            ))}{" "}
-          {canDuplicate && !duplicate ? (
-            <button
-              disabled={busy}
-              onClick={() => {
-                setSelected(current);
-                setDuplicate({ code: "", name: "" });
-              }}
-            >
-              {operationLabels.Duplicate}
-            </button>
-          ) : null}
-        </div>
-        {error && needsFullSignIn(error) ? (
-          <StatePanel heading={t("Confirm it's you")} status>
-            <FullSignInPrompt csrf={csrf} />
-            {pending ? (
-              <button disabled={busy} onClick={() => void run(pending)}>
-                {t("Try again")}
-              </button>
-            ) : null}
-          </StatePanel>
-        ) : error ? (
-          <StatePanel heading={t("Change not applied")} tone="error" status>
-            <p>{copy[error]}</p>
-            {pending && error === "Offline" ? (
-              <button disabled={busy} onClick={() => void run(pending)}>
-                {t("Retry")}
-              </button>
-            ) : (
-              <button onClick={reload}>{t("Refresh")}</button>
-            )}
-          </StatePanel>
-        ) : null}
+        )}
+        {role.state === "Removed" ? <p>{t("Removed roles keep their history.")}</p> : null}
+        <Failure csrf={csrf} state={state} reload={reload} />
       </StatePanel>
     </div>
+  );
+}
+function NewRole({
+  view,
+  client,
+  csrf,
+  reload,
+}: {
+  readonly view: RoleAdministrationPageView;
+  readonly client: RoleAdministrationPageClient;
+  readonly csrf: string;
+  readonly reload: () => void;
+}) {
+  const state = useRun(client, reload);
+  const [open, setOpen] = useState(false),
+    [name, setName] = useState(""),
+    [from, setFrom] = useState("");
+  const source = view.roles.find((role) => role.roleReference === from);
+  if (!open)
+    return (
+      <button data-variant="primary" onClick={() => setOpen(true)}>
+        {t("New role")}
+      </button>
+    );
+  return (
+    <div className="role-new">
+      <label>
+        {t("Role name")}
+        <input
+          value={name}
+          maxLength={80}
+          onChange={(event) => setName(event.currentTarget.value)}
+        />
+      </label>
+      <label>
+        {t("Start from")}
+        <select value={from} onChange={(event) => setFrom(event.currentTarget.value)}>
+          <option value="">{t("Start from blank")}</option>
+          {view.roles
+            .filter((role) => role.operations.includes("Duplicate"))
+            .map((role) => (
+              <option key={role.roleReference} value={role.roleReference}>
+                {t("A copy of {name}", { name: systemText(role.name) })}
+              </option>
+            ))}
+        </select>
+      </label>
+      <button
+        data-variant="primary"
+        disabled={state.busy || !name.trim()}
+        onClick={() =>
+          void state.run(
+            [
+              source === undefined
+                ? {
+                    operation: "Create",
+                    roleReference: null,
+                    expectedVersion: null,
+                    operationReference: newOperationReference(),
+                    reasonCode: reasonCodes.Create,
+                    draft: {
+                      displayName: name.trim(),
+                      description: name.trim(),
+                      actions: ["merchant.access"],
+                    },
+                  }
+                : request(source, "Duplicate", {
+                    displayName: name.trim(),
+                    description: t("Based on {name}", { name: source.name }),
+                    actions: [...source.permissions],
+                  }),
+            ],
+            true,
+          )
+        }
+      >
+        {t("Create and choose what it can do")}
+      </button>{" "}
+      <button disabled={state.busy} onClick={() => setOpen(false)}>
+        {t("Cancel")}
+      </button>
+      <Failure csrf={csrf} state={state} reload={reload} />
+    </div>
+  );
+}
+function RoleRow({ role }: { readonly role: RoleAdministrationItemView }) {
+  return (
+    <li className="role-row">
+      <div>
+        <strong>{systemText(role.name)}</strong>{" "}
+        <span className="role-kind">{roleKindLabels[role.kind]}</span>
+        {role.scope === "Brand" ? <span> · {roleScopeLabels.Brand}</span> : null}
+      </div>
+      <div>
+        {role.state === "NotOn"
+          ? t("Not turned on yet")
+          : t("{count} staff", { count: role.memberCount })}
+        {role.change ? <span> · {roleChangeStatusLabels[role.change.status]}</span> : null}
+      </div>
+      <Link to={`/app/organization/roles/${role.roleReference}`}>{t("Open")}</Link>
+    </li>
   );
 }
 export function RoleAdministrationScreen({
@@ -396,112 +736,99 @@ export function RoleAdministrationScreen({
   readonly csrf: string;
   readonly reload: () => void;
 }) {
-  const [query, setQuery] = useState(""),
-    [status, setStatus] = useState("All");
+  const [query, setQuery] = useState("");
+  const editor = view.screenId === "IAM-ROLE-EDITOR";
   const roles = useMemo(
     () =>
-      view.roles.filter(
-        (role) =>
-          (status === "All" || role.status === status) &&
-          `${role.name} ${role.code} ${role.description}`
-            .toLowerCase()
-            .includes(query.trim().toLowerCase()),
+      view.roles.filter((role) =>
+        `${systemText(role.name)} ${role.name}`.toLowerCase().includes(query.trim().toLowerCase()),
       ),
-    [query, status, view.roles],
+    [query, view.roles],
   );
-  const editor = view.screenId === "IAM-ROLE-EDITOR";
+  const role = editor ? view.roles[0] : undefined;
   return (
     <AppFrame
-      title={editor ? t("Role editor") : t("Roles")}
+      title={editor ? systemText(role?.name ?? "") || t("Role") : t("Roles")}
       description={[
-        editor ? t("Edit a role and its permissions") : t("Roles and permissions"),
-        view.freshness === "Stale" ? "may be out of date" : null,
-        view.completeness === "Partial" ? "some roles not shown" : null,
+        editor ? t("What this role can do, and changes to it") : t("Who can do what at this store"),
+        view.freshness === "Stale" ? t("may be out of date") : null,
       ]
         .filter(Boolean)
         .join(" · ")}
     >
       <header className="screen-heading">
         <div>
-          <p className="bop-eyebrow">{editor ? t("Role editor") : t("Roles")}</p>
-          <h2>{t("Role and permission governance")}</h2>
-          <p>
-            {t("Source as of")} <SourceTime instant={view.sourceAsOf} />
-          </p>
-          {!editor && view.mayManage ? (
+          <p className="bop-eyebrow">{t("Roles")}</p>
+          <h2>{editor && role ? systemText(role.name) : t("Roles and what they can do")}</h2>
+          {editor && role ? (
             <p>
-              {t(
-                "To create a custom role, open a role and duplicate it, then adjust its permissions.",
-              )}
+              {roleKindLabels[role.kind]} ·{" "}
+              {role.state === "Removed"
+                ? t("Removed")
+                : t("{count} staff hold this role", { count: role.memberCount })}
             </p>
-          ) : null}
+          ) : (
+            <p>
+              {t("Checked")} <SourceTime instant={view.sourceAsOf} />
+            </p>
+          )}
         </div>
+        {!editor && view.mayManage ? (
+          <NewRole view={view} client={client} csrf={csrf} reload={reload} />
+        ) : null}
       </header>
-      {editor ? null : (
-        <div className="list-filters" role="search">
-          <label>
-            {t("Role or permission")}
-            <input value={query} onChange={(event) => setQuery(event.currentTarget.value)} />
-          </label>
-          <label>
-            {t("Status")}
-            <select value={status} onChange={(event) => setStatus(event.currentTarget.value)}>
-              <option value="All">{t("All")}</option>
-              {Object.entries(roleStatusLabels).map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-      )}
-      {roles.length === 0 ? (
-        <StatePanel heading={t("No matching roles")} status>
-          <p>{t("Change the safe filters.")}</p>
-        </StatePanel>
+      {editor && role ? (
+        <>
+          <Link to="/app/organization/roles">{t("Back to roles")}</Link>
+          <Editor
+            key={`${role.roleReference}:${role.version}`}
+            view={view}
+            role={role}
+            client={client}
+            csrf={csrf}
+            reload={reload}
+          />
+        </>
       ) : (
-        roles.map((role) => (
-          <section key={role.roleReference}>
-            <StatePanel
-              heading={systemText(role.name)}
-              tone={role.permissions.some((item) => item.highRisk) ? "offline" : "neutral"}
-            >
-              <p>
-                <strong>{roleStatusLabels[role.status]}</strong>{" "}
-                {t("· {value} · {value2} · version {version}", {
-                  value: roleScopeLabels[role.scope],
-                  value2: roleTypeLabels[role.type],
-                  version: role.version,
-                })}
-              </p>
-              <p>{systemText(role.description)}</p>
-              <p>
-                {t("{memberCount} active assignments · {length} permissions", {
-                  memberCount: role.memberCount,
-                  length: role.permissions.length,
-                })}
-              </p>
-              {editor ? (
-                <Link to="/app/organization/roles">{t("Back to roles")}</Link>
-              ) : (
-                <Link to={`/app/organization/roles/${role.roleReference}`}>
-                  {t("View and manage")}
-                </Link>
-              )}
-            </StatePanel>
-            {editor ? (
-              <Editor
-                key={`${role.roleReference}:${role.version}`}
-                view={view}
-                role={role}
-                client={client}
-                csrf={csrf}
-                reload={reload}
+        <>
+          <div className="list-filters" role="search">
+            <label>
+              {t("Find a role")}
+              <input
+                type="search"
+                value={query}
+                onChange={(event) => setQuery(event.currentTarget.value)}
               />
-            ) : null}
+            </label>
+          </div>
+          <section aria-labelledby="roles-in-use">
+            <h3 id="roles-in-use">{t("Roles in use")}</h3>
+            {roles.filter((item) => item.state !== "Removed").length === 0 ? (
+              <p>{t("No matching roles.")}</p>
+            ) : (
+              <ul className="role-list">
+                {roles
+                  .filter((item) => item.state !== "Removed")
+                  .map((item) => (
+                    <RoleRow key={item.roleReference} role={item} />
+                  ))}
+              </ul>
+            )}
           </section>
-        ))
+          {roles.some((item) => item.state === "Removed") ? (
+            <section aria-labelledby="roles-removed">
+              <h3 id="roles-removed">{t("Removed roles")}</h3>
+              <p>{t("Nobody holds these. Open one to bring it back.")}</p>
+              <ul className="role-list">
+                {roles
+                  .filter((item) => item.state === "Removed")
+                  .map((item) => (
+                    <RoleRow key={item.roleReference} role={item} />
+                  ))}
+              </ul>
+            </section>
+          ) : null}
+        </>
       )}
     </AppFrame>
   );

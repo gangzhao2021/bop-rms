@@ -56,11 +56,11 @@ it("WP-2423 M07: Home lists staff roles waiting like the badge, and says when th
       ),
     );
   const waiting = render(2);
-  expect(waiting).toContain("Staff roles waiting for approval");
+  expect(waiting).toContain("Roles waiting for approval");
   expect(waiting).toContain("2 to approve");
   expect(waiting).toContain('href="/app/approvals"');
-  expect(render(0)).not.toContain("Staff roles waiting for approval");
-  expect(render(null)).not.toContain("Staff roles waiting for approval");
+  expect(render(0)).not.toContain("Roles waiting for approval");
+  expect(render(null)).not.toContain("Roles waiting for approval");
   // A failed read is never a silent zero.
   const failed = render("Unavailable");
   expect(failed).toContain("This list may be missing something");

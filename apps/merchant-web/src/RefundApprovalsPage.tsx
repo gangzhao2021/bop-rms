@@ -23,6 +23,11 @@ import { serviceOperationReference } from "./service-control-client.js";
 import { createOrdinaryRefundClient } from "./ordinary-refund-client.js";
 import { createCurrentOrderQueueClient } from "./current-order-queue-client.js";
 import { FullSignInPrompt } from "./FullSignInPrompt.js";
+import {
+  createRoleAdministrationPageClient,
+  RoleAdministrationPageError,
+  type RoleChangeWaitingView,
+} from "./role-administration-pages.js";
 import { needsFullSignIn } from "./full-sign-in.js";
 import type { SoleOperatorStatus } from "./refund-approval-client.js";
 import {
@@ -731,10 +736,13 @@ export function StaffRoleRequestsSection({
   read,
   refundsDenied,
   onRetry,
+  othersWaiting = 0,
 }: {
   readonly read: StaffRoleRead;
   readonly refundsDenied: boolean;
   readonly onRetry: () => void;
+  /** WP-2423 role presets: role changes shown above; "Nothing to approve" only when none. */
+  readonly othersWaiting?: number;
 }) {
   if (read.state === "Denied") return null;
   if (read.state === "Unavailable")
@@ -757,7 +765,7 @@ export function StaffRoleRequestsSection({
       </StatePanel>
     ) : null;
   if (read.requests.length === 0)
-    return refundsDenied ? (
+    return refundsDenied && othersWaiting === 0 ? (
       <StatePanel heading={t("Nothing to approve")} status>
         <p>{t("No staff role is waiting for your approval.")}</p>
       </StatePanel>
@@ -777,6 +785,89 @@ export function StaffRoleRequestsSection({
             <Link to={"/app/organization/users/" + item.actorReference}>
               {t("Open their page")}
             </Link>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+/** WP-2423 role presets: the role-change read on Approvals; an outage is never "no access". */
+export type RoleChangesRead =
+  | { readonly state: "Loading" }
+  | { readonly state: "Ready"; readonly changes: readonly RoleChangeWaitingView[] }
+  | { readonly state: "Denied" }
+  | { readonly state: "Unavailable" };
+export function useRoleChangesWaiting(
+  csrf: string,
+  refresh: number,
+  fetcher?: typeof fetch,
+): RoleChangesRead {
+  const [read, setRead] = useState<RoleChangesRead>({ state: "Loading" });
+  useEffect(() => {
+    let current = true;
+    setRead({ state: "Loading" });
+    void createRoleAdministrationPageClient(csrf, fetcher ?? fetch)
+      .waiting()
+      .then((changes) => {
+        if (current) setRead({ state: "Ready", changes });
+      })
+      .catch((error: unknown) => {
+        if (!current) return;
+        setRead(
+          error instanceof RoleAdministrationPageError && error.code === "PermissionDenied"
+            ? { state: "Denied" }
+            : { state: "Unavailable" },
+        );
+      });
+    return () => {
+      current = false;
+    };
+  }, [csrf, refresh, fetcher]);
+  return read;
+}
+/**
+ * WP-2423 role presets: role changes waiting for the signed-in person — another person's change
+ * to approve, their own to approve alone (sole operator), or an approved one to turn on. Each row
+ * opens the role, where the decision is made.
+ */
+export function RoleChangesSection({
+  read,
+  onRetry,
+}: {
+  readonly read: RoleChangesRead;
+  readonly onRetry: () => void;
+}) {
+  if (read.state === "Denied" || read.state === "Loading") return null;
+  if (read.state === "Unavailable")
+    return (
+      <StatePanel
+        heading={t("Role changes waiting for approval could not be loaded")}
+        tone="error"
+        status
+      >
+        <p>{t("Check your connection, then try again.")}</p>
+        <button type="button" onClick={onRetry}>
+          {t("Try again")}
+        </button>
+      </StatePanel>
+    );
+  if (read.changes.length === 0) return null;
+  return (
+    <section aria-labelledby="role-changes-heading" className="role-approvals">
+      <h2 id="role-changes-heading">{t("Role changes waiting for you")}</h2>
+      <ul className="role-approval-list">
+        {read.changes.map((item) => (
+          <li key={item.roleReference}>
+            <strong>{systemText(item.name)}</strong> ·{" "}
+            {t("adds {added}, removes {removed}", { added: item.added, removed: item.removed })} ·{" "}
+            {item.action === "ApproveAlone"
+              ? t("sent by you, you may approve it on your own")
+              : item.action === "TurnOn"
+                ? t("approved, waiting to be turned on")
+                : t("sent by {name}", { name: item.by })}{" "}
+            <StaffTime instant={item.at} /> ·{" "}
+            <Link to={"/app/organization/roles/" + item.roleReference}>{t("Open")}</Link>
           </li>
         ))}
       </ul>
@@ -818,6 +909,7 @@ export function RefundApprovalsPage({
   }, [refresh]);
   const reload = useCallback(() => setRefresh((value) => value + 1), []);
   const roleRequests = useStaffRoleRequests(csrf, refresh, fetcher);
+  const roleChanges = useRoleChangesWaiting(csrf, refresh, fetcher);
   useEffect(() => {
     const controller = new AbortController();
     setState("Loading");
@@ -849,13 +941,16 @@ export function RefundApprovalsPage({
         </button>
       }
     >
+      <RoleChangesSection read={roleChanges} onRetry={reload} />
       <StaffRoleRequestsSection
         read={roleRequests}
         refundsDenied={state === "Denied"}
         onRetry={reload}
+        othersWaiting={roleChanges.state === "Ready" ? roleChanges.changes.length : 0}
       />
       {/* A role approver without refund approval (a Store Manager) sees only the staff roles. */}
-      {state === "Denied" && roleRequests.state !== "Denied" ? null : (
+      {state === "Denied" &&
+      (roleRequests.state !== "Denied" || roleChanges.state !== "Denied") ? null : (
         <section aria-labelledby="refund-approvals-heading" data-screen-id="APPROVAL-INBOX">
           <h2 id="refund-approvals-heading">{t("Refunds awaiting approval")}</h2>
           {/* Owner 2026-10-25: one line; the rule itself behind "Why approval?". */}

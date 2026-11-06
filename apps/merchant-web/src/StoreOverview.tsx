@@ -579,7 +579,7 @@ export function attentionItems(
   if (typeof staffRoles === "number" && staffRoles > 0)
     items.push({
       key: "staff-roles",
-      title: t("Staff roles waiting for approval"),
+      title: t("Roles waiting for approval"),
       detail: t("{count} to approve", { count: staffRoles }),
       state: t("To approve"),
       tone: "warning",

@@ -5,95 +5,127 @@ import { RoleAdministrationScreen } from "./RoleAdministrationPages.js";
 import { roleEditorFixture, roleListFixture } from "./role-administration-pages.fixtures.js";
 import {
   parseRoleAdministrationPageView,
-  rolePermissionLabel,
-  roleScopeLabels,
-  roleStatusLabels,
-  roleTypeLabels,
+  roleKindLabels,
   unavailableRoleAdministrationPageClient,
 } from "./role-administration-pages.js";
 
-it("WP-2423: shows role statuses, scopes and types in plain words, never stored codes", () => {
-  expect(Object.values(roleStatusLabels)).toEqual([
-    "Draft",
-    "Waiting for approval",
-    "Approved, not yet active",
-    "Active",
-    "Rejected",
-    "Deactivated",
-  ]);
-  for (const label of [
-    ...Object.values(roleStatusLabels),
-    ...Object.values(roleScopeLabels),
-    ...Object.values(roleTypeLabels),
-  ])
-    expect(label).not.toMatch(/[a-z][A-Z]/u);
-  const render = (fixture: unknown, screenId: "IAM-ROLE-LIST" | "IAM-ROLE-EDITOR") =>
-    renderToStaticMarkup(
-      <MemoryRouter>
-        <RoleAdministrationScreen
-          view={parseRoleAdministrationPageView(fixture, screenId)}
-          client={unavailableRoleAdministrationPageClient}
-          csrf="synthetic-csrf"
-          reload={() => undefined}
-        />
-      </MemoryRouter>,
-    );
-  const list = render(roleListFixture, "IAM-ROLE-LIST");
-  expect(list).toContain("<strong>Waiting for approval</strong> · All stores in the brand");
-  expect(list).toContain("Custom role · version 3");
-  // The status filter offers the same words; its values stay the stored codes.
-  expect(list).toContain('<option value="InReview">Waiting for approval</option>');
-  expect(list).not.toMatch(/>InReview</u);
-  const editor = render(roleEditorFixture, "IAM-ROLE-EDITOR");
-  expect(editor).toContain("Waiting for approval");
-  expect(editor).not.toMatch(/>\s*InReview|identity\.role\.(view|activate)</u);
-});
-
-it("WP-2423: names a permission by its catalog description, else its group", () => {
-  const catalog = [
-    {
-      action: "identity.role.view",
-      group: "Role administration",
-      description: "View roles",
-      highRisk: false,
-    },
-  ];
-  expect(rolePermissionLabel("identity.role.view", catalog, "Role administration")).toBe(
-    "View roles",
+const render = (fixture: unknown, screenId: "IAM-ROLE-LIST" | "IAM-ROLE-EDITOR") =>
+  renderToStaticMarkup(
+    <MemoryRouter>
+      <RoleAdministrationScreen
+        view={parseRoleAdministrationPageView(fixture, screenId)}
+        client={unavailableRoleAdministrationPageClient}
+        csrf="synthetic-csrf"
+        reload={() => undefined}
+      />
+    </MemoryRouter>,
   );
-  expect(rolePermissionLabel("identity.role.activate", catalog, "Role administration")).toBe(
-    "Role administration",
-  );
-});
-
-it("WP-2423 M07: a custom role waiting for someone else says what a one-owner store can do instead", () => {
-  const render = (fixture: unknown) =>
-    renderToStaticMarkup(
-      <MemoryRouter>
-        <RoleAdministrationScreen
-          view={parseRoleAdministrationPageView(fixture, "IAM-ROLE-EDITOR")}
-          client={unavailableRoleAdministrationPageClient}
-          csrf="synthetic-csrf"
-          reload={() => undefined}
-        />
-      </MemoryRouter>,
-    );
-  const withRole = (patch: Record<string, unknown>) => {
-    const fixture = structuredClone(roleEditorFixture) as unknown as {
-      roles: Record<string, unknown>[];
-    };
-    fixture.roles = fixture.roles.map((role) => ({ ...role, ...patch }));
-    return fixture;
+const withRole = (patch: Record<string, unknown>, change: Record<string, unknown> | null = {}) => {
+  const fixture = structuredClone(roleEditorFixture) as unknown as {
+    roles: Record<string, unknown>[];
   };
-  // The person who submitted it cannot approve it: not a dead end, a way on.
-  const waiting = render(withRole({ status: "InReview", operations: [] }));
-  expect(waiting).toContain("Another administrator must approve this change.");
-  expect(waiting).toContain("even with Sole operator on");
-  expect(waiting).toContain('href="/app/organization/roles"');
-  expect(waiting).toContain('href="/app/organization/users"');
-  // Told before submitting, too.
-  const draft = render(withRole({ status: "Draft", operations: ["SaveDraft", "Submit"] }));
-  expect(draft).toContain("Submitting sends this role to another administrator");
-  // Someone who may approve it sees the Approve button, not the note.
-  expect(render(roleEditorFixture)).not.toContain("even with Sole operator on");
+  fixture.roles = fixture.roles.map((role) => ({
+    ...role,
+    ...patch,
+    change: change === null ? null : { ...(role.change as object), ...change },
+  }));
+  return fixture;
+};
+/** Never a permission code, an identifier, or a version number on a staff screen. */
+const noInternals = (html: string) => {
+  const text = html.replace(/<[^>]+>/gu, " ");
+  expect(text).not.toMatch(/\b[a-z]+(\.[a-z_]+){1,}\b/u);
+  expect(text).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-/u);
+  expect(text).not.toMatch(/version \d/u);
+};
+
+it("WP-2423 role presets: lists roles in use and removed roles in plain words", () => {
+  expect(Object.values(roleKindLabels)).toEqual([
+    "BOP preset",
+    "Your version of a BOP preset",
+    "Your role",
+  ]);
+  const list = render(roleListFixture, "IAM-ROLE-LIST");
+  expect(list).toContain("Roles in use");
+  expect(list).toContain("Removed roles");
+  expect(list).toContain("3 staff");
+  expect(list).toContain("Change waiting for approval");
+  expect(list).toContain("New role");
+  noInternals(list);
+});
+
+it("WP-2423 role presets: an approver reads what the change adds, flagged powers first", () => {
+  const editor = render(roleEditorFixture, "IAM-ROLE-EDITOR");
+  expect(editor).toContain(
+    "Adds: Approve a refund above the requester&#x27;s limit, Comp or discount dishes before the table pays",
+  );
+  expect(editor).toContain("This role can: Approve a refund above the requester");
+  expect(editor).toContain("Applies to the 3 staff who hold Front of House once approved");
+  expect(editor).toContain(">Approve</button>");
+  noInternals(editor);
+  // An approver who lacks a flagged power is told, and cannot approve it.
+  const lacking = render(
+    withRole(
+      {},
+      { approval: { mine: false, soleOperator: null, needsHolderOf: ["payment.refund.approve"] } },
+    ),
+    "IAM-ROLE-EDITOR",
+  );
+  expect(lacking).toContain("which you don&#x27;t hold yourself");
+  expect(lacking).toMatch(/<button[^>]*disabled=""[^>]*>Approve<\/button>/u);
+});
+
+it("WP-2423 role presets: the submitter of a one-owner store is offered to approve alone; with Mia, Mia must", () => {
+  const alone = render(
+    withRole(
+      { operations: ["ApproveAlone", "Withdraw"] },
+      {
+        approval: {
+          mine: true,
+          soleOperator: { status: "Effective", otherApprovers: [], verifiedUntil: null },
+          needsHolderOf: [],
+        },
+      },
+    ),
+    "IAM-ROLE-EDITOR",
+  );
+  expect(alone).toContain("Approve on my own and turn on");
+  expect(alone).toContain("Withdraw change");
+  const withMia = render(
+    withRole(
+      { operations: ["ApproveAlone", "Withdraw"] },
+      {
+        approval: {
+          mine: true,
+          soleOperator: {
+            status: "OtherApprovers",
+            otherApprovers: [{ displayName: "Mia" }],
+            verifiedUntil: null,
+          },
+          needsHolderOf: [],
+        },
+      },
+    ),
+    "IAM-ROLE-EDITOR",
+  );
+  expect(withMia).toContain("Mia");
+  expect(withMia).not.toContain("Approve on my own and turn on");
+});
+
+it("WP-2423 role presets: a Store's version offers Restore default; the Owner role is locked", () => {
+  const mine = render(
+    withRole({ kind: "YourVersion", operations: ["Revise", "RestoreDefault", "Duplicate"] }, null),
+    "IAM-ROLE-EDITOR",
+  );
+  expect(mine).toContain("Your version of a BOP preset");
+  expect(mine).toContain("Restore default");
+  expect(mine).toContain("Edit this preset");
+  const held = render(withRole({ operations: [] }, null), "IAM-ROLE-EDITOR");
+  expect(held).toContain("3 staff hold this role. Give them another role first.");
+  const owner = render(
+    withRole({ locked: true, operations: ["Duplicate"] }, null),
+    "IAM-ROLE-EDITOR",
+  );
+  expect(owner).toContain("cannot be edited or removed");
+  expect(owner).not.toContain("Remove role");
 });

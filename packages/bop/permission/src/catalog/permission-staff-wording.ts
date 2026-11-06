@@ -81,3 +81,10 @@ export function orderByRisk(codes: readonly string[]): readonly string[] {
   const rest = codes.filter((code) => !flaggedPermissionCodes.has(code));
   return Object.freeze([...named, ...flagged, ...rest]);
 }
+/** Where a permission comes in a "this role can" list: the Owner's six in order, other flagged
+ * ones next (6), anything else not listed there (null). */
+export function permissionRiskRank(code: string): number | null {
+  const named = ownerNamedRiskOrder.indexOf(code);
+  if (named >= 0) return named;
+  return flaggedPermissionCodes.has(code) ? ownerNamedRiskOrder.length : null;
+}

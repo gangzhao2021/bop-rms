@@ -14,6 +14,7 @@ import {
   orderByRisk,
   permissionGroupLabel,
   permissionWarning,
+  permissionRiskRank,
   rolePresetActions,
   rolePresetProfile,
   RoleAdministrationContractError,
@@ -475,9 +476,7 @@ export function createMerchantRoleAdministration(options: {
                                 ? null
                                 : {
                                     status: gate.status,
-                                    otherApprovers: gate.otherApprovers.map(
-                                      (item) => item.displayName,
-                                    ),
+                                    otherApprovers: gate.otherApprovers,
                                     verifiedUntil: gate.verifiedUntil,
                                   },
                             needsHolderOf: [] as string[],
@@ -504,6 +503,7 @@ export function createMerchantRoleAdministration(options: {
         description: entry.description,
         highRisk: entry.risk === "High",
         warning: permissionWarning(entry.code),
+        riskRank: permissionRiskRank(entry.code),
       })),
     };
   }

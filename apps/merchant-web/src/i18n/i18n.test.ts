@@ -20,6 +20,10 @@ import {
   storePermissionCatalog,
   storeRoleTemplateProfiles,
 } from "../../../../packages/bop/permission/src/catalog/store-permission-catalog.js";
+import {
+  permissionGroupLabels,
+  permissionWarning,
+} from "../../../../packages/bop/permission/src/catalog/permission-staff-wording.js";
 
 afterEach(() => setLanguageForTest("en"));
 
@@ -76,7 +80,14 @@ it("Owner 2026-10-24: every staff text has its Simplified Chinese wording, with 
   for (const match of navigation.matchAll(/label: "([^"]+)"/gu)) keys.add(match[1] as string);
   for (const label of Object.values(GROUP_LABELS)) keys.add(label);
   // Built-in role names and descriptions and permission descriptions the server sends.
-  for (const entry of storePermissionCatalog()) keys.add(entry.description);
+  for (const entry of storePermissionCatalog()) {
+    keys.add(entry.description);
+    // WP-2423 role presets: the permission's group and its warning in staff words.
+    const warning = permissionWarning(entry.code);
+    if (warning !== null) keys.add(warning);
+  }
+  for (const label of Object.values(permissionGroupLabels)) keys.add(label);
+  keys.add("Other");
   for (const profile of [
     ...Object.values(storeRoleTemplateProfiles),
     ...Object.values(brandRoleTemplateProfiles),

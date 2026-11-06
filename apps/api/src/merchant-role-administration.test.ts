@@ -371,4 +371,28 @@ describe("WP-2423 role administration authorization", () => {
       },
     ]);
   });
+  it("refuses to turn on an approved restore once BOP has changed the preset (check it again)", async () => {
+    const f = setup();
+    // Approved as the Front of House preset of its day, which no longer equals the preset now.
+    const approved = {
+      ...record,
+      code: "front_of_house",
+      lifecycle: "Approved",
+      submittedByReference: id(8),
+      approvedByReference: id(5),
+      reasonCode: "ROLE_APPROVED",
+      selections: [{ action: "merchant.access" }],
+    };
+    d.load.mockResolvedValue(
+      roleView({
+        record: approved,
+        opening: { ...approved, lifecycle: "Draft", reasonCode: "ROLE_PRESET_RESTORE" },
+        effective: { ...record, code: "front_of_house", lifecycle: "Active" },
+      }),
+    );
+    await expect(
+      f.service.command({ ...f.input, body: command({ operation: "Activate" }) }),
+    ).rejects.toMatchObject({ code: "PresetChanged" });
+    expect(d.execute).not.toHaveBeenCalled();
+  });
 });

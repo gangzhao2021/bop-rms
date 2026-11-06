@@ -657,7 +657,7 @@ it("role presets: edit, approve alone, remove, create, upgrade, restore and the 
         refused("SoleOperatorNotInEffect"),
       );
       item = await detail("ana", kitchen);
-      assert.deepEqual(item.change.approval.soleOperator.otherApprovers, ["Mia"]);
+      assert.deepEqual(item.change.approval.soleOperator.otherApprovers, [{ displayName: "Mia" }]);
       // Mia is told, and sees only Store A's changes; Ana's change waiting at Store B is not hers.
       await send("anaB", "Revise", fohB, {
         draft: { displayName: "Floor", description: "x", actions: catalogFoh },
