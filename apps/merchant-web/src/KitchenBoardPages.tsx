@@ -963,13 +963,13 @@ export function kitchenComboDishNote(line: KitchenBoardItem["comboPartOf"]): str
  * Combos by section. "All sections": the combo stays one card with its dishes under it. One section:
  * a regular dish shows if it is in that section; a combo is replaced by one line per chosen dish in
  * that section, each with its own Done, reading to make whatever another section did. A dish with no
- * section shows on every section's screen until someone finishes it, in a Store that has sections. A
- * combo still open with no dish left to make shows on every screen as one line, so it can be finished.
+ * section shows under "No section" only, as an ordinary dish does, so two stations never both make it;
+ * each section's screen counts it as waiting in "No section". A combo still open with no dish left to
+ * make shows on every screen as one line, so it can be finished.
  */
 export function kitchenScreenLines(
   items: readonly KitchenBoardItem[],
   section: string,
-  options: { readonly storeHasSections: boolean },
 ): readonly KitchenBoardItem[] {
   if (section === "All") return items;
   return items.flatMap((item) => {
@@ -981,10 +981,7 @@ export function kitchenScreenLines(
     if (open && parts.every((part) => part.done)) return [item];
     return parts.flatMap((part) => {
       const dishSection = sections[part.optionReference] ?? null;
-      const here =
-        (dishSection ?? "None") === section ||
-        (dishSection === null && options.storeHasSections && !part.done);
-      if (!here) return [];
+      if ((dishSection ?? "None") !== section) return [];
       const label = part.nameZh || part.name;
       const line = Object.fromEntries(
         Object.entries(item).filter(
@@ -2055,8 +2052,7 @@ export function KitchenBoardScreen({
     storeKitchenSection(value);
   };
   // What waits in the other sections, so nothing is hidden quietly: orders (tickets) per section. A
-  // combo's dish with no section is on this screen too, so it is not said to wait elsewhere.
-  const storeHasSections = (view.kitchenSections ?? []).length > 0;
+  // combo's dish with no section waits in "No section", like any dish with none.
   const otherSections =
     activeSection === "All"
       ? []
@@ -2064,7 +2060,6 @@ export function KitchenBoardScreen({
           ...searchMatches.filter(isActiveKitchenWork).reduce((found, item) => {
             for (const name of sectionsWithWork(item)) {
               if (name === activeSection) continue;
-              if (name === "None" && item.comboParts !== undefined && storeHasSections) continue;
               const tickets = found.get(name) ?? new Set<string>();
               tickets.add(item.ticketReference);
               found.set(name, tickets);
@@ -2077,7 +2072,7 @@ export function KitchenBoardScreen({
             a.name === "None" ? 1 : b.name === "None" ? -1 : a.name.localeCompare(b.name),
           );
   const sectionText = (name: string) => (name === "None" ? t("No section") : name);
-  const screenLines = kitchenScreenLines(searchMatches, activeSection, { storeHasSections });
+  const screenLines = kitchenScreenLines(searchMatches, activeSection);
   const itemsInStatus = (value: string) =>
     screenLines.filter(
       (item) =>
@@ -3504,9 +3499,7 @@ function KitchenBoardContent(
     () =>
       boardView === null
         ? null
-        : kitchenScreenLines(boardView.items, kitchenSectionOnBoard(boardView, section), {
-            storeHasSections: (boardView.kitchenSections ?? []).length > 0,
-          }),
+        : kitchenScreenLines(boardView.items, kitchenSectionOnBoard(boardView, section)),
     [boardView, section],
   );
   const previousLines = useRef<readonly KitchenBoardItem[] | null>(null);

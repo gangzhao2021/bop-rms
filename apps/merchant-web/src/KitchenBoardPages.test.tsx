@@ -1771,11 +1771,10 @@ describe("combos by section: what each kitchen section's screen shows", () => {
     kitchenSection: null,
     ...change,
   });
-  const lines = (section: string, item: Record<string, unknown>, storeHasSections = true) =>
+  const lines = (section: string, item: Record<string, unknown>) =>
     kitchenScreenLines(
       parseKitchenBoardView({ ...kitchenBoardFixture(), items: [item] }).items,
       section,
-      { storeHasSections },
     );
   it("a combo becomes one line per dish per section, and All sections keeps its card", () => {
     expect(lines("All", combo()).map((line) => line.displayName)).toEqual(["TEST set"]);
@@ -1796,7 +1795,7 @@ describe("combos by section: what each kitchen section's screen shows", () => {
     if (drink === undefined) throw new Error("no line");
     expect(kitchenLineKey(drink)).toBe("018f0f58-767a-7f3b-a1d0-000000000500:" + tea);
   });
-  it("a done dish leaves its screen; a dish with no mark shows under None and on every screen", () => {
+  it("a done dish leaves its screen; a dish with no mark shows under None only", () => {
     const done = combo({
       status: "In Progress",
       comboParts: [part(tea, "奶茶", "Milk tea", true), part(fries, "薯条", "Fries")],
@@ -1805,9 +1804,9 @@ describe("combos by section: what each kitchen section's screen shows", () => {
     expect(gone === undefined ? null : isActiveKitchenWork(gone)).toBe(false);
     const unmarked = combo({ comboPartSections: { [tea]: "Drinks", [fries]: null } });
     expect(lines("None", unmarked).map((line) => line.displayName)).toEqual(["薯条"]);
-    expect(lines("Drinks", unmarked).map((line) => line.displayName)).toEqual(["奶茶", "薯条"]);
-    // In a Store with no sections there is no other screen for it to be lost on.
-    expect(lines("Drinks", unmarked, false).map((line) => line.displayName)).toEqual(["奶茶"]);
+    // Never on two stations at once, so it is not made twice; as an ordinary dish with no section.
+    expect(lines("Drinks", unmarked).map((line) => line.displayName)).toEqual(["奶茶"]);
+    expect(lines("Snacks", unmarked)).toEqual([]);
   });
   it("a dish line reads to make whatever its combo's status, and its real status stays", () => {
     const [line] = lines("Snacks", combo({ status: "In Progress" }));
@@ -1863,7 +1862,6 @@ describe("combos by section: what each kitchen section's screen shows", () => {
         items: [wok("018f0f58-767a-7f3b-a1d0-000000000510")],
       }).items,
       "Drinks",
-      { storeHasSections: true },
     );
     const next = kitchenScreenLines(
       parseKitchenBoardView({
@@ -1874,7 +1872,6 @@ describe("combos by section: what each kitchen section's screen shows", () => {
         ],
       }).items,
       "Drinks",
-      { storeHasSections: true },
     );
     expect(newQueuedReferences(previous, next)).toEqual([]);
   });

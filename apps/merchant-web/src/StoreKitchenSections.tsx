@@ -5,7 +5,7 @@ import { newOperationReference } from "./operation-reference.js";
 export interface KitchenSectionsView {
   readonly version: number;
   readonly sections: readonly { readonly sectionReference: string; readonly name: string }[];
-  /** Dishes used in combos with no section here: they show on every section's screen. */
+  /** Dishes used in combos with no section here: they show only under "No section". */
   readonly comboDishesWithoutSection?: readonly {
     readonly productReference: string;
     readonly name: string;
@@ -247,7 +247,7 @@ export function StoreKitchenSections({
       {(saved?.comboDishesWithoutSection ?? []).length > 0 ? (
         <p className="store-features__detail" role="note">
           {t(
-            "In a combo with no section yet: {dishes}. They show on every section's screen until someone finishes them. Give each its section on the menu.",
+            "In a combo with no section yet: {dishes}. They show only on a screen set to No section. Give each its section on the menu.",
             {
               dishes: (saved?.comboDishesWithoutSection ?? [])
                 .map((dish) => dish.name)

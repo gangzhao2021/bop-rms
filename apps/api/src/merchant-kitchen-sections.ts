@@ -42,7 +42,7 @@ export interface MerchantKitchenSectionsResult {
     readonly sectionReference: string | null;
     readonly version: number;
   }[];
-  /** Dishes used in combos with no section here: they show on every section's screen. */
+  /** Dishes used in combos with no section here: they show only under "No section". */
   readonly comboDishesWithoutSection: readonly {
     readonly productReference: string;
     readonly name: string;
