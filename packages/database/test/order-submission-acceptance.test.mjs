@@ -184,9 +184,10 @@ async function prove(context) {
         `INSERT INTO rms_ordering.order_submission_record
          (submission_id,brand_id,store_id,order_id,guest_session_id,intent_digest,
           source_cart_id,source_cart_version,quote_id,created_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,5,$8,$9)`,
+         VALUES ($1,$2,$3,$4,$5,$6,$7,6,$8,$9)`,
         [id(11), id(1), id(2), id(18), id(4), `sha256:${"e".repeat(64)}`, id(12), id(13), at],
       ),
+      // Another Cart version, so the primary key (not 2000_210's one-Order-per-version) refuses it.
       /order_submission_record_pkey/u,
     );
     await client.query(

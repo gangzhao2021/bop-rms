@@ -43,6 +43,12 @@ it("atomically creates checkout sessions and Audit, recovers contention and reje
       await admin.query(
         "GRANT SELECT ON rms_ordering.cart_quote_attachment,rms_ordering.cart_line TO " + role,
       );
+      // WP-2423 M03: checkout first asks whether these dishes are already an Order (the pilot API
+      // holds SELECT on these tables).
+      await admin.query(
+        "GRANT SELECT ON rms_ordering.order_submission_record,rms_ordering.order_header,rms_ordering.order_item TO " +
+          role,
+      );
       await admin.query(
         "GRANT SELECT,INSERT ON rms_ordering.checkout_session_record,platform_audit.audit_record TO " +
           role,
