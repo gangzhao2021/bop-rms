@@ -101,17 +101,17 @@ test("@production staff confirms Host transfer and retains unknown operation acr
   await page.goto("/operations/dining");
   await page.getByRole("button", { name: "Refresh tables", exact: true }).click();
   await page.getByRole("button", { name: "Select T1", exact: true }).click();
-  const transfer = page.getByRole("button", { name: "Transfer order host", exact: true });
+  const transfer = page.getByRole("button", { name: "Let this phone send the cart", exact: true });
   await page.locator("details.table-panel__manage").evaluate((node) => {
     (node as HTMLDetailsElement).open = true;
   });
   await expect(transfer).toBeDisabled();
-  await page.getByRole("button", { name: "Refresh participants", exact: true }).click();
-  await page.getByRole("combobox", { name: "New order host", exact: true }).selectOption(id(5));
+  await page.getByRole("button", { name: "Refresh phones", exact: true }).click();
+  await page.getByRole("combobox", { name: "Phone that sends the cart", exact: true }).selectOption(id(5));
   await expect(transfer).toBeDisabled();
   await page
     .getByRole("checkbox", {
-      name: "I have identified the selected guest and confirm the host transfer",
+      name: "I checked with the guest holding this phone",
       exact: true,
     })
     .check();
@@ -124,7 +124,7 @@ test("@production staff confirms Host transfer and retains unknown operation acr
   await retry.click();
   await expect(retry).toBeEnabled();
   await expect(
-    page.getByRole("button", { name: "Refresh participants", exact: true }),
+    page.getByRole("button", { name: "Refresh phones", exact: true }),
   ).toBeDisabled();
   await retry.click();
   await expect(page.getByText(/Host transfer recorded at/)).toBeVisible();

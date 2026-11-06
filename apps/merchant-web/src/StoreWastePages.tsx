@@ -164,7 +164,13 @@ export function StoreWasteListPage({
           </label>
           {view.records.length === 0 ? (
             <StatePanel heading={t("No waste records")} status>
-              <p>{t("Nothing to show.")}</p>
+              {/* M159: say what the empty list means and the next step. */}
+              <p>
+                {needsReviewOnly
+                  ? t("Nothing is waiting for review.")
+                  : t("No waste recorded yet.")}{" "}
+                <Link to="/operations/inventory/waste/new">{t("Record waste")}</Link>
+              </p>
             </StatePanel>
           ) : (
             <table>

@@ -885,7 +885,7 @@ test.describe("@production CUST-DINE-IN-SESSION table view", () => {
       },
     };
     await page.reload();
-    await expect(card).toContainText("Tax rounding-$0.01");
+    await expect(card).toContainText("Rounding (tax worked out on the whole bill)-$0.01");
     await page.screenshot({
       path: "test-results/customer-dining-settled-split-390.png",
       fullPage: true,

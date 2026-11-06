@@ -98,7 +98,7 @@ export function DiningHostTransferAction({
         setTarget("");
         setConfirmed(false);
         setMessage(
-          t("Host transfer recorded at {value}. Refresh participants to see the current host.", {
+          t("Recorded at {value}. Refresh phones to see which phone sends the cart.", {
             value: new Date(result.transferredAt).toLocaleString(displayLocale()),
           }),
         );
@@ -134,30 +134,31 @@ export function DiningHostTransferAction({
   };
   return (
     <section aria-label={t("Dining host transfer")}>
-      <h3>{t("Order host")}</h3>
+      {/* M144: guest words, not "host" or "participant". */}
+      <h3>{t("Who can send the table's cart")}</h3>
       <p>
         {t(
-          "The host manages the shared cart. A transfer changes future permissions and preserves previous actions.",
+          "One phone sends the table's shared cart to the kitchen. You can let another phone send it.",
         )}
       </p>
       <button disabled={locked} onClick={() => void load()}>
-        {t("Refresh participants")}
+        {t("Refresh phones")}
       </button>
       {source ? (
         <>
           <ul>
             {source.participants.map((p, index) => (
               <li key={p.participantReference}>
-                {t("Participant {value} · Joined {value2}{value3}", {
+                {t("Phone {value} · Joined {value2}{value3}", {
                   value: index + 1,
                   value2: new Date(p.joinedAt).toLocaleString(displayLocale()),
-                  value3: p.isHost ? t(" · Current host") : "",
+                  value3: p.isHost ? t(" · Sends the cart") : "",
                 })}
               </li>
             ))}
           </ul>
           <label>
-            {t("New order host")}
+            {t("Phone that sends the cart")}
             <select
               value={target}
               disabled={locked}
@@ -166,11 +167,11 @@ export function DiningHostTransferAction({
                 setConfirmed(false);
               }}
             >
-              <option value="">{t("Select a participant")}</option>
+              <option value="">{t("Choose a phone")}</option>
               {source.participants.map((p, index) =>
                 p.isHost ? null : (
                   <option key={p.participantReference} value={p.participantReference}>
-                    {t("Participant {value} · Joined {value2}", {
+                    {t("Phone {value} · Joined {value2}", {
                       value: index + 1,
                       value2: new Date(p.joinedAt).toLocaleString(displayLocale()),
                     })}
@@ -186,7 +187,7 @@ export function DiningHostTransferAction({
               disabled={locked || !target}
               onChange={(event) => setConfirmed(event.target.checked)}
             />
-            {t("I have identified the selected guest and confirm the host transfer")}
+            {t("I checked with the guest holding this phone")}
           </label>
         </>
       ) : null}
@@ -203,7 +204,7 @@ export function DiningHostTransferAction({
           ? t("Retry same host transfer")
           : state === "Submitting"
             ? t("Transferring…")
-            : t("Transfer order host")}
+            : t("Let this phone send the cart")}
       </button>
       <p role="status">{state === "Loading" ? t("Loading participants…") : message}</p>
     </section>

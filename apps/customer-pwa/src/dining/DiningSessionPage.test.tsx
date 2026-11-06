@@ -558,14 +558,15 @@ describe("CUST-DINE-IN-SESSION (WP-2423 Q8)", () => {
     ])
       expect(cash).toContain(text);
     expect(cash).not.toContain("Tip");
-    expect(cash).not.toContain("Tax rounding");
+    expect(cash).not.toContain("Rounding (tax worked out on the whole bill)");
     // WP-2423 DEC-TAX-WHOLE-RECEIPT: the bill's tax rounding on its own line.
     const rounded = receipt([{ partNumber: null, method: "Cash", totalMinor: "1864" }], {
       taxRoundingMinor: "-1",
       ordersTotalMinor: "1864",
       paidMinor: "1865",
     });
-    expect(rounded).toContain("Tax rounding");
+    // M67: guests are told what the rounding is, not a bare "Tax rounding".
+    expect(rounded).toContain("Rounding (tax worked out on the whole bill)");
     expect(rounded).toContain("-$0.01");
     const split = receipt(
       [
@@ -727,7 +728,7 @@ describe("CUST-DINE-IN-SESSION item prices before tax (WP-2423 D5)", () => {
     } as typeof priced.summary;
     const html = text(render({ status: "ready", view: { ...priced, summary }, refreshing: false }));
     expect(html).toContain(
-      "Total ordered $39.00 Points used −$3.39 Taken off by the restaurant −$1.50 Tax rounding $0.01",
+      "Total ordered $39.00 Points used −$3.39 Taken off by the restaurant −$1.50 Rounding (tax worked out on the whole bill) $0.01",
     );
   });
 

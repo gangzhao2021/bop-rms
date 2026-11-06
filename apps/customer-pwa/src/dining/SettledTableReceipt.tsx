@@ -219,7 +219,7 @@ export function SettledTableReceiptView({ receipt }: { readonly receipt: Settled
         </div>
         {receipt.taxRoundingMinor !== "0" ? (
           <div>
-            <dt>{t("Tax rounding")}</dt>
+            <dt>{t("Rounding (tax worked out on the whole bill)")}</dt>
             <dd>{money(receipt.taxRoundingMinor)}</dd>
           </div>
         ) : null}

@@ -438,6 +438,9 @@ function tableActionFailureText(error: unknown): string {
   }
 }
 
+/** M159: set when the Store has no tables at all (the empty floor says what to do next). */
+const noTablesMessage = "no-tables";
+
 export function DiningSessionWorkspace({
   csrf,
   storeLabel,
@@ -618,8 +621,7 @@ export function DiningSessionWorkspace({
         setCanTakeTableRounds(loaded.canTakeTableRounds);
         setGuestStarts(loaded.guestTableStart);
         guestStartsNow.current = loaded.guestTableStart;
-        if (loaded.items.length === 0 && !more)
-          setMessage(t("No tables are available in this Store."));
+        if (loaded.items.length === 0 && !more) setMessage(noTablesMessage);
         void loadFacts(items, controller.signal);
       }
     } catch (error) {
@@ -1288,9 +1290,21 @@ export function DiningSessionWorkspace({
         <section className="table-list" aria-label={t("Tables by what they need")}>
           {tables.length === 0 ? (
             <p role="status" className="dining-floor-empty" data-loading={state === "Loading"}>
-              {state === "Loading"
-                ? t("Loading tables…")
-                : message || t("No tables have been loaded.")}
+              {state === "Loading" ? (
+                t("Loading tables…")
+              ) : message === noTablesMessage ? (
+                // M159: an empty floor says what to do next, not only that nothing is here.
+                <>
+                  {t("No tables yet.")}{" "}
+                  {tableQrHref !== undefined ? (
+                    <Link to={tableQrHref}>{t("Add your first table")}</Link>
+                  ) : (
+                    t("Ask the owner to add tables.")
+                  )}
+                </>
+              ) : (
+                message || t("No tables have been loaded.")
+              )}
             </p>
           ) : tab === "Needs" ? (
             <>
@@ -1393,14 +1407,14 @@ export function DiningSessionWorkspace({
                 );
               }}
             />
-          ) : (
+          ) : tables.length === 0 ? null : (
             <div className="dining-session-detail__empty">
               <p>{t("Choose a table to serve it, take its payment or close it.")}</p>
             </div>
           )}
         </aside>
       </div>
-      {message && tables.length > 0 ? (
+      {message && message !== noTablesMessage && tables.length > 0 ? (
         <p role="status" className="dining-floor-message">
           {message}
         </p>
