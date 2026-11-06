@@ -232,5 +232,5 @@ describe("SQL ordering on text output columns", () => {
     const found = new Set(hits.map((hit) => hit.file + "\t" + hit.name));
     expect(allowlist.filter(([file, name]) => !found.has(file + "\t" + name))).toEqual([]);
     expect(allowlist.filter(([, name]) => orderedValueName(name))).toEqual([]);
-  });
+  }, 60_000); // Reads every tracked source file: give a slow CI runner room.
 });
