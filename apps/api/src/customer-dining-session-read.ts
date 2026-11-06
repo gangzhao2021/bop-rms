@@ -31,6 +31,7 @@ import {
   listOrderBillOrders,
   listOrderDiningSessions,
   listStoreDiningBatchPaymentDeadlines,
+  listStorePaidOrderBatches,
   listStoreUnpaidBatchCancellations,
   OrderStatusProjectionError,
   type CartQueryTransactionRunner,
@@ -115,6 +116,13 @@ export interface CustomerDiningSessionFacts {
       { readonly phase: DiningItemPhase; readonly deliveredQuantity: number }
     >;
     readonly paymentOutcomes: ReadonlyMap<string, "Succeeded" | "Failed">;
+    /**
+     * WP-2423 M04: paid rounds the Store accepted that Ordering has not yet released to the kitchen
+     * (Ordering's payment wait, accepted, no outcome). They read "Received by the store" until the
+     * kitchen has them, never "Sent to the kitchen". A round with no payment wait (a table paying at
+     * the end) is never in it, so its accepted dishes read as sent, as before.
+     */
+    readonly kitchenPending?: ReadonlySet<string>;
     readonly paymentDeadlines: ReadonlyMap<string, string>;
     /**
      * WP-2423 item 5: rounds whose payment was started (online or on the card machine). A round
@@ -508,7 +516,8 @@ export function composeCustomerDiningSession(
       else if (active.every((item) => item.phase === "Ready")) status = "Ready";
       else if (active.some((item) => item.phase === "InProgress" || item.phase === "Ready"))
         status = "Preparing";
-      else if (active.some((item) => item.phase === "Accepted")) status = "Queued";
+      else if (active.some((item) => item.phase === "Accepted"))
+        status = order.kitchenPending?.has(reference) === true ? "Received" : "Queued";
       else status = "Received";
       // WP-2423 Q26: a dish being made again is neither served nor ready yet.
       if (active.some((item) => item.beingRemade))
@@ -915,6 +924,12 @@ function postgresDependencies(
           orderReference,
         ]))
           paymentOutcomes.set(entry.orderBatchReference, entry.status);
+        // WP-2423 M04: accepted paid rounds still on their way to the kitchen (Ordering's index).
+        const kitchenPending = new Set(
+          (
+            await listStorePaidOrderBatches(transaction, scope, [orderReference])
+          ).acceptedNotReleased.keys(),
+        );
         const paymentDeadlines = new Map<string, string>();
         for (const entry of await listStoreDiningBatchPaymentDeadlines(transaction, scope, [
           orderReference,
@@ -1230,6 +1245,7 @@ function postgresDependencies(
             ]),
           ),
           paymentOutcomes,
+          ...(kitchenPending.size === 0 ? {} : { kitchenPending }),
           paymentDeadlines,
           paymentStarted,
           payLaterRounds,

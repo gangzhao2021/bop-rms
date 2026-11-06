@@ -241,6 +241,30 @@ describe("WP-2423 Q8 composeCustomerDiningSession", () => {
     expect(view.summary?.paid).toEqual(cad(4410n));
   });
 
+  // WP-2423 M04: the guest page said "已送到厨房" for 8 to 19 minutes while the kitchen had nothing.
+  it("says a paid round accepted but not yet in the kitchen was received, never sent", () => {
+    const round = (kitchenPending: ReadonlySet<string> | undefined) =>
+      composeCustomerDiningSession(
+        facts({
+          batches: [
+            {
+              orderBatchReference: id(30),
+              submittedAt: at,
+              items: [item(31, "Ramen", 2, 3000n)],
+            },
+          ],
+          authorship: new Map([[id(30), true]]),
+          delivery: new Map([[id(31), { phase: "Accepted", deliveredQuantity: 0 }]]),
+          paymentOutcomes: new Map([[id(30), "Succeeded"]]),
+          paymentDeadlines: new Map(),
+          ...(kitchenPending === undefined ? {} : { kitchenPending }),
+        }),
+      ).rounds[0]?.status;
+    expect(round(new Set([id(30)]))).toBe("Received");
+    // Released to the kitchen (or a round with no payment wait, a table paying at the end): sent.
+    expect(round(undefined)).toBe("Queued");
+    expect(round(new Set([id(99)]))).toBe("Queued");
+  });
   it("follows the kitchen and service of a paid round", () => {
     const status = (entries: [number, string, number][]) =>
       composeCustomerDiningSession(
