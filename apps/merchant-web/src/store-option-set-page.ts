@@ -67,7 +67,7 @@ export function optionSetSaveEffectText(effect: OptionSetSaveEffect): string[] {
 /** A choice guests start with on some dishes is turned off (before and after Save). */
 export function offDefaultText(option: string, dishes: readonly string[]): string {
   return t(
-    "Guests start with {option} on {dishes}. While {option} isn't offered, guests choose another choice themselves. Tick Offered again when it's back.",
+    "Guests start with {option} on {dishes}. While {option} isn't offered, guests choose another choice themselves, and the menu can't be listed. To list other changes meanwhile, make another option the Default. Tick Offered again when it's back.",
     { option, dishes: dishes.join(", ") },
   );
 }

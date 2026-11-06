@@ -3758,8 +3758,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "{dishes}现在没有默认选项。上架菜单后客人才看到。",
   "{dishes} now start with {option}. List the menu to show it to guests.":
     "{dishes}现在默认选“{option}”。上架菜单后客人才看到。",
-  "Guests start with {option} on {dishes}. While {option} isn't offered, guests choose another choice themselves. Tick Offered again when it's back.":
-    "{dishes}默认选“{option}”。停供期间，客人点这些菜要自己另选。恢复后再勾选“供应”。",
+  "Guests start with {option} on {dishes}. While {option} isn't offered, guests choose another choice themselves, and the menu can't be listed. To list other changes meanwhile, make another option the Default. Tick Offered again when it's back.":
+    "{dishes}默认选“{option}”。停供期间，客人点这些菜要自己另选，菜单也不能上架。这期间要上架其他改动，先把另一个选项设为“默认”。恢复后再勾选“提供”。",
   "{dishes} will no longer start with {option}. Guests see the change after you list the menu.":
     "{dishes}将不再默认选“{option}”，上架菜单后客人看到。",
   "What this changes": "这次修改会影响",

@@ -52,7 +52,7 @@ describe("WP-2423 option set page helpers", () => {
   });
   it("WP-2423 (cart-unsellable-dishes): names the dishes a Save affects, and why one was refused", async () => {
     expect(offDefaultText("Hot", ["Soy milk", "Hot tea"])).toBe(
-      "Guests start with Hot on Soy milk, Hot tea. While Hot isn't offered, guests choose another choice themselves. Tick Offered again when it's back.",
+      "Guests start with Hot on Soy milk, Hot tea. While Hot isn't offered, guests choose another choice themselves, and the menu can't be listed. To list other changes meanwhile, make another option the Default. Tick Offered again when it's back.",
     );
     expect(
       optionSetSaveEffectText({
