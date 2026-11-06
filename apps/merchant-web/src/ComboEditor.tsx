@@ -1,4 +1,5 @@
 import { t } from "./i18n/i18n.js";
+import { MenuSectionSelect } from "./MenuSectionSelect.js";
 import { useEffect, useRef, useState } from "react";
 import { dishEditorSource, type DishEditorSource } from "./dish-editor-source.js";
 import { newOperationReference } from "./operation-reference.js";
@@ -76,6 +77,7 @@ export function saveComboCommand(input: {
     input.name.trim() === "" ||
     priceMinor === null ||
     input.tax === "" ||
+    input.section === "" ||
     input.slots.length === 0
   )
     return null;
@@ -306,21 +308,11 @@ export function ComboEditor({
             ))}
           </select>
         </label>
-        <label className="dish-editor__field">
-          <span>{t("Section")}</span>
-          <select
-            value={form.section}
-            onChange={(event) =>
-              setForm((current) => ({ ...current, section: event.target.value }))
-            }
-          >
-            {sections.map((section) => (
-              <option key={section.code} value={section.code}>
-                {section.nameZh ? `${section.name} ${section.nameZh}` : section.name}
-              </option>
-            ))}
-          </select>
-        </label>
+        <MenuSectionSelect
+          value={form.section}
+          sections={sections}
+          onChange={(section) => setForm((current) => ({ ...current, section }))}
+        />
       </div>
       {priceMinor === null && form.price.trim() !== "" ? (
         <p className="dish-editor__problem">{t("Enter the price like 12.88.")}</p>

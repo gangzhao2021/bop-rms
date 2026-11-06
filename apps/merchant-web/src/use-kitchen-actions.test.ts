@@ -7,7 +7,9 @@ import {
   kitchenRefusalText,
   kitchenStepText,
   kitchenTargetName,
+  withoutTapProblems,
   type KitchenConfirmedStep,
+  type KitchenStepNotice,
 } from "./use-kitchen-actions.js";
 
 const id = (n: number) => "01909985-0000-7000-8000-" + n.toString(16).padStart(12, "0");
@@ -133,6 +135,24 @@ describe("WP-2423 a confirmed kitchen step shows at once", () => {
     );
     expect(kitchenStepText("Order 6", "Latte", { outcome: "AlreadyFinished" })).toBeNull();
     expect(kitchenStepText("Order 6", "Latte", { outcome: "AlreadyStarted" })).toBeNull();
+  });
+  it("WP-2423 live minor 8: a tap said not recorded and then retried through says it went through", () => {
+    // The first send reached the server: the retry's replay answers "already".
+    expect(kitchenStepText("Order 6", "Latte", { outcome: "AlreadyFinished" }, true)).toBe(
+      "Order 6 · Latte done.",
+    );
+    expect(kitchenStepText("Order 6", "Latte", { outcome: "AlreadyStarted" }, true)).toBe(
+      "Order 6 · Latte started.",
+    );
+    const notices: KitchenStepNotice[] = [
+      { id: 3, tone: "Problem", text: "Order 6 · Latte is not recorded yet.", at: 3, tapId: 7 },
+      { id: 2, tone: "Problem", text: "Croissant is not recorded yet.", at: 2, tapId: 8 },
+      { id: 1, tone: "Done", text: "Order 5 · Tea done.", at: 1, tapId: 7 },
+      { id: 0, tone: "Problem", text: "The action was not accepted.", at: 0 },
+    ];
+    // Tap 7 answered: its "not recorded" goes; another tap's, a Done line and others stay.
+    expect(withoutTapProblems(notices, 7).map((notice) => notice.id)).toEqual([2, 1, 0]);
+    expect(withoutTapProblems(notices, 9)).toBe(notices);
   });
   it("says why a line of a tap was left out, in staff words", () => {
     expect(kitchenRefusalText("Latte", "Cancelled")).toBe(

@@ -474,6 +474,9 @@ export function TablePartySize({
   const [readProblem, setReadProblem] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
+  // WP-2423 live minor 0: the guests just saved, while the per-head charge follows them (the bill
+  // still shows the old count until Sync answers, which takes seconds under load).
+  const [teaSyncing, setTeaSyncing] = useState<number | null>(null);
   // One reference per intended number, kept until it is answered (a retry is recorded once).
   const operation = useRef<{ key: string; reference: string } | null>(null);
   // v15 live check (4a): a table just opened asks at once, with the number keyboard up.
@@ -534,8 +537,10 @@ export function TablePartySize({
       operation.current = null;
       setView({ ...view, ...saved });
       onRecorded?.(saved.partySize);
-      // The tea follows the guests now counted (tables that pay at the end).
-      void syncTea();
+      // The tea follows the guests now counted (tables that pay at the end); until it has, the
+      // old count is not shown as what is on the bill.
+      setTeaSyncing(saved.partySize);
+      void syncTea().finally(() => setTeaSyncing(null));
       setEditing(false);
       setDraft("");
     } catch (error) {
@@ -626,7 +631,14 @@ export function TablePartySize({
       {tea === null ||
       tea.status === "NoTeaCharge" ||
       tea.status === "PaysEachRound" ||
-      tea.status === "NoPartySize" ? null : (
+      tea.status === "NoPartySize" ? null : teaSyncing !== null ? (
+        <p className="table-panel__tea" role="status">
+          {t("Updating {item} on the bill for {count} guests…", {
+            item: teaItemName(tea),
+            count: teaSyncing,
+          })}
+        </p>
+      ) : (
         <p className="table-panel__tea">
           {tea.status === "Mismatch"
             ? t("{item} on the bill: {charged} · guests: {expected}", {
@@ -678,7 +690,7 @@ export function TablePartySize({
           ) : null}
         </p>
       )}
-      {teaCount !== null && tea !== null ? (
+      {teaCount !== null && tea !== null && teaSyncing === null ? (
         <form
           className="table-panel__tea-count"
           onSubmit={(event) => {
@@ -726,7 +738,7 @@ export function TablePartySize({
           </button>
         </form>
       ) : null}
-      {tea?.status === "Mismatch" && tea.problem === "NeedsManager" ? (
+      {teaSyncing !== null ? null : tea?.status === "Mismatch" && tea.problem === "NeedsManager" ? (
         <p role="alert">{needsManagerLabel(tea)}</p>
       ) : teaUnconfirmed !== null ? (
         <p role="alert">

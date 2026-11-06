@@ -130,6 +130,8 @@ export function OneStoreMenuPage({
   // The dish open in its editor (one at a time; "new" for a new dish).
   const [editing, setEditing] = useState<string | null>(null);
   const keepForm = useRef(false);
+  // WP-2423 live minor 7: the menu this page has shown; a later read that fails keeps it on screen.
+  const shownMenu = useRef<string | null>(null);
   useEffect(() => {
     keepForm.current = editing !== null && view !== null;
   }, [editing, view]);
@@ -156,6 +158,10 @@ export function OneStoreMenuPage({
   const [listingSince, setListingSince] = useState<number | null>(() =>
     readListingMarker(menuReference, Date.now()),
   );
+  // WP-2423 live minors 1/39: the menu version "List it" just listed. Until the menu is read again
+  // (four reads, seconds under load) the view on screen is from before the listing; it is not
+  // said to have saved changes waiting. The next read decides again.
+  const [listedVersion, setListedVersion] = useState<string | null>(null);
   const [clock, setClock] = useState(() => Date.now());
   useEffect(() => {
     let active = true;
@@ -187,6 +193,8 @@ export function OneStoreMenuPage({
         setSaved(orderKey(next));
         setFailed(null);
         setReadNotice(null);
+        setListedVersion(null);
+        shownMenu.current = menuReference;
       })
       .catch((error: unknown) => {
         if (!active) return;
@@ -198,9 +206,17 @@ export function OneStoreMenuPage({
           );
           return;
         }
-        setFailed(
+        const denied =
           (error instanceof MenuPageError || error instanceof AvailabilityPageError) &&
-            error.code === "PermissionDenied"
+          error.code === "PermissionDenied";
+        // A read again after a save (offline, busy): the menu already shown stays, said to be
+        // possibly out of date, with Read again. Only a first read (or a lost permission) replaces it.
+        if (!denied && shownMenu.current === menuReference) {
+          setReadNotice(t("The menu could not be read again. What you see may be out of date."));
+          return;
+        }
+        setFailed(
+          denied
             ? t("You do not have permission to see the menu.")
             : t("The menu could not be read. Check the connection and try again."),
         );
@@ -316,7 +332,10 @@ export function OneStoreMenuPage({
   const stage = menuStage(view.publication);
   // The menu as saved is not what guests see: never listed, edited since, or listing unfinished.
   // A combo with saved changes is listed with the menu.
-  const orderPending = listingPending(view) || combos.some((c) => c.state === "Waiting");
+  // Just listed (ListAll lists the waiting combos with it): nothing waits until the menu is read again.
+  const orderPending =
+    listedVersion !== view.menu.versionReference &&
+    (listingPending(view) || combos.some((c) => c.state === "Waiting"));
   const comboOf = (skuReference: string) => combos.find((c) => c.skuReference === skuReference);
   const isCombo = (skuReference: string) => comboOf(skuReference) !== undefined;
 
@@ -404,6 +423,7 @@ export function OneStoreMenuPage({
       writeListingMarker(menuReference, null);
       setProblem(t("Listed. Guests see the menu as it is now."));
       setProblemNeedsAllergens(false);
+      setListedVersion(view.menu.versionReference);
       reload();
     } catch (error) {
       const code = error instanceof MenuPageError ? error.code : null;
@@ -735,10 +755,9 @@ export function OneStoreMenuPage({
           dishes={comboDishChoices(rows, combos)}
           sections={rows}
           sectionCode={
+            // A dish not on the menu has no section until staff choose one (live minor 6).
             rows.find((row) => row.dishes.some((d) => d.skuReference === dish.skuReference))
-              ?.code ??
-            rows[0]?.code ??
-            ""
+              ?.code ?? ""
           }
           client={client}
           onSaved={(message) => {
@@ -754,10 +773,9 @@ export function OneStoreMenuPage({
           dish={dish}
           sections={rows}
           sectionCode={
+            // A dish not on the menu has no section until staff choose one (live minor 6).
             rows.find((row) => row.dishes.some((d) => d.skuReference === dish.skuReference))
-              ?.code ??
-            rows[0]?.code ??
-            ""
+              ?.code ?? ""
           }
           allergenChoices={choices}
           keepsStock={view.keepsStock === true}

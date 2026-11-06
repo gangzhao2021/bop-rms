@@ -1,4 +1,5 @@
 import { t } from "./i18n/i18n.js";
+import { MenuSectionSelect } from "./MenuSectionSelect.js";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { Link } from "react-router";
 import { ChoiceGroupApply } from "./ChoiceGroupApply.js";
@@ -284,6 +285,7 @@ export function DishEditor({
   );
   const invalid =
     form.name.trim() === "" ||
+    form.section === "" ||
     priceMinor === null ||
     form.tax === "" ||
     choicePrices.some(
@@ -754,21 +756,11 @@ export function DishEditor({
               ))}
             </select>
           </label>
-          <label className="dish-editor__field">
-            <span>{t("Section")}</span>
-            <select
-              value={form.section}
-              onChange={(event) =>
-                setForm((current) => ({ ...current, section: event.target.value }))
-              }
-            >
-              {sections.map((section) => (
-                <option key={section.code} value={section.code}>
-                  {section.nameZh ? `${section.name} ${section.nameZh}` : section.name}
-                </option>
-              ))}
-            </select>
-          </label>
+          <MenuSectionSelect
+            value={form.section}
+            sections={sections}
+            onChange={(section) => setForm((current) => ({ ...current, section }))}
+          />
           {showDescriptions ? (
             <>
               {field("description", t("English description"), { maxLength: 240 })}

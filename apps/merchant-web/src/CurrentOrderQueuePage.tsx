@@ -2696,14 +2696,28 @@ export function CurrentOrderQueuePage({
    * guest), by batch.
    */
   const [actionDone, setActionDone] = useState<Readonly<Record<string, string>>>({});
+  // WP-2423 live minor 12: why Making it by hand wasn't saved, by batch, until the next tap.
+  const [actionFailed, setActionFailed] = useState<Readonly<Record<string, string>>>({});
+  const failedWith = (orderBatchReference: string) => (failure: string | null) =>
+    setActionFailed((current) => {
+      if (failure === null) {
+        if (current[orderBatchReference] === undefined) return current;
+        return Object.fromEntries(
+          Object.entries(current).filter(([batch]) => batch !== orderBatchReference),
+        );
+      }
+      return { ...current, [orderBatchReference]: failure };
+    });
   const settledWith = (orderBatchReference: string) => (done: string | null) => {
     if (done !== null) setActionDone((current) => ({ ...current, [orderBatchReference]: done }));
+    failedWith(orderBatchReference)(null);
     reload(after);
   };
   // A confirmation belongs to the page it was given on.
   useEffect(() => {
     setReleased(null);
     setActionDone({});
+    setActionFailed({});
   }, [after]);
   // WP-2423: opened list orders and the refund totals read for them outlive a refresh.
   const [opened, setOpened] = useState<ReadonlySet<string>>(new Set());
@@ -3627,6 +3641,8 @@ export function CurrentOrderQueuePage({
                           csrf={csrf}
                           fetcher={fetcher}
                           onSettled={settledWith(batch.orderBatchReference)}
+                          failure={actionFailed[batch.orderBatchReference] ?? null}
+                          onFailed={failedWith(batch.orderBatchReference)}
                         />
                       ) : null}
                       {batch.canCantMake ? (

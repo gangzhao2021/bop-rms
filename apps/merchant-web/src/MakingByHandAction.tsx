@@ -26,6 +26,8 @@ export function MakingByHandAction({
   batch,
   csrf,
   onSettled,
+  failure = null,
+  onFailed,
   fetcher = fetch,
 }: {
   readonly order: Order;
@@ -33,6 +35,12 @@ export function MakingByHandAction({
   readonly csrf: string;
   /** Done carries the confirmation; the order card keeps showing it after the reread. */
   readonly onSettled: (done: string | null) => void;
+  /**
+   * WP-2423 live minor 12: why the last tap wasn't saved, kept by the page; the order's detail can
+   * be read again (and this button made again) before staff have seen it.
+   */
+  readonly failure?: string | null;
+  readonly onFailed?: ((failure: string | null) => void) | undefined;
   readonly fetcher?: typeof fetch | undefined;
 }) {
   const [state, setState] = useState<State>("Idle");
@@ -52,6 +60,7 @@ export function MakingByHandAction({
   const submit = async () => {
     if (state === "Pending") return;
     setState("Pending");
+    onFailed?.(null);
     let next: Exclude<State, "Idle" | "Pending">;
     try {
       const response = await fetcher("/merchant/orders/auto-accepted/keep", {
@@ -70,6 +79,7 @@ export function MakingByHandAction({
       next = "Failed";
     }
     setState(next);
+    if (next === "Failed" || next === "Denied") onFailed?.(message[next] ?? null);
     if (next === "Done" || next === "Changed")
       onSettled(next === "Done" ? (message.Done ?? null) : null);
   };
@@ -83,7 +93,11 @@ export function MakingByHandAction({
       >
         {state === "Pending" ? t("Saving…") : t("Making it by hand")}
       </button>
-      {state === "Idle" || state === "Pending" || state === "Done" ? null : (
+      {state === "Pending" || state === "Done" ? null : state === "Idle" ? (
+        failure === null ? null : (
+          <p role="alert">{failure}</p>
+        )
+      ) : (
         <p role="alert">{message[state]}</p>
       )}
     </div>

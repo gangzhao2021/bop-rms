@@ -29,6 +29,19 @@ export interface KitchenStepNotice {
   readonly text: string;
   /** When it was said (this page's clock), so the board says the newest thing first. */
   readonly at: number;
+  /** The tap it is about, when it is about one (its "not recorded" goes once the tap is answered). */
+  readonly tapId?: number;
+}
+/**
+ * WP-2423 live minor 8: a tap answered, undone or dismissed takes back what was said about it not
+ * being recorded; nothing else said goes.
+ */
+export function withoutTapProblems(
+  notices: readonly KitchenStepNotice[],
+  tapId: number,
+): readonly KitchenStepNotice[] {
+  const kept = notices.filter((notice) => notice.tone !== "Problem" || notice.tapId !== tapId);
+  return kept.length === notices.length ? notices : kept;
 }
 /** Confirmed steps show at once; a problem stays long enough to read it. */
 export const kitchenNoticeDoneMs = 6_000;
@@ -117,13 +130,24 @@ export function kitchenTargetName(target: KitchenStepTarget): string {
   return names.length === 0 ? target.item.displayName : names.join(listSeparator());
 }
 
-/** What the cook just did, in their words ("Order 6 · Latte done."); null when nothing changed. */
+/**
+ * What the cook just did, in their words ("Order 6 · Latte done."); null when nothing changed.
+ * `retried`: the tap had been said not recorded, so its replay ("already done": the first send had
+ * reached the server) is said as done too — the cook sees it went through.
+ */
 export function kitchenStepText(
   orderLabel: string,
   displayName: string,
   result: Pick<KitchenStepLineResult, "outcome">,
+  retried = false,
 ): string | null {
   switch (result.outcome) {
+    case "AlreadyStarted":
+      return retried
+        ? t("{orderLabel} · {displayName} started.", { orderLabel, displayName })
+        : null;
+    case "AlreadyFinished":
+      return retried ? t("{orderLabel} · {displayName} done.", { orderLabel, displayName }) : null;
     case "Started":
       return t("{orderLabel} · {displayName} started.", { orderLabel, displayName });
     case "Finished":
@@ -193,11 +217,21 @@ export function useKitchenActions(input: {
   // Read inside timers: the render that scheduled a send may be long past when it fires.
   const latest = useRef({ authority, csrf: input.csrf, view: input.view });
   latest.current = { authority, csrf: input.csrf, view: input.view };
-  const say = (tone: KitchenStepNotice["tone"], text: string) => {
+  // Taps said not recorded (a retry that goes through is then said done).
+  const unsentTaps = useRef(new Set<number>());
+  const forget = (tapId: number) => {
+    unsentTaps.current.delete(tapId);
+    setNotices((current) => withoutTapProblems(current, tapId));
+  };
+  const forgetRef = useRef(forget);
+  forgetRef.current = forget;
+  const say = (tone: KitchenStepNotice["tone"], text: string, tapId?: number) => {
     noticeId.current += 1;
     const id = noticeId.current;
     const at = performance.now();
-    setNotices((current) => [{ id, tone, text, at }, ...current].slice(0, 6));
+    setNotices((current) =>
+      [{ id, tone, text, at, ...(tapId === undefined ? {} : { tapId }) }, ...current].slice(0, 6),
+    );
     if (typeof window !== "undefined")
       window.setTimeout(
         () => setNotices((current) => current.filter((notice) => notice.id !== id)),
@@ -223,6 +257,8 @@ export function useKitchenActions(input: {
       onChange: setTaps,
       onConfirmed: (tap, reply: KitchenStepReply) => {
         bodies.current.delete(tap.id);
+        const retried = unsentTaps.current.has(tap.id);
+        forgetRef.current(tap.id);
         const lines = reply.lines;
         setConfirmed((steps) => {
           const others = steps.filter(
@@ -258,13 +294,14 @@ export function useKitchenActions(input: {
               t("{displayName} was not recorded. Tap it again.", { displayName: name }),
             );
           else {
-            const text = kitchenStepText(orderLabel(item), name, line);
+            const text = kitchenStepText(orderLabel(item), name, line, retried);
             if (text !== null) sayRef.current("Done", text);
           }
         }
       },
       onRefused: (tap, code) => {
         bodies.current.delete(tap.id);
+        forgetRef.current(tap.id);
         sayRef.current(
           "Problem",
           code === "PermissionDenied"
@@ -277,6 +314,9 @@ export function useKitchenActions(input: {
       onNotSent: (unsent) => {
         // The bodies stay: Try again sends the same one once the board is fresh.
         for (const tap of unsent) {
+          // Said once per tap: a newer "not recorded" replaces the older one.
+          forgetRef.current(tap.id);
+          unsentTaps.current.add(tap.id);
           const first = tap.targets[0];
           const name = first === undefined ? "" : kitchenTargetName(first);
           // Named with its table, so the cook finds the ticket among several.
@@ -301,6 +341,7 @@ export function useKitchenActions(input: {
                   "{orderLabel} · {displayName} is not recorded yet. The board lost touch; tap Try again on its ticket.",
                   { orderLabel: order, displayName: name },
                 ),
+            tap.id,
           );
         }
       },
@@ -373,7 +414,10 @@ export function useKitchenActions(input: {
     /** Within the hold: nothing was sent, so nothing is recorded and nobody is told anything. */
     undo(ids: readonly number[]) {
       for (const id of ids) {
-        if (queueRef.current?.undo(id) === true) bodies.current.delete(id);
+        if (queueRef.current?.undo(id) === true) {
+          bodies.current.delete(id);
+          forget(id);
+        }
       }
     },
     retry(ids: readonly number[]) {
@@ -383,6 +427,7 @@ export function useKitchenActions(input: {
       for (const id of ids) {
         queueRef.current?.dismiss(id);
         bodies.current.delete(id);
+        forget(id);
       }
     },
     readyBusy,

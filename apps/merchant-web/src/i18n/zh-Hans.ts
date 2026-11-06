@@ -116,6 +116,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Change allergens": "修改过敏原",
   "Save and add another": "保存并再加一道",
   "Check the allergens to add the next one": "核对过敏原后才能加下一道",
+  "The menu could not be read again. What you see may be out of date.":
+    "菜单没能重新读取，你看到的可能不是最新的。",
   "The menu could not be read again. Your form is kept; what you saved shows once it can be read.":
     "菜单没能重新读取。你的表单还在；读取成功后会显示已保存的内容。",
   "{choice} is not on any dish yet, and no dish uses its group. Open a dish and tick the group.":
@@ -6649,6 +6651,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "English description": "英文说明",
   "Chinese description": "中文说明",
   "Price ($)": "价格（元）",
+  "Choose a section": "选择分类",
+  "Not on the menu. Choose its section: saving puts it on the menu there (guests see it once the menu is listed).":
+    "不在菜单上。请选择它的分类：保存后它会放进这个分类（菜单上架后客人才看得到）。",
   Section: "分类",
   "Enter the price like 12.88.": "价格请写成 12.88 这样。",
   "Choice groups": "规格组",
@@ -6898,6 +6903,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Child not charged": "小孩不收",
   "{item} on the bill: {charged} · guests: {expected}":
     "账单上的{item}：{charged} · 人数：{expected}",
+  "Updating {item} on the bill for {count} guests…": "正在按 {count} 位客人更新账单上的{item}…",
   "{item} on the bill: {charged}": "账单上的{item}：{charged}",
   "Fewer guests than {item} on the bill: a manager takes the extra off (it is recorded who and why).":
     "人数比账单上的{item}少：请店长把多的去掉（会记录是谁、为什么）。",
