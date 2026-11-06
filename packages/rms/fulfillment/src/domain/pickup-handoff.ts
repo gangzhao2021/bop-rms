@@ -54,7 +54,11 @@ export interface PickupInPersonVerificationRecord {
   readonly brandReference: PickupHandoffReference;
   readonly storeReference: PickupHandoffReference;
   readonly verificationMethod: "InPerson";
-  readonly identityCheck: "OrderNumberAndName" | "OrderNumberAndPhoneLast4";
+  /**
+   * OrderNumberCalled (WP-2423 M21): a counter order with no pickup code; staff called its number
+   * and handed it to the customer who answered. Only while no proof was ever issued.
+   */
+  readonly identityCheck: "OrderNumberAndName" | "OrderNumberAndPhoneLast4" | "OrderNumberCalled";
   /**
    * CodeLocked (WP-2423): five wrong pickup codes locked code checks for a still-valid proof.
    * CodeNotShown (WP-2423): the proof is still valid and unlocked but the customer cannot show it;
@@ -505,7 +509,10 @@ export function parsePickupInPersonVerificationRecord(
   if (
     raw.verificationMethod !== "InPerson" ||
     (raw.identityCheck !== "OrderNumberAndName" &&
-      raw.identityCheck !== "OrderNumberAndPhoneLast4") ||
+      raw.identityCheck !== "OrderNumberAndPhoneLast4" &&
+      raw.identityCheck !== "OrderNumberCalled") ||
+    // A called number is a check only for an order that never had a pickup code.
+    (raw.identityCheck === "OrderNumberCalled" && raw.reason !== "ProofNotIssued") ||
     (raw.reason !== "ProofExpired" &&
       raw.reason !== "ProofNotIssued" &&
       raw.reason !== "CodeLocked" &&

@@ -824,6 +824,7 @@ describe("migration catalog", () => {
       "2000_450_alter_checkout_contact_redaction_staff_request",
       "2000_460_alter_pickup_not_collected_store_closing",
       "2000_480_create_pricing_price_book_draft_purpose",
+      "2000_490_alter_pickup_in_person_order_number_called",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),
@@ -2064,6 +2065,12 @@ describe("migration catalog", () => {
       ],
       // A Store keeping its version without what a BOP preset update offered.
       ["2000_322_create_role_preset_offer_decision", "@bop/permission", "bop_permission"],
+      // WP-2423 M21: a counter order handed over after its number was called.
+      [
+        "2000_490_alter_pickup_in_person_order_number_called",
+        "@rms/fulfillment",
+        "rms_fulfillment",
+      ],
     ]);
     const permission = migrations.find(
       (migration) => migration.id === "0300_001_create_permission",

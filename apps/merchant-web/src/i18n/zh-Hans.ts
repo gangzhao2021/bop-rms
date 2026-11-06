@@ -8769,4 +8769,32 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Paper order {orderNumber}: record the payment taken during the outage":
     "纸单 {orderNumber}：录入停电期间已收的款",
   "Record the paper order's payment": "录入纸单的付款",
+  "Called and handed over · Order {orderNumber}": "已叫号并交付 · {orderNumber} 号",
+  "Hand over to customer · Order {orderNumber}": "交给顾客 · {orderNumber} 号",
+  "Someone else is collecting": "他人代取",
+  "Check every item before you tap": "点按前核对每件物品",
+  "Taken at the counter, so no pickup code was sent. Call the order number and check every item before you tap.":
+    "柜台点单，没有发送取餐码。叫单号，点按前核对每件物品。",
+  "Guest changed their mind": "客人改主意",
+  "Guest left without paying": "客人未付款离开",
+  "Not confirmed yet. Check the connection, then tap Cancel order again; it is never cancelled twice.":
+    "尚未确认。请检查网络后再点“取消订单”，不会重复取消。",
+  "This order was just paid. Cancel it from Orders instead (a refund is needed).":
+    "此订单刚刚付款。请到订单页取消（需要退款）。",
+  "A paper order was already paid during the outage. Record its payment instead.":
+    "纸单已在停电期间付款，请录入其付款。",
+  "This order just changed. Close this and check it again.": "此订单刚有变化。请关闭后重新查看。",
+  "Only a manager can cancel an order. Ask a manager.": "只有经理可以取消订单。请找经理。",
+  "Not cancelled. Try again.": "未取消。请重试。",
+  "Cancel order {orderNumber}?": "取消 {orderNumber} 号订单？",
+  "Nothing was charged. The order is kept as cancelled before payment, with your name and the reason, and its items go back to stock.":
+    "尚未收款。订单会记录为付款前取消，并保留你的名字和原因，菜品退回库存。",
+  "Back to edit": "返回修改",
+  "Card declined? Try another card. Guest not paying? Cancel the order so its items go back to stock.":
+    "卡被拒？换一张卡。客人不付了？取消订单，菜品退回库存。",
+  "Card declined? Try another card. Guest not paying? Ask a manager to cancel it; otherwise it is released at {payBy}.":
+    "卡被拒？换一张卡。客人不付了？请经理取消；否则在 {payBy} 自动释放。",
+  "Charge each on the card machine and record it here before its time ends. A guest who isn't paying: cancel the order so its items go back to stock.":
+    "在刷卡机上逐单收款，并在时间结束前在这里录入。客人不付款的，取消订单，菜品退回库存。",
+  "Cancelled before payment by staff · {reason}": "付款前由员工取消 · {reason}",
 });

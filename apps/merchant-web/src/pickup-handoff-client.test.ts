@@ -225,3 +225,30 @@ describe("WP-2423 in-person handoff intent", () => {
     ).toThrow();
   });
 });
+
+it("WP-2423 M21: no initial only for the customer, and a called number only for a counter order", () => {
+  const client = createPickupHandoffClient(vi.fn() as unknown as typeof fetch);
+  expect(() => client.prepare({ ...input(), recipientDisplayMask: null })).not.toThrow();
+  expect(() =>
+    client.prepare({ ...input(), recipientType: "Delegate", recipientDisplayMask: null }),
+  ).toThrow();
+  const counter = { ...item, proofReadiness: "NotIssued" as const, takenAtCounter: true as const };
+  expect(() =>
+    client.prepare({
+      ...input(),
+      item: counter,
+      verification: null,
+      identityCheck: "OrderNumberCalled",
+      recipientDisplayMask: null,
+    }),
+  ).not.toThrow();
+  expect(() =>
+    client.prepare({
+      ...input(),
+      item: { ...item, proofReadiness: "NotIssued" },
+      verification: null,
+      identityCheck: "OrderNumberCalled",
+      recipientDisplayMask: null,
+    }),
+  ).toThrow();
+});

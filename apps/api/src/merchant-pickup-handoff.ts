@@ -7,6 +7,7 @@ import {
   completePickupHandoffPermission,
   pickupCodeNotShownCauses,
 } from "@rms/fulfillment";
+import { listStoreCounterOrders } from "@rms/ordering";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import type { MerchantBffService } from "./merchant-bff.js";
@@ -74,9 +75,20 @@ export function createMerchantPickupHandoff(options: {
     if (
       inPerson &&
       intent.identityCheck !== "OrderNumberAndName" &&
-      intent.identityCheck !== "OrderNumberAndPhoneLast4"
+      intent.identityCheck !== "OrderNumberAndPhoneLast4" &&
+      intent.identityCheck !== "OrderNumberCalled"
     )
       return invalid();
+    // WP-2423 M21: a counter order's number was called and the customer who answered took it. It is
+    // recorded as that check, never as a name check that was not made; a code is never involved.
+    const numberCalled = inPerson && intent.identityCheck === "OrderNumberCalled";
+    if (numberCalled && codeNotShown) return invalid();
+    // WP-2423 M21: the customer collecting their own order is recorded as "the customer" with no
+    // initial to type; someone else collecting still needs the initial staff saw.
+    const recipientDisplayMask =
+      intent.recipientType === "Customer" && intent.recipientDisplayMask === null
+        ? "Customer"
+        : intent.recipientDisplayMask;
     const codeNotShownCause = codeNotShown
       ? pickupCodeNotShownCauses.find((cause) => cause === intent.codeNotShownCause)
       : undefined;
@@ -154,6 +166,13 @@ export function createMerchantPickupHandoff(options: {
               (await authority.guard(ownerTransaction)),
           });
           const current = await store.lockByOrder({ transaction: tx, orderReference });
+          // Only an order staff took at the counter, which never had a pickup code (Ordering's read).
+          if (
+            numberCalled &&
+            (current.capability !== null ||
+              !(await listStoreCounterOrders(tx, selected, [orderReference])).has(orderReference))
+          )
+            return invalid();
           const prior = await store.resolveByIdempotency({
             transaction: tx,
             orderReference,
@@ -211,7 +230,7 @@ export function createMerchantPickupHandoff(options: {
               actorPermissions: [completePickupHandoffPermission],
               verification,
               recipientType: intent.recipientType,
-              recipientDisplayMask: intent.recipientDisplayMask,
+              recipientDisplayMask,
               pickupLocationReference: intent.pickupLocationReference,
               deviceReference: intent.deviceReference,
               quantities: intent.quantities,

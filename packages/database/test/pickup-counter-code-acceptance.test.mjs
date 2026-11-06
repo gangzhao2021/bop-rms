@@ -566,7 +566,8 @@ it("issues a unique six-digit code, accepts it once typed, records and locks wro
               actorPermissions: ["fulfillment.pickup.complete"],
               verification: verification(current),
               recipientType: "Customer",
-              recipientDisplayMask: "S***",
+              // WP-2423 M21: the customer collecting their own order is recorded as "Customer".
+              recipientDisplayMask: keys.recipientDisplayMask ?? "S***",
               pickupLocationReference,
               deviceReference,
               quantities: current.source.items.map((item) => ({
@@ -582,22 +583,24 @@ it("issues a unique six-digit code, accepts it once typed, records and locks wro
             },
           });
         });
-      const inPerson = (pickup, reason, cause) => (current) => {
-        assert.equal(current.codeChecksLocked, pickup === a2);
-        return {
-          verificationReference: reference(),
-          correlationReference: reference(),
-          fulfillmentReference: pickup.fulfillment,
-          brandReference: brand,
-          storeReference: pickup.scope.storeReference,
-          verificationMethod: "InPerson",
-          identityCheck: "OrderNumberAndName",
-          reason,
-          ...(cause === undefined ? {} : { codeNotShownCause: cause }),
-          verifiedByActorReference: actor,
-          verifiedAt: now(),
+      const inPerson =
+        (pickup, reason, cause, check = "OrderNumberAndName") =>
+        (current) => {
+          assert.equal(current.codeChecksLocked, pickup === a2);
+          return {
+            verificationReference: reference(),
+            correlationReference: reference(),
+            fulfillmentReference: pickup.fulfillment,
+            brandReference: brand,
+            storeReference: pickup.scope.storeReference,
+            verificationMethod: "InPerson",
+            identityCheck: check,
+            reason,
+            ...(cause === undefined ? {} : { codeNotShownCause: cause }),
+            verifiedByActorReference: actor,
+            verifiedAt: now(),
+          };
         };
-      };
       const refused = (error) => error.code === "PICKUP_HANDOFF_VERIFICATION_FAILED";
       clock = minutes(t0, 4);
       await assert.rejects(
@@ -728,7 +731,12 @@ it("issues a unique six-digit code, accepts it once typed, records and locks wro
         handOver(counter, inPerson(counter, "CodeNotShown", "CodeNotReceived")),
         refused,
       );
-      const handedOver = await handOver(counter, inPerson(counter, "ProofNotIssued"));
+      // WP-2423 M21: its number was called; that is the check recorded, with no initial typed.
+      const handedOver = await handOver(
+        counter,
+        inPerson(counter, "ProofNotIssued", undefined, "OrderNumberCalled"),
+        { recipientDisplayMask: "Customer" },
+      );
       assert.equal(handedOver.status, "Applied");
       assert.equal(handedOver.effect.nextPhase, "Completed");
       assert.equal(
@@ -739,6 +747,15 @@ it("issues a unique six-digit code, accepts it once typed, records and locks wro
           )
         ).rows[0].n,
         1,
+      );
+      assert.deepEqual(
+        (
+          await admin.query(
+            "SELECT v.identity_check,h.recipient_display_mask FROM rms_fulfillment.pickup_in_person_verification v JOIN rms_fulfillment.pickup_handoff_record h ON h.pickup_in_person_verification_id=v.pickup_in_person_verification_id WHERE v.fulfillment_id=$1",
+            [counter.fulfillment],
+          )
+        ).rows,
+        [{ identity_check: "OrderNumberCalled", recipient_display_mask: "Customer" }],
       );
       // The guest's QR order still refuses an in-person check while its code is valid.
       await assert.rejects(
@@ -857,6 +874,14 @@ it("issues a unique six-digit code, accepts it once typed, records and locks wro
           )
         ).rows[0].n,
         1,
+      );
+      // WP-2423 M21: a called number only while no code was ever issued, in the database too.
+      await assert.rejects(
+        admin.query(
+          "INSERT INTO rms_fulfillment.pickup_in_person_verification (pickup_in_person_verification_id,brand_id,store_id,fulfillment_id,verified_by_actor_id,identity_check,reason,verified_at,correlation_id,data_classification) VALUES ($1,$2,$3,$4,$5,'OrderNumberCalled','ProofExpired',$6,$7,'IndirectIdentifier')",
+          [reference(), brand, storeA, guest.fulfillment, actor, now(), reference()],
+        ),
+        (error) => error.code === "23514",
       );
       // The database holds the same rule: a cause exactly with CodeNotShown, only from the list.
       for (const [reason, cause] of [

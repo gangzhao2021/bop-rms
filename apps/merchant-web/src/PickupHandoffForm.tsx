@@ -13,7 +13,7 @@ import {
   readPickupIdentityCheck,
   type PickupIdentityOutcome,
 } from "./pickup-identity-check-client.js";
-const client = createPickupHandoffClient();
+const defaultClient = createPickupHandoffClient();
 /** WP-2423: what staff choose when a customer cannot show a still-valid pickup code. */
 const codeNotShownChoices: readonly (readonly [PickupCodeNotShownCause, string])[] = [
   ["PhoneUnavailable", t("Phone is dead, lost or left behind")],
@@ -95,7 +95,10 @@ export function PickupHandoffForm({
   paused = false,
   codeNotShown = false,
   onRecorded,
+  fetcher,
 }: {
+  /** Tests only: the network the handover is sent through. */
+  readonly fetcher?: typeof fetch;
   /**
    * WP-2423: the customer's code is still valid but they cannot show it (phone dead, code never
    * received, order page lost). A deliberate secondary action beside the code check: staff choose
@@ -116,10 +119,13 @@ export function PickupHandoffForm({
   readonly csrf: string;
   readonly storeReference: string;
 }) {
+  const [client] = useState(() =>
+    fetcher === undefined ? defaultClient : createPickupHandoffClient(fetcher),
+  );
   const dialog = useRef<HTMLDialogElement>(null),
     resultAnnouncement = useRef<HTMLParagraphElement>(null),
     controller = useRef<AbortController | null>(null);
-  const intent = useRef<ReturnType<typeof client.prepare> | null>(null);
+  const intent = useRef<ReturnType<typeof defaultClient.prepare> | null>(null);
   const [status, setStatus] = useState<
     "Idle" | "Pending" | "Unknown" | "Rejected" | "Completed" | "InProgress"
   >("Idle");
@@ -129,8 +135,12 @@ export function PickupHandoffForm({
   const counter = inPerson && item.takenAtCounter === true && item.proofReadiness === "NotIssued";
   const [cause, setCause] = useState<"" | PickupCodeNotShownCause>("");
   const [identityCheck, setIdentityCheck] = useState<
-    "" | "OrderNumberAndName" | "OrderNumberAndPhoneLast4"
+    "" | "OrderNumberAndName" | "OrderNumberAndPhoneLast4" | "OrderNumberCalled"
   >("");
+  // WP-2423 M21: the ordinary handover is one tap — after the code matched, or for a counter order
+  // whose number was called — to the customer themselves. Someone else collecting, a code the guest
+  // can't show and an expired or locked code keep the full form.
+  const quick = !codeNotShown && (verification !== null || counter);
   const [recipient, setRecipient] = useState<"" | "Customer" | "Delegate">(""),
     [mask, setMask] = useState(""),
     [confirmed, setConfirmed] = useState(false);
@@ -181,32 +191,34 @@ export function PickupHandoffForm({
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
   }, [locked]);
-  const submit = async (retry: boolean) => {
+  const submit = async (retry: boolean, oneTap = false) => {
     if (
       paused ||
       browserOffline() ||
       controller.current ||
       (!retry &&
         (status !== "Idle" ||
-          !confirmed ||
-          !recipient ||
-          !mask ||
-          (inPerson && !identityCheck) ||
-          (codeNotShown && !cause)))
+          (!oneTap &&
+            (!confirmed ||
+              !recipient ||
+              !mask ||
+              (inPerson && !identityCheck) ||
+              (codeNotShown && !cause)))))
     )
       return;
     try {
       if (!retry) {
-        if (intent.current || !recipient) return;
+        if (intent.current || (!oneTap && !recipient)) return;
+        const check = oneTap ? (counter ? "OrderNumberCalled" : "") : identityCheck;
         intent.current = client.prepare({
           item,
           verification,
-          ...(identityCheck ? { identityCheck } : {}),
+          ...(check ? { identityCheck: check } : {}),
           ...(codeNotShown && cause ? { codeNotShownCause: cause } : {}),
           workstation,
           storeReference,
-          recipientType: recipient,
-          recipientDisplayMask: mask,
+          recipientType: oneTap ? "Customer" : recipient || "Customer",
+          recipientDisplayMask: oneTap ? null : mask,
           idempotencyReference: serviceOperationReference(),
           correlationReference: serviceOperationReference(),
         });
@@ -242,20 +254,68 @@ export function PickupHandoffForm({
   };
   const lines =
     item.execution?.items.filter((line) => line.readyQuantity > line.handedOverQuantity) ?? [];
+  const orderNumber =
+    item.publicOrderNumber ?? item.execution?.publicOrderReference ?? t("reference unavailable");
   return (
     <>
+      {quick ? (
+        <div className="pickup-handoff__quick">
+          <ul className="pickup-handoff__quick-items">
+            {lines.map((line, index) => (
+              <li key={line.fulfillmentItemReference}>
+                {t("{line}: {value} to hand over", {
+                  line: pickupItemLabel(line, index),
+                  value: line.readyQuantity - line.handedOverQuantity,
+                })}
+              </li>
+            ))}
+          </ul>
+          <p className="bop-muted">
+            {counter
+              ? t(
+                  "Taken at the counter, so no pickup code was sent. Call the order number and check every item before you tap.",
+                )
+              : t("Check every item before you tap")}
+          </p>
+          <button
+            type="button"
+            data-variant="primary"
+            disabled={status !== "Idle" || paused || lines.length === 0}
+            onClick={() => void submit(false, true)}
+          >
+            {counter
+              ? t("Called and handed over · Order {orderNumber}", { orderNumber })
+              : t("Hand over to customer · Order {orderNumber}", { orderNumber })}
+          </button>
+          {status === "Pending" ? <p role="status">{t("Recording handoff…")}</p> : null}
+          {status === "Unknown" ? (
+            <p role="status">
+              {t(
+                "The handover could not be confirmed. Do not hand anything over again; try confirming the same handover again.",
+              )}{" "}
+              <button type="button" disabled={paused} onClick={() => void submit(true)}>
+                {t("Try confirming again")}
+              </button>
+            </p>
+          ) : null}
+        </div>
+      ) : null}
       <button
         disabled={status !== "Idle" || paused}
-        className={codeNotShown ? "pickup-handoff__no-code" : undefined}
+        className={
+          codeNotShown ? "pickup-handoff__no-code" : quick ? "pickup-handoff__other" : undefined
+        }
         onClick={() => {
+          // Opened as "Someone else is collecting": they are the one collecting.
+          if (quick && !recipient) setRecipient("Delegate");
           dialog.current?.showModal();
           loadDetails();
         }}
       >
         {codeNotShown
           ? t("Guest can’t show the code")
-          : counter
-            ? t("Hand over")
+          : quick
+            ? t("Someone else is collecting")
             : inPerson
               ? t("Hand over after checking in person")
               : t("Review pickup handoff")}
@@ -378,11 +438,16 @@ export function PickupHandoffForm({
                   }
                 >
                   <option value="">{t("Select what you checked")}</option>
-                  <option value="OrderNumberAndName">
-                    {counter
-                      ? t("Order number called at the counter")
-                      : t("Order number and name on the order")}
-                  </option>
+                  {counter ? (
+                    // WP-2423 M21: a called number is recorded as that, never as a name check.
+                    <option value="OrderNumberCalled">
+                      {t("Order number called at the counter")}
+                    </option>
+                  ) : (
+                    <option value="OrderNumberAndName">
+                      {t("Order number and name on the order")}
+                    </option>
+                  )}
                   <option value="OrderNumberAndPhoneLast4" disabled={phoneUnavailable}>
                     {t("Order number and last four digits of the phone")}
                   </option>

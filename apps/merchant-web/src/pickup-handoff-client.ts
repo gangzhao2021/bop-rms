@@ -44,7 +44,11 @@ export function createPickupHandoffClient(fetcher: typeof fetch = fetch) {
       storeReference: string;
       /** Null for an in-person check (the proof expired or was never issued). */
       verification: PickupVerification | null;
-      identityCheck?: "OrderNumberAndName" | "OrderNumberAndPhoneLast4";
+      /**
+       * OrderNumberCalled (WP-2423 M21): a counter order, never sent a pickup code; staff called
+       * its number and the customer who answered took it.
+       */
+      identityCheck?: "OrderNumberAndName" | "OrderNumberAndPhoneLast4" | "OrderNumberCalled";
       /**
        * WP-2423: the code is still valid but the customer cannot show it; staff chose why. Only
        * for an in-person check of an order whose code is ready.
@@ -52,7 +56,8 @@ export function createPickupHandoffClient(fetcher: typeof fetch = fetch) {
       codeNotShownCause?: PickupCodeNotShownCause;
       workstation: PickupWorkstation;
       recipientType: "Customer" | "Delegate";
-      recipientDisplayMask: string;
+      /** WP-2423 M21: null when the customer collects their own order (no initial to type). */
+      recipientDisplayMask: string | null;
       idempotencyReference: string;
       correlationReference: string;
     }) {
@@ -69,15 +74,21 @@ export function createPickupHandoffClient(fetcher: typeof fetch = fetch) {
                 ? !["Expired", "NotIssued", "Locked"].includes(input.item.proofReadiness)
                 : input.item.proofReadiness !== "Ready" ||
                   !pickupCodeNotShownCauses.includes(input.codeNotShownCause)) ||
-              (input.identityCheck !== "OrderNumberAndName" &&
-                input.identityCheck !== "OrderNumberAndPhoneLast4")
+              (input.identityCheck === "OrderNumberCalled"
+                ? input.item.takenAtCounter !== true ||
+                  input.item.proofReadiness !== "NotIssued" ||
+                  input.codeNotShownCause !== undefined
+                : input.identityCheck !== "OrderNumberAndName" &&
+                  input.identityCheck !== "OrderNumberAndPhoneLast4")
             : !execution.proof ||
               verification.fulfillmentReference !== input.item.fulfillmentReference ||
               verification.generation !== execution.proof.generation ||
               verification.grantsCompletionAuthority !== false ||
               verification.expectedAggregateVersion !== execution.aggregateVersion) ||
           !["Customer", "Delegate"].includes(input.recipientType) ||
-          !/^[\p{L}\p{N}* ._'()-]{1,64}$/u.test(input.recipientDisplayMask)
+          (input.recipientDisplayMask === null
+            ? input.recipientType !== "Customer"
+            : !/^[\p{L}\p{N}* ._'()-]{1,64}$/u.test(input.recipientDisplayMask))
         )
           return fail("Invalid");
         const quantities = execution.items

@@ -511,6 +511,21 @@ describe("WP-2423 in-person handoff when the customer cannot show a still-valid 
       );
     }
   });
+  it("WP-2423 M21: a called order number is a check only while no pickup code was ever issued", () => {
+    const called: Record<string, unknown> = {
+      ...record({ identityCheck: "OrderNumberCalled", reason: "ProofNotIssued" }),
+    };
+    delete called.codeNotShownCause;
+    expect(parsePickupInPersonVerificationRecord(called).identityCheck).toBe("OrderNumberCalled");
+    for (const reason of ["ProofExpired", "CodeLocked"]) {
+      const invalid = { ...called, reason };
+      code(() => parsePickupInPersonVerificationRecord(invalid), "PICKUP_HANDOFF_INPUT_INVALID");
+    }
+    code(
+      () => parsePickupInPersonVerificationRecord(record({ identityCheck: "OrderNumberCalled" })),
+      "PICKUP_HANDOFF_INPUT_INVALID",
+    );
+  });
   it("still reads older in-person records that carry no cause, with the same shape", () => {
     const older: Record<string, unknown> = { ...record({ reason: "CodeLocked" }) };
     delete older.codeNotShownCause;

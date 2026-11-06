@@ -6,6 +6,11 @@ const doubles = vi.hoisted(() => ({
   recover: vi.fn(),
   current: vi.fn(),
   complete: vi.fn(),
+  counterOrders: vi.fn(),
+}));
+vi.mock("@rms/ordering", async (original) => ({
+  ...(await original<object>()),
+  listStoreCounterOrders: doubles.counterOrders,
 }));
 vi.mock("./merchant-store-scope.js", () => ({ createMerchantStoreScope: () => doubles.scope }));
 vi.mock("@rms/fulfillment", async (original) => ({
@@ -340,4 +345,62 @@ it("WP-2423: a permission withdrawn or Session ended during the handoff refuses 
   expect(rolledBack).toMatchObject({ code: "PICKUP_HANDOFF_PERMISSION_DENIED" });
   expect(doubles.complete).toHaveBeenCalledOnce();
   expect(f.allowed).toHaveBeenCalledTimes(2);
+});
+
+it("WP-2423 M21: the customer collecting their own order needs no initial; someone else still does", async () => {
+  const f = setup();
+  doubles.current.mockResolvedValue({ verifications: [f.verification] });
+  await f.operation({
+    ...f.input,
+    command: { ...f.input.command, recipientDisplayMask: null },
+  });
+  expect(doubles.complete.mock.calls[0]?.[0].command).toMatchObject({
+    recipientType: "Customer",
+    recipientDisplayMask: "Customer",
+    quantities: [{ fulfillmentItemReference: id(10), quantity: 2 }],
+  });
+  // Someone else collecting: no initial is passed on as given and refused by the owner.
+  await f.operation({
+    ...f.input,
+    command: { ...f.input.command, recipientType: "Delegate", recipientDisplayMask: null },
+  });
+  expect(doubles.complete.mock.calls[1]?.[0].command).toMatchObject({
+    recipientType: "Delegate",
+    recipientDisplayMask: null,
+  });
+});
+
+it("WP-2423 M21: a counter order handed over after its number was called records that check", async () => {
+  const f = setup();
+  const command: Record<string, unknown> = {
+    ...f.input.command,
+    identityCheck: "OrderNumberCalled",
+    recipientDisplayMask: null,
+  };
+  delete command.verificationReference;
+  doubles.current.mockResolvedValue({ verifications: [], inPerson: [], capability: null });
+  doubles.counterOrders.mockResolvedValue(new Set([id(5)]));
+  await f.operation({ ...f.input, command });
+  expect(doubles.complete.mock.calls[0]?.[0].command).toMatchObject({
+    recipientType: "Customer",
+    recipientDisplayMask: "Customer",
+    verification: { identityCheck: "OrderNumberCalled", reason: "ProofNotIssued" },
+  });
+  // Not a counter order, or one with a pickup code: refused before anything is recorded.
+  doubles.counterOrders.mockResolvedValue(new Set());
+  await expect(f.operation({ ...f.input, command })).rejects.toMatchObject({
+    code: "PICKUP_HANDOFF_INPUT_INVALID",
+  });
+  doubles.counterOrders.mockResolvedValue(new Set([id(5)]));
+  doubles.current.mockResolvedValue({
+    verifications: [],
+    inPerson: [],
+    source: { lockedAt: "2026-09-19T12:00:00.000Z" },
+    codeChecksLocked: false,
+    capability: { expiresAt: "2026-09-19T11:00:00.000Z" },
+  });
+  await expect(f.operation({ ...f.input, command })).rejects.toMatchObject({
+    code: "PICKUP_HANDOFF_INPUT_INVALID",
+  });
+  expect(doubles.complete).toHaveBeenCalledTimes(1);
 });

@@ -238,7 +238,10 @@ it("WP-2423: a counter order is handed over in person at once, never by pickup c
   };
   const counter = render("NotIssued", true);
   expect(counter).toContain("Counter order");
-  expect(counter).toContain(">Hand over</button>");
+  // WP-2423 M21: one tap once the number is called; someone else collecting keeps the form.
+  expect(counter).toContain(">Called and handed over · Order ORD-1001</button>");
+  expect(counter).toContain(">Someone else is collecting</button>");
+  expect(counter).toContain('value="OrderNumberCalled"');
   expect(counter).toContain("This order was taken at the counter, so no pickup code was sent.");
   expect(counter).toContain("Order number called at the counter");
   for (const text of ["Check pickup code", "No code sent", "check in person"])
@@ -246,7 +249,7 @@ it("WP-2423: a counter order is handed over in person at once, never by pickup c
   // A guest's QR pickup order keeps the code flow.
   const guest = render("Ready", false);
   expect(guest).not.toContain("Counter order");
-  expect(guest).not.toContain(">Hand over</button>");
+  expect(guest).not.toContain("Called and handed over");
   expect(render("NotIssued", false)).toContain("No code sent · check in person");
   // Only `true` is accepted from the server.
   expect(() =>
