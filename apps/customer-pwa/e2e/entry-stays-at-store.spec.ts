@@ -326,7 +326,9 @@ test.describe("@production M02 a phone stays at the Store and table it scanned",
     await noHorizontalOverflow(page);
   });
 
-  test("on the menu with no visit yet, 'Return to entry' asks the scanned table again", async ({
+  // WP-2423 live minor 26: a reload of the menu opened from "Look at the menu first" (no visit yet)
+  // goes back to the scanned table by itself, never "scan the code".
+  test("on the menu with no visit yet, a reload goes back to the scanned table", async ({
     page,
   }) => {
     const state = await installation(page, {
@@ -334,15 +336,21 @@ test.describe("@production M02 a phone stays at the Store and table it scanned",
     });
     await page.goto("/menu");
     const main = page.getByRole("main");
-    await expect(main.getByRole("heading", { name: "Scan the location QR code" })).toBeVisible();
-    await main.getByRole("link", { name: "Return to entry" }).click();
     await expect(
-      main.getByRole("heading", { name: /^This table at .+ isn’t open yet$/u }),
+      main.getByRole("heading", { name: /^This table at Lane Dessert.* isn’t open yet$/u }),
     ).toBeVisible();
+    await expect(page).toHaveURL(/\/$/u);
+    await expect(main.getByRole("heading", { name: "Scan the location QR code" })).toHaveCount(0);
     await expect(page.getByText("DEMO Café")).toHaveCount(0);
     expect(scannedEntries(state)).toEqual([]);
     expect(state.entries).toEqual([{ resume: true }]);
     expect(state.pickupRequests).toEqual([]);
+    await page.getByRole("button", { name: "切换到中文" }).click();
+    await expect(
+      main.getByRole("heading", { name: /^Lane Dessert.* 的这桌还没开台$/u }),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "English" }).click();
+    await noHorizontalOverflow(page);
   });
 
   test("the outage page's Try again comes back with the scanned table code", async ({ page }) => {
