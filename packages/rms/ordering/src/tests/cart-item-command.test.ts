@@ -8,7 +8,12 @@ import type {
   CartItemOperationAction,
   CartItemOperationRecord,
 } from "../application/ports/cart-item-command-ports.js";
-import { CartError, parseCartAggregate, type CartAggregate } from "../domain/cart.js";
+import {
+  CartError,
+  parseCartAggregate,
+  readCartSelectionRejected,
+  type CartAggregate,
+} from "../domain/cart.js";
 
 const id = (n: number) => `018f5100-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 const ids = {
@@ -130,6 +135,7 @@ function fixture(
     auditOverride?: Partial<AppendAuditRecordInput>;
     denied?: boolean;
     catalogMode?: "Rejected" | "Mismatch" | "Failure";
+    rejectReason?: string;
     explainMany?: NonNullable<CartItemCommandPorts["catalog"]["explainMany"]>;
   } = {},
 ) {
@@ -143,7 +149,10 @@ function fixture(
         validations += 1;
         if (options.catalogMode === "Failure") throw new Error("synthetic Catalog failure");
         if (options.catalogMode === "Rejected")
-          return { status: "Rejected", reason: "OPTION_NOT_ENABLED" };
+          return {
+            status: "Rejected",
+            reason: (options.rejectReason ?? "OPTION_NOT_ENABLED") as never,
+          };
         return {
           status: "Accepted",
           ...input,
@@ -502,6 +511,66 @@ describe("Cart Item Add / Update / Remove commands", () => {
     await expect(
       fixture().service.add(addInput({ optionSelections: [hostileOption] })),
     ).rejects.toMatchObject({ code: "CART_INPUT_INVALID" });
+  });
+
+  it("WP-2423 (cart-unsellable-dishes): says why Catalog refused the dish, and keeps an outage a retry", async () => {
+    // The chosen option is not offered right now: choose another.
+    await expect(
+      fixture({ catalogMode: "Rejected" }).service.add(addInput()),
+    ).rejects.toMatchObject({
+      name: "CartSelectionRejectedError",
+      code: "CART_SELECTION_INVALID",
+      reason: "OptionNotOffered",
+    });
+    // Every choice of a required group off, or the dish hidden: it can't be had now.
+    for (const rejectReason of ["RULE_UNSATISFIED", "SELLABLE_UNAVAILABLE"]) {
+      const error = await fixture({
+        catalogMode: "Rejected",
+        rejectReason,
+        explainMany: async () => ["Unavailable"],
+      })
+        .service.add(addInput())
+        .catch((caught: unknown) => caught);
+      expect(readCartSelectionRejected(error)).toBe("NotAvailable");
+    }
+    // Without a stable standing it stays a plain refusal.
+    await expect(
+      fixture({
+        catalogMode: "Rejected",
+        rejectReason: "RULE_UNSATISFIED",
+        explainMany: async () => ["Indeterminate"],
+      }).service.add(addInput()),
+    ).rejects.toMatchObject({ reason: "Other" });
+    // Validation failed, but the line's standing is a stable setup problem: not available.
+    await expect(
+      fixture({
+        catalogMode: "Failure",
+        explainMany: async () => ["SetupIncomplete"],
+      }).service.add(addInput()),
+    ).rejects.toMatchObject({ code: "CART_SELECTION_INVALID", reason: "NotAvailable" });
+    await expect(
+      fixture({
+        catalogMode: "Failure",
+        explainMany: async () => ["OptionsChanged"],
+      }).service.add(addInput()),
+    ).rejects.toMatchObject({ code: "CART_SELECTION_INVALID", reason: "OptionNotOffered" });
+    // A real outage (the standing read fails too) is still "try again".
+    await expect(
+      fixture({
+        catalogMode: "Failure",
+        explainMany: async () => {
+          throw new Error("synthetic Catalog outage");
+        },
+      }).service.add(addInput()),
+    ).rejects.toMatchObject({ code: "CART_DEPENDENCY_UNAVAILABLE" });
+    // A second copy of the package: matched by name.
+    const copy = Object.assign(new Error("copy"), {
+      name: "CartSelectionRejectedError",
+      code: "CART_SELECTION_INVALID",
+      reason: "OptionNotOffered",
+    });
+    expect(readCartSelectionRejected(copy)).toBe("OptionNotOffered");
+    expect(readCartSelectionRejected(new CartError("CART_SELECTION_INVALID"))).toBeNull();
   });
 
   it("fails closed when Catalog rejects, mismatches or cannot validate the selection", async () => {

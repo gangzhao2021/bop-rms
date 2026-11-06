@@ -172,6 +172,36 @@ export class CartItemUnavailableError extends CartError {
 }
 
 /**
+ * WP-2423 (cart-unsellable-dishes): why Catalog refused the dish a guest is adding or changing.
+ * `OptionNotOffered`: a chosen option is not offered right now (choose another); `NotAvailable`:
+ * the dish itself can't be had now (hidden, sold out, every choice of a required group off, or its
+ * menu setup broken); `Other`: the choices don't fit the dish's rules.
+ */
+export type CartSelectionRejectedReason = "OptionNotOffered" | "NotAvailable" | "Other";
+const cartSelectionRejectedReasons: readonly CartSelectionRejectedReason[] = Object.freeze([
+  "OptionNotOffered",
+  "NotAvailable",
+  "Other",
+]);
+/** WP-2423 (cart-unsellable-dishes): a refused selection, with why (still CART_SELECTION_INVALID). */
+export class CartSelectionRejectedError extends CartError {
+  readonly reason: CartSelectionRejectedReason;
+  constructor(reason: CartSelectionRejectedReason) {
+    super("CART_SELECTION_INVALID");
+    this.name = "CartSelectionRejectedError";
+    this.reason = reason;
+  }
+}
+
+/** The reason of a CartSelectionRejectedError (either copy); null for any other error. */
+export function readCartSelectionRejected(error: unknown): CartSelectionRejectedReason | null {
+  const found = readCartError(error);
+  if (found === null || found.code !== "CART_SELECTION_INVALID") return null;
+  const reason = (found as Partial<CartSelectionRejectedError>).reason;
+  return reason !== undefined && cartSelectionRejectedReasons.includes(reason) ? reason : null;
+}
+
+/**
  * The CartError an edge maps, also when the deployed entry loads this package as a second copy
  * (then `instanceof` fails, as customer-dining-cart-composition notes): matched by name and a known
  * code. Anything else is null.
@@ -183,6 +213,7 @@ export function readCartError(error: unknown): CartError | null {
   if (
     (error.name !== "CartError" &&
       error.name !== "CartItemUnavailableError" &&
+      error.name !== "CartSelectionRejectedError" &&
       error.name !== "CartCheckoutInProgressError") ||
     typeof code !== "string" ||
     !(cartErrorCodes as readonly string[]).includes(code)
