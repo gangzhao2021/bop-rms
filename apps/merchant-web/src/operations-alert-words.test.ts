@@ -9,11 +9,14 @@ interface Catalog {
     params: unknown,
   ) => { title: string; summary: string; action: string };
   readonly ALERT_KEYS: readonly string[];
+  readonly clearedAlertTitle: (key: string) => string;
 }
 // The monitor's own catalog (plain JavaScript without types): this test fails when its wording
 // moves away from the Chinese held here.
 const catalogFile = new URL("../../../tooling/environment/pilot-alerts.mjs", import.meta.url).href;
-const { renderAlert, ALERT_KEYS } = (await import(/* @vite-ignore */ catalogFile)) as Catalog;
+const { renderAlert, ALERT_KEYS, clearedAlertTitle } = (await import(
+  /* @vite-ignore */ catalogFile
+)) as Catalog;
 
 const MIN = 60_000;
 const DAY = 24 * 60 * MIN;
@@ -193,7 +196,7 @@ describe("Owner 2026-11-03: system alerts in the store's language", () => {
     expect(action("orders.workflow", { state: "PaidTables" })).toContain("暂停堂食");
     expect(action("orders.workflow", { state: "FurtherRounds" })).toContain("不要再收一次");
     expect(action("orders.workflow", { state: "FurtherRounds" })).toContain(
-      "最后统一结账的桌子照常",
+      "最后一起付（吃完再付）的桌照常",
     );
     for (const state of ["Orders", "Pickup", "Tables", "PaidOrders", "PaidPickup", "PaidTables"]) {
       expect(action("orders.workflow", { state })).toContain("一直到打烊（可以提前恢复）");
@@ -219,6 +222,28 @@ describe("Owner 2026-11-03: system alerts in the store's language", () => {
     expect(action("orders.workflow", { state: "TablesNotOffered" })).toContain("开启堂食之前");
     expect(action("orders.unpaid_rounds")).toContain("重试没有用");
     expect(action("orders.unpaid_rounds")).toContain("别的桌子");
+    // The words the table screens use ("每轮先付", "最后一起付", "吃完再付", "追加轮次").
+    const workflowWords = [
+      ...["Orders", "Pickup", "Tables", "PaidOrders", "PaidPickup", "PaidTables", "FurtherRounds"]
+        .flatMap((state) => [action("orders.workflow", { state }), summary(state)])
+        .concat(alertTitle(renderAlert("orders.workflow", { state: "FurtherRounds" }).title)),
+      action("orders.unpaid_rounds"),
+      alertSummary(renderAlert("orders.unpaid_rounds", {}).summary),
+    ].join(" ");
+    expect(workflowWords).not.toMatch(/按轮付款|最后统一结账|加点/u);
+    expect(action("orders.workflow", { state: "FurtherRounds" })).toContain("每轮先付的桌");
+    expect(summary("FurtherRounds")).toContain("追加轮次");
+    // The card-machine payment goes on the sheet now; the Counter order waits for the fix.
+    expect(summary("Pickup")).toContain("马上记在情况记录表上");
+    expect(summary("Pickup")).toContain("等 BOP 技术支持确认修好后，再录入“柜台点单”");
+  });
+  it("a cleared order-rules row never reads as all clear, in Chinese either", () => {
+    setLanguageForTest("zh-Hans");
+    for (const key of ["orders.workflow", "orders.unpaid_rounds"]) {
+      const shown = alertTitle(clearedAlertTitle(key));
+      expect(english(shown), shown).toEqual([]);
+      expect(shown).toContain("在 BOP 技术支持确认修好之前");
+    }
   });
   it("shows the monitor's own words when a text matches nothing, never blank", () => {
     setLanguageForTest("zh-Hans");

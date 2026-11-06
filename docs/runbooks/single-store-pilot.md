@@ -2719,7 +2719,11 @@ refuses two: that merchant's guests could not pay, and since history cannot be e
 out would be a new Brand. So for a Brand installed by this tool, a rerun, a lost binding file and a
 second Store of the same Brand all use the same command with a fresh operation. When the Brand
 already has the Workflow the tool writes nothing to the database, uses no approval and writes the
-binding file only if it is missing.
+binding file only if it is missing. Rerunning with the original `--operation` (after an
+interruption) is checked the same way, at the time of the rerun: if the Brand now holds two
+families, or its family was withdrawn, expired or moved past the version that operation released,
+it refuses (`WORKFLOW_RELEASE_DUPLICATE_FAMILIES` or `WORKFLOW_RELEASE_ALREADY_INSTALLED_DIFFERENT`)
+and writes nothing, not even a missing file.
 
 **Stores from before this tool do not rerun order releases.** The internal test Brand (the first
 Store, DEMO 2 and DEMO 3 on v15; **test-environment only**) runs on `InternalTestSubmissionInventory`
@@ -3156,7 +3160,10 @@ being checked. The pilot operator runs `docker compose -f compose.pilot.yaml up 
 The monitor asks the owner's Workflow resolver about each binding file of the Store once a minute
 (read only, as the API role). Services hold the binding they loaded when they started, so a row can
 clear before a fix has reached them: staff stay on paper until BOP support says it is fixed, not
-until the row clears.
+until the row clears. So a cleared row is never sent or shown as "Resolved": the owner's message
+and Home say "Order rules check passes again: stay on paper until BOP support says it is fixed" (or,
+for unpaid rounds, "keep the noted tables until BOP support says it is fixed"). BOP support tells
+the merchant once the restart in the planned window is done.
 
 What each title means:
 
@@ -3179,7 +3186,9 @@ What each title means:
 nobody can accept them, and the acceptance deadline asks no Workflow, so about 30 minutes after
 payment each is closed and refunded, including one paid just before the refusal began. Staff screens
 are online, so the outage hold does not apply (DEC-OUTAGE-ACCEPTANCE-HOLD). A table's paid round has
-no deadline and waits.
+no deadline and waits. Staff write each such card-machine payment on the incident sheet straight
+away and enter it as a `Counter order` only after BOP support says it is fixed: until then the Counter
+order is refused too.
 
 **Staff / Owner.** Cannot go through and may not reach the kitchen: the manager pauses that service
 in `Hours & ordering` until closing (a pause ends by itself at its time, with no warning; it can be
@@ -3189,9 +3198,11 @@ a table that pays at the end still pays at the end
 ([section 3a](#3a-tables-that-pay-at-the-end-pay-later-during-an-outage)). A guest who paid: never a
 second payment; a kitchen slip with the order number. A paid pickup order nobody can accept refunds
 itself at the time `Orders` shows, even if the guest has the food: if it has, follow recovery
-[step 6](#5-recovery-when-screens-load-again) (card machine with the guest's agreement and a
-`Counter order` recorded after an outage, otherwise a loss on the incident sheet); the same for a
-guest who comes to collect after that. When BOP support says it is fixed: enter the paper orders
+[step 6](#5-recovery-when-screens-load-again): with the guest's agreement take payment on the card
+machine and write it on the incident sheet now, otherwise write it there as a loss. Enter it as a
+`Counter order` recorded after an outage only once BOP support says it is fixed, because a Counter
+pickup order goes through the same refused Workflow. The same for a guest who comes to collect after
+that. When BOP support says it is fixed: enter the paper orders
 (recovery steps 4 and 5), except slips with an order number: accept that order and mark it ready, do
 not make it again, and do not enter it. Further rounds: the same for tables that pay before each
 round, no pause; tables that pay at the end carry on. Cannot be turned on yet: nothing in the store;

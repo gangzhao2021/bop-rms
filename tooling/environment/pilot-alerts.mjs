@@ -101,7 +101,7 @@ const PAUSE_ALL = `Pause all services in Hours & ordering until closing (can res
 const PAUSE_PICKUP = `Pause pickup in Hours & ordering until closing (can resume early). New pickup orders: paper slip, card machine. ${PAID_ALREADY} The order refunds itself if not accepted. ${UNTIL_FIXED}`;
 const PAUSE_DINE_IN = `Pause dine-in in Hours & ordering until closing (can resume early). Tell seated tables to order with staff. New rounds: paper slip, card machine. ${PAID_ALREADY} ${UNTIL_FIXED}`;
 const REFUNDED =
-  "A paid pickup order nobody can accept is refunded automatically about 30 minutes after payment (Orders shows the time), even if the guest has the food. If so, with their agreement take payment on the card machine and enter it as a Counter order recorded after an outage; if they decline or cannot be reached, write it on the incident sheet as a loss.";
+  "A paid pickup order nobody can accept is refunded automatically about 30 minutes after payment (Orders shows the time), even if the guest has it. With their agreement take payment on the card machine and note it on the incident sheet now (a loss if they decline). Enter it as a Counter order recorded after an outage only once BOP support says it is fixed.";
 const PAUSE_TELLS =
   "A pause tells new guests to order with staff; it does not reach seated tables.";
 const PAY_AT_END = "A table that pays at the end still pays at the end.";
@@ -358,6 +358,10 @@ export const ALERT_CATALOG = Object.freeze({
     title: (p) => ORDER_WORKFLOW_WORDS[p.state]?.title ?? "The store's order rules cannot be used",
     summary: (p) => (ORDER_WORKFLOW_WORDS[p.state] ?? ORDER_WORKFLOW_WORDS.Orders).summary,
     action: (p) => (ORDER_WORKFLOW_WORDS[p.state] ?? ORDER_WORKFLOW_WORDS.Orders).action,
+    // The row can clear before the fix reaches the running services (they hold the binding they
+    // loaded at start), so its clearing never reads as all clear.
+    clearedTitle:
+      "Order rules check passes again: stay on paper until BOP support says it is fixed",
     runbook: "alert-orders-workflow",
   },
   // WP-2423 item 9: the cancellation Workflow refused. A manager's cancel and "Guests left" pass the
@@ -372,6 +376,8 @@ export const ALERT_CATALOG = Object.freeze({
       "At tables that pay before each round, unpaid rounds are not cancelled automatically and a manager cannot cancel them. They stay open and keep their ingredients set aside, so dishes can show as sold out to other guests, and the table cannot be closed for the next party. At a table that pays at the end, only a round waiting for staff is affected: it can be sent to the kitchen but not cancelled.",
     action: () =>
       "Tables that pay before each round: one with an unpaid round cannot be closed and that round cannot be cancelled here, so trying again will not help. Seat the next party at another table and note those tables. Tables that pay at the end carry on and close once they pay. Call BOP support now: they have to fix this. Close the noted tables once they say it is fixed.",
+    clearedTitle:
+      "Unpaid rounds check passes again: keep the noted tables until BOP support says it is fixed",
     runbook: "alert-orders-unpaid-rounds",
   },
   "reconciliation.differences": {
@@ -884,6 +890,15 @@ const KIND_LABEL = Object.freeze({
   cleared: "Resolved",
   test: "Test",
 });
+/**
+ * What a cleared row is called. A key whose clearing does not mean the store can go back to normal
+ * (orders.workflow: services keep what they loaded until restarted) says what staff still wait for.
+ */
+export function clearedAlertTitle(key) {
+  const catalog = ALERT_CATALOG[key];
+  return catalog.clearedTitle ?? catalog.title({ remainingMs: 1 });
+}
+const waitsForSupport = (item) => ALERT_CATALOG[item.key]?.clearedTitle !== undefined;
 export function renderAlert(key, params) {
   const catalog = ALERT_CATALOG[key];
   return {
@@ -910,15 +925,21 @@ export function renderMessage(batch, { siteLabel, runbookBase, homeUrl = null })
   const lines = ordered.map((item) => {
     if (item.kind === "test") return "Test alert: this channel works. No action is needed.";
     const text = renderAlert(item.key, item.params);
-    if (item.kind === "cleared") return `${KIND_LABEL.cleared}: ${text.title}.`;
+    if (item.kind === "cleared")
+      return waitsForSupport(item)
+        ? `${clearedAlertTitle(item.key)}.`
+        : `${KIND_LABEL.cleared}: ${text.title}.`;
     return `${KIND_LABEL[item.kind]} (${item.severity === "critical" ? "urgent" : "today"}): ${text.title}. ${text.summary} What to do: ${text.action} Runbook: ${runbookLink(runbookBase, text.runbook)}`;
   });
   let subject;
   if (top.kind === "test") subject = `${siteLabel}: test alert`;
   else if (ordered.length === 1)
-    subject = `${siteLabel}: ${top.kind === "cleared" ? "Resolved - " : top.severity === "critical" ? "URGENT - " : ""}${renderAlert(top.key, top.params).title}`;
+    subject =
+      top.kind === "cleared" && waitsForSupport(top)
+        ? `${siteLabel}: ${clearedAlertTitle(top.key)}`
+        : `${siteLabel}: ${top.kind === "cleared" ? "Resolved - " : top.severity === "critical" ? "URGENT - " : ""}${renderAlert(top.key, top.params).title}`;
   else
-    subject = `${siteLabel}: ${open.length > 0 ? `${count(open.length, "problem", "problems")}${open.some((item) => item.severity === "critical") ? " (urgent)" : ""}` : "problems resolved"}`;
+    subject = `${siteLabel}: ${open.length > 0 ? `${count(open.length, "problem", "problems")}${open.some((item) => item.severity === "critical") ? " (urgent)" : ""}` : ordered.some(waitsForSupport) ? "checks pass again, wait for BOP support before going back to normal" : "problems resolved"}`;
   const text = [...lines, ...(homeUrl ? [`Store Home: ${homeUrl}`] : [])].join("\n\n");
   return {
     subject,
@@ -959,7 +980,7 @@ export function buildAlertBoard(state, { observedAt, channels, backup, maintenan
     recentlyCleared: state.cleared
       .map((entry) => ({
         key: entry.key,
-        title: ALERT_CATALOG[entry.key].title({ remainingMs: 1 }),
+        title: clearedAlertTitle(entry.key),
         clearedAt: entry.clearedAt,
       }))
       .slice(-10),

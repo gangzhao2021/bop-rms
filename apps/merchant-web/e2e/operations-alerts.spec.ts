@@ -472,6 +472,49 @@ test("@production Home says what a refused order Workflow stops and what staff d
   expect(home.unexpected).toEqual([]);
 });
 
+// WP-2423 item 9: the row can clear before the fix reaches the running services, so its clearing
+// stays in view and tells staff to wait for BOP support, never "Resolved".
+test("@production Home keeps staff on paper when the order rules row clears (WP-2423 item 9)", async ({
+  page,
+}) => {
+  const catalog = new URL("../../../tooling/environment/pilot-alerts.mjs", import.meta.url).href;
+  const { clearedAlertTitle } = (await import(catalog)) as {
+    readonly clearedAlertTitle: (key: string) => string;
+  };
+  const board = {
+    ...problem,
+    active: [],
+    recentlyCleared: [
+      {
+        key: "orders.workflow",
+        title: clearedAlertTitle("orders.workflow"),
+        clearedAt: "2026-10-15T15:58:00.000Z",
+      },
+    ],
+  };
+  const home = await pilotHome(page, "owner", () => board);
+  await page.goto("/app");
+  await expect(
+    page.getByText(
+      /Order rules check passes again: stay on paper until BOP support says it is fixed/u,
+    ),
+  ).toBeVisible();
+  await expect(page.getByText(/Resolved recently/u)).toHaveCount(0);
+  await expectNoInternalText(page);
+  for (const width of [1440, 390, 320]) {
+    await page.setViewportSize({ width, height: 900 });
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.screenshot({
+      path: `test-results/home-order-workflow-cleared-${width}.png`,
+      fullPage: true,
+    });
+  }
+  expect(home.errors).toEqual([]);
+  expect(home.unexpected).toEqual([]);
+});
+
 // v15 finding: the pilot navigation has never had to carry an exceptions entry for the card to
 // appear; the server's answer decides. Owner and Store Manager see it, front of house does not.
 for (const role of ["owner", "store-manager"] as const)

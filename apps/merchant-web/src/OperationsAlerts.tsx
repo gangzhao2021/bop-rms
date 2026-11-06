@@ -37,6 +37,12 @@ export interface OperationsAlertView {
   readonly plannedUpdate: { readonly startedAt: string; readonly expiresAt: string } | null;
 }
 /** Owner 2026-11-03 walkthrough: the watcher writes English titles; staff read their language. */
+/** Keys whose clearing still waits for BOP support (pilot-alerts `clearedTitle`). */
+const clearedWaitsForSupport: ReadonlySet<string> = new Set([
+  "orders.workflow",
+  "orders.unpaid_rounds",
+]);
+
 export function alertTitle(title: string): string {
   const words: Readonly<Record<string, string>> = {
     "Store system is not responding": t("Store system is not responding"),
@@ -69,6 +75,12 @@ export function alertTitle(title: string): string {
     "Pickup cannot be turned on yet": t("Pickup cannot be turned on yet"),
     "Dine-in cannot be turned on yet": t("Dine-in cannot be turned on yet"),
     "Unpaid rounds are not being cancelled": t("Unpaid rounds are not being cancelled"),
+    "Order rules check passes again: stay on paper until BOP support says it is fixed": t(
+      "Order rules check passes again: stay on paper until BOP support says it is fixed",
+    ),
+    "Unpaid rounds check passes again: keep the noted tables until BOP support says it is fixed": t(
+      "Unpaid rounds check passes again: keep the noted tables until BOP support says it is fixed",
+    ),
     "Pickup orders cannot be taken": t("Pickup orders cannot be taken"),
     "Pickup times are running out": t("Pickup times are running out"),
     "Secure connection certificate has expired": t("Secure connection certificate has expired"),
@@ -383,7 +395,10 @@ export function StoreSystemLine({
   const at = (iso: string) => storeTime(iso, timeZone, true);
   // Only a monitor that reports can vouch for the backup and alert facts.
   const view = read.kind === "Ready" && read.value.monitor === "Reporting" ? read.value : null;
-  const resolved = view?.recentlyCleared ?? [];
+  const cleared = view?.recentlyCleared ?? [];
+  // A cleared order-rules row is not all clear: staff wait for BOP support (its title says so).
+  const waiting = cleared.filter((item) => clearedWaitsForSupport.has(item.key));
+  const resolved = cleared.filter((item) => !clearedWaitsForSupport.has(item.key));
   const moreToTell = view !== null && (resolved.length > 0 || !alertsOnlyHere(view.outbound));
   return (
     <section className="overview-system" aria-label={t("Store system")}>
@@ -417,6 +432,15 @@ export function StoreSystemLine({
           </button>
         ) : null}
       </div>
+      {/* In view, not under details: the row that told staff to go on paper has just gone. */}
+      {waiting
+        .slice(-2)
+        .reverse()
+        .map((item) => (
+          <p key={item.key + item.clearedAt} className="overview-system__note">
+            {`${alertTitle(item.title)} (${at(item.clearedAt)})`}
+          </p>
+        ))}
       {view !== null && alertsOnlyHere(view.outbound) ? (
         <p className="overview-system__note">{outboundNote(view.outbound)}</p>
       ) : null}

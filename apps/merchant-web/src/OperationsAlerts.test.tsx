@@ -184,6 +184,34 @@ describe("WP-2423 Q13 store system alerts on the Home", () => {
     });
     expect(html.indexOf("No recent backup")).toBeLessThan(html.indexOf("Store system is not"));
   });
+  it("WP-2423 item 9: a cleared order-rules row says to wait for BOP support, in view, never resolved", async () => {
+    const { clearedAlertTitle } = (await import(/* @vite-ignore */ catalogFile)) as {
+      readonly clearedAlertTitle: (key: string) => string;
+    };
+    const clearedAt = "2026-10-15T08:31:00.000Z";
+    const value = view({
+      recentlyCleared: [
+        { key: "orders.workflow", title: clearedAlertTitle("orders.workflow"), clearedAt },
+      ],
+    });
+    const html = line({ kind: "Ready", value });
+    expect(html).toContain(
+      "Order rules check passes again: stay on paper until BOP support says it is fixed",
+    );
+    expect(html).not.toContain("Resolved recently");
+    // Not folded away under System details.
+    expect(html.indexOf("stay on paper")).toBeLessThan(
+      html.indexOf("<details") === -1 ? Infinity : html.indexOf("<details"),
+    );
+    setLanguageForTest("zh-Hans");
+    try {
+      const zh = line({ kind: "Ready", value });
+      expect(zh).toContain("门店订单规则的检查又通过了");
+      expect(zh).not.toContain("最近已解决");
+    } finally {
+      setLanguageForTest("en");
+    }
+  });
   it("WP-2423 (2026-10-18): a planned update shows a calm notice, not an outage", () => {
     const plannedUpdate = {
       startedAt: "2026-10-15T11:58:00.000Z",

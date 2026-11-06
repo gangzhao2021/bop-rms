@@ -455,9 +455,14 @@ describe("WP-2423 Q13 alert rules", () => {
           expect(summary, state).toContain(
             "A paid pickup order nobody can accept is refunded automatically about 30 minutes after payment (Orders shows the time)",
           );
-          expect(summary, state).toContain("with their agreement take payment on the card machine");
-          expect(summary, state).toContain("as a Counter order recorded after an outage");
-          expect(summary, state).toContain("write it on the incident sheet as a loss");
+          expect(summary, state).toContain("With their agreement take payment on the card machine");
+          // A Counter pickup order passes the same refused Workflow: the sheet now, the entry later.
+          expect(summary, state).toContain(
+            "note it on the incident sheet now (a loss if they decline)",
+          );
+          expect(summary, state).toContain(
+            "as a Counter order recorded after an outage only once BOP support says it is fixed",
+          );
         }
         // Where only pickup is at stake, it is in what staff read without opening anything.
         for (const state of ["Pickup", "PaidPickup", "PickupStore", "PaidPickupStore"])
@@ -564,9 +569,17 @@ describe("WP-2423 Q13 alert rules", () => {
           backup: null,
         }).recentlyCleared.map(({ title }) => title),
       ).toEqual([
-        "The store's order rules cannot be used",
-        "Unpaid rounds are not being cancelled",
+        "Order rules check passes again: stay on paper until BOP support says it is fixed",
+        "Unpaid rounds check passes again: keep the noted tables until BOP support says it is fixed",
       ]);
+      // Services keep the binding they loaded until restarted: the owner's message says to wait.
+      for (const batch of [cleared.notifications, cleared.notifications.slice(0, 1)]) {
+        const sent = renderMessage(batch, { siteLabel: "Main St", runbookBase: "x" });
+        expect(sent.subject).not.toMatch(/Resolved|resolved/u);
+        expect(sent.text).not.toMatch(/Resolved/u);
+        expect(sent.text).toContain("until BOP support says it is fixed");
+      }
+      expect(cleared.notifications.map(({ kind }) => kind)).toEqual(["cleared", "cleared"]);
     });
     it("a rule that is not one fixed word never reaches the log", () => {
       expect(
