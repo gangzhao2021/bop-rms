@@ -12,8 +12,9 @@
 -- 2026-10-14): a BOP upgrade never writes a preset over a Store's own version of it, so the Roles
 -- page offers what the preset gained ("add it to yours?") or no longer has ("remove it from
 -- yours?"). Adding or removing is an ordinary role change through approval. "Keep mine" is
--- recorded here, append-only, against the preset version the offer was made from: the same offer
--- is not made again until BOP changes the preset again.
+-- recorded here, append-only, against the preset version the offer was made from (the last BOP
+-- version below the Store's own, which upgrades never move): that permission is not offered again
+-- for this role. A permission BOP adds or removes later is offered on its own.
 CREATE FUNCTION bop_permission.reject_role_preset_offer_decision_mutation() RETURNS trigger
 LANGUAGE plpgsql
 SET search_path = pg_catalog
