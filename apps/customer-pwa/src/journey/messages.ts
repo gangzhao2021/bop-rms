@@ -2,7 +2,7 @@ import {
   getGuestTableStarter,
   isGuestTableQuestion,
 } from "../session/customer-transaction-context.js";
-import { t } from "../i18n/i18n.js";
+import { saidTable, t } from "../i18n/i18n.js";
 import type { CartState } from "../cart/cart-state.js";
 import { getTablePaymentTiming } from "../session/customer-transaction-context.js";
 
@@ -1320,6 +1320,12 @@ export const orderStatusText = Object.freeze({
   get seeTableOrders() {
     return t("See everything your table ordered");
   },
+  /** WP-2423 table-move-payment review: staff moved the party after this phone ordered. */
+  tableMoved: (from: string, table: string) =>
+    t(
+      "Staff moved your party from table {from} to table {table}. Keep ordering and paying on this phone.",
+      { from: saidTable(from), table: saidTable(table) },
+    ),
   get viewReceipt() {
     return t("View receipt and support");
   },

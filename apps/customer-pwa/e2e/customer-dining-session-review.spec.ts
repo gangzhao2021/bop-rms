@@ -593,6 +593,79 @@ test.describe("@production CUST-DINE-IN-SESSION table view", () => {
     }
   });
 
+  test("WP-2423 table-move-payment: the order page says where a moved party sits too", async ({
+    page,
+  }) => {
+    // Review 2026-11-06: in the v15 run the paying phone was on its order page when staff moved
+    // the table, and that page said nothing. It now carries the same line. Synthetic TEST data.
+    await enterTable(page, () => ({
+      status: 200,
+      json: { ...session, session: { ...session.session, movedFromTableLabel: "T6" } },
+    }));
+    const order = id(900);
+    await page.route(
+      (url) => url.pathname === "/api/v1/orders/" + order + "/status",
+      (route) =>
+        route.fulfill({
+          headers: { "cache-control": "no-store" },
+          json: {
+            schemaVersion: 1,
+            status: {
+              projectionName: "ordering_order_status_v1",
+              projectionVersion: 1,
+              sourceCheckpoint: id(901),
+              projectedAt: "2026-08-11T14:00:00.000Z",
+              freshnessStatus: "Fresh",
+              order: {
+                orderReference: order,
+                orderNumber: "21",
+                orderType: "DineIn",
+                canonicalPhase: "Submitted",
+                paymentStatus: "NotReported",
+                kitchenStatus: "Unavailable",
+                fulfillmentStatus: "Unavailable",
+                fulfilledAt: null,
+                eta: null,
+                submittedAt: "2026-08-11T13:55:00.000Z",
+                batches: [
+                  {
+                    orderBatchReference: id(902),
+                    submittedAt: "2026-08-11T13:55:00.000Z",
+                    items: [
+                      {
+                        orderItemReference: id(903),
+                        displayName: "Synthetic egg waffle",
+                        quantity: 1,
+                        lineTotal: { amountMinor: "750", currencyCode: "CAD" },
+                      },
+                    ],
+                  },
+                ],
+              },
+            },
+          },
+        }),
+    );
+    await page.evaluate((reference) => {
+      history.pushState(null, "", "/orders/" + reference);
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    }, order);
+    const main = page.getByRole("main");
+    await expect(main.getByText("Synthetic egg waffle")).toBeVisible();
+    await expect(main.getByRole("status").filter({ hasText: "Staff moved your party" })).toHaveText(
+      "Staff moved your party from table T6 to table 12. Keep ordering and paying on this phone.",
+    );
+    await expectNoInternalText(page);
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: width === 1440 ? 900 : 844 });
+      await expectNoHorizontalOverflow(page);
+      await page.screenshot({
+        path: `test-results/customer-order-moved-${width}.png`,
+        fullPage: true,
+      });
+    }
+  });
+
   test("WP-2423 table-move-payment: the move line in Chinese", async ({ page }) => {
     // The guest chose Chinese on an earlier visit (the app's own stored choice).
     await page.addInitScript(() => localStorage.setItem("bop.customer.language", "zh-Hans"));

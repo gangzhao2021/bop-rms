@@ -1,5 +1,7 @@
 import { MemberJoinPanel } from "../member/MemberJoinPanel.js";
 import { listSeparator, useReloadOnLanguageChange } from "../i18n/i18n.js";
+import type { DiningSessionClient } from "../dining/dining-session-client.js";
+import { useTableMove } from "../dining/table-moved.js";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { Link, useParams } from "react-router";
 import {
@@ -1212,12 +1214,15 @@ export function OrderStatusPage({
   pickupController,
   store,
   contactRemoval,
+  diningClient,
 }: {
   readonly controller?: OrderStatusController;
   readonly pickupController?: PickupCodeController | undefined;
   readonly store?: CustomerStoreContext | undefined;
   /** WP-2423 Q16: removes the customer's own contact details (absent: no removal button). */
   readonly contactRemoval?: ContactRemovalClient | undefined;
+  /** The table read for a table order (absent: the HTTP client). */
+  readonly diningClient?: DiningSessionClient | undefined;
 }) {
   const { orderReference = "" } = useParams();
   const [controller] = useState(
@@ -1246,6 +1251,8 @@ export function OrderStatusPage({
     };
   }, [controller]);
   const view = state.status === "ready" || state.status === "offline" ? state.view : null;
+  // WP-2423 (table-move-payment review): staff moved the party after this phone ordered.
+  const tableMove = useTableMove(view?.order.orderType === "DineIn", diningClient);
   // Registered after the load effect so a remount's dispose doesn't drop the polling listener.
   useEffect(() => startOrderStatusPolling(controller), [controller]);
   return (
@@ -1259,6 +1266,11 @@ export function OrderStatusPage({
         <p className="bop-eyebrow">{orderStatusText.pageEyebrow}</p>
         <h2>{orderStatusText.pageHeading}</h2>
       </header>
+      {tableMove === null ? null : (
+        <p className="dining-session__moved" role="status">
+          {orderStatusText.tableMoved(tableMove.from, tableMove.table)}
+        </p>
+      )}
 
       {state.status === "loading" ? (
         <section role="status">
