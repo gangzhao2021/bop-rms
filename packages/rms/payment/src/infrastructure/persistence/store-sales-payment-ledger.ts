@@ -84,8 +84,16 @@ export interface StoreSalesSettlementTotals {
   readonly cashRefunded: { readonly count: number; readonly amountMinor: bigint };
 }
 
-const fail = (): never => {
-  throw new Error("STORE_SALES_PAYMENT_LEDGER_UNAVAILABLE");
+/**
+ * The ledger's own refusal. An agreement check names which agreement failed, as a fixed word on
+ * `rule` (read by the pilot's failure log); the message never changes for the reports that read it.
+ */
+type LedgerRule =
+  "OnlineCapturesDisagree" | "OnlineRefundWithoutCapture" | "TableRefundWithoutSettlement";
+const fail = (rule?: LedgerRule): never => {
+  const error: Error & { rule?: LedgerRule } = new Error("STORE_SALES_PAYMENT_LEDGER_UNAVAILABLE");
+  if (rule !== undefined) error.rule = rule;
+  throw error;
 };
 const integer = (value: unknown) => {
   if (typeof value !== "string" || !/^(0|[1-9][0-9]{0,18})$/u.test(value)) return fail();
@@ -347,7 +355,8 @@ export function createPostgresStoreSalesPaymentLedger(options: {
     );
     const cashRefunded = { count: 0, amountMinor: 0n };
     for (const refund of table.cashRefunds) {
-      const settlement = tableSettlements.get(refund.settlementReference) ?? fail();
+      const settlement =
+        tableSettlements.get(refund.settlementReference) ?? fail("TableRefundWithoutSettlement");
       // The cash came back from the bill's own Order (a merged table's rounds keep theirs): its
       // last round line on this payment, else the payment's last line.
       const last =
@@ -372,7 +381,8 @@ export function createPostgresStoreSalesPaymentLedger(options: {
     // WP-2423 DEC-TABLE-ONLINE-REFUND: a refund made on the card machine of a table paid there.
     const tableCardRefunded = { count: 0, amountMinor: 0n };
     for (const refund of table.cardRefunds) {
-      const settlement = tableSettlements.get(refund.settlementReference) ?? fail();
+      const settlement =
+        tableSettlements.get(refund.settlementReference) ?? fail("TableRefundWithoutSettlement");
       const last =
         settlement.lines.findLast((line) => line.orderReference === refund.orderReference) ??
         settlement.lines.at(-1) ??
@@ -396,7 +406,8 @@ export function createPostgresStoreSalesPaymentLedger(options: {
     // on the day the Provider created the refund.
     const tableOnlineRefunded = { count: 0, amountMinor: 0n };
     for (const refund of table.onlineRefunds) {
-      const settlement = tableSettlements.get(refund.settlementReference) ?? fail();
+      const settlement =
+        tableSettlements.get(refund.settlementReference) ?? fail("TableRefundWithoutSettlement");
       const last =
         settlement.lines.findLast((line) => line.orderReference === refund.orderReference) ??
         settlement.lines.at(-1) ??
@@ -488,7 +499,8 @@ export function createPostgresStoreSalesPaymentLedger(options: {
       if (takenAt >= startsAt && takenAt < endsAt) payments.push(payment);
       else refundedPayments.push(payment);
     }
-    if (refundedIntents.some((intent) => !seenIntents.has(intent))) return fail();
+    if (refundedIntents.some((intent) => !seenIntents.has(intent)))
+      return fail("OnlineRefundWithoutCapture");
     // S4: the online captures also hold tables a guest paid on their phone (one each).
     const onlineTables = table.settlements.filter(
       (settlement) =>
@@ -503,7 +515,7 @@ export function createPostgresStoreSalesPaymentLedger(options: {
       payments.length + onlineTables.length !== captured.captureCount ||
       onlineTotal !== captured.capturedAmountMinor
     )
-      return fail();
+      return fail("OnlineCapturesDisagree");
     for (const payment of cardMachine.payments) {
       const record = Object.freeze({
         channel: "CardMachine" as const,

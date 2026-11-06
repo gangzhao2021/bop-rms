@@ -238,6 +238,10 @@ it("each paid part of a split bill earns on its own, once, and answers for its o
 it("points spent on a table that never paid come back", () => journey("MemberPointsWrittenOff"));
 it("a member's points are added without asking only when this phone certainly paid", () =>
   journey("MemberPointsOnline"));
+// v15 2026-11-06 (points-sweep): a Store's points sweep reads its ledger under the Store's own
+// Provider account, and catches up with refunds made while it could not run.
+it("the points sweep settles a table's refund only under the Store's own account, and catches up after days of failures", () =>
+  journey("MemberPointsStoreAccount"));
 it("a paid pickup earns for the guest who ordered it, once, and for nobody else", () =>
   journey("MemberPointsPickup"));
 // WP-2423 item 8 ④: a split table pays one part in cash (some of it refunded), the guests leave;
@@ -1073,29 +1077,31 @@ async function journey(journeyEnding) {
                     ? "wp2423_plcwhole"
                     : ending === "MemberPointsOnline"
                       ? "wp2423_plmembon"
-                      : ending === "MemberPointsPickup"
-                        ? "wp2423_plmembpk"
-                        : ending === "MemberPoints"
-                          ? "wp2423_plmember"
-                          : ending === "MemberPointsSplit"
-                            ? "wp2423_plmembsp"
-                            : ending === "MemberPointsWrittenOff"
-                              ? "wp2423_plmembwo"
-                              : ending === "PaidSplit"
-                                ? "wp2423_plsplit"
-                                : ending === "SplitWrittenOff"
-                                  ? "wp2423_plsplwo"
-                                  : ending === "Held"
-                                    ? "wp2423_plheld"
-                                    : ending === "HeldAtCheckout"
-                                      ? "wp2423_plheldco"
-                                      : ending === "TipsOff"
-                                        ? "wp2423_pltips"
-                                        : ending === "Moved"
-                                          ? "wp2423_plmove"
-                                          : ending === "Merged"
-                                            ? "wp2423_plmerge"
-                                            : "wp2423_plon",
+                      : ending === "MemberPointsStoreAccount"
+                        ? "wp2423_plmembac"
+                        : ending === "MemberPointsPickup"
+                          ? "wp2423_plmembpk"
+                          : ending === "MemberPoints"
+                            ? "wp2423_plmember"
+                            : ending === "MemberPointsSplit"
+                              ? "wp2423_plmembsp"
+                              : ending === "MemberPointsWrittenOff"
+                                ? "wp2423_plmembwo"
+                                : ending === "PaidSplit"
+                                  ? "wp2423_plsplit"
+                                  : ending === "SplitWrittenOff"
+                                    ? "wp2423_plsplwo"
+                                    : ending === "Held"
+                                      ? "wp2423_plheld"
+                                      : ending === "HeldAtCheckout"
+                                        ? "wp2423_plheldco"
+                                        : ending === "TipsOff"
+                                          ? "wp2423_pltips"
+                                          : ending === "Moved"
+                                            ? "wp2423_plmove"
+                                            : ending === "Merged"
+                                              ? "wp2423_plmerge"
+                                              : "wp2423_plon",
     },
     async (context) => {
       const admin = new Client(context.clientConfig);
@@ -5837,7 +5843,8 @@ async function journey(journeyEnding) {
           assert.equal((await port.state(guest())).offered, true);
           assert.equal((await port.state(guest())).claim, null, "nothing paid yet");
 
-          if (ending === "MemberPointsOnline") {
+          if (ending === "MemberPointsOnline" || ending === "MemberPointsStoreAccount") {
+            const storeAccount = ending === "MemberPointsStoreAccount";
             const token = await join("+16135550171");
             // The bill's money: dishes earn, whichever phone is asking.
             const { intents, stripe } = providerStandIn();
@@ -5872,6 +5879,17 @@ async function journey(journeyEnding) {
               "SELECT total_minor::text AS total FROM rms_payment.dining_table_settlement WHERE order_id=$1",
               [orderReference],
             );
+            // The Store's own sweep, on a clock of its own: it succeeds now, before any refund.
+            let sweepClock = null;
+            const ownSweep = createMemberPointsSweep({
+              scope: { ...ownerScope, providerAccountReference: provider, environment: "Test" },
+              transactions: transactions(),
+              protector,
+              messages,
+              nextReference: fresh,
+              now: () => sweepClock ?? clock(),
+            });
+            if (storeAccount) assert.equal(await ownSweep.settlePoints(), 0);
             const refunded = await createMerchantDiningTableOnlineRefund({
               persistence: persistenceOf(manager),
               authentication: manager.authentication,
@@ -5890,6 +5908,48 @@ async function journey(journeyEnding) {
               },
             });
             assert.equal(refunded.payment.onlineRefunds[0].state, "Refunded");
+            if (storeAccount) {
+              const pointRows = async () =>
+                (
+                  await rows(
+                    "SELECT count(*)::int AS n FROM rms_loyalty.loyalty_points_transaction WHERE brand_id=$1",
+                    [scope.brandReference],
+                  )
+                )[0].n;
+              const written = await pointRows();
+              // v15: a Store's worker named another Store's Provider account. Its ledger holds none
+              // of this Store's captures, so the sweep refuses, names the rule and writes nothing.
+              const otherAccount = createMemberPointsSweep({
+                scope: { ...ownerScope, providerAccountReference: fresh(), environment: "Test" },
+                transactions: transactions(),
+                protector,
+                messages,
+                nextReference: fresh,
+                now: clock,
+              });
+              await assert.rejects(otherAccount.settlePoints(), (error) => {
+                assert.equal(error.message, "STORE_SALES_PAYMENT_LEDGER_UNAVAILABLE");
+                assert.equal(error.rule, "OnlineCapturesDisagree");
+                return true;
+              });
+              assert.equal(await pointRows(), written);
+              assert.equal(await pointsOf(token), before);
+              // Its sweeps then fail for five days (no run succeeds); the next success reaches back
+              // to its last one, though that is past the usual three days.
+              sweepClock = new Date(Date.now() + 5 * 86_400_000).toISOString();
+              assert.ok(
+                (await ownSweep.settlePoints()) > 0,
+                "the refund five days back is settled",
+              );
+              assert.equal(
+                await pointsOf(token),
+                before - Number((BigInt(earned) * 1000n) / BigInt(paidOnline.total)),
+              );
+              assert.equal(await ownSweep.settlePoints(), 0, "running it again changes nothing");
+              // A process's first sweep looks back two weeks; it finds the same, already settled.
+              assert.equal(await sweep.settlePoints(), 0);
+              return;
+            }
             assert.ok((await sweep.settlePoints()) > 0);
             assert.equal(
               await pointsOf(token),

@@ -21,6 +21,14 @@ import { storeOffersPoints } from "./merchant-store-features.js";
  */
 export const memberPointsSweepIntervalMs = 5 * 60_000;
 const refundLookbackMs = 3 * 86_400_000;
+/**
+ * v15 2026-11-06 (points-sweep): how far a sweep catches up. A process's first sweep looks back this
+ * far; after a run of failed sweeps, the next one reaches back to its last success (less the usual
+ * three days), up to this far. Sweeping again changes nothing, so the overlap is harmless. A sweep
+ * failing longer than this has been raised to a person for two weeks by then (the workload's
+ * attention rule); older refunds are left to them.
+ */
+export const memberPointsCatchUpMs = 14 * 86_400_000;
 const expiryBatch = 50;
 
 export function createMemberPointsSweep(options: {
@@ -114,12 +122,19 @@ export function createMemberPointsSweep(options: {
     return changed;
   };
 
+  // When this process's last sweep of refunds succeeded (its clock), or null before the first.
+  let settledAt: number | null = null;
   return Object.freeze({
     /** Refunds and unpaid tables since a few days ago: the ledger catches up with them. */
     async settlePoints(): Promise<number> {
-      const startsAt = new Date(Date.parse(options.now()) - refundLookbackMs).toISOString();
-      const endsAt = new Date(Date.parse(options.now()) + 1000).toISOString();
-      return options.transactions.run(async (tx) => {
+      const now = Date.parse(options.now());
+      const lookbackMs =
+        settledAt === null
+          ? memberPointsCatchUpMs
+          : Math.min(memberPointsCatchUpMs, Math.max(0, now - settledAt) + refundLookbackMs);
+      const startsAt = new Date(now - lookbackMs).toISOString();
+      const endsAt = new Date(now + 1000).toISOString();
+      const changed = await options.transactions.run(async (tx) => {
         const ledger = await createPostgresStoreSalesPaymentLedger({
           scope,
           authorize: async () => true,
@@ -153,6 +168,8 @@ export function createMemberPointsSweep(options: {
         }
         return changed;
       });
+      settledAt = now;
+      return changed;
     },
 
     /**
