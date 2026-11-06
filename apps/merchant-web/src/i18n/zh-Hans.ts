@@ -8534,4 +8534,46 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "This page can't be opened": "这一页打不开",
   "The system's answer could not be read. Reload the page; if it happens again, keep serving with paper slips and tell the store's owner.":
     "系统的回应无法读取。请刷新页面；如果还是这样，先用纸质点单继续营业，并告诉店主。",
+  // merchant-outage-recovery: Orders during a busy or broken spell.
+  "This device is offline. The orders show by themselves as soon as the network is back.":
+    "这台设备没有联网。网络一恢复，订单会自己显示出来。",
+  "Orders can't be read right now. Retrying on its own; they show as soon as the connection is back.":
+    "暂时读不到订单，正在自动重试，网络一恢复就会显示。",
+  "New order": "新单",
+  "round {sequence}": "第 {sequence} 轮",
+  "Accepting…": "正在接单…",
+  "Accept all {count}": "全部接单（{count}）",
+  "Accepted {accepted} of {count}.": "已接 {accepted} 单，共 {count} 单。",
+  "{orders} changed since it was loaded: check it.": "{orders} 读取后有变化，请查看。",
+  "{orders}: the network dropped, so tap Accept on it again; it won't be accepted twice.":
+    "{orders}：网络断了，请再按一次「接单」，不会重复接单。",
+  "Accept is paused until the connection is back.": "网络恢复前暂时不能接单。",
+  "Accept again ": "再按一次接单 ",
+  "Still working; the system is busy. No need to tap again, this finishes by itself.":
+    "还在处理，系统有点忙。不用再按，会自己完成。",
+  "The network dropped, so this may not have gone through. Tap it again once you're connected; it won't be done twice.":
+    "网络断了，这次可能没有完成。连上网后再按一次，不会重复。",
+  "The network dropped, so we can't tell whether this order was accepted. Tap Accept again once you're connected; it won't be accepted twice.":
+    "网络断了，不确定这单接上没有。连上网后再按一次「接单」，不会重复接单。",
+  "Sound is off. New orders won't ring on this screen.": "声音已关，新订单在这块屏幕上不会响。",
+  "Turn sound on": "打开声音",
+  "{orders} could not be accepted here: open it to see why.":
+    "{orders} 在这里接不了单，请打开看原因。",
+  "The bill could not be read again; showing the last update. Trying again by itself.":
+    "账单暂时无法重新读取，显示的是上次的内容，正在自动重试。",
+  "The network dropped, so this may not have gone through. Once you're connected, check whether the change is there before you do it again.":
+    "网络断了，这次可能没有完成。连上网后，先看看改动是否已经保存，再决定要不要重做。",
+  "You're offline, so the menu wasn't listed. List it again once you're connected.":
+    "网络断了，菜单没有上架。连上网后再按「上架」。",
+  "The network dropped, so we can't tell whether the menu was listed. Tap List it again once you're connected; it won't be listed twice.":
+    "网络断了，不确定菜单有没有上架。连上网后再按一次「上架」，不会重复上架。",
+  "The network dropped, so the new order wasn't saved. Your arrangement is still here; tap Save order again once you're connected.":
+    "网络断了，新顺序没有保存。排好的顺序还在，连上网后再按「保存顺序」。",
+  "The new order wasn't saved. Your arrangement is still here; tap Save order again.":
+    "新顺序没有保存。排好的顺序还在，请再按「保存顺序」。",
+  "Order placed": "下单时间",
+  "You were signed out here because this account signed in on too many screens. The screen used longest ago signs out first. Sign in again to keep working.":
+    "这个账号在太多块屏幕上登录了，最早使用的这块屏幕已被退出。请重新登录继续工作。",
+  "One account works on a limited number of screens. Signing in here may sign out the screen used longest ago.":
+    "一个账号能同时登录的屏幕有限，在这里登录可能会让最早使用的屏幕退出。",
 });

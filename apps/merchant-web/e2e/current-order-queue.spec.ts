@@ -263,27 +263,27 @@ test("@production acceptance retries the same operation after a lost response", 
   await page.goto("/operations/orders");
   await page.getByRole("button", { name: "Accept ORD-1 · round 2", exact: true }).first().click();
   await expect(
-    page.getByText("Acceptance could not be confirmed.", { exact: false }),
+    page.getByText("we can't tell whether this order was accepted", { exact: false }),
   ).toBeVisible();
   const searchOrder = page.getByRole("searchbox", { name: "Exact order number" });
   await searchOrder.fill("ORD-2");
   await expect(page.locator("li.order-row").first()).toHaveAttribute("hidden", "");
   await expect(
-    page.getByRole("button", { name: "Retry acceptance for ORD-1 · round 2", exact: true }).first(),
+    page.getByRole("button", { name: "Accept again ORD-1 · round 2", exact: true }).first(),
   ).toBeHidden();
   await page.getByRole("button", { name: "Clear order filters" }).click();
   await expect(
-    page.getByRole("button", { name: "Retry acceptance for ORD-1 · round 2", exact: true }).first(),
+    page.getByRole("button", { name: "Accept again ORD-1 · round 2", exact: true }).first(),
   ).toBeVisible();
   // Orders v2: opening the order moves its Accept into the panel and closing it brings it back to
   // the row; either way the pending retry is kept.
   await openOrder(page, "ORD-1");
   await expect(
-    page.getByRole("button", { name: "Retry acceptance for ORD-1 · round 2", exact: true }).first(),
+    page.getByRole("button", { name: "Accept again ORD-1 · round 2", exact: true }).first(),
   ).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(
-    page.getByRole("button", { name: "Retry acceptance for ORD-1 · round 2", exact: true }).first(),
+    page.getByRole("button", { name: "Accept again ORD-1 · round 2", exact: true }).first(),
   ).toBeVisible();
   expect(bodies).toHaveLength(1);
   await openOrder(page, "ORD-1");
@@ -293,7 +293,7 @@ test("@production acceptance retries the same operation after a lost response", 
       .getByText("Acceptance: Not accepted", { exact: true }),
   ).toBeVisible();
   await page
-    .getByRole("button", { name: "Retry acceptance for ORD-1 · round 2", exact: true })
+    .getByRole("button", { name: "Accept again ORD-1 · round 2", exact: true })
     .first()
     .click();
   // Orders v3: an accepted round no longer says it waits for acceptance.

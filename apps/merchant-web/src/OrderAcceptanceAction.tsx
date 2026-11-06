@@ -1,5 +1,7 @@
 import { t } from "./i18n/i18n.js";
 import { useEffect, useRef, useState } from "react";
+import { acceptanceUnknownText } from "./failure-words.js";
+import { SlowWaitNotice } from "./slow-wait.js";
 import {
   OrderAcceptanceClientError,
   type OrderAcceptanceConflict,
@@ -14,7 +16,14 @@ export function OrderAcceptanceAction({
   onRejected,
   onChanged,
   resumeUnknown = false,
+  paused = false,
 }: {
+  /**
+   * merchant-outage-recovery M100: this device has no network, so an Accept could not be sent.
+   * Only offline pauses it: a list that could not be refreshed still accepts, because the server
+   * refuses an outdated accept (Changed, AlreadyAccepted) and a paid order's refund deadline runs.
+   */
+  readonly paused?: boolean;
   readonly orderNumber: string;
   /**
    * Orders v2: this round's earlier attempt is still unresolved (its operation is kept only until
@@ -37,7 +46,7 @@ export function OrderAcceptanceAction({
   const pending = useRef<AbortController | null>(null);
   useEffect(() => () => pending.current?.abort(), []);
   const accept = async () => {
-    if (pending.current !== null) return;
+    if (pending.current !== null || paused) return;
     const controller = new AbortController();
     pending.current = controller;
     setState("Submitting");
@@ -69,9 +78,13 @@ export function OrderAcceptanceAction({
   return (
     <div className="card-actions order-accept-action">
       {state === "Idle" || state === "Submitting" || state === "Unknown" || state === "Changed" ? (
-        <button data-state={state} disabled={state === "Submitting"} onClick={() => void accept()}>
+        <button
+          data-state={state}
+          disabled={state === "Submitting" || paused}
+          onClick={() => void accept()}
+        >
           {state === "Unknown"
-            ? t("Retry acceptance for ")
+            ? t("Accept again ")
             : state === "Submitting"
               ? t("Accepting ")
               : t("Accept ")}
@@ -80,10 +93,10 @@ export function OrderAcceptanceAction({
           <span className="order-accept-action__number">{orderNumber}</span>
         </button>
       ) : null}
+      <SlowWaitNotice busy={state === "Submitting"} />
+      {paused ? <p role="status">{t("Accept is paused until the connection is back.")}</p> : null}
       {state === "Unknown" ? (
-        <p role="status">
-          {t("Acceptance could not be confirmed. Retry the same request to recover its result.")}
-        </p>
+        <p role="status">{acceptanceUnknownText}</p>
       ) : state === "Changed" ? (
         <p role="status">
           {t(

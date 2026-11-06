@@ -49,7 +49,12 @@ import {
 import { orderMoney } from "./order-money.js";
 export { orderMoney } from "./order-money.js";
 import { CardMachineRefundAction } from "./CardMachineRefundAction.js";
-import { createOrderAcceptanceClient } from "./order-acceptance-client.js";
+import {
+  OrderAcceptanceClientError,
+  createOrderAcceptanceClient,
+} from "./order-acceptance-client.js";
+import { SlowWaitNotice } from "./slow-wait.js";
+import { useRememberedAlertSound } from "./alert-sound.js";
 import { serviceOperationReference } from "./service-control-client.js";
 import { StatePanel } from "@bop-rms/ui";
 import { playKitchenChime } from "./alert-chime.js";
@@ -65,6 +70,7 @@ export { storeTime } from "./StoreTime.js";
 export { counterAwaitingCardMachine, counterPayByText, counterPayByTier };
 import { Fragment, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useStaffSessionLive } from "./staff-session-reads.js";
+import { browserOffline, useStaleRetry } from "./stale-read.js";
 import { Link, useLocation, useNavigate, useParams } from "react-router";
 import { StaffRoundPaymentAction } from "./StaffRoundPaymentAction.js";
 import {
@@ -1344,6 +1350,45 @@ export function acceptanceWindow(acceptBy: string | null, now: number) {
   };
 }
 /** WP-2423 Q1: batches staff can accept now, keyed by batch reference. */
+/**
+ * merchant-outage-recovery M43: when an order's waiting rounds started waiting (the earliest of
+ * them), for the oldest-first order of the orders still to accept. A table's later round counts
+ * from when it was sent, not from when the table opened.
+ */
+export function awaitingSince(order: CurrentOrderQueue["items"][number]): string {
+  const starts = order.batches
+    .filter((batch) => batch.canRequestAcceptance)
+    .map((batch) => batch.awaitingAcceptanceSince ?? batch.submittedAt ?? order.submittedAt);
+  return starts.length === 0 ? order.submittedAt : starts.reduce((a, b) => (b < a ? b : a));
+}
+/**
+ * merchant-outage-recovery M43: within each day group of the list (the server's order), the orders
+ * still waiting for acceptance come first, the one waiting longest on top, so a new order lands at
+ * the end of that group instead of pushing the others down. The rest keep the server's order.
+ */
+export function awaitingFirst<T extends CurrentOrderQueue["items"][number]>(
+  items: readonly T[],
+): readonly T[] {
+  const group = (order: T) =>
+    order.heldStock !== null || order.earlierOpenPickup ? "held" : (order.listedBusinessDate ?? "");
+  const result: T[] = [];
+  let run: T[] = [];
+  const flush = () => {
+    const waiting = run
+      .filter(isAwaitingAcceptance)
+      .map((order, index) => ({ order, index, since: awaitingSince(order) }))
+      .sort((a, b) => (a.since < b.since ? -1 : a.since > b.since ? 1 : a.index - b.index))
+      .map((entry) => entry.order);
+    result.push(...waiting, ...run.filter((order) => !isAwaitingAcceptance(order)));
+    run = [];
+  };
+  for (const order of items) {
+    if (run.length > 0 && group(run[0] as T) !== group(order)) flush();
+    run.push(order);
+  }
+  flush();
+  return result;
+}
 export function awaitingBatchReferences(view: CurrentOrderQueue): ReadonlySet<string> {
   return new Set(
     view.items.flatMap((order) =>
@@ -2075,7 +2120,10 @@ export function CurrentOrderQueueRows({
   rowAction,
   before,
   after,
+  fresh,
 }: {
+  /** merchant-outage-recovery M43: orders that arrived since this page loaded, not yet opened. */
+  readonly fresh?: ReadonlySet<string> | undefined;
   readonly view: CurrentOrderQueue;
   /** Figma v1: the order's next step, shown at the end of its row on the list (outside the row's
       button, so it is its own control). Kept while the panel shows the same order (Owner). */
@@ -2234,6 +2282,7 @@ export function CurrentOrderQueueRows({
                   <li
                     className="order-row"
                     data-open={isOpen ? "true" : undefined}
+                    data-new={fresh?.has(order.orderReference) === true ? "true" : undefined}
                     hidden={!listed(order)}
                   >
                     <div className="order-row__summary">
@@ -2251,6 +2300,9 @@ export function CurrentOrderQueueRows({
                         >
                           {orderLabel(order, today)}
                         </button>
+                        {fresh?.has(order.orderReference) === true ? (
+                          <span className="order-row__new">{t("New order")}</span>
+                        ) : null}
                       </h3>
                       <span className="order-row__what">
                         {/* Orders v2: what it is (its items), then who and when. */}
@@ -2730,26 +2782,15 @@ export function CurrentOrderQueuePage({
   );
   const [linesRevision, setLinesRevision] = useState(0);
   const background = useRef<AbortController | null>(null);
-  const [soundOn, setSoundOn] = useState(false);
-  const audio = useRef<AudioContext | null>(null);
+  // merchant-outage-recovery M42: this device remembers that staff wanted sound on Orders.
+  const {
+    soundOn,
+    soundResumes,
+    toggle: toggleSound,
+    audio,
+  } = useRememberedAlertSound("bop.orders.sound");
   const seenAwaiting = useRef<ReadonlySet<string> | null>(null);
   const urgentAlerted = useRef(new Set<string>());
-  const toggleSound = () => {
-    setSoundOn((value) => {
-      const next = !value;
-      if (next) {
-        // Created inside the operator's tap so the browser allows it to play later.
-        try {
-          const Audio = (globalThis as { AudioContext?: typeof AudioContext }).AudioContext;
-          audio.current ??= Audio ? new Audio() : null;
-          if (audio.current) playKitchenChime(audio.current);
-        } catch {
-          audio.current = null;
-        }
-      }
-      return next;
-    });
-  };
   useEffect(() => {
     const controller = new AbortController();
     setState({ kind: "Loading" });
@@ -2762,6 +2803,7 @@ export function CurrentOrderQueuePage({
     )
       .then((ready) => {
         if (controller.signal.aborted) return;
+        setFirstReadFailures(0);
         setState(ready);
         setUpdatedAt(Date.now());
       })
@@ -2805,38 +2847,44 @@ export function CurrentOrderQueuePage({
       if (document.visibilityState === "visible") tick();
     };
     document.addEventListener("visibilitychange", visible);
+    // merchant-outage-recovery M102: back online, the list reads again at once.
+    window.addEventListener("online", tick);
     return () => {
       clearInterval(timer);
       document.removeEventListener("visibilitychange", visible);
+      window.removeEventListener("online", tick);
       background.current?.abort();
       background.current = null;
     };
   }, [ready, live, after, orderReference, client]);
-  // WP-2423 item 10: the first read failed on our side, and the panel says this screen keeps trying.
-  // Each try is quiet: the panel stays until a read works. A new failure is a new state, so the next
-  // try is armed by this effect again.
-  useEffect(() => {
-    if (state.kind !== "ServerProblem" || !live) return;
+  // WP-2423 item 10, merchant-outage-recovery M102: the first read failed (the server, no answer,
+  // or no network), and the panel says this screen keeps trying: 5 s, 10 s, 20 s, then every 30 s,
+  // and at once when the network is back. Each try is quiet: the panel stays until a read works. A
+  // denial or a missing order is an answer, not retried.
+  const [firstReadFailures, setFirstReadFailures] = useState(0);
+  const firstReadRetrying = state.kind === "ServerProblem" || state.kind === "Unavailable";
+  const quietRead = useRef<AbortController | null>(null);
+  useEffect(() => () => quietRead.current?.abort(), []);
+  useStaleRetry(firstReadRetrying ? Math.max(firstReadFailures, 1) : null, () => {
+    if (quietRead.current !== null) return;
     const controller = new AbortController();
-    const timer = setTimeout(() => {
-      void readCurrentOrders(client, after, orderReference, controller.signal)
-        .then((next) => {
-          if (controller.signal.aborted) return;
-          setState({ kind: "Ready", ...next });
-          setUpdatedAt(Date.now());
-        })
-        .catch((error: unknown) => {
-          if (!controller.signal.aborted)
-            setState({
-              kind: error instanceof CurrentOrderQueueError ? error.code : "Unavailable",
-            });
-        });
-    }, ORDER_REFRESH_MS);
-    return () => {
-      clearTimeout(timer);
-      controller.abort();
-    };
-  }, [state, live, after, orderReference, client]);
+    quietRead.current = controller;
+    void readCurrentOrders(client, after, orderReference, controller.signal)
+      .then((next) => {
+        if (controller.signal.aborted) return;
+        setFirstReadFailures(0);
+        setState({ kind: "Ready", ...next });
+        setUpdatedAt(Date.now());
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return;
+        setFirstReadFailures((count) => count + 1);
+        setState({ kind: error instanceof CurrentOrderQueueError ? error.code : "Unavailable" });
+      })
+      .finally(() => {
+        if (quietRead.current === controller) quietRead.current = null;
+      });
+  });
   // WP-2423 Q1: chime for orders that arrived since the previous read and once when an order
   // enters its last five minutes, when the operator turned sound on.
   useEffect(() => {
@@ -2847,6 +2895,24 @@ export function CurrentOrderQueuePage({
         ? []
         : [...awaiting].filter((reference) => !seenAwaiting.current?.has(reference));
     seenAwaiting.current = awaiting;
+    // M43: an order with a round that arrived since the page loaded is marked New until opened
+    // or no longer waiting.
+    const arrivedOrders = new Set(
+      state.view.items
+        .filter((order) =>
+          order.batches.some((batch) => arrived.includes(batch.orderBatchReference)),
+        )
+        .map((order) => order.orderReference),
+    );
+    const stillAwaiting = new Set(
+      state.view.items.filter(isAwaitingAcceptance).map((order) => order.orderReference),
+    );
+    setFresh((current) => {
+      const next = new Set([...current, ...arrivedOrders].filter((key) => stillAwaiting.has(key)));
+      return next.size === current.size && [...next].every((key) => current.has(key))
+        ? current
+        : next;
+    });
     const urgent = state.view.items.filter(
       (order) =>
         isAwaitingAcceptance(order) &&
@@ -2858,6 +2924,21 @@ export function CurrentOrderQueuePage({
       playKitchenChime(audio.current);
   }, [state, now, soundOn]);
   const awaitingCount = state.kind === "Ready" ? ordersAwaitingAcceptance(state.view) : 0;
+  // M43: what arrived since the page loaded; opening an order clears its mark.
+  const [fresh, setFresh] = useState<ReadonlySet<string>>(new Set());
+  useEffect(() => {
+    if (opened.size === 0) return;
+    setFresh((current) =>
+      [...opened].some((key) => current.has(key))
+        ? new Set([...current].filter((key) => !opened.has(key)))
+        : current,
+    );
+  }, [opened]);
+  const sortedView = useMemo(
+    () =>
+      state.kind === "Ready" ? { ...state.view, items: awaitingFirst(state.view.items) } : null,
+    [state],
+  );
   // WP-2423 Q1: a background tab still shows how many orders wait for acceptance.
   useEffect(() => {
     const base = document.title.replace(/^\(\d+\) /u, "");
@@ -2874,6 +2955,10 @@ export function CurrentOrderQueuePage({
   }, [state]);
   const reload = (cursor: string | null) => {
     if (servingOrders.current.size > 0) return;
+    // merchant-outage-recovery M102/M43: the same page reads again in place, keeping what it shows
+    // (and staff's place and focus); a failed read leaves it on screen marked as not refreshed. Only
+    // another page, or a page that never loaded, goes through Loading.
+    if (state.kind === "Ready" && cursor === after) return refreshInPlace();
     restoreFocus.current = true;
     // WP-2423 Q6: a fresh read replaces the "could not be refreshed" notice from earlier polls.
     setStale("No");
@@ -2887,8 +2972,15 @@ export function CurrentOrderQueuePage({
    * and focus stays with staff instead of jumping to Refresh. A poll in flight read before the
    * action, so it is replaced. A failed reread keeps the view and says it could not be refreshed.
    */
-  const refreshInPlace = () => {
+  const refreshAfterServing = useRef(false);
+  function refreshInPlace(): void {
     if (state.kind !== "Ready") return reload(after);
+    // A serving command still in flight: read once it has finished, so the read neither cancels
+    // nor races it (the poll waits for it the same way).
+    if (servingOrders.current.size > 0) {
+      refreshAfterServing.current = true;
+      return;
+    }
     background.current?.abort();
     const controller = new AbortController();
     background.current = controller;
@@ -2907,7 +2999,7 @@ export function CurrentOrderQueuePage({
       .finally(() => {
         if (background.current === controller) background.current = null;
       });
-  };
+  }
   const filteredOrders = useMemo(() => {
     if (state.kind !== "Ready") return [];
     return filterCurrentOrderItems(state.view.items, {
@@ -2938,6 +3030,115 @@ export function CurrentOrderQueuePage({
   };
   const single = orderReference !== undefined;
   const detail = state.kind === "Ready" ? state.detail : undefined;
+  // M100: only a device with no network pauses Accept (see OrderAcceptanceAction).
+  const [offline, setOffline] = useState(browserOffline);
+  useEffect(() => {
+    const update = () => setOffline(browserOffline());
+    window.addEventListener("online", update);
+    window.addEventListener("offline", update);
+    return () => {
+      window.removeEventListener("online", update);
+      window.removeEventListener("offline", update);
+    };
+  }, []);
+  /** One acceptance per round, kept until its outcome is known, so a retry is the same request. */
+  const prepareAcceptance = (
+    order: CurrentOrderQueue["items"][number],
+    batch: CurrentOrderQueue["items"][number]["batches"][number],
+  ) => {
+    let operation = operations.current.get(batch.orderBatchReference);
+    if (!operation) {
+      operation = createOrderAcceptanceClient(fetcher).prepare({
+        acceptanceReference: serviceOperationReference(),
+        operationReference: serviceOperationReference(),
+        orderReference: order.orderReference,
+        orderBatchReference: batch.orderBatchReference,
+        expectedOrderVersion: order.currentVersion ?? 0,
+      });
+      operations.current.set(batch.orderBatchReference, operation);
+    }
+    return operation;
+  };
+  /**
+   * merchant-outage-recovery M43: "Accept all" on To accept. The rounds shown are accepted one at
+   * a time, each its own recorded, attributed acceptance with its own reference (no batch command),
+   * and the list then reads again once. What could not be accepted is named.
+   */
+  const [acceptAll, setAcceptAll] = useState<{
+    readonly running: boolean;
+    readonly summary: string | null;
+  }>({ running: false, summary: null });
+  const acceptAllRunning = useRef(false);
+  const acceptAllTargets =
+    state.kind === "Ready" && phaseFilter === "AwaitingAcceptance" && !single
+      ? awaitingFirst(filteredOrders).flatMap((order) =>
+          order.batches
+            .filter((batch) => acceptsInRow(order, batch, now))
+            .map((batch) => ({
+              order,
+              batch,
+              label:
+                batch.sequence === 1
+                  ? orderLabel(order, today)
+                  : orderLabel(order, today) +
+                    " · " +
+                    t("round {sequence}", { sequence: batch.sequence }),
+            })),
+        )
+      : [];
+  const runAcceptAll = async () => {
+    if (acceptAllRunning.current || offline || servingOrders.current.size > 0) return;
+    const targets = acceptAllTargets;
+    if (targets.length === 0) return;
+    acceptAllRunning.current = true;
+    setAcceptAll({ running: true, summary: null });
+    let accepted = 0;
+    const check: string[] = [];
+    const unknown: string[] = [];
+    const refused: string[] = [];
+    for (const target of targets) {
+      const reference = target.batch.orderBatchReference;
+      try {
+        await prepareAcceptance(target.order, target.batch).execute(csrf);
+        operations.current.delete(reference);
+        accepted += 1;
+      } catch (error) {
+        if (error instanceof OrderAcceptanceClientError && error.code === "Conflict") {
+          operations.current.delete(reference);
+          check.push(target.label);
+        } else if (error instanceof OrderAcceptanceClientError && error.code !== "OutcomeUnknown") {
+          operations.current.delete(reference);
+          refused.push(target.label);
+        } else unknown.push(target.label);
+      }
+    }
+    const parts = [
+      t("Accepted {accepted} of {count}.", { accepted, count: targets.length }),
+      ...(check.length === 0
+        ? []
+        : [t("{orders} changed since it was loaded: check it.", { orders: check.join(", ") })]),
+      ...(refused.length === 0
+        ? []
+        : [
+            t("{orders} could not be accepted here: open it to see why.", {
+              orders: refused.join(", "),
+            }),
+          ]),
+      ...(unknown.length === 0
+        ? []
+        : [
+            t(
+              "{orders}: the network dropped, so tap Accept on it again; it won't be accepted twice.",
+              {
+                orders: unknown.join(", "),
+              },
+            ),
+          ]),
+    ];
+    acceptAllRunning.current = false;
+    setAcceptAll({ running: false, summary: parts.join(" ") });
+    refreshInPlace();
+  };
   const acceptAction = (
     order: CurrentOrderQueue["items"][number],
     batch: CurrentOrderQueue["items"][number]["batches"][number],
@@ -2949,20 +3150,8 @@ export function CurrentOrderQueuePage({
       orderNumber={
         batch.sequence === 1 ? order.orderNumber : order.orderNumber + " · round " + batch.sequence
       }
-      operation={() => {
-        let operation = operations.current.get(batch.orderBatchReference);
-        if (!operation) {
-          operation = createOrderAcceptanceClient(fetcher).prepare({
-            acceptanceReference: serviceOperationReference(),
-            operationReference: serviceOperationReference(),
-            orderReference: order.orderReference,
-            orderBatchReference: batch.orderBatchReference,
-            expectedOrderVersion: order.currentVersion ?? 0,
-          });
-          operations.current.set(batch.orderBatchReference, operation);
-        }
-        return operation;
-      }}
+      paused={offline}
+      operation={() => prepareAcceptance(order, batch)}
       onRejected={() => operations.current.delete(batch.orderBatchReference)}
       onChanged={() => reload(after)}
       onAccepted={() => {
@@ -3077,7 +3266,8 @@ export function CurrentOrderQueuePage({
         {state.kind === "Ready" ? (
           <CurrentOrderQueueRows
             single={single}
-            view={state.view}
+            view={sortedView ?? state.view}
+            fresh={fresh}
             timeZone={timeZone}
             now={now}
             paymentPosition={detail?.paymentPosition}
@@ -3109,6 +3299,37 @@ export function CurrentOrderQueuePage({
                           { count: String(state.view.unreadable.length) },
                         )}
                   </p>
+                ) : null}
+                {!soundOn && !single && awaitingCount > 0 ? (
+                  <div className="order-sound-notice" role="status">
+                    <p>
+                      {soundResumes
+                        ? t("Sound turns back on at your next tap on this screen.")
+                        : t("Sound is off. New orders won't ring on this screen.")}
+                    </p>
+                    {soundResumes ? null : (
+                      <button type="button" onClick={toggleSound}>
+                        {t("Turn sound on")}
+                      </button>
+                    )}
+                  </div>
+                ) : null}
+                {acceptAllTargets.length >= 2 || acceptAll.summary !== null ? (
+                  <div className="order-accept-all">
+                    {acceptAllTargets.length >= 2 ? (
+                      <button
+                        type="button"
+                        disabled={acceptAll.running || offline || servingBusy}
+                        onClick={() => void runAcceptAll()}
+                      >
+                        {acceptAll.running
+                          ? t("Accepting…")
+                          : t("Accept all {count}", { count: acceptAllTargets.length })}
+                      </button>
+                    ) : null}
+                    <SlowWaitNotice busy={acceptAll.running} />
+                    {acceptAll.summary === null ? null : <p role="status">{acceptAll.summary}</p>}
+                  </div>
                 ) : null}
                 {stale === "No" ? null : (
                   <p className="order-queue-stale" role="status">
@@ -3434,6 +3655,10 @@ export function CurrentOrderQueuePage({
                   if (busy) servingOrders.current.add(order.orderReference);
                   else servingOrders.current.delete(order.orderReference);
                   setServingBusy(servingOrders.current.size > 0);
+                  if (servingOrders.current.size === 0 && refreshAfterServing.current) {
+                    refreshAfterServing.current = false;
+                    refreshInPlace();
+                  }
                 }}
               />
             )}
@@ -3701,6 +3926,7 @@ export function CurrentOrderQueuePage({
                             <OrderAcceptanceAction
                               key={batch.orderBatchReference}
                               resumeUnknown={operations.current.has(batch.orderBatchReference)}
+                              paused={offline}
                               csrf={csrf}
                               orderNumber={
                                 batch.sequence === 1
@@ -3806,7 +4032,13 @@ export function CurrentOrderQueuePage({
                     ? t("This order is not at the selected Store.")
                     : state.kind === "ServerProblem"
                       ? floorServerProblemText
-                      : t("Orders could not be refreshed. Check your connection and try again.")}
+                      : browserOffline()
+                        ? t(
+                            "This device is offline. The orders show by themselves as soon as the network is back.",
+                          )
+                        : t(
+                            "Orders can't be read right now. Retrying on its own; they show as soon as the connection is back.",
+                          )}
             </p>
           </StatePanel>
         )}

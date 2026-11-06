@@ -56,3 +56,24 @@ export const tableChangedText = t("This table changed. It has been read again.")
 export function isServerProblem(error: unknown): boolean {
   return (error as { code?: unknown } | null)?.code === "ServerProblem";
 }
+
+/**
+ * merchant-outage-recovery M155: a command sent while the network dropped. It carries a stable
+ * operation reference, so pressing again finishes the same change and never does it twice.
+ */
+export const offlineMayNotHaveGoneThroughText = t(
+  "The network dropped, so this may not have gone through. Tap it again once you're connected; it won't be done twice.",
+);
+
+/** merchant-outage-recovery M155: an Accept whose answer was lost (same acceptance reference). */
+export const acceptanceUnknownText = t(
+  "The network dropped, so we can't tell whether this order was accepted. Tap Accept again once you're connected; it won't be accepted twice.",
+);
+
+/**
+ * merchant-outage-recovery M155: a back-office change sent while the network dropped, where a new
+ * tap is a new request. Nothing is promised about repeats: staff check first.
+ */
+export const offlineCheckBeforeRepeatText = t(
+  "The network dropped, so this may not have gone through. Once you're connected, check whether the change is there before you do it again.",
+);

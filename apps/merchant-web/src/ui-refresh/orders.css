@@ -1523,3 +1523,50 @@
     padding-left: 12px;
   }
 }
+
+/* merchant-outage-recovery M43: an order that arrived since the page loaded. Words and a dot, no
+   box or side bar (merchant visual rules); the word carries it, not the colour. */
+.orders-page .order-row__new {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-inline-start: var(--bop-space-2);
+  color: var(--bop-color-accent);
+  font-size: 13px;
+  font-weight: 600;
+  vertical-align: 0.2em;
+}
+.orders-page .order-row__new::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--bop-color-accent);
+}
+.orders-page .order-accept-all {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--bop-space-2) var(--bop-space-4);
+  margin: 0 0 var(--bop-space-4);
+}
+.orders-page .order-accept-all p {
+  margin: 0;
+  font-size: 15px;
+}
+.slow-wait-notice {
+  margin: var(--bop-space-1) 0 0;
+  color: var(--bop-color-text-muted);
+  font-size: 13px;
+}
+.orders-page .order-sound-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--bop-space-2) var(--bop-space-4);
+  margin: 0 0 var(--bop-space-4);
+  font-size: 15px;
+}
+.orders-page .order-sound-notice p {
+  margin: 0;
+}
