@@ -38,6 +38,8 @@ export const staffOrderCancellationErrorCodes = [
   "ORDER_CANCELLATION_NOT_FOUND",
   "ORDER_CANCELLATION_VERSION_CONFLICT",
   "ORDER_CANCELLATION_PREPARATION_STARTED",
+  /** WP-2423 item 8a: a pickup with nothing for the kitchen to prepare is handed over or refunded. */
+  "ORDER_CANCELLATION_NOTHING_TO_PREPARE",
   "ORDER_CANCELLATION_NOT_CANCELLABLE",
   "ORDER_CANCELLATION_STOCK_NOT_RELEASABLE",
   "ORDER_CANCELLATION_UNAVAILABLE",
@@ -382,7 +384,7 @@ export async function cancelPaidBatch(
     (await loadKitchenBatchPreparationDecision(tx as never, selected, orderBatchReference))
       ?.allNotPrepared === true
   )
-    return fail("ORDER_CANCELLATION_PREPARATION_STARTED");
+    return fail("ORDER_CANCELLATION_NOTHING_TO_PREPARE");
   const created = await ordering.commit(tx, {
     plan,
     cancellationReference,

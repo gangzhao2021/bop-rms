@@ -2979,6 +2979,7 @@ it("WP-2423 Q6: protects staff cancellation transport and maps owner refusals to
     ["ORDER_CANCELLATION_NOT_FOUND", 404, "order_cancellation_not_found"],
     ["ORDER_CANCELLATION_VERSION_CONFLICT", 409, "order_version_conflict"],
     ["ORDER_CANCELLATION_PREPARATION_STARTED", 409, "order_preparation_started"],
+    ["ORDER_CANCELLATION_NOTHING_TO_PREPARE", 409, "order_nothing_to_prepare"],
     ["ORDER_CANCELLATION_NOT_CANCELLABLE", 409, "order_not_cancellable"],
     ["ORDER_CANCELLATION_STOCK_NOT_RELEASABLE", 409, "order_stock_not_releasable"],
     ["ORDER_CANCELLATION_UNAVAILABLE", 503, "order_cancellation_unavailable"],
@@ -6678,6 +6679,7 @@ it("WP-2423 Q6 step 2a: protects item cancellation transport and maps owner refu
   ).toBe("Refunded");
   for (const [code, status, error] of [
     ["ORDER_CANCELLATION_PREPARATION_STARTED", 409, "order_preparation_started"],
+    ["ORDER_CANCELLATION_NOTHING_TO_PREPARE", 409, "order_nothing_to_prepare"],
     ["ORDER_ITEM_CANCELLATION_STOCK_LEGACY", 409, "order_item_stock_legacy"],
     ["ORDER_CANCELLATION_PERMISSION_DENIED", 403, "order_cancellation_permission_denied"],
     ["ORDER_CANCELLATION_UNAVAILABLE", 503, "order_cancellation_unavailable"],

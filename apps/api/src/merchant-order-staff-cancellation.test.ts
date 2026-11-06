@@ -320,7 +320,7 @@ it("WP-2423 item 8a: a pickup with nothing for the kitchen to prepare was ready 
   });
   d.decision.mockResolvedValue({ allNotPrepared: true });
   await expect(f.operation(f.input)).rejects.toMatchObject({
-    code: "ORDER_CANCELLATION_PREPARATION_STARTED",
+    code: "ORDER_CANCELLATION_NOTHING_TO_PREPARE",
   });
   expect(d.decision.mock.calls[0]?.slice(1)).toEqual([
     { tenantReference: id(10), brandReference: id(3), storeReference: id(4) },

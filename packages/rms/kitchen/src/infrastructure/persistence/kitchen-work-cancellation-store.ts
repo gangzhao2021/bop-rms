@@ -227,8 +227,9 @@ export function createPostgresKitchenBatchCancellation(options: {
   async function execute(
     tx: ConsumerTransaction,
     raw: CancelInput,
-    target: CancellationScope,
+    requested: CancellationScope,
   ): Promise<KitchenBatchCancellationResult> {
+    let target = requested;
     const input = guarded(() => ({
       orderReference: parseKitchenTicketReference(raw.orderReference),
       orderBatchReference: parseKitchenTicketReference(raw.orderBatchReference),
@@ -303,6 +304,38 @@ export function createPostgresKitchenBatchCancellation(options: {
         };
       }),
     );
+    // WP-2423 item 8a: lines the kitchen left out of this round when it reached it (a fee, the
+    // tea) have no work to stop, as a round with no ticket has none. Only the other lines are
+    // cancelled here; a request for those lines alone needs no kitchen step.
+    if (target.kind === "Items") {
+      const lines = target.orderItemReferences;
+      const withoutWork = lines.filter(
+        (line) => !items.some((item) => item.orderItemReference === line),
+      );
+      if (withoutWork.length > 0) {
+        const decided = await tx.query(
+          "SELECT unnest(not_prepared_order_item_ids)::text AS item FROM rms_kitchen.kitchen_batch_preparation_decision " +
+            "WHERE brand_id=$1 AND store_id=$2 AND order_batch_id=$3 AND order_id=$4",
+          [brand, store, input.orderBatchReference, input.orderReference],
+        );
+        const leftOut = new Set<string>(
+          decided.rows.map((row) => guarded(() => parseKitchenTicketReference(row.item))),
+        );
+        if (withoutWork.some((line) => !leftOut.has(line))) return unavailable();
+        const withWork = lines.filter((line) => !leftOut.has(line));
+        if (withWork.length === 0)
+          return Object.freeze({
+            status: "NoKitchenWork" as const,
+            evidenceDigest: kitchenBatchCancellationEvidenceDigest({
+              orderReference: input.orderReference,
+              orderBatchReference: input.orderBatchReference,
+              kitchenTicketReference: ticketReference,
+              items: [],
+            }),
+          });
+        target = { kind: "Items", orderItemReferences: withWork };
+      }
+    }
 
     const existing = await loadKitchenWorkCancellations(tx, scope, ticketReference);
     if (
@@ -766,6 +799,38 @@ export async function listStoreKitchenOrderItemStates(
       if (!output.has(line)) output.set(line, "Started");
     }
     return output;
+  } catch {
+    return unavailable();
+  }
+}
+
+/**
+ * WP-2423 item 8a: batches (of at most 100 order batch references) the kitchen had nothing to
+ * prepare for when they reached it (a bottle, a bag fee). A pickup of such a round is ready for
+ * collection at once, so the merchant queue offers handover or refund, never "cancel".
+ */
+export async function listStoreKitchenBatchesWithNothingToPrepare(
+  tx: ConsumerTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  orderBatchReferences: readonly string[],
+): Promise<ReadonlySet<string>> {
+  const brand = guarded(() => parseKitchenTicketReference(scope.brandReference));
+  const store = guarded(() => parseKitchenTicketReference(scope.storeReference));
+  if (!Array.isArray(orderBatchReferences) || orderBatchReferences.length > 100)
+    return unavailable();
+  const batches = guarded(() =>
+    [...new Set(orderBatchReferences)].map((value) => parseKitchenTicketReference(value)),
+  );
+  if (batches.length === 0) return new Set();
+  try {
+    const result = await tx.query(
+      "SELECT order_batch_id::text AS order_batch_id FROM rms_kitchen.kitchen_batch_preparation_decision " +
+        "WHERE brand_id=$1 AND store_id=$2 AND order_batch_id=ANY($3::uuid[]) AND all_not_prepared",
+      [brand, store, batches],
+    );
+    const found = result.rows.map((row) => parseKitchenTicketReference(row.order_batch_id));
+    if (found.some((value) => !batches.includes(value))) return unavailable();
+    return new Set(found);
   } catch {
     return unavailable();
   }

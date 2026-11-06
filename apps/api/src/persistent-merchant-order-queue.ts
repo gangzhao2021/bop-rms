@@ -31,6 +31,7 @@ import {
 import {
   listStoreKitchenBatchTouches,
   listStoreKitchenBatchesNotPrepared,
+  listStoreKitchenBatchesWithNothingToPrepare,
   listStoreKitchenOrderItemStates,
   listStoreStartedKitchenBatches,
 } from "@rms/kitchen";
@@ -518,6 +519,11 @@ export function createPersistentMerchantOrderQueue(options: {
           };
           let confirmed: ReadonlySet<string> = new Set<string>();
           const started = new Set<string>();
+          /**
+           * WP-2423 item 8a: rounds the kitchen had nothing to prepare for (a bottle, a bag fee). A
+           * pickup of one is ready for collection at once: handed over or refunded, never cancelled.
+           */
+          const nothingToPrepare = new Set<string>();
           const itemCancellations = new Map<
             string,
             {
@@ -772,6 +778,13 @@ export function createPersistentMerchantOrderQueue(options: {
                   open.slice(index, index + 100),
                 ))
                   started.add(batch);
+              for (let index = 0; index < open.length; index += 100)
+                for (const batch of await listStoreKitchenBatchesWithNothingToPrepare(
+                  businessTransaction,
+                  scoped,
+                  open.slice(index, index + 100),
+                ))
+                  nothingToPrepare.add(batch);
             }
             // "Can't make it" is offered to whoever can accept, on batches the System accepted.
             if (!cancelAllowed && acceptanceAllowed && automaticBatches.length > 0) {
@@ -1449,7 +1462,8 @@ export function createPersistentMerchantOrderQueue(options: {
                               confirmed.has(batch.orderBatchReference) &&
                               !started.has(batch.orderBatchReference) &&
                               (item.orderType === "Pickup"
-                                ? item.currentPhase === "Accepted"
+                                ? item.currentPhase === "Accepted" &&
+                                  !nothingToPrepare.has(batch.orderBatchReference)
                                 : ["Submitted", "Accepted", "InProgress", "Ready"].includes(
                                     String(item.currentPhase),
                                   )))),

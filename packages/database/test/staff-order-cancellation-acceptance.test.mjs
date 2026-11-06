@@ -17,6 +17,7 @@ import {
   createKitchenWorkLifecycleService,
   createPostgresKitchenCustomerStatusReader,
   createPostgresKitchenWorkLifecycleStore,
+  recordKitchenBatchPreparationDecision,
 } from "../../rms/kitchen/src/index.ts";
 import {
   listStorePaidOrderBatches,
@@ -478,6 +479,8 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
           lineParts = {},
           // Real Pricing quote and line snapshots, for the Orders page's read of this Order.
           realSnapshots = false,
+          // WP-2423 item 8a: a round the kitchen had nothing to prepare for has no ticket.
+          kitchenTicket = true,
         },
       ) {
         const time = (offset) => baseTime(offset + shift);
@@ -950,58 +953,60 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
           );
 
           // Kitchen: the ticket created from the confirmed Batch, one queued work item per item.
-          await admin.query(
-            "INSERT INTO rms_kitchen.kitchen_ticket (kitchen_ticket_id,brand_id,store_id,order_id,order_batch_id,confirmation_id,consumer_name,consumer_version,source_event_id,source_aggregate_version,source_snapshot_digest,confirmed_at,correlation_id,semantic_event_binding_digest,source_evidence_id,source_evidence_version,source_evidence_digest,source_evidence_captured_at,work_plan_id,work_plan_version,work_plan_digest,work_plan_generated_at,aggregate_version,status,created_by_actor_type,updated_by_actor_type,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,'kitchen.confirmed-order:v1',1,$7,$8,$9,$10,$11,$12,$13,1,$14,$10,$16,1,$17,$15,1,'Open','System','System',$15,$15)",
-            [
-              refs.ticket,
-              brand,
-              store,
-              order.order,
-              refs.batch,
-              refs.confirmation,
-              refs.confirmedEvent,
-              version,
-              hash(["snapshot", b]),
-              acceptedAt,
-              refs.correlation,
-              hash(["binding", b]),
-              id(b + 97),
-              hash(["evidence", b]),
-              kitchenAt,
-              id(b + 98),
-              hash(["plan", b]),
-            ],
-          );
-          for (const [j, workItem] of refs.workItems.entries())
+          if (kitchenTicket) {
             await admin.query(
-              "INSERT INTO rms_kitchen.kitchen_work_item (kitchen_work_item_id,brand_id,store_id,kitchen_ticket_id,order_id,order_batch_id,order_item_id,source_evidence_id,work_plan_id,source_item_ordinal,split_ordinal,version,status,required_quantity,completed_quantity,product_id,product_version_id,sku_id,menu_version_id,localized_display_names_json,selected_options_json,source_line_digest,station_id,routing_rule_id,routing_rule_version,routing_rule_digest,preparation_id,preparation_version,preparation_digest,preparation_instructions_json,execution_snapshot_digest,created_by_actor_type,updated_by_actor_type,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,1,1,'Queued',1,0,$11,$12,$13,$14,$15::jsonb,'[]'::jsonb,$16,$17,$18,1,$19,$20,1,$21,$22::jsonb,$23,'System','System',$24,$24)",
+              "INSERT INTO rms_kitchen.kitchen_ticket (kitchen_ticket_id,brand_id,store_id,order_id,order_batch_id,confirmation_id,consumer_name,consumer_version,source_event_id,source_aggregate_version,source_snapshot_digest,confirmed_at,correlation_id,semantic_event_binding_digest,source_evidence_id,source_evidence_version,source_evidence_digest,source_evidence_captured_at,work_plan_id,work_plan_version,work_plan_digest,work_plan_generated_at,aggregate_version,status,created_by_actor_type,updated_by_actor_type,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,'kitchen.confirmed-order:v1',1,$7,$8,$9,$10,$11,$12,$13,1,$14,$10,$16,1,$17,$15,1,'Open','System','System',$15,$15)",
               [
-                workItem,
+                refs.ticket,
                 brand,
                 store,
-                refs.ticket,
                 order.order,
                 refs.batch,
-                refs.items[j],
+                refs.confirmation,
+                refs.confirmedEvent,
+                version,
+                hash(["snapshot", b]),
+                acceptedAt,
+                refs.correlation,
+                hash(["binding", b]),
                 id(b + 97),
-                id(b + 98),
-                j + 1,
-                id(700),
-                id(701),
-                id(702),
-                id(703),
-                JSON.stringify({ "en-CA": "Synthetic item " + (j + 1) }),
-                hash(["line", b, j]),
-                id(704),
-                id(705),
-                hash(["routing", b]),
-                id(706),
-                hash(["preparation-step", b]),
-                JSON.stringify(["Synthetic preparation"]),
-                hash(["execution", b, j]),
+                hash(["evidence", b]),
                 kitchenAt,
+                id(b + 98),
+                hash(["plan", b]),
               ],
             );
+            for (const [j, workItem] of refs.workItems.entries())
+              await admin.query(
+                "INSERT INTO rms_kitchen.kitchen_work_item (kitchen_work_item_id,brand_id,store_id,kitchen_ticket_id,order_id,order_batch_id,order_item_id,source_evidence_id,work_plan_id,source_item_ordinal,split_ordinal,version,status,required_quantity,completed_quantity,product_id,product_version_id,sku_id,menu_version_id,localized_display_names_json,selected_options_json,source_line_digest,station_id,routing_rule_id,routing_rule_version,routing_rule_digest,preparation_id,preparation_version,preparation_digest,preparation_instructions_json,execution_snapshot_digest,created_by_actor_type,updated_by_actor_type,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,1,1,'Queued',1,0,$11,$12,$13,$14,$15::jsonb,'[]'::jsonb,$16,$17,$18,1,$19,$20,1,$21,$22::jsonb,$23,'System','System',$24,$24)",
+                [
+                  workItem,
+                  brand,
+                  store,
+                  refs.ticket,
+                  order.order,
+                  refs.batch,
+                  refs.items[j],
+                  id(b + 97),
+                  id(b + 98),
+                  j + 1,
+                  id(700),
+                  id(701),
+                  id(702),
+                  id(703),
+                  JSON.stringify({ "en-CA": "Synthetic item " + (j + 1) }),
+                  hash(["line", b, j]),
+                  id(704),
+                  id(705),
+                  hash(["routing", b]),
+                  id(706),
+                  hash(["preparation-step", b]),
+                  JSON.stringify(["Synthetic preparation"]),
+                  hash(["execution", b, j]),
+                  kitchenAt,
+                ],
+              );
+          }
           order.batches.push(refs);
         }
         order.version = version;
@@ -1287,6 +1292,14 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
       // owner) while its stock stayed reserved — the v15 orders that ended before consumption.
       // After the last seeded round (stock ledger movements stay in time order).
       const legacy = await seedOrder(15000, { batches: [1], quantity: "1", shift: minutes(26) });
+      // WP-2423 item 8a: a paid, accepted pickup of only a bottle or a bag fee (no kitchen work).
+      const bottlePickup = await seedOrder(17000, {
+        batches: [1],
+        quantity: "1",
+        realSnapshots: true,
+        kitchenTicket: false,
+        shift: minutes(27),
+      });
       await admin.query(
         "INSERT INTO rms_ordering.order_termination_record (termination_id,operation_id,brand_id,store_id,order_id,order_batch_id,expected_order_version,terminated_order_version,expected_source_checkpoint,previous_phase,phase,actor_type,actor_id,purpose_code,permission_code,reason_code,workflow_version_id,transition_id,source_digest,terminated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'Accepted','Cancelled','System',NULL,'SyntheticLegacy','order.synthetic','SYNTHETIC_TEST',$10,$11,$12,$13)",
         [
@@ -1305,7 +1318,7 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
           time(-minutes(5)),
         ],
       );
-      assert.deepEqual(await stock(), { onHand: "20", reserved: "16" });
+      assert.deepEqual(await stock(), { onHand: "20", reserved: "17" });
       const nextDay = new Date(Date.parse(businessDate + "T12:00:00.000Z") + minutes(24 * 60))
         .toISOString()
         .slice(0, 10);
@@ -1394,7 +1407,7 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
         status: "Released",
         entryCount: 1,
       });
-      assert.deepEqual(await stock(), { onHand: "20", reserved: "15" });
+      assert.deepEqual(await stock(), { onHand: "20", reserved: "16" });
       const releaseAudit = (
         await admin.query(
           "SELECT action_code,actor_type,actor_reference AS actor,reason_code,target_id::text AS target FROM platform_audit.audit_record WHERE audit_id=$1",
@@ -1420,7 +1433,7 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
       held = await holding();
       assert.equal(held.has(legacy.batches[0].batch), false);
       assert.equal(held.get(pickup.batches[0].batch)?.state, "Open");
-      assert.deepEqual(await stock(), { onHand: "20", reserved: "15" });
+      assert.deepEqual(await stock(), { onHand: "20", reserved: "16" });
 
       // The kitchen accepted the first item of the pickup Order (still Queued, not started).
       assert.equal((await kitchen(pickup).accept(0)).outcome, "Accepted");
@@ -1610,7 +1623,7 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
       assert.equal(releases.length, 1);
       assert.equal(releases[0].performedBy, staff);
       assert.equal(releases[0].reasonCode, "STAFF_CANCELLED_BEFORE_PREPARATION");
-      assert.deepEqual(await stock(), { onHand: "20", reserved: "13" });
+      assert.deepEqual(await stock(), { onHand: "20", reserved: "14" });
 
       // Payment's compensation source: the CancelledByStaff disposition, discovered only by the
       // refund workload (includeStaffCancellations).
@@ -1664,7 +1677,7 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
         code: "ORDER_CANCELLATION_NOT_CANCELLABLE",
       });
       assert.deepEqual(await counts(), before);
-      assert.deepEqual(await stock(), { onHand: "20", reserved: "13" });
+      assert.deepEqual(await stock(), { onHand: "20", reserved: "14" });
 
       // ── Scenario 2: one item already started (In Progress): refused, nothing written.
       const startedKitchen = kitchen(started);
@@ -1690,7 +1703,7 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
         [[started.batches[0].batch, "InProgress"]],
       );
       assert.deepEqual(await counts(), before);
-      assert.deepEqual(await stock(), { onHand: "20", reserved: "13" });
+      assert.deepEqual(await stock(), { onHand: "20", reserved: "14" });
 
       // ── Scenario 3a: the kitchen starts first and holds its row locks; the cancellation waits,
       // then sees the started item and is refused.
@@ -1766,7 +1779,7 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
           0,
         );
       }
-      assert.deepEqual(await stock(), { onHand: "20", reserved: "12" });
+      assert.deepEqual(await stock(), { onHand: "20", reserved: "13" });
 
       // ── Scenario 6: dine-in Order with an initial and an additional Batch; staff cancel the
       // additional Batch only. The Order stays open; the first Batch is unaffected.
@@ -1794,7 +1807,7 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
       ]);
       assert.deepEqual(await itemStatuses(dineIn.batches[0].ticket), ["Queued"]);
       assert.deepEqual(await itemStatuses(dineIn.batches[1].ticket), ["Cancelled", "Cancelled"]);
-      assert.deepEqual(await stock(), { onHand: "20", reserved: "10.5" });
+      assert.deepEqual(await stock(), { onHand: "20", reserved: "11.5" });
       const diningState = await scoped((tx) =>
         createPostgresDiningOrderItemStateReader({
           brandReference: brand,
@@ -1820,7 +1833,7 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
       dineIn.version = 5;
       assert.equal((await cancel(dineIn, 0)).status, "Cancelled");
       assert.deepEqual(await itemStatuses(dineIn.batches[0].ticket), ["Cancelled"]);
-      assert.deepEqual(await stock(), { onHand: "20", reserved: "9" });
+      assert.deepEqual(await stock(), { onHand: "20", reserved: "10" });
 
       // ── Scenario 7: the refund workload opens one compensation case for the staff-cancelled
       // payment attempt and refunds the whole capture including tip, through Payment's runtime
@@ -2513,6 +2526,60 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
       assert.equal(refusedRow.batches[0].canRequestAcceptance, false);
       assert.equal(refusedRow.batches[0].canCancel, false);
       assert.equal(refusedRow.batches[0].staffCancellation.reasonCode, "SOLD_OUT");
+
+      // ── WP-2423 item 8a: a pickup of only a bottle or a bag fee. The kitchen had nothing to
+      // prepare and said it was ready at once (its decision; no ticket). The Orders page offers no
+      // Cancel, and a cancel sent anyway is refused with its own reason, writing nothing. Before,
+      // Cancel was offered and refused as "the kitchen has started".
+      {
+        const refs = bottlePickup.batches[0];
+        await scoped((tx) =>
+          recordKitchenBatchPreparationDecision(
+            tx,
+            { brandReference: brand, storeReference: store },
+            {
+              orderReference: bottlePickup.order,
+              orderBatchReference: refs.batch,
+              sourceEventReference: refs.confirmedEvent,
+              confirmationReference: refs.confirmation,
+              notPreparedOrderItemReferences: refs.items,
+              allNotPrepared: true,
+              // Test-only stand-in for the stored intake receipt (not read here).
+              intakeReceipt: { synthetic: "intake receipt" },
+              decidedAt: new Date().toISOString(),
+            },
+          ),
+        );
+        const bottleQueue = JSON.parse(
+          JSON.stringify(
+            await createPersistentMerchantOrderQueue({
+              persistence: {
+                ...reader.persistence,
+                transactions: transactions({ guc: false }),
+                now: () => new Date(Math.floor(Date.now())).toISOString(),
+              },
+              quoteVersion: 1,
+              acceptanceConfigured: true,
+            })({
+              sessionCookie: reader.sessionCookie,
+              afterOrderReference: null,
+              orderReference: bottlePickup.order,
+            }),
+          ),
+        );
+        const bottleRow = bottleQueue.items.find(
+          (item) => item.orderReference === bottlePickup.order,
+        );
+        assert.ok(bottleRow, "the bottle pickup is listed");
+        assert.equal(bottleRow.orderType, "Pickup");
+        assert.equal(bottleRow.batches[0].acceptanceStatus, "Accepted");
+        assert.equal(bottleRow.batches[0].canCancel, false, "nothing to prepare: no Cancel");
+        const beforeBottle = await stock();
+        await assert.rejects(cancel(bottlePickup, 0), {
+          code: "ORDER_CANCELLATION_NOTHING_TO_PREPARE",
+        });
+        assert.deepEqual(await stock(), beforeBottle);
+      }
       // Its stock returned, its waiting payment is settled, it can't be refused twice.
       assert.notDeepEqual(await stock(), stockBeforeRefusal);
       await assert.rejects(cancel(waitingPickup, 0, { reasonCode: "SOLD_OUT" }));

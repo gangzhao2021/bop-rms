@@ -315,6 +315,7 @@ export {
   listStoreKitchenOrderItemStates,
   listStoreKitchenBatchTouches,
   listStoreKitchenBatchesNotPrepared,
+  listStoreKitchenBatchesWithNothingToPrepare,
   listStoreStartedKitchenBatches,
   loadStoreLastKitchenStepAt,
 } from "./infrastructure/persistence/kitchen-work-cancellation-store.js";

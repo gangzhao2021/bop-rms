@@ -43,6 +43,8 @@ export const staffItemCancellationErrorCodes = [
   "ORDER_CANCELLATION_NOT_FOUND",
   "ORDER_CANCELLATION_VERSION_CONFLICT",
   "ORDER_CANCELLATION_PREPARATION_STARTED",
+  /** WP-2423 item 8a: every line of a pickup the kitchen had nothing to prepare for. */
+  "ORDER_CANCELLATION_NOTHING_TO_PREPARE",
   "ORDER_CANCELLATION_NOT_CANCELLABLE",
   "ORDER_CANCELLATION_STOCK_NOT_RELEASABLE",
   /** The submission reserved stock submission-wide (schema 1): lines cannot be released alone. */

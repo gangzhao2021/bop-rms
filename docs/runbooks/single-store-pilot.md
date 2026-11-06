@@ -856,7 +856,9 @@ never goes to the kitchen`; save, and press `List it`. Do not hide it: guests ne
 - **Fees and items the kitchen does not make** (WP-2423 item 8a): a fee (tea, corkage, sauce bar,
   bag fee) and a dish marked `Not prepared by the kitchen` never appear on the board, on a table
   or on a pickup. A pickup is ready as soon as the rest of it is, and one with nothing to prepare
-  is ready at once and can be handed over. To take one off a table's bill use `Comp or discount`,
+  is ready at once and can be handed over. It is not offered `Cancel`: if the guest no longer
+  wants it, hand it over or refund it; the page says
+  `Nothing to prepare: hand it over or refund it.` To take one off a table's bill use `Comp or discount`,
   because it counts as served from the moment it is ordered. On paper the counter writes them on the
   bill, not on the kitchen's slip.
 - **Kitchen sections** (WP-2423 item 8 ⑧): the owner names the sections once on `Store features`

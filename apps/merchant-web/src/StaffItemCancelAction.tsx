@@ -77,6 +77,8 @@ export function itemCancelFailureText(order: Order, failure: ItemCancelFailure) 
       return t(
         "The kitchen has started one of these items. Close to refresh; use a refund for items already started.",
       );
+    case "NothingToPrepare":
+      return t("Nothing to prepare: hand it over or refund it.");
     case "VersionConflict":
       return t(
         "This order changed since it was shown. Close to refresh it, then try again if needed.",

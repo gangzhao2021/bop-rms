@@ -540,7 +540,8 @@ it("staff cancel item lines of a paid order before the kitchen starts them, refu
        * payment disposition and the kitchen ticket with one queued work item per line.
        */
       // WP-2423 item 8a: `kitchenTicket: false` is a round the kitchen had nothing to prepare for.
-      async function seedOrder(n, { perLine = true, kitchenTicket = true } = {}) {
+      // `workLines`: the lines given kitchen work (the others were left out, as a fee is).
+      async function seedOrder(n, { perLine = true, kitchenTicket = true, workLines = null } = {}) {
         const b = n + 100;
         const order = { order: id(n + 1), guest: id(n + 2), version: 0 };
         const refs = {
@@ -876,7 +877,8 @@ it("staff cancel item lines of a paid order before the kitchen starts them, refu
             hash(["plan", b]),
           ],
         );
-        for (const [j, workItem] of refs.workItems.entries())
+        for (const [j, workItem] of refs.workItems.entries()) {
+          if (workLines !== null && !workLines.includes(j)) continue;
           await admin.query(
             "INSERT INTO rms_kitchen.kitchen_work_item (kitchen_work_item_id,brand_id,store_id,kitchen_ticket_id,order_id,order_batch_id,order_item_id,source_evidence_id,work_plan_id,source_item_ordinal,split_ordinal,version,status,required_quantity,completed_quantity,product_id,product_version_id,sku_id,menu_version_id,localized_display_names_json,selected_options_json,source_line_digest,station_id,routing_rule_id,routing_rule_version,routing_rule_digest,preparation_id,preparation_version,preparation_digest,preparation_instructions_json,execution_snapshot_digest,created_by_actor_type,updated_by_actor_type,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,1,1,'Queued',$11,0,$12,$13,$14,$15,$16::jsonb,'[]'::jsonb,$17,$18,$19,1,$20,$21,1,$22,$23::jsonb,$24,'System','System',$25,$25)",
             [
@@ -907,6 +909,7 @@ it("staff cancel item lines of a paid order before the kitchen starts them, refu
               kitchenAt,
             ],
           );
+        }
         return order;
       }
 
@@ -1063,7 +1066,8 @@ it("staff cancel item lines of a paid order before the kitchen starts them, refu
       const legacy = await seedOrder(6000, { perLine: false }); // scenario 8
       const journey = await seedOrder(7000); // scenario 9
       const bottles = await seedOrder(8000, { kitchenTicket: false }); // scenario 10
-      assert.deepEqual(await stock(), { onHand: "50", reserved: "24" });
+      const withFee = await seedOrder(9000, { workLines: [0] }); // scenario 11
+      assert.deepEqual(await stock(), { onHand: "50", reserved: "27" });
 
       // Store business-date publication for Payment's businessDate port (synthetic Store
       // configuration, actual published owner records and proof).
@@ -1383,7 +1387,7 @@ it("staff cancel item lines of a paid order before the kitchen starts them, refu
         [pickup.batch.reservations[0]]: "0",
         [pickup.batch.reservations[1]]: "1",
       });
-      assert.deepEqual(await stock(), { onHand: "50", reserved: "22" });
+      assert.deepEqual(await stock(), { onHand: "50", reserved: "25" });
       const releases = (
         await admin.query(
           "SELECT record_json FROM rms_inventory.stock_movement WHERE movement_type='Release'",
@@ -2518,7 +2522,7 @@ it("staff cancel item lines of a paid order before the kitchen starts them, refu
         // Cancelling every line (the whole Order) is refused and writes nothing.
         before = await counts();
         await assert.rejects(cancel(bottles, [0, 1]), {
-          code: "ORDER_CANCELLATION_PREPARATION_STARTED",
+          code: "ORDER_CANCELLATION_NOTHING_TO_PREPARE",
         });
         assert.deepEqual(await counts(), before);
         // The queue still reads, with the bottle ready to hand over.
@@ -2526,6 +2530,46 @@ it("staff cancel item lines of a paid order before the kitchen starts them, refu
           (item) => String(item.orderReference) === bottles.order,
         );
         assert.equal(after?.phase, "Ready");
+      }
+
+      // ── Scenario 11 (WP-2423 item 8a): a round the kitchen did prepare, with one line it left out
+      // (a bag fee or the tea, by default). Before: taking that line off failed as "unavailable"
+      // every time, because it has no kitchen work. Now the kitchen has nothing to stop for it and
+      // the line comes off with its refund; the other line's work stays queued.
+      {
+        merchant.allowed = () => true;
+        merchant.store = store;
+        const refs = withFee.batch;
+        await scoped((tx) =>
+          recordKitchenBatchPreparationDecision(tx, scope, {
+            orderReference: withFee.order,
+            orderBatchReference: refs.batch,
+            sourceEventReference: refs.confirmedEvent,
+            confirmationReference: refs.confirmation,
+            notPreparedOrderItemReferences: [refs.items[1]],
+            allNotPrepared: false,
+            // A round with a ticket keeps its receipt with the ticket, not here.
+            intakeReceipt: null,
+            decidedAt: new Date().toISOString(),
+          }),
+        );
+        before = await counts();
+        const fee = await cancel(withFee, [1]);
+        assert.equal(fee.status, "Cancelled");
+        assert.equal(fee.scope, "Items");
+        assert.deepEqual(fee.orderItemReferences, [refs.items[1]]);
+        const feeAfter = await counts();
+        assert.equal(feeAfter.items, before.items + 1);
+        assert.equal(feeAfter.kitchen, before.kitchen, "no kitchen work to cancel for the fee");
+        assert.deepEqual(
+          (
+            await admin.query(
+              "SELECT order_item_id::text AS item,status FROM rms_kitchen.kitchen_work_item WHERE order_batch_id=$1",
+              [refs.batch],
+            )
+          ).rows,
+          [{ item: refs.items[0], status: "Queued" }],
+        );
       }
 
       // History stays append-only for the API role.

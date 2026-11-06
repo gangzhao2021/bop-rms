@@ -5,6 +5,7 @@ import {
   createKitchenWorkCancelledEnvelope,
   createPostgresKitchenBatchCancellation,
   KitchenBatchCancellationError,
+  listStoreKitchenBatchesWithNothingToPrepare,
   listStoreStartedKitchenBatches,
   parseKitchenWorkCancelledEnvelope,
   parseKitchenWorkLifecycleEnvelope,
@@ -51,6 +52,8 @@ function harness(
     started?: boolean | readonly string[];
     cancellations?: Record<string, unknown>[];
     readyLines?: readonly string[];
+    /** WP-2423 item 8a: the round's lines the kitchen left out when it reached it. */
+    notPrepared?: readonly string[];
   } = {},
 ) {
   const calls: { sql: string; values: readonly unknown[] }[] = [];
@@ -74,6 +77,8 @@ function harness(
       return result(state.items ?? [item(1), item(2)]);
     if (sql.includes("FROM rms_kitchen.kitchen_work_cancellation"))
       return result(state.cancellations ?? []);
+    if (sql.includes("FROM rms_kitchen.kitchen_batch_preparation_decision"))
+      return result((state.notPrepared ?? []).map((line) => ({ item: line })));
     if (sql.includes("FROM rms_kitchen.kitchen_order_item_ready_result"))
       return result((state.readyLines ?? []).map((line) => ({ order_item_id: line })));
     if (sql.includes("KITCHEN_WORK_ITEM_STARTED")) {
@@ -342,6 +347,26 @@ describe("Kitchen staff batch cancellation (WP-2423 Q6)", () => {
     );
   });
 
+  it("WP-2423 item 8a: lists batches the kitchen had nothing to prepare for, bounded to 100", async () => {
+    const query = vi.fn(async () => ({ rows: [{ order_batch_id: batch }], rowCount: 1 }));
+    const transaction = { query } as unknown as ConsumerTransaction;
+    const scope = { brandReference: brand, storeReference: store };
+    expect([
+      ...(await listStoreKitchenBatchesWithNothingToPrepare(transaction, scope, [batch, id(6)])),
+    ]).toEqual([batch]);
+    expect(String(query.mock.calls[0]?.[0])).toContain("AND all_not_prepared");
+    expect(await listStoreKitchenBatchesWithNothingToPrepare(transaction, scope, [])).toEqual(
+      new Set(),
+    );
+    await expect(
+      listStoreKitchenBatchesWithNothingToPrepare(
+        transaction,
+        scope,
+        Array.from({ length: 101 }, (_, index) => id(1000 + index)),
+      ),
+    ).rejects.toMatchObject({ code: "KITCHEN_CANCELLATION_UNAVAILABLE" });
+  });
+
   it("lists batches whose kitchen work started, bounded to 100 batches", async () => {
     const query = vi.fn(async () => ({ rows: [{ order_batch_id: batch }], rowCount: 1 }));
     const transaction = { query } as unknown as ConsumerTransaction;
@@ -449,6 +474,35 @@ describe("Kitchen staff item cancellation (WP-2423 Q6 step 2)", () => {
       cancellation().cancelItems(test.transaction, itemsInput(lines)),
     ).rejects.toMatchObject({ code: "KITCHEN_CANCELLATION_UNAVAILABLE" });
     expect(test.calls.some((call) => /^(UPDATE|INSERT|SAVEPOINT)/u.test(call.sql))).toBe(false);
+  });
+
+  it("WP-2423 item 8a: lets through a line the kitchen left out of the round; it has no work", async () => {
+    // Line 203 (a fee) was left out of this round: only line 201's work is cancelled.
+    const mixed = harness({ items: sorted(split()), notPrepared: [id(203)] });
+    const both = await cancellation().cancelItems(
+      mixed.transaction,
+      itemsInput([id(201), id(203)]),
+    );
+    expect(both).toMatchObject({ status: "Cancelled", workItemCount: 2 });
+    expect(insertedRows(mixed.calls).map((row) => row.order_item_id)).toEqual([id(201), id(201)]);
+    // The fee alone needs no kitchen step and writes nothing.
+    const alone = harness({ items: sorted(split()), notPrepared: [id(203)] });
+    const result = await cancellation().cancelItems(alone.transaction, itemsInput([id(203)]));
+    expect(result).toEqual({
+      status: "NoKitchenWork",
+      evidenceDigest: kitchenBatchCancellationEvidenceDigest({
+        orderReference: order,
+        orderBatchReference: batch,
+        kitchenTicketReference: ticket,
+        items: [],
+      }),
+    });
+    expect(alone.calls.some((call) => /^(UPDATE|INSERT|SAVEPOINT)/u.test(call.sql))).toBe(false);
+    // A line neither on the ticket nor left out is still refused.
+    const unknown = harness({ items: sorted(split()), notPrepared: [id(203)] });
+    await expect(
+      cancellation().cancelItems(unknown.transaction, itemsInput([id(203), id(299)])),
+    ).rejects.toMatchObject({ code: "KITCHEN_CANCELLATION_UNAVAILABLE" });
   });
 
   it("publishes KitchenOrderReady when every remaining line is already ready", async () => {

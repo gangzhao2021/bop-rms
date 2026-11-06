@@ -181,6 +181,9 @@ it("WP-2423 Q6 step 2: says what to do for every refusal", () => {
   expect(itemCancelFailureText(dining, "LegacyStock")).toContain("Cancel the whole round instead.");
   expect(itemCancelFailureText(pickup, "VersionConflict")).toContain("Close to refresh it");
   expect(itemCancelFailureText(pickup, "PreparationStarted")).toContain("use a refund");
+  expect(itemCancelFailureText(pickup, "NothingToPrepare")).toBe(
+    "Nothing to prepare: hand it over or refund it.",
+  );
   expect(itemCancelFailureText(pickup, "NotCancellable")).toContain("can no longer be cancelled");
   expect(itemCancelFailureText(pickup, "Denied")).toContain("store manager or owner");
   expect(itemCancelFailureText(pickup, "Unknown")).toContain("Retry the same cancellation");

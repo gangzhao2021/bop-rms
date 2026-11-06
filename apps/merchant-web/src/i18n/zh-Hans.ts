@@ -4355,6 +4355,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "The kitchen has started one of these items. Close to refresh; use a refund for items already started.":
     "后厨已开始制作其中一项。关闭以刷新；已开始制作的商品请改用退款。",
   "The kitchen has started — use a refund instead.": "后厨已开始制作 — 请改用退款。",
+  "Nothing to prepare: hand it over or refund it.": "这单无需后厨制作：请直接交给顾客，或退款。",
   "The kitchen hasn't finished recording this order yet. Check again in a minute.":
     "后厨尚未完成这笔订单的记录。请一分钟后再查看。",
   "The kitchen is still remaking {value} for this order. Closing it also cancels the remake and takes it off the Kitchen screen. Tell the kitchen to stop making it.":

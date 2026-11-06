@@ -137,6 +137,8 @@ type Outcome =
   | "Pending"
   | "Cancelled"
   | "PreparationStarted"
+  /** WP-2423 item 8a: a pickup the kitchen had nothing to prepare for is ready at once. */
+  | "NothingToPrepare"
   | "VersionConflict"
   | "NotCancellable"
   | "Denied"
@@ -177,9 +179,11 @@ export function staffCancelOutcome(
   if (status === 409)
     return error === "order_preparation_started"
       ? "PreparationStarted"
-      : error === "order_version_conflict"
-        ? "VersionConflict"
-        : "NotCancellable";
+      : error === "order_nothing_to_prepare"
+        ? "NothingToPrepare"
+        : error === "order_version_conflict"
+          ? "VersionConflict"
+          : "NotCancellable";
   if (status === 400 || status === 404) return "NotCancellable";
   return "Unknown";
 }
@@ -188,6 +192,7 @@ const message: Record<Exclude<Outcome, "Idle">, string> = {
   Pending: "Cancelling…",
   Cancelled: t("Cancelled. The customer's refund has started."),
   PreparationStarted: t("The kitchen has started — use a refund instead."),
+  NothingToPrepare: t("Nothing to prepare: hand it over or refund it."),
   VersionConflict: t(
     "This order changed since it was shown. Close to refresh it, then cancel again if needed.",
   ),
@@ -336,7 +341,9 @@ export function StaffOrderCancelAction({
       >
         {label}
       </button>
-      {outcome === "Cancelled" || outcome === "PreparationStarted" ? (
+      {outcome === "Cancelled" ||
+      outcome === "PreparationStarted" ||
+      outcome === "NothingToPrepare" ? (
         <p role="status">
           {outcome === "Cancelled" && nothingToRefund
             ? t("Cancelled. It was already refunded in full; nothing more was refunded.")

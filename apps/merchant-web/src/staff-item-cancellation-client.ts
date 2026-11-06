@@ -182,6 +182,8 @@ export function parseItemRefundCheck(value: unknown) {
 /** How a preview or cancel request ended when it did not succeed. */
 export type ItemCancelFailure =
   | "PreparationStarted"
+  /** WP-2423 item 8a: every line of a pickup the kitchen had nothing to prepare for. */
+  | "NothingToPrepare"
   | "VersionConflict"
   | "LegacyStock"
   | "NotCancellable"
@@ -196,11 +198,13 @@ export function itemCancelFailure(status: number, error: string | null): ItemCan
   if (status === 409)
     return error === "order_preparation_started"
       ? "PreparationStarted"
-      : error === "order_version_conflict"
-        ? "VersionConflict"
-        : error === "order_item_stock_legacy"
-          ? "LegacyStock"
-          : "NotCancellable";
+      : error === "order_nothing_to_prepare"
+        ? "NothingToPrepare"
+        : error === "order_version_conflict"
+          ? "VersionConflict"
+          : error === "order_item_stock_legacy"
+            ? "LegacyStock"
+            : "NotCancellable";
   if (status === 400 || status === 404) return "NotCancellable";
   return "Unknown";
 }

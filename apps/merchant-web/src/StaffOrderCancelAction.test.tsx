@@ -75,6 +75,7 @@ it("WP-2423 Q6: sends cancel intent only, with the shown order version", () => {
 it("WP-2423 Q6: maps the server's answer", () => {
   expect(staffCancelOutcome(200, null)).toBe("Cancelled");
   expect(staffCancelOutcome(409, "order_preparation_started")).toBe("PreparationStarted");
+  expect(staffCancelOutcome(409, "order_nothing_to_prepare")).toBe("NothingToPrepare");
   expect(staffCancelOutcome(409, "order_version_conflict")).toBe("VersionConflict");
   expect(staffCancelOutcome(409, "order_not_cancellable")).toBe("NotCancellable");
   expect(staffCancelOutcome(409, "order_stock_not_releasable")).toBe("NotCancellable");
