@@ -478,15 +478,19 @@ export function OneStoreMenuPage({
       const stopped = code === "Unavailable" || code === "StoppedPartWay";
       // Stopped before anything was listed: the same listing goes again and finishes it.
       const notListed = code === "ChoiceRecipesStopped";
-      // merchant-outage-recovery M103: no answer (the network dropped). The List button comes
-      // back at once, with the same listing reference kept: the next tap continues this listing
-      // and the server never lists it twice.
       if (!stopped && !notListed && code !== "Offline") {
         setListing(null);
         writeListingAttempt(menuReference, null);
       }
-      setListingSince(null);
-      writeListingMarker(menuReference, null);
+      // merchant-outage-recovery M103: no answer because this device lost its network: the List
+      // button comes back at once, with the same listing reference kept, so the next tap continues
+      // this listing and the server never lists it twice. No answer with the network up (the page
+      // is going away, a reload): the listing may still be running on the server, so it stays
+      // shown in progress until the menu says listed (or three minutes pass).
+      if (code !== "Offline" || browserOffline()) {
+        setListingSince(null);
+        writeListingMarker(menuReference, null);
+      }
       // WP-2423 item 3: no recipe for a dish on this menu that declares nothing either: the owner
       // declares its allergens here (the refusal names a Store for a recipe assigned elsewhere).
       const undeclared =

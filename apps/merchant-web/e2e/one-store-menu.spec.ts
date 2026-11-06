@@ -1552,3 +1552,95 @@ test("@production a combo made on the one-page menu: parts, extra price, saved, 
     0,
   );
 });
+
+// merchant-outage-recovery M103: the network drops while listing. The List it button comes back
+// at once with a plain message, and the next tap continues the same listing (never a second one).
+test("@production a listing whose answer the dropped network lost continues with the same listing", async ({
+  page,
+  context,
+}) => {
+  released = null;
+  refuseListing = false;
+  await session(page);
+  await page.route("**/merchant/commerce/menus/query", (route) => {
+    const body = route.request().postDataJSON() as { menuReference: string | null };
+    const view = builder(3, [
+      [30, 31],
+      [32, 33],
+    ]);
+    if (body.menuReference !== null) return route.fulfill({ headers, json: view });
+    return route.fulfill({
+      headers,
+      json: {
+        screenId: "CAT-MENU-LIST",
+        sourceAsOf: at,
+        viewer: id(50),
+        permissions: view.permissions,
+        menus: [
+          {
+            menuReference: MENU,
+            internalCode: "MAIN",
+            aggregateVersion: 3,
+            currentVersionReference: id(2),
+            localizedNames: { "en-CA": "TEST menu" },
+            placements: 4,
+            publication: null,
+            latestRelease: null,
+          },
+        ],
+      },
+    });
+  });
+  await page.route("**/merchant/commerce/availability/query", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        screenId: "CAT-AVAILABILITY",
+        sourceAsOf: at,
+        viewer: id(50),
+        timeZone: scope.timeZone,
+        permissions: { mayOffer: true, mayMarkSoldOut: true, mayMarkUntilBack: true },
+        items: [30, 31, 32, 33].map((n) => ({
+          skuReference: id(n),
+          skuCode: "SKU_" + n,
+          productName: "x",
+          sizeName: "x",
+          status: "Available",
+          soldOutUntil: null,
+        })),
+      },
+    }),
+  );
+  const listings: Record<string, unknown>[] = [];
+  let drop = true;
+  await page.route("**/merchant/commerce/one-store-dishes/command", async (route) => {
+    listings.push(route.request().postDataJSON() as Record<string, unknown>);
+    if (drop) {
+      await context.setOffline(true);
+      return route.abort("internetdisconnected");
+    }
+    return route.fulfill({ headers, json: { status: "Listed", menuReference: MENU } });
+  });
+  await page.goto("/app/commerce/menus");
+  await page.getByRole("button", { name: "List it" }).click();
+  await expect(
+    page.getByText("The network dropped, so we can't tell whether the menu was listed.", {
+      exact: false,
+    }),
+  ).toBeVisible();
+  await expect(page.getByText("Listing…", { exact: false })).toHaveCount(0);
+  const list = page.getByRole("button", { name: "List it" });
+  await expect(list).toBeVisible();
+  // Still offline: nothing is sent.
+  await list.click();
+  await expect(
+    page.getByText("You're offline, so the menu wasn't listed.", { exact: false }),
+  ).toBeVisible();
+  expect(listings).toHaveLength(1);
+  drop = false;
+  await context.setOffline(false);
+  await list.click();
+  await expect(page.getByText("Listed. Guests see the menu as it is now.")).toBeVisible();
+  expect(listings).toHaveLength(2);
+  expect(listings[1]?.operationReference).toBe(listings[0]?.operationReference);
+});
