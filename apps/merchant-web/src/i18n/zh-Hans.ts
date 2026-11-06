@@ -690,6 +690,11 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "send for approval": "提交",
   approve: "批准",
   publish: "发布",
+  "Online ordering starts again at {time} (in {minutes} min).":
+    "线上点单将于 {time} 恢复（还有 {minutes} 分钟）。",
+  "Pause 15 more min": "再暂停 15 分钟",
+  "A pause can last up to 4 hours. To stop for longer, add a closure for today in Hours, or turn the service off in Store features.":
+    "暂停最长 4 小时。要停更久，请在营业时间里添加今天的休息，或在门店功能里关闭这项服务。",
   "An earlier {value} save must be recovered before another save.":
     "再次保存前，需先恢复之前的{value}保存。",
   "An ingredient": "一种配料",

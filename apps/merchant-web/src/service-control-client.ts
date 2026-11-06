@@ -31,6 +31,9 @@ export interface ServiceControlState {
     serviceModes: readonly ServiceMode[] | null;
   }[];
 }
+/** The refusal of a pause longer than 4 hours (English source; shown through systemText). */
+export const pauseTooLongText =
+  "A pause can last up to 4 hours. To stop for longer, add a closure for today in Hours, or turn the service off in Store features.";
 const reference = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const modes = ["DineIn", "Pickup", "Delivery"];
 function exact(value: unknown, keys: string[]) {
@@ -258,6 +261,8 @@ export function createServiceControlClient(fetcher: typeof fetch = fetch) {
       if (response.status === 403)
         throw new Error("Permission denied. Check your session and Store access.");
       if (response.status === 409) throw new Error("Source changed. Refresh before trying again.");
+      // WP-2423 store-service-controls (v15 M30): a new pause lasts at most 4 hours.
+      if (response.status === 422) throw new Error(pauseTooLongText);
       if (
         !response.ok ||
         response.headers.get("cache-control") !== "no-store" ||

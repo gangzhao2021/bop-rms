@@ -1,22 +1,31 @@
-import { useContext, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { t } from "./i18n/i18n.js";
 import {
   createServiceControlClient,
   serviceOperationReference,
   type ServiceControlState,
 } from "./service-control-client.js";
-import { PaidOrderWatchContext } from "./PaidOrderAlarm.js";
 import { storeTime } from "./StoreTime.js";
 
-const choices = [15, 30, 60] as const;
+const choices = [15, 30, 60, 120] as const;
+/** WP-2423 store-service-controls (v15 M30): staff are warned this long before ordering resumes. */
+export const pauseEndingWarningMs = 5 * 60_000;
+/** The server's limit for a new pause (service-control-store `storeServicePauseLimitMs`). */
+export const pauseLimitMs = 4 * 60 * 60_000;
+/** "Pause 15 more min": the new end, or null when it would pass the 4-hour limit from now. */
+export function pauseExtendedUntil(until: string, now: number): string | null {
+  const next = Date.parse(until) + 15 * 60_000;
+  return next > now + pauseLimitMs ? null : new Date(next).toISOString();
+}
 /** Re-read this often, so a pause that ended, or one set on another screen, shows as it is. */
 export const pauseOrderingReadMs = 30_000;
 
 /**
- * WP-2423 DEC-PAID-ORDER-AUTO-ACCEPT: the busy-night brake where staff work, on Orders and the
- * kitchen board, at a Store sending paid orders straight to the kitchen (others see nothing new).
- * Shown to whoever may pause ordering (the read answers no to anyone else); it uses the Store's own
- * pause, so every other page and guests see the same thing.
+ * WP-2423 DEC-PAID-ORDER-AUTO-ACCEPT: the busy-night brake where staff work (Home, Orders, Pickup
+ * and the kitchen board). WP-2423 store-service-controls (v15 M30): at every Store, not only one
+ * sending paid orders straight to the kitchen. Shown to whoever may pause ordering (the read
+ * answers no to anyone else); it uses the Store's own pause, so every other page and guests see
+ * the same thing. From 5 minutes before a pause ends it says so and offers 15 more minutes.
  */
 export function PauseOrderingControl({
   csrf,
@@ -27,8 +36,7 @@ export function PauseOrderingControl({
   readonly storeReference: string;
   readonly fetcher?: typeof fetch | undefined;
 }) {
-  const watch = useContext(PaidOrderWatchContext);
-  const offered = watch?.on === true;
+  const offered = true;
   const client = useMemo(() => createServiceControlClient(fetcher ?? fetch), [fetcher]);
   const [view, setView] = useState<ServiceControlState | null>(null);
   const [asking, setAsking] = useState(false);
@@ -57,12 +65,14 @@ export function PauseOrderingControl({
   useEffect(() => {
     if (paused === undefined) return;
     const left = Date.parse(paused.effectiveUntil) - Date.now();
+    // Wake at the warning point as well as at the end, so the warning shows on time.
+    const warnIn = left - pauseEndingWarningMs;
     const timer = setTimeout(
       () => {
         setNow(Date.now());
         setRevision((value) => value + 1);
       },
-      Math.max(0, Math.min(left, pauseOrderingReadMs)) + 500,
+      Math.max(0, Math.min(warnIn > 0 ? warnIn : left, pauseOrderingReadMs)) + 500,
     );
     return () => clearTimeout(timer);
   }, [paused]);
@@ -82,6 +92,9 @@ export function PauseOrderingControl({
       setBusy(false);
     }
   };
+  const ending =
+    paused !== undefined && Date.parse(paused.effectiveUntil) - now <= pauseEndingWarningMs;
+  const extended = paused === undefined ? null : pauseExtendedUntil(paused.effectiveUntil, now);
   const common = {
     operationReference: serviceOperationReference(),
     auditReference: serviceOperationReference(),
@@ -95,11 +108,34 @@ export function PauseOrderingControl({
     >
       {paused !== undefined ? (
         <>
-          <span>
-            {t("Ordering paused until {time}", {
-              time: storeTime(paused.effectiveUntil, view.timeZone),
-            })}
+          <span role={ending ? "alert" : undefined}>
+            {ending
+              ? t("Online ordering starts again at {time} (in {minutes} min).", {
+                  time: storeTime(paused.effectiveUntil, view.timeZone),
+                  minutes: Math.max(
+                    1,
+                    Math.ceil((Date.parse(paused.effectiveUntil) - now) / 60_000),
+                  ),
+                })
+              : t("Ordering paused until {time}", {
+                  time: storeTime(paused.effectiveUntil, view.timeZone),
+                })}
           </span>{" "}
+          {ending && extended !== null ? (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() =>
+                void run({
+                  ...common,
+                  command: "PauseService",
+                  content: { effectiveUntil: extended, serviceModes: paused.serviceModes },
+                })
+              }
+            >
+              {t("Pause 15 more min")}
+            </button>
+          ) : null}{" "}
           <button
             type="button"
             disabled={busy}

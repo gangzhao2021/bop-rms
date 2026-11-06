@@ -11,6 +11,7 @@ import { timeZoneLabel } from "./time-zone-names.js";
 import {
   createServiceControlClient,
   serviceOperationReference,
+  pauseTooLongText,
   type ServiceControlCommand,
   type ServiceControlState,
   type ServiceMode,
@@ -214,7 +215,11 @@ export function StoreServiceControlPanel({ store, csrf }: { store: string; csrf:
     } catch (error) {
       if (activeController.signal.aborted) return;
       const detail = error instanceof Error ? error.message : "";
-      if (detail.startsWith("Source changed.") || detail.startsWith("Permission denied.")) {
+      if (
+        detail.startsWith("Source changed.") ||
+        detail.startsWith("Permission denied.") ||
+        detail === pauseTooLongText
+      ) {
         pending.current = null;
         setUncertain(false);
         setView(null);
@@ -240,6 +245,10 @@ export function StoreServiceControlPanel({ store, csrf }: { store: string; csrf:
       !Number.isFinite(new Date(Date.now() + duration * 60000).getTime())
     ) {
       setMessage(t("Enter a positive whole number of minutes."));
+      return;
+    }
+    if (duration > 240) {
+      setMessage(pauseTooLongText);
       return;
     }
     void submit({
@@ -326,6 +335,7 @@ export function StoreServiceControlPanel({ store, csrf }: { store: string; csrf:
                 id="pause-duration"
                 type="number"
                 min="1"
+                max="240"
                 step="1"
                 value={minutes}
                 onChange={(event) => setMinutes(event.target.value)}

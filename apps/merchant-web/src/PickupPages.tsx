@@ -1,4 +1,5 @@
 import { t } from "./i18n/i18n.js";
+import { PauseOrderingControl } from "./PauseOrderingControl.js";
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { PickupProofForm, pickupCodeLockedText } from "./PickupProofForm.js";
 import { PickupHandoffForm } from "./PickupHandoffForm.js";
@@ -445,6 +446,13 @@ export function PickupQueueScreen({
       }
     >
       <>
+        {/* WP-2423 store-service-controls (v15 M30): the pause, where pickup staff work. */}
+        {proofContext ? (
+          <PauseOrderingControl
+            csrf={proofContext.csrf}
+            storeReference={proofContext.storeReference}
+          />
+        ) : null}
         {view.guestPickupOff === true ? (
           // WP-2423 item 8 ⑦ (v15 finding v): guests can no longer order pickup here; what is
           // still waiting is handed over as usual.

@@ -705,6 +705,11 @@ it("protects service-control transport and exposes only bounded results", async 
   });
   control.mockRejectedValueOnce(new Error("STORE_SERVICE_VERSION_CONFLICT"));
   expect((await submit()).status).toBe(409);
+  // WP-2423 store-service-controls (v15 M30): a pause longer than 4 hours is refused as such.
+  control.mockRejectedValueOnce(new Error("STORE_SERVICE_PAUSE_TOO_LONG"));
+  const tooLong = await submit();
+  expect(tooLong.status).toBe(422);
+  expect(await tooLong.json()).toEqual({ error: "pause_too_long" });
   control.mockRejectedValueOnce(new Error("synthetic private failure detail"));
   const failed = await submit();
   expect(failed.status).toBe(503);

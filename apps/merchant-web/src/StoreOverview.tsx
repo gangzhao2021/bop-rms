@@ -1,4 +1,5 @@
 import { systemText, countOf, t } from "./i18n/i18n.js";
+import { PauseOrderingControl } from "./PauseOrderingControl.js";
 import {
   useApprovalsWaiting,
   useStaffRolesWaiting,
@@ -1319,6 +1320,8 @@ export function StoreOverview({
     <>
       {/* WP-2423 item 13 ②: the platform paused this merchant's new guests (shown only then). */}
       <GuestIntakeNotice fetcher={fetcher} />
+      {/* WP-2423 store-service-controls (v15 M30): the Store's own pause, on Home as well. */}
+      <PauseOrderingControl csrf={csrf} storeReference={storeReference} fetcher={fetcher} />
       <NeedsAttention
         state={state}
         approvals={approvals}

@@ -228,6 +228,9 @@ export function installMerchantOperationsRoutes(
           )
         )
           response.status(409).json({ error: "service_control_conflict" });
+        // WP-2423 store-service-controls (v15 M30): longer than 4 hours is not a pause.
+        else if (error instanceof Error && error.message === "STORE_SERVICE_PAUSE_TOO_LONG")
+          response.status(422).json({ error: "pause_too_long" });
         else failed(response, error);
       });
   });
