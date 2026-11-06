@@ -184,6 +184,13 @@ describe("WP-2423: order status polling pace", () => {
     expect(delayFor({ status: "not-found" })).toBeNull();
   });
 
+  it("keeps the pace through offline, so checks resume when the phone is back (M94)", () => {
+    const polling = advanceOrderStatusPoll(stoppedOrderStatusPoll, ready(view("Accepted")));
+    const offline = advanceOrderStatusPoll(polling, { status: "offline", view: view("Accepted") });
+    expect(offline).toEqual(polling);
+    expect(nextOrderStatusPollDelayMs(offline)).not.toBeNull();
+  });
+
   it("backs off on failures up to a cap and resets after a success", () => {
     let poll = advanceOrderStatusPoll(stoppedOrderStatusPoll, ready(view("Ready")));
     const delays: (number | null)[] = [];

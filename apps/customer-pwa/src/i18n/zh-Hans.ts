@@ -573,7 +573,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Reconnect to load your cart.": "恢复网络后加载购物车。",
   "Reconnect to pay with another card.": "恢复网络后换一张卡付款。",
   "Reconnect to refresh.": "恢复网络后刷新。",
-  "Reconnect to show your pickup code.": "恢复网络后显示取餐码。",
+  "You’re offline. Your pickup code shows again when you’re back online.":
+    "你现在离线。网络恢复后会自动显示取餐码。",
   Recorded: "已记录",
   "Refresh after reconnecting": "恢复网络后刷新",
   "Refresh before changing delivery instructions.": "修改配送说明前请先刷新。",

@@ -102,7 +102,7 @@ describe("WP-1706 Pickup Code controller", () => {
     controller.dispose();
   });
 
-  it("clears an accepted raw proof on offline and does nothing on reconnect", async () => {
+  it("clears an accepted raw proof on offline and shows it again by itself on reconnect (M94)", async () => {
     let calls = 0;
     const controller = createPickupCodeController(
       id(1),
@@ -119,7 +119,51 @@ describe("WP-1706 Pickup Code controller", () => {
     controller.setOnline(false);
     expect(controller.getState()).toEqual({ status: "offline" });
     controller.setOnline(true);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(calls).toBe(2);
+    expect(controller.getState()).toMatchObject({ status: "ready" });
+  });
+
+  it("stays closed on reconnect when the guest never asked for the code (M94)", async () => {
+    let calls = 0;
+    const controller = createPickupCodeController(
+      id(1),
+      "1001",
+      {
+        load: async () => {
+          calls += 1;
+          return ready();
+        },
+      },
+      () => now,
+    );
+    controller.setOnline(false);
+    controller.setOnline(true);
+    await Promise.resolve();
+    expect(calls).toBe(0);
+    expect(controller.getState()).toEqual({ status: "hidden" });
+  });
+
+  it("follows a ready order that turned ready while offline once back online (M94)", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+    let calls = 0;
+    const controller = createPickupCodeController(id(1), "1001", {
+      load: async () => {
+        calls += 1;
+        return ready();
+      },
+    });
+    controller.setOnline(false);
+    controller.followUntilReady?.(true);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(calls).toBe(0);
+    controller.setOnline(true);
+    await vi.advanceTimersByTimeAsync(0);
     expect(calls).toBe(1);
+    expect(controller.getState()).toMatchObject({ status: "ready" });
+    controller.dispose();
   });
 
   it("clears the proof when its accepted expiry is reached", async () => {

@@ -280,6 +280,7 @@ export function createPickupCodeController(
   };
   const listeners = new Set<() => void>();
   let unsubscribeContext: (() => void) | undefined;
+  let wantedWhenOffline = false;
   const clearExpiry = () => {
     if (expiryTimer) clearTimeout(expiryTimer);
     expiryTimer = null;
@@ -383,9 +384,17 @@ export function createPickupCodeController(
     setOnline(value: boolean) {
       online = value;
       if (!value) {
+        // M94: remember whether the guest had the code open, so it comes back by itself.
+        if (state.status !== "hidden" && state.status !== "offline") wantedWhenOffline = true;
         clearFollow();
         clearProof({ status: "offline" });
-      } else if (following && state.status === "offline") void query();
+        return;
+      }
+      if (state.status !== "offline") return;
+      if (following || wantedWhenOffline) {
+        wantedWhenOffline = false;
+        void query();
+      } else publish({ status: "hidden" });
     },
     followUntilReady(active: boolean) {
       if (following === active) return;

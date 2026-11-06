@@ -56,7 +56,10 @@ export function PickupCodePanel({
   useEffect(() => {
     if (!autoReveal) return;
     const pending =
-      state.status === "hidden" || state.status === "not-ready" || state.status === "expired";
+      state.status === "hidden" ||
+      state.status === "not-ready" ||
+      state.status === "expired" ||
+      state.status === "offline";
     if (!pending || checkedFor.current === refreshToken) return;
     checkedFor.current = refreshToken;
     void controller.reveal();
@@ -148,7 +151,12 @@ export function PickupCodePanel({
       ) : null}
       {state.status === "offline" ? (
         <>
-          <p role="alert">{t("Reconnect to show your pickup code.")}</p>
+          <p role="alert">
+            {t("You’re offline. Your pickup code shows again when you’re back online.")}
+          </p>
+          <button type="button" onClick={() => void controller.reveal()}>
+            {t("Check again")}
+          </button>
           {closeButton}
         </>
       ) : null}

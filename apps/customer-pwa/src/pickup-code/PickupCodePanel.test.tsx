@@ -109,7 +109,7 @@ describe("CUST-PICKUP-CODE contextual screen", () => {
     ["feature-disabled", "not used at this location"],
     ["conflict", "Your pickup code changed"],
     ["unavailable", "can’t be shown right now"],
-    ["offline", "Reconnect to show your pickup code"],
+    ["offline", "Your pickup code shows again when you’re back online"],
     ["expired", "This pickup code expired"],
   ] as const)("renders the %s state without a raw proof", (status, message) => {
     const html = render({ status });
@@ -169,4 +169,11 @@ it("says a ready order without a usable code is ready and how staff hand it over
     expect(html).not.toContain("isn’t ready");
     expect(html).toContain("Ready for pickup");
   }
+});
+
+it("offers Check again offline and says the code comes back by itself (M94)", () => {
+  const html = render({ status: "offline" });
+  expect(html).toContain("Check again");
+  expect(html).toContain("shows again when you’re back online");
+  expect(html).not.toContain("cache");
 });

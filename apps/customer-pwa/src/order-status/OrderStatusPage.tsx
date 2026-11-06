@@ -260,6 +260,9 @@ export function advanceOrderStatusPoll(
     // for the guest's tap as before.
     case "unavailable":
       return previous.mode === "stopped" ? previous : { ...previous, errors: previous.errors + 1 };
+    // M94: offline keeps the pace, so polling picks up again when the phone is back online.
+    case "offline":
+      return previous;
     default:
       return stoppedOrderStatusPoll;
   }

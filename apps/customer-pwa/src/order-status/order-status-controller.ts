@@ -1098,15 +1098,25 @@ export function createOrderStatusController(
     },
     refresh: loadCanonical,
     setOnline(value: boolean) {
+      const wasOffline = !online || state.status === "offline";
       online = value;
-      if (!value) {
-        lifecycle += 1;
-        request += 1;
-        realtime = "unavailable";
-        unsubscribeRealtime?.();
-        unsubscribeRealtime = null;
-        publish({ status: "offline", view: currentView() });
+      // M94: back online the order is read again once and live updates restart, so a guest whose
+      // order was accepted or became ready while offline sees it with no tap and no reload.
+      if (value) {
+        if (!wasOffline || stopped || state.status !== "offline") return;
+        const activeLifecycle = lifecycle;
+        void loadCanonical().then(() => {
+          if (!stopped && online && activeLifecycle === lifecycle && !unsubscribeRealtime)
+            startRealtime();
+        });
+        return;
       }
+      lifecycle += 1;
+      request += 1;
+      realtime = "unavailable";
+      unsubscribeRealtime?.();
+      unsubscribeRealtime = null;
+      publish({ status: "offline", view: currentView() });
     },
     dispose() {
       stopped = true;

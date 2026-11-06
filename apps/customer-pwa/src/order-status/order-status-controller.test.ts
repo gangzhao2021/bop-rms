@@ -123,14 +123,18 @@ describe("WP-1705 Order Status controller", () => {
       },
     });
     await controller.load();
+    const stale = callbacks;
     controller.setOnline(false);
     controller.setOnline(true);
+    // M94: back online the order is read once by itself.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(calls).toBe(2);
     const retained = controller.getState();
-    callbacks?.onOpen();
-    callbacks?.onHint();
-    callbacks?.onError();
+    stale?.onOpen();
+    stale?.onHint();
+    stale?.onError();
     await Promise.resolve();
-    expect(calls).toBe(1);
+    expect(calls).toBe(2);
     expect(controller.getState()).toBe(retained);
     controller.dispose();
   });
@@ -184,25 +188,49 @@ describe("WP-1705 Order Status controller", () => {
     expect(controller.getState()).toMatchObject({ status: "ready", realtime: "available" });
   });
 
-  it("keeps the last accepted view offline and never refreshes automatically on reconnect", async () => {
+  it("keeps the last accepted view offline, then reads again and reconnects updates by itself (M94)", async () => {
     let calls = 0;
+    let subscribed = 0;
     let disposed = 0;
+    let accepted = false;
     const client: CustomerOrderStatusClient = {
       load: async () => {
         calls += 1;
-        return view();
+        const loaded = view();
+        return accepted
+          ? { ...loaded, order: { ...loaded.order, canonicalPhase: "Accepted" } }
+          : loaded;
       },
-      subscribe: () => () => {
-        disposed += 1;
+      subscribe: () => {
+        subscribed += 1;
+        return () => {
+          disposed += 1;
+        };
       },
     };
     const controller = createOrderStatusController(id(1), client);
     await controller.load();
     controller.setOnline(false);
     expect(controller.getState()).toMatchObject({ status: "offline", view: view() });
-    controller.setOnline(true);
-    expect(calls).toBe(1);
     expect(disposed).toBe(1);
+    // The store accepted the order while the phone was offline.
+    accepted = true;
+    controller.setOnline(true);
+    // The last view stays on screen while it is checked again.
+    expect(controller.getState()).toMatchObject({ status: "ready", refreshing: true });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(calls).toBe(2);
+    expect(subscribed).toBe(2);
+    expect(controller.getState()).toMatchObject({
+      status: "ready",
+      refreshing: false,
+      view: { order: { canonicalPhase: "Accepted" } },
+    });
+    // A second "online" without an offline in between does not read again.
+    controller.setOnline(true);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(calls).toBe(2);
+    controller.dispose();
   });
 
   it.each([
