@@ -59,6 +59,7 @@ import { serviceOperationReference } from "./service-control-client.js";
 import { StatePanel } from "@bop-rms/ui";
 import { playKitchenChime } from "./alert-chime.js";
 import { storeTime } from "./StoreTime.js";
+import { compRecordText } from "./ItemCompAction.js";
 import {
   counterAwaitingCardMachine,
   counterPayByText,
@@ -875,6 +876,40 @@ export function batchesRefundedEarlier(detail: CurrentOrderDetail): ReadonlySet<
       .map((line) => line.orderBatchReference),
   );
 }
+/**
+ * v15 M87/M161: every comp, discount and points line of the order, open or closed, with what it
+ * took off (tax included), why, who and when — kept on the record, never only a lower total.
+ */
+function CompRecordsNote({
+  detail,
+  timeZone,
+}: {
+  readonly detail: CurrentOrderDetail;
+  readonly timeZone: string | undefined;
+}) {
+  const comps = detail.order.batches.flatMap((batch) => batch.compedItems);
+  if (comps.length === 0) return null;
+  const names = new Map(detail.lines.items.map((line) => [line.orderItemReference, line.name]));
+  return (
+    <ul className="order-comp-records" aria-label={t("Comps and discounts")}>
+      {comps.map((comp) => (
+        <li key={comp.orderItemReference}>
+          <span>
+            {(names.get(comp.orderItemReference) ?? t("Dish")) +
+              " · " +
+              compRecordText(comp, timeZone)}
+          </span>{" "}
+          <span>
+            {"−" +
+              orderMoney({ amountMinor: comp.amountMinor, currencyCode: "CAD" }) +
+              " " +
+              t("incl. tax")}
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
 const sameSet = (a: ReadonlySet<string> | undefined, b: ReadonlySet<string>) =>
   a !== undefined && a.size === b.size && [...a].every((value) => b.has(value));
 /** WP-2423: the exact refunds of an online payment on the order detail, when Payment has any. */
@@ -1283,6 +1318,7 @@ function QueuedOrderLines({
     <>
       <PickupContactPanel contact={state.detail.pickupContact} />
       <OnlineRefundNote order={state.detail.order} position={state.detail.paymentPosition} />
+      <CompRecordsNote detail={state.detail} timeZone={timeZone} />
       <CurrentOrderLines
         lines={state.detail.lines}
         refundCheck={refundCheck}
@@ -1594,6 +1630,23 @@ export function orderAmountNote(
       return t("Guests left without paying · {amount} written off", {
         amount: orderMoney({ amountMinor: order.tableBill.writtenOffMinor, currencyCode: "CAD" }),
       });
+    // v15 M176: merged into another table: said where its dishes are and whether that was paid;
+    // money taken on this Order before the merge still shows as its own amount.
+    const into = order.tableBill.mergedInto;
+    if (into !== undefined) {
+      const there =
+        into.tableLabel === null
+          ? into.paid
+            ? t("Merged into another table · paid there")
+            : t("Merged into another table · on that bill")
+          : into.paid
+            ? t("Merged into {table} · paid there", { table: into.tableLabel })
+            : t("Merged into {table} · on that bill", { table: into.tableLabel });
+      const taken = orderAmountTaken(order);
+      return taken === null
+        ? there
+        : t("Paid {amount} here", { amount: orderMoney(taken) }) + " · " + there;
+    }
     if (paid === null) return t("On the table's bill");
     const how =
       paid.method === "Cash"
@@ -2264,7 +2317,10 @@ export function CurrentOrderQueueRows({
               const amount =
                 taken !== null
                   ? { ...taken, amountMinor: (BigInt(taken.amountMinor) - refunded).toString() }
-                  : order.tableBill !== null && order.tableBill.paid === null
+                  : order.tableBill !== null &&
+                      order.tableBill.paid === null &&
+                      // v15 M176: a merged table's dishes are in the other table's amount.
+                      order.tableBill.mergedInto === undefined
                     ? { amountMinor: order.tableBill.totalMinor, currencyCode: "CAD" }
                     : null;
               const age = now === undefined ? null : orderAgeText(order, now);
@@ -3625,6 +3681,7 @@ export function CurrentOrderQueuePage({
                     <>
                       <PickupContactPanel contact={detail.pickupContact} timeZone={timeZone} />
                       <OnlineRefundNote order={detail.order} position={detail.paymentPosition} />
+                      <CompRecordsNote detail={detail} timeZone={timeZone} />
                       <WithRoundPhones
                         csrf={csrf}
                         diningSessionReference={detail.order.diningSessionReference}

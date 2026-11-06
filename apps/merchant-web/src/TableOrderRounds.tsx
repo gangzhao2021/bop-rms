@@ -16,7 +16,7 @@ import {
   PayLaterRemoveRefusalNotice,
   type PayLaterRemoveRefusal,
 } from "./PayLaterItemRemoveAction.js";
-import { compedText, ItemCompAction } from "./ItemCompAction.js";
+import { compRecordText, ItemCompAction } from "./ItemCompAction.js";
 import { orderMoney } from "./order-money.js";
 import { useStoreBusinessDay } from "./StoreBusinessDay.js";
 import {
@@ -194,7 +194,7 @@ export function TableOrderRounds({
               <li key={comp.orderItemReference}>
                 <span>
                   {names.get(comp.orderItemReference)?.name ?? t("Dish")} ·{" "}
-                  {compedText(comp.kind, comp.percent)}
+                  {compRecordText(comp, timeZone)}
                 </span>
                 <span>−{orderMoney({ amountMinor: comp.amountMinor, currencyCode: "CAD" })}</span>
               </li>

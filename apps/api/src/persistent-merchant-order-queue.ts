@@ -18,6 +18,7 @@ import {
   listOrderItemPrices,
   listOrderBillOrders,
   listOrderDiningSessions,
+  listOrderMergedInto,
   loadMerchantOrderLines,
   loadMerchantOrderListSummaries,
   loadOrderPickupContact,
@@ -57,6 +58,13 @@ import { readStaffDiningRoundPaymentPreparation } from "./staff-dining-round-pay
 import { readCounterPaymentPreparation } from "./counter-payment-preparation.js";
 import { counterOrderPermission } from "./merchant-counter-order.js";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
+import { createStaffLabels } from "./merchant-staff-labels.js";
+import {
+  listStoreMembers,
+  memberDisplayNames,
+  type MemberDirectoryTransaction,
+} from "@bop/membership";
+import type { RoleAssignmentTransaction } from "@bop/permission";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import { createMerchantOrderQueueRead } from "./merchant-order-queue-read.js";
 import { pickupAcceptanceDeadline } from "./pickup-acceptance-deadline.js";
@@ -574,6 +582,11 @@ export function createPersistentMerchantOrderQueue(options: {
               totalMinor: string;
               /** Owner 2026-11-04 walkthrough: the guests left; the amount written off. */
               writtenOffMinor?: string;
+              /**
+               * v15 M176: this table was merged into another; its dishes are on that table's bill
+               * (and in its amount), paid there or still to be.
+               */
+              mergedInto?: { tableLabel: string | null; paid: boolean };
               /** Owner 2026-11-03 walkthrough: a split bill with some parts paid: what is left. */
               partlyPaid?: {
                 remainingMinor: string;
@@ -600,6 +613,10 @@ export function createPersistentMerchantOrderQueue(options: {
               kind: "Comp" | "Percent" | "Amount";
               percent: number | null;
               amountMinor: string;
+              /** v15 M87/M161: why, when and by whom, as recorded (points: the guest's own). */
+              reasonCode: string;
+              decidedAt: string;
+              byLabel: string | null;
             }[]
           >();
           if (scoped !== null && orderReferences.length > 0) {
@@ -935,6 +952,39 @@ export function createPersistentMerchantOrderQueue(options: {
               const reduced = new Map(
                 reductions.map((record) => [record.orderItemReference, record]),
               );
+              // v15 M87/M161: who decided each comp, by name ("You" for the viewer), or their role.
+              const decidedBy =
+                reductions.length === 0 || ownerScope === null
+                  ? null
+                  : await (async () => {
+                      const directory =
+                        businessTransaction as unknown as MemberDirectoryTransaction;
+                      const names = new Map<string, string | null>(
+                        (await listStoreMembers(directory, ownerScope)).map((member) => [
+                          member.actorReference,
+                          member.displayName,
+                        ]),
+                      );
+                      const others = [
+                        ...new Set(reductions.map((record) => record.actorReference)),
+                      ].filter((actor) => !names.has(actor));
+                      for (const [actor, name] of await memberDisplayNames(
+                        directory,
+                        ownerScope,
+                        others,
+                      ))
+                        names.set(actor, name);
+                      return createStaffLabels(
+                        businessTransaction as unknown as RoleAssignmentTransaction,
+                        ownerScope,
+                        {
+                          viewer: String(resolved.actorReference),
+                          at: new Date(Date.parse(String(source.now()))).toISOString(),
+                          names,
+                        },
+                      );
+                    })().catch(() => null);
+              if (!(await stillAllowed())) return unavailable();
               for (const record of reductions)
                 comped.set(record.orderBatchReference, [
                   ...(comped.get(record.orderBatchReference) ?? []),
@@ -943,8 +993,23 @@ export function createPersistentMerchantOrderQueue(options: {
                     kind: record.kind,
                     percent: record.percent,
                     amountMinor: record.totalMinor.toString(),
+                    reasonCode: record.reasonCode,
+                    decidedAt: record.decidedAt,
+                    byLabel:
+                      record.reasonCode === "POINTS_REDEMPTION" || decidedBy === null
+                        ? null
+                        : decidedBy(record.actorReference),
                   },
                 ]);
+              // v15 M176: tables merged into another, and the Order whose bill they are on now.
+              const mergedTargets = new Map<string, string>();
+              for (let index = 0; index < payLaterOrders.length; index += 200)
+                for (const [source, target] of await listOrderMergedInto(
+                  businessTransaction,
+                  scoped,
+                  payLaterOrders.slice(index, index + 200),
+                ))
+                  mergedTargets.set(source, target);
               // The table's bill on the Orders list: what it paid, else what its rounds come to.
               for (const order of payLaterOrders) {
                 // The guests left and it was written off: nothing is waiting to be paid.
@@ -1001,6 +1066,40 @@ export function createPersistentMerchantOrderQueue(options: {
                       method: settlement.method,
                       ...(refunded > 0n ? { refundedMinor: refunded.toString() } : {}),
                     },
+                  });
+                  continue;
+                }
+                // v15 M176: merged into another table, its dishes are on that table's bill: said so,
+                // with whether it was paid there; no amount of its own (it is in that bill's).
+                const into = mergedTargets.get(order);
+                if (into !== undefined && settlement === undefined && parts.length === 0) {
+                  const there = await tableStore.listByOrders(businessTransaction, [into]);
+                  let paidThere = there.some((entry) => entry.part === null);
+                  if (!paidThere && there.some((entry) => entry.part !== null)) {
+                    const [targetPlan] = await tableStore.listSplitPlans(businessTransaction, [
+                      into,
+                    ]);
+                    paidThere =
+                      targetPlan !== undefined &&
+                      targetPlan.mode !== "Whole" &&
+                      targetPlan.parts.length > 0 &&
+                      targetPlan.parts.every((part) =>
+                        there.some((entry) => entry.part?.partNumber === part.partNumber),
+                      );
+                  }
+                  const session = (
+                    await listOrderDiningSessions(businessTransaction, scoped, [into])
+                  ).get(into);
+                  const tableLabel =
+                    session === undefined
+                      ? null
+                      : ((
+                          await listDiningSessionTableLabels(businessTransaction, scoped, [session])
+                        ).get(session) ?? null);
+                  tableBills.set(order, {
+                    totalMinor: "0",
+                    paid: null,
+                    mergedInto: { tableLabel, paid: paidThere },
                   });
                   continue;
                 }

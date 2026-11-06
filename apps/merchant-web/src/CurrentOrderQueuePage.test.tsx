@@ -2057,6 +2057,26 @@ describe("Owner 2026-11-04: a written-off table on the Orders list", () => {
   });
 });
 
+describe("v15 M176: a table merged into another on the Orders list", () => {
+  const merged = (paid: boolean, paidOnline: unknown = null) =>
+    ({
+      tableBill: { totalMinor: "0", paid: null, mergedInto: { tableLabel: "Table 3", paid } },
+      paymentPosition: null,
+      paidOnline,
+      counter: null,
+      batches: [],
+    }) as never;
+  it("says where its dishes are and whether they were paid there, never 'On the table's bill'", () => {
+    expect(orderAmountNote(merged(true))).toBe("Merged into Table 3 · paid there");
+    expect(orderAmountNote(merged(false))).toBe("Merged into Table 3 · on that bill");
+  });
+  it("keeps money taken on it before the merge visible", () => {
+    expect(orderAmountNote(merged(true, { amountMinor: "1250", currencyCode: "CAD" }))).toBe(
+      "Paid $12.50 here · Merged into Table 3 · paid there",
+    );
+  });
+});
+
 it("WP-2423 item 2: staff are told what to do when a guest's phone can't start the payment", () => {
   const canCancel = unpaidGuestRoundGuidance(true);
   expect(canCancel).toContain("cancel it below");

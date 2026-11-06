@@ -6,6 +6,7 @@ import { FULL_SIGN_IN_REQUIRED_TEXT, isFullSignInRequired } from "./full-sign-in
 import { orderMoney } from "./order-money.js";
 import { serviceOperationReference } from "./service-control-client.js";
 import { dollarsToMinor } from "./TableCheckout.js";
+import { storeTime } from "./StoreTime.js";
 
 type Order = CurrentOrderQueue["items"][number];
 export type CompReason = "QUALITY" | "WRONG_DISH" | "LONG_WAIT" | "GOODWILL";
@@ -345,6 +346,36 @@ export function compIntroText() {
   return t(
     "Comp or discount dishes on this table's bill. It comes off the bill before the table pays and stays in the reports.",
   );
+}
+
+/**
+ * v15 M87/M161: a comp, discount or points line as staff read it after the fact: what, why, who
+ * and when ("Comped · Food quality · by Li, 21:14"; "Points used"). Points are the guest's own.
+ */
+export function compRecordText(
+  comp: {
+    readonly kind: "Comp" | "Percent" | "Amount";
+    readonly percent: number | null;
+    readonly reasonCode?: string;
+    readonly decidedAt?: string;
+    readonly byLabel?: string | null;
+  },
+  timeZone: string | undefined,
+): string {
+  if (comp.reasonCode === "POINTS_REDEMPTION") return t("Points used");
+  const parts = [compedText(comp.kind, comp.percent)];
+  const reason = compReasonLabel[comp.reasonCode as CompReason] as string | undefined;
+  if (reason !== undefined) parts.push(reason);
+  if (comp.decidedAt !== undefined)
+    parts.push(
+      comp.byLabel === null || comp.byLabel === undefined
+        ? storeTime(comp.decidedAt, timeZone)
+        : t("by {person}, {time}", {
+            person: comp.byLabel === "You" ? t("You") : comp.byLabel,
+            time: storeTime(comp.decidedAt, timeZone),
+          }),
+    );
+  return parts.join(" · ");
 }
 
 export function compedText(kind: "Comp" | "Percent" | "Amount", percent: number | null) {

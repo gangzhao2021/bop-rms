@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { compAmountMinor, compIntroText } from "./ItemCompAction.js";
+import { compAmountMinor, compIntroText, compRecordText } from "./ItemCompAction.js";
 import { setLanguageForTest } from "./i18n/i18n.js";
 
 const money = (amountMinor: string) => ({ amountMinor, currencyCode: "CAD" });
@@ -35,4 +35,27 @@ it("WP-2423 live minor 10: the comp panel is for any dish on the bill, not only 
   } finally {
     setLanguageForTest("en");
   }
+});
+
+it("v15 M87/M161: a comp says why, who and when; points say they were the guest's", () => {
+  expect(
+    compRecordText(
+      {
+        kind: "Comp",
+        percent: null,
+        reasonCode: "QUALITY",
+        decidedAt: "2026-11-04T02:14:00.000Z",
+        byLabel: "Li",
+      },
+      "America/Toronto",
+    ),
+  ).toBe("Comped · Food quality · by Li, 21:14");
+  expect(
+    compRecordText(
+      { kind: "Amount", percent: null, reasonCode: "POINTS_REDEMPTION", byLabel: null },
+      "America/Toronto",
+    ),
+  ).toBe("Points used");
+  // An older answer without the record says what it was, nothing invented.
+  expect(compRecordText({ kind: "Percent", percent: 20 }, "America/Toronto")).toBe("20% off");
 });

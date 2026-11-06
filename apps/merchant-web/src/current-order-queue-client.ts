@@ -18,6 +18,8 @@ function parseTableBill(
   readonly totalMinor: string;
   /** Owner 2026-11-04 walkthrough: the guests left without paying; the amount written off. */
   readonly writtenOffMinor?: string;
+  /** v15 M176: merged into another table; its dishes are on that bill, paid there or not yet. */
+  readonly mergedInto?: { readonly tableLabel: string | null; readonly paid: boolean };
   readonly partlyPaid?: {
     readonly remainingMinor: string;
     readonly paidParts: number;
@@ -36,11 +38,14 @@ function parseTableBill(
     value !== null && typeof value === "object" && Object.hasOwn(value, "partlyPaid");
   const withWriteOff =
     value !== null && typeof value === "object" && Object.hasOwn(value, "writtenOffMinor");
+  const withMerge =
+    value !== null && typeof value === "object" && Object.hasOwn(value, "mergedInto");
   const bill = exact(value, [
     "totalMinor",
     "paid",
     ...(withParts ? ["partlyPaid"] : []),
     ...(withWriteOff ? ["writtenOffMinor"] : []),
+    ...(withMerge ? ["mergedInto"] : []),
   ]);
   if (
     orderType !== "DineIn" ||
@@ -49,6 +54,23 @@ function parseTableBill(
   )
     return fail();
   if (bill.paid === null) {
+    if (withMerge) {
+      const into = exact(bill.mergedInto, ["tableLabel", "paid"]);
+      if (
+        (into.tableLabel !== null &&
+          (typeof into.tableLabel !== "string" || into.tableLabel.length > 100)) ||
+        typeof into.paid !== "boolean"
+      )
+        return fail();
+      return Object.freeze({
+        totalMinor: bill.totalMinor,
+        paid: null,
+        mergedInto: Object.freeze({
+          tableLabel: into.tableLabel as string | null,
+          paid: into.paid,
+        }),
+      });
+    }
     if (withWriteOff) {
       if (typeof bill.writtenOffMinor !== "string" || !minorAmount.test(bill.writtenOffMinor))
         return fail();
@@ -777,7 +799,26 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
         ? Array.isArray(batch.compedItems) && batch.compedItems.length <= 500
           ? Object.freeze(
               batch.compedItems.map((entry: unknown) => {
-                const comp = exact(entry, ["orderItemReference", "kind", "percent", "amountMinor"]);
+                // v15 M87/M161: why, when and by whom (read strictly when the server sends them).
+                const recorded =
+                  entry !== null && typeof entry === "object" && Object.hasOwn(entry, "reasonCode");
+                const comp = exact(entry, [
+                  "orderItemReference",
+                  "kind",
+                  "percent",
+                  "amountMinor",
+                  ...(recorded ? ["reasonCode", "decidedAt", "byLabel"] : []),
+                ]);
+                if (
+                  recorded &&
+                  (typeof comp.reasonCode !== "string" ||
+                    !/^[A-Z][A-Z0-9_]{0,63}$/u.test(comp.reasonCode) ||
+                    typeof comp.decidedAt !== "string" ||
+                    !Number.isFinite(Date.parse(comp.decidedAt)) ||
+                    (comp.byLabel !== null &&
+                      (typeof comp.byLabel !== "string" || comp.byLabel.length > 120)))
+                )
+                  return fail();
                 if (
                   (comp.kind !== "Comp" && comp.kind !== "Percent" && comp.kind !== "Amount") ||
                   (comp.kind === "Percent"
@@ -795,6 +836,13 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
                   kind: comp.kind as "Comp" | "Percent" | "Amount",
                   percent: comp.percent as number | null,
                   amountMinor: comp.amountMinor,
+                  ...(recorded
+                    ? {
+                        reasonCode: comp.reasonCode as string,
+                        decidedAt: comp.decidedAt as string,
+                        byLabel: comp.byLabel as string | null,
+                      }
+                    : {}),
                 });
               }),
             )
