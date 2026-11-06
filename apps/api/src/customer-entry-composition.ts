@@ -476,7 +476,9 @@ export function createCustomerEntryComposition(
           sessionCredential: session.sessionCredential,
           csrfCredential: session.csrfCredential,
           cookie: session.cookie,
-          ...(visits.length === 0 ? {} : { earlierCredentials: Object.freeze(keptCredentials(visits)) }),
+          ...(visits.length === 0
+            ? {}
+            : { earlierCredentials: Object.freeze(keptCredentials(visits)) }),
           ...(endedHere && current.result.status === "Ended"
             ? {
                 previousVisit: current.result.receiptsReadable

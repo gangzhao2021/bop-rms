@@ -824,7 +824,9 @@ describe("M104/M105: the entry answers that this phone's visit goes on", () => {
       (await client(async () => response(200, { ...established, resumed: true })).start()).kind,
     ).not.toBe("Established");
     expect(
-      await client(async () => response(201, { ...pickup, previousVisit: "EndedReceiptsKept" })).start(),
+      await client(async () =>
+        response(201, { ...pickup, previousVisit: "EndedReceiptsKept" }),
+      ).start(),
     ).toMatchObject({ kind: "Established", context: { previousVisit: "EndedReceiptsKept" } });
   });
 });

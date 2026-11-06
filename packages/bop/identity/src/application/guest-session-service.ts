@@ -348,7 +348,11 @@ export class GuestSessionService {
         readonly session: GuestSession;
         readonly csrfCredential: GuestRawCredential;
       }
-    | { readonly status: "Ended"; readonly session: GuestSession; readonly receiptsReadable: boolean }
+    | {
+        readonly status: "Ended";
+        readonly session: GuestSession;
+        readonly receiptsReadable: boolean;
+      }
     | { readonly status: "Unknown" }
   > {
     const raw = command(input, ["sessionCredential"], ["observedAt"]);

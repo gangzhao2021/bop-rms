@@ -169,7 +169,10 @@ describe("WP-1205 in-memory Cart state", () => {
 
   it("leaves a table cart's reconnect read to the table poll, so it reads once (M94)", async () => {
     const f = fixture();
-    f.setCurrent({ ...cart(), cart: { ...cart().cart, orderType: "DineIn", serviceMode: "DineIn" } });
+    f.setCurrent({
+      ...cart(),
+      cart: { ...cart().cart, orderType: "DineIn", serviceMode: "DineIn" },
+    });
     await f.controller.load();
     f.controller.setOnline(false);
     f.controller.setOnline(true);

@@ -224,7 +224,10 @@ describe("M117: after midnight in last night's overnight period", () => {
   });
   it("says open until 2:00 a.m. and tonight's hours, not the new date's", async () => {
     const profile = parseStoreProfile(late());
-    expect(profile.hours?.tonight).toEqual({ startLocalTime: "11:00:00", endLocalTime: "02:00:00" });
+    expect(profile.hours?.tonight).toEqual({
+      startLocalTime: "11:00:00",
+      endLocalTime: "02:00:00",
+    });
     expect(storeStatusLine(profile.hours as NonNullable<StoreProfile["hours"]>).detail).toBe(
       `until ${formatStoreLocalTime("02:00:00")}`,
     );
@@ -237,7 +240,10 @@ describe("M117: after midnight in last night's overnight period", () => {
     expect(() =>
       parseStoreProfile({
         ...late(),
-        store: { ...late().store, hours: { ...late().store.hours, tonight: { startLocalTime: "x" } } },
+        store: {
+          ...late().store,
+          hours: { ...late().store.hours, tonight: { startLocalTime: "x" } },
+        },
       }),
     ).toThrow();
   });

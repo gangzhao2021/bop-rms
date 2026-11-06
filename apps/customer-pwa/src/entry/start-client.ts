@@ -145,7 +145,12 @@ export function createCustomerStartClient(input: CustomerStartClientInput): Cust
       if (source.kind === "Code") {
         const token = await source.load();
         // The same table or pickup poster again keeps its visit; anything else, the new code.
-        if (token !== undefined && resumed !== null && restored && isRestoredVisitCode(token, restored))
+        if (
+          token !== undefined &&
+          resumed !== null &&
+          restored &&
+          isRestoredVisitCode(token, restored)
+        )
           return resumed;
         return enterCode(token);
       }

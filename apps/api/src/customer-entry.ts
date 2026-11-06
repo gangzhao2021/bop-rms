@@ -299,7 +299,8 @@ export const earlierVisitsCookieName = "__Host-bop-visits";
 const earlierVisitLimit = 2;
 const earlierVisitsAttributes = "Path=/; Secure; HttpOnly; SameSite=Strict";
 export function serializeEarlierVisits(credentials: readonly string[]): string {
-  if (credentials.length === 0) return `${earlierVisitsCookieName}=; Max-Age=0; ${earlierVisitsAttributes}`;
+  if (credentials.length === 0)
+    return `${earlierVisitsCookieName}=; Max-Age=0; ${earlierVisitsAttributes}`;
   return `${earlierVisitsCookieName}=${credentials
     .map((credential) => parseGuestRawCredential(credential))
     .join(".")}; Max-Age=86400; ${earlierVisitsAttributes}`;

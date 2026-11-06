@@ -169,9 +169,7 @@ export function describeCustomerStoreHours(input: {
     status,
     todayHours,
     closesAt:
-      status === "Open"
-        ? (current?.endLocalTime ?? carriedOver?.endLocalTime ?? null)
-        : null,
+      status === "Open" ? (current?.endLocalTime ?? carriedOver?.endLocalTime ?? null) : null,
     opensAt: status === "Closed" && next !== undefined ? next.startLocalTime : null,
     ...known,
   });

@@ -101,12 +101,12 @@ function StoreDetails({ profile }: { readonly profile: StoreProfile }) {
                   profile.hours.tonight.endLocalTime,
                 )}${t(" (next day)")}`
               : profile.hours.todayKind === null
-              ? todayHoursText(profile.hours)
-              : `${dayKindLabel(profile.hours.todayKind, profile.hours.todayHours)}${
-                  profile.hours.todayHours.length === 0
-                    ? ""
-                    : ` · ${intervalsText(profile.hours.todayHours)}`
-                }`}
+                ? todayHoursText(profile.hours)
+                : `${dayKindLabel(profile.hours.todayKind, profile.hours.todayHours)}${
+                    profile.hours.todayHours.length === 0
+                      ? ""
+                      : ` · ${intervalsText(profile.hours.todayHours)}`
+                  }`}
           </p>
           {profile.hours.upcoming.length === 0 ? null : (
             <div className="store-identity__upcoming">

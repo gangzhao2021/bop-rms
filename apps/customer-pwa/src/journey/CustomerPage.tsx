@@ -20,9 +20,7 @@ export function customerPageTitle(step: CustomerJourneyStep, storeName?: string)
     table: t("Your table"),
     other: null,
   }[step];
-  return name === null
-    ? t("{storeName} · Order", { storeName })
-    : `${name} · ${storeName}`;
+  return name === null ? t("{storeName} · Order", { storeName }) : `${name} · ${storeName}`;
 }
 
 export interface CustomerStoreContext {

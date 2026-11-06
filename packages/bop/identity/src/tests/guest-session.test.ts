@@ -947,9 +947,9 @@ describe("M104/M105 a rescan resumes this phone's visit", () => {
 
   it("says Unknown for a credential this Store has no record of, or a malformed one", async () => {
     const f = await recoveryFixture();
-    expect(
-      await f.service.resumeForEntry({ sessionCredential: nextSessionCredential }),
-    ).toEqual({ status: "Unknown" });
+    expect(await f.service.resumeForEntry({ sessionCredential: nextSessionCredential })).toEqual({
+      status: "Unknown",
+    });
     expect(await f.service.resumeForEntry({ sessionCredential: "short" })).toEqual({
       status: "Unknown",
     });

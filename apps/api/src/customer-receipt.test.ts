@@ -467,12 +467,16 @@ it("Owner 2026-10-23: names items and options in the guest's chosen language; th
 it("M104/M105: reads an earlier visit's receipt on this phone after a rescan started a new visit", async () => {
   const base = await setup(true, null);
   const earlier = "e".repeat(43);
-  const readView = vi.fn().mockRejectedValue(new DigitalReceiptError("DIGITAL_RECEIPT_PERMISSION_DENIED"));
-  const readEarlierView = vi.fn().mockImplementation(async (input: { sessionCredential: string }) => {
-    if (input.sessionCredential !== earlier)
-      throw new DigitalReceiptError("DIGITAL_RECEIPT_PERMISSION_DENIED");
-    return { chain: base.chain, financial: null };
-  });
+  const readView = vi
+    .fn()
+    .mockRejectedValue(new DigitalReceiptError("DIGITAL_RECEIPT_PERMISSION_DENIED"));
+  const readEarlierView = vi
+    .fn()
+    .mockImplementation(async (input: { sessionCredential: string }) => {
+      if (input.sessionCredential !== earlier)
+        throw new DigitalReceiptError("DIGITAL_RECEIPT_PERMISSION_DENIED");
+      return { chain: base.chain, financial: null };
+    });
   const server = createServer(
     createApp({
       customerReceipt: new CustomerReceiptHandler({
@@ -494,8 +498,14 @@ it("M104/M105: reads an earlier visit's receipt on this phone after a rescan sta
   expect(readEarlierView).not.toHaveBeenCalled();
   const response = await send(`${current}; __Host-bop-visits=${"x".repeat(43)}.${earlier}`);
   expect(response.status).toBe(200);
-  expect(((await response.json()) as { receipt: { orderReference: string } }).receipt.orderReference).toBe(id(1));
-  expect(readEarlierView.mock.calls.map(([input]) => (input as { sessionCredential: string }).sessionCredential)).toEqual(["x".repeat(43), earlier]);
+  expect(
+    ((await response.json()) as { receipt: { orderReference: string } }).receipt.orderReference,
+  ).toBe(id(1));
+  expect(
+    readEarlierView.mock.calls.map(
+      ([input]) => (input as { sessionCredential: string }).sessionCredential,
+    ),
+  ).toEqual(["x".repeat(43), earlier]);
   // An outage is never turned into another visit's read.
   readView.mockRejectedValueOnce(new DigitalReceiptError("DIGITAL_RECEIPT_DEPENDENCY_UNAVAILABLE"));
   expect((await send(`${current}; __Host-bop-visits=${earlier}`)).status).toBe(503);

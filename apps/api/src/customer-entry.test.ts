@@ -981,7 +981,11 @@ describe("M104/M105: a rescan goes on with this phone's visit", () => {
     expect(visitCookies(response)).toEqual([]);
     expect(visits(response)).toEqual([]);
     const body = await response.json();
-    expect(body).toMatchObject({ status: "Established", resumed: true, csrfToken: CSRF_CREDENTIAL });
+    expect(body).toMatchObject({
+      status: "Established",
+      resumed: true,
+      csrfToken: CSRF_CREDENTIAL,
+    });
     expect(JSON.stringify(body)).not.toContain(SESSION_CREDENTIAL);
   });
 

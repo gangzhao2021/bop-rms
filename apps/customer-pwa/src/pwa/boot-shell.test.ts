@@ -18,7 +18,9 @@ describe("M106: the guest sees the app opening before its script has loaded", ()
     expect(html).not.toMatch(/\sstyle=/iu);
     expect(html).not.toMatch(/\son[a-z]+=/iu);
     // The only script is the module the build replaces with its own file.
-    expect(html.match(/<script\b[^>]*>/giu)).toEqual(['<script type="module" src="/src/main.tsx">']);
+    expect(html.match(/<script\b[^>]*>/giu)).toEqual([
+      '<script type="module" src="/src/main.tsx">',
+    ]);
     expect(css).not.toMatch(/url\(|@import|expression\(/iu);
   });
 });

@@ -671,7 +671,11 @@ describe("M104/M105: a rescan goes on with this phone's visit", () => {
         }),
       },
     } as never);
-    expect(result).toMatchObject({ status: "Established", resumed: true, operatingState: "Closed" });
+    expect(result).toMatchObject({
+      status: "Established",
+      resumed: true,
+      operatingState: "Closed",
+    });
     expect(f.create).toHaveBeenCalledOnce();
     // A phone with no visit here is still refused.
     expect(
