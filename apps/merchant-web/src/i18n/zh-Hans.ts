@@ -8520,4 +8520,18 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Activity records": "操作记录",
   "Written by you": "由你编写",
   "Sent by you": "由你提交",
+  // merchant-outage-recovery M01: the workspace reconnecting by itself.
+  "Can't connect right now": "暂时连不上",
+  "Retrying on its own. This page opens as soon as the system answers, and nothing you entered is lost. Keep serving with paper slips if it takes more than a few minutes.":
+    "正在自动重试，系统一回应这一页就会自己打开，已经录入的内容不会丢。如果几分钟还连不上，先用纸质点单继续营业。",
+  "This device is offline": "这台设备没有联网",
+  "Check the wifi. The page opens again by itself when the network is back.":
+    "请检查无线网络。网络恢复后这一页会自己重新打开。",
+  "Paid orders that nobody accepts in time may be refunded automatically, and this screen can't warn you while it is reconnecting. Check new orders on a screen that is still connected; if none is, follow the paper-slip steps in the store runbook.":
+    "已付款的订单如果没人及时接单，可能会被自动退款，而这块屏幕在重连期间无法提醒你。请在仍然连得上的屏幕上查看新订单；如果都连不上，请按门店手册里的纸质点单步骤处理。",
+  "Try now": "立即重试",
+  "Last tried {time}": "上次尝试：{time}",
+  "This page can't be opened": "这一页打不开",
+  "The system's answer could not be read. Reload the page; if it happens again, keep serving with paper slips and tell the store's owner.":
+    "系统的回应无法读取。请刷新页面；如果还是这样，先用纸质点单继续营业，并告诉店主。",
 });

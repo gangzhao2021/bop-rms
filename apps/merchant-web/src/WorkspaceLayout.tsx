@@ -225,7 +225,10 @@ export function WorkspaceLayout({
   children,
   footer = null,
   csrf = null,
+  readsPaused = false,
 }: {
+  /** M01: reconnecting; the waiting counts are not read (they would only fail). */
+  readonly readsPaused?: boolean;
   /** WP-2423 Q28: the session's CSRF token, to count guests waiting for staff. */
   readonly csrf?: string | null;
   readonly items: readonly MerchantNavigationItem[];
@@ -240,16 +243,18 @@ export function WorkspaceLayout({
   const current = currentNavigationItem(items, path, search);
   const sections = workspaceNavigationSections(items);
   // WP-2423 Q35: refunds waiting for an approver are counted beside "Approvals" on every page.
-  const approvals = useApprovalsWaiting(items.some((item) => item.screenId === "APPROVAL-INBOX"));
+  const approvals = useApprovalsWaiting(
+    !readsPaused && items.some((item) => item.screenId === "APPROVAL-INBOX"),
+  );
   // WP-2423 M07: and staff roles waiting for this person.
   const staffRoles = useStaffRolesWaiting(
     csrf,
-    items.some((item) => item.screenId === "APPROVAL-INBOX"),
+    !readsPaused && items.some((item) => item.screenId === "APPROVAL-INBOX"),
   );
   // WP-2423 Q28: guests waiting for staff are counted beside "Tables" on every page.
   const staffCalls = useStaffCallsWaiting(
     csrf,
-    items.some((item) => item.screenId === "DIN-FLOOR-BOARD"),
+    !readsPaused && items.some((item) => item.screenId === "DIN-FLOOR-BOARD"),
   );
   const badges: Partial<Record<string, number>> = {
     "APPROVAL-INBOX": approvalsBadgeCount(approvals, staffRoles),

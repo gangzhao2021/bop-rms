@@ -1,3 +1,12 @@
+import {
+  WorkspaceReconnectContext,
+  WorkspaceReconnectPanel,
+  clearWorkspaceFrame,
+  loadWorkspaceFrame,
+  saveWorkspaceFrame,
+  useWorkspaceReconnect,
+  type WorkspaceReconnect,
+} from "./WorkspaceReconnect.js";
 import { StoresPage } from "./StoresPage.js";
 import { t } from "./i18n/i18n.js";
 import { CurrentOrderDetailRoute, CurrentOrderQueuePage } from "./CurrentOrderQueuePage.js";
@@ -32,6 +41,7 @@ import { StoreBusinessDayProvider } from "./StoreBusinessDay.js";
 import { MerchantShell } from "./MerchantShell.js";
 import { StoreOverview } from "./StoreOverview.js";
 import { WorkspacePage } from "./WorkspacePage.js";
+import { useStaleRetry } from "./stale-read.js";
 import { KitchenBoardPage, KitchenWorkItemPage } from "./KitchenBoardPages.js";
 import { createKitchenBoardClient } from "./kitchen-board-client.js";
 import { parseKitchenBoardView, type KitchenBoardView } from "./kitchen-board.js";
@@ -462,8 +472,15 @@ const sessionlessPaths: ReadonlySet<string> = new Set([
 type WorkspaceState =
   | { readonly kind: "Loading" }
   | { readonly kind: "SignedOut" }
-  | { readonly kind: "Offline" }
-  | { readonly kind: "Failure" }
+  /** M01: `attempts` counts failed reads in a row; each one is retried (5 s, 10 s, 20 s, 30 s). */
+  | { readonly kind: "Offline"; readonly attempts: number; readonly triedAt: string }
+  /** `final`: the answer could not be read; retrying would read the same answer. */
+  | {
+      readonly kind: "Failure";
+      readonly attempts: number;
+      readonly triedAt: string;
+      readonly final?: boolean;
+    }
   /** BOP paused or closed this Store or merchant: not a sign-in to repeat. */
   | { readonly kind: "NotActive" }
   | {
@@ -507,6 +524,9 @@ function SessionPending({
   readonly pending: boolean;
   readonly children: ReactNode;
 }) {
+  // M01: while the workspace cannot be read, the page says it is reconnecting by itself.
+  const reconnect = useWorkspaceReconnect();
+  if (reconnect !== null) return <WorkspaceReconnectPanel reconnect={reconnect} />;
   if (!pending) return <>{children}</>;
   return (
     <StatePanel heading={t("Loading")} tone="neutral" status>
@@ -646,6 +666,25 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
   // v15 cbff9d6f: nothing reads with a sign-in that has ended (the business-day check included).
   const sessionLive = useStaffSessionLive();
 
+  // M01: a failed workspace read is asked again by itself (and at once on "online", when the tab
+  // is shown again, or on "Try now"), without dropping back to Loading, until a final answer.
+  const [bootstrapRun, setBootstrapRun] = useState(0);
+  const retryBootstrap = useCallback(() => setBootstrapRun((run) => run + 1), []);
+  const bootstrapAttempts =
+    (state.kind === "Failure" && state.final !== true) || state.kind === "Offline"
+      ? state.attempts
+      : null;
+  useStaleRetry(bootstrapAttempts, retryBootstrap);
+  const retrying = bootstrapAttempts !== null;
+  useEffect(() => {
+    if (!retrying || typeof document === "undefined") return;
+    const visible = () => {
+      if (document.visibilityState === "visible") retryBootstrap();
+    };
+    document.addEventListener("visibilitychange", visible);
+    return () => document.removeEventListener("visibilitychange", visible);
+  }, [retrying, retryBootstrap]);
+
   useEffect(() => {
     let active = true;
     void client
@@ -678,12 +717,58 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
           setState({ kind: "NotActive" });
           return;
         }
-        setState({ kind: navigator.onLine ? "Failure" : "Offline" });
+        const triedAt = new Date().toISOString();
+        setState((previous) => {
+          const attempts =
+            previous.kind === "Failure" || previous.kind === "Offline" ? previous.attempts + 1 : 1;
+          if (error instanceof Error && error.message === "MERCHANT_WORKSPACE_INVALID")
+            return { kind: "Failure", attempts, triedAt, final: true };
+          return navigator.onLine
+            ? { kind: "Failure", attempts, triedAt }
+            : { kind: "Offline", attempts, triedAt };
+        });
       });
     return () => {
       active = false;
     };
-  }, [client]);
+  }, [client, bootstrapRun]);
+  const reconnect = useMemo((): WorkspaceReconnect | null => {
+    if (demo !== null) return null;
+    if (state.kind === "Offline")
+      return { gate: "Offline", lastTriedAt: state.triedAt, retry: retryBootstrap };
+    if (state.kind === "Failure")
+      return {
+        gate: state.final === true ? "Broken" : "Reconnecting",
+        lastTriedAt: state.triedAt,
+        retry: retryBootstrap,
+      };
+    return null;
+  }, [demo, state, retryBootstrap]);
+  // M01: the page frame this tab last showed, kept so a reconnecting page keeps its navigation.
+  useEffect(() => {
+    if (state.kind === "Ready" && demo === null)
+      saveWorkspaceFrame({
+        storeLabel: state.workspace.selectedScope.storeLabel,
+        timeZone: state.workspace.selectedScope.timeZone,
+        navigation: state.workspace.navigation,
+      });
+  }, [state, demo]);
+  const signedOut = state.kind === "SignedOut";
+  // A sign-out, a staff switch or PIN sign-in, or an ended sign-in drops the frame of who was here.
+  const frameEnds =
+    signedOut ||
+    !sessionLive ||
+    pathname === "/operations/switch-staff" ||
+    pathname === "/operations/sign-in";
+  useEffect(() => {
+    if (frameEnds) clearWorkspaceFrame();
+  }, [frameEnds]);
+  // Read once each time the page starts reconnecting.
+  const reconnectGate = reconnect?.gate ?? null;
+  const keptFrame = useMemo(
+    () => (reconnectGate !== null && reconnectGate !== "Broken" ? loadWorkspaceFrame() : null),
+    [reconnectGate],
+  );
 
   const ready = state.kind === "Ready";
   useEffect(() => (ready ? prefetchPilotScreens() : undefined), [ready]);
@@ -692,6 +777,8 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
     if (state.kind !== "Ready" || state.switching || switching.current) return;
     switching.current = true;
     const current = state;
+    // M01: the kept frame belongs to the Store being left; the new Store's frame replaces it.
+    clearWorkspaceFrame();
     setState({ ...current, switching: true, switchFailed: false });
     try {
       const refreshed = await client.switchStore(current.csrf, targetStoreReference);
@@ -774,32 +861,38 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
           path="/app"
           element={
             <LocalDemoRoute notice={demo?.Notice ?? null}>
-              <MerchantShell
-                overview={DemoOverview === undefined ? null : <DemoOverview />}
-                today={
-                  demo === null && state.kind === "Ready" && !state.switching ? (
-                    <StoreOverview
-                      key={state.workspace.selectedScope.storeReference + state.csrf}
-                      csrf={state.csrf}
-                      storeReference={state.workspace.selectedScope.storeReference}
-                      storeLabel={state.workspace.selectedScope.storeLabel}
-                      timeZone={state.workspace.selectedScope.timeZone}
-                      screens={state.workspace.navigation.map((item) => item.screenId)}
-                    />
-                  ) : undefined
-                }
-                prompt={
-                  demo === null && state.kind === "Ready" && !state.switching ? (
-                    <OwnNamePrompt
-                      key={state.workspace.selectedScope.storeReference + state.csrf}
-                      csrf={state.csrf}
-                    />
-                  ) : null
-                }
-                // NotActive never reaches the shell: its own page is shown instead of the routes.
-                state={state.kind === "NotActive" ? { kind: "Failure" } : state}
-                onSwitchStore={switchStore}
-              />
+              {reconnect !== null ? (
+                <WorkspacePage title={t("Operations")}>
+                  <WorkspaceReconnectPanel reconnect={reconnect} />
+                </WorkspacePage>
+              ) : (
+                <MerchantShell
+                  overview={DemoOverview === undefined ? null : <DemoOverview />}
+                  today={
+                    demo === null && state.kind === "Ready" && !state.switching ? (
+                      <StoreOverview
+                        key={state.workspace.selectedScope.storeReference + state.csrf}
+                        csrf={state.csrf}
+                        storeReference={state.workspace.selectedScope.storeReference}
+                        storeLabel={state.workspace.selectedScope.storeLabel}
+                        timeZone={state.workspace.selectedScope.timeZone}
+                        screens={state.workspace.navigation.map((item) => item.screenId)}
+                      />
+                    ) : undefined
+                  }
+                  prompt={
+                    demo === null && state.kind === "Ready" && !state.switching ? (
+                      <OwnNamePrompt
+                        key={state.workspace.selectedScope.storeReference + state.csrf}
+                        csrf={state.csrf}
+                      />
+                    ) : null
+                  }
+                  // NotActive never reaches the shell: its own page is shown instead of the routes.
+                  state={state.kind === "NotActive" ? { kind: "Failure" } : state}
+                  onSwitchStore={switchStore}
+                />
+              )}
             </LocalDemoRoute>
           }
         />
@@ -809,6 +902,10 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
             <LocalDemoRoute notice={demo?.Notice ?? null}>
               {state.kind === "Ready" && !state.switching ? (
                 <TaskInboxPage key={state.workspace.selectedScope.storeReference + state.csrf} />
+              ) : reconnect !== null ? (
+                <WorkspacePage title={t("Tasks")}>
+                  <WorkspaceReconnectPanel reconnect={reconnect} />
+                </WorkspacePage>
               ) : (
                 <AppFrame title={t("Tasks")} description="TASK-INBOX">
                   <TaskInboxStatePanel
@@ -2241,7 +2338,7 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
     (pathname.startsWith("/operations/") || /^\/app\/./u.test(pathname));
   return (
     <StoreTimeZoneContext.Provider
-      value={state.kind === "Ready" ? state.workspace.selectedScope.timeZone : undefined}
+      value={state.kind === "Ready" ? state.workspace.selectedScope.timeZone : keptFrame?.timeZone}
     >
       <StoreBusinessDayProvider
         initialBusinessDate={state.kind === "Ready" ? state.workspace.businessDate : null}
@@ -2284,17 +2381,31 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
         {refundRead !== null && !sessionless ? (
           <PaidOrderAlarmBanner watch={paidOrderWatch} />
         ) : null}
-        <PaidOrderWatchContext.Provider value={paidOrderWatch}>
-          {state.kind === "Ready" && usesWorkspaceLayout(pathname) && !soldOutFromKitchen ? (
-            workspaceFrame(routes)
-          ) : state.kind === "SignedOut" && demo === null && staffPage ? (
-            <StaffSignedOutPage />
-          ) : state.kind === "NotActive" && demo === null && !sessionless ? (
-            <OrganizationNotActivePage />
-          ) : (
-            routes
-          )}
-        </PaidOrderWatchContext.Provider>
+        <WorkspaceReconnectContext.Provider value={reconnect}>
+          <PaidOrderWatchContext.Provider value={paidOrderWatch}>
+            {state.kind === "Ready" && usesWorkspaceLayout(pathname) && !soldOutFromKitchen ? (
+              workspaceFrame(routes)
+            ) : keptFrame !== null && usesWorkspaceLayout(pathname) && !soldOutFromKitchen ? (
+              // M01: reconnecting keeps the navigation this tab last showed; nothing reads from it.
+              <WorkspaceLayout
+                csrf={null}
+                items={keptFrame.navigation}
+                path={pathname}
+                search={search}
+                storeLabel={keptFrame.storeLabel}
+                readsPaused
+              >
+                {routes}
+              </WorkspaceLayout>
+            ) : state.kind === "SignedOut" && demo === null && staffPage ? (
+              <StaffSignedOutPage />
+            ) : state.kind === "NotActive" && demo === null && !sessionless ? (
+              <OrganizationNotActivePage />
+            ) : (
+              routes
+            )}
+          </PaidOrderWatchContext.Provider>
+        </WorkspaceReconnectContext.Provider>
         {/* WP-2423 Q18: keep the Session alive while staff work; warn before it ends. */}
         {state.kind === "Ready" && demo === null && !sessionless ? (
           <StaffSessionGuard
