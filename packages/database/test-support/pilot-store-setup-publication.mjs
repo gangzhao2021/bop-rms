@@ -1340,6 +1340,8 @@ export async function exercisePilotStoreSetupPublication(input) {
     if (typeof input.afterPublication === "function")
       await input.afterPublication({
         ...input,
+        // The runner this harness seeds its own staff sessions with (a hook seeds its people so).
+        seedRunner,
         api,
         store,
         owner,
