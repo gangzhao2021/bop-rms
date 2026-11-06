@@ -58,10 +58,10 @@ const openCase = (page: Page, place = 0) =>
 const showTab = (page: Page, name: RegExp) =>
   page.getByRole("group", { name: "Show exceptions" }).getByRole("button", { name }).click();
 
-test("@production exception read recovers and clears old data on refresh denial", async ({
+test("@production exception read recovers from an outage, and a refusal of access says No access without a retry", async ({
   page,
 }) => {
-  let response: "denied" | "stale" | "empty" = "denied";
+  let response: "unavailable" | "denied" | "stale" | "empty" = "denied";
   const mutations: string[] = [];
   page.on("request", (request) => {
     // WP-2423 Q18: the staff Session activity report is not a business mutation.
@@ -78,10 +78,26 @@ test("@production exception read recovers and clears old data on refresh denial"
     route.fulfill(
       response === "denied"
         ? { status: 403, json: { error: "request_denied" }, headers }
-        : { json: { ...view(0), ...(response === "empty" ? { items: [] } : {}) }, headers },
+        : response === "unavailable"
+          ? { status: 503, json: { error: "unavailable" }, headers }
+          : { json: { ...view(0), ...(response === "empty" ? { items: [] } : {}) }, headers },
     ),
   );
+  // WP-2423: a staff member whose role does not include exceptions is told so; a retry can't help.
   await page.goto("/operations/order-exceptions");
+  await expect(page.getByRole("heading", { name: "No access" })).toBeVisible();
+  await expect(
+    page.getByText("You don't have access to this page. Ask the owner or a manager."),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Retry loading exceptions" })).toHaveCount(0);
+  await expect(page.getByText("Exceptions unavailable")).toHaveCount(0);
+  await page.getByRole("button", { name: "切换到中文" }).click();
+  await expect(page.getByRole("heading", { name: "无权限" })).toBeVisible();
+  await page.getByRole("button", { name: "Switch to English" }).click();
+  await expect(page.getByRole("heading", { name: "No access" })).toBeVisible();
+  // An outage keeps its retry, and recovers.
+  response = "unavailable";
+  await page.reload();
   await expect(page.getByRole("button", { name: "Retry loading exceptions" })).toBeVisible();
   response = "stale";
   await page.getByRole("button", { name: "Retry loading exceptions" }).focus();
@@ -96,11 +112,17 @@ test("@production exception read recovers and clears old data on refresh denial"
   ])
     await expect(page.getByRole("button", { name, exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Refresh" })).toBeFocused();
+  // Access withdrawn since the page opened: the old rows go and the page says No access.
   response = "denied";
   await page.keyboard.press("Enter");
+  await expect(page.getByRole("heading", { name: "No access" })).toBeVisible();
+  await expect(caseRow(page, "Paid without a fulfillable order")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Retry loading exceptions" })).toHaveCount(0);
+  // An outage on refresh also clears the old rows and offers the retry.
+  response = "unavailable";
+  await page.reload();
   await expect(page.getByRole("button", { name: "Retry loading exceptions" })).toBeVisible();
   await expect(caseRow(page, "Paid without a fulfillable order")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Retry loading exceptions" })).toBeFocused();
   response = "empty";
   await page.getByRole("button", { name: "Retry loading exceptions" }).focus();
   await page.keyboard.press("Enter");

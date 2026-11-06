@@ -1,5 +1,13 @@
 import type { OrderExceptionClient } from "./order-exception-view.js";
 
+/** The server refused this staff member the page (403): retrying will not help. */
+export class OrderExceptionAccessDenied extends Error {
+  constructor() {
+    super("ORDER_EXCEPTION_DENIED");
+    this.name = "OrderExceptionAccessDenied";
+  }
+}
+
 export function createOrderExceptionClient(fetcher: typeof fetch = fetch): OrderExceptionClient {
   return Object.freeze({
     async load(signal?: AbortSignal, resolvedBefore?: string) {
@@ -28,6 +36,7 @@ export function createOrderExceptionClient(fetcher: typeof fetch = fetch): Order
           signal: controller.signal,
           headers: { Accept: "application/json" },
         });
+        if (response.status === 403) throw new OrderExceptionAccessDenied();
         if (
           !response.ok ||
           response.headers.get("cache-control") !== "no-store" ||
@@ -38,8 +47,9 @@ export function createOrderExceptionClient(fetcher: typeof fetch = fetch): Order
         if (controller.signal.aborted || text.length > 1048576)
           throw new Error("ORDER_EXCEPTION_UNAVAILABLE");
         return JSON.parse(text) as unknown;
-      } catch {
-        throw new Error("ORDER_EXCEPTION_UNAVAILABLE");
+      } catch (error) {
+        if (error instanceof OrderExceptionAccessDenied) throw error;
+        throw new Error("ORDER_EXCEPTION_UNAVAILABLE", { cause: error });
       } finally {
         clearTimeout(timer);
         signal?.removeEventListener("abort", abort);

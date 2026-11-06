@@ -1,5 +1,8 @@
 import { expect, it, vi } from "vitest";
-import { createOrderExceptionClient } from "./order-exception-client.js";
+import {
+  createOrderExceptionClient,
+  OrderExceptionAccessDenied,
+} from "./order-exception-client.js";
 it("uses only the same-origin BFF and never sends scope or credentials in a URL", async () => {
   const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
     new Response('{"items":[]}', {
@@ -17,8 +20,27 @@ it("uses only the same-origin BFF and never sends scope or credentials in a URL"
     }),
   );
 });
+it("says a 403 is a refusal of access, not an outage, and keeps its body private", async () => {
+  const fetcher = vi
+    .fn<typeof fetch>()
+    .mockResolvedValue(new Response("private-denial", { status: 403 }));
+  const failure = await createOrderExceptionClient(fetcher)
+    .load()
+    .catch((error: unknown) => error);
+  expect(failure).toBeInstanceOf(OrderExceptionAccessDenied);
+  expect(String((failure as Error).message)).toBe("ORDER_EXCEPTION_DENIED");
+  // Every other failure stays the retryable one.
+  await expect(
+    createOrderExceptionClient(
+      vi.fn<typeof fetch>().mockResolvedValue(new Response("{}", { status: 503 })),
+    ).load(),
+  ).rejects.toThrow("ORDER_EXCEPTION_UNAVAILABLE");
+});
 it.each([
-  new Response("private-denial", { status: 403 }),
+  new Response("{}", {
+    status: 503,
+    headers: { "content-type": "application/json", "cache-control": "no-store" },
+  }),
   new Response("{}", { headers: { "content-type": "application/json" } }),
   new Response("private-html", {
     headers: { "content-type": "text/html", "cache-control": "no-store" },

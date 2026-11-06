@@ -7,6 +7,7 @@ import { findInternalText } from "../e2e/internal-text-patterns.js";
 import { exceptionOpenForText, isExceptionOverdue } from "./order-exception-view.js";
 import { summarizeExceptions } from "./StoreOverview.js";
 import {
+  OrderExceptionLoadFailed,
   OrderExceptionPage,
   OrderExceptionScreen,
   parseOrderExceptionView,
@@ -558,4 +559,19 @@ it("Owner 2026-11-03: a case is one row with its next step; its details wait in 
   expect(panels).toContain("hidden");
   expect(html).not.toContain('data-panel="open"');
   expect(findInternalText([html.replace(/<[^>]+>/gu, " ")])).toEqual([]);
+});
+
+it("WP-2423: a staff member without access is told so, with no retry; an outage keeps its retry", () => {
+  const denied = renderToStaticMarkup(
+    <OrderExceptionLoadFailed denied onRetry={() => undefined} />,
+  );
+  expect(denied).toContain("No access");
+  expect(denied).toContain("You don&#x27;t have access to this page.");
+  expect(denied).not.toContain("Retry loading exceptions");
+  expect(denied.split('class="bop-state-card"')[1]).not.toContain("<button");
+  const outage = renderToStaticMarkup(
+    <OrderExceptionLoadFailed denied={false} onRetry={() => undefined} />,
+  );
+  expect(outage).toContain("Exceptions unavailable");
+  expect(outage).toContain("Retry loading exceptions");
 });

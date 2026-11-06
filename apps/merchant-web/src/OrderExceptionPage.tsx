@@ -2,7 +2,11 @@ import { systemText, t } from "./i18n/i18n.js";
 import { ReconciliationFollowUpAction } from "./ReconciliationFollowUpAction.js";
 import { CompensationReconciliationAction } from "./CompensationReconciliationAction.js";
 import { UnmatchedCaptureRefundAction } from "./UnmatchedCaptureRefundAction.js";
-import { createOrderExceptionClient } from "./order-exception-client.js";
+import {
+  createOrderExceptionClient,
+  OrderExceptionAccessDenied,
+} from "./order-exception-client.js";
+import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { StatePanel } from "@bop-rms/ui";
 import { Freshness, SourceTime } from "./StoreTime.js";
 import { WorkspacePage } from "./WorkspacePage.js";
@@ -759,6 +763,36 @@ function OrderExceptionCard({
   );
 }
 const defaultExceptionClient = createOrderExceptionClient();
+/**
+ * WP-2423: a read that failed. A refusal of access (403) says so and offers no retry, because a
+ * retry cannot help; any other failure keeps its retry.
+ */
+export function OrderExceptionLoadFailed({
+  denied,
+  onRetry,
+  retryRef,
+}: {
+  readonly denied: boolean;
+  readonly onRetry: () => void;
+  readonly retryRef?: Ref<HTMLButtonElement>;
+}) {
+  return (
+    <WorkspacePage className="orders-page order-exception-page" title={t("Exceptions")}>
+      {denied ? (
+        <StatePanel heading={noAccessHeading} tone="error" status>
+          <p>{pageAccessDeniedText}</p>
+        </StatePanel>
+      ) : (
+        <StatePanel heading={t("Exceptions unavailable")} tone="error" status>
+          <p>{t("Exceptions could not be loaded. No action was sent.")}</p>
+          <button ref={retryRef} onClick={onRetry}>
+            {t("Retry loading exceptions")}
+          </button>
+        </StatePanel>
+      )}
+    </WorkspacePage>
+  );
+}
 export function OrderExceptionPage({
   client = defaultExceptionClient,
   csrf,
@@ -774,13 +808,17 @@ export function OrderExceptionPage({
     void client
       .load()
       .then(parseOrderExceptionView)
-      .then((view) => setState({ client, generation, view }))
-      .catch(() => undefined);
+      .then((view) => setState({ client, generation, view, denied: false }))
+      .catch((error: unknown) => {
+        if (error instanceof OrderExceptionAccessDenied)
+          setState({ client, generation, view: null, denied: true });
+      });
   };
   const [state, setState] = useState<{
     client: OrderExceptionClient;
     generation: number;
     view: OrderExceptionView | null;
+    denied: boolean;
   } | null>(null);
   useEffect(() => {
     let active = true;
@@ -789,10 +827,16 @@ export function OrderExceptionPage({
       .load(controller.signal)
       .then(parseOrderExceptionView)
       .then((view) => {
-        if (active) setState({ client, generation, view });
+        if (active) setState({ client, generation, view, denied: false });
       })
-      .catch(() => {
-        if (active) setState({ client, generation, view: null });
+      .catch((error: unknown) => {
+        if (active)
+          setState({
+            client,
+            generation,
+            view: null,
+            denied: error instanceof OrderExceptionAccessDenied,
+          });
       });
     return () => {
       active = false;
@@ -837,9 +881,13 @@ export function OrderExceptionPage({
           status: "Idle",
         });
       })
-      .catch(() => {
-        if (!controller.signal.aborted)
-          setOlder({ view: currentView, items: base?.items ?? [], cursor, status: "Failed" });
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return;
+        // Access withdrawn since the page opened: the whole page says so, the rows go.
+        if (error instanceof OrderExceptionAccessDenied) {
+          setOlder(null);
+          setState({ client, generation, view: null, denied: true });
+        } else setOlder({ view: currentView, items: base?.items ?? [], cursor, status: "Failed" });
       })
       .finally(() => {
         if (olderRequest.current === controller) olderRequest.current = null;
@@ -887,13 +935,6 @@ export function OrderExceptionPage({
       onRecorded={reloadQuietly}
     />
   ) : (
-    <WorkspacePage className="orders-page order-exception-page" title={t("Exceptions")}>
-      <StatePanel heading={t("Exceptions unavailable")} tone="error" status>
-        <p>{t("Exceptions could not be loaded. No action was sent.")}</p>
-        <button ref={recoveryButton} onClick={refresh}>
-          {t("Retry loading exceptions")}
-        </button>
-      </StatePanel>
-    </WorkspacePage>
+    <OrderExceptionLoadFailed denied={state.denied} onRetry={refresh} retryRef={recoveryButton} />
   );
 }
