@@ -416,7 +416,7 @@ function sendRoundMessage(round: SendRoundState, cart: CartView, onRetry: () => 
     case "session-ended":
       return <p role="alert">{checkoutText.sessionEnded}</p>;
     case "cart-changed":
-      return <p role="alert">{cartText.failure.conflict[1]}</p>;
+      return <p role="alert">{checkoutText.tableCartChanged}</p>;
     default:
       return null;
   }

@@ -508,6 +508,68 @@ test("@production a checkout whose order needs checking again says so, without a
   await expect(main.getByRole("link", { name: "Back to checkout" })).toBeVisible();
 });
 
+test("@production tips turned off after a table's round was placed points to the table, not an empty checkout", async ({
+  page,
+}) => {
+  // The server places the round (emptying the cart) before it records the tip.
+  let placed = false;
+  await checkout(page, {
+    channel: "DineIn",
+    cartLines: () => (placed ? 0 : 1),
+    intents: (route, call) => {
+      placed = true;
+      return refused(409, "payment_tips_turned_off")(route, call);
+    },
+  });
+  await goToPayment(page);
+  const main = page.getByRole("main");
+  await expect(
+    main.getByRole("heading", { name: "The restaurant stopped taking tips" }),
+  ).toBeVisible();
+  await expect(main).toContainText("Pay for it from your table page, without a tip.");
+  await expect(main).toContainText("saved on your table page");
+  await expect(main.getByRole("link", { name: "See your table" })).toBeVisible();
+  await expect(main.getByRole("link", { name: "Back to checkout" })).toHaveCount(0);
+  await expect(main.getByRole("heading", { name: "Need a staff member?" })).toBeVisible();
+  await expectNoInternalText(page);
+});
+
+test("@production tips turned off at pickup goes back to checkout to pay without a tip", async ({
+  page,
+}) => {
+  await checkout(page, { channel: "Pickup", intents: refused(409, "payment_tips_turned_off") });
+  await goToPayment(page);
+  const main = page.getByRole("main");
+  await expect(main).toContainText("Go back to checkout to pay without a tip.");
+  await expect(main.getByRole("link", { name: "Back to checkout" })).toBeVisible();
+  await expect(main.getByText("Need a staff member?")).toHaveCount(0);
+});
+
+test("@production a table's order that needs checking again after its round was placed says to pay from the table", async ({
+  page,
+}) => {
+  let placed = false;
+  await checkout(page, {
+    channel: "DineIn",
+    cartLines: () => (placed ? 0 : 1),
+    intents: (route, call) => {
+      placed = true;
+      return refused(422)(route, call);
+    },
+  });
+  await goToPayment(page);
+  const main = page.getByRole("main");
+  await expect(
+    main.getByRole("heading", { name: "Your order needs checking again" }),
+  ).toBeVisible();
+  await expect(main).toContainText(
+    "This order hasn’t been charged. Pay for it from your table page.",
+  );
+  await expect(main).not.toContainText("Go back to check out again");
+  await expect(main.getByRole("link", { name: "See your table" })).toBeVisible();
+  await expect(main.getByRole("link", { name: "Back to checkout" })).toHaveCount(0);
+});
+
 test("@production a table that turns out to pay at the end goes back to its cart", async ({
   page,
 }) => {

@@ -1362,6 +1362,12 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "如果你已经输入过银行卡，请先查看结果，不要重复付款；如果还没有，可以继续付款。",
   "Your order needs checking again": "这一单需要重新确认",
   "This order hasn’t been charged. Go back to check out again.": "这一单没有扣款。请返回重新结账。",
+  "This order hasn’t been charged. Pay for it from your table page.":
+    "这一单没有扣款。请在本桌页面付款。",
+  "Tips were turned off while you were checking out, so this order hasn’t been charged. Pay for it from your table page, without a tip.":
+    "你结账时门店关闭了小费，这一单没有扣款。请在本桌页面付款，不加小费。",
+  "Your table’s cart changed, so nothing was placed yet. Check it, then tap Place order.":
+    "同桌的购物车有变化，还没有下单。请看一下再点“下单”。",
   "We can’t show this payment on this phone": "这台手机无法显示这笔付款",
   "Ask a staff member to check it before you pay again.": "再次付款前，请先请店员核对。",
   "Check your connection and try again.": "请检查网络后重试。",

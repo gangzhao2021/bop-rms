@@ -329,6 +329,8 @@ function PreparedSessionPaymentPage({
     status === "start_failed" ||
     status === "expired" ||
     status === "closed" ||
+    // The server places a table's round before it records the tip: the dishes may be on the table.
+    status === "tips_off" ||
     (status === "denied" && !cardOffered);
   const back = useCheckoutReturn(failedStart, store?.serviceMode === "DineIn");
   // While a payment may be under way (or just failed), a second checkout is the last thing to offer.
@@ -423,11 +425,16 @@ function PreparedSessionPaymentPage({
         <section className="checkout-attention" role="alert">
           <h2>{t("The restaurant stopped taking tips")}</h2>
           <p>
-            {t(
-              "Tips were turned off while you were checking out, so this order hasn’t been charged. Go back to checkout to pay without a tip.",
-            )}
+            {back === "cart"
+              ? t(
+                  "Tips were turned off while you were checking out, so this order hasn’t been charged. Go back to checkout to pay without a tip.",
+                )
+              : t(
+                  "Tips were turned off while you were checking out, so this order hasn’t been charged. Pay for it from your table page, without a tip.",
+                )}
           </p>
-          <Link to="/checkout">{t("Back to checkout")}</Link>
+          <SavedOnTable to={back} />
+          <CheckoutReturnLink to={back} cartPath="/checkout" cartText={t("Back to checkout")} />
         </section>
       ) : null}
       {status === "requote_required" ? (
@@ -469,7 +476,11 @@ function PreparedSessionPaymentPage({
       {status === "expired" ? (
         <section className="checkout-attention" role="alert">
           <h2>{t("Your order needs checking again")}</h2>
-          <p>{t("This order hasn’t been charged. Go back to check out again.")}</p>
+          <p>
+            {back === "cart"
+              ? t("This order hasn’t been charged. Go back to check out again.")
+              : t("This order hasn’t been charged. Pay for it from your table page.")}
+          </p>
           <SavedOnTable to={back} />
           <CheckoutReturnLink to={back} cartPath="/checkout" cartText={t("Back to checkout")} />
         </section>
@@ -493,6 +504,7 @@ function PreparedSessionPaymentPage({
         status === "processing" ||
         status === "unknown" ||
         status === "closed" ||
+        status === "tips_off" ||
         (status === "denied" && cardOffered)) ? (
         // Asking for help is one tap for a seated guest; the panel hides itself if none is offered.
         <DiningStaffCallPanel />

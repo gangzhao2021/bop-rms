@@ -726,7 +726,10 @@ describe("WP-2423 item 6: a table that pays at the end", () => {
       "New dishes can’t be sent while the bill is being settled.",
     );
     expect(page(ready, { status: "session-ended" })).toContain("Your session ended.");
-    expect(page(ready, { status: "cart-changed" })).toContain("The latest cart was loaded.");
+    const changed = page(ready, { status: "cart-changed" });
+    expect(changed).toContain("so nothing was placed yet");
+    expect(changed).toContain("tap Place order");
+    expect(changed).not.toContain("submitting");
     expect(
       page(ready, { status: "blocked", messages: ["This order can’t be paid yet."] }),
     ).toContain("This order can’t be paid yet.");
@@ -759,6 +762,10 @@ describe("WP-2423 item 6: a table that pays at the end", () => {
       </MemoryRouter>,
     );
     expect(blocked).toContain("同桌有人正在下单");
+    // A send stopped by another guest's change says nothing went out, and names the button.
+    expect(page({ status: "ready", cart: tableCart() }, { status: "cart-changed" })).toContain(
+      "同桌的购物车有变化，还没有下单。请看一下再点“下单”。",
+    );
     const error = blocked.slice(blocked.indexOf("cart-state"), blocked.indexOf("cart-layout"));
     expect(error).not.toMatch(/付款|结账/u);
   });

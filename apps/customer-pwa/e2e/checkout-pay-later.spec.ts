@@ -937,7 +937,9 @@ test.describe("@production Pay-later table, the round just placed", () => {
     await openCart(page);
     await placeOrder(page).click();
     const main = page.getByRole("main");
-    await expect(main.getByRole("alert")).toContainText("The latest cart was loaded.");
+    await expect(main.getByRole("alert")).toContainText(
+      "Your table’s cart changed, so nothing was placed yet. Check it, then tap Place order.",
+    );
     await expect(main.getByRole("button", { name: "Try again", exact: true })).toHaveCount(0);
     await expect(main.getByRole("article", { name: "Mom's dumplings" })).toBeVisible();
     await expect(main.getByRole("button", { name: "Remove" }).first()).toBeEnabled();
@@ -1021,7 +1023,9 @@ test.describe("@production Pay-later table, the round just placed", () => {
     await openCart(page);
     await placeOrder(page).click();
     const main = page.getByRole("main");
-    await expect(main.getByRole("alert")).toContainText("The latest cart was loaded.");
+    await expect(main.getByRole("alert")).toContainText(
+      "Your table’s cart changed, so nothing was placed yet. Check it, then tap Place order.",
+    );
     await expect(main).not.toContainText("We couldn’t");
     await expect(main.getByRole("article", { name: "Mom's dumplings" })).toBeVisible();
     await expect(placeOrder(page)).toBeEnabled();
@@ -1040,7 +1044,9 @@ test.describe("@production Pay-later table, the round just placed", () => {
     await openCart(page);
     await placeOrder(page).click();
     const main = page.getByRole("main");
-    await expect(main.getByRole("alert")).toContainText("The latest cart was loaded.");
+    await expect(main.getByRole("alert")).toContainText(
+      "Your table’s cart changed, so nothing was placed yet. Check it, then tap Place order.",
+    );
     await expect(main).not.toContainText("We couldn’t");
     expect(table.sessionKeys).toHaveLength(1);
   });
