@@ -778,8 +778,9 @@ it("authors, reviews, publishes and binds recipes that orders and kitchen ticket
       const overlapping = async (first, second) => {
         const clients = [new Client(context.clientConfig), new Client(context.clientConfig)];
         await Promise.all(clients.map((client) => client.connect()));
+        // Shared, exclusive, or the bounded writer's first try (takeRecipeReferenceFenceBounded).
         const isFence = (sql, values) =>
-          String(sql).includes("pg_advisory_xact_lock") &&
+          /pg_(try_)?advisory_xact_lock/u.test(String(sql)) &&
           String(values?.[0]).startsWith("RecipeCatalogReferenceV1:");
         let firstPast, secondIssued;
         const firstAtFence = new Promise((resolve) => (firstPast = resolve));
@@ -829,10 +830,21 @@ it("authors, reviews, publishes and binds recipes that orders and kitchen ticket
             throw error;
           }
         };
+        // A Recipe writer waits only briefly for the fence and then gives way (55P03); the route's
+        // transaction retry runs it again, as here.
+        const retried = async (client, side, work) => {
+          for (let attempt = 1; ; attempt += 1) {
+            try {
+              return await run(client, side, work);
+            } catch (error) {
+              if (error?.code !== "55P03" || attempt === 4) throw error;
+            }
+          }
+        };
         try {
           return await Promise.all([
             run(clients[0], sides[0], first),
-            run(clients[1], sides[1], second),
+            retried(clients[1], sides[1], second),
           ]);
         } finally {
           await Promise.all(clients.map((client) => client.end()));
@@ -856,6 +868,62 @@ it("authors, reviews, publishes and binds recipes that orders and kitchen ticket
         ["Applied", "Applied"],
         "two archives in one Brand both finish",
       );
+
+      // DEC-MERCHANT-LOCK-SCOPE: an archive beside a long menu review never parks the Brand's own
+      // guests. A review holds the Recipe fence shared; the archive queues for it exclusive; a guest
+      // order (shared) arriving behind it gets through within the archive's bounded wait, not the
+      // transaction's own lock timeout. The archive gives way (55P03) and succeeds once retried.
+      {
+        const archiveThree = id(214);
+        await save({ recipeReference: archiveThree, draft: draft({ code: "ARCHIVE-THREE" }) });
+        const fenceKey = "RecipeCatalogReferenceV1:" + scope.brandReference;
+        const [review, manager, guest] = [0, 1, 2].map(() => new Client(context.clientConfig));
+        await Promise.all([review, manager, guest].map((client) => client.connect()));
+        try {
+          await review.query("BEGIN");
+          await review.query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))", [
+            fenceKey,
+          ]);
+          await manager.query("BEGIN");
+          await manager.query("SET LOCAL ROLE " + role);
+          // The runtime transaction's own limit (transaction-runner.ts), far above the bound.
+          await manager.query("SET LOCAL lock_timeout='5s'");
+          const archiving = archive(archiveThree)(manager).then(
+            () => null,
+            (error) => error,
+          );
+          for (let tries = 0; ; tries += 1) {
+            const { rows } = await admin.query(
+              "SELECT 1 FROM pg_locks WHERE pid=$1 AND locktype='advisory' AND NOT granted",
+              [manager.processID],
+            );
+            if (rows.length > 0) break;
+            assert.ok(tries < 2000, "the archive queues for the fence");
+            await new Promise((resolve) => setImmediate(resolve));
+          }
+          await guest.query("BEGIN");
+          await guest.query("SET LOCAL ROLE " + role);
+          await guest.query("SET LOCAL lock_timeout='5s'");
+          const started = Date.now();
+          await guest.query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))", [
+            fenceKey,
+          ]);
+          const waited = Date.now() - started;
+          assert.ok(waited < 1500, "the guest waited " + waited + " ms behind the archive");
+          await guest.query("COMMIT");
+          const archiveError = await archiving;
+          assert.equal(archiveError?.code, "55P03", "the archive gives way to the guests");
+          await manager.query("ROLLBACK");
+          await review.query("COMMIT");
+          assert.equal(
+            (await tx((t) => archive(archiveThree)(t))).status,
+            "Applied",
+            "the archive succeeds once retried",
+          );
+        } finally {
+          await Promise.all([review, manager, guest].map((client) => client.end()));
+        }
+      }
       const [readyOne, readyTwo] = [id(212), id(213)];
       for (const [recipeReference, code] of [
         [readyOne, "PREP-ONE"],
@@ -958,8 +1026,8 @@ it("authors, reviews, publishes and binds recipes that orders and kitchen ticket
         "SELECT action_code,count(*)::int n FROM platform_audit.audit_record WHERE action_code LIKE 'RECIPE_%' GROUP BY 1 ORDER BY 1",
       );
       assert.deepEqual(Object.fromEntries(audit.rows.map((row) => [row.action_code, row.n])), {
-        RECIPE_ARCHIVE: 3,
-        RECIPE_CREATEDRAFT: 6,
+        RECIPE_ARCHIVE: 4,
+        RECIPE_CREATEDRAFT: 7,
         RECIPE_PREPARATION_PUBLISHED: 4,
         RECIPE_PUBLISH: 4,
         RECIPE_REPLACEDRAFT: 1,

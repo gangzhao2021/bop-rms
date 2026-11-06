@@ -59,6 +59,31 @@ const sha256 = (value: string) => "sha256:" + sha256Hex(value);
 const iso = (value: unknown) =>
   value instanceof Date ? value.toISOString() : new Date(String(value)).toISOString();
 const scopeSql = "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)";
+/**
+ * DEC-MERCHANT-LOCK-SCOPE: a Recipe writer takes RecipeCatalogReferenceV1:<brand> exclusive without
+ * making the Brand's own guests queue behind it for long: at once if free, otherwise it waits at
+ * most RECIPE_WRITER_FENCE_WAIT (the same bound as rms_recipe.take_recipe_reference_fence, 2000_167)
+ * and fails with 55P03, which the route's transaction retry handles. The transaction's own lock
+ * timeout is restored afterwards.
+ */
+const RECIPE_WRITER_FENCE_WAIT = "300ms";
+async function takeRecipeReferenceFenceBounded(
+  tx: RecipeAuthoringTransaction,
+  brand: string,
+): Promise<void> {
+  const taken = await tx.query("SELECT pg_try_advisory_xact_lock(hashtextextended($1,0)) taken", [
+    "RecipeCatalogReferenceV1:" + brand,
+  ]);
+  if (taken.rows[0]?.taken === true) return;
+  const previous = await tx.query("SELECT current_setting('lock_timeout') previous", []);
+  await tx.query("SELECT set_config('lock_timeout',$1,true)", [RECIPE_WRITER_FENCE_WAIT]);
+  await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+    "RecipeCatalogReferenceV1:" + brand,
+  ]);
+  await tx.query("SELECT set_config('lock_timeout',$1,true)", [
+    String(previous.rows[0]?.previous ?? "0"),
+  ]);
+}
 const decimal = (micro: string, scale: number) => {
   const digits = micro.padStart(scale + 1, "0");
   const whole = digits.slice(0, -scale),
@@ -1284,10 +1309,10 @@ export async function archiveRecipe(
   const prior = await replay(tx, brand, input.operationReference, intent, input.actorReference);
   if (prior) return prior;
   // DEC-MERCHANT-LOCK-SCOPE: this read leads to a write of the same fence, so it is exclusive from
-  // the start (two archives both holding it shared would deadlock on the write).
-  await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
-    "RecipeCatalogReferenceV1:" + brand,
-  ]);
+  // the start (two archives both holding it shared would deadlock on the write). Guests' orders and
+  // kitchen tickets hold it shared, and a queued exclusive request stops every new shared one, so
+  // the wait is bounded like the a0_ trigger's: the archive gives way and the route retries.
+  await takeRecipeReferenceFenceBounded(tx, brand);
   const current = await currentOf(tx, brand, input.recipeReference);
   if (current === null) return fail("RECIPE_AUTHORING_NOT_FOUND");
   const s = current.snapshot;
