@@ -1,7 +1,13 @@
 import { createHash } from "node:crypto";
 import {
   CatalogError,
+  createCatalogProductService,
   createOptionSetService,
+  createPostgresProductCreationStore,
+  createPostgresProductDraftStore,
+  optionBindingDefaultRules,
+  productOptionBindingRule,
+  rebuiltProductOptionBinding,
   createPostgresOptionSetRepository,
   listBrandOptionSets,
   listBrandProducts,
@@ -9,6 +15,7 @@ import {
   parseCatalogHash,
   parseCatalogReference,
   type OptionSetAggregate,
+  type ProductAggregate,
   type ProductLifecycleTransaction,
 } from "@rms/catalog";
 import { withRememberedBrandAuthorization } from "./merchant-brand-transaction-authorization.js";
@@ -29,7 +36,20 @@ import { onlyRefusal } from "./merchant-failure.js";
  * an option that stops being offered cannot be ordered from then on.
  */
 export class MerchantOptionSetError extends Error {
-  constructor(readonly code: "PermissionDenied" | "NotFound" | "Conflict" | "Invalid") {
+  constructor(
+    readonly code: "PermissionDenied" | "NotFound" | "Conflict" | "Invalid" | "OptionSet",
+    /**
+     * WP-2423 (cart-unsellable-dishes), with "OptionSet": the change would leave these dishes
+     * without a choice guests start with in a group they must choose in (`DefaultNeeded`), or it
+     * moves what they start with and this person may not edit dishes
+     * (`DefaultChangeNeedsDishEditor`). Nothing was saved.
+     */
+    readonly problem: {
+      readonly reason: "DefaultNeeded" | "DefaultChangeNeedsDishEditor";
+      readonly optionName: string;
+      readonly productNames: readonly string[];
+    } | null = null,
+  ) {
     super(code);
     this.name = "MerchantOptionSetError";
   }
@@ -262,8 +282,28 @@ export function createMerchantOptionSets(options: {
    * The Brand's products (not archived) whose draft offers each option set, by name: a set no
    * product uses cannot reach customers, so staff are not told it is "in use".
    */
-  async function usage(tx: unknown, brand: string): Promise<ReadonlyMap<string, string[]>> {
-    const used = new Map<string, string[]>();
+  async function usage(tx: unknown, brand: string): Promise<Usage> {
+    const used: Usage = new Map();
+    for (const product of await dishes(tx, brand)) {
+      const productName = dishName(product);
+      for (const binding of product.draft.optionBindings) {
+        const names = used.get(String(binding.optionSetReference)) ?? [];
+        if (!names.includes(productName)) names.push(productName);
+        used.set(String(binding.optionSetReference), names);
+        // WP-2423 (cart-unsellable-dishes): which dishes start guests with each option.
+        for (const start of binding.defaultSelections) {
+          const key = "starts:" + String(start.optionReference);
+          const starting = used.get(key) ?? [];
+          if (!starting.includes(productName)) starting.push(productName);
+          used.set(key, starting);
+        }
+      }
+    }
+    return used;
+  }
+  /** The Brand's dishes that are not archived, as their drafts stand now. */
+  async function dishes(tx: unknown, brand: string): Promise<ProductAggregate[]> {
+    const found: ProductAggregate[] = [];
     for (const summary of await listBrandProducts(ptx(tx) as never, { brandReference: brand })) {
       if (summary.lifecycle === "Archived") continue;
       const product = await loadBrandProduct(
@@ -271,17 +311,13 @@ export function createMerchantOptionSets(options: {
         { brandReference: brand },
         summary.productReference,
       );
-      if (product === null) continue;
-      const productName =
-        staffContentName(product.draft.localizedNames, options.locale) || product.internalCode;
-      for (const binding of product.draft.optionBindings) {
-        const names = used.get(String(binding.optionSetReference)) ?? [];
-        if (!names.includes(productName)) names.push(productName);
-        used.set(String(binding.optionSetReference), names);
-      }
+      if (product !== null) found.push(product);
     }
-    return used;
+    return found;
   }
+  const dishName = (product: ProductAggregate) =>
+    staffContentName(product.draft.localizedNames, options.locale) || product.internalCode;
+  type Usage = Map<string, string[]>;
   const view = (set: OptionSetAggregate, used: ReadonlyMap<string, readonly string[]>) => ({
     optionSetReference: set.optionSetReference,
     internalCode: set.internalCode,
@@ -305,6 +341,8 @@ export function createMerchantOptionSets(options: {
         nameZh: chineseOf(option.localizedNames),
         offered: option.lifecycle === "Active",
         defaultChoice: option.defaultEligible,
+        /** WP-2423 (cart-unsellable-dishes): dishes whose draft starts guests with this option. */
+        startsOn: used.get("starts:" + String(option.optionReference)) ?? [],
       })),
   });
 
@@ -418,43 +456,50 @@ export function createMerchantOptionSets(options: {
               ...kept,
               ...dropped.map((option) => ({ ...option, lifecycle: "Inactive" as const })),
             ].map((option, sortOrder) => ({ ...option, sortOrder }));
+            const draft: OptionSetAggregate["draft"] = {
+              ...existing.draft,
+              localizedNames: withChinese(
+                { ...existing.draft.localizedNames, [options.locale]: body.name },
+                body.nameZh,
+              ),
+              ...limits(body),
+              options: merged.map((option) =>
+                "optionReference" in option && option.optionReference !== null
+                  ? {
+                      ...option,
+                      conflictOptionReferences: [...option.conflictOptionReferences].sort(),
+                    }
+                  : {
+                      ...option,
+                      optionReference: parseCatalogReference(
+                        derivedReference(body.operationReference, "option:" + option.stableCode),
+                      ),
+                      optionSetReference: existing.optionSetReference,
+                      brandReference: existing.brandReference,
+                      createdAt: at,
+                      createdByActorReference: s.actor,
+                    },
+              ),
+              updatedAt: at,
+            };
+            // WP-2423 (cart-unsellable-dishes): what this Save does to the dishes using the set.
+            const effect = await defaultEffect(tx, s, existing, draft);
             const result = await service.replaceDraft({
               optionSetReference: body.optionSetReference,
               expectedAggregateVersion: body.expectedAggregateVersion,
-              draft: {
-                ...existing.draft,
-                localizedNames: withChinese(
-                  { ...existing.draft.localizedNames, [options.locale]: body.name },
-                  body.nameZh,
-                ),
-                ...limits(body),
-                options: merged.map((option) =>
-                  "optionReference" in option && option.optionReference !== null
-                    ? {
-                        ...option,
-                        conflictOptionReferences: [...option.conflictOptionReferences].sort(),
-                      }
-                    : {
-                        ...option,
-                        optionReference: parseCatalogReference(
-                          derivedReference(body.operationReference, "option:" + option.stableCode),
-                        ),
-                        optionSetReference: existing.optionSetReference,
-                        brandReference: existing.brandReference,
-                        createdAt: at,
-                        createdByActorReference: s.actor,
-                      },
-                ),
-                updatedAt: at,
-              },
+              draft,
               operationReference: body.operationReference,
               requestedAt: at,
             });
+            const carried = await carryDefaults(tx, s, effect.moves, body.operationReference, at);
             return {
               status: result.status,
               optionSet: view(result.aggregate, await usage(tx, s.brand)),
+              defaultsCarried: carried,
+              notOfferedDefaults: effect.notOffered,
             };
           } catch (error) {
+            if (error instanceof MerchantOptionSetError) throw error;
             const mapped = error instanceof CatalogError ? catalogErrors[error.code] : undefined;
             if (mapped !== undefined) return fail(mapped);
             throw error;
@@ -463,6 +508,187 @@ export function createMerchantOptionSets(options: {
       ),
     );
   };
+
+  /**
+   * WP-2423 (cart-unsellable-dishes): what saving `draft` over `existing` does to each dish whose
+   * draft uses the set. A dish's start choices are those the set's default-eligible choices give
+   * it (ordered by the set, offered or not); only a change between the set as it is and as
+   * proposed moves them, so a dish whose stored defaults differ for another reason (older per-dish
+   * defaults) is never rewritten by an unrelated Save, and turning a choice off moves nothing.
+   * Refused before anything is written: a dish that would be left with no start choice in a group
+   * guests must choose in, or a move by someone who may not edit dishes.
+   */
+  async function defaultEffect(
+    tx: Tx,
+    s: Scope,
+    existing: OptionSetAggregate,
+    draft: OptionSetAggregate["draft"],
+  ) {
+    const proposed = { ...existing, draft } as OptionSetAggregate;
+    const setName = name(draft.localizedNames, existing.internalCode);
+    const moves: {
+      product: ProductAggregate;
+      productName: string;
+      bindings: ProductAggregate["draft"]["optionBindings"];
+      startsWith: string | null;
+    }[] = [];
+    const needed: string[] = [];
+    const notOffered = new Map<string, string[]>();
+    const starts = (selections: readonly { optionReference: string; quantity: number }[]) =>
+      selections
+        .map((item) => item.optionReference + "×" + item.quantity)
+        .sort()
+        .join(",");
+    for (const product of await dishes(tx, s.brand)) {
+      const productName = dishName(product);
+      let changed = false;
+      let startsWith: string | null = null;
+      const bindings = product.draft.optionBindings.map((binding) => {
+        if (binding.optionSetReference !== existing.optionSetReference) return binding;
+        // A choice that goes off now while this dish starts with it: say so (nothing moves).
+        for (const start of binding.defaultSelections) {
+          const option = draft.options.find((o) => o.optionReference === start.optionReference);
+          const before = existing.draft.options.find(
+            (o) => o.optionReference === start.optionReference,
+          );
+          if (option?.lifecycle === "Inactive" && before?.lifecycle !== "Inactive") {
+            const optionName = name(option.localizedNames, option.stableCode);
+            const list = notOffered.get(optionName) ?? [];
+            if (!list.includes(productName)) list.push(productName);
+            notOffered.set(optionName, list);
+          }
+        }
+        const order = { offeredFirst: false };
+        const now = rebuiltProductOptionBinding(binding, existing, order);
+        const next = rebuiltProductOptionBinding(binding, proposed, order);
+        if (starts(now.defaultSelections) === starts(next.defaultSelections)) return binding;
+        const carried = { ...binding, defaultSelections: next.defaultSelections };
+        const rule = productOptionBindingRule(carried, proposed, "Draft");
+        if (rule !== null && optionBindingDefaultRules.has(rule)) {
+          if (!needed.includes(productName)) needed.push(productName);
+          return binding;
+        }
+        changed = true;
+        const first = draft.options.find(
+          (o) => o.optionReference === next.defaultSelections[0]?.optionReference,
+        );
+        startsWith = first === undefined ? null : name(first.localizedNames, first.stableCode);
+        return carried;
+      });
+      if (changed) moves.push({ product, productName, bindings, startsWith });
+    }
+    if (needed.length > 0)
+      throw new MerchantOptionSetError("OptionSet", {
+        reason: "DefaultNeeded",
+        optionName: setName,
+        productNames: needed,
+      });
+    if (moves.length > 0 && (await s.decision("catalog.product.manage"))?.effect !== "Allow")
+      throw new MerchantOptionSetError("OptionSet", {
+        reason: "DefaultChangeNeedsDishEditor",
+        optionName: setName,
+        productNames: moves.map((move) => move.productName),
+      });
+    return {
+      moves,
+      notOffered: [...notOffered].map(([optionName, productNames]) => ({
+        optionName,
+        productNames,
+      })),
+    };
+  }
+  /**
+   * Each moved dish's draft, saved as Save dish saves it (the product's own command, audit row and
+   * version), correlated to this Save. Guests see the new start choice once the menu is listed.
+   */
+  async function carryDefaults(
+    tx: Tx,
+    s: Scope,
+    moves: Awaited<ReturnType<typeof defaultEffect>>["moves"],
+    operation: string,
+    at: string,
+  ) {
+    const carried: { productName: string; startsWith: string | null }[] = [];
+    const productTx = ptx(tx);
+    const storeOptions = {
+      brandReference: s.brand,
+      transactions: {
+        run: <T>(work: (t: ProductLifecycleTransaction) => Promise<T>) => work(productTx),
+      },
+      authorize: async () => true,
+    };
+    const creation = createPostgresProductCreationStore(storeOptions);
+    const drafts = createPostgresProductDraftStore(storeOptions);
+    for (const move of moves) {
+      const step = derivedReference(operation, "default-carry:" + move.product.productReference);
+      const generated: Record<string, number> = {};
+      const service = createCatalogProductService({
+        repository: {
+          resolveOperation: creation.resolveOperation,
+          load: creation.load,
+          codeAvailable: creation.codeAvailable,
+          create: creation.create,
+          commit: (value) => drafts.commit(value as never),
+        },
+        optionSets: {
+          resolveVersion: async (request) => {
+            if (request.brandReference !== s.brand) return null;
+            const sets = await listBrandOptionSets(productTx, { brandReference: s.brand });
+            return (
+              sets.find(
+                (set) =>
+                  set.optionSetReference === request.optionSetReference &&
+                  set.draft.versionReference === request.optionSetVersionReference,
+              ) ?? null
+            );
+          },
+        },
+        references: {
+          generate: (purpose) => {
+            const index = generated[purpose] ?? 0;
+            generated[purpose] = index + 1;
+            return derivedReference(step, purpose + ":" + index);
+          },
+          hashIntent: (value) => parseCatalogHash(createHash("sha256").update(value).digest("hex")),
+          equals: (a, b) => a === b,
+        },
+        authorization: {
+          authorize: async (request) => {
+            const permission = await s.decision("catalog.product.manage");
+            if (permission?.effect !== "Allow" || request.operationReference !== step) return null;
+            return {
+              tenantContext: s.scope.context,
+              permission,
+              audit: {
+                auditId: derivedReference(step, "audit"),
+                brandId: s.brand,
+                actor: { type: "User", reference: s.actor },
+                actionCode: "CATALOG_PRODUCT_REPLACEDRAFT",
+                targetType: "CatalogProduct",
+                targetId: request.productReference ?? "",
+                correlationId: operation,
+                occurredAt: request.observedAt,
+                reasonCode: "OPTION_SET_DEFAULT_CARRIED",
+                sourceChannel: "MERCHANT_WEB",
+                dataClassification: "Internal",
+                retentionPolicyCode: "CONFIGURATION_AUDIT",
+                retentionPolicyVersion: 1,
+              },
+            } as never;
+          },
+        },
+      });
+      await service.replaceDraft({
+        productReference: move.product.productReference,
+        expectedAggregateVersion: move.product.aggregateVersion,
+        operationReference: step,
+        requestedAt: at,
+        draft: { ...move.product.draft, optionBindings: move.bindings, updatedAt: at },
+      });
+      carried.push({ productName: move.productName, startsWith: move.startsWith });
+    }
+    return carried;
+  }
 
   const limits = (body: OptionSetBody) => ({
     displayStyle: styleOf(body.kind),

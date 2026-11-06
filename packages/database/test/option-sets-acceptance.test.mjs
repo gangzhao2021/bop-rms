@@ -107,6 +107,8 @@ it("creates and edits option sets, keeps saved options and binds them to a produ
             "catalog.sku.create",
           ],
           [reader]: ["catalog.option_set.read", "catalog.product.read"],
+          // WP-2423 (cart-unsellable-dishes): edits option sets, not dishes.
+          [id(6)]: ["catalog.option_set.read", "catalog.option_set.manage", "catalog.product.read"],
         },
       });
       const authentication = { authorize: async () => ({ sessionReference: id(7) }) };
@@ -342,6 +344,7 @@ it("creates and edits option sets, keeps saved options and binds them to a produ
             ],
           },
         }),
+        // Refused naming the choice group and the option (WP-2423 item 14), not a bare "Invalid".
         (error) =>
           (error.code === "ChoiceGroup" &&
             error.problem?.reason === "ChoiceGroupOption" &&
@@ -387,6 +390,138 @@ it("creates and edits option sets, keeps saved options and binds them to a produ
         "SELECT count(*)::int n FROM rms_catalog.option_set_operation_snapshot",
       );
       assert.equal(snapshots.rows[0].n, 4);
+
+      // WP-2423 (cart-unsellable-dishes): what an Option sets Save does to the dishes using it.
+      const latteDefaults = async () =>
+        (
+          await admin.query(
+            "SELECT o.option_id::text option FROM rms_catalog.product_option_binding b JOIN rms_catalog.product_option_binding_option o USING (binding_id) WHERE b.product_id=$1 AND b.option_set_id=$2 AND o.default_quantity IS NOT NULL ORDER BY 1",
+            [latte.productReference, milk.optionSet.optionSetReference],
+          )
+        ).rows.map((row) => row.option);
+      const productAudits = async () =>
+        (
+          await admin.query(
+            "SELECT count(*)::int n FROM platform_audit.audit_record WHERE action_code='CATALOG_PRODUCT_REPLACEDRAFT' AND target_id=$1",
+            [latte.productReference],
+          )
+        ).rows[0].n;
+      const milkNow = async () =>
+        (
+          await optionSets.query({
+            ...session,
+            optionSetReference: milk.optionSet.optionSetReference,
+          })
+        ).optionSet;
+      const milkSave = async (options, operationReference = op()) => {
+        const current = await milkNow();
+        return call({
+          ...save,
+          operationReference,
+          expectedAggregateVersion: current.aggregateVersion,
+          options,
+        });
+      };
+      const listed = (current, change) =>
+        current.options.map((o) => ({
+          optionReference: o.optionReference,
+          name: o.name,
+          offered: o.offered,
+          defaultChoice: o.defaultChoice,
+          ...(change[o.name] ?? {}),
+        }));
+      // The editor names which dishes start with each choice.
+      const before = await milkNow();
+      assert.deepEqual(before.options.find((o) => o.name === "Whole milk (2%)").startsOn, [
+        "Caffè Latte",
+      ]);
+      assert.deepEqual(await latteDefaults(), [whole.optionReference]);
+      // 1. The machine broke: Whole milk is not offered now. The dish keeps it as its default.
+      const audited = await productAudits();
+      const off = await milkSave(listed(before, { "Whole milk (2%)": { offered: false } }));
+      assert.equal(off.status, "Applied");
+      assert.deepEqual(off.defaultsCarried, []);
+      assert.deepEqual(off.notOfferedDefaults, [
+        { optionName: "Whole milk (2%)", productNames: ["Caffè Latte"] },
+      ]);
+      assert.deepEqual(await latteDefaults(), [whole.optionReference]);
+      assert.equal(await productAudits(), audited);
+      // Save dish while it is off: saved, and the dish still starts with Whole milk.
+      const latteNow = await products.query({
+        ...session,
+        productReference: latte.productReference,
+      });
+      const resaved = await products.command({
+        ...session,
+        body: {
+          ...bind,
+          operationReference: op(),
+          expectedAggregateVersion: latteNow.product.aggregateVersion,
+          name: "Caffè Latte",
+          optionSets: [bind.optionSets[0]],
+        },
+      });
+      assert.equal(resaved.status, "Applied");
+      assert.deepEqual(await latteDefaults(), [whole.optionReference]);
+      // 2. Guests should start with Oat milk now: the dish's draft is carried, with its own audit.
+      const afterOff = await milkNow();
+      const moveOperation = op();
+      const moved = await milkSave(
+        listed(afterOff, {
+          "Whole milk (2%)": { offered: true, defaultChoice: false },
+          "Oat milk": { defaultChoice: true },
+        }),
+        moveOperation,
+      );
+      assert.deepEqual(moved.defaultsCarried, [
+        { productName: "Caffè Latte", startsWith: "Oat milk" },
+      ]);
+      assert.deepEqual(await latteDefaults(), [oat.optionReference]);
+      assert.equal(await productAudits(), audited + 2);
+      // A retry of the same Save changes nothing more.
+      const retried = await call({
+        ...save,
+        operationReference: moveOperation,
+        expectedAggregateVersion: afterOff.aggregateVersion,
+        options: listed(afterOff, {
+          "Whole milk (2%)": { offered: true, defaultChoice: false },
+          "Oat milk": { defaultChoice: true },
+        }),
+      });
+      assert.equal(retried.status, "AlreadyApplied");
+      assert.equal(await productAudits(), audited + 2);
+      // 3. No choice left to start with in a group guests must choose in: refused, nothing saved.
+      const afterMove = await milkNow();
+      await assert.rejects(
+        milkSave(listed(afterMove, { "Oat milk": { defaultChoice: false } })),
+        (error) =>
+          error.code === "OptionSet" &&
+          error.problem.reason === "DefaultNeeded" &&
+          error.problem.productNames.join() === "Caffè Latte",
+      );
+      assert.equal((await milkNow()).aggregateVersion, afterMove.aggregateVersion);
+      assert.deepEqual(await latteDefaults(), [oat.optionReference]);
+      // 4. Someone who can't edit dishes can't move what they start with; nothing is saved.
+      scope.as(id(6));
+      await assert.rejects(
+        milkSave(
+          listed(afterMove, {
+            "Whole milk (2%)": { defaultChoice: true },
+            "Oat milk": { defaultChoice: false },
+          }),
+        ),
+        (error) =>
+          error.code === "OptionSet" &&
+          error.problem.reason === "DefaultChangeNeedsDishEditor" &&
+          error.problem.productNames.join() === "Caffè Latte",
+      );
+      assert.equal((await milkNow()).aggregateVersion, afterMove.aggregateVersion);
+      // Turning a choice off is still theirs to do: it moves no dish.
+      const offOnly = await milkSave(listed(afterMove, { "Soy milk": { offered: false } }));
+      assert.equal(offOnly.status, "Applied");
+      assert.deepEqual(offOnly.defaultsCarried, []);
+      assert.deepEqual(await latteDefaults(), [oat.optionReference]);
+      scope.as(owner);
     } finally {
       await admin.query("DROP OWNED BY " + role).catch(() => undefined);
       await admin.query("DROP ROLE IF EXISTS " + role).catch(() => undefined);
