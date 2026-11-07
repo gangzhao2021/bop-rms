@@ -18,7 +18,7 @@ vi.mock("@bop/identity", async (original) => ({
 vi.mock("@rms/ordering", async (original) => ({
   ...(await original<typeof import("@rms/ordering")>()),
   createPostgresGuestCheckoutRecovery: f.factory,
-  findLatestGuestSessionOrder: f.latestOrder,
+  findRecentGuestSessionOrders: f.latestOrder,
 }));
 vi.mock("@rms/store", async (original) => ({
   ...(await original<typeof import("@rms/store")>()),
@@ -55,7 +55,7 @@ beforeEach(() => {
     profile: { brandDisplayName: "Brand", storeDisplayName: "Store" },
   });
   f.factory.mockReturnValue({ latest: f.latest });
-  f.latestOrder.mockResolvedValue(null);
+  f.latestOrder.mockResolvedValue([]);
   f.latest.mockImplementation(async (transaction, input) => {
     const auth = f.factory.mock.calls[0]?.[0].authorize;
     if (!(await auth(transaction, input))) throw new Error("denied");
@@ -94,21 +94,41 @@ it("returns ordinary menu bootstrap when no checkout exists", async () => {
 });
 
 it("WP-2423 Q10: returns this Guest Session's latest order, looked up by the confirmed Session only", async () => {
-  f.latestOrder.mockResolvedValue({
-    orderReference: ref(7),
-    orderNumber: "41",
-    orderType: "Pickup",
-    createdAt: "2026-09-21T05:00:00.000Z",
-  });
+  f.latestOrder.mockResolvedValue([
+    {
+      orderReference: ref(7),
+      orderNumber: "41",
+      orderType: "Pickup",
+      createdAt: "2026-09-21T05:00:00.000Z",
+    },
+  ]);
   const result = await createCustomerSessionBootstrapRead(options).read("A".repeat(43));
   expect(result).toMatchObject({
     currentOrder: { orderReference: ref(7), orderNumber: "41", orderType: "Pickup" },
   });
+  expect(result).not.toHaveProperty("earlierOrders");
   expect(JSON.stringify(result)).not.toContain("createdAt");
   expect(f.latestOrder).toHaveBeenCalledWith(tx, options.scope, {
     guestSessionReference: ref(3),
     observedAt: options.now(),
+    limit: 5,
   });
+});
+
+it("M104 B.2: the earlier orders of this Guest Session follow the latest, newest first", async () => {
+  const order = (n: number) => ({
+    orderReference: ref(n),
+    orderNumber: String(n),
+    orderType: "Pickup",
+    createdAt: "2026-09-21T05:00:00.000Z",
+  });
+  f.latestOrder.mockResolvedValue([order(9), order(8)]);
+  const result = await createCustomerSessionBootstrapRead(options).read("A".repeat(43));
+  expect(result).toMatchObject({
+    currentOrder: { orderReference: ref(9), orderNumber: "9" },
+    earlierOrders: [{ orderReference: ref(8), orderNumber: "8", orderType: "Pickup" }],
+  });
+  expect(JSON.stringify(result)).not.toContain("createdAt");
 });
 
 // M02 (v15 07b7a1b7): a reloaded table page stays at its own table, joined or not.

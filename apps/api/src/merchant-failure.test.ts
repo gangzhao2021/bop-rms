@@ -215,6 +215,8 @@ describe("every code a service throws today", () => {
     "STORE_CONFIGURATION_PUBLICATION_CHECKS_INVALID",
     "STORE_CONFIGURATION_REFERENCE_INVALID",
     "STORE_PRICE_READ_ONLY",
+    // M109: the phone read is read-only; an audit write from it is a bug, never an answer.
+    "STORE_PUBLIC_PROFILE_READ_ONLY",
   ]);
   it("is classified, so a new refusal or race is not told to try again by accident", () => {
     const source = dirname(fileURLToPath(import.meta.url));
