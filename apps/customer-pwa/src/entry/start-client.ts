@@ -133,7 +133,13 @@ export function createCustomerStartClient(input: CustomerStartClientInput): Cust
       (restored?.channel === "Pickup" && input.pickupOffered !== false) ||
       restored === undefined,
     start() {
-      return settled ?? run();
+      if (settled === null) return run();
+      // M116: back from looking at a closed Store's menu, the start page asks that Store again.
+      const next = settled.then((answer) =>
+        answer.kind === "NotAccepting" && active !== null ? active.start() : answer,
+      );
+      settled = next;
+      return next;
     },
     retry() {
       return active === null ? run() : active.retry();

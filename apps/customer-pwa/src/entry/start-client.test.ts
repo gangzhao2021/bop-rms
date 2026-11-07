@@ -62,6 +62,27 @@ function setup(
   return { client, forCode, forReplay, replay, pickupCode };
 }
 
+describe("M116: back at the start page from a closed Store's menu", () => {
+  it("asks that Store again; any other answer is kept as it was", async () => {
+    const notAccepting = { kind: "NotAccepting" } as unknown as CustomerEntryScreenState;
+    const closed = answer(notAccepting);
+    const client = createCustomerStartClient({
+      source: { kind: "Code", load: async () => pickupB },
+      forCode: vi.fn(() => closed),
+      forReplay: vi.fn(() => answer(missing)),
+      pickupCode: vi.fn(async () => undefined),
+    });
+    await expect(client.start()).resolves.toBe(notAccepting);
+    await expect(client.start()).resolves.toBe(notAccepting);
+    expect(closed.start).toHaveBeenCalledTimes(2);
+    const open = setup({ source: { kind: "Code", load: async () => pickupB } });
+    await open.client.start();
+    await open.client.start();
+    expect(open.forCode).toHaveBeenCalledOnce();
+    expect(open.forCode.mock.results[0]?.value.start).toHaveBeenCalledOnce();
+  });
+});
+
 describe("M02 the start page stays at this phone's own Store and table", () => {
   it("reads which Store and table a code names, and compares it with the restored visit", () => {
     expect(codeNames(tableT)).toEqual({
