@@ -752,12 +752,12 @@ export function createPostgresCounterUnpaidCancellation(options: {
               ? original.terminatedAt.toISOString()
               : original?.terminatedAt,
         });
-        // The same staff command repeats its reason and staff member.
+        // The same staff member's retry of their own cancellation answers with what was recorded
+        // (its first reason), even when they picked another reason before retrying a lost answer.
         if (
           prior.rows.length !== 1 ||
           record.actorType !== "User" ||
           record.actorReference !== actorReference ||
-          record.reasonCode !== reasonCode ||
           record.purposeCode !== counterUnpaidCancellationPolicy.purposeCode
         )
           return fail();

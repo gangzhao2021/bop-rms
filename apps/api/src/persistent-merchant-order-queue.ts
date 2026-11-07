@@ -736,7 +736,13 @@ export function createPersistentMerchantOrderQueue(options: {
               counter.set(order, {
                 payBy,
                 amountDueMinor,
-                canCancelUnpaid: cancelAllowed && payBy !== null && !entry.recordedAfterOutage,
+                // A cancelled order keeps its capacity until its pay-by time (so payBy stays set):
+                // the cancellation itself says it is no longer cancellable.
+                canCancelUnpaid:
+                  cancelAllowed &&
+                  payBy !== null &&
+                  !entry.recordedAfterOutage &&
+                  !counterCancelled.has(order),
                 cancelledBeforePayment: counterCancelled.get(order) ?? null,
                 recordedAfterOutage: entry.recordedAfterOutage,
                 paidOnCardMachine:
@@ -1477,6 +1483,15 @@ export function createPersistentMerchantOrderQueue(options: {
           }
           const paymentPosition =
             only === undefined ? null : (paymentPositions.get(only.orderReference) ?? null);
+          // WP-2423 M127: only an order still waiting to be accepted (Submitted) can be cancelled
+          // unpaid; once accepted, cancelled or closed it never offers the cancel.
+          const counterFor = (item: (typeof result.items)[number]) => {
+            const current = counter.get(item.orderReference);
+            if (current === undefined) return null;
+            return current.canCancelUnpaid && item.currentPhase !== "Submitted"
+              ? { ...current, canCancelUnpaid: false }
+              : current;
+          };
           return Object.freeze({
             ...result,
             lines: detailLines,
@@ -1518,7 +1533,7 @@ export function createPersistentMerchantOrderQueue(options: {
                         }),
                   unfulfillable: closed,
                   pickupNotCollected: uncollected.has(item.orderReference),
-                  counter: counter.get(item.orderReference) ?? null,
+                  counter: counterFor(item),
                   // A counter order's payment is the card-machine payment above.
                   paidOnline: counter.has(item.orderReference)
                     ? null

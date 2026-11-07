@@ -178,9 +178,15 @@ export function CounterAwaitingPayment({
           </div>
         ) : (
           <p className="bop-muted">
-            {t(
-              "Charge each on the card machine and record it here before its time ends. A guest who isn't paying: cancel the order so its items go back to stock.",
-            )}
+            {/* WP-2423 M127: only those who may cancel are told to cancel; front of house asks a
+                manager, as the counter's charge step says. */}
+            {shown.some((order) => order.counter?.canCancelUnpaid === true)
+              ? t(
+                  "Charge each on the card machine and record it here before its time ends. A guest who isn't paying: cancel the order so its items go back to stock.",
+                )
+              : t(
+                  "Charge each on the card machine and record it here before its time ends. A guest who isn't paying: ask a manager to cancel it; otherwise it is released at its time and its items go back to stock.",
+                )}
           </p>
         )}
         <ul className="counter-order__awaiting-list">

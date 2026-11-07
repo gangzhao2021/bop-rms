@@ -515,6 +515,9 @@ const earlierCounterPickup = {
     },
     payBy: null,
     amountDueMinor: null,
+    // WP-2423 M127: paid, so not cancellable unpaid; never cancelled before payment.
+    canCancelUnpaid: false,
+    cancelledBeforePayment: null,
   },
   paidOnline: null,
   paymentPosition: null,

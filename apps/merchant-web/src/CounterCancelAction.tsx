@@ -96,6 +96,7 @@ export function CounterCancelAction({
     if (next !== "Unknown") operation.current = null;
     setState(next);
   };
+  const retrying = state === "Unknown" && operation.current !== null;
   const message: Partial<Record<State, string>> = {
     Pending: t("Cancelling…"),
     Unknown: t(
@@ -134,7 +135,9 @@ export function CounterCancelAction({
             void submit();
           }}
         >
-          <fieldset disabled={state === "Pending"}>
+          {/* A lost answer is retried with the same reference and reason: the first try may have
+              cancelled it already, so the reason is kept as sent. */}
+          <fieldset disabled={state === "Pending" || retrying}>
             <legend>{t("Why")}</legend>
             {(
               [

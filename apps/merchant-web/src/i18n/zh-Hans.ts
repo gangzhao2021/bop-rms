@@ -8765,9 +8765,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Already paid on paper. Enter what the slip or cash record shows, then record it. Don't charge again.":
     "纸单已付款。按小票或现金记录填写后录入，请勿重复收款。",
   "Sent. This paper order was paid during the outage: don't charge again, record it below.":
-    "已发送。此纸单已在停电期间付款，请勿重复收款，在下方录入。",
+    "已发送。此纸单已在停电/断网期间付款，请勿重复收款，在下方录入。",
   "Paper order {orderNumber}: record the payment taken during the outage":
-    "纸单 {orderNumber}：录入停电期间已收的款",
+    "纸单 {orderNumber}：录入停电/断网期间已收的款",
   "Record the paper order's payment": "录入纸单的付款",
   "Called and handed over · Order {orderNumber}": "已叫号并交付 · {orderNumber} 号",
   "Hand over to customer · Order {orderNumber}": "交给顾客 · {orderNumber} 号",
@@ -8782,7 +8782,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "This order was just paid. Cancel it from Orders instead (a refund is needed).":
     "此订单刚刚付款。请到订单页取消（需要退款）。",
   "A paper order was already paid during the outage. Record its payment instead.":
-    "纸单已在停电期间付款，请录入其付款。",
+    "纸单已在停电/断网期间付款，请录入其付款。",
   "This order just changed. Close this and check it again.": "此订单刚有变化。请关闭后重新查看。",
   "Only a manager can cancel an order. Ask a manager.": "只有经理可以取消订单。请找经理。",
   "Not cancelled. Try again.": "未取消。请重试。",
@@ -8796,5 +8796,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "卡被拒？换一张卡。客人不付了？请经理取消；否则在 {payBy} 自动释放。",
   "Charge each on the card machine and record it here before its time ends. A guest who isn't paying: cancel the order so its items go back to stock.":
     "在刷卡机上逐单收款，并在时间结束前在这里录入。客人不付款的，取消订单，菜品退回库存。",
+  "Charge each on the card machine and record it here before its time ends. A guest who isn't paying: ask a manager to cancel it; otherwise it is released at its time and its items go back to stock.":
+    "在刷卡机上逐单收款，并在时间结束前在这里录入。客人不付款的，请经理取消；否则到时自动释放，菜品退回库存。",
   "Cancelled before payment by staff · {reason}": "付款前由员工取消 · {reason}",
 });

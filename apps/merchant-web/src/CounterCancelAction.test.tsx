@@ -44,6 +44,8 @@ it("WP-2423 M127: cancels with the reason chosen, and a lost answer retries the 
   await click(submit);
   await settle();
   expect(container.textContent).toContain("it is never cancelled twice");
+  // The first try may have cancelled it: the retry repeats the same reason, so it can't change.
+  expect(container.querySelector("fieldset")?.disabled).toBe(true);
   answer = () =>
     new Response(JSON.stringify({ status: "Cancelled", cancelledAt: "2026-11-06T12:00:00.000Z" }), {
       headers: { "content-type": "application/json" },
