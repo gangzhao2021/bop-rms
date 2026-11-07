@@ -1222,14 +1222,39 @@ export { formatContactPhone };
  * WP-2423 Q10: who the pickup is for and how to reach them about this order — the contact the
  * customer gave for exactly that. Shown on the order detail only.
  */
-type ContactRemoval = "Idle" | "Confirming" | "Pending" | "Removed" | "Denied" | "Unknown";
+type ContactRemoval =
+  | "Idle"
+  | "Confirming"
+  | "Pending"
+  | "Removed"
+  | "Denied"
+  | "SignedOut"
+  | "NotFound"
+  | "Invalid"
+  | "Unknown";
 
-/** M108: the answer to a staff removal of a guest's pickup contact. */
-export function pickupContactRemovalOutcome(status: number): ContactRemoval {
+/**
+ * M108: the answer to a staff removal of a guest's pickup contact. Only an answer that may not
+ * have been recorded (the service couldn't answer, or the connection dropped) is Unknown and offers
+ * the same removal again; a refusal says why and is never retried as it was.
+ */
+export function pickupContactRemovalOutcome(status: number, error?: unknown): ContactRemoval {
   if (status >= 200 && status < 300) return "Removed";
-  if (status === 403) return "Denied";
+  if (status === 403 && error === "pickup_contact_removal_permission_denied") return "Denied";
+  // A staff session that is missing or has ended is a sign-in problem, not a missing permission.
+  if (status === 401 || status === 403) return "SignedOut";
+  if (status === 404) return "NotFound";
+  if (status === 400) return "Invalid";
   return "Unknown";
 }
+const removalRefusalText: Partial<Record<ContactRemoval, () => string>> = {
+  Denied: () => t("Your role can't remove a guest's contact. Ask a manager."),
+  SignedOut: () => t("Your sign-in has ended. Sign in again, then remove the contact."),
+  NotFound: () =>
+    t("This order isn't in this store's orders, so nothing was removed. Reload the order."),
+  Invalid: () =>
+    t("This couldn't be sent, so nothing was removed. Reload the order and try again."),
+};
 
 export function PickupContactPanel({
   contact,
@@ -1265,7 +1290,17 @@ export function PickupContactPanel({
         headers: { "content-type": "application/json", "x-bop-csrf": csrf },
         body: JSON.stringify({ orderReference, operationReference: operation.current }),
       });
-      next = pickupContactRemovalOutcome(response.status);
+      let error: unknown;
+      if (response.status === 403)
+        error = await response
+          .json()
+          .then((body: unknown) =>
+            body !== null && typeof body === "object"
+              ? (body as { error?: unknown }).error
+              : undefined,
+          )
+          .catch(() => undefined);
+      next = pickupContactRemovalOutcome(response.status, error);
     } catch {
       next = "Unknown";
     }
@@ -1326,18 +1361,17 @@ export function PickupContactPanel({
               </p>
             ) : (
               <p role="status">
-                {removal === "Denied"
-                  ? t("Your role can't remove a guest's contact. Ask a manager.")
-                  : t("Not sure the contact was removed. Remove again; it is only removed once.")}
+                {removalRefusalText[removal]?.() ??
+                  t("Not sure the contact was removed. Remove again; it is only removed once.")}
               </p>
             )}
-            {removal === "Denied" ? null : (
+            {removalRefusalText[removal] !== undefined ? null : (
               <button type="button" disabled={removal === "Pending"} onClick={() => void remove()}>
                 {removal === "Unknown" ? t("Remove again") : t("Remove")}
               </button>
             )}
             <button type="button" onClick={() => setRemoval("Idle")}>
-              {t("Keep")}
+              {removalRefusalText[removal] !== undefined ? t("Close") : t("Keep")}
             </button>
           </div>
         )

@@ -2127,6 +2127,28 @@ it("M108: staff remove a guest's contact at the guest's request, after a confirm
   expect(removed).toContain("Contact removed at the guest&#x27;s request");
   expect(removed).not.toContain("+14165550123");
   expect(pickupContactRemovalOutcome(200)).toBe("Removed");
-  expect(pickupContactRemovalOutcome(403)).toBe("Denied");
+  expect(pickupContactRemovalOutcome(403, "pickup_contact_removal_permission_denied")).toBe(
+    "Denied",
+  );
+  // Only an answer that may not have been recorded offers the same removal again.
   expect(pickupContactRemovalOutcome(503)).toBe("Unknown");
+  expect(pickupContactRemovalOutcome(409)).toBe("Unknown");
+  // A missing or ended staff session is a sign-in problem, not a missing permission.
+  expect(pickupContactRemovalOutcome(403, "request_denied")).toBe("SignedOut");
+  expect(pickupContactRemovalOutcome(401)).toBe("SignedOut");
+  expect(pickupContactRemovalOutcome(404)).toBe("NotFound");
+  expect(pickupContactRemovalOutcome(400)).toBe("Invalid");
+  for (const [state, text] of [
+    ["SignedOut", "Your sign-in has ended. Sign in again, then remove the contact."],
+    ["NotFound", "This order isn&#x27;t in this store&#x27;s orders, so nothing was removed."],
+    ["Invalid", "This couldn&#x27;t be sent, so nothing was removed."],
+  ] as const) {
+    const html = renderToStaticMarkup(
+      <PickupContactPanel contact={contact} orderReference="o" csrf="c" initialRemoval={state} />,
+    );
+    expect(html).toContain(text);
+    // Never a retry that can't succeed.
+    expect(html).not.toContain("Remove again");
+    expect(html).not.toContain(">Remove<");
+  }
 });

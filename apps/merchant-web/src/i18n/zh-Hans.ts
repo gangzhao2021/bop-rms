@@ -6437,6 +6437,12 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Not sure the contact was removed. Remove again; it is only removed once.":
     "不确定联系方式是否已删除。请再删一次，只会删除一次。",
   "Remove again": "再删一次",
+  "Your sign-in has ended. Sign in again, then remove the contact.":
+    "你的登录已结束。请重新登录后再删除联系方式。",
+  "This order isn't in this store's orders, so nothing was removed. Reload the order.":
+    "这笔订单不在本店的订单里，没有删除任何内容。请重新加载订单。",
+  "This couldn't be sent, so nothing was removed. Reload the order and try again.":
+    "没能发送，没有删除任何内容。请重新加载订单后再试。",
   "Remove contact": "删除联系方式",
   "Open · as of {time}": "营业中 · 截至 {time}",
   "Closed · today's books still open (as of {time})": "已打烊 · 今天的账还没结（截至 {time}）",
