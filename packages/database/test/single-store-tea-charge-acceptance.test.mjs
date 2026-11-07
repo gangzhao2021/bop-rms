@@ -461,16 +461,14 @@ it("tea charge: a new dish declared with no stock ingredients is listed, chosen 
           },
         });
 
-      // 1. A new tea dish, $1.50. Without a recipe the listing review stops at it (WP-2423 M69: at
-      // once, before choices are carried), and it is not a tea choice (not on the listed menu).
-      const teaDish = await saveDish("Tea charge (TEST)", "茶位", "150");
+      // 1. A new tea dish, $1.50. WP-2423 (M76, Owner decision 16): saved with nothing answered
+      // (neither its allergens nor "a fee, not food") it is refused and nothing is made. Saved as
+      // the dish editor saves a fee, it is not a tea choice until listed.
+      await assert.rejects(saveDish("Tea charge (TEST)", "茶位", "150"), {
+        code: "AllergensUnanswered",
+      });
+      const teaDish = await saveDish("Tea charge (TEST)", "茶位", "150", null, "NoIngredients");
       const tea = teaDish.skuReference;
-      const blocked = await listAll().then(
-        () => null,
-        (error) => error,
-      );
-      assert.equal(blocked?.code, "ReviewBlocked", String(blocked));
-      assert.equal(blocked?.problem?.missing, "Recipe");
       assert.equal(await refusal(tea), "STORE_FEATURES_TEA_NOT_LISTED");
 
       // 2. Declared a charge with no stock ingredients (who and when, labelled); "List it" now
@@ -532,7 +530,8 @@ it("tea charge: a new dish declared with no stock ingredients is listed, chosen 
 
       // WP-2423 item 8b: the guest's table page tells a charge from a dish beside it: the real
       // declaration above says so, the dish saved with its allergens declared doesn't.
-      const plainDish = await saveDish("Wonton soup (TEST)", "馄饨汤", "700");
+      // WP-2423 (M76): a new dish is saved with every allergen answered.
+      const plainDish = await saveDish("Wonton soup (TEST)", "馄饨汤", "700", null, noAllergens);
       await allergens.command({
         ...session,
         body: {
@@ -688,7 +687,7 @@ it("tea charge: a new dish declared with no stock ingredients is listed, chosen 
       assert.equal(await refusal(tea), "STORE_FEATURES_TEA_NOT_LISTED");
 
       // 6. A dish with a real recipe (it uses stock) stays refused as the tea.
-      const soup = await saveDish("Hot and sour soup (TEST)", "酸辣汤", "650");
+      const soup = await saveDish("Hot and sour soup (TEST)", "酸辣汤", "650", null, noAllergens);
       await admin.query("SET session_replication_role = replica");
       try {
         await admin.query(
