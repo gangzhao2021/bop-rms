@@ -782,9 +782,13 @@ export function CheckoutPage({
               </button>
             </section>
           ) : null}
-          {["offline", "session-expired", "outcome-unknown", "table-checking-out"].includes(
-            state.status,
-          ) ? (
+          {[
+            "offline",
+            "session-expired",
+            "outcome-unknown",
+            "table-checking-out",
+            "participation-ended",
+          ].includes(state.status) ? (
             <section role="alert" className="checkout-attention">
               <h2>{checkoutText.attentionHeading}</h2>
               <p>
@@ -794,8 +798,13 @@ export function CheckoutPage({
                     ? checkoutText.pricingOutcomeUnknown
                     : state.status === "table-checking-out"
                       ? cartText.failure.tableCheckingOut[1]
-                      : checkoutText.sessionEnded}
+                      : state.status === "participation-ended"
+                        ? cartText.failure.participationEnded.join(" ")
+                        : checkoutText.sessionEnded}
               </p>
+              {state.status === "participation-ended" ? (
+                <Link to="/dine-in/session">{cartText.failure.yourTable}</Link>
+              ) : null}
               {"canRetry" in state && state.canRetry ? (
                 <button
                   type="button"

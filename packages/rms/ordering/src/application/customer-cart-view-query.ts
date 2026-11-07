@@ -3,8 +3,11 @@ import { parseGetPublicStoreRequest, type GetPublicStoreResult } from "@rms/stor
 import { readClosedRecord } from "@bop/identity";
 import {
   CartError,
+  CartParticipationEndedError,
   cartItemUnavailableReason,
   readCartError,
+  readCartParticipationEnded,
+  type CartParticipationEndedReason,
   parseCartAggregate,
   parseOrderingInstant,
   parseOrderingReference,
@@ -265,6 +268,7 @@ const guestStateCodes = [
   "CART_INPUT_INVALID",
   "CART_TABLE_CHECKING_OUT",
   "CART_REPLACEMENT_FORBIDDEN",
+  "CART_PARTICIPATION_ENDED",
 ] as const;
 type GuestStateCode = (typeof guestStateCodes)[number];
 function createViewQuery(ports: ViewPorts, mode: "Pickup" | "DineIn") {
@@ -277,6 +281,8 @@ function createViewQuery(ports: ViewPorts, mode: "Pickup" | "DineIn") {
       // WP-2423 (guest-cart-503): what the guest's own state answers is kept as itself (a table
       // checking out, a phone no longer at the table); only a real fault becomes "unavailable".
       let authorizationErrorCode: GuestStateCode | null = null;
+      // M126 I.2: why the phone's place at the table ended travels with it.
+      let endedReason: CartParticipationEndedReason | null = null;
       const read = async () => {
         try {
           return await ports.reads.read(input);
@@ -284,6 +290,7 @@ function createViewQuery(ports: ViewPorts, mode: "Pickup" | "DineIn") {
           const code = readCartError(error)?.code;
           if (code !== undefined && (guestStateCodes as readonly string[]).includes(code))
             authorizationErrorCode = code as GuestStateCode;
+          endedReason = readCartParticipationEnded(error);
           throw error;
         }
       };
@@ -594,6 +601,7 @@ function createViewQuery(ports: ViewPorts, mode: "Pickup" | "DineIn") {
           }),
         });
       } catch (error) {
+        if (endedReason !== null) throw new CartParticipationEndedError(endedReason);
         if (authorizationErrorCode !== null) throw new CartError(authorizationErrorCode);
         // Keep what failed, for the log at the edge.
         throw Object.assign(new CartError("CART_DEPENDENCY_UNAVAILABLE"), { cause: error });

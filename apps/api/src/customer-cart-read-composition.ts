@@ -1,5 +1,9 @@
 import { logGuestFailure } from "./guest-failure-log.js";
-import { readCartError, type CustomerCartDisplayView } from "@rms/ordering";
+import {
+  readCartError,
+  readCartParticipationEnded,
+  type CustomerCartDisplayView,
+} from "@rms/ordering";
 import type { CustomerCartPort, CustomerCartPortResult } from "./customer-cart.js";
 
 export interface CustomerCartDisplayQuery {
@@ -31,6 +35,13 @@ function guestState(error: unknown): CustomerCartPortResult | null {
       return { status: "SessionExpired" };
     case "CART_TABLE_CHECKING_OUT":
       return { status: "TableCheckingOut" };
+    // M126 I.2: the phone's place at the table ended; why travels with it.
+    case "CART_PARTICIPATION_ENDED": {
+      const reason = readCartParticipationEnded(found);
+      return reason === null
+        ? { status: "SessionExpired" }
+        : { status: "ParticipationEnded", reason };
+    }
     default:
       return null;
   }

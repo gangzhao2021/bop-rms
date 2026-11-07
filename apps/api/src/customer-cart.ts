@@ -1,5 +1,5 @@
 import { logGuestFailure } from "./guest-failure-log.js";
-import { CartError, CartReplacementPendingError } from "@rms/ordering";
+import { CartError, CartReplacementPendingError, readCartParticipationEnded } from "@rms/ordering";
 import { checkoutHoldRetrySeconds } from "./customer-checkout-hold.js";
 import { customerDisplayLocale } from "./customer-display-locale.js";
 import type { CustomerCartRestorePort } from "./customer-pickup-cart-restore.js";
@@ -132,6 +132,8 @@ export type CustomerCartPortResult =
   | { readonly status: "CheckoutInProgress"; readonly heldUntil: string }
   /** DEC-DINE-IN-PAY-LATER: the guest's table is checking out; staff add dishes. */
   | { readonly status: "TableCheckingOut" }
+  /** M126 I.2: this phone's place at the table ended (left or removed, closed, changed). */
+  | { readonly status: "ParticipationEnded"; readonly reason: "Left" | "TableClosed" | "Changed" }
   /** Coordinator 2026-10-30: a phone that scanned a table but hasn't joined it (not seated). */
   | { readonly status: "NotSeated" }
   | { readonly status: "Unavailable" };
@@ -225,6 +227,7 @@ type ErrorCode =
   | "cart_order_processing"
   | "cart_checkout_in_progress"
   | "cart_table_checking_out"
+  | "cart_participant_ended"
   | "cart_dining_not_seated"
   | "cart_restore_not_available"
   | "cart_service_unavailable";
@@ -258,6 +261,8 @@ const errors = Object.freeze({
   // DEC-DINE-IN-PAY-LATER: the table is checking out (no new rounds; staff add dishes).
   cart_table_checking_out: { status: 409, messageKey: "customer.cart.table_checking_out" },
   cart_dining_not_seated: { status: 409, messageKey: "customer.cart.dining_not_seated" },
+  // M126 I.2: this phone is no longer at the table, and why (never "session expired").
+  cart_participant_ended: { status: 409, messageKey: "customer.cart.participant_ended" },
   // WP-2423 M03: no Order of this Cart that won't be made (still open, paid, or another Cart's).
   cart_restore_not_available: { status: 409, messageKey: "customer.cart.restore_not_available" },
   // WP-2423: the table's last checkout may still create an order or charge; retry shortly.
@@ -610,6 +615,7 @@ function sendError(
     readonly currentVersion?: number;
     readonly issueCodes?: readonly string[];
     readonly available?: number;
+    readonly reason?: "Left" | "TableClosed" | "Changed";
   },
 ): void {
   const contract = errors[errorCode];
@@ -642,6 +648,10 @@ function handleResult(
   }
   if (result.status === "TableCheckingOut") {
     sendError(response, "cart_table_checking_out");
+    return;
+  }
+  if (result.status === "ParticipationEnded") {
+    sendError(response, "cart_participant_ended", { reason: result.reason });
     return;
   }
   if (result.status === "NotSeated") {
@@ -913,6 +923,12 @@ export class CustomerCartHandler {
         if (error instanceof CartReplacementPendingError) {
           const seconds = orderProcessingRetrySeconds(error.pendingUntil, this.#now());
           if (seconds !== null) response.setHeader("Retry-After", String(seconds));
+        }
+        // M126 I.2: this phone's place at the table ended, and why.
+        const ended = readCartParticipationEnded(error);
+        if (ended !== null) {
+          sendError(response, "cart_participant_ended", { reason: ended });
+          return;
         }
         sendError(
           response,

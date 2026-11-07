@@ -486,7 +486,11 @@ it("reads coherent current Dining participation without writing authority or his
         [left.participantReference, JSON.stringify(left)],
       );
       nowValue = at(8);
-      assert.equal(await resolve(joined.participant.participantReference), null);
+      // M126 I.2: a phone that left (or that staff removed) is told so, not that its visit expired.
+      await assert.rejects(resolve(joined.participant.participantReference), {
+        name: "DiningParticipationEndedError",
+        reason: "Left",
+      });
       // WP-2423 (same-table-ordering): Dining's recorded departures, read as the restricted pilot
       // API role (rendered pilot ACL, NOBYPASSRLS): the removed phone is Left, the other is still
       // Present, each with the current QR of the table it joined at; an unknown participant is left

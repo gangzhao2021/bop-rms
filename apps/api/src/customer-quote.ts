@@ -59,6 +59,8 @@ export type QuoteCartResult =
   | { readonly status: "CheckoutInProgress"; readonly heldUntil: string }
   /** DEC-DINE-IN-PAY-LATER: staff started the table's checkout; no more rounds from a phone. */
   | { readonly status: "TableCheckingOut" }
+  /** M126 I.2: this phone's place at the table ended (left or removed, closed, changed). */
+  | { readonly status: "ParticipationEnded"; readonly reason: "Left" | "TableClosed" | "Changed" }
   /**
    * WP-2423 (guest-cart-503): this guest's cart line cannot be sold now (stable Catalog fact); the
    * guest removes it. `OptionsChanged`: the dish is sold, its chosen options no longer fit.
@@ -82,6 +84,7 @@ type ErrorCode =
   | "quote_configuration_invalid"
   | "cart_checkout_in_progress"
   | "cart_table_checking_out"
+  | "cart_participant_ended"
   | "quote_item_unavailable"
   | "quote_item_options_changed"
   | "quote_service_unavailable";
@@ -94,17 +97,23 @@ const errors = Object.freeze({
   quote_configuration_invalid: { status: 422, messageKey: "customer.quote.configuration_invalid" },
   cart_checkout_in_progress: { status: 409, messageKey: "customer.cart.checkout_in_progress" },
   cart_table_checking_out: { status: 409, messageKey: "customer.cart.table_checking_out" },
+  cart_participant_ended: { status: 409, messageKey: "customer.cart.participant_ended" },
   quote_item_unavailable: { status: 409, messageKey: "customer.quote.item_unavailable" },
   quote_item_options_changed: { status: 409, messageKey: "customer.quote.item_options_changed" },
   quote_service_unavailable: { status: 503, messageKey: "customer.quote.service_unavailable" },
 } as const);
 
-function sendError(response: Response, code: ErrorCode): void {
+function sendError(
+  response: Response,
+  code: ErrorCode,
+  reason?: "Left" | "TableClosed" | "Changed",
+): void {
   if (code === "quote_service_unavailable") response.setHeader("Retry-After", "5");
   const contract = errors[code];
-  response
-    .status(contract.status)
-    .json({ schemaVersion: 1, error: { code, messageKey: contract.messageKey } });
+  response.status(contract.status).json({
+    schemaVersion: 1,
+    error: { code, messageKey: contract.messageKey, ...(reason === undefined ? {} : { reason }) },
+  });
 }
 
 function protectResponse(response: Response): void {
@@ -321,6 +330,10 @@ export class CustomerQuoteHandler {
           String(checkoutHoldRetrySeconds(result.heldUntil, this.#now())),
         );
         sendError(response, "cart_checkout_in_progress");
+        return;
+      }
+      if (result.status === "ParticipationEnded") {
+        sendError(response, "cart_participant_ended", result.reason);
         return;
       }
       if (result.status === "ItemUnavailable") {

@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { CartError, type CustomerCartDisplayView } from "@rms/ordering";
+import {
+  CartError,
+  CartParticipationEndedError,
+  type CustomerCartDisplayView,
+} from "@rms/ordering";
 import { createCustomerCartReadPort } from "./customer-cart-read-composition.js";
 const credential = "a".repeat(43);
 const reference = "018f5500-0000-7000-8000-000000000001";
@@ -92,6 +96,24 @@ describe("Customer Cart read bridge", () => {
       expect(write).toHaveBeenCalledOnce();
     } finally {
       write.mockRestore();
+    }
+  });
+  it("M126 I.2: a phone whose place at the table ended reads why, plain or as a cause", async () => {
+    for (const error of [
+      new CartParticipationEndedError("TableClosed"),
+      Object.assign(new CartError("CART_DEPENDENCY_UNAVAILABLE"), {
+        cause: new CartParticipationEndedError("TableClosed"),
+      }),
+    ]) {
+      const port = createCustomerCartReadPort({
+        read: async () => {
+          throw error;
+        },
+      });
+      expect(await port.getCurrentCart(input)).toEqual({
+        status: "ParticipationEnded",
+        reason: "TableClosed",
+      });
     }
   });
   it("WP-2423 guest-cart-503: matches a second copy of Ordering's CartError by name", async () => {

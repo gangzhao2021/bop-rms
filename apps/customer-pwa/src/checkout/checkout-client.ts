@@ -1,9 +1,10 @@
-import type { CustomerCartClient } from "../cart/cart-client.js";
+import { participationReason, type CustomerCartClient } from "../cart/cart-client.js";
 import { browserRequestTimeoutMs } from "../network/bounded-fetch.js";
 import { CartClientError, type CartMoney, type CartView } from "../cart/types.js";
 import {
   captureCustomerCsrfContext,
   getCustomerCsrfCredential,
+  setParticipationEnded,
 } from "../session/customer-transaction-context.js";
 import type { CheckoutQuote, CheckoutState } from "./types.js";
 
@@ -380,6 +381,16 @@ export function createCheckoutClient(cartClient: CustomerCartClient): CheckoutCl
         // answer stays the same until the guest removes it.
         const named = itemRefusal(response.status, errorRoot.error);
         if (named !== null) throw named;
+        // M126 I.2: this phone's place at the table ended, and why.
+        if (
+          response.status === 409 &&
+          (errorRoot.error as { code?: unknown } | null)?.code === "cart_participant_ended"
+        ) {
+          const ended = exact(errorRoot.error, ["code", "messageKey", "reason"]);
+          if (ended.messageKey !== "customer.cart.participant_ended") throw new Error("invalid");
+          setParticipationEnded(participationReason(ended.reason));
+          throw new CartClientError("cart_participant_ended");
+        }
         const error = exact(errorRoot.error, ["code", "messageKey"]);
         text(error.messageKey, /^[a-z][a-z0-9_.-]{0,127}$/u);
         const known = {
@@ -545,7 +556,9 @@ export function createCheckoutController(
               ? "validation"
               : parsed === "cart_table_checking_out"
                 ? "table-checking-out"
-                : "unavailable",
+                : parsed === "cart_participant_ended"
+                  ? "participation-ended"
+                  : "unavailable",
       cart: parsed === "cart_session_expired" ? null : current,
       canRetry: false,
     });

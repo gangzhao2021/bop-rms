@@ -4,7 +4,11 @@ import {
   createDiningCartReadService,
   type DiningCartReadPorts,
 } from "../application/dining-cart-read-service.js";
-import { parseCartAggregate, type CartAggregate } from "../domain/cart.js";
+import {
+  CartParticipationEndedError,
+  parseCartAggregate,
+  type CartAggregate,
+} from "../domain/cart.js";
 
 const id = (n: number) => `018f5100-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 const ids = {
@@ -440,6 +444,18 @@ describe("current-authorized shared Dining Cart read", () => {
     });
     expect(f.current).not.toHaveBeenCalled();
   });
+  it.each(["Left", "TableClosed", "Changed"] as const)(
+    "M126 I.2: a phone whose place at the table ended (%s) is told why, not that its visit expired",
+    async (reason) => {
+      const f = fixture();
+      f.participate.mockRejectedValue(new CartParticipationEndedError(reason));
+      await expect(f.service.read({ sessionCredential: credential })).rejects.toMatchObject({
+        code: "CART_PARTICIPATION_ENDED",
+        reason,
+      });
+      expect(f.current).not.toHaveBeenCalled();
+    },
+  );
   it("denies a backwards clock before Cart access", async () => {
     const f = fixture();
     f.now.mockReturnValueOnce(requestedAt).mockReturnValue(createdAt);

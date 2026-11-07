@@ -3,6 +3,7 @@ import type { CustomerCartClient } from "../cart/cart-client.js";
 import { CartClientError, type CartView } from "../cart/types.js";
 import {
   getCustomerCsrfCredential,
+  getParticipationEnded,
   setCustomerCsrfCredential,
 } from "../session/customer-transaction-context.js";
 import {
@@ -1018,6 +1019,51 @@ describe("WP-2423 item 6: a table checking out when it is priced", () => {
     await controller.load();
     await controller.quote();
     expect(controller.getState().status).toBe("table-checking-out");
+  });
+});
+
+describe("M126 I.2: a phone no longer at its table when it is priced", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    setCustomerCsrfCredential(null);
+  });
+  it("is told why, never that its visit expired", async () => {
+    setCustomerCsrfCredential("c".repeat(43));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              schemaVersion: 1,
+              error: {
+                code: "cart_participant_ended",
+                messageKey: "customer.cart.participant_ended",
+                reason: "TableClosed",
+              },
+            }),
+            { status: 409 },
+          ),
+      ),
+    );
+    const cart = {
+      schemaVersion: 1,
+      cart: { cartReference: "018f7800-0000-7000-8000-000000000001", version: 3, items: [{}] },
+    } as unknown as CartView;
+    const failure = await createCheckoutClient({} as CustomerCartClient)
+      .quote(cart, "018f7800-0000-7000-8000-000000000002")
+      .catch((error: unknown) => error);
+    expect((failure as CartClientError).code).toBe("cart_participant_ended");
+    expect(getParticipationEnded()).toBe("TableClosed");
+    const controller = createCheckoutController({
+      loadCart: async () => cart,
+      quote: async () => {
+        throw failure;
+      },
+    });
+    await controller.load();
+    await controller.quote();
+    expect(controller.getState().status).toBe("participation-ended");
   });
 });
 

@@ -339,6 +339,7 @@ function ErrorState({
       checkoutInProgressMessage(state.retryAfterSeconds),
     ],
     "table-checking-out": failure.tableCheckingOut,
+    "participation-ended": failure.participationEnded,
     "not-seated": failure.notSeated,
     "command-failed": failure.commandFailed,
     unavailable: failure.unavailable,
@@ -380,6 +381,10 @@ function ErrorState({
           </button>
         )}
         <Link to="/menu">{commonText.returnToMenu}</Link>
+        {/* M126 I.2: the table page says what happened (moved, merged, settled) and what next. */}
+        {state.status === "participation-ended" ? (
+          <Link to="/dine-in/session">{cartText.failure.yourTable}</Link>
+        ) : null}
         {state.status === "not-seated" && (isGuestTableQuestion() || getGuestTableStarter()) ? (
           <Link to="/">{failure.goToStart}</Link>
         ) : null}
@@ -440,6 +445,14 @@ function sendRoundMessage(round: SendRoundState, cart: CartView, onRetry: () => 
       );
     case "table-checking-out":
       return <p role="alert">{cartText.failure.tableCheckingOut[1]}</p>;
+    case "participation-ended":
+      return (
+        <div role="alert">
+          <p>{cartText.failure.participationEnded[0]}</p>
+          <p>{cartText.failure.participationEnded[1]}</p>
+          <Link to="/dine-in/session">{cartText.failure.yourTable}</Link>
+        </div>
+      );
     case "session-ended":
       return <p role="alert">{checkoutText.sessionEnded}</p>;
     case "cart-changed":

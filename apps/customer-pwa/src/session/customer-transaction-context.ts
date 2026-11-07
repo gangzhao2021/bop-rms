@@ -45,6 +45,21 @@ export function getEndedVisitReceiptAccess(
  * the table it sits at now (the guest scans that table's code to join it again). Memory only.
  */
 let movedTableLabel: string | null = null;
+
+/**
+ * M126 I.2: why this phone's place at its table ended, as the Store last said (left or removed,
+ * the table's visit closed, the party's table changed). Memory only; cleared with a new visit.
+ */
+export type ParticipationEndedReason = "Left" | "TableClosed" | "Changed";
+let participationEnded: ParticipationEndedReason | null = null;
+
+export function setParticipationEnded(value: ParticipationEndedReason | null): void {
+  participationEnded = value;
+}
+
+export function getParticipationEnded(): ParticipationEndedReason | null {
+  return participationEnded;
+}
 /** WP-2423 item 8 ⑨: staff merged the party into the party at that table (not just moved it). */
 let movedTableMerged = false;
 
@@ -181,6 +196,7 @@ export function setCustomerCsrfCredential(value: string | null): void {
   if (value !== null) {
     endedVisitReceipt = null;
     movedTableLabel = null;
+    participationEnded = null;
     settledTable = null;
     unseatedTableScan = false;
     guestTableStarter = null;

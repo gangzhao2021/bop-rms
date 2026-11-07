@@ -180,6 +180,12 @@ describe("authorized Quote HTTP bridge", () => {
     expect(await f.port.quoteCart(f.input)).toEqual({ status: "TableCheckingOut" });
     f.attach.mockRejectedValueOnce({ name: "CartError", code: "CART_TABLE_CHECKING_OUT" });
     expect(await f.port.quoteCart(f.input)).toEqual({ status: "Unavailable" });
+    // M126 I.2: this phone's place at the table ended, and why.
+    f.attach.mockRejectedValueOnce(new Ordering.CartParticipationEndedError("Left"));
+    expect(await f.port.quoteCart(f.input)).toEqual({
+      status: "ParticipationEnded",
+      reason: "Left",
+    });
   });
   it.each([null, "corrupt", "failure"])("preserves uncertainty for %s history", async (kind) => {
     const f = fixture();

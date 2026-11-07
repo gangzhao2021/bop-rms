@@ -84,6 +84,20 @@ export class DiningTableCheckingOutError extends Error {
   }
 }
 
+/**
+ * M126 I.2: this phone's place at the table ended, and why: the phone left or staff removed it
+ * (`Left`), the table's visit closed (`TableClosed`), or the party's table changed (`Changed`).
+ * Told apart from an expired visit so the guest is told what happened, not to scan again.
+ */
+export type DiningParticipationEndedReason = "Left" | "TableClosed" | "Changed";
+export class DiningParticipationEndedError extends Error {
+  readonly code = "DINING_PARTICIPATION_ENDED" as const;
+  constructor(readonly reason: DiningParticipationEndedReason) {
+    super("the dining participation ended");
+    this.name = "DiningParticipationEndedError";
+  }
+}
+
 /** Internal owner facts only. Callers must separately authorize the current Guest and Cart action. */
 export function createDiningCartParticipationQuery(options: DiningCartParticipationOptions) {
   const scope = closed(options.scope, ["brandReference", "storeReference"]);
@@ -127,6 +141,7 @@ export function createDiningCartParticipationQuery(options: DiningCartParticipat
         if (snapshot === null) return null;
         const { session, participant, table } = snapshot;
         if (table.observedAt < requestedAt || table.observedAt > checkedAt) return unavailable();
+        // Facts that don't belong to this guest's own table are a plain refusal, never a reason.
         if (
           session.brandReference !== brandReference ||
           session.storeReference !== storeReference ||
@@ -136,16 +151,24 @@ export function createDiningCartParticipationQuery(options: DiningCartParticipat
           table.brandReference !== brandReference ||
           table.storeReference !== storeReference ||
           table.tableReference !== session.tableReference ||
-          table.assignmentVersion !== session.tableAssignmentVersion ||
-          table.activeDiningSessionReference !== diningSessionReference ||
-          (session.phase !== "Active" && session.phase !== "Closing") ||
-          participant.status !== "Active" ||
           table.tableState !== "Eligible" ||
           session.startedAt > table.observedAt ||
           participant.joinedAt < session.startedAt ||
           participant.joinedAt > table.observedAt
         )
           return null;
+        // M126 I.2: the guest's own place ended; why, in the order the guest would be told.
+        if (session.phase !== "Active" && session.phase !== "Closing")
+          throw new DiningParticipationEndedError("TableClosed");
+        if (participant.status !== "Active") throw new DiningParticipationEndedError("Left");
+        if (
+          table.assignmentVersion !== session.tableAssignmentVersion ||
+          table.activeDiningSessionReference !== diningSessionReference
+        ) {
+          // A table checking out that a move or merge is still settling says nothing new yet.
+          if (session.phase === "Closing") return null;
+          throw new DiningParticipationEndedError("Changed");
+        }
         if (session.phase === "Closing") throw new DiningTableCheckingOutError();
         return Object.freeze({
           schemaVersion: 1,
@@ -161,6 +184,7 @@ export function createDiningCartParticipationQuery(options: DiningCartParticipat
         });
       } catch (error) {
         if (error instanceof DiningTableCheckingOutError) throw error;
+        if (error instanceof DiningParticipationEndedError) throw error;
         return unavailable();
       }
     },

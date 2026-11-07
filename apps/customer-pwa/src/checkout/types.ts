@@ -51,7 +51,9 @@ export type CheckoutState =
         | "quote-expired"
         | "outcome-unknown"
         /** WP-2423 item 6: staff started the table's checkout; no more rounds from a phone. */
-        | "table-checking-out";
+        | "table-checking-out"
+        /** M126 I.2: this phone's place at the table ended (why: getParticipationEnded). */
+        | "participation-ended";
       cart: CartView | null;
       canRetry: boolean;
     }>

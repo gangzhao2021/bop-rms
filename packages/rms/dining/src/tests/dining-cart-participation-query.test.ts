@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   createDiningCartParticipationQuery,
+  DiningParticipationEndedError,
   DiningTableCheckingOutError,
   type DiningParticipationReadSnapshot,
 } from "../application/dining-cart-participation-query.js";
@@ -118,11 +119,6 @@ describe("Dining current Cart participation facts", () => {
     ["table", "brandReference", id(90)],
     ["table", "storeReference", id(90)],
     ["table", "tableReference", id(90)],
-    ["table", "assignmentVersion", 3],
-    ["table", "activeDiningSessionReference", id(90)],
-    ["table", "activeDiningSessionReference", null],
-    ["session", "phase", "Closed"],
-    ["session", "phase", "Cancelled"],
     ["table", "tableState", "Unavailable"],
     ["session", "startedAt", "2026-08-02T12:03:00.000Z"],
     ["participant", "joinedAt", "2026-08-02T11:59:00.000Z"],
@@ -136,6 +132,26 @@ describe("Dining current Cart participation facts", () => {
     } as never);
     expect(await f.query.resolve(input)).toBeNull();
   });
+  it.each([
+    ["session", "phase", "Closed", "TableClosed"],
+    ["session", "phase", "Cancelled", "TableClosed"],
+    ["table", "assignmentVersion", 3, "Changed"],
+    ["table", "activeDiningSessionReference", id(90), "Changed"],
+    ["table", "activeDiningSessionReference", null, "Changed"],
+  ] as const)(
+    "M126 I.2: says why this phone's place ended (%s.%s %s: %s), never an expired visit",
+    async (group, field, value, reason) => {
+      const f = fixture();
+      const current = source();
+      f.readCurrent.mockResolvedValue({
+        ...current,
+        [group]: { ...current[group], [field]: value },
+      } as never);
+      const failure = f.query.resolve(input);
+      await expect(failure).rejects.toBeInstanceOf(DiningParticipationEndedError);
+      await expect(failure).rejects.toMatchObject({ reason });
+    },
+  );
   it("says a table checking out is checking out (DEC-DINE-IN-PAY-LATER)", async () => {
     const f = fixture();
     const current = source();
@@ -145,7 +161,7 @@ describe("Dining current Cart participation facts", () => {
     } as never);
     await expect(f.query.resolve(input)).rejects.toBeInstanceOf(DiningTableCheckingOutError);
   });
-  it("denies a participant who has left even if they were the host", async () => {
+  it("denies a participant who has left even if they were the host, saying they left", async () => {
     const f = fixture();
     const current = source();
     f.readCurrent.mockResolvedValue({
@@ -153,7 +169,10 @@ describe("Dining current Cart participation facts", () => {
       session: { ...current.session, hostParticipantReference: id(4) },
       participant: { ...current.participant, status: "Left", leftAt: at },
     } as never);
-    expect(await f.query.resolve(input)).toBeNull();
+    await expect(f.query.resolve(input)).rejects.toMatchObject({
+      name: "DiningParticipationEndedError",
+      reason: "Left",
+    });
   });
   it.each([{}, { extra: true }, { participant: {} }])(
     "redacts malformed dependency shapes",

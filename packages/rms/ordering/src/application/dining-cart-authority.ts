@@ -8,6 +8,7 @@ import {
   CartError,
   parseOrderingInstant,
   parseOrderingReference,
+  readCartParticipationEnded,
   type OrderingInstant,
 } from "../domain/cart.js";
 
@@ -181,6 +182,8 @@ export function createDiningCartAuthority(ports: DiningCartAuthorityPorts) {
           if (error instanceof CartError && error.code === "CART_PERMISSION_DENIED")
             return denied();
           if (error instanceof CartError && error.code === "CART_TABLE_CHECKING_OUT") throw error;
+          // M126 I.2: the phone's place ended (left, table closed, changed): said as such.
+          if (readCartParticipationEnded(error) !== null) throw error;
           return unavailable();
         }
         const checkedAt = tick();

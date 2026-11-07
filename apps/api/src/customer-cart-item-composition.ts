@@ -26,6 +26,7 @@ import {
   readCartSelectionRejected,
   type PickupCartItemOptions,
   type PickupCartItemResult,
+  readCartParticipationEnded,
 } from "@rms/ordering";
 import type { CustomerCartRemovalCompositionOptions } from "./customer-cart-removal-composition.js";
 import {
@@ -117,6 +118,9 @@ export function createCustomerCartItemPort(options: {
       logGuestFailure("CUSTOMER_CART_CHANGE_UNAVAILABLE", error);
       return unavailable;
     }
+    // M126 I.2: this phone's place at the table ended; why, never "your visit expired".
+    const ended = readCartParticipationEnded(error);
+    if (ended !== null) return { status: "ParticipationEnded", reason: ended };
     switch (error.code) {
       case "CART_PERMISSION_DENIED":
         return { status: "SessionExpired" };

@@ -104,7 +104,15 @@ export type SendRoundState =
       readonly refusal: "item_short" | "item_unavailable" | "item_options_changed";
       readonly line: CheckoutRefusedLine | null;
     }
-  | { readonly status: "store-closed" | "table-checking-out" | "session-ended" | "cart-changed" }
+  | {
+      readonly status:
+        | "store-closed"
+        | "table-checking-out"
+        | "session-ended"
+        | "cart-changed"
+        /** M126 I.2: this phone's place at the table ended (why: getParticipationEnded). */
+        | "participation-ended";
+    }
   | {
       readonly status: "busy";
       readonly wait: "order-processing" | "checkout-in-progress";
@@ -262,6 +270,9 @@ export function createSendRoundController(
         case "cart_table_checking_out":
           plan = null;
           return { status: "table-checking-out" };
+        case "cart_participant_ended":
+          plan = null;
+          return { status: "participation-ended" };
         case "quote_operation_expired":
           if (active.quoteRenewed) return unconfirmed();
           active.quoteRenewed = true;

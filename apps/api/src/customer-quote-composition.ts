@@ -25,6 +25,7 @@ import {
   createPostgresPickupCartBindingReader,
   parseOrderingReference,
   readCartError,
+  readCartParticipationEnded,
   readCartItemUnavailable,
   type CartQueryTransactionRunner,
   type PickupCartQuoteOptions,
@@ -173,6 +174,11 @@ function initialFailure(raw: unknown): QuoteCartResult {
     // WP-2423 item 6: staff started checkout; nothing a guest can do by asking again.
     case "CART_TABLE_CHECKING_OUT":
       return { status: "TableCheckingOut" };
+    // M126 I.2: this phone's place at the table ended; why, never "not found".
+    case "CART_PARTICIPATION_ENDED": {
+      const reason = readCartParticipationEnded(error);
+      return reason === null ? { status: "NotFound" } : { status: "ParticipationEnded", reason };
+    }
     default:
       return unavailable;
   }

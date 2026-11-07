@@ -208,6 +208,8 @@ describe("WP-1205 in-memory Cart state", () => {
   it.each([
     ["cart_table_checking_out", "table-checking-out"],
     ["cart_session_expired", "session-expired"],
+    // M126 I.2: this phone's place at the table ended; said as such, never as expired.
+    ["cart_participant_ended", "participation-ended"],
   ] as const)("WP-2423 guest-cart-503: a quiet read says %s at once", async (code, status) => {
     const f = fixture();
     await f.controller.load();

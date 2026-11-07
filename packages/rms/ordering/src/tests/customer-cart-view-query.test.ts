@@ -4,7 +4,12 @@ import {
   createCustomerCartViewQuery,
   type CustomerCartViewPorts,
 } from "../application/customer-cart-view-query.js";
-import { CartError, parseCartAggregate, parseOrderingInstant } from "../domain/cart.js";
+import {
+  CartError,
+  CartParticipationEndedError,
+  parseCartAggregate,
+  parseOrderingInstant,
+} from "../domain/cart.js";
 import {
   parseCartQuoteAttachment,
   parseConfiguredCartQuoteAttachment,
@@ -332,6 +337,17 @@ describe("safe Customer Cart display", () => {
       }
     },
   );
+  it("M126 I.2: a phone whose place at the table ended keeps why, before or after the reads", async () => {
+    for (const after of [false, true]) {
+      const f = fixture();
+      if (after) f.read.mockResolvedValueOnce(snapshot());
+      f.read.mockRejectedValue(new CartParticipationEndedError("TableClosed"));
+      await expect(f.query.read(request)).rejects.toMatchObject({
+        code: "CART_PARTICIPATION_ENDED",
+        reason: "TableClosed",
+      });
+    }
+  });
   it("WP-2423 guest-cart-503: wraps a real fault, keeping its cause for the log", async () => {
     const f = fixture();
     const cause = new CartError("CART_LIFECYCLE_UNAVAILABLE");

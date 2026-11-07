@@ -26,6 +26,8 @@ export type ConfigureState =
         | "order-processing"
         | "checkout-in-progress"
         | "table-checking-out"
+        /** M126 I.2: this phone's place at the table ended (why: getParticipationEnded). */
+        | "participation-ended"
         | "not-seated"
         | "table-start-refused"
         | "table-in-use"
@@ -120,15 +122,17 @@ export function createConfigureController({
                   ? "checkout-in-progress"
                   : parsed.code === "cart_table_checking_out"
                     ? "table-checking-out"
-                    : parsed.code === "cart_dining_not_seated"
-                      ? "not-seated"
-                      : parsed.code === "cart_expired"
-                        ? "expired"
-                        : parsed.code === "cart_abandoned"
-                          ? "abandoned"
-                          : parsed.code === "network_unknown"
-                            ? "outcome-unknown"
-                            : "unavailable";
+                    : parsed.code === "cart_participant_ended"
+                      ? "participation-ended"
+                      : parsed.code === "cart_dining_not_seated"
+                        ? "not-seated"
+                        : parsed.code === "cart_expired"
+                          ? "expired"
+                          : parsed.code === "cart_abandoned"
+                            ? "abandoned"
+                            : parsed.code === "network_unknown"
+                              ? "outcome-unknown"
+                              : "unavailable";
     publish({
       status,
       issueCodes: parsed.issueCodes,

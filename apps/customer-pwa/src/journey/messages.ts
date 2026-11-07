@@ -4,7 +4,34 @@ import {
 } from "../session/customer-transaction-context.js";
 import { saidTable, t } from "../i18n/i18n.js";
 import type { CartState } from "../cart/cart-state.js";
-import { getTablePaymentTiming } from "../session/customer-transaction-context.js";
+import {
+  getParticipationEnded,
+  getTablePaymentTiming,
+} from "../session/customer-transaction-context.js";
+
+/**
+ * M126 I.2: why this phone is no longer ordering with its table, in the guest's words (heading,
+ * then what to do). Never "your visit expired": the guest's table page says more.
+ */
+export function participationEndedText(): readonly [string, string] {
+  switch (getParticipationEnded()) {
+    case "TableClosed":
+      return [
+        t("This table’s visit has ended"),
+        t("Open your table to see its bill and receipt."),
+      ] as const;
+    case "Changed":
+      return [
+        t("Your party’s table changed"),
+        t("Open your table to see where your party is now."),
+      ] as const;
+    default:
+      return [
+        t("This phone is no longer at this table"),
+        t("To order with your table again, scan the QR code on the table."),
+      ] as const;
+  }
+}
 
 /** Customer sentences for server codes. Raw codes never reach the page; unknown codes get one safe sentence. */
 
@@ -322,6 +349,9 @@ export const cartText = Object.freeze({
     get "table-checking-out"() {
       return t("Your table is checking out.");
     },
+    get "participation-ended"() {
+      return participationEndedText()[0];
+    },
     get "not-seated"() {
       return getGuestTableStarter() !== null
         ? t("Add a dish from the menu to start.")
@@ -427,6 +457,12 @@ export const cartText = Object.freeze({
     },
     get goToStart() {
       return t("Go to the start");
+    },
+    get participationEnded() {
+      return participationEndedText();
+    },
+    get yourTable() {
+      return t("Your table");
     },
     get tableCheckingOut() {
       return [

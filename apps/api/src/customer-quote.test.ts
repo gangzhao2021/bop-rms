@@ -282,6 +282,23 @@ describe("WP-1103/1104 Customer Quote API", () => {
     });
   });
 
+  it("M126 I.2: a phone no longer at the table is told why, with nothing to wait for", async () => {
+    const service = new Port();
+    const port = await listen(service);
+    service.result = { status: "ParticipationEnded", reason: "Changed" };
+    const response = await post(port);
+    expect(response.status).toBe(409);
+    expect(response.headers.get("retry-after")).toBeNull();
+    expect(await response.json()).toEqual({
+      schemaVersion: 1,
+      error: {
+        code: "cart_participant_ended",
+        messageKey: "customer.cart.participant_ended",
+        reason: "Changed",
+      },
+    });
+  });
+
   it.each([
     ["Unavailable", "quote_item_unavailable", "customer.quote.item_unavailable"],
     ["OptionsChanged", "quote_item_options_changed", "customer.quote.item_options_changed"],

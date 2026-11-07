@@ -9,7 +9,7 @@ import { createBrowserPickupCartClient } from "../cart/pickup-cart-client.js";
 import { CustomerPage } from "../journey/CustomerPage.js";
 import { SlowAddNotice } from "../slow-wait.js";
 import { formatDecimalMoney, formatMoney } from "../journey/format.js";
-import { cartIssueMessage } from "../journey/messages.js";
+import { cartIssueMessage, participationEndedText } from "../journey/messages.js";
 import {
   createContext,
   useCallback,
@@ -1486,6 +1486,7 @@ export function ConfigureStatus({
       "Your table is checking out, so new dishes can’t be sent. To add more, ask a staff member.",
     ),
     "not-seated": t("You can order once staff seat you. Ask a staff member, then scan again."),
+    "participation-ended": participationEndedText().join(" "),
     "table-start-refused": t(
       "This table can’t be started just now. Pick another table or ask staff. Your choices are kept here.",
     ),
@@ -1516,6 +1517,9 @@ export function ConfigureStatus({
       ) : null}
       {state.status === "conflict" ? <Link to="/cart">{t("Review cart")}</Link> : null}
       {state.status === "session-expired" ? <Link to="/">{t("Return to entry")}</Link> : null}
+      {state.status === "participation-ended" ? (
+        <Link to="/dine-in/session">{t("Your table")}</Link>
+      ) : null}
       {state.status === "table-question" ? <Link to="/">{t("Back to the question")}</Link> : null}
       {state.status === "table-in-use" ? <Link to="/">{t("Back to this table")}</Link> : null}
     </div>

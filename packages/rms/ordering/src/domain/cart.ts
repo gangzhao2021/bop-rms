@@ -77,6 +77,8 @@ export const cartErrorCodes = [
   "CART_CHECKOUT_IN_PROGRESS",
   /** DEC-DINE-IN-PAY-LATER: the guest's table is checking out; staff add dishes. */
   "CART_TABLE_CHECKING_OUT",
+  /** M126 I.2: this phone's place at the table ended (left or removed, table closed, changed). */
+  "CART_PARTICIPATION_ENDED",
   "CART_VERSION_CONFLICT",
   "CART_IDEMPOTENCY_CONFLICT",
   "CART_ITEM_NOT_FOUND",
@@ -110,6 +112,28 @@ export class CartError extends Error {
     this.name = "CartError";
     this.code = code;
   }
+}
+
+/** M126 I.2: why this phone's place at the table ended. */
+export const cartParticipationEndedReasons = ["Left", "TableClosed", "Changed"] as const;
+export type CartParticipationEndedReason = (typeof cartParticipationEndedReasons)[number];
+
+/** M126 I.2: told apart from an expired visit, so the guest is told what happened. */
+export class CartParticipationEndedError extends CartError {
+  readonly reason: CartParticipationEndedReason;
+  constructor(reason: CartParticipationEndedReason) {
+    super("CART_PARTICIPATION_ENDED");
+    this.name = "CartParticipationEndedError";
+    this.reason = reason;
+  }
+}
+
+/** The reason of a CartParticipationEndedError (either copy), or null. */
+export function readCartParticipationEnded(error: unknown): CartParticipationEndedReason | null {
+  const found = readCartError(error);
+  if (found === null || found.code !== "CART_PARTICIPATION_ENDED") return null;
+  const reason = (found as Partial<CartParticipationEndedError>).reason;
+  return reason !== undefined && cartParticipationEndedReasons.includes(reason) ? reason : null;
 }
 
 /**
@@ -214,7 +238,8 @@ export function readCartError(error: unknown): CartError | null {
     (error.name !== "CartError" &&
       error.name !== "CartItemUnavailableError" &&
       error.name !== "CartSelectionRejectedError" &&
-      error.name !== "CartCheckoutInProgressError") ||
+      error.name !== "CartCheckoutInProgressError" &&
+      error.name !== "CartParticipationEndedError") ||
     typeof code !== "string" ||
     !(cartErrorCodes as readonly string[]).includes(code)
   )

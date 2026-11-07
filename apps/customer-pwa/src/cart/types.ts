@@ -114,6 +114,8 @@ export type CartErrorCode =
   | "cart_table_checking_out"
   /** Coordinator 2026-10-30: this phone scanned a table but hasn't joined it yet. */
   | "cart_dining_not_seated"
+  /** M126 I.2: this phone's place at the table ended (left or removed, closed, changed). */
+  | "cart_participant_ended"
   /** WP-2423 (guest-cart-503): a named cart line can't be sold now; remove it (never retried). */
   | "cart_item_unavailable"
   /** WP-2423 (guest-cart-503): a named cart line's dish is sold, its options no longer fit. */

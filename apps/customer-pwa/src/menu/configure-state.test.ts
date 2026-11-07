@@ -186,6 +186,12 @@ describe("WP-1702 in-memory Configurator state", () => {
     expect(state.controller.getState()).toMatchObject({ status: "not-seated" });
   });
 
+  it("M126 I.2: tells a phone no longer at its table why, never that its visit expired", async () => {
+    const state = fixture(null);
+    state.failCreate(new CartClientError("cart_participant_ended"));
+    await state.controller.submit(id(3), draft);
+    expect(state.controller.getState()).toMatchObject({ status: "participation-ended" });
+  });
   it("sends nothing from a phone that scanned a table no party is seated at", async () => {
     setUnseatedTableScan(true);
     setCustomerCsrfCredential(null);

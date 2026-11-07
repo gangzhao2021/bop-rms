@@ -478,6 +478,17 @@ describe("WP-2423 item 6: placing a round from the cart", () => {
     expect(answered.controller.getState()).toEqual({ status: "table-checking-out" });
   });
 
+  it("M126 I.2: a phone no longer at the table is told so and sends nothing", async () => {
+    const ended = setUp({
+      quote: vi.fn<SendRoundPorts["quote"]>(async () => {
+        throw new CartClientError("cart_participant_ended");
+      }),
+    });
+    await ended.controller.send(cart(), seen);
+    expect(ended.controller.getState()).toEqual({ status: "participation-ended" });
+    expect(ended.ports.saveDetails).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["cart_item_unavailable", "item_unavailable"],
     ["cart_item_options_changed", "item_options_changed"],

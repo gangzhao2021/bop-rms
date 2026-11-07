@@ -17,6 +17,8 @@ export type CartState =
         | "order-processing"
         | "checkout-in-progress"
         | "table-checking-out"
+        /** M126 I.2: this phone's place at the table ended (why: getParticipationEnded). */
+        | "participation-ended"
         | "not-seated"
         | "expired"
         | "abandoned"
@@ -134,6 +136,7 @@ export function createCartStateController({
   const quietlyShown = (error: unknown) =>
     error instanceof CartClientError &&
     (error.code === "cart_table_checking_out" ||
+      error.code === "cart_participant_ended" ||
       error.code === "cart_session_expired" ||
       error.code === "cart_replacement_forbidden");
   const load = async () => {
@@ -168,15 +171,17 @@ export function createCartStateController({
                       ? "checkout-in-progress"
                       : parsed.code === "cart_table_checking_out"
                         ? "table-checking-out"
-                        : parsed.code === "cart_dining_not_seated"
-                          ? "not-seated"
-                          : parsed.code === "cart_expired"
-                            ? "expired"
-                            : parsed.code === "cart_abandoned"
-                              ? "abandoned"
-                              : parsed.code === "network_unknown"
-                                ? "command-failed"
-                                : "unavailable";
+                        : parsed.code === "cart_participant_ended"
+                          ? "participation-ended"
+                          : parsed.code === "cart_dining_not_seated"
+                            ? "not-seated"
+                            : parsed.code === "cart_expired"
+                              ? "expired"
+                              : parsed.code === "cart_abandoned"
+                                ? "abandoned"
+                                : parsed.code === "network_unknown"
+                                  ? "command-failed"
+                                  : "unavailable";
     publish({
       status,
       cart,

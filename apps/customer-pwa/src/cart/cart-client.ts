@@ -12,7 +12,14 @@ import {
   getCustomerCsrfCredential,
   setCustomerCsrfCredential,
   isUnseatedTableScan,
+  setParticipationEnded,
+  type ParticipationEndedReason,
 } from "../session/customer-transaction-context.js";
+
+/** M126 I.2: the Store's reason, or null when it sent none this page knows. */
+export function participationReason(value: unknown): ParticipationEndedReason | null {
+  return value === "Left" || value === "TableClosed" || value === "Changed" ? value : null;
+}
 import { browserRequestTimeoutMs } from "../network/bounded-fetch.js";
 import { withNameLocale } from "../i18n/i18n.js";
 
@@ -32,6 +39,7 @@ const errorStatuses: Partial<Record<CartErrorCode, number>> = {
   cart_checkout_in_progress: 409,
   cart_table_checking_out: 409,
   cart_dining_not_seated: 409,
+  cart_participant_ended: 409,
   cart_restore_not_available: 409,
   cart_service_unavailable: 503,
 };
@@ -277,6 +285,7 @@ function parse(response: Response, payload: unknown): CartView | null {
               currentVersion?: unknown;
               issueCodes?: unknown;
               available?: unknown;
+              reason?: unknown;
             };
           }
         ).error
@@ -287,6 +296,8 @@ function parse(response: Response, payload: unknown): CartView | null {
       ? (error?.code as CartErrorCode)
       : "cart_service_unavailable";
   if (code === "cart_not_found" && response.status === 404) return null;
+  // M126 I.2: why this phone's place at the table ended, for the words the page shows.
+  if (code === "cart_participant_ended") setParticipationEnded(participationReason(error?.reason));
   const retryHeader = response.headers.get("retry-after");
   throw new CartClientError(code, {
     ...(Number.isSafeInteger(error?.currentVersion)

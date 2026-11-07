@@ -9,7 +9,7 @@ import {
   type CustomerCartSelectionInventoryOptions,
 } from "./customer-cart-selection-inventory.js";
 import { createCustomerDiningCartInventoryAuthorization } from "./customer-dining-cart-inventory-authorization.js";
-import { DiningTableCheckingOutError } from "@rms/dining";
+import { DiningParticipationEndedError, DiningTableCheckingOutError } from "@rms/dining";
 import {
   assertGuestSessionUsable,
   createGuestSession,
@@ -20,6 +20,7 @@ import {
 import {
   CartCheckoutInProgressError,
   CartError,
+  CartParticipationEndedError,
   CartReplacementPendingError,
   createCustomerDiningCartViewQuery,
   createDiningCartReadService,
@@ -34,6 +35,7 @@ import {
   parseDiningCartSelectionReceipt,
   parseOrderingInstant,
   parseOrderingReference,
+  readCartParticipationEnded,
   type CartQueryTransactionRunner,
   type CustomerDiningCartViewPorts,
   type DiningCartReadPorts,
@@ -114,6 +116,9 @@ function failure(error: unknown): CustomerCartPortResult {
     return { status: "CheckoutInProgress", heldUntil: error.heldUntil };
   if (!(error instanceof CartError)) return unavailable;
   if (error.code === "CART_TABLE_CHECKING_OUT") return { status: "TableCheckingOut" };
+  // M126 I.2: this phone's place at the table ended; why, never "your visit expired".
+  const ended = readCartParticipationEnded(error);
+  if (ended !== null) return { status: "ParticipationEnded", reason: ended };
   switch (error.code) {
     case "CART_PERMISSION_DENIED":
       return { status: "SessionExpired" };
@@ -347,7 +352,10 @@ export interface CustomerDiningCartCompositionOptions {
     readonly audit: DiningCartItemOptions["audit"];
   };
 }
-/** DEC-DINE-IN-PAY-LATER: Dining's "this table is checking out" reaches the guest as such. */
+/**
+ * DEC-DINE-IN-PAY-LATER: Dining's "this table is checking out" reaches the guest as such; M126 I.2:
+ * so does why this phone's place at the table ended.
+ */
 export function cartParticipation(
   source: DiningCartReadPorts["participation"],
 ): DiningCartReadPorts["participation"] {
@@ -362,6 +370,15 @@ export function cartParticipation(
           (error instanceof Error && error.name === "DiningTableCheckingOutError")
         )
           throw new CartError("CART_TABLE_CHECKING_OUT");
+        // M126 I.2: left or removed, the table closed, or the party's table changed.
+        if (
+          error instanceof DiningParticipationEndedError ||
+          (error instanceof Error && error.name === "DiningParticipationEndedError")
+        ) {
+          const reason = (error as { reason?: unknown }).reason;
+          if (reason === "Left" || reason === "TableClosed" || reason === "Changed")
+            throw new CartParticipationEndedError(reason);
+        }
         throw error;
       }
     },

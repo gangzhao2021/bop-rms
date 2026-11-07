@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createGuestSession, type GuestSessionService } from "@bop/identity";
 import {
   CartError,
+  CartParticipationEndedError,
   CartReplacementPendingError,
   parseOrderingReference,
   type CustomerCartDisplayView,
@@ -14,9 +15,11 @@ import {
   TABLE_CART_EXPIRY_RETRY_SECONDS,
   continuationOperationReference,
   createCustomerCartChannelPort,
+  cartParticipation,
   createCustomerDiningCartComposition,
   createCustomerDiningCartPort,
 } from "./customer-dining-cart-composition.js";
+import { DiningParticipationEndedError } from "@rms/dining";
 const id = (n: number) => `018f2319-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 const at = (seconds = 0) =>
   new Date(Date.parse("2026-09-09T12:00:00.000Z") + seconds * 1000).toISOString();
@@ -447,6 +450,44 @@ describe("Dining Cart HTTP contract", () => {
     });
     expect(response.status).toBe(400);
     expect(f.select).not.toHaveBeenCalled();
+  });
+});
+
+describe("M126 I.2: a phone whose place at the table ended is told why", () => {
+  it.each(["Left", "TableClosed", "Changed"] as const)(
+    "Dining's %s reaches the cart as itself, never as an expired visit",
+    async (reason) => {
+      const participation = cartParticipation({
+        resolve: async () => {
+          throw new DiningParticipationEndedError(reason);
+        },
+      });
+      await expect(
+        participation.resolve({
+          purpose: "Cart",
+          diningSessionReference: id(1),
+          participantReference: id(2),
+        } as never),
+      ).rejects.toMatchObject({ code: "CART_PARTICIPATION_ENDED", reason });
+      const f = fixture();
+      f.select.mockRejectedValue(new CartParticipationEndedError(reason));
+      expect(await f.port.createCart(input())).toEqual({ status: "ParticipationEnded", reason });
+    },
+  );
+  it("answers 409 cart_participant_ended with the reason, and no cookie", async () => {
+    const f = fixture();
+    f.select.mockRejectedValue(new CartParticipationEndedError("Left"));
+    const response = await http(f.port, { method: "POST", headers: headers(), body: "{}" });
+    expect(response.status).toBe(409);
+    expect(response.headers.get("set-cookie")).toBeNull();
+    expect(await response.json()).toEqual({
+      schemaVersion: 1,
+      error: {
+        code: "cart_participant_ended",
+        messageKey: "customer.cart.participant_ended",
+        reason: "Left",
+      },
+    });
   });
 });
 

@@ -17,6 +17,7 @@ import {
   type CartItemWriteTransactionRunner,
   type PickupCartRemovalOptions,
   type PickupCartRemovalResult,
+  readCartParticipationEnded,
 } from "@rms/ordering";
 import {
   createCustomerCartReadPort,
@@ -53,6 +54,9 @@ export function createCustomerCartRemovalPort(options: {
     if (error instanceof CartCheckoutInProgressError)
       return { status: "CheckoutInProgress", heldUntil: error.heldUntil };
     if (!(error instanceof CartError)) return unavailable;
+    // M126 I.2: this phone's place at the table ended; why, never "your visit expired".
+    const ended = readCartParticipationEnded(error);
+    if (ended !== null) return { status: "ParticipationEnded", reason: ended };
     switch (error.code) {
       case "CART_PERMISSION_DENIED":
         return { status: "SessionExpired" };
