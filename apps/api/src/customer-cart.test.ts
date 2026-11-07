@@ -389,6 +389,34 @@ describe("WP-1205 Customer Cart HTTP contract", () => {
     expect((await plain.json()) as CustomerCartView).not.toHaveProperty("cart.recentRounds");
   });
 
+  it("WP-2423 shared-table-checkout (c): a table Cart passes on the dishes staff removed; a pickup Cart can't", async () => {
+    const staffRemoved = [
+      {
+        removedAt: "2026-08-02T20:00:00.000Z",
+        quantity: 1,
+        names: { "en-CA": "Mapo tofu", "zh-Hans-CA": "麻婆豆腐" },
+      },
+    ];
+    port.result = {
+      status: "Found",
+      view: view({ orderType: "DineIn", serviceMode: "DineIn", placedOrder: null, staffRemoved }),
+    };
+    const response = await request("/bff/customer/cart", { headers: headers() });
+    expect(response.status).toBe(200);
+    expect(((await response.json()) as CustomerCartView).cart.staffRemoved).toEqual(staffRemoved);
+    for (const overrides of [
+      { staffRemoved },
+      { orderType: "DineIn" as const, staffRemoved: [{ ...staffRemoved[0], quantity: 0 }] },
+      {
+        orderType: "DineIn" as const,
+        staffRemoved: [{ ...staffRemoved[0], names: { "<b>": "x" } }],
+      },
+    ]) {
+      port.result = { status: "Found", view: view(overrides as never) };
+      expect((await request("/bff/customer/cart", { headers: headers() })).status).toBe(503);
+    }
+  });
+
   it("WP-2423 M03: an emptied pickup Cart names the guest's Order its dishes went to", async () => {
     const placedOrder = { orderReference: id(9), orderNumber: "13", notMade: false };
     port.result = {

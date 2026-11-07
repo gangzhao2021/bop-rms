@@ -5,6 +5,7 @@ import {
   type CartItemDraft,
   type CartPlacedOrder,
   type CartRecentRound,
+  type CartStaffRemoval,
   type CartView,
 } from "./types.js";
 import {
@@ -165,8 +166,30 @@ function view(value: unknown): CartView {
         return placed === null ? {} : { placedOrder: placed };
       })(),
       ...(cart.recentRounds === undefined ? {} : { recentRounds: recentRounds(cart.recentRounds) }),
+      ...(cart.staffRemoved === undefined ? {} : { staffRemoved: staffRemoved(cart.staffRemoved) }),
     }),
   });
+}
+
+/** WP-2423 shared-table-checkout (c): dishes staff took out of the table's cart lately. */
+function staffRemoved(value: unknown): readonly CartStaffRemoval[] {
+  if (!Array.isArray(value) || value.length > 20)
+    throw new CartClientError("cart_service_unavailable");
+  return Object.freeze(
+    value.map((candidate) => {
+      const raw = record(candidate);
+      const names = record(raw.names);
+      return Object.freeze({
+        removedAt: string(raw.removedAt, canonicalInstant),
+        quantity: integer(raw.quantity),
+        names: Object.freeze(
+          Object.fromEntries(
+            Object.entries(names).map(([locale, name]) => [locale, string(name)] as const),
+          ),
+        ),
+      });
+    }),
+  );
 }
 
 /** WP-2423 (same-table-ordering): the table cart's recent rounds. */

@@ -342,6 +342,8 @@ export interface CustomerDiningCartCompositionOptions {
   readonly adders?: CustomerDiningCartViewPorts["adders"];
   /** WP-2423 (same-table-ordering): rounds this table Cart sent lately, for every phone. */
   readonly rounds?: CustomerDiningCartViewPorts["rounds"];
+  /** WP-2423 shared-table-checkout (c): dishes staff took out of this table's cart lately. */
+  readonly staffRemovals?: CustomerDiningCartViewPorts["staffRemovals"];
   readonly now: () => string;
   /** WP-2423: owner replacement used to continue past a timed-out table Cart (omitted: refused). */
   readonly replacement?: CustomerCartReplacementPort;
@@ -411,6 +413,7 @@ export function createCustomerDiningCartComposition(
     ...(options.availability === undefined ? {} : { availability: options.availability }),
     ...(options.adders === undefined ? {} : { adders: options.adders }),
     ...(options.rounds === undefined ? {} : { rounds: options.rounds }),
+    ...(options.staffRemovals === undefined ? {} : { staffRemovals: options.staffRemovals }),
   });
   const replacement = options.replacement;
   const succession = createPostgresDiningCartSuccessionSource(options.cartTransactions, fixedScope);

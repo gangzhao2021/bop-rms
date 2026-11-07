@@ -1,5 +1,10 @@
 import { AlreadyOrdered } from "../checkout/AlreadyOrdered.js";
-import { listSeparator, useReloadOnLanguageChange } from "../i18n/i18n.js";
+import {
+  CHINESE_LOCALE,
+  currentLanguage,
+  listSeparator,
+  useReloadOnLanguageChange,
+} from "../i18n/i18n.js";
 import {
   getGuestTableStarter,
   isGuestTableQuestion,
@@ -218,6 +223,23 @@ export const tableRoundSentByOther = (cart: CartView): number | null => {
   const latest = cart.cart.recentRounds?.[0];
   return latest === undefined || latest.sentByThisPhone ? null : latest.roundNumber;
 };
+
+/**
+ * WP-2423 shared-table-checkout (c): the dishes staff took out of this table's cart lately, named
+ * in the guest's language (the menu language when there is no such name; nothing when unnamed).
+ */
+export const staffRemovedDishes = (cart: CartView): readonly string[] =>
+  (cart.cart.staffRemoved ?? [])
+    .map((removal) => {
+      const names = removal.names;
+      const chosen =
+        currentLanguage() === "zh-Hans"
+          ? (names[CHINESE_LOCALE] ?? Object.values(names)[0])
+          : (Object.entries(names).find(([locale]) => locale.startsWith("en"))?.[1] ??
+            Object.values(names)[0]);
+      return chosen ?? "";
+    })
+    .filter((name) => name !== "");
 
 /** WP-2423 (guest-cart-503): the Store marked this line as not sellable now (stable fact). */
 const cartLineUnsellable = (item: CartView["cart"]["items"][number]) =>
@@ -632,6 +654,13 @@ function CartContent({
       </StateMessage>
     ) : (
       <StateMessage heading={commonText.emptyCartHeading}>
+        {state.status === "ready"
+          ? staffRemovedDishes(state.cart).map((dish, index) => (
+              <p key={"staff-removed:" + String(index)} role="status">
+                {cartText.line.staffRemoved(dish)}
+              </p>
+            ))
+          : null}
         <p>{cartText.emptyBody}</p>
         <Link className="cart-primary-link" to="/menu">
           {commonText.browseMenu}
@@ -772,6 +801,11 @@ function CartContent({
           {cartText.line.roundSentByTable(tableRoundSentByOther(cart) ?? 1)}
         </p>
       )}
+      {staffRemovedDishes(cart).map((dish, index) => (
+        <p key={"staff-removed:" + String(index)} className="cart-stale" role="status">
+          {cartText.line.staffRemoved(dish)}
+        </p>
+      ))}
       <div className="cart-layout" aria-busy={pending}>
         <section className="cart-items" aria-labelledby="cart-items-heading">
           <div className="cart-page__subheading">

@@ -79,6 +79,7 @@ import {
   createPostgresCartOrderLookup,
   createPostgresPickupCartBindingReader,
   createPostgresAnyCartQuoteReader,
+  listStaffCartRemovals,
   type CartQueryTransactionRunner,
 } from "@rms/ordering";
 import { createCustomerCartReadPort } from "./customer-cart-read-composition.js";
@@ -95,6 +96,7 @@ import {
   createCatalogSelectionDisplayQuery,
   createPostgresCatalogLineStandingSource,
   createPostgresPublishedMenuQueryStore,
+  listStoreMenuSellableNames,
   parseCatalogReference,
   type CustomerMenuQueryPorts,
   type PublishedMenuQueryTransactionRunner,
@@ -448,6 +450,7 @@ export function createLocalCustomerRuntime(options: LocalCustomerRuntimeOptions)
             },
           });
     const cartOrders = createPostgresCartOrderLookup(options.cartTransactions, scope);
+    const staffCartTransactions = options.cartTransactions;
     const query = createCustomerCartViewQuery({
       reads: createPickupCartReadService({
         sessions,
@@ -543,6 +546,31 @@ export function createLocalCustomerRuntime(options: LocalCustomerRuntimeOptions)
       rounds: {
         recent: (input: { cartReference: string; observedAt: string }) =>
           cartOrders.recentRounds(input),
+      },
+      // WP-2423 shared-table-checkout (c): dishes staff took out of the table's cart lately
+      // (15 minutes), named as on the menu, so every phone is told.
+      staffRemovals: {
+        recent: (input: { diningSessionReference: string; observedAt: string }) =>
+          staffCartTransactions.run(async (tx) => {
+            const removals = await listStaffCartRemovals(
+              tx,
+              scope,
+              input.diningSessionReference,
+              new Date(Date.parse(input.observedAt) - 15 * 60_000).toISOString(),
+            );
+            const names = await listStoreMenuSellableNames(
+              tx as never,
+              scope,
+              removals.map((removal) => removal.sellableReference),
+            );
+            return removals.map((removal) =>
+              Object.freeze({
+                removedAt: removal.occurredAt,
+                quantity: removal.quantity,
+                names: names.get(removal.sellableReference) ?? Object.freeze({}),
+              }),
+            );
+          }),
       },
       // WP-2423: a timed-out table Cart is replaced through the owner command, not a dead end.
       ...(options.cartReplacement === undefined ? {} : { replacement: options.cartReplacement }),

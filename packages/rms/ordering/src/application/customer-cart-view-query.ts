@@ -88,7 +88,26 @@ export interface CustomerCartDisplayView {
      * Absent for a pickup Cart, and when it can't be read.
      */
     readonly recentRounds?: readonly CustomerCartRecentRound[];
+    /**
+     * WP-2423 shared-table-checkout (c): dishes staff took out of this table's cart in the last
+     * 15 minutes (newest first), so every phone is told. Absent for a pickup Cart, and when it
+     * can't be read.
+     */
+    readonly staffRemoved?: readonly CustomerCartStaffRemoval[];
   };
+}
+export interface CustomerCartStaffRemoval {
+  readonly removedAt: string;
+  readonly quantity: number;
+  /** The dish's published name by locale (empty when it is on no current menu). */
+  readonly names: Readonly<Record<string, string>>;
+}
+/** WP-2423 shared-table-checkout (c): Ordering's own record of staff removals at a table. */
+export interface CustomerCartStaffRemovalsPort {
+  recent(input: {
+    readonly diningSessionReference: string;
+    readonly observedAt: string;
+  }): Promise<readonly CustomerCartStaffRemoval[]>;
 }
 export interface CustomerCartRecentRound {
   readonly roundNumber: number;
@@ -142,10 +161,12 @@ export interface CustomerDiningCartViewPorts {
    */
   readonly adders?: CartAdderStandingPort;
   readonly rounds?: CustomerCartRecentRoundsPort;
+  readonly staffRemovals?: CustomerCartStaffRemovalsPort;
 }
 type ViewPorts = Omit<CustomerCartViewPorts, "reads"> & {
   readonly adders?: CartAdderStandingPort;
   readonly rounds?: CustomerCartRecentRoundsPort;
+  readonly staffRemovals?: CustomerCartStaffRemovalsPort;
   readonly reads: {
     read(input: unknown): Promise<PickupCartReadResult | DiningCartReadResult | null>;
   };
@@ -455,6 +476,50 @@ function createViewQuery(ports: ViewPorts, mode: "Pickup" | "DineIn") {
             recentRounds = undefined;
           }
         }
+        // WP-2423 shared-table-checkout (c): dishes staff took out lately (fail-open: absent).
+        let staffRemoved: readonly CustomerCartStaffRemoval[] | undefined;
+        if (
+          mode === "DineIn" &&
+          ports.staffRemovals !== undefined &&
+          first.viewer !== null &&
+          cart.diningSessionReference !== null
+        ) {
+          try {
+            const removals = await ports.staffRemovals.recent({
+              diningSessionReference: String(cart.diningSessionReference),
+              observedAt: first.observedAt,
+            });
+            if (Array.isArray(removals) && removals.length <= 20)
+              staffRemoved = Object.freeze(
+                removals.map((removal) => {
+                  if (
+                    !Number.isSafeInteger(removal.quantity) ||
+                    removal.quantity < 1 ||
+                    removal.names === null ||
+                    typeof removal.names !== "object"
+                  )
+                    throw new Error("bad removal");
+                  return Object.freeze({
+                    removedAt: parseOrderingInstant(removal.removedAt),
+                    quantity: removal.quantity,
+                    names: Object.freeze(
+                      Object.fromEntries(
+                        Object.entries(removal.names as Readonly<Record<string, unknown>>).filter(
+                          (entry): entry is [string, string] =>
+                            /^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/u.test(entry[0]) &&
+                            typeof entry[1] === "string" &&
+                            entry[1].length > 0 &&
+                            entry[1].length <= 200,
+                        ),
+                      ) as Record<string, string>,
+                    ),
+                  });
+                }),
+              );
+          } catch {
+            staffRemoved = undefined;
+          }
+        }
         const items = Object.freeze(
           cart.items.map((item, index) => {
             const description = closed(descriptions[index], [
@@ -598,6 +663,7 @@ function createViewQuery(ports: ViewPorts, mode: "Pickup" | "DineIn") {
             warnings: Object.freeze([] as string[]),
             placedOrder: final.placedOrder,
             ...(recentRounds === undefined ? {} : { recentRounds }),
+            ...(staffRemoved === undefined ? {} : { staffRemoved }),
           }),
         });
       } catch (error) {

@@ -94,6 +94,12 @@ export interface CustomerCartView {
       readonly sentByThisPhone: boolean;
       readonly cartItemReferences: readonly string[];
     }[];
+    /** WP-2423 shared-table-checkout (c): dishes staff took out of this table's cart lately. */
+    readonly staffRemoved?: readonly {
+      readonly removedAt: string;
+      readonly quantity: number;
+      readonly names: Readonly<Record<string, string>>;
+    }[];
   };
 }
 
@@ -435,6 +441,9 @@ function publicView(value: unknown): CustomerCartView {
     ...(root.cart !== null && typeof root.cart === "object" && "recentRounds" in root.cart
       ? ["recentRounds"]
       : []),
+    ...(root.cart !== null && typeof root.cart === "object" && "staffRemoved" in root.cart
+      ? ["staffRemoved"]
+      : []),
   ]);
   if (cart.orderType !== "DineIn" && cart.orderType !== "Pickup")
     throw new TypeError("invalid order type");
@@ -552,8 +561,36 @@ function publicView(value: unknown): CustomerCartView {
       ...(cart.recentRounds === undefined
         ? {}
         : { recentRounds: recentRoundsView(cart.recentRounds, cart.orderType) }),
+      ...(cart.staffRemoved === undefined
+        ? {}
+        : { staffRemoved: staffRemovedView(cart.staffRemoved, cart.orderType) }),
     }),
   });
+}
+function staffRemovedView(
+  value: unknown,
+  orderType: "DineIn" | "Pickup",
+): NonNullable<CustomerCartView["cart"]["staffRemoved"]> {
+  if (orderType !== "DineIn" || !Array.isArray(value) || value.length > 20)
+    throw new TypeError("invalid staff removals");
+  return Object.freeze(
+    value.map((candidate) => {
+      const raw = closed(candidate, ["removedAt", "quantity", "names"]);
+      if (raw.names === null || typeof raw.names !== "object" || Array.isArray(raw.names))
+        throw new TypeError("invalid staff removal");
+      const names: Record<string, string> = {};
+      for (const [locale, name] of Object.entries(raw.names as Record<string, unknown>)) {
+        if (!/^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/u.test(locale))
+          throw new TypeError("invalid staff removal");
+        names[locale] = text(name, 200);
+      }
+      return Object.freeze({
+        removedAt: canonicalInstant(raw.removedAt),
+        quantity: positive(raw.quantity, 999),
+        names: Object.freeze(names),
+      });
+    }),
+  );
 }
 function recentRoundsView(
   value: unknown,

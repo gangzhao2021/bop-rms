@@ -401,6 +401,8 @@ export const cartText = Object.freeze({
     /** WP-2423 (same-table-ordering): another phone sent a round from this cart lately. */
     roundSentByTable: (round: number) =>
       t("Round {round} was sent by someone at your table.", { round: String(round) }),
+    /** WP-2423 shared-table-checkout (c): staff took a dish out of the table's cart. */
+    staffRemoved: (dish: string) => t("Staff removed {dish} from the cart.", { dish }),
     get removeUnavailableFirst() {
       return t("Remove the dishes that aren’t available right now, then order.");
     },

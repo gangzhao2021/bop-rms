@@ -35,7 +35,20 @@ export interface CartView {
      * first, with the cart lines each took; absent when unknown.
      */
     readonly recentRounds?: readonly CartRecentRound[];
+    /**
+     * WP-2423 shared-table-checkout (c): dishes staff took out of this table's cart in the last
+     * 15 minutes, newest first; absent when unknown.
+     */
+    readonly staffRemoved?: readonly CartStaffRemoval[];
   };
+}
+
+/** WP-2423 shared-table-checkout (c): a dish staff took out of the table's cart. */
+export interface CartStaffRemoval {
+  readonly removedAt: string;
+  readonly quantity: number;
+  /** The dish's menu name by locale (may be empty). */
+  readonly names: Readonly<Record<string, string>>;
 }
 
 /** WP-2423 (same-table-ordering): a round sent from this table cart (no names, no payer). */
