@@ -8618,4 +8618,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Prices updated: {changes}. Subtotal now {subtotal}.":
     "价格已更新：{changes}。小计现为 {subtotal}。",
   "{dish} {old} → {new}": "{dish} {old} → {new}",
+  "No longer offered: {changes}. Tap Change to choose again, or Remove.":
+    "已不再供应：{changes}。请点“更改”重新选择，或点“移除”。",
+  "{dish} ({options})": "{dish}（{options}）",
 });

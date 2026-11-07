@@ -13,6 +13,7 @@ import {
   TableCartOfferActions,
   paymentWindowNotice,
   rebindLines,
+  withdrawnOptions,
 } from "./StaffOrderEntryPage.js";
 import { setLanguageForTest } from "./i18n/i18n.js";
 import {
@@ -193,6 +194,46 @@ describe("counter order (OPS-ORDER-ENTRY) — WP-2423 Q7", () => {
     expect(rebound.repriced).toEqual([{ name: item.name, beforeMinor: 1050n, afterMinor: 1150n }]);
     // The same menu read again changes nothing and says nothing.
     expect(rebindLines([line], menu).repriced).toEqual([]);
+  });
+
+  it("WP-2423 M165 review: an option that leaves the menu mid-ticket stays on the line and is named, never dropped", () => {
+    const menu = parseCounterMenu(counterMenuResponse());
+    const item = menu.sections[0]?.items[0];
+    if (!item) throw new Error("fixture");
+    const line = {
+      key: "a",
+      item,
+      quantity: 1,
+      options: [{ optionReference: id(10), name: "Oat milk", quantity: 1 }],
+    };
+    expect(withdrawnOptions(line)).toEqual([]);
+    const withMilk = (options: (typeof item.rules)[number]["options"]) => ({
+      ...menu,
+      sections: menu.sections.map((section) => ({
+        ...section,
+        items: section.items.map((candidate) =>
+          candidate.sellableReference === item.sellableReference
+            ? {
+                ...candidate,
+                rules: candidate.rules.map((rule) => ({ ...rule, options })),
+              }
+            : candidate,
+        ),
+      })),
+    });
+    const milk = item.rules[0]?.options ?? [];
+    // Oat milk left the menu: the guest's choice is kept, not dropped, and named.
+    const gone = rebindLines([line], withMilk(milk.filter((o) => o.optionReference !== id(10))));
+    expect(gone.lines[0]?.options).toEqual(line.options);
+    expect(withdrawnOptions(gone.lines[0] ?? line)).toEqual(["Oat milk"]);
+    // Oat milk is still listed but not offered now: the same.
+    const paused = rebindLines(
+      [line],
+      withMilk(
+        milk.map((o) => (o.optionReference === id(10) ? { ...o, offeredNow: false as const } : o)),
+      ),
+    );
+    expect(withdrawnOptions(paused.lines[0] ?? line)).toEqual(["Oat milk"]);
   });
 
   it("WP-2423 item 3b: a choice repeated at the table counts each repeat, and prices each", () => {

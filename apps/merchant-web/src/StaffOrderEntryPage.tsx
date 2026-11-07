@@ -70,10 +70,29 @@ export interface RepricedLine {
 }
 
 /**
+ * WP-2423 M165 review: the chosen options of a line its item no longer offers (left the menu, or
+ * not offered now). They stay on the line, named, and the ticket cannot be sent until staff
+ * choose again, so the kitchen never gets a dish without the guest's instruction.
+ */
+export function withdrawnOptions(line: Line): readonly string[] {
+  const offered = new Map(
+    line.item.rules.flatMap((rule) =>
+      rule.options.map((option) => [option.optionReference, option] as const),
+    ),
+  );
+  return line.options
+    .filter((chosen) => {
+      const option = offered.get(chosen.optionReference);
+      return option === undefined || option.offeredNow === false;
+    })
+    .map((chosen) => chosen.name);
+}
+
+/**
  * WP-2423 M165: the ticket's lines on the menu just read, so the subtotal staff see is the price
  * the order is charged at. Each line takes its item's current price and options; a chosen option
- * that is no longer offered is dropped (the server then names the line). A line whose item left
- * the menu keeps its last item, and the send refuses it by name as before.
+ * that is no longer offered is kept on the line (see withdrawnOptions), never dropped quietly. A
+ * line whose item left the menu keeps its last item, and the send refuses it by name as before.
  */
 export function rebindLines<L extends Line>(
   lines: readonly L[],
@@ -88,14 +107,7 @@ export function rebindLines<L extends Line>(
   const next = lines.map((line) => {
     const item = items.get(line.item.sellableReference);
     if (item === undefined) return line;
-    const offered = new Set(
-      item.rules.flatMap((rule) => rule.options.map((option) => option.optionReference)),
-    );
-    const rebound = {
-      ...line,
-      item,
-      options: line.options.filter((option) => offered.has(option.optionReference)),
-    };
+    const rebound = { ...line, item };
     const before = estimatedLineMinor(line),
       after = estimatedLineMinor(rebound);
     if (before !== null && after !== null && before !== after)
@@ -796,9 +808,15 @@ export function StaffOrderEntryPage({
     return sum === null || value === null ? null : sum + value;
   }, 0n);
   const itemCount = lines.reduce((sum, line) => sum + line.quantity, 0);
+  // WP-2423 M165 review: chosen options the menu just read no longer offers, by dish.
+  const withdrawn = lines.flatMap((line) => {
+    const options = withdrawnOptions(line);
+    return options.length > 0 ? [{ dish: line.item.name, options }] : [];
+  });
   const canSend =
     phase === "Building" &&
     lines.length > 0 &&
+    withdrawn.length === 0 &&
     tipChoice() !== null &&
     (!paper || tablePaysLater || paperInstant !== null);
 
@@ -1317,7 +1335,9 @@ export function StaffOrderEntryPage({
                         >
                           +
                         </button>
-                        {line.item.rules.length > 0 || tableMode ? (
+                        {line.item.rules.length > 0 ||
+                        tableMode ||
+                        withdrawnOptions(line).length > 0 ? (
                           <button
                             type="button"
                             className="counter-order__change"
@@ -1375,6 +1395,20 @@ export function StaffOrderEntryPage({
             </ul>
           )}
           <div className="counter-order__ticket-foot">
+            {withdrawn.length > 0 && phase === "Building" ? (
+              <p className="order-accept-by" data-tier="warning" role="alert">
+                {t("No longer offered: {changes}. Tap Change to choose again, or Remove.", {
+                  changes: withdrawn
+                    .map((line) =>
+                      t("{dish} ({options})", {
+                        dish: line.dish,
+                        options: line.options.join(listSeparator()),
+                      }),
+                    )
+                    .join(listSeparator()),
+                })}
+              </p>
+            ) : null}
             {repriced.length > 0 &&
             estimate !== null &&
             lines.length > 0 &&
