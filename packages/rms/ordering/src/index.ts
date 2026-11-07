@@ -134,6 +134,16 @@ export {
   createPostgresDiningCartReadStore,
   createPostgresDiningCartSuccessionSource,
 } from "./infrastructure/persistence/dining-cart-read-store.js";
+export {
+  readStaffDiningCart,
+  listStaffCartRemovals,
+  removeStaffDiningCartLine,
+  type StaffDiningCart,
+  type StaffDiningCartLine,
+  type StaffCartRemovalReason,
+  type StaffCartRemovalRecord,
+  type StaffCartLineRemovalInput,
+} from "./infrastructure/persistence/cart-staff-line-store.js";
 
 export * from "./domain/dining-cart-selection.js";
 

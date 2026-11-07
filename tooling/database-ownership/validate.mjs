@@ -3795,6 +3795,15 @@ async function scanUnsupported(root, module, diagnostics) {
             module.manifest.ownedDatabase?.tables?.includes(table),
           ) &&
           moduleRelative === "src/infrastructure/persistence/cart-item-command-store.ts";
+        // WP-2423 shared-table-checkout (c): staff read a table's shared cart and remove a line,
+        // recorded and attributed in its own append-only record.
+        const acceptedCartStaffLineAsset =
+          module.packageName === "@rms/ordering" &&
+          module.manifest.ownedDatabase?.schema === "rms_ordering" &&
+          ["cart", "cart_line", "cart_staff_line_removal"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/cart-staff-line-store.ts";
         const acceptedCartQuoteAsset =
           module.packageName === "@rms/ordering" &&
           module.manifest.ownedDatabase?.schema === "rms_ordering" &&
@@ -4132,6 +4141,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedDiningCartReplacementAsset &&
           !acceptedCartOperationAsset &&
           !acceptedCartItemWriterAsset &&
+          !acceptedCartStaffLineAsset &&
           !acceptedPickupBindingAsset &&
           !acceptedCartLifecycleAsset &&
           !acceptedCartQuoteAsset &&

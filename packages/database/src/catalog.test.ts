@@ -835,6 +835,7 @@ describe("migration catalog", () => {
       "2000_480_create_pricing_price_book_draft_purpose",
       "2000_490_alter_pickup_in_person_order_number_called",
       "2000_510_create_staff_pin_device_limit_clear",
+      "2000_521_create_cart_staff_line_removal",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),

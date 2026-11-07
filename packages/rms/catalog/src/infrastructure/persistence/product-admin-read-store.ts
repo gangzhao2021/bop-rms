@@ -215,3 +215,55 @@ export async function listProductVersionTaxClassifications(
     ]);
   }
 }
+
+/**
+ * WP-2423 shared-table-checkout (c): the published names of the given sellables on the Store's
+ * current menus, for staff looking at a table's cart (dish names only). A sellable on no current
+ * menu has no entry. Reads in the Brand scope and restores the caller's Store scope afterwards.
+ */
+export async function listStoreMenuSellableNames(
+  tx: Tx,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  sellableReferences: readonly string[],
+): Promise<ReadonlyMap<string, Readonly<Record<string, string>>>> {
+  const brand = parseCatalogReference(scope.brandReference);
+  const store = parseCatalogReference(scope.storeReference);
+  const sellables = [...new Set(sellableReferences.map(parseCatalogReference))];
+  if (sellables.length === 0) return new Map();
+  const previous = (await tx.query("SELECT current_setting('bop.store_id',true) store", [])).rows[0]
+    ?.store;
+  await brandScope(tx, brand);
+  try {
+    const rows = (
+      await tx.query(
+        `SELECT DISTINCT ON (v.sellable_id) v.sellable_id::text sellable, v.localized_names_json names
+         FROM rms_catalog.published_menu_projection_checkpoint c
+         JOIN rms_catalog.published_menu_projection_generation g ON g.generation_id=c.active_generation_id
+          AND g.menu_id=c.menu_id AND g.brand_id=c.brand_id AND g.generation_status='Active'
+         JOIN rms_catalog.published_menu_projection p ON p.generation_id=g.generation_id AND p.menu_id=g.menu_id
+          AND p.brand_id=g.brand_id
+         JOIN rms_catalog.published_menu_projection_sellable v ON v.generation_id=p.generation_id
+          AND v.menu_id=p.menu_id AND v.brand_id=p.brand_id
+         WHERE c.consumer_name='catalog.published-menu-projection' AND c.brand_id=$1
+          AND (p.store_ids_json IS NULL OR p.store_ids_json='[]'::jsonb OR p.store_ids_json @> jsonb_build_array($2::text))
+          AND v.sellable_id=ANY($3::uuid[])
+         ORDER BY v.sellable_id, v.placement_id`,
+        [brand, store, sellables],
+      )
+    ).rows;
+    const names = new Map<string, Readonly<Record<string, string>>>();
+    for (const row of rows) {
+      const raw = row.names;
+      if (raw === null || typeof raw !== "object" || Array.isArray(raw)) continue;
+      const localized: Record<string, string> = {};
+      for (const [locale, name] of Object.entries(raw as Record<string, unknown>))
+        if (typeof name === "string" && name.trim() !== "") localized[locale] = name;
+      names.set(String(row.sellable), Object.freeze(localized));
+    }
+    return names;
+  } finally {
+    await tx.query("SELECT set_config('bop.store_id',$1,true)", [
+      typeof previous === "string" ? previous : "",
+    ]);
+  }
+}

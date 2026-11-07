@@ -364,6 +364,14 @@ const databaseAccessManifestInput = {
       piiClassification: ["indirect_identifier", "personal", "health"],
     },
     {
+      table: "cart_staff_line_removal",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/ordering" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "transactional",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       table: "cart_quote_attachment",
       classification: "append-only-record",
       writeOwner: { kind: "module", id: "@rms/ordering" },

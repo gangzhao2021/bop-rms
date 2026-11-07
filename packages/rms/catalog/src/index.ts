@@ -429,6 +429,7 @@ export {
   listCurrentProductOptionBindings,
   listProductVersionTaxClassifications,
   listStoreMenuSellables,
+  listStoreMenuSellableNames,
   loadBrandProduct,
   type BrandProductSummary,
 } from "./infrastructure/persistence/product-admin-read-store.js";
