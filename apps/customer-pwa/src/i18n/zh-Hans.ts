@@ -706,10 +706,12 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Start an empty cart": "开一个空购物车",
   "Start secure payment": "开始安全付款",
   "Start your order": "开始点单",
-  "Your earlier orders and receipts stay on this phone for 24 hours from your visit.":
-    "之前的订单和收据在这部手机上保留，从到店起 24 小时内都能查看。",
-  "Your earlier cart here has ended, so this is a new cart. Orders you placed stay on this phone, with their receipts, for 24 hours from your visit.":
-    "你之前在这里的购物车已结束，这是一个新的购物车。已下的订单和收据仍保留在这部手机上，从到店起 24 小时内都能查看。",
+  "This order stays on this phone. Scan this store’s pickup code again to come back to it.":
+    "这笔订单仍在这部手机上。再次扫描本店的自取二维码即可回到这笔订单。",
+  "Starting a new order here closes this order on this phone. The store still has it. To keep the receipt, open the order first.":
+    "在这里开始新订单会在这部手机上结束当前订单，门店仍保留着它。如需保留收据，请先打开这笔订单。",
+  "Your earlier cart here has ended, so this is a new cart. The store still has the orders you placed; ask the store if you need a receipt.":
+    "你之前在这里的购物车已结束，这是一个新的购物车。门店仍保留着你下过的订单；需要收据请问门店。",
   "Your earlier cart here has ended, so this is a new cart.":
     "你之前在这里的购物车已结束，这是一个新的购物车。",
   "The store isn’t taking new orders right now. Your cart and orders are still here.":

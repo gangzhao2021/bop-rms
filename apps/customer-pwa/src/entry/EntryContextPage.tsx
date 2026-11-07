@@ -384,11 +384,18 @@ export function CurrentOrderView({
           </div>
           {onStartNew ? (
             <>
-              {/* M104: ordering more keeps this order; nothing on this phone is closed. */}
+              {/* M104: said as it works. Order more goes on with this pickup visit, and this
+                  Store's pickup code scanned again comes back to it. A new order from another code
+                  starts a new visit; this one is then reached only from its own order or receipt
+                  link, so the guest is told to open it first. */}
               <p>
-                {t(
-                  "Your earlier orders and receipts stay on this phone for 24 hours from your visit.",
-                )}
+                {order.orderType === "Pickup"
+                  ? t(
+                      "This order stays on this phone. Scan this store’s pickup code again to come back to it.",
+                    )
+                  : t(
+                      "Starting a new order here closes this order on this phone. The store still has it. To keep the receipt, open the order first.",
+                    )}
               </p>
               <button
                 className={
@@ -974,7 +981,7 @@ function EntryState({
         <p className="entry-context" role="status">
           {context.previousVisit === "EndedReceiptsKept"
             ? t(
-                "Your earlier cart here has ended, so this is a new cart. Orders you placed stay on this phone, with their receipts, for 24 hours from your visit.",
+                "Your earlier cart here has ended, so this is a new cart. The store still has the orders you placed; ask the store if you need a receipt.",
               )
             : t("Your earlier cart here has ended, so this is a new cart.")}
         </p>

@@ -324,8 +324,10 @@ describe("WP-2423 Q10 continue the order in progress", () => {
     expect(html).toContain(`href="/orders/${order.orderReference}"`);
     expect(html).toContain("View order 12");
     expect(html).toContain("Order more");
-    expect(html).toContain("stay on this phone for 24 hours");
+    // Said as it works: this Store's pickup code scanned again comes back to this visit.
+    expect(html).toContain("Scan this store’s pickup code again to come back to it.");
     expect(html).not.toContain("closes this order");
+    expect(html).not.toContain("24 hours");
     expect(html).not.toContain("Your table");
   });
   it("links a dine-in guest to the table and asks for a QR scan when no code was scanned", () => {
@@ -334,6 +336,14 @@ describe("WP-2423 Q10 continue the order in progress", () => {
     expect(html).toContain("scan the QR code at your table or at the counter");
     // No "start a new order" action in the page (the header only carries the language switch).
     expect(html.split("<main")[1]).not.toContain("<button");
+  });
+  it("tells a dine-in guest starting a new order that this one closes here, and to open it first", () => {
+    const html = view({ order: { ...order, orderType: "DineIn" }, onStartNew: vi.fn() });
+    expect(html).toContain("Start a new order");
+    expect(html).toContain(
+      "Starting a new order here closes this order on this phone. The store still has it. To keep the receipt, open the order first.",
+    );
+    expect(html).toContain(`href="/orders/${order.orderReference}"`);
   });
 });
 
@@ -517,7 +527,9 @@ describe("M104/M105: a rescan says what happened to the visit on this phone", ()
   it("says an ended earlier cart by its reason, and never that nothing was ordered", () => {
     const kept = render({ ...pickupContext, previousVisit: "EndedReceiptsKept" });
     expect(kept).toContain("Your earlier cart here has ended");
-    expect(kept).toContain("Orders you placed stay on this phone");
+    // Nothing promised the guest can't reach: no list of earlier orders exists on this phone.
+    expect(kept).toContain("The store still has the orders you placed");
+    expect(kept).not.toContain("stay on this phone");
     const ended = render({ ...pickupContext, previousVisit: "Ended" });
     expect(ended).toContain("Your earlier cart here has ended");
     for (const html of [kept, ended]) {
