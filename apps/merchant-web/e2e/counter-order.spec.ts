@@ -342,8 +342,16 @@ test("@production staff take a counter pickup order, charge it on the card machi
     new Date(value.getTime() - value.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
   await page.getByLabel("Paid at (store time, from the paper order)").fill(local(paid));
   await page.getByRole("button", { name: "Send order" }).click();
+  // WP-2423 M96: a paper order was paid during the outage: record it, never charge it again.
   await expect(
-    page.getByRole("heading", { name: "Charge $6.72 on the card machine" }),
+    page.getByRole("heading", {
+      name: "Paper order 12: record the payment taken during the outage",
+    }),
+  ).toBeVisible();
+  await expect(
+    page.getByText(
+      "Sent. This paper order was paid during the outage: don't charge again, record it below.",
+    ),
   ).toBeVisible();
   expect(placedBodies.at(-1)?.recordedAfterOutage).toBe(true);
   await page.getByRole("button", { name: "Paid on card machine · $6.72" }).click();

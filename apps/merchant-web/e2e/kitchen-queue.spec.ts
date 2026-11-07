@@ -400,7 +400,10 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
     await expect(mobileOrderInput).toHaveAttribute("placeholder", "Order number or table");
     await mobileOrderInput.fill("unsent");
     await expect(mobileClearButton).toBeEnabled();
+    // WP-2423 M157: what is typed is searched at once, so clearing it closes the sheet on the list.
     await mobileClearButton.click();
+    await expect(filterSheet).not.toBeVisible();
+    await filterToggle.click();
     await expect(mobileOrderInput).toHaveValue("");
     await mobileOrderInput.fill(width === 390 ? "15" : "#16");
     await mobileSearchButton.click();

@@ -211,7 +211,13 @@ test("@production Pickup paging, current scope and permission recovery", async (
       },
     });
   });
-  const reviewHandoff = page.getByRole("button", { name: "Review pickup handoff" });
+  // WP-2423 M21: once the code matches, one tap hands it to the customer; the full form is
+  // "Someone else is collecting" (and still records the customer when chosen there).
+  await expect(
+    page.getByRole("button", { name: `Hand over to customer · Order ${first}` }),
+  ).toBeVisible();
+  await expect(page.getByText("Check every item before you tap")).toBeVisible();
+  const reviewHandoff = page.getByRole("button", { name: "Someone else is collecting" });
   await reviewHandoff.focus();
   await page.keyboard.press("Enter");
   const dialog = page.getByRole("dialog", { name: "Confirm pickup handoff" });
@@ -280,26 +286,15 @@ test("@production Pickup paging, current scope and permission recovery", async (
   await page.keyboard.press("Enter");
   await expect(page.getByText("The code matches.", { exact: false })).toBeVisible();
   expect(proofs).toHaveLength(4);
-  const secondReview = page.getByRole("button", { name: "Review pickup handoff" });
-  await secondReview.click();
-  const rejectedDialog = page.getByRole("dialog", { name: "Confirm pickup handoff" });
-  await rejectedDialog.getByLabel("Collected by").selectOption("Customer");
-  await rejectedDialog.getByLabel("Collector’s initial").fill("D***");
-  await rejectedDialog.getByRole("checkbox").check();
-  await rejectedDialog.getByRole("button", { name: "Confirm and record handoff" }).click();
-  await expect(
-    rejectedDialog.getByText(
-      "Handoff was not confirmed. Close and refresh the queue before another attempt.",
-    ),
-  ).toBeVisible();
-  await rejectedDialog.getByRole("button", { name: "Close handoff confirmation" }).focus();
-  await page.keyboard.press("Enter");
+  // WP-2423 M21: the one tap refused by the server says so and is not offered again.
+  const secondTap = page.getByRole("button", { name: /^Hand over to customer · Order / });
+  await secondTap.click();
   await expect(
     page.getByRole("status").filter({
       hasText: "Handoff was not confirmed. Refresh the queue before another attempt.",
     }),
-  ).toBeFocused();
-  await expect(secondReview).toBeDisabled();
+  ).toBeVisible();
+  await expect(secondTap).toBeDisabled();
   await page.getByRole("button", { name: "Previous page", exact: true }).click();
   await expect(heading("No pickups waiting")).toBeVisible();
   const includeCompleted = page.getByRole("checkbox", { name: "Include completed pickups" });
@@ -911,7 +906,14 @@ test("@production Pickup hands a counter order over in person at once while a gu
     page.getByText("Counter orders have no pickup code: call the number and hand it over."),
   ).toHaveCount(1);
   await expect(counterCard.getByRole("button", { name: "Check pickup code" })).toHaveCount(0);
-  await expect(counterCard.getByRole("button", { name: "Hand over", exact: true })).toBeEnabled();
+  // WP-2423 M21: one tap once the number is called.
+  const calledHandOver = counterCard.getByRole("button", {
+    name: "Called and handed over · Order 7",
+  });
+  await expect(calledHandOver).toBeEnabled();
+  await expect(
+    counterCard.getByRole("button", { name: "Someone else is collecting" }),
+  ).toBeVisible();
   // The guest's order keeps its pickup code check.
   await expect(guestCard.getByRole("button", { name: "Check pickup code" })).toBeVisible();
   await expect(guestCard.getByText("Counter order", { exact: false })).toHaveCount(0);
@@ -929,30 +931,20 @@ test("@production Pickup hands a counter order over in person at once while a gu
   await page.setViewportSize({ width: 1440, height: 900 });
   await expectNoInternalText(page);
 
-  await counterCard.getByRole("button", { name: "Hand over", exact: true }).click();
-  const dialog = page.getByRole("dialog", { name: "Confirm pickup handoff" });
-  await expect(
-    dialog.getByText("This order was taken at the counter, so no pickup code was sent.", {
-      exact: false,
-    }),
-  ).toBeVisible();
+  await calledHandOver.click();
   // A walk-up guest left no contact: nothing is looked up for them.
   expect(identityReads).toEqual([]);
-  await dialog
-    .getByLabel("Checked in person")
-    .selectOption({ label: "Order number called at the counter" });
-  await dialog.getByLabel("Collected by").selectOption("Customer");
-  await dialog.getByLabel("Collector’s initial").fill("S***");
-  await dialog.getByLabel("I matched this order", { exact: false }).check();
-  await dialog.getByRole("button", { name: "Confirm and record handoff" }).click();
   await expect(page.getByText("Order 7 handed over.", { exact: false })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Order 7", exact: true })).toHaveCount(0);
   expect(handoffs).toHaveLength(1);
   expect(handoffs[0]).toMatchObject({
     orderReference: id(3),
     fulfillmentReference: id(1),
-    identityCheck: "OrderNumberAndName",
+    // Recorded as the number called, never as a name check that was not made.
+    identityCheck: "OrderNumberCalled",
     recipientType: "Customer",
+    recipientDisplayMask: null,
+    quantities: expect.any(Array),
   });
   expect(handoffs[0]).not.toHaveProperty("verificationReference");
   await expectNoInternalText(page);
