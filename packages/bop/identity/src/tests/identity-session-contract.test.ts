@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   assertSessionUsable,
   createAuthenticationSession,
+  recordSessionActivity,
   createCredentialCompromisedEvent,
   createIdentityActor,
   createSessionRevokedEvent,
@@ -395,6 +396,81 @@ describe("Authentication Session contract", () => {
     expectCode(() => assertSessionUsable(revoked, "2026-07-28T12:20:00.001Z"), "SESSION_REVOKED");
     const expired = createAuthenticationSession(sessionInput({ status: "Expired" }));
     expectCode(() => assertSessionUsable(expired, "2026-07-28T12:20:00.001Z"), "SESSION_EXPIRED");
+  });
+
+  it("WP-2423 Q18: activity slides the idle deadline at most once per minute", () => {
+    const session = createAuthenticationSession(sessionInput());
+    expect(recordSessionActivity(session, "2026-07-28T12:10:59.999Z")).toBeNull();
+    const moved = recordSessionActivity(session, "2026-07-28T12:30:00.000Z");
+    expect(moved).toMatchObject({
+      lastSeenAt: "2026-07-28T12:30:00.000Z",
+      idleExpiresAt: "2026-07-28T13:00:00.000Z",
+      absoluteExpiresAt: "2026-07-29T00:00:00.000Z",
+      version: 1,
+      status: "Active",
+    });
+    expect(Object.isFrozen(moved)).toBe(true);
+    // The shape stays valid for the owning parser.
+    expect(
+      createAuthenticationSession(
+        sessionInput({
+          lastSeenAt: moved?.lastSeenAt,
+          idleExpiresAt: moved?.idleExpiresAt,
+        }),
+      ).idleExpiresAt,
+    ).toBe("2026-07-28T13:00:00.000Z");
+  });
+
+  it("WP-2423 Q18: the idle deadline never passes the absolute deadline", () => {
+    const late = createAuthenticationSession(
+      sessionInput({
+        lastSeenAt: "2026-07-28T23:20:00.000Z",
+        idleExpiresAt: "2026-07-28T23:50:00.000Z",
+      }),
+    );
+    const capped = recordSessionActivity(late, "2026-07-28T23:45:00.000Z");
+    expect(capped?.idleExpiresAt).toBe("2026-07-29T00:00:00.000Z");
+    expect(
+      createAuthenticationSession(
+        sessionInput({
+          lastSeenAt: "2026-07-28T23:45:00.000Z",
+          idleExpiresAt: "2026-07-29T00:00:00.000Z",
+        }),
+      ).idleExpiresAt,
+    ).toBe("2026-07-29T00:00:00.000Z");
+    // Once capped, further activity writes nothing and expiry is not postponed.
+    const atCap = createAuthenticationSession(
+      sessionInput({
+        lastSeenAt: "2026-07-28T23:45:00.000Z",
+        idleExpiresAt: "2026-07-29T00:00:00.000Z",
+      }),
+    );
+    expect(recordSessionActivity(atCap, "2026-07-28T23:50:00.000Z")).toBeNull();
+    expectCode(() => recordSessionActivity(atCap, "2026-07-29T00:00:00.000Z"), "SESSION_EXPIRED");
+    // A capped idle deadline that is not the absolute deadline is still rejected.
+    expectCode(
+      () =>
+        createAuthenticationSession(
+          sessionInput({
+            lastSeenAt: "2026-07-28T23:45:00.000Z",
+            idleExpiresAt: "2026-07-28T23:59:00.000Z",
+          }),
+        ),
+      "SESSION_SHAPE_INVALID",
+    );
+  });
+
+  it("WP-2423 Q18: activity never revives an expired or revoked Session", () => {
+    const session = createAuthenticationSession(sessionInput());
+    expectCode(() => recordSessionActivity(session, "2026-07-28T12:40:00.000Z"), "SESSION_EXPIRED");
+    const revoked = createAuthenticationSession(
+      sessionInput({
+        status: "Revoked",
+        revocationReason: "Logout",
+        revokedAt: "2026-07-28T12:20:00.000Z",
+      }),
+    );
+    expectCode(() => recordSessionActivity(revoked, "2026-07-28T12:30:00.000Z"), "SESSION_REVOKED");
   });
 
   it("rejects unknown and prototype-polluted Session fields", () => {

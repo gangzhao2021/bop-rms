@@ -1,15 +1,22 @@
+import { guestReadRetryWaitsMs } from "../network/read-retry.js";
 import type {
   CustomerEntryClient,
   CustomerEntryEstablishedContext,
+  CustomerEntryIntent,
   CustomerEntryScreenState,
   CustomerEntryServiceMode,
 } from "./types.js";
 import {
+  captureCustomerCsrfContext,
   setCustomerCsrfCredential,
   setPaymentOperationReference,
+  setUnseatedTableScan,
 } from "../session/customer-transaction-context.js";
-import { boundedFetch } from "../network/bounded-fetch.js";
 
+const scanRetryWaitsMs = Object.freeze([
+  ...guestReadRetryWaitsMs,
+  ...Array<number>(10).fill(3_000),
+]);
 const compactTokenPattern = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/u;
 const uuidV7Pattern = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const localePattern = /^[a-z]{2,3}(?:-[A-Z][a-z]{3})?(?:-[A-Z]{2}|\d{3})?$/u;
@@ -99,8 +106,13 @@ function parseSuccess(value: unknown): CustomerEntryEstablishedContext {
     "locale",
     "contextExpiresAt",
     "csrfToken",
+    ...(value !== null && typeof value === "object" && Object.hasOwn(value, "tableOpen")
+      ? ["tableOpen"]
+      : []),
   ]);
   if (
+    (raw.tableOpen !== undefined &&
+      (typeof raw.tableOpen !== "boolean" || raw.channel !== "DineIn")) ||
     raw.schemaVersion !== 2 ||
     raw.status !== "Established" ||
     (raw.channel !== "DineIn" && raw.channel !== "Pickup") ||
@@ -140,27 +152,233 @@ function parseSuccess(value: unknown): CustomerEntryEstablishedContext {
     locale: raw.locale,
     contextExpiresAt: instant(raw.contextExpiresAt),
     csrfToken: raw.csrfToken,
+    ...(raw.tableOpen === undefined ? {} : { tableOpen: raw.tableOpen as boolean }),
   });
 }
 
-function parseError(value: unknown): CustomerEntryScreenState {
+/** WP-2423 Q4: a closed or paused Store, with today's published hours. */
+function parseNotAccepting(value: unknown): CustomerEntryScreenState {
+  const raw = exact(value, ["schemaVersion", "code", "messageKey", "recovery", "store"]);
+  const recovery = exact(raw.recovery, ["action", "storeSelection"]);
+  const store = exact(raw.store, [
+    "storeDisplayName",
+    "operatingState",
+    "todayHours",
+    "todayKind",
+    "nextOpening",
+    "localDate",
+    ...((raw.store as { notReadyForOrders?: unknown } | null)?.notReadyForOrders === true
+      ? ["notReadyForOrders"]
+      : []),
+    ...((raw.store as { newGuestsPaused?: unknown } | null)?.newGuestsPaused === true
+      ? ["newGuestsPaused"]
+      : []),
+  ]);
+  const date = /^\d{4}-\d{2}-\d{2}$/u;
+  const time = /^([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]$/u;
+  if (
+    raw.schemaVersion !== 1 ||
+    raw.messageKey !== "customer.entry.not_accepting" ||
+    recovery.action !== "TryLaterOrAskStaff" ||
+    recovery.storeSelection !== "Hidden" ||
+    !["Closed", "TemporarilyClosed", "Open"].includes(String(store.operatingState)) ||
+    !Array.isArray(store.todayHours) ||
+    store.todayHours.length > 12 ||
+    (store.todayKind !== null &&
+      !["Holiday", "TemporaryClosure", "Override"].includes(String(store.todayKind))) ||
+    (store.localDate !== null &&
+      (typeof store.localDate !== "string" || !date.test(store.localDate)))
+  )
+    return Object.freeze({ kind: "ServiceUnavailable" });
+  try {
+    const todayHours = store.todayHours.map((entry: unknown) => {
+      const interval = exact(entry, ["startLocalTime", "endLocalTime", "endsNextDay"]);
+      if (
+        typeof interval.startLocalTime !== "string" ||
+        !time.test(interval.startLocalTime) ||
+        typeof interval.endLocalTime !== "string" ||
+        !time.test(interval.endLocalTime) ||
+        typeof interval.endsNextDay !== "boolean"
+      )
+        throw new TypeError("invalid hours");
+      return Object.freeze({
+        start: interval.startLocalTime,
+        end: interval.endLocalTime,
+        endsNextDay: interval.endsNextDay,
+      });
+    });
+    let nextOpening: { localDate: string; startLocalTime: string } | null = null;
+    if (store.nextOpening !== null) {
+      const next = exact(store.nextOpening, ["localDate", "startLocalTime"]);
+      if (
+        typeof next.localDate !== "string" ||
+        !date.test(next.localDate) ||
+        typeof next.startLocalTime !== "string" ||
+        !time.test(next.startLocalTime)
+      )
+        throw new TypeError("invalid next opening");
+      nextOpening = Object.freeze({
+        localDate: next.localDate,
+        startLocalTime: next.startLocalTime,
+      });
+    }
+    return Object.freeze({
+      kind: "NotAccepting",
+      storeDisplayName: publicLabel(store.storeDisplayName),
+      // Open with this service unavailable, or temporarily closed, is a pause, not closing time.
+      paused: store.operatingState !== "Closed",
+      todayHours: Object.freeze(todayHours),
+      todayKind: store.todayKind as "Holiday" | "TemporaryClosure" | "Override" | null,
+      nextOpening,
+      localDate: store.localDate as string | null,
+      ...(store.notReadyForOrders === true ? { notReady: true as const } : {}),
+      ...(store.newGuestsPaused === true ? { newGuestsPaused: true as const } : {}),
+    });
+  } catch {
+    return Object.freeze({ kind: "ServiceUnavailable" });
+  }
+}
+
+const tableAnswers: Readonly<
+  Record<
+    string,
+    {
+      readonly kind: "TableNotOpen" | "TableMayStart" | "TableBeingCleaned" | "TableAskNewParty";
+      readonly messageKey: string;
+    }
+  >
+> = Object.freeze({
+  entry_table_not_open: { kind: "TableNotOpen", messageKey: "customer.entry.table_not_open" },
+  entry_table_may_start: { kind: "TableMayStart", messageKey: "customer.entry.table_may_start" },
+  entry_table_being_cleaned: {
+    kind: "TableBeingCleaned",
+    messageKey: "customer.entry.table_being_cleaned",
+  },
+  entry_table_ask_new_party: {
+    kind: "TableAskNewParty",
+    messageKey: "customer.entry.table_ask_new_party",
+  },
+});
+
+function parseError(
+  status: number,
+  value: unknown,
+  retryAfter: string | null,
+  replay: boolean,
+): CustomerEntryScreenState {
+  if (
+    status === 409 &&
+    value !== null &&
+    typeof value === "object" &&
+    (value as { code?: unknown }).code === "entry_not_accepting"
+  )
+    return parseNotAccepting(value);
+  // Coordinator 2026-10-30: no party is seated at this table; no visit was started.
+  // WP-2423 DEC-DINING-GUEST-TABLE-START: nor at a table the guest may start, or is asked about.
+  const tableAnswer =
+    status === 409 && value !== null && typeof value === "object"
+      ? tableAnswers[String((value as { code?: unknown }).code)]
+      : undefined;
+  if (tableAnswer !== undefined) {
+    const raw = exact(value, ["schemaVersion", "code", "messageKey", "recovery", "store"]);
+    const store = exact(raw.store, [
+      "brandDisplayName",
+      "storeDisplayName",
+      "publicStoreReference",
+      "locale",
+    ]);
+    if (
+      raw.schemaVersion !== 1 ||
+      raw.messageKey !== tableAnswer.messageKey ||
+      typeof store.locale !== "string" ||
+      !localePattern.test(store.locale)
+    )
+      return Object.freeze({ kind: "ServiceUnavailable" });
+    setUnseatedTableScan(true);
+    return Object.freeze({
+      kind: tableAnswer.kind,
+      context: Object.freeze({
+        publicStoreReference: reference(store.publicStoreReference),
+        channel: "DineIn" as const,
+        locale: store.locale,
+        brandDisplayName: publicLabel(store.brandDisplayName),
+        storeDisplayName: publicLabel(store.storeDisplayName),
+      }),
+    });
+  }
+  // WP-2423 item 8 ⑦ 1b: the Store takes dine-in orders only.
+  if (
+    status === 409 &&
+    value !== null &&
+    typeof value === "object" &&
+    (value as { code?: unknown }).code === "entry_service_not_offered"
+  ) {
+    const raw = exact(value, ["schemaVersion", "code", "messageKey", "recovery", "store"]);
+    const recovery = exact(raw.recovery, ["action", "storeSelection"]);
+    const store = exact(raw.store, ["storeDisplayName"]);
+    if (
+      raw.schemaVersion !== 1 ||
+      raw.messageKey !== "customer.entry.pickup_not_offered" ||
+      recovery.action !== "AskStaff" ||
+      recovery.storeSelection !== "Hidden" ||
+      typeof store.storeDisplayName !== "string" ||
+      !/^[^\p{Cc}\p{Cf}<>]{1,120}$/u.test(store.storeDisplayName)
+    )
+      return Object.freeze({ kind: "ServiceUnavailable" });
+    return Object.freeze({ kind: "PickupNotOffered", storeDisplayName: store.storeDisplayName });
+  }
+  // M02: a replay with no waiting scan here (or none any merchant owns): the guest is asked to scan.
+  // A fresh scan that reaches no Store is an outage to try again, never "scan the code".
+  if (
+    replay &&
+    status === 404 &&
+    value !== null &&
+    typeof value === "object" &&
+    ((value as { code?: unknown }).code === "entry_scan_missing" ||
+      (value as { code?: unknown }).code === "CUSTOMER_STORE_NOT_FOUND")
+  )
+    return Object.freeze({ kind: "Missing" });
   const raw = exact(value, ["schemaVersion", "code", "messageKey", "recovery"]);
   const recovery = exact(raw.recovery, ["action", "storeSelection"]);
   if (raw.schemaVersion !== 1 || recovery.storeSelection !== "Hidden")
     return Object.freeze({ kind: "ServiceUnavailable" });
   if (
+    status === 400 &&
     raw.code === "entry_request_invalid" &&
     raw.messageKey === "customer.entry.request_invalid" &&
     recovery.action === "Rescan"
   )
     return Object.freeze({ kind: "RequestInvalid" });
   if (
+    status === 422 &&
     raw.code === "entry_unavailable" &&
     raw.messageKey === "customer.entry.unavailable" &&
     recovery.action === "RescanOrAskStaff"
   )
     return Object.freeze({ kind: "EntryUnavailable" });
   if (
+    status === 410 &&
+    raw.code === "entry_qr_retired" &&
+    (raw.messageKey === "customer.entry.qr_replaced" ||
+      raw.messageKey === "customer.entry.qr_turned_off") &&
+    recovery.action === "AskStaff"
+  )
+    return Object.freeze({
+      kind: "TableCodeRetired",
+      replaced: raw.messageKey === "customer.entry.qr_replaced",
+    });
+  if (
+    status === 429 &&
+    raw.code === "entry_rate_limited" &&
+    raw.messageKey === "customer.entry.rate_limited" &&
+    recovery.action === "RetryOrAskStaff" &&
+    retryAfter !== null &&
+    /^[1-9][0-9]{0,4}$/u.test(retryAfter) &&
+    Number(retryAfter) <= 86400
+  )
+    return Object.freeze({ kind: "RateLimited", retryAfterSeconds: Number(retryAfter) });
+  if (
+    status === 503 &&
     raw.code === "entry_service_unavailable" &&
     raw.messageKey === "customer.entry.service_unavailable" &&
     recovery.action === "RetryOrAskStaff"
@@ -190,45 +408,187 @@ export function consumeCustomerQrFragment(input: {
 
 export function createCustomerEntryClient(
   boundary: CustomerEntryBrowserBoundary,
+  inMemoryToken?: string,
+  /**
+   * M02: with no code, replay this browser's waiting scan (`{resume:true}`; the server holds the
+   * code). The restored visit's credential stays in place unless a new visit is issued.
+   */
+  options?: Readonly<{ resume?: boolean }>,
 ): CustomerEntryClient {
-  const token = consumeCustomerQrFragment(boundary);
+  const fragmentToken = consumeCustomerQrFragment(boundary);
+  const token =
+    inMemoryToken === undefined
+      ? fragmentToken
+      : boundary.pathname === "/" &&
+          boundary.search === "" &&
+          inMemoryToken.length > 0 &&
+          inMemoryToken.length <= 2048 &&
+          compactTokenPattern.test(inMemoryToken)
+        ? inMemoryToken
+        : null;
+  const replay = token === null && options?.resume === true;
   let settled: Promise<CustomerEntryScreenState> | null = null;
-
-  const execute = async (): Promise<CustomerEntryScreenState> => {
-    setCustomerCsrfCredential(null);
-    setPaymentOperationReference(null);
-    if (token === null) return Object.freeze({ kind: "Missing" });
-    if (!boundary.online()) return Object.freeze({ kind: "Offline" });
+  let retryUntil: number | null = null;
+  const cooldown = (): CustomerEntryScreenState =>
+    Object.freeze({
+      kind: "RateLimited",
+      retryAfterSeconds: Math.max(0, Math.ceil(((retryUntil ?? 0) - performance.now()) / 1000)),
+    });
+  let flight: Promise<CustomerEntryScreenState> | null = null;
+  const fetcher = boundary.fetch;
+  const online = () => {
     try {
-      const response = await boundedFetch(boundary.fetch, "/bff/customer/entry", {
-        method: "POST",
-        credentials: "same-origin",
-        cache: "no-store",
-        referrerPolicy: "no-referrer",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ qrToken: token }),
-      });
-      const body: unknown = await response.json();
-      if (response.status === 201) {
-        const context = parseSuccess(body);
-        setCustomerCsrfCredential(context.csrfToken);
-        return Object.freeze({ kind: "Established", context });
-      }
-      return parseError(body);
+      return boundary.online() === true;
     } catch {
-      return Object.freeze({ kind: boundary.online() ? "CommandFailed" : "Offline" });
+      return false;
     }
   };
 
+  async function receive(current: () => boolean, intent: CustomerEntryIntent | null) {
+    const controller = new AbortController();
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const guard = () => {
+      if (!online() || !current() || controller.signal.aborted)
+        throw new Error("entry unavailable");
+    };
+    const timeout = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => {
+        reject(new Error("entry unavailable"));
+        controller.abort();
+      }, 15_000);
+    });
+    const request = async () => {
+      guard();
+      const response = await fetcher("/bff/customer/entry", {
+        method: "POST",
+        mode: "cors",
+        credentials: "same-origin",
+        cache: "no-store",
+        redirect: "error",
+        referrerPolicy: "no-referrer",
+        signal: controller.signal,
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(
+          replay
+            ? intent === null
+              ? { resume: true }
+              : { resume: true, intent }
+            : intent === null
+              ? { qrToken: token }
+              : { qrToken: token, intent },
+        ),
+      });
+      try {
+        guard();
+        if (
+          response.redirected ||
+          response.body === null ||
+          !response.headers
+            .get("cache-control")
+            ?.split(",")
+            .some((part) => part.trim().toLowerCase() === "no-store") ||
+          !/^application\/json(?:\s*;|$)/iu.test(response.headers.get("content-type") ?? "")
+        )
+          throw new Error("entry unavailable");
+      } catch {
+        if (response.body) void response.body.cancel().catch(() => undefined);
+        throw new Error("entry unavailable");
+      }
+      if (response.body === null) throw new Error("entry unavailable");
+      reader = response.body.getReader();
+      const chunks: Uint8Array[] = [];
+      let size = 0;
+      while (true) {
+        guard();
+        const part = await reader.read();
+        guard();
+        if (part.done) break;
+        size += part.value.byteLength;
+        if (size > 16_384) throw new Error("entry unavailable");
+        chunks.push(part.value);
+      }
+      const bytes = new Uint8Array(size);
+      let offset = 0;
+      for (const chunk of chunks) {
+        bytes.set(chunk, offset);
+        offset += chunk.byteLength;
+      }
+      const body: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+      guard();
+      return { status: response.status, body, retryAfter: response.headers.get("retry-after") };
+    };
+    try {
+      return await Promise.race([request(), timeout]);
+    } finally {
+      clearTimeout(timer);
+      controller.abort();
+      if (reader) {
+        void reader.cancel().catch(() => undefined);
+        reader.releaseLock();
+      }
+    }
+  }
+  const execute = async (
+    intent: CustomerEntryIntent | null = null,
+  ): Promise<CustomerEntryScreenState> => {
+    // A scan replaces the visit on this phone; a replay keeps the restored one until it is replaced.
+    if (!replay) {
+      setCustomerCsrfCredential(null);
+      setPaymentOperationReference(null);
+    }
+    const current = captureCustomerCsrfContext();
+    if (token === null && !replay) return Object.freeze({ kind: "Missing" });
+    if (!online()) return Object.freeze({ kind: "Offline" });
+    try {
+      let answer = await receive(current, intent);
+      // WP-2423: a 503 issued nothing, so a scan in a burst is tried again before the guest sees it.
+      // Owner 2026-11-04: nor is a Store busy for half a minute (a menu being listed) an error yet.
+      for (const ms of scanRetryWaitsMs) {
+        if (answer.status !== 503) break;
+        await new Promise((resolve) => setTimeout(resolve, ms));
+        if (!online() || !current()) throw new Error("entry unavailable");
+        answer = await receive(current, intent);
+      }
+      const { status, body, retryAfter } = answer;
+      if (!online() || !current()) throw new Error("entry unavailable");
+      if (status === 201) {
+        const context = parseSuccess(body);
+        if (!online() || !current()) throw new Error("entry unavailable");
+        if (replay) setPaymentOperationReference(null);
+        setCustomerCsrfCredential(context.csrfToken);
+        return Object.freeze({ kind: "Established", context });
+      }
+      const error = parseError(status, body, retryAfter, replay);
+      retryUntil =
+        error.kind === "RateLimited" ? performance.now() + error.retryAfterSeconds * 1000 : null;
+      return error;
+    } catch {
+      return Object.freeze({ kind: online() ? "CommandFailed" : "Offline" });
+    }
+  };
+  function launch(intent: CustomerEntryIntent | null = null) {
+    if (flight) return flight;
+    if (retryUntil !== null && performance.now() < retryUntil) return Promise.resolve(cooldown());
+    retryUntil = null;
+    const pending = execute(intent);
+    flight = pending;
+    settled = pending;
+    void pending.then(() => {
+      if (flight === pending) flight = null;
+    });
+    return pending;
+  }
   return Object.freeze({
-    hasEntry: token !== null,
+    hasEntry: token !== null || replay,
     start() {
-      settled ??= execute();
-      return settled;
+      return retryUntil === null ? (settled ?? launch()) : Promise.resolve(cooldown());
     },
     retry() {
-      settled = execute();
-      return settled;
+      return flight ?? launch();
+    },
+    enter(intent: CustomerEntryIntent) {
+      return flight ?? launch(intent);
     },
   });
 }

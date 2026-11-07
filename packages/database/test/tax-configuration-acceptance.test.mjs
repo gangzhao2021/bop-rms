@@ -63,6 +63,12 @@ async function prove(context) {
        VALUES ($1,$2,$3,$4,$5,$6,'Pickup','Sellable','SYNTHETIC_COMPONENT','Taxable',0.13,'Exclusive','HalfUp',1,false,'SYNTHETIC_RECEIPT_LINE')`,
       [id(13), id(5), id(1), id(2), id(3), id(14)],
     );
+    // The legacy-original guard (migration 1200_015) admits operation records only from a
+    // Tenant/Brand/Store-scoped session; the owner's statements run outside a transaction.
+    await admin.query(
+      "SELECT set_config('bop.tenant_id',$1,false),set_config('bop.brand_id',$2,false),set_config('bop.store_id',$3,false)",
+      [id(20), id(2), id(3)],
+    );
     await admin.query(
       `INSERT INTO rms_pricing.tax_configuration_operation_record
        (operation_id,tax_configuration_id,brand_id,store_id,action_code,intent_digest,result_aggregate_version,result_version_id,occurred_at)
@@ -113,6 +119,10 @@ async function prove(context) {
       /tax_configuration_rule_treatment_evidence_check/u,
     );
 
+    // Clear the owner session scope again so the restricted role below starts unscoped.
+    await admin.query(
+      "SELECT set_config('bop.tenant_id','',false),set_config('bop.brand_id','',false),set_config('bop.store_id','',false)",
+    );
     await admin.query(`CREATE ROLE ${role} NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT`);
     await admin.query(`GRANT USAGE ON SCHEMA rms_pricing, platform_helpers TO ${role}`);
     await admin.query(

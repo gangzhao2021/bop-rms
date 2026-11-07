@@ -5,6 +5,7 @@ import {
   OrderStatusProjectionError,
   parseOrderStatusProjection,
   parseOrderStatusSourceSnapshot,
+  type OrderStatusCanonicalPhase,
 } from "../domain/order-status-projection.js";
 import type {
   OrderStatusProjectionPorts,
@@ -115,10 +116,9 @@ export function createOrderStatusProjector(ports: OrderStatusProjectionPorts) {
       } catch {
         return fail("ORDER_STATUS_INPUT_INVALID");
       }
-      const [sourceValue, currentValue] = await Promise.all([
-        ports.source.loadExact(orderReference).catch(dependency),
-        ports.projections.load(orderReference).catch(dependency),
-      ]);
+      // Sequential: owner ports may share one caller transaction (no concurrent use of a client).
+      const sourceValue = await ports.source.loadExact(orderReference).catch(dependency);
+      const currentValue = await ports.projections.load(orderReference).catch(dependency);
       if (sourceValue === null) return fail("ORDER_STATUS_NOT_FOUND");
       const source = parseDependencySource(sourceValue);
       if (source.orderReference !== orderReference)
@@ -155,7 +155,28 @@ export function createOrderStatusProjector(ports: OrderStatusProjectionPorts) {
   });
 }
 
-function customerView(projection: ReturnType<typeof parseOrderStatusProjection>) {
+/**
+ * WP-2423 / DEC-PILOT-BATCH-PHASE-01: the projection snapshot keeps the phase bound to its Order
+ * revision; the current overall phase is Ordering's merge of its own records and consumed Kitchen
+ * facts. A pickup's collected state stays tied to the recorded completion (Fulfilled iff
+ * Completed). A dine-in Order has no Fulfillment completion: it is Fulfilled when every remaining
+ * item was served (Dining's served quantities, merged by the caller), which never closes it.
+ */
+function currentPhase(
+  snapshot: ReturnType<typeof parseOrderStatusProjection>["snapshot"],
+  merged: { readonly canonicalPhase: OrderStatusCanonicalPhase } | null,
+): OrderStatusCanonicalPhase {
+  if (snapshot.fulfillmentStatus === "Completed") return "Fulfilled";
+  if (merged === null) return snapshot.canonicalPhase;
+  return merged.canonicalPhase === "Fulfilled" && snapshot.orderType !== "DineIn"
+    ? "Ready"
+    : merged.canonicalPhase;
+}
+
+function customerView(
+  projection: ReturnType<typeof parseOrderStatusProjection>,
+  merged: { readonly canonicalPhase: OrderStatusCanonicalPhase } | null = null,
+) {
   const snapshot = projection.snapshot;
   return Object.freeze({
     projectionName: projection.projectionName,
@@ -167,7 +188,7 @@ function customerView(projection: ReturnType<typeof parseOrderStatusProjection>)
       orderReference: snapshot.orderReference,
       orderNumber: snapshot.orderNumber,
       orderType: snapshot.orderType,
-      canonicalPhase: snapshot.canonicalPhase,
+      canonicalPhase: currentPhase(snapshot, merged),
       paymentStatus: snapshot.paymentStatus,
       kitchenStatus: snapshot.kitchenStatus,
       fulfillmentStatus: snapshot.fulfillmentStatus,
@@ -180,6 +201,15 @@ function customerView(projection: ReturnType<typeof parseOrderStatusProjection>)
 }
 
 export function createOrderStatusQueryService(ports: OrderStatusQueryPorts) {
+  const mergedPhase = async (
+    orderReference: string,
+    snapshot: ReturnType<typeof parseOrderStatusProjection>["snapshot"],
+  ) => {
+    if (ports.phases === undefined) return null;
+    return ports.phases
+      .load(parseOrderingReference(orderReference), { orderType: snapshot.orderType })
+      .catch(dependency);
+  };
   return Object.freeze({
     async getCustomer(value: unknown) {
       const raw = exact(value, ["orderReference", "observedAt"]);
@@ -209,7 +239,50 @@ export function createOrderStatusQueryService(ports: OrderStatusQueryPorts) {
         parsed.snapshot.storeReference !== parseOrderingReference(guest.storeReference)
       )
         return fail("ORDER_STATUS_PERMISSION_DENIED");
-      return customerView(parsed);
+      return customerView(parsed, await mergedPhase(orderReference, parsed.snapshot));
+    },
+    /**
+     * WP-2423 Q8: the table's shared view of its dine-in Order for any current participant of that
+     * dining session. Same customer-safe fields as getCustomer; the Order must be dine-in and in the
+     * participant's Brand and Store.
+     */
+    async getDiningParticipant(value: unknown) {
+      const raw = exact(value, ["orderReference", "observedAt"]);
+      let orderReference, observedAt;
+      try {
+        orderReference = parseOrderingReference(raw.orderReference);
+        observedAt = parseOrderingInstant(raw.observedAt);
+      } catch {
+        return fail("ORDER_STATUS_INPUT_INVALID");
+      }
+      const authorize = ports.authorization.authorizeDiningParticipant;
+      if (authorize === undefined) return fail("ORDER_STATUS_PERMISSION_DENIED");
+      const authorized = await authorize({ orderReference, observedAt }).catch(dependency);
+      if (!authorized) return fail("ORDER_STATUS_PERMISSION_DENIED");
+      let guest;
+      try {
+        guest = assertGuestSessionUsable(createGuestSession(authorized.guestSession), observedAt);
+      } catch {
+        return fail("ORDER_STATUS_PERMISSION_DENIED");
+      }
+      if (
+        guest.channel !== "DineIn" ||
+        guest.diningState !== "DiningBound" ||
+        guest.diningSessionReference === null ||
+        guest.diningParticipantReference === null
+      )
+        return fail("ORDER_STATUS_PERMISSION_DENIED");
+      const projection = await ports.projections.load(orderReference).catch(dependency);
+      if (!projection) return fail("ORDER_STATUS_NOT_FOUND");
+      const parsed = parseDependencyProjection(projection);
+      if (
+        parsed.snapshot.orderReference !== orderReference ||
+        parsed.snapshot.orderType !== "DineIn" ||
+        parsed.snapshot.brandReference !== parseOrderingReference(guest.brandReference) ||
+        parsed.snapshot.storeReference !== parseOrderingReference(guest.storeReference)
+      )
+        return fail("ORDER_STATUS_PERMISSION_DENIED");
+      return customerView(parsed, await mergedPhase(orderReference, parsed.snapshot));
     },
     async listMerchant(value: unknown) {
       const raw = exact(value, [
@@ -237,7 +310,12 @@ export function createOrderStatusQueryService(ports: OrderStatusQueryPorts) {
       const sourceChannel = optionalChoice(raw.sourceChannel, ["Api", "Pos", "Qr", "Web"] as const);
       const canonicalPhase = optionalChoice(raw.canonicalPhase, [
         "Submitted",
+        "Accepted",
+        "In Progress",
+        "Ready",
         "Fulfilled",
+        "Rejected",
+        "Cancelled",
       ] as const);
       const closureStatus = optionalChoice(raw.closureStatus, ["Open"] as const);
       const paymentStatus = optionalChoice(raw.paymentStatus, ["NotReported"] as const);
@@ -295,12 +373,16 @@ export function createOrderStatusQueryService(ports: OrderStatusQueryPorts) {
         )
           return fail("ORDER_STATUS_DEPENDENCY_UNAVAILABLE");
       }
+      const phases: ({ readonly canonicalPhase: OrderStatusCanonicalPhase } | null)[] = [];
+      for (const parsed of parsedRows)
+        phases.push(await mergedPhase(parsed.snapshot.orderReference, parsed.snapshot));
       return Object.freeze(
-        parsedRows.map((parsed) => {
+        parsedRows.map((parsed, index) => {
+          const view = customerView(parsed, phases[index] ?? null);
           return Object.freeze({
-            ...customerView(parsed),
+            ...view,
             order: Object.freeze({
-              ...customerView(parsed).order,
+              ...view.order,
               brandReference: parsed.snapshot.brandReference,
               storeReference: parsed.snapshot.storeReference,
               sourceChannel: parsed.snapshot.sourceChannel,

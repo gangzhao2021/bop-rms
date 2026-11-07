@@ -3,6 +3,10 @@ import { createMembership, createStoreAssignment, parseMembershipVersion } from 
 import { createBrand, createStore, createTenantContext } from "@bop/tenant";
 import { describe, expect, it } from "vitest";
 import {
+  createBrandAdministrationPolicyState,
+  createBrandAdministrationPermissionRole,
+} from "../domain/permission-policy.js";
+import {
   PermissionPolicyContractError,
   advancePolicyState,
   createPermissionDefinition,
@@ -284,6 +288,36 @@ function materialization(overrides: Readonly<Record<string, unknown>> = {}) {
 }
 
 describe("Role, Permission Grant and Explicit Deny / Allow policy", () => {
+  it.each(["Draft", "Suspended", "Archived"] as const)(
+    "reconstructs %s administrative Brand facts without weakening operational constructors",
+    (lifecycle) => {
+      const administrativeBrand = createBrand({ ...brand, lifecycle });
+      expect(createBrandAdministrationPolicyState(policyState, administrativeBrand)).toEqual(
+        policyState,
+      );
+      expect(createBrandAdministrationPermissionRole(brandRole, administrativeBrand)).toEqual(
+        brandRole,
+      );
+      expect(() => createPolicyState(policyState, administrativeBrand)).toThrow(
+        PermissionPolicyContractError,
+      );
+      expect(() => createPermissionRole(brandRole, administrativeBrand, null)).toThrow(
+        PermissionPolicyContractError,
+      );
+      expect(() => createBrandAdministrationPermissionRole(storeRole, administrativeBrand)).toThrow(
+        PermissionPolicyContractError,
+      );
+      expect(() =>
+        createBrandAdministrationPolicyState(
+          { ...policyState, brandReference: OTHER_BRAND },
+          administrativeBrand,
+        ),
+      ).toThrow(PermissionPolicyContractError);
+      expect(() =>
+        createBrandAdministrationPermissionRole({ ...brandRole, version: 0 }, administrativeBrand),
+      ).toThrow(PermissionPolicyContractError);
+    },
+  );
   it("creates frozen exact-action, Brand and Store policy facts", () => {
     expect(Object.isFrozen(permission)).toBe(true);
     expect(Object.isFrozen(brandRole)).toBe(true);
@@ -475,6 +509,28 @@ describe("Role, Permission Grant and Explicit Deny / Allow policy", () => {
     ).toThrowError("permission policy materialization is invalid");
   });
 
+  it("reports only current roles independently of grants or explicit action denial", () => {
+    const active = materializePermissionEvidence(
+      materialization({
+        permissionGrants: Object.freeze([]),
+      }) as never,
+    );
+    expect(active.activeRoleCodes).toEqual([brandRole.code, storeRole.code].sort());
+    expect(Object.isFrozen(active.activeRoleCodes)).toBe(true);
+    const suspended = materializePermissionEvidence(
+      materialization({
+        roles: Object.freeze([Object.freeze({ ...brandRole, lifecycle: "Suspended" }), storeRole]),
+      }) as never,
+    );
+    expect(suspended.activeRoleCodes).toEqual([storeRole.code]);
+    const unassigned = materializePermissionEvidence(
+      materialization({
+        roleAssignments: Object.freeze([]),
+      }) as never,
+    );
+    expect(unassigned.activeRoleCodes).toEqual([]);
+  });
+
   it("returns only bounded policy evidence and audit metadata", () => {
     const result = materializePermissionEvidence(
       materialization({
@@ -482,6 +538,7 @@ describe("Role, Permission Grant and Explicit Deny / Allow policy", () => {
       }) as never,
     );
     expect(Object.keys(result).sort()).toEqual([
+      "activeRoleCodes",
       "audit",
       "evidence",
       "policySnapshotReference",

@@ -21,6 +21,7 @@ export interface DiningClosingStaffEvidence {
   readonly audit: AppendAuditRecordInput;
 }
 
+/** Current Guest Host evidence requires Restricted CUSTOMER_PWA System Audit; Guest IDs are not User actors. */
 export interface DiningClosingHostEvidence {
   readonly kind: "Host";
   readonly guestSessionReference: DiningReference;
@@ -32,7 +33,20 @@ export interface DiningClosingHostEvidence {
   readonly audit: AppendAuditRecordInput;
 }
 
-export type DiningClosingAuthorityEvidence = DiningClosingStaffEvidence | DiningClosingHostEvidence;
+/**
+ * WP-2423 DEC-DINING-GUEST-TABLE-START: the System closes a guest-started table on its quiet rule, or
+ * for the next party, under the owner's rule and with nothing owed. It is never a User.
+ */
+export interface DiningClosingSystemEvidence {
+  readonly kind: "System";
+  readonly diningSessionReference: DiningReference;
+  readonly storeReference: DiningReference;
+  readonly observedAt: DiningInstant;
+  readonly audit: AppendAuditRecordInput;
+}
+
+export type DiningClosingAuthorityEvidence =
+  DiningClosingStaffEvidence | DiningClosingHostEvidence | DiningClosingSystemEvidence;
 
 export interface DiningClosingAuthorizationPort {
   authorize(input: {

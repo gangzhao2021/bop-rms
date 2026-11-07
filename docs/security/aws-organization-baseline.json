@@ -13,5 +13,16 @@
     "security-hub-disable-or-divert",
     "unencrypted-storage"
   ],
-  "externalEvidenceRequired": true
+  "externalEvidenceRequired": true,
+  "authority": "BOP-RMS Handoff 87.7.1 / WP-2060",
+  "requiredHumanAndRootControls": [
+    "identity-center-short-lived-mfa",
+    "no-long-lived-iam-user-keys",
+    "member-root-credentials-removed-where-supported",
+    "management-root-no-access-keys",
+    "management-root-hardware-mfa",
+    "group-controlled-recovery-contacts",
+    "tested-emergency-procedure",
+    "time-bound-two-person-centrally-alerted-break-glass"
+  ]
 }

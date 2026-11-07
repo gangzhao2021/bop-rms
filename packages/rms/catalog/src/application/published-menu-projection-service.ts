@@ -32,17 +32,21 @@ function menuEnvelope(value: MenuPublishedEnvelope): MenuPublishedEnvelope {
   return envelope;
 }
 
+export const publishedMenuConsumerRegistration = Object.freeze({
+  consumerName: "catalog.published-menu-projection:v1",
+  consumerVersion: 1,
+  eventType: "MenuPublished",
+  schemaVersions: [1],
+  ownerModule: "@rms/catalog",
+  tenantScope: "brand",
+  ordering: "aggregate",
+  sideEffect: "replace-published-menu-projection",
+  replaySafe: true,
+} satisfies Omit<ConsumerRegistration, "handler">);
+
 export function createPublishedMenuProjectionService(ports: PublishedMenuProjectionPorts) {
   const registration: ConsumerRegistration = {
-    consumerName: "catalog.published-menu-projection:v1",
-    consumerVersion: 1,
-    eventType: "MenuPublished",
-    schemaVersions: [1],
-    ownerModule: "@rms/catalog",
-    tenantScope: "brand",
-    ordering: "aggregate",
-    sideEffect: "replace Catalog Published Menu projection generation",
-    replaySafe: true,
+    ...publishedMenuConsumerRegistration,
     async handler({ envelope, transaction }) {
       const event = menuEnvelope(envelope as MenuPublishedEnvelope);
       const current = await ports.projections

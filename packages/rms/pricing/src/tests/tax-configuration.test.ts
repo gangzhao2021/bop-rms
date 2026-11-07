@@ -7,6 +7,7 @@ import {
   parsePricingDigest,
   parsePricingReference,
   resolveTaxConfiguration,
+  resolveDraftTaxConfiguration,
   TaxConfigurationError,
   validateTaxConfigurationCoverage,
   type TaxConfigurationRule,
@@ -364,6 +365,96 @@ describe("Store Tax Configuration resolution", () => {
           },
         ]),
       "TAX_CONFIGURATION_COVERAGE_MISSING",
+    );
+  });
+});
+
+describe("mechanical Draft candidate Tax resolution", () => {
+  const draft = () =>
+    snapshot({ lifecycle: "Draft", registrationEvidence: null, professionalEvidence: null });
+  it("resolves represented rules without inventing professional or registration evidence", () => {
+    const r = resolveDraftTaxConfiguration(draft(), context());
+    expect(r.profile).toBe("TaxDraftCandidateResolutionV1");
+    expect(r.professionalReviewStatus).toBe("NotEvaluated");
+    expect(r.legalConclusion).toBe("NotEvaluated");
+    expect(r.rules[0]?.resolvedRule.rate).toBe("0.13");
+    expect(Reflect.ownKeys(r).sort()).toEqual(
+      [
+        "profile",
+        "configurationReference",
+        "versionReference",
+        "snapshotDigest",
+        "effectivePeriod",
+        "rules",
+        "professionalReviewStatus",
+        "legalConclusion",
+      ].sort(),
+    );
+    expectCode(
+      () => resolveTaxConfiguration(draft(), context()),
+      "TAX_CONFIGURATION_SCOPE_MISMATCH",
+    );
+  });
+  it("does not accept Published configuration as a Draft candidate", () => {
+    expectCode(
+      () => resolveDraftTaxConfiguration(snapshot(), context()),
+      "TAX_CONFIGURATION_SCOPE_MISMATCH",
+    );
+  });
+  it("keeps actual Store, Brand, jurisdiction and currency binding", () => {
+    for (const changed of [
+      { storeReference: id(50) },
+      { brandReference: id(51) },
+      { jurisdictionCode: "CA-BC" },
+      { currencyCode: "USD" },
+    ])
+      expectCode(
+        () => resolveDraftTaxConfiguration(draft(), context(changed)),
+        "TAX_CONFIGURATION_SCOPE_MISMATCH",
+      );
+  });
+  it("retains coverage and exclusive effective-period boundaries", () => {
+    expectCode(
+      () => resolveDraftTaxConfiguration(draft(), context({ taxClassificationReference: id(99) })),
+      "TAX_CONFIGURATION_COVERAGE_MISSING",
+    );
+    expectCode(
+      () =>
+        resolveDraftTaxConfiguration(draft(), context({ evaluatedAt: "2026-09-01T04:00:00.000Z" })),
+      "TAX_CONFIGURATION_NOT_EFFECTIVE",
+    );
+    expectCode(
+      () =>
+        resolveDraftTaxConfiguration(draft(), context({ evaluatedAt: "2026-07-31T04:00:00.000Z" })),
+      "TAX_CONFIGURATION_NOT_EFFECTIVE",
+    );
+    expectCode(
+      () =>
+        resolveDraftTaxConfiguration(draft(), context({ evaluatedAt: "2026-02-30T04:00:00.000Z" })),
+      "TAX_CONFIGURATION_INPUT_INVALID",
+    );
+  });
+  it("rejects duplicate or inconsistent component rules", () => {
+    const d = draft();
+    expectCode(
+      () => resolveDraftTaxConfiguration({ ...d, rules: [rule(), rule()] }, context()),
+      "TAX_CONFIGURATION_RULE_CONFLICT",
+    );
+  });
+  it("rejects getters in rule array elements without invoking them", () => {
+    const d = draft(),
+      getter = () => {
+        throw new Error("must not invoke");
+      };
+    Object.defineProperty(d.rules, "0", { enumerable: true, get: getter });
+    expectCode(() => resolveDraftTaxConfiguration(d, context()), "TAX_CONFIGURATION_INPUT_INVALID");
+  });
+  it("rejects hidden authority keys in the closed candidate or context", () => {
+    const d = { ...draft(), approved: true };
+    expectCode(() => resolveDraftTaxConfiguration(d, context()), "TAX_CONFIGURATION_INPUT_INVALID");
+    expectCode(
+      () => resolveDraftTaxConfiguration(draft(), context({ approval: true })),
+      "TAX_CONFIGURATION_INPUT_INVALID",
     );
   });
 });

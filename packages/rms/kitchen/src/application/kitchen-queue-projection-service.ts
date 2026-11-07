@@ -614,6 +614,9 @@ function incrementalGeneration(input: {
   );
 }
 
+/** How long after a kitchen step superseded a generation its later pages are still served. */
+export const kitchenQueueContinuationWindowMs = 60_000;
+
 export function createKitchenQueueProjectionService(ports: KitchenQueueProjectionPorts) {
   const sha256 = ports.digests.sha256.bind(ports.digests);
 
@@ -1562,15 +1565,17 @@ export function createKitchenQueueProjectionService(ports: KitchenQueueProjectio
         exactPortSnapshot(snapshot, ["status"]);
         return dependency();
       }
+      const continued = snapshot.status === "Continued";
       const found = exactPortSnapshot(snapshot, [
         "status",
         "generation",
         "rows",
         "returnedCount",
         "hasMore",
+        ...(continued ? ["supersededAt"] : []),
       ]);
       if (
-        found.status !== "Found" ||
+        (found.status !== "Found" && !continued) ||
         !Number.isSafeInteger(found.returnedCount) ||
         (found.returnedCount as number) < 0 ||
         typeof found.hasMore !== "boolean"
@@ -1585,7 +1590,7 @@ export function createKitchenQueueProjectionService(ports: KitchenQueueProjectio
         return dependency();
       }
       if (
-        generation.generationStatus !== "Active" ||
+        generation.generationStatus !== (continued ? "Retired" : "Active") ||
         generation.brandReference !== scope.brandReference ||
         generation.storeReference !== scope.storeReference
       )
@@ -1595,6 +1600,23 @@ export function createKitchenQueueProjectionService(ports: KitchenQueueProjectio
         query.cursor.projectionGenerationReference !== generation.projectionGenerationReference
       )
         return conflict();
+      if (continued) {
+        // A later page of the generation the board's first page came from, which a kitchen step
+        // has since superseded: the board stays one consistent snapshot. Only while that snapshot
+        // is recent; an older cursor is a Conflict and the board reads from the first page again.
+        let supersededAt: string;
+        try {
+          supersededAt = parseKitchenTicketInstant(found.supersededAt);
+        } catch {
+          return dependency();
+        }
+        if (
+          query.cursor === null ||
+          Date.parse(supersededAt) < Date.parse(generation.projectedAt) ||
+          Date.parse(scope.observedAt) - Date.parse(supersededAt) > kitchenQueueContinuationWindowMs
+        )
+          return conflict();
+      }
       const unfilteredFirstPage =
         query.cursor === null &&
         query.filters.orderReference === null &&
@@ -1668,6 +1690,7 @@ export function createKitchenQueueProjectionService(ports: KitchenQueueProjectio
         generation: stripKitchenQueueStoredGeneration(generation),
         rows,
         nextCursor,
+        ...(continued ? { continuation: true as const } : {}),
       });
     });
   }

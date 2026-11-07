@@ -1,3 +1,5 @@
+import type { StoreContactView } from "../journey/StoreContact.js";
+
 export type ReceiptPaymentStatus = "Paid" | "RefundPending" | "PartiallyRefunded" | "Refunded";
 export type ReceiptRecordKind = "Original" | "Correction" | "Void" | "Refund" | "Reissue";
 
@@ -17,14 +19,73 @@ export interface ReceiptSnapshotView {
     readonly lineReference: string;
     readonly displayName: string;
     readonly quantity: number;
+    /** The item's frozen total after tax and fees; printed only on versions without `lineSubtotal`. */
     readonly lineTotal: ReceiptMoneyView;
+    /** WP-2423 D5: the item's price before tax (absent on versions issued before it was frozen). */
+    readonly lineSubtotal?: ReceiptMoneyView;
+    /**
+     * WP-2423: the options chosen for the item, each with what it added for the whole line; the
+     * item's `lineSubtotal` already includes them. Absent on versions issued before they were
+     * recorded, which print as issued.
+     */
+    readonly options?: readonly {
+      readonly displayName: string;
+      readonly quantity: number;
+      readonly amount: ReceiptMoneyView;
+    }[];
   }[];
+  readonly adjustments?: { readonly discount: ReceiptMoneyView; readonly fee: ReceiptMoneyView };
   readonly subtotal: ReceiptMoneyView;
   readonly tax: ReceiptMoneyView;
   readonly tip: ReceiptMoneyView;
   readonly total: ReceiptMoneyView;
   readonly paymentStatus: ReceiptPaymentStatus;
   readonly refundedTotal: ReceiptMoneyView;
+  /** WP-2423 Q15: issuer address, registrations and one line per tax (absent on older receipts). */
+  readonly taxDetails?: ReceiptTaxDetailsView;
+  /**
+   * WP-2423 (v15 3cd0f8dd M4): every confirmed refund to date and what it returned (absent on
+   * versions issued before it was recorded).
+   */
+  readonly refunds?: readonly ReceiptRefundView[];
+}
+
+/** WP-2423 (v15 3cd0f8dd M4): what one confirmed refund returned. */
+export interface ReceiptRefundView {
+  /** A refund staff made, items the store cancelled, a whole round returned, or an amount only. */
+  readonly kind: "Refund" | "ItemCancellation" | "RoundRefund" | "Other";
+  readonly lines: readonly {
+    readonly lineReference: string;
+    readonly displayName: string;
+    readonly quantity: number;
+    /** The item's price before tax that was returned. */
+    readonly amount: ReceiptMoneyView;
+  }[];
+  readonly tax: ReceiptMoneyView;
+  readonly tip: ReceiptMoneyView;
+  /** Fees, or an amount the payment's records did not split into items. */
+  readonly other: ReceiptMoneyView;
+  readonly total: ReceiptMoneyView;
+  /** First stated on this version (earlier refunds are repeated so the version is complete). */
+  readonly newInThisVersion: boolean;
+}
+
+export interface ReceiptTaxDetailsView {
+  readonly businessAddress: {
+    readonly addressLines: readonly string[];
+    readonly locality: string;
+    readonly regionCode: string;
+    readonly postalCode: string;
+    readonly countryCode: string;
+  } | null;
+  readonly taxRegistrations: readonly { readonly label: string; readonly number: string }[];
+  readonly taxLines: readonly {
+    readonly label: string;
+    readonly ratePercent: string;
+    readonly included: boolean;
+    readonly amount: ReceiptMoneyView;
+  }[];
+  readonly paymentMethod: "Card";
 }
 
 export interface ReceiptRecordView {
@@ -36,7 +97,28 @@ export interface ReceiptRecordView {
   readonly snapshot: ReceiptSnapshotView;
 }
 
+export interface ReceiptFinancialView {
+  readonly observedAt: string;
+  readonly currencyCode: string;
+  readonly capturedMinor: bigint;
+  readonly confirmedRefundMinor: bigint;
+  readonly pendingRefundMinor: bigint;
+  readonly unresolvedAttemptCount: number;
+  /** WP-2423 (v15 3cd0f8dd H1): of the amount paid, online and on the Store's card machine. */
+  readonly paidOnlineMinor?: bigint;
+  readonly paidOnCardMachineMinor?: bigint;
+}
 export interface ReceiptView {
+  readonly financial?: ReceiptFinancialView | null;
+  /** WP-2423 Q10: the Store's published phone and address. */
+  readonly storeContact?: StoreContactView;
+  /** WP-2423 Q16: the Store's privacy notice (absent until its Owner enters one). */
+  readonly privacyNoticeUrl?: string;
+  /**
+   * WP-2423 (v15 3cd0f8dd M5): the visit on this device has ended; the receipt stays readable here
+   * until this instant (absent while the visit is current).
+   */
+  readonly visitEnded?: { readonly receiptAvailableUntil: string };
   readonly orderReference: string;
   readonly freshnessStatus: "Fresh" | "Stale";
   readonly deliveryStatus:

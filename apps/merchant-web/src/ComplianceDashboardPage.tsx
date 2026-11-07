@@ -1,4 +1,5 @@
 import { StatePanel } from "@bop-rms/ui";
+import { SourceTime } from "./StoreTime.js";
 import { useEffect, useState } from "react";
 import {
   ComplianceDashboardPageError,
@@ -60,7 +61,8 @@ export function ComplianceDashboardList({ view }: { readonly view: ComplianceDas
           <p className="bop-eyebrow">CMP-DASHBOARD · Compliance</p>
           <h1>Compliance Dashboard</h1>
           <p>
-            Source as of {view.sourceAsOf} · {view.completeness} · {view.freshness}
+            Source as of <SourceTime instant={view.sourceAsOf} /> · {view.completeness} ·{" "}
+            {view.freshness}
           </p>
         </div>
       </header>

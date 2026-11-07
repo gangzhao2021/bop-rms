@@ -41,7 +41,7 @@ describe("WP-2044 tracked-file secret scan", () => {
       maxBuffer: 10 * 1024 * 1024,
     });
     const files = stdout.toString("utf8").split("\0").filter(Boolean);
-    expect(files).not.toContain("BOP-RMS Complete Handoff Package.md");
+    // Owner authorized the complete Handoff source in Git; scan it like every tracked file.
     const matches = [];
     for (const file of files) {
       const metadata = await stat(file);

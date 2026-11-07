@@ -111,6 +111,10 @@ describe("supervisor process identity", () => {
         await once(child.stdout, "data");
         expect(processMatches(child.pid, directory, "worker.mjs", "start")).toBe(true);
         expect(processMatches(child.pid, directory, "other.mjs", "start")).toBe(false);
+        // Started without interpreter options: a check that expects a loader does not match.
+        expect(
+          processMatches(child.pid, directory, "worker.mjs", "start", ["--import", "./loader.mjs"]),
+        ).toBe(false);
         expect(processHasEnvironmentVariable(child.pid, "BOP_RMS_PROCESS_TEST")).toBe(true);
         expect(processHasEnvironmentVariable(child.pid, "BOP_RMS_ABSENT_TEST")).toBe(false);
       } finally {

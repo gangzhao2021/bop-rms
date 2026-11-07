@@ -1,4 +1,5 @@
 import { StatePanel } from "@bop-rms/ui";
+import { SourceTime } from "./StoreTime.js";
 import { useEffect, useState } from "react";
 import {
   ProviderIntegrationPageError,
@@ -47,7 +48,7 @@ export function ProviderIntegrations({ view }: { readonly view: ProviderIntegrat
           <p className="bop-eyebrow">{view.screenId} · Integration Administration</p>
           <h1>Provider Adapters</h1>
           <p>
-            Source {view.sourceAsOf} · {view.completeness} · {view.freshness}
+            Source <SourceTime instant={view.sourceAsOf} /> · {view.completeness} · {view.freshness}
           </p>
         </div>
       </header>

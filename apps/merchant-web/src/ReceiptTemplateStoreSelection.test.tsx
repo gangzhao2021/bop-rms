@@ -1,0 +1,173 @@
+// Controlled public packets; rendered production/native acceptance belongs to the coordinator.
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { renderToStaticMarkup } from "react-dom/server";
+import {
+  ReceiptTemplateStoreSelection,
+  applyReceiptTemplateStoreSelection,
+  receiptTemplateStoreOptions,
+} from "./ReceiptTemplateStoreSelection.js";
+import { parseReceiptTemplatePublishedCurrent } from "./receipt-template-published-client.js";
+import { receiptTemplateArtifactRequiredFields } from "./receipt-template-artifact-client.js";
+const id = (n: number) => `01902501-0000-7000-8000-${n.toString(16).padStart(12, "0")}`,
+  at = "2026-10-05T10:00:00.000Z",
+  scope = {
+    tenantReference: id(1),
+    brandReference: id(2),
+    storeReference: id(3),
+    actorReference: id(4),
+  };
+const current = () =>
+  parseReceiptTemplatePublishedCurrent(
+    {
+      profile: "DigitalReceiptTemplatePublishedCurrentV1",
+      ...scope,
+      templateReference: id(8),
+      locale: "en",
+      currentVersion: {
+        templateReference: id(8),
+        versionReference: id(9),
+        versionNumber: 1,
+        versionCode: "RECEIPT_1",
+        brandReference: id(2),
+        storeReference: id(3),
+        locale: "en",
+        dataContractVersion: 1,
+        renderEngineVersion: 1,
+        outputProfile: "AccessibleDigitalReceipt",
+        layoutDefinitionReference: id(10),
+        complianceRuleReference: id(11),
+        requiredFields: receiptTemplateArtifactRequiredFields,
+        publicationReference: id(12),
+        publishedAt: at,
+        effectiveFrom: at,
+        effectiveUntil: null,
+      },
+      observedAt: at,
+      validUntil: "2026-10-05T10:00:05.000Z",
+      professionalReviewStatus: "NotEvaluated",
+      legalConclusion: "NotEvaluated",
+    },
+    scope,
+    id(8),
+    "en",
+  );
+beforeEach(() => vi.spyOn(Date, "now").mockReturnValue(Date.parse(at)));
+afterEach(() => vi.restoreAllMocks());
+it("selection emits only stable template identity, never artifact/version/publication pins", () => {
+  const selected = vi.fn();
+  applyReceiptTemplateStoreSelection(current(), scope, "en", selected);
+  expect(selected).toHaveBeenCalledExactlyOnceWith(id(8));
+  expect(selected).not.toHaveBeenCalledWith(id(9));
+  expect(selected).not.toHaveBeenCalledWith(id(12));
+});
+it("expired, foreign Actor or wrong store locale never updates parent draft", () => {
+  const selected = vi.fn(),
+    v = current();
+  expect(() =>
+    applyReceiptTemplateStoreSelection(v, { ...scope, actorReference: id(99) }, "en", selected),
+  ).toThrow();
+  expect(() => applyReceiptTemplateStoreSelection(v, scope, "fr", selected)).toThrow();
+  vi.spyOn(Date, "now").mockReturnValue(Date.parse(v.validUntil));
+  expect(() => applyReceiptTemplateStoreSelection(v, scope, "en", selected)).toThrow();
+  expect(selected).not.toHaveBeenCalled();
+});
+it("rendered entry keeps discovery separate from current qualification and saves parent separately", () => {
+  const html = renderToStaticMarkup(
+    <ReceiptTemplateStoreSelection
+      scope={scope}
+      locale="en"
+      csrf={"A".repeat(43)}
+      value={{ state: "Configured", value: id(8) }}
+      onSelect={() => undefined}
+    />,
+  );
+  expect(html).toContain("Saved templates");
+  expect(html).toContain("Check published receipt template");
+  expect(html).toContain("Save the setup draft separately");
+  expect(html).toContain("Clear receipt template choice");
+  expect(html).not.toContain("Provider ready");
+  expect(html).not.toContain('value="' + id(9) + '"');
+});
+it("WP-2423 v15: offers the template the Store issues receipts with today, and says when it is kept", () => {
+  const render = (value: { state: "Unconfigured" } | { state: "Configured"; value: string }) =>
+    renderToStaticMarkup(
+      <ReceiptTemplateStoreSelection
+        scope={scope}
+        locale="en"
+        csrf={"A".repeat(43)}
+        value={value}
+        liveTemplateReference={id(30)}
+        onSelect={() => undefined}
+      />,
+    );
+  const open = render({ state: "Unconfigured" });
+  expect(open).toContain("Keep the receipt template in use today");
+  expect(open).toContain(">Receipt template in use today</option>");
+  expect(open).toContain("cannot be published");
+  const kept = render({ state: "Configured", value: id(30) });
+  expect(kept).toContain(
+    "This setup uses the receipt template the Store issues receipts with today.",
+  );
+  expect(kept).not.toContain(id(30) + "</");
+});
+it("parent pending barrier disables every initial selection action and hidden step remains scoped", () => {
+  const selected = vi.fn(),
+    html = renderToStaticMarkup(
+      <ReceiptTemplateStoreSelection
+        scope={scope}
+        locale="en"
+        csrf={"A".repeat(43)}
+        hidden
+        disabled
+        value={{ state: "Unconfigured" }}
+        onSelect={selected}
+      />,
+    );
+  expect(html).toContain("hidden");
+  expect(html.match(/disabled=""/gu)?.length).toBe(5);
+  expect(html).toContain('aria-label="Published receipt template selection"');
+  expect(selected).not.toHaveBeenCalled();
+});
+it("forged readiness and non-effective scheduled metadata cannot be applied as a current template", () => {
+  const v = current(),
+    selected = vi.fn();
+  const corrupt = { ...v };
+  Object.defineProperty(corrupt, "legalConclusion", { value: "Approved" });
+  expect(() => applyReceiptTemplateStoreSelection(corrupt, scope, "en", selected)).toThrow();
+  expect(() =>
+    applyReceiptTemplateStoreSelection(
+      { ...v, currentVersion: { ...v.currentVersion, effectiveFrom: "2026-10-06T10:00:00.000Z" } },
+      scope,
+      "en",
+      selected,
+    ),
+  ).toThrow();
+  expect(selected).not.toHaveBeenCalled();
+});
+it("WP-2423: always offers the receipt template the Store started with, in plain words", () => {
+  // The Store moved to a template written in the product: the installed one is offered too.
+  expect(
+    receiptTemplateStoreOptions({ live: id(31), startedWith: id(30), saved: [id(31)] }),
+  ).toEqual([{ value: id(30), label: "Receipt template the Store started with" }]);
+  expect(receiptTemplateStoreOptions({ live: id(31), startedWith: id(30), saved: [] })).toEqual([
+    { value: id(31), label: "Receipt template in use today" },
+    { value: id(30), label: "Receipt template the Store started with" },
+  ]);
+  // Still on the installed template: one entry, said once.
+  expect(receiptTemplateStoreOptions({ live: id(30), startedWith: id(30), saved: [] })).toEqual([
+    {
+      value: id(30),
+      label: "Receipt template in use today (the one the Store started with)",
+    },
+  ]);
+  // Not found (yet): nothing invented.
+  expect(receiptTemplateStoreOptions({ live: null, startedWith: null, saved: [id(31)] })).toEqual(
+    [],
+  );
+  for (const option of receiptTemplateStoreOptions({
+    live: id(31),
+    startedWith: id(30),
+    saved: [],
+  }))
+    expect(option.label).not.toMatch(/RECEIPT_|[0-9a-f]{8}-/u);
+});

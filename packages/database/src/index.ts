@@ -41,6 +41,19 @@ export {
 } from "./tenant-context.ts";
 export {
   createTenantTransactionRunner,
+  isRetryableTransactionConflict,
   type DatabaseTransaction,
   type DatabaseTransactionRunner,
 } from "./transaction-runner.ts";
+export {
+  snapshotReadBegin,
+  snapshotReadStatement,
+  type SnapshotReadStatement,
+} from "./snapshot-read.ts";
+
+export {
+  createAbuseBudgetConsumer,
+  AbuseBudgetUnavailableError,
+  type AbuseBucketClass,
+  type AbuseBudgetResult,
+} from "./abuse-budget.ts";

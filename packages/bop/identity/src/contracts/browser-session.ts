@@ -17,19 +17,62 @@ export const browserSessionErrorCodes = [
   "BROWSER_SESSION_INPUT_INVALID",
   "BROWSER_SESSION_DENIED",
   "BROWSER_SESSION_VERSION_CONFLICT",
+  // WP-2423 Q18: the Session has genuinely ended (revoked, expired or unknown).
+  "BROWSER_SESSION_ENDED",
+  // WP-2423 Q18: the Session could not be checked right now (retry later; not an ended Session).
+  "BROWSER_SESSION_UNAVAILABLE",
 ] as const;
 export type BrowserSessionErrorCode = (typeof browserSessionErrorCodes)[number];
 
 export class BrowserSessionError extends Error {
   readonly code: BrowserSessionErrorCode;
 
-  constructor(code: BrowserSessionErrorCode) {
+  /**
+   * `cause`: the owner's own refusal behind a denial (for example a Store BOP closed), kept
+   * non-enumerable for the caller to recognise; never answered or serialized.
+   */
+  constructor(code: BrowserSessionErrorCode, options?: { readonly cause?: unknown }) {
     super(
       code === "BROWSER_SESSION_VERSION_CONFLICT" ? "session version conflict" : "request denied",
+      options?.cause === undefined ? undefined : { cause: options.cause },
     );
     this.name = "BrowserSessionError";
     this.code = code;
   }
+}
+
+/** Set by the database transaction runner on an error thrown after one of its queries failed. */
+const databaseFailure = Symbol.for("bop.database.failure");
+const coded = /^[A-Z][A-Za-z0-9_]{2,127}$/u;
+
+/**
+ * WP-2423 item 10: did a read of the session, the selection or the person fail, rather than decide?
+ * A database failure, a failure after a query failed, a programming error, or anything else that
+ * carries no owner code is a failure, and it carries on as itself, so a lock timeout or a missing
+ * grant behind a sign-in is never answered "denied". Access stays closed either way: the read
+ * threw, so nothing was returned. An owner's own code (an ended session, an inactive person, a
+ * malformed credential, a refused selection) is a decision; a corrupt secret is too, because
+ * signing in again is what recovers it.
+ */
+export function isBrowserSessionReadFailure(error: unknown): boolean {
+  if (error === null || typeof error !== "object") return true;
+  if (Object.getOwnPropertyDescriptor(error, databaseFailure) !== undefined) return true;
+  if (error instanceof SyntaxError) return false;
+  if (error instanceof TypeError || error instanceof ReferenceError || error instanceof RangeError)
+    return true;
+  const own = Object.getOwnPropertyDescriptor(error, "code")?.value as unknown;
+  const code =
+    typeof own === "string"
+      ? own
+      : error instanceof Error && coded.test(error.message)
+        ? error.message
+        : null;
+  return (
+    code === null ||
+    /^[0-9A-Z]{5}$/u.test(code) ||
+    code.startsWith("TENANT_DATABASE_") ||
+    code.endsWith("_UNAVAILABLE")
+  );
 }
 
 export type RawBrowserCredential = string & {

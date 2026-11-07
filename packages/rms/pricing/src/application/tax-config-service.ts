@@ -188,15 +188,6 @@ export function createTaxConfigService(ports: TaxConfigPorts) {
           JSON.stringify({ ...input, candidate: { ...candidate, rules: candidate.rules } }),
         ),
       );
-      const prior = await ports.repository.resolveOperation(operationReference).catch(dependency);
-      if (prior !== null) {
-        if (!ports.references.equals(prior.operationIntentHash, intent))
-          throw new TaxConfigWorkflowError("TAX_CONFIG_IDEMPOTENCY_CONFLICT");
-        return Object.freeze({
-          status: "AlreadyApplied" as const,
-          aggregate: createTaxConfigurationSnapshot(prior.aggregate),
-        });
-      }
       const auth = await authorize(
         ports,
         input.action,
@@ -206,6 +197,18 @@ export function createTaxConfigService(ports: TaxConfigPorts) {
       );
       if (candidate.brandReference !== auth.brand || candidate.storeReference !== auth.store)
         throw new TaxConfigWorkflowError("TAX_CONFIG_PERMISSION_DENIED");
+      const prior = await ports.repository.resolveOperation(operationReference).catch(dependency);
+      if (prior !== null) {
+        if (!ports.references.equals(prior.operationIntentHash, intent))
+          throw new TaxConfigWorkflowError("TAX_CONFIG_IDEMPOTENCY_CONFLICT");
+        const original = createTaxConfigurationSnapshot(prior.aggregate);
+        if (original.brandReference !== auth.brand || original.storeReference !== auth.store)
+          throw new TaxConfigWorkflowError("TAX_CONFIG_DEPENDENCY_UNAVAILABLE");
+        return Object.freeze({
+          status: "AlreadyApplied" as const,
+          aggregate: original,
+        });
+      }
       const current = await ports.repository
         .load(candidate.configurationReference)
         .catch(dependency);

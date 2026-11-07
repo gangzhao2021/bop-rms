@@ -1,4 +1,8 @@
 import {
+  parseOrderOptionPriceSnapshot,
+  type OrderOptionPriceSnapshot,
+} from "./order-option-price-snapshot.js";
+import {
   parseCartAggregate,
   parseCustomerNote,
   parseOrderingHash,
@@ -11,6 +15,7 @@ import {
 } from "./cart.js";
 import {
   parseCheckoutValidationEvidence,
+  parseConfiguredCheckoutValidationEvidence,
   type CheckoutValidationEvidence,
 } from "./checkout-validation.js";
 
@@ -77,9 +82,9 @@ export interface OrderTaxComponentSnapshot {
   readonly taxAmount: OrderSnapshotMoney;
 }
 
-export interface OrderPricingLineSnapshot {
+interface OrderPricingLineSnapshotFields {
   readonly quoteReference: OrderingReference;
-  readonly quoteVersion: 1;
+  readonly quoteVersion: 1 | 2;
   readonly quoteInputDigest: OrderingHash;
   readonly lineReference: OrderingReference;
   readonly sellableReference: OrderingReference;
@@ -104,7 +109,14 @@ export interface OrderPricingLineSnapshot {
   readonly quotedAt: OrderingInstant;
 }
 
-export interface OrderItemTransactionSnapshot {
+export type OrderPricingLineSnapshot<V extends 1 | 2 = 1> = Omit<
+  OrderPricingLineSnapshotFields,
+  "quoteVersion"
+> & { readonly quoteVersion: V } & (V extends 2
+    ? { readonly optionPrices: readonly OrderOptionPriceSnapshot[] }
+    : unknown);
+
+export interface OrderItemTransactionSnapshot<V extends 1 | 2 = 1> {
   readonly orderItemReference: OrderingReference;
   readonly orderBatchReference: OrderingReference;
   readonly cartItemReference: OrderingReference;
@@ -114,7 +126,7 @@ export interface OrderItemTransactionSnapshot {
   readonly addedByParticipantReference: OrderingReference | null;
   readonly addedAt: OrderingInstant;
   readonly catalog: OrderCatalogLineSnapshot;
-  readonly pricing: OrderPricingLineSnapshot;
+  readonly pricing: OrderPricingLineSnapshot<V>;
   readonly snapshotCapturedAt: OrderingInstant;
 }
 
@@ -450,7 +462,9 @@ function taxComponent(value: unknown, currencyCode: string): OrderTaxComponentSn
   }
 }
 
-function pricing(value: unknown): OrderPricingLineSnapshot {
+function pricing(value: unknown): OrderPricingLineSnapshot;
+function pricing(value: unknown, quoteVersion: 2): OrderPricingLineSnapshot<2>;
+function pricing(value: unknown, quoteVersion: 1 | 2 = 1): OrderPricingLineSnapshot<1 | 2> {
   const raw = closed(value, [
     "quoteReference",
     "quoteVersion",
@@ -476,8 +490,13 @@ function pricing(value: unknown): OrderPricingLineSnapshot {
     "taxEffectiveUntil",
     "taxComponents",
     "quotedAt",
+    ...(quoteVersion === 2 ? ["optionPrices"] : []),
   ]);
-  if (raw.quoteVersion !== 1 || !Array.isArray(raw.taxComponents) || raw.taxComponents.length > 20)
+  if (
+    raw.quoteVersion !== quoteVersion ||
+    !Array.isArray(raw.taxComponents) ||
+    raw.taxComponents.length > 20
+  )
     return invalid();
   try {
     const unitPrice = money(raw.unitPrice);
@@ -494,11 +513,63 @@ function pricing(value: unknown): OrderPricingLineSnapshot {
     const taxComponents = Object.freeze(
       raw.taxComponents.map((item) => taxComponent(item, currencyCode)),
     );
+    const quantity = positive(raw.quantity, 999);
+    const sellableReference = parseOrderingReference(raw.sellableReference);
+    if (quoteVersion === 2 && (!Array.isArray(raw.optionPrices) || raw.optionPrices.length > 100))
+      return invalid();
+    const optionPrices =
+      quoteVersion === 2
+        ? Object.freeze(
+            Array.from({ length: (raw.optionPrices as unknown[]).length }, (_, index) => {
+              const entry = Object.getOwnPropertyDescriptor(raw.optionPrices, String(index));
+              if (!entry || !("value" in entry) || !entry.enumerable) return invalid();
+              return parseOrderOptionPriceSnapshot(entry.value, {
+                quantity,
+                currencyCode,
+                quotedAt,
+                sellableReference,
+              });
+            }),
+          )
+        : Object.freeze([]);
+    const optionUnitAmount = optionPrices.reduce(
+      (sum, option) => sum + option.unitPrice.amountMinor * BigInt(option.chargedQuantityPerItem),
+      0n,
+    );
+    if (
+      quoteVersion === 2 &&
+      (parsedPriceResolution.unitPrice.amountMinor < 0n ||
+        subtotal.amountMinor !== unitPrice.amountMinor * BigInt(quantity) ||
+        discount.amountMinor !== 0n ||
+        fee.amountMinor !== 0n ||
+        new Set(optionPrices.map((option) => option.optionReference)).size !==
+          optionPrices.length ||
+        optionPrices.some(
+          (option) =>
+            (parsedPriceResolution.orderType !== null &&
+              option.orderType !== parsedPriceResolution.orderType) ||
+            (parsedPriceResolution.channelCode !== null &&
+              option.channelCode !== parsedPriceResolution.channelCode) ||
+            taxComponents.some(
+              (tax) => tax.taxClassificationReference !== option.taxClassificationReference,
+            ) ||
+            optionPrices.some(
+              (other) =>
+                other.brandReference !== option.brandReference ||
+                other.storeReference !== option.storeReference ||
+                other.channelCode !== option.channelCode ||
+                other.orderType !== option.orderType ||
+                other.storeGroupReference !== option.storeGroupReference ||
+                other.regionReference !== option.regionReference,
+            ),
+        ))
+    )
+      return invalid();
     if (
       [unitPrice, subtotal, discount, tax, fee, total].some((item) => item.amountMinor < 0n) ||
       subtotal.amountMinor - discount.amountMinor + tax.amountMinor + fee.amountMinor !==
         total.amountMinor ||
-      parsedPriceResolution.unitPrice.amountMinor !== unitPrice.amountMinor ||
+      parsedPriceResolution.unitPrice.amountMinor + optionUnitAmount !== unitPrice.amountMinor ||
       taxComponents.reduce((sum, item) => sum + item.taxAmount.amountMinor, 0n) !==
         tax.amountMinor ||
       new Set(taxComponents.map((item) => item.calculationOrder)).size !== taxComponents.length ||
@@ -518,11 +589,12 @@ function pricing(value: unknown): OrderPricingLineSnapshot {
       return invalid();
     return Object.freeze({
       quoteReference: parseOrderingReference(raw.quoteReference),
-      quoteVersion: 1,
+      quoteVersion,
+      ...(quoteVersion === 2 ? { optionPrices } : {}),
       quoteInputDigest: parseOrderingHash(raw.quoteInputDigest),
       lineReference: parseOrderingReference(raw.lineReference),
       sellableReference: parseOrderingReference(raw.sellableReference),
-      quantity: positive(raw.quantity, 999),
+      quantity,
       currencyMinorUnitExponent: raw.currencyMinorUnitExponent as number,
       currencyMetadataVersion: positive(raw.currencyMetadataVersion),
       currencyMetadataVersionReference: parseOrderingReference(
@@ -545,14 +617,34 @@ function pricing(value: unknown): OrderPricingLineSnapshot {
       taxEffectiveUntil,
       taxComponents,
       quotedAt,
-    });
+    }) as OrderPricingLineSnapshot<1 | 2>;
   } catch (error) {
     if (error instanceof OrderItemSnapshotError) throw error;
     return invalid();
   }
 }
 
-function parseLine(value: unknown): OrderItemTransactionSnapshot {
+/** Parses Catalog owner output before composing an immutable Order line. */
+export function parseOrderCatalogLineSnapshot(value: unknown): OrderCatalogLineSnapshot {
+  return catalog(value);
+}
+
+/** Reuses the immutable Order price constraints at public owner-source boundaries. */
+export function parseOrderPricingLineSnapshot(value: unknown): OrderPricingLineSnapshot {
+  return pricing(value);
+}
+
+/** Explicit v2 contract; legacy transaction creation still rejects unconfigured evidence. */
+export function parseConfiguredOrderPricingLineSnapshot(
+  value: unknown,
+): OrderPricingLineSnapshot<2> {
+  return pricing(value, 2);
+}
+
+function parseLine<V extends 1 | 2>(
+  value: unknown,
+  quoteVersion: V,
+): OrderItemTransactionSnapshot<V> {
   const raw = closed(value, [
     "orderItemReference",
     "orderBatchReference",
@@ -580,7 +672,9 @@ function parseLine(value: unknown): OrderItemTransactionSnapshot {
           : parseOrderingReference(raw.addedByParticipantReference),
       addedAt: parseOrderingInstant(raw.addedAt),
       catalog: catalog(raw.catalog),
-      pricing: pricing(raw.pricing),
+      pricing: (quoteVersion === 2
+        ? pricing(raw.pricing, 2)
+        : pricing(raw.pricing)) as OrderPricingLineSnapshot<V>,
       snapshotCapturedAt: parseOrderingInstant(raw.snapshotCapturedAt),
     });
   } catch (error) {
@@ -589,8 +683,11 @@ function parseLine(value: unknown): OrderItemTransactionSnapshot {
   }
 }
 
-export function parseOrderItemTransactionSnapshot(value: unknown): OrderItemTransactionSnapshot {
-  const snapshot = parseLine(value);
+function parseTransaction<V extends 1 | 2>(
+  value: unknown,
+  quoteVersion: V,
+): OrderItemTransactionSnapshot<V> {
+  const snapshot = parseLine(value, quoteVersion);
   if (
     snapshot.catalog.sellableReference !== snapshot.pricing.sellableReference ||
     snapshot.cartItemReference !== snapshot.pricing.lineReference ||
@@ -604,12 +701,47 @@ export function parseOrderItemTransactionSnapshot(value: unknown): OrderItemTran
     )
   )
     return invalid();
+  if (quoteVersion === 2) {
+    // parseLine selected the v2 parser above; TypeScript cannot narrow its generic V.
+    const configured = snapshot.pricing as unknown as OrderPricingLineSnapshot<2>;
+    if (
+      configured.optionPrices.length !== snapshot.catalog.options.length ||
+      configured.optionPrices.some((option) => {
+        const selected = snapshot.catalog.options.find(
+          (value) => value.optionReference === option.optionReference,
+        );
+        return (
+          selected === undefined ||
+          selected.bindingReference !== option.bindingReference ||
+          selected.quantity !== option.selectedQuantity ||
+          option.taxClassificationReference !== snapshot.catalog.taxClassificationReference ||
+          option.brandReference !== snapshot.catalog.brandReference ||
+          option.storeReference !== snapshot.catalog.storeReference ||
+          option.sellableReference !== snapshot.catalog.sellableReference
+        );
+      })
+    )
+      return invalid();
+  }
   return snapshot;
 }
 
-function checkout(value: unknown): CheckoutValidationEvidence {
+export function parseOrderItemTransactionSnapshot(value: unknown): OrderItemTransactionSnapshot {
+  return parseTransaction(value, 1);
+}
+export function parseConfiguredOrderItemTransactionSnapshot(
+  value: unknown,
+): OrderItemTransactionSnapshot<2> {
+  return parseTransaction(value, 2);
+}
+
+function checkout<V extends 1 | 2>(value: unknown, quoteVersion: V): CheckoutValidationEvidence<V> {
   try {
-    return parseCheckoutValidationEvidence(value);
+    return (
+      quoteVersion === 2
+        ? parseConfiguredCheckoutValidationEvidence(value)
+        : parseCheckoutValidationEvidence(value)
+    ) as CheckoutValidationEvidence<V>;
   } catch {
     return invalid();
   }
@@ -623,9 +755,10 @@ function cart(value: unknown): CartAggregate {
   }
 }
 
-export function createOrderItemSnapshots(
+function createSnapshots<V extends 1 | 2>(
   input: CreateOrderItemSnapshotsInput,
-): readonly OrderItemTransactionSnapshot[] {
+  quoteVersion: V,
+): readonly OrderItemTransactionSnapshot<V>[] {
   const raw = closed(input, [
     "orderReference",
     "orderBatchReference",
@@ -639,7 +772,7 @@ export function createOrderItemSnapshots(
     const orderReference = parseOrderingReference(raw.orderReference);
     const orderBatchReference = parseOrderingReference(raw.orderBatchReference);
     const snapshotCapturedAt = parseOrderingInstant(raw.snapshotCapturedAt);
-    const evidence = checkout(raw.checkoutValidationEvidence);
+    const evidence = checkout(raw.checkoutValidationEvidence, quoteVersion);
     const sourceCart = cart(raw.cart);
     if (Date.parse(snapshotCapturedAt) >= Date.parse(evidence.validUntil))
       throw new OrderItemSnapshotError("ORDER_ITEM_SNAPSHOT_VALIDATION_EXPIRED");
@@ -671,7 +804,8 @@ export function createOrderItemSnapshots(
         );
         if (cartItem === undefined || lineEvidence === undefined) return invalid();
         const catalogSnapshot = catalog(line.catalog);
-        const pricingSnapshot = pricing(line.pricing);
+        const pricingSnapshot =
+          quoteVersion === 2 ? pricing(line.pricing, 2) : pricing(line.pricing);
         const rules = cartItem.catalogSelectionEvidence?.ruleEvidence ?? [];
         if (
           cartItem.catalogSelectionEvidence === null ||
@@ -697,6 +831,11 @@ export function createOrderItemSnapshots(
             );
           }) ||
           pricingSnapshot.quoteReference !== evidence.quoteReference ||
+          pricingSnapshot.quoteVersion !== evidence.quoteVersion ||
+          (quoteVersion === 2 &&
+            (pricingSnapshot as OrderPricingLineSnapshot<2>).optionPrices.some(
+              (option) => option.orderType !== evidence.orderType,
+            )) ||
           pricingSnapshot.quoteInputDigest !== evidence.quoteInputDigest ||
           pricingSnapshot.lineReference !== cartItemReference ||
           pricingSnapshot.sellableReference !== cartItem.sellableReference ||
@@ -714,19 +853,22 @@ export function createOrderItemSnapshots(
           )
         )
           return invalid();
-        return parseOrderItemTransactionSnapshot({
-          orderItemReference,
-          orderBatchReference,
-          cartItemReference,
-          quantity: cartItem.quantity,
-          customerNote: cartItem.customerNote,
-          addedByActorReference: cartItem.addedByActorReference,
-          addedByParticipantReference: cartItem.addedByParticipantReference,
-          addedAt: cartItem.addedAt,
-          catalog: catalogSnapshot,
-          pricing: pricingSnapshot,
-          snapshotCapturedAt,
-        });
+        return parseTransaction(
+          {
+            orderItemReference,
+            orderBatchReference,
+            cartItemReference,
+            quantity: cartItem.quantity,
+            customerNote: cartItem.customerNote,
+            addedByActorReference: cartItem.addedByActorReference,
+            addedByParticipantReference: cartItem.addedByParticipantReference,
+            addedAt: cartItem.addedAt,
+            catalog: catalogSnapshot,
+            pricing: pricingSnapshot,
+            snapshotCapturedAt,
+          },
+          quoteVersion,
+        );
       }),
     );
     if (
@@ -745,4 +887,15 @@ export function createOrderItemSnapshots(
     if (error instanceof OrderItemSnapshotError) throw error;
     return invalid();
   }
+}
+
+export function createOrderItemSnapshots(
+  input: CreateOrderItemSnapshotsInput,
+): readonly OrderItemTransactionSnapshot[] {
+  return createSnapshots(input, 1);
+}
+export function createConfiguredOrderItemSnapshots(
+  input: CreateOrderItemSnapshotsInput,
+): readonly OrderItemTransactionSnapshot<2>[] {
+  return createSnapshots(input, 2);
 }

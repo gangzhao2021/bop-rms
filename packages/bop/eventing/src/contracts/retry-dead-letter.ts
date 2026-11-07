@@ -1,13 +1,21 @@
 import type { ConsumerErrorCode } from "./consumer-inbox.js";
 import type { OutboxDispatchErrorCode } from "./outbox-dispatch.js";
 
+/**
+ * WP-2423 (2026-10-15) version 2. Version 1 (1 s x 2 capped at 5 min, full jitter) spent its 8
+ * handoffs in about a minute, so a condition lasting minutes dead-lettered work staff then had to
+ * replay. Version 2 keeps 8 handoffs and the 24 h horizon: 2 s x 4 capped at 30 min with equal
+ * jitter (half the delay fixed, half random), i.e. retries after about 1-2 s, 4-8 s, 16-32 s,
+ * 1-2 min, 4-8.5 min, 15-30 min and 15-30 min, a dead letter only after about 36-71 minutes.
+ */
 export const retryPolicy = {
   name: "eventing_default",
-  version: 1,
+  version: 2,
   maximumActualHandoffs: 8,
-  baseDelayMs: 1_000,
-  multiplier: 2,
-  maximumDelayMs: 300_000,
+  baseDelayMs: 2_000,
+  multiplier: 4,
+  maximumDelayMs: 1_800_000,
+  jitter: "equal",
   maximumHorizonMs: 86_400_000,
 } as const;
 
@@ -113,7 +121,8 @@ export function resolveRetry(input: {
     retryPolicy.maximumDelayMs,
     retryPolicy.baseDelayMs * retryPolicy.multiplier ** Math.max(0, input.actualAttemptNumber - 1),
   );
-  const delayMs = Math.floor(input.random * unjitteredDelay);
+  // Equal jitter: spreads simultaneous retries without letting a low draw collapse the schedule.
+  const delayMs = Math.floor(unjitteredDelay / 2 + (input.random * unjitteredDelay) / 2);
   const next = Math.min(now + delayMs, deadline);
   return {
     ...common,

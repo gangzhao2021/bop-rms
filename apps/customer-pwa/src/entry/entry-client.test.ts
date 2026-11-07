@@ -1,9 +1,14 @@
-import { describe, expect, it, vi } from "vitest";
+import {
+  isUnseatedTableScan,
+  setUnseatedTableScan,
+} from "../session/customer-transaction-context.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { consumeCustomerQrFragment, createCustomerEntryClient } from "./entry-client.js";
 import {
   getCustomerCsrfCredential,
   getPaymentOperationReference,
   setPaymentOperationReference,
+  setCustomerCsrfCredential,
 } from "../session/customer-transaction-context.js";
 
 const established = Object.freeze({
@@ -22,7 +27,10 @@ const established = Object.freeze({
 });
 
 function response(status: number, body: unknown): Response {
-  return { status, json: async () => body } as Response;
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json", "cache-control": "no-store" },
+  });
 }
 
 describe("customer entry browser boundary", () => {
@@ -101,6 +109,221 @@ describe("customer entry browser boundary", () => {
     await expect(client.start()).resolves.toEqual({ kind: "EntryUnavailable" });
   });
 
+  it("WP-2423 Q11: reads a replaced or turned-off table code as ask-staff guidance", async () => {
+    const body = (messageKey: string) => ({
+      schemaVersion: 1,
+      code: "entry_qr_retired",
+      messageKey,
+      recovery: { action: "AskStaff", storeSelection: "Hidden" },
+    });
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(response(410, body("customer.entry.qr_replaced")))
+      .mockResolvedValueOnce(response(410, body("customer.entry.qr_turned_off")))
+      .mockResolvedValueOnce(response(410, body("customer.entry.other")));
+    const start = () =>
+      createCustomerEntryClient({
+        fetch,
+        hash: "#qr=aaa.bbb.ccc",
+        pathname: "/",
+        search: "",
+        replaceState: vi.fn(),
+        online: () => true,
+      }).start();
+    await expect(start()).resolves.toEqual({ kind: "TableCodeRetired", replaced: true });
+    await expect(start()).resolves.toEqual({ kind: "TableCodeRetired", replaced: false });
+    await expect(start()).resolves.toEqual({ kind: "ServiceUnavailable" });
+  });
+
+  it("WP-2423 item 8 ⑦ 1b: reads a Store that takes dine-in orders only", async () => {
+    const body = (storeDisplayName: unknown) => ({
+      schemaVersion: 1,
+      code: "entry_service_not_offered",
+      messageKey: "customer.entry.pickup_not_offered",
+      recovery: { action: "AskStaff", storeSelection: "Hidden" },
+      store: { storeDisplayName },
+    });
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(response(409, body("TEST Noodle House")))
+      .mockResolvedValueOnce(response(409, body("<b>")))
+      .mockResolvedValueOnce(response(409, { ...body("TEST"), extra: true }));
+    const start = () =>
+      createCustomerEntryClient({
+        fetch,
+        hash: "#qr=aaa.bbb.ccc",
+        pathname: "/",
+        search: "",
+        replaceState: vi.fn(),
+        online: () => true,
+      }).start();
+    await expect(start()).resolves.toEqual({
+      kind: "PickupNotOffered",
+      storeDisplayName: "TEST Noodle House",
+    });
+    await expect(start()).resolves.toEqual({ kind: "ServiceUnavailable" });
+    // An answer in an unknown form is never shown as a store's state.
+    await expect(start()).resolves.toEqual({ kind: "CommandFailed" });
+  });
+
+  it.each([
+    ["entry_table_may_start", "customer.entry.table_may_start", "TableMayStart"],
+    ["entry_table_being_cleaned", "customer.entry.table_being_cleaned", "TableBeingCleaned"],
+    ["entry_table_ask_new_party", "customer.entry.table_ask_new_party", "TableAskNewParty"],
+  ])(
+    "DEC-DINING-GUEST-TABLE-START: %s is the table's choice, with the menu's public context and no visit",
+    async (code, messageKey, kind) => {
+      const body = {
+        schemaVersion: 1,
+        code,
+        messageKey,
+        recovery: { action: "StartTable", storeSelection: "Hidden" },
+        store: {
+          brandDisplayName: "TEST Brand",
+          storeDisplayName: "TEST Noodle House",
+          publicStoreReference: "018f2a1b-7c3d-7a4e-8b5c-1234567890ab",
+          locale: "en-CA",
+        },
+      };
+      setUnseatedTableScan(false);
+      const state = await createCustomerEntryClient({
+        fetch: vi.fn().mockResolvedValueOnce(response(409, body)),
+        hash: "#qr=aaa.bbb.ccc",
+        pathname: "/",
+        search: "",
+        replaceState: vi.fn(),
+        online: () => true,
+      }).start();
+      expect(state.kind).toBe(kind);
+      expect(isUnseatedTableScan()).toBe(true);
+      setUnseatedTableScan(false);
+    },
+  );
+
+  it("DEC-DINING-GUEST-TABLE-START: a guest's answer is a second entry carrying what they tapped", async () => {
+    const fetch = vi.fn().mockResolvedValue(
+      response(409, {
+        schemaVersion: 1,
+        code: "entry_table_being_cleaned",
+        messageKey: "customer.entry.table_being_cleaned",
+        recovery: { action: "AskStaff", storeSelection: "Hidden" },
+        store: {
+          brandDisplayName: "TEST Brand",
+          storeDisplayName: "TEST Noodle House",
+          publicStoreReference: "018f2a1b-7c3d-7a4e-8b5c-1234567890ab",
+          locale: "en-CA",
+        },
+      }),
+    );
+    const client = createCustomerEntryClient({
+      fetch,
+      hash: "#qr=aaa.bbb.ccc",
+      pathname: "/",
+      search: "",
+      replaceState: vi.fn(),
+      online: () => true,
+    });
+    await client.enter?.("Start");
+    expect(JSON.parse(String(fetch.mock.calls[0]?.[1]?.body))).toEqual({
+      qrToken: "aaa.bbb.ccc",
+      intent: "Start",
+    });
+    setUnseatedTableScan(false);
+  });
+
+  it("reads a table no party is seated at: the menu's public context, and ordering waits", async () => {
+    const body = {
+      schemaVersion: 1,
+      code: "entry_table_not_open",
+      messageKey: "customer.entry.table_not_open",
+      recovery: { action: "AskStaff", storeSelection: "Hidden" },
+      store: {
+        brandDisplayName: "TEST Brand",
+        storeDisplayName: "TEST Noodle House",
+        publicStoreReference: "018f2a1b-7c3d-7a4e-8b5c-1234567890ab",
+        locale: "en-CA",
+      },
+    };
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(response(409, body))
+      .mockResolvedValueOnce(response(409, { ...body, store: { ...body.store, locale: "x" } }));
+    const start = () =>
+      createCustomerEntryClient({
+        fetch,
+        hash: "#qr=aaa.bbb.ccc",
+        pathname: "/",
+        search: "",
+        replaceState: vi.fn(),
+        online: () => true,
+      }).start();
+    setUnseatedTableScan(false);
+    await expect(start()).resolves.toEqual({
+      kind: "TableNotOpen",
+      context: {
+        publicStoreReference: "018f2a1b-7c3d-7a4e-8b5c-1234567890ab",
+        channel: "DineIn",
+        locale: "en-CA",
+        brandDisplayName: "TEST Brand",
+        storeDisplayName: "TEST Noodle House",
+      },
+    });
+    expect(isUnseatedTableScan()).toBe(true);
+    await expect(start()).resolves.toEqual({ kind: "ServiceUnavailable" });
+    setUnseatedTableScan(false);
+  });
+
+  it("WP-2423 Q4: reads a closed or paused Store with today's hours", async () => {
+    const body = (operatingState: string) => ({
+      schemaVersion: 1,
+      code: "entry_not_accepting",
+      messageKey: "customer.entry.not_accepting",
+      recovery: { action: "TryLaterOrAskStaff", storeSelection: "Hidden" },
+      store: {
+        storeDisplayName: "Synthetic Store",
+        operatingState,
+        todayHours: [{ startLocalTime: "11:00:00", endLocalTime: "21:30:00", endsNextDay: false }],
+        todayKind: null,
+        nextOpening: { localDate: "2026-12-23", startLocalTime: "11:00:00" },
+        localDate: "2026-12-22",
+      },
+    });
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(response(409, body("Closed")))
+      .mockResolvedValueOnce(response(409, body("TemporarilyClosed")))
+      .mockResolvedValueOnce(response(409, { ...body("Closed"), store: { storeDisplayName: "x" } }))
+      // WP-2423 item 13 ②: the platform paused this merchant's new guests.
+      .mockResolvedValueOnce(
+        response(409, {
+          ...body("Open"),
+          store: { ...body("Open").store, newGuestsPaused: true },
+        }),
+      );
+    const start = () =>
+      createCustomerEntryClient({
+        fetch,
+        hash: "#qr=aaa.bbb.ccc",
+        pathname: "/",
+        search: "",
+        replaceState: vi.fn(),
+        online: () => true,
+      }).start();
+    await expect(start()).resolves.toEqual({
+      kind: "NotAccepting",
+      storeDisplayName: "Synthetic Store",
+      paused: false,
+      todayHours: [{ start: "11:00:00", end: "21:30:00", endsNextDay: false }],
+      todayKind: null,
+      nextOpening: { localDate: "2026-12-23", startLocalTime: "11:00:00" },
+      localDate: "2026-12-22",
+    });
+    await expect(start()).resolves.toMatchObject({ kind: "NotAccepting", paused: true });
+    // A malformed body is a failed command, never a guessed Store state.
+    await expect(start()).resolves.toEqual({ kind: "CommandFailed" });
+    await expect(start()).resolves.toMatchObject({ kind: "NotAccepting", newGuestsPaused: true });
+  });
+
   it("reports offline without sending a request and retries only when explicitly asked", async () => {
     let online = false;
     const fetch = vi.fn(async () => response(201, established));
@@ -148,5 +371,431 @@ describe("customer entry browser boundary", () => {
       }),
     ).toBeNull();
     expect(replaceState).toHaveBeenCalledWith(null, "", "/");
+  });
+});
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((yes, no) => {
+    resolve = yes;
+    reject = no;
+  });
+  return { promise, resolve, reject };
+}
+function client(fetch: typeof globalThis.fetch, online = () => true) {
+  return createCustomerEntryClient({
+    fetch,
+    online,
+    hash: "#qr=aaa.bbb.ccc",
+    pathname: "/",
+    search: "",
+    replaceState: vi.fn(),
+  });
+}
+const headers = { "content-type": "application/json", "cache-control": "no-store" };
+const flush = async () => {
+  for (let i = 0; i < 12; i++) await Promise.resolve();
+};
+it("WP-2423: a scan answered 503 is tried again, and the guest gets in with no action", async () => {
+  const fetcher = vi
+    .fn<typeof globalThis.fetch>()
+    .mockResolvedValueOnce(
+      response(503, {
+        schemaVersion: 1,
+        code: "entry_service_unavailable",
+        messageKey: "customer.entry.service_unavailable",
+        recovery: { action: "RetryOrAskStaff", storeSelection: "Hidden" },
+      }),
+    )
+    .mockResolvedValueOnce(response(201, established));
+  await expect(client(fetcher).start()).resolves.toMatchObject({ kind: "Established" });
+  expect(fetcher).toHaveBeenCalledTimes(2);
+});
+afterEach(() => {
+  vi.useRealTimers();
+  setCustomerCsrfCredential(null);
+  setPaymentOperationReference(null);
+});
+
+describe("entry response ownership and bounded delivery", () => {
+  it("never lets an older client's response overwrite a newer established credential", async () => {
+    const older = deferred<Response>();
+    const first = client(() => older.promise).start();
+    const newer = "B".repeat(43);
+    await expect(
+      client(async () => response(201, { ...established, csrfToken: newer })).start(),
+    ).resolves.toMatchObject({ kind: "Established" });
+    older.resolve(response(201, established));
+    await expect(first).resolves.toEqual({ kind: "CommandFailed" });
+    expect(getCustomerCsrfCredential()).toBe(newer);
+  });
+  it.each([null, "A".repeat(43)])(
+    "rejects same-value generation replacement before headers: %s",
+    async (value) => {
+      const pending = deferred<Response>();
+      const first = client(() => pending.promise).start();
+      setCustomerCsrfCredential(value);
+      setCustomerCsrfCredential(null);
+      pending.resolve(response(201, established));
+      await expect(first).resolves.toEqual({ kind: "CommandFailed" });
+      expect(getCustomerCsrfCredential()).toBeNull();
+    },
+  );
+  it("checks generation again after a pending body read", async () => {
+    let stream!: ReadableStreamDefaultController<Uint8Array>;
+    const cancel = vi.fn();
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        stream = controller;
+      },
+      cancel,
+    });
+    const pending = client(async () => new Response(body, { status: 201, headers })).start();
+    await flush();
+    setCustomerCsrfCredential("B".repeat(43));
+    stream.enqueue(new TextEncoder().encode(JSON.stringify(established)));
+    await expect(pending).resolves.toEqual({ kind: "CommandFailed" });
+    expect(getCustomerCsrfCredential()).toBe("B".repeat(43));
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
+  it("failure leaves a newer credential and payment operation untouched", async () => {
+    const responsePending = deferred<Response>();
+    const pending = client(() => responsePending.promise).start();
+    setCustomerCsrfCredential("B".repeat(43));
+    setPaymentOperationReference("current-operation");
+    responsePending.reject(new Error("private diagnostic"));
+    await expect(pending).resolves.toEqual({ kind: "CommandFailed" });
+    expect(getCustomerCsrfCredential()).toBe("B".repeat(43));
+    expect(getPaymentOperationReference()).toBe("current-operation");
+  });
+  it("shares a pending request across start/retry and permits a later explicit retry", async () => {
+    const delivery = deferred<Response>();
+    const fetch = vi.fn(() => delivery.promise);
+    const entry = client(fetch);
+    const first = entry.start();
+    expect(entry.retry()).toBe(first);
+    expect(entry.start()).toBe(first);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    delivery.resolve(response(201, established));
+    await first;
+    fetch.mockImplementation(async () => response(201, established));
+    await entry.retry();
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+  it("ignores an offline response without publishing a credential", async () => {
+    let online = true;
+    const delivery = deferred<Response>();
+    const pending = client(
+      () => delivery.promise,
+      () => online,
+    ).start();
+    online = false;
+    delivery.resolve(response(201, established));
+    await expect(pending).resolves.toEqual({ kind: "Offline" });
+    expect(getCustomerCsrfCredential()).toBeNull();
+  });
+  it("treats a throwing online boundary as offline with no request", async () => {
+    const fetch = vi.fn();
+    await expect(
+      client(fetch, () => {
+        throw new Error("private");
+      }).start(),
+    ).resolves.toEqual({ kind: "Offline" });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+  it("times out even when fetch ignores abort and cancels a late response", async () => {
+    vi.useFakeTimers();
+    const delivery = deferred<Response>();
+    let signal: AbortSignal | null | undefined;
+    const pending = client((_url, init) => {
+      signal = init?.signal;
+      return delivery.promise;
+    }).start();
+    await vi.advanceTimersByTimeAsync(15_000);
+    await expect(pending).resolves.toEqual({ kind: "CommandFailed" });
+    expect(signal?.aborted).toBe(true);
+    const cancel = vi.fn();
+    delivery.resolve(new Response(new ReadableStream({ cancel }), { status: 201, headers }));
+    await flush();
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(getCustomerCsrfCredential()).toBeNull();
+  });
+  it("keeps the deadline through body reads and cancels stalled streams", async () => {
+    vi.useFakeTimers();
+    const cancel = vi.fn();
+    const pending = client(
+      async () => new Response(new ReadableStream({ cancel }), { status: 201, headers }),
+    ).start();
+    await flush();
+    await vi.advanceTimersByTimeAsync(15_000);
+    await expect(pending).resolves.toEqual({ kind: "CommandFailed" });
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(getCustomerCsrfCredential()).toBeNull();
+  });
+  it("counts actual UTF-8 bytes and cancels oversize bodies", async () => {
+    const cancel = vi.fn();
+    const body = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("界".repeat(6000)));
+      },
+      cancel,
+    });
+    await expect(
+      client(
+        async () =>
+          new Response(body, { status: 201, headers: { ...headers, "content-length": "1" } }),
+      ).start(),
+    ).resolves.toEqual({ kind: "CommandFailed" });
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(getCustomerCsrfCredential()).toBeNull();
+  });
+  it("accepts permitted Unicode public labels within the bounded response", async () => {
+    await expect(
+      client(async () =>
+        response(201, {
+          ...established,
+          brandDisplayName: "界".repeat(120),
+          storeDisplayName: "店".repeat(120),
+        }),
+      ).start(),
+    ).resolves.toMatchObject({ kind: "Established" });
+  });
+  it.each(["cache", "type", "redirect", "empty"] as const)(
+    "rejects the %s envelope",
+    async (kind) => {
+      const cancel = vi.fn();
+      const delivery = new Response(kind === "empty" ? null : new ReadableStream({ cancel }), {
+        status: 201,
+        headers: {
+          "content-type": kind === "type" ? "text/html" : "application/json",
+          "cache-control": kind === "cache" ? "public" : "no-store",
+        },
+      });
+      if (kind === "redirect") Object.defineProperty(delivery, "redirected", { value: true });
+      await expect(client(async () => delivery).start()).resolves.toEqual({
+        kind: "CommandFailed",
+      });
+      expect(cancel).toHaveBeenCalledTimes(kind === "empty" ? 0 : 1);
+    },
+  );
+  it.each([new Uint8Array([0xff]), new TextEncoder().encode("{")])(
+    "rejects invalid UTF-8 or JSON without credential publication",
+    async (bytes) => {
+      await expect(
+        client(async () => new Response(bytes, { status: 201, headers })).start(),
+      ).resolves.toEqual({ kind: "CommandFailed" });
+      expect(getCustomerCsrfCredential()).toBeNull();
+    },
+  );
+  it.each([
+    [400, "entry_request_invalid", "customer.entry.request_invalid", "Rescan", "RequestInvalid"],
+    [
+      422,
+      "entry_unavailable",
+      "customer.entry.unavailable",
+      "RescanOrAskStaff",
+      "EntryUnavailable",
+    ],
+    [
+      503,
+      "entry_service_unavailable",
+      "customer.entry.service_unavailable",
+      "RetryOrAskStaff",
+      "ServiceUnavailable",
+    ],
+  ] as const)(
+    "requires exact HTTP status for the %s failure contract",
+    async (status, code, messageKey, action, kind) => {
+      const error = {
+        schemaVersion: 1,
+        code,
+        messageKey,
+        recovery: { action, storeSelection: "Hidden" },
+      };
+      // A 503 is asked again for about half a minute before the guest is told.
+      vi.useFakeTimers();
+      const fetcher = vi.fn(async () => response(status, error));
+      const answer = client(fetcher).start();
+      await vi.runAllTimersAsync();
+      await expect(answer).resolves.toEqual({ kind });
+      expect(fetcher).toHaveBeenCalledTimes(status === 503 ? 13 : 1);
+      vi.useRealTimers();
+      await expect(client(async () => response(200, error)).start()).resolves.toEqual({
+        kind: "ServiceUnavailable",
+      });
+      expect(getCustomerCsrfCredential()).toBeNull();
+    },
+  );
+});
+
+describe("entry rate limiting", () => {
+  const body = {
+    schemaVersion: 1,
+    code: "entry_rate_limited",
+    messageKey: "customer.entry.rate_limited",
+    recovery: { action: "RetryOrAskStaff", storeSelection: "Hidden" },
+  };
+  function limited(header: string | null) {
+    const result = response(429, body);
+    if (header !== null) result.headers.set("retry-after", header);
+    return result;
+  }
+  it("blocks early manual retries in memory and requires explicit retry after expiry", async () => {
+    let clock = 1000;
+    vi.spyOn(performance, "now").mockImplementation(() => clock);
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(limited("5"))
+      .mockResolvedValueOnce(response(201, established));
+    const client = createCustomerEntryClient({
+      hash: "#qr=aaa.bbb.ccc",
+      pathname: "/",
+      search: "",
+      replaceState: vi.fn(),
+      online: () => true,
+      fetch,
+    });
+    expect(await client.start()).toEqual({ kind: "RateLimited", retryAfterSeconds: 5 });
+    clock = 4000;
+    expect(await client.retry()).toEqual({ kind: "RateLimited", retryAfterSeconds: 2 });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(getCustomerCsrfCredential()).toBeNull();
+    clock = 6000;
+    expect(await client.start()).toEqual({ kind: "RateLimited", retryAfterSeconds: 0 });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect((await client.retry()).kind).toBe("Established");
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+  it.each([null, "0", "-1", "1.5", "86401", "Wed, 21 Oct 2026 07:28:00 GMT"])(
+    "rejects unbounded or unsupported retry timing %s",
+    async (header) => {
+      const client = createCustomerEntryClient({
+        hash: "#qr=aaa.bbb.ccc",
+        pathname: "/",
+        search: "",
+        replaceState: vi.fn(),
+        online: () => true,
+        fetch: vi.fn(async () => limited(header)),
+      });
+      expect(await client.start()).toEqual({ kind: "ServiceUnavailable" });
+    },
+  );
+});
+
+it("accepts a validated in-memory entry token without putting it into history", async () => {
+  const fetcher = vi.fn(async () => response(201, established));
+  const replaceState = vi.fn();
+  const client = createCustomerEntryClient(
+    {
+      fetch: fetcher,
+      hash: "#internal-dining=table-2",
+      pathname: "/",
+      search: "",
+      replaceState,
+      online: () => true,
+    },
+    "synthetic.qr.token",
+  );
+  expect((await client.start()).kind).toBe("Established");
+  expect(replaceState).toHaveBeenCalledExactlyOnceWith(null, "", "/");
+  expect(fetcher).toHaveBeenCalledWith(
+    "/bff/customer/entry",
+    expect.objectContaining({ body: JSON.stringify({ qrToken: "synthetic.qr.token" }) }),
+  );
+});
+it.each(["", "invalid", "a.b.c".repeat(500)])(
+  "invalid in-memory token never sends an entry request",
+  async (token) => {
+    const fetcher = vi.fn<typeof fetch>();
+    const client = createCustomerEntryClient(
+      {
+        fetch: fetcher,
+        hash: "",
+        pathname: "/",
+        search: "",
+        replaceState: vi.fn(),
+        online: () => true,
+      },
+      token,
+    );
+    expect((await client.start()).kind).toBe("Missing");
+    expect(fetcher).not.toHaveBeenCalled();
+  },
+);
+
+// M02 (v15 07b7a1b7): with no code in the address, the page replays this browser's waiting scan.
+describe("M02 replay of a waiting scan", () => {
+  const boundary = (fetch: typeof globalThis.fetch) => ({
+    fetch,
+    hash: "",
+    pathname: "/",
+    search: "",
+    replaceState: () => undefined,
+    online: () => true,
+  });
+  it("sends {resume:true} (with the guest's answer) and keeps the restored visit until replaced", async () => {
+    setCustomerCsrfCredential("R".repeat(43));
+    setPaymentOperationReference("018f7900-0000-7000-8000-000000000001");
+    const bodies: unknown[] = [];
+    const fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body)));
+      return bodies.length === 1
+        ? response(404, {
+            schemaVersion: 1,
+            code: "entry_scan_missing",
+            messageKey: "customer.entry.scan_missing",
+            recovery: { action: "Rescan", storeSelection: "Hidden" },
+          })
+        : response(201, established);
+    });
+    const client = createCustomerEntryClient(boundary(fetch), undefined, { resume: true });
+    expect(client.hasEntry).toBe(true);
+    expect(await client.start()).toEqual({ kind: "Missing" });
+    // Nothing was waiting: the restored visit's credential is untouched.
+    expect(getCustomerCsrfCredential()).toBe("R".repeat(43));
+    expect(getPaymentOperationReference()).toBe("018f7900-0000-7000-8000-000000000001");
+    expect((await client.enter?.("Join"))?.kind).toBe("Established");
+    expect(bodies).toEqual([{ resume: true }, { resume: true, intent: "Join" }]);
+    expect(getCustomerCsrfCredential()).toBe("A".repeat(43));
+    expect(getPaymentOperationReference()).toBeNull();
+    setCustomerCsrfCredential(null);
+  });
+  it("reads 'no merchant owns this' as asked to scan, and without resume a missing code sends nothing", async () => {
+    const fetch = vi.fn(async () =>
+      response(404, { code: "CUSTOMER_STORE_NOT_FOUND" }),
+    ) as unknown as typeof globalThis.fetch;
+    expect(
+      await createCustomerEntryClient(boundary(fetch), undefined, { resume: true }).start(),
+    ).toEqual({ kind: "Missing" });
+    const silent = vi.fn();
+    const plain = createCustomerEntryClient(boundary(silent as never));
+    expect(plain.hasEntry).toBe(false);
+    expect(await plain.start()).toEqual({ kind: "Missing" });
+    expect(silent).not.toHaveBeenCalled();
+  });
+  it("a fresh scan that reaches no Store, or a Store not served now, is an outage to retry, never 'scan the code'", async () => {
+    const fresh = (fetch: typeof globalThis.fetch) =>
+      createCustomerEntryClient(boundary(fetch), "aaa.bbb.ccc").start();
+    const bodies: unknown[] = [];
+    const notFound = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body)));
+      return response(404, { code: "CUSTOMER_STORE_NOT_FOUND" });
+    });
+    expect(await fresh(notFound as unknown as typeof globalThis.fetch)).toEqual({
+      kind: "CommandFailed",
+    });
+    expect(bodies).toEqual([{ qrToken: "aaa.bbb.ccc" }]);
+    vi.useFakeTimers();
+    try {
+      const down = vi.fn(async () => response(503, { code: "CUSTOMER_STORE_UNAVAILABLE" }));
+      const answer = fresh(down as unknown as typeof globalThis.fetch);
+      await vi.runAllTimersAsync();
+      expect((await answer).kind).toBe("CommandFailed");
+      // Asked again for about half a minute before the guest is told.
+      expect(down).toHaveBeenCalledTimes(13);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

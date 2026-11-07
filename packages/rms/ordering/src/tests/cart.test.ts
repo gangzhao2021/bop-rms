@@ -128,3 +128,44 @@ describe("Cart aggregate minimum model", () => {
     expect(() => parseCartAggregate(hostile)).toThrow(CartError);
   });
 });
+
+describe("WP-2270 Cart revision storage boundary", () => {
+  it.each([1, 999, 1000, 2_147_483_647])(
+    "accepts revision %s independently of quantity",
+    (version) => {
+      const input = pickup();
+      input.aggregateVersion = version;
+      expect(parseCartAggregate(input).aggregateVersion).toBe(version);
+      expect(parseCartAggregate(input).items[0]?.quantity).toBe(2);
+    },
+  );
+  it.each([0, -1, 1.5, NaN, Infinity, "1000", null, 2_147_483_648, Number.MAX_SAFE_INTEGER + 1])(
+    "rejects invalid or out-of-storage revision %s",
+    (version) => {
+      expect(() => parseCartAggregate({ ...pickup(), aggregateVersion: version })).toThrow(
+        CartError,
+      );
+    },
+  );
+  it.each(["item", "option"])("preserves %s quantity bounds above revision999", (kind) => {
+    const input = pickup();
+    const item = input.items[0];
+    if (!item) throw new Error("fixture item missing");
+    for (const quantity of [999, 1000]) {
+      const candidate = {
+        ...input,
+        aggregateVersion: 1000,
+        items: [
+          {
+            ...item,
+            ...(kind === "item"
+              ? { quantity }
+              : { optionSelections: [{ optionReference: id(7), quantity }] }),
+          },
+        ],
+      };
+      if (quantity === 999) expect(parseCartAggregate(candidate).aggregateVersion).toBe(1000);
+      else expect(() => parseCartAggregate(candidate)).toThrow(CartError);
+    }
+  });
+});

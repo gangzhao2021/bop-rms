@@ -1087,9 +1087,15 @@ export function parsePaymentExceptionProjectionSource(
             raw.operationsDisposition === "Reconciled"
               ? "Closed"
               : "Open")
-        : raw.refundDisposition !== "NotApplicable" ||
-          raw.operationsDisposition !== "NotApplicable" ||
-          raw.state !== "Open") ||
+        : raw.kind.startsWith("Reconciliation") && raw.refundDisposition === "ProviderConfirmed"
+          ? // WP-2423 P6: a capture matching no payment was refunded in full by the Provider.
+            raw.operationsDisposition !== "Reconciled" || raw.state !== "Closed"
+          : raw.kind.startsWith("Reconciliation") && raw.operationsDisposition === "Reconciled"
+            ? // WP-2423: a later matching settlement check of the same day resolved it.
+              raw.refundDisposition !== "NotApplicable" || raw.state !== "Closed"
+            : raw.refundDisposition !== "NotApplicable" ||
+              raw.operationsDisposition !== "NotApplicable" ||
+              raw.state !== "Open") ||
       (capture && (paymentAttemptReference === null || raw.severity !== "Critical")) ||
       (!paid && !capture && raw.severity !== (terminalConflict ? "Critical" : "Error"))
     )
@@ -1176,6 +1182,11 @@ export function createPaymentReconciliationExceptionSource(
     "severity",
     "status",
     "openedAt",
+    "refundedAt",
+    // WP-2423: when a later matching settlement check of the same day resolved it.
+    ...(value !== null && typeof value === "object" && Object.hasOwn(value, "resolvedAt")
+      ? ["resolvedAt"]
+      : []),
   ]);
   const scope = parsePaymentExceptionProjectionScope(expectedScope);
   if (
@@ -1192,6 +1203,19 @@ export function createPaymentReconciliationExceptionSource(
     if (brandReference !== scope.brandReference || storeReference !== scope.storeReference)
       return invalid();
     const openedAt = parsePaymentInstant(raw.openedAt);
+    // The Provider-confirmed full refund of the unmatched capture closes the exception.
+    const refundedAt = raw.refundedAt === null ? null : parsePaymentInstant(raw.refundedAt);
+    if (refundedAt !== null && Date.parse(refundedAt) < Date.parse(openedAt)) return invalid();
+    const resolvedAt =
+      raw.resolvedAt === undefined || raw.resolvedAt === null
+        ? null
+        : parsePaymentInstant(raw.resolvedAt);
+    if (
+      resolvedAt !== null &&
+      (refundedAt !== null || Date.parse(resolvedAt) < Date.parse(openedAt))
+    )
+      return invalid();
+    const closedAt = refundedAt ?? resolvedAt;
     return parsePaymentExceptionProjectionSource({
       exceptionReference: parsePaymentReference(raw.exceptionReference),
       brandReference,
@@ -1201,12 +1225,12 @@ export function createPaymentReconciliationExceptionSource(
       orderReference: null,
       kind: reconciliationExceptionKinds[raw.reason as PaymentReconciliationException["reason"]],
       severity: raw.severity,
-      state: "Open",
-      refundDisposition: "NotApplicable",
-      operationsDisposition: "NotApplicable",
+      state: closedAt === null ? "Open" : "Closed",
+      refundDisposition: refundedAt === null ? "NotApplicable" : "ProviderConfirmed",
+      operationsDisposition: closedAt === null ? "NotApplicable" : "Reconciled",
       openedAt,
-      updatedAt: openedAt,
-      closedAt: null,
+      updatedAt: closedAt ?? openedAt,
+      closedAt,
     });
   } catch (error) {
     if (error instanceof PaymentCompensationError) throw error;

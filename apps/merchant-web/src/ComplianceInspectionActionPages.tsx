@@ -1,4 +1,5 @@
 import { StatePanel } from "@bop-rms/ui";
+import { SourceTime } from "./StoreTime.js";
 import { useEffect, useState } from "react";
 import {
   ComplianceInspectionActionPageError,
@@ -54,7 +55,8 @@ export function ComplianceInspectionList({ view }: { readonly view: ComplianceIn
           <p className="bop-eyebrow">CMP-INSPECTION · Compliance</p>
           <h1>Inspections</h1>
           <p>
-            Source as of {view.sourceAsOf} · {view.completeness} · {view.freshness}
+            Source as of <SourceTime instant={view.sourceAsOf} /> · {view.completeness} ·{" "}
+            {view.freshness}
           </p>
         </div>
         {view.permissions.maySchedule ? <button>Schedule Inspection</button> : null}
@@ -146,7 +148,8 @@ export function ComplianceCorrectiveActionList({
           <p className="bop-eyebrow">CMP-CORRECTIVE-ACTION · Compliance</p>
           <h1>Corrective Actions</h1>
           <p>
-            Source as of {view.sourceAsOf} · {view.completeness} · {view.freshness}
+            Source as of <SourceTime instant={view.sourceAsOf} /> · {view.completeness} ·{" "}
+            {view.freshness}
           </p>
         </div>
       </header>

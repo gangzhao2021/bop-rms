@@ -1,0 +1,465 @@
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
+import { afterEach, expect, it, vi } from "vitest";
+import { DigitalReceiptError, parseDigitalReceiptChain } from "@rms/ordering";
+import { createApp } from "./app.js";
+import { CustomerReceiptHandler } from "./customer-receipt.js";
+const id = (n: number) => "0190ec05-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+const at = "2026-09-12T12:00:00.000Z";
+const money = (amountMinor: bigint) => ({ amountMinor, currencyCode: "CAD" });
+const servers: Server[] = [];
+afterEach(async () => {
+  for (const server of servers.splice(0)) {
+    server.closeAllConnections();
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+  }
+});
+async function setup(
+  enabled = true,
+  financial?: import("./customer-receipt-financial.js").CustomerReceiptFinancialView | null,
+  storeContact?: Record<string, unknown>,
+) {
+  const chain = parseDigitalReceiptChain({
+    orderReference: id(1),
+    records: [
+      {
+        recordReference: id(2),
+        version: 1,
+        kind: "Original",
+        recordedAt: at,
+        previousRecordReference: null,
+        reasonCode: null,
+        snapshot: {
+          receiptReference: id(3),
+          orderReference: id(1),
+          guestSessionReference: id(4),
+          operatingEntityReference: id(5),
+          operatingEntityDisplayName: "Synthetic issuer",
+          brandReference: id(6),
+          storeReference: id(7),
+          storeDisplayName: "Synthetic Store",
+          orderNumber: "1",
+          issuedAt: at,
+          locale: "en-CA",
+          templateVersion: "RECEIPT_V1",
+          lines: [
+            {
+              lineReference: id(8),
+              displayName: "Synthetic item",
+              quantity: 1,
+              lineTotal: money(100n),
+            },
+          ],
+          subtotal: money(100n),
+          tax: money(13n),
+          tip: money(0n),
+          total: money(114n),
+          adjustments: { discount: money(1n), fee: money(2n) },
+          paymentStatus: "Paid",
+          refundedTotal: money(0n),
+        },
+      },
+    ],
+  });
+  const read = vi.fn().mockResolvedValue(chain);
+  const readView = vi.fn().mockImplementation(async () => ({
+    chain,
+    financial,
+    ...(storeContact === undefined ? {} : { storeContact }),
+  }));
+  const server = createServer(
+    createApp(
+      enabled
+        ? {
+            customerReceipt: new CustomerReceiptHandler({
+              allowedOrigin: "https://pilot.example",
+              port: { read, ...(financial === undefined ? {} : { readView }) },
+            }),
+          }
+        : {},
+    ),
+  );
+  servers.push(server);
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const url =
+    "http://127.0.0.1:" +
+    (server.address() as AddressInfo).port +
+    "/api/v1/orders/" +
+    id(1) +
+    "/receipt";
+  return {
+    read,
+    readView,
+    chain,
+    send: (headers: Record<string, string> = {}, query = "") =>
+      fetch(url + query, {
+        headers: {
+          "sec-fetch-site": "same-origin",
+          cookie: "__Host-bop-guest=" + "s".repeat(43),
+          "x-csrf-token": "c".repeat(43),
+          ...headers,
+        },
+      }),
+  };
+}
+it("serializes only immutable customer receipt fields and exact decimal amounts", async () => {
+  const test = await setup();
+  const response = await test.send();
+  expect(response.status).toBe(200);
+  expect(response.headers.get("cache-control")).toBe("no-store");
+  expect(response.headers.get("referrer-policy")).toBe("no-referrer");
+  const body = await response.json();
+  expect(body).toMatchObject({
+    receipt: {
+      orderReference: id(1),
+      freshnessStatus: "Stale",
+      deliveryStatus: "Unavailable",
+      supportEligible: false,
+      cancellationEligible: false,
+      records: [
+        {
+          snapshot: {
+            total: { amountMinor: "114" },
+            adjustments: { discount: { amountMinor: "1" }, fee: { amountMinor: "2" } },
+          },
+        },
+      ],
+    },
+  });
+  const encoded = JSON.stringify(body);
+  for (const key of [
+    "guestSessionReference",
+    "operatingEntityReference",
+    "brandReference",
+    "storeReference",
+    "templateVersion",
+    "previousRecordReference",
+  ])
+    expect(encoded).not.toContain(key);
+  expect(test.read).toHaveBeenCalledExactlyOnceWith({
+    sessionCredential: "s".repeat(43),
+    csrfCredential: "c".repeat(43),
+    orderReference: id(1),
+  });
+});
+it("rejects cross-origin, duplicate cookies and extraneous query data before owner access", async () => {
+  const test = await setup();
+  for (const headers of [
+    { "sec-fetch-site": "cross-site" },
+    { cookie: "__Host-bop-guest=" + "s".repeat(43) + "; __Host-bop-guest=" + "s".repeat(43) },
+    { "x-csrf-token": "" },
+  ]) {
+    expect((await test.send(headers)).status).toBe(400);
+  }
+  expect((await test.send({}, "?guest=" + id(4))).status).toBe(400);
+  expect(test.read).not.toHaveBeenCalled();
+});
+it("does not disclose permission failures or unconfigured dependencies", async () => {
+  const test = await setup();
+  test.read.mockRejectedValue(new DigitalReceiptError("DIGITAL_RECEIPT_PERMISSION_DENIED"));
+  expect((await test.send()).status).toBe(404);
+  test.read.mockResolvedValue({ ...test.chain, orderReference: id(99) });
+  expect((await test.send()).status).toBe(503);
+  const absent = await setup(false);
+  expect((await absent.send()).status).toBe(503);
+});
+
+it("serializes separate financial facts without rewriting immutable receipts", async () => {
+  const test = await setup(true, {
+    observedAt: at,
+    currencyCode: "CAD",
+    capturedMinor: 114n,
+    confirmedRefundMinor: 10n,
+    pendingRefundMinor: 20n,
+    unresolvedAttemptCount: 1,
+    paidOnlineMinor: 100n,
+    paidOnCardMachineMinor: 14n,
+  });
+  const response = await test.send();
+  expect(response.status).toBe(200);
+  const body = await response.json();
+  expect(body).toMatchObject({
+    receipt: {
+      financial: {
+        observedAt: at,
+        currencyCode: "CAD",
+        capturedMinor: "114",
+        confirmedRefundMinor: "10",
+        pendingRefundMinor: "20",
+        unresolvedAttemptCount: 1,
+        paidOnlineMinor: "100",
+        paidOnCardMachineMinor: "14",
+      },
+      records: [{ snapshot: { refundedTotal: { amountMinor: "0" } } }],
+      freshnessStatus: "Stale",
+    },
+  });
+  expect(test.read).not.toHaveBeenCalled();
+  expect(test.readView).toHaveBeenCalledTimes(1);
+});
+it("returns authorized history when optional financial source is unavailable", async () => {
+  const test = await setup(true, null);
+  const response = await test.send();
+  expect(response.status).toBe(200);
+  const body = await response.json();
+  expect(body).toMatchObject({ receipt: { financial: null, records: [{ version: 1 }] } });
+});
+
+it("WP-2423 Q10: serializes only the Store's published phone and address with the receipt", async () => {
+  const storeContact = {
+    phone: "+14165550123",
+    addressLines: ["DEMO 100 Test Street"],
+    locality: "Toronto",
+    regionCode: "ON",
+    postalCode: "M5V 1A1",
+  };
+  const test = await setup(true, null, { ...storeContact, ownerEmail: "private" });
+  const response = await test.send();
+  expect(response.status).toBe(200);
+  const text = await response.text();
+  expect(JSON.parse(text).receipt.storeContact).toEqual(storeContact);
+  expect(text).not.toContain("private");
+  const without = (await (await (await setup(true, null)).send()).json()) as {
+    receipt: Record<string, unknown>;
+  };
+  expect(without.receipt).not.toHaveProperty("storeContact");
+});
+
+it("WP-2423 D5: serializes each item's price before tax when the receipt version froze it", async () => {
+  const test = await setup();
+  const record = test.chain.records[0];
+  if (!record) throw new Error("missing fixture");
+  const priced = parseDigitalReceiptChain({
+    orderReference: id(1),
+    records: [
+      {
+        ...record,
+        snapshot: {
+          ...record.snapshot,
+          lines: [
+            { ...record.snapshot.lines[0], lineTotal: money(114n), lineSubtotal: money(100n) },
+          ],
+        },
+      },
+    ],
+  });
+  test.read.mockResolvedValue(priced);
+  const body = (await (await test.send()).json()) as {
+    receipt: { records: { snapshot: { lines: unknown[]; subtotal: unknown } }[] };
+  };
+  expect(body.receipt.records[0]?.snapshot.lines).toEqual([
+    {
+      lineReference: id(8),
+      displayName: "Synthetic item",
+      quantity: 1,
+      lineTotal: { amountMinor: "114", currencyCode: "CAD" },
+      lineSubtotal: { amountMinor: "100", currencyCode: "CAD" },
+    },
+  ]);
+  // An older version without it is serialized exactly as issued.
+  test.read.mockResolvedValue(test.chain);
+  const legacy = (await (await test.send()).json()) as typeof body;
+  expect(legacy.receipt.records[0]?.snapshot.lines[0]).not.toHaveProperty("lineSubtotal");
+});
+it("serializes each line's chosen options with what they added, and older lines without them (WP-2423)", async () => {
+  const { chain } = await setup();
+  const original = chain.records[0];
+  if (!original) throw new Error("missing fixture");
+  const line = {
+    ...original.snapshot.lines[0],
+    lineSubtotal: money(100n),
+    options: [{ displayName: "Whipped cream", quantity: 1, amount: money(50n) }],
+  };
+  const withOptions = parseDigitalReceiptChain({
+    orderReference: chain.orderReference,
+    records: [{ ...original, snapshot: { ...original.snapshot, lines: [line] } }],
+  });
+  const server = createServer(
+    createApp({
+      customerReceipt: new CustomerReceiptHandler({
+        allowedOrigin: "https://pilot.example",
+        port: { read: vi.fn().mockResolvedValue(withOptions) },
+      }),
+    }),
+  );
+  servers.push(server);
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const response = await fetch(
+    "http://127.0.0.1:" +
+      (server.address() as AddressInfo).port +
+      "/api/v1/orders/" +
+      id(1) +
+      "/receipt",
+    {
+      headers: {
+        "sec-fetch-site": "same-origin",
+        cookie: "__Host-bop-guest=" + "s".repeat(43),
+        "x-csrf-token": "c".repeat(43),
+      },
+    },
+  );
+  expect(response.status).toBe(200);
+  interface Body {
+    receipt: { records: { snapshot: { lines: Record<string, unknown>[] } }[] };
+  }
+  const body = (await response.json()) as Body;
+  expect(body.receipt.records[0]?.snapshot.lines[0]).toEqual({
+    lineReference: id(8),
+    displayName: "Synthetic item",
+    quantity: 1,
+    lineTotal: { amountMinor: "100", currencyCode: "CAD" },
+    lineSubtotal: { amountMinor: "100", currencyCode: "CAD" },
+    options: [
+      {
+        displayName: "Whipped cream",
+        quantity: 1,
+        amount: { amountMinor: "50", currencyCode: "CAD" },
+      },
+    ],
+  });
+  // A version issued before options were recorded is served exactly as issued.
+  const legacy = (await (await (await setup()).send()).json()) as Body;
+  expect(legacy.receipt.records[0]?.snapshot.lines[0]).not.toHaveProperty("options");
+});
+
+it("WP-2423 (v15 3cd0f8dd M4/M5): states each refund once as new, and an ended visit's bound", async () => {
+  const test = await setup(true, null);
+  const original = test.chain.records[0];
+  if (original === undefined) throw new Error("fixture");
+  const refund = {
+    refundReference: id(40),
+    kind: "ItemCancellation" as const,
+    lines: [
+      {
+        lineReference: id(8),
+        displayName: "Synthetic item",
+        quantity: 1,
+        amount: money(100n),
+      },
+    ],
+    tax: money(13n),
+    tip: money(0n),
+    other: money(0n),
+    total: money(113n),
+  };
+  const refunded = (version: number, reference: number, refunds: (typeof refund)[]) => ({
+    recordReference: id(reference),
+    version,
+    kind: "Refund",
+    recordedAt: "2026-09-12T12:0" + String(version) + ":00.000Z",
+    previousRecordReference: id(reference - 1),
+    reasonCode: "PAYMENT_REFUND_STATUS_CHANGED",
+    snapshot: {
+      ...original.snapshot,
+      paymentStatus: "PartiallyRefunded",
+      refundedTotal: money(refunds.reduce((sum, entry) => sum + entry.total.amountMinor, 0n)),
+      refunds,
+    },
+  });
+  const chain = parseDigitalReceiptChain({
+    orderReference: id(1),
+    records: [original, refunded(2, 3, [refund]), refunded(3, 4, [refund])],
+  });
+  test.readView.mockImplementation(async () => ({
+    chain,
+    financial: null,
+    visitEnded: { receiptAvailableUntil: "2026-09-13T11:00:00.000Z" },
+  }));
+  const response = await test.send();
+  expect(response.status).toBe(200);
+  const body = (await response.json()) as {
+    receipt: {
+      visitEnded?: unknown;
+      records: { snapshot: { refunds?: { newInThisVersion: boolean }[] } }[];
+    };
+  };
+  expect(body.receipt.visitEnded).toEqual({ receiptAvailableUntil: "2026-09-13T11:00:00.000Z" });
+  expect(body.receipt.records[0]?.snapshot.refunds).toBeUndefined();
+  expect(body.receipt.records[1]?.snapshot.refunds).toEqual([
+    {
+      kind: "ItemCancellation",
+      lines: [
+        {
+          lineReference: id(8),
+          displayName: "Synthetic item",
+          quantity: 1,
+          amount: { amountMinor: "100", currencyCode: "CAD" },
+        },
+      ],
+      tax: { amountMinor: "13", currencyCode: "CAD" },
+      tip: { amountMinor: "0", currencyCode: "CAD" },
+      other: { amountMinor: "0", currencyCode: "CAD" },
+      total: { amountMinor: "113", currencyCode: "CAD" },
+      newInThisVersion: true,
+    },
+  ]);
+  expect(body.receipt.records[2]?.snapshot.refunds?.[0]?.newInThisVersion).toBe(false);
+  // The internal refund reference is never sent.
+  expect(JSON.stringify(body)).not.toContain(id(40));
+});
+
+it("Owner 2026-10-23: names items and options in the guest's chosen language; the issued receipt is unchanged", async () => {
+  const test = await setup(true, null);
+  const original = test.chain.records[0];
+  if (original === undefined) throw new Error("fixture");
+  const line = {
+    ...original.snapshot.lines[0],
+    lineSubtotal: money(100n),
+    options: [{ displayName: "Oat milk", quantity: 1, amount: money(50n) }],
+  };
+  const chain = parseDigitalReceiptChain({
+    orderReference: test.chain.orderReference,
+    records: [{ ...original, snapshot: { ...original.snapshot, lines: [line] } }],
+  });
+  test.readView.mockImplementation(async () => ({
+    chain,
+    financial: null,
+    itemNames: new Map([[id(8), { displayName: "拿铁", options: ["燕麦奶"] }]]),
+  }));
+  interface Body {
+    receipt: {
+      records: {
+        snapshot: {
+          locale: string;
+          lines: { displayName: string; options?: { displayName: string }[] }[];
+        };
+      }[];
+    };
+  }
+  const response = await test.send({}, "?locale=zh-Hans-CA");
+  expect(response.status).toBe(200);
+  expect(test.readView).toHaveBeenLastCalledWith(
+    { sessionCredential: "s".repeat(43), csrfCredential: "c".repeat(43), orderReference: id(1) },
+    "zh-Hans-CA",
+  );
+  const snapshot = ((await response.json()) as Body).receipt.records[0]?.snapshot;
+  expect(snapshot?.lines[0]?.displayName).toBe("拿铁");
+  expect(snapshot?.lines[0]?.options?.[0]?.displayName).toBe("燕麦奶");
+  // The issued version's own locale is still stated; nothing was rewritten.
+  expect(snapshot?.locale).toBe("en-CA");
+  expect(chain.records[0]?.snapshot.lines[0]?.displayName).toBe("Synthetic item");
+  // A line without chosen names (or a mismatched option count) keeps the names it was issued with.
+  test.readView.mockImplementation(async () => ({
+    chain,
+    financial: null,
+    itemNames: new Map([[id(8), { displayName: "拿铁", options: [] }]]),
+  }));
+  const kept = ((await (await test.send({}, "?locale=zh-Hans-CA")).json()) as Body).receipt
+    .records[0]?.snapshot.lines[0];
+  expect(kept?.displayName).toBe("拿铁");
+  expect(kept?.options?.[0]?.displayName).toBe("Oat milk");
+  // No chosen language: the port is asked exactly as before.
+  await test.send();
+  expect(test.readView).toHaveBeenLastCalledWith({
+    sessionCredential: "s".repeat(43),
+    csrfCredential: "c".repeat(43),
+    orderReference: id(1),
+  });
+  for (const query of ["?locale=zh", "?locale=zh-Hans-CA&extra=1", "?locale=bad_locale"]) {
+    test.readView.mockClear();
+    const refused = await test.send({}, query);
+    expect(refused.status, query).toBe(query === "?locale=zh" ? 200 : 400);
+  }
+});

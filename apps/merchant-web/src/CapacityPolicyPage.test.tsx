@@ -112,6 +112,8 @@ describe("RES-CAPACITY-CONFIG", () => {
       "Simulation is deterministic evidence",
     ])
       expect(html).toContain(text);
+    expect(html).toContain("Eastern Time (Toronto");
+    expect(html).not.toContain("America/Toronto");
     expect(html).toMatch(/<button disabled="">Save draft<\/button>/u);
     expect(html).toMatch(/<button disabled="">Publish now<\/button>/u);
   });

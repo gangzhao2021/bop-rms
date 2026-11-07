@@ -8,6 +8,7 @@ import {
   type CustomerEntryPort,
   type CustomerEntryPortInput,
   type CustomerEntryPortResult,
+  type CustomerEntryRequestAdmission,
 } from "./customer-entry.js";
 
 const ORIGIN = "https://customer.example.test";
@@ -97,8 +98,12 @@ function referenceFactory(): () => string {
 function customerEntry(
   port: MutablePort,
   uuidV7Factory = referenceFactory(),
+  requestAdmission: CustomerEntryRequestAdmission | null = {
+    consume: async () => ({ status: "Allowed" }),
+  },
 ): CustomerEntryHandler {
   return new CustomerEntryHandler({
+    ...(requestAdmission === null ? {} : { requestAdmission }),
     allowedOrigin: ORIGIN,
     now: () => "2026-07-30T05:00:00.000Z",
     port,
@@ -168,6 +173,21 @@ async function rawPost(
   });
 }
 
+/** The Guest Session cookies an answer sets (a visit), apart from the waiting-scan cookie. */
+function visitCookies(response: Response): string[] {
+  return response.headers.getSetCookie().filter((cookie) => cookie.startsWith("__Host-bop-guest="));
+}
+const SCAN_COOKIE = `__Secure-bop-scan=${TOKEN}; Max-Age=1800; Path=/bff/customer/entry; Secure; HttpOnly; SameSite=Strict`;
+const FORGET_SCAN =
+  "__Secure-bop-scan=; Max-Age=0; Path=/bff/customer/entry; Secure; HttpOnly; SameSite=Strict";
+const tableNotOpen = {
+  status: "TableNotOpen",
+  brandDisplayName: "BOP Kitchen",
+  storeDisplayName: "Synthetic Market Store",
+  publicStoreReference: STORE_REFERENCE,
+  locale: "en-CA",
+};
+
 async function responseSnapshot(response: Response): Promise<{
   body: unknown;
   status: number;
@@ -184,7 +204,7 @@ describe("WP-1004 Customer-entry contract", () => {
 
     expect(response.status).toBe(201);
     expect(response.headers.get("set-cookie")).toBe(
-      `__Host-bop-guest=${SESSION_CREDENTIAL}; Path=/; Secure; HttpOnly; SameSite=Lax`,
+      `__Host-bop-guest=${SESSION_CREDENTIAL}; Path=/; Max-Age=86400; Secure; HttpOnly; SameSite=Lax`,
     );
     expect(await response.json()).toEqual({
       schemaVersion: 2,
@@ -208,6 +228,28 @@ describe("WP-1004 Customer-entry contract", () => {
         requestedAt: "2026-07-30T05:00:00.000Z",
       },
     ]);
+  });
+
+  it("says whether a party is seated at the scanned table, and only at a table", async () => {
+    const port = new MutablePort();
+    const serverPort = await listen(customerEntry(port));
+    port.result = established({ tableOpen: false });
+    const response = await post(serverPort);
+    expect(response.status).toBe(201);
+    expect(((await response.json()) as { tableOpen?: unknown }).tableOpen).toBe(false);
+    port.result = established({ tableOpen: true });
+    expect(((await (await post(serverPort)).json()) as { tableOpen?: unknown }).tableOpen).toBe(
+      true,
+    );
+    // A pickup code carries no table state; a malformed one is refused, not passed on.
+    port.result = established({
+      channel: "Pickup",
+      publicTableReference: null,
+      tableOpen: false,
+    });
+    expect((await post(serverPort)).status).toBe(503);
+    port.result = established({ tableOpen: "no" as never });
+    expect((await post(serverPort)).status).toBe(503);
   });
 
   it("sets no-store, non-index and referrer controls without CORS or retry invention", async () => {
@@ -367,6 +409,157 @@ describe("WP-1004 Customer-entry contract", () => {
     }
   });
 
+  it("WP-2423 Q4: says a closed Store is not taking orders, with today's hours, and sets no cookie", async () => {
+    const port = new MutablePort();
+    port.result = {
+      status: "NotAccepting",
+      storeDisplayName: "Synthetic Store",
+      operatingState: "Closed",
+      todayHours: [{ startLocalTime: "11:00:00", endLocalTime: "21:30:00", endsNextDay: false }],
+      // Decision 16: a holiday today, and when the Store opens next.
+      todayKind: "Holiday",
+      nextOpening: { localDate: "2026-12-26", startLocalTime: "11:00:00" },
+      localDate: "2026-12-25",
+    };
+    const response = await post(await listen(customerEntry(port)));
+    expect(response.status).toBe(409);
+    expect(visitCookies(response)).toEqual([]);
+    expect(await response.json()).toEqual({
+      schemaVersion: 1,
+      code: "entry_not_accepting",
+      messageKey: "customer.entry.not_accepting",
+      recovery: { action: "TryLaterOrAskStaff", storeSelection: "Hidden" },
+      store: {
+        storeDisplayName: "Synthetic Store",
+        operatingState: "Closed",
+        todayHours: [{ startLocalTime: "11:00:00", endLocalTime: "21:30:00", endsNextDay: false }],
+        todayKind: "Holiday",
+        nextOpening: { localDate: "2026-12-26", startLocalTime: "11:00:00" },
+        localDate: "2026-12-25",
+      },
+    });
+    // WP-2423 item 13 ②: the platform paused this merchant's new guests; the page is told.
+    port.result = { ...(port.result as object), newGuestsPaused: true };
+    expect(
+      ((await (await post(await listen(customerEntry(port)))).json()) as { store: unknown }).store,
+    ).toMatchObject({
+      newGuestsPaused: true,
+    });
+    port.result = { ...(port.result as object), newGuestsPaused: false };
+    expect((await post(await listen(customerEntry(port)))).status).toBe(503);
+    port.result = { ...(port.result as object), storeDisplayName: "<script>" };
+    expect((await post(await listen(customerEntry(port)))).status).toBe(503);
+  });
+
+  it("WP-2423 item 8 ⑦ 1b: says the Store takes dine-in orders only, and sets no cookie", async () => {
+    const port = new MutablePort();
+    port.result = { status: "ServiceNotOffered", storeDisplayName: "Synthetic Store" };
+    const response = await post(await listen(customerEntry(port)));
+    expect(response.status).toBe(409);
+    expect(visitCookies(response)).toEqual([]);
+    expect(await response.json()).toEqual({
+      schemaVersion: 1,
+      code: "entry_service_not_offered",
+      messageKey: "customer.entry.pickup_not_offered",
+      recovery: { action: "AskStaff", storeSelection: "Hidden" },
+      store: { storeDisplayName: "Synthetic Store" },
+    });
+    port.result = { status: "ServiceNotOffered", storeDisplayName: "<script>" };
+    expect((await post(await listen(customerEntry(port)))).status).toBe(503);
+  });
+
+  it("a table no party is seated at starts no visit (no cookie) and gives the menu's public context", async () => {
+    const port = new MutablePort();
+    port.result = {
+      status: "TableNotOpen",
+      brandDisplayName: "BOP Kitchen",
+      storeDisplayName: "Synthetic Market Store",
+      publicStoreReference: STORE_REFERENCE,
+      locale: "en-CA",
+    };
+    const response = await post(await listen(customerEntry(port)));
+    expect(response.status).toBe(409);
+    expect(visitCookies(response)).toEqual([]);
+    expect(await response.json()).toEqual({
+      schemaVersion: 1,
+      code: "entry_table_not_open",
+      messageKey: "customer.entry.table_not_open",
+      recovery: { action: "AskStaff", storeSelection: "Hidden" },
+      store: {
+        brandDisplayName: "BOP Kitchen",
+        storeDisplayName: "Synthetic Market Store",
+        publicStoreReference: STORE_REFERENCE,
+        locale: "en-CA",
+      },
+    });
+    port.result = { ...(port.result as object), storeDisplayName: "<script>" };
+    expect((await post(await listen(customerEntry(port)))).status).toBe(503);
+  });
+
+  it.each([
+    ["TableMayStart", "entry_table_may_start", "customer.entry.table_may_start", "StartTable"],
+    [
+      "TableBeingCleaned",
+      "entry_table_being_cleaned",
+      "customer.entry.table_being_cleaned",
+      "AskStaff",
+    ],
+    [
+      "TableAskNewParty",
+      "entry_table_ask_new_party",
+      "customer.entry.table_ask_new_party",
+      "AnswerNewParty",
+    ],
+  ])(
+    "DEC-DINING-GUEST-TABLE-START: %s starts no visit (no cookie) and answers with its own code",
+    async (status, code, messageKey, action) => {
+      const port = new MutablePort();
+      port.result = {
+        status,
+        brandDisplayName: "BOP Kitchen",
+        storeDisplayName: "Synthetic Market Store",
+        publicStoreReference: STORE_REFERENCE,
+        locale: "en-CA",
+      } as never;
+      const response = await post(await listen(customerEntry(port)));
+      expect(response.status).toBe(409);
+      expect(visitCookies(response)).toEqual([]);
+      expect(await response.json()).toEqual({
+        schemaVersion: 1,
+        code,
+        messageKey,
+        recovery: { action, storeSelection: "Hidden" },
+        store: {
+          brandDisplayName: "BOP Kitchen",
+          storeDisplayName: "Synthetic Market Store",
+          publicStoreReference: STORE_REFERENCE,
+          locale: "en-CA",
+        },
+      });
+    },
+  );
+
+  it("WP-2423 Q11: tells a guest with a replaced or turned-off table code to ask staff, with no cookie", async () => {
+    const port = new MutablePort();
+    for (const [reason, messageKey] of [
+      ["Replaced", "customer.entry.qr_replaced"],
+      ["TurnedOff", "customer.entry.qr_turned_off"],
+    ] as const) {
+      port.result = { status: "QrRetired", reason };
+      const response = await post(await listen(customerEntry(port)));
+      expect(response.status).toBe(410);
+      expect(response.headers.get("set-cookie")).toBeNull();
+      expect(await response.json()).toEqual({
+        schemaVersion: 1,
+        code: "entry_qr_retired",
+        messageKey,
+        recovery: { action: "AskStaff", storeSelection: "Hidden" },
+      });
+    }
+    port.result = { status: "QrRetired", reason: "Stolen" };
+    expect((await post(await listen(customerEntry(port)))).status).toBe(503);
+  });
+
   it("maps a strict port InvalidRequest without reflecting the QR", async () => {
     const port = new MutablePort();
     port.result = { status: "InvalidRequest" };
@@ -496,5 +689,252 @@ describe("WP-1004 Customer-entry contract", () => {
       channel: "Pickup",
       publicTableReference: null,
     });
+  });
+});
+
+describe("Customer entry request admission", () => {
+  it("returns generic429 before creating Guest and never issues a cookie", async () => {
+    const port = new MutablePort();
+    const response = await post(
+      await listen(
+        customerEntry(port, referenceFactory(), {
+          consume: async () => ({ status: "RateLimited", retryAfterSeconds: 37 }),
+        }),
+      ),
+    );
+    expect(response.status).toBe(429);
+    expect(response.headers.get("retry-after")).toBe("37");
+    expect(response.headers.get("set-cookie")).toBeNull();
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({
+      schemaVersion: 1,
+      code: "entry_rate_limited",
+      messageKey: "customer.entry.rate_limited",
+      recovery: { action: "RetryOrAskStaff", storeSelection: "Hidden" },
+    });
+    expect(port.calls).toHaveLength(0);
+  });
+  it("fails closed for absent, unavailable, failing or malformed admission", async () => {
+    const admissions: (CustomerEntryRequestAdmission | null)[] = [
+      null,
+      { consume: async () => ({ status: "Unavailable" }) },
+      {
+        consume: async () => {
+          throw new Error("private limiter detail");
+        },
+      },
+      { consume: async () => ({ status: "RateLimited", retryAfterSeconds: 0 }) },
+      { consume: async () => ({ status: "RateLimited", retryAfterSeconds: 86401 }) },
+    ];
+    for (const admission of admissions) {
+      const port = new MutablePort();
+      const response = await post(await listen(customerEntry(port, referenceFactory(), admission)));
+      expect(response.status).toBe(503);
+      expect(response.headers.get("retry-after")).toBeNull();
+      expect(response.headers.get("set-cookie")).toBeNull();
+      expect(await response.json()).toMatchObject({ code: "entry_service_unavailable" });
+      expect(port.calls).toHaveLength(0);
+    }
+  });
+  it("WP-2423: behind the entry only its own header names the guest; loopback never does", async () => {
+    const inputs: unknown[] = [];
+    await post(
+      await listen(
+        customerEntry(new MutablePort(), referenceFactory(), {
+          consume: async (input) => {
+            inputs.push(input);
+            return { status: "Allowed" };
+          },
+        }),
+      ),
+      { qrToken: TOKEN },
+      requestHeaders({ "x-bop-client-address": "198.51.100.20" }),
+    );
+    expect(inputs).toEqual([
+      { remoteAddress: "198.51.100.20", requestedAt: "2026-07-30T05:00:00.000Z" },
+    ]);
+  });
+  it("passes only direct peer address and server time, ignoring forged forwarding headers", async () => {
+    const inputs: unknown[] = [];
+    const port = new MutablePort();
+    const response = await post(
+      await listen(
+        customerEntry(port, referenceFactory(), {
+          consume: async (input) => {
+            inputs.push(input);
+            return { status: "Allowed" };
+          },
+        }),
+      ),
+      { qrToken: TOKEN },
+      requestHeaders({
+        "x-forwarded-for": "203.0.113.99",
+        forwarded: "for=203.0.113.99",
+      }),
+    );
+    expect(response.status).toBe(201);
+    expect(inputs).toEqual([{ remoteAddress: null, requestedAt: "2026-07-30T05:00:00.000Z" }]);
+    expect(port.calls).toHaveLength(1);
+  });
+});
+
+// M02 (v15 07b7a1b7): a reload lost the table or Store a guest scanned (the code leaves the
+// address bar), and the app then opened the installation's first Store instead.
+describe("M02 waiting scan: a reload asks the same Store about the same code", () => {
+  it.each([
+    ["TableNotOpen", tableNotOpen],
+    ["TableMayStart", { ...tableNotOpen, status: "TableMayStart" }],
+    ["TableAskNewParty", { ...tableNotOpen, status: "TableAskNewParty" }],
+    ["TableBeingCleaned", { ...tableNotOpen, status: "TableBeingCleaned" }],
+    ["ServiceNotOffered", { status: "ServiceNotOffered", storeDisplayName: "Synthetic Store" }],
+    [
+      "NotAccepting",
+      {
+        status: "NotAccepting",
+        storeDisplayName: "Synthetic Store",
+        operatingState: "Closed",
+        todayHours: [],
+        todayKind: null,
+        nextOpening: null,
+        localDate: null,
+      },
+    ],
+  ])(
+    "%s starts no visit and remembers the scanned code for the entry route only",
+    async (_, result) => {
+      const port = new MutablePort();
+      port.result = result;
+      const response = await post(await listen(customerEntry(port)));
+      expect(response.status).toBe(409);
+      expect(response.headers.getSetCookie()).toEqual([SCAN_COOKIE]);
+    },
+  );
+
+  it("`{resume:true}` replays the remembered code, with the guest's answer, through the normal entry", async () => {
+    const port = new MutablePort();
+    port.result = tableNotOpen;
+    const admitted: unknown[] = [];
+    const serverPort = await listen(
+      customerEntry(port, referenceFactory(), {
+        consume: async (input) => {
+          admitted.push(input);
+          return { status: "Allowed" };
+        },
+      }),
+    );
+    const cookie = requestHeaders({ cookie: `other=1; __Secure-bop-scan=${TOKEN}` });
+    const waiting = await post(serverPort, { resume: true }, cookie);
+    expect(waiting.status).toBe(409);
+    expect(((await waiting.json()) as { code: string }).code).toBe("entry_table_not_open");
+    expect(waiting.headers.getSetCookie()).toEqual([SCAN_COOKIE]);
+    // Staff opened the table: the same replay starts the visit there, and the scan is forgotten
+    // on the same answer as the new visit's cookie (two Set-Cookie headers, neither overwritten).
+    port.result = established();
+    const opened = await post(serverPort, { resume: true, intent: "Join" }, cookie);
+    expect(opened.status).toBe(201);
+    expect(opened.headers.getSetCookie()).toEqual([
+      `__Host-bop-guest=${SESSION_CREDENTIAL}; Path=/; Max-Age=86400; Secure; HttpOnly; SameSite=Lax`,
+      FORGET_SCAN,
+    ]);
+    expect(port.calls.map(({ qrToken, intent }) => ({ qrToken, intent }))).toEqual([
+      { qrToken: TOKEN, intent: undefined },
+      { qrToken: TOKEN, intent: "Join" },
+    ]);
+    // Each replay is an entry attempt like any other (the same budget).
+    expect(admitted).toHaveLength(2);
+  });
+
+  it("a fresh scan's visit also forgets an older waiting scan; none sent, none forgotten", async () => {
+    const port = new MutablePort();
+    const serverPort = await listen(customerEntry(port));
+    const fresh = await post(
+      serverPort,
+      { qrToken: TOKEN },
+      requestHeaders({ cookie: `__Secure-bop-scan=${TOKEN}` }),
+    );
+    expect(fresh.headers.getSetCookie()).toEqual([
+      `__Host-bop-guest=${SESSION_CREDENTIAL}; Path=/; Max-Age=86400; Secure; HttpOnly; SameSite=Lax`,
+      FORGET_SCAN,
+    ]);
+    expect((await post(serverPort)).headers.getSetCookie()).toHaveLength(1);
+  });
+
+  it("a retired code is forgotten; a refusal, a busy Store or a limit keeps the scan", async () => {
+    const port = new MutablePort();
+    const cookie = requestHeaders({ cookie: `__Secure-bop-scan=${TOKEN}` });
+    port.result = { status: "QrRetired", reason: "Replaced" };
+    const retired = await post(await listen(customerEntry(port)), { resume: true }, cookie);
+    expect(retired.status).toBe(410);
+    expect(retired.headers.getSetCookie()).toEqual([FORGET_SCAN]);
+    for (const result of [{ status: "EntryUnavailable" }, { status: "InvalidRequest" }]) {
+      port.result = result;
+      const refused = await post(await listen(customerEntry(port)), { resume: true }, cookie);
+      expect(refused.headers.getSetCookie()).toEqual([]);
+    }
+    const limited = await post(
+      await listen(
+        customerEntry(port, referenceFactory(), {
+          consume: async () => ({ status: "RateLimited", retryAfterSeconds: 30 }),
+        }),
+      ),
+      { resume: true },
+      cookie,
+    );
+    expect(limited.status).toBe(429);
+    expect(limited.headers.getSetCookie()).toEqual([]);
+  });
+
+  it("with no remembered scan the guest is asked to scan, before any budget or Store is used", async () => {
+    const port = new MutablePort();
+    let admissions = 0;
+    const serverPort = await listen(
+      customerEntry(port, referenceFactory(), {
+        consume: async () => {
+          admissions += 1;
+          return { status: "Allowed" };
+        },
+      }),
+    );
+    for (const cookie of [
+      undefined,
+      "__Secure-bop-scan=not-a-code",
+      `__Secure-bop-scan=${TOKEN}; __Secure-bop-scan=${TOKEN}`,
+    ]) {
+      const response = await post(
+        serverPort,
+        { resume: true },
+        cookie === undefined ? requestHeaders() : requestHeaders({ cookie }),
+      );
+      expect(response.status).toBe(404);
+      expect(await response.json()).toEqual({
+        schemaVersion: 1,
+        code: "entry_scan_missing",
+        messageKey: "customer.entry.scan_missing",
+        recovery: { action: "Rescan", storeSelection: "Hidden" },
+      });
+    }
+    expect(admissions).toBe(0);
+    expect(port.calls).toEqual([]);
+    // Only exactly `{resume:true}` (with an answer) is a replay.
+    for (const body of [
+      { resume: false },
+      { resume: "true" },
+      { resume: true, qrToken: TOKEN },
+      { resume: true, intent: "Leave" },
+    ])
+      expect((await post(serverPort, body)).status).toBe(400);
+  });
+
+  it("never echoes the remembered code in an answer", async () => {
+    const port = new MutablePort();
+    port.error = new Error(TOKEN);
+    const response = await post(
+      await listen(customerEntry(port)),
+      { resume: true },
+      requestHeaders({ cookie: `__Secure-bop-scan=${TOKEN}` }),
+    );
+    expect(response.status).toBe(503);
+    expect(await response.text()).not.toContain(TOKEN);
+    expect(response.headers.getSetCookie()).toEqual([]);
   });
 });

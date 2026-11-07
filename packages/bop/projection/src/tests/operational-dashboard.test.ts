@@ -235,3 +235,46 @@ describe("WP-1905 basic Merchant dashboard query", () => {
     ).toThrowError(new OperationalProjectionError("PERMISSION_DENIED"));
   });
 });
+
+it("counts unassociated reconciliation exceptions at Store level without attributing an order channel", () => {
+  const unlinked = buildOrderExceptionProjection({
+    ...scope,
+    businessDate: "2026-08-12",
+    checkpointReference: r(5),
+    projectedAt: "2026-08-12T20:00:01.000Z",
+    freshnessStatus: "Fresh",
+    deriveProjectionReference: () => r(90),
+    sources: [
+      {
+        ...scope,
+        sourceReference: r(91),
+        orderReference: null,
+        paymentReference: null,
+        diningReference: null,
+        kind: "PaymentReconciliationDifference",
+        severity: "Critical",
+        sourceOwner: "Payment",
+        sourceStatus: "Open",
+        providerState: "Unknown",
+        compensationStatus: "NotRequested",
+        sourceVersion: 1n,
+        sourceDigest: digest,
+        createdAt: "2026-08-12T19:59:00.000Z",
+        updatedAt: "2026-08-12T19:59:00.000Z",
+        resolutionEvidenceReference: null,
+      },
+    ],
+  });
+  const read = (filter = {}) =>
+    buildOperationalDashboardQuery({
+      query: query(filter),
+      authorizedPermissions: ["reporting.read"],
+      sources: { ...sources, exception: unlinked },
+      generatedAt: "2026-08-12T20:00:03.000Z",
+    });
+  expect(read().exceptions).toEqual({ open: 1, critical: 1 });
+  expect(read({ sourceChannel: "Pos", orderType: "DineIn" }).exceptions).toEqual({
+    open: 0,
+    critical: 0,
+  });
+});

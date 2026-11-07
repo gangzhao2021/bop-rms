@@ -1,3 +1,4 @@
+import { createContractParsers } from "./contract-parsers.js";
 export type DataQualityPageErrorCode =
   | "PermissionDenied"
   | "NotFound"
@@ -95,9 +96,7 @@ export interface ReconciliationClient {
   load(): Promise<unknown>;
 }
 
-const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const codePattern = /^[A-Z][A-Z0-9_.:-]{0,63}$/u;
-const instantPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 const decimalPattern = /^-?(?:0|[1-9][0-9]{0,20})(?:\.[0-9]{1,9})?$/u;
 const fail = (): never => {
   throw new DataQualityPageError("Unavailable");
@@ -118,21 +117,11 @@ function object(value: unknown, fields: readonly string[]) {
     fail();
   return value as Record<string, unknown>;
 }
-const reference = (value: unknown) =>
-  typeof value === "string" && uuid.test(value) ? value : fail();
+const { reference, instant, bool, oneOf } = createContractParsers(fail);
 const code = (value: unknown) =>
   typeof value === "string" && codePattern.test(value) ? value : fail();
-const instant = (value: unknown) =>
-  typeof value === "string" &&
-  instantPattern.test(value) &&
-  new Date(Date.parse(value)).toISOString() === value
-    ? value
-    : fail();
-const bool = (value: unknown) => (typeof value === "boolean" ? value : fail());
 const nullable = <T>(value: unknown, parse: (item: unknown) => T) =>
   value === null ? null : parse(value);
-const oneOf = <T extends string>(value: unknown, values: readonly T[]) =>
-  typeof value === "string" && values.includes(value as T) ? (value as T) : fail();
 const search = (value: unknown) =>
   value === null
     ? null

@@ -260,7 +260,7 @@ export function buildOperationalDashboardQuery(input: {
       ...(input.sources.kitchen?.rows ?? []),
       ...(input.sources.fulfillment?.rows ?? []),
       ...(input.sources.exception?.rows ?? []),
-    ].some((row) => !knownReferences.has(row.orderReference));
+    ].some((row) => row.orderReference !== null && !knownReferences.has(row.orderReference));
     if (hasUnknownOrder) projectionFail("SOURCE_CONFLICT");
   }
   const dependentRows = <T extends { readonly orderReference: string }>(rows: readonly T[]) =>
@@ -280,7 +280,11 @@ export function buildOperationalDashboardQuery(input: {
   const exceptionRows =
     selectedOrders === undefined || input.sources.exception === null
       ? null
-      : dependentRows(input.sources.exception.rows);
+      : input.sources.exception.rows.filter((row) =>
+          row.orderReference === null
+            ? query.sourceChannel === "All" && query.orderType === "All"
+            : selectedReferences.has(row.orderReference),
+        );
 
   const captured = paymentRows?.reduce((total, row) => total + BigInt(row.capturedAmountMinor), 0n);
   const refunded = paymentRows?.reduce((total, row) => total + BigInt(row.refundedAmountMinor), 0n);

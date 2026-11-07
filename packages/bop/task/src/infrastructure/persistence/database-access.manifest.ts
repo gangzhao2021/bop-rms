@@ -3,6 +3,14 @@ const databaseAccessManifestInput = {
   module: { moduleName: "task", packageName: "@bop/task", layer: "BOP" },
   tables: [
     {
+      table: "task_version",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@bop/task" },
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       table: "support_case_version",
       classification: "configuration-version",
       writeOwner: { kind: "module", id: "@bop/task" },

@@ -2,11 +2,23 @@ import type { ConsumerTransaction } from "@bop/eventing";
 
 import type { OrderCreatedEnvelope } from "../../contracts/order-created-event.js";
 import type { OrderingInstant, OrderingReference } from "../../domain/cart.js";
-import type { OrderStatusProjection } from "../../domain/order-status-projection.js";
+import type {
+  OrderStatusProjection,
+  OrderStatusSourceSnapshot,
+} from "../../domain/order-status-projection.js";
 
 export interface OrderCreatedEventConsumerPorts {
+  readonly authorization: {
+    authorize(transaction: ConsumerTransaction, envelope: OrderCreatedEnvelope): Promise<boolean>;
+  };
   readonly source: {
+    freshness(
+      transaction: ConsumerTransaction,
+      snapshot: OrderStatusSourceSnapshot,
+    ): Promise<"Fresh" | "Stale">;
     loadExact(input: {
+      readonly transaction: ConsumerTransaction;
+      readonly envelope: OrderCreatedEnvelope;
       readonly brandReference: OrderingReference;
       readonly storeReference: OrderingReference;
       readonly orderReference: OrderingReference;
@@ -16,7 +28,10 @@ export interface OrderCreatedEventConsumerPorts {
     }): Promise<unknown | null>;
   };
   readonly projections: {
-    load(orderReference: OrderingReference): Promise<OrderStatusProjection | null>;
+    load(input: {
+      readonly orderReference: OrderingReference;
+      readonly transaction: ConsumerTransaction;
+    }): Promise<OrderStatusProjection | null>;
     replace(input: {
       readonly projection: OrderStatusProjection;
       readonly envelope: OrderCreatedEnvelope;

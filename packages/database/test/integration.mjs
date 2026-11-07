@@ -62,11 +62,7 @@ await withIsolatedDatabase({ caseId: "integration", root }, async (isolated) => 
     await cp(path.join(root, "migrations"), path.join(fixtureRoot, "migrations"), {
       recursive: true,
     });
-    if (extraSql)
-      await writeFile(
-        path.join(fixtureRoot, "migrations", "0000-platform", `${syntheticId}.sql`),
-        extraSql,
-      );
+    if (extraSql) await writeFile(path.join(fixtureRoot, syntheticRelativePath), extraSql);
     const catalog = await readMigrationCatalog(fixtureRoot);
     assert.deepEqual(catalog.diagnostics, []);
     return { catalog, fixtureRoot };
@@ -75,9 +71,18 @@ await withIsolatedDatabase({ caseId: "integration", root }, async (isolated) => 
   const catalog = await readMigrationCatalog(root);
   assert.deepEqual(catalog.diagnostics, []);
   const platformMigrations = catalog.migrations.filter((migration) => migration.namespace === 0);
+  // DEC-MIGRATION-RELEASE-ORDER: module namespaces are closed, so a new migration (here the
+  // synthetic probe) belongs at the end of the current release namespace, whatever its owner.
+  const syntheticNamespace = Math.max(
+    ...catalog.migrations.map((migration) => migration.namespace),
+  );
+  const releaseMigrations = catalog.migrations.filter(
+    (migration) => migration.namespace === syntheticNamespace,
+  );
   const syntheticSequence =
-    Math.max(...platformMigrations.map((migration) => migration.sequence)) + 1;
-  const syntheticId = `0000_${String(syntheticSequence).padStart(3, "0")}_create_synthetic_rollback_probe`;
+    Math.max(...releaseMigrations.map((migration) => migration.sequence)) + 1;
+  const syntheticId = `${String(syntheticNamespace).padStart(4, "0")}_${String(syntheticSequence).padStart(3, "0")}_create_synthetic_rollback_probe`;
+  const syntheticRelativePath = `${path.posix.dirname(releaseMigrations[0].relativePath)}/${syntheticId}.sql`;
   const lifecycleClient = await targetClient(lifecycleDatabase);
   const objectQuery = `SELECT table_schema, table_name
     FROM information_schema.tables
@@ -403,9 +408,9 @@ await withIsolatedDatabase({ caseId: "integration", root }, async (isolated) => 
     `INSERT INTO platform_core.migration_history
       (migration_id, namespace, sequence, relative_path, owner_id, schema_name,
        checksum_sha256, runner_contract_version)
-     VALUES ($1, 0, $2, $3,
-       'shared-infrastructure/platform-core', 'platform_core', $4, 1)`,
-    [syntheticId, syntheticSequence, `migrations/0000-platform/${syntheticId}.sql`, "0".repeat(64)],
+     VALUES ($1, $2, $3, $4,
+       'shared-infrastructure/platform-core', 'platform_core', $5, 1)`,
+    [syntheticId, syntheticNamespace, syntheticSequence, syntheticRelativePath, "0".repeat(64)],
   );
   await lifecycleClient.end();
   const orphaned = await runMigrationCommand({
@@ -485,7 +490,8 @@ SELECT 1 / 0;
       to_regclass('platform_core.synthetic_rollback_probe')::text AS probe,
       (SELECT count(*)::integer FROM platform_core.migration_history) AS history_count`);
   assert.deepEqual(rollbackState.rows[0], {
-    history_count: platformMigrations.length,
+    // Apply runs in (namespace, sequence) order and stops at the failing probe, which is last.
+    history_count: catalog.migrations.length,
     probe: null,
   });
   await rollbackClient.end();

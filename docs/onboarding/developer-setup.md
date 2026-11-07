@@ -1,5 +1,7 @@
 # Developer Setup
 
+Project navigation: [spec index](../spec/README.md), [scenario evidence](../spec/design/business-scenario-coverage.md#current-scenario-evidence-view), [candidate register](../runbooks/project-candidate-register.md), and [release evidence intake](../runbooks/release-evidence-intake.md). Foundation startup below does not provision the separately recorded InternalTest installation.
+
 This is the canonical repository setup template for the current bootstrap baseline. Keep values portable and synthetic; never paste credentials, account identities, signed URLs, real Store/Provider data, PII, payment data, or allergy/health facts into this file.
 
 ## Supported environment
@@ -65,6 +67,8 @@ Default localhost endpoints are API `http://127.0.0.1:3000`, Merchant Web `http:
 API `/health` should be healthy. API `/ready` intentionally returns HTTP `503` with database `not_configured`; local PostgreSQL startup is not application database integration.
 
 ## Verify a change
+
+Select checks from the active WP and root `AGENTS.md` before execution. Documentation changes need source/link/format review; code or tooling changes need affected behavior and type/lint checks. Reuse a matching installation and valid unchanged-input evidence. The following inventory is an assembled environment/release milestone example, not a mandatory reinstall and full regression for every edit.
 
 Read root `AGENTS.md`, `docs/spec/README.md`, the active WP brief, and applicable nested instructions first. From the repository root, use only scripts that exist:
 

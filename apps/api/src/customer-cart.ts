@@ -1,3 +1,8 @@
+import { logGuestFailure } from "./guest-failure-log.js";
+import { CartError, CartReplacementPendingError } from "@rms/ordering";
+import { checkoutHoldRetrySeconds } from "./customer-checkout-hold.js";
+import { customerDisplayLocale } from "./customer-display-locale.js";
+import type { CustomerCartRestorePort } from "./customer-pickup-cart-restore.js";
 import type { Request, RequestHandler, Response } from "express";
 
 const uuidV7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
@@ -12,10 +17,13 @@ class GuestSessionError extends Error {}
 export const customerCartRoutes = Object.freeze({
   create: "/api/v1/carts",
   current: "/bff/customer/cart",
+  replacement: "/api/v1/carts/:cart_id/replacement",
   read: "/api/v1/carts/:cart_id",
   addItem: "/api/v1/carts/:cart_id/items",
   updateItem: "/api/v1/carts/:cart_id/items/:cart_item_id",
   removeItem: "/api/v1/carts/:cart_id/items/:cart_item_id",
+  /** WP-2423 M03: put the dishes of an Order that won't be made back in the guest's Cart. */
+  restoreOrder: "/bff/customer/cart/restore-order",
 });
 
 export interface CustomerCartMoney {
@@ -69,6 +77,23 @@ export interface CustomerCartView {
       readonly blockingReasons: readonly string[];
     };
     readonly warnings: readonly string[];
+    /**
+     * WP-2423 M03: the guest's own Order these dishes went to, while the pickup Cart is empty
+     * after it or still holds dishes already in it (their checkout is refused); `notMade`
+     * when that Order will not be made. Null otherwise and always null for a table.
+     */
+    readonly placedOrder: {
+      readonly orderReference: string;
+      readonly orderNumber: string;
+      readonly notMade: boolean;
+    } | null;
+    /** WP-2423 (same-table-ordering): a table Cart's rounds sent lately (absent otherwise). */
+    readonly recentRounds?: readonly {
+      readonly roundNumber: number;
+      readonly sentAt: string;
+      readonly sentByThisPhone: boolean;
+      readonly cartItemReferences: readonly string[];
+    }[];
   };
 }
 
@@ -86,16 +111,66 @@ export type CustomerCartPortResult =
   | { readonly status: "Found" | "Applied" | "Current"; readonly view: CustomerCartView }
   | { readonly status: "SessionExpired" | "NotFound" | "IdempotencyConflict" }
   | { readonly status: "VersionConflict"; readonly currentVersion: number }
-  | { readonly status: "SelectionInvalid"; readonly issueCodes: readonly string[] }
+  | {
+      readonly status: "SelectionInvalid";
+      readonly issueCodes: readonly string[];
+      /** WP-2423 (`ITEM_SHORT`): how many of the item the Store's stock can make (0: none). */
+      readonly available?: number;
+    }
   | { readonly status: "LifecycleExpired" | "LifecycleAbandoned" }
   | { readonly status: "RateLimited"; readonly retryAfterSeconds: number }
+  /** WP-2423: briefly unavailable (for example a table Cart expiry still being recorded). */
+  | { readonly status: "RetryLater"; readonly retryAfterSeconds: number }
+  /** WP-2423: the table's last checkout is still being processed; retry shortly. */
+  | {
+      readonly status: "OrderProcessing";
+      /** Seconds until the wait ends when it is time-bounded; null when it has no known end. */
+      readonly retryAfterSeconds: number | null;
+    }
+  /** DEC-DINING-ANY-PARTICIPANT-SUBMIT: another guest at the table is checking out this Cart
+   * version until heldUntil; nothing was changed. */
+  | { readonly status: "CheckoutInProgress"; readonly heldUntil: string }
+  /** DEC-DINE-IN-PAY-LATER: the guest's table is checking out; staff add dishes. */
+  | { readonly status: "TableCheckingOut" }
+  /** Coordinator 2026-10-30: a phone that scanned a table but hasn't joined it (not seated). */
+  | { readonly status: "NotSeated" }
   | { readonly status: "Unavailable" };
 
+export interface CustomerCartReplacementPort {
+  replace(input: {
+    readonly sessionCredential: string;
+    readonly csrfCredential: string;
+    readonly operationReference: string;
+    readonly previousCartReference: string;
+    readonly expectedCartVersion: number;
+  }): Promise<unknown>;
+}
+
+/**
+ * The optional display-locale argument to pass on: none for the session's own locale, so a call
+ * in the session language is the same call as before.
+ */
+export function cartDisplayArguments(displayLocale?: string | null): [] | [string] {
+  return displayLocale == null ? [] : [displayLocale];
+}
+
+/**
+ * Owner 2026-10-23: every Cart view a port returns names its items and options in `displayLocale`
+ * (the guest's chosen language, from the optional `locale` query parameter) when given, else in
+ * the session's own locale; names missing in it fall back to the menu language.
+ */
 export interface CustomerCartPort {
-  createCart(input: CustomerCartMutationContext): Promise<CustomerCartPortResult>;
-  getCurrentCart(input: CustomerCartContext): Promise<CustomerCartPortResult>;
+  createCart(
+    input: CustomerCartMutationContext,
+    displayLocale?: string | null,
+  ): Promise<CustomerCartPortResult>;
+  getCurrentCart(
+    input: CustomerCartContext,
+    displayLocale?: string | null,
+  ): Promise<CustomerCartPortResult>;
   getCart(
     input: CustomerCartContext & { readonly cartReference: string },
+    displayLocale?: string | null,
   ): Promise<CustomerCartPortResult>;
   addItem(
     input: CustomerCartMutationContext & {
@@ -109,6 +184,7 @@ export interface CustomerCartPort {
       }[];
       readonly customerNote: string | null;
     },
+    displayLocale?: string | null,
   ): Promise<CustomerCartPortResult>;
   updateItem(
     input: CustomerCartMutationContext & {
@@ -122,6 +198,7 @@ export interface CustomerCartPort {
       }[];
       readonly customerNote: string | null;
     },
+    displayLocale?: string | null,
   ): Promise<CustomerCartPortResult>;
   removeItem(
     input: CustomerCartMutationContext & {
@@ -129,6 +206,7 @@ export interface CustomerCartPort {
       readonly cartItemReference: string;
       readonly expectedCartVersion: number;
     },
+    displayLocale?: string | null,
   ): Promise<CustomerCartPortResult>;
 }
 
@@ -140,9 +218,27 @@ type ErrorCode =
   | "cart_idempotency_conflict"
   | "cart_selection_invalid"
   | "cart_expired"
+  | "cart_replacement_forbidden"
+  | "cart_replacement_unavailable"
   | "cart_abandoned"
   | "cart_rate_limited"
+  | "cart_order_processing"
+  | "cart_checkout_in_progress"
+  | "cart_table_checking_out"
+  | "cart_dining_not_seated"
+  | "cart_restore_not_available"
   | "cart_service_unavailable";
+
+/**
+ * WP-2423: seconds until a time-bounded wait for the table's last checkout ends (at least 1, at
+ * most an hour), or null when the wait has no known end, so the guest is never promised a time.
+ */
+export function orderProcessingRetrySeconds(pendingUntil: string | null, now: string) {
+  if (pendingUntil === null) return null;
+  const remaining = Date.parse(pendingUntil) - Date.parse(now);
+  if (!Number.isFinite(remaining)) return null;
+  return Math.min(3600, Math.max(1, Math.ceil(remaining / 1000)));
+}
 
 const errors = Object.freeze({
   cart_request_invalid: { status: 400, messageKey: "customer.cart.request_invalid" },
@@ -152,8 +248,22 @@ const errors = Object.freeze({
   cart_idempotency_conflict: { status: 409, messageKey: "customer.cart.idempotency_conflict" },
   cart_selection_invalid: { status: 422, messageKey: "customer.cart.selection_invalid" },
   cart_expired: { status: 409, messageKey: "customer.cart.expired" },
+  cart_replacement_forbidden: { status: 403, messageKey: "customer.cart.replacement_forbidden" },
+  cart_replacement_unavailable: {
+    status: 409,
+    messageKey: "customer.cart.replacement_unavailable",
+  },
   cart_abandoned: { status: 409, messageKey: "customer.cart.abandoned" },
   cart_rate_limited: { status: 429, messageKey: "customer.cart.rate_limited" },
+  // DEC-DINE-IN-PAY-LATER: the table is checking out (no new rounds; staff add dishes).
+  cart_table_checking_out: { status: 409, messageKey: "customer.cart.table_checking_out" },
+  cart_dining_not_seated: { status: 409, messageKey: "customer.cart.dining_not_seated" },
+  // WP-2423 M03: no Order of this Cart that won't be made (still open, paid, or another Cart's).
+  cart_restore_not_available: { status: 409, messageKey: "customer.cart.restore_not_available" },
+  // WP-2423: the table's last checkout may still create an order or charge; retry shortly.
+  cart_order_processing: { status: 409, messageKey: "customer.cart.order_processing" },
+  // DEC-DINING-ANY-PARTICIPANT-SUBMIT: another guest at the table is paying for this Cart.
+  cart_checkout_in_progress: { status: 409, messageKey: "customer.cart.checkout_in_progress" },
   cart_service_unavailable: { status: 503, messageKey: "customer.cart.service_unavailable" },
 } as const);
 
@@ -202,6 +312,12 @@ function canonicalInstant(value: unknown): string {
 function positive(value: unknown, maximum = 100): number {
   if (!Number.isSafeInteger(value) || Number(value) < 1 || Number(value) > maximum)
     throw new TypeError("positive integer required");
+  return Number(value);
+}
+
+function count(value: unknown, maximum: number): number {
+  if (!Number.isSafeInteger(value) || Number(value) < 0 || Number(value) > maximum)
+    throw new TypeError("count required");
   return Number(value);
 }
 
@@ -308,6 +424,12 @@ function publicView(value: unknown): CustomerCartView {
     "items",
     "quote",
     "warnings",
+    ...(root.cart !== null && typeof root.cart === "object" && "placedOrder" in root.cart
+      ? ["placedOrder"]
+      : []),
+    ...(root.cart !== null && typeof root.cart === "object" && "recentRounds" in root.cart
+      ? ["recentRounds"]
+      : []),
   ]);
   if (cart.orderType !== "DineIn" && cart.orderType !== "Pickup")
     throw new TypeError("invalid order type");
@@ -421,7 +543,56 @@ function publicView(value: unknown): CustomerCartView {
       items,
       quote,
       warnings: codes(cart.warnings),
+      placedOrder: placedOrderView(cart.placedOrder, cart.orderType),
+      ...(cart.recentRounds === undefined
+        ? {}
+        : { recentRounds: recentRoundsView(cart.recentRounds, cart.orderType) }),
     }),
+  });
+}
+function recentRoundsView(
+  value: unknown,
+  orderType: "DineIn" | "Pickup",
+): NonNullable<CustomerCartView["cart"]["recentRounds"]> {
+  if (orderType !== "DineIn" || !Array.isArray(value) || value.length > 5)
+    throw new TypeError("invalid rounds");
+  return Object.freeze(
+    value.map((candidate) => {
+      const raw = closed(candidate, [
+        "roundNumber",
+        "sentAt",
+        "sentByThisPhone",
+        "cartItemReferences",
+      ]);
+      if (
+        typeof raw.sentByThisPhone !== "boolean" ||
+        !Array.isArray(raw.cartItemReferences) ||
+        raw.cartItemReferences.length > 100
+      )
+        throw new TypeError("invalid round");
+      return Object.freeze({
+        roundNumber: positive(raw.roundNumber, 999),
+        sentAt: canonicalInstant(raw.sentAt),
+        sentByThisPhone: raw.sentByThisPhone,
+        cartItemReferences: Object.freeze(
+          raw.cartItemReferences.map((reference: unknown) => scalar(reference, uuidV7)),
+        ),
+      });
+    }),
+  );
+}
+function placedOrderView(
+  value: unknown,
+  orderType: "DineIn" | "Pickup",
+): CustomerCartView["cart"]["placedOrder"] {
+  if (value === undefined || value === null) return null;
+  const raw = closed(value, ["orderReference", "orderNumber", "notMade"]);
+  if (orderType !== "Pickup" || typeof raw.notMade !== "boolean")
+    throw new TypeError("invalid placed order");
+  return Object.freeze({
+    orderReference: scalar(raw.orderReference, uuidV7),
+    orderNumber: scalar(raw.orderNumber, /^[1-9][0-9]{0,18}$/u),
+    notMade: raw.notMade,
   });
 }
 
@@ -435,7 +606,11 @@ function responseControls(response: Response): void {
 function sendError(
   response: Response,
   errorCode: ErrorCode,
-  details?: { readonly currentVersion?: number; readonly issueCodes?: readonly string[] },
+  details?: {
+    readonly currentVersion?: number;
+    readonly issueCodes?: readonly string[];
+    readonly available?: number;
+  },
 ): void {
   const contract = errors[errorCode];
   response.status(contract.status).json({
@@ -448,7 +623,12 @@ function sendError(
   });
 }
 
-function handleResult(response: Response, result: CustomerCartPortResult, created = false): void {
+function handleResult(
+  response: Response,
+  result: CustomerCartPortResult,
+  created: boolean,
+  now: () => string,
+): void {
   if (result.status === "Found" || result.status === "Applied" || result.status === "Current") {
     try {
       const view = publicView(result.view);
@@ -458,6 +638,30 @@ function handleResult(response: Response, result: CustomerCartPortResult, create
     } catch {
       sendError(response, "cart_service_unavailable");
     }
+    return;
+  }
+  if (result.status === "TableCheckingOut") {
+    sendError(response, "cart_table_checking_out");
+    return;
+  }
+  if (result.status === "NotSeated") {
+    sendError(response, "cart_dining_not_seated");
+    return;
+  }
+  if (result.status === "CheckoutInProgress") {
+    response.setHeader("Retry-After", String(checkoutHoldRetrySeconds(result.heldUntil, now())));
+    sendError(response, "cart_checkout_in_progress");
+    return;
+  }
+  if (result.status === "OrderProcessing") {
+    if (result.retryAfterSeconds !== null)
+      response.setHeader("Retry-After", String(positive(result.retryAfterSeconds, 3600)));
+    sendError(response, "cart_order_processing");
+    return;
+  }
+  if (result.status === "RetryLater") {
+    response.setHeader("Retry-After", String(positive(result.retryAfterSeconds, 60)));
+    sendError(response, "cart_service_unavailable");
     return;
   }
   if (result.status === "RateLimited") {
@@ -482,7 +686,12 @@ function handleResult(response: Response, result: CustomerCartPortResult, create
     result.status === "VersionConflict"
       ? { currentVersion: positive(result.currentVersion, 999_999_999) }
       : result.status === "SelectionInvalid"
-        ? { issueCodes: codes(result.issueCodes) }
+        ? {
+            issueCodes: codes(result.issueCodes),
+            ...(result.available === undefined
+              ? {}
+              : { available: count(result.available, 999_999_999) }),
+          }
         : undefined,
   );
 }
@@ -490,11 +699,13 @@ function handleResult(response: Response, result: CustomerCartPortResult, create
 async function invoke(
   response: Response,
   operation: Promise<CustomerCartPortResult>,
-  created = false,
+  created: boolean,
+  now: () => string,
 ): Promise<void> {
   try {
-    handleResult(response, await operation, created);
-  } catch {
+    handleResult(response, await operation, created, now);
+  } catch (error) {
+    logGuestFailure("CUSTOMER_CART_UNAVAILABLE", error);
     sendError(response, "cart_service_unavailable");
   }
 }
@@ -515,19 +726,84 @@ export class CustomerCartHandler {
   readonly #allowedOrigin: string;
   readonly #now: () => string;
   readonly #port: CustomerCartPort;
+  readonly #replacement: CustomerCartReplacementPort | undefined;
+  readonly #restore: CustomerCartRestorePort | undefined;
+  readonly #invoke = (
+    response: Response,
+    operation: Promise<CustomerCartPortResult>,
+    created = false,
+  ) => invoke(response, operation, created, this.#now);
 
   constructor({
     allowedOrigin,
     now = () => new Date().toISOString(),
     port,
+    replacement,
+    restore,
   }: {
     readonly allowedOrigin: string;
     readonly now?: () => string;
     readonly port: CustomerCartPort;
+    readonly replacement?: CustomerCartReplacementPort;
+    readonly restore?: CustomerCartRestorePort;
   }) {
     this.#allowedOrigin = parseOrigin(allowedOrigin);
     this.#now = now;
     this.#port = port;
+    this.#replacement = replacement;
+    this.#restore = restore;
+  }
+
+  /** WP-2423 M03: puts an unmade Order's dishes back in the Cart (never an Order or a charge). */
+  restoreOrder(): RequestHandler {
+    return async (request, response) => {
+      responseControls(response);
+      let input: Parameters<CustomerCartRestorePort["restore"]>[0];
+      let locale: string | null;
+      try {
+        const raw = body(request, ["orderReference"]);
+        input = {
+          ...this.#mutation(request),
+          orderReference: scalar(raw.orderReference, uuidV7),
+        };
+        locale = this.#displayLocale(request);
+      } catch (error) {
+        this.#requestError(response, error);
+        return;
+      }
+      if (this.#restore === undefined) {
+        sendError(response, "cart_service_unavailable");
+        return;
+      }
+      try {
+        const result = await this.#restore.restore(input, ...cartDisplayArguments(locale));
+        if (result.status === "SessionExpired") {
+          sendError(response, "cart_session_expired");
+          return;
+        }
+        if (result.status === "NotRestorable") {
+          sendError(response, "cart_restore_not_available");
+          return;
+        }
+        if (result.status !== "Restored") {
+          sendError(response, "cart_service_unavailable");
+          return;
+        }
+        const view = publicView(result.view);
+        response.setHeader("ETag", `"${view.cart.version}"`);
+        response.status(200).json({
+          ...view,
+          restored: {
+            added: count(result.added, 100),
+            alreadyPutBack: count(result.alreadyPutBack, 100),
+            unavailable: count(result.unavailable, 100),
+          },
+        });
+      } catch (error) {
+        logGuestFailure("CUSTOMER_CART_RESTORE_UNAVAILABLE", error);
+        sendError(response, "cart_service_unavailable");
+      }
+    };
   }
 
   #context(request: Request): CustomerCartContext {
@@ -535,6 +811,12 @@ export class CustomerCartHandler {
       guestCredential: guestCredential(request),
       requestedAt: canonicalInstant(this.#now()),
     });
+  }
+
+  /** Only `locale` is read from the query; other query keys stay ignored as before. */
+  #displayLocale(request: Request): string | null {
+    const locale = request.query.locale;
+    return customerDisplayLocale(locale === undefined ? {} : { locale });
   }
 
   #mutation(request: Request): CustomerCartMutationContext {
@@ -559,9 +841,85 @@ export class CustomerCartHandler {
       try {
         const input = this.#mutation(request);
         body(request, []);
-        await invoke(response, this.#port.createCart(input), true);
+        await this.#invoke(
+          response,
+          this.#port.createCart(input, ...cartDisplayArguments(this.#displayLocale(request))),
+          true,
+        );
       } catch (error) {
         this.#requestError(response, error);
+      }
+    };
+  }
+
+  replace(): RequestHandler {
+    return async (request, response) => {
+      responseControls(response);
+      let input: Parameters<CustomerCartReplacementPort["replace"]>[0];
+      try {
+        const context = this.#mutation(request);
+        body(request, []);
+        input = {
+          sessionCredential: context.guestCredential,
+          csrfCredential: context.csrfCredential,
+          operationReference: context.operationReference,
+          previousCartReference: scalar(request.params.cart_id, uuidV7),
+          expectedCartVersion: versionHeader(request),
+        };
+      } catch (error) {
+        this.#requestError(response, error);
+        return;
+      }
+      if (this.#replacement === undefined) {
+        sendError(response, "cart_service_unavailable");
+        return;
+      }
+      try {
+        const raw = closed(await this.#replacement.replace(input), [
+          "operationReference",
+          "previousCartReference",
+          "cartReference",
+          "occurredAt",
+          "expiresAt",
+        ]);
+        const receipt = {
+          schemaVersion: 1,
+          operationReference: scalar(raw.operationReference, uuidV7),
+          previousCartReference: scalar(raw.previousCartReference, uuidV7),
+          cartReference: scalar(raw.cartReference, uuidV7),
+          occurredAt: canonicalInstant(raw.occurredAt),
+          expiresAt: canonicalInstant(raw.expiresAt),
+        };
+        if (
+          receipt.operationReference !== input.operationReference ||
+          receipt.previousCartReference !== input.previousCartReference ||
+          receipt.cartReference === input.previousCartReference ||
+          Date.parse(receipt.expiresAt) - Date.parse(receipt.occurredAt) !== 86400000
+        )
+          throw new Error("invalid replacement receipt");
+        response.setHeader("Location", `/api/v1/carts/${receipt.cartReference}`);
+        // This is an operation receipt, not a current Cart version/ETag.
+        response.status(200).type("application/json").end(JSON.stringify(receipt));
+      } catch (error) {
+        const mapping = {
+          CART_PERMISSION_DENIED: "cart_session_expired",
+          CART_REPLACEMENT_FORBIDDEN: "cart_replacement_forbidden",
+          CART_VERSION_CONFLICT: "cart_version_conflict",
+          CART_IDEMPOTENCY_CONFLICT: "cart_idempotency_conflict",
+          CART_LIFECYCLE_UNAVAILABLE: "cart_replacement_unavailable",
+          CART_EXPIRED: "cart_expired",
+          CART_REPLACEMENT_CHECKOUT_PENDING: "cart_order_processing",
+        } as const;
+        if (error instanceof CartReplacementPendingError) {
+          const seconds = orderProcessingRetrySeconds(error.pendingUntil, this.#now());
+          if (seconds !== null) response.setHeader("Retry-After", String(seconds));
+        }
+        sendError(
+          response,
+          error instanceof CartError && error.code in mapping
+            ? mapping[error.code as keyof typeof mapping]
+            : "cart_service_unavailable",
+        );
       }
     };
   }
@@ -571,7 +929,25 @@ export class CustomerCartHandler {
       responseControls(response);
       try {
         sameOriginRead(request);
-        await invoke(response, this.#port.getCurrentCart(this.#context(request)));
+        const operation = this.#port.getCurrentCart(
+          this.#context(request),
+          ...cartDisplayArguments(this.#displayLocale(request)),
+        );
+        let result: CustomerCartPortResult;
+        try {
+          result = await operation;
+        } catch {
+          sendError(response, "cart_service_unavailable");
+          return;
+        }
+        // WP-2423: a guest with no active Cart is an ordinary state, not an error. Answer it
+        // explicitly so guest pages don't log a failed request on every visit. An expired table
+        // Cart is still replaced on the next add (DEC-DINING-CART-TIMEOUT-CONTINUATION).
+        if (result.status === "NotFound") {
+          response.status(200).json({ schemaVersion: 1, cart: null });
+          return;
+        }
+        await this.#invoke(response, Promise.resolve(result));
       } catch (error) {
         this.#requestError(response, error);
       }
@@ -583,12 +959,15 @@ export class CustomerCartHandler {
       responseControls(response);
       try {
         sameOriginRead(request);
-        await invoke(
+        await this.#invoke(
           response,
-          this.#port.getCart({
-            ...this.#context(request),
-            cartReference: scalar(request.params.cart_id, uuidV7),
-          }),
+          this.#port.getCart(
+            {
+              ...this.#context(request),
+              cartReference: scalar(request.params.cart_id, uuidV7),
+            },
+            ...cartDisplayArguments(this.#displayLocale(request)),
+          ),
         );
       } catch (error) {
         this.#requestError(response, error);
@@ -606,17 +985,20 @@ export class CustomerCartHandler {
           "optionSelections",
           "customerNote",
         ]);
-        await invoke(
+        await this.#invoke(
           response,
-          this.#port.addItem({
-            ...this.#mutation(request),
-            cartReference: scalar(request.params.cart_id, uuidV7),
-            expectedCartVersion: versionHeader(request),
-            sellableReference: scalar(raw.sellableReference, uuidV7),
-            quantity: positive(raw.quantity, 100),
-            optionSelections: selections(raw.optionSelections),
-            customerNote: note(raw.customerNote),
-          }),
+          this.#port.addItem(
+            {
+              ...this.#mutation(request),
+              cartReference: scalar(request.params.cart_id, uuidV7),
+              expectedCartVersion: versionHeader(request),
+              sellableReference: scalar(raw.sellableReference, uuidV7),
+              quantity: positive(raw.quantity, 100),
+              optionSelections: selections(raw.optionSelections),
+              customerNote: note(raw.customerNote),
+            },
+            ...cartDisplayArguments(this.#displayLocale(request)),
+          ),
         );
       } catch (error) {
         this.#requestError(response, error);
@@ -629,17 +1011,20 @@ export class CustomerCartHandler {
       responseControls(response);
       try {
         const raw = body(request, ["quantity", "optionSelections", "customerNote"]);
-        await invoke(
+        await this.#invoke(
           response,
-          this.#port.updateItem({
-            ...this.#mutation(request),
-            cartReference: scalar(request.params.cart_id, uuidV7),
-            cartItemReference: scalar(request.params.cart_item_id, uuidV7),
-            expectedCartVersion: versionHeader(request),
-            quantity: positive(raw.quantity, 100),
-            optionSelections: selections(raw.optionSelections),
-            customerNote: note(raw.customerNote),
-          }),
+          this.#port.updateItem(
+            {
+              ...this.#mutation(request),
+              cartReference: scalar(request.params.cart_id, uuidV7),
+              cartItemReference: scalar(request.params.cart_item_id, uuidV7),
+              expectedCartVersion: versionHeader(request),
+              quantity: positive(raw.quantity, 100),
+              optionSelections: selections(raw.optionSelections),
+              customerNote: note(raw.customerNote),
+            },
+            ...cartDisplayArguments(this.#displayLocale(request)),
+          ),
         );
       } catch (error) {
         this.#requestError(response, error);
@@ -651,14 +1036,17 @@ export class CustomerCartHandler {
     return async (request, response) => {
       responseControls(response);
       try {
-        await invoke(
+        await this.#invoke(
           response,
-          this.#port.removeItem({
-            ...this.#mutation(request),
-            cartReference: scalar(request.params.cart_id, uuidV7),
-            cartItemReference: scalar(request.params.cart_item_id, uuidV7),
-            expectedCartVersion: versionHeader(request),
-          }),
+          this.#port.removeItem(
+            {
+              ...this.#mutation(request),
+              cartReference: scalar(request.params.cart_id, uuidV7),
+              cartItemReference: scalar(request.params.cart_item_id, uuidV7),
+              expectedCartVersion: versionHeader(request),
+            },
+            ...cartDisplayArguments(this.#displayLocale(request)),
+          ),
         );
       } catch (error) {
         this.#requestError(response, error);

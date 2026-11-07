@@ -5,15 +5,22 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="robots" content="noindex,nofollow" />
     <meta name="referrer" content="no-referrer" />
-    <title>BOP — Offline</title>
+    <title>Try again in a minute</title>
   </head>
   <body>
+    <!--
+      WP-2423: shown by the service worker when a page can't be loaded. The phone may be offline,
+      or the restaurant's ordering service may be restarting for a planned update (the whole entry
+      restarts, so nothing can answer for it). Say both honestly, in the guest's words.
+    -->
     <main>
-      <h1>You are offline</h1>
+      <h1>We can’t reach the restaurant right now</h1>
       <p>
-        This fallback contains no Order, Cart, Payment, identity, pickup or other business data.
+        If your phone has lost its connection, reconnect first. If you’re connected, the ordering
+        page may be restarting for an update — this usually takes a minute.
       </p>
-      <p>Reconnect, return to the application and review the current screen before retrying.</p>
+      <p>An order you already placed is kept. Try again to see where it stands.</p>
+      <p><a href="">Try again</a></p>
     </main>
   </body>
 </html>

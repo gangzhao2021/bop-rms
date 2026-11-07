@@ -30,6 +30,7 @@ export interface OrderPaymentOutcomeConsumerPorts {
   };
   readonly source: {
     loadExact(input: {
+      readonly transaction: ConsumerTransaction;
       readonly brandReference: OrderingReference;
       readonly storeReference: OrderingReference;
       readonly orderReference: OrderingReference;
@@ -38,6 +39,17 @@ export interface OrderPaymentOutcomeConsumerPorts {
       readonly paymentAttemptReference: OrderingReference;
       readonly paymentEventReference: OrderingReference;
       readonly paymentEvent: PaymentSucceededEnvelope;
+    }): Promise<unknown | null>;
+  };
+  readonly waiting?: {
+    record(input: {
+      transaction: ConsumerTransaction;
+      event: PaymentSucceededEnvelope;
+      disposition: OrderPaymentOutcomeDisposition;
+    }): Promise<unknown>;
+    load(input: {
+      transaction: ConsumerTransaction;
+      event: PaymentSucceededEnvelope;
     }): Promise<unknown | null>;
   };
   readonly outcomes: {

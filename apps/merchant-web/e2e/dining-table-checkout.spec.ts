@@ -1,0 +1,1033 @@
+import AxeBuilder from "@axe-core/playwright";
+import { expect, test, type Page } from "@playwright/test";
+import { expectNoInternalText } from "./internal-text-guard";
+
+/**
+ * WP-2423 DEC-DINE-IN-PAY-LATER (DIN-FLOOR-BOARD): a pay-later table pays once at the end. Staff
+ * start checkout from Tables, read the whole table's bill, choose the tip and take cash — rounded
+ * to 5 cents, with the change shown — then see the table's receipt and close it as usual.
+ */
+const id = (n: number) => "01909969-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+const headers = { "cache-control": "no-store" };
+const csrf = "a".repeat(43);
+
+const unpaidBill = (phase: "Active" | "Closing", version: number) => ({
+  diningSessionReference: id(2),
+  sessionPhase: phase,
+  sessionVersion: version,
+  paymentTiming: "PayLater",
+  tableLabel: "T2",
+  orderReference: id(3),
+  rounds: [
+    {
+      roundNumber: 1,
+      orderBatchReference: id(21),
+      submissionReference: id(31),
+      items: [
+        {
+          orderItemReference: id(901),
+          quantity: 1,
+          displayName: "Shoyu Ramen",
+          subtotalMinor: "2003",
+          totalMinor: "2263",
+        },
+      ],
+      subtotalMinor: "2003",
+      taxMinor: "260",
+      totalMinor: "2263",
+      paid: false,
+    },
+    {
+      roundNumber: 2,
+      orderBatchReference: id(22),
+      submissionReference: id(32),
+      items: [
+        {
+          orderItemReference: id(902),
+          quantity: 1,
+          displayName: "Gyoza",
+          subtotalMinor: "1000",
+          totalMinor: "1130",
+        },
+      ],
+      subtotalMinor: "1000",
+      taxMinor: "130",
+      totalMinor: "1130",
+      paid: false,
+    },
+  ],
+  owed: { subtotalMinor: "3003", taxMinor: "390", totalMinor: "3393" },
+  consistent: true,
+  settlement: null,
+});
+
+async function floor(
+  page: Page,
+  state: { phase: "Active" | "Closing"; version: number },
+  options: { canWriteOff?: boolean; timeZone?: string } = {},
+) {
+  const scope = {
+    brandLabel: "Synthetic Brand",
+    storeLabel: "Synthetic Store",
+    storeReference: id(99),
+  };
+  await page.route("**/merchant/session", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        authenticated: true,
+        csrf,
+        workspace: {
+          screenId: "HOME-OVERVIEW",
+          selectedScope:
+            options.timeZone === undefined ? scope : { ...scope, timeZone: options.timeZone },
+          authorizedStores: [scope],
+          businessDate: "2026-10-15",
+          storeStatus: "Open",
+          freshness: "Current",
+          dashboardAvailability: "UnavailableUntilWP1905",
+          navigation: [
+            {
+              screenId: "DIN-FLOOR-BOARD",
+              label: "Tables",
+              href: "/operations/dining",
+              permission: "dining.operate",
+            },
+          ],
+        },
+      },
+    }),
+  );
+  await page.route("**/merchant/dining/tables", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        canOperateTables: false,
+        canCloseSessions: true,
+        ...(options.canWriteOff ? { canWriteOff: true } : {}),
+        items: [
+          {
+            tableReference: id(1),
+            stableLabel: "T2",
+            areaCode: "MAIN",
+            capacity: 4,
+            lifecycle: "Published",
+            operationalState: "Available",
+            blockReasonCode: null,
+            aggregateVersion: 2,
+            currentDiningSessionReference: id(2),
+            elapsedMinutes: 55,
+            qrCodeValidUntil: "2027-04-12T13:00:00.000Z",
+            paymentTiming: "PayLater",
+            session: { phase: state.phase, version: state.version, orderReference: id(3) },
+            staffRoundsAwaitingPayment: [],
+          },
+        ],
+        nextAfterTableReference: null,
+      },
+    }),
+  );
+  await page.route("**/merchant/dining/order-progress", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        orderReference: id(3),
+        tableLabel: "T2",
+        diningSessionReference: id(2),
+        sessionPhase: state.phase,
+        closureStatus: "Open",
+        closureVersion: 0,
+        currentOrderVersion: 4,
+        sessionVersion: state.version,
+        tableAssignmentVersion: 1,
+        orderVersion: 4,
+        phase: "Fulfilled",
+        observedAt: "2026-10-15T19:00:00.000Z",
+        // Every dish served.
+        items: [21, 22].map((batch, index) => ({
+          orderItemReference: id(100 + batch),
+          orderBatchReference: id(batch),
+          displayName: index === 0 ? "Shoyu Ramen" : "Gyoza",
+          batchSequence: index + 1,
+          itemOrdinal: 1,
+          phase: "Fulfilled",
+          orderedQuantity: 1,
+          deliveredQuantity: 1,
+          remainingQuantity: 0,
+          itemServiceVersion: 1,
+        })),
+      },
+    }),
+  );
+}
+
+test("@production DEC-DINE-IN-PAY-LATER: staff start checkout, take cash rounded to 5 cents with change, and see the table's receipt", async ({
+  page,
+}) => {
+  const state: { phase: "Active" | "Closing"; version: number } = { phase: "Active", version: 6 };
+  await floor(page, state);
+  let paid = false;
+  const closing: Record<string, unknown>[] = [];
+  const settles: Record<string, unknown>[] = [];
+  await page.route("**/merchant/dining/closing", (route) => {
+    const body = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>;
+    closing.push(body);
+    // Begin starts checkout; Cancel takes the table back to ordering (DEC rule 3).
+    state.phase = body.action === "Cancel" ? "Active" : "Closing";
+    state.version += 1;
+    return route.fulfill({
+      headers: { ...headers, "content-type": "application/json" },
+      body: JSON.stringify({
+        status: "Applied",
+        phase: state.phase,
+        sessionVersion: state.version,
+      }),
+    });
+  });
+  await page.route("**/merchant/dining/table-close-plan", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        orderReference: id(3),
+        diningSessionReference: id(2),
+        orderVersion: 4,
+        observedAt: "2026-10-15T19:00:00.000Z",
+        rounds: [],
+        closeBlockers: paid ? [] : ["ORDER_BALANCE_UNPAID"],
+        totals: { onlineMinor: "0", cardMachineMinor: "0" },
+      },
+    }),
+  );
+  const paidBill = () => ({
+    ...unpaidBill("Closing", 7),
+    rounds: unpaidBill("Closing", 7).rounds.map((round) => ({ ...round, paid: true })),
+    owed: { subtotalMinor: "0", taxMinor: "0", totalMinor: "0" },
+    settlement: {
+      method: "Cash",
+      roundsMinor: "3393",
+      tipMinor: "450",
+      roundingMinor: "2",
+      totalMinor: "3845",
+      tenderedMinor: "5000",
+      changeMinor: "1155",
+      recordedAt: "2026-10-15T19:05:00.000Z",
+      recordedAfterOutage: false,
+    },
+  });
+  await page.route("**/merchant/dining/table-bill", (route) =>
+    route.fulfill({ headers, json: paid ? paidBill() : unpaidBill(state.phase, state.version) }),
+  );
+  await page.route("**/merchant/dining/table-settle", (route) => {
+    settles.push(JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>);
+    paid = true;
+    return route.fulfill({ headers, json: { status: "Recorded", bill: paidBill() } });
+  });
+
+  await page.goto("/operations/dining");
+  await page.getByRole("button", { name: "Select T2", exact: true }).click();
+  const checkout = page.getByRole("region", { name: "Checkout" });
+  await expect(checkout).toContainText("This table pays once at the end.");
+  await checkout.getByRole("button", { name: "Start checkout" }).click();
+  expect(closing[0]).toMatchObject({
+    action: "Begin",
+    diningSessionReference: id(2),
+    expectedSessionVersion: 6,
+  });
+
+  // The guests want more after all: checkout is cancelled and the table orders again.
+  await expect(checkout.getByText("Round 1")).toBeVisible();
+  await checkout.getByRole("button", { name: "Cancel checkout" }).click();
+  await expect(checkout.getByRole("button", { name: "Start checkout" })).toBeVisible();
+  expect(closing[1]).toMatchObject({ action: "Cancel", expectedSessionVersion: 7 });
+  await checkout.getByRole("button", { name: "Start checkout" }).click();
+  expect(closing[2]).toMatchObject({ action: "Begin", expectedSessionVersion: 8 });
+
+  // The whole table's bill, round by round, then subtotal, tax and total.
+  await expect(checkout.getByText("Round 1")).toBeVisible();
+  await expect(checkout).toContainText("Shoyu Ramen");
+  await expect(checkout).toContainText("Gyoza");
+  await expect(checkout).toContainText("$33.93");
+  // Not paid: the table can't be closed yet.
+  await expect(page.getByRole("button", { name: "Close table T2", exact: true })).toHaveCount(0);
+
+  // WP-2423 item 8 ① (Owner 2026-10-27): no tip is chosen for the guests; staff ask first.
+  await expect(checkout.getByRole("radio", { name: /15%/u })).not.toBeChecked();
+  await expect(checkout.getByRole("radio", { name: "No tip" })).not.toBeChecked();
+  await expect(
+    checkout.getByRole("button", { name: "Choose a tip to take payment" }),
+  ).toBeDisabled();
+  await checkout.getByRole("radio", { name: /15%/u }).check();
+  await checkout.getByRole("radio", { name: "Cash" }).check();
+  // 33.93 + tip 4.50 = 38.43 → 38.45 in cash.
+  await expect(checkout.getByText("Cash total $38.45 (rounded to 5 cents)")).toBeVisible();
+  await checkout.getByRole("textbox", { name: "Cash received" }).fill("50");
+  await expect(checkout.getByText("Change $11.55")).toBeVisible();
+  // "Temporarily unavailable" is the Tables state filter's own wording.
+  await expectNoInternalText(page, ["Temporarily unavailable"]);
+  await checkout.getByRole("button", { name: "Cash received · $38.45" }).click();
+  // Money is confirmed: cash due (rounded), received and change, once more, before it is recorded.
+  const confirm = checkout.getByRole("alertdialog", { name: "Confirm the payment" });
+  await expect(confirm).toContainText("Cash due (rounded to 5 cents)$38.45");
+  await expect(confirm).toContainText("Cash received$50.00");
+  await expect(confirm).toContainText("Change to give$11.55");
+  expect(settles).toEqual([]);
+  await page.screenshot({ path: "test-results/dining-table-checkout-confirm.png", fullPage: true });
+  await confirm.getByRole("button", { name: "Confirm $38.45 cash received" }).click();
+  // The browser sends intent only: method, tip choice and the cash handed over. The server prices
+  // the payment; the bill staff saw goes along only to be checked (refused if it changed since).
+  expect(settles).toEqual([
+    {
+      operationReference: expect.stringMatching(/^[0-9a-f-]{36}$/u),
+      diningSessionReference: id(2),
+      method: "Cash",
+      tip: { kind: "Percent", percent: 15 },
+      tenderedMinor: "5000",
+      slipReference: null,
+      recordedAfterOutage: false,
+      takenAt: null,
+      owedMinor: "3393",
+    },
+  ]);
+  // One receipt for the whole table: tip, cash rounding, total, how it was paid and the change.
+  const receipt = checkout.getByLabel("Receipt for table T2");
+  await expect(receipt).toContainText("Cash rounding");
+  await expect(receipt).toContainText("$38.45");
+  await expect(receipt).toContainText("$11.55");
+  await expect(checkout.getByRole("button", { name: "Print receipt" })).toBeVisible();
+  // A paid table never goes back to ordering: no Cancel checkout.
+  await expect(checkout.getByRole("button", { name: "Cancel checkout" })).toHaveCount(0);
+  // Paid in full and every dish served: the table can now be closed as usual.
+  await expect(page.getByRole("button", { name: "Close table T2", exact: true })).toBeVisible();
+
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.screenshot({
+      path: `test-results/dining-table-checkout-${width}.png`,
+      fullPage: true,
+    });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const axe = await new AxeBuilder({ page })
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
+    .analyze();
+  expect(
+    axe.violations
+      .filter((v) => v.impact === "serious" || v.impact === "critical")
+      .map((v) => v.id),
+  ).toEqual([]);
+});
+
+test("@production DEC-DINE-IN-PAY-LATER: a table the guests left without paying shows it was written off and offers no payment", async ({
+  page,
+}) => {
+  const state: { phase: "Active" | "Closing"; version: number } = {
+    phase: "Closing",
+    version: 7,
+  };
+  await floor(page, state);
+  await page.route("**/merchant/dining/table-close-plan", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        orderReference: id(3),
+        diningSessionReference: id(2),
+        orderVersion: 4,
+        observedAt: "2026-10-15T19:00:00.000Z",
+        rounds: [],
+        closeBlockers: [],
+        totals: { onlineMinor: "0", cardMachineMinor: "0" },
+      },
+    }),
+  );
+  await page.route("**/merchant/dining/table-bill", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        ...unpaidBill("Closing", 7),
+        writeOff: { amountMinor: "3393", decidedAt: "2026-10-15T19:05:00.000Z" },
+      },
+    }),
+  );
+  await page.goto("/operations/dining");
+  await page.getByRole("button", { name: "Select T2", exact: true }).click();
+  const checkout = page.getByRole("region", { name: "Checkout" });
+  await expect(checkout.getByRole("heading", { name: "Written off" })).toBeVisible();
+  await expect(checkout).toContainText("$33.93 was written off");
+  // Nothing to take, no second decision and no way back to ordering.
+  await expect(checkout.getByRole("radio", { name: "Cash" })).toHaveCount(0);
+  await expect(checkout.getByRole("button", { name: "Guests left without paying" })).toHaveCount(0);
+  await expect(checkout.getByRole("button", { name: "Cancel checkout" })).toHaveCount(0);
+  await expectNoInternalText(page, ["Temporarily unavailable"]);
+});
+
+// A phone joined after the table was shown: the refused start reads the table again and tries once
+// more as a new operation at the new version (live check 2026-11-03: it took a second tap).
+test("@production staff can start checkout after a phone joined the table", async ({ page }) => {
+  const state: { phase: "Active" | "Closing"; version: number } = { phase: "Active", version: 6 };
+  await floor(page, state);
+  const closing: Record<string, unknown>[] = [];
+  await page.route("**/merchant/dining/closing", (route) => {
+    const body = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>;
+    closing.push(body);
+    if (body.expectedSessionVersion !== state.version)
+      return route.fulfill({ status: 409, headers, json: { error: "version_conflict" } });
+    state.phase = "Closing";
+    state.version += 1;
+    return route.fulfill({
+      headers: { ...headers, "content-type": "application/json" },
+      body: JSON.stringify({
+        status: "Applied",
+        phase: state.phase,
+        sessionVersion: state.version,
+      }),
+    });
+  });
+  await page.route("**/merchant/dining/table-bill", (route) =>
+    route.fulfill({ headers, json: unpaidBill(state.phase, state.version) }),
+  );
+
+  await page.goto("/operations/dining");
+  await page.getByRole("button", { name: "Select T2", exact: true }).click();
+  const checkout = page.getByRole("region", { name: "Checkout" });
+  const start = checkout.getByRole("button", { name: "Start checkout" });
+  await expect(start).toBeVisible();
+  state.version = 7;
+  await start.click();
+  // No second tap and no message: the refusal was only about the phone that joined.
+  await expect.poll(() => closing.length).toBe(2);
+  await expect(page.getByText("This table changed since it was shown.")).toHaveCount(0);
+  await expect(checkout.getByText("Round 1")).toBeVisible();
+  const last = closing.at(-1) as Record<string, unknown>;
+  expect(last).toMatchObject({ action: "Begin", expectedSessionVersion: 7 });
+  expect(last.operationReference).not.toBe(closing[0]?.operationReference);
+  expect(state.phase).toBe("Closing");
+});
+
+// WP-2423 item 8 ⑦ (Owner decision 11): with tips off, staff are asked no tip and the payment is
+// recorded with none; the Store's own percentages are offered while tips are on.
+test("@production a store with tips off takes the table's payment with no tip", async ({
+  page,
+}) => {
+  const state: { phase: "Active" | "Closing"; version: number } = {
+    phase: "Closing",
+    version: 7,
+  };
+  await floor(page, state);
+  await page.route("**/merchant/dining/table-close-plan", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        orderReference: id(3),
+        diningSessionReference: id(2),
+        orderVersion: 4,
+        observedAt: "2026-10-15T19:00:00.000Z",
+        rounds: [],
+        closeBlockers: ["ORDER_BALANCE_UNPAID"],
+        totals: { onlineMinor: "0", cardMachineMinor: "0" },
+      },
+    }),
+  );
+  let tips = { enabled: true, tierPercents: [12, 18, 20] };
+  await page.route("**/merchant/dining/table-bill", (route) =>
+    route.fulfill({ headers, json: { ...unpaidBill("Closing", 7), tips } }),
+  );
+  const sent: Record<string, unknown>[] = [];
+  await page.route("**/merchant/dining/table-settle", (route) => {
+    sent.push(route.request().postDataJSON() as Record<string, unknown>);
+    return route.fulfill({ headers, status: 409, json: { error: "tips_off" } });
+  });
+  await page.goto("/operations/dining");
+  await page.getByRole("button", { name: "Select T2", exact: true }).click();
+  const checkout = page.getByRole("region", { name: "Checkout" });
+  const tip = checkout.getByRole("group", { name: "Tip" });
+  await expect(tip.getByRole("radio", { name: /^12% · /u })).toBeVisible();
+  await expect(tip.getByRole("radio", { name: /^15%/u })).toHaveCount(0);
+  // Tips turned off meanwhile: refused, the bill is read again and no tip is asked.
+  await tip.getByRole("radio", { name: /^20% · /u }).check();
+  await checkout.getByRole("radio", { name: "Card machine" }).check();
+  tips = { enabled: false, tierPercents: [12, 18, 20] };
+  await checkout.getByRole("button", { name: /^Paid on card machine · /u }).click();
+  await checkout
+    .getByRole("alertdialog", { name: "Confirm the payment" })
+    .getByRole("button", { name: /^Confirm /u })
+    .click();
+  expect(sent[0]).toMatchObject({ tip: { kind: "Percent", percent: 20 } });
+  await expect(checkout).toContainText(
+    "Tips are turned off for this store, so nothing was recorded.",
+  );
+  await expect(tip).toBeHidden();
+  // With no tip to choose, the payment is the bill as it stands.
+  await expect(
+    checkout.getByRole("button", { name: "Paid on card machine · $33.93" }),
+  ).toBeEnabled();
+  await expectNoInternalText(page, ["Temporarily unavailable"]);
+});
+
+// WP-2423 (v15 fabf0261, Hotpot PC 9): a table paid on paper is entered with its slip's time. A
+// date other than today and a time a little before the last round was ordered are warned about
+// (a card machine's clock drifts); a time well before it is refused by the server, and staff
+// correct it in the paid-at field, where the refusal is said.
+test("@production a table's paper paid-at is checked against when it ordered, and corrected where it is refused", async ({
+  page,
+}) => {
+  const state: { phase: "Active" | "Closing"; version: number } = {
+    phase: "Closing",
+    version: 7,
+  };
+  await floor(page, state, { timeZone: "America/Toronto" });
+  await page.route("**/merchant/dining/table-close-plan", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        orderReference: id(3),
+        diningSessionReference: id(2),
+        orderVersion: 4,
+        observedAt: "2026-10-15T19:00:00.000Z",
+        rounds: [],
+        closeBlockers: ["ORDER_BALANCE_UNPAID"],
+        totals: { onlineMinor: "0", cardMachineMinor: "0" },
+      },
+    }),
+  );
+  const minute = 60_000;
+  const lastRoundAt = Date.now() - 20 * minute;
+  const bill = unpaidBill("Closing", 7);
+  const liveBill = {
+    ...bill,
+    rounds: [
+      { ...bill.rounds[0], liveOrderedAt: new Date(Date.now() - 50 * minute).toISOString() },
+      { ...bill.rounds[1], liveOrderedAt: new Date(lastRoundAt).toISOString() },
+    ],
+  };
+  await page.route("**/merchant/dining/table-bill", (route) =>
+    route.fulfill({ headers, json: liveBill }),
+  );
+  const sent: Record<string, unknown>[] = [];
+  await page.route("**/merchant/dining/table-settle", (route) => {
+    sent.push(route.request().postDataJSON() as Record<string, unknown>);
+    return route.fulfill({ headers, status: 409, json: { error: "taken_before_ordered" } });
+  });
+  const storeLocal = (at: number) => {
+    const parts = Object.fromEntries(
+      new Intl.DateTimeFormat("en-CA", {
+        timeZone: "America/Toronto",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        hourCycle: "h23",
+      })
+        .formatToParts(new Date(at))
+        .map((part) => [part.type, part.value]),
+    );
+    return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
+  };
+  await page.goto("/operations/dining");
+  await page.getByRole("button", { name: "Select T2", exact: true }).click();
+  const checkout = page.getByRole("region", { name: "Checkout" });
+  await checkout.getByRole("radio", { name: "No tip" }).check();
+  await checkout.getByRole("radio", { name: "Card machine" }).check();
+  await checkout
+    .getByRole("checkbox", { name: "Paid while the system was down (enter it from paper now)" })
+    .check();
+  const paidAt = checkout.getByLabel("Paid at (store time)");
+  // A slip from yesterday: the date is asked to be checked (it counts on the day it was paid).
+  await paidAt.fill(storeLocal(Date.now() - 26 * 60 * minute));
+  await expect(checkout.getByRole("note").filter({ hasText: "is not today" })).toBeVisible();
+  // A typo well before the table ordered: the server refuses it, and the field says so.
+  await checkout.getByRole("button", { name: /^Paid on card machine · /u }).click();
+  const confirm = checkout.getByRole("alertdialog", { name: "Confirm the payment" });
+  await expect(confirm).toContainText("Paid at");
+  await expect(confirm).toContainText("is not today");
+  await confirm.getByRole("button", { name: /^Confirm /u }).click();
+  expect(sent[0]).toMatchObject({ recordedAfterOutage: true, takenAt: expect.any(String) });
+  const refusal = checkout
+    .getByRole("alert")
+    .filter({ hasText: "before this table's last round was ordered in the system" });
+  await expect(refusal).toBeVisible();
+  await expect(paidAt).toBeFocused();
+  await expect(paidAt).toHaveAttribute("aria-invalid", "true");
+  await expect(paidAt).toHaveAttribute("aria-describedby", "table-checkout-paid-at-refused");
+  // Corrected to the slip's time, a few minutes before the last round by the machine's clock:
+  // warned about, not refused here, and the refusal is gone.
+  await paidAt.fill(storeLocal(lastRoundAt - 5 * minute));
+  await expect(paidAt).toHaveAttribute("aria-invalid", "false");
+  await expect(refusal).toHaveCount(0);
+  await checkout.getByRole("button", { name: /^Paid on card machine · /u }).click();
+  await expect(confirm).toContainText(
+    "This is before this table's last round was ordered in the system",
+  );
+  await expect(confirm).not.toContainText("is not today");
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.screenshot({
+      path: `test-results/dining-table-paper-paid-at-${width}.png`,
+      fullPage: true,
+    });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await expectNoInternalText(page, ["Temporarily unavailable"]);
+});
+
+test("@production DEC-DINE-IN-PAY-LATER S4: while a guest pays on their phone staff take nothing else, and can stop a payment the guest gave up on", async ({
+  page,
+}) => {
+  const state: { phase: "Active" | "Closing"; version: number } = {
+    phase: "Closing",
+    version: 7,
+  };
+  await floor(page, state);
+  let stopped = false;
+  const stops: unknown[] = [];
+  await page.route("**/merchant/dining/table-close-plan", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        orderReference: id(3),
+        diningSessionReference: id(2),
+        orderVersion: 4,
+        observedAt: "2026-10-15T19:00:00.000Z",
+        rounds: [],
+        closeBlockers: ["ORDER_BALANCE_UNPAID"],
+        totals: { onlineMinor: "0", cardMachineMinor: "0" },
+      },
+    }),
+  );
+  const billNow = () => ({
+    ...unpaidBill("Closing", 7),
+    onlinePayment: {
+      status: stopped ? "Cancelled" : "InProgress",
+      totalMinor: "3843",
+      tipMinor: "450",
+      startedAt: "2026-10-15T19:01:00.000Z",
+    },
+  });
+  await page.route("**/merchant/dining/table-bill", (route) =>
+    route.fulfill({ headers, json: billNow() }),
+  );
+  await page.route("**/merchant/dining/table-online-payment/stop", (route) => {
+    stops.push(route.request().postDataJSON());
+    stopped = true;
+    return route.fulfill({ headers, json: { status: "Stopped", bill: billNow() } });
+  });
+  await page.goto("/operations/dining");
+  await page.getByRole("button", { name: "Select T2", exact: true }).click();
+  const checkout = page.getByRole("region", { name: "Checkout" });
+  await expect(checkout).toContainText("A guest is paying the whole table on their phone: $38.43.");
+  // Nothing else to take, and no way back to ordering, while the guest pays.
+  await expect(checkout.getByRole("radio", { name: "Cash" })).toHaveCount(0);
+  await expect(checkout.getByRole("button", { name: "Cancel checkout" })).toHaveCount(0);
+  await checkout.getByRole("button", { name: "Stop the phone payment" }).click();
+  expect(stops).toEqual([{ diningSessionReference: id(2) }]);
+  // Stopped: the table is paid here as usual.
+  await expect(checkout.getByRole("radio", { name: "Cash" })).toBeVisible();
+  await expectNoInternalText(page, ["Temporarily unavailable"]);
+});
+
+/**
+ * WP-2423 item 8 ④ (Figma "分单 / AA · v3"): a table split evenly in three — part 1 paid on the
+ * card machine, part 3 being paid on a guest's phone — staff collect part 2 in cash with its own
+ * rounding and change; the browser sends only the part number and intent.
+ */
+test("@production split bill: staff collect one part in cash while the others are paid or being paid", async ({
+  page,
+}) => {
+  const state: { phase: "Active" | "Closing"; version: number } = {
+    phase: "Closing",
+    version: 7,
+  };
+  await floor(page, state, { canWriteOff: true });
+  await page.route("**/merchant/dining/table-close-plan", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        orderReference: id(3),
+        diningSessionReference: id(2),
+        orderVersion: 4,
+        observedAt: "2026-10-15T19:00:00.000Z",
+        rounds: [],
+        closeBlockers: [],
+        totals: { onlineMinor: "0", cardMachineMinor: "0" },
+      },
+    }),
+  );
+  const { splitBillFixture } = await import("../src/table-split.fixtures.js");
+  const split = { ...splitBillFixture(), diningSessionReference: id(2), orderReference: id(3) };
+  await page.route("**/merchant/dining/table-bill", (route) =>
+    route.fulfill({ headers, json: split }),
+  );
+  const sent: unknown[] = [];
+  await page.route("**/merchant/dining/table-settle", (route) => {
+    sent.push(route.request().postDataJSON());
+    const paid = structuredClone(split) as typeof split & {
+      split: { parts: Record<string, unknown>[]; paidParts: number; remainingMinor: string };
+    };
+    paid.split.parts[1] = {
+      ...paid.split.parts[1],
+      payment: {
+        method: "Cash",
+        tipMinor: "0",
+        roundingMinor: "1",
+        totalMinor: "3165",
+        tenderedMinor: "4000",
+        changeMinor: "835",
+        recordedAt: "2026-10-29T00:50:00.000Z",
+        recordedAfterOutage: false,
+      },
+    };
+    paid.split.paidParts = 2;
+    paid.split.remainingMinor = "3164";
+    return route.fulfill({ headers, json: { status: "Recorded", bill: paid } });
+  });
+  await page.goto("/operations/dining");
+  await page.getByRole("button", { name: "Select T2", exact: true }).click();
+  const checkout = page.getByRole("region", { name: "Checkout" });
+  const parts = checkout.getByRole("list", { name: "Parts" });
+  await expect(parts).toContainText("Part 1 · $31.64");
+  await expect(parts).toContainText("Paid $35.84 · card machine");
+  await expect(parts).toContainText("A guest is paying on their phone");
+  await expect(checkout).toContainText("1 of 3 parts paid · $63.28 to go");
+  // v15 2026-10-28: a part is paid, so checkout can't be cancelled.
+  await expect(checkout.getByRole("button", { name: "Cancel checkout" })).toHaveCount(0);
+  // v15 2026-10-28 b: with parts unpaid, the write-off is offered for those parts only.
+  await checkout.getByRole("button", { name: "Guests left without paying the rest" }).click();
+  await expect(checkout.getByRole("group", { name: "Guests left without paying" })).toContainText(
+    "left without paying the 2 parts still unpaid ($63.28)? The parts already paid stay paid.",
+  );
+  await checkout.getByRole("button", { name: "Cancel", exact: true }).click();
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await checkout.screenshot({ path: `test-results/split-bill-${width}.png` });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await checkout.getByRole("button", { name: "Collect this part" }).click();
+  await expect(checkout.getByRole("heading", { name: "Collect part 2 of 3" })).toBeVisible();
+  await expect(checkout).toContainText("This part with tax$31.64");
+  await checkout.getByRole("radio", { name: "No tip" }).check();
+  await checkout.getByRole("radio", { name: "Cash" }).check();
+  await checkout.getByRole("textbox", { name: "Cash received" }).fill("40");
+  await checkout.screenshot({ path: "test-results/split-bill-collect-1440.png" });
+  // The part's own cash total, rounded to 5 cents: $31.64 → $31.65.
+  await checkout.getByRole("button", { name: "Cash received · $31.65" }).click();
+  const confirm = checkout.getByRole("alertdialog", { name: "Confirm the payment" });
+  await confirm.getByRole("button", { name: "Confirm $31.65 cash received" }).click();
+  await expect(checkout).toContainText("2 of 3 parts paid · $31.64 to go");
+  // Once every part is paid, nothing is left to write off: not offered.
+  const allPaid = structuredClone(split) as typeof split & {
+    split: { parts: Record<string, unknown>[]; paidParts: number; remainingMinor: string };
+    owed: { subtotalMinor: string; taxMinor: string; totalMinor: string };
+  };
+  for (const entry of allPaid.split.parts)
+    entry.payment ??= {
+      method: "Cash",
+      tipMinor: "0",
+      roundingMinor: "1",
+      totalMinor: "3165",
+      tenderedMinor: "4000",
+      changeMinor: "835",
+      recordedAt: "2026-10-29T00:55:00.000Z",
+      recordedAfterOutage: false,
+    };
+  for (const entry of allPaid.split.parts) entry.guestPaying = false;
+  allPaid.split.paidParts = 3;
+  allPaid.split.remainingMinor = "0";
+  allPaid.owed = { subtotalMinor: "0", taxMinor: "0", totalMinor: "0" };
+  await page.unroute("**/merchant/dining/table-bill");
+  await page.route("**/merchant/dining/table-bill", (route) =>
+    route.fulfill({ headers, json: allPaid }),
+  );
+  await page.reload();
+  await page.getByRole("button", { name: "Select T2", exact: true }).click();
+  await expect(checkout.getByRole("heading", { name: "Paid" })).toBeVisible();
+  await expect(checkout.getByRole("button", { name: "Cancel checkout" })).toHaveCount(0);
+  await expect(checkout.getByRole("button", { name: /Guests left without paying/u })).toHaveCount(
+    0,
+  );
+  expect(sent).toHaveLength(1);
+  expect(sent[0]).toMatchObject({
+    diningSessionReference: id(2),
+    method: "Cash",
+    tip: { kind: "None" },
+    tenderedMinor: "4000",
+    partNumber: 2,
+  });
+  await expectNoInternalText(page, ["Temporarily unavailable"]);
+});
+
+test("@production DEC-TAX-WHOLE-RECEIPT: the bill shows its tax rounding on its own line", async ({
+  page,
+}) => {
+  const state: { phase: "Active" | "Closing"; version: number } = {
+    phase: "Closing",
+    version: 7,
+  };
+  await floor(page, state);
+  await page.route("**/merchant/dining/table-close-plan", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        orderReference: id(3),
+        diningSessionReference: id(2),
+        orderVersion: 4,
+        observedAt: "2026-10-15T19:00:00.000Z",
+        rounds: [],
+        closeBlockers: ["ORDER_BALANCE_UNPAID"],
+        totals: { onlineMinor: "0", cardMachineMinor: "0" },
+      },
+    }),
+  );
+  // The rounds were charged 260¢ + 130¢; the whole bill's tax is 1¢ less (on round 2).
+  const bill = unpaidBill("Closing", 7);
+  const rounds = bill.rounds.map((round, index) =>
+    index === 1
+      ? { ...round, taxMinor: "129", totalMinor: "1129", taxRoundingMinor: "-1" }
+      : { ...round, taxRoundingMinor: "0" },
+  );
+  await page.route("**/merchant/dining/table-bill", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        ...bill,
+        rounds,
+        taxRoundingMinor: "-1",
+        owed: { subtotalMinor: "3003", taxMinor: "389", totalMinor: "3392" },
+        tips: { enabled: false, tierPercents: [12, 18, 20] },
+      },
+    }),
+  );
+  await page.goto("/operations/dining");
+  await page.getByRole("button", { name: "Select T2", exact: true }).click();
+  const checkout = page.getByRole("region", { name: "Checkout" });
+  await expect(checkout).toContainText("Tax$3.90");
+  // Each round as it was ordered (as Orders and the guest show it); the rounding is one line.
+  await expect(checkout.locator(".table-checkout__rounds > li").nth(1)).toContainText(
+    "Round 2$11.30",
+  );
+  await expect(checkout).toContainText("Tax rounding−$0.01");
+  await expect(checkout).toContainText("Total with tax$33.92");
+  await checkout.getByRole("radio", { name: "Card machine" }).check();
+  await expect(
+    checkout.getByRole("button", { name: "Paid on card machine · $33.92" }),
+  ).toBeEnabled();
+  await expectNoInternalText(page, ["Temporarily unavailable"]);
+});
+
+test("@production a table payment the server failed goes again as the same request, so it is recorded once", async ({
+  page,
+}) => {
+  await floor(page, { phase: "Closing", version: 7 });
+  await page.route("**/merchant/dining/table-close-plan", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        orderReference: id(3),
+        diningSessionReference: id(2),
+        orderVersion: 4,
+        observedAt: "2026-10-15T19:00:00.000Z",
+        rounds: [],
+        closeBlockers: ["ORDER_BALANCE_UNPAID"],
+        totals: { onlineMinor: "0", cardMachineMinor: "0" },
+      },
+    }),
+  );
+  await page.route("**/merchant/dining/table-bill", (route) =>
+    route.fulfill({ headers, json: unpaidBill("Closing", 7) }),
+  );
+  const settles: { operationReference: string }[] = [];
+  let failing = true;
+  await page.route("**/merchant/dining/table-settle", (route) => {
+    settles.push(route.request().postDataJSON() as { operationReference: string });
+    if (failing) return route.fulfill({ status: 503, headers, json: { error: "retry_later" } });
+    const paid = unpaidBill("Closing", 8);
+    return route.fulfill({
+      headers,
+      json: {
+        status: "Recorded",
+        bill: {
+          ...paid,
+          rounds: paid.rounds.map((round) => ({ ...round, paid: true })),
+          owed: { subtotalMinor: "0", taxMinor: "0", totalMinor: "0" },
+          settlement: {
+            method: "Cash",
+            roundsMinor: "3393",
+            tipMinor: "0",
+            roundingMinor: "2",
+            totalMinor: "3395",
+            tenderedMinor: "5000",
+            changeMinor: "1605",
+            recordedAt: "2026-10-15T19:05:00.000Z",
+            recordedAfterOutage: false,
+          },
+        },
+      },
+    });
+  });
+  await page.goto("/operations/dining");
+  await page.getByRole("button", { name: "Select T2", exact: true }).click();
+  const checkout = page.getByRole("region", { name: "Checkout" });
+  await checkout.getByRole("radio", { name: "No tip" }).check();
+  await checkout.getByRole("radio", { name: "Cash" }).check();
+  await checkout.getByRole("textbox", { name: "Cash received" }).fill("50");
+  const pay = async () => {
+    await checkout.getByRole("button", { name: "Cash received · $33.95" }).click();
+    await checkout
+      .getByRole("alertdialog", { name: "Confirm the payment" })
+      .getByRole("button", { name: "Confirm $33.95 cash received" })
+      .click();
+  };
+  await pay();
+  await expect(
+    checkout.getByText("We couldn't confirm the result. Press again: it is never recorded twice.", {
+      exact: false,
+    }),
+  ).toBeVisible();
+  // The payment may already be recorded: never "card machine for payment" here.
+  await expect(checkout.getByText("do not charge them again", { exact: false })).toBeVisible();
+  const words = (await checkout.innerText()).toLowerCase();
+  expect(words).not.toContain("connection");
+  expect(words).not.toContain("permission");
+  expect(words).not.toContain("card machine for payment");
+  failing = false;
+  await pay();
+  await expect(checkout.getByLabel("Receipt for table T2")).toContainText("$33.95");
+  expect(settles).toHaveLength(2);
+  expect(settles[1]?.operationReference).toBe(settles[0]?.operationReference);
+});
+
+// v15 2026-11-06 (Fireside Table 5): a guest round waiting for staff OK is not on the bill and
+// no payment is taken until staff decide it, right in checkout. Sending it puts it on the bill.
+test("@production a round waiting for staff OK is decided in checkout before the table pays", async ({
+  page,
+}) => {
+  const state: { phase: "Active" | "Closing"; version: number } = {
+    phase: "Closing",
+    version: 7,
+  };
+  await floor(page, state);
+  await page.route("**/merchant/dining/table-close-plan", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        orderReference: id(3),
+        diningSessionReference: id(2),
+        orderVersion: 4,
+        observedAt: "2026-10-15T19:00:00.000Z",
+        rounds: [],
+        closeBlockers: ["ORDER_BALANCE_UNPAID"],
+        totals: { onlineMinor: "0", cardMachineMinor: "0" },
+      },
+    }),
+  );
+  let sent = false;
+  const decisions: Record<string, unknown>[] = [];
+  const settles: Record<string, unknown>[] = [];
+  const waiting = {
+    ...unpaidBill("Closing", 7),
+    rounds: unpaidBill("Closing", 7).rounds.slice(0, 1),
+    owed: { subtotalMinor: "2003", taxMinor: "260", totalMinor: "2263" },
+    waitingRounds: [
+      {
+        orderReference: id(3),
+        orderBatchReference: id(22),
+        heldAt: "2026-10-15T18:50:00.000Z",
+        reason: "PhoneRapid",
+        itemCount: 1,
+        totalMinor: "1130",
+        orderedBy: 2,
+      },
+    ],
+    tips: { enabled: false, tierPercents: [12, 18, 20] },
+  };
+  const afterSend = {
+    ...unpaidBill("Closing", 7),
+    waitingRounds: [],
+    tips: { enabled: false, tierPercents: [12, 18, 20] },
+  };
+  await page.route("**/merchant/dining/table-bill", (route) =>
+    route.fulfill({ headers, json: sent ? afterSend : waiting }),
+  );
+  await page.route("**/merchant/dining/held-round", (route) => {
+    decisions.push(JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>);
+    sent = true;
+    return route.fulfill({ headers, json: { status: "Sent" } });
+  });
+  await page.route("**/merchant/dining/table-settle", (route) => {
+    settles.push(JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>);
+    return route.fulfill({
+      headers,
+      json: {
+        status: "Recorded",
+        bill: {
+          ...afterSend,
+          rounds: afterSend.rounds.map((round) => ({ ...round, paid: true })),
+          owed: { subtotalMinor: "0", taxMinor: "0", totalMinor: "0" },
+          settlement: {
+            method: "CardMachine",
+            roundsMinor: "3393",
+            tipMinor: "0",
+            roundingMinor: "0",
+            totalMinor: "3393",
+            tenderedMinor: null,
+            changeMinor: null,
+            recordedAt: "2026-10-15T19:05:00.000Z",
+            recordedAfterOutage: false,
+          },
+        },
+      },
+    });
+  });
+  await page.goto("/operations/dining");
+  await page.getByRole("button", { name: "Select T2", exact: true }).click();
+  const checkout = page.getByRole("region", { name: "Checkout" });
+  await expect(checkout).toContainText(
+    "1 round is waiting for your OK and is not on this bill ($11.30). Send it to the kitchen or cancel it before taking payment.",
+  );
+  await expect(checkout).toContainText("A round the guests were already served or charged for");
+  // The bill is round 1 only; no payment until the waiting round is decided.
+  await expect(checkout).toContainText("Total with tax$22.63");
+  await checkout.getByRole("radio", { name: "Card machine" }).check();
+  const blocked = checkout.getByRole("button", {
+    name: "Decide the rounds waiting for your OK first",
+  });
+  await expect(blocked).toBeDisabled();
+  await expect(page.getByText("cancelled automatically")).toHaveCount(0);
+  await expect(page.getByText("Card payment not confirmed")).toHaveCount(0);
+  const results = await new AxeBuilder({ page }).include(".table-checkout").analyze();
+  expect(results.violations).toEqual([]);
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await checkout.scrollIntoViewIfNeeded();
+    await page.screenshot({
+      path: `test-results/held-round-checkout-${width}.png`,
+      fullPage: false,
+    });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+
+  // Staff send it to the kitchen: it is on the bill, and the payment takes the new total.
+  await checkout.getByRole("button", { name: "Send to kitchen" }).click();
+  expect(decisions[0]).toMatchObject({
+    action: "Confirm",
+    orderReference: id(3),
+    orderBatchReference: id(22),
+  });
+  await expect(checkout).toContainText("Total with tax$33.93");
+  await expect(checkout).not.toContainText("waiting for your OK and is not on this bill");
+  const pay = checkout.getByRole("button", { name: "Paid on card machine · $33.93" });
+  await expect(pay).toBeEnabled();
+  await pay.click();
+  await checkout.getByRole("button", { name: "Confirm $33.93 paid" }).click();
+  await expect.poll(() => settles.length).toBe(1);
+  expect(settles[0]).toMatchObject({ method: "CardMachine", owedMinor: "3393" });
+  await expectNoInternalText(page, ["Temporarily unavailable"]);
+});

@@ -1,12 +1,17 @@
 import { assertGuestSessionUsable, createGuestSession } from "@bop/identity";
 import type { CatalogSelectionAccepted } from "@rms/catalog";
-import { parseCartQuoteAttachment } from "../domain/cart-quote-attachment.js";
+import {
+  parseCartQuoteAttachmentOfVersion,
+  type CartQuoteAttachment,
+} from "../domain/cart-quote-attachment.js";
 import {
   CheckoutValidationError,
   parseCheckoutValidationEvidence,
+  parseConfiguredCheckoutValidationEvidence,
   type CheckoutCatalogLineEvidence,
   type CheckoutFulfillmentAccepted,
   type CheckoutFulfillmentRejectionReason,
+  type CheckoutLineRefusal,
   type CheckoutValidationEvidence,
 } from "../domain/checkout-validation.js";
 import {
@@ -18,12 +23,23 @@ import {
   type CartItem,
   type OrderingInstant,
   type OrderingReference,
+  isGuestCartChannel,
 } from "../domain/cart.js";
 import { assertCartLifecycleActive } from "../domain/cart-lifecycle.js";
-import type { CheckoutValidationPorts } from "./ports/checkout-validation-ports.js";
+import type {
+  CheckoutStockLine,
+  CheckoutValidationPorts,
+} from "./ports/checkout-validation-ports.js";
+import {
+  findCheckoutStockShortage,
+  sameCheckoutStockConfiguration,
+} from "./checkout-stock-shortage.js";
 
-function fail(code: ConstructorParameters<typeof CheckoutValidationError>[0]): never {
-  throw new CheckoutValidationError(code);
+function fail(
+  code: ConstructorParameters<typeof CheckoutValidationError>[0],
+  line: CheckoutLineRefusal | null = null,
+): never {
+  throw new CheckoutValidationError(code, line);
 }
 
 function exact(value: unknown, fields: readonly string[]): Readonly<Record<string, unknown>> {
@@ -77,7 +93,7 @@ function sessionScope(sessionValue: unknown, cart: CartAggregate, observedAt: Or
     if (
       parseOrderingReference(session.brandReference) !== cart.brandReference ||
       parseOrderingReference(session.storeReference) !== cart.storeReference ||
-      !["Qr", "Web"].includes(cart.sourceChannel) ||
+      !isGuestCartChannel(cart.orderType, cart.sourceChannel) ||
       session.channel !== cart.orderType ||
       (cart.orderType === "Pickup" &&
         (parseOrderingReference(session.sessionReference) !== cart.createdByActorReference ||
@@ -282,9 +298,18 @@ function fulfillmentRejection(value: unknown): CheckoutFulfillmentRejectionReaso
   }
 }
 
-export function createCheckoutValidationService(ports: CheckoutValidationPorts) {
+/** Internal versioned core; v2 callers must supply full configured evidence verification. */
+export function createVersionedCheckoutValidationService<V extends 1 | 2>(
+  ports: CheckoutValidationPorts<V>,
+  quoteVersion: V,
+  verifyConfiguration?: (
+    cart: CartAggregate,
+    quote: CartQuoteAttachment<1 | 2>,
+    observedAt: OrderingInstant,
+  ) => Promise<void>,
+) {
   return Object.freeze({
-    async validate(value: unknown): Promise<CheckoutValidationEvidence> {
+    async validate(value: unknown): Promise<CheckoutValidationEvidence<V>> {
       const raw = exact(value, [
         "validationReference",
         "cartReference",
@@ -316,10 +341,10 @@ export function createCheckoutValidationService(ports: CheckoutValidationPorts) 
         }),
       );
       if (authorized === null) return fail("CHECKOUT_PERMISSION_DENIED");
-      const [loadedCart, loadedQuote] = await Promise.all([
-        dependency(ports.repository.loadCart(cartReference)),
-        dependency(ports.repository.loadQuote(cartReference)),
-      ]);
+      // Owner ports may share one caller transaction (the final submission re-validates inside
+      // its own); never run them concurrently on it (WP-2423, v15 2026-10-14).
+      const loadedCart = await dependency(ports.repository.loadCart(cartReference));
+      const loadedQuote = await dependency(ports.repository.loadQuote(cartReference));
       if (loadedCart === null) return fail("CHECKOUT_CART_UNAVAILABLE");
       let cart: CartAggregate;
       try {
@@ -337,9 +362,9 @@ export function createCheckoutValidationService(ports: CheckoutValidationPorts) 
       const session = sessionScope(authorized.guestSession, cart, requestedAt);
       if (cart.items.length === 0) return fail("CHECKOUT_CART_EMPTY");
       if (loadedQuote === null) return fail("CHECKOUT_QUOTE_MISSING");
-      let quote: ReturnType<typeof parseCartQuoteAttachment>;
+      let quote: CartQuoteAttachment<1 | 2>;
       try {
-        quote = parseCartQuoteAttachment(loadedQuote);
+        quote = parseCartQuoteAttachmentOfVersion(loadedQuote, quoteVersion);
       } catch {
         return fail("CHECKOUT_DEPENDENCY_UNAVAILABLE");
       }
@@ -369,9 +394,12 @@ export function createCheckoutValidationService(ports: CheckoutValidationPorts) 
         })
       )
         return fail("CHECKOUT_REQUOTE_REQUIRED");
-      const catalogResults = await Promise.all(
-        cart.items.map((item) =>
-          dependency(
+      // One line at a time: a Cart with several lines must not run its Catalog/Inventory checks
+      // concurrently on a shared transaction (they failed every multi-line dine-in round on v15).
+      const catalogResults: Awaited<ReturnType<typeof ports.catalog.validateSelection>>[] = [];
+      for (const item of cart.items)
+        catalogResults.push(
+          await dependency(
             ports.catalog.validateSelection({
               brandReference: cart.brandReference as never,
               storeReference: cart.storeReference as never,
@@ -382,19 +410,52 @@ export function createCheckoutValidationService(ports: CheckoutValidationPorts) 
               observedAt: requestedAt as never,
             }),
           ),
+        );
+      // WP-2423: what the Store's stock can make of this Cart, as Inventory answers it.
+      const stockLines: readonly CheckoutStockLine[] = Object.freeze(
+        cart.items.map((item) =>
+          Object.freeze({
+            cartItemReference: item.cartItemReference,
+            sellableReference: item.sellableReference,
+            quantity: item.quantity,
+            optionSelections: item.optionSelections,
+          }),
         ),
       );
-      const catalogLines = Object.freeze(
-        catalogResults.map((result, index) => {
-          if (result.status === "Rejected")
-            return fail(
-              result.reason === "SELLABLE_UNAVAILABLE"
-                ? "CHECKOUT_ITEM_UNAVAILABLE"
-                : "CHECKOUT_SELECTION_INVALID",
-            );
-          return catalogEvidence(result, cart, cart.items[index] as CartItem, requestedAt);
-        }),
-      );
+      const stock = ports.stock;
+      const covers = (lines: readonly CheckoutStockLine[]) =>
+        stock === undefined
+          ? Promise.resolve(true)
+          : dependency(stock.covers({ lines, observedAt: requestedAt }));
+      const shortage = async (preferred: OrderingReference | null) => {
+        const found = await findCheckoutStockShortage(stockLines, covers, preferred);
+        return found === null ? null : fail("CHECKOUT_STOCK_SHORT", found);
+      };
+      const catalogLines: CheckoutCatalogLineEvidence[] = [];
+      for (const [index, result] of catalogResults.entries()) {
+        const item = cart.items[index] as CartItem;
+        if (result.status === "Rejected") {
+          if (result.reason !== "SELLABLE_UNAVAILABLE") return fail("CHECKOUT_SELECTION_INVALID");
+          // Not sellable now: sold out (the item, in this Cart's quantity) or off the menu.
+          const own = stockLines[index] as CheckoutStockLine;
+          const same = stockLines.filter((line) => sameCheckoutStockConfiguration(line, own));
+          if (stock !== undefined && !(await covers(same))) await shortage(item.cartItemReference);
+          return fail("CHECKOUT_ITEM_UNAVAILABLE", {
+            cartItemReference: item.cartItemReference,
+            available: null,
+            sharedStock: false,
+          });
+        }
+        catalogLines.push(catalogEvidence(result, cart, item, requestedAt));
+      }
+      Object.freeze(catalogLines);
+      if (quoteVersion === 2) {
+        if (verifyConfiguration === undefined) return fail("CHECKOUT_DEPENDENCY_UNAVAILABLE");
+        await dependency(verifyConfiguration(cart, quote, requestedAt));
+      }
+      // Each item was checked on its own; items sharing stock are checked together, as the
+      // reservation at submission takes them (before any payment).
+      if (stock !== undefined) await shortage(null);
       const fulfillmentResult = await dependency(
         ports.fulfillment.validate({
           brandReference: cart.brandReference,
@@ -422,7 +483,11 @@ export function createCheckoutValidationService(ports: CheckoutValidationPorts) 
       );
       if (Date.parse(validUntil) <= Date.parse(requestedAt))
         return fail("CHECKOUT_DEPENDENCY_UNAVAILABLE");
-      return parseCheckoutValidationEvidence({
+      return (
+        quoteVersion === 2
+          ? parseConfiguredCheckoutValidationEvidence
+          : parseCheckoutValidationEvidence
+      )({
         validationReference,
         validationIntentHash,
         guestSessionReference: parseOrderingReference(session.sessionReference),
@@ -431,7 +496,7 @@ export function createCheckoutValidationService(ports: CheckoutValidationPorts) 
         cartReference: cart.cartReference,
         cartVersion: cart.aggregateVersion,
         quoteReference: quote.quoteReference,
-        quoteVersion: 1,
+        quoteVersion,
         quoteInputDigest: quote.quoteInputDigest,
         orderType: cart.orderType,
         sourceChannel: cart.sourceChannel,
@@ -439,7 +504,11 @@ export function createCheckoutValidationService(ports: CheckoutValidationPorts) 
         fulfillment: acceptedFulfillment,
         validatedAt: requestedAt,
         validUntil,
-      });
+      }) as CheckoutValidationEvidence<V>;
     },
   });
+}
+
+export function createCheckoutValidationService(ports: CheckoutValidationPorts) {
+  return createVersionedCheckoutValidationService(ports, 1);
 }

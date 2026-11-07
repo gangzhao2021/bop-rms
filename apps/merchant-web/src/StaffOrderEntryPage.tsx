@@ -1,283 +1,1890 @@
-import { AppFrame, StatePanel } from "@bop-rms/ui";
-import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router";
+import { t, saidTable, listSeparator } from "./i18n/i18n.js";
+import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
+import { StatePanel } from "@bop-rms/ui";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useStaffSessionLive } from "./staff-session-reads.js";
+import { Link, useSearchParams } from "react-router";
+import { createDiningSessionClient } from "./dining-session-client.js";
+import { validSlipReference } from "./CardMachineRefundAction.js";
+import { orderMoney } from "./order-money.js";
+import { serviceOperationReference } from "./service-control-client.js";
+import { storeTime } from "./StoreTime.js";
+import { WorkspacePage } from "./WorkspacePage.js";
+import { CounterAwaitingPayment } from "./CounterAwaitingPayment.js";
+import { loadOftenOrdered, recordOrdered } from "./counter-often-ordered.js";
 import {
-  parseStaffOrderEntryView,
-  StaffOrderEntryClientError,
-  unavailableStaffOrderEntryClient,
-  type StaffOrderEntryClientErrorCode,
-  type StaffOrderEntryProjectionClient,
-  type StaffOrderEntryView,
+  paidAtDayNote,
+  paidAtInstant,
+  paidAtRefusal,
+  payErrorText,
+  paidNoteText,
+  paymentUrgentMinutes,
+  paymentWindowNotice,
+} from "./counter-payment.js";
+import {
+  CounterOrderClientError,
+  counterMenuFamilies,
+  counterMenuSearch,
+  createCounterOrderClient,
+  type CounterMenu,
+  type CounterMenuItem,
+  type CounterMenuRule,
+  type CounterTip,
+  type PlacedCounterOrder,
+  type TableCartItem,
 } from "./staff-order-entry.js";
 
-type State =
-  | { readonly kind: "Loading" | StaffOrderEntryClientErrorCode }
-  | { readonly kind: "Found"; readonly view: StaffOrderEntryView };
+export { paidAtInstant, payErrorText, paymentUrgentMinutes, paymentWindowNotice };
 
-export function StaffOrderEntryState({
-  state,
-}: {
-  readonly state: Exclude<State["kind"], "Found">;
-}) {
-  const values: Record<typeof state, readonly [string, string, "neutral" | "error" | "offline"]> = {
-    Loading: ["Loading", "Loading the authorized Staff Order Entry context…", "neutral"],
-    PermissionDenied: [
-      "Permission denied",
-      "Both Staff Ordering permissions and Store scope are required.",
-      "error",
-    ],
-    NotFound: [
-      "Context unavailable",
-      "The Store or ordering context is not available in this scope.",
-      "neutral",
-    ],
-    FeatureDisabled: [
-      "Staff ordering disabled",
-      "Staff Order Entry is not enabled for this Store.",
-      "neutral",
-    ],
-    Stale: [
-      "Ordering context is stale",
-      "Refresh Menu, Cart, Quote and eligibility evidence before continuing.",
-      "offline",
-    ],
-    Conflict: [
-      "Cart changed",
-      "Recover the current Cart version and Quote before retrying.",
-      "offline",
-    ],
-    CommandFailed: [
-      "Command failed",
-      "No Cart, Order, Batch or Payment success is assumed.",
-      "error",
-    ],
-    Offline: [
-      "Offline read-only",
-      "Cached context cannot submit an Order or start Terminal payment.",
-      "offline",
-    ],
-    Unavailable: [
-      "Staff Order Entry unavailable",
-      "The authorized shared-contract BFF is not connected.",
-      "error",
-    ],
-  };
-  const value = values[state];
-  return (
-    <StatePanel heading={value[0]} tone={value[2]} status>
-      <p>{value[1]}</p>
-      <Link to="/app">Return to Merchant Home</Link>
-    </StatePanel>
-  );
+const cad = (amountMinor: string) => orderMoney({ amountMinor, currencyCode: "CAD" });
+
+interface Line {
+  readonly key: string;
+  readonly item: CounterMenuItem;
+  readonly quantity: number;
+  readonly options: readonly { optionReference: string; name: string; quantity: number }[];
+  /** WP-2423 Q7 slice 2: the guest's note for the kitchen (table rounds only). */
+  readonly note?: string | null;
 }
 
-const formatMoney = (amountMinor: number) => `CAD ${(amountMinor / 100).toFixed(2)}`;
+/** What staff see for an item: about its base price plus chosen options (the order total decides). */
+export function estimatedLineMinor(line: Line): bigint | null {
+  if (line.item.priceMinor === null) return null;
+  let each = BigInt(line.item.priceMinor);
+  for (const chosen of line.options) {
+    const option = line.item.rules
+      .flatMap((rule) => rule.options)
+      .find((candidate) => candidate.optionReference === chosen.optionReference);
+    if (option?.priceMinor === null || option === undefined) return null;
+    each += BigInt(option.priceMinor) * BigInt(chosen.quantity);
+  }
+  return each * BigInt(line.quantity);
+}
 
-export function StaffOrderEntryScreen({ view }: { readonly view: StaffOrderEntryView }) {
-  const [query, setQuery] = useState("");
-  const [section, setSection] = useState("All");
-  const [availability, setAvailability] = useState("AvailableNow");
-  const sections = useMemo(
-    () => [...new Set(view.menuItems.map((item) => item.sectionCode))].sort(),
-    [view.menuItems],
+/** How many of each option chosen by default (a choice guests can repeat, such as double pearls). */
+function defaultCounts(item: CounterMenuItem) {
+  return Object.fromEntries(
+    item.rules.flatMap((rule) =>
+      rule.options.map((option) => [option.optionReference, option.defaultQuantity || 1]),
+    ),
+  ) as Record<string, number>;
+}
+
+/** Defaults pre-chosen per option group; a group of one choice is a single pick. */
+function defaultChoices(item: CounterMenuItem) {
+  return Object.fromEntries(
+    item.rules.map((rule) => [
+      rule.bindingReference,
+      rule.options
+        .filter((option) => option.selectedByDefault)
+        .slice(0, Math.max(rule.maximumSelections, 0))
+        .map((option) => option.optionReference),
+    ]),
+  ) as Record<string, string[]>;
+}
+
+/** The group's limit counts each repeat of a choice (two of pearls is two of "at most 3"). */
+const chosenInRule = (choices: readonly string[], counts: Readonly<Record<string, number>>) =>
+  choices.reduce((sum, reference) => sum + (counts[reference] ?? 1), 0);
+/** The group's rule in the words guests see: "Required", "Optional · up to 3", "Choose 1 to 2". */
+export function staffChoiceText(
+  rule: Pick<CounterMenuRule, "minimumSelections" | "maximumSelections">,
+) {
+  const { minimumSelections: min, maximumSelections: max } = rule;
+  if (min === max) return max === 1 ? t("Required") : t("Required · choose {max}", { max });
+  if (min === 0) return max === 1 ? t("Optional") : t("Optional · up to {max}", { max });
+  return t("Choose {min} to {max}", { min, max });
+}
+/**
+ * WP-2423 item 3b: how many of one chosen option staff may enter — its own limit, or what the
+ * group's total leaves after the other choices, whichever is lower (never below one).
+ */
+export function repeatLimit(
+  rule: CounterMenuRule,
+  optionReference: string,
+  choices: readonly string[],
+  counts: Readonly<Record<string, number>>,
+) {
+  const option = rule.options.find((candidate) => candidate.optionReference === optionReference);
+  if (option === undefined) return 1;
+  const others = chosenInRule(
+    choices.filter((reference) => reference !== optionReference),
+    counts,
   );
-  const normalized = query.trim().toLocaleUpperCase();
-  const items = view.menuItems.filter(
-    (item) =>
-      (section === "All" || item.sectionCode === section) &&
-      (availability === "All" || item.availability === availability) &&
-      (normalized.length === 0 ||
-        item.code.includes(normalized) ||
-        item.localizedName.toLocaleUpperCase().includes(normalized)),
+  return Math.max(1, Math.min(option.maximumQuantity, rule.maximumSelections - others));
+}
+export function choicesComplete(
+  item: CounterMenuItem,
+  choices: Record<string, string[]>,
+  counts: Readonly<Record<string, number>> = {},
+) {
+  return item.rules.every((rule) => {
+    const chosen = choices[rule.bindingReference] ?? [];
+    const picked = chosenInRule(chosen, counts);
+    return (
+      picked >= rule.minimumSelections &&
+      picked <= rule.maximumSelections &&
+      chosen.every((reference) => {
+        const option = rule.options.find((candidate) => candidate.optionReference === reference);
+        const count = counts[reference] ?? 1;
+        return (
+          option !== undefined &&
+          Number.isSafeInteger(count) &&
+          count >= 1 &&
+          count <= option.maximumQuantity
+        );
+      })
+    );
+  });
+}
+
+const menuError: Record<string, [string, string]> = {
+  PermissionDenied: [noAccessHeading, pageAccessDeniedText],
+  TableUnavailable: [
+    t("This table can't take an order now"),
+    t("It may be marked unavailable or its session may be closing. Check it on the Tables page."),
+  ],
+  TableHasNoQr: [
+    t("This table has no table QR code yet"),
+    t(
+      "Orders for a table use its code. Ask a manager to create one on the Table QR codes page, then take the order.",
+    ),
+  ],
+  TableUnknown: [t("Table not found"), t("Open the table from the Tables page to take its order.")],
+  Unavailable: [
+    t("The menu could not be loaded"),
+    t(
+      "Try again. If the system stays down, take the order on paper and record it here afterwards.",
+    ),
+  ],
+};
+
+/** WP-2423 (staff-round-soldout): the guests' items staff may take off (can't be served now). */
+export function tableCartUnsellable(items: readonly TableCartItem[]): readonly TableCartItem[] {
+  return items.filter(
+    (item) => item.standing === "Unavailable" || item.standing === "OptionsChanged",
   );
-  const readOnly = view.freshness !== "Current" || view.partial;
+}
+/** The items' menu names as staff read them ("Plum juice, Noodles" / "酸梅汤、面"). */
+export function tableCartNames(items: readonly TableCartItem[]): string {
+  return items.map((item) => item.name).join(listSeparator());
+}
+/** WP-2423 (staff-round-soldout): what a guest's item is marked with, or null when it can be sent. */
+export function tableCartMark(item: TableCartItem): string | null {
+  if (item.standing === "Unavailable") return t("Sold out or off the menu now");
+  if (item.standing === "OptionsChanged") return t("Choices changed on the menu");
+  if (item.standing === "Short")
+    return (item.available ?? 0) > 0
+      ? t("Only {count} left", { count: item.available ?? 0 })
+      : t("None left");
+  return null;
+}
+
+export function placeErrorText(
+  error: CounterOrderClientError,
+  lines: readonly Line[],
+  table: string | null = null,
+  canCreateTableCode = false,
+) {
+  switch (error.code) {
+    case "TableCartHasItems": {
+      const value =
+        error.pendingItems.length > 0
+          ? ` (${error.pendingItems.map((item) => `${item.quantity} × ${item.name}`).join(", ")})`
+          : "";
+      // WP-2423 (staff-round-soldout): too few left of a guest's item: only the guests change it
+      // (or, with none left, staff mark it sold out, and can then remove it).
+      const short = error.pendingItems.find((item) => item.standing === "Short");
+      if (error.tableCart !== null && short !== undefined)
+        return (short.available ?? 0) > 0
+          ? t(
+              "{name} has only {count} left. Ask the guests to lower it on their phone, then send again. Nothing was sent or charged.",
+              { name: short.name, count: short.available ?? 0 },
+            )
+          : t(
+              "{name} has none left. Ask the guests to remove it on their phone, or mark it sold out, then send again. Nothing was sent or charged.",
+              { name: short.name },
+            );
+      // WP-2423 (staff-round-soldout): a guest's item can't be served now; staff remove it.
+      const unsellable = tableCartUnsellable(error.pendingItems);
+      if (error.tableCart !== null && unsellable.length > 0) {
+        const names = tableCartNames(unsellable);
+        if (unsellable.length === 1)
+          return error.tableCart.guestsCanSend
+            ? t(
+                "Guests at this table have items in their shared cart that haven't been sent. {names} can't be served now. Remove it from their order, or ask the guests to change their order on their phone.",
+                { names },
+              )
+            : t(
+                "Guests at this table have items in their shared cart that haven't been sent. {names} can't be served now, and guests can no longer send after last orders. Remove it from their order to send this round.",
+                { names },
+              );
+        return error.tableCart.guestsCanSend
+          ? t(
+              "Guests at this table have items in their shared cart that haven't been sent. {names} can't be served now. Remove them from their order, or ask the guests to change their order on their phone.",
+              { names },
+            )
+          : t(
+              "Guests at this table have items in their shared cart that haven't been sent. {names} can't be served now, and guests can no longer send after last orders. Remove them from their order to send this round.",
+              { names },
+            );
+      }
+      // WP-2423 item 8 ⑦ (v15 finding t): staff add them to this round; asking the guests only
+      // while they can still send (not after last orders).
+      if (error.tableCart !== null)
+        return error.tableCart.guestsCanSend
+          ? t(
+              "Guests at this table have items in their shared cart that haven't been sent{value}. Add them to this round, or ask the guests to send or remove them on their phone.",
+              { value },
+            )
+          : t(
+              "Guests at this table have items in their shared cart that haven't been sent{value}, and guests can no longer send them after last orders. Add them to this round to order them.",
+              { value },
+            );
+      return t(
+        "Guests at this table have items in their shared cart that haven't been sent{value}. Ask them to send or remove those items on their phone, then send this order again.",
+        { value },
+      );
+    }
+    case "TableCheckoutInProgress":
+      return t(
+        "A guest at this table is ordering or paying on their phone. Wait a minute, then send again.",
+      );
+    case "TableUnavailable":
+      return t(
+        "{value} can't take an order now (marked unavailable, or its session is closing). Check the table on the Tables page.",
+        { value: table ?? "This table" },
+      );
+    case "TableHasNoQr":
+      return t(
+        "{value} has no table QR code, so orders can't be taken for it yet. Nothing was sent or charged. {value2}",
+        {
+          value: table ?? "This table",
+          value2: canCreateTableCode
+            ? "Create one on Table QR codes (it can be printed later), then send the order again."
+            : "Ask a manager to create one on the Table QR codes page, then send the order again.",
+        },
+      );
+    case "ItemUnavailable": {
+      const line = error.lineIndex === null ? undefined : lines[error.lineIndex];
+      // WP-2423 (staff-round-soldout): the dish is sold, the choices made for it no longer fit.
+      if (line && error.optionsChanged)
+        return t(
+          "{name}'s choices changed on the menu. Remove it, add it again with the new choices, then send. Nothing was sent or charged.",
+          { name: line.item.name },
+        );
+      // WP-2423: each item could be made on its own, but not together (they share an ingredient).
+      if (line && error.sharedStock)
+        return t(
+          "There isn't enough left to make {name} with the rest of this order (other items use the same ingredients). Remove {name2} or change the other items, then send again. Nothing was sent or charged.",
+          { name: line.item.name, name2: line.item.name },
+        );
+      return line
+        ? t(
+            "{name} can't be sold right now (sold out or off the menu). Remove it and send again. Nothing was sent or charged.",
+            { name: line.item.name },
+          )
+        : t(
+            "An item can't be sold right now (it may have just sold out). Check the order and send again. Nothing was sent or charged.",
+          );
+    }
+    case "ItemShort": {
+      // v15 run: name the short item and how many are left; the order stays as entered.
+      const line = error.lineIndex === null ? undefined : lines[error.lineIndex];
+      const left = error.available ?? 0;
+      if (line === undefined)
+        return t(
+          "An item has only {left} left. Remove it and add {left2} back, then send again. Nothing was sent or charged.",
+          { left: left, left2: left },
+        );
+      // WP-2423: short only because other items in the order use the same ingredients.
+      if (error.sharedStock)
+        return t(
+          "Only {left} {name} can be made with the rest of this order (other items use the same ingredients). Lower {name2} to {left2} or change the other items, then send again. Nothing was sent or charged.",
+          { left: left, name: line.item.name, name2: line.item.name, left2: left },
+        );
+      const options = (entry: Line) =>
+        JSON.stringify(
+          entry.options.map((option) => [option.optionReference, option.quantity]).sort(),
+        );
+      const ordered = lines
+        .filter(
+          (other) =>
+            other.item.sellableReference === line.item.sellableReference &&
+            options(other) === options(line),
+        )
+        .reduce((sum, other) => sum + other.quantity, 0);
+      return t(
+        "Only {left} {name} left, {ordered} in this order. Remove {name2} and add {left2} back, then send again. Nothing was sent or charged.",
+        { left: left, name: line.item.name, ordered: ordered, name2: line.item.name, left2: left },
+      );
+    }
+    case "StoreNotTakingOrders":
+      return table !== null
+        ? t(
+            "The store is closed, so no new table orders can be taken now. A paper order taken earlier can still be entered under Paper order.",
+          )
+        : t(
+            "Pickup hours are over, so the counter can't take a new order now. A paper order taken earlier can still be entered under Paper order.",
+          );
+    case "TipsOff":
+      return t(
+        "Tips are turned off for this store, so nothing was sent or charged. Send it again with no tip.",
+      );
+    case "TipChoicesChanged":
+      return t(
+        "The store's tip choices just changed, so nothing was sent or charged. Choose the tip again and send.",
+      );
+    // WP-2423 item 13 ② (Owner 2026-11-05): only new guests stop; what is open carries on.
+    case "NewGuestsPaused":
+      return table !== null
+        ? t(
+            "New guests are paused for this restaurant by the platform, so no new table can be opened. Tables already seated carry on as usual: serve, take payment and refund. Ask the owner about it.",
+          )
+        : t(
+            "New guests are paused for this restaurant by the platform, so the counter can't take a new order. Nothing was sent or charged. Orders already placed carry on as usual: prepare, hand over and refund them. Ask the owner about it.",
+          );
+    case "CounterOrderingOff":
+      return t(
+        "Counter ordering is turned off for this store, so nothing was sent or charged. The owner can turn it back on in Store features.",
+      );
+    case "NotPriced":
+      return t("This order could not be priced. Check the items and options and send again.");
+    case "NotFinished":
+      return t("This order didn't go through and nothing was charged. Send it again.");
+    case "InProgress":
+      return t("This order is still being sent. Wait a moment, then send again to see it.");
+    case "PermissionDenied":
+      return t("Your session can't take counter orders. Sign in again or ask a manager.");
+    case "OutcomeUnknown":
+      return t("No answer from the system. Send again — the same order is never created twice.");
+    case "NoPickupTimes":
+      return t(
+        "Pickup times have run out in the system, so no pickup order can be entered right now. Nothing was sent or charged. Take this order on paper and charge it on the card machine, then enter it under Paper order once pickup times are back. Tell a manager — Home shows the alert.",
+      );
+    // WP-2423 M03: these dishes went into an order already; never charge them a second time.
+    case "AlreadyOrdered":
+      return error.placedOrderNumber !== null
+        ? t("Already ordered as order {number}. Nothing new was charged. Open it in Orders.", {
+            number: error.placedOrderNumber,
+          })
+        : t("These items are already in an order. Nothing new was charged. Open it in Orders.");
+    case "SystemProblem":
+      return table !== null
+        ? t(
+            "The system couldn't send this round for {table} (a problem on our side, not with the order). Nothing was sent to the kitchen or charged. Send it once more. If it fails again, take the order on paper, charge it on the card machine and enter it under Paper order later. Home shows any alert.",
+            { table: table },
+          )
+        : t(
+            "The system couldn't place this order (a problem on our side, not with the order). Nothing was charged. Send it once more. If it fails again, take the order on paper, charge it on the card machine and enter it under Paper order later. Home shows any alert.",
+          );
+    default:
+      // WP-2423: e.g. no order can be priced right now; Home shows the alert and what to do.
+      return t(
+        "The order could not be sent. Check the order and try again. If it keeps failing, check Home for an alert and take the order on paper.",
+      );
+  }
+}
+
+/** v15 run: how often the counter menu re-reads what the store can sell while staff build an order. */
+export const MENU_REFRESH_MS = 30_000;
+
+/**
+ * WP-2423 Q7 (OPS-ORDER-ENTRY, DEC-COUNTER-PAYMENT-RECORD): staff take a pickup order at the
+ * counter for a customer without a phone, or enter a paper order taken while the system was down.
+ * The order uses the same menu, sold-out state, prices and tax as the customer app; the store's
+ * own card machine takes the payment (no cash) and staff record it here.
+ */
+/**
+ * WP-2423 (staff-round-soldout): the guests' unsent items, each marked when it can't be sent, and
+ * what staff can do with them: add them to this round, or first take off the ones that can't be
+ * served (the server removes only those, and only while they still can't be sold). An item with
+ * too few left is the guests' to change, so it offers nothing.
+ */
+export function TableCartOfferActions({
+  offer,
+  disabled,
+  onSend,
+}: {
+  readonly offer: { readonly items: readonly TableCartItem[] };
+  readonly disabled: boolean;
+  readonly onSend: (removeUnavailable: readonly TableCartItem[]) => void;
+}) {
+  const unsellable = tableCartUnsellable(offer.items);
+  const short = offer.items.some((item) => item.standing === "Short");
+  const names = tableCartNames(unsellable);
   return (
-    <AppFrame
-      title="Staff Order Entry"
-      description="OPS-ORDER-ENTRY · merchant_staff_order_entry_v1"
-    >
-      <header className="screen-heading">
-        <div>
-          <p className="bop-eyebrow">Fixed Store / named Staff / shared Ordering truth</p>
-          <h2>
-            {view.storeLabel} · {view.serviceMode}
-          </h2>
-          <p>
-            {view.actorLabel} · channel {view.sourceChannel} · {view.freshness} · {view.asOfUtc}
-          </p>
-        </div>
-        <button disabled>Create staff-scoped Cart</button>
-      </header>
-      {readOnly ? (
-        <StatePanel heading="Read-only dependency context" tone="offline" status>
-          <p>
-            Menu, Quote, Dining, allergen and Payment evidence must be current before a command.
-          </p>
-        </StatePanel>
+    <>
+      {offer.items.length > 0 ? (
+        <ul className="counter-order__table-cart" aria-label={t("Guests' items not sent yet")}>
+          {offer.items.map((item) => {
+            const mark = tableCartMark(item);
+            return (
+              <li key={item.cartItemReference}>
+                <span>
+                  {t("{quantity} × {name}", { quantity: item.quantity, name: item.name })}
+                </span>
+                {mark !== null ? (
+                  <span className="order-accept-by" data-tier="warning">
+                    {mark}
+                  </span>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
       ) : null}
-      <section className="detail-section" aria-labelledby="staff-menu">
-        <h3 id="staff-menu">Public-effective Menu and Sellable configurator</h3>
-        <p className="bop-muted">
-          Menu snapshot {view.menuSnapshotReference}. Price and tax are server-derived; no override
-          is accepted.
-        </p>
-        <div className="list-filters" role="search">
-          <label>
-            Localized item / code
-            <input value={query} onChange={(event) => setQuery(event.currentTarget.value)} />
-          </label>
-          <label>
-            Section
-            <select value={section} onChange={(event) => setSection(event.currentTarget.value)}>
-              <option>All</option>
-              {sections.map((value) => (
-                <option key={value}>{value}</option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Availability
-            <select
-              value={availability}
-              onChange={(event) => setAvailability(event.currentTarget.value)}
-            >
-              <option>AvailableNow</option>
-              <option>All</option>
-              <option>Unavailable</option>
-            </select>
-          </label>
-          <label>
-            Service mode
-            <select value={view.serviceMode} disabled>
-              <option>{view.serviceMode}</option>
-            </select>
-          </label>
-        </div>
-        {items.length === 0 ? (
-          <StatePanel heading="No matching Sellables" status>
-            <p>No public-effective item matches the current filters.</p>
-          </StatePanel>
-        ) : (
-          <div className="store-card-grid">
-            {items.map((item) => (
-              <article className="store-card" key={item.sellableReference}>
-                <header>
-                  <div>
-                    <p className="bop-eyebrow">
-                      {item.sectionCode} · {item.code}
-                    </p>
-                    <h3>{item.localizedName}</h3>
-                  </div>
-                  <strong>{formatMoney(item.configuredPrice.amountMinor)}</strong>
-                </header>
-                <p>
-                  {item.availability} · allergen {item.allergenRequirement}
-                </p>
-                <button disabled>Configure and add</button>
-              </article>
-            ))}
-          </div>
-        )}
-      </section>
-      <div className="detail-grid">
-        <section className="detail-section">
-          <h3>Staff Cart / canonical Quote</h3>
-          {view.cart === null ? (
-            <p>No staff Cart has been created.</p>
-          ) : (
-            <dl>
-              <div>
-                <dt>Cart / version</dt>
-                <dd>
-                  {view.cart.cartReference} · {view.cart.cartVersion}
-                </dd>
-              </div>
-              <div>
-                <dt>Lines</dt>
-                <dd>{view.cart.lineCount}</dd>
-              </div>
-              <div>
-                <dt>Quote</dt>
-                <dd>
-                  {view.cart.quoteStatus} · {view.cart.quoteReference ?? "Missing"}
-                </dd>
-              </div>
-              <div>
-                <dt>Total</dt>
-                <dd>
-                  {view.cart.total
-                    ? formatMoney(view.cart.total.amountMinor)
-                    : "Awaiting server Quote"}
-                </dd>
-              </div>
-            </dl>
-          )}
-          <div className="card-actions">
-            <button disabled>Requote</button>
-            <button disabled>Submit Order / Batch idempotently</button>
-          </div>
-        </section>
-        <section className="detail-section">
-          <h3>Dining Session / verified Customer reference</h3>
-          <p>
-            Dining eligibility: {view.diningSession.eligibility} ·{" "}
-            {view.diningSession.sessionReference ?? "No session attached"}
-          </p>
-          <p>
-            Customer reference:{" "}
-            {view.customerReference.verified
-              ? view.customerReference.maskedReference
-              : "Not attached"}
-          </p>
-          <button disabled>Attach eligible Dining Session</button>
-        </section>
-      </div>
-      <section className="detail-section">
-        <h3>Structured allergen review</h3>
+      {short ? null : (
         <p>
-          Status: {view.allergenReview}. No allergy / health free text is displayed or stored by
-          this screen.
+          <button
+            type="button"
+            className="counter-order__primary counter-order__table-cart-action"
+            disabled={disabled}
+            onClick={() => onSend(unsellable)}
+          >
+            {unsellable.length === 0
+              ? t("Add them to this round")
+              : unsellable.length === offer.items.length
+                ? t("Remove {names} and send this round", { names })
+                : t("Remove {names} and add the rest to this round", { names })}
+          </button>
         </p>
-        <button disabled>Record Staff allergen assistance</button>
-      </section>
-      <section className="detail-section">
-        <h3>Cashless Terminal handoff</h3>
-        <p>
-          Terminal status: {view.terminalStatus}. A start command may report Pending only; Provider
-          truth owns finality.
-        </p>
-        <button disabled>Start Terminal payment</button>
-      </section>
-    </AppFrame>
+      )}
+    </>
   );
 }
 
 export function StaffOrderEntryPage({
-  client = unavailableStaffOrderEntryClient,
+  storeLabel,
+  storeReference = storeLabel,
+  csrf,
+  timeZone,
+  tableQrHref,
+  fetcher,
 }: {
-  readonly client?: StaffOrderEntryProjectionClient;
+  readonly storeLabel: string;
+  /** Which Store this tablet's often-ordered dishes belong to. */
+  readonly storeReference?: string;
+  readonly csrf: string;
+  readonly timeZone?: string | undefined;
+  /** Where staff who can create table QR codes do so (same rule as the Tables page), if allowed. */
+  readonly tableQrHref?: string | undefined;
+  readonly fetcher?: typeof fetch | undefined;
 }) {
-  const [state, setState] = useState<State>({ kind: "Loading" });
+  const client = useMemo(() => createCounterOrderClient(csrf, fetcher), [csrf, fetcher]);
+  // WP-2423 Q7 slice 2 (DEC-STAFF-DINE-IN-ROUND): opened from the Tables page for one table.
+  const [searchParams] = useSearchParams();
+  const requestedTable = searchParams.get("table");
+  const tableReference =
+    requestedTable !== null &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(requestedTable)
+      ? requestedTable
+      : null;
+  const tableMode = requestedTable !== null;
+  const [tableLabel, setTableLabel] = useState<string | null>(null);
+  // DEC-DINE-IN-PAY-LATER: the table pays once at the end — no tip and no charge per round.
+  const [tablePaysLater, setTablePaysLater] = useState(false);
+  const [menu, setMenu] = useState<
+    { kind: "Loading" } | { kind: "Error"; code: string } | { kind: "Ready"; menu: CounterMenu }
+  >({ kind: "Loading" });
+  const [reload, setReload] = useState(0);
+  const [lines, setLines] = useState<readonly Line[]>([]);
+  const [choosing, setChoosing] = useState<{
+    item: CounterMenuItem;
+    choices: Record<string, string[]>;
+    /** How many of each chosen option, where guests can take more than one of the same choice. */
+    counts: Record<string, number>;
+    quantity: number;
+    note: string;
+    /** The order line being changed; null for a new line. */
+    editing: string | null;
+  } | null>(null);
+  const [search, setSearch] = useState("");
+  // Read once per visit, so the dishes staff reach for stay where they are while they work.
+  const [oftenOrdered] = useState(() => loadOftenOrdered(storeReference));
+  const [activeSection, setActiveSection] = useState<string | null>(null);
+  // "0": no tip; a percentage the Store offers, as text; or an amount typed in.
+  const [tip, setTip] = useState<string>("0");
+  const [customTip, setCustomTip] = useState("");
+  const [paper, setPaper] = useState(false);
+  const [paidAt, setPaidAt] = useState("");
+  const [slip, setSlip] = useState("");
+  const [placed, setPlaced] = useState<PlacedCounterOrder | null>(null);
+  const [phase, setPhase] = useState<
+    "Building" | "Sending" | "Charge" | "Recording" | "Paid" | "Accepted" | "Sent"
+  >("Building");
+  const [problem, setProblem] = useState<string | null>(null);
+  const [problemNeedsTableCode, setProblemNeedsTableCode] = useState(false);
+  // WP-2423 item 8 ⑦: the guests' unsent items the server named, to add to this round.
+  const [tableCartOffer, setTableCartOffer] = useState<{
+    readonly cartVersion: number;
+    readonly items: readonly TableCartItem[];
+  } | null>(null);
+  // WP-2423 (staff-round-soldout): the guests' items taken off with the round sent, to tell them.
+  const [removedNote, setRemovedNote] = useState<string | null>(null);
+  const [paidNote, setPaidNote] = useState<string | null>(null);
+  // WP-2423 (v15 751dd768): re-read the sent, unpaid counter orders after a send or a payment.
+  const [awaitingKey, setAwaitingKey] = useState(0);
+  const placeOperation = useRef<string | null>(null);
+  // One operation per payment as staff entered it (as at table checkout): a retry after no answer
+  // with the same details is the same command (never counted twice); a corrected paid-at or slip is
+  // a new one, not a conflict with the first.
+  const payOperation = useRef<{ key: string; reference: string } | null>(null);
+  // WP-2423 (v15 fabf0261): the server refused the paid-at itself; staff correct it in the charge
+  // step, where it is shown, and record again.
+  const [paidAtRefused, setPaidAtRefused] = useState(false);
+  const [focusPaidAt, setFocusPaidAt] = useState(0);
+  const chargePaidAt = useRef<HTMLInputElement>(null);
+  const chargeHeading = useRef<HTMLHeadingElement>(null);
+  const ticketHeading = useRef<HTMLHeadingElement>(null);
+  const chooseHeading = useRef<HTMLHeadingElement>(null);
+  const chooseDialog = useRef<HTMLDialogElement>(null);
+  // WP-2423 item 5: the clock behind the payment-time warning, ticking while payment is due.
+  const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    let active = true;
-    void client
-      .load()
-      .then((value) => {
-        if (active) setState({ kind: "Found", view: parseStaffOrderEntryView(value) });
+    if (phase !== "Charge" && phase !== "Recording") return;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 15_000);
+    return () => clearInterval(timer);
+  }, [phase]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setMenu({ kind: "Loading" });
+    if (tableMode && tableReference === null) {
+      setMenu({ kind: "Error", code: "TableUnknown" });
+      return () => controller.abort();
+    }
+    const loadTable = async () => {
+      if (tableReference === null) return;
+      // The table's name as staff know it, from the Tables list (paged, at most 500 tables).
+      const tables = createDiningSessionClient(fetcher);
+      let after: string | null = null;
+      for (let page = 0; page < 10; page += 1) {
+        const result = await tables.tables(csrf, after, controller.signal);
+        const found = result.items.find((table) => table.tableReference === tableReference);
+        if (found !== undefined) {
+          if (found.lifecycle !== "Published" || found.operationalState !== "Available")
+            throw new CounterOrderClientError("TableUnavailable");
+          if (found.qrCodeValidUntil === null) throw new CounterOrderClientError("TableHasNoQr");
+          setTableLabel(found.stableLabel);
+          setTablePaysLater(found.paymentTiming === "PayLater");
+          return;
+        }
+        if (result.next === null) break;
+        after = result.next;
+      }
+      throw new CounterOrderClientError("TableUnavailable");
+    };
+    Promise.all([client.loadMenu(controller.signal, tableMode ? "DineIn" : "Pickup"), loadTable()])
+      .then(([value]) => {
+        if (!controller.signal.aborted) setMenu({ kind: "Ready", menu: value });
       })
       .catch((error: unknown) => {
-        if (active)
-          setState({
-            kind: error instanceof StaffOrderEntryClientError ? error.code : "Unavailable",
-          });
+        if (controller.signal.aborted) return;
+        setMenu({
+          kind: "Error",
+          code:
+            error instanceof CounterOrderClientError &&
+            (error.code === "PermissionDenied" ||
+              error.code === "TableUnavailable" ||
+              error.code === "TableHasNoQr")
+              ? error.code
+              : "Unavailable",
+        });
       });
-    return () => {
-      active = false;
+    return () => controller.abort();
+  }, [client, reload, csrf, fetcher, tableMode, tableReference]);
+  useEffect(() => {
+    if (phase === "Charge" || phase === "Sent") chargeHeading.current?.focus();
+  }, [phase]);
+  // After the charge heading takes focus on returning to Charge: a refused paid-at takes it instead.
+  useEffect(() => {
+    if (focusPaidAt === 0) return;
+    chargePaidAt.current?.focus();
+    chargePaidAt.current?.select?.();
+  }, [focusPaidAt]);
+  // The item's options open over the menu (a sheet on a phone), so the order stays where it is.
+  const choosingItem = choosing?.item.sellableReference ?? null;
+  useEffect(() => {
+    if (choosingItem === null) return;
+    const dialog = chooseDialog.current;
+    if (dialog !== null && !dialog.open) dialog.showModal();
+    chooseHeading.current?.focus();
+  }, [choosingItem]);
+  // The category bar follows the menu as it scrolls.
+  const sectionKeys =
+    menu.kind === "Ready"
+      ? menu.menu.sections.map((section) => section.sectionReference).join()
+      : "";
+  useEffect(() => {
+    if (sectionKeys === "" || search !== "" || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const seen = entries.find((entry) => entry.isIntersecting);
+        if (seen) setActiveSection(seen.target.id);
+      },
+      { rootMargin: "-20% 0px -70% 0px" },
+    );
+    for (const key of sectionKeys.split(",")) {
+      const section = document.getElementById("counter-section-" + key);
+      if (section !== null) observer.observe(section);
+    }
+    return () => observer.disconnect();
+  }, [sectionKeys, search]);
+
+  // v15 run: what the store can sell changes with every order (stock used, items sold out), so
+  // the menu is re-read quietly after each send or payment, every 30 s while staff build an
+  // order, and when the screen comes back into view. A failed re-read keeps the last menu (the
+  // server still refuses an item that ran out, naming it); it never blanks the order in progress.
+  const menuRefresh = useRef<AbortController | null>(null);
+  const refreshMenu = useCallback(() => {
+    menuRefresh.current?.abort();
+    const controller = new AbortController();
+    menuRefresh.current = controller;
+    client
+      .loadMenu(controller.signal, tableMode ? "DineIn" : "Pickup")
+      .then((value) => {
+        if (!controller.signal.aborted)
+          setMenu((current) =>
+            current.kind === "Ready" ? { kind: "Ready", menu: value } : current,
+          );
+      })
+      .catch(() => undefined);
+  }, [client, tableMode]);
+  useEffect(() => () => menuRefresh.current?.abort(), []);
+  const menuReady = menu.kind === "Ready";
+  // v15 cbff9d6f: no menu re-reads once this screen's sign-in has ended.
+  const live = useStaffSessionLive();
+  useEffect(() => {
+    if (!menuReady || !live || phase !== "Building") return;
+    const timer = setInterval(refreshMenu, MENU_REFRESH_MS);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") refreshMenu();
     };
-  }, [client]);
-  return state.kind === "Found" ? (
-    <StaffOrderEntryScreen view={state.view} />
-  ) : (
-    <StaffOrderEntryState state={state.kind} />
+    window.addEventListener("focus", refreshMenu);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener("focus", refreshMenu);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [live, menuReady, phase, refreshMenu]);
+
+  // Any change to what is ordered is a new order intent.
+  const changeLines = (next: readonly Line[]) => {
+    placeOperation.current = null;
+    setProblem(null);
+    setProblemNeedsTableCode(false);
+    setLines(next);
+  };
+  const itemPrice = (item: CounterMenuItem) =>
+    item.available
+      ? item.priceMinor === null
+        ? t("Price at checkout")
+        : cad(item.priceMinor)
+      : t("Sold out");
+  const canAdd = (item: CounterMenuItem) => item.available && ordering && item.priceMinor !== null;
+  // An item with nothing to choose goes straight onto the order (one more of the same line); one
+  // with options opens its choices first, the usual ones already picked. For a table, a kitchen
+  // note is added with Change on the order line.
+  const add = (item: CounterMenuItem) => {
+    if (item.rules.length > 0) {
+      setChoosing({
+        item,
+        choices: defaultChoices(item),
+        counts: defaultCounts(item),
+        quantity: 1,
+        note: "",
+        editing: null,
+      });
+      return;
+    }
+    const same = lines.find(
+      (line) =>
+        line.item.sellableReference === item.sellableReference &&
+        line.options.length === 0 &&
+        (line.note ?? null) === null,
+    );
+    changeLines(
+      same
+        ? lines.map((line) =>
+            line.key === same.key ? { ...line, quantity: line.quantity + 1 } : line,
+          )
+        : [
+            ...lines,
+            { key: serviceOperationReference(), item, quantity: 1, options: [], note: null },
+          ],
+    );
+  };
+  // WP-2423 item 8 ⑦ (Owner decision 11): the Store's own percentages; with tips off, no tip.
+  const tips = menu.kind === "Ready" ? menu.menu.tips : null;
+  const tipOptions = tips === null || !tips.enabled ? [] : ["0", ...tips.tierPercents.map(String)];
+  useEffect(() => {
+    if (tip !== "Custom" && tip !== "0" && tips !== null && !tipOptions.includes(tip)) setTip("0");
+  }, [tip, tips, tipOptions]);
+  const tipChoice = (): CounterTip | null => {
+    if (tip === "0" || tablePaysLater || tips?.enabled === false) return { kind: "None" };
+    if (tip !== "Custom") return { kind: "Percent", percent: Number(tip) };
+    const match = /^(0|[1-9][0-9]{0,4})(?:\.([0-9]{1,2}))?$/u.exec(customTip.trim());
+    if (!match) return null;
+    return {
+      kind: "Amount",
+      amountMinor: String(Number(match[1]) * 100 + Number((match[2] ?? "0").padEnd(2, "0"))),
+    };
+  };
+  const paperInstant = paper ? paidAtInstant(paidAt, Date.now(), timeZone) : null;
+  const estimate = lines.reduce<bigint | null>((sum, line) => {
+    const value = estimatedLineMinor(line);
+    return sum === null || value === null ? null : sum + value;
+  }, 0n);
+  const itemCount = lines.reduce((sum, line) => sum + line.quantity, 0);
+  const canSend =
+    phase === "Building" &&
+    lines.length > 0 &&
+    tipChoice() !== null &&
+    (!paper || tablePaysLater || paperInstant !== null);
+
+  const send = async (
+    includeTableCart: {
+      readonly expectedCartVersion: number;
+      readonly removeUnavailable: readonly TableCartItem[];
+    } | null = null,
+  ) => {
+    const chosenTip = tipChoice();
+    if (!canSend || chosenTip === null) return;
+    placeOperation.current ??= serviceOperationReference();
+    setPhase("Sending");
+    setProblem(null);
+    setProblemNeedsTableCode(false);
+    setTableCartOffer(null);
+    setRemovedNote(null);
+    try {
+      const chosen = lines.map((line) => ({
+        sellableReference: line.item.sellableReference,
+        quantity: line.quantity,
+        optionSelections: line.options.map((option) => ({
+          optionReference: option.optionReference,
+          quantity: option.quantity,
+        })),
+      }));
+      const order =
+        tableReference !== null
+          ? await client.placeTableRound({
+              operationReference: placeOperation.current,
+              tableReference,
+              lines: chosen.map((line, index) => ({ ...line, note: lines[index]?.note ?? null })),
+              tip: chosenTip,
+              recordedAfterOutage: paper,
+              ...(includeTableCart === null
+                ? {}
+                : {
+                    includeTableCart: {
+                      expectedCartVersion: includeTableCart.expectedCartVersion,
+                      ...(includeTableCart.removeUnavailable.length === 0
+                        ? {}
+                        : {
+                            removeUnavailable: includeTableCart.removeUnavailable.map(
+                              (item) => item.cartItemReference,
+                            ),
+                          }),
+                    },
+                  }),
+            })
+          : await client.placeOrder({
+              operationReference: placeOperation.current,
+              lines: chosen,
+              tip: chosenTip,
+              recordedAfterOutage: paper,
+            });
+      setPlaced(order);
+      if (includeTableCart !== null && includeTableCart.removeUnavailable.length > 0)
+        setRemovedNote(
+          t("Tell the guests: {names} isn't available now, so it was taken off their order.", {
+            names: tableCartNames(includeTableCart.removeUnavailable),
+          }),
+        );
+      recordOrdered(
+        storeReference,
+        lines.map((line) => [line.item.sellableReference, line.quantity]),
+      );
+      payOperation.current = null;
+      setPhase(order.payLater ? "Sent" : "Charge");
+      setAwaitingKey((value) => value + 1);
+      refreshMenu();
+    } catch (error) {
+      const failure =
+        error instanceof CounterOrderClientError
+          ? error
+          : new CounterOrderClientError("Unavailable");
+      // An unknown or still-running outcome keeps the same operation (a retry returns the same
+      // order); anything else starts over as a new order.
+      if (failure.code !== "OutcomeUnknown" && failure.code !== "InProgress")
+        placeOperation.current = null;
+      setProblem(
+        placeErrorText(
+          failure,
+          lines,
+          tableLabel === null
+            ? null
+            : t("Table {tableLabel}", { tableLabel: saidTable(tableLabel) }),
+          tableQrHref !== undefined,
+        ),
+      );
+      setProblemNeedsTableCode(failure.code === "TableHasNoQr");
+      setTableCartOffer(
+        failure.code === "TableCartHasItems" && failure.tableCart !== null
+          ? { cartVersion: failure.tableCart.cartVersion, items: failure.pendingItems }
+          : null,
+      );
+      if (
+        failure.code === "ItemUnavailable" ||
+        failure.code === "ItemShort" ||
+        failure.code === "TipsOff" ||
+        failure.code === "TipChoicesChanged"
+      )
+        refreshMenu();
+      setPhase("Building");
+    }
+  };
+
+  const recordPayment = async (expectedTotalMinor: string) => {
+    if (placed === null || phase !== "Charge" || !validSlipReference(slip.trim())) return;
+    if (placed.recordedAfterOutage && paperInstant === null) return;
+    const takenAt = placed.recordedAfterOutage ? paperInstant : null;
+    const intent = JSON.stringify([
+      placed.orderBatchReference,
+      expectedTotalMinor,
+      slip.trim(),
+      takenAt,
+    ]);
+    if (payOperation.current?.key !== intent)
+      payOperation.current = { key: intent, reference: serviceOperationReference() };
+    setPhase("Recording");
+    setProblem(null);
+    setProblemNeedsTableCode(false);
+    setPaidAtRefused(false);
+    let recorded;
+    try {
+      recorded = await client.recordPayment({
+        operationReference: payOperation.current.reference,
+        orderReference: placed.orderReference,
+        orderBatchReference: placed.orderBatchReference,
+        expectedTotalMinor,
+        slipReference: slip.trim() === "" ? null : slip.trim(),
+        takenAt,
+      });
+    } catch (error) {
+      const failure =
+        error instanceof CounterOrderClientError
+          ? error
+          : new CounterOrderClientError("Unavailable");
+      if (failure.code !== "OutcomeUnknown") payOperation.current = null;
+      if (failure.code === "AmountChanged" && failure.totalMinor !== null)
+        setPlaced({ ...placed, totalMinor: failure.totalMinor });
+      setProblem(payErrorText(failure));
+      setPhase("Charge");
+      if (placed.recordedAfterOutage && paidAtRefusal(failure)) {
+        setPaidAtRefused(true);
+        setFocusPaidAt((value) => value + 1);
+      }
+      return;
+    }
+    refreshMenu();
+    setAwaitingKey((value) => value + 1);
+    // WP-2423 D1: the server accepts the paid order or round with the payment record (at the
+    // Order's current version), so it reaches the kitchen even if this page is closed now.
+    setPhase(recorded.acceptance === "Accepted" ? "Accepted" : "Paid");
+    setPaidNote(
+      paidNoteText({
+        tableMode,
+        recordedAfterOutage: placed.recordedAfterOutage,
+        acceptance: recorded.acceptance,
+      }),
+    );
+  };
+
+  const startOver = () => {
+    setLines([]);
+    setPlaced(null);
+    setTip("0");
+    setCustomTip("");
+    setPaper(false);
+    setPaidAt("");
+    setSlip("");
+    setProblem(null);
+    setProblemNeedsTableCode(false);
+    setPaidNote(null);
+    setRemovedNote(null);
+    setPaidAtRefused(false);
+    placeOperation.current = null;
+    payOperation.current = null;
+    setPhase("Building");
+  };
+
+  const pageTitle = tableMode
+    ? tableLabel === null
+      ? t("Table order")
+      : t("Table {tableLabel} order", { tableLabel: saidTable(tableLabel) })
+    : t("Counter order");
+  if (menu.kind === "Loading")
+    return (
+      <WorkspacePage title={pageTitle} meta={storeLabel}>
+        <StatePanel heading={t("Loading the menu")} status>
+          <p>{t("Loading what the store sells now…")}</p>
+        </StatePanel>
+      </WorkspacePage>
+    );
+  if (menu.kind === "Error") {
+    const [heading, text] = menuError[menu.code] ?? (menuError.Unavailable as [string, string]);
+    const createCode = menu.code === "TableHasNoQr" ? tableQrHref : undefined;
+    return (
+      <WorkspacePage title={pageTitle} meta={storeLabel}>
+        <StatePanel heading={heading} tone="error" status>
+          {createCode ? (
+            // Same rule as the Tables page: staff who can create codes get the link.
+            <p>
+              {t("Orders for a table use its code. Create one on")}{" "}
+              <Link to={createCode}>{t("Table QR codes")}</Link>{" "}
+              {t("(it can be printed later), then take the order.")}
+            </p>
+          ) : (
+            <p>{text}</p>
+          )}
+          {menu.code === "Unavailable" ? (
+            <button type="button" onClick={() => setReload((value) => value + 1)}>
+              {t("Try again")}
+            </button>
+          ) : tableMode ? (
+            <Link to="/operations/dining">{t("Back to Tables")}</Link>
+          ) : (
+            <Link to="/app">{t("Back to home")}</Link>
+          )}
+        </StatePanel>
+      </WorkspacePage>
+    );
+  }
+
+  const ordering = phase === "Building" || phase === "Sending";
+  const found = counterMenuSearch(menu.menu.sections, search);
+  const often = oftenOrdered.flatMap((reference) =>
+    menu.menu.sections
+      .flatMap((section) => section.items)
+      .filter((item) => item.sellableReference === reference)
+      .slice(0, 1),
+  );
+  const inOrder = (item: CounterMenuItem) =>
+    lines
+      .filter((line) => line.item.sellableReference === item.sellableReference)
+      .reduce((sum, line) => sum + line.quantity, 0);
+  const jumpTo = (id: string) => {
+    setActiveSection(id);
+    document.getElementById(id)?.scrollIntoView({ block: "start" });
+  };
+  const itemRow = (item: CounterMenuItem) => (
+    <li key={item.sellableReference} data-available={item.available}>
+      <button
+        type="button"
+        className="counter-order__item"
+        disabled={!canAdd(item)}
+        aria-label={t("Add {name}", { name: item.name })}
+        onClick={() => add(item)}
+      >
+        <span className="counter-order__item-name">
+          {inOrder(item) > 0 ? (
+            <span className="counter-order__in-order">{inOrder(item)} × </span>
+          ) : null}
+          {item.name}
+        </span>
+        <span className="counter-order__item-price">{itemPrice(item)}</span>
+      </button>
+    </li>
+  );
+  const choosingLine: Line | null =
+    choosing === null
+      ? null
+      : {
+          key: choosing.editing ?? serviceOperationReference(),
+          item: choosing.item,
+          quantity: choosing.quantity,
+          options: choosing.item.rules.flatMap((rule) =>
+            (choosing.choices[rule.bindingReference] ?? []).map((reference) => {
+              const option = rule.options.find(
+                (candidate) => candidate.optionReference === reference,
+              );
+              return {
+                optionReference: reference,
+                name: option?.name ?? "",
+                quantity: choosing.counts[reference] ?? option?.defaultQuantity ?? 1,
+              };
+            }),
+          ),
+          note: tableMode && choosing.note.trim() !== "" ? choosing.note.trim() : null,
+        };
+  const choosingMinor = choosingLine === null ? null : estimatedLineMinor(choosingLine);
+  return (
+    <WorkspacePage
+      title={pageTitle}
+      meta={
+        tableMode
+          ? tablePaysLater
+            ? t("{store} · Dine-in · added to the table's bill · the table pays at the end", {
+                store: storeLabel,
+              })
+            : t(
+                "{store} · Dine-in · added to the table's order · paid on the store's card machine",
+                {
+                  store: storeLabel,
+                },
+              )
+          : t("{store} · Pickup · paid on the store's card machine", { store: storeLabel })
+      }
+      className="counter-order"
+    >
+      {/* WP-2423 (v15 751dd768): sent counter orders not paid yet, from the server. */}
+      {tableMode ? null : (
+        <CounterAwaitingPayment
+          csrf={csrf}
+          timeZone={timeZone}
+          fetcher={fetcher}
+          refreshKey={awaitingKey}
+          excludeOrderReference={
+            placed !== null && (phase === "Charge" || phase === "Recording")
+              ? placed.orderReference
+              : null
+          }
+        />
+      )}
+      <div className="counter-order__layout">
+        <section className="counter-order__menu" aria-labelledby="counter-menu-heading">
+          <h2 id="counter-menu-heading" className="counter-order__hidden-heading">
+            {t("Menu")}
+          </h2>
+          <div className="counter-order__menu-bar">
+            <label className="counter-order__search">
+              <span className="counter-order__hidden-heading">
+                {t("Search dishes (Chinese or English)")}
+              </span>
+              <input
+                type="search"
+                value={search}
+                placeholder={t("Search dishes (Chinese or English)")}
+                autoComplete="off"
+                onChange={(event) => setSearch(event.currentTarget.value)}
+                onKeyDown={(event) => {
+                  // A keyboard at the counter: Enter adds the one dish left on the list.
+                  if (event.key !== "Enter") return;
+                  const only = found.flatMap((section) => section.items);
+                  if (only.length === 1 && only[0] && canAdd(only[0])) {
+                    add(only[0]);
+                    setSearch("");
+                  }
+                }}
+              />
+            </label>
+            {search === "" && menu.menu.sections.length + (often.length > 0 ? 1 : 0) > 1 ? (
+              <nav className="counter-order__categories" aria-label={t("Menu categories")}>
+                {often.length > 0 ? (
+                  <button
+                    type="button"
+                    aria-current={activeSection === "counter-section-often" ? "true" : undefined}
+                    onClick={() => jumpTo("counter-section-often")}
+                  >
+                    {t("Often ordered")}
+                  </button>
+                ) : null}
+                {menu.menu.sections.map((section) => (
+                  <button
+                    key={section.sectionReference}
+                    type="button"
+                    aria-current={
+                      activeSection === "counter-section-" + section.sectionReference
+                        ? "true"
+                        : undefined
+                    }
+                    onClick={() => jumpTo("counter-section-" + section.sectionReference)}
+                  >
+                    {section.name}
+                  </button>
+                ))}
+              </nav>
+            ) : null}
+          </div>
+          {menu.menu.sections.length === 0 ? (
+            <p className="counter-order__menu-empty">
+              {t(
+                "Nothing is on the menu right now. Check the menu's hours and items on the Menus page.",
+              )}
+            </p>
+          ) : null}
+          {search !== "" && found.length === 0 ? (
+            <p className="counter-order__menu-empty" role="status">
+              {t("No dish matches “{query}”.", { query: search.trim() })}
+            </p>
+          ) : null}
+          {search === "" && often.length > 0 ? (
+            <section
+              id="counter-section-often"
+              className="counter-order__section"
+              aria-label={t("Often ordered")}
+            >
+              <h3>{t("Often ordered")}</h3>
+              <ul className="counter-order__items">{often.map((item) => itemRow(item))}</ul>
+            </section>
+          ) : null}
+          {found.map((section) => (
+            <section
+              key={section.sectionReference}
+              id={`counter-section-${section.sectionReference}`}
+              className="counter-order__section"
+              aria-label={section.name}
+            >
+              <h3>{section.name}</h3>
+              <ul className="counter-order__items">
+                {counterMenuFamilies(section.items).map((family) => {
+                  const single = family.sizes.length === 1 ? family.sizes[0]?.item : undefined;
+                  if (single !== undefined) return itemRow(single);
+                  // Owner 2026-10-26: one row per drink; a tap on a size adds that size.
+                  return (
+                    <li
+                      key={family.key}
+                      className="counter-order__family"
+                      data-available={family.sizes.some((size) => size.item.available)}
+                    >
+                      <span className="counter-order__item-name">{family.name}</span>
+                      <span className="counter-order__sizes" role="group" aria-label={family.name}>
+                        {family.sizes.map((size) => (
+                          <button
+                            key={size.item.sellableReference}
+                            type="button"
+                            disabled={!canAdd(size.item)}
+                            aria-label={t("Add {name}", { name: size.item.name })}
+                            data-available={size.item.available}
+                            onClick={() => add(size.item)}
+                          >
+                            <span>
+                              {inOrder(size.item) > 0 ? (
+                                <span className="counter-order__in-order">
+                                  {inOrder(size.item)} ×{" "}
+                                </span>
+                              ) : null}
+                              {size.label}
+                            </span>
+                            <span className="counter-order__item-price">
+                              {itemPrice(size.item)}
+                            </span>
+                          </button>
+                        ))}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+          ))}
+        </section>
+
+        <section
+          id="counter-order-ticket"
+          className="counter-order__ticket store-card"
+          aria-labelledby="counter-ticket"
+        >
+          <header className="counter-order__ticket-header">
+            <h2 id="counter-ticket" ref={ticketHeading} tabIndex={-1}>
+              {t("Order")}
+            </h2>
+            {itemCount > 0 ? (
+              <span className="counter-order__count">
+                {itemCount === 1 ? t("1 item") : t("{itemCount} items", { itemCount: itemCount })}
+              </span>
+            ) : null}
+          </header>
+          {lines.length === 0 ? (
+            <div className="counter-order__empty">
+              <p className="counter-order__empty-title">{t("No items yet")}</p>
+              <p className="bop-muted">{t("Add items from the menu.")}</p>
+            </div>
+          ) : (
+            <ul className="counter-order__lines" aria-label={t("Items in this order")}>
+              {lines.map((line) => {
+                const each = estimatedLineMinor(line);
+                const setQuantity = (quantity: number) =>
+                  changeLines(
+                    lines.map((other) => (other.key === line.key ? { ...other, quantity } : other)),
+                  );
+                return (
+                  <li key={line.key}>
+                    <span className="counter-order__line-name">
+                      {line.quantity} × {line.item.name}
+                      {line.options.length > 0 ? (
+                        <span className="bop-muted">
+                          {" "}
+                          ·{" "}
+                          {line.options
+                            .map((option) =>
+                              option.quantity > 1
+                                ? `${option.name} × ${option.quantity}`
+                                : option.name,
+                            )
+                            .join(", ")}
+                        </span>
+                      ) : null}
+                      {line.note ? (
+                        <span className="bop-muted">
+                          {" "}
+                          {t("· Note: {note}", { note: line.note })}
+                        </span>
+                      ) : null}
+                    </span>
+                    <span className="counter-order__line-price">
+                      {each === null ? "" : cad(each.toString())}
+                    </span>
+                    {/* WP-2423 D5: once sent, an item is changed by cancelling it on the order. */}
+                    {ordering ? (
+                      <span className="counter-order__line-actions">
+                        <button
+                          type="button"
+                          className="counter-order__step"
+                          disabled={phase !== "Building" || line.quantity <= 1}
+                          aria-label={t("One less {name}", { name: line.item.name })}
+                          onClick={() => setQuantity(line.quantity - 1)}
+                        >
+                          −
+                        </button>
+                        <button
+                          type="button"
+                          className="counter-order__step"
+                          disabled={phase !== "Building" || line.quantity >= 99}
+                          aria-label={t("One more {name}", { name: line.item.name })}
+                          onClick={() => setQuantity(line.quantity + 1)}
+                        >
+                          +
+                        </button>
+                        {line.item.rules.length > 0 || tableMode ? (
+                          <button
+                            type="button"
+                            className="counter-order__change"
+                            disabled={phase !== "Building"}
+                            aria-label={t("Change {name}", { name: line.item.name })}
+                            onClick={() =>
+                              setChoosing({
+                                item: line.item,
+                                choices: Object.fromEntries(
+                                  line.item.rules.map((rule) => [
+                                    rule.bindingReference,
+                                    line.options
+                                      .map((option) => option.optionReference)
+                                      .filter((reference) =>
+                                        rule.options.some(
+                                          (option) => option.optionReference === reference,
+                                        ),
+                                      ),
+                                  ]),
+                                ),
+                                counts: {
+                                  ...defaultCounts(line.item),
+                                  ...Object.fromEntries(
+                                    line.options.map((option) => [
+                                      option.optionReference,
+                                      option.quantity,
+                                    ]),
+                                  ),
+                                },
+                                quantity: line.quantity,
+                                note: line.note ?? "",
+                                editing: line.key,
+                              })
+                            }
+                          >
+                            {t("Change")}
+                          </button>
+                        ) : null}
+                        <button
+                          type="button"
+                          className="counter-order__remove"
+                          disabled={phase !== "Building"}
+                          aria-label={t("Remove {name}", { name: line.item.name })}
+                          onClick={() =>
+                            changeLines(lines.filter((other) => other.key !== line.key))
+                          }
+                        >
+                          {t("Remove")}
+                        </button>
+                      </span>
+                    ) : null}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          <div className="counter-order__ticket-foot">
+            {estimate !== null && lines.length > 0 ? (
+              <div className="counter-order__totals">
+                <p className="counter-order__subtotal">
+                  <span>{t("Subtotal")}</span>
+                  <span>{cad(estimate.toString())}</span>
+                </p>
+                <p className="counter-order__estimate">
+                  {placed !== null && !ordering
+                    ? placed.payLater
+                      ? t("Sent to the kitchen. {totalMinor} with tax goes on the table's bill.", {
+                          totalMinor: cad(placed.totalMinor),
+                        })
+                      : phase === "Paid" || phase === "Accepted"
+                        ? t("Sent and paid: {totalMinor} with tax and tip.", {
+                            totalMinor: cad(placed.totalMinor),
+                          })
+                        : t("Sent. Charge {totalMinor} with tax and tip on the card machine.", {
+                            totalMinor: cad(placed.totalMinor),
+                          })
+                    : tablePaysLater
+                      ? t(
+                          "About {value} before tax. It goes on the table's bill; the table pays once at the end.",
+                          { value: cad(estimate.toString()) },
+                        )
+                      : t(
+                          "About {value} before tax and tip. The final total comes when you send the order.",
+                          { value: cad(estimate.toString()) },
+                        )}
+                </p>
+              </div>
+            ) : null}
+            {tablePaysLater || tipOptions.length === 0 ? null : (
+              <fieldset className="counter-order__tip" disabled={!ordering}>
+                <legend>{t("Tip")}</legend>
+                {tipOptions.map((value) => (
+                  <label key={value}>
+                    <input
+                      type="radio"
+                      name="counter-tip"
+                      checked={tip === value}
+                      onChange={() => {
+                        placeOperation.current = null;
+                        setTip(value);
+                      }}
+                    />
+                    {value === "0" ? t("No tip") : `${value}%`}
+                  </label>
+                ))}
+                <label>
+                  <input
+                    type="radio"
+                    name="counter-tip"
+                    checked={tip === "Custom"}
+                    onChange={() => {
+                      placeOperation.current = null;
+                      setTip("Custom");
+                    }}
+                  />
+                  {t("Other amount")}
+                </label>
+                {tip === "Custom" ? (
+                  <label className="counter-order__custom-tip">
+                    {t("Tip amount ($)")}
+                    <input
+                      inputMode="decimal"
+                      value={customTip}
+                      aria-invalid={tipChoice() === null}
+                      onChange={(event) => {
+                        placeOperation.current = null;
+                        setCustomTip(event.currentTarget.value);
+                      }}
+                    />
+                  </label>
+                ) : null}
+              </fieldset>
+            )}
+            <fieldset className="counter-order__paper" disabled={!ordering}>
+              <legend className="counter-order__hidden-heading">{t("Paper order")}</legend>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={paper}
+                  onChange={(event) => {
+                    placeOperation.current = null;
+                    setPaper(event.currentTarget.checked);
+                  }}
+                />
+                {t("Recorded after an outage (taken on paper)")}
+              </label>
+              {/* Once sent, the paid-at is shown and corrected in the charge step below. */}
+              {paper && !tablePaysLater && ordering ? (
+                <label>
+                  {t("Paid at (store time, from the paper order)")}
+                  <input
+                    type="datetime-local"
+                    value={paidAt}
+                    aria-invalid={paperInstant === null}
+                    aria-describedby="counter-paper-hint"
+                    onChange={(event) => {
+                      placeOperation.current = null;
+                      setPaidAt(event.currentTarget.value);
+                    }}
+                  />
+                </label>
+              ) : null}
+              {paper && !tablePaysLater && ordering ? (
+                <p id="counter-paper-hint" className="field-hint">
+                  {t(
+                    "Within the last 3 days. The order is marked “Recorded after outage” and its payment counts on the day it was paid.",
+                  )}
+                </p>
+              ) : null}
+              {paper &&
+              !tablePaysLater &&
+              ordering &&
+              paidAtDayNote(paperInstant, Date.now(), timeZone) ? (
+                <p className="order-accept-by" data-tier="warning" role="note">
+                  {paidAtDayNote(paperInstant, Date.now(), timeZone)}
+                </p>
+              ) : null}
+            </fieldset>
+            {tableMode && ordering ? (
+              <p className="field-hint">
+                {t(
+                  "Sending gives this order its own join code, so a join code you handed out that hasn't been used yet stops working. Guests already at the table stay joined.",
+                )}
+              </p>
+            ) : null}
+            {problem !== null && ordering ? <p role="alert">{problem}</p> : null}
+            {problem !== null && ordering && tableCartOffer !== null ? (
+              <TableCartOfferActions
+                offer={tableCartOffer}
+                disabled={!canSend}
+                onSend={(removeUnavailable) =>
+                  void send({ expectedCartVersion: tableCartOffer.cartVersion, removeUnavailable })
+                }
+              />
+            ) : null}
+            {problem !== null && ordering && problemNeedsTableCode && tableQrHref !== undefined ? (
+              <p>
+                <Link to={tableQrHref}>{t("Table QR codes")}</Link>
+              </p>
+            ) : null}
+            {ordering ? (
+              <div className="card-actions counter-order__send">
+                <button
+                  type="button"
+                  className="counter-order__primary"
+                  disabled={!canSend}
+                  onClick={() => void send()}
+                >
+                  {phase === "Sending" ? t("Sending…") : t("Send order")}
+                </button>
+              </div>
+            ) : null}
+          </div>
+        </section>
+
+        {ordering && lines.length > 0 ? (
+          // Phone layout only (CSS): the ticket sits below the menu, so a bottom bar keeps the
+          // order's count and estimate in view and takes staff to it to send.
+          <div className="counter-order__summary-bar">
+            <span className="counter-order__summary-text">
+              <span>
+                {itemCount === 1 ? t("1 item") : t("{itemCount} items", { itemCount: itemCount })}
+              </span>
+              {estimate !== null ? <strong>{cad(estimate.toString())}</strong> : null}
+            </span>
+            <button
+              type="button"
+              className="counter-order__primary"
+              onClick={() => {
+                document
+                  .getElementById("counter-order-ticket")
+                  ?.scrollIntoView({ block: "start", behavior: "smooth" });
+                ticketHeading.current?.focus({ preventScroll: true });
+              }}
+            >
+              {t("View order")}
+            </button>
+          </div>
+        ) : null}
+
+        {placed !== null && !ordering && placed.payLater ? (
+          <section
+            className="counter-order__charge store-card"
+            aria-labelledby="counter-charge"
+            data-phase={phase}
+          >
+            <h2 id="counter-charge" ref={chargeHeading} tabIndex={-1}>
+              {t("Table {value} round sent to the kitchen", {
+                value: saidTable(placed.tableLabel ?? tableLabel ?? ""),
+              })}
+            </h2>
+            {removedNote !== null ? (
+              <p className="order-accept-by" data-tier="warning" role="note">
+                {removedNote}
+              </p>
+            ) : null}
+            <dl>
+              <div>
+                <dt>{t("Order")}</dt>
+                <dd>{placed.orderNumber}</dd>
+              </div>
+              <div>
+                <dt>{t("Round total incl. tax")}</dt>
+                <dd>
+                  <strong>{cad(placed.orderMinor)}</strong>
+                </dd>
+              </div>
+            </dl>
+            <p role="status">
+              {t(
+                "Nothing to charge now. The round is on the table's bill; the table pays once at the end, tip included.",
+              )}
+            </p>
+            {paper ? (
+              <p role="note">
+                {t(
+                  "It also shows in the kitchen, marked as from a paper slip. If it was already made, the kitchen marks it done and you mark it served.",
+                )}
+              </p>
+            ) : null}
+            <div className="card-actions">
+              <button type="button" onClick={startOver}>
+                {t("Another order for this table")}
+              </button>
+              <Link to="/operations/dining">{t("Back to Tables")}</Link>
+              <Link to="/operations/orders">{t("Open Orders")}</Link>
+            </div>
+          </section>
+        ) : placed !== null && !ordering ? (
+          <section
+            className="counter-order__charge store-card"
+            aria-labelledby="counter-charge"
+            data-phase={phase}
+          >
+            <h2 id="counter-charge" ref={chargeHeading} tabIndex={-1}>
+              {phase === "Paid" || phase === "Accepted"
+                ? tableMode
+                  ? t("Table {value} order paid", {
+                      value: saidTable(placed.tableLabel ?? tableLabel ?? ""),
+                    })
+                  : t("Order {orderNumber} paid", { orderNumber: placed.orderNumber })
+                : t("Charge {totalMinor} on the card machine", {
+                    totalMinor: cad(placed.totalMinor),
+                  })}
+            </h2>
+            {removedNote !== null ? (
+              <p className="order-accept-by" data-tier="warning" role="note">
+                {removedNote}
+              </p>
+            ) : null}
+            <dl>
+              <div>
+                <dt>{t("Order")}</dt>
+                <dd>{placed.orderNumber}</dd>
+              </div>
+              <div>
+                <dt>{t("Order total incl. tax")}</dt>
+                <dd>{cad(placed.orderMinor)}</dd>
+              </div>
+              <div>
+                <dt>{t("Tip")}</dt>
+                <dd>{cad(placed.tipMinor)}</dd>
+              </div>
+              <div>
+                <dt>{t("To charge")}</dt>
+                <dd>
+                  <strong>{cad(placed.totalMinor)}</strong>
+                </dd>
+              </div>
+            </dl>
+            {phase === "Charge" || phase === "Recording" ? (
+              <>
+                {(() => {
+                  const notice = paymentWindowNotice({
+                    payBy: placed.payBy ?? "",
+                    now,
+                    tableMode,
+                    timeZone,
+                  });
+                  return (
+                    <p
+                      className="order-accept-by"
+                      data-tier={notice.tier}
+                      role={notice.tier === "urgent" ? "alert" : "note"}
+                    >
+                      {notice.text}
+                    </p>
+                  );
+                })()}
+                <form
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void recordPayment(placed.totalMinor);
+                  }}
+                >
+                  <label>
+                    {t("Slip reference (optional)")}
+                    <input
+                      value={slip}
+                      maxLength={40}
+                      autoComplete="off"
+                      aria-invalid={!validSlipReference(slip.trim())}
+                      aria-describedby="counter-slip-hint"
+                      onChange={(event) => setSlip(event.currentTarget.value)}
+                    />
+                  </label>
+                  <p id="counter-slip-hint" className="field-hint">
+                    {t(
+                      "The approval or reference code on the card machine slip, to match the machine's day total. Never the card number.",
+                    )}
+                  </p>
+                  {placed.recordedAfterOutage ? (
+                    <>
+                      <label>
+                        {t("Paid at (store time, from the paper order)")}
+                        <input
+                          ref={chargePaidAt}
+                          type="datetime-local"
+                          value={paidAt}
+                          disabled={phase === "Recording"}
+                          aria-invalid={paperInstant === null || paidAtRefused}
+                          aria-describedby={
+                            paidAtRefused
+                              ? "counter-charge-paid-at-refused counter-charge-paid-at-hint"
+                              : "counter-charge-paid-at-hint"
+                          }
+                          onChange={(event) => {
+                            setPaidAt(event.currentTarget.value);
+                            if (paidAtRefused) {
+                              setPaidAtRefused(false);
+                              setProblem(null);
+                            }
+                          }}
+                        />
+                      </label>
+                      {paidAtRefused && problem !== null ? (
+                        <p id="counter-charge-paid-at-refused" role="alert">
+                          {problem}
+                        </p>
+                      ) : null}
+                      <p id="counter-charge-paid-at-hint" className="field-hint">
+                        {t(
+                          "Within the last 3 days. If the time was wrong, correct it here and record again.",
+                        )}
+                      </p>
+                      {paidAtDayNote(paperInstant, now, timeZone) !== null ? (
+                        <p className="order-accept-by" data-tier="warning" role="note">
+                          {paidAtDayNote(paperInstant, now, timeZone)}
+                        </p>
+                      ) : null}
+                    </>
+                  ) : null}
+                  {problem !== null && !paidAtRefused ? <p role="alert">{problem}</p> : null}
+                  <div className="card-actions">
+                    <button
+                      type="submit"
+                      className="counter-order__primary"
+                      disabled={
+                        phase === "Recording" ||
+                        !validSlipReference(slip.trim()) ||
+                        (placed.recordedAfterOutage && paperInstant === null)
+                      }
+                    >
+                      {phase === "Recording"
+                        ? t("Recording…")
+                        : t("Paid on card machine · {totalMinor}", {
+                            totalMinor: cad(placed.totalMinor),
+                          })}
+                    </button>
+                  </div>
+                </form>
+                <p className="bop-muted">
+                  {tableMode
+                    ? t(
+                        "Card declined? Try another card. Nothing goes to the kitchen until this is recorded; after {payBy} it can no longer be paid here and must be sent again.",
+                        { payBy: storeTime(placed.payBy ?? "", timeZone) },
+                      )
+                    : t(
+                        "Card declined? Try another card. Not paying? Leave it: the order is released at {payBy}.",
+                        { payBy: storeTime(placed.payBy ?? "", timeZone) },
+                      )}
+                </p>
+              </>
+            ) : (
+              <>
+                <p role="status">{paidNote ?? t("Paid on the card machine.")}</p>
+                <div className="card-actions">
+                  <button type="button" onClick={startOver}>
+                    {tableMode ? t("Another order for this table") : t("New counter order")}
+                  </button>
+                  {tableMode ? <Link to="/operations/dining">{t("Back to Tables")}</Link> : null}
+                  <Link to="/operations/orders">{t("Open Orders")}</Link>
+                </div>
+              </>
+            )}
+          </section>
+        ) : null}
+      </div>
+      {choosing !== null && choosingLine !== null ? (
+        <dialog
+          ref={chooseDialog}
+          className="counter-order__choose"
+          onCancel={() => setChoosing(null)}
+          onClick={(event) => {
+            if (event.target === chooseDialog.current) setChoosing(null);
+          }}
+        >
+          <form
+            aria-label={t("Choose {name}", { name: choosing.item.name })}
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (!choicesComplete(choosing.item, choosing.choices, choosing.counts)) return;
+              changeLines(
+                choosing.editing === null
+                  ? [...lines, choosingLine]
+                  : lines.map((line) => (line.key === choosing.editing ? choosingLine : line)),
+              );
+              setChoosing(null);
+            }}
+          >
+            <h3 ref={chooseHeading} tabIndex={-1}>
+              {choosing.item.name}
+            </h3>
+            {choosing.item.rules.map((rule) => {
+              const single = rule.maximumSelections === 1;
+              const picked = choosing.choices[rule.bindingReference] ?? [];
+              const total = chosenInRule(picked, choosing.counts);
+              return (
+                <fieldset key={rule.bindingReference}>
+                  <legend>
+                    {rule.name}
+                    {` · ${staffChoiceText(rule)}`}
+                  </legend>
+                  {total > rule.maximumSelections ? (
+                    <p role="status">
+                      {t("{name} allows at most {max}. Choose fewer.", {
+                        name: rule.name,
+                        max: rule.maximumSelections,
+                      })}
+                    </p>
+                  ) : null}
+                  {rule.options.map((option) => (
+                    <label key={option.optionReference}>
+                      <input
+                        type={single ? "radio" : "checkbox"}
+                        name={rule.bindingReference}
+                        checked={picked.includes(option.optionReference)}
+                        disabled={
+                          (option.offeredNow === false &&
+                            !picked.includes(option.optionReference)) ||
+                          (!single &&
+                            !picked.includes(option.optionReference) &&
+                            total >= rule.maximumSelections)
+                        }
+                        onChange={(event) => {
+                          const checked = event.currentTarget.checked;
+                          setChoosing({
+                            ...choosing,
+                            choices: {
+                              ...choosing.choices,
+                              [rule.bindingReference]: single
+                                ? [option.optionReference]
+                                : checked
+                                  ? [...picked, option.optionReference]
+                                  : picked.filter((value) => value !== option.optionReference),
+                            },
+                          });
+                        }}
+                      />
+                      <span>{option.name}</span>
+                      {option.offeredNow === false ? (
+                        <span className="counter-order__option-price">
+                          {t("Not available now")}
+                        </span>
+                      ) : option.priceMinor !== null && option.priceMinor !== "0" ? (
+                        <span className="counter-order__option-price">
+                          +{cad(option.priceMinor)}
+                        </span>
+                      ) : null}
+                    </label>
+                  ))}
+                  {/* WP-2423 item 3b: a choice guests can repeat (double pearls) at the table too. */}
+                  {rule.options
+                    .filter(
+                      (option) =>
+                        option.maximumQuantity > 1 && picked.includes(option.optionReference),
+                    )
+                    .map((option) => (
+                      <label key={option.optionReference} className="counter-order__quantity">
+                        {t("How many {name}", { name: option.name })}
+                        <input
+                          type="number"
+                          inputMode="numeric"
+                          min={1}
+                          max={repeatLimit(rule, option.optionReference, picked, choosing.counts)}
+                          value={choosing.counts[option.optionReference] ?? 1}
+                          onChange={(event) =>
+                            setChoosing({
+                              ...choosing,
+                              counts: {
+                                ...choosing.counts,
+                                [option.optionReference]: Math.min(
+                                  repeatLimit(
+                                    rule,
+                                    option.optionReference,
+                                    picked,
+                                    choosing.counts,
+                                  ),
+                                  Math.max(1, Number(event.currentTarget.value) || 1),
+                                ),
+                              },
+                            })
+                          }
+                        />
+                      </label>
+                    ))}
+                </fieldset>
+              );
+            })}
+            <label className="counter-order__quantity">
+              {t("Quantity")}
+              <input
+                type="number"
+                inputMode="numeric"
+                min={1}
+                max={99}
+                value={choosing.quantity}
+                onChange={(event) =>
+                  setChoosing({
+                    ...choosing,
+                    quantity: Math.min(99, Math.max(1, Number(event.currentTarget.value) || 1)),
+                  })
+                }
+              />
+            </label>
+            {tableMode ? (
+              <label className="counter-order__note">
+                {t("Note for the kitchen (optional)")}
+                <input
+                  value={choosing.note}
+                  maxLength={140}
+                  autoComplete="off"
+                  onChange={(event) =>
+                    setChoosing({ ...choosing, note: event.currentTarget.value })
+                  }
+                />
+              </label>
+            ) : null}
+            <div className="counter-order__choose-actions">
+              <button
+                type="submit"
+                className="counter-order__primary"
+                disabled={!choicesComplete(choosing.item, choosing.choices, choosing.counts)}
+              >
+                {choosing.editing === null ? t("Add to order") : t("Save change")}
+                {choosingMinor === null ? "" : ` · ${cad(choosingMinor.toString())}`}
+              </button>
+              <button type="button" onClick={() => setChoosing(null)}>
+                {t("Cancel")}
+              </button>
+            </div>
+          </form>
+        </dialog>
+      ) : null}
+    </WorkspacePage>
   );
 }

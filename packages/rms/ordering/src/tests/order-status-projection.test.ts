@@ -342,4 +342,68 @@ describe("Order status projection", () => {
       malformedProjection.getCustomer({ orderReference: refs.order, observedAt: at }),
     ).rejects.toMatchObject({ code: "ORDER_STATUS_DEPENDENCY_UNAVAILABLE" });
   });
+
+  it("WP-2423 Q8: lets any current participant read the table's dine-in Order, nothing else", async () => {
+    const projected = await createOrderStatusProjector({
+      references: { generateGeneration: () => refs.generation, now: () => at },
+      source: {
+        loadExact: async () => source({ orderType: "DineIn", guestSessionReference: id(50) }),
+      },
+      projections: { load: async () => null, replace: async (projection) => projection },
+    }).project(refs.order);
+    const participant = guest({
+      channel: "DineIn",
+      publicTableReference: id(22) as never,
+      diningState: "DiningBound",
+      diningSessionReference: id(23) as never,
+      diningParticipantReference: id(24) as never,
+    });
+    const service = (session: GuestSession | null, loaded = projected) =>
+      createOrderStatusQueryService({
+        authorization: {
+          authorizeCustomer: async () => ({ guestSession: session ?? guest() }),
+          ...(session === null
+            ? {}
+            : { authorizeDiningParticipant: async () => ({ guestSession: session }) }),
+          authorizeMerchant: async () => null,
+        },
+        projections: { load: async () => loaded, list: async () => [] },
+      });
+    // Another guest at the table (not the Order's first guest) reads the shared view.
+    const result = await service(participant).getDiningParticipant({
+      orderReference: refs.order,
+      observedAt: at,
+    });
+    expect(result.order).toMatchObject({ orderType: "DineIn", orderNumber: "42" });
+    expect(result.order).not.toHaveProperty("guestSessionReference");
+    // The ordinary customer read still refuses that guest.
+    await expect(
+      service(participant).getCustomer({ orderReference: refs.order, observedAt: at }),
+    ).rejects.toMatchObject({ code: "ORDER_STATUS_PERMISSION_DENIED" });
+    for (const refused of [
+      null,
+      guest(),
+      {
+        ...participant,
+        diningState: "ContextOnly",
+        diningSessionReference: null,
+        diningParticipantReference: null,
+      } as GuestSession,
+      { ...participant, storeReference: id(60) } as GuestSession,
+    ])
+      await expect(
+        service(refused).getDiningParticipant({ orderReference: refs.order, observedAt: at }),
+      ).rejects.toMatchObject({ code: "ORDER_STATUS_PERMISSION_DENIED" });
+    const pickup = await createOrderStatusProjector({
+      references: { generateGeneration: () => refs.generation, now: () => at },
+      source: { loadExact: async () => source() },
+      projections: { load: async () => null, replace: async (projection) => projection },
+    }).project(refs.order);
+    await expect(
+      service(participant, pickup).getDiningParticipant({
+        orderReference: refs.order,
+        observedAt: at,
+      }),
+    ).rejects.toMatchObject({ code: "ORDER_STATUS_PERMISSION_DENIED" });
+  });
 });

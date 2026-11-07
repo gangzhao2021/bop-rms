@@ -1,3 +1,4 @@
+import { t } from "../i18n/i18n.js";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import {
   createConnectivityController,
@@ -35,22 +36,25 @@ export function ConnectivityBanner({
     >
       {state.status === "offline" ? (
         <>
-          <strong>You are offline.</strong>{" "}
+          <strong>{t("You’re offline.")}</strong>{" "}
           <span>
-            Transaction and identity actions are unavailable. Nothing will run or replay in the
-            background.
+            {t(
+              "Ordering and payment are paused until you reconnect. Nothing is sent in the background.",
+            )}
           </span>
         </>
       ) : (
         <>
           <div>
-            <strong>Connection restored.</strong>{" "}
+            <strong>{t("Connection restored.")}</strong>{" "}
             <span>
-              Review the current screen and retry explicitly. No action ran automatically.
+              {t(
+                "Check this page, then try again if you need to. Nothing was sent while you were offline.",
+              )}
             </span>
           </div>
           <button type="button" onClick={() => controller.dismissRestored()}>
-            Dismiss
+            {t("Dismiss")}
           </button>
         </>
       )}

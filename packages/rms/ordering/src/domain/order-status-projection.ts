@@ -7,6 +7,9 @@ import {
   type OrderingReference,
 } from "./cart.js";
 
+export type OrderStatusCanonicalPhase =
+  "Submitted" | "Accepted" | "In Progress" | "Ready" | "Fulfilled" | "Rejected" | "Cancelled";
+
 export type OrderStatusFreshness = "Fresh" | "Stale" | "Rebuilding" | "Failed";
 
 export interface OrderStatusMoney {
@@ -40,7 +43,7 @@ export interface OrderStatusSourceSnapshot {
   readonly orderNumber: string;
   readonly orderType: CartOrderType;
   readonly sourceChannel: CartSourceChannel;
-  readonly canonicalPhase: "Submitted" | "Fulfilled";
+  readonly canonicalPhase: OrderStatusCanonicalPhase;
   readonly closureStatus: "Open";
   readonly paymentStatus: "NotReported";
   readonly kitchenStatus: "Unavailable";
@@ -200,7 +203,15 @@ export function parseOrderStatusSourceSnapshot(value: unknown): OrderStatusSourc
     !/^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])$/u.test(raw.businessDate) ||
     !["DineIn", "Pickup"].includes(String(raw.orderType)) ||
     !["Api", "Pos", "Qr", "Web"].includes(String(raw.sourceChannel)) ||
-    !["Submitted", "Fulfilled"].includes(String(raw.canonicalPhase)) ||
+    ![
+      "Submitted",
+      "Accepted",
+      "In Progress",
+      "Ready",
+      "Fulfilled",
+      "Rejected",
+      "Cancelled",
+    ].includes(String(raw.canonicalPhase)) ||
     raw.closureStatus !== "Open" ||
     raw.paymentStatus !== "NotReported" ||
     raw.kitchenStatus !== "Unavailable" ||
@@ -256,7 +267,7 @@ export function parseOrderStatusSourceSnapshot(value: unknown): OrderStatusSourc
     orderNumber: raw.orderNumber,
     orderType: raw.orderType as CartOrderType,
     sourceChannel: raw.sourceChannel as CartSourceChannel,
-    canonicalPhase: raw.canonicalPhase as "Submitted" | "Fulfilled",
+    canonicalPhase: raw.canonicalPhase as OrderStatusCanonicalPhase,
     closureStatus: "Open",
     paymentStatus: "NotReported",
     kitchenStatus: "Unavailable",

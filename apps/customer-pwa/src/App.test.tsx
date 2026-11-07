@@ -1,7 +1,9 @@
 import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import * as orderStatusClient from "./order-status/order-status-client.js";
+import { enabledCustomerDemo } from "./customer-demo.js";
 import { App } from "./App.js";
 describe("customer PWA shell", () => {
   it("maps the canonical clean root to the missing-entry state", () => {
@@ -21,8 +23,8 @@ describe("customer PWA shell", () => {
         <App />
       </MemoryRouter>,
     );
-    expect(html).toContain("Order at BOP");
-    expect(html).toContain("No cached menu is enabled");
+    expect(html).toContain("Page not found");
+    expect(html).toContain("Open the menu");
   });
   it("registers only the bounded Customer Service Worker without persistence code in entry clients", () => {
     const source = readFileSync(new URL("./main.tsx", import.meta.url), "utf8");
@@ -79,10 +81,12 @@ describe("customer PWA shell", () => {
         <App />
       </MemoryRouter>,
     );
-    expect(html).toContain("Review your order");
+    expect(html).toContain(">Checkout</h2>");
     expect(html).toContain("Loading checkout");
+    // WP-2423 item 8 ⑦: while the cart is still being read nothing is asked, not even a tip.
     expect(html).toContain("Continue to payment");
-    expect(html).toContain("Payment remains gated until an approved Provider");
+    expect(html).not.toContain('id="checkout-tip"');
+    expect(html).toContain('disabled=""');
   });
   it("maps the canonical clean Payment routes without trusting callback state", () => {
     const payment = renderToStaticMarkup(
@@ -95,9 +99,10 @@ describe("customer PWA shell", () => {
         <App />
       </MemoryRouter>,
     );
-    expect(payment).toContain("Continue to payment");
-    expect(payment).toContain("Loading payment");
-    expect(result).toContain("Verify your payment");
+    expect(payment).toContain("Secure payment");
+    expect(payment).not.toContain('id="payment-tip"');
+    expect(payment).toContain("Loading checkout");
+    expect(result).toContain("Check your payment");
     expect(result).toContain("Verifying payment");
     expect(result).not.toContain("Payment confirmed");
     expect(result).not.toContain("provider-secret");
@@ -111,8 +116,35 @@ describe("customer PWA shell", () => {
     );
     expect(html).toContain("Track your order");
     expect(html).toContain("Loading order status");
-    expect(html).toContain("Your Guest Session authorizes access");
     expect(html).not.toContain(`>${reference}<`);
+  });
+  it("uses the HTTP client for normal order routes and preserves the matching demo", () => {
+    const client = vi.spyOn(orderStatusClient, "createHttpOrderStatusClient");
+    try {
+      const normal = renderToStaticMarkup(
+        <MemoryRouter initialEntries={["/orders/018f7a00-0000-7000-8000-000000000099"]}>
+          <App />
+        </MemoryRouter>,
+      );
+      expect(normal).toContain("Loading order status");
+      expect(client).toHaveBeenCalledOnce();
+      client.mockClear();
+      const demo = renderToStaticMarkup(
+        <MemoryRouter initialEntries={[`/orders/${enabledCustomerDemo.orderReference}`]}>
+          <App demo={enabledCustomerDemo} />
+        </MemoryRouter>,
+      );
+      expect(demo).toContain("Order collected");
+      expect(client).not.toHaveBeenCalled();
+      renderToStaticMarkup(
+        <MemoryRouter initialEntries={["/orders/018f7a00-0000-7000-8000-000000000099"]}>
+          <App demo={enabledCustomerDemo} />
+        </MemoryRouter>,
+      );
+      expect(client).toHaveBeenCalledOnce();
+    } finally {
+      client.mockRestore();
+    }
   });
   it("maps the canonical Receipt route without treating the reference as authority", () => {
     const reference = "018f7a00-0000-7000-8000-000000000001";
@@ -121,7 +153,7 @@ describe("customer PWA shell", () => {
         <App />
       </MemoryRouter>,
     );
-    expect(html).toContain("Your receipt");
+    expect(html).toContain(">Receipt</h2>");
     expect(html).toContain("Loading receipt");
     expect(html).not.toContain(`>${reference}<`);
   });
@@ -150,6 +182,7 @@ describe("customer PWA shell", () => {
       </MemoryRouter>,
     );
     expect(html).toContain("Loading the current menu");
-    expect(html).toContain("BOP Test Kitchen · Harbour Test Store");
+    expect(html).toContain("<h1>Harbour Test Store</h1>");
+    expect(html).toContain("BOP Test Kitchen · Dine in");
   });
 });

@@ -1,0 +1,106 @@
+/* Figma v1 (2026-10-25): approvals. Each refund is one card: what and how much as the title, the
+   facts side by side (label over value), then the decision buttons. */
+.refund-approval-list {
+  gap: var(--bop-space-4);
+}
+.refund-approval-card {
+  padding: var(--bop-space-6);
+  border-radius: var(--bop-radius-card);
+}
+.refund-approval-card > h3 {
+  margin: 0 0 var(--bop-space-4);
+  font-size: 18px;
+  font-weight: 600;
+}
+.refund-approval-card > dl {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 11rem), 1fr));
+  gap: var(--bop-space-3) var(--bop-space-6);
+  margin: 0 0 var(--bop-space-4);
+}
+.refund-approval-card > dl > div {
+  display: grid;
+  align-content: start;
+  gap: 2px;
+  min-width: 0;
+}
+.refund-approval-card > dl dt {
+  color: var(--bop-color-text-muted);
+  font-size: 13px;
+  font-weight: 400;
+}
+.refund-approval-card > dl dd {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.refund-approval-card .card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--bop-space-2);
+}
+.refund-approval-card > dl dd ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.refund-approval-card .card-actions {
+  align-items: center;
+  justify-content: flex-start;
+  margin-top: var(--bop-space-2);
+}
+.refund-approval-card .card-actions button[data-variant="primary"]:not(:disabled) {
+  border-color: var(--bop-color-brand-primary);
+  background: var(--bop-color-brand-primary);
+  color: var(--bop-color-on-primary);
+}
+.refund-approval-card .refund-decline label {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 13px;
+}
+.refund-approval-card .refund-decline select {
+  width: auto;
+  min-width: 14rem;
+}
+
+/* Owner 2026-10-25: one readable column, the decision first. */
+.workspace-page.approvals-page {
+  max-width: 60rem;
+}
+.approvals-page .approvals-why {
+  margin: 0 0 var(--bop-space-4);
+  color: var(--bop-color-text-muted);
+}
+.approvals-page .approvals-why summary {
+  min-height: 44px;
+  cursor: pointer;
+}
+.approvals-page .approvals-why p {
+  max-width: 44rem;
+}
+.refund-approval-card__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--bop-space-1) var(--bop-space-4);
+  margin-bottom: var(--bop-space-4);
+}
+.refund-approval-card .refund-approval-card__header h3 {
+  margin: 0;
+}
+.refund-approval-card__waiting {
+  margin: 0;
+  color: var(--bop-color-warning);
+  font-size: 14px;
+  font-weight: 600;
+}
+.refund-approval-card__requester {
+  color: var(--bop-color-text-muted);
+}
+.approvals-page .approvals-sole-link {
+  margin-top: var(--bop-space-6);
+  color: var(--bop-color-text-muted);
+}

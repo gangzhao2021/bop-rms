@@ -7,6 +7,15 @@ import type {
   PlatformTenantAdministrationCommand,
   PlatformTenantAdministrationPorts,
 } from "./ports/platform-tenant-administration-ports.js";
+
+/** True when every check passes; checks run one after another, never concurrently. */
+async function everySequential<T>(
+  values: readonly T[],
+  check: (value: T) => Promise<boolean>,
+): Promise<boolean> {
+  for (const value of values) if (!(await check(value))) return false;
+  return true;
+}
 const fail = (code: ConstructorParameters<typeof PlatformTenantAdministrationError>[0]): never => {
   throw new PlatformTenantAdministrationError(code);
 };
@@ -131,13 +140,10 @@ export function createPlatformTenantAdministrationService(
         !(await ports.references
           .validatePolicy(input.candidate.retentionPolicyReference)
           .catch(dependency)) ||
-        !(
-          await Promise.all(
-            input.candidate.capabilityMetadataReferences.map((r) =>
-              ports.references.validateCapability(r).catch(dependency),
-            ),
-          )
-        ).every(Boolean)
+        // Sequential: owner ports may share one caller transaction.
+        !(await everySequential(input.candidate.capabilityMetadataReferences, (r) =>
+          ports.references.validateCapability(r).catch(dependency),
+        ))
       )
         return fail("PLATFORM_TENANT_REFERENCE_INVALID");
       if (["ApproveOnboarding", "ApproveConfiguration", "ApproveSuspension"].includes(command)) {

@@ -1,0 +1,564 @@
+/* WP-2423 merchant UI refresh (redone 2026-11-03): pickup. Loaded after styles.css so it refines the shared baseline. */
+/* Pickup (FUL-PICKUP-QUEUE), in the v3 rules and read like Orders: one compact filter row, then
+   plain rows parted by hairlines — the number to call, what is in the bag, how long it has waited
+   and the state of its code, then the one next step. No boxes; 28/20/16/14 at 600/400. */
+
+/* ---- Page header: quiet words, as on Orders ---------------------------------------------- */
+.workspace-page.pickup-queue .workspace-page__header {
+  align-items: center;
+}
+.workspace-page.pickup-queue .workspace-page__title h1 {
+  font-size: 28px;
+  font-weight: 600;
+}
+.workspace-page.pickup-queue .workspace-page__meta {
+  font-size: 14px;
+}
+.workspace-page.pickup-queue .workspace-page__header button:not(.language-switch) {
+  min-height: 44px;
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  font-weight: 400;
+}
+.workspace-page.pickup-queue .workspace-page__header button:not(.language-switch):hover {
+  color: var(--bop-color-accent);
+}
+
+/* ---- Filters: one compact row ------------------------------------------------------------ */
+.workspace-page.pickup-queue .pickup-queue__filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--bop-space-3) var(--bop-space-4);
+  margin-bottom: var(--bop-space-3);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+/* The same row as the Kitchen's: the field says what it is; the label is still read out. */
+.pickup-queue__filter-label,
+.pickup-queue__number-word {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.workspace-page.pickup-queue .pickup-queue__filters > label {
+  flex: 0 1 11rem;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 400;
+}
+.workspace-page.pickup-queue .pickup-queue__filters > label:first-child {
+  flex: 1 1 14rem;
+  max-width: 20rem;
+}
+.workspace-page.pickup-queue .pickup-queue__filters > label.pickup-completed-filter {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  order: 5;
+  font-weight: 400;
+}
+.pickup-completed-filter__checkbox {
+  accent-color: var(--bop-color-accent);
+}
+.workspace-page.pickup-queue .pickup-queue__filters > button {
+  order: 6;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--bop-color-accent);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.workspace-page.pickup-queue .pickup-queue__summary {
+  margin: 0 0 var(--bop-space-2);
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- Rows: number, what, state, next step ------------------------------------------------- */
+.workspace-page .store-card-grid.pickup-queue__cards {
+  container: pickup-list / inline-size;
+  display: block;
+  margin-top: var(--bop-space-2);
+}
+.workspace-page .store-card.pickup-queue__card {
+  gap: 4px var(--bop-space-6);
+  margin: 0;
+  padding: var(--bop-space-4) 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+}
+.workspace-page .store-card.pickup-queue__card:not([hidden]) {
+  display: grid;
+  grid-template-columns: 6.5rem minmax(0, 1fr) 15rem 24rem;
+  grid-template-areas:
+    "num what state next"
+    "num note note next";
+  align-items: start;
+}
+.workspace-page .store-card.pickup-queue__card[hidden] {
+  display: none;
+}
+/* A line between rows, none above the first or below the last (a filtered-out row counts for
+   nothing). */
+.workspace-page
+  .store-card.pickup-queue__card:not([hidden])
+  ~ .store-card.pickup-queue__card:not([hidden]) {
+  border-top: 1px solid var(--bop-color-row-divider);
+}
+.workspace-page .store-card.pickup-queue__card h3.pickup-queue__number {
+  grid-area: num;
+  margin: 0;
+  color: var(--bop-color-text-default);
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.pickup-queue__what,
+.pickup-queue__state {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.pickup-queue__what {
+  grid-area: what;
+}
+.pickup-queue__state {
+  grid-area: state;
+}
+.pickup-queue__items {
+  display: block;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 16px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.pickup-queue__items li {
+  display: inline;
+}
+.pickup-queue__items li + li::before {
+  content: " · ";
+  color: var(--bop-color-text-muted);
+}
+.workspace-page .pickup-queue__card .pickup-queue__facts,
+.workspace-page .pickup-queue__card .pickup-queue__code {
+  margin: 0;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Status: a dot for its meaning, then dark words: waiting in the accent, too long or a warning in
+   the danger mark, handed over in the success mark. */
+.workspace-page .pickup-queue__card .pickup-queue__phase,
+.workspace-page .pickup-queue__card .pickup-queue__status,
+.workspace-page .pickup-queue__card .pickup-queue__alert,
+.workspace-page .pickup-queue__card .pickup-queue__remake,
+.workspace-page .pickup-queue__card .pickup-queue__locked,
+.workspace-page.pickup-queue .pickup-queue__handed-over,
+.workspace-page.pickup-queue .pickup-queue__off {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--bop-color-text-default);
+  font-size: 14px;
+  font-weight: 400;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+}
+.workspace-page .pickup-queue__card .pickup-queue__status {
+  display: block;
+  min-height: 0;
+}
+.workspace-page .pickup-queue__card .pickup-queue__phase::before,
+.workspace-page .pickup-queue__card .pickup-queue__status::before,
+.workspace-page .pickup-queue__card .pickup-queue__alert::before,
+.workspace-page .pickup-queue__card .pickup-queue__remake::before,
+.workspace-page .pickup-queue__card .pickup-queue__locked::before,
+.workspace-page.pickup-queue .pickup-queue__handed-over::before,
+.workspace-page.pickup-queue .pickup-queue__off::before,
+.workspace-page.pickup-queue .pickup-queue__earlier-section > summary h2::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-inline-end: 8px;
+  border-radius: 50%;
+  background: var(--bop-color-danger-mark);
+  vertical-align: 0.1em;
+}
+.workspace-page .pickup-queue__card .pickup-queue__phase:not([data-wait="late"])::before,
+.workspace-page.pickup-queue .pickup-queue__off::before {
+  background: var(--bop-color-accent);
+}
+.workspace-page .pickup-queue__card .pickup-queue__status::before,
+.workspace-page.pickup-queue .pickup-queue__handed-over::before {
+  background: var(--bop-color-success-mark);
+}
+/* What stops or changes the handover reads under the row, beside the next step. */
+.workspace-page .pickup-queue__card .pickup-queue__remake,
+.workspace-page .pickup-queue__card .pickup-queue__locked,
+.workspace-page .pickup-queue__card .pickup-queue__note {
+  grid-column: 2 / 4;
+  margin: 4px 0 0;
+  font-size: 14px;
+}
+
+/* ---- Next step: the accent button for the current step, accent or red words for the rest --- */
+.workspace-page .pickup-queue__card > .card-actions {
+  grid-area: next;
+  display: flex;
+  flex-flow: row-reverse wrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0 var(--bop-space-4);
+  margin: 0;
+  padding: 0;
+  text-align: end;
+}
+.workspace-page .pickup-queue__card > .card-actions:empty {
+  display: none;
+}
+.workspace-page
+  .pickup-queue__card
+  > .card-actions
+  > button:not(.pickup-handoff__no-code, .pickup-not-collected),
+.workspace-page .pickup-queue__card > .card-actions > section form button[type="submit"],
+.workspace-page
+  .pickup-queue__card
+  > .card-actions
+  > section
+  > button:not(.pickup-handoff__no-code) {
+  min-height: 44px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-accent);
+  color: var(--bop-color-on-accent-fill);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+.workspace-page
+  .pickup-queue__card
+  > .card-actions
+  > button:not(.pickup-handoff__no-code, .pickup-not-collected):disabled,
+.workspace-page .pickup-queue__card > .card-actions > section form button[type="submit"]:disabled,
+.workspace-page
+  .pickup-queue__card
+  > .card-actions
+  > section
+  > button:not(.pickup-handoff__no-code):disabled {
+  background: none;
+  color: var(--bop-color-text-muted);
+  cursor: not-allowed;
+}
+.workspace-page .pickup-queue__card .card-actions button.pickup-handoff__no-code,
+.workspace-page .pickup-queue__card .card-actions button.pickup-not-collected {
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--bop-color-accent);
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+}
+.workspace-page .pickup-queue__card .card-actions button.pickup-not-collected:not(:disabled) {
+  color: var(--bop-color-danger);
+}
+.workspace-page .pickup-queue__card .card-actions button.pickup-handoff__no-code:disabled,
+.workspace-page .pickup-queue__card .card-actions button.pickup-not-collected:disabled {
+  color: var(--bop-color-text-muted);
+}
+.workspace-page .pickup-queue__card > .card-actions > p {
+  margin: 4px 0 0;
+  font-size: 14px;
+}
+/* The open code check takes the row's width under its facts, with no box of its own. */
+.workspace-page .store-card.pickup-queue__card:not([hidden]):has(> .card-actions > section) {
+  grid-template-areas:
+    "num what state state"
+    "num note note note"
+    "num next next next";
+}
+.workspace-page .pickup-queue__card > .card-actions:has(> section) {
+  flex-flow: column;
+  align-items: flex-start;
+  margin-top: var(--bop-space-2);
+  text-align: start;
+}
+.workspace-page .pickup-queue__card > .card-actions > section {
+  display: grid;
+  gap: var(--bop-space-2);
+  width: min(32rem, 100%);
+  padding: 0;
+  border: 0;
+  font-size: 14px;
+}
+.workspace-page .pickup-queue__card > .card-actions > section p,
+.workspace-page .pickup-queue__card > .card-actions > section [role="status"] {
+  margin: 0;
+  font-size: 14px;
+}
+.workspace-page .pickup-queue__card > .card-actions > section [role="status"]:empty {
+  display: none;
+}
+.workspace-page .pickup-queue__card > .card-actions > section form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--bop-space-3);
+}
+.workspace-page .pickup-queue__card > .card-actions > section form label {
+  display: grid;
+  flex: 1 1 10rem;
+  gap: 4px;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  font-weight: 400;
+}
+.workspace-page .pickup-queue__card > .card-actions > section input {
+  min-height: 44px;
+  font-size: 20px;
+  font-weight: 400;
+  letter-spacing: 0.12em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- Handover and close dialogs: the same plain words and two button kinds ----------------- */
+.pickup-handoff-dialog {
+  max-height: 90vh;
+  overflow-y: auto;
+  padding: 24px;
+  border: 0;
+}
+.pickup-handoff-dialog h2 {
+  font-size: 20px;
+  font-weight: 600;
+}
+.pickup-handoff-dialog p,
+.pickup-handoff-dialog ul,
+.pickup-handoff-dialog [role="status"] {
+  font-size: 14px;
+  font-weight: 400;
+}
+.workspace-layout .pickup-handoff-dialog label {
+  font-size: 14px;
+  font-weight: 400;
+}
+.pickup-handoff-dialog label:has(> input[type="checkbox"]) input {
+  accent-color: var(--bop-color-accent);
+}
+.workspace-layout .pickup-handoff-dialog form > button,
+.workspace-layout .pickup-handoff-dialog > button {
+  min-height: 44px;
+  margin: 0 16px 0 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--bop-color-accent);
+  font-size: 14px;
+  font-weight: 600;
+}
+.workspace-layout .pickup-handoff-dialog form > button[data-variant="primary"]:not(:disabled) {
+  width: 100%;
+  margin: 0 0 4px;
+  padding: 0 16px;
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-accent);
+  color: var(--bop-color-on-accent-fill);
+}
+.workspace-layout .pickup-handoff-dialog > button[data-variant="destructive"]:not(:disabled) {
+  color: var(--bop-color-danger);
+}
+.workspace-layout .pickup-handoff-dialog :is(form > button, > button):disabled {
+  background: none;
+  color: var(--bop-color-text-muted);
+}
+.pickup-identity {
+  padding: 0;
+  border: 0;
+  background: none;
+}
+.pickup-identity dt {
+  font-size: 14px;
+}
+.pickup-identity dd {
+  font-size: 16px;
+}
+
+/* ---- Empty and pages -------------------------------------------------------------------- */
+.pickup-queue__empty .bop-state-card {
+  margin: var(--bop-space-4) 0 0;
+  padding: 0;
+  border: 0;
+}
+.pickup-queue__empty .bop-state-card h2 {
+  font-size: 16px;
+  font-weight: 600;
+}
+.pickup-queue__empty .bop-state-card p {
+  max-width: 32rem;
+  margin: 4px 0 0;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+.workspace-page.pickup-queue .pickup-pagination {
+  justify-content: flex-end;
+  gap: var(--bop-space-6);
+  margin: var(--bop-space-4) 0 0;
+  padding: 0;
+  border: 0;
+}
+.workspace-page.pickup-queue .pickup-pagination button {
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--bop-color-accent);
+  font-size: 14px;
+  font-weight: 600;
+}
+.workspace-page.pickup-queue .pickup-pagination button:disabled {
+  color: var(--bop-color-text-muted);
+}
+
+/* Notices at the top: words after a dot; "may be out of date" needs action, so it is no other hue. */
+.workspace-page.pickup-queue > .bop-state-card[data-tone="offline"] h2 {
+  color: var(--bop-color-text-default);
+}
+.workspace-page.pickup-queue > .bop-state-card[data-tone="offline"] h2::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-inline-end: 8px;
+  border-radius: 50%;
+  background: var(--bop-color-danger-mark);
+  vertical-align: 0.1em;
+}
+.workspace-page.pickup-queue .pickup-queue__off,
+.workspace-page.pickup-queue .pickup-queue__handed-over {
+  margin: 0 0 var(--bop-space-3);
+}
+
+/* Earlier days: one plain collapsed row, like the Kitchen's. */
+.workspace-page .pickup-queue__earlier-section {
+  margin: var(--bop-space-6) 0 0;
+  padding: 0;
+  border: 0;
+}
+.pickup-queue__earlier-section > summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  min-height: 44px;
+  cursor: pointer;
+}
+.workspace-page .pickup-queue__earlier-section > summary h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+.pickup-queue__earlier-count {
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+.workspace-page .pickup-queue__earlier-section > p {
+  max-width: 48rem;
+  font-size: 14px;
+}
+
+/* ---- Narrower lists: what and state stack beside the next step ---------------------------- */
+@container pickup-list (max-width: 1000px) {
+  .workspace-page .store-card.pickup-queue__card:not([hidden]) {
+    grid-template-columns: 5rem minmax(0, 1fr) 15rem;
+    grid-template-areas:
+      "num what next"
+      "num state next"
+      "num note next";
+    column-gap: var(--bop-space-4);
+  }
+  .workspace-page .pickup-queue__card > .card-actions {
+    flex-flow: column;
+    align-items: flex-end;
+  }
+  .workspace-page .pickup-queue__card .pickup-queue__remake,
+  .workspace-page .pickup-queue__card .pickup-queue__locked,
+  .workspace-page .pickup-queue__card .pickup-queue__note {
+    grid-column: 2;
+  }
+  .workspace-page .store-card.pickup-queue__card:not([hidden]):has(> .card-actions > section) {
+    grid-template-columns: 5rem minmax(0, 1fr);
+    grid-template-areas:
+      "num what"
+      "num state"
+      "num note"
+      "num next";
+  }
+}
+/* Phones: the number and how long it has waited, then what, then the next step. */
+@container pickup-list (max-width: 512px) {
+  .workspace-page .store-card.pickup-queue__card:not([hidden]),
+  .workspace-page .store-card.pickup-queue__card:not([hidden]):has(> .card-actions > section) {
+    grid-template-columns: fit-content(50%) minmax(0, 1fr);
+    grid-template-areas:
+      "num state"
+      "what what"
+      "note note"
+      "next next";
+    column-gap: var(--bop-space-3);
+  }
+  .workspace-page .pickup-queue__card .pickup-queue__remake,
+  .workspace-page .pickup-queue__card .pickup-queue__locked,
+  .workspace-page .pickup-queue__card .pickup-queue__note {
+    grid-column: 1 / -1;
+  }
+  .workspace-page .pickup-queue__card > .card-actions {
+    flex-flow: row wrap;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 0 var(--bop-space-4);
+    margin-top: var(--bop-space-2);
+    text-align: start;
+  }
+}
+
+@media (max-width: 48rem) {
+  /* Search and status share a row, so the first order is near the top of a phone. */
+  .workspace-page.pickup-queue .pickup-queue__filters > label,
+  .workspace-page.pickup-queue .pickup-queue__filters > label:first-child {
+    flex: 1 1 calc(50% - var(--bop-space-4));
+    max-width: none;
+  }
+  .workspace-page.pickup-queue .pickup-queue__filters > label.pickup-completed-filter {
+    flex: 1 1 auto;
+  }
+  .workspace-page.pickup-queue .pickup-pagination {
+    justify-content: space-between;
+  }
+}

@@ -141,7 +141,9 @@ const leaseOwnerPattern = /^[a-z][a-z0-9_-]{0,63}$/u;
 const instant = (value: Date | string): string =>
   value instanceof Date ? value.toISOString() : new Date(value).toISOString();
 
-function toClaim(row: ClaimedRow): ClaimedOutboxEvent {
+type EnvelopeRow = Omit<ClaimedRow, "attempt_count" | "lease_expires_at" | "lease_token">;
+
+function toEnvelope(row: EnvelopeRow): DomainEventEnvelope {
   const actor =
     row.actor_type === "System"
       ? ({ type: "System" } as const)
@@ -165,9 +167,13 @@ function toClaim(row: ClaimedRow): ClaimedOutboxEvent {
     replayMetadata: row.replay_metadata_json,
   };
   validateDomainEventEnvelope(envelope);
+  return envelope;
+}
+
+function toClaim(row: ClaimedRow): ClaimedOutboxEvent {
   return {
     attemptCount: row.attempt_count,
-    envelope,
+    envelope: toEnvelope(row),
     leaseExpiresAt: instant(row.lease_expires_at),
     leaseToken: row.lease_token,
   };
@@ -215,4 +221,23 @@ export async function markOutboxFailed(
     input.errorCode,
   ]);
   return result.rowCount === 1 ? "completed" : "lost_lease";
+}
+
+/** Read an immutable original event only within the current Brand/Store transaction context. */
+export async function loadOutboxEnvelope(
+  transaction: OutboxDispatchTransaction,
+  eventId: string,
+): Promise<DomainEventEnvelope | null> {
+  if (!uuidV7.test(eventId)) throw new TypeError("eventId must be a UUIDv7");
+  const result = await transaction.query<EnvelopeRow>(
+    `SELECT event_id::text, event_type, schema_version, occurred_at, producer_module,
+      brand_id::text, store_id::text, aggregate_type, aggregate_id::text,
+      aggregate_version::text, correlation_id::text, causation_id::text, actor_type,
+      actor_id::text, payload_json, redaction_classification, replay_metadata_json
+    FROM platform_eventing.outbox_event
+    WHERE event_id = $1 AND brand_id = platform_helpers.current_brand_id()
+      AND store_id IS NOT DISTINCT FROM platform_helpers.current_store_id()`,
+    [eventId],
+  );
+  return result.rows[0] ? toEnvelope(result.rows[0]) : null;
 }

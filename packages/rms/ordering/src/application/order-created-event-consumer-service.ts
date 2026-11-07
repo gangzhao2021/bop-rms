@@ -58,19 +58,21 @@ function eventBindingMatches(
 
 export function createOrderCreatedEventConsumerService(ports: OrderCreatedEventConsumerPorts) {
   const registration: ConsumerRegistration = {
-    consumerName: "ordering.order-status-projection:v1",
-    consumerVersion: 1,
+    consumerName: "ordering.order-status-projection:v2",
+    consumerVersion: 2,
     eventType: "OrderCreated",
     schemaVersions: [1],
     ownerModule: "@rms/ordering",
     tenantScope: "store",
     ordering: "aggregate",
-    sideEffect: "replace Ordering Order Status projection generation",
+    sideEffect: "replace-order-status-projection",
     replaySafe: true,
     async handler({ envelope, transaction }) {
       const event = parseOrderCreatedEnvelope(envelope);
       const orderReference = parseOrderingReference(event.aggregateId);
-      const currentValue = await ports.projections.load(orderReference).catch(dependency);
+      const currentValue = await ports.projections
+        .load({ orderReference, transaction })
+        .catch(dependency);
       const current = currentValue === null ? null : parseProjection(currentValue);
       const eventVersion = Number(event.aggregateVersion);
       if (
@@ -89,6 +91,8 @@ export function createOrderCreatedEventConsumerService(ports: OrderCreatedEventC
       }
       const sourceValue = await ports.source
         .loadExact({
+          transaction,
+          envelope: event,
           brandReference: parseOrderingReference(event.tenantId),
           storeReference: parseOrderingReference(event.storeId),
           orderReference,
@@ -120,10 +124,13 @@ export function createOrderCreatedEventConsumerService(ports: OrderCreatedEventC
         return dependency();
       let projection;
       try {
-        projection = buildOrderStatusProjection({
-          source,
-          generationReference: ports.references.generateGeneration(),
-          projectedAt: ports.references.now(),
+        projection = parseOrderStatusProjection({
+          ...buildOrderStatusProjection({
+            source,
+            generationReference: ports.references.generateGeneration(),
+            projectedAt: ports.references.now(),
+          }),
+          freshnessStatus: await ports.source.freshness(transaction, source),
         });
       } catch {
         return dependency();
@@ -145,8 +152,10 @@ export function createOrderCreatedEventConsumerService(ports: OrderCreatedEventC
     registration: Object.freeze(registration),
     async consume(transaction: ConsumerTransaction, envelope: OrderCreatedEnvelope) {
       const event = parseOrderCreatedEnvelope(envelope);
+      if ((await ports.authorization.authorize(transaction, event)) !== true)
+        throw new OrderStatusProjectionError("ORDER_STATUS_PERMISSION_DENIED");
       const currentValue = await ports.projections
-        .load(parseOrderingReference(event.aggregateId))
+        .load({ orderReference: parseOrderingReference(event.aggregateId), transaction })
         .catch(dependency);
       if (currentValue !== null) {
         const current = parseProjection(currentValue);
@@ -156,7 +165,16 @@ export function createOrderCreatedEventConsumerService(ports: OrderCreatedEventC
         )
           throw new OrderStatusProjectionError("ORDER_STATUS_VERSION_CONFLICT");
       }
-      return await consumeEventInTransaction(transaction, registration, event);
+      await transaction.query("SAVEPOINT ordering_created_projection_consumer", []);
+      try {
+        const result = await consumeEventInTransaction(transaction, registration, event);
+        await transaction.query("RELEASE SAVEPOINT ordering_created_projection_consumer", []);
+        return result;
+      } catch (error) {
+        await transaction.query("ROLLBACK TO SAVEPOINT ordering_created_projection_consumer", []);
+        await transaction.query("RELEASE SAVEPOINT ordering_created_projection_consumer", []);
+        throw error;
+      }
     },
   });
 }

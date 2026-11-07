@@ -1,0 +1,338 @@
+/**
+ * WP-2423 item 8 ⑦ DEC-STORE-FEATURES: the modules the Store uses (Store features page). Read and
+ * changed by the owner; a change takes effect at once and is the next recorded version.
+ */
+export interface StoreFeatures {
+  readonly version: number;
+  readonly templateCode: "FullService" | "Custom" | null;
+  readonly modules: {
+    readonly counterOrder: boolean;
+    readonly pickup: boolean;
+    readonly inventory: boolean;
+    readonly loyalty: boolean;
+    readonly alcohol: boolean;
+  };
+  readonly changedAt: string | null;
+  /** WP-2423 item 8 ⑦ (Owner decision 4): guests call staff; servers chase a dish. */
+  readonly services: {
+    readonly version: number;
+    readonly staffCall: boolean;
+    readonly chaseDish: boolean;
+    /** Owner decision 2: staff record how many guests when opening a table. */
+    readonly askPartySize: boolean;
+    /** DEC-DINING-GUEST-TABLE-START: guests start a free table by scanning (absent: off). */
+    readonly guestTableStart: boolean;
+    readonly changedAt: string | null;
+  };
+  /** Guests pay each round first here, which guests starting tables needs (absent: not known). */
+  readonly guestTableStartAllowed: boolean;
+  /** WP-2423 item 8 ⑦ (decision 2): the menu item charged per guest, or none. */
+  readonly teaCharge: {
+    readonly version: number;
+    readonly teaSellableReference: string | null;
+    readonly changedAt: string | null;
+    /** WP-2423 item 8a: the Store marked the tea item as made in the kitchen; that mark stands. */
+    readonly kitchenPrepares: boolean;
+  };
+  /**
+   * v15 2026-10-29: the items the tea charge can be — on the listed dine-in menu (hidden ones
+   * included), each by its own name. Absent from an older server: none.
+   */
+  readonly teaChoices: readonly {
+    readonly sellableReference: string;
+    readonly name: string;
+    /** Why it can't be the tea now: hidden from this Store on the menu, or no price here. */
+    readonly unavailable: "NotOffered" | "NoPrice" | null;
+    /** WP-2423 item 8a: declared a charge; anything else is a dish, and the owner is asked first. */
+    readonly declaredCharge: boolean;
+    /** What each guest would be charged here ("1.50"); null when it has no price. */
+    readonly priceAmount: string | null;
+    /** The Store marked it as made in the kitchen, so it still goes there as the tea. */
+    readonly kitchenPrepares: boolean;
+  }[];
+  /**
+   * WP-2423 item 8 ⑦ (Owner decision 11): the three tip percentages guests and staff are
+   * offered (with "no tip" and "other amount"), or tips off. Payment's own versioned setting.
+   */
+  readonly tips: {
+    readonly version: number;
+    readonly enabled: boolean;
+    readonly tierPercents: readonly [number, number, number];
+    readonly changedAt: string | null;
+    /** The Store's published configuration has Tip Off: no one is asked, whatever is set here. */
+    readonly offInStoreSetup: boolean;
+  };
+  /**
+   * DEC-PAID-ORDER-AUTO-ACCEPT: paid orders go straight to the kitchen (off until the owner turns it
+   * on). Absent from an older server: off.
+   */
+  readonly autoAccept: {
+    readonly version: number;
+    readonly pickup: boolean;
+    readonly dineIn: boolean;
+    readonly changedAt: string | null;
+  };
+}
+/** Three whole percentages, each 1–50, from lowest to highest. */
+export const validTipTiers = (tiers: readonly number[]): boolean =>
+  tiers.length === 3 &&
+  tiers.every((n) => Number.isSafeInteger(n) && n >= 1 && n <= 50) &&
+  (tiers[0] as number) < (tiers[1] as number) &&
+  (tiers[1] as number) < (tiers[2] as number);
+export class StoreFeaturesClientError extends Error {
+  constructor(
+    readonly code:
+      | "Denied"
+      | "Changed"
+      | "TeaUsesStock"
+      | "TeaNotListed"
+      | "GuestStartNeedsPayFirst"
+      | "Unavailable",
+  ) {
+    super("store features " + code);
+    this.name = "StoreFeaturesClientError";
+  }
+}
+const fail = (code: StoreFeaturesClientError["code"] = "Unavailable"): never => {
+  throw new StoreFeaturesClientError(code);
+};
+const instant = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
+const reference = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+
+export function parseStoreFeatures(value: unknown): StoreFeatures {
+  const raw = value as Record<string, unknown> | null;
+  const modules = raw?.modules as Record<string, unknown> | null | undefined;
+  const services = raw?.services as Record<string, unknown> | null | undefined;
+  const tips = raw?.tips as Record<string, unknown> | null | undefined;
+  const tea = raw?.teaCharge as Record<string, unknown> | null | undefined;
+  if (
+    tea === null ||
+    typeof tea !== "object" ||
+    Object.keys(tea)
+      .filter((key) => key !== "kitchenPrepares")
+      .sort()
+      .join(",") !== "changedAt,teaSellableReference,version" ||
+    !Number.isSafeInteger(tea.version) ||
+    Number(tea.version) < 0 ||
+    (tea.teaSellableReference !== null &&
+      (typeof tea.teaSellableReference !== "string" ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(
+          tea.teaSellableReference,
+        ))) ||
+    (tea.changedAt !== null && (typeof tea.changedAt !== "string" || !instant.test(tea.changedAt)))
+  )
+    return fail();
+  if (
+    tips === null ||
+    typeof tips !== "object" ||
+    Object.keys(tips).sort().join(",") !==
+      "changedAt,enabled,offInStoreSetup,tierPercents,version" ||
+    typeof tips.offInStoreSetup !== "boolean" ||
+    !Number.isSafeInteger(tips.version) ||
+    Number(tips.version) < 0 ||
+    typeof tips.enabled !== "boolean" ||
+    !Array.isArray(tips.tierPercents) ||
+    !validTipTiers(tips.tierPercents as number[]) ||
+    (tips.changedAt !== null &&
+      (typeof tips.changedAt !== "string" || !instant.test(tips.changedAt)))
+  )
+    return fail();
+  if (
+    raw === null ||
+    typeof raw !== "object" ||
+    !Number.isSafeInteger(raw.version) ||
+    Number(raw.version) < 0 ||
+    (raw.templateCode !== null &&
+      raw.templateCode !== "FullService" &&
+      raw.templateCode !== "Custom") ||
+    (raw.changedAt !== null &&
+      (typeof raw.changedAt !== "string" || !instant.test(raw.changedAt))) ||
+    modules === null ||
+    typeof modules !== "object" ||
+    Object.keys(modules).sort().join(",") !== "alcohol,counterOrder,inventory,loyalty,pickup" ||
+    Object.values(modules).some((entry) => typeof entry !== "boolean") ||
+    services === null ||
+    typeof services !== "object" ||
+    Object.keys(services)
+      .filter((key) => key !== "guestTableStart")
+      .sort()
+      .join(",") !== "askPartySize,changedAt,chaseDish,staffCall,version" ||
+    (services.guestTableStart !== undefined && typeof services.guestTableStart !== "boolean") ||
+    typeof services.askPartySize !== "boolean" ||
+    !Number.isSafeInteger(services.version) ||
+    Number(services.version) < 0 ||
+    typeof services.staffCall !== "boolean" ||
+    typeof services.chaseDish !== "boolean" ||
+    (services.changedAt !== null &&
+      (typeof services.changedAt !== "string" || !instant.test(services.changedAt)))
+  )
+    return fail();
+  return Object.freeze({
+    version: Number(raw.version),
+    templateCode: raw.templateCode as StoreFeatures["templateCode"],
+    modules: Object.freeze({
+      counterOrder: modules.counterOrder === true,
+      pickup: modules.pickup === true,
+      inventory: modules.inventory === true,
+      loyalty: modules.loyalty === true,
+      alcohol: modules.alcohol === true,
+    }),
+    changedAt: raw.changedAt as string | null,
+    services: Object.freeze({
+      version: Number(services.version),
+      staffCall: services.staffCall,
+      chaseDish: services.chaseDish,
+      askPartySize: services.askPartySize,
+      guestTableStart: services.guestTableStart === true,
+      changedAt: services.changedAt as string | null,
+    }),
+    guestTableStartAllowed: raw.guestTableStartAllowed === true,
+    teaCharge: Object.freeze({
+      version: Number(tea.version),
+      teaSellableReference: tea.teaSellableReference as string | null,
+      changedAt: tea.changedAt as string | null,
+      kitchenPrepares: tea.kitchenPrepares === true,
+    }),
+    teaChoices: Object.freeze(
+      (Array.isArray(raw.teaChoices) ? (raw.teaChoices as unknown[]) : []).flatMap((entry) => {
+        const item = entry as Record<string, unknown> | null;
+        return item !== null &&
+          typeof item === "object" &&
+          typeof item.sellableReference === "string" &&
+          reference.test(item.sellableReference) &&
+          typeof item.name === "string"
+          ? [
+              Object.freeze({
+                sellableReference: item.sellableReference,
+                name: item.name,
+                unavailable:
+                  item.unavailable === "NotOffered" || item.unavailable === "NoPrice"
+                    ? item.unavailable
+                    : null,
+                declaredCharge: item.declaredCharge === true,
+                priceAmount: typeof item.priceAmount === "string" ? item.priceAmount : null,
+                kitchenPrepares: item.kitchenPrepares === true,
+              }),
+            ]
+          : [];
+      }),
+    ),
+    tips: Object.freeze({
+      version: Number(tips.version),
+      enabled: tips.enabled,
+      tierPercents: Object.freeze([...(tips.tierPercents as number[])]) as unknown as readonly [
+        number,
+        number,
+        number,
+      ],
+      changedAt: tips.changedAt as string | null,
+      offInStoreSetup: tips.offInStoreSetup,
+    }),
+    autoAccept: parseAutoAccept(raw.autoAccept),
+  });
+}
+
+function parseAutoAccept(value: unknown): StoreFeatures["autoAccept"] {
+  if (value === undefined)
+    return Object.freeze({ version: 0, pickup: false, dineIn: false, changedAt: null });
+  const auto = value as Record<string, unknown> | null;
+  if (
+    auto === null ||
+    typeof auto !== "object" ||
+    Object.keys(auto).sort().join(",") !== "changedAt,dineIn,pickup,version" ||
+    !Number.isSafeInteger(auto.version) ||
+    Number(auto.version) < 0 ||
+    typeof auto.pickup !== "boolean" ||
+    typeof auto.dineIn !== "boolean" ||
+    (auto.changedAt !== null &&
+      (typeof auto.changedAt !== "string" || !instant.test(auto.changedAt)))
+  )
+    return fail();
+  return Object.freeze({
+    version: Number(auto.version),
+    pickup: auto.pickup,
+    dineIn: auto.dineIn,
+    changedAt: auto.changedAt as string | null,
+  });
+}
+
+export function createStoreFeaturesClient(csrf: string, fetcher: typeof fetch = fetch) {
+  const send = async (command: unknown): Promise<StoreFeatures> => {
+    let response: Response;
+    try {
+      response = await fetcher("/merchant/store/features", {
+        method: "POST",
+        credentials: "same-origin",
+        cache: "no-store",
+        headers: { "content-type": "application/json", "x-bop-csrf": csrf },
+        body: JSON.stringify(command),
+      });
+    } catch {
+      return fail();
+    }
+    if (response.status === 403) return fail("Denied");
+    if (response.status === 409) {
+      const payload = (await response.json().catch(() => null)) as { error?: unknown } | null;
+      return fail(
+        payload?.error === "store_features_tea_uses_stock"
+          ? "TeaUsesStock"
+          : payload?.error === "store_features_tea_not_listed"
+            ? "TeaNotListed"
+            : payload?.error === "store_features_guest_start_needs_pay_first"
+              ? "GuestStartNeedsPayFirst"
+              : "Changed",
+      );
+    }
+    if (!response.ok) return fail();
+    return parseStoreFeatures(await response.json().catch(() => null));
+  };
+  return Object.freeze({
+    read: () => send({ action: "Read" }),
+    changeServices: (input: {
+      operationReference: string;
+      expectedVersion: number;
+      staffCall: boolean;
+      chaseDish: boolean;
+      askPartySize: boolean;
+      /** Absent: kept as it is. */
+      guestTableStart?: boolean;
+    }) => send({ action: "ChangeServices", ...input }),
+    changeTeaCharge: (input: {
+      operationReference: string;
+      expectedVersion: number;
+      teaSellableReference: string | null;
+    }) => send({ action: "ChangeTeaCharge", ...input }),
+    changeTips: (input: {
+      operationReference: string;
+      expectedVersion: number;
+      enabled: boolean;
+      tierPercents: readonly number[];
+    }) => send({ action: "ChangeTips", ...input }),
+    changeAutoAccept: (input: {
+      operationReference: string;
+      expectedVersion: number;
+      pickup: boolean;
+      dineIn: boolean;
+    }) => send({ action: "ChangeAutoAccept", ...input }),
+    applyFullService: (input: { operationReference: string; expectedVersion: number }) =>
+      send({ action: "ApplyTemplate", template: "FullService", ...input }),
+    change: (input: {
+      operationReference: string;
+      expectedVersion: number;
+      modules: {
+        counterOrder: boolean;
+        pickup: boolean;
+        inventory: boolean;
+        loyalty: boolean;
+        alcohol: boolean;
+      };
+    }) =>
+      send({
+        action: "Change",
+        operationReference: input.operationReference,
+        expectedVersion: input.expectedVersion,
+        modules: input.modules,
+      }),
+  });
+}
+export type StoreFeaturesClient = ReturnType<typeof createStoreFeaturesClient>;

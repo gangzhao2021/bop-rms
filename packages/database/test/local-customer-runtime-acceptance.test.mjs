@@ -30,6 +30,9 @@ it("composes scoped persisted entry and menu through one restartable loopback ru
     });
     const sessionRole = `wp2221_s_${context.runId}`;
     const menuRole = `wp2221_m_${context.runId}`;
+    const cartRole = `wp2221_c_${context.runId}`;
+    let cartReads = 0;
+    let cartFault = false;
     const f = fixture();
     const key = randomBytes(32);
     const credentials = createGuestSessionCredentialProvider(key);
@@ -43,8 +46,8 @@ it("composes scoped persisted entry and menu through one restartable loopback ru
     let writes = 0;
     await admin.connect();
     try {
-      for (const role of [sessionRole, menuRole]) {
-        assert.match(role, /^wp2221_[sm]_[a-f0-9]+$/u);
+      for (const role of [sessionRole, menuRole, cartRole]) {
+        assert.match(role, /^wp2221_[smc]_[a-f0-9]+$/u);
         await admin.query(
           `CREATE ROLE ${role} NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE`,
         );
@@ -60,8 +63,10 @@ it("composes scoped persisted entry and menu through one restartable loopback ru
       );
       await admin.query(`GRANT USAGE ON SCHEMA rms_catalog TO ${menuRole}`);
       await admin.query(
-        `GRANT SELECT ON rms_catalog.published_menu_projection_generation, rms_catalog.published_menu_projection, rms_catalog.published_menu_projection_section, rms_catalog.published_menu_projection_sellable, rms_catalog.published_menu_projection_checkpoint TO ${menuRole}`,
+        `GRANT SELECT ON rms_catalog.published_menu_projection_generation, rms_catalog.published_menu_projection, rms_catalog.published_menu_projection_section, rms_catalog.published_menu_projection_sellable, rms_catalog.published_menu_projection_checkpoint, rms_catalog.menu_release_effective_period,rms_catalog.menu_release_effective_end, rms_catalog.menu_publication_release, rms_catalog.menu_publication_revision, rms_catalog.menu_version_store, rms_catalog.menu_version_channel, rms_catalog.menu_version_order_type TO ${menuRole}`,
       );
+      await admin.query(`GRANT USAGE ON SCHEMA rms_ordering TO ${cartRole}`);
+      await admin.query(`GRANT SELECT ON rms_ordering.cart_binding_record TO ${cartRole}`);
       await seedMenu(admin);
       const sessionRunner = createTenantTransactionRunner(
         {
@@ -115,8 +120,34 @@ it("composes scoped persisted entry and menu through one restartable loopback ru
           }
         },
       };
+      const cartTransactions = {
+        async run(action) {
+          cartReads++;
+          if (cartFault) throw new Error("synthetic_cart_driver_fault");
+          const client = new Client(context.clientConfig);
+          await client.connect();
+          try {
+            await client.query("BEGIN READ ONLY");
+            await client.query(`SET LOCAL ROLE ${cartRole}`);
+            await client.query("SET LOCAL statement_timeout='5s'");
+            const result = await action({ query: (sql, values) => client.query(sql, [...values]) });
+            await client.query("COMMIT");
+            const cleared = await client.query(
+              "SELECT current_setting('bop.brand_id',true) AS brand, current_setting('bop.store_id',true) AS store",
+            );
+            assert(!cleared.rows[0].brand && !cleared.rows[0].store);
+            return result;
+          } catch (error) {
+            await client.query("ROLLBACK");
+            throw error;
+          } finally {
+            await client.end();
+          }
+        },
+      };
       const options = {
         scope,
+        entryRequestAdmission: { consume: async () => ({ status: "Allowed" }) },
         entry: { ...f.options, session: { binding: f.options.session.binding, credentials } },
         menuStores: {
           resolvePublic: async (reference) =>
@@ -124,6 +155,7 @@ it("composes scoped persisted entry and menu through one restartable loopback ru
         },
         sessionTransactions,
         menuTransactions,
+        cartTransactions,
         allowedOrigin: "https://customer.invalid",
         now: () => at,
         uuidV7Factory: () => id(++sequence),
@@ -151,7 +183,7 @@ it("composes scoped persisted entry and menu through one restartable loopback ru
         });
       const menu = (publicStore = id(4)) =>
         globalThis.fetch(
-          `${root}/api/v1/public/stores/${publicStore}/menu?channel=DINE_IN&orderType=TABLE_SERVICE&locale=en-CA`,
+          `${root}/api/v1/public/stores/${publicStore}/menu?channel=CUSTOMER_PWA&orderType=DINE_IN&locale=en-CA`,
         );
       for (const response of [
         await entry({ origin: "https://wrong.invalid" }),
@@ -178,6 +210,17 @@ it("composes scoped persisted entry and menu through one restartable loopback ru
       assert.equal(record.session.storeReference, scope.storeReference);
       assert(!JSON.stringify(record).includes(sessionCredential));
       assert(!JSON.stringify(record).includes(body.csrfToken));
+      const unsupported = await globalThis.fetch(root + "/bff/customer/cart", {
+        headers: {
+          cookie: cookie.split(";")[0],
+          "sec-fetch-site": "same-origin",
+          "sec-fetch-mode": "cors",
+        },
+      });
+      assert.equal(unsupported.status, 401);
+      await unsupported.text();
+      assert.equal(cartReads, 0);
+      assert.deepEqual(await sessionStore.resolve(selector), record);
       const found = await menu(body.publicStoreReference);
       assert.equal(found.status, 200);
       const publicMenu = await found.json();
@@ -199,6 +242,47 @@ it("composes scoped persisted entry and menu through one restartable loopback ru
           .count,
         1,
       );
+      // A real persisted Pickup context reaches Ordering's read-only absent-binding query.
+      Object.assign(f.payload, { channel: "Pickup", publicTableReference: null });
+      Object.assign(f.context, {
+        channel: "Pickup",
+        publicTableReference: null,
+        tableReference: null,
+        tableLifecycle: null,
+        assignmentState: null,
+      });
+      const pickupToken = f.token();
+      secrets.push(pickupToken);
+      const pickupIssued = await entry({}, pickupToken);
+      assert.equal(pickupIssued.status, 201);
+      const pickupBody = await pickupIssued.json();
+      const pickupCookie = pickupIssued.headers.get("set-cookie").split(";")[0];
+      const pickupCredential = pickupCookie.split("=")[1];
+      const pickupSelector = credentials.hashCredential("Session", pickupCredential);
+      secrets.push(pickupCredential, pickupBody.csrfToken, pickupSelector);
+      const pickupRecord = await sessionStore.resolve(pickupSelector);
+      assert(pickupRecord && pickupRecord.session.channel === "Pickup");
+      const cartRequest = () =>
+        globalThis.fetch(root + "/bff/customer/cart", {
+          headers: {
+            cookie: pickupCookie,
+            "sec-fetch-site": "same-origin",
+            "sec-fetch-mode": "cors",
+          },
+        });
+      const absentCart = await cartRequest();
+      // WP-2423: no active Cart is an explicit empty answer, not a failed request.
+      assert.equal(absentCart.status, 200);
+      assert.match(absentCart.headers.get("cache-control"), /no-store/u);
+      assert.deepEqual(await absentCart.json(), { schemaVersion: 1, cart: null });
+      assert.equal(cartReads, 1);
+      assert.deepEqual(await sessionStore.resolve(pickupSelector), pickupRecord);
+      cartFault = true;
+      const cartUnavailable = await cartRequest();
+      assert.equal(cartUnavailable.status, 503);
+      assert(!(await cartUnavailable.text()).includes("synthetic_cart_driver_fault"));
+      cartFault = false;
+      assert.deepEqual(await sessionStore.resolve(pickupSelector), pickupRecord);
       menuFault = true;
       const unavailable = await menu();
       assert.equal(unavailable.status, 503);
@@ -242,6 +326,7 @@ it("composes scoped persisted entry and menu through one restartable loopback ru
         ...secrets,
         "synthetic_session_driver_fault",
         "synthetic_menu_driver_fault",
+        "synthetic_cart_driver_fault",
         "rms_catalog.",
         "bop_identity.",
       ])

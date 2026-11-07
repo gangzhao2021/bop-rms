@@ -168,21 +168,20 @@ export function createProductionBatchService(ports: ProductionBatchPorts) {
           candidate.aggregateVersion !== 1
         )
           throw new ProductionBatchWorkflowError("PRODUCTION_BATCH_LIFECYCLE_CONFLICT");
-        const [recipe, inventory] = await Promise.all([
-          ports.recipe
-            .validatePublished({
-              recipeReference: candidate.recipeReference,
-              recipeVersionReference: candidate.recipeVersionReference,
-              brandReference: candidate.brandReference,
-            })
-            .catch(dependency),
-          ports.inventory
-            .validateSources({
-              storeReference: candidate.storeReference,
-              ingredients: candidate.ingredients,
-            })
-            .catch(dependency),
-        ]);
+        // Sequential: owner ports may share one caller transaction (no concurrent use of a client).
+        const recipe = await ports.recipe
+          .validatePublished({
+            recipeReference: candidate.recipeReference,
+            recipeVersionReference: candidate.recipeVersionReference,
+            brandReference: candidate.brandReference,
+          })
+          .catch(dependency);
+        const inventory = await ports.inventory
+          .validateSources({
+            storeReference: candidate.storeReference,
+            ingredients: candidate.ingredients,
+          })
+          .catch(dependency);
         if (!recipe || !inventory)
           throw new ProductionBatchWorkflowError("PRODUCTION_BATCH_EVIDENCE_INVALID");
       } else {

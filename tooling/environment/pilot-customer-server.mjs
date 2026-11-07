@@ -1,0 +1,617 @@
+import { createPilotEntryListener, withClientAddress } from "./pilot-client-address.mjs";
+import { pilotMerchantAppPaths } from "./pilot-merchant-app-paths.mjs";
+import { registerInternalDiningEntry } from "./pilot-dining-launcher.mjs";
+import { installInternalStaffLogin } from "./pilot-staff-login.mjs";
+import { Buffer } from "node:buffer";
+import process from "node:process";
+import { URL } from "node:url";
+import { CustomerPaymentResultHandler } from "../../apps/api/dist/customer-payment-result.js";
+import { createMerchantBffRouter } from "../../apps/api/dist/merchant-bff.js";
+import {
+  bodyRoutedLimit,
+  createCustomerStoreRouting,
+  isBodyRouted,
+  routingFailureAnswer,
+} from "./pilot-customer-store-routing.mjs";
+import { servedScopeOf } from "./pilot-served-stores.mjs";
+import {
+  createMerchantSessionStoreResolver,
+  createMerchantStoreRouting,
+} from "../../apps/api/dist/merchant-store-routing.js";
+import { staffContentLocaleMiddleware } from "../../apps/api/dist/staff-content-locale.js";
+import { createPilotProductImages } from "../../apps/api/dist/product-image-route.js";
+import { CustomerPaymentIntentHandler } from "../../apps/api/dist/customer-payment-intent.js";
+import { CustomerPaymentHandoffHandler } from "../../apps/api/dist/customer-payment-handoff.js";
+import { createCustomerSessionPaymentHandoff } from "../../apps/api/dist/customer-session-payment-handoff.js";
+import { createPostgresPaymentIntentCreationStore } from "../../packages/rms/payment/src/index.ts";
+import { isStripeProvider } from "./pilot-stripe-provider.mjs";
+import { reportUnexpected } from "./pilot-merchant-pickup.mjs";
+import { createMerchantRequestReporter } from "./pilot-unexpected.mjs";
+import { createServer } from "node:https";
+import { request } from "node:http";
+import { readFile, lstat } from "node:fs/promises";
+import { createRequire } from "node:module";
+import { resolve } from "node:path";
+import {
+  createPilotStaticAssets,
+  createResponseCompressor,
+  encodedHeaders,
+  missingPilotAsset,
+  publicApiEncoding,
+} from "./pilot-static-assets.mjs";
+import { INTERNAL_CUSTOMER_ORIGIN } from "./pilot-hosting.mjs";
+import { isInternalTest, isPilotRuntime, matchesPilotEnvironment } from "./pilot-environment.mjs";
+const require = createRequire(new URL("../../apps/api/package.json", import.meta.url));
+const express = require("express");
+/**
+ * v15 2026-11-01: the guest routes a Store's own payment stack answers. Anything mounted by
+ * `paymentRoutes` must be named here, or at a multi-Store installation it falls through to the API.
+ */
+const STORE_PAYMENT_ROUTE =
+  /^\/(?:api\/v1\/checkout-sessions\/[^/]+\/(?:payment-reconciliation|payment-handoff|simulation-confirm|simulation-fail)|api\/v1\/dine-in\/table-payment(?:\/[a-z-]+)?|bff\/customer\/payment-configuration|bff\/customer\/member)$/u;
+const storeNotFound = (res) =>
+  res.status(404).set("Cache-Control", "no-store").json({ code: "CUSTOMER_STORE_NOT_FOUND" });
+export const isStorePaymentRoute = (method, path) =>
+  (method === "POST" || method === "GET") && STORE_PAYMENT_ROUTE.test(path);
+
+/** One Store's guest payment stack: its own checkout, orders, payment intents and terminal. */
+async function paymentStack(f, resources, simulator) {
+  const entry = await f.createInternalCustomerEntry(resources),
+    items = await f.createInternalTestItems(resources);
+  const checkout = f.createInternalCheckout(resources, entry, items.catalogCartItems);
+  const orders = await f.createInternalOrder(resources, checkout, items.catalogCartItems);
+  const diningCheckout = f.createInternalDiningCheckout(resources, entry, checkout);
+  const diningOrders = await f.createInternalOrder(
+    resources,
+    { ...checkout, preparation: diningCheckout.preparation },
+    items.catalogCartItems,
+    "DineIn",
+  );
+  const intents = await f.createInternalChannelPayment(
+    resources,
+    checkout,
+    diningCheckout,
+    orders,
+    diningOrders,
+    simulator,
+    items.catalogCartItems,
+  );
+  const terminal = f.createInternalPaymentTerminal(resources, checkout, intents, simulator);
+  return { entry, checkout, intents, terminal };
+}
+
+/** One Store's guest payment routes, on its own payment stack and Provider (or simulator). */
+function paymentRoutes({
+  resources,
+  checkout,
+  intents,
+  terminal,
+  simulator,
+  origin,
+  registerTablePayment,
+  clientAddress,
+}) {
+  const router = express.Router();
+  // DEC-DINE-IN-PAY-LATER S4: a guest pays the whole table on their phone.
+  registerTablePayment?.(router, { resources, checkout, simulator, origin, clientAddress });
+  router.post(
+    "/api/v1/checkout-sessions/:checkout_session_id/payment-reconciliation",
+    express.json({ limit: "2kb", strict: true }),
+    new CustomerPaymentResultHandler({
+      allowedOrigin: origin,
+      port: { read: (input) => terminal.reconcile(input) },
+    }).handler("reconcile"),
+  );
+  // DEC-STRIPE-PILOT-WIRING: the payment form the customer app shows comes from this
+  // installation's runtime configuration (payment.json), not from the build.
+  router.get("/bff/customer/payment-configuration", (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    if (
+      req.headers["sec-fetch-site"] !== "same-origin" ||
+      (req.headers.origin !== undefined && req.headers.origin !== origin) ||
+      Object.keys(req.query).length !== 0
+    )
+      return res.status(400).json({ code: "PAYMENT_CONFIGURATION_UNAVAILABLE" });
+    res.json(
+      isStripeProvider(simulator)
+        ? {
+            schemaVersion: 1,
+            mode: "stripe",
+            publishableKey: simulator.publishableKey,
+            returnUrl: simulator.returnUrl,
+            // Apple Pay / Google Pay only on the domain registered and verified with Stripe.
+            wallets:
+              simulator.walletDomain !== null &&
+              new URL(origin).hostname === simulator.walletDomain,
+            // Wire name kept for installed apps: the Store's address opens pickup ordering
+            // (`/bff/customer/pickup-entry`), in InternalTest and in a Pilot Store alike.
+            internalTestEntry: true,
+          }
+        : { schemaVersion: 1, mode: "simulation", internalTestEntry: true },
+    );
+  });
+  if (isStripeProvider(simulator)) {
+    // The guest's ephemeral Stripe client credential, re-authorized against the current
+    // Guest, Order, payment window and owner fences before and after the Stripe read.
+    const history = createPostgresPaymentIntentCreationStore(
+      resources.transactions,
+      resources.scope,
+      { now: resources.now, generateObservationReference: resources.credentials.reference },
+    );
+    router.post(
+      "/api/v1/checkout-sessions/:checkout_session_id/payment-handoff",
+      express.json({ limit: "2kb", strict: true }),
+      new CustomerPaymentHandoffHandler({
+        allowedOrigin: origin,
+        port: {
+          async retrieve(input) {
+            const prepared = await intents.resolveRequest(input);
+            return createCustomerSessionPaymentHandoff({
+              access: checkout.accessOptions,
+              history,
+              transactions: resources.transactions,
+              currentAdmission: () => prepared.admission,
+              allowConfirmation: async () => true,
+              provider: simulator.handoff,
+            }).retrieve(input);
+          },
+        },
+      }).handler(),
+    );
+  }
+  for (const [path, confirmation] of simulator.simulation === true
+    ? [
+        ["simulation-confirm", "SIMULATE_CAPTURE"],
+        ["simulation-fail", "SIMULATE_FAILURE"],
+      ]
+    : []) {
+    const handler = new CustomerPaymentIntentHandler({
+      allowedOrigin: origin,
+      port: {
+        async create(input) {
+          await terminal.confirm(input, confirmation);
+          return intents.create(input);
+        },
+        // WP-2423 Q20: another (simulated) card after a decline, on the same payment.
+        async retry(input) {
+          return (await terminal.confirm(input, confirmation, { retry: true })).created;
+        },
+        // WP-2423 abandoned payment: confirm the guest's open attempt after they came back.
+        async resume(input) {
+          return (await terminal.confirm(input, confirmation, { resume: true })).created;
+        },
+      },
+    });
+    router.post(
+      "/api/v1/checkout-sessions/:checkout_session_id/" + path,
+      (req, res, next) => {
+        res.setHeader("Cache-Control", "no-store");
+        if (req.headers["x-bop-simulation-confirmation"] !== confirmation)
+          return res.status(400).json({ code: "SIMULATION_CONFIRMATION_REQUIRED" });
+        next();
+      },
+      express.json({ limit: "2kb", strict: true }),
+      handler.handler(),
+    );
+  }
+  return router;
+}
+
+export async function startInternalCustomerServer({
+  createInternalMerchant,
+  additionalStores = [],
+  // M02 (v15 07b7a1b7): whether stores.json names more than one Store, whichever of them started.
+  multiStore = additionalStores.length > 0,
+  loadInternalPickupQr,
+  diningEntries = [],
+  createInternalTestResources,
+  createInternalCustomerEntry,
+  createInternalDiningCheckout,
+  createInternalTestItems,
+  createInternalCheckout,
+  createInternalOrder,
+  createInternalChannelPayment,
+  createInternalSimulatedProvider,
+  createInternalPaymentTerminal,
+  registerInternalDiningTablePayment,
+  loadProfile,
+  keyFile,
+  certificateFile,
+  productImageDirectory,
+  publicOrigin = INTERNAL_CUSTOMER_ORIGIN,
+  stateClientAddress = false,
+  createStoreRouting = createCustomerStoreRouting,
+  // The local entry and API ports (tests pass their own; the pilot always uses 4443 and 4300).
+  listenPort = 4443,
+  apiPort = 4300,
+}) {
+  const origin = publicOrigin,
+    host = new URL(publicOrigin).host;
+  // DEC-PILOT-RUNTIME-ENVIRONMENT: the customer and staff HTTPS server of either pilot process
+  // (InternalTest, or a Pilot Store with NODE_ENV=production); the installation profile must
+  // declare the same environment. The DEMO launchers below stay InternalTest only.
+  if (!isPilotRuntime()) throw new Error("PILOT_RUNTIME_ONLY");
+  const profile = await loadProfile();
+  if (!matchesPilotEnvironment(profile.environment)) throw new Error("PILOT_RUNTIME_ONLY");
+  const internalTest = isInternalTest();
+  const stat = await lstat(keyFile);
+  if (
+    !stat.isFile() ||
+    stat.isSymbolicLink() ||
+    (stat.mode & 0o777) !== 0o600 ||
+    stat.uid !== process.getuid()
+  )
+    throw new Error("INTERNAL_TLS_UNAVAILABLE");
+  let entryListener = null;
+  // This server takes these requests itself: the guest's address is what `front` stated, if it did.
+  const entryAddress = (req) => entryListener?.clientAddress(req) ?? null;
+  const app = express();
+  app.disable("x-powered-by");
+  app.use((req, res, next) => {
+    if (req.headers.host !== host) return res.sendStatus(421);
+    res.setHeader("Referrer-Policy", "no-referrer");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    next();
+  });
+  const pickupQr = await loadInternalPickupQr(profile);
+  // 2026-11-01: each served Store's own pickup entry, by its public Store reference.
+  const pickupByStore = new Map();
+  if (typeof profile?.binding?.publicStoreReference === "string")
+    pickupByStore.set(profile.binding.publicStoreReference, pickupQr);
+  // DEC-PILOT-RUNTIME-ENVIRONMENT: the Store's own address opens pickup ordering, so the pickup
+  // poster's QR code is just the customer origin and never needs reprinting when keys rotate.
+  // The old InternalTest path stays for an app version cached before this change.
+  const pickupEntry = (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    const keys = Object.keys(req.query);
+    if (
+      req.headers["sec-fetch-site"] !== "same-origin" ||
+      (req.headers.origin !== undefined && req.headers.origin !== origin) ||
+      !(keys.length === 0 || (keys.length === 1 && typeof req.query.store === "string"))
+    )
+      return res.status(400).json({ code: "INTERNAL_ENTRY_UNAVAILABLE" });
+    // 2026-11-01: a Store's own pickup link names it (a Store not served here: not found).
+    // M02 (v15 07b7a1b7): at an installation of several Stores the bare address names none of
+    // them, so it never opens the first Store for another merchant's guest (who is asked to scan).
+    // One Store: its bare-origin posters keep working.
+    const qr =
+      keys.length === 0
+        ? multiStore
+          ? undefined
+          : pickupQr
+        : pickupByStore.get(String(req.query.store));
+    if (qr === undefined) return res.status(404).json({ code: "PICKUP_ENTRY_UNKNOWN_STORE" });
+    res.json({ schemaVersion: 1, qrToken: qr.token() });
+  };
+  app.get("/bff/customer/pickup-entry", pickupEntry);
+  if (internalTest) app.get("/bff/internal-test/pickup-entry", pickupEntry);
+  let resources, simulator;
+  const additionalResources = [],
+    additionalSimulators = [];
+  // One Store: every guest request goes to the local customer API as before.
+  let customerStore = null;
+  try {
+    resources = await createInternalTestResources();
+    simulator = await createInternalSimulatedProvider();
+    const own = {
+      createInternalCustomerEntry,
+      createInternalTestItems,
+      createInternalCheckout,
+      createInternalOrder,
+      createInternalDiningCheckout,
+      createInternalChannelPayment,
+      createInternalPaymentTerminal,
+      registerInternalDiningTablePayment,
+    };
+    const { entry, checkout, intents, terminal } = await paymentStack(own, resources, simulator);
+    // WP-2423 Q11: each DEMO launcher table opens its current issued code; none issued → 503.
+    // InternalTest only: a Pilot Store's guests scan the printed table codes (DIN-TABLE-LIST).
+    if (internalTest)
+      registerInternalDiningEntry(app, {
+        profile,
+        tables: diningEntries.map(({ selector, label, tableReference }) => ({
+          selector,
+          label,
+          loadQr: async () => {
+            const token = await entry.dining.currentToken(tableReference);
+            if (typeof token !== "string") throw new Error("INTERNAL_DINING_QR_UNAVAILABLE");
+            return { token: () => token };
+          },
+        })),
+      });
+    // v15 2026-11-01: each Store's guest payments (checkout confirm/decline, retry, resume,
+    // reconciliation, handoff and table payment) are answered by that Store's own payment stack
+    // and simulator, chosen below by the Store that owns the guest's Session.
+    const primaryPayments = paymentRoutes({
+      resources,
+      checkout,
+      intents,
+      terminal,
+      simulator,
+      origin,
+      registerTablePayment: registerInternalDiningTablePayment,
+      clientAddress: entryAddress,
+    });
+    const storePayments = new Map();
+    // DEC-BRAND-MULTI-STORE-ONE-INSTALLATION: each Store this installation serves has its own staff
+    // composition (its own Store facts); every one may select the others. One Store: as before.
+    // v15 2026-10-31: a Store whose resources or staff composition fail to start is logged and not
+    // served (nor offered to switch to); the installation's own Store and the others keep serving.
+    const served = [];
+    for (const store of additionalStores) {
+      let storeResources = null;
+      try {
+        storeResources = await store.createInternalTestResources();
+        if (store.customer !== undefined) {
+          const storeSimulator = await store.customer.createInternalSimulatedProvider();
+          additionalSimulators.push(storeSimulator);
+          const stack = await paymentStack(store.customer, storeResources, storeSimulator);
+          storePayments.set(
+            store.storeReference,
+            paymentRoutes({
+              resources: storeResources,
+              ...stack,
+              simulator: storeSimulator,
+              origin,
+              registerTablePayment: store.customer.registerInternalDiningTablePayment,
+              clientAddress: entryAddress,
+            }),
+          );
+        }
+        if (store.loadPickupQr !== undefined) {
+          const own = await store.loadPickupQr();
+          pickupByStore.set(own.publicStoreReference, own.qr);
+        }
+        served.push({ store, resources: storeResources });
+      } catch (error) {
+        await storeResources?.close().catch(() => undefined);
+        reportUnexpected("PILOT_CUSTOMER_STORE_UNAVAILABLE", error);
+      }
+    }
+    const routers = new Map(),
+      ports = new Map();
+    const servedScopes = () =>
+      served.length === 0
+        ? []
+        : [resources, ...served.map((entry) => entry.resources)].map(servedScopeOf);
+    for (const entry of [...served]) {
+      const others = servedScopes().filter(
+        (scope) => scope.storeReference !== entry.store.storeReference,
+      );
+      try {
+        const storeMerchant = await entry.store.createInternalMerchant({
+          ...entry.resources,
+          servedStores: others,
+        });
+        routers.set(entry.store.storeReference, createMerchantBffRouter(storeMerchant.bff));
+        additionalResources.push(entry.resources);
+        ports.set(entry.store.storeReference, entry.store.apiPort);
+      } catch (error) {
+        served.splice(served.indexOf(entry), 1);
+        await entry.resources.close().catch(() => undefined);
+        reportUnexpected("PILOT_CUSTOMER_STORE_UNAVAILABLE", error);
+      }
+    }
+    const merchant = await createInternalMerchant(
+      served.length === 0
+        ? resources
+        : {
+            ...resources,
+            servedStores: servedScopes().filter(
+              (scope) => scope.storeReference !== resources.scope.storeReference,
+            ),
+          },
+    );
+    const merchantRouter = createMerchantBffRouter(merchant.bff);
+    let staffRoutes = merchantRouter;
+    const routedStore = (storeResources) => ({
+      storeReference: storeResources.scope.storeReference,
+      brandReference: storeResources.scope.brandReference,
+      tenantReference: storeResources.publicProfile.binding.tenantReference,
+      publicStoreReference: storeResources.publicProfile.binding.publicStoreReference,
+      port: storeResources === resources ? apiPort : ports.get(storeResources.scope.storeReference),
+      transactions: storeResources.transactions,
+      hashSession: (credential) =>
+        storeResources.credentials.sessions.hashCredential("Session", credential),
+    });
+    // M02 (v15 07b7a1b7): every other Store in stores.json failed to start, so only this one is
+    // served; a scan of one of the others is still a retryable outage, never this Store's refusal.
+    if (served.length === 0 && multiStore)
+      customerStore = createStoreRouting({ stores: [routedStore(resources)], multiStore });
+    if (served.length > 0) {
+      routers.set(resources.scope.storeReference, merchantRouter);
+      ports.set(resources.scope.storeReference, apiPort);
+      // DEC-BRAND-MULTI-STORE-ONE-INSTALLATION segment 4: guest requests go to their Store's
+      // customer API (the next local ports, in stores.json order).
+      customerStore = createStoreRouting({
+        stores: [resources, ...additionalResources].map(routedStore),
+        multiStore,
+      });
+      // A request goes to the composition of the Store its Session is bound to (server-side).
+      const reportRouting = createMerchantRequestReporter({
+        event: "PILOT_MERCHANT_STORE_ROUTING_UNAVAILABLE",
+      });
+      staffRoutes = createMerchantStoreRouting({
+        primaryStoreReference: resources.scope.storeReference,
+        routers,
+        resolve: createMerchantSessionStoreResolver(merchant.persistence),
+        ...(merchant.bff.staffPin === undefined
+          ? {}
+          : { resolveDevice: merchant.bff.staffPin.storeOfDevice }),
+        // Every request asks this first, so a broken read is one line a minute, not one per poll.
+        onUnexpected: (error) => reportRouting("/store-routing", error),
+      });
+    }
+    // WP-2423 DEC-COGNITO-STORE-STAFF: the TEST-ONLY staff sign-in page is not served when staff
+    // sign in with their own Cognito account.
+    if (merchant.staffSignInMode !== "cognito") installInternalStaffLogin(app, merchant);
+    // Owner 2026-10-24: item and option names on staff screens in the staff member's language.
+    app.use("/merchant", staffContentLocaleMiddleware(), staffRoutes);
+
+    app.use(async (req, res, next) => {
+      // One Store served (alone, or the others failed to start): its payments, as before.
+      if (customerStore === null || served.length === 0) return primaryPayments(req, res, next);
+      if (!isStorePaymentRoute(req.method, req.path)) return next();
+      let store;
+      try {
+        store = await customerStore({
+          method: req.method,
+          url: req.url,
+          cookie: req.headers.cookie,
+        });
+      } catch {
+        return res
+          .status(503)
+          .set("Cache-Control", "no-store")
+          .json({ code: "INTERNAL_API_UNAVAILABLE" });
+      }
+      // DEC-MULTI-MERCHANT-ONE-INSTALLATION: no merchant's Store owns this request.
+      if (store === null) return storeNotFound(res);
+      if (store.storeReference === resources.scope.storeReference)
+        return primaryPayments(req, res, next);
+      // Never another Store's payments for this Store's guest (its stack failed to start: logged).
+      const payments = storePayments.get(store.storeReference);
+      if (payments === undefined)
+        return res
+          .status(503)
+          .set("Cache-Control", "no-store")
+          .json({ code: "INTERNAL_API_UNAVAILABLE" });
+      return payments(req, res, next);
+    });
+    app.use((error, req, res, next) => {
+      if (!error) return next();
+      res.status(400).set("Cache-Control", "no-store").json({ code: "SIMULATION_REQUEST_INVALID" });
+    });
+    app.use(async (req, res, next) => {
+      if (!/^\/(?:api|bff)(?:\/|$)/u.test(req.url)) return next();
+      // DEC-BRAND-MULTI-STORE-ONE-INSTALLATION: the Store's own customer API.
+      let port = apiPort,
+        body;
+      if (customerStore !== null) {
+        if (isBodyRouted(req.method, req.url)) {
+          const chunks = [];
+          let size = 0;
+          for await (const chunk of req) {
+            size += chunk.length;
+            if (size > bodyRoutedLimit)
+              return res
+                .status(413)
+                .set("Cache-Control", "no-store")
+                .json({ code: "REQUEST_TOO_LARGE" });
+            chunks.push(chunk);
+          }
+          body = Buffer.concat(chunks);
+        }
+        try {
+          const store = await customerStore({
+            method: req.method,
+            url: req.url,
+            cookie: req.headers.cookie,
+            body,
+          });
+          if (store === null) return storeNotFound(res);
+          port = store.port;
+        } catch (error) {
+          const failure = routingFailureAnswer(error, { method: req.method, url: req.url, body });
+          res.status(503).set("Cache-Control", "no-store");
+          // WP-2423 live minor 25: a fresh scan of a Store not served now keeps its code.
+          if (failure.setCookie !== null) res.append("Set-Cookie", failure.setCookie);
+          return res.json({ code: failure.code });
+        }
+      }
+      const upstream = request(
+        {
+          hostname: "127.0.0.1",
+          port,
+          path: req.url,
+          method: req.method,
+          headers: withClientAddress(
+            { ...req.headers, host, connection: "close" },
+            entryListener?.clientAddress(req) ?? null,
+          ),
+        },
+        (response) => {
+          // WP-2423 Q30: the public menu answer is sent compressed when the browser accepts it.
+          const encoding = publicApiEncoding(
+            req.path,
+            req.method,
+            response,
+            req.headers["accept-encoding"],
+          );
+          if (encoding === null) {
+            res.writeHead(response.statusCode ?? 502, response.headers);
+            response.pipe(res);
+          } else {
+            res.writeHead(response.statusCode ?? 502, encodedHeaders(response.headers, encoding));
+            const compressor = createResponseCompressor(encoding);
+            compressor.on("error", () => res.destroy());
+            response.pipe(compressor).pipe(res);
+          }
+          response.on("error", () => res.destroy());
+        },
+      );
+      upstream.setTimeout(30000, () => upstream.destroy());
+      upstream.on("error", () => {
+        if (res.headersSent) return res.destroy();
+        res.status(502).set("Cache-Control", "no-store").json({ code: "INTERNAL_API_UNAVAILABLE" });
+      });
+      req.on("aborted", () => upstream.destroy());
+      res.on("close", () => {
+        if (!res.writableFinished) upstream.destroy();
+      });
+      if (body === undefined) req.pipe(upstream);
+      else upstream.end(body);
+    });
+    // WP-2423 (v15 run): hashed build files are cached for a year and sent compressed; the app
+    // pages and other unhashed files are revalidated so a deploy is picked up.
+    // WP-2423 menu descriptions and photos: published product photo sizes, named by content hash.
+    if (productImageDirectory !== undefined)
+      app.get("/media/images/:name", createPilotProductImages(productImageDirectory).fileHandler);
+    const assets = resolve("apps/customer-pwa/dist");
+    app.use(createPilotStaticAssets(assets));
+    const merchantAssets = resolve("apps/merchant-web/dist");
+    app.use(createPilotStaticAssets(merchantAssets));
+    app.use("/assets", missingPilotAsset);
+    app.get([...pilotMerchantAppPaths], (_req, res) =>
+      res.set("Cache-Control", "no-store").sendFile(resolve(merchantAssets, "index.html")),
+    );
+    app.get("/{*path}", (_req, res) =>
+      res.set("Cache-Control", "no-store").sendFile(resolve(assets, "index.html")),
+    );
+    const secure = { key: await readFile(keyFile), cert: await readFile(certificateFile) };
+    // WP-2423: `front` states each guest's address only when hosting.json says it can.
+    let server;
+    if (stateClientAddress) {
+      entryListener = createPilotEntryListener({ ...secure, app });
+      server = entryListener.server;
+    } else server = createServer(secure, app);
+    server.listen(listenPort, "127.0.0.1", () =>
+      process.stdout.write(
+        "Pilot customer HTTPS listening on 127.0.0.1:" + server.address().port + "\n",
+      ),
+    );
+    for (const signal of ["SIGINT", "SIGTERM"])
+      process.once(signal, () =>
+        server.close(async () => {
+          try {
+            simulator.close();
+            for (const storeSimulator of additionalSimulators) storeSimulator.close();
+            for (const storeResources of additionalResources) await storeResources.close();
+            await resources.close();
+          } finally {
+            process.exit(0);
+          }
+        }),
+      );
+    return server;
+  } catch (error) {
+    try {
+      simulator?.close();
+      for (const storeSimulator of additionalSimulators) storeSimulator.close();
+      for (const storeResources of additionalResources) await storeResources.close();
+    } finally {
+      await resources?.close();
+    }
+    throw error;
+  }
+}

@@ -19,12 +19,48 @@ import {
   createStoreOperatingStatusService,
   type PublicStoreProfilePorts,
   type StoreOperatingStatusPorts,
+  type StoreOperatingStatus,
+  type StoreUpcomingHours,
 } from "@rms/store";
 import type { CustomerEntryPort, CustomerEntryPortInput } from "./customer-entry.js";
 
 export interface CustomerEntryAdmissionInput extends Omit<CustomerEntryPortInput, "qrToken"> {
   readonly context: QrTableContext;
   readonly scope: Readonly<{ brandReference: string; storeReference: string }>;
+}
+
+export interface CustomerEntryOperatingReader {
+  readCurrent(input: {
+    brandReference: string;
+    storeReference: string;
+    publicStoreReference: string;
+    evaluatedAt: string;
+  }): Promise<
+    | (Pick<StoreOperatingStatus, "state" | "availableServiceModes"> & {
+        brandReference: string;
+        storeReference: string;
+        evaluatedAt: string;
+        /** WP-2423 Q4: today's published hours, when the reader provides them. */
+        todayHours?: readonly {
+          startLocalTime: string;
+          endLocalTime: string;
+          endsNextDay: boolean;
+        }[];
+        /** The Store's local time ("HH:MM:SS") at `evaluatedAt`, when the reader provides it. */
+        localTime?: string;
+        /** The Store's local date at `evaluatedAt`, when the reader provides it. */
+        localDate?: string;
+        /** WP-2423 item 8 ③ (decision 16): holidays, last orders and the next opening. */
+        upcomingHours?: StoreUpcomingHours;
+        /** WP-2423 item 8 ⑦ 1b: services the Store turned off (never offered, whatever the hour). */
+        servicesTurnedOff?: readonly "Pickup"[];
+        /** WP-2423 item 11: this Store isn't ready to take orders yet (not a closing time). */
+        notReadyForOrders?: boolean;
+        /** WP-2423 item 13 ②: the platform paused this merchant's new guests. */
+        newGuestsPaused?: boolean;
+      })
+    | null
+  >;
 }
 
 export interface CustomerEntryCompositionOptions {
@@ -36,12 +72,55 @@ export interface CustomerEntryCompositionOptions {
     consume(input: CustomerEntryAdmissionInput): Promise<GuestAdmissionEvidence | null>;
   };
   readonly session: Pick<GuestSessionServiceOptions, "binding" | "store" | "credentials">;
+  /** Coordinator 2026-10-30: the scanned table's public state (a party seated there or not). */
+  readonly table?: CustomerEntryTableReader;
+}
+
+export interface CustomerEntryTableReader {
+  isOpen(input: {
+    readonly brandReference: string;
+    readonly storeReference: string;
+    readonly tableReference: string;
+  }): Promise<boolean>;
+  /**
+   * WP-2423 DEC-DINING-GUEST-TABLE-START: at a free table, what a guest may do by scanning it. Absent
+   * or failed: nothing new (the table isn't open, as before).
+   */
+  guestStart?(input: {
+    readonly brandReference: string;
+    readonly storeReference: string;
+    readonly tableReference: string;
+    readonly at: string;
+  }): Promise<"MayStart" | "BeingCleaned" | "No">;
+  /** At an open table a guest started: whether this phone is asked if it is with those guests. */
+  asksNewParty?(input: {
+    readonly brandReference: string;
+    readonly storeReference: string;
+    readonly tableReference: string;
+  }): Promise<boolean>;
 }
 
 const unavailable = Object.freeze({ status: "EntryUnavailable" } as const);
 
+/**
+ * WP-2423: the database could not answer a read Entry needs (a lost connection, a timeout, a missing
+ * grant). It is an outage, so the guest is asked to retry (503), never told the code is unusable.
+ * The failure that caused it is kept, non-enumerable, for the request log's safe failure code only.
+ */
+export class CustomerEntryServiceUnavailableError extends Error {
+  readonly code = "CUSTOMER_ENTRY_SERVICE_UNAVAILABLE";
+  constructor() {
+    super("CUSTOMER_ENTRY_SERVICE_UNAVAILABLE");
+    this.name = "CustomerEntryServiceUnavailableError";
+  }
+}
+
 export function createCustomerEntryComposition(
-  options: CustomerEntryCompositionOptions,
+  options:
+    | CustomerEntryCompositionOptions
+    | (Omit<CustomerEntryCompositionOptions, "operating"> & {
+        operatingReader: CustomerEntryOperatingReader;
+      }),
 ): CustomerEntryPort {
   return Object.freeze({
     async establish(input: CustomerEntryPortInput) {
@@ -93,21 +172,132 @@ export function createCustomerEntryComposition(
           },
         }).getPublicStore({ ...query, requestedLocale: qr.context.locale });
         if (profile.status !== "Available") return unavailable;
-        const operating = await createStoreOperatingStatusService({
-          ...options.operating,
-          resolution: {
-            async resolve(request) {
-              const resolved = await options.operating.resolution.resolve(request);
-              return resolved !== null && sameScope(resolved) ? resolved : null;
+        let operatingStatus: Pick<StoreOperatingStatus, "state" | "availableServiceModes">;
+        let todayHours: readonly {
+          startLocalTime: string;
+          endLocalTime: string;
+          endsNextDay: boolean;
+        }[] = [];
+        let upcoming: StoreUpcomingHours | null = null;
+        let localDate: string | null = null;
+        let turnedOff: readonly string[] = [];
+        let notReady = false;
+        let newGuestsPaused = false;
+        if ("operatingReader" in options) {
+          const current = await options.operatingReader.readCurrent({
+            ...scope,
+            publicStoreReference: query.publicStoreReference,
+            evaluatedAt: requestedAt,
+          });
+          if (!current || !sameScope(current) || current.evaluatedAt !== requestedAt)
+            return unavailable;
+          operatingStatus = current;
+          todayHours = current.todayHours ?? [];
+          upcoming = current.upcomingHours ?? null;
+          localDate = current.localDate ?? null;
+          turnedOff = current.servicesTurnedOff ?? [];
+          notReady = current.notReadyForOrders === true;
+          newGuestsPaused = current.newGuestsPaused === true;
+        } else {
+          const operating = await createStoreOperatingStatusService({
+            ...options.operating,
+            resolution: {
+              async resolve(request) {
+                const resolved = await options.operating.resolution.resolve(request);
+                return resolved !== null && sameScope(resolved) ? resolved : null;
+              },
             },
-          },
-        }).getStoreOperatingStatus(query);
+          }).getStoreOperatingStatus(query);
+          if (operating.status !== "Available") return unavailable;
+          operatingStatus = operating.operatingStatus;
+        }
+        // WP-2423 item 8 ⑦ 1b: a pickup code at a Store that turned pickup off.
+        if (turnedOff.includes(qr.context.channel))
+          return Object.freeze({
+            status: "ServiceNotOffered" as const,
+            storeDisplayName: profile.profile.storeDisplayName,
+          });
         if (
-          operating.status !== "Available" ||
-          operating.operatingStatus.state !== "Open" ||
-          !operating.operatingStatus.availableServiceModes.includes(qr.context.channel)
+          operatingStatus.state !== "Open" ||
+          !operatingStatus.availableServiceModes.includes(qr.context.channel)
         )
-          return unavailable;
+          return Object.freeze({
+            status: "NotAccepting" as const,
+            storeDisplayName: profile.profile.storeDisplayName,
+            operatingState: operatingStatus.state,
+            todayHours,
+            todayKind: upcoming?.todayKind ?? null,
+            nextOpening: upcoming?.nextOpening ?? null,
+            localDate,
+            ...(notReady ? { notReadyForOrders: true as const } : {}),
+          });
+
+        // Coordinator 2026-10-30: at a table, whether a party is seated there now (public state).
+        let tableOpen: boolean | undefined;
+        const tableReference = evidence.tableReference;
+        if (
+          options.table !== undefined &&
+          qr.context.channel === "DineIn" &&
+          tableReference !== null &&
+          tableReference !== undefined
+        ) {
+          tableOpen = await options.table
+            .isOpen({ ...scope, tableReference: String(tableReference) })
+            .catch(() => undefined);
+        }
+        // WP-2423 item 13 ② (Owner 2026-11-05): while the platform has paused this merchant, no new
+        // visit starts (a pickup code, a free table, a guest-started table). A phone joining a party
+        // already seated is part of that visit, so it still enters and the party finishes as usual;
+        // a new party at that table ("NewParty") is a new visit.
+        if (
+          newGuestsPaused &&
+          !(qr.context.channel === "DineIn" && tableOpen === true && input.intent !== "NewParty")
+        )
+          return Object.freeze({
+            status: "NotAccepting" as const,
+            storeDisplayName: profile.profile.storeDisplayName,
+            operatingState: operatingStatus.state,
+            todayHours,
+            todayKind: upcoming?.todayKind ?? null,
+            nextOpening: upcoming?.nextOpening ?? null,
+            localDate,
+            newGuestsPaused: true as const,
+          });
+        const publicContext = {
+          brandDisplayName: profile.profile.brandDisplayName,
+          storeDisplayName: profile.profile.storeDisplayName,
+          publicStoreReference: String(qr.context.publicStoreReference),
+          locale: String(qr.context.locale),
+        };
+        // Nobody can join or order at a table no party is seated at: start no visit (an earlier
+        // one on this browser, e.g. of a guest whose table was just settled, stays as it is).
+        // WP-2423 DEC-DINING-GUEST-TABLE-START: where guests start tables a scan alone still starts
+        // nothing; only the guest's tap on Start ("Start" or "NewParty") goes on to a visit.
+        if (tableOpen === false) {
+          const offer = await (
+            options.table?.guestStart?.({
+              ...scope,
+              tableReference: String(tableReference),
+              at: requestedAt,
+            }) ?? Promise.resolve("No" as const)
+          ).catch(() => "No" as const);
+          if (offer === "BeingCleaned")
+            return Object.freeze({ status: "TableBeingCleaned" as const, ...publicContext });
+          if (offer === "No")
+            return Object.freeze({ status: "TableNotOpen" as const, ...publicContext });
+          if (input.intent !== "Start" && input.intent !== "NewParty")
+            return Object.freeze({ status: "TableMayStart" as const, ...publicContext });
+        } else if (
+          tableOpen === true &&
+          input.intent === undefined &&
+          (await (
+            options.table?.asksNewParty?.({
+              ...scope,
+              tableReference: String(tableReference),
+            }) ?? Promise.resolve(false)
+          ).catch(() => false))
+        )
+          return Object.freeze({ status: "TableAskNewParty" as const, ...publicContext });
 
         const admitted = parseGuestAdmissionEvidence(
           await options.admission.consume(
@@ -168,15 +358,17 @@ export function createCustomerEntryComposition(
           publicStoreReference: String(qr.context.publicStoreReference),
           publicTableReference: qr.context.publicTableReference,
           channel: qr.context.channel,
-          operatingState: operating.operatingStatus.state,
-          availableServiceModes: operating.operatingStatus.availableServiceModes,
+          operatingState: operatingStatus.state,
+          availableServiceModes: operatingStatus.availableServiceModes,
           locale: String(qr.context.locale),
           contextExpiresAt,
+          ...(tableOpen === undefined ? {} : { tableOpen }),
           sessionCredential: session.sessionCredential,
           csrfCredential: session.csrfCredential,
           cookie: session.cookie,
         });
-      } catch {
+      } catch (error) {
+        if (error instanceof CustomerEntryServiceUnavailableError) throw error;
         return unavailable;
       }
     },

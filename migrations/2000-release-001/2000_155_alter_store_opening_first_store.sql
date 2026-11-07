@@ -1,0 +1,13 @@
+-- bop-rms-migration: 1
+-- owner: @bop/tenant
+-- schema: bop_tenant
+-- phase: expand
+-- risk: low
+-- transaction: required
+-- lock-timeout-ms: 5000
+-- statement-timeout-ms: 60000
+-- recovery: forward-fix
+-- WP-2423 DEC-MULTI-MERCHANT-ONE-INSTALLATION A6: a new merchant's first Store is opened from no
+-- other Store, so its opening names none. Every other opening still names the Store it came from.
+-- Grant: api INSERT on bop_tenant.brand (Owner standing approval 2026-10-14, WP-2423).
+ALTER TABLE bop_tenant.store_opening ALTER COLUMN opened_from_store_id DROP NOT NULL;

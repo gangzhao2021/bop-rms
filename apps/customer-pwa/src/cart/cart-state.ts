@@ -8,11 +8,16 @@ export type CartState =
   | { readonly status: "offline-readonly"; readonly cart: CartView | null }
   | {
       readonly status:
+        | "replacement-forbidden"
         | "session-expired"
         | "not-found"
         | "conflict"
         | "validation"
         | "rate-limited"
+        | "order-processing"
+        | "checkout-in-progress"
+        | "table-checking-out"
+        | "not-seated"
         | "expired"
         | "abandoned"
         | "command-failed"
@@ -21,18 +26,28 @@ export type CartState =
       readonly issueCodes: readonly string[];
       readonly retryAfterSeconds: number | null;
       readonly canRetrySameOperation: boolean;
+      /** WP-2423: the line whose asked quantity the store can't make, and how many it can. */
+      readonly shortItem?: { readonly cartItemReference: string; readonly available: number };
+      /**
+       * WP-2423 (same-table-ordering): a read of the cart failed (no change of the guest's was
+       * involved), so reading again later is how it recovers.
+       */
+      readonly fromRead?: true;
     }
   | { readonly status: "command-pending"; readonly cart: CartView };
 
 type PendingOperation =
+  | { readonly kind: "replace"; readonly cart: CartView; readonly operationReference: string }
   | {
       readonly kind: "update";
+      readonly cart: CartView;
       readonly cartItemReference: string;
       readonly draft: CartItemDraft;
       readonly operationReference: string;
     }
   | {
       readonly kind: "remove";
+      readonly cart: CartView;
       readonly cartItemReference: string;
       readonly operationReference: string;
     };
@@ -40,7 +55,14 @@ type PendingOperation =
 export interface CartStateController {
   getState(): CartState;
   load(): Promise<void>;
+  /**
+   * Reads the cart again with what's on screen kept there (and the guest's place on the page with it);
+   * a failed read changes nothing. With nothing on screen yet it is a load. Resolves whether the
+   * read worked (WP-2423 same-table-ordering: the table poll waits longer after a failure).
+   */
+  refresh(): Promise<boolean>;
   removeItem(cartItemReference: string): Promise<void>;
+  replaceExpiredCart?(): Promise<void>;
   retry(): Promise<void>;
   setOnline(online: boolean): void;
   subscribe(listener: () => void): () => void;
@@ -72,6 +94,8 @@ export function createCartStateController({
   let online = typeof navigator === "undefined" || navigator.onLine !== false;
   let pending: PendingOperation | null = null;
   let commandFlight: Promise<void> | null = null;
+  let readRevision = 0;
+  let outcomeUnknown = false;
   const listeners = new Set<() => void>();
 
   const publish = (next: CartState) => {
@@ -80,74 +104,122 @@ export function createCartStateController({
   };
   const currentCart = () => ("cart" in state ? state.cart : null);
 
-  const load = async () => {
+  const read = async (quiet: boolean): Promise<boolean> => {
+    if (commandFlight !== null) return commandFlight.then(() => true);
     if (!online) {
       publish({ status: "offline-readonly", cart: currentCart() });
-      return;
+      return false;
     }
     const priorCart = currentCart();
-    publish({ status: "loading" });
+    const revision = ++readRevision;
+    const keep = quiet && state.status !== "loading";
+    if (pending === null && !keep) publish({ status: "loading" });
     try {
       const cart = await client.loadCurrent();
-      pending = null;
-      publish(cart === null ? { status: "empty" } : { status: "ready", cart });
+      if (revision !== readRevision) return true;
+      if (!online) publish({ status: "offline-readonly", cart });
+      else if (pending !== null) mapError(new CartClientError("network_unknown"), cart, true);
+      else publish(cart === null ? { status: "empty" } : { status: "ready", cart });
+      return true;
     } catch (error) {
-      mapError(error, priorCart, false);
+      if (revision !== readRevision) return true;
+      if (!online) publish({ status: "offline-readonly", cart: priorCart });
+      else if (pending !== null) mapError(new CartClientError("network_unknown"), priorCart, true);
+      else if (!keep || quietlyShown(error)) mapError(error, priorCart, false, null, true);
+      return false;
     }
   };
+  // WP-2423 (guest-cart-503): a quiet re-read keeps a passing fault off the page, but the guest's
+  // own state is said at once: the table started checkout, or this phone is no longer at it.
+  const quietlyShown = (error: unknown) =>
+    error instanceof CartClientError &&
+    (error.code === "cart_table_checking_out" ||
+      error.code === "cart_session_expired" ||
+      error.code === "cart_replacement_forbidden");
+  const load = async () => {
+    await read(false);
+  };
 
-  const mapError = (error: unknown, cart: CartView | null, operationCanRetry: boolean) => {
+  const mapError = (
+    error: unknown,
+    cart: CartView | null,
+    operationCanRetry: boolean,
+    cartItemReference: string | null = null,
+    fromRead = false,
+  ) => {
     const parsed =
       error instanceof CartClientError ? error : new CartClientError("cart_service_unavailable");
     const status =
-      parsed.code === "cart_session_expired"
-        ? "session-expired"
-        : parsed.code === "cart_not_found"
-          ? "not-found"
-          : parsed.code === "cart_version_conflict" || parsed.code === "cart_idempotency_conflict"
-            ? "conflict"
-            : parsed.code === "cart_selection_invalid" || parsed.code === "cart_request_invalid"
-              ? "validation"
-              : parsed.code === "cart_rate_limited"
-                ? "rate-limited"
-                : parsed.code === "cart_expired"
-                  ? "expired"
-                  : parsed.code === "cart_abandoned"
-                    ? "abandoned"
-                    : parsed.code === "network_unknown"
-                      ? "command-failed"
-                      : "unavailable";
+      parsed.code === "cart_replacement_forbidden"
+        ? "replacement-forbidden"
+        : parsed.code === "cart_session_expired"
+          ? "session-expired"
+          : parsed.code === "cart_not_found"
+            ? "not-found"
+            : parsed.code === "cart_version_conflict" || parsed.code === "cart_idempotency_conflict"
+              ? "conflict"
+              : parsed.code === "cart_selection_invalid" || parsed.code === "cart_request_invalid"
+                ? "validation"
+                : parsed.code === "cart_rate_limited"
+                  ? "rate-limited"
+                  : parsed.code === "cart_order_processing"
+                    ? "order-processing"
+                    : parsed.code === "cart_checkout_in_progress"
+                      ? "checkout-in-progress"
+                      : parsed.code === "cart_table_checking_out"
+                        ? "table-checking-out"
+                        : parsed.code === "cart_dining_not_seated"
+                          ? "not-seated"
+                          : parsed.code === "cart_expired"
+                            ? "expired"
+                            : parsed.code === "cart_abandoned"
+                              ? "abandoned"
+                              : parsed.code === "network_unknown"
+                                ? "command-failed"
+                                : "unavailable";
     publish({
       status,
       cart,
       issueCodes: parsed.issueCodes,
       retryAfterSeconds: parsed.retryAfterSeconds,
       canRetrySameOperation: operationCanRetry && parsed.code === "network_unknown",
+      ...(status === "validation" &&
+      cartItemReference !== null &&
+      parsed.issueCodes.includes("ITEM_SHORT") &&
+      parsed.available !== null
+        ? { shortItem: { cartItemReference, available: parsed.available } }
+        : {}),
+      ...(fromRead ? { fromRead: true as const } : {}),
     });
   };
 
   const execute = async (operation: PendingOperation) => {
-    const cart = currentCart();
+    const cart = operation.cart;
     if (!online) {
-      pending = operation;
       publish({ status: "offline-readonly", cart });
       return;
     }
-    if (cart === null) {
-      mapError(new CartClientError("cart_not_found"), null, false);
-      return;
-    }
+    readRevision += 1;
     pending = operation;
     publish({ status: "command-pending", cart });
     try {
       const result =
-        operation.kind === "update"
-          ? await client.updateItem({ cart, ...operation })
-          : await client.removeItem({ cart, ...operation });
+        operation.kind === "replace"
+          ? await (client.replaceExpiredCart === undefined
+              ? Promise.reject(new CartClientError("cart_service_unavailable"))
+              : client.replaceExpiredCart(operation))
+          : operation.kind === "update"
+            ? await client.updateItem(operation)
+            : await client.removeItem(operation);
       pending = null;
-      publish({ status: "ready", cart: result });
+      publish({ status: online ? "ready" : "offline-readonly", cart: result });
     } catch (error) {
-      if (error instanceof CartClientError && error.code === "cart_version_conflict") {
+      let parsed =
+        error instanceof CartClientError ? error : new CartClientError("network_unknown");
+      outcomeUnknown ||= parsed.code === "network_unknown";
+      if (outcomeUnknown) parsed = new CartClientError("network_unknown");
+      else pending = null;
+      if (parsed.code === "cart_version_conflict") {
         try {
           const refreshed = await client.loadCurrent();
           mapError(error, refreshed, false);
@@ -157,12 +229,51 @@ export function createCartStateController({
           return;
         }
       }
-      mapError(error, cart, true);
+      mapError(
+        parsed,
+        cart,
+        true,
+        operation.kind === "update" ? operation.cartItemReference : null,
+      );
     }
   };
-  const begin = (createOperation: () => PendingOperation): Promise<void> => {
+  const begin = (
+    createOperation: (cart: CartView) => PendingOperation,
+    retry = false,
+    cartItemReference?: string,
+    /** WP-2423 (guest-cart-503): Remove of another phone's line the Store marked not sold now. */
+    removal = false,
+  ): Promise<void> => {
     if (commandFlight !== null) return commandFlight;
-    const current = execute(createOperation());
+    if (pending !== null && !retry) return Promise.resolve();
+    if (!online) {
+      publish({ status: "offline-readonly", cart: currentCart() });
+      return Promise.resolve();
+    }
+    const cart = retry && pending !== null ? pending.cart : currentCart();
+    if (cart === null) return Promise.resolve();
+    // Only new UI intents are blocked; an unknown original operation still needs server reconciliation.
+    if (
+      !retry &&
+      cartItemReference !== undefined &&
+      cart.cart.items.some(
+        (item) =>
+          item.cartItemReference === cartItemReference &&
+          item.warnings.includes("OTHER_PARTICIPANT_ITEM") &&
+          !(
+            removal &&
+            (item.warnings.includes("ITEM_UNAVAILABLE") ||
+              item.warnings.includes("ITEM_OPTIONS_CHANGED") ||
+              // WP-2423 (same-table-ordering): its phone has left the table.
+              item.warnings.includes("ADDER_LEFT_TABLE"))
+          ),
+      )
+    )
+      return Promise.resolve();
+    if (!retry) outcomeUnknown = false;
+    const current = execute(
+      createOperation(Object.freeze({ ...cart, cart: Object.freeze({ ...cart.cart }) })),
+    );
     commandFlight = current;
     void current.then(
       () => {
@@ -178,22 +289,67 @@ export function createCartStateController({
   return Object.freeze({
     getState: () => state,
     load,
+    refresh: () => read(true),
+    ...(client.replaceExpiredCart === undefined
+      ? {}
+      : {
+          replaceExpiredCart: () => {
+            const cart = currentCart();
+            if (
+              state.status === "replacement-forbidden" ||
+              cart === null ||
+              cart.cart.orderType !== "DineIn" ||
+              cart.cart.lifecycle.status === "Active" ||
+              cart.cart.warnings.includes("FEATURE_DISABLED") ||
+              cart.cart.warnings.includes("PROJECTION_STALE")
+            )
+              return Promise.resolve();
+            return begin((cart) => ({ kind: "replace", cart, operationReference: keyFactory() }));
+          },
+        }),
     removeItem: (cartItemReference: string) =>
-      begin(() => ({ kind: "remove", cartItemReference, operationReference: keyFactory() })),
+      begin(
+        (cart) => ({
+          kind: "remove",
+          cart,
+          cartItemReference,
+          operationReference: keyFactory(),
+        }),
+        false,
+        cartItemReference,
+        true,
+      ),
     retry: () => {
-      if (pending === null || state.status !== "command-failed" || !state.canRetrySameOperation)
-        return Promise.resolve();
-      return begin(() => pending as PendingOperation);
+      if (pending === null) return Promise.resolve();
+      return begin(() => pending as PendingOperation, true);
     },
     setOnline: (value: boolean) => {
       online = value;
       if (!value) publish({ status: "offline-readonly", cart: currentCart() });
+      else if (pending !== null && commandFlight === null)
+        mapError(new CartClientError("network_unknown"), currentCart(), true);
     },
     subscribe: (listener: () => void) => {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
     updateItem: (cartItemReference: string, draft: CartItemDraft) =>
-      begin(() => ({ kind: "update", cartItemReference, draft, operationReference: keyFactory() })),
+      begin(
+        (cart) => ({
+          kind: "update",
+          cart,
+          cartItemReference,
+          draft: Object.freeze({
+            quantity: draft.quantity,
+            customerNote: draft.customerNote,
+            optionSelections: Object.freeze(
+              draft.optionSelections.map((option) => Object.freeze({ ...option })),
+            ),
+          }),
+          operationReference: keyFactory(),
+        }),
+        false,
+        cartItemReference,
+      ),
   });
 }

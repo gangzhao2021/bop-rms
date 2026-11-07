@@ -1,4 +1,5 @@
 import { AppFrame, StatePanel } from "@bop-rms/ui";
+import { SourceTime } from "./StoreTime.js";
 import { useEffect, useMemo, useState } from "react";
 import {
   ExportJobPageError,
@@ -57,7 +58,9 @@ function Screen({ view }: { readonly view: ExportJobPageView }) {
         <div>
           <p className="bop-eyebrow">EXPORT-JOB-LIST</p>
           <h2>Controlled export center</h2>
-          <p>Source as of {view.sourceAsOf}</p>
+          <p>
+            Source as of <SourceTime instant={view.sourceAsOf} />
+          </p>
         </div>
         <button
           disabled={

@@ -103,7 +103,8 @@ function resultStatus(value: unknown): CustomerMenuQueryResult["status"] | null 
     : null;
 }
 
-function publicFound(value: CustomerMenuFound): CustomerMenuFound {
+/** The customer-facing menu fields only (also the counter item picker, WP-2423 Q7). */
+export function publicFound(value: CustomerMenuFound): CustomerMenuFound {
   return {
     status: "Found",
     schemaVersion: value.schemaVersion,
@@ -142,25 +143,33 @@ function publicFound(value: CustomerMenuFound): CustomerMenuFound {
           presentationRole: sellable.presentationRole,
           pinned: sellable.pinned,
           availability: sellable.availability,
+          ...(sellable.alcohol === undefined ? {} : { alcohol: sellable.alcohol }),
           optionRules: sellable.optionRules.map((rule) => ({
+            ...(rule.semanticsVersion === 2
+              ? {
+                  semanticsVersion: 2,
+                  activationOptionReferences: [...(rule.activationOptionReferences ?? [])],
+                }
+              : {}),
+            name: rule.name,
             bindingReference: rule.bindingReference,
             optionSetVersionReference: rule.optionSetVersionReference,
             minimumSelections: rule.minimumSelections,
             maximumSelections: rule.maximumSelections,
             enabledOptionReferences: [...rule.enabledOptionReferences],
             defaultOptionReferences: [...rule.defaultOptionReferences],
+            ...(rule.comboPart === true ? { comboPart: true as const } : {}),
             options: rule.options.map((option) => ({
               optionReference: option.optionReference,
               name: option.name,
               maximumQuantity: option.maximumQuantity,
               conflictOptionReferences: [...option.conflictOptionReferences],
               selectedByDefault: option.selectedByDefault,
-              incrementalPrice: {
-                status: option.incrementalPrice.status,
-                amount: option.incrementalPrice.amount,
-                currency: option.incrementalPrice.currency,
-                reason: option.incrementalPrice.reason,
-              },
+              ...(rule.semanticsVersion === 2
+                ? { defaultQuantity: Number(option.defaultQuantity) }
+                : {}),
+              ...(option.offeredNow === false ? { offeredNow: false as const } : {}),
+              incrementalPrice: { ...option.incrementalPrice },
             })),
           })),
           allergenDisclosure: {
@@ -173,18 +182,48 @@ function publicFound(value: CustomerMenuFound): CustomerMenuFound {
             })),
             allergenFreeClaim: false,
             assistanceCode: sellable.allergenDisclosure.assistanceCode,
+            ...(sellable.allergenDisclosure.byChoice === undefined
+              ? {}
+              : { byChoice: sellable.allergenDisclosure.byChoice }),
+            ...(sellable.allergenDisclosure.byOption === undefined
+              ? {}
+              : { byOption: sellable.allergenDisclosure.byOption }),
           },
-          displayPrice: {
-            status: sellable.displayPrice.status,
-            amount: sellable.displayPrice.amount,
-            currency: sellable.displayPrice.currency,
-            reason: sellable.displayPrice.reason,
-          },
+          displayPrice:
+            sellable.displayPrice.status === "Available"
+              ? {
+                  status: "Available" as const,
+                  amount: sellable.displayPrice.amount,
+                  currency: sellable.displayPrice.currency,
+                  reason: null,
+                }
+              : {
+                  status: "Unavailable" as const,
+                  amount: null,
+                  currency: null,
+                  reason: sellable.displayPrice.reason,
+                },
           taxDisplayContext: {
             status: sellable.taxDisplayContext.status,
             taxInclusive: sellable.taxDisplayContext.taxInclusive,
             reason: sellable.taxDisplayContext.reason,
           },
+          // WP-2423 menu descriptions and photos: the published description and photo sizes.
+          description: sellable.description,
+          photo:
+            sellable.photo === null
+              ? null
+              : {
+                  altText: sellable.photo.altText,
+                  width: sellable.photo.width,
+                  height: sellable.photo.height,
+                  renditions: sellable.photo.renditions.map((rendition) => ({
+                    url: rendition.url,
+                    contentType: rendition.contentType,
+                    width: rendition.width,
+                    height: rendition.height,
+                  })),
+                },
         })),
       })),
     },

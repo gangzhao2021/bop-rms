@@ -24,9 +24,9 @@ describe("Customer PWA connectivity banner", () => {
     const html = renderToStaticMarkup(
       <ConnectivityBanner controller={controller({ status: "offline" })} />,
     );
-    expect(html).toContain("You are offline");
-    expect(html).toContain("Transaction and identity actions are unavailable");
-    expect(html).toContain("Nothing will run or replay in the background");
+    expect(html).toContain("You’re offline");
+    expect(html).toContain("Ordering and payment are paused until you reconnect");
+    expect(html).toContain("Nothing is sent in the background");
     expect(html).toContain('aria-live="polite"');
   });
 
@@ -35,8 +35,8 @@ describe("Customer PWA connectivity banner", () => {
       <ConnectivityBanner controller={controller({ status: "restored" })} />,
     );
     expect(html).toContain("Connection restored");
-    expect(html).toContain("retry explicitly");
-    expect(html).toContain("No action ran automatically");
+    expect(html).toContain("then try again if you need to");
+    expect(html).toContain("Nothing was sent while you were");
     expect(html).toContain("Dismiss");
   });
 });

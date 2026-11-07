@@ -6,6 +6,16 @@ import type {
 } from "../../contracts/inventory-item-command.js";
 import type { InventoryItemAggregate, InventoryReference } from "../../domain/inventory-item.js";
 
+export type InventoryItemPermission =
+  | "inventory.item.create"
+  | "inventory.item.update"
+  | "inventory.item.unit.manage"
+  | "inventory.item.tracking.manage"
+  | "inventory.item.activate"
+  | "inventory.item.deactivate"
+  | "inventory.item.archive"
+  | "inventory.item.restore"
+  | "inventory.item.reorder.manage";
 export interface InventoryItemPorts {
   readonly authorization: {
     authorize(input: {
@@ -13,7 +23,8 @@ export interface InventoryItemPorts {
       readonly brandReference: InventoryReference;
       readonly actorReference: InventoryReference;
       readonly purpose: "InventoryItemManagement";
-      readonly permission: "inventory.manage";
+      /** One DEC-PERM-CATALOG action code; every required code is authorized separately. */
+      readonly permission: InventoryItemPermission;
       readonly action: InventoryItemAction;
     }): Promise<{ readonly authorized: true } | null>;
   };

@@ -1,3 +1,5 @@
+import { t } from "./i18n/i18n.js";
+import { createContractParsers } from "./contract-parsers.js";
 export type OperationalDashboardClientErrorCode =
   | "PermissionDenied"
   | "NotFound"
@@ -10,7 +12,7 @@ export type OperationalDashboardClientErrorCode =
 
 export class OperationalDashboardClientError extends Error {
   constructor(readonly code: OperationalDashboardClientErrorCode) {
-    super("Operational Dashboard unavailable");
+    super(t("Operational Dashboard unavailable"));
     this.name = "OperationalDashboardClientError";
   }
 }
@@ -140,16 +142,9 @@ const object = (value: unknown, fields: readonly string[]) => {
 const ref = (value: unknown) => (typeof value === "string" && uuid.test(value) ? value : fail());
 const text = (value: unknown) =>
   typeof value === "string" && value.trim() === value && safeText.test(value) ? value : fail();
-const instant = (value: unknown) =>
-  typeof value === "string" &&
-  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(value) &&
-  new Date(Date.parse(value)).toISOString() === value
-    ? value
-    : fail();
+const { instant, oneOf } = createContractParsers(fail);
 const integer = (value: unknown) =>
   Number.isSafeInteger(value) && (value as number) >= 0 ? (value as number) : fail();
-const oneOf = <T extends string>(value: unknown, values: readonly T[]) =>
-  typeof value === "string" && values.includes(value as T) ? (value as T) : fail();
 const permissionObject = (value: unknown) => {
   const parsed = object(value, [
     "mayChangeScope",

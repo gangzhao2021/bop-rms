@@ -9,6 +9,13 @@ describe("WP-1804 Kitchen Board contract", () => {
   it("accepts a closed Store-scoped queue", () => {
     expect(parseKitchenBoardView(kitchenBoardFixture()).items).toHaveLength(1);
   });
+  it("accepts explicitly unavailable Station display labels without exposing a reference", () => {
+    const view = parseKitchenBoardView({
+      ...kitchenBoardFixture(),
+      items: [{ ...kitchenItemFixture(), stationLabel: null }],
+    });
+    expect(view.items[0]?.stationLabel).toBeNull();
+  });
   it("rejects invalid routes, open DTOs and quantity drift", () => {
     expect(() => parseKitchenRouteReference("bad")).toThrow("KITCHEN_BOARD_INVALID");
     expect(() => parseKitchenBoardView({ ...kitchenBoardFixture(), extra: true })).toThrow(
@@ -17,5 +24,23 @@ describe("WP-1804 Kitchen Board contract", () => {
     expect(() =>
       parseKitchenWorkItemView({ ...kitchenItemFixture(), completedQuantity: 3 }),
     ).toThrow("KITCHEN_BOARD_INVALID");
+    expect(() => {
+      const item = { ...kitchenItemFixture() };
+      Reflect.deleteProperty(item, "selectedOptions");
+      parseKitchenWorkItemView(item);
+    }).toThrow("KITCHEN_BOARD_INVALID");
+    expect(() =>
+      parseKitchenWorkItemView({
+        ...kitchenItemFixture(),
+        selectedOptions: [{ displayName: "Extra mushrooms", quantity: 0 }],
+      }),
+    ).toThrow("KITCHEN_BOARD_INVALID");
   });
+});
+
+it("Owner 2026-11-03: a round from a paper slip stays marked on the board", () => {
+  expect(
+    parseKitchenWorkItemView({ ...kitchenItemFixture(), takenOnPaper: true }).takenOnPaper,
+  ).toBe(true);
+  expect(parseKitchenWorkItemView(kitchenItemFixture()).takenOnPaper).toBeUndefined();
 });

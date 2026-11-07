@@ -25,6 +25,12 @@ describe("WP-1708 deny-by-default Service Worker policy", () => {
     for (const candidate of [
       publicMenu({ method: "POST" }),
       publicMenu({ credentials: "same-origin" }),
+      // The deployment payment mode is runtime configuration and must never be cached.
+      publicMenu({ url: `${origin}/bff/customer/payment-configuration` }),
+      publicMenu({
+        url: `${origin}/bff/customer/payment-configuration`,
+        credentials: "same-origin",
+      }),
       publicMenu({ url: publicMenu().url.replace(`menuVersion=${id(2)}`, "") }),
       publicMenu({ url: publicMenu().url.replace(origin, "https://other.example.test") }),
       publicMenu({
@@ -41,6 +47,7 @@ describe("WP-1708 deny-by-default Service Worker policy", () => {
     for (const path of [
       "/auth/sign-in",
       "/bff/realtime",
+      "/bff/customer/payment-configuration",
       "/cart",
       "/checkout/payment",
       `/orders/${id(1)}`,

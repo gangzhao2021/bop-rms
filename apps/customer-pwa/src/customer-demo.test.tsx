@@ -1,3 +1,4 @@
+import { createLocalDiningAdmissionDemo } from "./customer-dining-demo.js";
 import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
@@ -13,6 +14,18 @@ import { loadLocalCustomerDemo, shouldUseLocalCustomerDemoEntry } from "./custom
 import { MenuScreen } from "./menu/MenuPage.js";
 
 describe("WP-2204 local Customer preview", () => {
+  it("keeps Dining UI training separate and explicitly synthetic", async () => {
+    const sample = createLocalDiningAdmissionDemo();
+    const entry = await sample.entryClient.start();
+    expect(entry.kind).toBe("Established");
+    if (entry.kind !== "Established") throw new Error("missing synthetic entry");
+    expect(entry.context.channel).toBe("DineIn");
+    const original = await enabledCustomerDemo.entryClient.start();
+    expect(original.kind === "Established" && original.context.channel).toBe("Pickup");
+    const normal = readFileSync(new URL("./main.tsx", import.meta.url), "utf8");
+    expect(normal).not.toContain("customer-dining-demo");
+  });
+
   it("selects the separate entry only for the exact development flag", async () => {
     expect(shouldUseLocalCustomerDemoEntry("serve", "1")).toBe(true);
     expect(shouldUseLocalCustomerDemoEntry("build", "1")).toBe(false);
@@ -46,7 +59,7 @@ describe("WP-2204 local Customer preview", () => {
     expect(html).toContain("Local synthetic preview");
     expect(html).toContain("Read-only training data");
     expect(html).toContain("Synthetic mushroom rice bowl");
-    expect(html).toContain("Offline read-only");
+    expect(html).toContain("You’re offline");
     expect(html).toContain(
       'disabled="" aria-label="Increase Synthetic mushroom rice bowl quantity"',
     );
@@ -119,6 +132,41 @@ describe("WP-2204 local Customer preview", () => {
     await enabledCustomerDemo.receiptController.load();
     expect(fetch).not.toHaveBeenCalled();
     fetch.mockRestore();
+  });
+
+  it("filters the read-only menu preview by exact section reference", async () => {
+    const all = await enabledCustomerDemo.menuClient.load();
+    if (all.kind !== "Found") throw new Error("synthetic menu missing");
+    const selectedSection = all.menu.sections[0];
+    if (!selectedSection) throw new Error("synthetic menu section missing");
+    await expect(
+      enabledCustomerDemo.menuClient.load({
+        sectionReference: selectedSection.sectionReference,
+      }),
+    ).resolves.toMatchObject({
+      kind: "Found",
+      menu: { sections: [{ sectionReference: selectedSection.sectionReference }] },
+    });
+    await expect(
+      enabledCustomerDemo.menuClient.load({
+        searchTerm: "iced",
+        sectionReference: selectedSection.sectionReference,
+      }),
+    ).resolves.toMatchObject({
+      kind: "Found",
+      menu: { sections: [{ sellables: [{ name: "Synthetic iced tea" }] }] },
+    });
+  });
+
+  it("also finds menu items by their published customer description", async () => {
+    const result = await enabledCustomerDemo.menuClient.load({ searchTerm: "CARROT" });
+    if (result.kind !== "Found") throw new Error("description match missing");
+    expect(
+      result.menu.sections.flatMap((section) => section.sellables.map((item) => item.name)),
+    ).toEqual(["Synthetic mushroom rice bowl"]);
+    await expect(enabledCustomerDemo.menuClient.load({ searchTerm: "oat" })).resolves.toEqual({
+      kind: "NotFound",
+    });
   });
 
   it("renders the visible notice independently of route content", () => {

@@ -1,0 +1,1316 @@
+import { systemText, countOf, t } from "./i18n/i18n.js";
+import {
+  useApprovalsWaiting,
+  useStaffRolesWaiting,
+  type ApprovalsWaiting,
+  type StaffRolesWaiting,
+} from "./approvals-waiting.js";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { OpeningList } from "./OpeningList.js";
+import { GuestIntakeNotice } from "./GuestIntakeNotice.js";
+import { createStoreKitchenSetupClient } from "./store-kitchen-setup-client.js";
+import { useStaffSessionLive } from "./staff-session-reads.js";
+import { Link } from "react-router";
+import {
+  createCurrentOrderQueueClient,
+  ordersAwaitingAcceptance,
+  paidOrdersStuck,
+  roundsAwaitingAcceptance,
+  type CurrentOrderQueue,
+} from "./current-order-queue-client.js";
+import { awaitingAcceptanceText, paidRoundUrgentMinutes } from "./paid-round-wait.js";
+import { createOrderExceptionClient } from "./order-exception-client.js";
+import {
+  isExceptionOverdue,
+  parseOrderExceptionView,
+  type OrderExceptionView,
+} from "./order-exception-view.js";
+import { createPickupClient } from "./pickup-client.js";
+import { parsePickupQueueView } from "./pickup.js";
+import { storeTime } from "./StoreTime.js";
+import { ClosingReminder, closingReminderScreen } from "./ClosingReminder.js";
+import { OrderingEndingNotice } from "./OrderingEndingNotice.js";
+import { formatContactPhone } from "./contact-phone.js";
+import {
+  StoreSystemLine,
+  systemAttentionItems,
+  useOperationsAlerts,
+  type OperationsAlertsRead,
+} from "./OperationsAlerts.js";
+import {
+  createDiningSessionClient,
+  longOpenSessionMinutes,
+  type StaffDiningTable,
+} from "./dining-session-client.js";
+import {
+  createSettlementClient,
+  SettlementClientError,
+  unfinishedGuestPayment,
+  type SettlementView,
+} from "./settlement-client.js";
+import { businessDateText, useStoreBusinessDay } from "./StoreBusinessDay.js";
+import { floorServerProblemText, isServerProblem } from "./failure-words.js";
+
+/** WP-2423 P2: what the Store is dealing with right now, from the pilot projections. */
+export interface OrdersSummary {
+  readonly open: number;
+  readonly awaitingAcceptance: number;
+  /**
+   * WP-2423 (2026-11-03): accepted pickups of earlier days the kitchen never finished. Those it did
+   * finish are on Pickup's own earlier-days count.
+   */
+  readonly earlierUnfinished: number;
+  /** WP-2423: rounds awaiting acceptance (a table may have several) and paid ones waiting long. */
+  readonly awaitingRounds: number;
+  readonly urgentRounds: number;
+  /**
+   * WP-2423 M04: paid orders that need a person now — accepted but not in the kitchen a minute
+   * later, or a pickup whose automatic refund did not go through.
+   */
+  readonly paidStuck: number;
+  /**
+   * Open dine-in orders (tables) with food the kitchen marked ready that nobody served yet, in any
+   * round — the Tables page's rule, so a ready round counts even while another round waits for
+   * payment. Pickup readiness is a Fulfillment fact (the pickup queue), so pickups are not counted.
+   */
+  readonly readyToServe: number;
+  /** Whether any open order is dine-in; a pickup-only Store has nothing to serve at tables. */
+  readonly dineIn: boolean;
+  /** The first page was full; there are more open orders than counted here. */
+  readonly more: boolean;
+  /**
+   * WP-2423 (3cd0f8dd M7): dine-in Orders every item of which was served (on this page), so a
+   * table still open for one of them is waiting to be closed once the guests leave.
+   */
+  readonly servedDineIn: ReadonlySet<string>;
+}
+export interface PickupsSummary {
+  /** Waiting pickups of today's business day (all of them while the day is not known). */
+  readonly waiting: number;
+  /**
+   * WP-2423 (3cd0f8dd L7): waiting pickups from an earlier business day — check whether they were
+   * collected, then hand them over or close them as not collected on the Pickup page.
+   */
+  readonly earlierDays: number;
+  /** Waiting pickups with a dish the kitchen is remaking; staff wait before handing them over. */
+  readonly remaking: number;
+  readonly more: boolean;
+}
+/** WP-2423 (3cd0f8dd M7): the Store's tables as the Tables page reads them (first page). */
+export interface TablesRead {
+  readonly tables: readonly StaffDiningTable[];
+  /** The staff member may close tables (Owner, Store Manager). */
+  readonly canClose: boolean;
+  readonly more: boolean;
+  /** When the tables were read (each table's elapsed minutes count up to this instant). */
+  readonly readAt?: string;
+}
+export interface TablesSummary {
+  /** Tables with a party (an open session). */
+  readonly open: number;
+  /**
+   * Open tables to close once the guests have left: everything served and nothing waiting for
+   * payment or acceptance, or open so long the guests most likely left. Null for staff who don't
+   * close tables (the Tables page tells them who does).
+   */
+  readonly toClose: number | null;
+  /**
+   * WP-2423 (46940b76 L1): open tables whose party was seated before the Store's current business
+   * day began (left open overnight). Null until the business day and the read time are known.
+   */
+  readonly earlierDays: number | null;
+  readonly more: boolean;
+}
+export function summarizeTables(
+  read: TablesRead,
+  servedDineIn: ReadonlySet<string> | null,
+  /** Start of the Store's current business day (Store time zone and day start, from the shell). */
+  dayStartsAt: string | null = null,
+) {
+  const open = read.tables.filter((table) => table.currentDiningSessionReference !== null);
+  const readAt = read.readAt === undefined ? Number.NaN : Date.parse(read.readAt);
+  const dayStart = dayStartsAt === null ? Number.NaN : Date.parse(dayStartsAt);
+  const earlierDays =
+    Number.isFinite(readAt) && Number.isFinite(dayStart)
+      ? open.filter(
+          (table) =>
+            table.elapsedMinutes !== null && readAt - table.elapsedMinutes * 60_000 < dayStart,
+        ).length
+      : null;
+  const toClose = open.filter(
+    (table) =>
+      (table.elapsedMinutes ?? 0) > longOpenSessionMinutes ||
+      (table.session?.orderReference != null &&
+        servedDineIn?.has(table.session.orderReference) === true &&
+        table.staffRoundsAwaitingPayment.length === 0 &&
+        table.guestRoundsAwaitingPayment.length === 0 &&
+        table.roundsAwaitingAcceptance.length === 0),
+  ).length;
+  return {
+    open: open.length,
+    toClose: read.canClose ? toClose : null,
+    earlierDays,
+    more: read.more,
+  } satisfies TablesSummary;
+}
+export interface ExceptionsSummary {
+  readonly open: number;
+  readonly overdue: number;
+}
+/** WP-2423 Q1: the home page re-reads its summaries this often. */
+export const OVERVIEW_REFRESH_MS = 30_000;
+const openPhases = new Set(["Submitted", "Accepted", "InProgress", "Ready"]);
+export function summarizeOrders(queue: CurrentOrderQueue, now = Date.now()): OrdersSummary {
+  // Owner 2026-11-04 walkthrough: a pickup closed as not collected keeps its phase but is finished.
+  const open = queue.items.filter(
+    (order) => openPhases.has(order.currentPhase ?? "") && !order.pickupNotCollected,
+  );
+  const dineIn = open.filter((order) => order.orderType === "DineIn");
+  const rounds = roundsAwaitingAcceptance(queue, now, paidRoundUrgentMinutes);
+  return {
+    open: open.length,
+    awaitingAcceptance: ordersAwaitingAcceptance(queue),
+    earlierUnfinished: queue.items.filter(
+      (order) => order.earlierOpenPickup && order.kitchenPhase !== "Ready",
+    ).length,
+    awaitingRounds: rounds.rounds,
+    urgentRounds: rounds.urgentRounds,
+    paidStuck: paidOrdersStuck(queue, now),
+    readyToServe: dineIn.filter(
+      (order) =>
+        // DEC-DINING-GUEST-TABLE-START: at a table a guest started, the kitchen finishing a dish is
+        // the last step anyone has to take (Tables says the same).
+        order.startedByGuest !== true &&
+        // An older server sends no count: then only an Order that is Ready as a whole.
+        (order.readyToServeItemCount === null
+          ? order.currentPhase === "Ready"
+          : order.readyToServeItemCount > 0),
+    ).length,
+    dineIn: dineIn.length > 0,
+    more: queue.nextAfterOrderReference !== null,
+    servedDineIn: new Set(
+      queue.items
+        .filter((order) => order.orderType === "DineIn" && order.currentPhase === "Fulfilled")
+        .map((order) => order.orderReference),
+    ),
+  };
+}
+export function summarizePickups(
+  view: {
+    readonly items: readonly {
+      readonly phase: string;
+      readonly remakeQuantity?: number;
+      readonly businessDate?: string;
+    }[];
+    readonly nextAfterFulfillmentReference?: string | null | undefined;
+  },
+  /** The Store's current business date (Pickup's rule: an earlier date is an earlier day). */
+  today: string | null = null,
+): PickupsSummary {
+  const all = view.items.filter((item) => item.phase !== "Completed");
+  const earlier = (item: (typeof all)[number]) =>
+    Boolean(item.businessDate && today && item.businessDate < today);
+  const waiting = all.filter((item) => !earlier(item));
+  return {
+    waiting: waiting.length,
+    earlierDays: all.length - waiting.length,
+    remaking: waiting.filter((item) => (item.remakeQuantity ?? 0) > 0).length,
+    more: (view.nextAfterFulfillmentReference ?? null) !== null,
+  };
+}
+export function summarizeExceptions(view: OrderExceptionView): ExceptionsSummary {
+  const open = view.items.filter((item) => item.status !== "Resolved");
+  return {
+    open: open.length,
+    overdue: open.filter((item) => isExceptionOverdue(item, view.projectedAt)).length,
+  };
+}
+
+export type OverviewRead<T> =
+  /** WP-2423 Q11 follow-up: the staff member's role has no screen for this; it is not read. */
+  | { readonly kind: "Hidden" }
+  | { readonly kind: "Loading" }
+  | { readonly kind: "Ready"; readonly value: T }
+  /** `server`: the server answered 5xx (WP-2423 item 10), as told apart from no answer. */
+  | { readonly kind: "Unavailable"; readonly server?: boolean };
+export interface OverviewTodayState {
+  readonly orders: OverviewRead<OrdersSummary>;
+  readonly pickups: OverviewRead<PickupsSummary>;
+  readonly exceptions: OverviewRead<ExceptionsSummary>;
+  /** WP-2423 (3cd0f8dd M7): open tables and those waiting to be closed. */
+  readonly tables: OverviewRead<TablesRead>;
+  readonly updatedAt: string | null;
+}
+const loading = { kind: "Loading" } as const;
+export const initialOverviewState: OverviewTodayState = {
+  orders: loading,
+  pickups: loading,
+  exceptions: loading,
+  tables: loading,
+  updatedAt: null,
+};
+/** WP-2423 (3cd0f8dd M7): the tables summary once both the tables and the orders are read. */
+export function tablesSummary(
+  state: OverviewTodayState,
+  dayStartsAt: string | null = null,
+): OverviewRead<TablesSummary> {
+  if (state.tables.kind !== "Ready") return state.tables;
+  return {
+    kind: "Ready",
+    value: summarizeTables(
+      state.tables.value,
+      state.orders.kind === "Ready" ? state.orders.value.servedDineIn : null,
+      dayStartsAt,
+    ),
+  };
+}
+
+/**
+ * 2026-10-21 live check ("Open orders 3+" was unclear): the Home page reads the first page of each
+ * list only. When more follows, the number is a lower bound and says so in words ("At least 3")
+ * with what was counted; otherwise it is the exact count.
+ */
+export interface CountShown {
+  /** Words before the number ("At least"), or null for an exact count. */
+  readonly qualifier: string | null;
+  readonly number: string;
+  /** What was counted, when the number is only a lower bound. */
+  readonly note: string | null;
+}
+export function countShown(n: number, more: boolean, partOfList: string): CountShown {
+  return more
+    ? {
+        qualifier: n > 0 ? t("At least") : null,
+        number: String(n),
+        note: t("Counted from {partOfList} only", { partOfList: partOfList }),
+      }
+    : { qualifier: null, number: String(n), note: null };
+}
+function Count<T>({
+  label,
+  read,
+  value,
+  detail,
+  href,
+}: {
+  readonly label: string;
+  readonly read: OverviewRead<T>;
+  readonly value: (summary: T) => CountShown;
+  /** Only what the list above doesn't already say. */
+  readonly detail?: ((summary: T) => string | null) | undefined;
+  readonly href: string;
+}) {
+  if (read.kind === "Hidden") return null;
+  const count = read.kind === "Ready" ? value(read.value) : null;
+  const words = read.kind === "Ready" ? (detail?.(read.value) ?? null) : null;
+  return (
+    <li aria-busy={read.kind === "Loading"}>
+      {count !== null ? (
+        <strong className="overview-count__value">
+          {count.qualifier === null ? null : (
+            <span className="overview-count__qualifier">{count.qualifier} </span>
+          )}
+          {count.number}
+        </strong>
+      ) : (
+        <span className="overview-count__unread" role="status">
+          {read.kind === "Loading" ? t("Reading…") : t("Could not be read")}
+        </span>
+      )}
+      <Link className="overview-count__label" to={href}>
+        {label}
+      </Link>
+      {count?.note == null ? null : <span className="overview-count__note">{count.note}</span>}
+      {words === null ? null : <span className="overview-count__detail">{words}</span>}
+    </li>
+  );
+}
+
+/** "Right now": the few numbers staff use; what someone must act on is in "Needs attention". */
+export function OverviewToday({
+  state,
+  timeZone,
+  busy = false,
+  onRefresh,
+  reportsHref = null,
+}: {
+  readonly state: OverviewTodayState;
+  readonly timeZone?: string | undefined;
+  readonly busy?: boolean;
+  readonly onRefresh?: (() => void) | undefined;
+  /** Where Today's summary lives; null when this staff member has no reports screen. */
+  readonly reportsHref?: string | null;
+}) {
+  if (
+    reportsHref === null &&
+    [state.orders, state.pickups, state.tables].every((read) => read.kind === "Hidden")
+  )
+    return null;
+  return (
+    <section className="overview-now" aria-labelledby="today-summary-heading">
+      <header>
+        <h2 id="today-summary-heading">{t("Right now")}</h2>
+        <div className="overview-now__tools">
+          <p className="overview-updated">
+            {state.updatedAt === null
+              ? t("Reading current work…")
+              : t("Last checked {updatedAt}", { updatedAt: storeTime(state.updatedAt, timeZone) })}
+          </p>
+          {onRefresh ? (
+            <button
+              type="button"
+              className="overview-text-action"
+              onClick={onRefresh}
+              disabled={busy}
+            >
+              {t("Refresh")}
+            </button>
+          ) : null}
+        </div>
+      </header>
+      <ul className="overview-counts">
+        <Count
+          label={t("Open orders")}
+          read={state.orders}
+          value={(o) => countShown(o.open, o.more, t("the most recent orders"))}
+          href="/operations/orders"
+        />
+        <Count
+          label={t("Waiting for pickup")}
+          read={state.pickups}
+          value={(p) => countShown(p.waiting, p.more, t("the first pickups listed"))}
+          href="/operations/pickup"
+        />
+        <Count
+          label={t("Open tables")}
+          read={tablesSummary(state)}
+          value={(read) => countShown(read.open, read.more, t("the first tables listed"))}
+          detail={(read) =>
+            read.open > 0 && read.toClose === null
+              ? t("A manager or the owner closes tables when the guests have left")
+              : null
+          }
+          href="/operations/dining"
+        />
+        {reportsHref === null ? null : (
+          <li className="overview-counts__summary">
+            <Link className="overview-count__label" to={reportsHref}>
+              {t("Today's summary")}
+            </Link>
+          </li>
+        )}
+      </ul>
+    </section>
+  );
+}
+
+/** One row of "Needs attention": what, the detail, its state in words, and where to act. */
+export interface AttentionItem {
+  readonly key: string;
+  readonly title: string;
+  /** Words before the detail ("What to do:"). */
+  readonly detailLabel?: string;
+  readonly detail: string;
+  /** The background, on request. */
+  readonly more?: string;
+  /** Grey words under the state ("Since 11:56 AM"). */
+  readonly since?: string;
+  readonly state: string;
+  /** "warning" and "danger" both need someone; "progress" is under way. Words carry the meaning. */
+  readonly tone: "warning" | "danger" | "progress";
+  /** The page that settles it, or null when the row has no page. */
+  readonly href: string | null;
+  readonly action: string | null;
+  /** The row's action reads again rather than opens a page. */
+  readonly retry?: "reads" | "system";
+  /** Work that can wait for the live service: listed after it. */
+  readonly backlog?: boolean;
+  /** Who to call about it, when the row sends them to BOP support. */
+  readonly call?: { readonly phone: string; readonly testOnly: boolean };
+}
+/**
+ * Figma v1 (2026-10-25), reordered after the Owner's 2026-11-03 walkthrough: the work on Home that
+ * someone has to act on now, the guests in front of you first, the backlog after, each with the
+ * page that settles it. This is the only place Home says these things, so a fact dropped from the
+ * numbers must be here (and a read that failed says so, never a false "nothing needs attention").
+ * Built only from the summaries Home already reads.
+ */
+export function attentionItems(
+  state: OverviewTodayState,
+  approvals: ApprovalsWaiting | null,
+  dayStartsAt: string | null = null,
+  kitchenSetupHref: string | null = null,
+  settlement: SettlementStatusRead = { kind: "Hidden" },
+  staffRoles: StaffRolesWaiting = null,
+): readonly AttentionItem[] {
+  const items: AttentionItem[] = [];
+  const unread = [
+    ...(state.orders.kind === "Unavailable" ? [t("Orders")] : []),
+    ...(state.pickups.kind === "Unavailable" ? [t("Pickup")] : []),
+    ...(state.tables.kind === "Unavailable" ? [t("Tables")] : []),
+    ...(state.exceptions.kind === "Unavailable" ? [t("Exceptions")] : []),
+    ...(settlement.kind === "Unavailable" ? [t("Settlement")] : []),
+    ...(staffRoles === "Unavailable" ? [t("Staff roles waiting for approval")] : []),
+  ];
+  // WP-2423 item 11: first, since no guest can order until this is done.
+  if (kitchenSetupHref !== null)
+    items.push({
+      key: "kitchen-setup",
+      title: t("The kitchen isn't set up"),
+      detail: t("Guests and staff can't place orders at this Store until it is."),
+      state: t("Not set up"),
+      tone: "danger",
+      href: kitchenSetupHref,
+      action: t("Set up the kitchen"),
+    });
+  if (unread.length > 0)
+    items.push({
+      key: "unread",
+      title: t("This list may be missing something"),
+      detail:
+        t("Could not read: {value}", { value: unread.join(" · ") }) +
+        ([state.orders, state.pickups, state.tables, state.exceptions].some(
+          (read) => read.kind === "Unavailable" && read.server === true,
+        )
+          ? " " + floorServerProblemText
+          : ""),
+      state: t("Not read"),
+      tone: "danger",
+      href: null,
+      action: t("Refresh"),
+      retry: "reads",
+    });
+  const tables = state.tables.kind === "Ready" ? state.tables.value.tables : [];
+  const calls = tables.filter((table) => table.staffCall != null).length;
+  if (calls > 0)
+    items.push({
+      key: "staff-calls",
+      title: t("{tables} asking for staff", { tables: countOf(calls, "table") }),
+      detail: t("A guest asked a staff member to come to the table."),
+      state: t("Waiting"),
+      tone: "danger",
+      href: "/operations/dining",
+      action: t("Go to Tables"),
+    });
+  if (state.orders.kind === "Ready") {
+    const o = state.orders.value;
+    if (o.paidStuck > 0)
+      items.push({
+        key: "paid-stuck",
+        title: t("Paid orders that need you"),
+        detail: t(
+          "{orders} paid but not in the kitchen, or not refunded as it should be. Open each on Orders to see what to do.",
+          { orders: countOf(o.paidStuck, "order") },
+        ),
+        state: t("Needs you"),
+        tone: "danger",
+        href: "/operations/orders",
+        action: t("View orders"),
+      });
+    if (o.awaitingAcceptance + o.awaitingRounds > 0)
+      items.push({
+        key: "orders",
+        title: t("Orders waiting to be accepted"),
+        detail: awaitingAcceptanceText({
+          orders: o.awaitingAcceptance,
+          rounds: o.awaitingRounds,
+          urgentRounds: o.urgentRounds,
+        }),
+        state: t("To accept"),
+        tone: o.urgentRounds > 0 ? "danger" : "warning",
+        href: "/operations/orders",
+        action: t("View orders"),
+      });
+    if (o.readyToServe > 0)
+      items.push({
+        key: "ready-to-serve",
+        title: t("Food ready to serve"),
+        detail: t("{ready} ready to serve", { ready: o.readyToServe }),
+        state: t("To serve"),
+        tone: "warning",
+        href: state.tables.kind === "Hidden" ? "/operations/orders" : "/operations/dining",
+        action: state.tables.kind === "Hidden" ? t("View orders") : t("Go to Tables"),
+      });
+  }
+  if (state.pickups.kind === "Ready" && state.pickups.value.remaking > 0)
+    items.push({
+      key: "pickup-remakes",
+      title: t("Pickups waiting on a remake"),
+      detail: t("{remaking} waiting on a remake", {
+        remaking: countOf(state.pickups.value.remaking, "order"),
+      }),
+      state: t("Don't hand over yet"),
+      tone: "warning",
+      href: "/operations/pickup",
+      action: t("View pickups"),
+    });
+  const summary = tablesSummary(state, dayStartsAt);
+  if (summary.kind === "Ready" && (summary.value.toClose ?? 0) > 0)
+    items.push({
+      key: "tables",
+      title: t("Tables to close"),
+      detail: t("{toClose} served — close when the guests have left", {
+        toClose: countOf(summary.value.toClose ?? 0, "table"),
+      }),
+      state: t("To close"),
+      tone: "warning",
+      href: "/operations/dining",
+      action: t("View tables"),
+    });
+  if (approvals !== null && approvals.awaiting + approvals.approvedNotSent > 0)
+    items.push({
+      key: "approvals",
+      title: t("Refunds waiting for approval"),
+      detail: [
+        approvals.awaiting === 0 ? null : t("{count} to approve", { count: approvals.awaiting }),
+        approvals.approvedNotSent === 0
+          ? null
+          : t("{count} approved, not sent yet", { count: approvals.approvedNotSent }),
+      ]
+        .filter((part) => part !== null)
+        .join(" · "),
+      state: approvals.awaiting > 0 ? t("To approve") : t("Not sent yet"),
+      tone: "warning",
+      href: "/app/approvals",
+      action: t("Review approvals"),
+      backlog: true,
+    });
+  // WP-2423 M07: staff roles waiting for this person, the same count as the Approvals badge.
+  if (typeof staffRoles === "number" && staffRoles > 0)
+    items.push({
+      key: "staff-roles",
+      title: t("Roles waiting for approval"),
+      detail: t("{count} to approve", { count: staffRoles }),
+      state: t("To approve"),
+      tone: "warning",
+      href: "/app/approvals",
+      action: t("Review approvals"),
+      backlog: true,
+    });
+  // The last closed day's money not matching is a problem, not a line in a checklist.
+  if (settlement.kind === "Ready" && settlement.value.needsLook === true)
+    items.push({
+      key: "settlement",
+      title: t("Settlement for {businessDate}", {
+        businessDate: businessDateText(settlement.value.businessDate),
+      }),
+      detail: settlement.value.text,
+      state: t("To check"),
+      tone: "warning",
+      href: `/app/operations/payment-reconciliation?businessDate=${settlement.value.businessDate}`,
+      action: t("Go to {value}", { value: t("Settlement") }),
+      backlog: true,
+    });
+  if (state.orders.kind === "Ready" && state.orders.value.earlierUnfinished > 0)
+    items.push({
+      key: "earlier-orders",
+      title: t("Earlier orders not finished"),
+      detail:
+        String(state.orders.value.earlierUnfinished) +
+        " · " +
+        t("Make it if the guest comes back; otherwise cancel it and refund them"),
+      state: t("To check"),
+      tone: "warning",
+      href: "/operations/orders",
+      action: t("View orders"),
+      backlog: true,
+    });
+  if (state.pickups.kind === "Ready" && state.pickups.value.earlierDays > 0)
+    items.push({
+      key: "pickups",
+      title: t("Pickups from earlier days"),
+      detail:
+        String(state.pickups.value.earlierDays) +
+        " · " +
+        t("Check whether they were collected; if not, a manager marks them not collected"),
+      state: t("To check"),
+      tone: "warning",
+      href: "/operations/pickup",
+      action: t("Check and close"),
+      backlog: true,
+    });
+  if (state.exceptions.kind === "Ready" && state.exceptions.value.open > 0) {
+    const { open, overdue } = state.exceptions.value;
+    items.push(
+      overdue > 0
+        ? {
+            key: "exceptions",
+            title: t("Exceptions overdue"),
+            detail:
+              t("{overdue} overdue", { overdue }) +
+              (open > overdue ? " · " + t("{open} open", { open }) : ""),
+            state: t("Overdue"),
+            tone: "danger",
+            href: "/operations/order-exceptions",
+            action: t("View exceptions"),
+            backlog: true,
+          }
+        : {
+            key: "exceptions",
+            title: t("Open exceptions"),
+            detail: t("{open} open", { open }) + " · " + t("None overdue"),
+            state: t("To check"),
+            tone: "warning",
+            href: "/operations/order-exceptions",
+            action: t("View exceptions"),
+            backlog: true,
+          },
+    );
+  }
+  return items;
+}
+function AttentionRow({
+  item,
+  onRefresh,
+  onCheckSystem,
+}: {
+  readonly item: AttentionItem;
+  readonly onRefresh?: (() => void) | undefined;
+  readonly onCheckSystem?: (() => void) | undefined;
+}) {
+  const retry = item.retry === "system" ? onCheckSystem : onRefresh;
+  return (
+    <li>
+      <div className="overview-attention__text">
+        <strong>{item.title}</strong>
+        <p>
+          {item.detailLabel === undefined ? null : (
+            <span className="overview-attention__label">{item.detailLabel} </span>
+          )}
+          {item.detail}
+        </p>
+        {item.more === undefined ? null : (
+          <details className="overview-more">
+            <summary>{t("More about this")}</summary>
+            <p>{item.more}</p>
+          </details>
+        )}
+        {item.call === undefined ? null : (
+          <p className="overview-attention__call">
+            <a className="overview-text-action" href={`tel:${item.call.phone}`}>
+              {t("Call BOP support: {value}", { value: formatContactPhone(item.call.phone) })}
+            </a>
+            {item.call.testOnly ? ` ${t("(test number)")}` : null}
+          </p>
+        )}
+      </div>
+      <div className="overview-attention__status">
+        <span className={`overview-attention__state overview-attention__state--${item.tone}`}>
+          {item.state}
+        </span>
+        {item.since === undefined ? null : (
+          <span className="overview-attention__since">{item.since}</span>
+        )}
+      </div>
+      {item.href !== null && item.action !== null ? (
+        <Link className="overview-attention__action" to={item.href}>
+          {item.action}
+        </Link>
+      ) : item.action !== null && retry !== undefined ? (
+        <button type="button" className="overview-attention__action" onClick={retry}>
+          {item.action}
+        </button>
+      ) : null}
+    </li>
+  );
+}
+export function NeedsAttention({
+  state,
+  approvals = null,
+  staffRoles = null,
+  kitchenSetupHref = null,
+  settlement = { kind: "Hidden" },
+  system = { kind: "NotPermitted" },
+  timeZone,
+  dayStartsAt,
+  reminder = null,
+  onRefresh,
+  onCheckSystem,
+}: {
+  readonly state: OverviewTodayState;
+  readonly approvals?: ApprovalsWaiting | null;
+  readonly staffRoles?: StaffRolesWaiting;
+  readonly kitchenSetupHref?: string | null;
+  readonly settlement?: SettlementStatusRead;
+  /** The store system's board: a real problem is a row here, not only in the status line. */
+  readonly system?: OperationsAlertsRead;
+  readonly timeZone?: string | undefined;
+  /** The store's current business day; from the Store's business-day read when not given. */
+  readonly dayStartsAt?: string | null | undefined;
+  /** The evening reminder, which reads for itself: a row above the rest when it shows. */
+  readonly reminder?: ReactNode;
+  readonly onRefresh?: (() => void) | undefined;
+  readonly onCheckSystem?: (() => void) | undefined;
+}) {
+  const reads = [state.orders, state.pickups, state.exceptions, state.tables];
+  const businessDay = useStoreBusinessDay();
+  const { urgent, later } = systemAttentionItems(
+    system,
+    timeZone,
+    dayStartsAt ?? businessDay?.startsAt ?? null,
+  );
+  if (
+    kitchenSetupHref === null &&
+    urgent.length + later.length === 0 &&
+    reads.every((read) => read.kind === "Hidden")
+  )
+    return <>{reminder}</>;
+  const work = attentionItems(state, approvals, null, kitchenSetupHref, settlement, staffRoles);
+  const items = [
+    ...urgent,
+    ...work.filter((item) => item.backlog !== true),
+    ...later,
+    ...work.filter((item) => item.backlog === true),
+  ];
+  const reading = reads.some((read) => read.kind === "Loading");
+  return (
+    <section className="overview-needs" aria-labelledby="needs-attention-heading">
+      <h2 id="needs-attention-heading">{t("Needs attention")}</h2>
+      {reminder}
+      {items.length === 0 ? (
+        <p className="overview-attention__empty" role="status">
+          {reading ? t("Reading current work…") : t("Nothing needs attention right now.")}
+        </p>
+      ) : (
+        <ul className="overview-attention" aria-live="polite">
+          {items.map((item) => (
+            <AttentionRow
+              key={item.key}
+              item={item}
+              onRefresh={onRefresh}
+              onCheckSystem={onCheckSystem}
+            />
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+/**
+ * WP-2423 (3cd0f8dd M6): the last closed business day's settlement in staff words, for the opening
+ * checklist. Unfinished guest payments (nothing charged) are not something to look at.
+ */
+export function settlementStatusText(view: SettlementView): string {
+  return settlementStatus(view).text;
+}
+function settlementStatus(view: SettlementView): {
+  readonly text: string;
+  /** Payments differ: someone has to look. "Not checked yet" is only a state of the day. */
+  readonly needsLook: boolean;
+} {
+  const reconciliation = view.reconciliation;
+  if (reconciliation === null) return { text: t("Not checked yet"), needsLook: false };
+  const attention = reconciliation.differences.filter((check) => !unfinishedGuestPayment(check));
+  if (attention.length > 0)
+    return {
+      text: t("{length} payment{value} to look at", {
+        length: attention.length,
+        value: attention.length === 1 ? "" : "s",
+      }),
+      needsLook: true,
+    };
+  const settlement = reconciliation.settlement;
+  if (settlement === null)
+    return { text: t("Not checked against the payment provider yet"), needsLook: false };
+  const checks = settlement.recheck === null ? settlement.checks : [settlement.recheck.check];
+  return checks.every((check) => check.outcome === "Matched" || check.outcome === "Healed")
+    ? { text: t("Matches the payment provider"), needsLook: false }
+    : { text: t("Differs from the payment provider — look at it"), needsLook: true };
+}
+export type SettlementStatusRead = OverviewRead<{
+  readonly businessDate: string;
+  readonly text: string;
+  readonly needsLook?: boolean;
+}>;
+interface ChecklistItem {
+  readonly key: string;
+  readonly text: string;
+  /** What the Store's records say now ("3 open", "Done"); null for an instruction. */
+  readonly status: string | null;
+  readonly done: boolean;
+  readonly href?: string;
+  readonly linkLabel?: string;
+}
+function readStatus<T>(
+  read: OverviewRead<T>,
+  value: (v: T) => { readonly status: string; readonly done: boolean },
+): { readonly status: string; readonly done: boolean } | null {
+  if (read.kind === "Hidden") return null;
+  if (read.kind === "Loading") return { status: t("Reading…"), done: false };
+  if (read.kind === "Unavailable") return { status: t("Could not be read"), done: false };
+  return value(read.value);
+}
+// A lower bound says so in words ("At least 3 left"), never as "3+".
+const left = (n: number, more = false) =>
+  n === 0
+    ? { status: t("Done"), done: true }
+    : { status: more ? t("At least {n} left", { n }) : t("{n} left", { n }), done: false };
+/**
+ * WP-2423 (3cd0f8dd M6): what staff check when they open and close the Store, each line from the
+ * same reads as "Right now" (and the last closed day's settlement). Lines whose screen the staff
+ * member does not have are left out. Pure so every state renders without a network.
+ */
+export function dayChecklist(
+  state: OverviewTodayState,
+  settlement: SettlementStatusRead,
+  serviceHref: string | null,
+  /** Start of the Store's current business day; tables seated before it were left open. */
+  dayStartsAt: string | null = null,
+): { readonly opening: readonly ChecklistItem[]; readonly closing: readonly ChecklistItem[] } {
+  const tables = tablesSummary(state, dayStartsAt);
+  const item = (
+    key: string,
+    text: string,
+    status: { readonly status: string; readonly done: boolean } | null,
+    href?: string,
+    linkLabel?: string,
+  ): ChecklistItem[] =>
+    status === null
+      ? []
+      : [
+          {
+            key,
+            text,
+            status: status.status,
+            done: status.done,
+            ...(href === undefined ? {} : { href }),
+            ...(linkLabel === undefined ? {} : { linkLabel }),
+          },
+        ];
+  const instruction = (key: string, text: string, href: string, linkLabel: string) => ({
+    key,
+    text,
+    status: null,
+    done: false,
+    href,
+    linkLabel,
+  });
+  const opening: ChecklistItem[] = [
+    ...(serviceHref === null
+      ? []
+      : [
+          instruction(
+            "ordering-on",
+            t("If online ordering was paused at closing, turn it back on."),
+            serviceHref,
+            t("Hours & ordering"),
+          ),
+        ]),
+    ...item(
+      "settlement",
+      settlement.kind === "Ready"
+        ? t("Settlement for {businessDate}", {
+            businessDate: businessDateText(settlement.value.businessDate),
+          })
+        : t("Settlement for the last closed day"),
+      readStatus(settlement, (v) => ({
+        status: v.text,
+        done: v.text === "Matches the payment provider",
+      })),
+      settlement.kind === "Ready"
+        ? `/app/operations/payment-reconciliation?businessDate=${settlement.value.businessDate}`
+        : "/app/operations/payment-reconciliation",
+      t("Settlement"),
+    ),
+    ...item(
+      "earlier-pickups",
+      t("Pickups from earlier days: check whether they were collected, then close them"),
+      readStatus(state.pickups, (p) => left(p.earlierDays)),
+      "/operations/pickup",
+      t("Pickup"),
+    ),
+    ...item(
+      "tables-left-open",
+      t("Tables still open from before"),
+      readStatus(tables, (summary) =>
+        summary.earlierDays === null
+          ? { status: t("Reading…"), done: false }
+          : left(summary.earlierDays, summary.more),
+      ),
+      "/operations/dining",
+      t("Tables"),
+    ),
+  ];
+  const closing: ChecklistItem[] = [
+    ...item(
+      "orders",
+      t("Every order made and served or handed over"),
+      readStatus(state.orders, (o) => left(o.open, o.more)),
+      "/operations/orders",
+      t("Orders"),
+    ),
+    ...item(
+      "pickups",
+      t("Pickups not collected: a manager marks them not collected"),
+      readStatus(state.pickups, (p) => left(p.waiting + p.earlierDays, p.more)),
+      "/operations/pickup",
+      t("Pickup"),
+    ),
+    ...item(
+      "tables",
+      t("Tables closed once the guests have left"),
+      readStatus(tables, (t) => left(t.open, t.more)),
+      "/operations/dining",
+      t("Tables"),
+    ),
+    ...item(
+      "exceptions",
+      t("Exceptions handled or noted for tomorrow"),
+      readStatus(state.exceptions, (e) => left(e.open)),
+      "/operations/order-exceptions",
+      t("Exceptions"),
+    ),
+    ...(serviceHref === null
+      ? []
+      : [
+          instruction(
+            "ordering-off",
+            t(
+              "When you stop taking orders, pause online ordering so guests can't order after close.",
+            ),
+            serviceHref,
+            t("Hours & ordering"),
+          ),
+        ]),
+    ...(settlement.kind === "Hidden"
+      ? []
+      : [
+          {
+            key: "settlement-later",
+            text: t(
+              "Today's payments are checked against the payment provider after the business day ends. Look at the result when you open.",
+            ),
+            status: null,
+            done: false,
+          },
+        ]),
+  ];
+  return { opening, closing };
+}
+function ChecklistList({
+  label,
+  items,
+}: {
+  readonly label: string;
+  readonly items: readonly ChecklistItem[];
+}) {
+  if (items.length === 0) return null;
+  return (
+    <div className="overview-checklist__group">
+      <h4>{label}</h4>
+      <ul>
+        {items.map((entry) => (
+          <li key={entry.key} data-done={entry.done ? "true" : undefined}>
+            <span className="overview-checklist__text">{entry.text}</span>
+            {entry.status === null ? null : (
+              <strong className="overview-checklist__status">{systemText(entry.status)}</strong>
+            )}
+            {entry.href === undefined ? null : (
+              <Link className="overview-text-action" to={entry.href}>
+                {t("Go to {value}", { value: entry.linkLabel ?? t("the page") })}
+              </Link>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+/** WP-2423 (3cd0f8dd M6): the day-start and day-end checklist on Home, closed until asked for. */
+export function DayChecklist({
+  state,
+  settlement,
+  serviceHref,
+}: {
+  readonly state: OverviewTodayState;
+  readonly settlement: SettlementStatusRead;
+  readonly serviceHref: string | null;
+}) {
+  const dayStartsAt = useStoreBusinessDay()?.startsAt ?? null;
+  const { opening, closing } = dayChecklist(state, settlement, serviceHref, dayStartsAt);
+  if (opening.length === 0 && closing.length === 0) return null;
+  return (
+    <section className="overview-checklist" aria-label={t("Opening and closing")}>
+      <details className="overview-more">
+        <summary>{t("Opening and closing")}</summary>
+        <div className="overview-checklist__groups">
+          <ChecklistList label={t("When you open")} items={opening} />
+          <ChecklistList label={t("Before you close")} items={closing} />
+        </div>
+      </details>
+    </section>
+  );
+}
+
+/** Reads the three pilot projections for the selected Store and keeps them current on demand. */
+/** Home summary screens, each read only when the role's workspace includes its screen. */
+export const overviewScreens = Object.freeze({
+  orders: "OPS-ORDER-QUEUE",
+  pickups: "FUL-PICKUP-QUEUE",
+  exceptions: "OPS-ORDER-EXCEPTION",
+  tables: "DIN-FLOOR-BOARD",
+  settlement: "PAY-RECONCILIATION",
+  service: "ORG-STORE-LIST",
+  kitchenSetup: "STORE-SETUP",
+  reports: closingReminderScreen,
+} as const);
+export function StoreOverview({
+  csrf,
+  storeReference,
+  storeLabel,
+  timeZone,
+  screens,
+  fetcher,
+}: {
+  /** Screen IDs the workspace permits this staff member (the navigation list). */
+  readonly screens: readonly string[];
+  readonly csrf: string;
+  readonly storeReference: string;
+  readonly storeLabel: string;
+  readonly timeZone?: string | undefined;
+  readonly fetcher?: typeof fetch | undefined;
+}) {
+  const clients = useMemo(
+    () => ({
+      orders: createCurrentOrderQueueClient(fetcher),
+      exceptions: createOrderExceptionClient(fetcher),
+      tables: createDiningSessionClient(fetcher),
+      settlement: createSettlementClient(fetcher),
+      pickups: createPickupClient({
+        csrf,
+        storeReference,
+        storeLabel,
+        ...(fetcher === undefined ? {} : { fetcher }),
+      }),
+    }),
+    [csrf, storeReference, storeLabel, fetcher],
+  );
+  // A new array each render must not restart reading: depend on its content only.
+  const screenKey = screens.join("|");
+  const permitted = useMemo(() => {
+    const ids = screenKey.split("|");
+    return {
+      orders: ids.includes(overviewScreens.orders),
+      pickups: ids.includes(overviewScreens.pickups),
+      exceptions: ids.includes(overviewScreens.exceptions),
+      tables: ids.includes(overviewScreens.tables),
+      settlement: ids.includes(overviewScreens.settlement),
+      service: ids.includes(overviewScreens.service),
+      kitchenSetup: ids.includes(overviewScreens.kitchenSetup),
+      reports: ids.includes(overviewScreens.reports),
+    };
+  }, [screenKey]);
+  const hidden = { kind: "Hidden" } as const;
+  const [state, setState] = useState<OverviewTodayState>(() => ({
+    ...initialOverviewState,
+    orders: permitted.orders ? initialOverviewState.orders : hidden,
+    pickups: permitted.pickups ? initialOverviewState.pickups : hidden,
+    exceptions: permitted.exceptions ? initialOverviewState.exceptions : hidden,
+    tables: permitted.tables ? initialOverviewState.tables : hidden,
+  }));
+  const [settlement, setSettlement] = useState<SettlementStatusRead>(() =>
+    permitted.settlement ? { kind: "Loading" } : hidden,
+  );
+  // Pickup's rule for an earlier day needs the Store's business date (read by the shell).
+  const today = useStoreBusinessDay()?.businessDate ?? null;
+  const todayRef = useRef(today);
+  todayRef.current = today;
+  const pickupView = useRef<Parameters<typeof summarizePickups>[0] | null>(null);
+  // WP-2423 item 11: told only to those who can fix it; a failed read says nothing here (the
+  // Store setup section and the listing refusal still say it).
+  const [kitchenSetupHref, setKitchenSetupHref] = useState<string | null>(null);
+  useEffect(() => {
+    if (!permitted.kitchenSetup) return;
+    let live = true;
+    void createStoreKitchenSetupClient({ csrf, ...(fetcher ? { fetcher } : {}) })
+      .load()
+      .then(
+        (kitchen) => {
+          if (live)
+            setKitchenSetupHref(
+              kitchen.canChange && kitchen.version === 0
+                ? `/app/organization/stores/${storeReference}/setup#kitchen-setup`
+                : null,
+            );
+        },
+        () => undefined,
+      );
+    return () => {
+      live = false;
+    };
+  }, [csrf, fetcher, storeReference, permitted.kitchenSetup]);
+  useEffect(() => {
+    const view = pickupView.current;
+    if (view !== null)
+      setState((s) =>
+        s.pickups.kind === "Ready"
+          ? { ...s, pickups: { kind: "Ready", value: summarizePickups(view, today) } }
+          : s,
+      );
+  }, [today]);
+  const [busy, setBusy] = useState(false);
+  const active = useRef<AbortController | null>(null);
+  const load = useCallback(
+    async (withSettlement = false) => {
+      active.current?.abort();
+      const controller = new AbortController();
+      active.current = controller;
+      setBusy(true);
+      const read = async <T,>(
+        run: () => Promise<T>,
+        apply: (read: OverviewRead<T>) => void,
+      ): Promise<void> => {
+        try {
+          const value = await run();
+          if (!controller.signal.aborted) apply({ kind: "Ready", value });
+        } catch (error) {
+          if (!controller.signal.aborted)
+            apply({ kind: "Unavailable", server: isServerProblem(error) });
+        }
+      };
+      await Promise.all([
+        permitted.orders
+          ? read(
+              async () => summarizeOrders(await clients.orders.load(null, controller.signal)),
+              (orders) => setState((s) => ({ ...s, orders })),
+            )
+          : null,
+        permitted.pickups
+          ? read(
+              async () => {
+                const view = parsePickupQueueView(await clients.pickups.loadQueue());
+                pickupView.current = view;
+                return summarizePickups(view, todayRef.current);
+              },
+              (pickups) => setState((s) => ({ ...s, pickups })),
+            )
+          : null,
+        permitted.tables
+          ? read(
+              async (): Promise<TablesRead> => {
+                const page = await clients.tables.tables(csrf, null, controller.signal);
+                return {
+                  tables: page.items,
+                  canClose: page.canCloseSessions,
+                  more: page.next !== null,
+                  readAt: new Date().toISOString(),
+                };
+              },
+              (tables) => setState((s) => ({ ...s, tables })),
+            )
+          : null,
+        // The last closed day's settlement does not change while the day runs: read on opening the
+        // page and on Refresh, not on every poll.
+        permitted.settlement && withSettlement
+          ? clients.settlement
+              .load(null, controller.signal)
+              .then((view) => {
+                if (!controller.signal.aborted)
+                  setSettlement({
+                    kind: "Ready",
+                    value: { businessDate: view.businessDate, ...settlementStatus(view) },
+                  });
+              })
+              .catch((error: unknown) => {
+                if (controller.signal.aborted) return;
+                setSettlement(
+                  error instanceof SettlementClientError && error.code === "NotCovered"
+                    ? { kind: "Hidden" }
+                    : { kind: "Unavailable" },
+                );
+              })
+          : null,
+        permitted.exceptions
+          ? read(
+              async () =>
+                summarizeExceptions(
+                  parseOrderExceptionView(await clients.exceptions.load(controller.signal)),
+                ),
+              (exceptions) => setState((s) => ({ ...s, exceptions })),
+            )
+          : null,
+      ]);
+      if (!controller.signal.aborted) {
+        setState((s) => ({ ...s, updatedAt: new Date().toISOString() }));
+        setBusy(false);
+      }
+    },
+    [clients, permitted, csrf],
+  );
+  // v15 cbff9d6f: no reads once this screen's sign-in has ended; again at once if it is live.
+  const live = useStaffSessionLive();
+  const approvals = useApprovalsWaiting(screenKey.split("|").includes("APPROVAL-INBOX"), fetcher);
+  const staffRoles = useStaffRolesWaiting(
+    csrf,
+    screenKey.split("|").includes("APPROVAL-INBOX"),
+    fetcher,
+  );
+  useEffect(() => {
+    if (!live) return;
+    if (!permitted.orders && !permitted.pickups && !permitted.exceptions && !permitted.tables)
+      return;
+    void load(true);
+    // WP-2423 Q1: keep "Right now" current while the home page is open and visible.
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") void load();
+    }, OVERVIEW_REFRESH_MS);
+    return () => {
+      clearInterval(timer);
+      active.current?.abort();
+    };
+  }, [live, load, permitted]);
+  // WP-2423 Q13: store system alerts. The server decides who may read them (Owner, Store Manager);
+  // for other roles it answers "not permitted" and neither the rows nor the line appear.
+  const system = useOperationsAlerts(fetcher);
+  return (
+    <>
+      {/* WP-2423 item 13 ②: the platform paused this merchant's new guests (shown only then). */}
+      <GuestIntakeNotice fetcher={fetcher} />
+      <NeedsAttention
+        state={state}
+        approvals={approvals}
+        staffRoles={staffRoles}
+        kitchenSetupHref={kitchenSetupHref}
+        settlement={settlement}
+        system={system.read}
+        timeZone={timeZone}
+        // WP-2423 item 8 ②: in the evening, what is still open before closing. Staff with no row of
+        // store system alerts here hear of ordering's last day as on their other screens.
+        reminder={
+          <>
+            {system.read.kind === "NotPermitted" ? (
+              <OrderingEndingNotice fetcher={fetcher} />
+            ) : null}
+            <ClosingReminder screens={screens} fetcher={fetcher} />
+          </>
+        }
+        onRefresh={() => void load(true)}
+        onCheckSystem={() => void system.refresh()}
+      />
+      {permitted.kitchenSetup ? (
+        <OpeningList csrf={csrf} storeReference={storeReference} fetcher={fetcher} />
+      ) : null}
+      <OverviewToday
+        state={state}
+        timeZone={timeZone}
+        busy={busy}
+        onRefresh={() => void load(true)}
+        reportsHref={permitted.reports ? "/app/reports/operations" : null}
+      />
+      <DayChecklist
+        state={state}
+        settlement={settlement}
+        serviceHref={
+          permitted.service ? `/app/organization/stores/${storeReference}/service` : null
+        }
+      />
+      <StoreSystemLine
+        read={system.read}
+        timeZone={timeZone}
+        busy={system.busy}
+        onRefresh={() => void system.refresh()}
+      />
+    </>
+  );
+}

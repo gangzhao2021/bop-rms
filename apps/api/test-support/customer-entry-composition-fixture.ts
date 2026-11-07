@@ -1,4 +1,4 @@
-import { createHmac, generateKeyPairSync, randomBytes, sign, verify } from "node:crypto";
+import { createHmac, generateKeyPairSync, randomBytes, sign } from "node:crypto";
 import { vi } from "vitest";
 import {
   parseGuestAdmissionEvidence,
@@ -6,7 +6,11 @@ import {
   parseGuestSelectorHash,
   type GuestSessionRecord,
 } from "@bop/identity";
-import { parseQrTableContextEvidence, parseQrVerificationKeySetEvidence } from "@rms/dining";
+import {
+  createQrSignatureVerifier,
+  parseQrTableContextEvidence,
+  parseQrVerificationKeySetEvidence,
+} from "@rms/dining";
 import {
   parsePublicStoreResolutionEvidence,
   parseStoreOperatingStatusResolutionEvidence,
@@ -24,7 +28,7 @@ const until = "2026-02-01T00:00:00.000Z";
 export const admissionUntil = "2026-01-15T12:01:00.000Z";
 const scope = { kind: "Store", brandReference: id(1), storeReference: id(2) };
 
-function publication(configurationType: string, reference: string) {
+function publication(configurationType: string, reference: string, start = before, end = until) {
   const common = {
     familyReference: id(21),
     configurationType,
@@ -32,7 +36,7 @@ function publication(configurationType: string, reference: string) {
     snapshotReference: reference,
     snapshotDigest: `sha256:${"a".repeat(64)}`,
     scope,
-    createdAt: before,
+    createdAt: start,
   };
   return {
     publishingLifecycle: {
@@ -42,7 +46,7 @@ function publication(configurationType: string, reference: string) {
       state: "Published",
       validationEvidenceReference: null,
       approvalEvidenceReference: null,
-      changedAt: before,
+      changedAt: start,
     },
     publishingRelease: {
       ...common,
@@ -61,8 +65,8 @@ function publication(configurationType: string, reference: string) {
       version: 1,
       period: {
         timeZone: "UTC",
-        effectiveFrom: { instant: before, localDateTime: before.slice(0, -1), utcOffsetMinutes: 0 },
-        effectiveUntil: { instant: until, localDateTime: until.slice(0, -1), utcOffsetMinutes: 0 },
+        effectiveFrom: { instant: start, localDateTime: start.slice(0, -1), utcOffsetMinutes: 0 },
+        effectiveUntil: { instant: end, localDateTime: end.slice(0, -1), utcOffsetMinutes: 0 },
       },
       periodDigest: `sha256:${"b".repeat(64)}`,
       approvalEvidenceReference: id(26),
@@ -70,7 +74,17 @@ function publication(configurationType: string, reference: string) {
   };
 }
 
-export function fixture() {
+export function fixture(observedAt = now) {
+  const now = observedAt;
+  const before =
+    observedAt === "2026-01-15T12:00:00.000Z"
+      ? "2026-01-01T00:00:00.000Z"
+      : new Date(Date.parse(now) - 86400000).toISOString();
+  const until =
+    observedAt === "2026-01-15T12:00:00.000Z"
+      ? "2026-02-01T00:00:00.000Z"
+      : new Date(Date.parse(now) + 86400000).toISOString();
+  const admissionUntil = new Date(Date.parse(now) + 60000).toISOString();
   const keys = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
   const pepper = randomBytes(32);
   let sequence = 100;
@@ -144,7 +158,7 @@ export function fixture() {
     website: "https://example.test/store",
     logo: null,
     contentDigest: `sha256:${"a".repeat(64)}`,
-    ...publication("STORE_PROFILE", id(9)),
+    ...publication("STORE_PROFILE", id(9), before, until),
   };
   const operating = {
     configurationReference: id(10),
@@ -167,7 +181,7 @@ export function fixture() {
     exceptions: [],
     temporaryClosures: [],
     contentDigest: `sha256:${"a".repeat(64)}`,
-    ...publication("STORE_OPERATING_HOURS", id(10)),
+    ...publication("STORE_OPERATING_HOURS", id(10), before, until),
   };
   const admissionEvidence = (input: CustomerEntryAdmissionInput) => ({
     decision: "Allowed",
@@ -225,18 +239,10 @@ export function fixture() {
         ),
       },
       verifier: {
-        verify: vi.fn(async (input) =>
-          verify(
-            "sha256",
-            Buffer.from(input.signingInput),
-            {
-              key: keys.publicKey,
-              dsaEncoding: "ieee-p1363",
-            },
-            input.signature,
-          )
-            ? ("Verified" as const)
-            : ("Invalid" as const),
+        verify: vi.fn(
+          createQrSignatureVerifier(async (reference) =>
+            String(reference) === id(13) ? keys.publicKey : null,
+          ).verify,
         ),
       },
       contexts: { resolve: vi.fn(async () => parseQrTableContextEvidence(context)) },

@@ -10,6 +10,7 @@ const moduleManifestInput =
     lifecycle: "Phase 1",
     publicExports: ["."],
     allowedSynchronousDependencies: [
+      { moduleName: "publishing", packageName: "@bop/publishing", layer: "BOP" },
       {
         moduleName: "audit",
         packageName: "@bop/audit",
@@ -39,6 +40,15 @@ const moduleManifestInput =
     ownedDatabase: {
       schema: "rms_device",
       tables: [
+        "digital_receipt_template_lifecycle_operation",
+        "digital_receipt_template_sole_operator_approval",
+        "digital_receipt_template_submit_operation",
+        "digital_receipt_template_submission",
+        "digital_receipt_template_draft_revision",
+        "digital_receipt_template_draft_operation",
+        "digital_receipt_template_artifact_version",
+        "digital_receipt_template_artifact_operation",
+        "digital_receipt_template_version",
         "device",
         "device_assignment",
         "device_capability_version",

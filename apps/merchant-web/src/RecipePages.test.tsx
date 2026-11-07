@@ -1,115 +1,102 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { describe, expect, it } from "vitest";
-import { RecipeEditorScreen, RecipeListScreen, RecipeState } from "./RecipePages.js";
-import { parseRecipeEditorView, parseRecipeListView, RecipeClientError } from "./recipe-pages.js";
-const id = (n: number) => `018f9b00-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
-const item = () => ({
-  recipeReference: id(1),
-  name: "Synthetic Recipe",
-  stableCode: "SYNTHETIC_RECIPE",
-  lifecycle: "Published",
-  yieldSummary: "10 portions",
-  costMinor: "1200",
-  allergenStatus: "Verified",
-  usageSummary: "One Product / SKU",
-  effectiveVersion: "Version 2",
-  ingredientSummary: "Synthetic flour",
-  mappingMissing: false,
-  costChanged: true,
-  aggregateVersion: 2,
-});
-const editor = () => ({
-  screenId: "RECIPE-EDITOR",
-  ...item(),
-  ingredients: [
-    {
-      sourceReference: id(2),
-      sourceKind: "InventoryItem",
-      sourceName: "Synthetic flour",
-      quantitySummary: "1000000 microunits",
-      lossSummary: "5 percent loss",
-      allergenSummary: "Contains synthetic allergen ref",
-      evidenceSummary: "Verified evidence version",
-      mappingStatus: "Resolved",
-    },
-  ],
-  preparationSummary: "Preparation version 2 with ordered steps",
-  substitutionPolicySummary: "No automatic substitution",
-  allergenUnionSummary: "Verified structured union",
-  costDerivationSummary: "Exact minor-unit derivation",
-  productSkuUsageSummary: "One Product / SKU public reference",
-  reviewSummary: "Independent Cost and Food Safety approvals",
-  historySummary: "Version 2 publication history",
-});
-describe("Recipe screen contracts", () => {
-  it("renders List filters, yield, cost, allergen status and actions", () => {
-    const html = renderToStaticMarkup(
-      <MemoryRouter>
-        <RecipeListScreen
-          view={parseRecipeListView({
-            screenId: "RECIPE-LIST",
-            asOfUtc: "2026-08-13T18:00:00.000Z",
-            items: [item()],
-          })}
-        />
-      </MemoryRouter>,
-    );
-    for (const value of [
-      "Recipe management",
-      "Synthetic Recipe",
-      "1200 CAD minor units",
-      "Verified",
-      "Name / code / Ingredient",
-      "Missing mapping",
-      "Review",
-      "Publish",
-      "Archive",
-    ])
-      expect(html).toContain(value);
+import { centsToDollarsText, dollarsToCentsText, RecipeListPage } from "./RecipePages.js";
+import {
+  centsText,
+  createRecipeClient,
+  lineCostCentsText,
+  parseRecipeEditorView,
+  parseRecipeListView,
+  RecipePageError,
+  suggestRecipeCode,
+  unitText,
+} from "./recipe-pages.js";
+
+describe("WP-2423 recipe authoring page helpers", () => {
+  it("writes units as staff do, never as codes", () => {
+    expect(unitText("EACH")).toBe("each");
+    expect(unitText("KG")).toBe("kg");
+    expect(unitText("ML")).toBe("mL");
+    expect(unitText("L")).toBe("L");
+    expect(unitText("BOX")).toBe("box");
+    expect(unitText(undefined)).toBe("unit");
   });
-  it("renders Editor graph, preparation, cost, dual review and invalidation", () => {
-    const html = renderToStaticMarkup(
-      <MemoryRouter>
-        <RecipeEditorScreen view={parseRecipeEditorView(editor())} />
-      </MemoryRouter>,
-    );
-    for (const value of [
-      "Recipe editor",
-      "Ingredient requirements",
-      "Synthetic flour",
-      "Preparation version",
-      "Cost derivation",
-      "Dual review",
-      "Recalculate yield / cost / allergens",
-      "Invalidate",
-    ])
-      expect(html).toContain(value);
+  it("suggests stable codes from names", () => {
+    expect(suggestRecipeCode("Flat white 12 oz")).toBe("FLAT-WHITE-12-OZ");
+    expect(suggestRecipeCode("Crème brûlée")).toBe("CREME-BRULEE");
+    expect(suggestRecipeCode("12 oz latte")).toBe("R-12-OZ-LATTE");
+    expect(suggestRecipeCode("拿铁")).toBe("");
   });
-  it("rejects markup, URLs and numeric money, and renders every required state", () => {
+  it("converts standard costs between dollars and cents exactly", () => {
+    expect(dollarsToCentsText("0.00289")).toBe("0.289");
+    expect(dollarsToCentsText("2.89")).toBe("289");
+    expect(dollarsToCentsText("1.0000001")).toBeNull();
+    expect(dollarsToCentsText("-1")).toBeNull();
+    expect(centsToDollarsText("0.289")).toBe("0.00289");
+    expect(centsToDollarsText(289)).toBe("2.89");
+    expect(centsToDollarsText("300")).toBe("3.00");
+    expect(centsToDollarsText(null)).toBe("");
+  });
+  it.each([
+    ["0.25", "0", "289", "72"],
+    ["0.25", "10", "289", "79"],
+    ["18", "0", "4.5", "81"],
+    ["0.5", "0", "5", "2"],
+    ["1.5", "0", "5", "8"],
+  ])("line %s with %s%% loss at %s cents costs %s cents", (q, loss, cost, cents) => {
+    expect(lineCostCentsText(q, loss, cost)).toBe(cents);
+  });
+  it("refuses quantities finer than the recipe precision", () => {
+    expect(lineCostCentsText("0.0000001", "0", "1")).toBeNull();
+    expect(centsText("12345")).toBe("123.45");
+    expect(centsText("7")).toBe("0.07");
+  });
+  it("maps server refusals and offline failures", async () => {
+    const reply = (status: number, body: unknown) =>
+      Promise.resolve(new Response(JSON.stringify(body), { status }));
+    const client = createRecipeClient("csrf", () => reply(422, { error: "LineInvalid", line: 3 }));
+    await expect(client.load(null)).rejects.toMatchObject({ code: "LineInvalid", line: 3 });
+    const forbidden = createRecipeClient("csrf", () => reply(403, { error: "unknown" }));
+    await expect(forbidden.load(null)).rejects.toMatchObject({ code: "PermissionDenied" });
+    const offline = createRecipeClient("csrf", () => Promise.reject(new TypeError("offline")));
+    await expect(offline.load(null)).rejects.toBeInstanceOf(RecipePageError);
+    await expect(offline.load(null)).rejects.toMatchObject({ code: "Offline" });
+  });
+  it("sends same-origin requests with the CSRF header", async () => {
+    const calls: { url: string; init: RequestInit | undefined }[] = [];
+    const client = createRecipeClient("token", (url, init) => {
+      calls.push({ url: String(url), init });
+      return Promise.resolve(new Response("{}", { status: 200 }));
+    });
+    await client.load("01909a0e-0000-7000-8000-000000000001");
+    expect(calls[0]?.url).toBe("/merchant/commerce/recipes/query");
+    expect(calls[0]?.init?.credentials).toBe("same-origin");
+    expect((calls[0]?.init?.headers as Record<string, string>)["x-bop-csrf"]).toBe("token");
+    expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({
+      recipeReference: "01909a0e-0000-7000-8000-000000000001",
+    });
+  });
+  it("accepts only the matching screen", () => {
+    const base = {
+      sourceAsOf: "2026-10-07T12:00:00.000Z",
+      permissions: { mayEdit: true, mayReview: false, mayPublish: false },
+      viewer: "01909a0e-0000-7000-8000-000000000002",
+      choices: { yieldUnits: ["EACH"], items: [], subRecipes: [], stations: [], skus: [] },
+    };
+    expect(parseRecipeListView({ ...base, screenId: "RECIPE-LIST", recipes: [] }).recipes).toEqual(
+      [],
+    );
     expect(() =>
-      parseRecipeEditorView({ ...editor(), historySummary: "https://bad.example" }),
-    ).toThrow(RecipeClientError);
-    expect(() => parseRecipeEditorView({ ...editor(), costMinor: 1200 })).toThrow(
-      RecipeClientError,
+      parseRecipeEditorView({ ...base, screenId: "RECIPE-LIST", recipes: [] }),
+    ).toThrow();
+  });
+  it("renders the loading state before the source answers", () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <RecipeListPage />
+      </MemoryRouter>,
     );
-    for (const state of [
-      "Loading",
-      "PermissionDenied",
-      "NotFound",
-      "FeatureDisabled",
-      "Stale",
-      "Conflict",
-      "CommandFailed",
-      "Offline",
-      "Unavailable",
-    ] as const)
-      expect(
-        renderToStaticMarkup(
-          <MemoryRouter>
-            <RecipeState state={state} />
-          </MemoryRouter>,
-        ).length,
-      ).toBeGreaterThan(50);
+    expect(html).toContain("Loading recipes");
   });
 });

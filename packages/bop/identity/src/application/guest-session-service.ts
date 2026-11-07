@@ -1,9 +1,12 @@
 import {
+  assertGuestSessionReceiptReadable,
   assertGuestSessionUsable,
   createGuestSession,
   createGuestSessionRecord,
+  guestSessionAbsoluteLifetimeMs,
   guestSessionCookie,
   GuestSessionError,
+  guestSessionIdleLifetimeMs,
   parseGuestAdmissionEvidence,
   parseGuestDiningAdmissionEvidence,
   parseGuestDiningAdmissionReference,
@@ -27,8 +30,8 @@ import type {
   GuestSessionStorePort,
 } from "./ports/guest-session-ports.js";
 
-const fourHours = 4 * 60 * 60 * 1000;
-const twentyFourHours = 24 * 60 * 60 * 1000;
+const fourHours = guestSessionIdleLifetimeMs;
+const twentyFourHours = guestSessionAbsoluteLifetimeMs;
 const plus = (value: CanonicalInstant, milliseconds: number) =>
   new Date(Date.parse(value) + milliseconds).toISOString() as CanonicalInstant;
 const command = (
@@ -168,7 +171,12 @@ export class GuestSessionService {
       ) {
         throw error;
       }
-      throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
+      // WP-2423 (v15 rush 2026-11-02): the store failed, the session may be fine: said apart, so a
+      // guest isn't told their session expired because of a passing database failure.
+      throw Object.assign(new GuestSessionError("GUEST_SESSION_UNAVAILABLE"), {
+        dependencyFailure: true,
+        cause: error,
+      });
     }
   }
 
@@ -185,8 +193,13 @@ export class GuestSessionService {
       if ((await this.#binding.validate(session, observedAt)) !== "Current") {
         throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
       }
-    } catch {
-      throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
+    } catch (error) {
+      if (error instanceof GuestSessionError && !("dependencyFailure" in error)) throw error;
+      // WP-2423 (burst 2026-11-02): reading the binding failed: says nothing about the session.
+      throw Object.assign(new GuestSessionError("GUEST_SESSION_UNAVAILABLE"), {
+        dependencyFailure: true,
+        cause: error,
+      });
     }
   }
 
@@ -313,6 +326,23 @@ export class GuestSessionService {
       );
       if (touched === null) throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
       return assertGuestSessionUsable(this.#record(touched).session, observedAt);
+    } catch (error) {
+      if ((error as { dependencyFailure?: unknown }).dependencyFailure === true) throw error;
+      throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
+    }
+  }
+
+  /** Read-only bootstrap for a same-origin foreground request; does not renew idle expiry. */
+  async recoverForegroundCsrf(input: {
+    readonly sessionCredential: unknown;
+  }): Promise<GuestRawCredential> {
+    const raw = command(input, ["sessionCredential"]);
+    const sessionCredential = parseGuestRawCredential(raw.sessionCredential);
+    await this.resolve({ sessionCredential, activity: "Background" });
+    if (!this.#credentials.deriveForegroundCsrf)
+      throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
+    try {
+      return parseGuestRawCredential(this.#credentials.deriveForegroundCsrf(sessionCredential));
     } catch {
       throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
     }
@@ -333,16 +363,103 @@ export class GuestSessionService {
       );
       if (
         record === null ||
-        !this.#credentials.equals(
+        (!this.#credentials.equals(
           this.#credentials.hashCredential("Csrf", csrfCredential),
           record.csrfSelectorHash,
-        )
+        ) &&
+          !(
+            this.#credentials.deriveForegroundCsrf &&
+            this.#credentials.equals(
+              this.#credentials.hashCredential("Csrf", csrfCredential),
+              this.#credentials.hashCredential(
+                "Csrf",
+                parseGuestRawCredential(this.#credentials.deriveForegroundCsrf(sessionCredential)),
+              ),
+            )
+          ))
       ) {
         throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
       }
       const session = assertGuestSessionUsable(this.#record(record).session, observedAt);
       await this.#assertCurrent(session, observedAt);
       return session;
+    } catch (error) {
+      if ((error as { dependencyFailure?: unknown }).dependencyFailure === true) throw error;
+      throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
+    }
+  }
+
+  /**
+   * WP-2423 (v15 3cd0f8dd M5): the foreground CSRF credential of a visit that has ended (its table
+   * closed, or it sat idle) so the same device can still read its own receipt. Read only: the
+   * Session must be Active and within its absolute lifetime (assertGuestSessionReceiptReadable);
+   * no binding is checked, nothing is renewed, and every other action still requires `authorize`.
+   */
+  async recoverEndedVisitCsrf(input: {
+    readonly sessionCredential: unknown;
+    readonly observedAt?: unknown;
+  }): Promise<{ readonly csrfCredential: GuestRawCredential; readonly session: GuestSession }> {
+    const raw = command(input, ["sessionCredential"], ["observedAt"]);
+    const observedAt = this.#at(raw.observedAt);
+    const sessionCredential = parseGuestRawCredential(raw.sessionCredential);
+    try {
+      if (!this.#credentials.deriveForegroundCsrf)
+        throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
+      const record = await this.#storeCall(() =>
+        this.#store.resolve(this.#credentials.hashCredential("Session", sessionCredential)),
+      );
+      if (record === null) throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
+      const session = assertGuestSessionReceiptReadable(this.#record(record).session, observedAt);
+      return Object.freeze({
+        csrfCredential: parseGuestRawCredential(
+          this.#credentials.deriveForegroundCsrf(sessionCredential),
+        ),
+        session,
+      });
+    } catch {
+      throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
+    }
+  }
+
+  /**
+   * WP-2423 (v15 3cd0f8dd M5): authorizes reading this visit's own receipt after the visit ended.
+   * The same credential and CSRF checks as `authorize`; the Session must be Active and within its
+   * absolute lifetime, but its table binding, idle and closure limits are not required. Grants
+   * nothing else: callers use it for the receipt read only.
+   */
+  async authorizeEndedVisit(input: {
+    readonly sessionCredential: unknown;
+    readonly csrfCredential: unknown;
+    readonly observedAt?: unknown;
+  }): Promise<GuestSession> {
+    const raw = command(input, ["sessionCredential", "csrfCredential"], ["observedAt"]);
+    const observedAt = this.#at(raw.observedAt);
+    const sessionCredential = parseGuestRawCredential(raw.sessionCredential);
+    const csrfCredential = parseGuestRawCredential(raw.csrfCredential);
+    try {
+      const record = await this.#storeCall(() =>
+        this.#store.resolve(this.#credentials.hashCredential("Session", sessionCredential)),
+      );
+      if (
+        record === null ||
+        (!this.#credentials.equals(
+          this.#credentials.hashCredential("Csrf", csrfCredential),
+          record.csrfSelectorHash,
+        ) &&
+          !(
+            this.#credentials.deriveForegroundCsrf &&
+            this.#credentials.equals(
+              this.#credentials.hashCredential("Csrf", csrfCredential),
+              this.#credentials.hashCredential(
+                "Csrf",
+                parseGuestRawCredential(this.#credentials.deriveForegroundCsrf(sessionCredential)),
+              ),
+            )
+          ))
+      ) {
+        throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
+      }
+      return assertGuestSessionReceiptReadable(this.#record(record).session, observedAt);
     } catch {
       throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
     }
@@ -403,12 +520,14 @@ export class GuestSessionService {
     try {
       evidence = parseGuestDiningAdmissionEvidence(
         await this.#diningAdmission.consume({
+          guestSessionReference: currentSession.sessionReference,
           admissionReference,
           operationReference,
           requestedAt,
         }),
       );
       if (
+        evidence.guestSessionReference !== currentSession.sessionReference ||
         evidence.admissionReference !== admissionReference ||
         evidence.operationReference !== operationReference ||
         evidence.storeReference !== currentSession.storeReference ||

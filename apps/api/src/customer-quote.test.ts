@@ -213,6 +213,7 @@ describe("WP-1103/1104 Customer Quote API", () => {
       { cartVersion: 7, price: 1 },
       {},
       { cartVersion: 0 },
+      { cartVersion: 2147483648 },
     ])
       expect((await post(port, body)).status).toBe(400);
     expect(service.calls).toEqual([]);
@@ -247,6 +248,54 @@ describe("WP-1103/1104 Customer Quote API", () => {
     }
   });
 
+  it("DEC-DINING-ANY-PARTICIPANT-SUBMIT: says another guest is checking out, with the wait", async () => {
+    const service = new Port();
+    const port = await listen(service);
+    service.result = { status: "CheckoutInProgress", heldUntil: "2026-08-02T16:00:45.500Z" };
+    const response = await post(port);
+    expect(response.status).toBe(409);
+    expect(response.headers.get("retry-after")).toBe("46");
+    expect(await response.json()).toEqual({
+      schemaVersion: 1,
+      error: {
+        code: "cart_checkout_in_progress",
+        messageKey: "customer.cart.checkout_in_progress",
+      },
+    });
+  });
+
+  it("WP-2423 item 6: a table checking out is said as such, with nothing to wait for", async () => {
+    const service = new Port();
+    const port = await listen(service);
+    service.result = { status: "TableCheckingOut" };
+    const response = await post(port);
+    expect(response.status).toBe(409);
+    expect(response.headers.get("retry-after")).toBeNull();
+    expect(await response.json()).toEqual({
+      schemaVersion: 1,
+      error: { code: "cart_table_checking_out", messageKey: "customer.cart.table_checking_out" },
+    });
+  });
+
+  it.each([
+    ["Unavailable", "quote_item_unavailable", "customer.quote.item_unavailable"],
+    ["OptionsChanged", "quote_item_options_changed", "customer.quote.item_options_changed"],
+  ] as const)(
+    "WP-2423 guest-cart-503: names the %s line with nothing to wait for",
+    async (reason, code, messageKey) => {
+      const service = new Port();
+      const port = await listen(service);
+      const cartItemReference = "0190a7c3-0000-7000-8000-000000000301";
+      service.result = { status: "ItemUnavailable", cartItemReference, reason };
+      const response = await post(port);
+      expect(response.status).toBe(409);
+      expect(response.headers.get("retry-after")).toBeNull();
+      expect(await response.json()).toEqual({
+        schemaVersion: 1,
+        error: { code, messageKey, line: { cartItemReference } },
+      });
+    },
+  );
   it("fails closed on thrown or declared service unavailability", async () => {
     const service = new Port();
     const port = await listen(service);
@@ -264,4 +313,30 @@ describe("WP-1103/1104 Customer Quote API", () => {
   it("defaults to unavailable when the Pricing service is not wired", async () => {
     expect((await post(await listen())).status).toBe(503);
   });
+});
+
+it("returns only a matching closed expiry receipt and no private history", async () => {
+  const service = new Port();
+  service.result = {
+    status: "Expired",
+    resolution: { operationReference: key, cartReference: id(4), cartVersion: 7 },
+  };
+  const port = await listen(service);
+  const response = await post(port);
+  expect(response.status).toBe(410);
+  expect(response.headers.get("cache-control")).toBe("no-store");
+  expect(await response.json()).toEqual({
+    schemaVersion: 1,
+    error: { code: "quote_operation_expired", messageKey: "customer.quote.operation_expired" },
+    resolution: service.result.resolution,
+  });
+  for (const resolution of [
+    { operationReference: id(99), cartReference: id(4), cartVersion: 7 },
+    { operationReference: key, cartReference: id(4), cartVersion: 8 },
+    { operationReference: key, cartReference: id(99), cartVersion: 7 },
+    { operationReference: key, cartReference: id(4), cartVersion: 7, private: true },
+  ]) {
+    service.result = { status: "Expired", resolution };
+    expect((await post(port)).status).toBe(503);
+  }
 });

@@ -254,8 +254,12 @@ export function regenerateDiningJoinCapability(value: unknown): Readonly<{
   const replacement = parseDiningJoinCapability(raw.replacement);
   const observedAt = parseCanonicalInstant(raw.observedAt);
   if (
-    previous.status !== "Active" ||
+    previous.status === "Revoked" ||
+    (previous.status === "Consumed" &&
+      (previous.consumedAt === null || previous.consumedAt > observedAt)) ||
+    (previous.status === "Expired" && previous.expiresAt > observedAt) ||
     replacement.status !== "Active" ||
+    replacement.version !== 1 ||
     replacement.kind !== previous.kind ||
     replacement.storeReference !== previous.storeReference ||
     replacement.tableReference !== previous.tableReference ||
@@ -265,18 +269,20 @@ export function regenerateDiningJoinCapability(value: unknown): Readonly<{
     replacement.capabilityReference === previous.capabilityReference ||
     replacement.selectorHash === previous.selectorHash ||
     Date.parse(observedAt) < Date.parse(previous.issuedAt) ||
-    Date.parse(observedAt) >= Date.parse(previous.expiresAt) ||
     Date.parse(replacement.issuedAt) < Date.parse(observedAt)
   ) {
     throw new PublicCapabilityError("PUBLIC_CAPABILITY_STATE_INVALID");
   }
   return Object.freeze({
-    previous: parseDiningJoinCapability({
-      ...previous,
-      status: "Revoked",
-      version: previous.version + 1,
-      revokedAt: observedAt,
-    }),
+    previous:
+      previous.status === "Active"
+        ? parseDiningJoinCapability({
+            ...previous,
+            status: "Revoked",
+            version: previous.version + 1,
+            revokedAt: observedAt,
+          })
+        : previous,
     current: replacement,
   });
 }

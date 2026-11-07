@@ -1,5 +1,12 @@
-import type { PriceQuoteRequoteResult, PriceQuoteSnapshot, PricingReference } from "@rms/pricing";
+import { readClosedRecord } from "@bop/identity";
+import type {
+  ConfiguredPriceQuoteSnapshot,
+  PriceQuoteRequoteResult,
+  PriceQuoteSnapshot,
+  PricingReference,
+} from "@rms/pricing";
 import type { Request, RequestHandler, Response } from "express";
+import { checkoutHoldRetrySeconds } from "./customer-checkout-hold.js";
 
 const uuidV7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const instant = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
@@ -15,14 +22,52 @@ export interface QuoteCartCommand {
   readonly requestedAt: string;
 }
 
+/** WP-2423 item 8 ⑦ (Owner decision 11): the tips the Store offers, worked out on the subtotal. */
+export interface QuoteTipChoices {
+  readonly enabled: boolean;
+  readonly tierPercents: readonly number[];
+}
 export type QuoteCartResult =
-  | { readonly status: "Created"; readonly quote: PriceQuoteSnapshot }
-  | { readonly status: "Current"; readonly quote: PriceQuoteSnapshot }
-  | { readonly status: "Requoted"; readonly requote: PriceQuoteRequoteResult }
+  | {
+      readonly status: "Created";
+      readonly quote: PriceQuoteSnapshot | ConfiguredPriceQuoteSnapshot;
+      readonly tips?: QuoteTipChoices;
+    }
+  | {
+      readonly status: "Current";
+      readonly quote: PriceQuoteSnapshot | ConfiguredPriceQuoteSnapshot;
+      readonly tips?: QuoteTipChoices;
+    }
+  | {
+      readonly status: "Requoted";
+      readonly requote: PriceQuoteRequoteResult;
+      readonly tips?: QuoteTipChoices;
+    }
+  | {
+      readonly status: "Expired";
+      readonly resolution: {
+        readonly operationReference: string;
+        readonly cartReference: string;
+        readonly cartVersion: number;
+      };
+    }
   | { readonly status: "NotFound" }
   | { readonly status: "VersionConflict" }
   | { readonly status: "IdempotencyConflict" }
   | { readonly status: "InvalidConfiguration" }
+  /** DEC-DINING-ANY-PARTICIPANT-SUBMIT: another guest at the table is checking out this Cart. */
+  | { readonly status: "CheckoutInProgress"; readonly heldUntil: string }
+  /** DEC-DINE-IN-PAY-LATER: staff started the table's checkout; no more rounds from a phone. */
+  | { readonly status: "TableCheckingOut" }
+  /**
+   * WP-2423 (guest-cart-503): this guest's cart line cannot be sold now (stable Catalog fact); the
+   * guest removes it. `OptionsChanged`: the dish is sold, its chosen options no longer fit.
+   */
+  | {
+      readonly status: "ItemUnavailable";
+      readonly cartItemReference: string;
+      readonly reason: "Unavailable" | "OptionsChanged";
+    }
   | { readonly status: "Unavailable" };
 
 export interface CustomerQuotePort {
@@ -35,6 +80,10 @@ type ErrorCode =
   | "quote_version_conflict"
   | "quote_idempotency_conflict"
   | "quote_configuration_invalid"
+  | "cart_checkout_in_progress"
+  | "cart_table_checking_out"
+  | "quote_item_unavailable"
+  | "quote_item_options_changed"
   | "quote_service_unavailable";
 
 const errors = Object.freeze({
@@ -43,6 +92,10 @@ const errors = Object.freeze({
   quote_version_conflict: { status: 409, messageKey: "customer.quote.version_conflict" },
   quote_idempotency_conflict: { status: 409, messageKey: "customer.quote.idempotency_conflict" },
   quote_configuration_invalid: { status: 422, messageKey: "customer.quote.configuration_invalid" },
+  cart_checkout_in_progress: { status: 409, messageKey: "customer.cart.checkout_in_progress" },
+  cart_table_checking_out: { status: 409, messageKey: "customer.cart.table_checking_out" },
+  quote_item_unavailable: { status: 409, messageKey: "customer.quote.item_unavailable" },
+  quote_item_options_changed: { status: 409, messageKey: "customer.quote.item_options_changed" },
   quote_service_unavailable: { status: 503, messageKey: "customer.quote.service_unavailable" },
 } as const);
 
@@ -91,7 +144,8 @@ function parse(request: Request, now: () => string, allowedOrigin: string): Quot
     keys.length !== 1 ||
     keys[0] !== "cartVersion" ||
     !Number.isSafeInteger(cartVersion) ||
-    Number(cartVersion) < 1
+    Number(cartVersion) < 1 ||
+    Number(cartVersion) > 2147483647
   )
     throw new TypeError("invalid body");
   const cartReference = request.params.cart_id;
@@ -124,9 +178,16 @@ function parse(request: Request, now: () => string, allowedOrigin: string): Quot
 const money = (value: PriceQuoteSnapshot["subtotal"]) =>
   Object.freeze({ amountMinor: value.amountMinor.toString(), currency: value.currencyCode });
 
-function publicQuote(quote: PriceQuoteSnapshot, requote?: PriceQuoteRequoteResult) {
+function publicQuote(
+  quote: PriceQuoteSnapshot | ConfiguredPriceQuoteSnapshot,
+  requote?: PriceQuoteRequoteResult,
+  tips?: QuoteTipChoices,
+) {
   return {
     schemaVersion: 1,
+    ...(tips === undefined
+      ? {}
+      : { tips: { enabled: tips.enabled, tierPercents: [...tips.tierPercents] } }),
     quote: {
       quoteReference: quote.quoteReference,
       quoteVersion: quote.quoteVersion,
@@ -188,6 +249,41 @@ export class CustomerQuoteHandler {
         sendError(response, "quote_service_unavailable");
         return;
       }
+      if (result.status === "Expired") {
+        try {
+          const envelope = readClosedRecord(
+            result,
+            ["status", "resolution"],
+            "ACTOR_SHAPE_INVALID",
+          );
+          const resolution = readClosedRecord(
+            envelope.resolution,
+            ["operationReference", "cartReference", "cartVersion"],
+            "ACTOR_SHAPE_INVALID",
+          );
+          if (
+            resolution.operationReference !== command.idempotencyKey ||
+            resolution.cartReference !== command.cartReference ||
+            resolution.cartVersion !== command.expectedCartVersion
+          )
+            throw new Error();
+          response.status(410).json({
+            schemaVersion: 1,
+            error: {
+              code: "quote_operation_expired",
+              messageKey: "customer.quote.operation_expired",
+            },
+            resolution: {
+              operationReference: resolution.operationReference,
+              cartReference: resolution.cartReference,
+              cartVersion: resolution.cartVersion,
+            },
+          });
+        } catch {
+          sendError(response, "quote_service_unavailable");
+        }
+        return;
+      }
       if (
         result.status === "Created" ||
         result.status === "Current" ||
@@ -200,10 +296,44 @@ export class CustomerQuoteHandler {
           response.setHeader("Location", `/api/v1/price-quotes/${quote.quoteReference}`);
           response
             .status(result.status === "Current" ? 200 : 201)
-            .json(publicQuote(quote, result.status === "Requoted" ? result.requote : undefined));
+            .json(
+              publicQuote(
+                quote,
+                result.status === "Requoted" ? result.requote : undefined,
+                result.tips,
+              ),
+            );
         } catch {
           sendError(response, "quote_service_unavailable");
         }
+        return;
+      }
+      if (result.status === "CheckoutInProgress") {
+        response.setHeader(
+          "Retry-After",
+          String(checkoutHoldRetrySeconds(result.heldUntil, this.#now())),
+        );
+        sendError(response, "cart_checkout_in_progress");
+        return;
+      }
+      if (result.status === "ItemUnavailable") {
+        // No Retry-After: asking again gives the same answer until the guest removes the line.
+        const code =
+          result.reason === "OptionsChanged"
+            ? "quote_item_options_changed"
+            : "quote_item_unavailable";
+        if (!uuidV7.test(result.cartItemReference)) {
+          sendError(response, "quote_service_unavailable");
+          return;
+        }
+        response.status(409).json({
+          schemaVersion: 1,
+          error: {
+            code,
+            messageKey: errors[code].messageKey,
+            line: { cartItemReference: result.cartItemReference },
+          },
+        });
         return;
       }
       const mapping = {
@@ -211,6 +341,7 @@ export class CustomerQuoteHandler {
         VersionConflict: "quote_version_conflict",
         IdempotencyConflict: "quote_idempotency_conflict",
         InvalidConfiguration: "quote_configuration_invalid",
+        TableCheckingOut: "cart_table_checking_out",
         Unavailable: "quote_service_unavailable",
       } as const;
       sendError(response, mapping[result.status]);

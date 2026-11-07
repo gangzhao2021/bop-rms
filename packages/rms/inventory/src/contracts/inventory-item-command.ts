@@ -13,7 +13,6 @@ export interface InventoryItemCommand {
   readonly brandReference: InventoryReference;
   readonly actorReference: InventoryReference;
   readonly purpose: "InventoryItemManagement";
-  readonly permission: "inventory.manage";
   readonly operationReference: InventoryReference;
   readonly occurredAt: InventoryInstant;
   readonly action: InventoryItemAction;

@@ -1,5 +1,9 @@
 # `@rms/dining`
 
+## Current owner persistence
+
+The current [module manifest](./src/module.manifest.ts) declares `rms_dining` owner tables. [WP-2402](../../../docs/spec/work-packages/WP-2402.md) records later commitment, session/table lifecycle and composed local journey evidence. The namespace omission and injected-port statements below describe original WP-1006/1007/2112 scope, not a new approval requirement. [Scenario coverage](../../../docs/spec/design/business-scenario-coverage.md#current-scenario-evidence-view) distinguishes normal-entry and external acceptance.
+
 `@rms/dining` is the provider-neutral Dining contract for WP-1002, WP-1006, WP-1007 and WP-2112.
 
 It verifies a bounded canonical ES256 static QR through injected key-registry, signature-verifier
@@ -28,8 +32,7 @@ summaries; mutation controls remain disabled until an authorized command-capable
 
 Section 50 provides no `rms_dining` schema or Dining migration namespace, and accepted WP-1006 /
 WP-1007 explicitly keep Dining persistence behind injected ports. WP-2112 therefore creates no
-database migration, outbox publication, realtime connection or Event Catalog registration. A later
-accepted persistence package must resolve that ownership before any durable adapter is added.
+database migration, outbox publication, realtime connection or Event Catalog registration. Later accepted owner persistence is now declared above; these historical WPs did not themselves add those adapters.
 
 There is no Guest Self-Start、Convenience Mode、Order/Payment/Write-off authority、private key、
 KMS/provider integration、Task storage、abuse bucket、production persistence、transport、live
