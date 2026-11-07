@@ -425,7 +425,9 @@ for (const screen of [
               (route) => {
                 const reconciliation = route.request().url().endsWith("/payment-reconciliation");
                 expect(route.request().method()).toBe(reconciliation ? "POST" : "GET");
-                expect(reconciliation).toBe(resultCalls > 0);
+                // WP-2423 M17: the payment page reads the result once, then the result page loads
+                // it; checking again after that reconciles.
+                expect(reconciliation).toBe(resultCalls > 1);
                 if (reconciliation) expect(route.request().postDataJSON()).toEqual({});
                 expect(route.request().headers()["x-csrf-token"]).toBe(csrf);
                 resultCalls++;
@@ -438,15 +440,14 @@ for (const screen of [
                       paymentIntentReference: id(11),
                       orderReference: id(12),
                       status:
-                        resultCalls === 1
+                        resultCalls <= 2
                           ? "Pending"
                           : terminal === "payment-failed"
                             ? "Failed"
                             : "Succeeded",
                       total: { amountMinor: "138", currency: "CAD" },
                       payBy: "2026-01-01T12:30:00.000Z",
-                      failure:
-                        resultCalls !== 1 && terminal === "payment-failed" ? "Declined" : null,
+                      failure: resultCalls > 2 && terminal === "payment-failed" ? "Declined" : null,
                     },
                   },
                 });
@@ -582,36 +583,13 @@ for (const screen of [
             await context.setOffline(true);
             await expect(pay).toHaveCount(0);
             await context.setOffline(false);
-            // A card was offered: nothing here may say it wasn't charged, and the same payment goes on.
-            await expect(
-              page.getByRole("heading", { name: "We can’t confirm where your payment stands" }),
-            ).toBeVisible();
-            await expect(page.getByRole("main")).not.toContainText("hasn’t been charged");
-            const continuePayment = page.getByRole("button", {
-              name: "Continue to payment",
-              exact: true,
-            });
-            await expect(continuePayment).toBeEnabled();
-            expect(paymentCalls).toHaveLength(3);
-            await page.evaluate(async () => {
-              Reflect.set(window, "syntheticHoldSubmit", false);
-              const resolve = Reflect.get(window, "syntheticResolveSubmit") as (
-                value: object,
-              ) => void;
-              resolve({});
-              await Promise.resolve();
-            });
-            expect(await page.evaluate(() => Reflect.get(window, "syntheticCard"))).toEqual({
-              mounts: 1,
-              destroys: 1,
-              confirms: 0,
-            });
-            await continuePayment.click();
-            await expect(pay).toBeEnabled();
-            expect(paymentCalls[3]).toEqual(paymentCalls[0]);
-            expect(handoffCalls).toBe(2);
-            await pay.click();
+            // WP-2423 M17: a card was offered and the page lost track of it. It never offers the
+            // card again: it reads the payment, which exists, and its result page takes over.
             await expect(page).toHaveURL(/\/checkout\/result$/u);
+            await expect(page.getByRole("main")).not.toContainText("hasn’t been charged");
+            await expect(page.getByRole("button", { name: "Continue to payment" })).toHaveCount(0);
+            expect(paymentCalls).toHaveLength(3);
+            expect(handoffCalls).toBe(1);
             await expect(
               page.getByText(
                 "Your payment is still being confirmed. Don’t start another payment.",
@@ -620,7 +598,7 @@ for (const screen of [
                 },
               ),
             ).toBeVisible();
-            expect(resultCalls).toBe(1);
+            expect(resultCalls).toBe(2);
             await expect(
               page.getByRole("heading", { name: "Payment confirmed", exact: true }),
             ).toHaveCount(0);
@@ -645,13 +623,14 @@ for (const screen of [
               ).toHaveAttribute("href", "/orders/" + id(12));
               await expectNoInternalText(page);
             }
-            expect(resultCalls).toBe(2);
-            expect(paymentCalls).toHaveLength(4);
+            expect(resultCalls).toBe(3);
+            // The card form was never offered again, so nothing could be paid twice.
+            expect(paymentCalls).toHaveLength(3);
             await expect(pay).toHaveCount(0);
             expect(await page.evaluate(() => Reflect.get(window, "syntheticCard"))).toEqual({
-              mounts: 2,
-              destroys: 2,
-              confirms: 1,
+              mounts: 1,
+              destroys: 1,
+              confirms: 0,
             });
             expect(await page.content()).not.toContain("pi_SyntheticBrowser_secret_SyntheticOnly");
             expect(await page.evaluate(() => localStorage.length + sessionStorage.length)).toBe(0);
@@ -665,8 +644,8 @@ for (const screen of [
               await expect(
                 page.getByRole("heading", { name: "Payment confirmed", exact: true }),
               ).toHaveCount(0);
-              expect(resultCalls).toBe(2);
-              expect(paymentCalls).toHaveLength(4);
+              expect(resultCalls).toBe(3);
+              expect(paymentCalls).toHaveLength(3);
             }
             expect(failures).toEqual([]);
             return;
