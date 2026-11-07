@@ -205,6 +205,7 @@ const view: CustomerStoreProfileView = {
     lastOrdersAt: "10:30:00",
     ordersStopped: false,
     nextOpening: null,
+    tonight: null,
     upcoming: [
       {
         localDate: "2026-12-24",
