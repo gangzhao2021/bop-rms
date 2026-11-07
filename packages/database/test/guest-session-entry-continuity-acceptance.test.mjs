@@ -236,6 +236,8 @@ it("M104/M105: a rescan resumes the same Guest Session; replaced visits are kept
       assert.equal((await back.json()).resumed, true);
       assert.deepEqual(cookies(back), { guest: visit, visits: elsewhere });
       assert.equal(await sessions(), 4);
+      // Only the visit gone back to is renewed, once.
+      assert.equal(await versionOf(visit), 3);
 
       // Credentials never reach the request log.
       for (const credential of [visit, idle, elsewhere])
