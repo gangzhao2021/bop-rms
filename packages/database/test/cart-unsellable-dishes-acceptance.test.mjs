@@ -224,6 +224,7 @@ it("WP-2423 (cart-unsellable-dishes): a hidden dish or a default choice turned o
             soldOutUntil,
             actorReference: id(3),
             observedAt,
+            audit: { auditReference: id(5000 + operation), summary: { change: "Synthetic" } },
           }),
         );
       const menuFacts = async () =>
@@ -320,6 +321,22 @@ it("WP-2423 (cart-unsellable-dishes): a hidden dish or a default choice turned o
           [5, false, id(3)],
         ],
       );
+      // Each recorded change is audited in the Store's scope, with who and what (one per version;
+      // the replayed operation adds none).
+      assert.deepEqual(
+        (
+          await admin.query(
+            "SELECT action_code,actor_reference::text actor,store_id::text store,target_id::text target,after_summary_json->>'version' version FROM platform_audit.audit_record WHERE target_type='CatalogStoreOptionSoldOut' ORDER BY (after_summary_json->>'version')::int",
+          )
+        ).rows.map((row) => [row.action_code, row.actor, row.store, row.target, row.version]),
+        [
+          ["CATALOG_OPTION_SOLD_OUT", id(3), store, iced, "1"],
+          ["CATALOG_OPTION_SOLD_OUT", id(3), store, iced, "2"],
+          ["CATALOG_OPTION_BACK_ON", id(3), store, iced, "3"],
+          ["CATALOG_OPTION_SOLD_OUT", id(3), store, iced, "4"],
+          ["CATALOG_OPTION_BACK_ON", id(3), store, iced, "5"],
+        ],
+      );
 
       // Iced stands for a combo's dish (synthetic link and dish rules: the combo, the dish's SKU and
       // the foreign keys they need are not part of what is checked here, so they are left out). The
@@ -358,6 +375,7 @@ it("WP-2423 (cart-unsellable-dishes): a hidden dish or a default choice turned o
           soldOutUntil: null,
           actorReference: id(3),
           observedAt: minute(9),
+          audit: { auditReference: id(5084), summary: { change: "Synthetic" } },
         }),
       );
       // WP-2423 (M24): emptied by sold-out marks, it is sold out — on the menu and in the cart.
@@ -372,6 +390,7 @@ it("WP-2423 (cart-unsellable-dishes): a hidden dish or a default choice turned o
           soldOutUntil: null,
           actorReference: id(3),
           observedAt: minute(10),
+          audit: { auditReference: id(5085), summary: { change: "Synthetic" } },
         }),
       );
       await admin.query("SET session_replication_role = replica");

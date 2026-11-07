@@ -671,10 +671,10 @@ export function createMerchantAvailability(options: {
     body: Extract<AvailabilityCommandBody, { action: "OptionSoldOut" | "OptionBackOn" }>,
     at: string,
   ) {
-    const offered = (await listStoreChoiceOptions(tx as never, s.owner)).some(
+    const offered = (await listStoreChoiceOptions(tx as never, s.owner)).find(
       (option) => option.optionReference === body.optionReference,
     );
-    if (!offered) return fail("NotFound");
+    if (offered === undefined) return fail("NotFound");
     const before = (
       await listStoreOptionSoldOutMarks(tx as never, s.owner, [body.optionReference], at)
     ).get(body.optionReference);
@@ -699,6 +699,26 @@ export function createMerchantAvailability(options: {
         soldOutUntil,
         actorReference: s.actor,
         observedAt: at,
+        // Recorded with the mark, as a dish's sold-out is: what changed, for which choice, by
+        // which authority (no personal data).
+        audit: {
+          auditReference: derivedReference(body.operationReference, "audit:option-sold-out"),
+          summary: {
+            change:
+              body.action === "OptionBackOn"
+                ? "BackOn"
+                : body.until === "EndOfDay"
+                  ? "SoldOutToday"
+                  : "SoldOutUntilFurtherNotice",
+            option: name(offered.localizedNames, ""),
+            authority: s.brandAuthority
+              ? "BrandAvailability"
+              : s.permissions.mayMarkUntilBack
+                ? "StoreAvailability"
+                : "SoldOutToday",
+            commandReference: body.operationReference,
+          },
+        },
       });
       return { status: "Applied", option: optionStatus(after) };
     } catch (error) {

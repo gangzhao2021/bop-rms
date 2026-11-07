@@ -1,3 +1,4 @@
+import { appendAuditRecordInTransaction, type JsonObject } from "@bop/audit";
 import { resolveStoreAvailability } from "../../domain/availability.js";
 import {
   parseCatalogCode,
@@ -209,6 +210,11 @@ export async function listOptionsOffNow(
  * brings it back (`soldOut: false`): the choice's next version at this Store, with who and when,
  * against the version staff saw (0: never marked). The same operation again returns what it
  * recorded. The caller authorizes and owns the transaction.
+ *
+ * Each change is also an Audit record in the Store's scope, in the same transaction, as a dish's
+ * sold-out mark is (`CATALOG_OPTION_SOLD_OUT` / `CATALOG_OPTION_BACK_ON`): the owner sees who took
+ * pearls off and put them back. The summary the caller gives names the choice and the authority,
+ * never personal data.
  */
 export async function changeStoreOptionSoldOut(
   tx: SoldOutTransaction,
@@ -224,6 +230,11 @@ export async function changeStoreOptionSoldOut(
     readonly soldOutUntil: string | null;
     readonly actorReference: string;
     readonly observedAt: string;
+    /** The Audit record's id (derived from the operation) and its non-personal summary. */
+    readonly audit: {
+      readonly auditReference: string;
+      readonly summary: JsonObject;
+    };
   },
 ): Promise<StoreOptionSoldOutMark> {
   const brand = reference(scope.brandReference);
@@ -293,6 +304,32 @@ export async function changeStoreOptionSoldOut(
         input.observedAt,
       ],
     );
+    // The Audit record is kept in the Store's scope; the mark stays Catalog Brand configuration.
+    await tx.query("SELECT set_config('bop.store_id',$1,true)", [store]);
+    await appendAuditRecordInTransaction(tx, {
+      auditId: reference(input.audit.auditReference),
+      brandId: brand,
+      storeId: store,
+      actor: { type: "User", reference: reference(input.actorReference) },
+      actionCode: input.soldOut ? "CATALOG_OPTION_SOLD_OUT" : "CATALOG_OPTION_BACK_ON",
+      targetType: "CatalogStoreOptionSoldOut",
+      targetId: option,
+      afterSummary: {
+        ...input.audit.summary,
+        optionReference: option,
+        storeReference: store,
+        version,
+        soldOutUntil: input.soldOutUntil,
+      },
+      reasonCode: "AUTHORIZED_OPERATION",
+      correlationId: operation,
+      occurredAt: input.observedAt,
+      sourceChannel: "MERCHANT_WEB",
+      dataClassification: "Internal",
+      retentionPolicyCode: "CONFIGURATION_AUDIT",
+      retentionPolicyVersion: 1,
+    });
+    await tx.query("SELECT set_config('bop.store_id','',true)", []);
     return markOf(
       {
         option,
