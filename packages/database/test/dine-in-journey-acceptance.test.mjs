@@ -2605,6 +2605,27 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
       const recorded = await request({ ...session("manager"), command: round1Refund });
       assert.equal(recorded.status, "Created");
       assert.equal(recorded.approvalRequired, true);
+      const positionOf = (refs) =>
+        transactions(api).run((tx) =>
+          createPostgresOrdinaryRefundPositionSource({
+            scope: ownerScope,
+            providerAccountReference: provider,
+            environment: "Test",
+            authorize: async () => true,
+          })(tx, {
+            orderReference,
+            paymentTransactionReference: refs.transaction,
+            paymentIntentReference: refs.paymentIntent,
+            paymentAttemptReference: refs.attempt,
+            observedAt: now(),
+          }),
+        );
+      // WP-2423 M16: recorded and waiting for approval, nothing was sent: all of it is "not sent".
+      const waitingApproval = await positionOf(pay1);
+      assert.deepEqual(
+        [waitingApproval.pendingMinor, waitingApproval.unsentMinor, waitingApproval.confirmedMinor],
+        [roundTotal, roundTotal, 0n],
+      );
       assert.equal(
         (
           await stepUp({
@@ -2635,21 +2656,6 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
       assert.equal(providerSends, 1);
 
       // ── 7. Payment position: the confirmed refund counts once; round 3 is untouched.
-      const positionOf = (refs) =>
-        transactions(api).run((tx) =>
-          createPostgresOrdinaryRefundPositionSource({
-            scope: ownerScope,
-            providerAccountReference: provider,
-            environment: "Test",
-            authorize: async () => true,
-          })(tx, {
-            orderReference,
-            paymentTransactionReference: refs.transaction,
-            paymentIntentReference: refs.paymentIntent,
-            paymentAttemptReference: refs.attempt,
-            observedAt: now(),
-          }),
-        );
       const reconcile = createPostgresOrdinaryRefundReconciliationRuntime({
         scope: ownerScope,
         providerAccountReference: provider,
@@ -2672,6 +2678,7 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
       const position1 = await positionOf(pay1);
       assert.equal(position1.confirmedMinor, roundTotal);
       assert.equal(position1.pendingMinor, 0n);
+      assert.equal(position1.unsentMinor, 0n);
       const position3 = await positionOf(pay3);
       assert.equal(position3.confirmedMinor, 0n);
       assert.equal(position3.pendingMinor, 0n);
@@ -2707,6 +2714,8 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
       assert.deepEqual(refundedDetail.paymentPosition, {
         refundedMinor: String(roundTotal),
         refundPendingMinor: "0",
+        refundNotSentMinor: "0",
+        refundOnMachineMinor: "0",
       });
       // DEC-TAX-WHOLE-RECEIPT: a table paying each round first has a receipt per round; its
       // detail has no bill tax rounding and its total is its lines' as each round charged them.
@@ -2730,7 +2739,12 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
       })({ sessionCookie: queueSession.sessionCookie, afterOrderReference: null });
       assert.deepEqual(
         refundedList.items.find((item) => item.orderReference === orderReference)?.paymentPosition,
-        { refundedMinor: String(roundTotal), refundPendingMinor: "0" },
+        {
+          refundedMinor: String(roundTotal),
+          refundPendingMinor: "0",
+          refundNotSentMinor: "0",
+          refundOnMachineMinor: "0",
+        },
       );
       // A guest who has left the table no longer reads it; the Host still does.
       await admin.query(

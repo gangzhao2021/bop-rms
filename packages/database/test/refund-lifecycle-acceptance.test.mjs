@@ -3,6 +3,8 @@ import { withAutoAcceptWorld } from "../test-support/auto-accept-world.mjs";
 import { createMerchantOrderStaffCancellation } from "../../../apps/api/src/merchant-order-staff-cancellation.ts";
 import { createPersistentMerchantOrderQueue } from "../../../apps/api/src/persistent-merchant-order-queue.ts";
 import { createPostgresOrdinaryRefundRequestRuntime } from "../../rms/payment/src/index.ts";
+import { measureDatabaseClockOffset } from "../../../tooling/environment/pilot-database-clock.mjs";
+import { refundAuthorityCurrent } from "../../../tooling/environment/pilot-refund-workforce.mjs";
 
 /**
  * WP-2423 M10/M14 (DEC-OWNER-DEFAULTS-2026-11-06 item 2). Under the restricted NOBYPASSRLS role
@@ -233,5 +235,72 @@ it("an order refunded dish by dish before anyone accepted it is never accepted, 
       ),
       [{ previous_phase: "Submitted", refund_disposition: "AlreadyRefunded" }],
     );
+  });
+});
+
+/**
+ * WP-2423 M15. The pilot application clock is a lower bound of the database's, so an instant a
+ * Payment store just stamped with clock_timestamp() can be after the application's own now. On
+ * v15 that refused approvals at random ("Your session has ended"). Run as the restricted API role,
+ * with this process's clock set behind the database's, the refund authority check compares on the
+ * database clock and lets the approval through; the old application-clock comparison refused it.
+ */
+it("refund authority is never refused because the application clock trails the database's", async () => {
+  await withAutoAcceptWorld({ caseId: "wp2423_rl_clock", orderType: "Pickup" }, async (world) => {
+    const { assert, transactions } = world;
+    const SystemDate = globalThis.Date;
+    const offset = await transactions().run((tx) =>
+      measureDatabaseClockOffset((sql) => tx.query(sql)),
+    );
+    // 250 ms behind the database: wider than the 1-2 ms seen live, so a slow round trip on this
+    // host cannot hide the gap, and well inside the pilot's 2 s allowance.
+    const shiftMs = offset - 250;
+    globalThis.Date = new Proxy(SystemDate, {
+      construct: (target, args, newTarget) =>
+        Reflect.construct(
+          target,
+          args.length === 0 ? [SystemDate.now() + shiftMs] : args,
+          newTarget,
+        ),
+      get: (target, key) =>
+        key === "now" ? () => SystemDate.now() + shiftMs : Reflect.get(target, key),
+    });
+    try {
+      const answers = await transactions().run(async (tx) => {
+        const role = (
+          await tx.query("SELECT rolbypassrls FROM pg_roles WHERE rolname=current_user")
+        ).rows[0];
+        // As a Payment store stamps an approval or a send: the database's own now.
+        const at = (
+          await tx.query(
+            `SELECT to_char(date_trunc('milliseconds',clock_timestamp()) AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS at`,
+          )
+        ).rows[0].at;
+        let authorized = 0;
+        const current = refundAuthorityCurrent(tx, async () => {
+          authorized += 1;
+          return true;
+        });
+        return {
+          bypassesRls: role.rolbypassrls,
+          applicationClockSaysLater: at > new Date().toISOString(),
+          approved: await current(tx, at),
+          authorized,
+          // Another transaction, or an instant really after the database's now, is still refused.
+          otherTransaction: await current({ query: (...args) => tx.query(...args) }, at),
+          future: await current(tx, new SystemDate(Date.parse(at) + 60_000).toISOString()),
+        };
+      });
+      assert.deepEqual(answers, {
+        bypassesRls: false,
+        applicationClockSaysLater: true,
+        approved: true,
+        authorized: 1,
+        otherTransaction: false,
+        future: false,
+      });
+    } finally {
+      globalThis.Date = SystemDate;
+    }
   });
 });
