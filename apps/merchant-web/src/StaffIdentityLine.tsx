@@ -20,20 +20,41 @@ type NameSnapshot =
 export class NameStore {
   private snapshot: NameSnapshot = { kind: "Loading" };
   private readonly listeners = new Set<() => void>();
-  private started = false;
+  private reading = false;
+  private read = false;
+  // A failed read (a short network drop) is tried again when the screen is back online, or when
+  // the line is shown again, so the name returns without a reload.
+  private readonly retryOnline = () => {
+    if (this.snapshot.kind === "Failed") this.load();
+  };
   constructor(private readonly client: OwnNameClient) {}
   readonly subscribe = (listener: () => void) => {
     this.listeners.add(listener);
-    if (!this.started) {
-      this.started = true;
-      void this.client.read().then(
-        (state) => this.set({ kind: "Ready", state }),
-        () => this.set({ kind: "Failed" }),
-      );
-    }
-    return () => this.listeners.delete(listener);
+    if (this.listeners.size === 1 && typeof window !== "undefined")
+      window.addEventListener("online", this.retryOnline);
+    if (!this.read || this.snapshot.kind === "Failed") this.load();
+    return () => {
+      this.listeners.delete(listener);
+      if (this.listeners.size === 0 && typeof window !== "undefined")
+        window.removeEventListener("online", this.retryOnline);
+    };
   };
   readonly get = () => this.snapshot;
+  private load() {
+    if (this.reading) return;
+    this.reading = true;
+    this.read = true;
+    void this.client.read().then(
+      (state) => {
+        this.reading = false;
+        this.set({ kind: "Ready", state });
+      },
+      () => {
+        this.reading = false;
+        this.set({ kind: "Failed" });
+      },
+    );
+  }
   private set(next: NameSnapshot) {
     this.snapshot = next;
     for (const listener of this.listeners) listener();

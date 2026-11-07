@@ -75,4 +75,41 @@ describe("M61: the frame says who is signed in", () => {
     expect(store.get()).toEqual({ kind: "Failed" });
     stop();
   });
+
+  it("reads the name again after a failed read, when shown again or back online", async () => {
+    const read = vi
+      .fn<OwnNameClient["read"]>()
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValueOnce({ name: "Recorded", displayName: "Sam" })
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValueOnce({ name: "Recorded", displayName: "Sam" });
+    const flaky: OwnNameClient = { read, save: () => Promise.reject(new Error("not used")) };
+    vi.stubGlobal("window", new EventTarget());
+    const store = staffNameStoreFor("r".repeat(43), "store-a", flaky);
+    const first = store.subscribe(() => undefined);
+    await settle();
+    expect(store.get()).toEqual({ kind: "Failed" });
+    first();
+    // Shown again (next mount): read again.
+    const second = store.subscribe(() => undefined);
+    await settle();
+    expect(store.get()).toEqual({ kind: "Ready", state: { name: "Recorded", displayName: "Sam" } });
+    second();
+    expect(read).toHaveBeenCalledTimes(2);
+    // A Ready name is not read again on each mount.
+    const third = store.subscribe(() => undefined);
+    await settle();
+    expect(read).toHaveBeenCalledTimes(2);
+    third();
+    // Back online after a failed read while the line stays on screen.
+    const other = staffNameStoreFor("r".repeat(43), "store-b", flaky);
+    const onScreen = other.subscribe(() => undefined);
+    await settle();
+    expect(other.get()).toEqual({ kind: "Failed" });
+    window.dispatchEvent(new Event("online"));
+    await settle();
+    expect(other.get()).toEqual({ kind: "Ready", state: { name: "Recorded", displayName: "Sam" } });
+    onScreen();
+    vi.unstubAllGlobals();
+  });
 });
