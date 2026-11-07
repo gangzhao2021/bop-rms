@@ -82,7 +82,12 @@ function pricedMenu() {
 interface Table {
   version: number;
   items: { reference: number; name: string; quantity: number; other: boolean }[];
-  rounds: { roundNumber: number; sentByThisPhone: boolean; lines: number[] }[];
+  rounds: {
+    roundNumber: number;
+    sentByThisPhone: boolean;
+    lines: number[];
+    paymentState?: "AwaitingPayment" | "Paid" | "PayLater" | "Cancelled";
+  }[];
 }
 interface Seen {
   quotes: number;
@@ -149,6 +154,7 @@ async function stubTable(page: Page, table: Table) {
             sentAt: new Date(Date.now() - 1000).toISOString(),
             sentByThisPhone: round.sentByThisPhone,
             cartItemReferences: round.lines.map(id),
+            ...(round.paymentState === undefined ? {} : { paymentState: round.paymentState }),
           })),
         },
       },
@@ -360,6 +366,39 @@ for (const screen of [
         page.getByText("Round 2 was sent by someone at your table.", { exact: true }),
       ).toBeVisible();
       await expect(page.getByRole("link", { name: "See your table" })).toBeVisible();
+    });
+
+    test("M38: while another phone is still paying, the cart says so instead of paid and sent", async ({
+      page,
+    }, info) => {
+      const table: Table = {
+        version: 4,
+        items: [],
+        rounds: [
+          { roundNumber: 1, sentByThisPhone: false, lines: [2], paymentState: "AwaitingPayment" },
+        ],
+      };
+      await stubTable(page, table);
+      await enterTable(page, "/cart");
+      await expect(
+        page.getByText("Someone at your table is paying for round 1 now. Your dishes are in it.", {
+          exact: true,
+        }),
+      ).toBeVisible();
+      await expect(page.getByText(/was sent by someone|paid and sent/u)).toHaveCount(0);
+      await page.screenshot({ path: info.outputPath(`table-being-paid-${screen.width}.png`) });
+      // Closed unpaid: nothing claims the dishes came back.
+      table.rounds = [
+        { roundNumber: 1, sentByThisPhone: false, lines: [2], paymentState: "Cancelled" },
+      ];
+      table.version = 5;
+      await expect(
+        page.getByText(
+          "Round 1 wasn’t paid, so it wasn’t sent to the kitchen. Add the dishes again to order them.",
+          { exact: true },
+        ),
+      ).toBeVisible({ timeout: 6_000 });
+      await expectNoInternalText(page);
     });
 
     test("nothing is read while offline, and the cart keeps up again by itself once back online", async ({
