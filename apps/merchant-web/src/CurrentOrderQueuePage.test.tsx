@@ -8,6 +8,7 @@ import {
   CurrentOrderLines,
   formatContactPhone,
   PickupContactPanel,
+  pickupContactRemovalOutcome,
   orderMoney,
   CurrentOrderQueueRows,
   onlinePaymentText,
@@ -2088,4 +2089,44 @@ it("WP-2423 item 2: staff are told what to do when a guest's phone can't start t
   expect(cannot).toContain(
     "If their phone can't start the payment, ask a manager to cancel this round, then take the order for the table and charge it on the card machine.",
   );
+});
+
+it("M108: staff remove a guest's contact at the guest's request, after a confirm that names it", () => {
+  const contact = {
+    status: "Available" as const,
+    name: "Synthetic Guest",
+    channel: "Phone" as const,
+    value: "+14165550123",
+  };
+  // Without the order and the staff session there is nothing to remove with.
+  expect(renderToStaticMarkup(<PickupContactPanel contact={contact} />)).not.toContain(
+    "Remove contact",
+  );
+  const offered = renderToStaticMarkup(
+    <PickupContactPanel contact={contact} orderReference="o" csrf="c" />,
+  );
+  expect(offered).toContain("Remove contact");
+  const confirming = renderToStaticMarkup(
+    <PickupContactPanel
+      contact={contact}
+      orderReference="o"
+      csrf="c"
+      initialRemoval="Confirming"
+    />,
+  );
+  expect(confirming).toContain("Remove Synthetic Guest&#x27;s phone or email from this order?");
+  expect(confirming).toContain("Do this only when the guest asks");
+  expect(confirming).toContain("The order and payment are not changed");
+  const denied = renderToStaticMarkup(
+    <PickupContactPanel contact={contact} orderReference="o" csrf="c" initialRemoval="Denied" />,
+  );
+  expect(denied).toContain("Your role can&#x27;t remove a guest&#x27;s contact");
+  const removed = renderToStaticMarkup(
+    <PickupContactPanel contact={contact} orderReference="o" csrf="c" initialRemoval="Removed" />,
+  );
+  expect(removed).toContain("Contact removed at the guest&#x27;s request");
+  expect(removed).not.toContain("+14165550123");
+  expect(pickupContactRemovalOutcome(200)).toBe("Removed");
+  expect(pickupContactRemovalOutcome(403)).toBe("Denied");
+  expect(pickupContactRemovalOutcome(503)).toBe("Unknown");
 });

@@ -1222,14 +1222,65 @@ export { formatContactPhone };
  * WP-2423 Q10: who the pickup is for and how to reach them about this order — the contact the
  * customer gave for exactly that. Shown on the order detail only.
  */
+type ContactRemoval = "Idle" | "Confirming" | "Pending" | "Removed" | "Denied" | "Unknown";
+
+/** M108: the answer to a staff removal of a guest's pickup contact. */
+export function pickupContactRemovalOutcome(status: number): ContactRemoval {
+  if (status >= 200 && status < 300) return "Removed";
+  if (status === 403) return "Denied";
+  return "Unknown";
+}
+
 export function PickupContactPanel({
   contact,
   timeZone,
+  orderReference,
+  csrf,
+  fetcher = fetch,
+  initialRemoval = "Idle",
 }: {
   readonly contact: OrderPickupContact | null;
   readonly timeZone?: string | undefined;
+  /** M108: with these, staff can remove the contact when the guest asks. */
+  readonly orderReference?: string | undefined;
+  readonly csrf?: string | undefined;
+  readonly fetcher?: typeof fetch | undefined;
+  /** For previews and tests: the removal step shown first. */
+  readonly initialRemoval?: ContactRemoval;
 }) {
+  const [removal, setRemoval] = useState<ContactRemoval>(initialRemoval);
+  const operation = useRef<string | null>(null);
   if (contact === null) return null;
+  const remove = async () => {
+    if (removal === "Pending" || orderReference === undefined || csrf === undefined) return;
+    operation.current ??= serviceOperationReference();
+    setRemoval("Pending");
+    let next: ContactRemoval;
+    try {
+      const response = await fetcher("/merchant/orders/pickup-contact/removal", {
+        method: "POST",
+        credentials: "same-origin",
+        redirect: "error",
+        cache: "no-store",
+        headers: { "content-type": "application/json", "x-bop-csrf": csrf },
+        body: JSON.stringify({ orderReference, operationReference: operation.current }),
+      });
+      next = pickupContactRemovalOutcome(response.status);
+    } catch {
+      next = "Unknown";
+    }
+    // An unknown answer retries the same operation, so it is never removed twice.
+    if (next !== "Unknown") operation.current = null;
+    setRemoval(next);
+  };
+  if (removal === "Removed")
+    return (
+      <section className="order-pickup-contact" aria-label={t("Pickup customer")}>
+        <p role="status">
+          {t("Contact removed at the guest's request. The order and payment are not changed.")}
+        </p>
+      </section>
+    );
   return (
     <section className="order-pickup-contact" aria-label={t("Pickup customer")}>
       {contact.status === "Available" ? (
@@ -1259,6 +1310,38 @@ export function PickupContactPanel({
       ) : (
         <p>{t("No contact was given. Call out the order number at the counter.")}</p>
       )}
+      {contact.status === "Available" && orderReference !== undefined && csrf !== undefined ? (
+        removal === "Idle" ? (
+          <button type="button" onClick={() => setRemoval("Confirming")}>
+            {t("Remove contact")}
+          </button>
+        ) : (
+          <div className="order-pickup-contact__remove" role="group">
+            {removal === "Confirming" || removal === "Pending" ? (
+              <p>
+                {t(
+                  "Remove {name}'s phone or email from this order? Do this only when the guest asks. The order and payment are not changed.",
+                  { name: contact.name },
+                )}
+              </p>
+            ) : (
+              <p role="status">
+                {removal === "Denied"
+                  ? t("Your role can't remove a guest's contact. Ask a manager.")
+                  : t("Not sure the contact was removed. Remove again; it is only removed once.")}
+              </p>
+            )}
+            {removal === "Denied" ? null : (
+              <button type="button" disabled={removal === "Pending"} onClick={() => void remove()}>
+                {removal === "Unknown" ? t("Remove again") : t("Remove")}
+              </button>
+            )}
+            <button type="button" onClick={() => setRemoval("Idle")}>
+              {t("Keep")}
+            </button>
+          </div>
+        )
+      ) : null}
     </section>
   );
 }
@@ -3679,7 +3762,13 @@ export function CurrentOrderQueuePage({
                 lines={
                   detail !== undefined ? (
                     <>
-                      <PickupContactPanel contact={detail.pickupContact} timeZone={timeZone} />
+                      <PickupContactPanel
+                        contact={detail.pickupContact}
+                        timeZone={timeZone}
+                        orderReference={detail.order.orderReference}
+                        csrf={csrf}
+                        fetcher={fetcher}
+                      />
                       <OnlineRefundNote order={detail.order} position={detail.paymentPosition} />
                       <CompRecordsNote detail={detail} timeZone={timeZone} />
                       <WithRoundPhones

@@ -6428,6 +6428,16 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Sales by period": "按时段报表",
   "Online (guest's phone)": "线上（客人手机）",
   "Today's summary · {date}": "今天的营业小结 · {date}",
+  "Contact removed at the guest's request. The order and payment are not changed.":
+    "已按客人要求删除联系方式。订单和付款不受影响。",
+  "Remove {name}'s phone or email from this order? Do this only when the guest asks. The order and payment are not changed.":
+    "要从这笔订单中删除{name}的电话或邮箱吗？只在客人要求时删除。订单和付款不受影响。",
+  "Your role can't remove a guest's contact. Ask a manager.":
+    "你的角色不能删除客人的联系方式，请找店长。",
+  "Not sure the contact was removed. Remove again; it is only removed once.":
+    "不确定联系方式是否已删除。请再删一次，只会删除一次。",
+  "Remove again": "再删一次",
+  "Remove contact": "删除联系方式",
   "Open · as of {time}": "营业中 · 截至 {time}",
   "Closed · today's books still open (as of {time})": "已打烊 · 今天的账还没结（截至 {time}）",
   "Day closed": "营业日已结束",

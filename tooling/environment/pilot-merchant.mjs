@@ -145,6 +145,7 @@ import {
 } from "../../apps/api/dist/merchant-order-staff-cancellation.js";
 import { createMerchantUnpaidRoundCancellation } from "../../apps/api/dist/merchant-unpaid-round-cancellation.js";
 import { createMerchantEndedOrderStockRelease } from "../../apps/api/dist/merchant-stock-holding-orders.js";
+import { createMerchantPickupContactRemoval } from "../../apps/api/dist/merchant-pickup-contact-removal.js";
 import { createMerchantBusinessDayWindows } from "../../apps/api/dist/merchant-business-day-window.js";
 import { createMerchantOrderItemStaffCancellation } from "../../apps/api/dist/merchant-order-item-staff-cancellation.js";
 import { createMerchantOrdinaryRefundBusinessDate } from "../../apps/api/dist/merchant-ordinary-refund-business-date.js";
@@ -507,6 +508,11 @@ export async function createInternalMerchant(
         timeZone: resources.operating.timeZone,
         authorize: async () => true,
       }).today(tx, resources.now()),
+  });
+  // M108: staff remove a guest's pickup contact at the guest's request.
+  const pickupContactRemoval = createMerchantPickupContactRemoval({
+    persistence,
+    authentication: service,
   });
   // WP-2423 Q9-G1 (DEC-OUTAGE-ACCEPTANCE-HOLD): signed-in staff using the Orders page, kitchen
   // board or counter order mark the Store online (at most one write a minute); a manager may refund
@@ -1560,6 +1566,7 @@ export async function createInternalMerchant(
       orderStaffCancellationPreview,
       ...(unpaidRoundCancellation === undefined ? {} : { unpaidRoundCancellation }),
       endedOrderStockRelease,
+      pickupContactRemoval,
       ...(orderItemStaffCancellation === undefined ? {} : { orderItemStaffCancellation }),
       // WP-2423 Q7: counter pickup orders and card-machine payments and refunds.
       ...(internalCounter === undefined

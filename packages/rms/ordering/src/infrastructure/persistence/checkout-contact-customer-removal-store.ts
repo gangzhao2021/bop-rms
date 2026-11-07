@@ -58,13 +58,17 @@ interface Located {
 async function locate(
   transaction: Query,
   scope: { readonly brandReference: string; readonly storeReference: string },
-  input: { readonly orderReference: string; readonly guestSessionReference: string },
+  input: { readonly orderReference: string; readonly guestSessionReference: string | null },
   lock: boolean,
 ): Promise<Located | null> {
   const brand = parseOrderingReference(scope.brandReference),
     store = parseOrderingReference(scope.storeReference),
     order = parseOrderingReference(input.orderReference),
-    guest = parseOrderingReference(input.guestSessionReference);
+    // M108: a staff removal locates the order's details by the order alone.
+    guest =
+      input.guestSessionReference === null
+        ? null
+        : parseOrderingReference(input.guestSessionReference);
   await transaction.query(
     "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
     [brand, store],
@@ -79,9 +83,10 @@ async function locate(
         "JOIN rms_ordering.order_checkout_details_link l ON l.brand_id=s.brand_id AND l.store_id=s.store_id AND l.submission_id=s.submission_id " +
         "JOIN rms_ordering.checkout_details_record d ON d.brand_id=l.brand_id AND d.store_id=l.store_id AND d.details_id=l.details_id AND d.details_version=l.details_version " +
         "WHERE s.brand_id=$1 AND s.store_id=$2 AND s.order_id=$3 AND s.submission_kind='Initial' " +
-        "AND s.guest_session_id=$4 AND d.guest_session_id=$4 LIMIT 2" +
+        (guest === null ? "" : "AND s.guest_session_id=$4 AND d.guest_session_id=$4 ") +
+        "LIMIT 2" +
         (lock ? " FOR UPDATE OF d" : ""),
-      [brand, store, order, guest],
+      guest === null ? [brand, store, order] : [brand, store, order, guest],
     ),
   );
   if (rows.length > 1) return unavailable();
@@ -136,6 +141,89 @@ export async function readCheckoutContactPresence(
  * authorized the Guest Session for this order, owns the transaction and records the audit when the
  * result is `Removed`.
  */
+export const checkoutContactStaffRequestPolicy = Object.freeze({
+  policyCode: "STAFF_ON_CUSTOMER_REQUEST",
+  policyVersion: 1,
+});
+
+/**
+ * M108: staff remove the pickup contact (and any receipt email) of an order at the guest's
+ * request, for example after the guest's visit on their phone ended. The same one-time change as
+ * the customer's own removal; the evidence row names the staff member and never holds the value.
+ * The caller has authorized the staff member for this Store, owns the transaction and records the
+ * audit when the result is `Removed`. A repeat returns `AlreadyRemoved` without writing.
+ */
+export async function removeCheckoutContactOnStaffRequest(
+  transaction: Query,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  input: {
+    readonly orderReference: string;
+    readonly actorReference: string;
+    readonly observedAt: string;
+    readonly redactionReference: string;
+  },
+): Promise<{ readonly status: "Removed" | "AlreadyRemoved" | "NotGiven" }> {
+  try {
+    const actor = String(parseOrderingReference(input.actorReference));
+    return await removeLocated(
+      transaction,
+      scope,
+      { orderReference: input.orderReference, guestSessionReference: null },
+      input,
+      checkoutContactStaffRequestPolicy,
+      actor,
+    );
+  } catch (error) {
+    if (error instanceof CheckoutContactRemovalError) throw error;
+    return unavailable();
+  }
+}
+
+async function removeLocated(
+  transaction: Query,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  where: { readonly orderReference: string; readonly guestSessionReference: string | null },
+  input: { readonly observedAt: string; readonly redactionReference: string },
+  policy: { readonly policyCode: string; readonly policyVersion: number },
+  actor: string | null,
+): Promise<{ readonly status: "Removed" | "AlreadyRemoved" | "NotGiven" }> {
+  const observedAt = parseOrderingInstant(input.observedAt),
+    redaction = String(parseOrderingReference(input.redactionReference));
+  const located = await locate(transaction, scope, where, true);
+  if (located === null) throw new CheckoutContactRemovalError("CHECKOUT_CONTACT_REMOVAL_NOT_FOUND");
+  if (located.presence === "Removed") return Object.freeze({ status: "AlreadyRemoved" as const });
+  if (located.presence === "NotGiven") return Object.freeze({ status: "NotGiven" as const });
+  if (observedAt < located.recordedAt) return unavailable();
+  const brand = String(parseOrderingReference(scope.brandReference)),
+    store = String(parseOrderingReference(scope.storeReference));
+  const evidence = await transaction.query(
+    "INSERT INTO rms_ordering.checkout_contact_redaction " +
+      "(brand_id,store_id,details_id,details_version,redaction_id,policy_code,policy_version,retention_days,details_recorded_at,redacted_at,removed_by_actor_id) " +
+      "VALUES ($1,$2,$3,$4,$5,$6,$7,NULL,$8::timestamptz,$9::timestamptz,$10)",
+    [
+      brand,
+      store,
+      located.detailsReference,
+      located.detailsVersion,
+      redaction,
+      policy.policyCode,
+      policy.policyVersion,
+      located.recordedAt,
+      observedAt,
+      actor,
+    ],
+  );
+  if (rowCount(evidence) !== 1) return unavailable();
+  const cleared = await transaction.query(
+    "UPDATE rms_ordering.checkout_details_record SET snapshot_json=snapshot_json||" +
+      "jsonb_build_object('pickupContact','null'::jsonb,'receipt',jsonb_build_object('choice','InSession','email','null'::jsonb)) " +
+      "WHERE brand_id=$1 AND store_id=$2 AND details_id=$3 AND details_version=$4",
+    [brand, store, located.detailsReference, located.detailsVersion],
+  );
+  if (rowCount(cleared) !== 1) return unavailable();
+  return Object.freeze({ status: "Removed" as const });
+}
+
 export async function removeCheckoutContactOnCustomerRequest(
   transaction: Query,
   scope: { readonly brandReference: string; readonly storeReference: string },
@@ -147,42 +235,14 @@ export async function removeCheckoutContactOnCustomerRequest(
   },
 ): Promise<{ readonly status: "Removed" | "AlreadyRemoved" | "NotGiven" }> {
   try {
-    const observedAt = parseOrderingInstant(input.observedAt),
-      redaction = String(parseOrderingReference(input.redactionReference));
-    const located = await locate(transaction, scope, input, true);
-    if (located === null)
-      throw new CheckoutContactRemovalError("CHECKOUT_CONTACT_REMOVAL_NOT_FOUND");
-    if (located.presence === "Removed") return Object.freeze({ status: "AlreadyRemoved" as const });
-    if (located.presence === "NotGiven") return Object.freeze({ status: "NotGiven" as const });
-    if (observedAt < located.recordedAt) return unavailable();
-    const brand = String(parseOrderingReference(scope.brandReference)),
-      store = String(parseOrderingReference(scope.storeReference));
-    const { policyCode, policyVersion } = checkoutContactCustomerRequestPolicy;
-    const evidence = await transaction.query(
-      "INSERT INTO rms_ordering.checkout_contact_redaction " +
-        "(brand_id,store_id,details_id,details_version,redaction_id,policy_code,policy_version,retention_days,details_recorded_at,redacted_at) " +
-        "VALUES ($1,$2,$3,$4,$5,$6,$7,NULL,$8::timestamptz,$9::timestamptz)",
-      [
-        brand,
-        store,
-        located.detailsReference,
-        located.detailsVersion,
-        redaction,
-        policyCode,
-        policyVersion,
-        located.recordedAt,
-        observedAt,
-      ],
+    return await removeLocated(
+      transaction,
+      scope,
+      input,
+      input,
+      checkoutContactCustomerRequestPolicy,
+      null,
     );
-    if (rowCount(evidence) !== 1) return unavailable();
-    const cleared = await transaction.query(
-      "UPDATE rms_ordering.checkout_details_record SET snapshot_json=snapshot_json||" +
-        "jsonb_build_object('pickupContact','null'::jsonb,'receipt',jsonb_build_object('choice','InSession','email','null'::jsonb)) " +
-        "WHERE brand_id=$1 AND store_id=$2 AND details_id=$3 AND details_version=$4",
-      [brand, store, located.detailsReference, located.detailsVersion],
-    );
-    if (rowCount(cleared) !== 1) return unavailable();
-    return Object.freeze({ status: "Removed" as const });
   } catch (error) {
     if (error instanceof CheckoutContactRemovalError) throw error;
     return unavailable();

@@ -88,6 +88,7 @@ import type {
 } from "./merchant-order-staff-cancellation.js";
 import type { createMerchantUnpaidRoundCancellation } from "./merchant-unpaid-round-cancellation.js";
 import type { createMerchantEndedOrderStockRelease } from "./merchant-stock-holding-orders.js";
+import type { createMerchantPickupContactRemoval } from "./merchant-pickup-contact-removal.js";
 import type { createMerchantOrderAcceptanceHoldRefund } from "./merchant-order-acceptance-hold-refund.js";
 import type { createMerchantOrderItemStaffCancellation } from "./merchant-order-item-staff-cancellation.js";
 import type { createMerchantCounterMenu } from "./merchant-counter-menu.js";
@@ -515,6 +516,8 @@ export interface MerchantBffRouterOptions {
   readonly unpaidRoundCancellation?: ReturnType<typeof createMerchantUnpaidRoundCancellation>;
   /** WP-2423 (2026-10-16): return stock still set aside for an earlier-day Order that ended. */
   readonly endedOrderStockRelease?: ReturnType<typeof createMerchantEndedOrderStockRelease>;
+  /** M108: staff remove a guest's pickup contact from an order at the guest's request. */
+  readonly pickupContactRemoval?: ReturnType<typeof createMerchantPickupContactRemoval>;
   /** WP-2423 Q9-G1: a manager refunds an order paid while the Store was offline. */
   readonly orderAcceptanceHoldRefund?: ReturnType<typeof createMerchantOrderAcceptanceHoldRefund>;
   /** WP-2423 Q6 step 2a: staff cancel item lines before the kitchen starts them. */

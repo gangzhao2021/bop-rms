@@ -24,6 +24,7 @@ import { StaffOrderCancellationError } from "./merchant-order-staff-cancellation
 import { PaidOrderAutoAcceptOffError, PaidOrderKeepError } from "./merchant-paid-order-watch.js";
 import { UnpaidRoundCancellationError } from "./merchant-unpaid-round-cancellation.js";
 import { EndedOrderStockReleaseError } from "./merchant-stock-holding-orders.js";
+import { PickupContactRemovalError } from "./merchant-pickup-contact-removal.js";
 import { StaffItemCancellationError } from "./merchant-order-item-staff-cancellation.js";
 import { OrderCloseCommandError } from "./merchant-dining-order-close-command.js";
 import { UnpaidDepartureError } from "./merchant-dining-unpaid-departure.js";
@@ -1221,6 +1222,53 @@ export function installMerchantOrderRoutes(
         response.status(status).set("Cache-Control", NO_STORE).json({ error: code });
       });
   });
+  // M108: staff remove a guest's pickup contact at the guest's request (attributed, never echoed).
+  router.post(
+    "/orders/pickup-contact/removal",
+    sameOriginMutation(options),
+    (request, response) => {
+      const sessionCookie = cookie(request, "__Host-bop-merchant");
+      const csrf = exactHeader(request, "x-bop-csrf");
+      if (
+        sessionCookie === null ||
+        csrf === null ||
+        csrf.length === 0 ||
+        Object.keys(request.query).length !== 0
+      ) {
+        denied(response);
+        return;
+      }
+      if (!options.pickupContactRemoval) {
+        response.status(503).json({ error: "pickup_contact_removal_unavailable" });
+        return;
+      }
+      void options
+        .pickupContactRemoval({ sessionCookie, csrf, command: request.body })
+        .then((result) => {
+          response.set("Cache-Control", NO_STORE);
+          response.json({ status: result.status });
+        })
+        .catch((error: unknown) => {
+          noteFailure(response, error);
+          if (!(error instanceof PickupContactRemovalError)) {
+            failed(response, error);
+            return;
+          }
+          const [status, code] = (
+            {
+              PICKUP_CONTACT_REMOVAL_INPUT_INVALID: [400, "pickup_contact_removal_input_invalid"],
+              PICKUP_CONTACT_REMOVAL_PERMISSION_DENIED: [
+                403,
+                "pickup_contact_removal_permission_denied",
+              ],
+              PICKUP_CONTACT_REMOVAL_NOT_FOUND: [404, "order_not_found"],
+              PICKUP_CONTACT_REMOVAL_UNAVAILABLE: [503, "pickup_contact_removal_unavailable"],
+            } as const
+          )[error.code];
+          response.status(status).set("Cache-Control", NO_STORE).json({ error: code });
+        });
+    },
+  );
   // WP-2423 Q6 step 2a: staff cancel item lines before the kitchen starts them; those items'
   // net and tax are refunded (the last remaining lines cancel the whole order or batch).
   const itemCancellationError = (response: express.Response, error: unknown) => {
