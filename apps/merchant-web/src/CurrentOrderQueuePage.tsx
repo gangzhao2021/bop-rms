@@ -2435,7 +2435,13 @@ export function CurrentOrderDetails({
   onChanged,
   lines,
   fetcher,
+  revision = 0,
 }: {
+  /**
+   * merchant-outage-recovery M43: the page's in-place reread count; the serving progress reads
+   * again with it (the kitchen's steps do not change the order's version).
+   */
+  readonly revision?: number;
   readonly order: CurrentOrderQueue["items"][number];
   readonly csrf: string;
   readonly locked: boolean;
@@ -2455,7 +2461,9 @@ export function CurrentOrderDetails({
         <DiningRoundsProvider
           orderReference={order.orderReference}
           csrf={csrf}
-          refreshKey={order.observedAt + ":" + String(order.currentVersion)}
+          refreshKey={
+            order.observedAt + ":" + String(order.currentVersion) + ":" + String(revision)
+          }
           locked={locked}
           onBusy={onBusy}
           onChanged={onChanged}
@@ -3567,6 +3575,7 @@ export function CurrentOrderQueuePage({
             })()}
             detail={(order, open, roundHead) => (
               <CurrentOrderDetails
+                revision={linesRevision}
                 fetcher={fetcher}
                 lines={
                   detail !== undefined ? (
@@ -3833,7 +3842,12 @@ export function CurrentOrderQueuePage({
                     <fieldset disabled={servingBusy} className="order-cancel-actions">
                       {detail !== undefined ? (
                         <PayLaterItemRemoveAction
-                          key={"remove-" + batch.orderBatchReference}
+                          key={
+                            "remove-" +
+                            batch.orderBatchReference +
+                            ":" +
+                            String(order.currentVersion)
+                          }
                           order={order}
                           batch={batch}
                           lines={detail.lines.items}
@@ -3887,7 +3901,7 @@ export function CurrentOrderQueuePage({
                         />
                       ) : batch.canCancel ? (
                         <StaffOrderCancelAction
-                          key={batch.orderBatchReference}
+                          key={batch.orderBatchReference + ":" + String(order.currentVersion)}
                           order={order}
                           batch={batch}
                           csrf={csrf}
@@ -3898,7 +3912,12 @@ export function CurrentOrderQueuePage({
                       {/* WP-2423 Q6 step 2: items are chosen from the order's lines (order detail). */}
                       {!batch.canCancelItems ? null : detail !== undefined ? (
                         <StaffItemCancelAction
-                          key={"items-" + batch.orderBatchReference}
+                          key={
+                            "items-" +
+                            batch.orderBatchReference +
+                            ":" +
+                            String(order.currentVersion)
+                          }
                           order={order}
                           batch={batch}
                           lines={detail.lines.items}
@@ -3971,7 +3990,7 @@ export function CurrentOrderQueuePage({
                           {batch.canCancel ? (
                             <div className="order-cancel-actions">
                               <StaffOrderCancelAction
-                                key={batch.orderBatchReference}
+                                key={batch.orderBatchReference + ":" + String(order.currentVersion)}
                                 order={order}
                                 batch={batch}
                                 csrf={csrf}
@@ -3989,7 +4008,9 @@ export function CurrentOrderQueuePage({
                 {batch.canCancelUnpaid ? (
                   <fieldset disabled={servingBusy}>
                     <UnpaidRoundCancelAction
-                      key={"unpaid-" + batch.orderBatchReference}
+                      key={
+                        "unpaid-" + batch.orderBatchReference + ":" + String(order.currentVersion)
+                      }
                       orderReference={order.orderReference}
                       orderBatchReference={batch.orderBatchReference}
                       roundNumber={batch.sequence}
