@@ -1277,6 +1277,19 @@
   color: var(--bop-color-danger);
 }
 
+/* WP-2423 shared-table-checkout (c): the table's unsent cart. The dish keeps its line; the reason
+   question and the three reasons sit on their own line under it, so they never split mid-row. */
+.tables-v3 .table-cart .table-phones__list li > span:first-child {
+  flex: 1 1 14em;
+  min-width: 0;
+}
+.tables-v3 .table-cart .table-phones__confirm {
+  flex-basis: 100%;
+}
+.tables-v3 .table-cart .table-phones__confirm > span {
+  flex-basis: 100%;
+}
+
 /* WP-2423 item 8 ⑤ decisions 5–7: a guest round waiting for staff before the kitchen. The one
    next step ("Send to kitchen") is the accent fill; cancelling is accent words, asked once more. */
 .tables-v3 .table-held-rounds {
