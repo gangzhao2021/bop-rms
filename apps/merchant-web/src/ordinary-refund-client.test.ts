@@ -685,7 +685,7 @@ it("WP-2423 item 4: shows a recorded card-machine slip reference, never a card n
   await expect(client.status(id(1), id(3), csrf)).rejects.toMatchObject({ code: "Unavailable" });
 });
 
-it("WP-2423 M10: a full refund of an order nobody accepted is told to use Can't make it", async () => {
+it("WP-2423 M10: a full refund of an order nobody accepted is told to use Refuse and refund, the control a manager has", async () => {
   const fetcher = vi
     .fn<typeof fetch>()
     .mockResolvedValue(response({ error: "refund_order_not_accepted" }, 409));
@@ -695,6 +695,6 @@ it("WP-2423 M10: a full refund of an order nobody accepted is told to use Can't 
     .catch((e: unknown) => e);
   expect(error).toMatchObject({ code: "OrderNotAccepted" });
   expect(refundErrorText(error)).toBe(
-    "This order hasn't been accepted. Use Can't make it to refund it in full.",
+    "This order hasn't been accepted. Use Refuse and refund on the order to refund it in full.",
   );
 });

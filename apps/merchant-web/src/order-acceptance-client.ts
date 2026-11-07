@@ -12,7 +12,7 @@ export type OrderAcceptanceConflict =
   | "Changed"
   | "AlreadyAccepted"
   | "NotAcceptable"
-  /** WP-2423 M10: every dish of it was refunded; close it with Can't make it. */
+  /** WP-2423 M10: every dish of it was refunded; close it with the refusal the reader has. */
   | "FullyRefunded";
 export class OrderAcceptanceClientError extends Error {
   constructor(

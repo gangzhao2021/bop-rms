@@ -17,6 +17,7 @@ export function OrderAcceptanceAction({
   onChanged,
   resumeUnknown = false,
   paused = false,
+  closeWith = null,
 }: {
   /**
    * merchant-outage-recovery M100: this device has no network, so an Accept could not be sent.
@@ -37,6 +38,12 @@ export function OrderAcceptanceAction({
   readonly onRejected: () => void;
   /** WP-2423 D1: the order changed or was accepted meanwhile; the list reloads its current state. */
   readonly onChanged?: () => void;
+  /**
+   * WP-2423 M10: the control this reader has to close an order already refunded in full — the
+   * general "Refuse and refund" (a manager), "Can't make it" (whoever may accept), a refund
+   * through the outage hold's "Refund instead", or none (ask a manager).
+   */
+  readonly closeWith?: "RefuseAndRefund" | "CantMake" | "RefundInstead" | null;
 }) {
   const [state, setState] = useState<
     "Idle" | "Submitting" | "Unknown" | "Denied" | OrderAcceptanceConflict
@@ -106,7 +113,15 @@ export function OrderAcceptanceAction({
       ) : state === "AlreadyAccepted" ? (
         <p role="status">{t("Already accepted by someone else. It is in the kitchen.")}</p>
       ) : state === "FullyRefunded" ? (
-        <p role="status">{t("This order was refunded in full. Close it with Can't make it.")}</p>
+        <p role="status">
+          {closeWith === "RefuseAndRefund"
+            ? t("This order was refunded in full. Close it with Refuse and refund.")
+            : closeWith === "CantMake"
+              ? t("This order was refunded in full. Close it with Can't make it.")
+              : closeWith === "RefundInstead"
+                ? t("This order was refunded in full. Close it with Refund instead.")
+                : t("This order was refunded in full. Ask a manager to close it.")}
+        </p>
       ) : state === "NotAcceptable" ? (
         <p role="status">
           {t(

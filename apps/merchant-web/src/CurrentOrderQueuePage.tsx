@@ -1188,6 +1188,20 @@ export const unpaidRoundUrgentMinutes = 10;
  * WP-2423 item 2: what staff do about a guest's unpaid round. A payment that can't start on the
  * guest's phone needs a way out here too: "ask them to finish paying" alone sends everyone in a loop.
  */
+/**
+ * WP-2423 M10: which control closes a batch waiting for acceptance that was refunded in full, as
+ * the order panel offers it: "Can't make it" when that is shown (no general cancel), otherwise the
+ * general "Refuse and refund", otherwise none.
+ */
+export function acceptanceCloseControl(
+  batch: Pick<CurrentOrderQueue["items"][number]["batches"][number], "canCancel" | "canCantMake">,
+): "RefuseAndRefund" | "CantMake" | null {
+  return batch.canCantMake && !batch.canCancel
+    ? "CantMake"
+    : batch.canCancel
+      ? "RefuseAndRefund"
+      : null;
+}
 export function unpaidGuestRoundGuidance(canCancel: boolean): string {
   return canCancel
     ? t(
@@ -3662,6 +3676,7 @@ export function CurrentOrderQueuePage({
       key={batch.orderBatchReference}
       resumeUnknown={operations.current.has(batch.orderBatchReference)}
       csrf={csrf}
+      closeWith={acceptanceCloseControl(batch)}
       orderNumber={
         batch.sequence === 1 ? order.orderNumber : order.orderNumber + " · round " + batch.sequence
       }
@@ -4482,6 +4497,7 @@ export function CurrentOrderQueuePage({
                               resumeUnknown={operations.current.has(batch.orderBatchReference)}
                               paused={offline}
                               csrf={csrf}
+                              closeWith="RefundInstead"
                               orderNumber={
                                 batch.sequence === 1
                                   ? order.orderNumber

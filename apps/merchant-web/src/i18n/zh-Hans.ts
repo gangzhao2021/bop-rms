@@ -290,8 +290,13 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "退款由店长记录，再由你批准。如果你一个人经营，请在“门店设置”里打开“独立经营者”（对本品牌所有门店生效），或在“员工”里给一位员工店长角色。",
   "This order was refunded in full. Close it with Can't make it.":
     "这单已全额退款。请按“做不了”结束。",
-  "This order hasn't been accepted. Use Can't make it to refund it in full.":
-    "这单还没接。请用“做不了”全额退款。",
+  "This order hasn't been accepted. Use Refuse and refund on the order to refund it in full.":
+    "这单还没接。请在这单上用“拒单并退款”全额退款。",
+  "This order was refunded in full. Close it with Refuse and refund.":
+    "这单已全额退款。请按“拒单并退款”结束。",
+  "This order was refunded in full. Close it with Refund instead.":
+    "这单已全额退款。请按“改为退款”结束。",
+  "This order was refunded in full. Ask a manager to close it.": "这单已全额退款。请店长结束它。",
   "This order was paid on the card machine. Refund these items from the order's payment under Payments and refunds: refund on the machine, then record the slip.":
     "这单是刷卡机付的。请在“付款与退款”里从这笔付款退这些菜：先在刷卡机上退款，再登记小票。",
   "Cancelled. Earlier refunds cover the whole payment; {value} of them is not sent yet.":
