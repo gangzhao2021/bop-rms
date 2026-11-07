@@ -353,7 +353,18 @@ export function createCustomerEntryComposition(
             todayKind: upcoming?.todayKind ?? null,
             nextOpening: upcoming?.nextOpening ?? null,
             localDate,
-            ...(notReady ? { notReadyForOrders: true as const } : {}),
+            // M116: closed for the night or paused, the guest can still look at the menu. A Store
+            // not ready for orders yet has no menu to show.
+            ...(notReady
+              ? { notReadyForOrders: true as const }
+              : {
+                  browse: Object.freeze({
+                    brandDisplayName: profile.profile.brandDisplayName,
+                    publicStoreReference: String(qr.context.publicStoreReference),
+                    locale: String(qr.context.locale),
+                    channel: qr.context.channel,
+                  }),
+                }),
           });
 
         // Coordinator 2026-10-30: at a table, whether a party is seated there now (public state).

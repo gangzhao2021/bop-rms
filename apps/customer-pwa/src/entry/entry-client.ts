@@ -1,5 +1,6 @@
 import { guestReadRetryWaitsMs } from "../network/read-retry.js";
 import type {
+  CustomerEntryBrowseContext,
   CustomerEntryClient,
   CustomerEntryEstablishedContext,
   CustomerEntryIntent,
@@ -185,6 +186,9 @@ function parseNotAccepting(value: unknown): CustomerEntryScreenState {
     ...((raw.store as { newGuestsPaused?: unknown } | null)?.newGuestsPaused === true
       ? ["newGuestsPaused"]
       : []),
+    ...(raw.store !== null && typeof raw.store === "object" && Object.hasOwn(raw.store, "browse")
+      ? ["browse"]
+      : []),
   ]);
   const date = /^\d{4}-\d{2}-\d{2}$/u;
   const time = /^([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]$/u;
@@ -234,6 +238,31 @@ function parseNotAccepting(value: unknown): CustomerEntryScreenState {
         startLocalTime: next.startLocalTime,
       });
     }
+    // M116: closed or paused, the menu can still be looked at (no visit, no cart).
+    let browse: CustomerEntryBrowseContext | undefined;
+    if (store.browse !== undefined) {
+      if (store.notReadyForOrders === true || store.newGuestsPaused === true)
+        throw new TypeError("no menu without hours");
+      const menu = exact(store.browse, [
+        "brandDisplayName",
+        "publicStoreReference",
+        "locale",
+        "channel",
+      ]);
+      if (
+        typeof menu.locale !== "string" ||
+        !localePattern.test(menu.locale) ||
+        (menu.channel !== "DineIn" && menu.channel !== "Pickup")
+      )
+        throw new TypeError("invalid menu context");
+      browse = Object.freeze({
+        publicStoreReference: reference(menu.publicStoreReference),
+        channel: menu.channel,
+        locale: menu.locale,
+        brandDisplayName: publicLabel(menu.brandDisplayName),
+        storeDisplayName: publicLabel(store.storeDisplayName),
+      });
+    }
     return Object.freeze({
       kind: "NotAccepting",
       storeDisplayName: publicLabel(store.storeDisplayName),
@@ -245,6 +274,7 @@ function parseNotAccepting(value: unknown): CustomerEntryScreenState {
       localDate: store.localDate as string | null,
       ...(store.notReadyForOrders === true ? { notReady: true as const } : {}),
       ...(store.newGuestsPaused === true ? { newGuestsPaused: true as const } : {}),
+      ...(browse === undefined ? {} : { browse }),
     });
   } catch {
     return Object.freeze({ kind: "ServiceUnavailable" });
@@ -447,6 +477,8 @@ export function createCustomerEntryClient(
       retryAfterSeconds: Math.max(0, Math.ceil(((retryUntil ?? 0) - performance.now()) / 1000)),
     });
   let flight: Promise<CustomerEntryScreenState> | null = null;
+  // M116: the last answer was "not taking orders now", which is worth asking again on return.
+  let closedAnswer = false;
   const fetcher = boundary.fetch;
   const online = () => {
     try {
@@ -593,15 +625,19 @@ export function createCustomerEntryClient(
     const pending = execute(intent);
     flight = pending;
     settled = pending;
-    void pending.then(() => {
+    closedAnswer = false;
+    void pending.then((answer) => {
       if (flight === pending) flight = null;
+      if (settled === pending) closedAnswer = answer.kind === "NotAccepting";
     });
     return pending;
   }
   return Object.freeze({
     hasEntry: token !== null || replay,
     start() {
-      return retryUntil === null ? (settled ?? launch()) : Promise.resolve(cooldown());
+      if (retryUntil !== null) return Promise.resolve(cooldown());
+      // M116: back from looking at a closed Store's menu, the page asks again whether it's open.
+      return settled !== null && !closedAnswer ? settled : launch();
     },
     retry() {
       return flight ?? launch();

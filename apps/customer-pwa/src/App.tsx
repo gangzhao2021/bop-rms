@@ -172,7 +172,8 @@ export function App({
       current.channel === context.channel &&
       current.locale === context.locale &&
       current.brandDisplayName === context.brandDisplayName &&
-      current.storeDisplayName === context.storeDisplayName
+      current.storeDisplayName === context.storeDisplayName &&
+      current.closed === context.closed
         ? current
         : Object.freeze({
             publicStoreReference: context.publicStoreReference,
@@ -180,6 +181,8 @@ export function App({
             locale: context.locale,
             brandDisplayName: context.brandDisplayName,
             storeDisplayName: context.storeDisplayName,
+            // M116: a Store not taking orders now: its menu is only to look at.
+            ...(context.closed === undefined ? {} : { closed: context.closed }),
           }),
     );
   }, []);

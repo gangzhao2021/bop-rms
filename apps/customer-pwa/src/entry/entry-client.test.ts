@@ -324,6 +324,67 @@ describe("customer entry browser boundary", () => {
     await expect(start()).resolves.toMatchObject({ kind: "NotAccepting", newGuestsPaused: true });
   });
 
+  it("M116: a closed Store's menu can be looked at, and coming back asks again whether it's open", async () => {
+    const browse = {
+      brandDisplayName: "Synthetic Brand",
+      publicStoreReference: "0190a4c0-0000-7000-8000-000000000004",
+      locale: "en-CA",
+      channel: "Pickup",
+    };
+    const closed = {
+      schemaVersion: 1,
+      code: "entry_not_accepting",
+      messageKey: "customer.entry.not_accepting",
+      recovery: { action: "TryLaterOrAskStaff", storeSelection: "Hidden" },
+      store: {
+        storeDisplayName: "Synthetic Store",
+        operatingState: "Closed",
+        todayHours: [],
+        todayKind: null,
+        nextOpening: { localDate: "2026-12-23", startLocalTime: "11:00:00" },
+        localDate: "2026-12-22",
+        browse,
+      },
+    };
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(response(409, closed))
+      .mockResolvedValueOnce(response(409, closed))
+      .mockResolvedValueOnce(
+        response(409, {
+          ...closed,
+          store: { ...closed.store, browse: { ...browse, channel: "Delivery" } },
+        }),
+      )
+      .mockResolvedValueOnce(
+        response(409, { ...closed, store: { ...closed.store, newGuestsPaused: true } }),
+      );
+    const client = createCustomerEntryClient({
+      fetch,
+      hash: "#qr=aaa.bbb.ccc",
+      pathname: "/",
+      search: "",
+      replaceState: vi.fn(),
+      online: () => true,
+    });
+    await expect(client.start()).resolves.toMatchObject({
+      kind: "NotAccepting",
+      browse: {
+        publicStoreReference: browse.publicStoreReference,
+        channel: "Pickup",
+        locale: "en-CA",
+        brandDisplayName: "Synthetic Brand",
+        storeDisplayName: "Synthetic Store",
+      },
+    });
+    // The entry page opened again (back from the menu) asks the Store again, not the old answer.
+    await expect(client.start()).resolves.toMatchObject({ kind: "NotAccepting" });
+    expect(fetch).toHaveBeenCalledTimes(2);
+    // A menu context that isn't a guest channel, or one beside a pause, is never trusted.
+    await expect(client.start()).resolves.toEqual({ kind: "ServiceUnavailable" });
+    await expect(client.retry()).resolves.toEqual({ kind: "ServiceUnavailable" });
+  });
+
   it("reports offline without sending a request and retries only when explicitly asked", async () => {
     let online = false;
     const fetch = vi.fn(async () => response(201, established));

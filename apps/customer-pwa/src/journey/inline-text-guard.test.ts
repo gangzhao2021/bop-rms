@@ -253,6 +253,8 @@ const pageMachineCodes: Readonly<Record<string, ReadonlySet<string>>> = {
   "member/MemberPage.tsx": new Set(["Loading", "Ready", "Failed", "Left"]),
   "menu/MenuPage.tsx": new Set([
     "Loading",
+    // M116: how the next opening is worded inside a line (never shown).
+    "Line",
     "88px",
     "(min-width: 960px) 45vw, (min-width: 736px) 640px, calc(100vw - 64px)",
     "configure-price- - ",

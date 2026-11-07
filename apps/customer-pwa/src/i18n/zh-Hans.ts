@@ -459,6 +459,12 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Ordering and payment are paused until you reconnect. Nothing is sent in the background.":
     "恢复网络前，点单和付款都已暂停，后台不会发送任何内容。",
   "Ordering is paused": "点单已暂停",
+  "Ordering is paused for a short while": "点单暂停一小会儿",
+  "Closed now": "现在已打烊",
+  "You can look at the menu. You can order once the store opens.":
+    "可以先看看菜单，门店开门后就能点单。",
+  "You can look at the menu. You can order once ordering starts again.":
+    "可以先看看菜单，恢复点单后就能下单。",
   "Ordering is unavailable": "暂时无法点单",
   Other: "其他",
   "Outcome not confirmed": "结果未确认",

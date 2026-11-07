@@ -822,6 +822,33 @@ describe("Owner 2026-11-03: one tap for a dish with nothing to choose", () => {
     expect(screen(soldOut)).not.toContain(add);
     expect(screen(withOptions, { readOnlyNotice: "Read only" })).not.toContain(add);
   });
+
+  it("M116: a closed Store's menu is to look at: when it opens, Check again, no add, no Cart", () => {
+    const add = 'aria-label="Add Latte to your cart"';
+    const closed = {
+      ...context,
+      closed: {
+        paused: false,
+        nextOpening: { localDate: "2026-12-23", startLocalTime: "11:00:00" },
+        localDate: "2026-12-22",
+      },
+    };
+    const html = screen(withOptions, { context: closed });
+    expect(html).toContain("Closed now · opens tomorrow at 11:00 a.m.");
+    expect(html).toContain("You can look at the menu. You can order once the store opens.");
+    expect(html).toMatch(/href="\/"[^>]*>Check again</u);
+    expect(html).toContain("Latte");
+    expect(html).not.toContain(add);
+    expect(html).not.toContain('href="/cart"');
+    expect(html).not.toContain("menu-cart");
+    // An ordinary visit still has its cart and adding.
+    expect(screen(withOptions)).toContain('href="/cart"');
+    const paused = screen(withOptions, {
+      context: { ...context, closed: { paused: true, nextOpening: null, localDate: null } },
+    });
+    expect(paused).toContain("Ordering is paused for a short while");
+    expect(paused).not.toContain("Closed now");
+  });
 });
 
 describe("WP-2423 (cart-unsellable-dishes): a choice the Store does not offer now", () => {

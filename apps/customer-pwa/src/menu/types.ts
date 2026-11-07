@@ -4,6 +4,18 @@ export interface MenuJourneyContext {
   readonly locale: string;
   readonly brandDisplayName: string;
   readonly storeDisplayName: string;
+  /**
+   * M116: the Store isn't taking orders now (closed, or paused for a while); its menu is only to
+   * look at: no visit, no cart, nothing to add.
+   */
+  readonly closed?: MenuClosedStore | undefined;
+}
+
+/** M116: why a Store's menu is only to look at, and when it opens next. */
+export interface MenuClosedStore {
+  readonly paused: boolean;
+  readonly nextOpening: { readonly localDate: string; readonly startLocalTime: string } | null;
+  readonly localDate: string | null;
 }
 
 export interface MenuAllergenItem {

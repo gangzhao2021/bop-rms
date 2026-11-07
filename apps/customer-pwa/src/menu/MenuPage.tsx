@@ -58,12 +58,14 @@ import {
   type StoreProfileLoader,
 } from "../store/store-profile-client.js";
 import { OrdersStoppedNotice, StoreInfoSection, StoreStatusStrip } from "../store/StoreIdentity.js";
+import { nextOpeningText } from "../store/store-hours-text.js";
 import { TableOrderedProvider, useTableOrderedCount } from "../dining/table-ordered.js";
 import type { DiningSessionClient } from "../dining/dining-session-client.js";
 import { cartLinePrices, cartLinesSubtotal } from "./menu-line-prices.js";
 import type {
   CustomerMenuClient,
   MenuAllergenItem,
+  MenuClosedStore,
   MenuJourneyContext,
   MenuLoadResult,
   MenuOptionRule,
@@ -254,6 +256,31 @@ function optionPriceText(price: MenuOptionRule["options"][number]["price"]): str
   if (/^0+(\.0+)?$/u.test(price.amount)) return null;
   const amount = formatDecimalMoney(price.amount, price.currency);
   return amount === null ? t("Priced at checkout") : `+ ${amount}`;
+}
+
+/** M116: "Closed now · opens tomorrow at 11:00 a.m.", and a way to ask again. */
+function ClosedStoreNotice({ closed }: { readonly closed: MenuClosedStore }) {
+  return (
+    <>
+      <p className="menu-closed-notice__line">
+        {closed.paused
+          ? t("Ordering is paused for a short while")
+          : closed.nextOpening === null
+            ? t("Closed now")
+            : t("Closed now") +
+              " · " +
+              nextOpeningText(closed.nextOpening, closed.localDate, "Line")}
+      </p>
+      <p>
+        {closed.paused
+          ? t("You can look at the menu. You can order once ordering starts again.")
+          : t("You can look at the menu. You can order once the store opens.")}
+      </p>
+      <Link className="menu-action" to="/">
+        {t("Check again")}
+      </Link>
+    </>
+  );
 }
 
 export function MenuBrowsePage({
@@ -447,9 +474,9 @@ export function MenuScreen({
   mode,
   onRetry,
   onRefresh,
-  readOnlyNotice,
+  readOnlyNotice: givenReadOnlyNotice,
   cartSummary,
-  storeProfile,
+  storeProfile: givenStoreProfile,
   tableOrderedClient,
   search,
   searchTerm,
@@ -459,7 +486,14 @@ export function MenuScreen({
   // push the page down; the item's own heading carries its name.
   const title = mode === "search" ? t("Search menu") : t("Menu");
   const browseFound = mode === "browse" && state.kind === "Found";
-  const withCart = context !== undefined && mode !== "detail";
+  // M116: a Store not taking orders now shows its menu to look at, with no cart and no adding.
+  const closed = context?.closed;
+  const readOnlyNotice =
+    givenReadOnlyNotice ??
+    (closed === undefined ? undefined : <ClosedStoreNotice closed={closed} />);
+  // Its hours come from the entry answer: this phone may have no visit, or one at another Store.
+  const storeProfile = closed === undefined ? givenStoreProfile : null;
+  const withCart = context !== undefined && mode !== "detail" && closed === undefined;
   const justAdded = useBackOnMenu(browseFound);
   const [quickMessage, setQuickMessage] = useState<string | null>(null);
   const [cartReads, setCartReads] = useState(0);
@@ -488,6 +522,7 @@ export function MenuScreen({
       <MenuQuickAdd.Provider value={quickAdd}>
         <CustomerPage
           step="menu"
+          browseOnly={closed !== undefined}
           className={`customer-menu-screen customer-menu-screen--${mode}`}
           store={
             context
@@ -501,6 +536,11 @@ export function MenuScreen({
         >
           <div className={`menu-layout${withCart ? " menu-layout--with-cart" : ""}`}>
             <div className="menu-layout__main">
+              {closed !== undefined && mode !== "detail" ? (
+                <div className="menu-readonly-boundary menu-closed-notice" role="status">
+                  {readOnlyNotice}
+                </div>
+              ) : null}
               {mode === "browse" && context !== undefined ? (
                 <StoreStatusStrip
                   load={storeProfile === undefined ? browserStoreProfile : storeProfile}

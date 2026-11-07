@@ -40,6 +40,7 @@ export function CustomerPage({
   className,
   fallbackTitle,
   navigationHeld = false,
+  browseOnly = false,
   children,
 }: {
   readonly step: CustomerJourneyStep;
@@ -51,6 +52,11 @@ export function CustomerPage({
   readonly fallbackTitle?: string | undefined;
   /** WP-2423 item 6: the page's answer is on its way, and only this page can say what it was. */
   readonly navigationHeld?: boolean;
+  /**
+   * M116: a Store not taking orders now, looked at with no visit: there is no cart or order to go
+   * to, so the journey offers only the menu.
+   */
+  readonly browseOnly?: boolean;
   readonly children: ReactNode;
 }) {
   const { language } = useLanguage();
@@ -65,12 +71,12 @@ export function CustomerPage({
     : t("Scan the location QR code to begin");
   const links: readonly { step: CustomerJourneyStep; label: string; href: string }[] = [
     { step: "menu", label: t("Menu"), href: "/menu" },
-    { step: "cart", label: t("Cart"), href: "/cart" },
-    ...(orderReference === undefined
+    ...(browseOnly ? [] : [{ step: "cart" as const, label: t("Cart"), href: "/cart" }]),
+    ...(orderReference === undefined || browseOnly
       ? []
       : [{ step: "order" as const, label: t("Order"), href: `/orders/${orderReference}` }]),
     // WP-2423 Q8: a dine-in guest can always see what the whole table has ordered.
-    ...(store?.serviceMode === "DineIn" || step === "table"
+    ...((store?.serviceMode === "DineIn" && !browseOnly) || step === "table"
       ? [{ step: "table" as const, label: t("Your table"), href: "/dine-in/session" }]
       : []),
   ];

@@ -543,6 +543,13 @@ export async function exercisePersistentProfileEntry({
           todayKind: null,
           localDate: "2026-01-15",
           nextOpening: { localDate: "2026-01-16", startLocalTime: "00:00:00" },
+          // M116: the guest can look at the menu while it's closed (public context, no Session).
+          browse: {
+            brandDisplayName: body.brandDisplayName,
+            publicStoreReference: body.publicStoreReference,
+            locale: body.locale,
+            channel: "Pickup",
+          },
         },
       });
       // M02: a closed Store keeps only the scan the guest already holds (a reload asks the same Store

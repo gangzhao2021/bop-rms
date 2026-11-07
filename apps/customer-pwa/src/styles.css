@@ -3214,3 +3214,16 @@ body {
     flex-wrap: wrap;
   }
 }
+/* M116: a Store not taking orders now; its menu is to look at. */
+.menu-closed-notice {
+  display: grid;
+  gap: var(--bop-space-2);
+  justify-items: start;
+  margin-bottom: var(--bop-space-3);
+}
+.menu-closed-notice p {
+  margin: 0;
+}
+.menu-closed-notice__line {
+  font-weight: 650;
+}

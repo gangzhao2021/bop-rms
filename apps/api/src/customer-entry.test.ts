@@ -447,6 +447,28 @@ describe("WP-1004 Customer-entry contract", () => {
     });
     port.result = { ...(port.result as object), newGuestsPaused: false };
     expect((await post(await listen(customerEntry(port)))).status).toBe(503);
+    // M116: closed for the night, the guest can look at the menu (its public context, no cookie).
+    const browse = {
+      brandDisplayName: "Synthetic Brand",
+      publicStoreReference: "0190a4c0-0000-7000-8000-000000000004",
+      locale: "en-CA",
+      channel: "Pickup",
+    };
+    const closed = { ...(port.result as Record<string, unknown>) };
+    delete closed.newGuestsPaused;
+    port.result = { ...closed, browse };
+    const browsing = await post(await listen(customerEntry(port)));
+    expect(browsing.status).toBe(409);
+    expect(visitCookies(browsing)).toEqual([]);
+    expect(((await browsing.json()) as { store: unknown }).store).toMatchObject({ browse });
+    // Never beside a pause (no menu then), and never with a context that isn't public.
+    port.result = { ...closed, browse, newGuestsPaused: true };
+    expect((await post(await listen(customerEntry(port)))).status).toBe(503);
+    port.result = { ...closed, browse: { ...browse, channel: "Delivery" } };
+    expect((await post(await listen(customerEntry(port)))).status).toBe(503);
+    port.result = { ...closed, browse: { ...browse, brandDisplayName: "<b>" } };
+    expect((await post(await listen(customerEntry(port)))).status).toBe(503);
+    port.result = closed;
     port.result = { ...(port.result as object), storeDisplayName: "<script>" };
     expect((await post(await listen(customerEntry(port)))).status).toBe(503);
   });

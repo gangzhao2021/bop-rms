@@ -289,6 +289,52 @@ describe("WP-2423 Q4 not accepting orders", () => {
   });
 });
 
+describe("M116: a closed Store gives a menu to look at, never a dead end", () => {
+  const closed = {
+    kind: "NotAccepting" as const,
+    storeDisplayName: "Synthetic Store",
+    paused: false,
+    todayHours: [],
+    todayKind: null,
+    nextOpening: { localDate: "2026-12-23", startLocalTime: "11:00:00" },
+    localDate: "2026-12-22",
+  };
+  const browse = {
+    publicStoreReference: context.publicStoreReference,
+    channel: "Pickup" as const,
+    locale: "en-CA",
+    brandDisplayName: context.brandDisplayName,
+    storeDisplayName: "Synthetic Store",
+  };
+  it("offers the menu first and Check again second, under the Store's name, with no Cart link", () => {
+    const html = render({ ...closed, browse });
+    expect(html).toContain('class="entry-action" type="button">Look at the menu first');
+    expect(html).toContain('class="entry-secondary-action" type="button">Check again');
+    expect(html).not.toContain(">Try again<");
+    expect(html).toContain("BOP Test Kitchen · Pickup");
+    expect(html).not.toContain("Scan the location QR code to begin");
+    expect(html).not.toContain('href="/cart"');
+    expect(html).toContain('href="/menu"');
+  });
+  it("with no menu to show (an older answer) it keeps Try again, and still no Cart link", () => {
+    const html = render(closed);
+    expect(html).toContain(">Try again<");
+    expect(html).not.toContain("Look at the menu first");
+    expect(html).not.toContain('href="/cart"');
+  });
+  it("has every new word in Simplified Chinese", () => {
+    for (const key of [
+      "Check again",
+      "Look at the menu first",
+      "Closed now",
+      "Ordering is paused for a short while",
+      "You can look at the menu. You can order once the store opens.",
+      "You can look at the menu. You can order once ordering starts again.",
+    ])
+      expect(zh[key], key).toBeTruthy();
+  });
+});
+
 describe("WP-2423 Q11 replaced table code", () => {
   it("tells the guest in plain words to ask staff, with no retry or internal code", () => {
     const replaced = render({ kind: "TableCodeRetired", replaced: true });

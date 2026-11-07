@@ -29,6 +29,15 @@ export type CustomerEntryPublicContext = Readonly<{
   storeDisplayName: string;
 }>;
 
+/** M116: a Store closed now or paused: its menu to look at, with nothing to order. */
+export type CustomerEntryBrowseContext = Readonly<{
+  publicStoreReference: string;
+  channel: "DineIn" | "Pickup";
+  locale: string;
+  brandDisplayName: string;
+  storeDisplayName: string;
+}>;
+
 export type CustomerEntryIntent = "Start" | "Join" | "NewParty";
 
 /**
@@ -67,6 +76,8 @@ export type CustomerEntryScreenState =
       notReady?: true;
       /** WP-2423 item 13 ②: not taking new guests for now; no hours to wait for. */
       newGuestsPaused?: true;
+      /** M116: the menu can be looked at (read-only: no visit, no cart). */
+      browse?: CustomerEntryBrowseContext;
     }>
   /** WP-2423 item 8 ⑦ 1b: a pickup code at a Store that takes dine-in orders only. */
   | Readonly<{ kind: "PickupNotOffered"; storeDisplayName: string }>

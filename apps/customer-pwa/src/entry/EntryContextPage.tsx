@@ -34,6 +34,7 @@ import type {
   CustomerEntryScreenState,
 } from "./types.js";
 import { watchTableOpening } from "./table-open-recheck.js";
+import type { MenuClosedStore } from "../menu/types.js";
 
 const unavailableClient: CustomerEntryClient = Object.freeze({
   hasEntry: false,
@@ -54,7 +55,10 @@ export interface EntryContextPageProps {
         context: Pick<
           CustomerEntryEstablishedContext,
           "publicStoreReference" | "channel" | "locale" | "brandDisplayName" | "storeDisplayName"
-        >,
+        > & {
+          /** M116: the Store isn't taking orders now; its menu is only to look at. */
+          readonly closed?: MenuClosedStore | undefined;
+        },
       ) => void)
     | undefined;
   /**
@@ -278,11 +282,27 @@ export function EntryContextPage({
         }
       />
     );
+  // M116: a Store closed now (or paused): the guest looks at its menu, with nothing to order.
+  const browse =
+    state.kind === "NotAccepting" && state.browse !== undefined
+      ? (() => {
+          const context = state.browse;
+          const closed: MenuClosedStore = Object.freeze({
+            paused: state.paused,
+            nextOpening: state.nextOpening,
+            localDate: state.localDate,
+          });
+          return () => {
+            established.current?.(Object.freeze({ ...context, closed }));
+            void navigate("/menu");
+          };
+        })()
+      : undefined;
   return (
     <EntryContextView
       diningAdmission={diningAdmission}
       headingRef={heading}
-      onContinue={() => navigate("/menu")}
+      onContinue={browse ?? (() => navigate("/menu"))}
       onRetry={retry}
       onAnswer={client.enter === undefined ? undefined : answer}
       onSeated={recheckNow ?? undefined}
@@ -456,7 +476,9 @@ export function EntryContextView({
     state.kind === "TableBeingCleaned" ||
     state.kind === "TableAskNewParty"
       ? state.context
-      : null);
+      : state.kind === "NotAccepting"
+        ? (state.browse ?? null)
+        : null);
   return (
     <CustomerPage
       step="entry"
@@ -471,6 +493,8 @@ export function EntryContextView({
       }
       className="entry-page"
       fallbackTitle={t("Start your order")}
+      // M116: no visit was started, so there is no cart or order to go to.
+      browseOnly={state.kind === "NotAccepting"}
     >
       <section className="entry-card" aria-live="polite" aria-busy={state.kind === "Loading"}>
         <EntryState
@@ -579,10 +603,22 @@ function StateHeading({
 function RetryAction({
   onRetry,
   disabled = false,
-}: Readonly<{ onRetry?: (() => void) | undefined; disabled?: boolean }>) {
+  secondary = false,
+  label,
+}: Readonly<{
+  onRetry?: (() => void) | undefined;
+  disabled?: boolean;
+  secondary?: boolean;
+  label?: string | undefined;
+}>) {
   return onRetry ? (
-    <button className="entry-action" type="button" onClick={onRetry} disabled={disabled}>
-      {t("Try again")}
+    <button
+      className={secondary ? "entry-secondary-action" : "entry-action"}
+      type="button"
+      onClick={onRetry}
+      disabled={disabled}
+    >
+      {label ?? t("Try again")}
     </button>
   ) : null;
 }
@@ -716,7 +752,17 @@ function EntryState({
                   .join(listSeparator())}
           </p>
         )}
-        <RetryAction onRetry={onRetry} />
+        {/* M116: the menu to look at first; asking again whether it's open comes second. */}
+        {state.browse !== undefined && onContinue ? (
+          <>
+            <button className="entry-action" type="button" onClick={onContinue}>
+              {t("Look at the menu first")}
+            </button>
+            <RetryAction onRetry={onRetry} secondary label={t("Check again")} />
+          </>
+        ) : (
+          <RetryAction onRetry={onRetry} />
+        )}
       </div>
     );
 

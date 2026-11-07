@@ -96,6 +96,19 @@ export interface CustomerEntryNotAccepting {
   readonly notReadyForOrders?: true;
   /** WP-2423 item 13 ②: the platform paused this merchant's new guests (no hours to wait for). */
   readonly newGuestsPaused?: true;
+  /**
+   * M116: closed for the night or paused for a while, the guest can still look at the menu (no
+   * Session, no cart): the public context the read-only menu needs.
+   */
+  readonly browse?: CustomerEntryBrowseContext;
+}
+
+/** M116: what the read-only menu of a Store not taking orders now needs; no Session. */
+export interface CustomerEntryBrowseContext {
+  readonly brandDisplayName: string;
+  readonly publicStoreReference: string;
+  readonly locale: string;
+  readonly channel: "DineIn" | "Pickup";
 }
 
 /**
@@ -628,12 +641,39 @@ function parsePortResult(
       "localDate",
       ...(Object.hasOwn(value as object, "notReadyForOrders") ? ["notReadyForOrders"] : []),
       ...(Object.hasOwn(value as object, "newGuestsPaused") ? ["newGuestsPaused"] : []),
+      ...(Object.hasOwn(value as object, "browse") ? ["browse"] : []),
     ]);
     if (
       (raw.notReadyForOrders !== undefined && raw.notReadyForOrders !== true) ||
-      (raw.newGuestsPaused !== undefined && raw.newGuestsPaused !== true)
+      (raw.newGuestsPaused !== undefined && raw.newGuestsPaused !== true) ||
+      // M116: a menu to look at only when there is a closing time or a pause to wait out.
+      (raw.browse !== undefined && (raw.notReadyForOrders === true || raw.newGuestsPaused === true))
     )
       throw new TypeError("invalid not-accepting result");
+    let browse: CustomerEntryBrowseContext | undefined;
+    if (raw.browse !== undefined) {
+      const context = closedRecord(raw.browse, [
+        "brandDisplayName",
+        "publicStoreReference",
+        "locale",
+        "channel",
+      ]);
+      if (
+        typeof context.brandDisplayName !== "string" ||
+        !/^[^\p{Cc}\p{Cf}<>{}[\]`*_#]{1,120}$/u.test(context.brandDisplayName) ||
+        context.brandDisplayName !== context.brandDisplayName.trim() ||
+        typeof context.locale !== "string" ||
+        !localePattern.test(context.locale) ||
+        (context.channel !== "DineIn" && context.channel !== "Pickup")
+      )
+        throw new TypeError("invalid not-accepting result");
+      browse = Object.freeze({
+        brandDisplayName: context.brandDisplayName,
+        publicStoreReference: parseUuidV7(context.publicStoreReference),
+        locale: context.locale,
+        channel: context.channel,
+      });
+    }
     const time = /^([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]$/u;
     if (
       typeof raw.storeDisplayName !== "string" ||
@@ -691,6 +731,7 @@ function parsePortResult(
       localDate: raw.localDate as string | null,
       ...(raw.notReadyForOrders === true ? { notReadyForOrders: true as const } : {}),
       ...(raw.newGuestsPaused === true ? { newGuestsPaused: true as const } : {}),
+      ...(browse === undefined ? {} : { browse }),
     });
   }
   throw new TypeError("unknown Customer-entry result");
@@ -936,6 +977,8 @@ export class CustomerEntryHandler {
               localDate: result.localDate,
               ...(result.notReadyForOrders === true ? { notReadyForOrders: true } : {}),
               ...(result.newGuestsPaused === true ? { newGuestsPaused: true } : {}),
+              // M116: the menu can be looked at (read-only, no Session, no cart).
+              ...(result.browse === undefined ? {} : { browse: result.browse }),
             },
           });
           return;

@@ -406,6 +406,13 @@ it.each(["closed", "paused", "mode", "scope", "time", "missing"])(
             todayKind: null,
             nextOpening: null,
             localDate: null,
+            // M116: the read-only menu's public context; no Session.
+            browse: {
+              brandDisplayName: "Synthetic Brand",
+              publicStoreReference: id(4),
+              locale: expect.any(String),
+              channel: "DineIn",
+            },
           }
         : { status: "EntryUnavailable" },
     );
@@ -597,6 +604,8 @@ describe("WP-2423 item 13 ② (Owner 2026-11-05): a merchant the platform paused
         ...(intent ? { intent } : {}),
       });
       expect(result).toMatchObject({ status: "NotAccepting", newGuestsPaused: true });
+      // M116: a merchant paused by the platform shows no menu either.
+      expect(result).not.toHaveProperty("browse");
       expect(f.admission).not.toHaveBeenCalled();
       expect(f.create).not.toHaveBeenCalled();
     }
