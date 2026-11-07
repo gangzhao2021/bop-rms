@@ -15,6 +15,7 @@ import {
   createPostgresCartQueryStore,
   createPostgresDiningCartCommandQueryStore,
   createPostgresOrderCreationStore,
+  listDiningSessionRoundSenders,
 } from "../../rms/ordering/src/index.ts";
 import { orderWriteFixture } from "../../rms/ordering/src/tests/order-creation-store.fixture.ts";
 import { seedSubmissionCart } from "../test-support/dining-order-submission-seed.mjs";
@@ -263,6 +264,8 @@ it("WP-2423 (same-table-ordering): a round sent from the cart is reported with i
           guestSessionReference: f.request.record.guestSessionReference,
           participantReference: payer,
           cartItemReferences: f.cart.items.map((item) => item.cartItemReference).sort(),
+          // M38: a pay-first round nobody has paid yet is never called paid.
+          paymentState: "AwaitingPayment",
         },
       ];
       const rounds = await lookup.recentRounds({
@@ -272,6 +275,57 @@ it("WP-2423 (same-table-ordering): a round sent from the cart is reported with i
       assert.deepEqual(
         rounds.map((round) => ({ ...round, cartItemReferences: [...round.cartItemReferences] })),
         expected,
+      );
+      // M139: the round is labelled by the phone that sent it (the payer), not by the phone that
+      // added its first dish.
+      const diningSession = (
+        await admin.query(
+          "SELECT dining_session_id::text s FROM rms_ordering.cart WHERE cart_id=$1",
+          [f.cart.cartReference],
+        )
+      ).rows[0].s;
+      // The order items name the phone that added each dish (the fixture's adder), another phone.
+      assert.ok(f.cart.items.every((item) => item.addedByParticipantReference !== payer));
+      const senders = await runner.run((tx) =>
+        listDiningSessionRoundSenders(tx, f.scope, diningSession),
+      );
+      assert.equal(senders.length, 1);
+      assert.equal(senders[0].participantReference, payer);
+      assert.equal(senders[0].staffEntered, false);
+      // Another Store sees no rounds.
+      assert.deepEqual(
+        await runner.run((tx) =>
+          listDiningSessionRoundSenders(
+            tx,
+            { brandReference: f.scope.brandReference, storeReference: id(2) },
+            diningSession,
+          ),
+        ),
+        [],
+      );
+      // A round staff entered for the table is marked as theirs.
+      await admin.query(
+        `INSERT INTO rms_ordering.staff_dining_round_entry (brand_id,store_id,operation_id,
+           intent_hash,actor_id,table_id,dining_session_id,guest_session_id,tip_selection_id,
+           recorded_after_outage,created_at,audit_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,false,date_trunc('milliseconds',now()),$10)`,
+        [
+          f.scope.brandReference,
+          f.scope.storeReference,
+          id(91),
+          "sha256:" + "b".repeat(64),
+          id(92),
+          id(93),
+          diningSession,
+          f.request.record.guestSessionReference,
+          id(94),
+          id(95),
+        ],
+      );
+      assert.equal(
+        (await runner.run((tx) => listDiningSessionRoundSenders(tx, f.scope, diningSession)))[0]
+          .staffEntered,
+        true,
       );
       // Someone adds a dish after the round (the cart moves on twice): the round is still found.
       await admin.query(
@@ -291,6 +345,44 @@ it("WP-2423 (same-table-ordering): a round sent from the cart is reported with i
       assert.deepEqual(
         await otherStore.recentRounds({ cartReference: f.cart.cartReference, observedAt: now }),
         [],
+      );
+      // M38: a round still awaiting payment stays in view whatever its age, so the payer and the
+      // companions never lose it while the payment is open.
+      const later = new Date(Date.parse(at) + 40 * 60_000).toISOString();
+      assert.deepEqual(
+        (await lookup.recentRounds({ cartReference: f.cart.cartReference, observedAt: later })).map(
+          (round) => round.paymentState,
+        ),
+        ["AwaitingPayment"],
+      );
+      // Once the payment arrived it reads Paid, and 15 minutes later it is no longer news.
+      const batch = (
+        await admin.query(
+          `SELECT b.order_batch_id,b.order_id,b.submission_id FROM rms_ordering.order_batch b
+           WHERE b.source_cart_id=$1`,
+          [f.cart.cartReference],
+        )
+      ).rows[0];
+      await admin.query(
+        `INSERT INTO rms_ordering.order_payment_acceptance_wait (wait_id,brand_id,store_id,order_id,
+           order_batch_id,submission_id,payment_event_id,source_digest,evaluated_at,record_json)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,date_trunc('milliseconds',now()),'{}'::jsonb)`,
+        [
+          id(89),
+          f.scope.brandReference,
+          f.scope.storeReference,
+          batch.order_id,
+          batch.order_batch_id,
+          batch.submission_id,
+          id(90),
+          "sha256:" + "a".repeat(64),
+        ],
+      );
+      assert.deepEqual(
+        (await lookup.recentRounds({ cartReference: f.cart.cartReference, observedAt: now })).map(
+          (round) => round.paymentState,
+        ),
+        ["Paid"],
       );
       assert.deepEqual(
         await lookup.recentRounds({
