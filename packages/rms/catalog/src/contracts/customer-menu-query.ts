@@ -124,6 +124,11 @@ export interface CustomerMenuSellableDto {
         }[]
       >
     >;
+    /**
+     * WP-2423 (M77, M167): a recipe changed what the dish contains since the menu was listed;
+     * `items` (and `byChoice`) already include what it adds. Guests are told to ask staff.
+     */
+    readonly justUpdated?: true;
   };
   /** The Store's current base price before options and tax; the final Quote stays authoritative. */
   readonly displayPrice:

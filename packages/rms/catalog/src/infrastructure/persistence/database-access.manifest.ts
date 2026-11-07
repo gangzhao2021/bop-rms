@@ -52,6 +52,15 @@ const databaseAccessManifestInput = {
       piiClassification: ["indirect_identifier"],
     },
     {
+      // WP-2423 (M77, M167): a dish's allergens as now resolved after a recipe change (append-only).
+      table: "sellable_allergen_change",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/catalog" },
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       // WP-2423 item 8 ⑥ part 4: the dish a combo is compiled into (append-only).
       table: "bundle_combo_dish",
       classification: "append-only-record",

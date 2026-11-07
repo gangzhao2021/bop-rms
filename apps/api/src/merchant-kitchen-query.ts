@@ -19,6 +19,10 @@ import {
 import {
   allergenDisclosureForChoice,
   listPublishedSellableAllergenDisclosures,
+  listSellableAllergenChangesSince,
+  sellableAllergenChangeKey,
+  withSellableAllergenChange,
+  type SellableAllergenChange,
   sellableDisclosureKey,
 } from "@rms/catalog";
 import {
@@ -119,6 +123,12 @@ export type KitchenItemAllergens =
        * for the published menu); false when they cover every choice, so choices may add more.
        */
       readonly forChoices: boolean;
+      /**
+       * WP-2423 (M77, M167): a recipe bound or ended since the menu was listed changed what the
+       * dish contains; `items` already include what it adds (or, when it could not be resolved,
+       * the cook asks the manager). Absent otherwise.
+       */
+      readonly changedSinceListed?: true;
     }
   | { readonly status: "Unavailable" };
 /** WP-2423 Q2: how the kitchen names the Order (no Customer identity). */
@@ -453,6 +463,25 @@ async function kitchenAllergens(
       productVersionReference: key.productVersionReference,
     })),
   );
+  // WP-2423 (M77, M167): what a recipe change since the listing brought, by menu version and dish.
+  const changeKeys = [
+    ...new Map(
+      [...keys.values()].map((key) => [
+        sellableAllergenChangeKey(key.menuVersionReference, key.skuReference),
+        { menuVersionReference: key.menuVersionReference, skuReference: key.skuReference },
+      ]),
+    ).values(),
+  ];
+  const changes = new Map<string, SellableAllergenChange>();
+  for (let at = 0; at < changeKeys.length; at += 200)
+    for (const [key, change] of await listSellableAllergenChangesSince(
+      transaction as never,
+      scope,
+      changeKeys.slice(at, at + 200),
+    ))
+      changes.set(key, change);
+  const named = (names: Readonly<Record<string, string>>, code: string) =>
+    names["en-CA"] ?? names.en ?? Object.values(names)[0] ?? code;
   return new Map(
     [...keys].map(([workItem, key]) => {
       const disclosure = disclosures.get(
@@ -469,6 +498,23 @@ async function kitchenAllergens(
         ] as const;
       const chosen = chosenOptions.get(workItem) ?? null;
       const forChoice = chosen === null ? null : allergenDisclosureForChoice(disclosure, chosen);
+      const listed = (forChoice ?? disclosure.items).map((item) =>
+        Object.freeze({
+          code: String(item.code),
+          name: named(item.localizedNames, String(item.code)),
+          classification: item.classification,
+        }),
+      );
+      const merged = withSellableAllergenChange(
+        listed,
+        changes.get(sellableAllergenChangeKey(key.menuVersionReference, key.skuReference)),
+        (allergen) =>
+          Object.freeze({
+            code: allergen.code,
+            name: named(allergen.localizedNames, allergen.code),
+            classification: allergen.classification,
+          }),
+      );
       return [
         workItem,
         {
@@ -476,16 +522,8 @@ async function kitchenAllergens(
           allergens: Object.freeze({
             status: "Declared" as const,
             forChoices: forChoice !== null,
-            items: Object.freeze(
-              (forChoice ?? disclosure.items).map((item) => {
-                const names = item.localizedNames;
-                return Object.freeze({
-                  code: item.code,
-                  name: names["en-CA"] ?? names.en ?? Object.values(names)[0] ?? item.code,
-                  classification: item.classification,
-                });
-              }),
-            ),
+            items: Object.freeze(merged.items),
+            ...(merged.changed ? { changedSinceListed: true as const } : {}),
           }),
         },
       ] as const;

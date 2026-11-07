@@ -1613,6 +1613,8 @@ async function scanUnsupported(root, module, diagnostics) {
               "src/infrastructure/persistence/product-alcohol-mark-store.ts",
               // WP-2423 (M22, M24): choices a Store cannot sell now, and its sold-out marks.
               "src/infrastructure/persistence/store-option-sold-out-store.ts",
+              // WP-2423 (M77, M167): a dish's allergens as now resolved after a recipe change.
+              "src/infrastructure/persistence/sellable-allergen-change-store.ts",
             ].includes(moduleRelative)) ||
           (module.packageName === "@rms/pricing" &&
             module.manifest.ownedDatabase?.schema === "rms_pricing" &&

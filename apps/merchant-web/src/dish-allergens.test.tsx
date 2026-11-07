@@ -3,6 +3,7 @@ import { expect, it } from "vitest";
 import {
   AllergenFields,
   allergenFormSummary,
+  allergenSummary,
   everyAllergenAnswer,
   startingAllergenAnswers,
   unansweredAllergens,
@@ -88,4 +89,19 @@ it("WP-2423 (M76): an allergen added to the list after the dish was declared sta
   ]);
   expect(unansweredAllergens(declared, choices)).toBe(1);
   expect(everyAllergenAnswer(declared, choices)).toBeNull();
+});
+
+it("WP-2423 (M77, M167): a dish a recipe changed since the listing tells the owner to list again", () => {
+  const dish = (changedByRecipe: boolean) =>
+    ({
+      allergens: {
+        source: "Recipe",
+        declared: [],
+        ...(changedByRecipe ? { changedByRecipe: true } : {}),
+      },
+    }) as unknown as Parameters<typeof allergenSummary>[0];
+  expect(allergenSummary(dish(false), choices)).toBe("Allergens from its recipe");
+  expect(allergenSummary(dish(true), choices)).toBe(
+    "Allergens from its recipe · Allergens changed by a recipe. List the menu again so guests get the reviewed list.",
+  );
 });

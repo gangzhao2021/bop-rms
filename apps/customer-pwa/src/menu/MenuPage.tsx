@@ -1998,6 +1998,11 @@ function AllergenSummary({ sellable }: { readonly sellable: MenuSellable }) {
           )}
         </dl>
       )}
+      {sellable.allergensJustUpdated === true ? (
+        <p className="menu-allergens-updated" role="note">
+          {t("Allergen info was just updated. Ask staff if unsure.")}
+        </p>
+      ) : null}
     </div>
   );
 }

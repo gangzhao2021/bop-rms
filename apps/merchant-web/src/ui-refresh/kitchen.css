@@ -376,6 +376,11 @@
 .kitchen-work-item__allergens-modifiers {
   flex-basis: 100%;
 }
+/* WP-2423 (M77): a recipe changed the dish's allergens since the menu was listed. */
+.kitchen-work-item__allergens-changed {
+  flex-basis: 100%;
+  color: var(--bop-color-danger);
+}
 .kitchen-work-item__staff {
   font-size: 13px;
   color: var(--bop-color-text-muted);

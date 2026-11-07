@@ -812,6 +812,11 @@ export function KitchenAllergenLine({ item }: { readonly item: KitchenBoardItem 
           {t("Modifiers may add allergens")}
         </span>
       ) : null}
+      {allergens.changedSinceListed === true ? (
+        <strong className="kitchen-work-item__allergens-changed">
+          {t("Allergens changed since this menu was listed. Check with the manager.")}
+        </strong>
+      ) : null}
     </p>
   );
 }

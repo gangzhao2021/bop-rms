@@ -381,6 +381,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "下一步你将确认一笔测试付款。这是内部测试：不需要银行卡，也不会产生真实扣款。",
   "No Order confirmation is assumed.": "不会假定订单已确认。",
   "No Payment request was sent and no Order was created.": "没有发出付款请求，也没有生成订单。",
+  "Allergen info was just updated. Ask staff if unsure.": "过敏原信息刚刚更新，不确定请问店员。",
   "No allergen-free claim is made. Ask staff before ordering.":
     "不声称任何商品不含过敏原。点单前请先询问店员。",
   "The menu can’t open without a connection. It opens again by itself when you’re back online. Nothing was ordered.":

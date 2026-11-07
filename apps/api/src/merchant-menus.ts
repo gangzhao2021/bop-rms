@@ -22,6 +22,7 @@ import {
   listBrandSkuChoices,
   listAllergenRegistryEntryReferences,
   listCurrentIngredientDeclarations,
+  listSellableAllergenChangesSince,
   listStoreAvailabilityRules,
   parseCatalogHash,
   parseCatalogReference,
@@ -889,7 +890,12 @@ export function createMerchantMenus(options: {
    * staff choose from, and whether the Brand keeps stock (then generated recipes should be
    * replaced by real ones; the page asks, it never mixes the two).
    */
-  const dishAllergens = async (tx: unknown, s: Scope) => {
+  const dishAllergens = async (
+    tx: unknown,
+    s: Scope,
+    /** WP-2423 (M77, M167): the menu version guests see now (null: not listed yet). */
+    listedVersion: string | null = null,
+  ) => {
     const rtx = tx as unknown as RecipeAuthoringTransaction;
     const scope = {
       brandReference: s.owner.brandReference,
@@ -938,14 +944,36 @@ export function createMerchantMenus(options: {
          * to the list since, or the declaration ran out); staff answer them before it is declared.
          */
         readonly unanswered: readonly string[];
+        /**
+         * WP-2423 (M77, M167): a recipe bound or ended since the menu was listed changed what the
+         * dish contains; guests and the kitchen already read it with the listed allergens, and
+         * listing the menu again makes it the reviewed list. Absent otherwise.
+         */
+        readonly changedByRecipe?: true;
       }
     >();
     const skus = new Set([
       ...recipes.flatMap((recipe) => recipe.bindings.map((binding) => binding.skuReference)),
       ...sources.flatMap((source) => (source.skuReference === null ? [] : [source.skuReference])),
     ]);
+    const changed = new Set<string>();
+    if (listedVersion !== null) {
+      const all = [...skus];
+      for (let at = 0; at < all.length; at += 200)
+        for (const change of (
+          await listSellableAllergenChangesSince(
+            ptx(tx) as never,
+            s.owner,
+            all.slice(at, at + 200).map((skuReference) => ({
+              menuVersionReference: listedVersion,
+              skuReference,
+            })),
+          )
+        ).values())
+          changed.add(change.skuReference);
+    }
     for (const sku of skus) {
-      const kind = sizeRecipeSource(recipes, sources, sku);
+      const kind = sizeRecipeSource(recipes, sources, sku, s.owner.storeReference);
       const item = sources.find((x) => x.subject === "Dish" && x.skuReference === sku);
       if (kind !== "None")
         bySku.set(sku, {
@@ -965,6 +993,7 @@ export function createMerchantMenus(options: {
             kind === "StaffDeclared" && item?.label !== "NoIngredientsDeclaredByStaff"
               ? unansweredFor(item?.itemReference)
               : [],
+          ...(changed.has(sku) ? { changedByRecipe: true as const } : {}),
         });
     }
     await brandScope(tx, s.owner.brandReference);
@@ -1304,7 +1333,11 @@ export function createMerchantMenus(options: {
                     verifiedUntil: gate.verifiedUntil,
                   },
             ...(await (async () => {
-              const allergens = await dishAllergens(tx, s);
+              const allergens = await dishAllergens(
+                tx,
+                s,
+                summary.latestRelease?.menuVersionReference ?? null,
+              );
               return {
                 sellables: (await sellables(tx, s)).map((sku) => ({
                   ...sku,

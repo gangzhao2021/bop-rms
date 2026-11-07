@@ -192,6 +192,10 @@ export function publicFound(value: CustomerMenuFound): CustomerMenuFound {
             ...(sellable.allergenDisclosure.byOption === undefined
               ? {}
               : { byOption: sellable.allergenDisclosure.byOption }),
+            // WP-2423 (M77, M167): a recipe changed what the dish contains since the listing.
+            ...(sellable.allergenDisclosure.justUpdated === true
+              ? { justUpdated: true as const }
+              : {}),
           },
           displayPrice:
             sellable.displayPrice.status === "Available"

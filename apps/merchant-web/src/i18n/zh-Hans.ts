@@ -2213,6 +2213,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Missing prices": "缺少价格",
   Modifiers: "附加选项",
   "Modifiers may add allergens": "附加选项可能带来过敏原",
+  "Allergens changed since this menu was listed. Check with the manager.":
+    "菜单上架后过敏原有变化，请先和经理确认。",
   "Moncton, New Brunswick": "蒙克顿，新不伦瑞克省",
   Monday: "星期一",
   "More information needed": "需要更多信息",
@@ -3847,6 +3849,12 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Sold out for the rest of today": "今天余下时间售罄",
   "Sold out to guests (stock)": "对顾客售罄（库存）",
   "Sold out to guests (choices)": "对顾客售罄（必选项已售罄）",
+  "Guests and the kitchen see the dish's allergens from the new recipe at once, with those listed. List the menu again to make them the reviewed list.":
+    "客人和厨房会马上看到新配方的过敏原（连同已上架的）。请重新上架菜单，让它成为审核过的清单。",
+  "A recipe changed what some dishes contain. Guests and the kitchen already see those allergens with the listed ones; list the menu to make them the reviewed list.":
+    "配方改变了部分菜品的成分。客人和厨房已经能看到这些过敏原（连同已上架的）；请上架菜单，让它成为审核过的清单。",
+  "Allergens changed by a recipe. List the menu again so guests get the reviewed list.":
+    "配方改变了过敏原。请重新上架菜单，让客人看到审核过的清单。",
   "Every choice of a group guests must choose from is sold out here. Bring one back under Extras and choices.":
     "顾客必须选的一组里，本店每一项都售罄了。请在“加料和选项”里恢复其中一项。",
   "Sold out today": "今天售罄",

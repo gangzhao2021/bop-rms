@@ -361,6 +361,23 @@ describe("WP-1701 Customer Menu screens", () => {
     expect(html).toContain("Ask staff");
   });
 
+  it("WP-2423 (M77, M167): says the allergen info was just updated when a recipe changed it", () => {
+    const updated = render({
+      context,
+      detail: { ...sellable, allergensJustUpdated: true },
+      mode: "detail",
+      state: { kind: "Found", menu },
+    });
+    expect(updated).toContain("Allergen info was just updated. Ask staff if unsure.");
+    const plain = render({
+      context,
+      detail: sellable,
+      mode: "detail",
+      state: { kind: "Found", menu },
+    });
+    expect(plain).not.toContain("just updated");
+  });
+
   it("renders required-selection, price and sensitive-note boundaries without references", () => {
     const configurable = {
       ...sellable,

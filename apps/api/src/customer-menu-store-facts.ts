@@ -1,6 +1,7 @@
 import {
   listBundleComboRecords,
   listOptionsOffNow,
+  listSellableAllergenChangesSince,
   listStoreAvailabilityRules,
   parseAvailabilitySafetyEvidence,
   parseCatalogCode,
@@ -9,6 +10,7 @@ import {
   publishedDefaultOptionSelections,
   publishedRequiredGroupSoldOut,
   resolveStoreAvailability,
+  sellableAllergenChangeKey,
   type CustomerMenuQueryPorts,
   type CustomerMenuStoreFact,
   type ProductLifecycleTransaction,
@@ -217,6 +219,28 @@ export function createCustomerMenuStoreFacts(options: {
             )
               facts.set(item.sellableReference, { ...fact, availability: "SoldOut" });
           }
+        // WP-2423 (M77, M167): a recipe bound or ended since this menu version was checked for
+        // listing changes what the dish contains now; guests read it with the listed allergens.
+        if (input.menuVersionReference !== undefined) {
+          const version = String(input.menuVersionReference);
+          const skus = [...facts.keys()];
+          for (let at = 0; at < skus.length; at += 200) {
+            const changes = await listSellableAllergenChangesSince(
+              tx as never,
+              scope,
+              skus.slice(at, at + 200).map((skuReference) => ({
+                menuVersionReference: version,
+                skuReference,
+              })),
+            );
+            for (const sku of skus.slice(at, at + 200)) {
+              const change = changes.get(sellableAllergenChangeKey(version, sku));
+              const fact = facts.get(sku);
+              if (change !== undefined && fact !== undefined)
+                facts.set(sku, { ...fact, allergenChange: change });
+            }
+          }
+        }
         // WP-2423 DEC-ALCOHOL: where and when the dishes that contain alcohol can be ordered.
         const alcohol = await readAlcoholSale(tx, scope, input.requestedAt, [...facts.keys()]);
         for (const sellable of alcohol.skus) {

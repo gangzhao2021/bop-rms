@@ -104,6 +104,11 @@ export interface MenuSellable {
    * older menu) says nothing, and the guest is told to ask staff.
    */
   readonly allergensByOption?: Readonly<Record<string, readonly MenuAllergenItem[]>>;
+  /**
+   * WP-2423 (M77, M167): the kitchen's recipe changed since the menu was listed; the allergens
+   * above already include what it adds, and the guest is asked to check with staff.
+   */
+  readonly allergensJustUpdated?: true;
   readonly optionRules: readonly MenuOptionRule[];
 }
 

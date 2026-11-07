@@ -82,8 +82,15 @@ function allergens(value: unknown) {
     closedRecord(value, ["status"]);
     return { status: "Unavailable" };
   }
-  const declared = closedRecord(value, ["status", "items", "forChoices"]);
+  const changed = Object.hasOwn(raw, "changedSinceListed");
+  const declared = closedRecord(value, [
+    "status",
+    "items",
+    "forChoices",
+    ...(changed ? ["changedSinceListed"] : []),
+  ]);
   if (
+    (changed && declared.changedSinceListed !== true) ||
     declared.status !== "Declared" ||
     !Array.isArray(declared.items) ||
     declared.items.length > 30 ||
@@ -101,7 +108,14 @@ function allergens(value: unknown) {
     else return fail();
   }
   // WP-2423 ⑪: forChoices — these are for exactly the options chosen on this item.
-  return { status: "Declared", contains, mayContain, forChoices: declared.forChoices };
+  return {
+    status: "Declared",
+    contains,
+    mayContain,
+    forChoices: declared.forChoices,
+    // WP-2423 (M77, M167): a recipe changed what the dish contains since the menu was listed.
+    ...(changed ? { changedSinceListed: true } : {}),
+  };
 }
 function item(value: unknown) {
   const raw = record(value),

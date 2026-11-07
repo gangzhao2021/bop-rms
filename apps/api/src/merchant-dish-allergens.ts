@@ -195,13 +195,29 @@ export function sizeRecipeSource(
     readonly recipeReference: string | null;
   }[],
   skuReference: string,
+  /**
+   * WP-2423 (M167): the Store the page is for — its own recipe for the size is in effect there,
+   * so the size's allergens come from that recipe, not from what staff declared. Absent: the
+   * Brand-wide answer.
+   */
+  storeReference?: string,
 ): "Recipe" | "StaffDeclared" | "None" {
   const generated = new Set(
     sources.flatMap((x) => (x.recipeReference === null ? [] : [x.recipeReference])),
   );
-  const bound = recipes.find((recipe) =>
-    recipe.bindings.some((b) => b.skuReference === skuReference && b.storeReference === null),
-  );
+  const bound =
+    (storeReference === undefined
+      ? undefined
+      : recipes.find(
+          (recipe) =>
+            !generated.has(recipe.familyReference) &&
+            recipe.bindings.some(
+              (b) => b.skuReference === skuReference && b.storeReference === storeReference,
+            ),
+        )) ??
+    recipes.find((recipe) =>
+      recipe.bindings.some((b) => b.skuReference === skuReference && b.storeReference === null),
+    );
   if (bound !== undefined && !generated.has(bound.familyReference)) return "Recipe";
   return sources.some((x) => x.subject === "Dish" && x.skuReference === skuReference)
     ? "StaffDeclared"

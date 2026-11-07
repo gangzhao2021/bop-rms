@@ -307,6 +307,38 @@ describe("WP-1026 Customer Menu REST API", () => {
     expect(body.menu.sections[0]?.sellables[0]?.allergenDisclosure).toMatchObject({ byOption });
   });
 
+  it("WP-2423 (M77, M167): passes on that a recipe changed the dish's allergens since the listing", async () => {
+    const catalog = new MutablePort();
+    const value = found();
+    if (value.status !== "Found") throw new Error("fixture");
+    const sellable = value.menu.sections[0]?.sellables[0];
+    if (sellable === undefined) throw new Error("fixture");
+    catalog.result = {
+      ...value,
+      menu: {
+        ...value.menu,
+        sections: [
+          {
+            ...value.menu.sections[0],
+            sellables: [
+              {
+                ...sellable,
+                allergenDisclosure: { ...sellable.allergenDisclosure, justUpdated: true as const },
+              },
+            ],
+          },
+        ],
+      },
+    };
+    const response = await fetch(url(await listen(catalog)));
+    const body = (await response.json()) as {
+      menu: { sections: { sellables: { allergenDisclosure: unknown }[] }[] };
+    };
+    expect(body.menu.sections[0]?.sellables[0]?.allergenDisclosure).toMatchObject({
+      justUpdated: true,
+    });
+  });
+
   it("serializes an allowlisted DTO and drops unexpected internal adapter fields", async () => {
     const catalog = new MutablePort();
     catalog.result = { ...found(), internalDatabaseFact: "raw-secret" };

@@ -456,3 +456,6 @@ export {
   type StoreOptionSoldOutMark,
 } from "./infrastructure/persistence/store-option-sold-out-store.js";
 export { withOptionsOffNow } from "./application/options-off-now.js";
+// WP-2423 (M77, M167): a dish's allergens as now resolved after a recipe change.
+export * from "./domain/sellable-allergen-change.js";
+export * from "./infrastructure/persistence/sellable-allergen-change-store.js";

@@ -12,9 +12,14 @@ import {
   parseCatalogInstant,
   parseCatalogLocale,
   parseCatalogReference,
+  type CatalogCode,
   type CatalogInstant,
   type CatalogReference,
 } from "../domain/product.js";
+import {
+  withSellableAllergenChange,
+  type SellableAllergenChange,
+} from "../domain/sellable-allergen-change.js";
 import {
   parsePublishedMenuProjection,
   publishedDefaultOptionSelections,
@@ -193,6 +198,53 @@ function comboPartRule(
     rule.options.every((option) => fact.comboChoices?.has(option.optionReference))
   );
 }
+/**
+ * WP-2423 (M77, M167): the listed allergens together with those a recipe change brought since the
+ * menu was listed — in `items` and in every set of choices — so a guest never reads a list that
+ * leaves one out. Said "just updated" when the change adds or strengthens one, or could not be
+ * resolved.
+ */
+export function changedAllergenDisclosure(
+  disclosure: CustomerMenuSellableDto["allergenDisclosure"],
+  change: SellableAllergenChange | undefined,
+  name: (names: Readonly<Record<string, string>>) => string,
+): CustomerMenuSellableDto["allergenDisclosure"] {
+  if (change === undefined) return disclosure;
+  const merged = withSellableAllergenChange(disclosure.items, change, (allergen) =>
+    Object.freeze({
+      allergenReference: allergen.allergenReference as CatalogReference,
+      code: allergen.code as CatalogCode,
+      name: name(allergen.localizedNames) || allergen.code,
+      classification: allergen.classification,
+    }),
+  );
+  if (!merged.changed) return disclosure;
+  const byChoice = disclosure.byChoice;
+  return Object.freeze({
+    ...disclosure,
+    items: merged.items,
+    ...(byChoice === undefined
+      ? {}
+      : {
+          byChoice: Object.freeze({
+            ...byChoice,
+            outcomes: Object.freeze(
+              byChoice.outcomes.map(
+                (outcome) =>
+                  withSellableAllergenChange(outcome, change, (allergen) =>
+                    Object.freeze({
+                      code: allergen.code as CatalogCode,
+                      classification: allergen.classification,
+                    }),
+                  ).items,
+              ),
+            ),
+          }),
+        }),
+    justUpdated: true as const,
+  });
+}
+
 function publicSellable(
   item: PublishedSellable,
   locale: string,
@@ -261,25 +313,33 @@ function publicSellable(
         ? null
         : localizedOptional(item.presentation.localizedDescriptions, locale, defaultLocale),
     photo: publicPhoto(item.presentation, locale, defaultLocale),
-    allergenDisclosure: Object.freeze({
-      registryVersionReference: item.allergenDisclosure.registryVersionReference,
-      items: Object.freeze(
-        item.allergenDisclosure.items.map((allergen) =>
-          Object.freeze({
-            allergenReference: allergen.allergenReference,
-            code: allergen.code,
-            name: localized(allergen.localizedNames, locale, defaultLocale),
-            classification: allergen.classification,
-          }),
-        ),
+    allergenDisclosure: Object.freeze(
+      changedAllergenDisclosure(
+        {
+          registryVersionReference: item.allergenDisclosure.registryVersionReference,
+          items: Object.freeze(
+            item.allergenDisclosure.items.map((allergen) =>
+              Object.freeze({
+                allergenReference: allergen.allergenReference,
+                code: allergen.code,
+                name: localized(allergen.localizedNames, locale, defaultLocale),
+                classification: allergen.classification,
+              }),
+            ),
+          ),
+          allergenFreeClaim: false,
+          assistanceCode: "ALLERGEN_ASSISTANCE_REQUIRED",
+          ...(item.allergenDisclosure.byChoice === undefined
+            ? {}
+            : { byChoice: item.allergenDisclosure.byChoice }),
+          ...(byOption.length === 0
+            ? {}
+            : { byOption: Object.freeze(Object.fromEntries(byOption)) }),
+        },
+        fact?.allergenChange,
+        (names) => localizedOptional(names, locale, defaultLocale) ?? "",
       ),
-      allergenFreeClaim: false,
-      assistanceCode: "ALLERGEN_ASSISTANCE_REQUIRED",
-      ...(item.allergenDisclosure.byChoice === undefined
-        ? {}
-        : { byChoice: item.allergenDisclosure.byChoice }),
-      ...(byOption.length === 0 ? {} : { byOption: Object.freeze(Object.fromEntries(byOption)) }),
-    }),
+    ),
     displayPrice: Object.freeze(
       fact === null
         ? {
@@ -460,6 +520,7 @@ export function createCustomerMenuQueryService(ports: CustomerMenuQueryPorts) {
                 section.sellables.map((item) => item.sellableReference),
               ),
             ),
+            menuVersionReference: projection.snapshot.menuVersionReference,
             // The published options offered on this channel, to show what each adds.
             options: Object.freeze(
               projection.snapshot.sections.flatMap((section) =>

@@ -1,3 +1,4 @@
+import type { SellableAllergenChange } from "../../domain/sellable-allergen-change.js";
 import type {
   CustomerMenuQueryInput,
   CustomerMenuQueryResult,
@@ -42,6 +43,11 @@ export interface CustomerMenuStoreFact {
    * checkout refuse them from the same answer (`listOptionsOffNow`).
    */
   readonly soldOutOptions?: ReadonlySet<string>;
+  /**
+   * WP-2423 (M77, M167): the dish's allergens as resolved after a recipe change recorded since
+   * this menu version was checked for listing. Guests read them with the listed ones.
+   */
+  readonly allergenChange?: SellableAllergenChange;
 }
 
 export interface CustomerMenuQueryPorts {
@@ -66,6 +72,8 @@ export interface CustomerMenuQueryPorts {
       readonly orderTypeCode: CustomerMenuQueryInput["orderTypeCode"];
       readonly requestedAt: CustomerMenuQueryInput["requestedAt"];
       readonly sellableReferences: readonly CatalogReference[];
+      /** WP-2423 (M77): the listed menu version shown (absent: no allergen change is read). */
+      readonly menuVersionReference?: CatalogReference;
       /** The published options of those items to price (each item's own bindings). */
       readonly options?: readonly {
         readonly sellableReference: CatalogReference;

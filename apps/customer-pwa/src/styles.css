@@ -1035,6 +1035,11 @@
   margin: 0 0 var(--bop-space-1);
   font-weight: 650;
 }
+/* WP-2423 (M77): the kitchen's recipe changed since the menu was listed. */
+.menu-allergens-updated {
+  margin: var(--bop-space-1) 0 0;
+  font-weight: 650;
+}
 .customer-page .menu-allergens dl {
   display: grid;
   gap: 0.125rem;

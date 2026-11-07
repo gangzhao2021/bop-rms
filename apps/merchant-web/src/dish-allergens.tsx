@@ -16,6 +16,14 @@ export type AllergenAnswer = "None" | AllergenClassification;
 
 /** The dish's declared allergens in words, for its row ("" when none are declared). */
 export function allergenSummary(dish: MenuDish, choices: readonly AllergenChoice[]): string {
+  const summary = declaredSummary(dish, choices);
+  // WP-2423 (M77, M167): guests and the kitchen already read the recipe's allergens with the
+  // listed ones; listing again makes them the reviewed list.
+  return dish.allergens.changedByRecipe === true
+    ? `${summary} · ${t("Allergens changed by a recipe. List the menu again so guests get the reviewed list.")}`
+    : summary;
+}
+function declaredSummary(dish: MenuDish, choices: readonly AllergenChoice[]): string {
   if (dish.allergens.source === "Recipe") return t("Allergens from its recipe");
   if (dish.allergens.source === "None") return t("Allergens not declared");
   if (dish.allergens.noIngredients === true) return t("A charge, no stock ingredients");

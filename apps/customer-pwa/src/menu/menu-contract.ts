@@ -304,6 +304,8 @@ function allergenDisclosure(value: unknown, language: MenuLanguage) {
   const hasChoices =
     value !== null && typeof value === "object" && Object.hasOwn(value, "byChoice");
   const hasOwn = value !== null && typeof value === "object" && Object.hasOwn(value, "byOption");
+  const updated =
+    value !== null && typeof value === "object" && Object.hasOwn(value, "justUpdated");
   const raw = exact(value, [
     "registryVersionReference",
     "items",
@@ -311,9 +313,11 @@ function allergenDisclosure(value: unknown, language: MenuLanguage) {
     "assistanceCode",
     ...(hasChoices ? ["byChoice"] : []),
     ...(hasOwn ? ["byOption"] : []),
+    ...(updated ? ["justUpdated"] : []),
   ]);
   reference(raw.registryVersionReference);
   if (
+    (updated && raw.justUpdated !== true) ||
     raw.allergenFreeClaim !== false ||
     raw.assistanceCode !== "ALLERGEN_ASSISTANCE_REQUIRED" ||
     !Array.isArray(raw.items)
@@ -339,6 +343,7 @@ function allergenDisclosure(value: unknown, language: MenuLanguage) {
     items,
     byChoice: hasChoices ? allergensByChoice(raw.byChoice, names) : undefined,
     byOption: hasOwn ? allergensByOption(raw.byOption, names) : undefined,
+    justUpdated: updated,
   };
 }
 
@@ -532,6 +537,7 @@ function sellable(value: unknown, language: MenuLanguage): MenuSellable {
         allergens: disclosure.items,
         ...(disclosure.byChoice === undefined ? {} : { allergensByChoice: disclosure.byChoice }),
         ...(disclosure.byOption === undefined ? {} : { allergensByOption: disclosure.byOption }),
+        ...(disclosure.justUpdated ? { allergensJustUpdated: true as const } : {}),
       };
     })(),
     optionRules,

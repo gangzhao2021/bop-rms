@@ -6137,6 +6137,24 @@
       "privilege": "INSERT",
       "principal": "api",
       "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); WP-2423 sold-out-and-allergen-safety (M24): a Store marks one choice or extra sold out for today or until further notice and brings it back; every Sale read checks it (append-only)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "sellable_allergen_change",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); WP-2423 sold-out-and-allergen-safety (M77, M167): binding or ending a recipe records the dish's allergens as now resolved, so guests and the kitchen never read a listed list that leaves one out (append-only)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "sellable_allergen_change",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); WP-2423 sold-out-and-allergen-safety (M77, M167): binding or ending a recipe records the dish's allergens as now resolved, so guests and the kitchen never read a listed list that leaves one out (append-only)"
     }
   ]
 }

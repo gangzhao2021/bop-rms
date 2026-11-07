@@ -72,5 +72,10 @@ describe("WP-2423 item 8 ⑥ dish allergens declared by staff", () => {
     expect(sizeRecipeSource([bound(21, 10, id(99))], [generated], id(10))).toBe("StaffDeclared");
     expect(sizeRecipeSource([], [], id(10))).toBe("None");
     expect(sizeRecipeSource([bound(21, 11)], [], id(11))).toBe("Recipe");
+    // WP-2423 (M167): at that Store, its own recipe is what guests and the kitchen get.
+    expect(sizeRecipeSource([bound(21, 10, id(99))], [generated], id(10), id(99))).toBe("Recipe");
+    expect(sizeRecipeSource([bound(21, 10, id(99))], [generated], id(10), id(98))).toBe(
+      "StaffDeclared",
+    );
   });
 });

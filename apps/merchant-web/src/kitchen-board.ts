@@ -23,6 +23,11 @@ export type KitchenItemAllergens =
        * cover every choice of the item and chosen options may add more.
        */
       readonly forChoices: boolean;
+      /**
+       * WP-2423 (M77, M167): a recipe bound or ended since the menu was listed changed what the
+       * dish contains; the names above include what it adds. Absent otherwise.
+       */
+      readonly changedSinceListed?: true;
     }
   | { readonly status: "Unavailable" };
 
@@ -351,8 +356,17 @@ export function parseKitchenItemAllergens(value: unknown): KitchenItemAllergens 
     closed(value, ["status"]);
     return Object.freeze({ status: "Unavailable" });
   }
-  const input = closed(value, ["status", "contains", "mayContain", "forChoices"]);
-  if (typeof input.forChoices !== "boolean") throw new Error("KITCHEN_BOARD_INVALID");
+  const changed =
+    value !== null && typeof value === "object" && Object.hasOwn(value, "changedSinceListed");
+  const input = closed(value, [
+    "status",
+    "contains",
+    "mayContain",
+    "forChoices",
+    ...(changed ? ["changedSinceListed"] : []),
+  ]);
+  if (typeof input.forChoices !== "boolean" || (changed && input.changedSinceListed !== true))
+    throw new Error("KITCHEN_BOARD_INVALID");
   const names = (list: unknown) => {
     if (!Array.isArray(list) || list.length > 30) throw new Error("KITCHEN_BOARD_INVALID");
     return Object.freeze(
@@ -369,6 +383,7 @@ export function parseKitchenItemAllergens(value: unknown): KitchenItemAllergens 
     contains: names(input.contains),
     mayContain: names(input.mayContain),
     forChoices: input.forChoices,
+    ...(changed ? { changedSinceListed: true as const } : {}),
   });
 }
 

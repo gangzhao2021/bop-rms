@@ -960,6 +960,12 @@ function Bindings({
           <p>
             {t("The SKU's previous recipe in the same scope stops applying at the same moment.")}
           </p>
+          {/* WP-2423 (M77, M167): what guests and the kitchen read changes with it. */}
+          <p>
+            {t(
+              "Guests and the kitchen see the dish's allergens from the new recipe at once, with those listed. List the menu again to make them the reviewed list.",
+            )}
+          </p>
         </form>
       ) : recipe.lifecycle === "Published" && recipe.yieldUnit !== "EACH" ? (
         <p>{t("Batch recipes are used as sub-recipes, not by SKUs.")}</p>

@@ -359,11 +359,16 @@ export function OneStoreMenuPage({
   // The menu as saved is not what guests see: never listed, edited since, or listing unfinished.
   // A combo with saved changes is listed with the menu.
   // Just listed (ListAll lists the waiting combos with it): nothing waits until the menu is read again.
+  // WP-2423 (M77, M167): a recipe changed what a listed dish contains; listing makes it reviewed.
+  const recipeChanged =
+    view.latestRelease !== null &&
+    (view.sellables ?? []).some((sku) => sku.allergens?.changedByRecipe === true);
   const orderPending =
-    listedVersion !== view.menu.versionReference &&
-    (listingPending(view) ||
-      combos.some((c) => c.state === "Waiting") ||
-      (view.priceDraft ?? null) !== null);
+    (listedVersion !== view.menu.versionReference &&
+      (listingPending(view) ||
+        combos.some((c) => c.state === "Waiting") ||
+        (view.priceDraft ?? null) !== null)) ||
+    recipeChanged;
   // WP-2423 M69: dishes on the menu whose allergens nobody answered ("List it" waits for them).
   const undeclaredOnMenu = [
     ...new Set(
@@ -1170,7 +1175,13 @@ export function OneStoreMenuPage({
                   )
                 : view.latestRelease === null
                   ? t("This menu has not been listed yet. Guests do not see it.")
-                  : t("There are saved changes not listed yet. Guests still see the listed menu.")}
+                  : recipeChanged && !listingPending(view)
+                    ? t(
+                        "A recipe changed what some dishes contain. Guests and the kitchen already see those allergens with the listed ones; list the menu to make them the reviewed list.",
+                      )
+                    : t(
+                        "There are saved changes not listed yet. Guests still see the listed menu.",
+                      )}
           </p>
           {changedOrder ? (
             <div className="one-menu__pending-actions">

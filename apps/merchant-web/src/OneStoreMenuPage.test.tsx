@@ -378,3 +378,33 @@ it("WP-2423 (M76, Owner decision 16): a dish not declared yet saves only once ev
     }),
   ]);
 });
+
+it("WP-2423 (M77, M167): a recipe that changed a listed dish's allergens offers List it, and listing sends the menu", async () => {
+  const menu = () => {
+    const read = builder(id(3), "Listed", id(3));
+    return {
+      ...read,
+      sellables: read.sellables.map((sku) =>
+        sku.skuReference === id(30)
+          ? {
+              ...sku,
+              allergens: {
+                source: "Recipe",
+                declared: [],
+                noIngredients: false,
+                changedByRecipe: true,
+              },
+            }
+          : sku,
+      ),
+    };
+  };
+  const { container, sent } = await page(async () => menu());
+  expect(container.textContent).toContain(
+    "A recipe changed what some dishes contain. Guests and the kitchen already see those allergens with the listed ones; list the menu to make them the reviewed list.",
+  );
+  expect(container.textContent).toContain("Allergens changed by a recipe.");
+  await click(buttonNamed(container, "List it"));
+  await settle(10);
+  expect(sent.map((command) => command.action)).toEqual(["ListAll"]);
+});

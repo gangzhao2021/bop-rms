@@ -447,6 +447,11 @@ export interface DishAllergens {
    * (added to the list since it was declared); they start unanswered, never as No.
    */
   readonly unanswered?: readonly string[];
+  /**
+   * WP-2423 (M77, M167): a recipe bound or ended since the menu was listed changed what the dish
+   * contains; guests and the kitchen already see it, and listing again makes it the reviewed list.
+   */
+  readonly changedByRecipe?: true;
 }
 export interface AllergenChoice {
   readonly allergenReference: string;

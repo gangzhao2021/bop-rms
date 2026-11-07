@@ -356,6 +356,32 @@ describe("Customer Menu client", () => {
       await expect(load(invalid)).resolves.toEqual({ kind: "Unavailable" });
   });
 
+  it("WP-2423 (M77, M167): carries 'allergen info just updated' and refuses anything else there", async () => {
+    const withUpdate = (justUpdated: unknown) => {
+      const body = found();
+      const sellable = body.menu.sections[0]?.sellables[0];
+      if (!sellable) throw new Error("fixture");
+      Object.assign(sellable.allergenDisclosure, { justUpdated });
+      return body;
+    };
+    const load = (justUpdated: unknown) =>
+      createCustomerMenuClient(context, {
+        fetch: async () => response(200, withUpdate(justUpdated)),
+        online: () => true,
+      }).load();
+    const result = await load(true);
+    if (result.kind !== "Found") throw new Error("expected a menu");
+    expect(result.menu.sections[0]?.sellables[0]?.allergensJustUpdated).toBe(true);
+    const plain = await createCustomerMenuClient(context, {
+      fetch: async () => response(200, found()),
+      online: () => true,
+    }).load();
+    if (plain.kind !== "Found") throw new Error("expected a menu");
+    expect(plain.menu.sections[0]?.sellables[0]?.allergensJustUpdated).toBeUndefined();
+    for (const invalid of [false, "yes", null])
+      await expect(load(invalid)).resolves.toEqual({ kind: "Unavailable" });
+  });
+
   it("Owner 2026-10-23: names priority allergens in Chinese while Chinese is chosen", async () => {
     const { LanguageRoot } = await import("../i18n/i18n.js");
     const { renderToStaticMarkup } = await import("react-dom/server");

@@ -38,6 +38,8 @@ import { createStaffLabels } from "./merchant-staff-labels.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { retryTransactionConflict } from "./transaction-conflict-retry.js";
+import { derivedReference } from "./merchant-products.js";
+import { recordRecipeAllergenChange } from "./recipe-allergen-change.js";
 import { staffContentName } from "./staff-content-locale.js";
 import { onlyRefusal } from "./merchant-failure.js";
 
@@ -250,8 +252,10 @@ export function createMerchantRecipes(options: {
   authentication: Pick<MerchantBffService, "authorize">;
   references: { next(): string };
   locale: string;
+  /** Test seam: the Brand scope resolver (defaults to the current session's Brand scope). */
+  resolveScope?: ReturnType<typeof createMerchantBrandScope>;
 }) {
-  const resolveBrand = createMerchantBrandScope(options.persistence);
+  const resolveBrand = options.resolveScope ?? createMerchantBrandScope(options.persistence);
   type Tx = Parameters<Parameters<typeof options.persistence.transactions.run>[0]>[0];
   const session = (input: { sessionCookie: unknown; csrf: unknown }) =>
     options.authentication
@@ -537,6 +541,34 @@ export function createMerchantRecipes(options: {
             at,
             nextReference: () => options.references.next(),
           };
+          const allergenChange = async (
+            skuReference: string,
+            storeReference: string | null,
+            cause: "RecipeBound" | "RecipeEnded",
+          ) => {
+            const recorded = await recordRecipeAllergenChange(tx, {
+              scope: {
+                tenantReference: scope.tenantReference,
+                brandReference: scope.brandReference,
+                storeReference: scope.storeReference,
+              },
+              skuReference,
+              storeReference,
+              cause,
+              actorReference: scope.actorReference,
+              operationReference: derivedReference(body.operationReference, "allergen-change"),
+              changeReference: options.references.next(),
+              at,
+              locale: options.locale,
+            });
+            // In the staff member's language: the codes, named on the page (never references).
+            return recorded === null
+              ? null
+              : {
+                  resolved: recorded.allergens !== null,
+                  codes: (recorded.allergens ?? []).map((allergen) => allergen.code),
+                };
+          };
           const reviewersAuthorized = async (actors: readonly string[]) =>
             (await brandActionHeldBy(tx as unknown as RoleAssignmentTransaction, {
               brandReference: scope.brandReference,
@@ -673,7 +705,7 @@ export function createMerchantRecipes(options: {
                   (item) => item.skuReference === body.skuReference && item.active,
                 );
                 if (sku === undefined) return fail("NotFound");
-                return await bindRecipeToSku(rtx, scope, {
+                const bound = await bindRecipeToSku(rtx, scope, {
                   ...writer,
                   operationReference: body.operationReference,
                   recipeReference: body.recipeReference,
@@ -682,14 +714,35 @@ export function createMerchantRecipes(options: {
                   skuUnitOfSale: sku.unitOfSale,
                   auditReference: options.references.next(),
                 });
+                // WP-2423 (M77, M167): guests and the kitchen read the dish's allergens from this
+                // recipe at once, with the listed ones, until the menu is listed again.
+                const change =
+                  bound.status === "Applied"
+                    ? await allergenChange(
+                        body.skuReference,
+                        body.storeOnly ? scope.storeReference : null,
+                        "RecipeBound",
+                      )
+                    : null;
+                return change === null ? bound : { ...bound, allergensNow: change };
               }
-              case "EndStoreBinding":
-                return await endStoreRecipeBinding(rtx, scope, {
+              case "EndStoreBinding": {
+                // The dish whose Store recipe ends (read before it ends).
+                const ending = (await listRecipes(rtx, scope, at))
+                  .flatMap((recipe) => recipe.bindings)
+                  .find((binding) => binding.bindingReference === body.bindingReference);
+                const ended = await endStoreRecipeBinding(rtx, scope, {
                   ...writer,
                   operationReference: body.operationReference,
                   bindingReference: body.bindingReference,
                   auditReference: options.references.next(),
                 });
+                const change =
+                  ended.status === "Applied" && ending !== undefined
+                    ? await allergenChange(ending.skuReference, scope.storeReference, "RecipeEnded")
+                    : null;
+                return change === null ? ended : { ...ended, allergensNow: change };
+              }
               case "Archive":
                 return await archiveRecipe(rtx, scope, {
                   ...writer,

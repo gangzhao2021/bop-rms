@@ -130,6 +130,7 @@ const moduleManifestInput =
         "product_operation_record",
         "product_alcohol_mark",
         "store_option_sold_out",
+        "sellable_allergen_change",
         "product_operation_snapshot",
         "product_publication_revision",
         "product_publication_validation_report",

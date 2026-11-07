@@ -824,6 +824,7 @@ describe("migration catalog", () => {
       "2000_450_alter_checkout_contact_redaction_staff_request",
       "2000_460_alter_pickup_not_collected_store_closing",
       "2000_470_create_store_option_sold_out",
+      "2000_471_create_sellable_allergen_change",
       "2000_480_create_pricing_price_book_draft_purpose",
       "2000_490_alter_pickup_in_person_order_number_called",
       "2000_510_create_staff_pin_device_limit_clear",

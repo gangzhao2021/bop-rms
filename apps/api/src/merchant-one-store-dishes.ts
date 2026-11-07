@@ -1223,7 +1223,18 @@ export function createMerchantOneStoreDishes(options: {
     // WP-2423 (v15 2026-11-05): a choice group turned into "a quantity of each" under Option sets:
     // its "no change" option recipes are carried to the new quantities first (a real change stays
     // for a person, and the check below names it). A stop here comes before anything is listed.
-    const menu = await loadMenu(session, body.menuReference);
+    let menu = await loadMenu(session, body.menuReference);
+    // WP-2423 (M77, M167): a recipe bound or ended since the listing changed what a listed dish
+    // contains. Guests already read it with the listed allergens; listing again reviews the menu
+    // as it is now, so its own version is opened (the listed one stays for guests meanwhile).
+    if (
+      menu.publication !== null &&
+      (
+        (menu as { readonly sellables?: readonly { allergens?: { changedByRecipe?: unknown } }[] })
+          .sellables ?? []
+      ).some((sku) => sku.allergens?.changedByRecipe === true)
+    )
+      menu = await editableMenu(session, body.menuReference, step("recipe-allergens"));
     const skus = new Set(
       menu.menu.sections.flatMap((s) => s.items.map((item) => item.skuReference)),
     );

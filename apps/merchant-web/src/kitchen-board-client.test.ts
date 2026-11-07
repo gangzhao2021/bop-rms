@@ -1,4 +1,7 @@
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { expect, it, vi } from "vitest";
+import { KitchenAllergenLine } from "./KitchenBoardPages.js";
 import { createKitchenBoardClient } from "./kitchen-board-client.js";
 import {
   parseKitchenBoardView,
@@ -322,6 +325,41 @@ it("WP-2423 Q3: groups the menu's declared allergens and fails closed on malform
     );
     await expect(f.client.loadQueue()).rejects.toMatchObject({ code: "Unavailable" });
   }
+});
+it("WP-2423 (M77, M167): tells the cook a recipe changed the dish's allergens since the menu was listed", async () => {
+  const f = setup();
+  const changed = {
+    ...item(),
+    allergens: {
+      status: "Declared",
+      items: [{ code: "EGG", name: "Eggs", classification: "Contains" }],
+      forChoices: false,
+      changedSinceListed: true,
+    },
+  };
+  f.fetcher.mockResolvedValueOnce(response({ ...metadata, items: [changed], nextCursor: null }));
+  const view = parseKitchenBoardView(await f.client.loadQueue());
+  expect(view.items[0]?.allergens).toEqual({
+    status: "Declared",
+    contains: ["Eggs"],
+    mayContain: [],
+    forChoices: false,
+    changedSinceListed: true,
+  });
+  const html = renderToStaticMarkup(
+    createElement(KitchenAllergenLine, {
+      item: view.items[0] as Parameters<typeof KitchenAllergenLine>[0]["item"],
+    }),
+  );
+  expect(html).toContain("Allergens changed since this menu was listed. Check with the manager.");
+  f.fetcher.mockResolvedValueOnce(
+    response({
+      ...metadata,
+      items: [{ ...changed, allergens: { ...changed.allergens, changedSinceListed: "yes" } }],
+      nextCursor: null,
+    }),
+  );
+  await expect(f.client.loadQueue()).rejects.toMatchObject({ code: "Unavailable" });
 });
 it("DEC-KITCHEN-STALE-TICKETS: carries each ticket's business day and whether this staff member may close earlier days", async () => {
   const f = setup();
