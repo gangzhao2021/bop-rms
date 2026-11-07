@@ -1093,6 +1093,13 @@ export const orderStatusText = Object.freeze({
     get unpaidElsewhere() {
       return t("Finish paying on the phone you ordered with, or ask a staff member for help.");
     },
+    /** WP-2423 M18 review: the payment result could not be read (network or server down). */
+    get paymentUnchecked() {
+      return t("Couldn’t check your payment. Try again.");
+    },
+    get paymentUncheckedRetry() {
+      return t("Try again");
+    },
     get awaitingPaymentHeading() {
       return t("Waiting for payment");
     },
