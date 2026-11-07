@@ -79,7 +79,8 @@ export function storeStatusLine(
       detail:
         hours.pausedUntil === null
           ? null
-          : t("until {value1}", { value1: formatStoreLocalTime(hours.pausedUntil) }),
+          : // Its own words: "until" alone reads as the opening hours in Chinese ("营业至").
+            t("resumes at {time}", { time: formatStoreLocalTime(hours.pausedUntil) }),
     };
   if (hours.status === "Open")
     return {
@@ -353,6 +354,23 @@ export function storeServiceNoticeText(
           ? t("Ordering from your phone is paused for a short while.")
           : t("Ordering from your phone is paused until {time}.", { time: until }),
       detail: t("A staff member can take your order."),
+    };
+  }
+  // WP-2423 store-service-controls (v15 M34 review): closed (closing time came while the cart or
+  // checkout stayed open, or this service is off) says so, and when a pickup guest can order next.
+  if (phase === "Closed") {
+    const opening =
+      hours.opensAt !== null && hours.localDate !== null
+        ? { localDate: hours.localDate, startLocalTime: hours.opensAt }
+        : hours.nextOpening;
+    if (channel === "Pickup")
+      return {
+        headline: t("Online pickup ordering is closed now."),
+        detail: opening === null ? null : endSentence(nextOpeningText(opening, hours.localDate)),
+      };
+    return {
+      headline: t("Ordering from your phone is closed now."),
+      detail: t("A staff member can help you."),
     };
   }
   if (phase === "Stopped") {

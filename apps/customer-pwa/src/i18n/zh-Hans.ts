@@ -1159,6 +1159,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "plus tax": "另加税",
   "registration no.": "登记号",
   "until {value1}": "营业至 {value1}",
+  "resumes at {time}": "{time} 恢复",
+  "Online pickup ordering is closed now.": "线上自取现已停止接单。",
+  "Ordering from your phone is closed now.": "手机点单现已停止。",
+  "A staff member can help you.": "店员可以为您服务。",
   "{amount} before tax": "税前 {amount}",
   "{base} Please try again shortly. If this keeps happening, ask a staff member.":
     "{base}请稍后再试。如果一直这样，请询问店员。",

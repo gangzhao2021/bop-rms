@@ -7,16 +7,25 @@ import {
   storeDirectionsUrl,
   type StoreProfile,
 } from "./store-profile-client.js";
+import { createElement } from "react";
+import { LanguageRoot } from "../i18n/i18n.js";
 import {
   OrdersStoppedNotice,
   StoreIdentityCard,
   StoreStatusStrip,
+  storeServiceNoticeText,
   storeStatusLine,
   todayHoursText,
 } from "./StoreIdentity.js";
-import { formatStoreLocalTime } from "../journey/format.js";
+import { endSentence, formatStoreLocalTime } from "../journey/format.js";
+import { takesNewOrders } from "./store-service.js";
 
 afterEach(() => vi.restoreAllMocks());
+function publishedHours() {
+  const hours = parseStoreProfile(body()).hours;
+  if (hours === null) throw new Error("the synthetic Store publishes its hours");
+  return hours;
+}
 
 const body = () => ({
   schemaVersion: 1,
@@ -279,6 +288,66 @@ describe("WP-2423 store-service-controls (v15 M30/M34) the guest's own service",
       <OrdersStoppedNotice load={loaderOf({ status: "Paused", pausedUntil: "19:45:00" })} />,
     );
     expect(table).toContain("A staff member can take your order.");
+  });
+  it("M30 review: the pause line says when ordering resumes, never the opening hours' 'until'", () => {
+    const paused = {
+      ...publishedHours(),
+      status: "Paused" as const,
+      closesAt: null,
+      pausedUntil: "19:45:00",
+    };
+    expect(storeStatusLine(paused).detail).toBe(`resumes at ${formatStoreLocalTime("19:45:00")}`);
+    renderToStaticMarkup(createElement(LanguageRoot, { initial: "zh-Hans", children: () => null }));
+    try {
+      const detail = storeStatusLine(paused).detail ?? "";
+      expect(detail).toContain("恢复");
+      expect(detail).not.toContain("营业至");
+    } finally {
+      renderToStaticMarkup(createElement(LanguageRoot, { initial: "en", children: () => null }));
+    }
+  });
+  it("M34 review: closed says so in this service's words, and when a pickup guest can order next", () => {
+    const closed = { status: "Closed" as const, closesAt: null, lastOrdersAt: null };
+    const tomorrow = {
+      ...closed,
+      nextOpening: { localDate: "2026-12-23", startLocalTime: "11:00:00" },
+    };
+    const pickup = storeServiceNoticeText(
+      parseStoreProfile({
+        ...body(),
+        store: { ...body().store, hours: { ...body().store.hours, ...tomorrow } },
+      }).hours,
+      "Closed",
+      null,
+      "Pickup",
+    );
+    expect(pickup).toEqual({
+      headline: "Online pickup ordering is closed now.",
+      detail: endSentence(`Opens tomorrow at ${formatStoreLocalTime("11:00:00")}`),
+    });
+    const later = renderToStaticMarkup(
+      <OrdersStoppedNotice load={loaderOf({ ...closed, opensAt: "17:00:00" })} channel="Pickup" />,
+    );
+    expect(later).toContain(endSentence(`Opens today at ${formatStoreLocalTime("17:00:00")}`));
+    expect(later).not.toContain("staff");
+    const unknown = storeServiceNoticeText(
+      { ...publishedHours(), ...closed, nextOpening: null },
+      "Closed",
+      null,
+      "Pickup",
+    );
+    expect(unknown).toEqual({ headline: "Online pickup ordering is closed now.", detail: null });
+    const table = renderToStaticMarkup(<OrdersStoppedNotice load={loaderOf(closed)} />);
+    expect(table).toContain("Ordering from your phone is closed now.");
+    expect(table).toContain("A staff member can help you.");
+  });
+  it("M34 review: whenever the cart or checkout holds a new order back, there are words for why", () => {
+    const base = publishedHours();
+    for (const phase of ["Stopped", "Paused", "Closed"] as const)
+      for (const channel of ["DineIn", "Pickup"] as const) {
+        expect(takesNewOrders(phase)).toBe(false);
+        expect(storeServiceNoticeText(base, phase, null, channel)?.headline).toBeTruthy();
+      }
   });
   it("counts down the last 30 minutes before last orders", () => {
     vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-12-22T22:10:00.000Z")); // 17:10
