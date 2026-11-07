@@ -69,6 +69,8 @@ export function createPostgresPickupHandoffStore(options: {
           readonly actionCode: "PICKUP_NOT_COLLECTED";
           readonly permission: "ordering.order.cancel";
           readonly purpose: "CloseUncollectedPickup";
+          /** WP-2423 store-service-controls (v15 M46): recorded as closing for the night. */
+          readonly closureReason?: "NotCollected" | "StoreClosing";
         })
     ) & {
       readonly fulfillmentReference: string;
@@ -324,6 +326,11 @@ export function createPostgresPickupHandoffStore(options: {
       idempotencyReference: string;
       correlationReference: string;
       closedAt: string;
+      /**
+       * WP-2423 store-service-controls (v15 M46): closing for the night, from when the day's service
+       * ended (read by the caller in this transaction); absent for the ordinary closure.
+       */
+      closingFrom?: string | null;
     }): Promise<{ status: "Applied" | "AlreadyApplied"; record: PickupNotCollectedRecord }> {
       const tx = input.transaction;
       await authorize(tx, input.orderReference, "Complete");
@@ -350,7 +357,8 @@ export function createPostgresPickupHandoffStore(options: {
             brandReference: brand,
             storeReference: store,
             actorReference: String(row.actor_id),
-            reason: "NotCollected" as const,
+            reason: row.reason === "StoreClosing" ? ("StoreClosing" as const) : ("NotCollected" as const),
+            closingFrom: row.closing_from == null ? null : String(at(row.closing_from)),
             readyAt: String(at(row.ready_at)),
             closedAt: String(at(row.closed_at)),
             idempotencyReference: key,
@@ -375,13 +383,18 @@ export function createPostgresPickupHandoffStore(options: {
         idempotencyReference: key,
         correlationReference: input.correlationReference,
         closedAt: input.closedAt,
+        closingFrom: input.closingFrom ?? null,
       });
       await tx.query("SAVEPOINT pickup_not_collected_write", []);
       try {
         await tx.query(
           "INSERT INTO rms_fulfillment.pickup_not_collected_record (pickup_not_collected_id,brand_id,store_id," +
             "fulfillment_id,actor_id,reason,ready_at,closed_at,idempotency_id,correlation_id,aggregate_version_before," +
-            "data_classification) VALUES ($1,$2,$3,$4,$5,'NotCollected',$6,$7,$8,$9,$10,'IndirectIdentifier')",
+            "data_classification" +
+            (record.closingFrom === null ? "" : ",closing_from") +
+            ") VALUES ($1,$2,$3,$4,$5,$11,$6,$7,$8,$9,$10,'IndirectIdentifier'" +
+            (record.closingFrom === null ? "" : ",$12") +
+            ")",
           [
             record.notCollectedReference,
             brand,
@@ -393,6 +406,8 @@ export function createPostgresPickupHandoffStore(options: {
             record.idempotencyReference,
             record.correlationReference,
             record.aggregateVersionBefore.toString(),
+            record.reason,
+            ...(record.closingFrom === null ? [] : [record.closingFrom]),
           ],
         );
         // WP-2423 / DEC-PILOT-BATCH-PHASE-01: the closure and its PickupNotCollected event commit
@@ -422,6 +437,7 @@ export function createPostgresPickupHandoffStore(options: {
           dataClassification: "Confidential",
           occurredAt: parsePickupProofInstant(record.closedAt),
           fulfillmentReference: record.fulfillmentReference,
+          closureReason: record.reason,
         });
         await tx.query("RELEASE SAVEPOINT pickup_not_collected_write", []);
       } catch {

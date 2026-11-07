@@ -578,4 +578,24 @@ describe("WP-2423 closing an uncollected pickup", () => {
     );
     code(() => close({ expectedAggregateVersion: 4n }), "PICKUP_HANDOFF_VERSION_CONFLICT");
   });
+  it("WP-2423 store-service-controls (v15 M46): closes for the night once service has ended", () => {
+    // Ready 20 minutes ago, its code still valid: closed for the night after the day's service.
+    const night = {
+      readyAt: "2026-08-11T13:10:00.000Z",
+      proofExpiresAt: "2026-08-11T14:10:00.000Z",
+      closedAt: "2026-08-11T13:30:00.000Z",
+    };
+    expect(close({ ...night, closingFrom: "2026-08-11T13:30:00.000Z" })).toMatchObject({
+      reason: "StoreClosing",
+      closingFrom: "2026-08-11T13:30:00.000Z",
+    });
+    // Before the day's service ended (for example at last orders + 5 minutes): refused.
+    code(
+      () => close({ ...night, closingFrom: "2026-08-11T13:30:00.001Z" }),
+      "PICKUP_HANDOFF_NOT_CLOSING_YET",
+    );
+    // Without closing for the night the one-hour hold still applies.
+    code(() => close(night), "PICKUP_HANDOFF_NOT_READY");
+    expect(close()).toMatchObject({ reason: "NotCollected", closingFrom: null });
+  });
 });

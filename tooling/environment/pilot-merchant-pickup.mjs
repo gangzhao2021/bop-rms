@@ -127,7 +127,14 @@ export async function createInternalMerchantPickup(
         // WP-2423: a handover without the code while it was still valid is named apart, with the
         // cause staff chose.
         ...(audit.actionCode === "PICKUP_NOT_COLLECTED"
-          ? { afterSummary: { action: audit.purpose }, reasonCode: "PICKUP_NOT_COLLECTED" }
+          ? {
+              afterSummary: { action: audit.purpose },
+              // WP-2423 store-service-controls (v15 M46): closed with the reason "store closing".
+              reasonCode:
+                audit.closureReason === "StoreClosing"
+                  ? "PICKUP_NOT_COLLECTED_STORE_CLOSING"
+                  : "PICKUP_NOT_COLLECTED",
+            }
           : pickupHandoffAuditDetails(audit)),
         correlationId: audit.correlationReference,
         occurredAt: audit.occurredAt,

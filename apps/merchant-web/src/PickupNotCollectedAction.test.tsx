@@ -3,7 +3,9 @@ import { expect, it } from "vitest";
 import {
   closeUncollectedBody,
   closeUncollectedOutcome,
+  PickupClosingAction,
   PickupNotCollectedAction,
+  storeClosingNow,
 } from "./PickupNotCollectedAction.js";
 import { parsePickupQueueView } from "./pickup.js";
 import { pickupQueueFixture } from "./pickup.fixtures.js";
@@ -71,4 +73,30 @@ it("WP-2423: says plainly that closing also cancels a remake the kitchen is stil
     "The kitchen is still remaking 1 item for this order. Closing it also cancels the remake and takes it off the Kitchen screen. Tell the kitchen to stop making it.",
   );
   expect(render(3)).toContain("still remaking 3 items for this order.");
+});
+
+it("WP-2423 store-service-controls (v15 M46): at closing, all ready orders close in one confirmation", () => {
+  const at = Date.parse("2026-11-07T03:00:00.000Z");
+  expect(storeClosingNow(null, at)).toBe(false);
+  expect(storeClosingNow({ closesAt: "2026-11-07T03:00:00.000Z" }, at)).toBe(true);
+  expect(storeClosingNow({ closesAt: "2026-11-07T03:00:00.001Z" }, at)).toBe(false);
+  expect(storeClosingNow({ closesAt: null, closedToday: true }, at)).toBe(true);
+  const parsed = parsePickupQueueView(pickupQueueFixture()).items[0];
+  if (!parsed) throw new Error("fixture");
+  const item = {
+    ...parsed,
+    execution: { aggregateVersion: "3", publicOrderReference: null, proof: null, items: [] },
+  };
+  const markup = renderToStaticMarkup(
+    <PickupClosingAction
+      items={[item, { ...item, fulfillmentReference: "b" }]}
+      csrf="c"
+      storeReference="s"
+    />,
+  );
+  expect(markup).toContain("Mark all not collected (2)");
+  expect(markup).toContain("Recorded with the reason: store closing.");
+  expect(renderToStaticMarkup(<PickupClosingAction items={[]} csrf="c" storeReference="s" />)).toBe(
+    "",
+  );
 });

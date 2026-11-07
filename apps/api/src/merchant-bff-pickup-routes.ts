@@ -86,6 +86,7 @@ export function installMerchantPickupRoutes(
           PICKUP_HANDOFF_VERIFICATION_FAILED: 422,
           PICKUP_HANDOFF_ALREADY_COMPLETED: 409,
           PICKUP_HANDOFF_VERSION_CONFLICT: 409,
+          PICKUP_HANDOFF_NOT_CLOSING_YET: 409,
         }[error.code];
         response.status(status).json({ error: error.code });
       });
@@ -125,6 +126,7 @@ export function installMerchantPickupRoutes(
           PICKUP_HANDOFF_VERIFICATION_FAILED: 422,
           PICKUP_HANDOFF_ALREADY_COMPLETED: 409,
           PICKUP_HANDOFF_VERSION_CONFLICT: 409,
+          PICKUP_HANDOFF_NOT_CLOSING_YET: 409,
         }[error.code];
         response.status(status).json({ error: error.code });
       });
@@ -162,6 +164,7 @@ export function installMerchantPickupRoutes(
           PICKUP_HANDOFF_VERIFICATION_FAILED: 422,
           PICKUP_HANDOFF_ALREADY_COMPLETED: 409,
           PICKUP_HANDOFF_VERSION_CONFLICT: 409,
+          PICKUP_HANDOFF_NOT_CLOSING_YET: 409,
         }[error.code];
         response.status(status).json({ error: error.code });
       });
@@ -205,6 +208,7 @@ export function installMerchantPickupRoutes(
           PICKUP_HANDOFF_VERIFICATION_FAILED: 422,
           PICKUP_HANDOFF_ALREADY_COMPLETED: 409,
           PICKUP_HANDOFF_VERSION_CONFLICT: 409,
+          PICKUP_HANDOFF_NOT_CLOSING_YET: 409,
         }[error.code];
         response.status(status).json({ error: error.code });
       });

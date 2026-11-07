@@ -13,7 +13,14 @@ export interface PickupNotCollectedRecord {
   readonly brandReference: string;
   readonly storeReference: string;
   readonly actorReference: string;
-  readonly reason: "NotCollected";
+  /**
+   * WP-2423 store-service-controls (v15 M46, Owner item 9): NotCollected after the pickup hold, or
+   * StoreClosing once the Store's service for the day has ended (`closingFrom`), however long ago
+   * the order was ready.
+   */
+  readonly reason: "NotCollected" | "StoreClosing";
+  /** StoreClosing only: when the day's service ended; null for NotCollected. */
+  readonly closingFrom: string | null;
   readonly readyAt: string;
   readonly closedAt: string;
   readonly idempotencyReference: string;
@@ -51,6 +58,8 @@ export function planPickupNotCollected(input: {
   readonly idempotencyReference: string;
   readonly correlationReference: string;
   readonly closedAt: string;
+  /** Closing for the night: the instant the Store's service ended (the caller reads it). */
+  readonly closingFrom?: string | null;
 }): PickupNotCollectedRecord {
   const source = input.source;
   if (input.alreadyClosed) return fail("PICKUP_HANDOFF_ALREADY_COMPLETED");
@@ -61,8 +70,15 @@ export function planPickupNotCollected(input: {
     return fail("PICKUP_HANDOFF_VERSION_CONFLICT");
   const readyAt = instant(input.readyAt),
     closedAt = instant(input.closedAt);
-  if (
-    closedAt > source.lockedAt ||
+  const closingFrom =
+    input.closingFrom === undefined || input.closingFrom === null
+      ? null
+      : instant(input.closingFrom);
+  if (closedAt > source.lockedAt) return fail("PICKUP_HANDOFF_NOT_READY");
+  // Closing for the night: the closure itself ends the pickup code; the hold no longer applies.
+  if (closingFrom !== null) {
+    if (closedAt < closingFrom) return fail("PICKUP_HANDOFF_NOT_CLOSING_YET");
+  } else if (
     Date.parse(closedAt) < Date.parse(readyAt) + pickupHoldMilliseconds ||
     (input.proofExpiresAt !== null && instant(input.proofExpiresAt) > closedAt)
   )
@@ -79,7 +95,8 @@ export function planPickupNotCollected(input: {
     brandReference: source.brandReference,
     storeReference: source.storeReference,
     actorReference: reference(input.actorReference),
-    reason: "NotCollected",
+    reason: closingFrom === null ? "NotCollected" : "StoreClosing",
+    closingFrom,
     readyAt,
     closedAt,
     idempotencyReference: references[1] as string,

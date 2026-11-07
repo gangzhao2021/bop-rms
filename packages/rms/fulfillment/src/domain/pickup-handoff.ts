@@ -182,6 +182,8 @@ export const pickupHandoffErrorCodes = [
   "PICKUP_HANDOFF_VERIFICATION_FAILED",
   "PICKUP_HANDOFF_ALREADY_COMPLETED",
   "PICKUP_HANDOFF_VERSION_CONFLICT",
+  // WP-2423 store-service-controls (v15 M46): closing for the night before the day's service ended.
+  "PICKUP_HANDOFF_NOT_CLOSING_YET",
 ] as const;
 
 export class PickupHandoffError extends Error {

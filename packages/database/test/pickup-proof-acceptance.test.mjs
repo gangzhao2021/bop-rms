@@ -443,6 +443,73 @@ async function prove(context) {
         [id(630)],
       ),
     );
+    // WP-2423 store-service-controls (v15 M46, Owner item 9): closing for the night, 20 minutes
+    // after ready, only with when the day's service ended and at or after it; the ordinary
+    // closure still waits out the hour and never carries a closing time.
+    await seedReadyPickup(client, id(3), 650);
+    const closingRow = (closureId, idempotency, reason, closingFrom, closedAt) =>
+      client.query(
+        `INSERT INTO rms_fulfillment.pickup_not_collected_record (
+           pickup_not_collected_id,brand_id,store_id,fulfillment_id,actor_id,reason,ready_at,
+           closed_at,idempotency_id,correlation_id,aggregate_version_before,data_classification,
+           closing_from
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,2,'IndirectIdentifier',$11)`,
+        [
+          closureId,
+          id(2),
+          id(3),
+          id(650),
+          id(631),
+          reason,
+          "2026-08-11T18:01:00.000Z",
+          closedAt,
+          idempotency,
+          id(670),
+          closingFrom,
+        ],
+      );
+    await assert.rejects(
+      closingRow(id(660), id(661), "StoreClosing", null, "2026-08-11T18:21:00.000Z"),
+      /pickup_not_collected_record_hold_check/u,
+    );
+    await assert.rejects(
+      closingRow(
+        id(660),
+        id(661),
+        "StoreClosing",
+        "2026-08-11T18:30:00.000Z",
+        "2026-08-11T18:21:00.000Z",
+      ),
+      /pickup_not_collected_record_hold_check/u,
+    );
+    await assert.rejects(
+      closingRow(
+        id(660),
+        id(661),
+        "NotCollected",
+        "2026-08-11T18:00:00.000Z",
+        "2026-08-11T19:30:00.000Z",
+      ),
+      /pickup_not_collected_record_hold_check/u,
+    );
+    await assert.rejects(
+      closingRow(id(660), id(661), "Other", "2026-08-11T18:00:00.000Z", "2026-08-11T18:21:00.000Z"),
+      // Any other reason breaks both the reason and the hold rule; either may be named.
+      /pickup_not_collected_record_(?:reason|hold)_check/u,
+    );
+    await closingRow(
+      id(660),
+      id(661),
+      "StoreClosing",
+      "2026-08-11T18:20:00.000Z",
+      "2026-08-11T18:21:00.000Z",
+    );
+    await assert.rejects(
+      client.query(
+        "UPDATE rms_fulfillment.pickup_not_collected_record SET closing_from=closing_from WHERE pickup_not_collected_id=$1",
+        [id(660)],
+      ),
+    );
     await seedReadyPickup(client, id(99), 200);
     await insertGeneration(client, {
       capabilityId: id(230),
@@ -466,7 +533,7 @@ async function prove(context) {
     await client.query(`GRANT SELECT ON rms_fulfillment.pickup_not_collected_record TO ${role}`);
     assert.equal(
       await scopedCount(client, role, id(3), "rms_fulfillment.pickup_not_collected_record"),
-      1,
+      2, // the ordinary closure and the closing-for-the-night one
     );
     assert.equal(
       await scopedCount(client, role, id(99), "rms_fulfillment.pickup_not_collected_record"),

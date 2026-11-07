@@ -169,3 +169,161 @@ export function PickupNotCollectedAction({
     </>
   );
 }
+
+/**
+ * WP-2423 store-service-controls (v15 M46, Owner item 9): the Store's service for the day has
+ * ended (its last period's end, or a day it does not open), so the closing checklist can be done.
+ */
+export function storeClosingNow(
+  day: { readonly closesAt?: string | null; readonly closedToday?: boolean } | null,
+  at: number,
+): boolean {
+  if (day === null) return false;
+  if (day.closedToday === true) return true;
+  return day.closesAt !== undefined && day.closesAt !== null && at >= Date.parse(day.closesAt);
+}
+
+type BulkState = "Pending" | "Closed" | "Failed";
+
+/**
+ * At closing, every ready pickup nobody collected is closed in one confirmation, each with its own
+ * command and idempotency key (kept for a retry), recorded with the reason "store closing". What
+ * failed stays listed with Retry. Not refunded; a manager may still refund.
+ */
+export function PickupClosingAction({
+  items,
+  csrf,
+  storeReference,
+  fetcher = fetch,
+  paused = false,
+  onDone,
+}: {
+  readonly items: readonly PickupQueueItem[];
+  readonly csrf: string;
+  readonly storeReference: string;
+  readonly fetcher?: typeof fetch;
+  readonly paused?: boolean;
+  readonly onDone?: (() => void) | undefined;
+}) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  const intents = useRef(
+    new Map<string, { idempotencyReference: string; correlationReference: string }>(),
+  );
+  const [confirmed, setConfirmed] = useState(false);
+  const [running, setRunning] = useState(false);
+  const [states, setStates] = useState<ReadonlyMap<string, BulkState>>(new Map());
+  const open = items.filter(
+    (item) => item.execution && states.get(item.fulfillmentReference) !== "Closed",
+  );
+  if (items.length === 0) return null;
+  const label = (item: PickupQueueItem) => item.publicOrderNumber ?? t("reference unavailable");
+  const closeAll = async () => {
+    if (running || paused || browserOffline()) return;
+    setRunning(true);
+    let closed = 0;
+    for (const item of open) {
+      const key = item.fulfillmentReference;
+      let intent = intents.current.get(key);
+      if (!intent) {
+        intent = {
+          idempotencyReference: serviceOperationReference(),
+          correlationReference: serviceOperationReference(),
+        };
+        intents.current.set(key, intent);
+      }
+      setStates((value) => new Map(value).set(key, "Pending"));
+      let result: BulkState = "Failed";
+      try {
+        const response = await fetcher("/merchant/pickup/not-collected", {
+          method: "POST",
+          credentials: "same-origin",
+          redirect: "error",
+          cache: "no-store",
+          headers: { "content-type": "application/json", "x-bop-csrf": csrf },
+          body: JSON.stringify({
+            ...closeUncollectedBody(item, storeReference, intent),
+            reason: "StoreClosing",
+          }),
+        });
+        result = closeUncollectedOutcome(response.status) === "Closed" ? "Closed" : "Failed";
+      } catch {
+        result = "Failed";
+      }
+      if (result === "Closed") closed += 1;
+      setStates((value) => new Map(value).set(key, result));
+    }
+    setRunning(false);
+    if (closed > 0) onDone?.();
+  };
+  const done = items.filter((item) => states.get(item.fulfillmentReference) === "Closed").length;
+  const failed = items.filter((item) => states.get(item.fulfillmentReference) === "Failed");
+  return (
+    <div className="pickup-closing">
+      <button
+        type="button"
+        data-variant="destructive"
+        disabled={paused || open.length === 0}
+        onClick={() => dialog.current?.showModal()}
+      >
+        {t("Mark all not collected ({count})", { count: open.length })}
+      </button>
+      <dialog
+        className="order-cancel-dialog pickup-handoff-dialog"
+        ref={dialog}
+        aria-labelledby="pickup-closing-title"
+      >
+        <h2 id="pickup-closing-title">{t("Close the pickups nobody collected")}</h2>
+        <p>{t("The store has closed for today. These ready orders were not collected:")}</p>
+        <ul className="pickup-closing__orders">
+          {items.map((item) => (
+            <li key={item.fulfillmentReference}>
+              {t("Order {value}", { value: label(item) })}
+              {states.get(item.fulfillmentReference) === "Closed"
+                ? " · " + t("closed")
+                : states.get(item.fulfillmentReference) === "Failed"
+                  ? " · " + t("not closed yet")
+                  : ""}
+            </li>
+          ))}
+        </ul>
+        <p>
+          {t("Recorded with the reason: store closing. Not refunded; a manager can still refund.")}
+        </p>
+        <label>
+          <input
+            type="checkbox"
+            checked={confirmed}
+            onChange={(event) => setConfirmed(event.currentTarget.checked)}
+          />
+          {t("I checked the pickup shelf and nobody collected these orders")}
+        </label>
+        <button
+          type="button"
+          data-variant="destructive"
+          disabled={!confirmed || paused || running || open.length === 0}
+          onClick={() => void closeAll()}
+        >
+          {failed.length > 0
+            ? t("Retry the {count} not closed", { count: failed.length })
+            : t("Mark all not collected ({count})", { count: open.length })}
+        </button>
+        <p role="status">
+          {running || done > 0
+            ? t("Closed {done} of {count}.", { done, count: items.length })
+            : null}
+        </p>
+        {failed.length > 0 && !running ? (
+          <p role="alert">
+            {t(
+              "Some orders were not closed. They may have changed on another screen; retry, or close them one by one.",
+            )}
+          </p>
+        ) : null}
+        {paused ? <p role="status">{t("Paused until the connection returns.")}</p> : null}
+        <button type="button" disabled={running} onClick={() => dialog.current?.close()}>
+          {t("Close")}
+        </button>
+      </dialog>
+    </div>
+  );
+}

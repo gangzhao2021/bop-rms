@@ -8,9 +8,24 @@ import {
 } from "@rms/fulfillment";
 import { createPostgresKitchenReworkStore, KitchenReworkError } from "@rms/kitchen";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
+import { createMerchantStoreBusinessDay } from "./merchant-store-business-day.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
+
+/**
+ * WP-2423 store-service-controls (v15 M46): from when a ready order may be closed for the night —
+ * the end of the business day's last service period once it has passed, or the start of a business
+ * day the Store does not open; null while service remains (or the hours can't be read).
+ */
+export function storeClosingFrom(
+  day: { readonly startsAt: string; readonly closesAt: string | null; readonly closedToday: boolean },
+  at: string,
+): string | null {
+  if (day.closedToday) return String(day.startsAt);
+  if (day.closesAt === null) return null;
+  return Date.parse(at) >= Date.parse(day.closesAt) ? day.closesAt : null;
+}
 
 /** Closing an uncollected pickup gives up a paid order, so it needs the cancellation permission. */
 export const closeUncollectedPickupPermission = "ordering.order.cancel" as const;
@@ -40,6 +55,12 @@ export function createMerchantPickupNotCollected(options: {
   return async (input: { sessionCookie: unknown; csrf: unknown; command: unknown }) => {
     const session = await options.authentication.authorize(input);
     let intent: Readonly<Record<string, unknown>>;
+    // WP-2423 store-service-controls (v15 M46, Owner item 9): `reason: "StoreClosing"` closes a
+    // ready order for the night once the Store's service for the day has ended.
+    const withReason =
+      input.command !== null &&
+      typeof input.command === "object" &&
+      Object.hasOwn(input.command, "reason");
     try {
       intent = readClosedRecord(input.command, [
         "orderReference",
@@ -47,10 +68,13 @@ export function createMerchantPickupNotCollected(options: {
         "expectedAggregateVersion",
         "idempotencyReference",
         "correlationReference",
+        ...(withReason ? ["reason"] : []),
       ]);
     } catch {
       return invalid();
     }
+    if (withReason && intent.reason !== "StoreClosing") return invalid();
+    const storeClosing = withReason;
     const orderReference = parsePickupProofReference(intent.orderReference);
     const idempotencyReference = parsePickupProofReference(intent.idempotencyReference);
     const correlationReference = parsePickupProofReference(intent.correlationReference);
@@ -108,6 +132,23 @@ export function createMerchantPickupNotCollected(options: {
               access.permission === completePickupHandoffPermission &&
               (await authority.guard(ownerTransaction)),
           });
+          const closedAt = options.persistence.now();
+          // The day's service has ended: after the last service period's end (the effective close
+          // tonight), or on a day the Store does not open. Read in this transaction.
+          let closingFrom: string | null = null;
+          if (storeClosing) {
+            const day = await createMerchantStoreBusinessDay({
+              publication: options.persistence.publication,
+              tenantReference: scope.selected.tenantReference,
+              brandReference: selected.brandReference,
+              storeReference: selected.storeReference,
+              timeZone: scope.store.timeZone,
+              authorize: () => authority.guard(),
+            })(transaction, closedAt);
+            closingFrom = storeClosingFrom(day, closedAt);
+            if (closingFrom === null)
+              throw new PickupHandoffError("PICKUP_HANDOFF_NOT_CLOSING_YET");
+          }
           const result = await store.closeUncollected({
             transaction: tx,
             orderReference,
@@ -115,7 +156,8 @@ export function createMerchantPickupNotCollected(options: {
             notCollectedReference: options.nextReference(),
             idempotencyReference,
             correlationReference,
-            closedAt: options.persistence.now(),
+            closedAt,
+            closingFrom,
           });
           // DEC-PICKUP-NOT-COLLECTED-REMAKE (2026-10-19): nobody is coming for the order, so a
           // dish the kitchen is still remaking for it is cancelled with the closure (the guest no

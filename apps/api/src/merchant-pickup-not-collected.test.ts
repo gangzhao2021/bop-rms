@@ -1,8 +1,9 @@
 import { KitchenReworkError } from "@rms/kitchen";
-import { beforeEach, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   closeUncollectedPickupPermission,
   createMerchantPickupNotCollected,
+  storeClosingFrom,
 } from "./merchant-pickup-not-collected.js";
 const doubles = vi.hoisted(() => ({
   scope: vi.fn(),
@@ -10,6 +11,10 @@ const doubles = vi.hoisted(() => ({
   close: vi.fn(),
   kitchen: vi.fn(),
   cancelRemakes: vi.fn(),
+  businessDay: vi.fn(),
+}));
+vi.mock("./merchant-store-business-day.js", () => ({
+  createMerchantStoreBusinessDay: () => doubles.businessDay,
 }));
 vi.mock("@rms/kitchen", async (original) => ({
   ...(await original<object>()),
@@ -28,8 +33,9 @@ function setup() {
   const run = vi.fn(async (work: (tx: object) => Promise<unknown>) => work({ query: vi.fn() }));
   doubles.scope.mockResolvedValue({
     actorReference: id(2),
+    selected: { tenantReference: id(9) },
     context: { brand: { brandReference: id(3) } },
-    store: { storeReference: id(4) },
+    store: { storeReference: id(4), timeZone: "America/Toronto" },
     allowed,
   });
   doubles.store.mockReturnValue({ closeUncollected: doubles.close });
@@ -166,5 +172,40 @@ it("WP-2423: a remake that can't be cancelled fails the whole close (retry the s
   doubles.cancelRemakes.mockRejectedValue(new KitchenReworkError("KITCHEN_REWORK_UNAVAILABLE"));
   await expect(f.operation(f.input)).rejects.toMatchObject({
     code: "PICKUP_HANDOFF_INPUT_INVALID",
+  });
+});
+
+describe("WP-2423 store-service-controls (v15 M46) closing for the night", () => {
+  const day = {
+    startsAt: "2026-10-09T08:00:00.000Z",
+    closesAt: "2026-10-09T04:00:00.000Z",
+    closedToday: false,
+  };
+  it("is allowed from the end of the day's last service period, never at last orders", () => {
+    expect(storeClosingFrom(day, "2026-10-09T04:00:00.000Z")).toBe("2026-10-09T04:00:00.000Z");
+    // Last orders was 03:30; at 03:35 guests can still come for ready orders: refused.
+    expect(storeClosingFrom(day, "2026-10-09T03:35:00.000Z")).toBeNull();
+    expect(storeClosingFrom({ ...day, closesAt: null }, "2026-10-09T05:00:00.000Z")).toBeNull();
+    expect(
+      storeClosingFrom({ ...day, closesAt: null, closedToday: true }, "2026-10-09T09:00:00.000Z"),
+    ).toBe("2026-10-09T08:00:00.000Z");
+  });
+  it("closes with the reason and the end of service, or answers not closing yet", async () => {
+    const f = setup();
+    const closing = { ...f.input, command: { ...f.input.command, reason: "StoreClosing" } };
+    doubles.businessDay.mockResolvedValue(day);
+    await f.operation(closing);
+    expect(doubles.close.mock.calls[0]?.[0]).toMatchObject({
+      closingFrom: "2026-10-09T04:00:00.000Z",
+      closedAt: "2026-10-09T05:00:00.000Z",
+    });
+    doubles.businessDay.mockResolvedValue({ ...day, closesAt: "2026-10-09T06:00:00.000Z" });
+    await expect(f.operation(closing)).rejects.toMatchObject({
+      code: "PICKUP_HANDOFF_NOT_CLOSING_YET",
+    });
+    await expect(
+      f.operation({ ...f.input, command: { ...f.input.command, reason: "Other" } }),
+    ).rejects.toMatchObject({ code: "PICKUP_HANDOFF_INPUT_INVALID" });
+    expect(doubles.close).toHaveBeenCalledTimes(1);
   });
 });

@@ -3,7 +3,12 @@ import { PauseOrderingControl } from "./PauseOrderingControl.js";
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { PickupProofForm, pickupCodeLockedText } from "./PickupProofForm.js";
 import { PickupHandoffForm } from "./PickupHandoffForm.js";
-import { PickupNotCollectedAction, pickupHoldMinutes } from "./PickupNotCollectedAction.js";
+import {
+  PickupClosingAction,
+  PickupNotCollectedAction,
+  pickupHoldMinutes,
+  storeClosingNow,
+} from "./PickupNotCollectedAction.js";
 import { businessDateText, useStoreBusinessDay } from "./StoreBusinessDay.js";
 import { StatePanel } from "@bop-rms/ui";
 import { Freshness } from "./StoreTime.js";
@@ -407,7 +412,13 @@ export function PickupQueueScreen({
   const visibleReferences = new Set(items.map((item) => item.fulfillmentReference));
   // WP-2423 Q26: earlier business days' orders are grouped apart so their repeated numbers are not
   // mistaken for today's orders.
-  const today = useStoreBusinessDay()?.businessDate ?? null;
+  const businessDay = useStoreBusinessDay();
+  const today = businessDay?.businessDate ?? null;
+  // WP-2423 store-service-controls (v15 M46): after the day's service, every ready order nobody
+  // collected can be closed for the night at once.
+  const closingItems = storeClosingNow(businessDay, Date.parse(view.projectedAt))
+    ? view.items.filter((item) => item.phase === "Ready" && item.execution !== undefined)
+    : [];
   // An order already handed over needs no checking, whichever day it was from.
   const needsChecking = (item: PickupQueueItem) =>
     fromEarlierDay(item, today) && item.phase !== "Completed";
@@ -451,6 +462,15 @@ export function PickupQueueScreen({
           <PauseOrderingControl
             csrf={proofContext.csrf}
             storeReference={proofContext.storeReference}
+          />
+        ) : null}
+        {proofContext && closingItems.length > 0 ? (
+          <PickupClosingAction
+            items={closingItems}
+            paused={readOnly || stale !== undefined}
+            csrf={proofContext.csrf}
+            storeReference={proofContext.storeReference}
+            onDone={onRefresh}
           />
         ) : null}
         {view.guestPickupOff === true ? (

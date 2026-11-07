@@ -822,6 +822,7 @@ describe("migration catalog", () => {
       "2000_322_create_role_preset_offer_decision",
       "2000_433_alter_dining_table_cash_refund_nickel",
       "2000_450_alter_checkout_contact_redaction_staff_request",
+      "2000_460_alter_pickup_not_collected_store_closing",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),

@@ -693,6 +693,29 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Online ordering starts again at {time} (in {minutes} min).":
     "线上点单将于 {time} 恢复（还有 {minutes} 分钟）。",
   "Pause 15 more min": "再暂停 15 分钟",
+  "Orders could not be read, so paid pickup orders waiting for Accept aren't known. Check Orders.":
+    "订单读不到，所以不知道是否还有已付款待接单的自取单。请查看订单页。",
+  "{count} paid pickup orders are waiting for Accept (refunded automatically from {time}). Accept or cancel them in Orders first.":
+    "还有 {count} 单已付款的自取单待接单（{time} 起自动退款）。请先在订单页接单或取消。",
+
+  ", when {value}.": "，在{value}。",
+  "BOP support renews tax setup: call BOP support before then, or the store cannot take orders after that.":
+    "税务设置由 BOP 支持续期：请在此之前致电 BOP 支持，否则之后门店无法接单。",
+
+  "Mark all not collected ({count})": "全部标记未取餐（{count}）",
+  "Close the pickups nobody collected": "关闭没人来取的自取单",
+  "The store has closed for today. These ready orders were not collected:":
+    "今天已打烊。这些做好的订单没有人来取：",
+  "not closed yet": "尚未关闭",
+  "Recorded with the reason: store closing. Not refunded; a manager can still refund.":
+    "记录原因：打烊。不自动退款，经理仍可退款。",
+  "I checked the pickup shelf and nobody collected these orders":
+    "我已检查取餐架，这些订单都没人取",
+  "Retry the {count} not closed": "重试未关闭的 {count} 单",
+  "Closed {done} of {count}.": "已关闭 {done}/{count} 单。",
+  "Some orders were not closed. They may have changed on another screen; retry, or close them one by one.":
+    "有些订单没有关闭。可能已在其他屏幕上改变；请重试，或逐单关闭。",
+
   "A pause can last up to 4 hours. To stop for longer, add a closure for today in Hours, or turn the service off in Store features.":
     "暂停最长 4 小时。要停更久，请在营业时间里添加今天的休息，或在门店功能里关闭这项服务。",
   "An earlier {value} save must be recovered before another save.":
