@@ -1137,6 +1137,7 @@ it("sole operator: set by the Brand Owner, self-approval with MFA, lapse on a se
         tipsMinor: "300",
         serviceChargesMinor: "0",
         notItemizedMinor: "0",
+        cashRoundingMinor: "0",
       });
       assert.deepEqual(
         report.items.map((row) => [

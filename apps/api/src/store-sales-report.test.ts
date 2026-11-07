@@ -274,6 +274,7 @@ describe("store sales report (WP-2423 Q14)", () => {
         tipsMinor: "0",
         serviceChargesMinor: "0",
         notItemizedMinor: "0",
+        cashRoundingMinor: "0",
       },
       netCollectedMinor: "2045",
       netSalesAfterRefundsMinor: "1500",
@@ -1094,5 +1095,171 @@ describe("store sales report (WP-2423 Q14)", () => {
     expect(values[columns.indexOf("net_sales_after_refunds")]).toBe("9.35");
     // The columns an accountant already imports keep their places; new ones come after them.
     expect(columns.indexOf("points_used")).toBeGreaterThan(columns.indexOf("currency"));
+  });
+  describe("v15 M162: a table refund is shared over every round of the bill", () => {
+    // A table of two rounds paid at the end: a latte ($11.30 with tax), then two muffins ($7.91).
+    const roundA = [item(sku.latteLarge, 1, 1000)];
+    const roundB = [item(sku.muffin, 2, 700)];
+    const tableOrder = order(904, "DineIn", "Qr", [roundA, roundB]);
+    const settlementReference = ref(964);
+    const line = (
+      index: number,
+      items: readonly StoreSalesOrderItem[],
+      channel: "Cash" | "CardMachine",
+      tip: bigint,
+      rounding: bigint,
+    ): StoreSalesPayment => ({
+      channel,
+      paymentIntentReference: settlementReference + ":" + String(index + 1),
+      orderReference: ref(904),
+      orderBatchReference: ref(904 + 10 + index),
+      orderAllocationMinor: total(items),
+      tipMinor: tip,
+      totalMinor: total(items) + tip,
+      roundingMinor: rounding,
+      paymentCount: index === 0 ? 1 : 0,
+      takenAt: "2026-10-14T20:00:00.000Z",
+      tableSettlementReference: settlementReference,
+    });
+    const tableRefund = (
+      channel: "Cash" | "CardMachine",
+      amountMinor: bigint,
+      n: number,
+    ): StoreSalesRefund => ({
+      channel,
+      kind: channel,
+      refundReference: ref(n),
+      orderReference: ref(904),
+      // Keyed to the Order's last round line, as the ledger records it.
+      paymentIntentReference: settlementReference + ":2",
+      amountMinor,
+      refundedAt: "2026-10-14T21:00:00.000Z",
+      items: null,
+      tableSettlementReference: settlementReference,
+    });
+    const report = (
+      channel: "Cash" | "CardMachine",
+      tip: bigint,
+      rounding: bigint,
+      refunds: StoreSalesRefund[],
+    ) => {
+      const lines = [line(0, roundA, channel, 0n, 0n), line(1, roundB, channel, tip, rounding)];
+      const taken = lines.reduce((sum, l) => sum + l.totalMinor + l.roundingMinor, 0n);
+      const refunded = {
+        count: refunds.length,
+        amountMinor: refunds.reduce((sum, r) => sum + r.amountMinor, 0n),
+      };
+      const none = { count: 0, amountMinor: 0n };
+      return computeStoreSalesReport({
+        ...today,
+        orders: [tableOrder],
+        payments: lines,
+        refundedPayments: [],
+        refunds,
+        settlement: {
+          onlineCaptured: none,
+          onlineRefunded: none,
+          cardMachineTaken:
+            channel === "CardMachine"
+              ? { count: 1, amountMinor: taken, tipMinor: tip }
+              : { count: 0, amountMinor: 0n, tipMinor: 0n },
+          cardMachineRefunded: channel === "CardMachine" ? refunded : none,
+          cashTaken:
+            channel === "Cash"
+              ? { count: 1, amountMinor: taken, tipMinor: tip, roundingMinor: rounding }
+              : { count: 0, amountMinor: 0n, tipMinor: 0n, roundingMinor: 0n },
+          cashRefunded: channel === "Cash" ? refunded : none,
+        },
+        priceReductions: [],
+      });
+    };
+    it("a full refund of a two-round table gives back every round's sales, tax and tip", () => {
+      const view = report("CardMachine", 100n, 0n, [tableRefund("CardMachine", 2021n, 705)]);
+      expect(view.summary).toMatchObject({
+        netSalesMinor: "1700",
+        taxMinor: "221",
+        refundsMinor: "2021",
+        refunds: {
+          salesMinor: "1700",
+          taxMinor: "221",
+          tipsMinor: "100",
+          notItemizedMinor: "0",
+          cashRoundingMinor: "0",
+        },
+        netSalesAfterRefundsMinor: "0",
+        taxAfterRefundsMinor: "0",
+      });
+      expect(view.items.find((row) => row.name === "Latte — Large")).toMatchObject({
+        refundedQuantity: 1,
+        netAfterRefundsMinor: "0",
+      });
+      expect(view.reconciliation.matchesSettlement).toBe(true);
+    });
+    it("an amount larger than the last round is shared over both rounds, with its tax", () => {
+      const view = report("CardMachine", 100n, 0n, [tableRefund("CardMachine", 1500n, 706)]);
+      const refunds = view.summary.refunds;
+      expect(refunds.notItemizedMinor).toBe("0");
+      expect(BigInt(refunds.taxMinor)).toBeGreaterThan(0n);
+      expect(
+        BigInt(refunds.salesMinor) + BigInt(refunds.taxMinor) + BigInt(refunds.tipsMinor),
+      ).toBe(1500n);
+      // Both rounds' dishes give back their share, not only the last round's muffins.
+      const latte = view.items.find((row) => row.name === "Latte — Large");
+      const muffins = view.items.find((row) => row.name === "Muffin");
+      expect(BigInt(latte?.refundsMinor ?? "0")).toBeGreaterThan(0n);
+      expect(BigInt(muffins?.refundsMinor ?? "0")).toBeGreaterThan(0n);
+      expect(latte?.refundedQuantity).toBe(0);
+      // A later refund of exactly what is left is a full refund (no double count).
+      const rest = report("CardMachine", 100n, 0n, [
+        tableRefund("CardMachine", 1500n, 706),
+        { ...tableRefund("CardMachine", 521n, 707), refundedAt: "2026-10-14T21:30:00.000Z" },
+      ]);
+      expect(rest.summary).toMatchObject({
+        refunds: { salesMinor: "1700", taxMinor: "221", tipsMinor: "100", notItemizedMinor: "0" },
+        netSalesAfterRefundsMinor: "0",
+        taxAfterRefundsMinor: "0",
+      });
+    });
+    it("a full cash refund with its rounding leaves no sales or tax, whichever way it rounded", () => {
+      // $20.21 rounded down to $20.20 and handed back in full.
+      const down = report("Cash", 100n, -1n, [tableRefund("Cash", 2020n, 708)]);
+      expect(down.summary).toMatchObject({
+        refundsMinor: "2020",
+        refunds: {
+          salesMinor: "1700",
+          taxMinor: "221",
+          tipsMinor: "100",
+          notItemizedMinor: "0",
+          cashRoundingMinor: "-1",
+        },
+        netSalesAfterRefundsMinor: "0",
+        taxAfterRefundsMinor: "0",
+      });
+      expect(down.reconciliation.matchesSettlement).toBe(true);
+      // $19.21 rounded up to $19.25 and handed back in full.
+      const up = report("Cash", 0n, 4n, [tableRefund("Cash", 1925n, 709)]);
+      expect(up.summary).toMatchObject({
+        refundsMinor: "1925",
+        refunds: {
+          salesMinor: "1700",
+          taxMinor: "221",
+          tipsMinor: "0",
+          notItemizedMinor: "0",
+          cashRoundingMinor: "4",
+        },
+        netSalesAfterRefundsMinor: "0",
+        taxAfterRefundsMinor: "0",
+      });
+      // A part handed back first, then the rest with the rounding: still nothing left.
+      const parts = report("Cash", 0n, 4n, [
+        tableRefund("Cash", 1000n, 710),
+        { ...tableRefund("Cash", 925n, 711), refundedAt: "2026-10-14T21:30:00.000Z" },
+      ]);
+      expect(parts.summary).toMatchObject({
+        refunds: { notItemizedMinor: "0", cashRoundingMinor: "4" },
+        netSalesAfterRefundsMinor: "0",
+        taxAfterRefundsMinor: "0",
+      });
+    });
   });
 });

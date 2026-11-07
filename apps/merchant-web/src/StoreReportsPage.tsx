@@ -160,6 +160,8 @@ function SummaryLines({ summary }: { readonly summary: StoreReportSummary }) {
     lines.push([t("  of which tips"), money(summary.refunds.tipsMinor)]);
     if (summary.refunds.serviceChargesMinor !== "0")
       lines.push([t("  of which service charges"), money(summary.refunds.serviceChargesMinor)]);
+    if (summary.refunds.cashRoundingMinor !== "0")
+      lines.push([t("  of which cash rounding"), money(summary.refunds.cashRoundingMinor)]);
     if (summary.refunds.notItemizedMinor !== "0")
       lines.push([t("  not split by item"), money(summary.refunds.notItemizedMinor)]);
   }

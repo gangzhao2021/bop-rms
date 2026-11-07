@@ -171,6 +171,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{item} at {store}: the option {value} has no published recipe change for the recipe used there. Set, review and publish it under Option recipes, then list it again.":
     "{item}（{store}）：选项 {value} 对那里使用的配方没有已发布的配方变化。请在“选项配方”里设置、审核并发布，然后重新上架。",
   "  not split by item": "  未按商品拆分",
+  "  of which cash rounding": "  其中现金取整",
   "  of which sales": "  其中销售额",
   "  of which service charges": "  其中服务费",
   "  of which tax": "  其中税",

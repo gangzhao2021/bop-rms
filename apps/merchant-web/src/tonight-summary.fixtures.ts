@@ -56,6 +56,7 @@ function summary(figures: Figures, extra: { writeOffs?: number; writeOffMinor?: 
       tipsMinor: "0",
       serviceChargesMinor: "0",
       notItemizedMinor: "0",
+      cashRoundingMinor: "0",
     },
     netSalesAfterRefundsMinor: money(net - (figures.refundSales ?? 0)),
     taxAfterRefundsMinor: money(figures.tax - (figures.refundTax ?? 0)),

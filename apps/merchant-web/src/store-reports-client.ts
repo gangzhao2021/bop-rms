@@ -65,6 +65,8 @@ export interface StoreReportSummary {
     readonly tipsMinor: string;
     readonly serviceChargesMinor: string;
     readonly notItemizedMinor: string;
+    /** v15 M162: the cash rounding a full cash refund handed back with it (signed). */
+    readonly cashRoundingMinor: string;
   };
   readonly netSalesAfterRefundsMinor: string;
   /** v15 M45 (Owner rule 6): tax charged less the tax refunds gave back. */
@@ -183,6 +185,7 @@ function summary(value: Record<string, unknown>): StoreReportSummary {
     "tipsMinor",
     "serviceChargesMinor",
     "notItemizedMinor",
+    "cashRoundingMinor",
   ]);
   return Object.freeze({
     paymentCount: count(value.paymentCount),
@@ -216,6 +219,7 @@ function summary(value: Record<string, unknown>): StoreReportSummary {
       tipsMinor: minor(refunds.tipsMinor),
       serviceChargesMinor: minor(refunds.serviceChargesMinor),
       notItemizedMinor: minor(refunds.notItemizedMinor),
+      cashRoundingMinor: signed(refunds.cashRoundingMinor),
     }),
     netSalesAfterRefundsMinor: signed(value.netSalesAfterRefundsMinor),
     taxAfterRefundsMinor: signed(value.taxAfterRefundsMinor),

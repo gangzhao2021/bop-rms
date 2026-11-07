@@ -39,6 +39,11 @@ export interface StoreSalesPayment {
    * other parts pay the rest, or are written off). Absent: not a split part.
    */
   readonly splitPart?: true;
+  /**
+   * v15 M162: the table payment this round line belongs to (absent: not a table's payment). A
+   * refund of the table is shared over all of its lines, not charged to the last round.
+   */
+  readonly tableSettlementReference?: string;
 }
 /** A refund's share of one order item, from the refund request's own allocation. */
 export interface StoreSalesRefundItemShare {
@@ -63,6 +68,11 @@ export interface StoreSalesRefund {
   readonly refundedAt: string;
   /** Item shares when the refund request allocated them; null for a whole-payment refund. */
   readonly items: readonly StoreSalesRefundItemShare[] | null;
+  /**
+   * v15 M162: a table refund's payment. The refund is keyed to its Order's last round line (so it
+   * belongs to that Order), and the reports share it over every round line of this payment.
+   */
+  readonly tableSettlementReference?: string;
 }
 /** The day-end settlement's own totals for the same window, read by its own sources. */
 export interface StoreSalesSettlementTotals {
@@ -357,8 +367,9 @@ export function createPostgresStoreSalesPaymentLedger(options: {
     for (const refund of table.cashRefunds) {
       const settlement =
         tableSettlements.get(refund.settlementReference) ?? fail("TableRefundWithoutSettlement");
-      // The cash came back from the bill's own Order (a merged table's rounds keep theirs): its
-      // last round line on this payment, else the payment's last line.
+      // The cash came back from the bill's own Order (a merged table's rounds keep theirs): keyed to
+      // its last round line on this payment, else the payment's last line; the reports share the
+      // amount over every round line of the payment (v15 M162).
       const last =
         settlement.lines.findLast((line) => line.orderReference === refund.orderReference) ??
         settlement.lines.at(-1) ??
@@ -375,6 +386,7 @@ export function createPostgresStoreSalesPaymentLedger(options: {
           amountMinor: refund.amountMinor,
           refundedAt: refund.refundedAt,
           items: null,
+          tableSettlementReference: settlement.settlementReference,
         }),
       );
     }
@@ -399,6 +411,7 @@ export function createPostgresStoreSalesPaymentLedger(options: {
           amountMinor: refund.amountMinor,
           refundedAt: refund.refundedAt,
           items: null,
+          tableSettlementReference: settlement.settlementReference,
         }),
       );
     }
@@ -424,6 +437,7 @@ export function createPostgresStoreSalesPaymentLedger(options: {
           amountMinor: refund.amountMinor,
           refundedAt: refund.outcome?.providerCreatedAt ?? fail(),
           items: null,
+          tableSettlementReference: settlement.settlementReference,
         }),
       );
     }
@@ -566,6 +580,7 @@ export function createPostgresStoreSalesPaymentLedger(options: {
           paymentCount: index === 0 ? (1 as const) : (0 as const),
           takenAt: settlement.takenAt,
           ...(settlement.part === null ? {} : { splitPart: true as const }),
+          tableSettlementReference: settlement.settlementReference,
         });
         if (inWindow) payments.push(record);
         else refundedPayments.push(record);

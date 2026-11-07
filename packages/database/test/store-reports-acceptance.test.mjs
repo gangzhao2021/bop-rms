@@ -634,6 +634,7 @@ it("reports a business day's sales, items, hours and tips, matches the settlemen
             tipsMinor: "0",
             serviceChargesMinor: "0",
             notItemizedMinor: "0",
+            cashRoundingMinor: "0",
           },
           netCollected: "3062",
         },

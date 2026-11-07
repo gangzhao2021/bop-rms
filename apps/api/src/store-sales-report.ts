@@ -102,6 +102,8 @@ interface Totals {
   refundedServiceChargeMinor: bigint;
   /** Whole-payment refunds that could not be split by item (should be none). */
   refundedUnallocatedMinor: bigint;
+  /** v15 M162: the cash rounding a table's full cash refund handed back with it (not sales or tax). */
+  refundedRoundingMinor: bigint;
   /** DEC-DINE-IN-PAY-LATER: tables written off unpaid (not collected, not in the sums above). */
   writeOffCount: number;
   writeOffMinor: bigint;
@@ -138,6 +140,7 @@ const totals = (): Totals => ({
   refundedTipMinor: 0n,
   refundedServiceChargeMinor: 0n,
   refundedUnallocatedMinor: 0n,
+  refundedRoundingMinor: 0n,
 });
 interface ItemTotals {
   name: string;
@@ -618,17 +621,36 @@ function computeSales(
   );
   const returned = new Map<string, { units: number; net: bigint; tax: bigint; fee: bigint }>();
   const tipReturned = new Map<string, bigint>();
+  const roundingReturned = new Map<string, bigint>();
+  // v15 M162: a table payment is one line per round; a refund of it is shared over all of them.
+  const tableLines = new Map<string, StoreSalesPayment[]>();
+  for (const line of paymentsByIntent.values()) {
+    if (line.tableSettlementReference === undefined) continue;
+    const list = tableLines.get(line.tableSettlementReference) ?? [];
+    list.push(line);
+    tableLines.set(line.tableSettlementReference, list);
+  }
   for (const refund of [...input.refunds].sort((a, b) =>
     a.refundedAt.localeCompare(b.refundedAt),
   )) {
     const payment = paymentsByIntent.get(refund.paymentIntentReference) ?? fail();
     if (payment.orderReference !== refund.orderReference) return fail();
-    const items = batchItems(payment.orderReference, payment.orderBatchReference) ?? [];
-    const byItem = new Map(items.map((item) => [item.orderItemReference, item]));
-    // Each share: [item or null, units, net, tax, fee, tip].
-    const shares: [(typeof items)[number] | null, number, bigint, bigint, bigint, bigint][] = [];
-    let unallocated = 0n;
+    // Each share: [item or null, units, net, tax, fee, tip, the payment line its tip came off].
+    const shares: [
+      StoreSalesOrder["batches"][number]["items"][number] | null,
+      number,
+      bigint,
+      bigint,
+      bigint,
+      bigint,
+      string,
+    ][] = [];
+    let unallocated = 0n,
+      roundingShare = 0n;
+    const roundingKey = refund.tableSettlementReference ?? payment.paymentIntentReference;
     if (refund.items !== null) {
+      const items = batchItems(payment.orderReference, payment.orderBatchReference) ?? [];
+      const byItem = new Map(items.map((item) => [item.orderItemReference, item]));
       for (const share of refund.items) {
         const item = byItem.get(share.orderItemReference) ?? null;
         shares.push([
@@ -638,46 +660,79 @@ function computeSales(
           share.taxMinor,
           share.serviceChargeMinor,
           share.tipMinor,
+          payment.paymentIntentReference,
         ]);
       }
     } else {
-      // A whole-payment refund returns what remained of each item and of the tip.
+      // A whole-payment refund returns what remained of each item and of the tip, over every
+      // round line of a table's payment (a refund is off the whole bill, not its last round).
+      const lines =
+        refund.tableSettlementReference === undefined
+          ? [payment]
+          : (tableLines.get(refund.tableSettlementReference) ?? fail());
+      if (!lines.includes(payment)) return fail();
       let remaining = 0n;
       const pending: typeof shares = [];
-      for (const item of items) {
-        const before = returned.get(item.orderItemReference) ?? {
-          units: 0,
-          net: 0n,
-          tax: 0n,
-          fee: 0n,
-        };
-        const share: (typeof shares)[number] = [
-          item,
-          item.quantity - before.units,
-          item.subtotalMinor - item.discountMinor - item.compMinor - item.pointsMinor - before.net,
-          item.taxMinor - before.tax,
-          item.feeMinor - before.fee,
-          0n,
-        ];
-        remaining += share[2] + share[3] + share[4];
-        pending.push(share);
+      const tips: [string, bigint][] = [];
+      let itemized = true;
+      for (const line of lines) {
+        const items = batchItems(line.orderReference, line.orderBatchReference) ?? [];
+        if (items.length === 0) itemized = false;
+        for (const item of items) {
+          const before = returned.get(item.orderItemReference) ?? {
+            units: 0,
+            net: 0n,
+            tax: 0n,
+            fee: 0n,
+          };
+          const share: (typeof shares)[number] = [
+            item,
+            item.quantity - before.units,
+            item.subtotalMinor -
+              item.discountMinor -
+              item.compMinor -
+              item.pointsMinor -
+              before.net,
+            item.taxMinor - before.tax,
+            item.feeMinor - before.fee,
+            0n,
+            line.paymentIntentReference,
+          ];
+          remaining += share[2] + share[3] + share[4];
+          pending.push(share);
+        }
+        const tipLeft = line.tipMinor - (tipReturned.get(line.paymentIntentReference) ?? 0n);
+        remaining += tipLeft;
+        tips.push([line.paymentIntentReference, tipLeft]);
       }
-      const tipLeft = payment.tipMinor - (tipReturned.get(payment.paymentIntentReference) ?? 0n);
-      if (items.length > 0 && remaining + tipLeft === refund.amountMinor) {
+      // The cash rounding taken with the payment and not yet handed back (cash only; else 0).
+      const roundingLeft =
+        lines.reduce((sum, line) => sum + line.roundingMinor, 0n) -
+        (roundingReturned.get(roundingKey) ?? 0n);
+      // What came back beyond the dishes and tip left: the rounding, when it is a full refund.
+      const extra = refund.amountMinor - remaining;
+      const everythingLeft =
+        extra === 0n ||
+        (roundingLeft > 0n ? extra > 0n && extra <= roundingLeft : extra === roundingLeft);
+      if (itemized && everythingLeft) {
+        // Everything left, with the rounding when it came back too ($23.45 for a $23.47 bill).
         shares.push(...pending);
-        shares.push([null, 0, 0n, 0n, 0n, tipLeft]);
-      } else if (
-        items.length > 0 &&
-        refund.amountMinor > 0n &&
-        refund.amountMinor < remaining + tipLeft
-      ) {
+        for (const [line, tipLeft] of tips) shares.push([null, 0, 0n, 0n, 0n, tipLeft, line]);
+        roundingShare = extra;
+      } else if (itemized && refund.amountMinor > 0n && extra < 0n) {
         // v15 M162: an amount refunded off part of a bill ("Store mistake, $10 back") gives back
         // its proportion of what is left of each dish's sales, tax and service charge and of the
-        // tip (largest remainder; the ETA s. 232 price-reduction treatment), so the refunded tax is
-        // reported and net sales after refunds subtract it. No dish counts as returned.
-        const parts = pending.flatMap((share) => [share[2], share[3], share[4]]);
-        const weights = [...parts, tipLeft].map((value) => (value > 0n ? value : 0n));
-        const split = allocate(refund.amountMinor, weights);
+        // tip, on every round of the bill (largest remainder; the ETA s. 232 price-reduction
+        // treatment), so the refunded tax is reported and net sales after refunds subtract it.
+        // No dish counts as returned.
+        const parts = [
+          ...pending.flatMap((share) => [share[2], share[3], share[4]]),
+          ...tips.map(([, tipLeft]) => tipLeft),
+        ];
+        const split = allocate(
+          refund.amountMinor,
+          parts.map((value) => (value > 0n ? value : 0n)),
+        );
         pending.forEach((share, index) => {
           shares.push([
             share[0],
@@ -686,9 +741,12 @@ function computeSales(
             split[index * 3 + 1] ?? fail(),
             split[index * 3 + 2] ?? fail(),
             0n,
+            share[6],
           ]);
         });
-        shares.push([null, 0, 0n, 0n, 0n, split.at(-1) ?? fail()]);
+        tips.forEach(([line], index) => {
+          shares.push([null, 0, 0n, 0n, 0n, split[pending.length * 3 + index] ?? fail(), line]);
+        });
       } else unallocated = refund.amountMinor;
     }
     for (const [item, units, net, tax, fee] of shares) {
@@ -707,7 +765,8 @@ function computeSales(
       });
     }
     const tipShare = shares.reduce((sum, share) => sum + share[5], 0n);
-    add(tipReturned, payment.paymentIntentReference, tipShare);
+    for (const share of shares) add(tipReturned, share[6], share[5]);
+    add(roundingReturned, roundingKey, roundingShare);
     const day = refund.refundedAt >= first.startsAt ? dayOf(refund.refundedAt) : null;
     if (day === null) continue;
     const f = facts.get(day.businessDate) ?? fail();
@@ -717,7 +776,8 @@ function computeSales(
     const net = shares.reduce((sum, share) => sum + share[2], 0n),
       tax = shares.reduce((sum, share) => sum + share[3], 0n),
       fee = shares.reduce((sum, share) => sum + share[4], 0n);
-    if (net + tax + fee + tipShare + unallocated !== refund.amountMinor) return fail();
+    if (net + tax + fee + tipShare + unallocated + roundingShare !== refund.amountMinor)
+      return fail();
     for (const t of groups) {
       t.refundCount++;
       t.refundedMinor += refund.amountMinor;
@@ -726,6 +786,7 @@ function computeSales(
       t.refundedServiceChargeMinor += fee;
       t.refundedTipMinor += tipShare;
       t.refundedUnallocatedMinor += unallocated;
+      t.refundedRoundingMinor += roundingShare;
     }
     (f.tips.get(refund.channel) ?? fail()).refundedMinor += tipShare;
     for (const [item, units, itemNet] of shares) {
@@ -775,6 +836,7 @@ function computeSales(
       "refundedTipMinor",
       "refundedServiceChargeMinor",
       "refundedUnallocatedMinor",
+      "refundedRoundingMinor",
     ] as const)
       target[key] += source[key];
     target.unmatchedCount += source.unmatchedCount;
@@ -902,6 +964,7 @@ function computeSales(
         tipsMinor: s(t.refundedTipMinor),
         serviceChargesMinor: s(t.refundedServiceChargeMinor),
         notItemizedMinor: s(t.refundedUnallocatedMinor),
+        cashRoundingMinor: s(t.refundedRoundingMinor),
       }),
       netSalesAfterRefundsMinor: s(netSales - t.refundedNetMinor),
       // v15 M45 (Owner rule 6): the tax still owed once refunds gave theirs back.
