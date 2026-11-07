@@ -6,7 +6,7 @@ import {
   parseDiningReference,
   type DiningCredentialPort,
 } from "@rms/dining";
-import { listDiningSessionRoundSenders } from "@rms/ordering";
+import { listDiningSessionRoundSenders, type DiningSessionRoundSender } from "@rms/ordering";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
@@ -66,6 +66,32 @@ export function parseMerchantDiningQrJoinCommand(value: unknown): MerchantDining
     });
   }
   throw new Error("DINING_QR_JOIN_INPUT_INVALID");
+}
+
+/**
+ * WP-2423 M139: the phones panel's label for each round — the number of the phone that sent it, or
+ * null for a round staff entered, one whose sender is not recorded, or a phone no longer listed.
+ */
+export function diningRoundPhoneNumbers(
+  senders: readonly DiningSessionRoundSender[],
+  phones: readonly { readonly participantReference: unknown; readonly phoneNumber: number }[],
+): readonly { readonly orderBatchReference: string; readonly phoneNumber: number | null }[] {
+  const phoneOf = new Map(
+    phones.map((phone) => [String(phone.participantReference), phone.phoneNumber]),
+  );
+  const rounds = new Map<string, number | null>(
+    senders.map((round) => [
+      round.orderBatchReference,
+      round.staffEntered || round.participantReference === null
+        ? null
+        : (phoneOf.get(round.participantReference) ?? null),
+    ]),
+  );
+  return Object.freeze(
+    [...rounds].map(([orderBatchReference, phoneNumber]) =>
+      Object.freeze({ orderBatchReference, phoneNumber }),
+    ),
+  );
 }
 
 export function createMerchantDiningQrJoin(options: {
@@ -168,29 +194,15 @@ export function createMerchantDiningQrJoin(options: {
             brandReference: scope.brandReference,
             storeReference: scope.storeReference,
           };
-          const phoneOf = new Map(
-            state.phones.map((phone) => [String(phone.participantReference), phone.phoneNumber]),
-          );
-          const rounds = new Map<string, number | null>(
-            (
+          return Object.freeze({
+            ...state,
+            rounds: diningRoundPhoneNumbers(
               await listDiningSessionRoundSenders(
                 tx as unknown as ConsumerTransaction,
                 owner,
                 command.diningSessionReference,
-              )
-            ).map((round) => [
-              round.orderBatchReference,
-              round.staffEntered || round.participantReference === null
-                ? null
-                : (phoneOf.get(round.participantReference) ?? null),
-            ]),
-          );
-          return Object.freeze({
-            ...state,
-            rounds: Object.freeze(
-              [...rounds].map(([orderBatchReference, phoneNumber]) =>
-                Object.freeze({ orderBatchReference, phoneNumber }),
               ),
+              state.phones,
             ),
           });
         },
