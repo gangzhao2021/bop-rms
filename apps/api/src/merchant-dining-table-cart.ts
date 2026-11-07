@@ -197,6 +197,8 @@ export function createMerchantDiningTableCart(options: {
           const unavailable = (error: unknown): never => {
             if (error instanceof MerchantDiningTableCartError) throw error;
             if (error instanceof CartError) {
+              if (error.code === "CART_CHECKOUT_IN_PROGRESS")
+                throw new MerchantDiningTableCartError("DINING_TABLE_CART_GUEST_PAYING");
               if (error.code === "CART_VERSION_CONFLICT" || error.code === "CART_ITEM_NOT_FOUND")
                 throw new MerchantDiningTableCartError("DINING_TABLE_CART_CHANGED");
               if (error.code === "CART_PERMISSION_DENIED" || error.code === "CART_UNAVAILABLE")
@@ -208,8 +210,6 @@ export function createMerchantDiningTableCart(options: {
           };
           if (command.action === "Remove") {
             try {
-              if (await guestPaying(command.cartReference, command.expectedCartVersion))
-                throw new MerchantDiningTableCartError("DINING_TABLE_CART_GUEST_PAYING");
               await removeStaffDiningCartLine(cartTx, owner, {
                 operationReference: command.operationReference,
                 diningSessionReference: session,
@@ -220,6 +220,9 @@ export function createMerchantDiningTableCart(options: {
                 actorReference,
                 observedAt,
                 hashIntent: (value) => "sha256:" + createHash("sha256").update(value).digest("hex"),
+                // Asked by Ordering under the cart row lock, so a checkout that started just
+                // before is seen (see removeStaffDiningCartLine).
+                checkoutHeld: (cartVersion) => guestPaying(command.cartReference, cartVersion),
                 audit: {
                   auditId: options.nextReference(),
                   brandId: scope.brandReference,

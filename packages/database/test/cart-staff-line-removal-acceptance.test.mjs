@@ -73,6 +73,7 @@ it("WP-2423 (shared-table-checkout): staff remove a dish from a table cart, reco
         actorReference: staff,
         observedAt: at,
         hashIntent,
+        checkoutHeld: async () => false,
         audit: {
           auditId: id(++audits),
           brandId: scope.brandReference,
@@ -129,6 +130,76 @@ it("WP-2423 (shared-table-checkout): staff remove a dish from a table cart, reco
         { code: "CART_PERMISSION_DENIED" },
       );
       assert.deepEqual(await written(), before);
+
+      // A guest starts paying just as staff remove: the guest's checkout session holds the cart
+      // row (its hold already recorded) while staff wait for it. Staff then see the hold and are
+      // refused; nothing is written, so the guest pays for exactly the dishes they saw.
+      {
+        const guest = new Client(context.clientConfig);
+        await guest.connect();
+        let holdRecorded = false;
+        const asked = [];
+        try {
+          await guest.query("BEGIN");
+          await guest.query("SET LOCAL ROLE " + api);
+          await guest.query(
+            "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+            [scope.brandReference, scope.storeReference],
+          );
+          await guest.query(
+            "SELECT aggregate_version FROM rms_ordering.cart WHERE brand_id=$1 AND store_id=$2 AND cart_id=$3 FOR UPDATE",
+            [scope.brandReference, scope.storeReference, cart.cartReference],
+          );
+          const staffRemoval = inTransaction((tx) =>
+            removeStaffDiningCartLine(
+              tx,
+              scope,
+              removal(15, {
+                checkoutHeld: async (version) => {
+                  asked.push(version);
+                  return holdRecorded;
+                },
+              }),
+            ),
+          ).then(
+            (value) => ({ value }),
+            (error) => ({ error }),
+          );
+          // Wait until staff are blocked on the cart row lock.
+          for (let attempt = 0; ; attempt += 1) {
+            const waiting = await admin.query(
+              "SELECT count(*)::int AS n FROM pg_stat_activity WHERE wait_event_type='Lock' AND query LIKE '%FROM rms_ordering.cart WHERE%FOR UPDATE%'",
+            );
+            if (waiting.rows[0].n > 0) break;
+            assert.ok(attempt < 200, "staff removal never waited for the cart lock");
+            await new Promise((resolve) => setTimeout(resolve, 50));
+          }
+          holdRecorded = true;
+          await guest.query("COMMIT");
+          const outcome = await staffRemoval;
+          assert.equal(outcome.error?.code, "CART_CHECKOUT_IN_PROGRESS", String(outcome.value));
+          assert.deepEqual(asked, [cart.aggregateVersion]);
+        } finally {
+          await guest.end();
+        }
+        assert.deepEqual(await written(), before);
+        // A hold that can't be read is an outage, not a refusal of the staff member.
+        await assert.rejects(
+          inTransaction((tx) =>
+            removeStaffDiningCartLine(
+              tx,
+              scope,
+              removal(16, {
+                checkoutHeld: async () => {
+                  throw new Error("dining unavailable");
+                },
+              }),
+            ),
+          ),
+          { code: "CART_DEPENDENCY_UNAVAILABLE" },
+        );
+        assert.deepEqual(await written(), before);
+      }
 
       // The removal: next version, the line gone, one record and one Audit record.
       const removed = await inTransaction((tx) =>

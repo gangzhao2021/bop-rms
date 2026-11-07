@@ -18,8 +18,8 @@ import { createPostgresDiningCartReadStore } from "./dining-cart-read-store.js";
  * WP-2423 shared-table-checkout (c): staff see a table's shared cart (dishes guests put in and
  * haven't sent) and take a dish out, with a reason, recorded and attributed to the staff member.
  * Not a sale: no order holds a cart line; the cart's next version and this record keep it in the
- * history. The caller authorizes the staff member (dining.operate) and owns the transaction; it
- * also checks that no guest is paying for this cart version (Dining's checkout hold).
+ * history. The caller authorizes the staff member (dining.operate), owns the transaction and
+ * supplies the read of Dining's checkout hold, which is asked under the cart row lock.
  */
 export type StaffCartRemovalReason = "GuestAsked" | "GuestLeft" | "CantMake";
 const reasons: readonly StaffCartRemovalReason[] = ["GuestAsked", "GuestLeft", "CantMake"];
@@ -150,6 +150,13 @@ export interface StaffCartLineRemovalInput {
   /** The staff member's Audit record for this removal (actor User, action ORDERING_CART_ITEM_REMOVE_BY_STAFF). */
   readonly audit: AppendAuditRecordInput;
   readonly hashIntent: (value: string) => string;
+  /**
+   * Whether a guest's checkout holds this cart version (Dining's checkout hold). Asked after the
+   * cart row is locked: a guest's checkout session takes the same lock and checks the version, and
+   * its hold is recorded before that, so a guest who started paying is either seen here or finds
+   * the cart already at the next version and cannot pay for the removed dish.
+   */
+  readonly checkoutHeld: (cartVersion: number) => Promise<boolean>;
 }
 
 /** The digest of what staff asked for; the same operation reference replays only the same ask. */
@@ -243,6 +250,13 @@ export async function removeStaffDiningCartLine(
   const item = current.items.find((candidate) => candidate.cartItemReference === line);
   if (item === undefined) throw new CartError("CART_ITEM_NOT_FOUND");
   if (Date.parse(at) < Date.parse(current.updatedAt)) return unavailable();
+  let held: boolean;
+  try {
+    held = await input.checkoutHeld(expected);
+  } catch {
+    return unavailable();
+  }
+  if (held !== false) throw new CartError("CART_CHECKOUT_IN_PROGRESS");
   const next = parseCartAggregate({
     ...current,
     aggregateVersion: expected + 1,
