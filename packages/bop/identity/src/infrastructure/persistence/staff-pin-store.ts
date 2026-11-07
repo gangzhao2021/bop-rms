@@ -611,13 +611,17 @@ export async function checkStaffPin(
   const insert =
     "INSERT INTO bop_identity.staff_pin_attempt (brand_id,store_id,attempt_id,device_id,actor_id,credential_version,outcome,rejection_reason,failure_number,attempted_at,audit_id,data_classification) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'IndirectIdentifier')";
   const auditReference = ref(input.auditReference);
-  // Past the limit, an owner or manager's check is recorded as such first (the database lets the
-  // check through only with it, and a verified one clears the limit).
-  if (overLimit)
-    await tx.query(
-      "INSERT INTO bop_identity.staff_pin_device_limit_clear (brand_id,store_id,attempt_id,device_id,actor_id,permission_code,decided_at,data_classification) VALUES ($1,$2,$3,$4,$5,'identity.staff_pin.reset',$6,'IndirectIdentifier')",
-      [scope.brandReference, scope.storeReference, attempt, device, actor, observedAt],
-    );
+  // Past the limit, an owner or manager's check is recorded as such just before the check itself
+  // (the database lets the check through only with it, and a verified one clears the limit). Only
+  // a path that records a check records it: their own lock answers "Locked" and records neither.
+  const recordCheck = async (values: readonly unknown[]) => {
+    if (overLimit)
+      await tx.query(
+        "INSERT INTO bop_identity.staff_pin_device_limit_clear (brand_id,store_id,attempt_id,device_id,actor_id,permission_code,decided_at,data_classification) VALUES ($1,$2,$3,$4,$5,'identity.staff_pin.reset',$6,'IndirectIdentifier')",
+        [scope.brandReference, scope.storeReference, attempt, device, actor, observedAt],
+      );
+    await tx.query(insert, values);
+  };
   const rejectedAudit = (failureNumber: number | null) =>
     audit(tx, policy, {
       auditReference,
@@ -643,7 +647,7 @@ export async function checkStaffPin(
         parameters: kdf.current,
       })
       .catch(() => undefined);
-    await tx.query(insert, [
+    await recordCheck([
       scope.brandReference,
       scope.storeReference,
       attempt,
@@ -712,7 +716,7 @@ export async function checkStaffPin(
       within(latestAt)
         ? Number(latest.failure_number) + 1
         : 1;
-    await tx.query(insert, [
+    await recordCheck([
       scope.brandReference,
       scope.storeReference,
       attempt,
@@ -746,7 +750,7 @@ export async function checkStaffPin(
       lockedUntil: new Date(now + minutes(staffPinPolicy.lockMinutes)).toISOString(),
     });
   }
-  await tx.query(insert, [
+  await recordCheck([
     scope.brandReference,
     scope.storeReference,
     attempt,

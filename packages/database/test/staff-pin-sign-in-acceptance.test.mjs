@@ -1421,6 +1421,50 @@ it("WP-2423 staff PIN: tablets, PINs, lockout, tablet limit, reset, switch and s
       assert.equal(profileAudit.length, 1);
       assert.equal(profileAudit[0].actor, cole);
       assert.ok(!profileAudit[0].after.includes("Cole"), "the audit never carries the name");
+
+      // ── 14. WP-2423 M63 review: the Store owner on his own five-try lock at a paused tablet is
+      //        told "Locked until …" (not a service error); nothing is recorded for that try, so
+      //        no clear row is left without its check.
+      const fourth = await at(70, async () =>
+        staffPin.registerDevice({
+          sessionCookie: await signIn(manager),
+          csrf,
+          deviceCookie: null,
+          label: "Bar",
+        }),
+      );
+      const bar = fourth.deviceCookie;
+      for (const [k, wrongPin] of ["200001", "200002", "200003", "200004"].entries())
+        assert.deepEqual(await at(71 + k * 0.5, () => unlock(cole, wrongPin, null, bar)), {
+          status: "Rejected",
+        });
+      assert.deepEqual(await at(73, () => unlock(cole, "200005", null, bar)), {
+        status: "Locked",
+        lockedUntil: T(88),
+      });
+      for (const [k, wrongPin] of ["200006", "200007", "200008", "200009"].entries())
+        assert.deepEqual(await at(73.5 + k * 0.5, () => unlock(ava, wrongPin, null, bar)), {
+          status: "Rejected",
+        });
+      assert.deepEqual(await at(75.5, () => unlock(manager, "200010", null, bar)), {
+        status: "Rejected",
+      });
+      // Ten rejected checks: the tablet is paused for everyone without the reset permission.
+      assert.equal((await at(76, () => unlock(ava, "604827", null, bar))).status, "Throttled");
+      const barRows = async () =>
+        (
+          await admin.query(
+            "SELECT (SELECT count(*)::int FROM bop_identity.staff_pin_attempt WHERE device_id=$1) AS attempts,(SELECT count(*)::int FROM bop_identity.staff_pin_device_limit_clear WHERE device_id=$1) AS clears",
+            [fourth.device.device],
+          )
+        ).rows[0];
+      const barBefore = await barRows();
+      assert.deepEqual(await at(76.5, () => unlock(cole, "730419", null, bar)), {
+        status: "Locked",
+        lockedUntil: T(88),
+      });
+      assert.deepEqual(await barRows(), barBefore, "no check and no clear row recorded");
+      assert.equal(barBefore.clears, 0);
     } finally {
       await admin.end();
     }
