@@ -298,18 +298,18 @@ it("WP-2423 Q10: order continuity reads, staff contact, retention removal and pa
       );
       // M104 (B.2): every order of exactly this Guest Session in this Store, newest first; never
       // another Session's, another Store's, or one placed after the observation instant.
-      const recent = (guestSessionReference, observedAt, s = scope) =>
+      const recentOrders = (guestSessionReference, observedAt, s = scope) =>
         runAs(apiRole, (tx) =>
           findRecentGuestSessionOrders(tx, s, { guestSessionReference, observedAt, limit: 5 }),
         ).then((orders) => orders.map((order) => order.orderReference));
-      assert.deepEqual(await recent(guest, now), [id(0x102), id(0x101)]);
-      assert.deepEqual(await recent(otherGuest, now), [id(0x103)]);
-      assert.deepEqual(await recent(id(12), now), []);
+      assert.deepEqual(await recentOrders(guest, now), [id(0x102), id(0x101)]);
+      assert.deepEqual(await recentOrders(otherGuest, now), [id(0x103)]);
+      assert.deepEqual(await recentOrders(id(12), now), []);
       assert.deepEqual(
-        await recent(guest, now, { brandReference: brand, storeReference: otherStore }),
+        await recentOrders(guest, now, { brandReference: brand, storeReference: otherStore }),
         [id(0x104)],
       );
-      assert.deepEqual(await recent(guest, at(-2 * day)), [id(0x101)]);
+      assert.deepEqual(await recentOrders(guest, at(-2 * day)), [id(0x101)]);
 
       // 1b. v15 2026-10-16: the guest opens the status page right after paying, before the outbox
       // worker has built the order's status projection. The projection is missing, but Ordering's
