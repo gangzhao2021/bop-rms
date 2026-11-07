@@ -485,9 +485,16 @@ export function createPostgresCatalogLineStandingSource(
               standings.push("SetupIncomplete");
               continue;
             }
-            // A required choice group with nothing offered now: the dish can't be had now.
-            if (requiredGroupOffNow(facts, ownerScope.brandReference, channelCode, observedAt)) {
-              standings.push("Unavailable");
+            // A required choice group with nothing offered now: the dish can't be had now — sold
+            // out when the Store's sold-out marks emptied it (pearls and tapioca both gone).
+            const short = requiredGroupOffNow(
+              facts,
+              ownerScope.brandReference,
+              channelCode,
+              observedAt,
+            );
+            if (short !== null) {
+              standings.push(short);
               continue;
             }
             const selection = await createCatalogSelectionValidationService({
@@ -523,15 +530,17 @@ function isOptionBindingSourceError(error: unknown): boolean {
 
 /**
  * WP-2423 (cart-unsellable-dishes): whether a choice group the guest must choose in (always shown,
- * not opened by another choice) has fewer choices offered now than its minimum. Rules that cannot
- * be resolved are not judged here: the validation that follows keeps its own answer.
+ * not opened by another choice) has fewer choices offered now than its minimum — `SoldOut` when a
+ * choice of that group is off now because it is sold out here (M24: the guest is told it just sold
+ * out), else `Unavailable`; null when every such group can still be filled. Rules that cannot be
+ * resolved are not judged here: the validation that follows keeps its own answer.
  */
 function requiredGroupOffNow(
   facts: Exclude<Awaited<ReturnType<typeof classifiedFacts>>, string>,
   brandReference: string,
   channelCode: string,
   observedAt: string,
-): boolean {
+): "SoldOut" | "Unavailable" | null {
   let rules;
   try {
     const current = resolveCurrentCatalogSelectionRules(
@@ -549,12 +558,25 @@ function requiredGroupOffNow(
         ? current
         : publishedSelectionRules(facts.published.optionRules, current, channelCode);
   } catch {
-    return false;
+    return null;
   }
-  return rules.some(
+  const short = rules.filter(
     (rule) =>
       rule.activationOptionReferences.length === 0 &&
       rule.minimumQuantity > 0 &&
       rule.options.reduce((sum, option) => sum + option.maximumQuantity, 0) < rule.minimumQuantity,
   );
+  if (short.length === 0) return null;
+  const soldOut = short.some((rule) =>
+    facts.bindings.some(
+      ({ binding, optionSet }) =>
+        binding.bindingReference === rule.bindingReference &&
+        optionSet.draft.options.some(
+          (option) =>
+            binding.enabledOptionReferences.includes(option.optionReference) &&
+            facts.optionsOffNow.get(String(option.optionReference)) === "SoldOut",
+        ),
+    ),
+  );
+  return soldOut ? "SoldOut" : "Unavailable";
 }

@@ -134,6 +134,43 @@ export function publishedDefaultOptionSelections(
   return Object.freeze([...selected.values()]);
 }
 
+/**
+ * WP-2423 (M24): whether a group a guest must choose in on this channel (always shown, not opened
+ * by another choice) is left with fewer choices than its minimum because of the Store's sold-out
+ * marks — every pearl and every tapioca gone. The dish is then sold out as a whole: the menu says
+ * so, as the cart's standing does, instead of leaving guests to find every choice greyed out
+ * inside the dish. A group short only because choices are not offered here is not sold out.
+ */
+export function publishedRequiredGroupSoldOut(
+  rules: readonly PublishedOptionRule[],
+  channelCode: string,
+  soldOut: ReadonlySet<string>,
+  notOffered: ReadonlySet<string> = new Set(),
+): boolean {
+  if (soldOut.size === 0) return false;
+  return rules.some((rule) => {
+    if (rule.semanticsVersion === 2 && !rule.channelCodes?.some((code) => code === channelCode))
+      return false;
+    if ((rule.activationOptionReferences ?? []).length > 0 || rule.minimumSelections <= 0)
+      return false;
+    const enabled = rule.options.filter((option) =>
+      rule.enabledOptionReferences.includes(option.optionReference),
+    );
+    const capacity = (off: (reference: string) => boolean) =>
+      enabled
+        .filter((option) => !off(String(option.optionReference)))
+        .reduce(
+          (sum, option) => sum + (rule.semanticsVersion === 2 ? option.maximumQuantity : 1),
+          0,
+        );
+    return (
+      enabled.some((option) => soldOut.has(String(option.optionReference))) &&
+      capacity((reference) => soldOut.has(reference) || notOffered.has(reference)) <
+        rule.minimumSelections
+    );
+  });
+}
+
 export type PublishedImageContentType = "image/jpeg" | "image/webp";
 export interface PublishedImageRendition {
   readonly contentType: PublishedImageContentType;

@@ -7,6 +7,7 @@ import {
   parseCatalogInstant,
   parseCatalogReference,
   publishedDefaultOptionSelections,
+  publishedRequiredGroupSoldOut,
   resolveStoreAvailability,
   type CustomerMenuQueryPorts,
   type CustomerMenuStoreFact,
@@ -199,6 +200,23 @@ export function createCustomerMenuStoreFacts(options: {
             ...(soldOutOptions.size === 0 ? {} : { soldOutOptions }),
           });
         }
+        // WP-2423 (M24): a dish whose required group the Store's sold-out marks emptied is sold
+        // out on the menu, as the cart says, not found out choice by choice inside the dish.
+        if (soldOutOptions.size > 0)
+          for (const item of input.items ?? []) {
+            const fact = facts.get(item.sellableReference);
+            if (
+              fact?.availability === "Available" &&
+              item.optionRules !== undefined &&
+              publishedRequiredGroupSoldOut(
+                item.optionRules,
+                String(input.channelCode),
+                soldOutOptions,
+                notOffered,
+              )
+            )
+              facts.set(item.sellableReference, { ...fact, availability: "SoldOut" });
+          }
         // WP-2423 DEC-ALCOHOL: where and when the dishes that contain alcohol can be ordered.
         const alcohol = await readAlcoholSale(tx, scope, input.requestedAt, [...facts.keys()]);
         for (const sellable of alcohol.skus) {

@@ -25,6 +25,26 @@ const brand = id(2),
   hot = id(31),
   iced = id(32),
   binding = id(35);
+const option = (reference, name, selectedByDefault) => ({
+  optionReference: reference,
+  localizedNames: { "en-CA": name },
+  maximumQuantity: 1,
+  conflictOptionReferences: [],
+  selectedByDefault,
+});
+/** The published "Serve" group: choose one of Hot (the default) or Iced. */
+const rules = [
+  {
+    localizedNames: { "en-CA": "Serve" },
+    bindingReference: binding,
+    optionSetVersionReference: id(34),
+    minimumSelections: 1,
+    maximumSelections: 1,
+    enabledOptionReferences: [hot, iced],
+    defaultOptionReferences: [hot],
+    options: [option(hot, "Hot", true), option(iced, "Iced", false)],
+  },
+];
 
 /**
  * WP-2423 (cart-unsellable-dishes): Soy milk, "Serve" choose one of Hot (the default) or Iced.
@@ -229,6 +249,14 @@ it("WP-2423 (cart-unsellable-dishes): a hidden dish or a default choice turned o
               { sellableReference: sku, bindingReference: binding, optionReference: hot },
               { sellableReference: sku, bindingReference: binding, optionReference: iced },
             ],
+            items: [
+              {
+                sellableReference: sku,
+                productVersionReference: id(14),
+                defaultOptionSelections: [],
+                optionRules: rules,
+              },
+            ],
           })
         ).get(sku);
       // Iced sold out for the rest of the business day (ends at minute 30).
@@ -325,7 +353,9 @@ it("WP-2423 (cart-unsellable-dishes): a hidden dish or a default choice turned o
           observedAt: minute(9),
         }),
       );
-      assert.deepEqual(await standing.explainMany([line(null)]), ["Unavailable"]);
+      // WP-2423 (M24): emptied by sold-out marks, it is sold out — on the menu and in the cart.
+      assert.deepEqual(await standing.explainMany([line(null)]), ["SoldOut"]);
+      assert.equal((await menuFacts())?.availability, "SoldOut");
       // Back to the state the rest of this case starts from.
       await writeRunner.run((tx) =>
         changeStoreOptionSoldOut(tx, owner, {
@@ -505,25 +535,6 @@ async function seed(admin) {
     `INSERT INTO rms_catalog.published_menu_projection_section (generation_id,brand_id,menu_id,section_id,internal_code,localized_names_json,sort_order) VALUES ($1,$2,$3,$4,'DRINKS','{"en-CA":"Drinks"}'::jsonb,0)`,
     [id(9), brand, id(1), id(11)],
   );
-  const option = (reference, name, selectedByDefault) => ({
-    optionReference: reference,
-    localizedNames: { "en-CA": name },
-    maximumQuantity: 1,
-    conflictOptionReferences: [],
-    selectedByDefault,
-  });
-  const rules = [
-    {
-      localizedNames: { "en-CA": "Serve" },
-      bindingReference: binding,
-      optionSetVersionReference: id(34),
-      minimumSelections: 1,
-      maximumSelections: 1,
-      enabledOptionReferences: [hot, iced],
-      defaultOptionReferences: [hot],
-      options: [option(hot, "Hot", true), option(iced, "Iced", false)],
-    },
-  ];
   await q(
     `INSERT INTO rms_catalog.published_menu_projection_sellable (generation_id,brand_id,menu_id,section_id,placement_id,sellable_id,product_version_id,localized_names_json,presentation_role,sort_order,pinned,configured_availability,option_rules_json,allergen_disclosure_json) VALUES ($1,$2,$3,$4,$5,$6,$7,'{"en-CA":"Soy milk"}'::jsonb,'Standard',0,false,'Available',$8::jsonb,'{"registryVersionReference":"018f7300-0000-7000-8000-000000000019","items":[],"allergenFreeClaim":false,"assistanceCode":"ALLERGEN_ASSISTANCE_REQUIRED"}'::jsonb)`,
     [id(9), brand, id(1), id(11), id(12), sku, id(14), JSON.stringify(rules)],

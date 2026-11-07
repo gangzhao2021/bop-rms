@@ -1,7 +1,10 @@
 import { expect, it } from "vitest";
 import { resolveCurrentCatalogSelectionRules } from "../application/current-selection-rules.js";
 import { withOptionsOffNow } from "../application/options-off-now.js";
-import { publishedDefaultOptionSelections } from "../domain/published-menu-projection.js";
+import {
+  publishedDefaultOptionSelections,
+  publishedRequiredGroupSoldOut,
+} from "../domain/published-menu-projection.js";
 
 /** WP-2423 sold-out-and-allergen-safety (M22, M24): choices a Store cannot sell now. */
 const id = (n: number) => "01902402-0000-7000-8000-" + String(n).padStart(12, "0");
@@ -127,4 +130,45 @@ it("observes stock for the dish as guests can order it: a default that is off mo
   expect(
     publishedDefaultOptionSelections([rule], "CUSTOMER_PWA", new Set([id(13), id(14)])),
   ).toEqual([]);
+});
+
+it("a required group emptied by sold-out marks makes the dish sold out; one choice left does not", () => {
+  const choice = (n: number) => ({
+    optionReference: id(n) as never,
+    localizedNames: { "en-CA": "Synthetic option" },
+    maximumQuantity: 1,
+    conflictOptionReferences: [],
+    selectedByDefault: n === 21,
+  });
+  const rules = [
+    {
+      bindingReference: id(20) as never,
+      optionSetVersionReference: id(19) as never,
+      minimumSelections: 1,
+      maximumSelections: 1,
+      enabledOptionReferences: [id(21), id(22)] as never[],
+      defaultOptionReferences: [id(21)] as never[],
+      options: [choice(21), choice(22)],
+    },
+  ];
+  expect(publishedRequiredGroupSoldOut(rules, "CUSTOMER_PWA", new Set([id(21)]))).toBe(false);
+  expect(publishedRequiredGroupSoldOut(rules, "CUSTOMER_PWA", new Set([id(21), id(22)]))).toBe(
+    true,
+  );
+  // One sold out and the other not offered here: nothing left, and sold out is part of why.
+  expect(
+    publishedRequiredGroupSoldOut(rules, "CUSTOMER_PWA", new Set([id(21)]), new Set([id(22)])),
+  ).toBe(true);
+  // Only not offered here: not sold out (the cart names it not available).
+  expect(
+    publishedRequiredGroupSoldOut(rules, "CUSTOMER_PWA", new Set(), new Set([id(21), id(22)])),
+  ).toBe(false);
+  // An optional group emptied is not a reason.
+  expect(
+    publishedRequiredGroupSoldOut(
+      [{ ...rules[0]!, minimumSelections: 0 }],
+      "CUSTOMER_PWA",
+      new Set([id(21), id(22)]),
+    ),
+  ).toBe(false);
 });
