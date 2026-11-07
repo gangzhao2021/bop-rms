@@ -74,7 +74,12 @@ export class MerchantOneStoreDishError extends Error {
        * WP-2423 M71: what "List it" was confirmed for is not what is waiting now (someone saved a
        * price since the review was shown): look again, then list.
        */
-      | "PricesChangedSinceShown",
+      | "PricesChangedSinceShown"
+      /**
+       * WP-2423 (M76, Owner decision 16): a new food dish at a Brand with an allergen list is saved
+       * only with every allergen answered; nothing is recorded.
+       */
+      | "AllergensUnanswered",
   ) {
     super(code);
     this.name = "MerchantOneStoreDishError";
@@ -453,6 +458,8 @@ interface MenuBuilder {
   };
   /** The version's review and publication; null while it is being edited. */
   readonly publication: { readonly state: string } | null;
+  /** The Brand's allergen list (absent or empty: the Brand has none yet). */
+  readonly allergenChoices?: readonly unknown[];
 }
 
 export function createMerchantOneStoreDishes(options: {
@@ -709,6 +716,15 @@ export function createMerchantOneStoreDishes(options: {
     rebind = false,
   ) => {
     const step = (purpose: string) => derivedReference(body.operationReference, purpose);
+    // WP-2423 (M76, Owner decision 16): a new food dish starts with every allergen unanswered and
+    // is not saved until each one is answered, whichever client sends it. An existing dish not
+    // declared yet still saves (its price, say); listing keeps refusing it until it is declared.
+    if (
+      body.productReference === null &&
+      body.allergens === null &&
+      ((await loadMenu(session, body.menuReference)).allergenChoices?.length ?? 0) > 0
+    )
+      return fail("AllergensUnanswered");
     const product = async (productReference: string) =>
       (
         (await options.products.query({ ...session, productReference })) as unknown as {

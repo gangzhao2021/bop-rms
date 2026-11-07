@@ -6743,8 +6743,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "还有 1 种过敏原没有回答。请逐项选择“含有”“可能含有”或“不含”。",
   "{count} allergens are not answered yet. Answer Contains, May contain or No for each one.":
     "还有 {count} 种过敏原没有回答。请逐项选择“含有”“可能含有”或“不含”。",
-  "Answer the rest to save. A row left blank is never taken as No.":
-    "回答完其余各项才能保存。没有回答的一项不会当作“不含”。",
+  "Answer every allergen to save: {count} left.": "每种过敏原都回答后才能保存：还剩 {count} 项。",
+  "A row left blank is never taken as No.": "没有回答的一项不会当作“不含”。",
+  "Tick the allergen check to save.": "勾选过敏原核对后才能保存。",
   "Answer every allergen with Contains, May contain or No. Nothing was declared, so the dish is not on sale until every one is answered.":
     "请为每种过敏原选择“含有”“可能含有”或“不含”。这次没有申报，全部回答之前这道菜不能上架。",
   "Save dish": "保存菜品",

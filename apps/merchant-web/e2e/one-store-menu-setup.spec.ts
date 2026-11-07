@@ -818,17 +818,24 @@ test("@production Same as copies choices and marks, never the name, price or kin
   await expect(form.getByText("Check the allergens to add the next one")).toBeVisible();
   await expect(form.getByLabel("English name")).toHaveValue("Taro tea (TEST)");
   expect(f.dishCommands).toEqual([]);
-  // A plain save without the tick sends no allergens: the dish waits for its declaration.
+  // WP-2423 (M76, Owner decision 16): copied allergens are not a declaration, and the dish is not
+  // saved with its allergens left for later. Ticked, the save declares every row.
+  await expect(form.getByRole("button", { name: "Save dish" })).toBeDisabled();
+  await expect(form.getByText("Tick the allergen check to save.")).toBeVisible();
+  await tick(form).check();
   await form.getByRole("button", { name: "Save dish" }).click();
   await expect(
-    page.getByText("Taro tea (TEST) saved. Declare its allergens, then list it."),
+    page.getByText("Taro tea (TEST) saved. Guests see it when the menu is listed."),
   ).toBeVisible();
   expect(lastCommand(f)).toMatchObject({
     productReference: null,
     name: "Taro tea (TEST)",
     priceMinor: "620",
     sectionCode: "DRINKS",
-    allergens: null,
+    allergens: expect.arrayContaining([
+      expect.objectContaining({ classification: "Contains" }),
+      expect.objectContaining({ classification: "CrossContactPossible" }),
+    ]),
     choiceGroups: [
       {
         optionSetReference: toppings,

@@ -319,13 +319,17 @@ export function DishEditor({
       })),
     [chosen],
   );
-  // WP-2423 (M76, Owner default 2026-11-06): some allergens answered and some not — saving waits
-  // until every one is answered (Contains, May contain or No), so no row is taken as No unread.
+  // WP-2423 (M76, Owner decision 16): a food dish starts with every allergen unanswered and saves
+  // only once each one is answered (Contains, May contain or No) and confirmed, so no row is ever
+  // taken as No unread and no dish is saved with its allergens left for later.
   const unanswered = unansweredAllergens(allergens, allergenChoices);
-  const partlyAnswered =
-    !recipeAllergens && !charge && unanswered > 0 && unanswered < allergenChoices.length;
+  const allergensOutstanding =
+    !recipeAllergens &&
+    !charge &&
+    allergenChoices.length > 0 &&
+    (unanswered > 0 || !allergensChecked);
   const invalid =
-    partlyAnswered ||
+    allergensOutstanding ||
     form.name.trim() === "" ||
     form.section === "" ||
     priceMinor === null ||
@@ -1144,9 +1148,11 @@ export function DishEditor({
               />
               {t("I checked every allergen of this dish.")}
             </label>
-            {partlyAnswered ? (
+            {allergensOutstanding ? (
               <p className="dish-editor__note" role="note">
-                {t("Answer the rest to save. A row left blank is never taken as No.")}
+                {unanswered > 0
+                  ? `${t("Answer every allergen to save: {count} left.", { count: unanswered })} ${t("A row left blank is never taken as No.")}`
+                  : t("Tick the allergen check to save.")}
               </p>
             ) : null}
           </div>

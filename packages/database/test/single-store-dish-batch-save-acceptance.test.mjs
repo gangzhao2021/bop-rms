@@ -209,22 +209,20 @@ it("a 19-choice drink saves in a few transactions with the same records; retries
         products: 2,
       });
 
-      // 5. Allergens not declared yet: the dish saves, its choices wait, nothing is written for
-      // them. Declaring later covers them, and only then.
+      // 5. WP-2423 (M76, Owner decision 16): a new dish with its allergens unanswered is not
+      // saved, and nothing is written. Answered, it saves and its choices are covered at once.
       const before = await recordsOf(admin, f.brandReference);
-      const waiting = await f.saveDish({
-        name: "Mango slush (TEST)",
-        nameZh: "芒果冰沙",
-        allergens: null,
-        choiceGroups: allGroups,
-      });
-      assert.equal(waiting.choicesWaiting, true);
-      assert.deepEqual(await recordsOf(admin, f.brandReference), {
-        ...before,
-        products: before.products + 1,
-      });
+      await assert.rejects(
+        f.saveDish({
+          name: "Mango slush (TEST)",
+          nameZh: "芒果冰沙",
+          allergens: null,
+          choiceGroups: allGroups,
+        }),
+        (error) => error.code === "AllergensUnanswered" || assert.fail(String(error.code)),
+      );
+      assert.deepEqual(await recordsOf(admin, f.brandReference), before);
       const declared = await f.saveDish({
-        productReference: waiting.productReference,
         name: "Mango slush (TEST)",
         nameZh: "芒果冰沙",
         allergens: [{ allergenReference: f.allergenList.milk, classification: "Contains" }],

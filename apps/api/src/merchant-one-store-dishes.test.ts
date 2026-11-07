@@ -18,6 +18,8 @@ const MENU = id(1),
 function fakes() {
   const calls: string[] = [];
   const state = {
+    /** The Brand's allergen list as the menu read gives it (empty: none yet). */
+    allergenChoices: [] as unknown[],
     product: null as null | {
       productReference: string;
       lifecycle: string;
@@ -248,6 +250,7 @@ function fakes() {
       query: async () => ({
         menu: state.menu,
         publication: state.published ? { state: "Published" } : null,
+        allergenChoices: state.allergenChoices,
       }),
       command: async ({ body }: { body: Record<string, unknown> }) => {
         record("menu", body);
@@ -452,6 +455,24 @@ describe("WP-2423 item 8 ⑥ one dish saved from the one-page menu", () => {
       const saved = await dishes.command({ ...session, body: save({ allergens: null }) });
       expect(saved).toMatchObject({ status: "Saved", choicesWaiting: true });
       expect(calls).not.toContain("optionRecipe:cover");
+    });
+
+    it("WP-2423 (M76): a new dish with its allergens unanswered at a Brand with a list is refused, with nothing recorded", async () => {
+      const { calls, state, dishes } = fakes();
+      state.allergenChoices = [{ allergenReference: PEANUT }];
+      await expect(
+        dishes.command({ ...session, body: save({ allergens: null }) }),
+      ).rejects.toMatchObject({ name: "MerchantOneStoreDishError", code: "AllergensUnanswered" });
+      expect(calls).toEqual([]);
+      // An existing dish not declared yet still saves (a price change, say).
+      await dishes.command({ ...session, body: save() });
+      calls.length = 0;
+      await dishes.command({
+        ...session,
+        body: save({ productReference: id(10), allergens: null, priceMinor: "1388" }),
+      });
+      expect(calls).not.toContain("allergens:DeclareDish");
+      expect(calls).toContain("price:SaveDraft");
     });
 
     it("allergens sent and still no recipe is a real failure, not a waiting dish", async () => {

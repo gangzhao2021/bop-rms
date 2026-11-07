@@ -332,3 +332,49 @@ it("WP-2423 live minor 6: a dish on the menu opens in its own section", async ()
   expect(sectionSelect?.value).toBe("NOODLE");
   expect(editor.textContent).not.toContain("Choose a section");
 });
+
+it("WP-2423 (M76, Owner decision 16): a dish not declared yet saves only once every allergen is answered", async () => {
+  const PEANUT = id(80);
+  const EGG = id(81);
+  const menu = () => {
+    const read = builder(id(3), "Listed", id(3));
+    return {
+      ...read,
+      allergenRegistry: true,
+      allergenChoices: [
+        { allergenReference: PEANUT, code: "PEANUT", name: "Peanuts", nameZh: "" },
+        { allergenReference: EGG, code: "EGG", name: "Eggs", nameZh: "" },
+      ],
+      sellables: read.sellables.map((sku) =>
+        sku.skuReference === id(30)
+          ? { ...sku, allergens: { source: "None", declared: [], noIngredients: false } }
+          : sku,
+      ),
+    };
+  };
+  const { container, sent } = await page(async () => menu());
+  const editor = await editDish(container, "Har gow (TEST)");
+  const save = () => buttonNamed(editor, "Save dish");
+  const answer = async (allergen: string, kind: number) =>
+    click(editor.querySelectorAll(`[role="radiogroup"][aria-label="${allergen}"] input`)[kind]);
+  // Nothing is chosen for it, and saving waits for every row.
+  expect(editor.querySelectorAll('[role="radiogroup"][data-unanswered]').length).toBe(2);
+  expect(save()?.hasAttribute("disabled")).toBe(true);
+  expect(editor.textContent).toContain("Answer every allergen to save: 2 left.");
+  await answer("Peanuts", 1);
+  expect(save()?.hasAttribute("disabled")).toBe(true);
+  expect(editor.textContent).toContain("Answer every allergen to save: 1 left.");
+  await answer("Eggs", 0);
+  expect(save()?.hasAttribute("disabled")).toBe(false);
+  await click(save());
+  await settle(10);
+  expect(sent).toEqual([
+    expect.objectContaining({
+      action: "SaveDish",
+      allergens: [
+        { allergenReference: PEANUT, classification: "Contains" },
+        { allergenReference: EGG, classification: "None" },
+      ],
+    }),
+  ]);
+});
