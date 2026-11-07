@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   fullServiceSetupText,
   paidPickupAwaitingAccept,
+  paidPickupWaitingText,
   waitingPickupOrders,
 } from "./StoreFeaturesPage.js";
 import { setLanguageForTest } from "./i18n/i18n.js";
@@ -72,4 +73,24 @@ it("WP-2423 store-service-controls (v15 M128): counts paid pickup orders waiting
   expect(
     await paidPickupAwaitingAccept({ load: vi.fn().mockRejectedValue(new Error("x")) } as never),
   ).toBeNull();
+});
+
+it("WP-2423 M128 review: the automatic refund is at the Store's clock, and one order reads as one", () => {
+  setLanguageForTest("en");
+  // 01:10 UTC is 20:10 in Toronto, whatever the browser's own zone.
+  const one = paidPickupWaitingText(
+    { count: 1, earliestRefundAt: "2026-11-07T01:10:00.000Z" },
+    "America/Toronto",
+  );
+  expect(one).toMatch(
+    /^1 paid pickup order is waiting for Accept \(refunded automatically at 20:10\)/u,
+  );
+  expect(one).toContain("Accept or cancel it in Orders first.");
+  const two = paidPickupWaitingText(
+    { count: 2, earliestRefundAt: "2026-11-07T01:10:00.000Z" },
+    "America/Vancouver",
+  );
+  expect(two).toMatch(
+    /^2 paid pickup orders are waiting for Accept \(refunded automatically from 17:10\)/u,
+  );
 });

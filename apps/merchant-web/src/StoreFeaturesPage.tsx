@@ -1,10 +1,10 @@
 import { StoreGuestTableStart } from "./StoreGuestTableStart.js";
 import { StatePanel } from "@bop-rms/ui";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { displayLocale, t } from "./i18n/i18n.js";
+import { useContext, useEffect, useMemo, useRef, useState } from "react";
+import { t } from "./i18n/i18n.js";
 import { createCurrentOrderQueueClient } from "./current-order-queue-client.js";
 import { newOperationReference } from "./operation-reference.js";
-import { SourceTime } from "./StoreTime.js";
+import { SourceTime, StoreTimeZoneContext, storeTime } from "./StoreTime.js";
 import { WorkspacePage } from "./WorkspacePage.js";
 import {
   createStoreFeaturesClient,
@@ -40,6 +40,26 @@ export async function waitingPickupOrders(client: PickupClient): Promise<number 
   } catch {
     return null;
   }
+}
+
+/**
+ * WP-2423 store-service-controls (v15 M128 review): what turning pickup off leaves waiting for
+ * Accept, one order or several, with the first automatic refund at the Store's own clock.
+ */
+export function paidPickupWaitingText(
+  paid: { readonly count: number; readonly earliestRefundAt: string | null },
+  timeZone: string | undefined,
+): string {
+  const time = paid.earliestRefundAt === null ? "—" : storeTime(paid.earliestRefundAt, timeZone);
+  return paid.count === 1
+    ? t(
+        "1 paid pickup order is waiting for Accept (refunded automatically at {time}). Accept or cancel it in Orders first.",
+        { time },
+      )
+    : t(
+        "{count} paid pickup orders are waiting for Accept (refunded automatically from {time}). Accept or cancel them in Orders first.",
+        { count: paid.count, time },
+      );
 }
 
 /**
@@ -169,6 +189,7 @@ export function StoreFeaturesPage({
     () => injectedOrders ?? createCurrentOrderQueueClient(),
     [injectedOrders],
   );
+  const storeTimeZone = useContext(StoreTimeZoneContext);
   const [paidWaiting, setPaidWaiting] = useState<
     "Reading" | Awaited<ReturnType<typeof paidPickupAwaitingAccept>>
   >("Reading");
@@ -312,19 +333,7 @@ export function StoreFeaturesPage({
         </p>
       ) : paidWaiting.count > 0 ? (
         <p>
-          {t(
-            "{count} paid pickup orders are waiting for Accept (refunded automatically from {time}). Accept or cancel them in Orders first.",
-            {
-              count: paidWaiting.count,
-              time:
-                paidWaiting.earliestRefundAt === null
-                  ? "—"
-                  : new Intl.DateTimeFormat(displayLocale(), {
-                      hour: "numeric",
-                      minute: "2-digit",
-                    }).format(new Date(paidWaiting.earliestRefundAt)),
-            },
-          )}{" "}
+          {paidPickupWaitingText(paidWaiting, storeTimeZone)}{" "}
           <a href="/operations/orders">{t("Open Orders")}</a>
         </p>
       ) : null}

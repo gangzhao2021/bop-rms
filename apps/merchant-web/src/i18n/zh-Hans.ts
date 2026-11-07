@@ -695,6 +695,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Pause 15 more min": "再暂停 15 分钟",
   "Orders could not be read, so paid pickup orders waiting for Accept aren't known. Check Orders.":
     "订单读不到，所以不知道是否还有已付款待接单的自取单。请查看订单页。",
+  "1 paid pickup order is waiting for Accept (refunded automatically at {time}). Accept or cancel it in Orders first.":
+    "还有 1 单已付款的自取单待接单（{time} 自动退款）。请先在订单页接单或取消。",
   "{count} paid pickup orders are waiting for Accept (refunded automatically from {time}). Accept or cancel them in Orders first.":
     "还有 {count} 单已付款的自取单待接单（{time} 起自动退款）。请先在订单页接单或取消。",
 
