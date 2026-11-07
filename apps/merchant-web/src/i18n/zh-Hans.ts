@@ -7974,6 +7974,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "记录这笔申请还不会退款：批准后才会发送。",
   "Refresh payment amounts": "刷新付款金额",
   "Refresh payment": "刷新付款",
+  "This contact was already removed. The order and payment are not changed.":
+    "这个联系方式已经删除过了。订单和付款不受影响。",
+  "This guest gave no contact on this order, so there was nothing to remove.":
+    "这位客人在这笔订单上没有留联系方式，没有需要删除的内容。",
   "Add the store's phone number": "添加门店电话",
   "So pickup guests can reach you about allergies or their order.":
     "方便自取客人就过敏或订单问题联系你。",

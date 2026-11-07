@@ -1227,6 +1227,10 @@ type ContactRemoval =
   | "Confirming"
   | "Pending"
   | "Removed"
+  /** The contact had already been removed (by staff or the guest): nothing was written now. */
+  | "AlreadyRemoved"
+  /** The guest gave no contact on this order: there was nothing to remove. */
+  | "NothingToRemove"
   | "Denied"
   | "SignedOut"
   | "NotFound"
@@ -1238,8 +1242,15 @@ type ContactRemoval =
  * have been recorded (the service couldn't answer, or the connection dropped) is Unknown and offers
  * the same removal again; a refusal says why and is never retried as it was.
  */
-export function pickupContactRemovalOutcome(status: number, error?: unknown): ContactRemoval {
-  if (status >= 200 && status < 300) return "Removed";
+export function pickupContactRemovalOutcome(status: number, answer?: unknown): ContactRemoval {
+  // The Store's answer says what happened: removed now, already removed, or nothing to remove.
+  if (status >= 200 && status < 300)
+    return answer === "AlreadyRemoved"
+      ? "AlreadyRemoved"
+      : answer === "NotGiven"
+        ? "NothingToRemove"
+        : "Removed";
+  const error = answer;
   if (status === 403 && error === "pickup_contact_removal_permission_denied") return "Denied";
   // A staff session that is missing or has ended is a sign-in problem, not a missing permission.
   if (status === 401 || status === 403) return "SignedOut";
@@ -1263,6 +1274,7 @@ export function PickupContactPanel({
   csrf,
   fetcher = fetch,
   initialRemoval = "Idle",
+  onRemoved,
 }: {
   readonly contact: OrderPickupContact | null;
   readonly timeZone?: string | undefined;
@@ -1272,6 +1284,8 @@ export function PickupContactPanel({
   readonly fetcher?: typeof fetch | undefined;
   /** For previews and tests: the removal step shown first. */
   readonly initialRemoval?: ContactRemoval;
+  /** After an answer that settles it: the page reads the order again. */
+  readonly onRemoved?: (() => void) | undefined;
 }) {
   const [removal, setRemoval] = useState<ContactRemoval>(initialRemoval);
   const operation = useRef<string | null>(null);
@@ -1290,29 +1304,38 @@ export function PickupContactPanel({
         headers: { "content-type": "application/json", "x-bop-csrf": csrf },
         body: JSON.stringify({ orderReference, operationReference: operation.current }),
       });
-      let error: unknown;
-      if (response.status === 403)
-        error = await response
+      let answer: unknown;
+      if (response.status === 403 || response.ok)
+        answer = await response
           .json()
           .then((body: unknown) =>
             body !== null && typeof body === "object"
-              ? (body as { error?: unknown }).error
+              ? response.ok
+                ? (body as { status?: unknown }).status
+                : (body as { error?: unknown }).error
               : undefined,
           )
           .catch(() => undefined);
-      next = pickupContactRemovalOutcome(response.status, error);
+      next = pickupContactRemovalOutcome(response.status, answer);
     } catch {
       next = "Unknown";
     }
     // An unknown answer retries the same operation, so it is never removed twice.
     if (next !== "Unknown") operation.current = null;
     setRemoval(next);
+    // The order detail is read again so the phone is not shown from an earlier read.
+    if (next === "Removed" || next === "AlreadyRemoved" || next === "NothingToRemove")
+      onRemoved?.();
   };
-  if (removal === "Removed")
+  if (removal === "Removed" || removal === "AlreadyRemoved" || removal === "NothingToRemove")
     return (
       <section className="order-pickup-contact" aria-label={t("Pickup customer")}>
         <p role="status">
-          {t("Contact removed at the guest's request. The order and payment are not changed.")}
+          {removal === "Removed"
+            ? t("Contact removed at the guest's request. The order and payment are not changed.")
+            : removal === "AlreadyRemoved"
+              ? t("This contact was already removed. The order and payment are not changed.")
+              : t("This guest gave no contact on this order, so there was nothing to remove.")}
         </p>
       </section>
     );
@@ -3369,6 +3392,15 @@ export function CurrentOrderQueuePage({
     setAcceptAll({ running: false, summary: parts.join(" ") });
     refreshInPlace();
   };
+  // M108: after a contact removal, the order is read again quietly (as the background read does).
+  const rereadAfterContactRemoval = () => {
+    void readCurrentOrders(client, after, orderReference, new AbortController().signal)
+      .then((next) => {
+        setUpdatedAt(Date.now());
+        setState((previous) => refreshedOrderState(previous, next));
+      })
+      .catch(() => undefined);
+  };
   const acceptAction = (
     order: CurrentOrderQueue["items"][number],
     batch: CurrentOrderQueue["items"][number]["batches"][number],
@@ -3802,6 +3834,7 @@ export function CurrentOrderQueuePage({
                         orderReference={detail.order.orderReference}
                         csrf={csrf}
                         fetcher={fetcher}
+                        onRemoved={rereadAfterContactRemoval}
                       />
                       <OnlineRefundNote order={detail.order} position={detail.paymentPosition} />
                       <CompRecordsNote detail={detail} timeZone={timeZone} />

@@ -2127,6 +2127,23 @@ it("M108: staff remove a guest's contact at the guest's request, after a confirm
   expect(removed).toContain("Contact removed at the guest&#x27;s request");
   expect(removed).not.toContain("+14165550123");
   expect(pickupContactRemovalOutcome(200)).toBe("Removed");
+  // The Store's answer is said as it is: already removed, or nothing given to remove.
+  expect(pickupContactRemovalOutcome(200, "Removed")).toBe("Removed");
+  expect(pickupContactRemovalOutcome(200, "AlreadyRemoved")).toBe("AlreadyRemoved");
+  expect(pickupContactRemovalOutcome(200, "NotGiven")).toBe("NothingToRemove");
+  for (const [state, text] of [
+    ["AlreadyRemoved", "This contact was already removed."],
+    [
+      "NothingToRemove",
+      "This guest gave no contact on this order, so there was nothing to remove.",
+    ],
+  ] as const) {
+    const html = renderToStaticMarkup(
+      <PickupContactPanel contact={contact} orderReference="o" csrf="c" initialRemoval={state} />,
+    );
+    expect(html).toContain(text);
+    expect(html).not.toContain("Contact removed at the guest");
+  }
   expect(pickupContactRemovalOutcome(403, "pickup_contact_removal_permission_denied")).toBe(
     "Denied",
   );
