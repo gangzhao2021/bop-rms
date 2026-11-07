@@ -101,6 +101,31 @@ const amount = (value: unknown): string =>
 const orderTypes = ["Pickup", "DineIn"] as const;
 const quoteChannel = "CUSTOMER_WEB";
 
+/**
+ * WP-2423 M71: a draft's own changes (against the Brand prices it was started from) on top of the
+ * Brand prices in effect now: a price it changed or added is set, a price it took off stays off.
+ * Menu and Prices-page drafts hold Brand prices only; a draft holding any other price is refused
+ * rather than started again without it.
+ */
+export function rebasedBrandPrices(
+  started: PriceBookSnapshot | null,
+  live: PriceBookSnapshot | null,
+  draft: PriceBookSnapshot,
+): Map<string, string> {
+  if (
+    draft.entries.some(
+      (e) => e.scopeKind !== "Brand" || e.channelCode !== null || e.orderType !== null,
+    )
+  )
+    fail("Invalid");
+  const from = storePrices(started, "").brand;
+  const mine = storePrices(draft, "").brand;
+  const prices = storePrices(live, "").brand;
+  for (const [sku, amountMinor] of mine)
+    if (from.get(sku) !== amountMinor) prices.set(sku, amountMinor);
+  for (const sku of from.keys()) if (!mine.has(sku)) prices.delete(sku);
+  return prices;
+}
 export interface PriceInput {
   readonly sellableReference: string;
   readonly amountMinor: string;
@@ -799,13 +824,11 @@ export function createMerchantPrices(options: {
               brandPriceDigest(started) !== purpose.sourceBrandDigest
             )
               fail("Invalid");
-            const from = storePrices(started, "").brand;
-            const prices = storePrices(
+            const prices = rebasedBrandPrices(
+              started,
               (await storeBook(tx as never, s.owner, options.currencyMetadata))?.snapshot ?? null,
-              "",
-            ).brand;
-            for (const [sku, amountMinor] of storePrices(old, "").brand)
-              if (from.get(sku) !== amountMinor) prices.set(sku, amountMinor);
+              old,
+            );
             await reads(tx).query(
               "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id','',true)",
               [s.owner.brandReference],

@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   localBoundary,
+  MerchantPriceError,
   parsePriceCommandBody,
+  rebasedBrandPrices,
   priceDraftCode,
   storeLocalDate,
 } from "./merchant-prices.js";
@@ -107,5 +109,58 @@ describe("WP-2423 M150: names carry the Store's own date", () => {
     expect(
       priceDraftCode("PriceChange", id(9), "2026-11-05T04:22:00.000Z", "America/Toronto"),
     ).toMatch(/^PRICES-20261104-[0-9A-F]{6}$/u);
+  });
+});
+
+describe("WP-2423 M71 Apply my changes to the prices in use (Rebase)", () => {
+  const book = (
+    entries: readonly (readonly [string, string, string?])[],
+  ): Parameters<typeof rebasedBrandPrices>[2] =>
+    ({
+      entries: entries.map(([sku, amountMinor, channelCode]) => ({
+        sellableReference: sku,
+        scopeKind: "Brand",
+        scopeReference: null,
+        channelCode: channelCode ?? null,
+        orderType: null,
+        amount: { amountMinor: BigInt(amountMinor), currencyCode: "CAD" },
+      })),
+    }) as unknown as Parameters<typeof rebasedBrandPrices>[2];
+  const soup = id(10),
+    tea = id(11),
+    rice = id(12);
+  it("keeps the draft's changes and removals on top of the prices in use now", () => {
+    const started = book([
+      [soup, "800"],
+      [tea, "300"],
+      [rice, "200"],
+    ]);
+    // Someone else listed tea at 3.50 meanwhile; the draft raised soup and took rice off.
+    const live = book([
+      [soup, "800"],
+      [tea, "350"],
+      [rice, "200"],
+    ]);
+    const draft = book([
+      [soup, "900"],
+      [tea, "300"],
+    ]);
+    expect(Object.fromEntries(rebasedBrandPrices(started, live, draft))).toEqual({
+      [soup]: "900",
+      [tea]: "350",
+    });
+  });
+  it("refuses a draft holding a price it cannot carry over, never dropping it silently", () => {
+    const started = book([[soup, "800"]]);
+    expect(() =>
+      rebasedBrandPrices(
+        started,
+        started,
+        book([
+          [soup, "800"],
+          [tea, "300", "CUSTOMER_WEB"],
+        ]),
+      ),
+    ).toThrow(MerchantPriceError);
   });
 });
