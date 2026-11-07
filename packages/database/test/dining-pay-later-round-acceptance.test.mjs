@@ -3833,6 +3833,8 @@ async function journey(journeyEnding) {
                 endsAt: new Date(Date.now() + 1000).toISOString(),
               },
               observedAt: new Date().toISOString(),
+              // No online refund here: an online payment the ledger does not hold counts as kept (M40).
+              ledger: { payments: [], refundedPayments: [], refunds: [] },
               authorize: async () => true,
             }),
           );

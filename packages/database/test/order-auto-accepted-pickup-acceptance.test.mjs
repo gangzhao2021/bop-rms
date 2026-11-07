@@ -635,6 +635,8 @@ it("a table round made on paper is said Making it by hand too, and leaves the ki
             endsAt: world.time(world.minutes(600)),
           },
           observedAt: world.now(),
+          // No online refund here: an online payment the ledger does not hold counts as kept (M40).
+          ledger: { payments: [], refundedPayments: [], refunds: [] },
           authorize: async () => true,
         }),
       );
@@ -884,6 +886,8 @@ it("what the manager sees: every refund and keep named on tonight's summary, the
             endsAt: world.time(world.minutes(600)),
           },
           observedAt: world.now(),
+          // No online refund here: an online payment the ledger does not hold counts as kept (M40).
+          ledger: { payments: [], refundedPayments: [], refunds: [] },
           authorize: async () => true,
         }),
       );

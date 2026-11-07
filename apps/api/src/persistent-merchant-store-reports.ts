@@ -261,6 +261,7 @@ export function createPersistentMerchantStoreReports(options: {
             scope,
             window: { startsAt: first.startsAt, endsAt: last.endsAt },
             observedAt: persistence.now(),
+            ledger,
             authorize: sameTransaction,
           });
           return { view, tonight };

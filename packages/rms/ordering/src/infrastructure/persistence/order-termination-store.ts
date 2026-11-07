@@ -433,6 +433,41 @@ export function createPostgresOrderExecutionReader(options: {
   });
 }
 
+/**
+ * WP-2423 M40: which Batches of these Orders (at most 100) Ordering terminated — cancelled or
+ * rejected in the initial window, with the payment returned by Payment's compensation. Read only;
+ * the caller authorizes the Orders and owns the transaction.
+ */
+export async function listStoreTerminatedOrderBatches(
+  tx: ConsumerTransaction,
+  scope: Readonly<{ brandReference: string; storeReference: string }>,
+  orderReferences: readonly string[],
+): Promise<ReadonlySet<string>> {
+  if (orderReferences.length === 0) return new Set<string>();
+  if (orderReferences.length > 100) return fail();
+  const brand = parseOrderingReference(scope.brandReference),
+    store = parseOrderingReference(scope.storeReference),
+    orders = orderReferences.map((reference) => String(parseOrderingReference(reference)));
+  await setScope(tx, { brandReference: brand, storeReference: store });
+  const found = await tx.query(
+    "SELECT order_id::text AS order_id,order_batch_id::text AS order_batch_id " +
+      "FROM rms_ordering.order_termination_record WHERE brand_id=$1 AND store_id=$2 " +
+      "AND order_id=ANY($3::uuid[]) LIMIT 101",
+    [brand, store, orders],
+  );
+  if (!Array.isArray(found.rows) || found.rows.length > 100) return fail();
+  const batches = new Set<string>();
+  for (const row of found.rows as readonly Record<string, unknown>[]) {
+    if (
+      Object.keys(row).length !== 2 ||
+      !orders.includes(String(parseOrderingReference(row.order_id)))
+    )
+      return fail();
+    batches.add(String(parseOrderingReference(row.order_batch_id)));
+  }
+  return batches;
+}
+
 /** Caller holds all current eligibility fences and owns transaction commit/rollback. */
 export function createPostgresOrderTerminationStore(options: {
   brandReference: string;

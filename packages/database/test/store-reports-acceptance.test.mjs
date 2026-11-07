@@ -6,6 +6,9 @@ import pg from "pg";
 import { it, vi } from "vitest";
 import { createPersistentMerchantSettlement } from "../../../apps/api/src/persistent-merchant-settlement.ts";
 import { createPersistentMerchantStoreReports } from "../../../apps/api/src/persistent-merchant-store-reports.ts";
+import { readPayFirstRoundStandings } from "../../../apps/api/src/merchant-tonight-summary.ts";
+import { listStoreTerminatedOrderBatches } from "../../rms/ordering/src/index.ts";
+import { createPostgresStoreSalesPaymentLedger } from "../../rms/payment/src/index.ts";
 import { renderPilotAclSql } from "../../../tooling/environment/pilot-acl-render.mjs";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 import { seedMerchantAcceptanceSession } from "../test-support/merchant-acceptance-session.mjs";
@@ -982,6 +985,39 @@ it("reports a business day's sales, items, hours and tips, matches the settlemen
         BigInt(day.captured.amountMinor) + BigInt(day.cardMachine.taken.amountMinor),
       );
       assert.equal(storeOne.items.find((row) => row.name === "Synthetic muffin")?.quantitySold, 3);
+
+      // ── WP-2423 M40 (review): which paid rounds tonight counts as money kept, read as the API
+      // role from Ordering's and Payment's own records and the report's payment ledger in one
+      // transaction. The table's two rounds paid online are kept; the counter order paid on the
+      // card machine is kept; the one refunded in full on the machine and terminated, and
+      // yesterday's refunded in full because it could not be fulfilled, are not. (The rounds are
+      // asked for as pay-first rounds of open tables; the session has no unpaid round.)
+      const asked = [t1.order, c1.order, c2.order, c0.order].map((orderReference) => ({
+        paymentTiming: "PayFirst",
+        diningSessionReference: fresh(),
+        orderReference,
+      }));
+      const standings = await transactions.run(async (tx) => {
+        const observedAt = now();
+        const allowed = async () => true;
+        const ledger = await createPostgresStoreSalesPaymentLedger({
+          scope: { ...ownerScope, providerAccountReference: provider, environment: "Test" },
+          authorize: allowed,
+        })(tx, { startsAt: time(-minutes(180)), endsAt: observedAt, observedAt });
+        return {
+          terminated: [
+            ...(await listStoreTerminatedOrderBatches(
+              tx,
+              scope,
+              asked.map((t) => t.orderReference),
+            )),
+          ],
+          ...(await readPayFirstRoundStandings(tx, ownerScope, asked, ledger, allowed)),
+        };
+      });
+      assert.deepEqual(standings.terminated, [c2.batch]);
+      assert.deepEqual(Object.fromEntries(standings.kept), { [t1.order]: 2, [c1.order]: 1 });
+      assert.equal(standings.unpaid.size, 0);
 
       // A second Store of the Brand with one paid online pickup (its own session and settlement).
       scope = { brandReference: id(1), storeReference: id(0x700) };

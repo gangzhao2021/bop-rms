@@ -5,6 +5,7 @@ import { createPostgresDiningSessionReadStore, createPostgresDiningTableStore } 
 import {
   listStoreCancelledDishes,
   listStoreOrderAutoAcceptanceEvents,
+  listStoreTerminatedOrderBatches,
   listStoreUnpaidGuestDiningRounds,
   readStaffOrderCancellations,
 } from "@rms/ordering";
@@ -12,6 +13,8 @@ import {
   createPostgresCardMachinePaymentStore,
   listStoreOrderBatchPaymentOutcomes,
   listStoreOrderBatchesPaidOnline,
+  type StoreSalesPayment,
+  type StoreSalesRefund,
 } from "@rms/payment";
 import { readDiningTableBill } from "./merchant-dining-table-checkout.js";
 
@@ -35,7 +38,7 @@ export interface TonightOpenTable {
 /**
  * M40: Owes — its bill still owes money; RoundUnpaid — a pay-first round nobody has paid yet;
  * Paid — money was really taken and kept (a table settlement, a paid split part, or a pay-first
- * round paid and not cancelled for a refund); NothingOrdered — seated, no Order; NothingToCollect
+ * round paid and not refunded in full); NothingOrdered — seated, no Order; NothingToCollect
  * — rounds were ordered but all came off unpaid; WrittenOff — the guests left without paying.
  */
 export type TonightTableStanding =
@@ -47,7 +50,7 @@ export function tonightTableStanding(input: {
   readonly unpaidRounds: number;
   /** A table settlement or a paid split part. */
   readonly tableMoneyTaken: boolean;
-  /** Pay-first rounds paid (online or on the card machine) and not cancelled for a refund. */
+  /** Pay-first rounds paid (online or on the card machine) whose money was not all given back. */
   readonly keptPaidRounds: number;
   readonly ordered: boolean;
 }): TonightTableStanding {
@@ -100,6 +103,8 @@ export async function readTonightFacts(
     };
     readonly window: { readonly startsAt: string; readonly endsAt: string };
     readonly observedAt: string;
+    /** The report's own payment ledger, read in this transaction (M40). */
+    readonly ledger: TonightPaymentLedger;
     authorize(tx: ConsumerTransaction): Promise<boolean>;
   },
 ): Promise<TonightFacts> {
@@ -156,7 +161,7 @@ export async function readTonightFacts(
     if (listed.nextAfterTableReference === null) break;
     after = listed.nextAfterTableReference;
   }
-  const standings = await payFirstRounds(tx, input.scope, open, allowed);
+  const standings = await readPayFirstRoundStandings(tx, input.scope, open, input.ledger, allowed);
   const cancelled = await listStoreCancelledDishes(tx, input.scope, input.window);
   const events = await listStoreOrderAutoAcceptanceEvents(tx, input.scope, input.window);
   const names =
@@ -227,12 +232,27 @@ export async function readTonightFacts(
 }
 
 /**
- * M40: for the pay-first tables, the rounds nobody has paid yet (by session) and the rounds paid
- * online or on the card machine that were not cancelled for a refund (by Order). A round whose
- * dishes were cancelled with "Can't make it · refund" was refunded in full, so it is not money kept.
- * Read in the summary's own transaction; one read each for every open table.
+ * M40: the payment ledger the report read in this same transaction — every payment of the window,
+ * the earlier payments with a refund, and every refund made before the window's end. Tonight
+ * nets a round's online payment against it (captured minus refunded), as the report does.
  */
-async function payFirstRounds(
+export interface TonightPaymentLedger {
+  readonly payments: readonly StoreSalesPayment[];
+  readonly refundedPayments: readonly StoreSalesPayment[];
+  readonly refunds: readonly StoreSalesRefund[];
+}
+
+/**
+ * M40: for the pay-first tables, the rounds nobody has paid yet (by session) and the rounds whose
+ * money was taken and kept (by Order). A paid round is not kept when its money went back in full:
+ * staff cancelled the whole round for a refund ("Can't make it · refund", and the others),
+ * Ordering terminated it (its payment is returned by Payment's compensation), or what was refunded
+ * — on the card machine, online, or by an ordinary refund request — covers what was taken. A
+ * partial refund leaves money kept. An online payment the ledger does not hold (taken before the
+ * window and never refunded) is kept. Read in the summary's own transaction; one read each for
+ * every open table.
+ */
+export async function readPayFirstRoundStandings(
   tx: ConsumerTransaction,
   scope: {
     readonly tenantReference: string;
@@ -244,6 +264,7 @@ async function payFirstRounds(
     readonly diningSessionReference: string;
     readonly orderReference: string | null;
   }[],
+  ledger: TonightPaymentLedger,
   allowed: () => Promise<boolean>,
 ): Promise<{ unpaid: ReadonlyMap<string, number>; kept: ReadonlyMap<string, number> }> {
   const payFirst = tables.filter((table) => table.paymentTiming === "PayFirst");
@@ -251,6 +272,31 @@ async function payFirstRounds(
   const kept = new Map<string, number>();
   if (payFirst.length === 0) return { unpaid, kept };
   const owner = { brandReference: scope.brandReference, storeReference: scope.storeReference };
+  // Online payments of rounds by Batch, and what went back on each payment, from the ledger.
+  const onlineByBatch = new Map<
+    string,
+    { order: string; capturedMinor: bigint; intents: Set<string> }
+  >();
+  for (const payment of [...ledger.payments, ...ledger.refundedPayments]) {
+    // A table's own lines (pay at the end, split parts) are the table settlement's, not a round's.
+    if (payment.channel !== "Online" || payment.paymentIntentReference.includes(":")) continue;
+    const entry = onlineByBatch.get(payment.orderBatchReference) ?? {
+      order: payment.orderReference,
+      capturedMinor: 0n,
+      intents: new Set<string>(),
+    };
+    if (entry.intents.has(payment.paymentIntentReference)) continue;
+    entry.intents.add(payment.paymentIntentReference);
+    entry.capturedMinor += payment.totalMinor;
+    onlineByBatch.set(payment.orderBatchReference, entry);
+  }
+  const refundedByIntent = new Map<string, bigint>();
+  for (const refund of ledger.refunds)
+    if (refund.channel === "Online" && refund.kind !== "TableOnline")
+      refundedByIntent.set(
+        refund.paymentIntentReference,
+        (refundedByIntent.get(refund.paymentIntentReference) ?? 0n) + refund.amountMinor,
+      );
   for (let start = 0; start < payFirst.length; start += 100) {
     const chunk = payFirst.slice(start, start + 100);
     const sessions = chunk.map((table) => table.diningSessionReference);
@@ -275,22 +321,37 @@ async function payFirstRounds(
           (unpaid.get(round.diningSessionReference) ?? 0) + 1,
         );
     if (orders.length === 0) continue;
-    const paidBatches = new Map<string, string>();
+    // Each paid round: its Order, whether it was paid online, and what the card machine kept.
+    const paid = new Map<string, { order: string; online: boolean; machineNetMinor: bigint }>();
+    const round = (batch: string, order: string) => {
+      const found = paid.get(batch) ?? { order, online: false, machineNetMinor: 0n };
+      paid.set(batch, found);
+      return found;
+    };
     for (const outcome of await listStoreOrderBatchPaymentOutcomes(
       tx as unknown as Parameters<typeof listStoreOrderBatchPaymentOutcomes>[0],
       owner,
       orders,
     ))
       if (outcome.status === "Succeeded")
-        paidBatches.set(outcome.orderBatchReference, outcome.orderReference);
+        round(outcome.orderBatchReference, outcome.orderReference).online = true;
+    // A capture the ledger holds is paid online too, even before its status projection is written.
+    for (const [batch, online] of onlineByBatch)
+      if (orders.includes(online.order)) round(batch, online.order).online = true;
     const machine = await createPostgresCardMachinePaymentStore({
-      scope: owner,
+      scope,
       authorize: async () => allowed(),
     }).listByOrders(tx as never, orders);
     for (const [order, entries] of machine)
-      for (const entry of entries)
-        paidBatches.set(String(entry.payment.orderBatchReference), order);
-    const refunded = new Set(
+      for (const entry of entries) {
+        const refundedMinor = entry.refunds.reduce(
+          (sum, refund) => sum + BigInt(refund.amountMinor),
+          0n,
+        );
+        round(String(entry.payment.orderBatchReference), order).machineNetMinor +=
+          BigInt(entry.payment.preparation.total.amountMinor) - refundedMinor;
+      }
+    const cancelled = new Set(
       (
         await readStaffOrderCancellations(
           tx as unknown as Parameters<typeof readStaffOrderCancellations>[0],
@@ -299,8 +360,26 @@ async function payFirstRounds(
         )
       ).map((record) => String(record.orderBatchReference)),
     );
-    for (const [batch, order] of paidBatches)
-      if (!refunded.has(batch)) kept.set(order, (kept.get(order) ?? 0) + 1);
+    const terminated = await listStoreTerminatedOrderBatches(
+      tx as unknown as Parameters<typeof listStoreTerminatedOrderBatches>[0],
+      owner,
+      orders,
+    );
+    for (const [batch, standing] of paid) {
+      if (cancelled.has(batch) || terminated.has(batch)) continue;
+      let netMinor = standing.machineNetMinor;
+      let onlineUnknown = false;
+      if (standing.online) {
+        const online = onlineByBatch.get(batch);
+        if (online === undefined) onlineUnknown = true;
+        else {
+          netMinor += online.capturedMinor;
+          for (const intent of online.intents) netMinor -= refundedByIntent.get(intent) ?? 0n;
+        }
+      }
+      if (onlineUnknown || netMinor > 0n)
+        kept.set(standing.order, (kept.get(standing.order) ?? 0) + 1);
+    }
   }
   return { unpaid, kept };
 }
