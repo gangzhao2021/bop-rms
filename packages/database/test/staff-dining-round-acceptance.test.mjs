@@ -2229,10 +2229,15 @@ async function exerciseCardMachinePartialRefund({
       csrf: elsewhere.csrf,
       query: { paymentIntentReference: saved.paymentIntentReference },
     }),
-    // M126 I.5: said as another Store's payment (switch Store), not as an outage to retry.
+    // M126 I.5: refused (this sign-in there can't read refunds) or said as another Store's
+    // payment (switch Store), never an outage to retry.
     (error) => {
       for (let current = error, depth = 0; current && depth < 6; depth += 1) {
-        if (current.message === "MERCHANT_REFUND_PAYMENT_NOT_FOUND") return true;
+        if (
+          current.message === "MERCHANT_REFUND_PAYMENT_NOT_FOUND" ||
+          current.message === "ORDINARY_REFUND_REQUEST_DENIED"
+        )
+          return true;
         current = current.cause;
       }
       return false;
