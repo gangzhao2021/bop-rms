@@ -8689,4 +8689,76 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "No longer offered: {changes}. Tap Change to choose again, or Remove.":
     "已不再供应：{changes}。请点“更改”重新选择，或点“移除”。",
   "{dish} ({options})": "{dish}（{options}）",
+  "Price here ($)": "本店价格（$）",
+  "Type the extra for each ticked choice (0.00 if it is free).":
+    "为每个勾选的选项填写加价（免费请填 0.00）。",
+  "a dish": "一道菜",
+  "What goes live": "上架内容",
+  "The menu as it is on this page: dishes, sections, photos and descriptions.":
+    "本页上的菜单：菜品、分区、图片和描述。",
+  "No price changes.": "价格没有变动。",
+  "{dish}: {to} (new)": "{dish}：{to}（新）",
+  "{dish}: {from} → {to}": "{dish}：{from} → {to}",
+  "(every Store)": "（所有门店）",
+  "Someone else changed these prices. Listing them is your review: check each one.":
+    "这些价格是其他人改的。上架即表示由你审核：请逐一检查。",
+  "Not included": "不包括",
+  "1 price change started on the Prices page stays there; it does not go live with the menu.":
+    "在“价格”页开始的 1 项价格变动仍留在那里，不会随菜单上架。",
+  "{count} price changes started on the Prices page stay there; they do not go live with the menu.":
+    "在“价格”页开始的 {count} 项价格变动仍留在那里，不会随菜单上架。",
+  "See them": "查看",
+  "Another price change went live after these menu prices were changed. Listing them as they are would undo it.":
+    "这些菜单价格修改之后，另一项价格变动已经生效。按现在的样子上架会撤销那项变动。",
+  "Apply my price changes to the prices in use": "把我的价格修改应用到当前使用的价格上",
+  "Answer allergens for {count} first: {dishes}.": "请先为 {count} 填写过敏原：{dishes}。",
+  "1 dish": "1 道菜",
+  "{count} dishes": "{count} 道菜",
+  "Answer allergens": "填写过敏原",
+  "A group named “{name}” already exists. It is ticked below.":
+    "名为“{name}”的选项组已存在，已在下方勾选。",
+  "Your price changes now start from the prices in use. Check them, then list.":
+    "你的价格修改现在以当前使用的价格为基础。请检查后再上架。",
+  "Someone changed this price since you opened the dish. Close it, open it again and check the price.":
+    "你打开这道菜之后，有人改了这个价格。请关闭后重新打开，并检查价格。",
+  "Only the owner changes this dish's price at every Store. Choose “Only at this Store”, or ask the owner.":
+    "只有店主可以修改这道菜在所有门店的价格。请选择“仅限本门店”，或请店主修改。",
+  "This dish has no price yet. Its first price is for every Store; the owner lists it.":
+    "这道菜还没有价格。它的第一个价格适用于所有门店，由店主上架。",
+  "Prices changed since you looked. Nothing was listed. Check them again, then list.":
+    "你查看之后价格有变动。没有上架任何内容。请重新检查后再上架。",
+  "Another price change went live after these menu prices were changed. Nothing was listed. Apply your price changes to the prices in use, check them, then list.":
+    "这些菜单价格修改之后，另一项价格变动已经生效。没有上架任何内容。请把你的价格修改应用到当前使用的价格上，检查后再上架。",
+  "A choice group by that name already exists. It is ticked below.":
+    "同名的选项组已存在，已在下方勾选。",
+  "Dish prices changed on the Menu page are already waiting there. List them on the Menu page first.":
+    "在“菜单”页修改的菜品价格正在那里等待上架。请先在“菜单”页上架。",
+  "Another price change went live after this one was started. Apply your changes to the prices in use, check them, then publish.":
+    "这项价格变动开始之后，另一项价格变动已经生效。请把你的修改应用到当前使用的价格上，检查后再发布。",
+  "To change one dish's price, open it on the Menu page. To change several prices together, start a price change here.":
+    "要修改一道菜的价格，请在“菜单”页打开它。要一起修改多个价格，请在这里开始一项价格变动。",
+  "The prices in use here": "本店当前使用的价格",
+  "Your changes now start from the prices in use.": "你的修改现在以当前使用的价格为基础。",
+  "Prices changed on the Menu page": "在“菜单”页修改的价格",
+  "These are dish prices changed on the Menu page. They go live when someone presses List it there.":
+    "这些是在“菜单”页修改的菜品价格。有人在那里点击“上架”后才会生效。",
+  "Go to Menu": "前往菜单",
+  "Prices changed since this was started": "开始之后价格已有变动",
+  "Another price change went live after this draft was started. Publishing it as it is would undo that change, so it cannot be published until your changes start from the prices in use now.":
+    "这份草稿开始之后，另一项价格变动已经生效。按现在的样子发布会撤销那项变动，所以要等你的修改以当前使用的价格为基础后才能发布。",
+  "Apply my changes to the prices in use": "把我的修改应用到当前使用的价格上",
+  "This Store charges its own price, {own}.": "本门店使用自己的价格：{own}。",
+  "This Store charges the Brand price.": "本门店使用品牌价格。",
+  "No price yet. The first price is for every Store.": "还没有价格。第一个价格适用于所有门店。",
+  "Brand price: {brand}.": "品牌价格：{brand}。",
+  "{price} for every Store once listed.": "上架后所有门店为 {price}。",
+  "Change the price": "修改价格",
+  "Only at this Store — changes now": "仅限本门店 — 立即生效",
+  "At every Store — when you List it": "所有门店 — 上架时生效",
+  "This changes the price at this Store only, now.": "这会立即修改本门店的价格，仅限本门店。",
+  "This changes the price at every Store when you List it.": "这会在你上架时修改所有门店的价格。",
+  "This Store keeps its own price {own}. To charge the new price here too, choose “Only at this Store”, or set it back to the Brand price on Prices.":
+    "本门店仍使用自己的价格 {own}。要让本门店也使用新价格，请选择“仅限本门店”，或在“价格”页改回品牌价格。",
+  "You can't change this dish's price. Ask the owner or the Store's manager.":
+    "你不能修改这道菜的价格。请联系店主或本门店店长。",
 });
