@@ -3846,6 +3846,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Sold out": "售罄",
   "Sold out for the rest of today": "今天余下时间售罄",
   "Sold out to guests (stock)": "对顾客售罄（库存）",
+  "Sold out to guests (choices)": "对顾客售罄（必选项已售罄）",
+  "Every choice of a group guests must choose from is sold out here. Bring one back under Extras and choices.":
+    "顾客必须选的一组里，本店每一项都售罄了。请在“加料和选项”里恢复其中一项。",
   "Sold out today": "今天售罄",
   "Sold out until brought back": "售罄，直到恢复供应",
   "Sold out until further notice": "售罄直至另行通知",

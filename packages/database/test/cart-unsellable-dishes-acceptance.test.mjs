@@ -14,6 +14,7 @@ import {
   changeStoreOptionSoldOut,
 } from "../../rms/catalog/src/index.ts";
 import { createCustomerMenuStoreFacts } from "../../../apps/api/src/customer-menu-store-facts.ts";
+import { createStaffStockShortageSource } from "../../../apps/api/src/customer-menu-inventory-evidence.ts";
 const { Client } = pg;
 const id = (n) => "01902423-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 const at = "2026-11-06T16:00:00.000Z";
@@ -381,6 +382,26 @@ it("WP-2423 (cart-unsellable-dishes): a hidden dish or a default choice turned o
       // WP-2423 (M24): emptied by sold-out marks, it is sold out — on the menu and in the cart.
       assert.deepEqual(await standing.explainMany([line(null)]), ["SoldOut"]);
       assert.equal((await menuFacts())?.availability, "SoldOut");
+      // Staff read the same answer on Item availability and the Menu page (before, only guests did).
+      const staffStock = createStaffStockShortageSource({
+        scope: { ...owner, stockSiteReference: id(96) },
+        resolveExpiryCutoff: async () => {
+          throw new Error("no lots in this case");
+        },
+        menuReference: id(1),
+      });
+      const staffSees = async () =>
+        (
+          await readRunner.run((tx) =>
+            staffStock.explain(tx, {
+              brandReference: brand,
+              storeReference: store,
+              observedAt: now,
+              sellableReferences: [sku],
+            }),
+          )
+        ).get(sku)?.choicesSoldOut === true;
+      assert.equal(await staffSees(), true);
       // Back to the state the rest of this case starts from.
       await writeRunner.run((tx) =>
         changeStoreOptionSoldOut(tx, owner, {
@@ -393,6 +414,7 @@ it("WP-2423 (cart-unsellable-dishes): a hidden dish or a default choice turned o
           audit: { auditReference: id(5085), summary: { change: "Synthetic" } },
         }),
       );
+      assert.equal(await staffSees(), false);
       await admin.query("SET session_replication_role = replica");
       await admin.query("DELETE FROM rms_catalog.bundle_combo_choice WHERE option_id=$1", [iced]);
       await admin.query("SET session_replication_role = origin");

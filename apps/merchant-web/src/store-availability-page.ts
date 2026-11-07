@@ -29,6 +29,11 @@ export interface AvailabilityItem {
    * "Unknown" (no recipe stock, or not read). Absent from an older server.
    */
   readonly stock?: "Short" | "Enough" | "Unknown";
+  /**
+   * WP-2423 (M24): offered, but this Store's sold-out marks emptied a choice group guests must
+   * choose in, so guests see it sold out. Absent: not so (or an older server).
+   */
+  readonly choicesSoldOut?: true;
 }
 export interface StockShortIngredient {
   readonly name: string;

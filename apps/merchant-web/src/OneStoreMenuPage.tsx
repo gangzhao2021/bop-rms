@@ -818,7 +818,9 @@ export function OneStoreMenuPage({
                       ? t("Sold out today")
                       : size.stockShort === true
                         ? t("Sold out to guests (stock)")
-                        : ""}
+                        : size.choicesShort === true
+                          ? t("Sold out to guests (choices)")
+                          : ""}
                 </span>
                 {soldOutButton(size, sizeLabel, true)}
               </li>
@@ -848,7 +850,9 @@ export function OneStoreMenuPage({
             ? t("Sold out today")
             : dish.stockShort === true
               ? t("Sold out to guests (stock)")
-              : ""}
+              : dish.choicesShort === true
+                ? t("Sold out to guests (choices)")
+                : ""}
       </span>
       <span className="one-menu__actions">
         {dishActions(dish)}

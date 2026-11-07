@@ -446,12 +446,23 @@ export function StoreAvailabilityPage({
                   <td data-label={t("Status")}>
                     {item.status === "SoldOut"
                       ? soldOutText(item.soldOutUntil, view.timeZone)
-                      : item.stockSoldOut != null &&
+                      : item.choicesSoldOut === true &&
                           (item.status === "Available" || item.status === "Varies")
-                        ? t("Sold out to guests (stock)")
-                        : item.status === "Available" && view.stockCheck === "NotChecked"
-                          ? t("Offered")
-                          : availabilityStatusText(item.status)}
+                        ? t("Sold out to guests (choices)")
+                        : item.stockSoldOut != null &&
+                            (item.status === "Available" || item.status === "Varies")
+                          ? t("Sold out to guests (stock)")
+                          : item.status === "Available" && view.stockCheck === "NotChecked"
+                            ? t("Offered")
+                            : availabilityStatusText(item.status)}
+                    {item.choicesSoldOut === true &&
+                    (item.status === "Available" || item.status === "Varies") ? (
+                      <p className="availability-note">
+                        {t(
+                          "Every choice of a group guests must choose from is sold out here. Bring one back under Extras and choices.",
+                        )}
+                      </p>
+                    ) : null}
                     {item.stockSoldOut != null &&
                     (item.status === "Available" || item.status === "Varies") ? (
                       <p className="availability-note">

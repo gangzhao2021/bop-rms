@@ -437,6 +437,12 @@ export function createMerchantAvailability(options: {
             ),
             stockSoldOut: stockSoldOutView(found),
             ...(stockSource === undefined ? {} : { stock: stockAnswer(found) }),
+            // WP-2423 (M24): offered, but the Store's sold-out marks emptied a choice group guests
+            // must choose in, so guests see it sold out — staff read the same answer.
+            ...((status.status === "Available" || status.status === "Varies") &&
+            found?.choicesSoldOut === true
+              ? { choicesSoldOut: true as const }
+              : {}),
           };
         })
         .sort(

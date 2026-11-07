@@ -3,6 +3,7 @@ import {
   parseCatalogInstant,
   parseCatalogReference,
   publishedDefaultOptionSelections,
+  publishedRequiredGroupSoldOut,
   type CurrentAvailabilityQueryInput,
   type PublishedDefaultOptionSelection,
 } from "@rms/catalog";
@@ -242,6 +243,12 @@ export interface StaffStockShortage {
   readonly noStockReceived?: true;
   /** WP-2423 (M78): this item's stock could not be read (not the same as "no recipe stock"). */
   readonly failed?: true;
+  /**
+   * WP-2423 (M24): the Store's sold-out marks emptied a choice group guests must choose in (every
+   * pearl and every tapioca gone), so guests see the dish sold out, as the guest menu and the cart
+   * say. Absent otherwise.
+   */
+  readonly choicesSoldOut?: true;
 }
 export type RecipeStockShortageView = Awaited<
   ReturnType<ReturnType<typeof createCustomerRecipeInventoryObservation>["observe"]>
@@ -307,6 +314,7 @@ export function createStaffStockShortageSource(options: {
           scope,
         ).siteHasHeldStock(scope.stockSiteReference));
       for (const sellableReference of input.sellableReferences.slice(0, maximum)) {
+        let choicesSoldOut = false;
         try {
           const facts = await createPostgresCurrentSelectionFactsStore(joined, {
             brandReference: scope.brandReference,
@@ -323,6 +331,17 @@ export function createStaffStockShortageSource(options: {
             orderTypeCode: "PICKUP",
           });
           if (facts === null) continue;
+          // WP-2423 (M24): the same answer the guest menu gives from the same published rules.
+          const off = (kind: string) =>
+            new Set(
+              [...facts.optionsOffNow].flatMap(([option, why]) => (why === kind ? [option] : [])),
+            );
+          choicesSoldOut = publishedRequiredGroupSoldOut(
+            facts.published.optionRules ?? [],
+            "CUSTOMER_PWA",
+            off("SoldOut"),
+            off("NotOffered"),
+          );
           const found = await observation.observe({
             sellableReference,
             productVersionReference: facts.published.productVersionReference,
@@ -348,13 +367,19 @@ export function createStaffStockShortageSource(options: {
               ...(found.status === "Unavailable" && !(await stockReceived())
                 ? { noStockReceived: true as const }
                 : {}),
+              ...(choicesSoldOut ? { choicesSoldOut: true as const } : {}),
             }),
           );
         } catch {
           // Unknown stock: no reason is shown (the menu never sells out an item from it either).
           result.set(
             sellableReference,
-            Object.freeze({ status: "Indeterminate", shortages: [], failed: true as const }),
+            Object.freeze({
+              status: "Indeterminate",
+              shortages: [],
+              failed: true as const,
+              ...(choicesSoldOut ? { choicesSoldOut: true as const } : {}),
+            }),
           );
         }
       }

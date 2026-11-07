@@ -32,6 +32,8 @@ export interface MenuSize {
   readonly soldOut: boolean;
   /** WP-2423 (M78): offered, but guests see it sold out because stock cannot make one. */
   readonly stockShort?: boolean;
+  /** WP-2423 (M24): offered, but sold-out marks emptied a choice group guests must choose in. */
+  readonly choicesShort?: boolean;
   readonly hidden: boolean;
   readonly featured: boolean;
 }
@@ -57,6 +59,8 @@ export interface MenuDish {
   readonly soldOut: boolean;
   /** WP-2423 (M78): every size is offered but short of stock for guests. */
   readonly stockShort?: boolean;
+  /** WP-2423 (M24): every size is offered but its required choices are sold out here. */
+  readonly choicesShort?: boolean;
   readonly hidden: boolean;
   readonly featured: boolean;
   /** Where its allergens come from: declared by staff here, a real recipe, or not yet. */
@@ -113,6 +117,7 @@ function groupDishes(sizes: readonly MenuDish[]): readonly MenuDish[] {
       sizes: merged,
       soldOut: merged.every((x) => x.soldOut),
       stockShort: merged.every((x) => x.stockShort === true),
+      choicesShort: merged.every((x) => x.choicesShort === true),
       hidden: merged.every((x) => x.hidden),
     };
   }
@@ -138,6 +143,9 @@ function dishOf(
   const stockShort =
     (status === "Available" || status === "Varies") &&
     (item?.stock === "Short" || (item?.stock === undefined && item?.stockSoldOut != null));
+  // WP-2423 (M24): offered here, but guests see it sold out because its required choices are.
+  const choicesShort =
+    (status === "Available" || status === "Varies") && item?.choicesSoldOut === true;
   return {
     skuReference: sku.skuReference,
     name: sku.productName,
@@ -155,6 +163,7 @@ function dishOf(
     productReference: sku.productReference ?? null,
     soldOut: status === "SoldOut",
     stockShort,
+    choicesShort,
     // Not offered at this Store: guests here do not see it (it stays on the menu).
     hidden: sku.offeredHere === false || status === "NotOffered" || status === "Unavailable",
     featured,
@@ -170,6 +179,7 @@ function dishOf(
         pendingPriceMinor: sku.pendingPriceMinor ?? null,
         soldOut: status === "SoldOut",
         stockShort,
+        choicesShort,
         hidden: sku.offeredHere === false || status === "NotOffered" || status === "Unavailable",
         featured,
       },
@@ -203,7 +213,10 @@ export function dishMatches(
   if (query !== "" && !fold(dish.name).includes(query) && !fold(dish.nameZh).includes(query))
     return false;
   // A dish shows under a filter when any of its sizes is sold out, unpriced or hidden.
-  if (filters.has("SoldOut") && !dish.sizes.some((x) => x.soldOut || x.stockShort === true))
+  if (
+    filters.has("SoldOut") &&
+    !dish.sizes.some((x) => x.soldOut || x.stockShort === true || x.choicesShort === true)
+  )
     return false;
   if (filters.has("NoPrice") && !dish.sizes.some((x) => x.priceMinor === null)) return false;
   if (filters.has("Hidden") && !dish.sizes.some((x) => x.hidden)) return false;
