@@ -677,6 +677,16 @@ const openNewDish = async (page: Page): Promise<Locator> => {
 const tick = (form: Locator) =>
   form.getByRole("checkbox", { name: "I checked every allergen of this dish." });
 const lastCommand = (f: Fixture) => f.dishCommands.at(-1) as Record<string, unknown>;
+/** WP-2423 (M76): staff answer every allergen of a new dish (here: none of them). */
+const answerNone = async (form: Locator) => {
+  for (const allergen of ["Wheat", "Milk", "Soy"])
+    await form.getByRole("radiogroup", { name: allergen }).getByLabel("No").check();
+};
+const noAllergens = [
+  expect.objectContaining({ classification: "None" }),
+  expect.objectContaining({ classification: "None" }),
+  expect.objectContaining({ classification: "None" }),
+];
 
 test("@production a choice starts from its usual extra; a combo's parts are not offered; extras typed in a new group reach the dish", async ({
   page,
@@ -754,10 +764,11 @@ test("@production Enter saves only from the names and price; in an extra it move
     );
   });
   expect(f.dishCommands).toEqual([]);
-  // From the name, Enter saves.
+  // From the name, Enter saves (once every allergen is answered).
+  await answerNone(form);
   await form.getByLabel("English name").press("Enter");
   await expect(page.getByText("Oolong (TEST) saved.", { exact: false })).toBeVisible();
-  expect(lastCommand(f)).toMatchObject({ name: "Oolong (TEST)", allergens: null });
+  expect(lastCommand(f)).toMatchObject({ name: "Oolong (TEST)", allergens: noAllergens });
 });
 
 test("@production Same as copies choices and marks, never the name, price or kind; only the tick confirms copied allergens", async ({
@@ -1024,6 +1035,7 @@ test("@production a save that stopped after the dish was made goes on as an edit
   const form = await openNewDish(page);
   await form.getByLabel("English name").fill("Made already (TEST)");
   await form.getByLabel("Price ($)").fill("5.00");
+  await answerNone(form);
   await form.getByRole("button", { name: "Save dish" }).click();
   await expect(form.getByRole("alert")).toContainText("Saving stopped part-way.");
   await form.getByRole("button", { name: "Save dish" }).click();
@@ -1346,9 +1358,16 @@ test("@production Start empty after a copy takes away what the copy brought and 
   await expect(form.getByRole("checkbox", { name: /Contains alcohol/u })).not.toBeChecked();
   await expect(form.getByLabel("English name")).toHaveValue("Plain tea (TEST)");
   await form.getByLabel("Price ($)").fill("3.50");
+  // The copied allergens went too: every row is unanswered again.
+  await expect(form.locator('[role="radiogroup"][data-unanswered]')).toHaveCount(3);
+  await answerNone(form);
   await form.getByRole("button", { name: "Save dish" }).click();
   await expect(page.getByText("Plain tea (TEST) saved.", { exact: false })).toBeVisible();
-  expect(lastCommand(f)).toMatchObject({ choiceGroups: [], allergens: null, priceMinor: "350" });
+  expect(lastCommand(f)).toMatchObject({
+    choiceGroups: [],
+    allergens: noAllergens,
+    priceMinor: "350",
+  });
   expect(f.alcoholCommands).toEqual([]);
 });
 
@@ -1410,16 +1429,22 @@ test("@production a price put back after a save stopped part-way is sent, not ta
   expect(lastCommand(f).priceMinor).toBe("550");
 });
 
-test("@production a dish saved without its allergens is told to declare them before listing", async ({
+test("@production WP-2423 (M76, Owner decision 16): a new dish is not saved until every allergen is answered", async ({
   page,
 }) => {
   const f = await setUp(page);
   const form = await openNewDish(page);
   await form.getByLabel("English name").fill("Steamed rice (TEST)");
   await form.getByLabel("Price ($)").fill("3.00");
+  // Before, it saved with its allergens left for later.
+  await expect(form.getByRole("button", { name: "Save dish" })).toBeDisabled();
+  await expect(form.getByText("Answer every allergen to save: 3 left.")).toBeVisible();
+  await form.getByLabel("Price ($)").press("Enter");
+  expect(f.dishCommands).toEqual([]);
+  await answerNone(form);
   await form.getByRole("button", { name: "Save dish" }).click();
   await expect(
-    page.getByText("Steamed rice (TEST) saved. Declare its allergens, then list it."),
+    page.getByText("Steamed rice (TEST) saved. Guests see it when the menu is listed."),
   ).toBeVisible();
-  expect(lastCommand(f)).toMatchObject({ allergens: null, choiceGroups: [] });
+  expect(lastCommand(f)).toMatchObject({ allergens: noAllergens, choiceGroups: [] });
 });
