@@ -52,9 +52,6 @@ import { seedSubmissionInventoryStock } from "./submission-inventory-stock.mjs";
 import { seedSubmissionInventoryWorkflow } from "./submission-inventory-workflow.mjs";
 import { seedTaxConfiguration } from "./tax-configuration-seed.mjs";
 
-// WP-2423 M71: the price list "List it" confirms (read as the review reads it).
-let menuPrices;
-
 const { Client, Pool } = pg;
 const idsOf = (merchant) => (n) =>
   (0x01a7ee00 + merchant).toString(16).padStart(8, "0") +
@@ -733,12 +730,14 @@ async function listRealMenu({
       0,
     ]);
     const menus = createMerchantMenus({ ...common, currencyMetadata });
+    // WP-2423 M71: this merchant's prices, which "List it" confirms (as its review reads them).
+    const menuPrices = createMerchantPrices({ ...common, currencyMetadata });
     const dishAllergens = createMerchantDishAllergens({ ...common, references: { next: op } });
     const optionSets = createMerchantOptionSets(common);
     const optionRecipes = createMerchantOptionRecipes(common);
     const commands = createMerchantOneStoreDishes({
       products: createMerchantProducts(common),
-      prices: (menuPrices = createMerchantPrices({ ...common, currencyMetadata })),
+      prices: menuPrices,
       optionPrices: createMerchantOptionPrices({ ...common, currencyMetadata }),
       menus,
       dishAllergens,
@@ -750,6 +749,7 @@ async function listRealMenu({
     });
     grants.as(owner);
     const session = { sessionCookie: "cookie", csrf: "csrf" };
+    const savedPrices = new Map();
     const saveDish = (
       name,
       nameZh,
@@ -758,27 +758,34 @@ async function listRealMenu({
       allergens = null,
       choiceGroups = [],
     ) =>
-      commands.command({
-        ...session,
-        body: {
-          action: "SaveDish",
-          operationReference: op(),
-          menuReference,
-          productReference,
-          sectionCode: "SOUPS",
-          name,
-          nameZh,
-          description: "",
-          descriptionZh: "",
-          taxClassificationReference,
-          priceMinor,
-          // WP-2423 M70: the Brand price, for every Store (the one-Store menu has one).
-          priceScope: priceMinor === null ? null : "AllStores",
-          expectedPriceMinor: null,
-          choiceGroups,
-          allergens,
-        },
-      });
+      commands
+        .command({
+          ...session,
+          body: {
+            action: "SaveDish",
+            operationReference: op(),
+            menuReference,
+            productReference,
+            sectionCode: "SOUPS",
+            name,
+            nameZh,
+            description: "",
+            descriptionZh: "",
+            taxClassificationReference,
+            priceMinor,
+            // WP-2423 M70: the Brand price, for every Store (the one-Store menu has one).
+            priceScope: priceMinor === null ? null : "AllStores",
+            // The price this helper last saved for the dish (what the editor would have shown).
+            expectedPriceMinor:
+              productReference === null ? null : (savedPrices.get(productReference) ?? null),
+            choiceGroups,
+            allergens,
+          },
+        })
+        .then((saved) => {
+          if (priceMinor !== null) savedPrices.set(saved.productReference, priceMinor);
+          return saved;
+        });
     const teaDish = await saveDish("Tea charge (TEST)", "茶位", "150");
     await saveDish("Tea charge (TEST)", "茶位", "150", teaDish.productReference, "NoIngredients");
     await asApi((tx) =>

@@ -471,6 +471,10 @@ export async function createOneStoreMenuFixture(
         choiceGroups: [],
         allergens: [],
         ...overrides,
+        // No price sent, no scope (an edit keeping its price).
+        ...(overrides?.priceMinor === null && overrides.priceScope === undefined
+          ? { priceScope: null }
+          : {}),
       },
     });
   const listAll = async () =>

@@ -24,6 +24,8 @@ const priceApiGrants = [
   "GRANT USAGE ON SCHEMA bop_tenant TO ROLE_",
   "GRANT EXECUTE ON FUNCTION bop_tenant.brand_store_ids(uuid) TO ROLE_",
   "GRANT SELECT,INSERT ON rms_pricing.store_price_change TO ROLE_",
+  // WP-2423 M71: why each draft was started (as the pilot ACL grants it).
+  "GRANT SELECT,INSERT ON rms_pricing.price_book_draft_purpose TO ROLE_",
   "GRANT SELECT ON rms_catalog.published_menu_projection,rms_catalog.published_menu_projection_checkpoint,rms_catalog.published_menu_projection_generation,rms_catalog.published_menu_projection_section,rms_catalog.published_menu_projection_sellable TO ROLE_",
 ];
 

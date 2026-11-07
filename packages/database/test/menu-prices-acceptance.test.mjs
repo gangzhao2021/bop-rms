@@ -635,7 +635,10 @@ it("two Stores: menu prices list as reviewed, Prices-page changes stay, nothing 
       await assert.rejects(
         two.dishes.command({
           ...session,
-          body: dish(soup.productReference, "Hot and sour soup (TEST)", "990", "AllStores", "980"),
+          body: {
+            ...dish(soup.productReference, "Hot and sour soup (TEST)", "990", "AllStores", "980"),
+            nameZh: "酸辣汤",
+          },
         }),
         (error) => error.code === "NeedsBrandOwner",
       );
