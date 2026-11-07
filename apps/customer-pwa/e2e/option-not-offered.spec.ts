@@ -26,14 +26,21 @@ for (const screen of [
       isMobile: screen.touch,
       serviceWorkers: "block",
     });
-    for (const scenario of ["hot off", "refused meanwhile", "all off"] as const)
+    for (const scenario of [
+      "hot off",
+      "refused meanwhile",
+      "all off",
+      // WP-2423 (M22, M24, M154): Hot sold out at the Store today; the dish sold out meanwhile.
+      "hot sold out",
+      "dish sold out meanwhile",
+    ] as const)
       test(scenario, async ({ page }) => {
         const failures: string[] = [];
         page.on("pageerror", () => failures.push("page error"));
         const at = new Date().toISOString(),
           expiresAt = new Date(Date.now() + 600_000).toISOString();
         // "refused meanwhile": the page was read while Hot was offered; it goes off before Add.
-        let hotOff = scenario !== "refused meanwhile";
+        let hotOff = scenario !== "refused meanwhile" && scenario !== "dish sold out meanwhile";
         let menuReads = 0;
         await page.route("**/bff/customer/entry", (route) =>
           route.fulfill({
@@ -63,6 +70,7 @@ for (const screen of [
           selectedByDefault: start,
           defaultQuantity: start ? 1 : 0,
           ...(off ? { offeredNow: false } : {}),
+          ...(off && reference === hot && scenario === "hot sold out" ? { soldOut: true } : {}),
           incrementalPrice: { status: "Available", amount: "0.00", currency: "CAD", reason: null },
         });
         await page.route("**/api/v1/public/stores/*/menu?*", (route) => {
@@ -176,6 +184,20 @@ for (const screen of [
             optionSelections: { optionReference: string }[];
           };
           adds.push(body.optionSelections.map((selection) => selection.optionReference));
+          if (scenario === "dish sold out meanwhile") {
+            await route.fulfill({
+              status: 422,
+              json: {
+                schemaVersion: 1,
+                error: {
+                  code: "cart_selection_invalid",
+                  messageKey: "customer.cart.selection_invalid",
+                  issueCodes: ["CATALOG_ITEM_SOLD_OUT"],
+                },
+              },
+            });
+            return;
+          }
           if (body.optionSelections.some((selection) => selection.optionReference === hot)) {
             // Staff unticked Hot after this page was read.
             hotOff = true;
@@ -229,6 +251,35 @@ for (const screen of [
           await expect(hotChoice).toBeDisabled();
           await expect(icedChoice).toBeDisabled();
           await expect(add).toBeDisabled();
+        } else if (scenario === "hot sold out") {
+          await expect(hotChoice).toBeDisabled();
+          await expect(hotChoice).not.toBeChecked();
+          await expect(page.getByText("Sold out today", { exact: true })).toBeVisible();
+          await expect(page.getByText("Only Iced is left today", { exact: true })).toBeVisible();
+          await expect(page.getByText("Not available now", { exact: true })).toHaveCount(0);
+          await page.screenshot({
+            path: `test-results/option-sold-out-${screen.width}.png`,
+            fullPage: true,
+          });
+          await press(icedChoice);
+          await press(add);
+          await expect(page).toHaveURL(/\/menu$/u);
+          expect(adds).toEqual([[iced]]);
+        } else if (scenario === "dish sold out meanwhile") {
+          await expect(hotChoice).toBeChecked();
+          await press(add);
+          // The real reason is the headline, with the way back to the menu.
+          await expect(page.getByText("This dish just sold out.", { exact: true })).toBeVisible();
+          await expect(page.getByText(/can’t be ordered as selected/u)).toHaveCount(0);
+          await expect(
+            page.getByRole("alert").getByRole("link", { name: "Back to menu" }),
+          ).toBeVisible();
+          await page.screenshot({
+            path: `test-results/dish-sold-out-meanwhile-${screen.width}.png`,
+            fullPage: true,
+          });
+          await press(page.getByRole("alert").getByRole("link", { name: "Back to menu" }));
+          await expect(page).toHaveURL(/\/menu$/u);
         } else if (scenario === "hot off") {
           await expect(hotChoice).toBeDisabled();
           await expect(hotChoice).not.toBeChecked();
