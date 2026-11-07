@@ -21,6 +21,9 @@ import { keepingCause, onlyRefusal } from "./merchant-failure.js";
  */
 export const pickupContactRemovalPermission = "ordering.order.close" as const;
 
+const pickupContactRemovalAuditAction = "CHECKOUT_CONTACT_REMOVED_BY_STAFF";
+const pickupContactRemovalAuditTarget = "OrderCheckoutContact";
+
 export const pickupContactRemovalErrorCodes = [
   "PICKUP_CONTACT_REMOVAL_INPUT_INVALID",
   "PICKUP_CONTACT_REMOVAL_PERMISSION_DENIED",
@@ -91,12 +94,24 @@ export function createMerchantPickupContactRemoval(options: {
               storeReference: String(scope.store.storeReference),
             };
             const actorReference = String(scope.actorReference);
-            // A replay of this operation: its staff audit exists, so the answer is the first one.
+            // A replay of this operation is its own staff audit: this Store, this order, this
+            // action. The same reference used for anything else is refused, never answered
+            // "Removed" for an order it did not remove.
             const prior = await tx.query(
-              "SELECT count(*)::int AS n FROM platform_audit.audit_record WHERE audit_id=$1",
-              [operationReference],
+              "SELECT (brand_id=$2 AND store_id=$3 AND target_id=$4 AND action_code=$5 AND target_type=$6) AS same " +
+                "FROM platform_audit.audit_record WHERE audit_id=$1",
+              [
+                operationReference,
+                selected.brandReference,
+                selected.storeReference,
+                orderReference,
+                pickupContactRemovalAuditAction,
+                pickupContactRemovalAuditTarget,
+              ],
             );
-            if (prior.rows[0]?.n === 1) {
+            const replay = prior.rows[0] as { same?: unknown } | undefined;
+            if (replay !== undefined) {
+              if (replay.same !== true) return fail("PICKUP_CONTACT_REMOVAL_INPUT_INVALID");
               if (!(await authority.guard()))
                 return fail("PICKUP_CONTACT_REMOVAL_PERMISSION_DENIED");
               return Object.freeze({ status: "Removed" as const });
@@ -126,8 +141,8 @@ export function createMerchantPickupContactRemoval(options: {
                   brandId: selected.brandReference,
                   storeId: selected.storeReference,
                   actor: { type: "User", reference: actorReference },
-                  actionCode: "CHECKOUT_CONTACT_REMOVED_BY_STAFF",
-                  targetType: "OrderCheckoutContact",
+                  actionCode: pickupContactRemovalAuditAction,
+                  targetType: pickupContactRemovalAuditTarget,
                   targetId: orderReference,
                   reasonCode: "CUSTOMER_REQUEST",
                   correlationId: operationReference,
