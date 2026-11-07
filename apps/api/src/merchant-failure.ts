@@ -66,6 +66,9 @@ const changedCodes: ReadonlySet<string> = new Set([
   "NotFound",
   // The round this refund asks about was refunded by a cancellation meanwhile.
   "ORDINARY_REFUND_ROUND_REFUNDED_BY_CANCELLATION",
+  // WP-2423 M10: every dish of an order nobody accepted (the refund routes answer it 409
+  // refund_order_not_accepted; anywhere else it is a conflict, never "try again").
+  "ORDINARY_REFUND_ORDER_NOT_ACCEPTED",
 ]);
 const retryCodes: ReadonlySet<string> = new Set([
   "Unavailable",
