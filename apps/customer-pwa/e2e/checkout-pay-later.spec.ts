@@ -995,6 +995,34 @@ test.describe("@production Pay-later table, the round just placed", () => {
     expect(table.sent).toHaveLength(1);
   });
 
+  test("M101: on the checkout page a lost answer says the round isn’t placed yet and Place order again places one", async ({
+    page,
+  }) => {
+    let lost = false;
+    const table = await stubTable(page, [], {
+      session: (route) => {
+        if (lost) return undefined;
+        lost = true;
+        return route.abort("internetdisconnected");
+      },
+    });
+    await openCart(page);
+    await goTo(page, "/checkout");
+    await page.getByRole("button", { name: /Place order · \$22\.60/u }).click();
+    const main = page.getByRole("main");
+    await expect(main.getByRole("alert")).toContainText(
+      "This round hasn’t been placed yet. Tap Place order again; it won’t be ordered twice.",
+    );
+    // Nothing is charged at this table: never a word about a card or a payment.
+    await expect(main.getByRole("alert")).not.toContainText(/pay|card|charged/iu);
+    await main.getByRole("button", { name: "Place order again", exact: true }).click();
+    await expect(page).toHaveURL(/\/dine-in\/session$/u);
+    expect(table.sessionKeys).toHaveLength(2);
+    expect(table.sessionKeys[1]).toBe(table.sessionKeys[0]);
+    expect(table.sent).toHaveLength(1);
+    await expectNoInternalText(page);
+  });
+
   test("a price read that keeps failing never locks the cart, and leaving forgets it", async ({
     page,
   }) => {
