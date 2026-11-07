@@ -142,16 +142,30 @@ function roundWaitingForStaff(round: number, byThisPhone: boolean): string {
       );
 }
 /**
- * WP-2423 M38: a round closed unpaid (or with nothing left it could make). Its dishes do not come
- * back to the cart by themselves, so the guest is told to add them again. At a table that pays at
- * the end only staff cancel a round (one held for them), so it is never called unpaid there.
+ * WP-2423 M38: a round that will not be made. Its dishes do not come back to the cart by
+ * themselves, so the guest is told to add them again. Staff are named only when staff did it
+ * (StaffDeclined: cancelled before it was sent, including a round held for them;
+ * StaffCancelled: cancelled after it was sent); a round the payment window closed (nobody on
+ * staff touched it) is "not paid" at a pay-first table and "not placed" at a pay-later one.
  */
-function roundNotOrdered(round: number, payLater: boolean): string {
+function roundNotOrdered(
+  round: number,
+  payLater: boolean,
+  paymentState: "Cancelled" | "StaffDeclined" | "StaffCancelled",
+): string {
+  if (paymentState === "StaffDeclined")
+    return t(
+      "Staff didn’t send round {round} to the kitchen. Add the dishes again to order them, or ask staff.",
+      { round: String(round) },
+    );
+  if (paymentState === "StaffCancelled")
+    return t("Staff cancelled round {round}. Ask staff if you still want these dishes.", {
+      round: String(round),
+    });
   return payLater
-    ? t(
-        "Staff didn’t send round {round} to the kitchen. Add the dishes again to order them, or ask staff.",
-        { round: String(round) },
-      )
+    ? t("Round {round} wasn’t placed. Add the dishes again to order them.", {
+        round: String(round),
+      })
     : t(
         "Round {round} wasn’t paid, so it wasn’t sent to the kitchen. Add the dishes again to order them.",
         { round: String(round) },
@@ -167,7 +181,12 @@ function roundStillOpen(
   if (paymentState === "WaitingForStaff") return roundWaitingForStaff(round, byThisPhone);
   if (paymentState === "AwaitingPayment")
     return payLater ? roundNotPlacedYet(round, byThisPhone) : roundBeingPaid(round, byThisPhone);
-  if (paymentState === "Cancelled") return roundNotOrdered(round, payLater);
+  if (
+    paymentState === "Cancelled" ||
+    paymentState === "StaffDeclined" ||
+    paymentState === "StaffCancelled"
+  )
+    return roundNotOrdered(round, payLater, paymentState);
   return null;
 }
 
@@ -502,6 +521,12 @@ export const cartText = Object.freeze({
     get staffRemovedUnnamed() {
       return t("Staff removed a dish from the cart.");
     },
+    /**
+     * WP-2423 M38: this phone's own round that is still open (being paid, not placed yet, waiting
+     * for staff) or will not be made; null once it went to the kitchen (nothing to say then).
+     */
+    roundSentByThisPhone: (round: number, paymentState: CartRoundPaymentState, payLater: boolean) =>
+      roundStillOpen(round, true, payLater, paymentState),
     get removeUnavailableFirst() {
       return t("Remove the dishes that aren’t available right now, then order.");
     },

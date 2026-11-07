@@ -289,6 +289,28 @@ describe("safe shared Dining Cart display", () => {
       },
     });
     expect((await unknownState.read(request))?.cart).not.toHaveProperty("recentRounds");
+    // M38: who cancelled a round is passed on, so guests read "staff" only when staff did it.
+    for (const paymentState of ["Cancelled", "StaffDeclined", "StaffCancelled"] as const) {
+      const cancelled = createCustomerDiningCartViewQuery({
+        reads: { read: base.read },
+        stores: { getPublicStore: async () => profile() },
+        catalog: { describeMany: base.describeMany },
+        rounds: {
+          recent: async () => [
+            {
+              roundNumber: 1,
+              sentAt: "2026-09-08T11:59:30.000Z",
+              guestSessionReference: id(5),
+              cartItemReferences: [id(51)],
+              paymentState,
+            },
+          ],
+        },
+      });
+      expect((await cancelled.read(request))?.cart.recentRounds?.[0]?.paymentState).toBe(
+        paymentState,
+      );
+    }
   });
   it("WP-2423 same-table-ordering: a round this phone paid from an earlier session is still its own", async () => {
     const base = fixture();

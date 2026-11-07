@@ -570,8 +570,12 @@ export async function readLatestCartOrder(
  * table", whatever was added to the Cart since. At most 5, newest first. Read on the caller's
  * transaction with local Brand/Store context set.
  *
- * WP-2423 M38: with where its payment stands, from Ordering's own records — Cancelled (closed
- * unpaid, cancelled by staff, or paid with nothing it could still make), PayLater (sent to the
+ * WP-2423 M38: with where its payment stands, from Ordering's own records — StaffDeclined (staff
+ * cancelled it before it was sent: STAFF_CANCELLED_UNPAID, which is also how a round held for staff
+ * is declined), Cancelled (closed by the payment window — deadline, payment not started or not
+ * completed — or paid with nothing it could still make: nobody on staff touched it),
+ * StaffCancelled (staff cancelled it after it was sent: the whole round, or every one of its
+ * dishes taken off), PayLater (sent to the
  * kitchen to be paid at the end), Paid, WaitingForStaff (a guest round held for staff that no one
  * has sent or cancelled yet: nobody is paying for it), else AwaitingPayment (neither paid nor sent:
  * at a pay-first table its checkout is open; at a pay-later table its send is not confirmed yet —
@@ -580,13 +584,21 @@ export async function readLatestCartOrder(
  * newest first, so an old stuck round never hides the newer ones (and drops out after 5 newer).
  */
 export type RecentCartRoundPaymentState =
-  "AwaitingPayment" | "WaitingForStaff" | "Paid" | "PayLater" | "Cancelled";
+  | "AwaitingPayment"
+  | "WaitingForStaff"
+  | "Paid"
+  | "PayLater"
+  | "Cancelled"
+  | "StaffDeclined"
+  | "StaffCancelled";
 const recentCartRoundPaymentStates: readonly RecentCartRoundPaymentState[] = Object.freeze([
   "AwaitingPayment",
   "WaitingForStaff",
   "Paid",
   "PayLater",
   "Cancelled",
+  "StaffDeclined",
+  "StaffCancelled",
 ]);
 export interface RecentCartRound {
   readonly roundNumber: number;
@@ -625,8 +637,19 @@ export async function readRecentCartRounds(
        r.payment_state AS "paymentState"
      FROM (SELECT q.*, CASE
              WHEN EXISTS (SELECT 1 FROM rms_ordering.order_batch_checkout_cancellation x
+               WHERE x.brand_id=$1 AND x.store_id=$2 AND x.order_batch_id=q.order_batch_id
+                 AND x.reason_code='STAFF_CANCELLED_UNPAID') THEN 'StaffDeclined'
+             WHEN EXISTS (SELECT 1 FROM rms_ordering.order_batch_checkout_cancellation x
                WHERE x.brand_id=$1 AND x.store_id=$2 AND x.order_batch_id=q.order_batch_id)
                THEN 'Cancelled'
+             WHEN EXISTS (SELECT 1 FROM rms_ordering.order_staff_cancellation x
+               WHERE x.brand_id=$1 AND x.store_id=$2 AND x.order_batch_id=q.order_batch_id)
+               OR NOT EXISTS (SELECT 1 FROM rms_ordering.order_item i
+                 WHERE i.brand_id=$1 AND i.store_id=$2 AND i.order_batch_id=q.order_batch_id
+                   AND NOT EXISTS (SELECT 1 FROM rms_ordering.order_item_staff_cancellation x
+                     WHERE x.brand_id=$1 AND x.store_id=$2 AND x.order_batch_id=q.order_batch_id
+                       AND i.order_item_id = ANY (x.order_item_ids)))
+               THEN 'StaffCancelled'
              WHEN EXISTS (SELECT 1 FROM rms_ordering.order_pay_later_confirmation x
                WHERE x.brand_id=$1 AND x.store_id=$2 AND x.order_batch_id=q.order_batch_id)
                THEN 'PayLater'

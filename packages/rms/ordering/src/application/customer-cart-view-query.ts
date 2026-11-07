@@ -119,13 +119,21 @@ export interface CustomerCartRecentRound {
   readonly paymentState: CustomerCartRoundPaymentState;
 }
 export type CustomerCartRoundPaymentState =
-  "AwaitingPayment" | "WaitingForStaff" | "Paid" | "PayLater" | "Cancelled";
+  | "AwaitingPayment"
+  | "WaitingForStaff"
+  | "Paid"
+  | "PayLater"
+  | "Cancelled"
+  | "StaffDeclined"
+  | "StaffCancelled";
 const roundPaymentStates: ReadonlySet<string> = new Set([
   "AwaitingPayment",
   "WaitingForStaff",
   "Paid",
   "PayLater",
   "Cancelled",
+  "StaffDeclined",
+  "StaffCancelled",
 ]);
 /** WP-2423 (same-table-ordering): Ordering's own rounds sent from a table Cart. */
 export interface CustomerCartRecentRoundsPort {

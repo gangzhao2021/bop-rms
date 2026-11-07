@@ -50,6 +50,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "第 {round} 轮没有付款，所以没有送到厨房。要点这些菜，请重新加入购物车。",
   "Staff didn’t send round {round} to the kitchen. Add the dishes again to order them, or ask staff.":
     "店员没有把第 {round} 轮送到厨房。要点这些菜，请重新加入购物车，或询问店员。",
+  "Round {round} wasn’t placed. Add the dishes again to order them.":
+    "第 {round} 轮没有下单成功。要点这些菜，请重新加入购物车。",
+  "Staff cancelled round {round}. Ask staff if you still want these dishes.":
+    "店员取消了第 {round} 轮。如果还想要这些菜，请询问店员。",
   "Round {round} isn’t placed yet. If it still isn’t in a minute, ask staff to check it.":
     "第 {round} 轮还没下单成功。如果一分钟后仍未成功，请让店员帮你查看。",
   "Someone at your table is still placing round {round}. Your dishes are in it.":

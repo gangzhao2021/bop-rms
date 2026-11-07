@@ -95,7 +95,13 @@ export interface CustomerCartView {
       readonly cartItemReferences: readonly string[];
       /** WP-2423 M38: where the round's payment stands. */
       readonly paymentState:
-        "AwaitingPayment" | "WaitingForStaff" | "Paid" | "PayLater" | "Cancelled";
+        | "AwaitingPayment"
+        | "WaitingForStaff"
+        | "Paid"
+        | "PayLater"
+        | "Cancelled"
+        | "StaffDeclined"
+        | "StaffCancelled";
     }[];
     /** WP-2423 shared-table-checkout (c): dishes staff took out of this table's cart lately. */
     readonly staffRemoved?: readonly {
@@ -615,7 +621,9 @@ function recentRoundsView(
           raw.paymentState !== "WaitingForStaff" &&
           raw.paymentState !== "Paid" &&
           raw.paymentState !== "PayLater" &&
-          raw.paymentState !== "Cancelled") ||
+          raw.paymentState !== "Cancelled" &&
+          raw.paymentState !== "StaffDeclined" &&
+          raw.paymentState !== "StaffCancelled") ||
         typeof raw.sentByThisPhone !== "boolean" ||
         !Array.isArray(raw.cartItemReferences) ||
         raw.cartItemReferences.length > 100

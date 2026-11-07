@@ -186,8 +186,29 @@ describe("WP-2423 same-table-ordering: what happened at the table while this pho
       "Round 2 isn’t placed yet. If it still isn’t in a minute, ask staff to check it.",
     );
     // Staff declined a held round: it was not unpaid.
-    expect(cartText.line.roundSentByTable(2, "Cancelled", true)).toBe(
+    expect(cartText.line.roundSentByTable(2, "StaffDeclined", true)).toBe(
       "Staff didn’t send round 2 to the kitchen. Add the dishes again to order them, or ask staff.",
     );
+  });
+  it("M38: staff are named only when staff cancelled the round", () => {
+    // Closed by the payment window at a pay-later table (an unconfirmed send the sweep
+    // cancelled): nobody on staff touched it, so staff are not blamed.
+    for (const byThisPhone of [false, true]) {
+      const closed = checkoutText.tableCartSent(3, byThisPhone, true, "Cancelled");
+      expect(closed).toBe("Round 3 wasn’t placed. Add the dishes again to order them.");
+      expect(closed).not.toMatch(/staff/iu);
+    }
+    expect(cartText.line.roundSentByTable(3, "Cancelled", true)).toBe(
+      "Round 3 wasn’t placed. Add the dishes again to order them.",
+    );
+    // A pay-first round staff cancelled unpaid: staff, not "wasn't paid".
+    expect(checkoutText.tableCartSent(3, true, false, "StaffDeclined")).toBe(
+      "Staff didn’t send round 3 to the kitchen. Add the dishes again to order them, or ask staff.",
+    );
+    // A round staff cancelled after it was sent is never "sent" or "didn't send".
+    for (const payLater of [false, true])
+      expect(cartText.line.roundSentByTable(3, "StaffCancelled", payLater)).toBe(
+        "Staff cancelled round 3. Ask staff if you still want these dishes.",
+      );
   });
 });

@@ -423,6 +423,262 @@ it("WP-2423 (same-table-ordering): a round sent from the cart is reported with i
 });
 
 /**
+ * WP-2423 M38 (shared-table-cart-staff-round, round 5): several rounds of one table, as the
+ * restricted pilot API role (rendered pilot ACL, NOBYPASSRLS) with the Store selected. The list is
+ * newest first; an older round still open stays listed beside the newer ones past 15 minutes (and
+ * drops out once 5 newer ones are listed); each round's state comes from its own record:
+ * PayLater (confirmed to the kitchen), Cancelled (the payment window closed it: nobody on staff
+ * touched it), StaffDeclined (staff cancelled it unpaid, also how a held round is declined) and
+ * StaffCancelled (staff took every dish off after it was sent, or cancelled the whole round).
+ * The later rounds and their records are written as the owner with triggers and foreign keys off
+ * (test set-up only: each writer's own checks are covered by its own tests); the read is real.
+ */
+it("WP-2423 M38: a table's rounds are newest first, each in its own state, and an open old one stays beside them", async () => {
+  await withIsolatedDatabase({ caseId: "wp2423_sto_rounds5" }, async (context) => {
+    const admin = new Client(context.clientConfig);
+    await admin.connect();
+    const api = "wp2423_many_rounds_" + context.runId;
+    const x = (n) => "01902424-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+    try {
+      await admin.query(
+        "CREATE ROLE " + api + " NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE",
+      );
+      await grantPilotApiAcl(admin, api);
+      const runner = {
+        async run(action) {
+          const client = new Client(context.clientConfig);
+          await client.connect();
+          try {
+            await client.query("BEGIN");
+            await client.query("SET LOCAL ROLE " + api);
+            const value = await action({ query: (sql, values) => client.query(sql, [...values]) });
+            await client.query("COMMIT");
+            return value;
+          } catch (error) {
+            await client.query("ROLLBACK");
+            throw error;
+          } finally {
+            await client.end();
+          }
+        },
+      };
+      const at = new Date(Date.now() - 1000).toISOString();
+      const f = orderWriteFixture({ namespace: "01902423", at, dineIn: true });
+      await seedSubmissionCart(admin, f);
+      const created = await createPostgresOrderCreationStore(runner, f.scope).append(f.request);
+      assert.equal(created.status, "Created");
+      const first = (
+        await admin.query(
+          `SELECT order_batch_id::text batch,order_id::text "order",submission_id::text submission
+           FROM rms_ordering.order_batch WHERE source_cart_id=$1`,
+          [f.cart.cartReference],
+        )
+      ).rows[0];
+      const minutes = (n) => new Date(Date.parse(at) + n * 60_000).toISOString();
+      // Only the columns given (the others keep their defaults), typed by the table itself.
+      const insert = (table, row) => {
+        const columns = Object.keys(row).join(",");
+        return admin.query(
+          `INSERT INTO rms_ordering.${table} (${columns}) SELECT ${columns} FROM
+             jsonb_populate_record(NULL::rms_ordering.${table}, $1::jsonb)`,
+          [JSON.stringify(row)],
+        );
+      };
+      const scope = { brand_id: f.scope.brandReference, store_id: f.scope.storeReference };
+      const digest = (c) => "sha256:" + c.repeat(64);
+      // Another round of the same Order from the same Cart, sent `minute` minutes after the first.
+      async function round(n, minute) {
+        const batch = x(100 + n),
+          submission = x(200 + n),
+          item = x(300 + n);
+        await admin.query("BEGIN");
+        await admin.query("SET LOCAL session_replication_role = replica");
+        await admin.query(
+          `CREATE TEMP TABLE s ON COMMIT DROP AS
+             SELECT * FROM rms_ordering.order_submission_record WHERE submission_id=$1;
+           UPDATE s SET submission_id=$2, submission_kind='Additional', created_at=$3::timestamptz,
+             source_cart_version=source_cart_version+$4;
+           INSERT INTO rms_ordering.order_submission_record SELECT * FROM s;
+           CREATE TEMP TABLE b ON COMMIT DROP AS
+             SELECT * FROM rms_ordering.order_batch WHERE order_batch_id=$5;
+           UPDATE b SET order_batch_id=$6, submission_id=$2, submitted_at=$3::timestamptz,
+             source_cart_version=source_cart_version+$4;
+           INSERT INTO rms_ordering.order_batch SELECT * FROM b;
+           CREATE TEMP TABLE i ON COMMIT DROP AS
+             SELECT * FROM rms_ordering.order_item WHERE order_batch_id=$5 LIMIT 1;
+           UPDATE i SET order_item_id=$7, order_batch_id=$6;
+           INSERT INTO rms_ordering.order_item SELECT * FROM i;`.replace(/\$(\d)/gu, (_, d) =>
+            [
+              "",
+              first.submission,
+              submission,
+              minutes(minute),
+              String(n),
+              first.batch,
+              batch,
+              item,
+            ][Number(d)].replace(/^(?!\d+$)(.*)$/u, "'$1'"),
+          ),
+        );
+        await admin.query("COMMIT");
+        return { batch, submission, item, minute };
+      }
+      async function withoutTriggers(write) {
+        await admin.query("BEGIN");
+        await admin.query("SET LOCAL session_replication_role = replica");
+        await write();
+        await admin.query("COMMIT");
+      }
+      const base = (r, n) => ({
+        ...scope,
+        order_id: first.order,
+        order_batch_id: r.batch,
+        submission_id: r.submission,
+        operation_id: x(400 + n),
+      });
+      // Round 2: sent to the kitchen to be paid at the end.
+      const r2 = await round(2, 6);
+      // Round 3: the payment window closed it (no staff).
+      const r3 = await round(3, 7);
+      // Round 4: held for staff, and staff declined it (STAFF_CANCELLED_UNPAID + Cancelled release).
+      const r4 = await round(4, 8);
+      // Round 5: confirmed, then staff took every dish off the bill.
+      const r5 = await round(5, 9);
+      const confirm = (r, n) =>
+        insert("order_pay_later_confirmation", {
+          ...base(r, n),
+          confirmation_id: x(500 + n),
+          dining_session_id: x(600 + n),
+          acceptance_id: x(700 + n),
+          accepted_order_version: 2,
+          source_snapshot_digest: digest("c"),
+          order_confirmed_event_id: x(800 + n),
+          confirmed_at: minutes(r.minute),
+        });
+      const unpaidCancellation = (r, n, reason) =>
+        insert("order_batch_checkout_cancellation", {
+          ...base(r, n),
+          cancellation_id: x(900 + n),
+          tenant_id: x(1),
+          payment_operation_id: x(1000 + n),
+          expiry_record_id: reason === "STAFF_CANCELLED_UNPAID" ? null : x(1100 + n),
+          expiry_evidence_digest: reason === "STAFF_CANCELLED_UNPAID" ? null : digest("d"),
+          expected_order_version: 2,
+          cancelled_order_version: 3,
+          expected_source_checkpoint: x(1200 + n),
+          workflow_version_id: x(1300 + n),
+          transition_id: x(1400 + n),
+          order_item_ids: [r.item],
+          cancelled_at: minutes(r.minute + 1),
+          phase: "Cancelled",
+          reason_code: reason,
+        });
+      await withoutTriggers(async () => {
+        await confirm(r2, 2);
+        await unpaidCancellation(r3, 3, "CHECKOUT_DEADLINE_REACHED");
+        await insert("order_round_staff_hold", {
+          ...scope,
+          hold_id: x(1500),
+          order_id: first.order,
+          order_batch_id: r4.batch,
+          submission_id: r4.submission,
+          guest_session_id: f.request.record.guestSessionReference,
+          reason: "FirstOrder",
+          held_at: minutes(r4.minute),
+        });
+        await unpaidCancellation(r4, 4, "STAFF_CANCELLED_UNPAID");
+        await insert("order_round_staff_hold_release", {
+          ...scope,
+          operation_id: x(1501),
+          order_id: first.order,
+          order_batch_id: r4.batch,
+          outcome: "Cancelled",
+          actor_id: x(1502),
+          released_at: minutes(r4.minute + 1),
+        });
+        await confirm(r5, 5);
+        await insert("order_item_staff_cancellation", {
+          ...base(r5, 15),
+          cancellation_id: x(1600),
+          order_type: "DineIn",
+          expected_order_version: 3,
+          cancelled_order_version: 4,
+          expected_source_checkpoint: x(1601),
+          previous_phase: "Accepted",
+          actor_id: x(1602),
+          permission_code: "ordering.order.cancel",
+          reason_code: "SOLD_OUT",
+          basis: "PayLater",
+          currency_code: "CAD",
+          order_item_ids: [r5.item],
+          kitchen_evidence_digest: digest("e"),
+          source_digest: digest("f"),
+          audit_id: x(1603),
+          cancelled_at: minutes(r5.minute + 1),
+        });
+      });
+      const lookup = createPostgresCartOrderLookup(runner, f.scope);
+      const states = async (observedAt) =>
+        (await lookup.recentRounds({ cartReference: f.cart.cartReference, observedAt })).map(
+          (r) => [r.roundNumber, r.paymentState],
+        );
+      // 16 minutes after round 1 (still unpaid): it stays listed, last, beside the newer rounds.
+      assert.deepEqual(await states(minutes(16)), [
+        [5, "StaffCancelled"],
+        [4, "StaffDeclined"],
+        [3, "Cancelled"],
+        [2, "PayLater"],
+        [1, "AwaitingPayment"],
+      ]);
+      // Round 6: confirmed, sent, and then cancelled whole by staff; round 1 now drops out.
+      const r6 = await round(6, 10);
+      await withoutTriggers(async () => {
+        await confirm(r6, 6);
+        await insert("order_staff_cancellation", {
+          ...base(r6, 16),
+          cancellation_id: x(1700),
+          order_type: "DineIn",
+          expected_order_version: 3,
+          cancelled_order_version: 4,
+          expected_source_checkpoint: x(1701),
+          previous_phase: "Accepted",
+          actor_id: x(1702),
+          permission_code: "ordering.order.cancel",
+          reason_code: "STORE_ERROR",
+          payment_disposition_id: x(1703),
+          payment_transaction_id: x(1704),
+          payment_intent_id: x(1705),
+          payment_attempt_id: x(1706),
+          payment_event_id: x(1707),
+          order_item_ids: [r6.item],
+          kitchen_evidence_digest: digest("e"),
+          source_digest: digest("f"),
+          audit_id: x(1708),
+          cancelled_at: minutes(r6.minute + 1),
+        });
+      });
+      assert.deepEqual(await states(minutes(16)), [
+        [6, "StaffCancelled"],
+        [5, "StaffCancelled"],
+        [4, "StaffDeclined"],
+        [3, "Cancelled"],
+        [2, "PayLater"],
+      ]);
+      // With another Store selected nothing is listed.
+      assert.deepEqual(
+        await createPostgresCartOrderLookup(runner, {
+          brandReference: f.scope.brandReference,
+          storeReference: id(2),
+        }).recentRounds({ cartReference: f.cart.cartReference, observedAt: minutes(16) }),
+        [],
+      );
+    } finally {
+      await admin.end();
+    }
+  });
+}, 120_000);
+
+/**
  * WP-2423 (same-table-ordering): the remove of another phone's line, end to end against the real
  * stores as the restricted pilot API role (rendered pilot ACL, NOBYPASSRLS): Identity's live
  * Guest Sessions decide whether the adder is still at the table, and Ordering writes the next Cart

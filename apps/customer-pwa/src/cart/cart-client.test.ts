@@ -421,6 +421,36 @@ it("WP-2423: carries the wait while another guest at the table is checking out",
   ).rejects.toMatchObject({ code: "cart_checkout_in_progress", retryAfterSeconds: null });
 });
 
+it("WP-2423 M38: reads who cancelled a table round, so staff are named only when they did it", async () => {
+  for (const paymentState of ["Cancelled", "StaffDeclined", "StaffCancelled"] as const) {
+    const view = cart();
+    const table = {
+      ...view,
+      cart: {
+        ...view.cart,
+        orderType: "DineIn",
+        serviceMode: "DineIn",
+        recentRounds: [
+          {
+            roundNumber: 2,
+            sentAt: "2026-08-02T20:00:00.000Z",
+            sentByThisPhone: false,
+            cartItemReferences: [id(2)],
+            paymentState,
+          },
+        ],
+      },
+    } as CartView;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify(table), { status: 200 })),
+    );
+    expect(
+      (await createBrowserCustomerCartClient().loadCurrent())?.cart.recentRounds?.[0]?.paymentState,
+    ).toBe(paymentState);
+  }
+});
+
 describe("complete Cart response bounds", () => {
   it.each(["headers", "body"] as const)(
     "enforces the deadline during stalled %s without cooperative abort",
