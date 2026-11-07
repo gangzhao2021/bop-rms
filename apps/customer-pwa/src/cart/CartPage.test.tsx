@@ -804,6 +804,42 @@ describe("WP-2423 item 6: a table that pays at the end", () => {
     expect(page({ status: "empty" })).toContain("Your cart is empty");
   });
 
+  it("M38: the newest round is reported, and an older one held for staff on its own line, never as being paid", () => {
+    const sent = (
+      roundNumber: number,
+      paymentState: NonNullable<CartView["cart"]["recentRounds"]>[number]["paymentState"],
+      sentByThisPhone = false,
+    ) => ({
+      roundNumber,
+      sentAt: "2026-11-06T16:0" + String(roundNumber) + ":00.000Z",
+      sentByThisPhone,
+      cartItemReferences: [],
+      paymentState,
+    });
+    const html = page({
+      status: "ready",
+      cart: tableCart({
+        recentRounds: [sent(3, "PayLater"), sent(2, "PayLater"), sent(1, "WaitingForStaff")],
+      }),
+    });
+    expect(html).toContain("Round 3 was sent by someone at your table.");
+    expect(html).toContain(
+      "Round 1 from someone at your table is waiting for staff to send it to the kitchen.",
+    );
+    expect(html).not.toMatch(/paying for round/u);
+    // This phone's own newest round: an older open round of another phone is still said.
+    const own = page({
+      status: "ready",
+      cart: tableCart({ recentRounds: [sent(2, "PayLater", true), sent(1, "AwaitingPayment")] }),
+    });
+    expect(own).not.toContain("Round 2");
+    expect(own).toContain("Someone at your table is still placing round 1.");
+    // A held round staff cancelled was not unpaid.
+    expect(
+      page({ status: "ready", cart: tableCart({ recentRounds: [sent(1, "Cancelled")] }) }),
+    ).toContain("Staff didn’t send round 1 to the kitchen.");
+  });
+
   it("names a dish that ran out, and each other stop in plain words", () => {
     const item = tableCart().cart.items[0];
     if (item === undefined) throw new Error("synthetic item missing");

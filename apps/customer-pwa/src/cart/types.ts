@@ -63,7 +63,12 @@ export interface CartRecentRound {
    */
   readonly paymentState: CartRoundPaymentState | null;
 }
-export type CartRoundPaymentState = "AwaitingPayment" | "Paid" | "PayLater" | "Cancelled";
+/**
+ * WP-2423 M38: AwaitingPayment is neither paid nor sent (pay-first: its checkout is open;
+ * pay-later: its send is not confirmed yet); WaitingForStaff is a guest round held for staff.
+ */
+export type CartRoundPaymentState =
+  "AwaitingPayment" | "WaitingForStaff" | "Paid" | "PayLater" | "Cancelled";
 
 /** WP-2423 M03: an order the guest already placed from this cart (its store number for display). */
 export interface CartPlacedOrder {

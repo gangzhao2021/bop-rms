@@ -205,6 +205,7 @@ function recentRounds(value: unknown): readonly CartRecentRound[] {
       if (
         paymentState !== null &&
         paymentState !== "AwaitingPayment" &&
+        paymentState !== "WaitingForStaff" &&
         paymentState !== "Paid" &&
         paymentState !== "PayLater" &&
         paymentState !== "Cancelled"

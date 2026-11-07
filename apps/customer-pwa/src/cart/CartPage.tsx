@@ -224,13 +224,55 @@ function CartItem({
 export const tableRoundSentByOther = (cart: CartView): number | null =>
   tableRoundByOther(cart)?.roundNumber ?? null;
 /**
- * WP-2423 M38: that round, to say where its payment stands. The server lists a round still being
- * paid first, so it is the one shown while it is open.
+ * WP-2423 M38: that round, to say where its payment stands. The server lists rounds newest first,
+ * so this is always the table's latest round, whatever older one is still open.
  */
 const tableRoundByOther = (cart: CartView) => {
   const latest = cart.cart.recentRounds?.[0];
   return latest === undefined || latest.sentByThisPhone ? null : latest;
 };
+/**
+ * WP-2423 M38: an older round another phone sent that is still open (being paid, not placed yet,
+ * or waiting for staff), said on its own line so a later round never hides it.
+ */
+const tableOpenRoundByOther = (cart: CartView) => {
+  const shown = tableRoundByOther(cart);
+  return (
+    cart.cart.recentRounds?.find(
+      (round) =>
+        round !== shown &&
+        !round.sentByThisPhone &&
+        (round.paymentState === "AwaitingPayment" || round.paymentState === "WaitingForStaff"),
+    ) ?? null
+  );
+};
+/** WP-2423 (same-table-ordering, M38): what other phones' rounds mean for this cart. */
+function TableRoundNotes({
+  cart,
+  payLater,
+  className,
+}: {
+  readonly cart: CartView;
+  readonly payLater: boolean;
+  readonly className?: string;
+}) {
+  const shown = tableRoundByOther(cart);
+  const open = tableOpenRoundByOther(cart);
+  return (
+    <>
+      {shown === null ? null : (
+        <p className={className} role="status">
+          {cartText.line.roundSentByTable(shown.roundNumber, shown.paymentState, payLater)}
+        </p>
+      )}
+      {open === null ? null : (
+        <p className={className} role="status">
+          {cartText.line.roundSentByTable(open.roundNumber, open.paymentState, payLater)}
+        </p>
+      )}
+    </>
+  );
+}
 
 /**
  * WP-2423 shared-table-checkout (c): the dishes staff took out of this table's cart lately, named
@@ -651,15 +693,11 @@ function CartContent({
           <Link to="/menu">{commonText.browseMenu}</Link>
         </div>
       </StateMessage>
-    ) : state.status === "ready" && tableRoundSentByOther(state.cart) !== null ? (
+    ) : state.status === "ready" &&
+      (tableRoundSentByOther(state.cart) !== null || tableOpenRoundByOther(state.cart) !== null) ? (
       // WP-2423 (same-table-ordering): another phone's round took this cart's dishes.
       <StateMessage heading={commonText.emptyCartHeading}>
-        <p role="status">
-          {cartText.line.roundSentByTable(
-            tableRoundSentByOther(state.cart) ?? 1,
-            tableRoundByOther(state.cart)?.paymentState ?? null,
-          )}
-        </p>
+        <TableRoundNotes cart={state.cart} payLater={timing === "PayLater"} />
         <div className="cart-state__actions">
           <Link className="cart-primary-link" to="/dine-in/session">
             {cartText.seeYourTable}
@@ -811,14 +849,7 @@ function CartContent({
           {cartText.quoteExpired}
         </div>
       ) : null}
-      {tableRoundSentByOther(cart) === null ? null : (
-        <p className="cart-stale" role="status">
-          {cartText.line.roundSentByTable(
-            tableRoundSentByOther(cart) ?? 1,
-            tableRoundByOther(cart)?.paymentState ?? null,
-          )}
-        </p>
-      )}
+      <TableRoundNotes cart={cart} payLater={payLater} className="cart-stale" />
       {staffRemovedDishes(cart).map((dish, index) => (
         <p key={"staff-removed:" + String(index)} className="cart-stale" role="status">
           {staffRemovedNotice(dish)}

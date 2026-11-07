@@ -164,4 +164,30 @@ describe("WP-2423 same-table-ordering: what happened at the table while this pho
       "Round 1 was sent by someone at your table.",
     );
   });
+  it("M38: at a table that pays at the end nobody is told a round is being paid now", () => {
+    for (const byThisPhone of [false, true]) {
+      for (const state of ["AwaitingPayment", "WaitingForStaff", "Cancelled"] as const) {
+        const text = checkoutText.tableCartSent(2, byThisPhone, true, state);
+        expect(text).not.toMatch(/pay|paid/iu);
+      }
+    }
+    // A round held for staff says so, to the sender and to the table.
+    expect(checkoutText.tableCartSent(2, true, true, "WaitingForStaff")).toBe(
+      "Round 2 is waiting for staff to send it to the kitchen.",
+    );
+    expect(cartText.line.roundSentByTable(2, "WaitingForStaff", true)).toBe(
+      "Round 2 from someone at your table is waiting for staff to send it to the kitchen. Your dishes are in it.",
+    );
+    // A send whose answer did not come back is not placed yet, never "paying".
+    expect(cartText.line.roundSentByTable(2, "AwaitingPayment", true)).toBe(
+      "Someone at your table is still placing round 2. Your dishes are in it.",
+    );
+    expect(checkoutText.tableCartSent(2, true, true, "AwaitingPayment")).toBe(
+      "Round 2 isn’t placed yet. If it still isn’t in a minute, ask staff to check it.",
+    );
+    // Staff declined a held round: it was not unpaid.
+    expect(cartText.line.roundSentByTable(2, "Cancelled", true)).toBe(
+      "Staff didn’t send round 2 to the kitchen. Add the dishes again to order them, or ask staff.",
+    );
+  });
 });

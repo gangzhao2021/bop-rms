@@ -48,6 +48,16 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "同桌有人正在为第 {round} 轮付款，你的菜也在里面。",
   "Round {round} wasn’t paid, so it wasn’t sent to the kitchen. Add the dishes again to order them.":
     "第 {round} 轮没有付款，所以没有送到厨房。要点这些菜，请重新加入购物车。",
+  "Staff didn’t send round {round} to the kitchen. Add the dishes again to order them, or ask staff.":
+    "店员没有把第 {round} 轮送到厨房。要点这些菜，请重新加入购物车，或询问店员。",
+  "Round {round} isn’t placed yet. If it still isn’t in a minute, ask staff to check it.":
+    "第 {round} 轮还没下单成功。如果一分钟后仍未成功，请让店员帮你查看。",
+  "Someone at your table is still placing round {round}. Your dishes are in it.":
+    "同桌有人正在下第 {round} 轮，你的菜也在里面。",
+  "Round {round} is waiting for staff to send it to the kitchen.":
+    "第 {round} 轮正在等店员送到厨房。",
+  "Round {round} from someone at your table is waiting for staff to send it to the kitchen. Your dishes are in it.":
+    "同桌点的第 {round} 轮正在等店员送到厨房，你的菜也在里面。",
   "This round hasn’t been placed yet. Tap Place order again; it won’t be ordered twice.":
     "这一轮还没下单。请再按一次“再次下单”，不会重复下单。",
   "{dish} ×{quantity}": "{dish} ×{quantity}",

@@ -571,13 +571,19 @@ export async function readLatestCartOrder(
  * transaction with local Brand/Store context set.
  *
  * WP-2423 M38: with where its payment stands, from Ordering's own records — Cancelled (closed
- * unpaid, or paid with nothing it could still make), PayLater (sent to the kitchen to be paid at
- * the end), Paid, else AwaitingPayment. A round still awaiting payment is included whatever its
- * age and comes first, so a table with many rounds never loses sight of the one being paid.
+ * unpaid, cancelled by staff, or paid with nothing it could still make), PayLater (sent to the
+ * kitchen to be paid at the end), Paid, WaitingForStaff (a guest round held for staff that no one
+ * has sent or cancelled yet: nobody is paying for it), else AwaitingPayment (neither paid nor sent:
+ * at a pay-first table its checkout is open; at a pay-later table its send is not confirmed yet —
+ * the caller, which knows the table's payment timing, words it). A round still open
+ * (AwaitingPayment or WaitingForStaff) is included whatever its age, but the list is always the
+ * newest first, so an old stuck round never hides the newer ones (and drops out after 5 newer).
  */
-export type RecentCartRoundPaymentState = "AwaitingPayment" | "Paid" | "PayLater" | "Cancelled";
+export type RecentCartRoundPaymentState =
+  "AwaitingPayment" | "WaitingForStaff" | "Paid" | "PayLater" | "Cancelled";
 const recentCartRoundPaymentStates: readonly RecentCartRoundPaymentState[] = Object.freeze([
   "AwaitingPayment",
+  "WaitingForStaff",
   "Paid",
   "PayLater",
   "Cancelled",
@@ -632,6 +638,9 @@ export async function readRecentCartRounds(
                OR EXISTS (SELECT 1 FROM rms_ordering.order_payment_disposition_record x
                WHERE x.brand_id=$1 AND x.store_id=$2 AND x.order_batch_id=q.order_batch_id)
                THEN 'Paid'
+             WHEN EXISTS (SELECT 1 FROM rms_ordering.order_round_staff_hold x
+               WHERE x.brand_id=$1 AND x.store_id=$2 AND x.order_batch_id=q.order_batch_id)
+               THEN 'WaitingForStaff'
              ELSE 'AwaitingPayment' END AS payment_state
            FROM (SELECT b.order_batch_id,b.submitted_at,b.source_cart_id,s.guest_session_id,
                    row_number() OVER (PARTITION BY b.order_id ORDER BY b.submitted_at,b.order_batch_id)
@@ -644,8 +653,8 @@ export async function readRecentCartRounds(
                    WHERE o.brand_id=$1 AND o.store_id=$2 AND o.source_cart_id=$3)) q
            WHERE q.source_cart_id=$3 AND q.submitted_at <= $4::timestamptz) r
      WHERE r.submitted_at > $4::timestamptz - interval '15 minutes'
-       OR r.payment_state='AwaitingPayment'
-     ORDER BY (r.payment_state='AwaitingPayment') DESC, r.submitted_at DESC, r.order_batch_id DESC
+       OR r.payment_state IN ('AwaitingPayment','WaitingForStaff')
+     ORDER BY r.submitted_at DESC, r.order_batch_id DESC
      LIMIT 5`,
     [brand, store, cart, observedAt],
   );

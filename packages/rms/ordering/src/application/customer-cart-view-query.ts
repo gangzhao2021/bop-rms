@@ -118,9 +118,11 @@ export interface CustomerCartRecentRound {
   /** WP-2423 M38: where the round's payment stands, so no phone calls an unpaid round paid. */
   readonly paymentState: CustomerCartRoundPaymentState;
 }
-export type CustomerCartRoundPaymentState = "AwaitingPayment" | "Paid" | "PayLater" | "Cancelled";
+export type CustomerCartRoundPaymentState =
+  "AwaitingPayment" | "WaitingForStaff" | "Paid" | "PayLater" | "Cancelled";
 const roundPaymentStates: ReadonlySet<string> = new Set([
   "AwaitingPayment",
+  "WaitingForStaff",
   "Paid",
   "PayLater",
   "Cancelled",

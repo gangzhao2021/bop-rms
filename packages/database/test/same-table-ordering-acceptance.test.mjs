@@ -355,14 +355,39 @@ it("WP-2423 (same-table-ordering): a round sent from the cart is reported with i
         ),
         ["AwaitingPayment"],
       );
-      // Once the payment arrived it reads Paid, and 15 minutes later it is no longer news.
       const batch = (
         await admin.query(
-          `SELECT b.order_batch_id,b.order_id,b.submission_id FROM rms_ordering.order_batch b
-           WHERE b.source_cart_id=$1`,
+          `SELECT b.order_batch_id,b.order_id,b.submission_id,
+             to_char(b.submitted_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') submitted
+           FROM rms_ordering.order_batch b WHERE b.source_cart_id=$1`,
           [f.cart.cartReference],
         )
       ).rows[0];
+      // M38: a guest round held for staff (never released by itself) is not being paid by
+      // anyone: it reads WaitingForStaff, and stays in view while it waits.
+      await admin.query(
+        `INSERT INTO rms_ordering.order_round_staff_hold (hold_id,brand_id,store_id,order_id,
+           order_batch_id,submission_id,guest_session_id,reason,held_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,'FirstOrder',$8::timestamptz)`,
+        [
+          id(88),
+          f.scope.brandReference,
+          f.scope.storeReference,
+          batch.order_id,
+          batch.order_batch_id,
+          batch.submission_id,
+          f.request.record.guestSessionReference,
+          batch.submitted,
+        ],
+      );
+      for (const observedAt of [now, later])
+        assert.deepEqual(
+          (await lookup.recentRounds({ cartReference: f.cart.cartReference, observedAt })).map(
+            (round) => round.paymentState,
+          ),
+          ["WaitingForStaff"],
+        );
+      // Once the payment arrived it reads Paid, and 15 minutes later it is no longer news.
       await admin.query(
         `INSERT INTO rms_ordering.order_payment_acceptance_wait (wait_id,brand_id,store_id,order_id,
            order_batch_id,submission_id,payment_event_id,source_digest,evaluated_at,record_json)
