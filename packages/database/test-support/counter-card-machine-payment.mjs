@@ -448,6 +448,9 @@ export async function exerciseCounterCardMachinePayment({
           // Paid: nothing left to charge and no release time.
           payBy: null,
           amountDueMinor: null,
+          // WP-2423 M127: paid, so it can't be cancelled unpaid; it never was.
+          canCancelUnpaid: false,
+          cancelledBeforePayment: null,
         });
       },
     });
