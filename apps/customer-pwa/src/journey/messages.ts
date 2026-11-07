@@ -503,7 +503,9 @@ export const cartText = Object.freeze({
   }),
   offline: Object.freeze({
     get reconnectToLoad() {
-      return t("Reconnect to load your cart.");
+      return t(
+        "Your cart can’t open without a connection. It opens again by itself when you’re back online. Nothing was changed.",
+      );
     },
     get refreshAfterReconnecting() {
       return t("Refresh after reconnecting");

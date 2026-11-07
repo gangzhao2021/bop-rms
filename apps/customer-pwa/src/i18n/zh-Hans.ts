@@ -578,7 +578,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Reconnect to continue. Payment will not restart automatically.":
     "恢复网络后继续，付款不会自动重新开始。",
   "Reconnect to finish paying.": "恢复网络后完成付款。",
-  "Reconnect to load your cart.": "恢复网络后加载购物车。",
+  "Your cart can’t open without a connection. It opens again by itself when you’re back online. Nothing was changed.":
+    "没有网络，暂时打不开购物车。网络恢复后会自动重新打开。没有做任何更改。",
   "Reconnect to pay with another card.": "恢复网络后换一张卡付款。",
   "Reconnect to refresh.": "恢复网络后刷新。",
   "You’re offline. Your pickup code shows again when you’re back online.":

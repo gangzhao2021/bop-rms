@@ -614,12 +614,16 @@ function CartContent({
   if (cart === null) {
     if (state.status === "offline-readonly")
       return (
+        // Said as it works: the cart reads again by itself once back online (e48a3616); the
+        // actions wrap whole at 320px rather than splitting the menu link around the button.
         <StateMessage heading={commonText.offlineHeading} tone="warning">
           <p>{cartText.offline.reconnectToLoad}</p>
-          <button type="button" onClick={() => void controller.load()}>
-            {cartText.offline.refreshAfterReconnecting}
-          </button>
-          <Link to="/menu">{commonText.returnToMenu}</Link>
+          <div className="shell-actions">
+            <button type="button" onClick={() => void controller.load()}>
+              {commonText.tryAgain}
+            </button>
+            <Link to="/menu">{commonText.returnToMenu}</Link>
+          </div>
         </StateMessage>
       );
     return <ErrorState state={state} controller={controller} />;

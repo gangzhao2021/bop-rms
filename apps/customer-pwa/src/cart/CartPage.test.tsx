@@ -164,6 +164,13 @@ describe("CUST-CART page contract", () => {
     expect(html).toContain('disabled="" aria-label="Increase Synthetic tea quantity"');
   });
 
+  it("offline with no cart loaded says it opens again by itself, with the actions kept whole", () => {
+    const html = renderPage({ status: "offline-readonly", cart: null });
+    expect(html).toContain("It opens again by itself when you’re back online.");
+    expect(html).not.toContain("Refresh after reconnecting");
+    expect(html).toMatch(/<div class="shell-actions"><button[^>]*>Try again<\/button><a[^>]*>/u);
+  });
+
   it("renders explicit Feature-disabled and Quote-expired states", () => {
     const disabled = cart();
     expect(
