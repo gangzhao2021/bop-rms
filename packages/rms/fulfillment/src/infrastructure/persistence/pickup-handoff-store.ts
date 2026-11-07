@@ -357,7 +357,8 @@ export function createPostgresPickupHandoffStore(options: {
             brandReference: brand,
             storeReference: store,
             actorReference: String(row.actor_id),
-            reason: row.reason === "StoreClosing" ? ("StoreClosing" as const) : ("NotCollected" as const),
+            reason:
+              row.reason === "StoreClosing" ? ("StoreClosing" as const) : ("NotCollected" as const),
             closingFrom: row.closing_from == null ? null : String(at(row.closing_from)),
             readyAt: String(at(row.ready_at)),
             closedAt: String(at(row.closed_at)),

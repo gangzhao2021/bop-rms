@@ -19,7 +19,11 @@ import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js"
  * day the Store does not open; null while service remains (or the hours can't be read).
  */
 export function storeClosingFrom(
-  day: { readonly startsAt: string; readonly closesAt: string | null; readonly closedToday: boolean },
+  day: {
+    readonly startsAt: string;
+    readonly closesAt: string | null;
+    readonly closedToday: boolean;
+  },
   at: string,
 ): string | null {
   if (day.closedToday) return String(day.startsAt);
