@@ -541,6 +541,37 @@ describe("WP-2423 Q8 createCustomerDiningSessionRead authorization", () => {
     });
   });
 
+  it("M126 I.3: a Guest Session store that can't answer is an outage, never 'not joined'", async () => {
+    const outage = () =>
+      Object.assign(new GuestSessionError("GUEST_SESSION_UNAVAILABLE"), {
+        dependencyFailure: true,
+      });
+    const first = setup(() => {
+      throw outage();
+    });
+    await expect(first.read.read(credentials)).rejects.toMatchObject({
+      code: "ORDER_STATUS_DEPENDENCY_UNAVAILABLE",
+    });
+    expect(first.factsPort).not.toHaveBeenCalled();
+    // The check again after the facts (the guest is still at this table) fails the same way.
+    let reads = 0;
+    const later = setup(() => {
+      reads += 1;
+      if (reads > 1) throw outage();
+      return guest();
+    });
+    await expect(later.read.read(credentials)).rejects.toMatchObject({
+      code: "ORDER_STATUS_DEPENDENCY_UNAVAILABLE",
+    });
+    // A session that really ended is still refused as before.
+    const ended = setup(() => {
+      throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
+    });
+    await expect(ended.read.read(credentials)).rejects.toMatchObject({
+      code: "ORDER_STATUS_PERMISSION_DENIED",
+    });
+  });
+
   it("rejects malformed credentials and maps owner failures to unavailable", async () => {
     const { read } = setup(() => guest());
     await expect(read.read({ ...credentials, extra: true })).rejects.toMatchObject({

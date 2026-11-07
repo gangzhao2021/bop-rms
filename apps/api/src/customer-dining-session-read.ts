@@ -1442,6 +1442,14 @@ const customerCancellationReasons = Object.freeze({
   GUEST_LEFT: "GuestLeft",
 } as const);
 
+/** M126 I.3: the Guest Session store failed (identity marks it); the session itself may be fine. */
+function isGuestSessionOutage(error: unknown): boolean {
+  return (
+    error instanceof GuestSessionError &&
+    (error as { dependencyFailure?: unknown }).dependencyFailure === true
+  );
+}
+
 /**
  * Current Guest credentials are resolved inside the same transaction as every owner read, and are
  * re-checked between reads. The guest never names a table, session or Order: the view is always
@@ -1494,7 +1502,10 @@ export function createCustomerDiningSessionRead(
           const stillAuthorized = async () => {
             try {
               return JSON.stringify((await authorize()).guest) === fingerprint;
-            } catch {
+            } catch (error) {
+              // M126 I.3: a Guest Session store that couldn't answer says nothing about the guest;
+              // it is an outage to retry, never "you haven't joined this table".
+              if (isGuestSessionOutage(error)) throw error;
               return false;
             }
           };
@@ -1531,7 +1542,7 @@ export function createCustomerDiningSessionRead(
         }
         if (error instanceof OrderStatusProjectionError) throw error;
         if (error instanceof DiningOrderStillProcessingError) throw error;
-        if (error instanceof GuestSessionError)
+        if (error instanceof GuestSessionError && !isGuestSessionOutage(error))
           throw new OrderStatusProjectionError("ORDER_STATUS_PERMISSION_DENIED");
         throw withFailureCause(
           new OrderStatusProjectionError("ORDER_STATUS_DEPENDENCY_UNAVAILABLE"),
