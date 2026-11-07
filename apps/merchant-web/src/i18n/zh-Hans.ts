@@ -442,6 +442,12 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     '{item}中使用的配方尚未发布。请在"配方"中发布，然后重新提交。',
   "A refund is still being made (online, or not yet recorded as refunded on the card machine). Record the card-machine refund on the Orders page, or check again in a few minutes.":
     "还有退款正在进行（在线退款，或尚未在刷卡机上记录退款）。请在订单页记录刷卡机退款，或几分钟后再查看。",
+  "A refund of {amount} is recorded and waiting for approval. It is sent once it is approved under Approvals.":
+    "一笔 {amount} 的退款已记录，正在等待批准。在“审批”里批准后才会发出。",
+  "A refund of {amount} is approved but not sent yet. The approver sends it from Approvals.":
+    "一笔 {amount} 的退款已批准，还没发出。由批准人在“审批”里发送。",
+  "A refund of {amount} is recorded but not sent yet. Open the payment under Payments and refunds to see whether it waits for approval, or to send it.":
+    "一笔 {amount} 的退款已记录，还没发出。请在“付款与退款”里打开这笔付款，看它是否在等批准，或去发送。",
   "A refund of {amount} is recorded but not sent yet. Open the payment under Payments and refunds to send it.":
     "一笔 {amount} 的退款已记录，还没发出。请在“付款与退款”里打开这笔付款去发送。",
   "A refund of {amount} is still to be made on the card machine. Refund it on the machine, then record the slip under Payments and refunds.":

@@ -643,6 +643,37 @@ it("WP-2423 M16: a refund recorded but never sent is not called on its way", () 
     "A refund of $15.69 is recorded but not sent yet.",
   );
   expect(note(position("1569", "1569"))).not.toContain("on its way");
+  // WP-2423 M16: a request waiting for approval is not offered as something to send from the
+  // payment page (which can only say it waits); approved and unread states are said as they are.
+  const withApprovals = (
+    p: ReturnType<typeof position>,
+    approvals: { amountMinor: string; state: "AwaitingApproval" | "Approved" }[] | null,
+  ) => renderToStaticMarkup(<OnlineRefundNote order={order} position={p} approvals={approvals} />);
+  const waiting = withApprovals(position("1569", "1569"), [
+    { amountMinor: "1569", state: "AwaitingApproval" },
+  ]);
+  expect(waiting).toContain(
+    "A refund of $15.69 is recorded and waiting for approval. It is sent once it is approved under Approvals.",
+  );
+  expect(waiting).not.toContain("to send it");
+  expect(
+    withApprovals(position("1569", "1569"), [{ amountMinor: "1569", state: "Approved" }]),
+  ).toContain(
+    "A refund of $15.69 is approved but not sent yet. The approver sends it from Approvals.",
+  );
+  const mixed = withApprovals(position("3137", "3137"), [
+    { amountMinor: "1000", state: "AwaitingApproval" },
+  ]);
+  expect(mixed).toContain("A refund of $10.00 is recorded and waiting for approval.");
+  expect(mixed).toContain(
+    "A refund of $21.37 is recorded but not sent yet. Open the payment under Payments and refunds to send it.",
+  );
+  expect(withApprovals(position("1569", "1569"), [])).toContain(
+    "Open the payment under Payments and refunds to send it.",
+  );
+  expect(note(position("1569", "1569"))).toContain(
+    "Open the payment under Payments and refunds to see whether it waits for approval, or to send it.",
+  );
   expect(note(position("1569", "0"))).toContain(
     "A refund of $15.69 was sent and is waiting on the card company.",
   );

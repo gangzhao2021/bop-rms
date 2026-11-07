@@ -10,6 +10,7 @@ import {
 } from "./AcceptanceHoldActions.js";
 import { paidRoundWait, paidRoundWaitText } from "./paid-round-wait.js";
 import { OrderPaymentLinks } from "./OrderPaymentLinks.js";
+import { createRefundApprovalClient, type RefundApprovalEntry } from "./refund-approval-client.js";
 import {
   DiningRoundItemState,
   DiningRoundProgressItems,
@@ -957,9 +958,15 @@ const refundStillPending = (position: CurrentOrderDetail["paymentPosition"] | un
 export function OnlineRefundNote({
   order,
   position,
+  approvals = null,
 }: {
   readonly order: CurrentOrderQueue["items"][number];
   readonly position: CurrentOrderDetail["paymentPosition"];
+  /**
+   * WP-2423 M16: this order's online refunds waiting for approval, or approved and not sent yet
+   * (Payment's approval queue); null when it was not read, so the note does not guess.
+   */
+  readonly approvals?: readonly Pick<RefundApprovalEntry, "amountMinor" | "state">[] | null;
 }) {
   if (order.paidOnline === null || position === null) return null;
   const refunded = BigInt(position.refundedMinor),
@@ -967,6 +974,16 @@ export function OnlineRefundNote({
     notSent = BigInt(position.refundNotSentMinor),
     onMachine = BigInt(position.refundOnMachineMinor),
     sending = pending - notSent - onMachine;
+  // Of the amount not sent: what waits for an approver, what was approved and waits to be sent
+  // from Approvals, and the rest (recorded, sent from the payment's own page).
+  const queued = (state: RefundApprovalEntry["state"]) =>
+    (approvals ?? [])
+      .filter((entry) => entry.state === state)
+      .reduce((sum, entry) => sum + BigInt(entry.amountMinor), 0n);
+  const awaiting = notSent < queued("AwaitingApproval") ? notSent : queued("AwaitingApproval"),
+    approvedLeft = notSent - awaiting,
+    approved = approvedLeft < queued("Approved") ? approvedLeft : queued("Approved"),
+    toSend = notSent - awaiting - approved;
   if (refunded === 0n && pending === 0n) return null;
   const amount = (minor: bigint) =>
     orderMoney({
@@ -979,12 +996,33 @@ export function OnlineRefundNote({
         ? t("Refunded {refunded} of the online payment.", { refunded: amount(refunded) })
         : ""}
       {/* WP-2423 M16: never sent, sent and waiting, and to be made on the card machine, apart. */}
-      {notSent > 0n
+      {awaiting > 0n
         ? " " +
           t(
-            "A refund of {amount} is recorded but not sent yet. Open the payment under Payments and refunds to send it.",
-            { amount: amount(notSent) },
+            "A refund of {amount} is recorded and waiting for approval. It is sent once it is approved under Approvals.",
+            { amount: amount(awaiting) },
           )
+        : ""}
+      {approved > 0n
+        ? " " +
+          t(
+            "A refund of {amount} is approved but not sent yet. The approver sends it from Approvals.",
+            {
+              amount: amount(approved),
+            },
+          )
+        : ""}
+      {toSend > 0n
+        ? " " +
+          (approvals === null
+            ? t(
+                "A refund of {amount} is recorded but not sent yet. Open the payment under Payments and refunds to see whether it waits for approval, or to send it.",
+                { amount: amount(toSend) },
+              )
+            : t(
+                "A refund of {amount} is recorded but not sent yet. Open the payment under Payments and refunds to send it.",
+                { amount: amount(toSend) },
+              ))
         : ""}
       {onMachine > 0n
         ? " " +
@@ -1001,6 +1039,42 @@ export function OnlineRefundNote({
         : ""}
     </p>
   );
+}
+/**
+ * WP-2423 M16: the refund note with this order's approval state read from Payment's approval queue
+ * when some of its refund is not sent; a failed or refused read leaves the note neutral.
+ */
+function LiveOnlineRefundNote({
+  order,
+  position,
+  fetcher,
+}: {
+  readonly order: CurrentOrderQueue["items"][number];
+  readonly position: CurrentOrderDetail["paymentPosition"];
+  readonly fetcher?: typeof fetch | undefined;
+}) {
+  const needed =
+    order.paidOnline !== null && position !== null && BigInt(position.refundNotSentMinor) > 0n;
+  const [approvals, setApprovals] = useState<readonly RefundApprovalEntry[] | null>(null);
+  useEffect(() => {
+    setApprovals(null);
+    if (!needed) return;
+    const controller = new AbortController();
+    createRefundApprovalClient(fetcher)
+      .approvals(controller.signal)
+      .then((view) => {
+        if (!controller.signal.aborted)
+          setApprovals(
+            view.entries.filter(
+              (entry) =>
+                entry.orderReference === order.orderReference && entry.paymentMethod === "Online",
+            ),
+          );
+      })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [needed, order.orderReference, fetcher, position?.refundNotSentMinor]);
+  return <OnlineRefundNote order={order} position={position} approvals={approvals} />;
 }
 /**
  * WP-2423: an order's current status in staff words. Dine-in is Fulfilled once every item not
@@ -1532,7 +1606,11 @@ function QueuedOrderLines({
   return state.kind === "Ready" ? (
     <>
       <PickupContactPanel contact={state.detail.pickupContact} />
-      <OnlineRefundNote order={state.detail.order} position={state.detail.paymentPosition} />
+      <LiveOnlineRefundNote
+        order={state.detail.order}
+        position={state.detail.paymentPosition}
+        fetcher={refundCheck?.fetcher}
+      />
       <CompRecordsNote detail={state.detail} timeZone={timeZone} />
       <CurrentOrderLines
         lines={state.detail.lines}
@@ -4109,7 +4187,11 @@ export function CurrentOrderQueuePage({
                         fetcher={fetcher}
                         onRemoved={rereadAfterContactRemoval}
                       />
-                      <OnlineRefundNote order={detail.order} position={detail.paymentPosition} />
+                      <LiveOnlineRefundNote
+                        order={detail.order}
+                        position={detail.paymentPosition}
+                        fetcher={fetcher}
+                      />
                       <CompRecordsNote detail={detail} timeZone={timeZone} />
                       <WithRoundPhones
                         csrf={csrf}
