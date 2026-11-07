@@ -1735,13 +1735,13 @@ function PaymentContent({
   const refreshFinancial = useCallback(() => setFinancialRevision((value) => value + 1), []);
   const [context, setContext] = useState<Context | null>(null),
     [loading, setLoading] = useState(true),
-    [message, setMessage] = useState(""),
+    [failure, setFailure] = useState<PaymentLoadFailure>({ message: "", retry: true }),
     [refresh, setRefresh] = useState(0);
   useEffect(() => {
     const controller = new AbortController();
     setContext(null);
     setLoading(true);
-    setMessage("");
+    setFailure({ message: "", retry: true });
     void client
       .context(paymentIntentReference, csrf, controller.signal)
       .then((result) => {
@@ -1752,7 +1752,7 @@ function PaymentContent({
       })
       .catch((error) => {
         if (!controller.signal.aborted) {
-          setMessage(errorMessage(error));
+          setFailure(paymentLoadFailure(error));
           setLoading(false);
         }
       });
@@ -1774,9 +1774,9 @@ function PaymentContent({
       {!context ? (
         <>
           <p role="status" className="refund-status">
-            {loading ? t("Loading payment…") : message}
+            {loading ? t("Loading payment…") : failure.message}
           </p>
-          {loading ? null : (
+          {loading || !failure.retry ? null : (
             <button
               type="button"
               className="refund-text"
@@ -1829,6 +1829,30 @@ function PaymentContent({
     </WorkspacePage>
   );
 }
+/** What staff are told when the payment can't be shown, and whether reading again can help. */
+export interface PaymentLoadFailure {
+  readonly message: string;
+  readonly retry: boolean;
+}
+
+/**
+ * M126 I.5: another Store's payment, or a role that can't refund, is said in plain words with no
+ * Refresh (reading again changes nothing); only a read that couldn't answer offers it.
+ */
+export function paymentLoadFailure(error: unknown): PaymentLoadFailure {
+  if (error instanceof OrdinaryRefundClientError && error.code === "NotFound")
+    return {
+      message: t("This payment belongs to another store. Switch to that store to refund it."),
+      retry: false,
+    };
+  if (error instanceof OrdinaryRefundClientError && error.code === "Denied")
+    return {
+      message: t("Your role can't refund payments. Ask the owner or a manager."),
+      retry: false,
+    };
+  return { message: errorMessage(error), retry: true };
+}
+
 export function RefundPaymentPage({
   csrf,
   storeLabel,

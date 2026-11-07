@@ -7,6 +7,7 @@ import {
   cardMachineRequestsToCheck,
   nextFinancialSummary,
   PaymentFinancialSummary,
+  paymentLoadFailure,
   paymentRefundStateLabel,
   paymentStateLabel,
   refundEverythingQuantities,
@@ -16,6 +17,7 @@ import {
 } from "./RefundPaymentPage.js";
 import { StoreTimeZoneContext } from "./StoreTime.js";
 import { setLanguageForTest } from "./i18n/i18n.js";
+import { OrdinaryRefundClientError } from "./ordinary-refund-client.js";
 
 afterEach(() => setLanguageForTest("en"));
 
@@ -328,4 +330,26 @@ it("v15 2026-10-17: the payment page lists this payment's card-machine refunds s
   // Already recorded, or a request of another payment of the same order: not offered here.
   expect(cardMachineRefundToRecord(id(1), first, status("Confirmed"), null)).toBeNull();
   expect(cardMachineRefundToRecord(id(1), first, status("NotDispatched", id(9)), null)).toBeNull();
+});
+
+it("M126 I.5: another store's payment and a role that can't refund say why, with no Refresh", () => {
+  expect(paymentLoadFailure(new OrdinaryRefundClientError("NotFound"))).toEqual({
+    message: "This payment belongs to another store. Switch to that store to refund it.",
+    retry: false,
+  });
+  expect(paymentLoadFailure(new OrdinaryRefundClientError("Denied"))).toEqual({
+    message: "Your role can't refund payments. Ask the owner or a manager.",
+    retry: false,
+  });
+  // Only a read that couldn't answer offers reading again.
+  expect(paymentLoadFailure(new OrdinaryRefundClientError("Unavailable"))).toMatchObject({
+    retry: true,
+  });
+  setLanguageForTest("zh-Hans");
+  expect(paymentLoadFailure(new OrdinaryRefundClientError("NotFound")).message).toBe(
+    "这笔付款不属于当前门店，请切换到下单的门店再退款。",
+  );
+  expect(paymentLoadFailure(new OrdinaryRefundClientError("Denied")).message).toBe(
+    "你的角色不能退款，请找店主或店长。",
+  );
 });

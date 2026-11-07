@@ -15,6 +15,7 @@ import {
 } from "./merchant-bff-http.js";
 import { UnmatchedCaptureRefundError } from "@rms/payment";
 import { retryTransactionConflict } from "./transaction-conflict-retry.js";
+import { failureNamed } from "./merchant-failure.js";
 import type { MerchantBffRouterOptions } from "./merchant-bff-contract.js";
 
 /** WP-2423 Q5: why an approval or decline was refused, without internal detail. */
@@ -327,7 +328,17 @@ export function installMerchantRefundRoutes(
           canRequest: result.canRequest,
         }),
       )
-      .catch((error: unknown) => refundReadFailure(response, error));
+      .catch((error: unknown) => {
+        // M126 I.5: a payment not in this Store's books (another Store's): switch Store, no retry.
+        if (failureNamed(error, "MERCHANT_REFUND_PAYMENT_NOT_FOUND")) {
+          response
+            .status(404)
+            .set("Cache-Control", NO_STORE)
+            .json({ error: "refund_payment_not_found" });
+          return;
+        }
+        refundReadFailure(response, error);
+      });
   });
 
   router.post("/payments/refunds/items", sameOriginMutation(options), (request, response) => {

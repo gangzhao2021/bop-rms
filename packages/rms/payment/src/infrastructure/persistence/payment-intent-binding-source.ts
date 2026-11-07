@@ -51,6 +51,9 @@ export function createPostgresPaymentIntentBindingSource(options: {
       "SELECT payment_operation_id::text AS operation FROM rms_payment.payment_intent WHERE brand_id=$1 AND store_id=$2 AND payment_intent_id=$3",
       [scope.brandReference, scope.storeReference, query.paymentIntentReference],
     );
+    // M126 I.5: no such payment in this Store (another Store's, or none at all) is said apart from
+    // a read that couldn't answer, so staff are told to switch Store rather than to retry.
+    if (found.rows.length === 0) throw new Error("PAYMENT_INTENT_BINDING_NOT_FOUND");
     if (found.rows.length !== 1) return fail();
     const operation = ref(found.rows[0]?.operation);
     const owner = createPostgresPaymentIntentCreationStore(

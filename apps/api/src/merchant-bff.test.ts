@@ -4615,6 +4615,20 @@ it("protects refund payment context and preserves unknown amounts", async () => 
       })
     ).status,
   ).toBe(503);
+  // M126 I.5: another Store's payment is not found here (switch Store), no permission is a
+  // refusal, and only a read that couldn't answer is "try again".
+  query.mockRejectedValueOnce(
+    new Error("MERCHANT_REFUND_PAYMENT_NOT_FOUND", {
+      cause: new Error("PAYMENT_INTENT_BINDING_NOT_FOUND"),
+    }),
+  );
+  const notHere = await send();
+  expect(notHere.status).toBe(404);
+  expect(await notHere.json()).toEqual({ error: "refund_payment_not_found" });
+  query.mockRejectedValueOnce(new Error("ORDINARY_REFUND_REQUEST_DENIED"));
+  expect((await send()).status).toBe(403);
+  query.mockRejectedValueOnce(new Error("PAYMENT_INTENT_BINDING_UNAVAILABLE"));
+  expect((await send()).status).toBe(503);
 });
 
 async function serveRefundStatus(

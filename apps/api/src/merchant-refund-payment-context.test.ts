@@ -168,6 +168,15 @@ it.each([
   await expect(f.operation(f.input)).rejects.toThrow();
   expect(d.position).not.toHaveBeenCalled();
 });
+it("M126 I.5: a payment this Store has no record of is another Store's, not an outage", async () => {
+  const f = setup();
+  d.binding.mockRejectedValueOnce(new Error("PAYMENT_INTENT_BINDING_NOT_FOUND"));
+  await expect(f.operation(f.input)).rejects.toThrow("MERCHANT_REFUND_PAYMENT_NOT_FOUND");
+  expect(d.terminal).not.toHaveBeenCalled();
+  // A binding read that couldn't answer stays itself (503, try again).
+  d.binding.mockRejectedValueOnce(new Error("PAYMENT_INTENT_BINDING_UNAVAILABLE"));
+  await expect(f.operation(f.input)).rejects.toThrow("PAYMENT_INTENT_BINDING_UNAVAILABLE");
+});
 it("rejects refund totals exceeding captured amount", async () => {
   const f = setup();
   d.position.mockResolvedValue({ confirmedMinor: 2000n, pendingMinor: 1000n });

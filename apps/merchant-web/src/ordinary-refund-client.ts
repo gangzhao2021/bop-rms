@@ -8,8 +8,15 @@ import {
 export class OrdinaryRefundClientError extends Error {
   constructor(
     /** Changed: the order's refunds changed while a read was loading (it was read once more). */
+    /** NotFound (M126 I.5): no such payment in this Store; it belongs to another Store. */
     readonly code:
-      "Denied" | FullSignInRequired | "Conflict" | "Changed" | "Unavailable" | "OutcomeUnknown",
+      | "Denied"
+      | FullSignInRequired
+      | "Conflict"
+      | "Changed"
+      | "Unavailable"
+      | "OutcomeUnknown"
+      | "NotFound",
   ) {
     super(t("Refund request could not be confirmed"));
   }
@@ -239,6 +246,9 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
         throw new OrdinaryRefundClientError(FULL_SIGN_IN_REQUIRED);
       if (response.status === 401 || response.status === 403)
         throw new OrdinaryRefundClientError("Denied");
+      // M126 I.5: a payment this Store has no record of (another Store's): never "try again".
+      if (response.status === 404 && (await replyError(response)) === "refund_payment_not_found")
+        throw new OrdinaryRefundClientError("NotFound");
       // v15 2026-10-18: a read that met a refund recorded while it was loading answers 409
       // changed_while_loading; a busy server answers 503 retry_later. Neither is a refusal.
       if (response.status === 409 || response.status === 503) {
@@ -289,6 +299,7 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
         if (
           error instanceof OrdinaryRefundClientError &&
           (error.code === "Denied" ||
+            error.code === "NotFound" ||
             error.code === FULL_SIGN_IN_REQUIRED ||
             error.code === "Conflict" ||
             (!mutation && error.code === "Changed"))

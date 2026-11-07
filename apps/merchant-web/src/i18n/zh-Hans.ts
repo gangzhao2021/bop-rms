@@ -7975,6 +7975,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "记录这笔申请还不会退款：批准后才会发送。",
   "Refresh payment amounts": "刷新付款金额",
   "Refresh payment": "刷新付款",
+  "This payment belongs to another store. Switch to that store to refund it.":
+    "这笔付款不属于当前门店，请切换到下单的门店再退款。",
+  "Your role can't refund payments. Ask the owner or a manager.":
+    "你的角色不能退款，请找店主或店长。",
   "Refresh refund requests and items": "刷新退款申请和菜品",
   "Refresh request {value}": "刷新申请 {value}",
   "Refund everything fills this payment's items only. Items paid another way are refunded from their own payment page.":

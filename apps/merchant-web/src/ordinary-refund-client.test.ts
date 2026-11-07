@@ -242,6 +242,19 @@ it("payment context preserves separate capture, confirmed and pending amounts", 
   const fetcher = vi.fn<typeof fetch>().mockResolvedValue(response(context));
   await expect(createOrdinaryRefundClient(fetcher).context(id(6), csrf)).resolves.toEqual(context);
 });
+it("M126 I.5: another store's payment is NotFound, a role without refunds Denied, once each", async () => {
+  const fetcher = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(response({ error: "refund_payment_not_found" }, 404))
+    .mockResolvedValueOnce(response({ error: "request_denied" }, 403))
+    .mockResolvedValueOnce(response({ error: "not_found" }, 404));
+  const client = createOrdinaryRefundClient(fetcher);
+  await expect(client.context(id(6), csrf)).rejects.toMatchObject({ code: "NotFound" });
+  await expect(client.context(id(6), csrf)).rejects.toMatchObject({ code: "Denied" });
+  // Any other 404 (not this route's answer) is no claim about the payment.
+  await expect(client.context(id(6), csrf)).rejects.toMatchObject({ code: "Unavailable" });
+  expect(fetcher).toHaveBeenCalledTimes(3);
+});
 it("payment context preserves unknown amounts rather than inventing zero", async () => {
   const unknown = {
     ...context,

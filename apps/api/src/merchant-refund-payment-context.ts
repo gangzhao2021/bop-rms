@@ -231,7 +231,14 @@ export function createMerchantRefundPaymentContext(options: {
       const binding = await createPostgresPaymentIntentBindingSource({
         scope: { ...scope, environment: configuration.environment },
         authorize: (tx) => allowed(tx),
-      })(businessTransaction, { paymentIntentReference, observedAt: resolvedAt });
+      })(businessTransaction, { paymentIntentReference, observedAt: resolvedAt }).catch(
+        (error: unknown) => {
+          // M126 I.5: this Store has no such payment (it belongs to another Store): said so.
+          if (error instanceof Error && error.message === "PAYMENT_INTENT_BINDING_NOT_FOUND")
+            throw new Error("MERCHANT_REFUND_PAYMENT_NOT_FOUND", { cause: error });
+          throw error;
+        },
+      );
       const observedAt = await observeOrder(binding.orderReference);
       const terminal = await createPostgresPaymentTerminalStore(
         { run: (work) => work(businessTransaction) },

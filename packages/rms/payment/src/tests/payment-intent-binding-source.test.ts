@@ -101,3 +101,10 @@ it("rejects an unresolved owner record", async () => {
   d.read.mockResolvedValue(null);
   await expect(f.read()).rejects.toThrow();
 });
+
+it("M126 I.5: a payment this Store has no record of is not found, not an outage", async () => {
+  const f = setup();
+  f.query.mockImplementation(async () => ({ rows: [], rowCount: null }));
+  await expect(f.read()).rejects.toThrow("PAYMENT_INTENT_BINDING_NOT_FOUND");
+  expect(d.read).not.toHaveBeenCalled();
+});
