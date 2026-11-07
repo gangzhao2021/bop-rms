@@ -106,6 +106,33 @@ export interface DiningTableOnlinePaymentView {
   readonly lastOwnDeclined?: null | { readonly partNumber: number | null };
 }
 
+/**
+ * M92: this guest's latest finished phone payment when it was declined, and which part it was for
+ * (null: the whole table). A declined part belongs to the split it was tried on: staff splitting
+ * again make a new plan whose parts may reuse the number, and that new part was never tried, so
+ * nothing is said about it.
+ */
+export function lastOwnDeclinedOf(
+  attempts: readonly Pick<
+    DiningTableOnlinePaymentRecord,
+    "outcome" | "guestSessionReference" | "createdAt" | "part"
+  >[],
+  guestSessionReference: string | null,
+  currentSplitPlanReference: string | null,
+): { readonly partNumber: number | null } | null {
+  if (guestSessionReference === null) return null;
+  const lastOwn = attempts
+    .filter(
+      (attempt) =>
+        attempt.outcome !== null && attempt.guestSessionReference === guestSessionReference,
+    )
+    .sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0))[0];
+  if (lastOwn?.outcome?.status !== "Failed") return null;
+  if (lastOwn.part !== null && lastOwn.part.splitPlanReference !== currentSplitPlanReference)
+    return null;
+  return Object.freeze({ partNumber: lastOwn.part?.partNumber ?? null });
+}
+
 const sha = (value: unknown) =>
   "sha256:" + createHash("sha256").update(canonicalizeRfc8785(value)).digest("hex");
 /** The attempt's reference, derived from the guest's operation (a retry finds the same one). */
@@ -185,20 +212,13 @@ export function createDiningTableOnlinePayments(options: DiningTableOnlinePaymen
       splitPlanRecord?: unknown;
     };
     void settlementRecord;
-    void splitPlanRecord;
-    const lastOwn = attempts
-      .filter(
-        (attempt) =>
-          attempt.outcome !== null &&
-          authority.guestSessionReference !== null &&
-          attempt.guestSessionReference === authority.guestSessionReference,
-      )
-      .sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0))[0];
     return Object.freeze({
-      lastOwnDeclined:
-        lastOwn?.outcome?.status === "Failed"
-          ? Object.freeze({ partNumber: lastOwn.part?.partNumber ?? null })
-          : null,
+      lastOwnDeclined: lastOwnDeclinedOf(
+        attempts,
+        authority.guestSessionReference,
+        (splitPlanRecord as DiningTableSplitPlanRecord | null | undefined)?.splitPlanReference ??
+          null,
+      ),
       bill: publicBill,
       attempt:
         open === undefined
