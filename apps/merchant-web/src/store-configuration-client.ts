@@ -547,7 +547,7 @@ export async function withdrawStoreConfiguration(
   });
   if (response.status === 403)
     throw new Error("Permission denied. Only the person who made it, or an Owner, can do this.");
-  if (response.status === 409) throw new Error("Source changed. Refresh before trying again.");
+  if (response.status === 409) throw new Error(t("Source changed. Refresh before trying again."));
   if (!response.ok || response.headers.get("cache-control") !== "no-store")
     throw new Error("Configuration request unavailable.");
   const raw: unknown = await response.json();
@@ -637,12 +637,14 @@ export function createStoreConfigurationClient(fetcher: typeof fetch = fetch) {
         if (error === "not_your_change") throw new Error(NOT_YOUR_CHANGE_MESSAGE);
         if (error === "approval_needs_another_person")
           throw new Error(APPROVAL_NEEDS_ANOTHER_PERSON_MESSAGE);
-        throw new Error("Source changed. Refresh before trying again.");
+        throw new Error(t("Source changed. Refresh before trying again."));
       }
       // WP-2423 Q4: the change itself was not accepted; keep the form so staff can correct it.
       if (response.status === 422)
         throw new Error(
-          "Change not accepted. Only opening hours and dated closures can change here, and a change must be approved by someone other than its author.",
+          t(
+            "Change not accepted. Only opening hours and dated closures can change here, and a change must be approved by someone other than its author.",
+          ),
         );
       if (
         !response.ok ||

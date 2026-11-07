@@ -111,6 +111,13 @@ export interface TabletRefundRecheck {
   }[];
 }
 const CHOICE = /^[A-Za-z0-9_-]{43}$/u;
+/** WP-2423 M63: the one person, Store and time a paused tablet's clear is decided for. */
+export interface TabletLimitClearScope {
+  readonly brandReference: string;
+  readonly storeReference: string;
+  readonly actorReference: string;
+  readonly at: string;
+}
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const active = (member: StoreMember) =>
   member.membershipLifecycle === "Active" && member.assignmentLifecycle === "Active";
@@ -166,22 +173,14 @@ export function createMerchantStaffPin(options: {
    * manager: identity.staff_pin.reset at the Store). Asked only past the tablet limit; any failure
    * reads as no. Defaults to the Permission owner's fail-closed single-actor read.
    */
-  mayClearTabletLimit?(
-    tx: Query,
-    scope: {
-      readonly brandReference: string;
-      readonly storeReference: string;
-      readonly actorReference: string;
-      readonly at: string;
-    },
-  ): Promise<boolean>;
+  mayClearTabletLimit?(tx: Query, scope: TabletLimitClearScope): Promise<boolean>;
   readonly retentionPolicyCode: string;
   readonly retentionPolicyVersion: number;
 }) {
   const persistence = options.persistence;
   const mayClearTabletLimit =
     options.mayClearTabletLimit ??
-    ((tx: Query, scope: Parameters<NonNullable<typeof options.mayClearTabletLimit>>[1]) =>
+    ((tx: Query, scope: TabletLimitClearScope) =>
       storeActionHeldWithoutDeny(tx as unknown as RoleAssignmentTransaction, {
         ...scope,
         action: "identity.staff_pin.reset",

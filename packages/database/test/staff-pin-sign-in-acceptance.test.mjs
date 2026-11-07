@@ -886,13 +886,14 @@ it("WP-2423 staff PIN: tablets, PINs, lockout, tablet limit, reset, switch and s
         { status: "Throttled", retryAfterSeconds: 600 },
       );
       assert.equal(await patioAttempts(), beforeFailing, "no PIN was read");
-      // His wrong PIN counts against his own five tries and clears nothing: Ava still waits.
+      // His wrong PIN counts against his own five tries and clears nothing: Ava still waits (and,
+      // with one more wrong PIN in the window, until 15 minutes after the second one, 31.5).
       assert.deepEqual(await at(36.1, () => unlock(cole, "100011", null, patio)), {
         status: "Rejected",
       });
       assert.deepEqual(await at(36.2, () => unlock(ava, "482913", null, patio)), {
         status: "Throttled",
-        retryAfterSeconds: 588,
+        retryAfterSeconds: 618,
       });
       // His right PIN signs him in and clears the tablet, recorded and audited in his name.
       assert.equal((await at(36.3, () => unlock(cole, "730419", null, patio))).status, "SignedIn");

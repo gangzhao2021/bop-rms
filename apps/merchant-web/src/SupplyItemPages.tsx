@@ -41,7 +41,7 @@ const copy: Record<SupplyItemErrorCode | "Loading", string> = {
 };
 const itemTypes = [
   ["RawMaterial", t("Raw material")],
-  ["Packaging", "Packaging"],
+  ["Packaging", t("Packaging")],
   ["SemiFinished", t("Semi-finished (prepared in store)")],
   ["FinishedGood", t("Finished good")],
   ["NonFoodSupply", t("Non-food supply")],

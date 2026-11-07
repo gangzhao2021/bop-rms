@@ -987,6 +987,7 @@ it("protects current order queue reads and bounds cursor authority", async () =>
     lines: null,
     pickupContact: null,
     paymentPosition: null,
+    record: null,
   }));
   const root = await serve(
     fakeService(),
@@ -7787,6 +7788,7 @@ it("WP-2423: the Orders list and pickup queue rerun a deadlocked read and never 
     lines: null,
     pickupContact: null,
     paymentPosition: null,
+    record: null,
   };
   const queue = vi.fn<NonNullable<MerchantBffRouterOptions["orderQueue"]>>();
   const query = vi.fn<NonNullable<MerchantBffRouterOptions["pickupQuery"]>>();

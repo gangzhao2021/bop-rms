@@ -8880,4 +8880,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "That gives back more than most stores (2–5%).": "这比大多数门店（2–5%）返得多。",
   "About {percent}% back: a guest earns 1 point per $1 and {redeem} points take $1 off.":
     "约返 {percent}%：每消费 $1 得 1 分，{redeem} 分抵 $1。",
+  "Change not accepted. Only opening hours and dated closures can change here, and a change must be approved by someone other than its author.":
+    "改动未被接受。这里只能改营业时间和指定日期的停业，而且改动必须由作者以外的人批准。",
 });

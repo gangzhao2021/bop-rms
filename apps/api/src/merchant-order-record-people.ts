@@ -85,8 +85,12 @@ export interface OrderRecord {
   } | null;
 }
 
-const byTime = <T extends { readonly at: string }>(items: readonly T[]) =>
-  Object.freeze([...items].sort((a, b) => Date.parse(a.at) - Date.parse(b.at)).map(Object.freeze));
+const byTime = <T extends { readonly at: string }>(items: readonly T[]): readonly Readonly<T>[] =>
+  Object.freeze(
+    [...items]
+      .sort((a, b) => Date.parse(a.at) - Date.parse(b.at))
+      .map((item) => Object.freeze(item)),
+  );
 
 /** Names every person in the facts at once, in the read's own transaction and Store scope. */
 export async function nameOrderRecord(

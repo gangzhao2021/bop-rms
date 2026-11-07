@@ -1,7 +1,13 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { setLanguageForTest } from "./i18n/i18n.js";
 import { orderRecordRows, personLabel } from "./CurrentOrderQueuePage.js";
-import { parseOrderRecordPeople } from "./current-order-queue-client.js";
+import { parseOrderRecordPeople as parseNullable } from "./current-order-queue-client.js";
+
+const parseOrderRecordPeople = (value: unknown) => {
+  const parsed = parseNullable(value);
+  if (parsed === null) throw new Error("expected a record");
+  return parsed;
+};
 
 afterEach(() => setLanguageForTest("en"));
 
@@ -30,7 +36,7 @@ describe("M61: the order record says who did what", () => {
   it("parses names and times only, and refuses an id or a nameless staff payment", () => {
     const parsed = parseOrderRecordPeople(record);
     expect(parsed?.accepted[0]?.by).toBe("Sam");
-    expect(parseOrderRecordPeople(null)).toBeNull();
+    expect(parseNullable(null)).toBeNull();
     expect(() =>
       parseOrderRecordPeople({
         ...record,
@@ -41,7 +47,7 @@ describe("M61: the order record says who did what", () => {
   });
 
   it("lists accepted, handed over, payment and refund with the approver, in English", () => {
-    const parsed = parseOrderRecordPeople(record)!;
+    const parsed = parseOrderRecordPeople(record);
     const rows = orderRecordRows(parsed, "Pickup", tz, "2026-11-05");
     expect(rows.map((row) => [row.label, row.text])).toEqual([
       ["Accepted", "Sam · 19:42"],
@@ -70,7 +76,7 @@ describe("M61: the order record says who did what", () => {
         approvedBy: "Sam",
         at: "2026-11-06T02:00:00.000Z",
       },
-    })!;
+    });
     const rows = orderRecordRows(parsed, "DineIn", tz, "2026-11-05");
     expect(rows.map((row) => [row.label, row.text])).toEqual([
       ["Round 1 accepted", "Automatically, when paid · 19:42"],
@@ -86,7 +92,7 @@ describe("M61: the order record says who did what", () => {
     expect(personLabel("Store owner")).toBe("店主");
     expect(personLabel("You")).toBe("你");
     expect(personLabel("Sam")).toBe("Sam");
-    const rows = orderRecordRows(parseOrderRecordPeople(record)!, "Pickup", tz, "2026-11-05");
+    const rows = orderRecordRows(parseOrderRecordPeople(record), "Pickup", tz, "2026-11-05");
     expect(rows.map((row) => [row.label, row.text])).toEqual([
       ["已接单", "Sam · 19:42"],
       ["已交付", "Mia · 20:15"],

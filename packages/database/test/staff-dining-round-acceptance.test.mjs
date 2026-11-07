@@ -1128,6 +1128,14 @@ it("enters a dine-in round by staff, takes its card-machine payment and marks it
         amountMinor: String(tipMinor),
         currencyCode: "CAD",
       });
+      // WP-2423 M61: the order's record names who took round 2's card-machine payment (the
+      // person reading it: "You"), never an id.
+      assert.deepEqual(
+        afterDetail.record.payments.map((entry) => [entry.method, entry.part, entry.round, entry.by]),
+        [["CardMachine", null, 2, "You"]],
+      );
+      assert.equal(afterDetail.record.payments[0].at, String(saved.takenAt));
+      assert.doesNotMatch(JSON.stringify(afterDetail.record), /[0-9a-f]{8}-[0-9a-f]{4}-/u);
       assert.deepEqual(after.batches[1].staffRound, {
         recordedAfterOutage: false,
         amountDueMinor: null,

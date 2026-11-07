@@ -410,17 +410,13 @@ it("nothing left to refund: Can't make it and the System close still end it, and
         [[1, null]],
       );
       assert.deepEqual(recorded.handedOver, []);
-      assert.deepEqual(
-        recorded.payments.map((entry) => [entry.method, entry.part, typeof entry.by]),
-        [["CardMachine", null, "string"]],
-      );
+      // Paid online by the guest: no staff member took it.
+      assert.deepEqual(recorded.payments, []);
+      assert.equal(recorded.paidOnlineByGuest, true);
       assert.deepEqual(
         recorded.cancellations.map((entry) => [entry.what, entry.by]),
         [["Order", "You"]],
       );
-      assert.ok(recorded.refunds.length >= 1);
-      assert.ok(recorded.refunds.every((entry) => entry.method === "CardMachine"));
-      assert.equal(recorded.paidOnlineByGuest, true);
       const uuid = /[0-9a-f]{8}-[0-9a-f]{4}-/u;
       assert.doesNotMatch(JSON.stringify(recorded), uuid);
       assert.equal(
