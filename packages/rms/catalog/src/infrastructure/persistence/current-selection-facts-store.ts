@@ -27,6 +27,8 @@ import {
   createPostgresCurrentOptionBindingsStore,
 } from "./current-option-bindings-store.js";
 import { resolveCurrentCatalogSelectionRules } from "../../application/current-selection-rules.js";
+import { withOptionsOffNow } from "../../application/options-off-now.js";
+import { listOptionsOffNow, type OptionOffNow } from "./store-option-sold-out-store.js";
 
 /**
  * WP-2423 (guest-cart-503): one cart line's standing now. Only `Available` sells; `Indeterminate`
@@ -148,6 +150,23 @@ async function classifiedFacts(
   });
   if (options === null || options.productReference !== sku.productReference)
     return "Indeterminate" as FactsAbsence;
+  // WP-2423 (M22, M24): the choices this Store cannot sell now — its own sold-out marks, and a
+  // combo's dishes sold out or hidden here — are off for now in every Sale read (the guest menu
+  // reads the same answer). Two statements in this snapshot, only for a dish with choices.
+  const optionReferences = options.bindings.flatMap((pair) =>
+    pair.optionSet.draft.options.map((option) => String(option.optionReference)),
+  );
+  const offNow =
+    optionReferences.length === 0
+      ? new Map<string, OptionOffNow>()
+      : await listOptionsOffNow(tx as never, {
+          brandReference: brand,
+          storeReference: store,
+          channelCode: request.channelCode,
+          orderTypeCode: request.orderTypeCode,
+          observedAt: request.observedAt,
+          optionReferences,
+        });
   return Object.freeze({
     brandReference: brand,
     storeReference: store,
@@ -165,7 +184,9 @@ async function classifiedFacts(
       optionRules: published.optionRules,
     }),
     sku,
-    bindings: options.bindings,
+    bindings: withOptionsOffNow(options.bindings, offNow),
+    /** WP-2423 (M22, M24): the dish's choices off now, and why. */
+    optionsOffNow: offNow as ReadonlyMap<string, OptionOffNow>,
   });
 }
 

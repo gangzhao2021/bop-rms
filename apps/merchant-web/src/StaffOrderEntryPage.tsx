@@ -1978,7 +1978,7 @@ export function StaffOrderEntryPage({
                       <span>{option.name}</span>
                       {option.offeredNow === false ? (
                         <span className="counter-order__option-price">
-                          {t("Not available now")}
+                          {option.soldOut === true ? t("Sold out today") : t("Not available now")}
                         </span>
                       ) : option.priceMinor !== null && option.priceMinor !== "0" ? (
                         <span className="counter-order__option-price">

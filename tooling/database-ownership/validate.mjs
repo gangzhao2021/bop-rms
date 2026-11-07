@@ -1611,6 +1611,8 @@ async function scanUnsupported(root, module, diagnostics) {
               "src/infrastructure/persistence/bundle-store.ts",
               // WP-2423 DEC-ALCOHOL: dishes that contain alcohol.
               "src/infrastructure/persistence/product-alcohol-mark-store.ts",
+              // WP-2423 (M22, M24): choices a Store cannot sell now, and its sold-out marks.
+              "src/infrastructure/persistence/store-option-sold-out-store.ts",
             ].includes(moduleRelative)) ||
           (module.packageName === "@rms/pricing" &&
             module.manifest.ownedDatabase?.schema === "rms_pricing" &&

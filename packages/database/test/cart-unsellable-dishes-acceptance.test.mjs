@@ -11,6 +11,7 @@ import {
   createPostgresCatalogOrderSnapshotSource,
   createPostgresCatalogSelectionService,
   createPostgresCurrentOptionBindingsStore,
+  changeStoreOptionSoldOut,
 } from "../../rms/catalog/src/index.ts";
 import { createCustomerMenuStoreFacts } from "../../../apps/api/src/customer-menu-store-facts.ts";
 const { Client } = pg;
@@ -75,7 +76,7 @@ it("WP-2423 (cart-unsellable-dishes): a hidden dish or a default choice turned o
       );
       await admin.query(renderPilotAclSql(matrices, { api, worker }));
       await seed(admin);
-      const now = minute(10);
+      let now = minute(10);
       // WP-2423 (M154): stock that cannot make one (synthetic Inventory evidence).
       let stockShort = false;
       const safety = {
@@ -163,6 +164,183 @@ it("WP-2423 (cart-unsellable-dishes): a hidden dish or a default choice turned o
       assert.deepEqual(await standing.explainMany([line(hot)]), ["SoldOut"]);
       stockShort = false;
       assert.deepEqual(await standing.explainMany([line(hot)]), ["Available"]);
+
+      // WP-2423 (M22, M24): a Store's own "sold out" for one choice, and a combo choice whose dish
+      // is sold out or hidden here, are off in every Sale read — the menu, add, the cart's marks
+      // and the order capture — from one answer, and a "today" mark ends by itself.
+      const writeRunner = {
+        async run(action) {
+          const client = new Client(context.clientConfig);
+          await client.connect();
+          active++;
+          try {
+            await client.query("BEGIN");
+            await client.query("SET LOCAL ROLE " + api);
+            await client.query(
+              "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+              [brand, store],
+            );
+            const result = await action({
+              query: (sql, values) => client.query(sql, [...values]),
+            });
+            await client.query("COMMIT");
+            return result;
+          } catch (error) {
+            await client.query("ROLLBACK");
+            throw error;
+          } finally {
+            await client.end();
+            active--;
+          }
+        },
+      };
+      const owner = { tenantReference: id(5), brandReference: brand, storeReference: store };
+      const markIced = (operation, soldOut, soldOutUntil, observedAt) =>
+        writeRunner.run((tx) =>
+          changeStoreOptionSoldOut(tx, owner, {
+            optionReference: iced,
+            operationReference: id(operation),
+            soldOut,
+            soldOutUntil,
+            actorReference: id(3),
+            observedAt,
+          }),
+        );
+      const menuFacts = async () =>
+        (
+          await createCustomerMenuStoreFacts({
+            transactions: readRunner,
+            currencyMetadata: {
+              currencyCode: "CAD",
+              minorUnitExponent: 2,
+              metadataVersion: 1,
+              metadataVersionReference: id(90),
+              metadataDigest: digest,
+            },
+            priceChannelCode: "CUSTOMER_WEB",
+          }).load({
+            brandReference: brand,
+            storeReference: store,
+            channelCode: "CUSTOMER_PWA",
+            orderTypeCode: "PICKUP",
+            requestedAt: now,
+            sellableReferences: [sku],
+            options: [
+              { sellableReference: sku, bindingReference: binding, optionReference: hot },
+              { sellableReference: sku, bindingReference: binding, optionReference: iced },
+            ],
+          })
+        ).get(sku);
+      // Iced sold out for the rest of the business day (ends at minute 30).
+      const marked = await markIced(80, true, minute(30), minute(9));
+      assert.deepEqual(
+        { version: marked.version, soldOut: marked.soldOut, inEffect: marked.inEffect },
+        { version: 1, soldOut: true, inEffect: true },
+      );
+      // The same operation again returns what it recorded; reused for another answer, refused.
+      assert.equal((await markIced(80, true, minute(30), minute(9))).version, 1);
+      await assert.rejects(markIced(80, false, null, minute(9)), {
+        code: "STORE_OPTION_SOLD_OUT_CHANGED",
+      });
+      assert.deepEqual(await selection.validateSelection(line(iced)), {
+        status: "Rejected",
+        reason: "OPTION_NOT_ENABLED",
+      });
+      assert.equal(await validate(hot), "Accepted");
+      assert.deepEqual(await standing.explainMany([line(hot), line(iced)]), [
+        "Available",
+        "OptionsChanged",
+      ]);
+      assert.equal(await orders.capture(line(iced)), null);
+      {
+        const fact = await menuFacts();
+        assert.deepEqual([...(fact?.soldOutOptions ?? [])], [iced]);
+        assert.equal(fact?.availability, "Available");
+      }
+      // At the business-day end it is back by itself, with nothing written.
+      now = minute(31);
+      assert.equal(await validate(iced), "Accepted");
+      assert.equal((await menuFacts())?.soldOutOptions, undefined);
+      now = minute(10);
+      // Until further notice, then back on: each change is a new attributed version.
+      await markIced(82, true, null, minute(9));
+      assert.equal(await validate(iced), "Rejected");
+      await markIced(83, false, null, minute(10));
+      assert.equal(await validate(iced), "Accepted");
+      // The records are append-only for the api role.
+      for (const sql of [
+        "UPDATE rms_catalog.store_option_sold_out SET sold_out=false",
+        "DELETE FROM rms_catalog.store_option_sold_out",
+      ])
+        await assert.rejects(writeRunner.run((tx) => tx.query(sql, [])));
+      assert.deepEqual(
+        (
+          await admin.query(
+            "SELECT version,sold_out,actor_id::text actor FROM rms_catalog.store_option_sold_out ORDER BY version",
+          )
+        ).rows.map((row) => [row.version, row.sold_out, row.actor]),
+        [
+          [1, true, id(3)],
+          [2, true, id(3)],
+          [3, false, id(3)],
+        ],
+      );
+
+      // Iced stands for a combo's dish (synthetic link and dish rules: the combo, the dish's SKU and
+      // the foreign keys they need are not part of what is checked here, so they are left out). The
+      // dish has no offer at this Store: the choice is not offered; offered, it sells; marked sold
+      // out, the choice is sold out — and the menu says so from the same answer.
+      const dish = id(15);
+      await admin.query("SET session_replication_role = replica");
+      await admin.query(
+        "INSERT INTO rms_catalog.bundle_combo_choice(brand_id,option_id,option_set_id,bundle_id,group_code,dish_sku_id,actor_id,recorded_at) VALUES($1,$2,$3,$4,'MAIN',$5,$6,$7)",
+        [brand, iced, id(33), id(70), dish, id(3), at],
+      );
+      await admin.query("SET session_replication_role = origin");
+      assert.equal(await validate(iced), "Rejected");
+      assert.deepEqual([...((await menuFacts())?.notOfferedOptions ?? [])], [iced]);
+      await admin.query("SET session_replication_role = replica");
+      await admin.query(
+        "INSERT INTO rms_catalog.availability_rule(availability_rule_id,brand_id,internal_code,aggregate_version,lifecycle,sku_id,store_id,channel_codes_json,order_type_codes_json,effective_from,effective_until,decision,priority,reason_code,created_at,created_by_actor_id,updated_at) VALUES($1,$2,'SYNTHETIC_DISH_OFFER',1,'Active',$3,$4,'[]'::jsonb,'[]'::jsonb,$5,NULL,'Available',100,'STORE_OFFERED',$5,$6,$5)",
+        [id(62), brand, dish, store, at, id(3)],
+      );
+      await admin.query("SET session_replication_role = origin");
+      assert.equal(await validate(iced), "Accepted");
+      await admin.query("SET session_replication_role = replica");
+      await admin.query(
+        "INSERT INTO rms_catalog.availability_rule(availability_rule_id,brand_id,internal_code,aggregate_version,lifecycle,sku_id,store_id,channel_codes_json,order_type_codes_json,effective_from,effective_until,decision,priority,reason_code,created_at,created_by_actor_id,updated_at) VALUES($1,$2,'SYNTHETIC_DISH_SOLD_OUT',1,'Active',$3,$4,'[]'::jsonb,'[]'::jsonb,$5,NULL,'Unavailable',900,'SOLD_OUT',$5,$6,$5)",
+        [id(63), brand, dish, store, at, id(3)],
+      );
+      await admin.query("SET session_replication_role = origin");
+      assert.equal(await validate(iced), "Rejected");
+      assert.deepEqual([...((await menuFacts())?.soldOutOptions ?? [])], [iced]);
+      // Hot sold out too: the required group has nothing left, so the dish can't be had now.
+      await writeRunner.run((tx) =>
+        changeStoreOptionSoldOut(tx, owner, {
+          optionReference: hot,
+          operationReference: id(84),
+          soldOut: true,
+          soldOutUntil: null,
+          actorReference: id(3),
+          observedAt: minute(9),
+        }),
+      );
+      assert.deepEqual(await standing.explainMany([line(null)]), ["Unavailable"]);
+      // Back to the state the rest of this case starts from.
+      await writeRunner.run((tx) =>
+        changeStoreOptionSoldOut(tx, owner, {
+          optionReference: hot,
+          operationReference: id(85),
+          soldOut: false,
+          soldOutUntil: null,
+          actorReference: id(3),
+          observedAt: minute(10),
+        }),
+      );
+      await admin.query("SET session_replication_role = replica");
+      await admin.query("DELETE FROM rms_catalog.bundle_combo_choice WHERE option_id=$1", [iced]);
+      await admin.query("SET session_replication_role = origin");
+      assert.equal(await validate(iced), "Accepted");
 
       // Pay first: the order's lines are captured when it is submitted, before any payment starts.
       const captured = await orders.capture(line(hot));
@@ -262,7 +440,8 @@ it("WP-2423 (cart-unsellable-dishes): a hidden dish or a default choice turned o
       assert.equal(
         (await admin.query("SELECT count(*)::int AS n FROM rms_catalog.availability_rule")).rows[0]
           .n,
-        1,
+        // The offer, and the synthetic marks this case added (M154 sold out; the combo dish).
+        4,
       );
       assert.equal(active, 0);
     } finally {

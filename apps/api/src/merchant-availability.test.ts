@@ -5,7 +5,9 @@ import {
   stockSoldOutView,
   itemAvailability,
   MerchantAvailabilityError,
+  optionStatus,
   parseAvailabilityCommandBody,
+  stockAnswer,
 } from "./merchant-availability.js";
 
 const id = (n: number) => "01909a1f-0000-7000-8000-" + n.toString(16).padStart(12, "0");
@@ -121,5 +123,68 @@ describe("WP-2423 (2026-10-16) stock reason on the item availability page", () =
     ).toEqual({ noStockReceived: true, ingredients: [] });
     expect(stockSoldOutView({ status: "Indeterminate", shortages: [] })).toBeNull();
     expect(stockSoldOutView(undefined)).toBeNull();
+  });
+});
+
+describe("WP-2423 (M24, M78) choices sold out at the Store, and what stock says", () => {
+  it("takes a choice's sold-out and back-on commands, and nothing else on them", () => {
+    expect(
+      parseAvailabilityCommandBody({
+        action: "OptionSoldOut",
+        operationReference: id(20),
+        optionReference: id(21),
+        until: "EndOfDay",
+      }),
+    ).toEqual({
+      action: "OptionSoldOut",
+      operationReference: id(20),
+      optionReference: id(21),
+      until: "EndOfDay",
+    });
+    expect(
+      parseAvailabilityCommandBody({
+        action: "OptionBackOn",
+        operationReference: id(20),
+        optionReference: id(21),
+      }).action,
+    ).toBe("OptionBackOn");
+    for (const body of [
+      { action: "OptionSoldOut", operationReference: id(20), optionReference: id(21) },
+      {
+        action: "OptionBackOn",
+        operationReference: id(20),
+        optionReference: id(21),
+        until: "EndOfDay",
+      },
+      {
+        action: "OptionSoldOut",
+        operationReference: id(20),
+        skuReference: id(21),
+        until: "EndOfDay",
+      },
+    ])
+      expect(() => parseAvailabilityCommandBody(body)).toThrow(MerchantAvailabilityError);
+  });
+  it("says a choice's status from its current mark", () => {
+    expect(optionStatus(undefined)).toEqual({ status: "Available", soldOutUntil: null });
+    const mark = {
+      optionReference: id(21),
+      version: 1,
+      soldOut: true,
+      soldOutUntil: "2026-10-09T08:00:00.000Z",
+      inEffect: true,
+    };
+    expect(optionStatus(mark)).toEqual({
+      status: "SoldOut",
+      soldOutUntil: "2026-10-09T08:00:00.000Z",
+    });
+    expect(optionStatus({ ...mark, inEffect: false }).status).toBe("Available");
+  });
+  it("tells short stock from stock that was not read", () => {
+    expect(stockAnswer({ status: "Unavailable", shortages: [] })).toBe("Short");
+    expect(stockAnswer({ status: "Available", shortages: [] })).toBe("Enough");
+    expect(stockAnswer({ status: "Indeterminate", shortages: [] })).toBe("Unknown");
+    expect(stockAnswer({ status: "Indeterminate", shortages: [], failed: true })).toBe("Unknown");
+    expect(stockAnswer(undefined)).toBe("Unknown");
   });
 });

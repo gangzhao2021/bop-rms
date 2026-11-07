@@ -1725,6 +1725,15 @@ export function SellableConfigurator({
               {rule.name ?? t("Choice group {value1}", { value1: groupIndex + 1 })}
             </span>
             <span className="configure-group__rule">{choiceText(rule)}</span>
+            {((left) =>
+              // WP-2423 (M22, M24): a required group down to its last choice today says so.
+              rule.minimumSelections > 0 &&
+              left.length === 1 &&
+              rule.options.some((option) => option.soldOut === true) ? (
+                <span className="configure-group__rule">
+                  {t("Only {name} is left today", { name: left[0]?.name ?? "" })}
+                </span>
+              ) : null)(rule.options.filter((option) => option.offeredNow !== false))}
           </legend>
           {rule.options.map((option, optionIndex) => {
             const price = optionPriceText(option.price);
@@ -1762,7 +1771,9 @@ export function SellableConfigurator({
                   <span className="configure-option__name">{option.name}</span>
                 </label>
                 {option.offeredNow === false ? (
-                  <span className="configure-option__price">{t("Not available now")}</span>
+                  <span className="configure-option__price">
+                    {option.soldOut === true ? t("Sold out today") : t("Not available now")}
+                  </span>
                 ) : priceId === null ? null : (
                   <span id={priceId} className="configure-option__price">
                     {price}

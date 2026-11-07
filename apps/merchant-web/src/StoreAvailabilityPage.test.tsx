@@ -212,3 +212,30 @@ it("Owner 2026-10-25: groups sizes under their product, in the order products fi
     ["Muffin", ["Muffin"]],
   ]);
 });
+
+it("WP-2423 (M24): lists choices with the dishes that offer them, and finds one as staff type", async () => {
+  const { optionDishesText, optionMatches } = await import("./store-availability-page.js");
+  const pearls = {
+    optionReference: "0190a7c4-0000-7000-8000-000000000009",
+    name: "Pearls",
+    dishNames: ["Milk tea", "Taro milk tea", "Brown sugar milk", "Matcha latte", "Jasmine tea"],
+    status: "Available" as const,
+    soldOutUntil: null,
+  };
+  expect(optionDishesText(pearls.dishNames)).toBe(
+    "In: Milk tea, Taro milk tea, Brown sugar milk +2",
+  );
+  expect(optionDishesText(["Milk tea"])).toBe("In: Milk tea");
+  expect(optionMatches(pearls, "pea")).toBe(true);
+  expect(optionMatches(pearls, "taro")).toBe(true);
+  expect(optionMatches(pearls, "coffee")).toBe(false);
+  const view = {
+    screenId: "CAT-AVAILABILITY",
+    items: [],
+    options: [pearls],
+  };
+  expect(parseStoreAvailabilityView(view).options).toHaveLength(1);
+  expect(() =>
+    parseStoreAvailabilityView({ ...view, options: [{ ...pearls, status: "Maybe" }] }),
+  ).toThrow();
+});

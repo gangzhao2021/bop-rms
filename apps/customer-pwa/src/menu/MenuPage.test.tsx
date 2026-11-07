@@ -901,6 +901,28 @@ describe("WP-2423 (cart-unsellable-dishes): a choice the Store does not offer no
     expect(html).toContain("Not available now");
     expect(html).not.toContain("isn’t available right now");
   });
+  it("WP-2423 (M22, M24): names a sold-out choice and says which one is left today", () => {
+    const value = serve(false);
+    const rule = value.optionRules[0];
+    if (!rule) throw new Error("fixture");
+    const html = render({
+      ...value,
+      optionRules: [
+        {
+          ...rule,
+          options: rule.options.map((o) =>
+            o.optionReference === "hot" ? { ...o, soldOut: true as const } : o,
+          ),
+        },
+      ],
+    });
+    expect(html).toContain("Sold out today");
+    expect(html).not.toContain("Not available now");
+    expect(html).toContain("Only Iced is left today");
+    const hot = /<input[^>]*>(?=<span class="configure-option__name">Hot)/u.exec(html)?.[0] ?? "";
+    expect(hot).toContain("disabled");
+    expect(hot).not.toContain("checked");
+  });
   it("says the dish isn't available when every choice of a required group is off", () => {
     const html = render(serve(true));
     expect(html).toContain("Soy milk isn&#x27;t available right now.");

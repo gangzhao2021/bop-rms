@@ -444,3 +444,15 @@ export {
   loadProductAlcoholMarks,
   ProductAlcoholMarkError,
 } from "./infrastructure/persistence/product-alcohol-mark-store.js";
+// WP-2423 sold-out-and-allergen-safety (M22, M24): choices a Store cannot sell now.
+export {
+  changeStoreOptionSoldOut,
+  listOptionsOffNow,
+  listStoreChoiceOptions,
+  listStoreOptionSoldOutMarks,
+  StoreOptionSoldOutError,
+  type OptionOffNow,
+  type StoreChoiceOption,
+  type StoreOptionSoldOutMark,
+} from "./infrastructure/persistence/store-option-sold-out-store.js";
+export { withOptionsOffNow } from "./application/options-off-now.js";

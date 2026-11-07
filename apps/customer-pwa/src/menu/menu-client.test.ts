@@ -619,6 +619,15 @@ it("WP-2423 (cart-unsellable-dishes): a min-1 group whose only default is not of
   expect(requiredGroupNotOffered(allOff.menu.sections[0]?.sellables[0]?.optionRules ?? [])).toBe(
     true,
   );
+  // WP-2423 (M22, M24): sold out today is read with the mark; `soldOut` alone is not a menu.
+  Object.assign(iced, { offeredNow: false, soldOut: true });
+  const soldOut = await client.load();
+  if (soldOut.kind !== "Found") throw new Error("the menu must load");
+  expect(soldOut.menu.sections[0]?.sellables[0]?.optionRules[0]?.options[1]?.soldOut).toBe(true);
+  Object.assign(iced, { offeredNow: undefined });
+  delete (iced as { offeredNow?: unknown }).offeredNow;
+  expect((await client.load()).kind).not.toBe("Found");
+  delete (iced as { soldOut?: unknown }).soldOut;
   // Only `false` is a mark; anything else is not a menu this client reads.
   Object.assign(iced, { offeredNow: true });
   expect((await client.load()).kind).not.toBe("Found");

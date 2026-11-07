@@ -1,4 +1,4 @@
-import { t } from "./i18n/i18n.js";
+import { listSeparator, t } from "./i18n/i18n.js";
 /** WP-2423 8.5: CAT-AVAILABILITY view contract and same-origin client for the selected Store. */
 import { storeDayTime } from "./StoreTime.js";
 import type { KitchenBoardView } from "./kitchen-board.js";
@@ -166,6 +166,16 @@ export interface StoreAvailabilityView {
   /** WP-2423 (M78): "NotChecked" when stock could not be read, so short items are not marked. */
   readonly stockCheck?: "Checked" | "NotChecked";
   readonly items: readonly AvailabilityItem[];
+  /** WP-2423 (M24): choices and extras dishes on sale offer (absent from an older server). */
+  readonly options?: readonly AvailabilityOption[];
+}
+/** WP-2423 (M24): one choice or extra; a mark stops it in every dish that offers it, here only. */
+export interface AvailabilityOption {
+  readonly optionReference: string;
+  readonly name: string;
+  readonly dishNames: readonly string[];
+  readonly status: "Available" | "SoldOut";
+  readonly soldOutUntil: string | null;
 }
 export type AvailabilityCommand =
   | {
@@ -178,7 +188,50 @@ export type AvailabilityCommand =
       readonly operationReference: string;
       readonly skuReference: string;
       readonly until: "EndOfDay" | "UntilBack";
+    }
+  | {
+      readonly action: "OptionSoldOut";
+      readonly operationReference: string;
+      readonly optionReference: string;
+      readonly until: "EndOfDay" | "UntilBack";
+    }
+  | {
+      readonly action: "OptionBackOn";
+      readonly operationReference: string;
+      readonly optionReference: string;
     };
+/** The item or choice a command is about (a retry reuses the operation for the same one). */
+export const commandTarget = (command: AvailabilityCommand): string =>
+  "skuReference" in command ? command.skuReference : command.optionReference;
+/** "In: Milk tea, Taro milk tea +4" — at most three dishes named. */
+export function optionDishesText(dishNames: readonly string[]): string {
+  const shown = dishNames.slice(0, 3).join(listSeparator());
+  const more = dishNames.length - 3;
+  return t("In: {list}", { list: more > 0 ? shown + " +" + more : shown });
+}
+/** Choices whose name or dishes contain the search text (either language, as typed). */
+export function optionMatches(option: AvailabilityOption, search: string): boolean {
+  const fold = (value: string) => value.normalize("NFKC").toLocaleLowerCase();
+  const query = fold(search.trim());
+  return (
+    query === "" ||
+    fold(option.name).includes(query) ||
+    option.dishNames.some((dish) => fold(dish).includes(query))
+  );
+}
+const validOption = (value: unknown): boolean => {
+  const o = value as Record<string, unknown> | null;
+  return (
+    o !== null &&
+    typeof o === "object" &&
+    typeof o.optionReference === "string" &&
+    typeof o.name === "string" &&
+    Array.isArray(o.dishNames) &&
+    o.dishNames.every((dish) => typeof dish === "string") &&
+    (o.status === "Available" || o.status === "SoldOut") &&
+    (o.soldOutUntil === null || typeof o.soldOutUntil === "string")
+  );
+};
 export interface AvailabilityClient {
   load(): Promise<unknown>;
   command?(command: AvailabilityCommand): Promise<unknown>;
@@ -191,6 +244,7 @@ export function parseStoreAvailabilityView(value: unknown): StoreAvailabilityVie
     typeof r !== "object" ||
     r.screenId !== "CAT-AVAILABILITY" ||
     (r.stockCheck !== undefined && r.stockCheck !== "Checked" && r.stockCheck !== "NotChecked") ||
+    (r.options !== undefined && (!Array.isArray(r.options) || !r.options.every(validOption))) ||
     !Array.isArray(r.items) ||
     !r.items.every(
       (item: unknown) =>

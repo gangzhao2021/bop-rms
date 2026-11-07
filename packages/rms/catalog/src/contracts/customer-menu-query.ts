@@ -42,6 +42,8 @@ export interface CustomerMenuOptionRuleDto {
      * never starts with it, even when it is the configured default; absent: offered.
      */
     readonly offeredNow?: false;
+    /** WP-2423 (M22, M24): not offered now because it is sold out at the Store today. */
+    readonly soldOut?: true;
     /** What one of this option adds now at the Store (0 is "no charge"); the Quote decides. */
     readonly incrementalPrice:
       | {

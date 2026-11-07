@@ -110,6 +110,9 @@ export async function seedCartCatalog(
 }
 export const cartCatalogTables = [
   "product_alcohol_mark",
+  // WP-2423 (M22, M24): every Sale read asks which choices are off now.
+  "store_option_sold_out",
+  "bundle_combo_choice",
   "availability_rule",
   "menu_publication_revision",
   "menu_publication_release",

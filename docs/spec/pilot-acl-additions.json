@@ -6119,6 +6119,24 @@
       "privilege": "INSERT",
       "principal": "api",
       "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); WP-2423 bundle staff-identity-stock-and-wording (M63): an owner or manager's PIN check past a paused shared tablet's limit, and the clear it makes (append-only)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "store_option_sold_out",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); WP-2423 sold-out-and-allergen-safety (M24): a Store marks one choice or extra sold out for today or until further notice and brings it back; every Sale read checks it (append-only)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "store_option_sold_out",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); WP-2423 sold-out-and-allergen-safety (M24): a Store marks one choice or extra sold out for today or until further notice and brings it back; every Sale read checks it (append-only)"
     }
   ]
 }

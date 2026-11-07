@@ -196,9 +196,11 @@ export function createCustomerCatalogInventoryPort(options: {
             item = {
               sellableReference: request.sellableReference,
               productVersionReference: facts.published.productVersionReference,
+              // WP-2423 (M22, M24): around a default choice the Store cannot sell now.
               defaultOptionSelections: publishedDefaultOptionSelections(
                 facts.published.optionRules ?? [],
                 request.channelCode,
+                facts.optionsOffNow,
               ),
             };
         } catch {
@@ -328,6 +330,7 @@ export function createStaffStockShortageSource(options: {
             selections: publishedDefaultOptionSelections(
               facts.published.optionRules ?? [],
               "CUSTOMER_PWA",
+              facts.optionsOffNow,
             ).map((selection) =>
               parseRecipeOptionSelection({
                 bindingReference: selection.bindingReference,

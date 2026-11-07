@@ -719,3 +719,41 @@ it("WP-2423 (cart-unsellable-dishes): a choice the Store does not offer now is s
   expect(off?.selectedByDefault).toBe(option.selectedByDefault);
   for (const other of others) expect(other).not.toHaveProperty("offeredNow");
 });
+
+it("WP-2423 (M22, M24): a choice sold out at the Store today is sent as sold out, not only off", async () => {
+  const menu = projection();
+  const option = menu.snapshot.sections[0]?.sellables[0]?.optionRules[0]?.options[0];
+  if (option === undefined) throw new Error("fixture");
+  let given: { items?: readonly { optionRules?: unknown }[] } | undefined;
+  const result = await createCustomerMenuQueryService({
+    stores: {
+      resolvePublic: async () => ({
+        brandReference: id(3) as never,
+        storeReference: id(7) as never,
+        status: "Active",
+      }),
+    },
+    projections: { loadCandidates: async () => [menu] },
+    storeFacts: {
+      load: async (input) => {
+        given = input;
+        return new Map([
+          [
+            id(10),
+            {
+              availability: "Available" as const,
+              price: null,
+              soldOutOptions: new Set([String(option.optionReference)]),
+            },
+          ],
+        ]);
+      },
+    },
+  }).getPublishedMenu(input());
+  if (result.status !== "Found") throw new Error("menu");
+  const [off, ...others] = result.menu.sections[0]?.sellables[0]?.optionRules[0]?.options ?? [];
+  expect(off).toMatchObject({ offeredNow: false, soldOut: true });
+  for (const other of others) expect(other).not.toHaveProperty("soldOut");
+  // The Store's facts get each item's rules, to observe its stock around choices off now.
+  expect(given?.items?.[0]?.optionRules).toBeDefined();
+});

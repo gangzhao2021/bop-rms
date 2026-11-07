@@ -44,6 +44,8 @@ export interface MenuOptionRule {
     readonly defaultQuantity?: number;
     /** WP-2423 (cart-unsellable-dishes): present only when the Store doesn't offer it right now. */
     readonly offeredNow?: false;
+    /** WP-2423 (M22, M24): not offered now because it is sold out at the Store today. */
+    readonly soldOut?: true;
     /** What one adds now ("0.75" CAD); null when the Store has not priced it yet. */
     readonly price: { readonly amount: string; readonly currency: string } | null;
   }[];

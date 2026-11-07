@@ -169,6 +169,10 @@ export function publicFound(value: CustomerMenuFound): CustomerMenuFound {
                 ? { defaultQuantity: Number(option.defaultQuantity) }
                 : {}),
               ...(option.offeredNow === false ? { offeredNow: false as const } : {}),
+              // WP-2423 (M22, M24): sold out at the Store today (only with offeredNow false).
+              ...(option.offeredNow === false && option.soldOut === true
+                ? { soldOut: true as const }
+                : {}),
               incrementalPrice: { ...option.incrementalPrice },
             })),
           })),

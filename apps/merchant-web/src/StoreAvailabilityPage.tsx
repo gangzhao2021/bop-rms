@@ -18,7 +18,10 @@ import { newOperationReference } from "./operation-reference.js";
 import {
   AvailabilityPageError,
   availabilityActions,
+  commandTarget,
   floorStaffOnly,
+  optionDishesText,
+  optionMatches,
   kitchenDisplayPermissions,
   parseStoreAvailabilityView,
   soldOutText,
@@ -29,6 +32,7 @@ import {
   type AvailabilityCommand,
   type AvailabilityErrorCode,
   type AvailabilityItem,
+  type AvailabilityOption,
   type StoreAvailabilityView,
 } from "./store-availability-page.js";
 import { StorePriceCell } from "./StorePriceCell.js";
@@ -156,6 +160,8 @@ export function StoreAvailabilityPage({
   const [pending, setPending] = useState<AvailabilityCommand | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ tone: "error" | "neutral"; text: string } | null>(null);
+  // WP-2423 (M24): filters "Extras and choices" as staff type (never Enter-only).
+  const [optionSearch, setOptionSearch] = useState("");
   const reload = useCallback(() => setGeneration((value) => value + 1), []);
   // The Store's prices; null until read, or when they cannot be read (the page still works).
   const [prices, setPrices] = useState<StorePricesView | null>(null);
@@ -240,7 +246,7 @@ export function StoreAvailabilityPage({
     const command =
       pending !== null &&
       pending.action === fresh.action &&
-      pending.skuReference === fresh.skuReference
+      commandTarget(pending) === commandTarget(fresh)
         ? pending
         : fresh;
     setBusy(true);
@@ -475,6 +481,134 @@ export function StoreAvailabilityPage({
           ))}
         </table>
       )}
+      {(view.options ?? []).length === 0 ? null : (
+        <OptionAvailability
+          options={view.options ?? []}
+          permissions={permissions}
+          search={optionSearch}
+          onSearch={setOptionSearch}
+          busy={busy}
+          timeZone={view.timeZone}
+          send={send}
+        />
+      )}
     </AppFrame>
+  );
+}
+
+/**
+ * WP-2423 (M24): "Extras and choices" — one mark stops a choice (pearls) in every dish that offers
+ * it, at this Store only, for today or until further notice; the same permissions as dishes.
+ */
+function OptionAvailability({
+  options,
+  permissions,
+  search,
+  onSearch,
+  busy,
+  timeZone,
+  send,
+}: {
+  readonly options: readonly AvailabilityOption[];
+  readonly permissions: StoreAvailabilityView["permissions"];
+  readonly search: string;
+  readonly onSearch: (value: string) => void;
+  readonly busy: boolean;
+  readonly timeZone: string;
+  readonly send: (command: AvailabilityCommand, done: string) => Promise<void>;
+}) {
+  const untilBack = permissions.mayMarkUntilBack ?? permissions.mayMarkSoldOut;
+  const shown = options.filter((option) => optionMatches(option, search));
+  return (
+    <section className="availability-options" aria-labelledby="availability-options-heading">
+      <h3 id="availability-options-heading">{t("Extras and choices")}</h3>
+      <label className="availability-options__search">
+        <span>{t("Find a choice")}</span>
+        <input type="search" value={search} onChange={(event) => onSearch(event.target.value)} />
+      </label>
+      {shown.length === 0 ? (
+        <p className="availability-note">{t("No choice matches.")}</p>
+      ) : (
+        <table>
+          <thead>
+            <tr>
+              <th>{t("Choice")}</th>
+              <th>{t("Status")}</th>
+              <th aria-label={t("Actions")} />
+            </tr>
+          </thead>
+          <tbody>
+            {shown.map((option) => {
+              const mark = (until: "EndOfDay" | "UntilBack") =>
+                void send(
+                  {
+                    action: "OptionSoldOut",
+                    operationReference: newOperationReference(),
+                    optionReference: option.optionReference,
+                    until,
+                  },
+                  until === "EndOfDay"
+                    ? t("{item} is sold out for today in every dish.", { item: option.name })
+                    : t("{item} is sold out in every dish until you bring it back.", {
+                        item: option.name,
+                      }),
+                );
+              return (
+                <tr key={option.optionReference}>
+                  <td>
+                    {option.name}
+                    <p className="availability-note">{optionDishesText(option.dishNames)}</p>
+                  </td>
+                  <td data-label={t("Status")}>
+                    {option.status === "SoldOut"
+                      ? soldOutText(option.soldOutUntil, timeZone)
+                      : t("Available")}
+                  </td>
+                  <td>
+                    {!permissions.mayMarkSoldOut ? null : option.status === "SoldOut" ? (
+                      !untilBack && option.soldOutUntil === null ? (
+                        <span className="availability-note">
+                          {t(
+                            "A manager marked this sold out until further notice. Ask a manager to bring it back.",
+                          )}
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() =>
+                            void send(
+                              {
+                                action: "OptionBackOn",
+                                operationReference: newOperationReference(),
+                                optionReference: option.optionReference,
+                              },
+                              t("{item} is back on.", { item: option.name }),
+                            )
+                          }
+                        >
+                          {t("Back on")}
+                        </button>
+                      )
+                    ) : (
+                      <div className="availability-actions">
+                        <button type="button" disabled={busy} onClick={() => mark("EndOfDay")}>
+                          {t("Sold out today")}
+                        </button>
+                        {untilBack ? (
+                          <button type="button" disabled={busy} onClick={() => mark("UntilBack")}>
+                            {t("Sold out until further notice")}
+                          </button>
+                        ) : null}
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
+    </section>
   );
 }

@@ -129,6 +129,7 @@ const moduleManifestInput =
         "sku",
         "product_operation_record",
         "product_alcohol_mark",
+        "store_option_sold_out",
         "product_operation_snapshot",
         "product_publication_revision",
         "product_publication_validation_report",

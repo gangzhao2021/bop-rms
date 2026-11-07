@@ -207,6 +207,19 @@
   justify-content: flex-end;
   gap: var(--bop-space-2);
 }
+/* WP-2423 (M24): Extras and choices — plain rows after the dishes, a search that filters as typed. */
+.availability-options {
+  margin-top: var(--bop-space-6, 32px);
+}
+.availability-options__search {
+  display: grid;
+  gap: var(--bop-space-1);
+  max-width: 360px;
+  margin: var(--bop-space-2) 0;
+}
+.availability-options__search input {
+  min-height: 44px;
+}
 .availability-menu > summary {
   display: inline-flex;
   min-height: 40px;

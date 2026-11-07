@@ -1703,4 +1703,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   // WP-2423 sold-out-and-allergen-safety (M154)
   "This dish just sold out.": "这道菜刚刚售罄了。",
   "This dish was just updated. Check the choices again.": "这道菜刚刚更新了，请重新看一下选项。",
+  "Sold out today": "今天已售罄",
+  "Only {name} is left today": "今天只剩 {name}",
 });

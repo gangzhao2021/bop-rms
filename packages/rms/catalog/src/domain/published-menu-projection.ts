@@ -56,6 +56,12 @@ export interface PublishedDefaultOptionSelection {
 export function publishedDefaultOptionSelections(
   rules: readonly PublishedOptionRule[],
   channelCode: string,
+  /**
+   * WP-2423 (M22, M24): choices the Store cannot sell now. A default among them is not chosen;
+   * a group that then has fewer than its minimum takes its first choice still offered, so a dish
+   * as normally ordered is the one guests can actually order (its stock is read for that).
+   */
+  offNow: ReadonlyMap<string, unknown> | ReadonlySet<string> = new Set(),
 ): readonly PublishedDefaultOptionSelection[] {
   const offered = rules.filter(
     (rule) =>
@@ -72,7 +78,8 @@ export function publishedDefaultOptionSelections(
       for (const option of rule.options) {
         if (
           selected.has(option.optionReference) ||
-          !rule.enabledOptionReferences.includes(option.optionReference)
+          !rule.enabledOptionReferences.includes(option.optionReference) ||
+          offNow.has(String(option.optionReference))
         )
           continue;
         const quantity =
@@ -91,6 +98,36 @@ export function publishedDefaultOptionSelections(
           }),
         );
         changed = true;
+      }
+      // A required group whose default is off now: its first choice still offered stands in.
+      const defaultOff = rule.options.some(
+        (option) =>
+          offNow.has(String(option.optionReference)) &&
+          (rule.semanticsVersion === 2
+            ? (option.defaultQuantity ?? 0) >= 1
+            : option.selectedByDefault),
+      );
+      if (defaultOff && rule.minimumSelections > 0) {
+        const chosen = rule.options.filter((option) => selected.has(option.optionReference));
+        if (chosen.length < rule.minimumSelections) {
+          const next = rule.options.find(
+            (option) =>
+              !selected.has(option.optionReference) &&
+              rule.enabledOptionReferences.includes(option.optionReference) &&
+              !offNow.has(String(option.optionReference)),
+          );
+          if (next !== undefined) {
+            selected.set(
+              next.optionReference,
+              Object.freeze({
+                bindingReference: rule.bindingReference,
+                optionReference: next.optionReference,
+                quantity: 1,
+              }),
+            );
+            changed = true;
+          }
+        }
       }
     }
   }

@@ -1,10 +1,12 @@
 import {
   listBundleComboRecords,
+  listOptionsOffNow,
   listStoreAvailabilityRules,
   parseAvailabilitySafetyEvidence,
   parseCatalogCode,
   parseCatalogInstant,
   parseCatalogReference,
+  publishedDefaultOptionSelections,
   resolveStoreAvailability,
   type CustomerMenuQueryPorts,
   type CustomerMenuStoreFact,
@@ -85,11 +87,27 @@ export function createCustomerMenuStoreFacts(options: {
           (await listBundleComboRecords(tx as never, scope)).choices.map((c) => c.optionReference),
         );
         // WP-2423 (cart-unsellable-dishes): the published choices not offered right now.
-        const notOffered = await notOfferedOptions(
+        const brandOff = await notOfferedOptions(
           tx,
           scope.brandReference,
           (input.options ?? []).map((option) => String(option.optionReference)),
         );
+        // WP-2423 (M22, M24): the choices this Store cannot sell now — the same answer the cart,
+        // quote and checkout read (`listOptionsOffNow`), so the menu and the cart agree.
+        const offNow = await listOptionsOffNow(tx, {
+          ...scope,
+          channelCode: String(input.channelCode),
+          orderTypeCode: String(input.orderTypeCode),
+          observedAt: String(input.requestedAt),
+          optionReferences: (input.options ?? []).map((option) => String(option.optionReference)),
+        });
+        const soldOutOptions = new Set(
+          [...offNow].filter(([, why]) => why === "SoldOut").map(([option]) => option),
+        );
+        const notOffered = new Set([
+          ...brandOff,
+          ...[...offNow].filter(([, why]) => why === "NotOffered").map(([option]) => option),
+        ]);
         const facts = new Map<string, CustomerMenuStoreFact>();
         for (const sellable of input.sellableReferences) {
           const own = rules.filter((rule) => rule.sellableReference === sellable);
@@ -178,6 +196,7 @@ export function createCustomerMenuStoreFacts(options: {
             optionPrices,
             ...(comboChoices.size === 0 ? {} : { comboChoices }),
             ...(notOffered.size === 0 ? {} : { notOfferedOptions: notOffered }),
+            ...(soldOutOptions.size === 0 ? {} : { soldOutOptions }),
           });
         }
         // WP-2423 DEC-ALCOHOL: where and when the dishes that contain alcohol can be ordered.
@@ -196,10 +215,25 @@ export function createCustomerMenuStoreFacts(options: {
               brandReference: scope.brandReference,
               storeReference: scope.storeReference,
               observedAt: String(input.requestedAt),
-              // Only items otherwise shown as available can become sold out from stock.
-              items: input.items.filter(
-                (item) => facts.get(item.sellableReference)?.availability === "Available",
-              ),
+              // Only items otherwise shown as available can become sold out from stock. An item
+              // whose default choice is off now is observed as guests can order it (WP-2423 M22).
+              items: input.items
+                .filter((item) => facts.get(item.sellableReference)?.availability === "Available")
+                .map((item) =>
+                  offNow.size === 0 && brandOff.size === 0
+                    ? item
+                    : {
+                        ...item,
+                        defaultOptionSelections:
+                          item.optionRules === undefined
+                            ? item.defaultOptionSelections
+                            : publishedDefaultOptionSelections(
+                                item.optionRules,
+                                String(input.channelCode),
+                                new Set([...offNow.keys(), ...brandOff]),
+                              ),
+                      },
+                ),
             });
           } catch {
             // Unknown stock never hides or sells out an item; add-to-cart checks stock again.

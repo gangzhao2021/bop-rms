@@ -136,8 +136,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Yes, make it the tea": "确定，用它做茶位",
   "{choice} is not on any dish yet.": "{choice} 还没有用在任何菜品上。",
   "Add it to dishes": "把它加到菜品",
-  "{item} has no allergens declared. Declare its allergens in this menu, or publish a recipe under Recipes and assign it to this size. Then list it again.":
-    "{item} 没有申报过敏原。请在这份菜单里申报，或在配方里发布配方并分配给这个规格，然后重新上架。",
+  "{item} has no allergens answered. Open it and answer each allergen, then list again.":
+    "{item} 还没有回答过敏原。打开它逐项回答后再上架。",
   "Saved. Tea is added for each guest from the next party size recorded.":
     "已保存。从下一次记人数起，按人数加茶位。",
   "{item} is a dish. It leaves the guest menu, and every guest at a pay-later table is charged {price}. The kitchen still makes it, as set on the menu.":
@@ -166,8 +166,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "{item} 在 {store} 的某个用餐方式下没有税率，那里的客人无法报价。请检查 {store} 的税务审核或商品的税类，然后重新上架。",
   "{item} has no tax rate for one of this menu's order types at one of its Stores. Check that Store's Tax review, or the product's tax class, then list it again.":
     "{item} 在本菜单的某家门店的某个用餐方式下没有税率。请检查那家门店的税务审核或商品的税类，然后重新上架。",
-  "{item} has no recipe at {store}: its recipe is assigned to another Store only, or to none. Under Recipes, assign its recipe to this size for the whole Brand (not this store only), then list it again.":
-    "{item} 在 {store} 没有配方：它的配方只分配给了另一家门店，或没有分配。请在“配方”里把配方分配给这个规格并适用于整个品牌（不要只限本店），然后重新上架。",
+  "{item} at {store} uses a recipe for another Store only. Open it under Recipes and use it for the whole Brand, or answer its allergens in this menu.":
+    "{item} 在 {store} 用的是只给另一家店的配方。请在“配方”里改为全品牌使用，或在本菜单里回答它的过敏原。",
   "{item} at {store}: the option {value} has no published recipe change for the recipe used there. Set, review and publish it under Option recipes, then list it again.":
     "{item}（{store}）：选项 {value} 对那里使用的配方没有已发布的配方变化。请在“选项配方”里设置、审核并发布，然后重新上架。",
   "  not split by item": "  未按商品拆分",
@@ -8915,4 +8915,14 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   // WP-2423 sold-out-and-allergen-safety
   "Stock couldn't be checked just now, so items short of stock aren't marked. Refresh to try again.":
     "现在查不到库存，缺料售罄的菜没有标出来。请刷新再试。",
+  "Extras and choices": "加料和选项",
+  "Find a choice": "查找选项",
+  "No choice matches.": "没有符合的选项。",
+  "In: {list}": "用在：{list}",
+  "{item} is sold out for today in every dish.": "{item} 今天在所有菜里都已售罄。",
+  "{item} is sold out in every dish until you bring it back.":
+    "{item} 在所有菜里都已售罄，恢复前一直售罄。",
+  "{item} is back on.": "{item} 已恢复供应。",
+  "Back on": "恢复供应",
+  "Open {item}": "打开 {item}",
 });

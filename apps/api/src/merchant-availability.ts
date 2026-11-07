@@ -3,6 +3,11 @@ import { createHash } from "node:crypto";
 import {
   availabilityTargetExists,
   CatalogError,
+  changeStoreOptionSoldOut,
+  listStoreChoiceOptions,
+  listStoreOptionSoldOutMarks,
+  StoreOptionSoldOutError,
+  type StoreOptionSoldOutMark,
   createAvailabilityService,
   createPostgresAvailabilityRuleRepository,
   listBrandSkuChoices,
@@ -69,6 +74,18 @@ export type AvailabilityCommandBody =
       readonly operationReference: string;
       readonly skuReference: string;
       readonly until: "EndOfDay" | "UntilBack";
+    }
+  /** WP-2423 (M24): one choice or extra sold out at this Store, in every dish that offers it. */
+  | {
+      readonly action: "OptionSoldOut";
+      readonly operationReference: string;
+      readonly optionReference: string;
+      readonly until: "EndOfDay" | "UntilBack";
+    }
+  | {
+      readonly action: "OptionBackOn";
+      readonly operationReference: string;
+      readonly optionReference: string;
     };
 export function parseAvailabilityCommandBody(value: unknown): AvailabilityCommandBody {
   const r = value as Record<string, unknown> | null;
@@ -93,6 +110,23 @@ export function parseAvailabilityCommandBody(value: unknown): AvailabilityComman
       operationReference: ref(r.operationReference),
       skuReference: ref(r.skuReference),
       until: r.until,
+    };
+  if (
+    r.action === "OptionSoldOut" &&
+    keys === "action,operationReference,optionReference,until" &&
+    (r.until === "EndOfDay" || r.until === "UntilBack")
+  )
+    return {
+      action: "OptionSoldOut",
+      operationReference: ref(r.operationReference),
+      optionReference: ref(r.optionReference),
+      until: r.until,
+    };
+  if (r.action === "OptionBackOn" && keys === "action,operationReference,optionReference")
+    return {
+      action: "OptionBackOn",
+      operationReference: ref(r.operationReference),
+      optionReference: ref(r.optionReference),
     };
   return fail("Invalid");
 }
@@ -155,6 +189,13 @@ export function itemAvailability(
   if (results.every((status) => status === "Indeterminate"))
     return { status: "NotOffered", soldOutUntil: null };
   return { status: "Varies", soldOutUntil: null };
+}
+
+/** WP-2423 (M24): a choice's status at the Store for staff. */
+export function optionStatus(mark: StoreOptionSoldOutMark | undefined) {
+  return mark?.inEffect === true
+    ? { status: "SoldOut" as const, soldOutUntil: mark.soldOutUntil }
+    : { status: "Available" as const, soldOutUntil: null };
 }
 
 const catalogErrors: Partial<Record<CatalogError["code"], MerchantAvailabilityError["code"]>> = {
@@ -311,11 +352,19 @@ export function createMerchantAvailability(options: {
               itemAvailability(rules, s.owner, sku.skuReference, at),
             ]),
           );
-          return { s, at, skus, rules, statuses };
+          // WP-2423 (M24): the choices and extras dishes on sale offer, and this Store's marks.
+          const choices = await listStoreChoiceOptions(tx as never, s.owner);
+          const marks = await listStoreOptionSoldOutMarks(
+            tx as never,
+            s.owner,
+            choices.map((option) => option.optionReference),
+            at,
+          );
+          return { s, at, skus, rules, statuses, choices, marks };
         }),
       ),
     );
-    const { s, at, skus, rules, statuses } = read;
+    const { s, at, skus, rules, statuses, choices, marks } = read;
     // WP-2423 (M78, 2026-11-06): what guests see from stock is read the way the guest menu reads
     // it — one Repeatable Read, read-only snapshot scoped to the Store the caller was just
     // authorized for. The stock read refuses any other transaction, so reading it inside the
@@ -394,6 +443,19 @@ export function createMerchantAvailability(options: {
           (a, b) =>
             a.productName.localeCompare(b.productName) || a.skuCode.localeCompare(b.skuCode),
         ),
+      // WP-2423 (M24): "Extras and choices" — one mark stops a choice in every dish offering it.
+      options: choices
+        .map((option) => ({
+          optionReference: option.optionReference,
+          name: name(option.localizedNames, ""),
+          dishNames: option.dishNames
+            .map((names) => name(names, ""))
+            .filter((dish) => dish !== "")
+            .sort((a, b) => a.localeCompare(b)),
+          ...optionStatus(marks.get(option.optionReference)),
+        }))
+        .filter((option) => option.name !== "")
+        .sort((a, b) => a.name.localeCompare(b.name)),
     };
   };
 
@@ -410,11 +472,13 @@ export function createMerchantAvailability(options: {
             fail("PermissionDenied");
           // Q17: the today-only mark never sets "until further notice".
           if (
-            body.action === "SoldOut" &&
+            (body.action === "SoldOut" || body.action === "OptionSoldOut") &&
             body.until === "UntilBack" &&
             !s.permissions.mayMarkUntilBack
           )
             fail("PermissionDenied");
+          if (body.action === "OptionSoldOut" || body.action === "OptionBackOn")
+            return optionCommand(tx, s, body, at);
           const sku = (await listBrandSkuChoices(ptx(tx), s.owner)).find(
             (candidate) => candidate.skuReference === body.skuReference && candidate.active,
           );
@@ -423,30 +487,7 @@ export function createMerchantAvailability(options: {
           // business-day start (e.g. 04:00 after a late service), never at calendar midnight.
           const soldOutUntil =
             body.action === "SoldOut" && body.until === "EndOfDay"
-              ? String(
-                  (
-                    await createMerchantStoreBusinessDay({
-                      publication: options.persistence.publication,
-                      tenantReference: s.owner.tenantReference,
-                      brandReference: s.owner.brandReference,
-                      storeReference: s.owner.storeReference,
-                      timeZone: s.timeZone,
-                      authorize: async () =>
-                        (await s.markDecision()) !== null ||
-                        (await s.storeDecision()) !== null ||
-                        (await s.brandDecision()) !== null,
-                    })(tx, at).catch((error: unknown) => {
-                      // The Store's hours changed under the mark: read again. Anything else
-                      // (a failed read, a fault) carries on as itself and is logged.
-                      if (
-                        merchantFailureCode(error) ===
-                        "STORE_BUSINESS_DATE_CONFIGURATION_NOT_EFFECTIVE"
-                      )
-                        return fail("Conflict");
-                      throw error;
-                    })
-                  ).endsAt,
-                )
+              ? await businessDayEnd(tx, s, at)
               : null;
           // Audit summary per rule step: what changed, for which item and Store (no personal data).
           const steps = new Map<string, string>();
@@ -592,6 +633,82 @@ export function createMerchantAvailability(options: {
       ),
     );
   };
+
+  /** Q21: when the Store's business day that holds `at` ends (e.g. 04:00 after a late service). */
+  async function businessDayEnd(tx: Tx, s: Scope, at: string): Promise<string> {
+    return String(
+      (
+        await createMerchantStoreBusinessDay({
+          publication: options.persistence.publication,
+          tenantReference: s.owner.tenantReference,
+          brandReference: s.owner.brandReference,
+          storeReference: s.owner.storeReference,
+          timeZone: s.timeZone,
+          authorize: async () =>
+            (await s.markDecision()) !== null ||
+            (await s.storeDecision()) !== null ||
+            (await s.brandDecision()) !== null,
+        })(tx, at).catch((error: unknown) => {
+          // The Store's hours changed under the mark: read again. Anything else
+          // (a failed read, a fault) carries on as itself and is logged.
+          if (merchantFailureCode(error) === "STORE_BUSINESS_DATE_CONFIGURATION_NOT_EFFECTIVE")
+            return fail("Conflict");
+          throw error;
+        })
+      ).endsAt,
+    );
+  }
+
+  /**
+   * WP-2423 (M24): one choice or extra sold out at this Store (pearls in every drink), or back on.
+   * The same permissions as a dish: today's mark for floor staff, "until further notice" and
+   * bringing that back for whoever manages availability here. The mark is the Catalog's attributed,
+   * append-only record (who, when, until); nothing is changed in the Brand's option sets.
+   */
+  async function optionCommand(
+    tx: Tx,
+    s: Scope,
+    body: Extract<AvailabilityCommandBody, { action: "OptionSoldOut" | "OptionBackOn" }>,
+    at: string,
+  ) {
+    const offered = (await listStoreChoiceOptions(tx as never, s.owner)).some(
+      (option) => option.optionReference === body.optionReference,
+    );
+    if (!offered) return fail("NotFound");
+    const before = (
+      await listStoreOptionSoldOutMarks(tx as never, s.owner, [body.optionReference], at)
+    ).get(body.optionReference);
+    const soldOutNow = before?.inEffect === true;
+    if (body.action === "OptionSoldOut" && soldOutNow)
+      return { status: "Unchanged", option: optionStatus(before) };
+    if (body.action === "OptionBackOn") {
+      if (!soldOutNow) return { status: "Unchanged", option: optionStatus(before) };
+      // Q17: a manager's "until further notice" mark is brought back by a manager.
+      if (before?.soldOutUntil === null && !s.permissions.mayMarkUntilBack)
+        fail("PermissionDenied");
+    }
+    const soldOutUntil =
+      body.action === "OptionSoldOut" && body.until === "EndOfDay"
+        ? await businessDayEnd(tx, s, at)
+        : null;
+    try {
+      const after = await changeStoreOptionSoldOut(tx as never, s.owner, {
+        optionReference: body.optionReference,
+        operationReference: body.operationReference,
+        soldOut: body.action === "OptionSoldOut",
+        soldOutUntil,
+        actorReference: s.actor,
+        observedAt: at,
+      });
+      return { status: "Applied", option: optionStatus(after) };
+    } catch (error) {
+      if (error instanceof StoreOptionSoldOutError)
+        return fail(error.code === "STORE_OPTION_SOLD_OUT_INPUT_INVALID" ? "Invalid" : "Conflict");
+      // Two staff marking the same choice at once: the second reads again.
+      if ((error as { code?: unknown }).code === "23514") return fail("Conflict");
+      throw error;
+    }
+  }
 
   /**
    * The Catalog availability service with the Brand authority, or the Store's for sold-out marks

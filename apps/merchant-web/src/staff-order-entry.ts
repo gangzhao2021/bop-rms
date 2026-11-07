@@ -192,6 +192,8 @@ export interface CounterMenuOption {
   readonly conflictOptionReferences: readonly string[];
   /** WP-2423 (cart-unsellable-dishes): false while the Store does not offer it right now. */
   readonly offeredNow?: false;
+  /** WP-2423 (M22, M24): not offered now because it is sold out at the Store today. */
+  readonly soldOut?: true;
 }
 export interface CounterMenuRule {
   readonly bindingReference: string;
@@ -367,9 +369,15 @@ function counterItem(value: unknown): CounterMenuItem {
                     "selectedByDefault",
                     "incrementalPrice",
                   ],
-                  ["defaultQuantity", "offeredNow"],
+                  ["defaultQuantity", "offeredNow", "soldOut"],
                 );
                 if (option.offeredNow !== undefined && option.offeredNow !== false)
+                  return invalid();
+                // WP-2423 (M22, M24): sold out at the Store today, only with offeredNow false.
+                if (
+                  option.soldOut !== undefined &&
+                  (option.soldOut !== true || option.offeredNow !== false)
+                )
                   return invalid();
                 const increment = record(option.incrementalPrice, [
                   "status",
@@ -387,6 +395,7 @@ function counterItem(value: unknown): CounterMenuItem {
                   selectedByDefault:
                     !comboPart && option.selectedByDefault === true && option.offeredNow !== false,
                   ...(option.offeredNow === false ? { offeredNow: false as const } : {}),
+                  ...(option.soldOut === true ? { soldOut: true as const } : {}),
                   defaultQuantity:
                     typeof option.defaultQuantity === "number" &&
                     Number.isInteger(option.defaultQuantity) &&

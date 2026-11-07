@@ -43,6 +43,15 @@ const databaseAccessManifestInput = {
       piiClassification: ["indirect_identifier"],
     },
     {
+      // WP-2423 (M24): a Store's own "sold out" for one choice or extra (versioned, append-only).
+      table: "store_option_sold_out",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/catalog" },
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       // WP-2423 item 8 ⑥ part 4: the dish a combo is compiled into (append-only).
       table: "bundle_combo_dish",
       classification: "append-only-record",

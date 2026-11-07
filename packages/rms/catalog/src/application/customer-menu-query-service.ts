@@ -241,9 +241,12 @@ function publicSellable(
                 ...(rule.semanticsVersion === 2
                   ? { defaultQuantity: Number(option.defaultQuantity) }
                   : {}),
-                ...(fact?.notOfferedOptions?.has(String(option.optionReference)) === true
-                  ? { offeredNow: false as const }
-                  : {}),
+                // WP-2423 (M22, M24): sold out at the Store today, or not offered now.
+                ...(fact?.soldOutOptions?.has(String(option.optionReference)) === true
+                  ? { offeredNow: false as const, soldOut: true as const }
+                  : fact?.notOfferedOptions?.has(String(option.optionReference)) === true
+                    ? { offeredNow: false as const }
+                    : {}),
                 incrementalPrice: Object.freeze(
                   optionPrice(fact, rule.bindingReference, option.optionReference),
                 ),
@@ -494,6 +497,7 @@ export function createCustomerMenuQueryService(ports: CustomerMenuQueryPorts) {
                         item.optionRules,
                         input.channelCode,
                       ),
+                      optionRules: item.optionRules,
                     }),
                   ),
               ),

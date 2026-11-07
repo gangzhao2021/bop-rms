@@ -3,7 +3,10 @@ import type {
   CustomerMenuQueryResult,
 } from "../../contracts/customer-menu-query.js";
 import type { PublishedMenuProjection } from "../../contracts/published-menu-projection.js";
-import type { PublishedDefaultOptionSelection } from "../../domain/published-menu-projection.js";
+import type {
+  PublishedDefaultOptionSelection,
+  PublishedOptionRule,
+} from "../../domain/published-menu-projection.js";
 import type { CatalogReference } from "../../contracts/product.js";
 
 export interface CustomerMenuStoreContext {
@@ -33,6 +36,12 @@ export interface CustomerMenuStoreFact {
    * now (absent or empty: all offered). The menu still shows them, greyed, never pre-chosen.
    */
   readonly notOfferedOptions?: ReadonlySet<string>;
+  /**
+   * WP-2423 (M22, M24): the item's choices sold out at the Store now — its own mark on the choice,
+   * or a combo dish marked sold out. Shown "Sold out today", never pre-chosen; the cart, quote and
+   * checkout refuse them from the same answer (`listOptionsOffNow`).
+   */
+  readonly soldOutOptions?: ReadonlySet<string>;
 }
 
 export interface CustomerMenuQueryPorts {
@@ -71,6 +80,8 @@ export interface CustomerMenuQueryPorts {
         readonly sellableReference: CatalogReference;
         readonly productVersionReference: CatalogReference;
         readonly defaultOptionSelections: readonly PublishedDefaultOptionSelection[];
+        /** WP-2423 (M22, M24): its published rules, to choose again around choices off now. */
+        readonly optionRules?: readonly PublishedOptionRule[];
       }[];
     }): Promise<ReadonlyMap<string, CustomerMenuStoreFact>>;
   };

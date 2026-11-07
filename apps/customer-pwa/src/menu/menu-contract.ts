@@ -174,9 +174,12 @@ function optionRule(value: unknown): MenuOptionRule {
         candidate !== null &&
         typeof candidate === "object" &&
         Object.hasOwn(candidate, "offeredNow");
+      // WP-2423 (M22, M24): `soldOut: true` (only with `offeredNow: false`) — sold out today.
+      const soldOut = off && Object.hasOwn(candidate, "soldOut");
       const option = exact(candidate, [
         ...(quantity ? ["defaultQuantity"] : []),
         ...(off ? ["offeredNow"] : []),
+        ...(soldOut ? ["soldOut"] : []),
         "optionReference",
         "name",
         "maximumQuantity",
@@ -208,6 +211,7 @@ function optionRule(value: unknown): MenuOptionRule {
         Number(option.maximumQuantity) > 999 ||
         typeof option.selectedByDefault !== "boolean" ||
         (off && option.offeredNow !== false) ||
+        (soldOut && option.soldOut !== true) ||
         conflictOptionReferences.includes(optionReference) ||
         !(
           (incrementalPrice.status === "Available" &&
@@ -232,6 +236,7 @@ function optionRule(value: unknown): MenuOptionRule {
         selectedByDefault: option.selectedByDefault,
         ...(quantity ? { defaultQuantity } : {}),
         ...(off ? { offeredNow: false as const } : {}),
+        ...(soldOut ? { soldOut: true as const } : {}),
         price:
           incrementalPrice.status === "Available"
             ? Object.freeze({
