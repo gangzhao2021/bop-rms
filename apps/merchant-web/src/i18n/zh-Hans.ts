@@ -8358,6 +8358,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "guest asked": "客人要求",
   refunded: "已退款",
   "refund in progress": "退款处理中",
+  "not refunded yet": "尚未退款",
   "Guest cancelled": "客人取消",
   "Cancelled by staff": "员工取消",
   "Not accepted in time": "未及时接单",

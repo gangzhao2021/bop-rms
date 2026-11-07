@@ -86,7 +86,12 @@ export function causeTitle(item: OrderExceptionItem): string | null {
   const cause = item.cause;
   if (item.kind !== "PaidWithoutFulfillableOrder" || cause === undefined) return null;
   const refunded = item.compensationStatus === "Completed";
-  const back = refunded ? t("refunded") : t("refund in progress");
+  // No refund started: say so plainly, so staff do not assume the guest is being paid back.
+  const back = refunded
+    ? t("refunded")
+    : item.compensationStatus === "Pending"
+      ? t("refund in progress")
+      : t("not refunded yet");
   const reason = (code: string) =>
     stopReasonText[code] === undefined ? "" : " · " + (stopReasonText[code] as string);
   switch (cause.kind) {

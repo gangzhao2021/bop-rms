@@ -591,6 +591,20 @@ describe("v15 M44: a paid order that will not be made is named by why it ended",
     expect(causeTitle(item({ kind: "PaymentWindowExpired" }, "Pending"))).toBe(
       "Paid after the order had closed · refund in progress",
     );
+    // No refund started yet: the title never says money is moving.
+    for (const cause of [
+      { kind: "StoreRejected", reasonCode: "SOLD_OUT" },
+      { kind: "StaffCancelled", reasonCode: "STORE_ERROR" },
+      { kind: "NotAcceptedInTime" },
+    ]) {
+      const title = causeTitle(item(cause, "NotRequested")) as string;
+      expect(title.endsWith(" · not refunded yet")).toBe(true);
+      expect(title).not.toContain("refund in progress");
+      expect(title).not.toContain("refunded automatically");
+    }
+    expect(
+      causeTitle(item({ kind: "StoreRejected", reasonCode: "SOLD_OUT" }, "NotRequested")),
+    ).toBe("Rejected · sold out · not refunded yet");
     // Not known: the kind stays the title.
     expect(causeTitle(item(undefined))).toBeNull();
     expect(causeTitle(item({ kind: "Other" }))).toBeNull();
