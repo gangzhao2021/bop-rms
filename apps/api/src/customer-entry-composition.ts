@@ -105,11 +105,11 @@ const unavailable = Object.freeze({ status: "EntryUnavailable" } as const);
 
 /** At most this many earlier visits are kept on a phone besides its current one. */
 export const customerEntryEarlierVisitLimit = 2;
-type PresentedVisit = {
+interface PresentedVisit {
   readonly source: "Current" | "Earlier";
   readonly credential: string;
   readonly result: Awaited<ReturnType<GuestSessionService["resumeForEntry"]>>;
-};
+}
 async function presentedVisits(
   session: CustomerEntryCompositionOptions["session"],
   input: CustomerEntryPortInput,
