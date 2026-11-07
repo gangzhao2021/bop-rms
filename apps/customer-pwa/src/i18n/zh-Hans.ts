@@ -1598,7 +1598,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Still adding; the restaurant's system is busy. No need to tap again.":
     "还在加入，餐厅系统有点忙，不用再按。",
   "Checking your payment — don’t pay again": "正在确认付款，请不要重复付款",
-  "We’re checking with the bank. This page updates by itself.": "正在向银行确认，本页会自动更新。",
+  "We’re checking your payment. This page updates by itself.": "正在确认你的付款，本页会自动更新。",
   "Check now": "立即查看",
   "Time to pay ran out": "付款时间已过",
   "Your order was cancelled and you haven’t been charged.": "订单已取消，没有扣款。",

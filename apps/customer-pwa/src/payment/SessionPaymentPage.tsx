@@ -664,7 +664,7 @@ function PreparedSessionPaymentPage({
       {status === "unknown" && resolution === "checking" ? (
         <section className="checkout-attention" role="alert">
           <h2>{t("Checking your payment — don’t pay again")}</h2>
-          <p>{t("We’re checking with the bank. This page updates by itself.")}</p>
+          <p>{t("We’re checking your payment. This page updates by itself.")}</p>
           <button
             type="button"
             disabled={!online}
