@@ -36,6 +36,7 @@ import type {
 } from "./types.js";
 import { watchTableOpening } from "./table-open-recheck.js";
 import type { MenuClosedStore } from "../menu/types.js";
+import { createMenuTableJoiner } from "./menu-table-joiner.js";
 
 const unavailableClient: CustomerEntryClient = Object.freeze({
   hasEntry: false,
@@ -609,24 +610,7 @@ function EntryNextSteps({
       setGuestTableJoiner(null);
       return;
     }
-    const join = async (): Promise<GuestTableStartAnswer> => {
-      try {
-        const result = await diningAdmission.journey.start({
-          operationReference: diningAdmission.generateOperationReference(),
-          joinCredential: null,
-        });
-        if (
-          result === null ||
-          typeof result !== "object" ||
-          (result as { status?: unknown }).status !== "Bound"
-        )
-          return "Refused";
-      } catch (error) {
-        return admissionStateForFailure(error) === "TableInUse" ? "InUse" : "Refused";
-      }
-      setGuestTableJoiner(null);
-      return "Started";
-    };
+    const join = createMenuTableJoiner(diningAdmission, () => setGuestTableJoiner(null));
     setGuestTableJoiner(join);
   }, [first, diningAdmission, context, starting]);
   return (

@@ -482,6 +482,20 @@ it("lets a guest join an open table by its QR code, with staff pause, removal an
       assert.equal(second.status, "Joined");
       const phone2 = second.participant.participantReference;
       assert.notEqual(second.session.hostParticipantReference, phone2);
+      // WP-2423 M115: a phone that already joined and scans again with a new operation (as a
+      // menu tap after a lost answer would) never becomes a second guest at the table: nothing is
+      // joined. The menu's join therefore resumes its own operation, never starts a new one.
+      const participantsBefore = (await counts()).participants;
+      const again = await issue(20, 81, 170, 3);
+      assert.equal(again.status, "Issued");
+      let repeat;
+      try {
+        repeat = await join(again.joinCredential, 81, 670, 3);
+      } catch (error) {
+        repeat = { status: "Threw", code: error?.code };
+      }
+      assert.ok(!["Joined", "AlreadyApplied"].includes(repeat.status), JSON.stringify(repeat));
+      assert.equal((await counts()).participants, participantsBefore);
       // The issued code is used once: a second join with it is refused.
       const issued = await issue(20, 82, 103, 4);
       assert.equal(issued.status, "Issued");
