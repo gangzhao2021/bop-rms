@@ -662,9 +662,12 @@ for (const screen of [
           await page.clock.fastForward(600_001);
           // WP-2423 M125: one message once the hold ended; never "saved" beside it.
           await expect(
-            page.getByText("Price hold ended. Tap Refresh prices. Your details are kept.", {
-              exact: true,
-            }),
+            page.getByText(
+              "Time to continue has ended. Tap Refresh prices. Your details are kept.",
+              {
+                exact: true,
+              },
+            ),
           ).toBeVisible();
           await expect(page.getByText("Checkout details saved.", { exact: true })).toHaveCount(0);
           await expect(name).toBeDisabled();

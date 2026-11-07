@@ -219,7 +219,9 @@ describe("CUST-CHECKOUT page contract", () => {
 
   it("marks an expired Quote and offers a fresh idempotent request", () => {
     const html = render({ status: "ready", cart, quote }, Date.parse("2026-08-12T00:06:00.000Z"));
-    expect(html).toContain("Price hold ended. Tap Refresh prices. Your details are kept.");
+    expect(html).toContain(
+      "Time to continue has ended. Tap Refresh prices. Your details are kept.",
+    );
     expect(html).toContain("Refresh prices");
   });
 
@@ -308,7 +310,7 @@ describe("WP-2423 item 6: a table that pays at the end reaches this page only fo
     expect(html).toContain('<h2 id="page-heading">Place order</h2>');
     expect(html).toContain("Place order · $1.13");
     expect(html).not.toContain("checkout-progress");
-    expect(html).not.toContain("Prices held for");
+    expect(html).not.toContain("Continue within");
     expect(html).not.toContain("checkout-tip");
     expect(html).not.toContain(">Checkout<");
     expect(html).toContain("Nothing is charged now.");
@@ -319,7 +321,7 @@ describe("WP-2423 item 6: a table that pays at the end reaches this page only fo
       "PayFirst",
     );
     expect(html).toContain("checkout-progress");
-    expect(html).toContain("Prices held for 4:00");
+    expect(html).toContain("Continue within 4:00");
     expect(html).not.toContain("Place order");
   });
 });
@@ -382,15 +384,16 @@ describe("WP-2423 guest-payment-state: what the guest pays, and until when", () 
     expect(html).toContain("The restaurant just updated its menu, so we priced your order again.");
   });
 
-  it("M125: the prices are held with a countdown, and the last minute is announced", () => {
+  it("M125: a countdown says how long to continue with this total, never a price hold, and the last minute is announced", () => {
     expect(render({ status: "ready", cart, quote: priced("599") })).toContain(
-      "Prices held for 4:00",
+      "Continue within 4:00",
     );
     const late = render(
       { status: "ready", cart, quote: priced("599") },
       Date.parse("2026-08-12T00:04:10.000Z"),
     );
-    expect(late).toContain("Prices held for 0:50");
-    expect(late).toContain("Your prices are held for 1 more minute.");
+    expect(late).toContain("Continue within 0:50");
+    expect(late).toContain("1 minute left. Continue now, or we’ll check prices again.");
+    expect(late).not.toMatch(/price hold|prices held/iu);
   });
 });

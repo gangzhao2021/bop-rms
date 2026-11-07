@@ -527,7 +527,7 @@ for (const screen of [
       // Nothing about paying or a price lock on the way.
       await expect(main.getByRole("heading", { name: "Tip", exact: true })).toHaveCount(0);
       await expect(main).not.toContainText("Checkout");
-      await expect(main).not.toContainText("Prices held for");
+      await expect(main).not.toContainText("Continue within");
       await expectNoInternalText(page);
       // The notes qualify the button: they read with it at every width, not across the page.
       const widths = screen.touch ? [screen.width] : [1024, screen.width];
@@ -764,7 +764,7 @@ test.describe("@production Pay-later table, the round just placed", () => {
     await expect(main.getByRole("button", { name: "Save details" })).toHaveCount(0);
     await expect(main.getByRole("button", { name: "Reload checkout details" })).toHaveCount(0);
     await expect(main.getByRole("list", { name: "Checkout progress" })).toHaveCount(0);
-    await expect(main).not.toContainText("Prices held for");
+    await expect(main).not.toContainText("Continue within");
     expect(table.sent).toEqual([]);
   });
 

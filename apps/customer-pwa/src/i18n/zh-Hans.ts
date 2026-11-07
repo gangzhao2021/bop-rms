@@ -1617,11 +1617,11 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "这单还未付款。请在 {time} 前付款，否则会取消，不会扣款。",
   "This order was cancelled because it wasn’t paid in time. You weren’t charged.":
     "这单因未按时付款已取消，没有扣款。",
-  "Price hold ended. Tap Refresh prices. Your details are kept.":
-    "价格保留已结束。请点“刷新价格”，已填信息会保留。",
-  "Prices held for {left}": "价格保留 {left}",
-  "Your prices are held for 1 more minute. Continue now, or we’ll check them again.":
-    "价格只再保留 1 分钟。请现在继续，否则会重新核价。",
+  "Time to continue has ended. Tap Refresh prices. Your details are kept.":
+    "继续时间已过。请点“刷新价格”，已填信息会保留。",
+  "Continue within {left}": "请在 {left} 内继续",
+  "1 minute left. Continue now, or we’ll check prices again.":
+    "还剩 1 分钟。请现在继续，否则会重新核价。",
   "New total {total}": "新合计 {total}",
   "I accept the new prices": "我接受新价格",
   "A tip can’t be more than the order itself ({subtotal}). Ask staff if you’d like to leave more.":

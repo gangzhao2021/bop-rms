@@ -47,7 +47,10 @@ export function customTipCheck(
   return tip * 100n > base * largeTipPercent ? "confirm" : "ok";
 }
 
-/** WP-2423 M125: how long the confirmed prices are still held, as the page shows it. */
+/**
+ * WP-2423 M125: how long the priced total can still be continued with, as the page shows it. Not
+ * a price hold (Owner #26 shortfall in WP-2423): a menu change inside it is still re-priced.
+ */
 export function priceHold(
   expiresAt: string,
   nowMs: number,

@@ -589,12 +589,16 @@ export const checkoutText = Object.freeze({
     return t("Tip");
   },
   get pricesExpired() {
-    return t("Price hold ended. Tap Refresh prices. Your details are kept.");
+    return t("Time to continue has ended. Tap Refresh prices. Your details are kept.");
   },
-  /** WP-2423 M125: the countdown of the confirmed prices (m:ss). */
-  pricesHeldFor: (left: string) => t("Prices held for {left}", { left }),
-  get pricesHeldLastMinute() {
-    return t("Your prices are held for 1 more minute. Continue now, or we’ll check them again.");
+  /**
+   * WP-2423 M125: how long this total can be continued with (m:ss). It is not a price hold: a
+   * menu change inside it still asks the guest to accept the new prices (Owner #26 shortfall,
+   * WP-2423), so the wording never promises one.
+   */
+  continueWithin: (left: string) => t("Continue within {left}", { left }),
+  get continueLastMinute() {
+    return t("1 minute left. Continue now, or we’ll check prices again.");
   },
   /** WP-2423 M74: after the dishes whose price changed. */
   newTotal: (total: string) => t("New total {total}", { total }),
