@@ -74,9 +74,7 @@ export class MerchantOneStoreDishError extends Error {
        * WP-2423 M71: what "List it" was confirmed for is not what is waiting now (someone saved a
        * price since the review was shown): look again, then list.
        */
-      | "PricesChangedSinceShown"
-      /** WP-2423 M69: dishes on the menu have no allergens answered yet; nothing was listed. */
-      | "AllergensUndeclared",
+      | "PricesChangedSinceShown",
   ) {
     super(code);
     this.name = "MerchantOneStoreDishError";
@@ -1202,29 +1200,10 @@ export function createMerchantOneStoreDishes(options: {
     // WP-2423 (v15 2026-11-05): a choice group turned into "a quantity of each" under Option sets:
     // its "no change" option recipes are carried to the new quantities first (a real change stays
     // for a person, and the check below names it). A stop here comes before anything is listed.
-    const menu = (await loadMenu(session, body.menuReference)) as MenuBuilder & {
-      sellables?: readonly {
-        skuReference: string;
-        productName: string;
-        allergens?: { source: string };
-      }[];
-    };
+    const menu = await loadMenu(session, body.menuReference);
     const skus = new Set(
       menu.menu.sections.flatMap((s) => s.items.map((item) => item.skuReference)),
     );
-    // WP-2423 M69: dishes whose allergens nobody answered are named first, before anything slow
-    // runs or anything is written (the menu's own check below stays the full guard).
-    const undeclared = [
-      ...new Set(
-        (menu.sellables ?? [])
-          .filter((x) => skus.has(x.skuReference) && x.allergens?.source === "None")
-          .map((x) => x.productName),
-      ),
-    ];
-    if (undeclared.length > 0)
-      throw Object.assign(new MerchantOneStoreDishError("AllergensUndeclared"), {
-        problem: { dishes: undeclared.slice(0, 20), count: undeclared.length },
-      });
     // WP-2423 M71: the menu's own price draft must be the one the review showed, unchanged; a
     // price change started on the Prices page is never listed from here.
     const priceBooks = await priceList(session);
@@ -1244,26 +1223,42 @@ export function createMerchantOneStoreDishes(options: {
           confirmed.aggregateVersion !== menuDraft.aggregateVersion
     )
       return fail("PricesChangedSinceShown");
-    try {
-      await options.optionRecipes.extendNoChangeChoices({
-        ...session,
-        operationReference: body.operationReference,
-        skuReferences: skus,
-      });
-    } catch (error) {
-      // Not allowed to read or set option recipes: nothing is carried over, and the check below
-      // names any choice that needs a person (as it did before).
-      if (!(error instanceof MerchantOptionRecipeError && error.code === "PermissionDenied"))
-        throw Object.assign(new MerchantOneStoreDishError("ChoiceRecipesStopped"), {
-          cause: error,
+    // WP-2423 M69: the menu's own check first. A dish whose allergens nobody answered (no recipe)
+    // is refused at once, before the slow carrying of choices below; any other gap may be one that
+    // carrying fixes, so it goes on and the check runs again after it.
+    const checked = await options.menus
+      .command({ ...session, body: { action: "Check", menuReference: body.menuReference } })
+      .then(
+        () => true,
+        (error: unknown) => {
+          const missing = (error as { problem?: { missing?: unknown } } | null)?.problem?.missing;
+          if (error instanceof Error && error.name === "MerchantMenuError" && missing === "Recipe")
+            throw error;
+          return false;
+        },
+      );
+    if (!checked) {
+      try {
+        await options.optionRecipes.extendNoChangeChoices({
+          ...session,
+          operationReference: body.operationReference,
+          skuReferences: skus,
         });
+      } catch (error) {
+        // Not allowed to read or set option recipes: nothing is carried over, and the check below
+        // names any choice that needs a person (as it did before).
+        if (!(error instanceof MerchantOptionRecipeError && error.code === "PermissionDenied"))
+          throw Object.assign(new MerchantOneStoreDishError("ChoiceRecipesStopped"), {
+            cause: error,
+          });
+      }
+      // v15 2026-10-29 finding c: nothing is published while the menu itself could not be listed
+      // (its tax, choice recipes or allergen list): prices never go live ahead of their menu.
+      await options.menus.command({
+        ...session,
+        body: { action: "Check", menuReference: body.menuReference },
+      });
     }
-    // v15 2026-10-29 finding c: nothing is published while the menu itself could not be listed
-    // (its tax, choice recipes or allergen list): prices never go live ahead of their menu.
-    await options.menus.command({
-      ...session,
-      body: { action: "Check", menuReference: body.menuReference },
-    });
     // Combos with saved changes first: each is listed alone at the Brand's one store.
     if (options.combos !== undefined)
       await options.combos.listDrafts({ ...session, operationReference: step("combos") });

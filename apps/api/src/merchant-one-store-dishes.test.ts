@@ -80,9 +80,8 @@ function fakes() {
     perRound: 12,
     /** The menu's own check refuses (a choice without a recipe). */
     menuRefused: false,
-    /** WP-2423 M69: dishes on the menu as the menu view reads them (absent: not read). */
-    sellables: undefined as
-      { skuReference: string; productName: string; allergens: { source: string } }[] | undefined,
+    /** WP-2423 M69: the menu's check finds a dish with no recipe (no allergens answered). */
+    recipeMissing: false,
     // Store availability by size: absent = never decided here (NotOffered).
     offered: new Map<string, string>([[id(12), "Hidden"]]),
   };
@@ -249,11 +248,16 @@ function fakes() {
       query: async () => ({
         menu: state.menu,
         publication: state.published ? { state: "Published" } : null,
-        ...(state.sellables === undefined ? {} : { sellables: state.sellables }),
       }),
       command: async ({ body }: { body: Record<string, unknown> }) => {
         record("menu", body);
         if (body.action === "Check") {
+          if (state.recipeMissing)
+            throw Object.assign(new Error("refused"), {
+              name: "MerchantMenuError",
+              code: "ReviewBlocked",
+              problem: { missing: "Recipe", productName: "Dan dan noodles (TEST)" },
+            });
           if (state.menuRefused)
             throw Object.assign(new Error("refused"), {
               name: "MerchantMenuError",
@@ -546,7 +550,8 @@ describe("WP-2423 item 8 ⑥ one dish saved from the one-page menu", () => {
         body: listAll(id(102), state),
       }),
     ).rejects.toMatchObject({ code: "OptionRecipeMissing" });
-    expect(calls).toEqual(["menu:Check"]);
+    // A gap carrying choices may fill is checked again after it; still refused, nothing listed.
+    expect(calls).toEqual(["menu:Check", "menu:Check"]);
     expect(state.assigned).toBeNull();
   });
 
@@ -554,6 +559,9 @@ describe("WP-2423 item 8 ⑥ one dish saved from the one-page menu", () => {
     const { calls, state, dishes } = fakes();
     await dishes.command({ ...session, body: save() });
     calls.length = 0;
+    // The check finds choices without their recipes (a group's new quantities): carrying them
+    // over stops.
+    state.menuRefused = true;
     state.extendFails = new Error("lock timeout");
     const stopped = await dishes
       .command({
@@ -565,8 +573,8 @@ describe("WP-2423 item 8 ⑥ one dish saved from the one-page menu", () => {
       name: "MerchantOneStoreDishError",
       code: "ChoiceRecipesStopped",
     });
-    // Nothing checked, nothing published: the prices sentence would be false.
-    expect(calls).toEqual([]);
+    // Checked once, nothing published: the prices sentence would be false.
+    expect(calls).toEqual(["menu:Check"]);
     expect(state.assigned).toBeNull();
   });
 
@@ -695,25 +703,16 @@ describe("WP-2423 item 8 ⑥ one dish saved from the one-page menu", () => {
     ).rejects.toMatchObject({ code: "PriceChanged" });
   });
 
-  it("WP-2423 M69: names dishes without allergens before anything slow runs", async () => {
+  it("WP-2423 M69: a dish without allergens is refused before anything slow runs", async () => {
     const { calls, state, dishes } = fakes();
     await dishes.command({ ...session, body: save({ allergens: null }) });
-    state.sellables = [
-      {
-        skuReference: id(11),
-        productName: "Dan dan noodles (TEST)",
-        allergens: { source: "None" },
-      },
-    ];
+    state.recipeMissing = true;
     state.extendFails = new Error("must not run");
     calls.length = 0;
     await expect(
       dishes.command({ ...session, body: listAll(id(130), state) }),
-    ).rejects.toMatchObject({
-      code: "AllergensUndeclared",
-      problem: { dishes: ["Dan dan noodles (TEST)"], count: 1 },
-    });
-    expect(calls).toEqual([]);
+    ).rejects.toMatchObject({ code: "ReviewBlocked", problem: { missing: "Recipe" } });
+    expect(calls).toEqual(["menu:Check"]);
   });
 
   it("accepts only a whole dish or a listing", () => {

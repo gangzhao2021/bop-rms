@@ -47,9 +47,9 @@ export interface MenuDish {
   /** What this Store will charge once listed, when different (null: none). */
   readonly pendingPriceMinor: string | null;
   /** WP-2423 M70: the Brand price, this Store's own (null: none) and a waiting Brand price. */
-  readonly brandPriceMinor: string | null;
-  readonly storePriceMinor: string | null;
-  readonly pendingBrandPriceMinor: string | null;
+  readonly brandPriceMinor?: string | null;
+  readonly storePriceMinor?: string | null;
+  readonly pendingBrandPriceMinor?: string | null;
   /** The dish (product) of the size; null in views without it. */
   readonly productReference: string | null;
   readonly soldOut: boolean;
@@ -57,6 +57,8 @@ export interface MenuDish {
   readonly featured: boolean;
   /** Where its allergens come from: declared by staff here, a real recipe, or not yet. */
   readonly allergens: DishAllergens;
+  /** WP-2423 M69: answered at all, a recipe bound at this Store included ("List it" waits). */
+  readonly allergensAnswered?: boolean;
   readonly sizes: readonly MenuSize[];
 }
 export interface MenuSectionRow {
@@ -146,6 +148,9 @@ function dishOf(
     hidden: sku.offeredHere === false || status === "NotOffered" || status === "Unavailable",
     featured,
     allergens: sku.allergens ?? { source: "None", declared: [] },
+    // A view without allergen facts cannot say: the server's own check stays the guard.
+    allergensAnswered:
+      sku.allergensAnswered ?? (sku.allergens === undefined || sku.allergens.source !== "None"),
     sizes: [
       {
         skuReference: sku.skuReference,

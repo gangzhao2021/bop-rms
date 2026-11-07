@@ -122,9 +122,7 @@ export const menuErrorText: Record<MenuErrorCode | "Loading", string> = {
   PricesMoved: t(
     "Another price change went live after these menu prices were changed. Nothing was listed. Apply your price changes to the prices in use, check them, then list.",
   ),
-  AllergensUndeclared: t(
-    "Some dishes on the menu have no allergens answered yet. Nothing was listed. Answer them first.",
-  ),
+  CodeTaken: t("A choice group by that name already exists. It is ticked below."),
   ManySizes: t("This dish has more than one size. Change it on the Products page."),
   NotADish: t("A combo can only offer dishes on sale, not another combo. Choose its dishes again."),
   ChoiceRecipesStopped: t(

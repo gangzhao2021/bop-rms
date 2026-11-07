@@ -43,7 +43,9 @@ export function MenuListingReview({
   };
   const elsewhere = view.priceChangesOnPricesPage ?? 0;
   const moved = draft?.movedSinceStart === true;
-  const blocked = undeclared.length > 0 || moved;
+  // Allergens are named here, and the server's own check refuses the listing until they are
+  // answered (a recipe at this Store answers them although this page cannot always tell).
+  const blocked = moved;
   return (
     <section className="one-menu__pending one-menu__review" aria-labelledby="listing-review">
       <h3 id="listing-review">{t("What goes live")}</h3>

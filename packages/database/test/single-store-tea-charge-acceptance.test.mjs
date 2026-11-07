@@ -457,8 +457,8 @@ it("tea charge: a new dish declared with no stock ingredients is listed, chosen 
           },
         });
 
-      // 1. A new tea dish, $1.50. Without a recipe the listing review stops at it, and it is not a
-      // tea choice (not on the listed menu).
+      // 1. A new tea dish, $1.50. Without a recipe the listing review stops at it (WP-2423 M69: at
+      // once, before choices are carried), and it is not a tea choice (not on the listed menu).
       const teaDish = await saveDish("Tea charge (TEST)", "茶位", "150");
       const tea = teaDish.skuReference;
       const blocked = await listAll().then(

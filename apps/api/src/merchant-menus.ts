@@ -938,8 +938,18 @@ export function createMerchantMenus(options: {
         });
     }
     await brandScope(tx, s.owner.brandReference);
+    // WP-2423 M69: sizes whose allergens come from a recipe bound at this Store (a Store's own
+    // recipe answers them too, although the dish editor shows the Brand's).
+    const recipeHere = new Set(
+      recipes.flatMap((recipe) =>
+        recipe.bindings
+          .filter((b) => b.storeReference === s.owner.storeReference)
+          .map((b) => b.skuReference),
+      ),
+    );
     return {
       bySku,
+      recipeHere,
       choices: (registry?.entries ?? []).map((entry) => ({
         allergenReference: entry.allergenReference,
         name: name(entry.localizedNames, entry.code),
@@ -1272,6 +1282,10 @@ export function createMerchantMenus(options: {
                     itemReference: null,
                     noIngredients: false,
                   },
+                  // WP-2423 M69: whether its allergens are answered at all ("List it" waits).
+                  allergensAnswered:
+                    (allergens.bySku.get(sku.skuReference)?.source ?? "None") !== "None" ||
+                    allergens.recipeHere.has(sku.skuReference),
                 })),
                 allergenChoices: allergens.choices,
                 keepsStock: allergens.keepsStock,

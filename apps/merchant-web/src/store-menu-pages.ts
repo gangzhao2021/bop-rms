@@ -71,8 +71,6 @@ export type MenuErrorCode =
   | "PricesChangedSinceShown"
   /** WP-2423 M71: another price change went live after these menu prices were started. */
   | "PricesMoved"
-  /** WP-2423 M69: dishes on the menu have no allergens answered yet. */
-  | "AllergensUndeclared"
   /** WP-2423 M134: the Brand already has a choice group by that name. */
   | "CodeTaken"
   | "Offline"
@@ -429,6 +427,8 @@ export interface MenuSellable {
   readonly offeredHere?: boolean;
   /** WP-2423 item 8 ⑥: where the dish's allergens come from (absent from older views: None). */
   readonly allergens?: DishAllergens;
+  /** WP-2423 M69: its allergens are answered (declared, or a recipe here); absent: from source. */
+  readonly allergensAnswered?: boolean;
 }
 export type AllergenClassification = "Contains" | "CrossContactPossible";
 export interface DishAllergens {
@@ -1045,7 +1045,6 @@ const codes = new Set<MenuErrorCode>([
   "NoBrandPriceYet",
   "PricesChangedSinceShown",
   "PricesMoved",
-  "AllergensUndeclared",
   "CodeTaken",
 ]);
 export function createMenuClient(csrf: string, fetcher: typeof fetch = fetch): MenuClient {

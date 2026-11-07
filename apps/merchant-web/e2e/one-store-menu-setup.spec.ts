@@ -1280,7 +1280,11 @@ test("@production a listing stopped by a dish with no allergens points to those 
     },
   });
   await page.goto("/app/commerce/menus");
+  // WP-2423 M69: "List it" shows what goes live first and names the dish with no allergens.
   await page.getByRole("button", { name: "List it" }).click();
+  const review = page.getByRole("region", { name: "What goes live" });
+  await expect(review.getByText("Answer allergens for 1 dish first: Coffee (TEST).")).toBeVisible();
+  await review.getByRole("button", { name: "List it" }).click();
   const refusal = page.getByText("Coffee (TEST) has no allergens declared.", { exact: false });
   await expect(refusal).toBeVisible();
   await expect(page.getByText("as a charge", { exact: false })).toHaveCount(0);
@@ -1290,6 +1294,10 @@ test("@production a listing stopped by a dish with no allergens points to those 
   // A save part-way through a listing says to list it again.
   f.failSaves.push({ status: 409, json: { error: "StoppedPartWay", part: "OneStoreDish" } });
   await page.getByRole("button", { name: "List it" }).click();
+  await page
+    .getByRole("region", { name: "What goes live" })
+    .getByRole("button", { name: "List it" })
+    .click();
   await expect(
     page.getByText(
       "Listing stopped part-way. New prices may already be showing to guests; the menu is not updated yet. List it again to finish.",

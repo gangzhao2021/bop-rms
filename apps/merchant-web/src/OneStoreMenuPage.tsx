@@ -366,7 +366,7 @@ export function OneStoreMenuPage({
   const undeclaredOnMenu = [
     ...new Set(
       rows.flatMap((row) =>
-        row.dishes.filter((dish) => dish.allergens.source === "None").map((dish) => dish.name),
+        row.dishes.filter((dish) => dish.allergensAnswered === false).map((dish) => dish.name),
       ),
     ),
   ];
@@ -468,6 +468,8 @@ export function OneStoreMenuPage({
   // WP-2423 item 8 ⑥ part 2: "List it" — the menu as saved takes effect for guests, no review.
   const listMenu = async () => {
     if (client.command === undefined || blocked) return;
+    // The review was confirmed: what happens next is said where "List it" was.
+    setReviewing(false);
     // merchant-outage-recovery M103: with no network nothing is sent and nothing shows as listing.
     if (browserOffline()) {
       setProblem(
@@ -1170,7 +1172,7 @@ export function OneStoreMenuPage({
                   underway || listing !== null ? void listMenu() : setReviewing(true)
                 }
               >
-                {underway || listing !== null ? t("Continue listing") : t("List it")}
+                {underway ? t("Continue listing") : t("List it")}
               </button>
             </div>
           ) : (
