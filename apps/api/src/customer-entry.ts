@@ -44,6 +44,11 @@ export interface CustomerEntryPortInput {
    * table code answers AlreadyAtTable instead of starting a second visit for the same phone.
    */
   readonly presentedTable?: CustomerEntryPresentedTable;
+  /**
+   * Identity says this browser's own Guest Session is seated at this table, but Dining could not
+   * be read to confirm it (an outage): nobody can say whether this phone is already there.
+   */
+  readonly presentedTableUnconfirmed?: CustomerEntryPresentedTable;
 }
 export interface CustomerEntryPresentedCredential {
   readonly source: "Current" | "Earlier";
@@ -212,14 +217,18 @@ export interface CustomerEntryHandlerOptions {
   readonly uuidV7Factory: () => string;
   /**
    * WP-2423 shared-table-checkout (b): the table the presented Guest cookie is currently seated
-   * at (a current dining-bound Session whose participant is still at the table), or null. Any
-   * failure is treated as null: the scan goes on as an ordinary entry, so an outage never strands
-   * a guest.
+   * at (a current dining-bound Session whose participant is still at the table), null when the
+   * owners answered it is not seated there, or `unconfirmed` when Dining could not be read to
+   * confirm a seat Identity holds. An unconfirmed seat at that same table is answered as a
+   * store-busy retry, never as a join (a duplicate participant) or a scan pause refusal. A read that
+   * throws is treated as null: the scan goes on as an ordinary entry.
    */
   readonly presentedTable?: (
     sessionCredential: string,
     observedAt: string,
-  ) => Promise<CustomerEntryPresentedTable | null>;
+  ) => Promise<
+    CustomerEntryPresentedTable | null | { readonly unconfirmed: CustomerEntryPresentedTable }
+  >;
 }
 
 const guestCookieName = "__Host-bop-guest";
@@ -957,7 +966,11 @@ export class CustomerEntryHandler {
               requestedAt,
               ...(intent === undefined ? {} : { intent }),
               ...(presented.length === 0 ? {} : { presentedCredentials: Object.freeze(presented) }),
-              ...(presentedTable === null ? {} : { presentedTable }),
+              ...(presentedTable === null
+                ? {}
+                : "unconfirmed" in presentedTable
+                  ? { presentedTableUnconfirmed: presentedTable.unconfirmed }
+                  : { presentedTable }),
             }),
           ),
           requestedAt,

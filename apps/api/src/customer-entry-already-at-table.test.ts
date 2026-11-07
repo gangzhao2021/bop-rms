@@ -10,8 +10,14 @@ import {
   type CustomerEntryPortResult,
   type CustomerEntryPresentedTable,
 } from "./customer-entry.js";
-import { createCustomerEntryComposition } from "./customer-entry-composition.js";
-import { createCustomerEntryPresentedTable } from "./customer-entry-presented-table.js";
+import {
+  createCustomerEntryComposition,
+  CustomerEntryServiceUnavailableError,
+} from "./customer-entry-composition.js";
+import {
+  createCustomerEntryPresentedTable,
+  diningSeatOf,
+} from "./customer-entry-presented-table.js";
 import { fixture, id } from "../test-support/customer-entry-composition-fixture.js";
 
 // WP-2423 shared-table-checkout (b): a phone already seated at a table that scans the same table
@@ -125,9 +131,9 @@ describe("Entry handler: a phone already at this table", () => {
     ["a malformed cookie", "__Host-bop-guest=short", async () => seated],
     ["a session that is not seated", `__Host-bop-guest=${COOKIE}`, async () => null],
     [
-      "a read that failed (outage)",
+      "a read that threw",
       `__Host-bop-guest=${COOKIE}`,
-      async () => Promise.reject(new Error("db")),
+      async () => Promise.reject(new Error("unexpected")),
     ],
   ])("with %s, the scan is an ordinary entry", async (_name, cookie, read) => {
     const calls: CustomerEntryPortInput[] = [];
@@ -149,6 +155,36 @@ describe("Entry handler: a phone already at this table", () => {
     await post(serverPort, cookie);
     expect(calls).toHaveLength(1);
     expect(Object.hasOwn(calls[0] as object, "presentedTable")).toBe(false);
+    expect(Object.hasOwn(calls[0] as object, "presentedTableUnconfirmed")).toBe(false);
+  });
+
+  it("when Dining could not confirm the seat, the entry is told so and answers retry", async () => {
+    const read = async () => ({ unconfirmed: seated });
+    const calls: CustomerEntryPortInput[] = [];
+    const serverPort = await listen(
+      new CustomerEntryHandler({
+        allowedOrigin: ORIGIN,
+        now: () => "2026-07-30T05:00:00.000Z",
+        port: {
+          establish: async (input) => {
+            calls.push(input);
+            throw new CustomerEntryServiceUnavailableError();
+          },
+        },
+        uuidV7Factory: references(),
+        requestAdmission: { consume: async () => ({ status: "Allowed" }) },
+        presentedTable: read,
+      }),
+    );
+    const response = await post(serverPort, `__Host-bop-guest=${COOKIE}`);
+    expect(calls[0]?.presentedTableUnconfirmed).toEqual(seated);
+    expect(Object.hasOwn(calls[0] as object, "presentedTable")).toBe(false);
+    // The ordinary store-busy answer: the guest is asked to try again.
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({
+      code: "entry_service_unavailable",
+      recovery: { action: "RetryOrAskStaff" },
+    });
   });
 });
 
@@ -191,6 +227,53 @@ describe("Entry composition: a re-scan of the table this phone is seated at", ()
     expect(f.create).toHaveBeenCalledOnce();
   });
 
+  it("a phone whose seat here could not be confirmed is asked to try again, never joined", async () => {
+    // Joining would make a second participant for a phone that may be seated here, and with
+    // joining by scan paused it would be told it is refused: the store is busy, try again.
+    const f = fixture();
+    const result = await createCustomerEntryComposition({
+      ...f.options,
+      table: openTable,
+    })
+      .establish({ ...f.input(), presentedTableUnconfirmed: presentedFor(f) })
+      .catch((error: unknown) => error);
+    expect(result).toBeInstanceOf(CustomerEntryServiceUnavailableError);
+    expect(f.create).not.toHaveBeenCalled();
+    expect(f.records.size).toBe(0);
+  });
+
+  it.each([
+    ["starts a new party there", { intent: "NewParty" as const }, () => openTable],
+    ["scans a table nobody is seated at", {}, () => ({ isOpen: vi.fn(async () => false) })],
+  ])(
+    "a phone whose seat could not be confirmed that %s goes on as before",
+    async (_n, extra, table) => {
+      const plain = fixture();
+      const before = await createCustomerEntryComposition({
+        ...plain.options,
+        table: table(),
+      }).establish({ ...plain.input(), ...extra });
+      const f = fixture();
+      const result = await createCustomerEntryComposition({
+        ...f.options,
+        table: table(),
+      }).establish({ ...f.input(), ...extra, presentedTableUnconfirmed: presentedFor(f) });
+      expect(result.status).toBe(before.status);
+      expect(result.status).not.toBe("EntryUnavailable");
+    },
+  );
+
+  it("an unconfirmed seat at another table, or on a replaced code, is an ordinary entry", async () => {
+    for (const change of [{ publicTableReference: id(90) }, { qrRevocationVersion: 2 }]) {
+      const f = fixture();
+      const result = await createCustomerEntryComposition({
+        ...f.options,
+        table: openTable,
+      }).establish({ ...f.input(), presentedTableUnconfirmed: { ...presentedFor(f), ...change } });
+      expect(result.status).toBe("Established");
+    }
+  });
+
   it("a guest starting a new party after them is never told they are already there", async () => {
     const f = fixture();
     const result = await createCustomerEntryComposition({
@@ -214,33 +297,98 @@ describe("The presented cookie's seated table", () => {
       ...changes,
     }) as unknown as GuestSession;
 
+  const ports = (
+    changes: {
+      identity?: () => Promise<GuestSession>;
+      seated?: () => Promise<GuestSession>;
+      participant?: () => Promise<"Seated" | "NotSeated">;
+    } = {},
+  ) => {
+    const identity = vi.fn(changes.identity ?? (async () => session()));
+    const seatedRead = vi.fn(changes.seated ?? (async () => session()));
+    const participant = vi.fn(changes.participant ?? (async () => "Seated" as const));
+    return {
+      identity,
+      seatedRead,
+      participant,
+      read: createCustomerEntryPresentedTable({
+        identity: { resolve: identity },
+        seated: { resolve: seatedRead },
+        participant,
+      }),
+    };
+  };
+  const at = "2026-07-30T05:00:00.000Z";
+
   it("is read in the background (no idle renewal) and gives the table facts only", async () => {
-    const resolve = vi.fn(async () => session());
-    const read = createCustomerEntryPresentedTable({ resolve });
-    expect(await read(COOKIE, "2026-07-30T05:00:00.000Z")).toEqual(seated);
-    expect(resolve).toHaveBeenCalledWith({
-      sessionCredential: COOKIE,
-      activity: "Background",
-      observedAt: "2026-07-30T05:00:00.000Z",
-    });
+    const p = ports();
+    expect(await p.read(COOKIE, at)).toEqual(seated);
+    for (const resolve of [p.identity, p.seatedRead])
+      expect(resolve).toHaveBeenCalledWith({
+        sessionCredential: COOKIE,
+        activity: "Background",
+        observedAt: at,
+      });
+    expect(p.participant).not.toHaveBeenCalled();
   });
 
   it.each([
     ["context only (not yet at the table)", { diningState: "ContextOnly" }],
     ["pickup", { channel: "Pickup", publicTableReference: null }],
   ] as const)("is none for a session that is %s", async (_name, change) => {
-    const read = createCustomerEntryPresentedTable({
-      resolve: async () => session(change as Partial<GuestSession>),
-    });
-    expect(await read(COOKIE, "2026-07-30T05:00:00.000Z")).toBeNull();
+    const p = ports({ identity: async () => session(change as Partial<GuestSession>) });
+    expect(await p.read(COOKIE, at)).toBeNull();
+    expect(p.seatedRead).not.toHaveBeenCalled();
   });
 
-  it("is none for a phone staff removed (the binding check refuses its participant)", async () => {
-    // The Dining binding query answers null for a participant that is not Active (Left), so the
-    // Guest Session read throws GUEST_SESSION_UNAVAILABLE; the scan then joins as usual.
-    const read = createCustomerEntryPresentedTable({
-      resolve: async () => Promise.reject(new Error("GUEST_SESSION_UNAVAILABLE")),
+  it("is none for a cookie Identity doesn't hold (unknown, revoked, expired, another Store)", async () => {
+    const p = ports({
+      identity: async () => Promise.reject(new Error("GUEST_SESSION_UNAVAILABLE")),
     });
-    expect(await read(COOKIE, "2026-07-30T05:00:00.000Z")).toBeNull();
+    expect(await p.read(COOKIE, at)).toBeNull();
+  });
+
+  it("is none for a phone staff removed: Dining itself says its participant left", async () => {
+    const p = ports({
+      seated: async () => Promise.reject(new Error("GUEST_SESSION_UNAVAILABLE")),
+      participant: async () => "NotSeated",
+    });
+    expect(await p.read(COOKIE, at)).toBeNull();
+    expect(p.participant).toHaveBeenCalledWith(session(), at);
+  });
+
+  it("is unconfirmed, never 'not seated', when Dining could not be read", async () => {
+    const p = ports({
+      seated: async () => Promise.reject(new Error("GUEST_SESSION_UNAVAILABLE")),
+      participant: async () => Promise.reject(new Error("connection reset")),
+    });
+    expect(await p.read(COOKIE, at)).toEqual({ unconfirmed: seated });
+  });
+
+  it("is none when Dining answers seated but the binding check failed otherwise (no retry loop)", async () => {
+    // A replaced code or a moved party: the phone goes on as an ordinary entry.
+    const p = ports({
+      seated: async () => Promise.reject(new Error("GUEST_SESSION_UNAVAILABLE")),
+      participant: async () => "Seated",
+    });
+    expect(await p.read(COOKIE, at)).toBeNull();
+  });
+});
+
+describe("Dining's own answer whether a phone is still seated", () => {
+  const snapshot = (participant: string, phase: string, followedMove: unknown = null) => ({
+    participant: { status: participant },
+    session: { phase },
+    followedMove,
+  });
+  it.each([
+    ["Active participant, Active session", snapshot("Active", "Active"), "Seated"],
+    ["Active participant, table paying (Closing)", snapshot("Active", "Closing"), "Seated"],
+    ["staff removed the phone (Left)", snapshot("Left", "Active"), "NotSeated"],
+    ["the table was closed", snapshot("Active", "Closed"), "NotSeated"],
+    ["the party was moved to another table", snapshot("Active", "Active", { at: 1 }), "NotSeated"],
+    ["no such participant", null, "NotSeated"],
+  ] as const)("%s: %s", (_name, value, expected) => {
+    expect(diningSeatOf(value)).toBe(expected);
   });
 });

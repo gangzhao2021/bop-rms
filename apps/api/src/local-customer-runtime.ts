@@ -1,4 +1,4 @@
-import { createCustomerEntryPresentedTable } from "./customer-entry-presented-table.js";
+import { composeCustomerEntryPresentedTable } from "./customer-entry-presented-table.js";
 import { createCustomerPickupCartRestore } from "./customer-pickup-cart-restore.js";
 import { loadDiningTeaChargeSetting, type DiningParticipantDepartureSource } from "@rms/dining";
 import { guestCartWithoutTea, guestMenuWithoutTea } from "./customer-cart-tea-guard.js";
@@ -876,21 +876,16 @@ export function createLocalCustomerRuntime(options: LocalCustomerRuntimeOptions)
       ...(options.diningAdmission === undefined
         ? {}
         : {
-            presentedTable: createCustomerEntryPresentedTable(
-              new GuestSessionService({
-                ...entry.session,
-                store,
-                admission: { consume: async () => null },
-                now,
-                binding: createCustomerDiningSessionBinding({
-                  scope,
-                  binding: entry.session.binding,
-                  repository: options.diningAdmission.binding.dining.binding,
-                  contexts: options.diningAdmission.binding.contexts,
-                  now,
-                }),
-              }),
-            ),
+            presentedTable: composeCustomerEntryPresentedTable({
+              scope,
+              session: entry.session,
+              store,
+              dining: {
+                binding: options.diningAdmission.binding.dining.binding,
+                contexts: options.diningAdmission.binding.contexts,
+              },
+              now,
+            }),
           }),
       ...(options.entryCodeCheck === undefined ? {} : { codeCheck: options.entryCodeCheck }),
       port: customerEntry,
