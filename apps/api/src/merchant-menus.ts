@@ -20,6 +20,7 @@ import {
   listBrandMenus,
   listBrandOptionSets,
   listBrandSkuChoices,
+  listAllergenRegistryEntryReferences,
   listCurrentIngredientDeclarations,
   listStoreAvailabilityRules,
   parseCatalogHash,
@@ -897,11 +898,29 @@ export function createMerchantMenus(options: {
     const at = options.persistence.now();
     const registry = await currentAllergenRegistry(ptx(tx) as never, s.owner);
     const sources = await listStaffDeclaredAllergenSources(rtx, scope);
+    // WP-2423 (M76): each item's latest declaration, whichever list it answered. An allergen added
+    // to the list since was never answered for the dish, so it is sent as unanswered, never as No.
     const declarations = new Map(
-      (await listCurrentIngredientDeclarations(ptx(tx) as never, s.owner, at))
-        .filter((d) => d.registryVersionReference === registry?.registryVersionReference)
-        .map((d) => [d.itemReference, d]),
+      (await listCurrentIngredientDeclarations(ptx(tx) as never, s.owner, at)).map((d) => [
+        d.itemReference,
+        d,
+      ]),
     );
+    const current = new Set((registry?.entries ?? []).map((entry) => entry.allergenReference));
+    const answeredOn = await listAllergenRegistryEntryReferences(
+      ptx(tx) as never,
+      s.owner,
+      [...declarations.values()]
+        .map((d) => d.registryVersionReference)
+        .filter((version) => version !== registry?.registryVersionReference),
+    );
+    const unansweredFor = (itemReference: string | undefined): readonly string[] => {
+      const declaration = itemReference === undefined ? undefined : declarations.get(itemReference);
+      if (declaration === undefined) return [...current];
+      if (declaration.registryVersionReference === registry?.registryVersionReference) return [];
+      const answered = answeredOn.get(declaration.registryVersionReference) ?? new Set<string>();
+      return [...current].filter((allergen) => !answered.has(allergen));
+    };
     const recipes = await listRecipes(rtx, scope, at);
     const items = await listInventoryRecipeIngredientFacts(ptx(tx) as never, s.owner);
     const generatedItems = new Set(sources.map((x) => x.itemReference));
@@ -914,6 +933,11 @@ export function createMerchantMenus(options: {
         readonly itemReference: string | null;
         /** WP-2423 item 8 ⑦: declared to use no stock ingredients (a charge such as tea). */
         readonly noIngredients: boolean;
+        /**
+         * WP-2423 (M76): allergens on the current list the staff declaration never answered (added
+         * to the list since, or the declaration ran out); staff answer them before it is declared.
+         */
+        readonly unanswered: readonly string[];
       }
     >();
     const skus = new Set([
@@ -928,13 +952,19 @@ export function createMerchantMenus(options: {
           source: kind,
           declared:
             kind === "StaffDeclared" && item !== undefined
-              ? (declarations.get(item.itemReference)?.allergens ?? []).map((a) => ({
-                  allergenReference: a.allergenReference,
-                  classification: a.classification,
-                }))
+              ? (declarations.get(item.itemReference)?.allergens ?? [])
+                  .filter((a) => current.has(a.allergenReference))
+                  .map((a) => ({
+                    allergenReference: a.allergenReference,
+                    classification: a.classification,
+                  }))
               : [],
           itemReference: kind === "StaffDeclared" ? (item?.itemReference ?? null) : null,
           noIngredients: kind === "StaffDeclared" && item?.label === "NoIngredientsDeclaredByStaff",
+          unanswered:
+            kind === "StaffDeclared" && item?.label !== "NoIngredientsDeclaredByStaff"
+              ? unansweredFor(item?.itemReference)
+              : [],
         });
     }
     await brandScope(tx, s.owner.brandReference);
@@ -1283,6 +1313,7 @@ export function createMerchantMenus(options: {
                     declared: [],
                     itemReference: null,
                     noIngredients: false,
+                    unanswered: [],
                   },
                   // WP-2423 M69: whether its allergens are answered at all ("List it" waits).
                   allergensAnswered:

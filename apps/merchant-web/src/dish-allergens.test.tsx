@@ -71,3 +71,21 @@ it("WP-2423 (M76): a dish staff declared reads No for every allergen it did not 
   );
   expect(html.match(/checked/gu)).toHaveLength(3);
 });
+
+it("WP-2423 (M76): an allergen added to the list after the dish was declared starts unanswered, never No", () => {
+  // Declared when the list was eggs and milk; soy was added since.
+  const declared = startingAllergenAnswers(
+    {
+      source: "StaffDeclared",
+      declared: [{ allergenReference: "milk", classification: "Contains" }],
+      unanswered: ["soy"],
+    },
+    choices,
+  );
+  expect([...declared]).toEqual([
+    ["egg", "None"],
+    ["milk", "Contains"],
+  ]);
+  expect(unansweredAllergens(declared, choices)).toBe(1);
+  expect(everyAllergenAnswer(declared, choices)).toBeNull();
+});

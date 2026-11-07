@@ -1,7 +1,12 @@
 import { optionRowDollars, type DishEditorSource } from "./dish-editor-source.js";
 import type { MenuDish, MenuSectionRow } from "./one-store-menu.js";
 import type { ProductOptionSetChoice } from "./product-pages.js";
-import type { AllergenClassification, DishAllergens, SaveDishCommand } from "./store-menu-pages.js";
+import {
+  MenuPageError,
+  type AllergenClassification,
+  type DishAllergens,
+  type SaveDishCommand,
+} from "./store-menu-pages.js";
 import { dollarsToMinor } from "./store-price-pages.js";
 
 /**
@@ -198,6 +203,14 @@ export function mergedDeclaration(
     changed = true;
   }
   if (!changed) return null;
+  // WP-2423 (M76): an allergen added to the list since the dish was declared was never answered;
+  // the merge never answers it No for staff. The dish is opened and answered first.
+  if (
+    (allergens.unanswered ?? []).some(
+      (allergen) => !merged.has(allergen) && choices.some((c) => c.allergenReference === allergen),
+    )
+  )
+    throw new MenuPageError("AllergensUnanswered");
   return [
     ...[...merged].map(([allergenReference, classification]) => ({
       allergenReference,

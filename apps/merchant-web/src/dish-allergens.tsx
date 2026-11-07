@@ -55,17 +55,20 @@ export function choiceName(choice: AllergenChoice): string {
 
 /**
  * WP-2423 (M76, Owner default 2026-11-06): the answers a dish starts from. A dish staff declared
- * answered every allergen then, so each one it did not declare reads No; a new dish (or one not
- * declared yet) starts with every allergen unanswered, so a tick never declares "none" for rows
- * nobody looked at.
+ * answered every allergen on the list then, so each one it did not declare reads No; one added to
+ * the list since was never answered and starts unanswered. A new dish (or one not declared yet)
+ * starts with every allergen unanswered, so a tick never declares "none" for rows nobody looked at.
  */
 export function startingAllergenAnswers(
   allergens: DishAllergens | undefined,
   choices: readonly AllergenChoice[],
 ): ReadonlyMap<string, AllergenAnswer> {
   if (allergens?.source !== "StaffDeclared" || allergens.noIngredients === true) return new Map();
+  const neverAnswered = new Set(allergens.unanswered ?? []);
   const answers = new Map<string, AllergenAnswer>(
-    choices.map((choice) => [choice.allergenReference, "None"]),
+    choices
+      .filter((choice) => !neverAnswered.has(choice.allergenReference))
+      .map((choice) => [choice.allergenReference, "None"]),
   );
   for (const declared of allergens.declared)
     answers.set(declared.allergenReference, declared.classification);

@@ -4,6 +4,7 @@ import { it } from "vitest";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 import { createOneStoreMenuFixture } from "../test-support/one-store-menu-fixture.mjs";
 import { createPilotApiRole } from "../test-support/sole-operator-brand-gate.mjs";
+import { createAllergenRegistryVersion } from "../../rms/catalog/src/index.ts";
 
 const { Client } = pg;
 
@@ -228,6 +229,84 @@ it("cheese foam with milk applied to three drinks: each declares milk, its price
         assert.ok(named.includes(milk), "its allergens name milk");
         assert.ok(named.includes(wheat), "and what it declared before");
       }
+    } finally {
+      await f.close();
+      await admin.end();
+    }
+  });
+});
+
+it("WP-2423 (M76): an allergen added to the Brand's list after a dish was declared reads unanswered, not No", async () => {
+  await withIsolatedDatabase({ caseId: "wp2423_list_grew" }, async (context) => {
+    const admin = new Client(context.clientConfig);
+    await admin.connect();
+    const role = await createPilotApiRole(admin, context, "wp2423_lg");
+    const f = await createOneStoreMenuFixture(admin, context, { role });
+    try {
+      const { peanut, wheat, milk } = f.allergenList;
+      const tart = await f.saveDish({
+        name: "Custard tart (TEST)",
+        nameZh: "蛋挞",
+        allergens: [{ allergenReference: milk, classification: "Contains" }],
+      });
+      const allergensOf = async () =>
+        (await f.menus.query({ ...f.session, menuReference: f.menuReference })).sellables.find(
+          (sku) => sku.skuReference === tart.skuReference,
+        ).allergens;
+      assert.deepEqual(await allergensOf(), {
+        source: "StaffDeclared",
+        declared: [{ allergenReference: milk, classification: "Contains" }],
+        itemReference: (await allergensOf()).itemReference,
+        noIngredients: false,
+        unanswered: [],
+      });
+      // The owner adds eggs to the list. Nobody answered eggs for the tart.
+      const egg = f.id(66);
+      await f.setup((t) =>
+        createAllergenRegistryVersion(t, f.scope, {
+          registryVersionReference: f.id(65),
+          jurisdictionCode: "CA",
+          policyDocument: "TEST-ONLY synthetic allergen list, eggs added",
+          entries: [
+            { allergenReference: peanut, code: "PEANUT", localizedNames: { "en-CA": "Peanuts" } },
+            { allergenReference: wheat, code: "WHEAT", localizedNames: { "en-CA": "Wheat" } },
+            { allergenReference: milk, code: "MILK", localizedNames: { "en-CA": "Milk" } },
+            { allergenReference: egg, code: "EGG", localizedNames: { "en-CA": "Eggs" } },
+          ],
+          actorReference: f.owner,
+          at: new Date().toISOString(),
+          auditReference: f.op(),
+        }),
+      );
+      // Before, the declaration on the older list was dropped and every row read No.
+      assert.deepEqual(await allergensOf(), {
+        source: "StaffDeclared",
+        declared: [{ allergenReference: milk, classification: "Contains" }],
+        itemReference: (await allergensOf()).itemReference,
+        noIngredients: false,
+        unanswered: [egg],
+      });
+      // Answered, the declaration is on the current list and nothing waits.
+      await f.saveDish({
+        productReference: tart.productReference,
+        name: "Custard tart (TEST)",
+        nameZh: "蛋挞",
+        priceMinor: null,
+        sectionCode: null,
+        allergens: [
+          { allergenReference: milk, classification: "Contains" },
+          { allergenReference: egg, classification: "Contains" },
+        ],
+      });
+      const after = await allergensOf();
+      assert.deepEqual(after.unanswered, []);
+      assert.deepEqual(
+        [...after.declared].sort((a, b) => a.allergenReference.localeCompare(b.allergenReference)),
+        [
+          { allergenReference: milk, classification: "Contains" },
+          { allergenReference: egg, classification: "Contains" },
+        ].sort((a, b) => a.allergenReference.localeCompare(b.allergenReference)),
+      );
     } finally {
       await f.close();
       await admin.end();

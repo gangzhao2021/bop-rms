@@ -284,6 +284,25 @@ describe("WP-2423 item 3 F: allergens a choice brings", () => {
       ),
     ).toBeNull();
   });
+  it("WP-2423 (M76): an allergen added to the list since the dish was declared is never merged as No", () => {
+    const dish = {
+      source: "StaffDeclared" as const,
+      declared: [{ allergenReference: "soy", classification: "Contains" as const }],
+      unanswered: ["peanut"],
+    };
+    expect(() => mergedDeclaration(dish, new Map([["milk", "Contains"]]), list)).toThrow(
+      expect.objectContaining({ code: "AllergensUnanswered" }),
+    );
+    // A choice that adds that very allergen answers it.
+    expect(
+      mergedDeclaration({ ...dish, unanswered: ["egg"] }, new Map([["egg", "Contains"]]), list),
+    ).toEqual([
+      { allergenReference: "soy", classification: "Contains" },
+      { allergenReference: "egg", classification: "Contains" },
+      { allergenReference: "milk", classification: "None" },
+      { allergenReference: "peanut", classification: "None" },
+    ]);
+  });
   it("only the choices a dish is getting bring their allergens", () => {
     const answers = new Map<string, ReadonlyMap<string, AllergenClassification>>([
       ["foam", new Map([["milk", "Contains"]])],

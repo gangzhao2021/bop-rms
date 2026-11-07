@@ -87,6 +87,32 @@ export async function currentAllergenRegistry(
   });
 }
 
+/**
+ * WP-2423 (M76): the allergens on each of these registry versions, so a declaration made against
+ * an older list says which allergens of the current one it never answered.
+ */
+export async function listAllergenRegistryEntryReferences(
+  tx: Tx,
+  scope: { readonly brandReference: string },
+  registryVersionReferences: readonly string[],
+): Promise<ReadonlyMap<string, ReadonlySet<string>>> {
+  const versions = [...new Set(registryVersionReferences.map(parseCatalogReference))];
+  if (versions.length === 0) return new Map();
+  const brand = parseCatalogReference(scope.brandReference);
+  await brandScope(tx, brand);
+  const found = new Map<string, Set<string>>(versions.map((version) => [version, new Set()]));
+  for (const row of (
+    await tx.query(
+      `SELECT registry_version_id::text version,allergen_id::text allergen
+       FROM rms_catalog.allergen_registry_entry
+       WHERE brand_id=$1 AND registry_version_id=ANY($2::uuid[])`,
+      [brand, versions],
+    )
+  ).rows)
+    found.get(String(row.version))?.add(String(row.allergen));
+  return found;
+}
+
 const audit = (input: {
   readonly brand: string;
   readonly actor: string;

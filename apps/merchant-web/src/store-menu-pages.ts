@@ -442,6 +442,11 @@ export interface DishAllergens {
     readonly allergenReference: string;
     readonly classification: AllergenClassification;
   }[];
+  /**
+   * WP-2423 (M76): allergens on the Brand's current list that the declaration never answered
+   * (added to the list since it was declared); they start unanswered, never as No.
+   */
+  readonly unanswered?: readonly string[];
 }
 export interface AllergenChoice {
   readonly allergenReference: string;
