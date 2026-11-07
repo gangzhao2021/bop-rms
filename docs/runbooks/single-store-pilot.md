@@ -562,12 +562,13 @@ section on a phone in both languages and on the kitchen screen before testing wi
 
 ## Counter and Pickup handover (WP-2423 M21, M127, M53)
 
-- **Handing over.** After the guest's code matches, `Pickup` shows one button, `Hand over to
-  customer · Order N`: check every item on the card, then tap it. For an order taken at the counter
-  (no code), call the number and tap `Called and handed over · Order N`; the record says the number
-  was called, never that a name was checked. If someone else is collecting, tap `Someone else is
-  collecting` and fill in their initial and the confirmation as before. A guest who cannot show a
-  valid code, or whose code expired or locked, still goes through the full in-person check.
+- **Handing over.** After the guest's code matches, `Pickup` shows one button,
+  `Hand over to customer · Order N`: check every item on the card, then tap it. For an order taken
+  at the counter (no code), call the number and tap `Called and handed over · Order N`; the record
+  says the number was called, never that a name was checked. If someone else is collecting, tap
+  `Someone else is collecting` and fill in their initial and the confirmation as before. A guest
+  who cannot show a valid code, or whose code expired or locked, still goes through the full
+  in-person check.
 - **A counter guest who does not pay.** Card declined: try another card. Guest not paying, entered
   by mistake, or guest left: a Store Manager or Owner taps `Cancel order` on the counter screen,
   in "Sent, not paid yet" or on `Orders`, and chooses why (`Back to edit` cancels it as entered by
@@ -580,6 +581,13 @@ section on a phone in both languages and on the kitchen screen before testing wi
   on a table round; the kitchen ticket shows it.
 - **When the system is down.** Nothing here changes the outage procedure below: take paper slips,
   charge the card machine, and enter them as paper orders once the system is back.
+- **A counter guest who only has cash.** The counter cannot record cash yet (WP-2423 M52, not
+  built), online or after an outage. Until it can, take card only at the counter: tell the guest
+  before charging and offer the card machine. Never take cash you cannot record, and never write
+  down a card number.
+- **If a retry says "Not confirmed yet".** Tap `Cancel order` again: the reason chosen first is kept
+  and the order is never cancelled twice. If it still fails, check `Orders`: a cancelled order shows
+  "Cancelled before payment by staff".
 
 ## Guests starting free tables (WP-2423 item 5)
 
