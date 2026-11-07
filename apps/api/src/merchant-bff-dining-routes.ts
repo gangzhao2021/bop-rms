@@ -20,6 +20,7 @@ import { DiningCheckoutAlreadyPaidError } from "./merchant-dining-closing-comman
 import type { Response, Router } from "express";
 import { DiningTableCheckoutError } from "./merchant-dining-table-checkout.js";
 import { MerchantDiningHeldRoundError } from "./merchant-dining-held-round.js";
+import { MerchantDiningTableCartError } from "./merchant-dining-table-cart.js";
 import { MerchantDiningChaseError } from "./merchant-dining-chase.js";
 import { MerchantDiningPartySizeError } from "./merchant-dining-party-size.js";
 import { MerchantDiningTableMoveError } from "./merchant-dining-table-move.js";
@@ -103,6 +104,24 @@ function heldRoundFailure(response: Response, error: unknown) {
       : error.code === "HELD_ROUND_PERMISSION_DENIED"
         ? 403
         : error.code === "HELD_ROUND_UNAVAILABLE"
+          ? 503
+          : 409;
+  response.status(status).set("Cache-Control", NO_STORE).json({ error: error.code.toLowerCase() });
+}
+
+/** WP-2423 shared-table-checkout (c): the table cart's refusals, each with its own wording. */
+function tableCartFailure(response: Response, error: unknown) {
+  noteFailure(response, error);
+  if (!(error instanceof MerchantDiningTableCartError)) {
+    failed(response, error);
+    return;
+  }
+  const status =
+    error.code === "DINING_TABLE_CART_INPUT_INVALID"
+      ? 400
+      : error.code === "DINING_TABLE_CART_DENIED"
+        ? 403
+        : error.code === "DINING_TABLE_CART_UNAVAILABLE"
           ? 503
           : 409;
   response.status(status).set("Cache-Control", NO_STORE).json({ error: error.code.toLowerCase() });
@@ -419,6 +438,29 @@ export function installMerchantDiningRoutes(
       .diningQrJoin({ sessionCookie, csrf, command: request.body })
       .then((result) => response.set("Cache-Control", NO_STORE).json(result))
       .catch((error: unknown) => failed(response, error));
+  });
+  // WP-2423 shared-table-checkout (c): what guests put in the table's cart and haven't sent; staff
+  // take a dish out with a reason (recorded and attributed).
+  router.post("/dining/sessions/table-cart", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant"),
+      csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.diningTableCart) {
+      response.status(503).json({ error: "dining_table_cart_unavailable" });
+      return;
+    }
+    void options
+      .diningTableCart({ sessionCookie, csrf, command: request.body })
+      .then((result) => response.set("Cache-Control", NO_STORE).json(result))
+      .catch((error: unknown) => tableCartFailure(response, error));
   });
   router.post("/dining/sessions/regenerate", sameOriginMutation(options), (request, response) => {
     const sessionCookie = cookie(request, "__Host-bop-merchant"),

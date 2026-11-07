@@ -168,6 +168,7 @@ import type { createMerchantProductPublicationCommand } from "./merchant-product
 import type { createMerchantPriceBookHttpCommand } from "./merchant-price-book-http-command.js";
 import type { createMerchantDiningJoinState } from "./merchant-dining-join-state.js";
 import type { createMerchantDiningQrJoin } from "./merchant-dining-qr-join.js";
+import type { createMerchantDiningTableCart } from "./merchant-dining-table-cart.js";
 import type {
   createMerchantDiningHeldRound,
   createMerchantDiningRoundHoldSetting,
@@ -655,6 +656,8 @@ export interface MerchantBffRouterOptions {
   readonly diningJoinState?: ReturnType<typeof createMerchantDiningJoinState>;
   /** WP-2423 item 8 ⑤: the phones at a table, pause/resume joining by QR, remove a phone. */
   readonly diningQrJoin?: ReturnType<typeof createMerchantDiningQrJoin>;
+  /** WP-2423 shared-table-checkout (c): a table's unsent cart; staff remove a dish with a reason. */
+  readonly diningTableCart?: ReturnType<typeof createMerchantDiningTableCart>;
   /** WP-2423 item 8 ⑤: send a round waiting for staff to the kitchen, or cancel it. */
   readonly diningHeldRound?: ReturnType<typeof createMerchantDiningHeldRound>;
   /** WP-2423 item 8 ⑤: the Store's "a new phone's first round waits for staff". */

@@ -40,6 +40,7 @@ import { createMerchantOrdinaryRefundItems } from "../../apps/api/dist/merchant-
 import { createMerchantOrdinaryRefundRequest } from "../../apps/api/dist/merchant-ordinary-refund-request.js";
 import { createMerchantDiningJoinState } from "../../apps/api/dist/merchant-dining-join-state.js";
 import { createMerchantDiningQrJoin } from "../../apps/api/dist/merchant-dining-qr-join.js";
+import { createMerchantDiningTableCart } from "../../apps/api/dist/merchant-dining-table-cart.js";
 import {
   createMerchantDiningHeldRound,
   createMerchantDiningRoundHoldSetting,
@@ -1034,6 +1035,15 @@ export async function createInternalMerchant(
     nextReference: () => resources.credentials.reference(),
     now: resources.now,
   });
+  // WP-2423 shared-table-checkout (c): a table's unsent cart; staff remove a dish with a reason.
+  const diningTableCart = createMerchantDiningTableCart({
+    persistence,
+    authentication: service,
+    retentionPolicyCode: "AUDIT_DEFAULT",
+    retentionPolicyVersion: 1,
+    nextReference: () => resources.credentials.reference(),
+    now: resources.now,
+  });
   const diningJoinRegenerate = createMerchantDiningJoinRegenerate({
     persistence,
     authentication: service,
@@ -1724,6 +1734,7 @@ export async function createInternalMerchant(
       })(),
       diningJoinState,
       diningQrJoin,
+      diningTableCart,
       // WP-2423 item 8 ⑤ decision 5: "a new phone's first round waits for staff".
       diningRoundHoldSetting: createMerchantDiningRoundHoldSetting({
         persistence,
