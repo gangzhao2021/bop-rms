@@ -1006,6 +1006,12 @@ export async function listOrderOrdinaryRefundRequesters(
     readonly actorReference: string;
     readonly amountMinor: string;
     readonly requestedAt: string;
+    /**
+     * How the money goes back, from the request's own record: an ordinary refund returns
+     * Provider captures (each named payment intent), so it goes back online to the guest's card.
+     * Card-machine refunds are the card-machine payment's own records, never these.
+     */
+    readonly method: "Online";
   }[]
 > {
   const brand = String(parsePaymentReference(scope.brandReference));
@@ -1015,13 +1021,19 @@ export async function listOrderOrdinaryRefundRequesters(
     store,
   ]);
   const result = await tx.query(
-    "SELECT request_id::text AS request,actor_id::text AS actor,amount_minor::text AS amount,requested_at FROM rms_payment.ordinary_refund_request WHERE brand_id=$1 AND store_id=$2 AND order_id=$3 ORDER BY requested_at,request_id LIMIT 101",
+    "SELECT request_id::text AS request,actor_id::text AS actor,amount_minor::text AS amount,requested_at,record_json::text AS record FROM rms_payment.ordinary_refund_request WHERE brand_id=$1 AND store_id=$2 AND order_id=$3 ORDER BY requested_at,request_id LIMIT 101",
     [brand, store, String(parsePaymentReference(orderReference))],
   );
   if (result.rows.length > 100) return fail("ORDINARY_REFUND_REQUEST_UNAVAILABLE");
   return Object.freeze(
-    result.rows.map((row) =>
-      Object.freeze({
+    result.rows.map((row) => {
+      const recorded = decodeOrdinaryRefundRequest(row.record);
+      if (
+        recorded.requestReference !== String(parsePaymentReference(row.request)) ||
+        recorded.payments.length === 0
+      )
+        return fail("ORDINARY_REFUND_REQUEST_UNAVAILABLE");
+      return Object.freeze({
         requestReference: String(parsePaymentReference(row.request)),
         actorReference: String(parsePaymentReference(row.actor)),
         amountMinor: String(BigInt(String(row.amount))),
@@ -1030,7 +1042,8 @@ export async function listOrderOrdinaryRefundRequesters(
             row.requested_at instanceof Date ? row.requested_at.toISOString() : row.requested_at,
           ),
         ),
-      }),
-    ),
+        method: "Online" as const,
+      });
+    }),
   );
 }

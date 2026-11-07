@@ -1644,7 +1644,8 @@ export function createPersistentMerchantOrderQueue(options: {
                   )) {
                     const approval = approvals.get(request.requestReference);
                     recordFacts.refunds.push({
-                      method: counter.has(only.orderReference) ? "CardMachine" : "Online",
+                      // Payment's record of the request says how the money goes back.
+                      method: request.method,
                       amountMinor: request.amountMinor,
                       actor: request.actorReference,
                       approver: approval?.approverReference ?? null,
