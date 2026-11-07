@@ -50,9 +50,15 @@ const frontOfHouse = async (world, prefix) => {
       }),
   };
 };
+/**
+ * What Ordering recorded about the batch's payment: its dispositions and any staff cancellation.
+ * Payment opens one compensation case per payment attempt (1400_009), from the staff
+ * cancellation or from a deadline disposition; an acknowledgement that a refused order's payment
+ * has no order (OrderNoLongerFulfillable) opens nothing new for an attempt already compensated.
+ */
 const compensationsOf = (world, order) =>
   world.query(
-    "SELECT d.disposition,d.reason FROM rms_ordering.order_payment_disposition_record d WHERE d.order_batch_id=$1 AND d.disposition<>'Confirmed' UNION ALL SELECT 'StaffCancellation',refund_disposition FROM rms_ordering.order_staff_cancellation WHERE order_batch_id=$1",
+    "SELECT d.disposition,d.reason FROM rms_ordering.order_payment_disposition_record d WHERE d.order_batch_id=$1 AND d.disposition<>'Confirmed' UNION ALL SELECT 'StaffCancellation',refund_disposition FROM rms_ordering.order_staff_cancellation WHERE order_batch_id=$1 ORDER BY 1,2",
     [order.orderBatchReference],
   );
 
@@ -60,13 +66,16 @@ it("a cashier declines a paid order not accepted yet: refunded once, the deadlin
   await withAutoAcceptWorld({ caseId: "wp2423_rl_cant", orderType: "Pickup" }, async (world) => {
     const { assert, paid, kitchenScreen, transactions, seedPaidPickup, query } = world;
     await kitchenScreen.seenNow();
+    // Staff were on all along, so a deadline that passes is the Store's, not an outage's.
+    await world.staffOnSince(34);
     const cashier = await frontOfHouse(world, "01a6ab01");
-    // Two pickups paid 31 minutes ago, still waiting for a person when the worker first saw them;
-    // their acceptance deadline (30 minutes) has just passed.
-    const declined = await seedPaidPickup({ paidMinutesAgo: 31 });
-    const expired = await seedPaidPickup({ paidMinutesAgo: 31 });
-    const open = await seedPaidPickup();
-    world.clock.offset = -world.minutes(30.5);
+    // Two pickups paid 32 minutes ago, still waiting for a person when the worker first saw them;
+    // their acceptance deadline (30 minutes) has just passed. Oldest first, before anything else
+    // moves stock: the stock ledger reads forward in time.
+    const declined = await seedPaidPickup({ paidMinutesAgo: 32 });
+    const expired = await seedPaidPickup({ paidMinutesAgo: 32 });
+    await kitchenScreen.seenNow(new Date(Date.now() - world.minutes(31.5)).toISOString());
+    world.clock.offset = -world.minutes(31);
     try {
       for (const order of [declined, expired])
         assert.equal(
@@ -76,6 +85,8 @@ it("a cashier declines a paid order not accepted yet: refunded once, the deadlin
     } finally {
       world.clock.offset = 0;
     }
+    await kitchenScreen.seenNow();
+    const open = await seedPaidPickup();
     assert.equal(
       (await transactions().run((tx) => paid.consume(tx, open.event))).result.status,
       "AwaitingOrderAcceptance",
@@ -113,26 +124,38 @@ it("a cashier declines a paid order not accepted yet: refunded once, the deadlin
       [{ phase: "Rejected", actor_type: "User", permission_code: "ordering.order.accept" }],
     );
     // A second press finds it closed: nothing more is refunded.
-    await assert.rejects(cashier.refuse(open), { code: "ORDER_CANCELLATION_VERSION_CONFLICT" });
+    await assert.rejects(cashier.refuse(open), { code: "ORDER_CANCELLATION_NOT_CANCELLABLE" });
     // Declined just as its deadline passed, then the deadline worker runs: one refund, the cashier's.
     assert.equal((await cashier.refuse(declined)).status, "Cancelled");
     await world
       .worker()
       .run((tx) => paid.resume(tx, declined.event.eventId))
       .catch(() => null);
+    // The worker records that the refused order's payment has no order to fulfil (not the
+    // deadline's own refund): the cashier's refusal is the one compensation reason.
     assert.deepEqual(await compensationsOf(world, declined), [
+      { disposition: "PaidWithoutFulfillableOrder", reason: "OrderNoLongerFulfillable" },
       { disposition: "StaffCancellation", reason: "Refund" },
     ]);
     // The deadline worker first: it refunds the order, and the cashier's Can't make it then can't.
-    await world
+    await world.staffSeen(world.now());
+    const resumed = await world
       .worker()
       .run((tx) => paid.resume(tx, expired.event.eventId))
-      .catch(() => null);
+      .catch((error) => error);
+    assert.equal(resumed?.status, "CompensationRequired", String(resumed?.code ?? resumed));
     const closed = await compensationsOf(world, expired);
     assert.equal(closed.length, 1, JSON.stringify(closed));
     assert.equal(closed[0].disposition, "PaidWithoutFulfillableOrder");
     await assert.rejects(cashier.refuse(expired));
-    assert.equal((await compensationsOf(world, expired)).length, 1);
+    assert.deepEqual(await compensationsOf(world, expired), closed);
+    // Payment's own line: one compensation case per payment attempt, whoever asks first.
+    assert.deepEqual(
+      await query(
+        "SELECT indexdef FROM pg_indexes WHERE indexname='payment_compensation_case_history_attempt_idx'",
+      ).then((rows) => rows.length),
+      1,
+    );
   });
 });
 

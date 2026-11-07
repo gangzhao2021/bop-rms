@@ -1209,6 +1209,8 @@ it("46940b76 L2: lists every refund on the order so they add up to what was refu
     orderRefundRows(order(cancellation, "DineIn"), lines, {
       refundedMinor: "2000",
       refundPendingMinor: "100",
+      refundNotSentMinor: "0",
+      refundOnMachineMinor: "0",
     }).map((row) => [row.label, row.amount?.amountMinor]),
   ).toEqual([
     ["Cancelled items refund", "608"],
