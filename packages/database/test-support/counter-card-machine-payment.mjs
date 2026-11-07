@@ -42,6 +42,11 @@ export async function exerciseCounterCardMachinePayment({
   merchant,
   at,
   positive,
+  /**
+   * WP-2423 M127: when given, the order is a live (not paper) counter order nobody paid for, and a
+   * manager cancels it as the pilot API role (exactly the rendered pilot ACL). The journey ends there.
+   */
+  pilot = null,
 }) {
   const id = (n) => "01909995-0000-7000-8000-" + n.toString(16).padStart(12, "0");
   let sequence = 0x5000;
@@ -96,7 +101,7 @@ export async function exerciseCounterCardMachinePayment({
     guestSessionReference: order.guestSessionReference,
     cartReference: batch.sourceCartReference,
     tipSelectionReference: selection.selectionReference,
-    recordedAfterOutage: true,
+    recordedAfterOutage: pilot === null,
     createdAt: at,
     auditReference: next(),
   };
@@ -254,6 +259,24 @@ export async function exerciseCounterCardMachinePayment({
   await assert.rejects(cancelUnpaid(counterSession)(cancelInput(counterSession)), {
     code: "COUNTER_CANCEL_PERMISSION_DENIED",
   });
+  if (pilot !== null)
+    return await exerciseCounterUnpaidCancellation({
+      admin,
+      pilot,
+      scope,
+      at,
+      next,
+      quoteVersion,
+      orderReference,
+      batch,
+      stock,
+      cancelUnpaid,
+      terminations,
+      payInput,
+      command,
+      counts,
+      before,
+    });
   const managerSession = await seedMerchantAcceptanceSession({
     admin,
     runner,
@@ -455,4 +478,162 @@ export async function exerciseCounterCardMachinePayment({
       },
     });
   return { payment: saved, event: paymentEvent };
+}
+
+/**
+ * WP-2423 M127: a manager cancels a live counter order nobody paid for, as the pilot API role
+ * (NOBYPASSRLS, exactly the rendered pilot ACL): the append-only User termination with its audit,
+ * the reserved stock released under their name, Orders reading it as cancelled before payment with
+ * the reason (and no longer cancellable), a retry answering with the first outcome, and the card
+ * machine refusing a payment afterwards.
+ */
+async function exerciseCounterUnpaidCancellation({
+  admin,
+  pilot,
+  scope,
+  at,
+  next,
+  quoteVersion,
+  orderReference,
+  batch,
+  stock,
+  cancelUnpaid,
+  terminations,
+  payInput,
+  command,
+  counts,
+  before,
+}) {
+  const manager = next();
+  const seeded = await seedMerchantAcceptanceSession({
+    admin,
+    runner: pilot.runner,
+    scope,
+    actor: manager,
+    at,
+    extraPermissions: ["ordering.order.create_staff", "ordering.order.cancel"],
+    referencePrefix: "01909a85",
+    sessionReferencePrefix: "01909a86",
+  });
+  const managerSession = {
+    ...seeded,
+    persistence: { ...seeded.persistence, transactions: pilot.runner },
+  };
+  const queue = createPersistentMerchantOrderQueue({
+    persistence: { ...managerSession.persistence, now: () => new Date().toISOString() },
+    quoteVersion,
+    acceptanceConfigured: true,
+  });
+  const listed = async () =>
+    (
+      await queue({ sessionCookie: managerSession.sessionCookie, afterOrderReference: null })
+    ).items.find((item) => item.orderReference === orderReference);
+  const reserved = async () =>
+    (
+      await admin.query(
+        "SELECT reserved::text AS n FROM rms_inventory.stock_balance WHERE account_id=$1",
+        [stock.accountReference],
+      )
+    ).rows[0].n;
+  const releases = async () =>
+    (
+      await admin.query(
+        "SELECT record_json FROM rms_inventory.stock_movement WHERE movement_type='Release' ORDER BY ledger_version",
+      )
+    ).rows.map((row) => row.record_json);
+  const unpaid = await listed();
+  assert.equal(unpaid?.currentPhase, "Submitted");
+  assert.equal(unpaid.counter.recordedAfterOutage, false);
+  assert.equal(unpaid.counter.canCancelUnpaid, true);
+  assert.equal(unpaid.counter.cancelledBeforePayment, null);
+  const heldBefore = await reserved();
+  assert.notEqual(heldBefore, "0");
+  assert.deepEqual(await releases(), []);
+
+  const cancelCommand = {
+    operationReference: next(),
+    orderReference,
+    orderBatchReference: String(batch.orderBatchReference),
+    expectedOrderVersion: unpaid.currentVersion,
+    reasonCode: "COUNTER_GUEST_LEFT_UNPAID",
+  };
+  const cancel = (overrides = {}) =>
+    cancelUnpaid(managerSession)({
+      sessionCookie: managerSession.sessionCookie,
+      csrf: managerSession.csrf,
+      command: { ...cancelCommand, ...overrides },
+    });
+  const cancelled = await cancel();
+  assert.equal(cancelled.status, "Cancelled");
+  // The append-only termination names the staff member and the reason, with its audit.
+  const termination = (
+    await admin.query(
+      "SELECT termination_id::text AS id,actor_type,actor_id::text AS actor,reason_code,purpose_code,permission_code,previous_phase,phase FROM rms_ordering.order_termination_record WHERE order_id=$1",
+      [orderReference],
+    )
+  ).rows;
+  assert.equal(termination.length, 1);
+  assert.deepEqual(
+    { ...termination[0], id: undefined },
+    {
+      id: undefined,
+      actor_type: "User",
+      actor: manager,
+      reason_code: "COUNTER_GUEST_LEFT_UNPAID",
+      purpose_code: "CounterUnpaidCancellation",
+      permission_code: "ordering.order.cancel",
+      previous_phase: "Submitted",
+      phase: "Cancelled",
+    },
+  );
+  const audits = (
+    await admin.query(
+      "SELECT actor_type,actor_reference::text AS actor,reason_code FROM platform_audit.audit_record WHERE action_code='ORDER_TERMINATED' AND target_id=$1",
+      [orderReference],
+    )
+  ).rows;
+  assert.deepEqual(audits, [
+    { actor_type: "User", actor: manager, reason_code: "COUNTER_GUEST_LEFT_UNPAID" },
+  ]);
+  // The reserved stock is back at once, released under the staff member's name.
+  assert.equal(await reserved(), "0");
+  const released = await releases();
+  assert.equal(released.length, 1);
+  assert.equal(released[0].performedBy, manager);
+  assert.equal(released[0].reasonCode, "STAFF_CANCELLED_BEFORE_PREPARATION");
+  // Released at the cancellation's instant (its references derive from the termination).
+  assert.equal(Date.parse(released[0].occurredAt), Date.parse(cancelled.cancelledAt));
+  assert.equal(released[0].movementReference.slice(0, 14), termination[0].id.slice(0, 14));
+
+  // Orders: cancelled before payment by staff, with the reason; it no longer offers the cancel.
+  const after = await listed();
+  assert.equal(after.currentPhase, "Cancelled");
+  assert.deepEqual(after.counter.cancelledBeforePayment, {
+    reasonCode: "COUNTER_GUEST_LEFT_UNPAID",
+    cancelledAt: cancelled.cancelledAt,
+  });
+  assert.equal(after.counter.canCancelUnpaid, false);
+
+  // A lost answer retried (even after picking another reason) answers with what was recorded;
+  // nothing is written twice. Another cancellation of the same order is refused.
+  const movements = async () =>
+    (await admin.query("SELECT count(*)::int AS n FROM rms_inventory.stock_movement")).rows[0].n;
+  const written = { terminations: await terminations(), movements: await movements() };
+  for (const overrides of [{}, { reasonCode: "COUNTER_GUEST_CHANGED_MIND" }])
+    assert.deepEqual(await cancel(overrides), {
+      status: "AlreadyCancelled",
+      cancelledAt: cancelled.cancelledAt,
+    });
+  await assert.rejects(cancel({ operationReference: next() }), {
+    code: "COUNTER_CANCEL_NOT_CANCELLABLE",
+  });
+  assert.deepEqual({ terminations: await terminations(), movements: await movements() }, written);
+  assert.equal(await reserved(), "0");
+
+  // The card machine can no longer record a payment for it: nothing is charged or written.
+  await assert.rejects(command(payInput({ operationReference: next(), takenAt: null })), {
+    code: "CARD_MACHINE_NOT_PAYABLE",
+  });
+  assert.deepEqual(await counts(), before);
+  return { cancelled };
 }

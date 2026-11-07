@@ -1,3 +1,5 @@
+import { URL } from "node:url";
+import { readFile } from "node:fs/promises";
 import { exerciseConfiguredJourneyQuote } from "../test-support/customer-configured-journey-quote.mjs";
 import {
   createCustomerPickupSessionOrderSubmission,
@@ -53,6 +55,7 @@ import { createHash } from "node:crypto";
 import pg from "pg";
 import { it, vi } from "vitest";
 import { exerciseCounterCardMachinePayment } from "../test-support/counter-card-machine-payment.mjs";
+import { renderPilotAclSql } from "../../../tooling/environment/pilot-acl-render.mjs";
 
 // WP-2423 Q7: only the counter staff member's merchant session lookup is a test double (the cookie
 // below names a signed-in staff member at this Store); every other cookie, such as the order
@@ -126,6 +129,8 @@ it.each([
   [true, true, false],
   // WP-2423 Q7: a counter (Pos) pickup Cart staff open for a walk-up guest takes the same path.
   [true, true, true],
+  // WP-2423 M127: a live counter order nobody paid for is cancelled by a manager (pilot ACL).
+  [true, false, true],
 ])(
   "prepares Pickup through persisted Identity, Cart, Quote and shared capacity with original recovery (configured=%s, positive=%s, counter=%s)",
   async (configured, positive, counter) => {
@@ -1390,6 +1395,27 @@ it.each([
         );
         if (counter) {
           counterStaff.scope = ownerScope;
+          // WP-2423 M127: the unpaid counter order's cancellation runs as the pilot API role holding
+          // exactly the rendered pilot ACL (matrix plus approved additions).
+          let pilot = null;
+          if (!positive) {
+            const api = "wp2402_pickup_pa_" + env.runId,
+              worker = "wp2402_pickup_pw_" + env.runId;
+            for (const name of [api, worker]) {
+              await admin.query(
+                "CREATE ROLE " + name + " NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE",
+              );
+              roles.push(name);
+            }
+            const specs = new URL("../../../docs/spec/", import.meta.url);
+            const matrices = await Promise.all(
+              ["pilot-acl-matrix.json", "pilot-acl-additions.json"].map(async (file) =>
+                JSON.parse(await readFile(new URL(file, specs), "utf8")),
+              ),
+            );
+            await admin.query(renderPilotAclSql(matrices, { api, worker }));
+            pilot = { runner: runner(api), role: api };
+          }
           await exerciseCounterCardMachinePayment({
             admin,
             runner: runner(roles[1]),
@@ -1407,7 +1433,10 @@ it.each([
             merchant: counterStaff,
             at: observedAt,
             positive,
+            pilot,
           });
+          // The cancelled order's journey ends with its cancellation (the other cases cover the rest).
+          if (pilot !== null) return;
         } else
           await exerciseSubmissionInventoryPayment({
             journey: checkoutJourney,
