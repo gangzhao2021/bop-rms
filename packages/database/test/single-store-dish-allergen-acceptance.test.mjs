@@ -307,11 +307,20 @@ it("dish allergens: staff declare them; generated recipe labelled, never stock, 
       const products = createMerchantProducts({ ...common, references: { next: op } });
       const dishAllergens = createMerchantDishAllergens({ ...common, references: { next: op } });
       const session = { sessionCookie: "cookie", csrf: "csrf" };
-      const declare = (skuReference, allergens, operationReference = op()) =>
+      // WP-2423 (M76): staff answer every allergen on the list; those not named here are No.
+      const answered = (allergens) => [
+        ...allergens,
+        ...[peanut, sesame, wheat]
+          .filter((reference) => !allergens.some((a) => a.allergenReference === reference))
+          .map((allergenReference) => ({ allergenReference, classification: "None" })),
+      ];
+      const declareAnswers = (skuReference, allergens, operationReference = op()) =>
         dishAllergens.command({
           ...session,
           body: { action: "DeclareDish", operationReference, skuReference, allergens },
         });
+      const declare = (skuReference, allergens, operationReference = op()) =>
+        declareAnswers(skuReference, answered(allergens), operationReference);
       const rejects = (promise, code) =>
         assert.rejects(promise, (error) => error.code === code || assert.fail(String(error.code)));
       const read = (work) => persistence.transactions.run(work);
@@ -342,6 +351,15 @@ it("dish allergens: staff declare them; generated recipe labelled, never stock, 
           expectedAggregateVersion: dish.aggregateVersion,
         },
       });
+
+      // WP-2423 (M76): an allergen left unanswered declares nothing — before, the rows nobody
+      // answered were recorded as "No".
+      await rejects(
+        declareAnswers(sku, [{ allergenReference: peanut, classification: "Contains" }]),
+        "AllergensUnanswered",
+      );
+      await rejects(declareAnswers(sku, []), "AllergensUnanswered");
+      assert.equal((await read((t) => listStaffDeclaredAllergenSources(t, scope))).length, 0);
 
       // 1. Peanuts contained, sesame possible.
       const first = op();

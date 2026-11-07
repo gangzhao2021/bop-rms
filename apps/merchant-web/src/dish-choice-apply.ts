@@ -184,6 +184,8 @@ export function summarisePriceChanges(plans: readonly DishApplyPlan[]): readonly
 export function mergedDeclaration(
   allergens: DishAllergens,
   additions: ReadonlyMap<string, AllergenClassification>,
+  /** WP-2423 (M76): the Brand's list; the declaration answers each one (No unless declared). */
+  choices: readonly { readonly allergenReference: string }[],
 ): SaveDishCommand["allergens"] {
   // Only a dish staff declared is added to; a recipe dish is named, an undeclared one still waits.
   if (allergens.source !== "StaffDeclared" || allergens.noIngredients === true) return null;
@@ -196,10 +198,18 @@ export function mergedDeclaration(
     changed = true;
   }
   if (!changed) return null;
-  return [...merged].map(([allergenReference, classification]) => ({
-    allergenReference,
-    classification,
-  }));
+  return [
+    ...[...merged].map(([allergenReference, classification]) => ({
+      allergenReference,
+      classification: classification as AllergenClassification | "None",
+    })),
+    ...choices
+      .filter((choice) => !merged.has(choice.allergenReference))
+      .map((choice) => ({
+        allergenReference: choice.allergenReference,
+        classification: "None" as const,
+      })),
+  ];
 }
 
 /** The allergens a dish gains from the choices it is getting (the stronger answer stays). */

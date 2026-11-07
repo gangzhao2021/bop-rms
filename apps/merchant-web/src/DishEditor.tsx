@@ -3,7 +3,14 @@ import { MenuSectionSelect } from "./MenuSectionSelect.js";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { Link } from "react-router";
 import { ChoiceGroupApply } from "./ChoiceGroupApply.js";
-import { AllergenFields, allergenFormSummary, type AllergenAnswer } from "./dish-allergens.js";
+import {
+  AllergenFields,
+  allergenFormSummary,
+  everyAllergenAnswer,
+  startingAllergenAnswers,
+  unansweredAllergens,
+  type AllergenAnswer,
+} from "./dish-allergens.js";
 import { applySections } from "./dish-choice-apply.js";
 import {
   copiedChoices,
@@ -137,9 +144,9 @@ export function DishEditor({
     section: sectionCode,
   });
   const [chosen, setChosen] = useState<ReadonlyMap<string, ReadonlyMap<string, string>>>(new Map());
-  const [allergens, setAllergens] = useState<ReadonlyMap<string, AllergenAnswer>>(
-    () =>
-      new Map((dish?.allergens.declared ?? []).map((a) => [a.allergenReference, a.classification])),
+  // WP-2423 (M76): a new dish starts with every allergen unanswered; a declared one, as declared.
+  const [allergens, setAllergens] = useState<ReadonlyMap<string, AllergenAnswer>>(() =>
+    startingAllergenAnswers(dish?.allergens, allergenChoices),
   );
   // Allergens are declared only when staff confirm the list is complete (or change it).
   const [allergensChecked, setAllergensChecked] = useState(
@@ -312,7 +319,13 @@ export function DishEditor({
       })),
     [chosen],
   );
+  // WP-2423 (M76, Owner default 2026-11-06): some allergens answered and some not — saving waits
+  // until every one is answered (Contains, May contain or No), so no row is taken as No unread.
+  const unanswered = unansweredAllergens(allergens, allergenChoices);
+  const partlyAnswered =
+    !recipeAllergens && !charge && unanswered > 0 && unanswered < allergenChoices.length;
   const invalid =
+    partlyAnswered ||
     form.name.trim() === "" ||
     form.section === "" ||
     priceMinor === null ||
@@ -357,12 +370,7 @@ export function DishEditor({
           : "NoIngredients"
         : !allergensChecked
           ? null
-          : [...allergenValues]
-              .filter((entry): entry is [string, AllergenClassification] => entry[1] !== "None")
-              .map(([allergenReference, classification]) => ({
-                allergenReference,
-                classification,
-              })),
+          : everyAllergenAnswer(allergenValues, allergenChoices),
   });
   // v15 2026-10-30: the dish as it was read. Saving it unchanged records nothing, so the menu has
   // no change to list (the kitchen marks and section below save on their own; guests never see
@@ -497,7 +505,8 @@ export function DishEditor({
   };
   // Item 3 C: the next drink goes on from this one. Only a dish whose allergens were looked at (or
   // a fee, or a Brand with no allergen list yet), or an undeclared run would surface only at List it.
-  const nextAllowed = allergensChecked || charge || allergenChoices.length === 0;
+  const nextAllowed =
+    (allergensChecked && unanswered === 0) || charge || allergenChoices.length === 0;
   const saveAndAddAnother = async () => {
     if (client.oneStore === undefined || busy || invalid || priceMinor === null) return;
     if (dish !== null || !nextAllowed) return;
@@ -610,13 +619,7 @@ export function DishEditor({
         tax: found.taxClassificationReference ?? current.tax,
         section: placed?.code ?? current.section,
       }));
-      setAllergens(
-        new Map(
-          target.allergens.source === "StaffDeclared"
-            ? target.allergens.declared.map((a) => [a.allergenReference, a.classification])
-            : [],
-        ),
-      );
+      setAllergens(startingAllergenAnswers(target.allergens, allergenChoices));
       setAllergensChecked(false);
       setCharge(false);
       setCarried(true);
@@ -1078,10 +1081,12 @@ export function DishEditor({
                     choices={allergenChoices}
                     values={allergens}
                     onChange={(allergen, next) => {
-                      setAllergens((current) => new Map(current).set(allergen, next));
+                      const answers = new Map(allergens).set(allergen, next);
+                      setAllergens(answers);
                       // Copied values are confirmed only by the tick: changing one of them says
-                      // nothing about the rest.
-                      if (!carried) setAllergensChecked(true);
+                      // nothing about the rest. The last row answered is the list checked.
+                      if (!carried && unansweredAllergens(answers, allergenChoices) === 0)
+                        setAllergensChecked(true);
                     }}
                   />
                 </div>
@@ -1133,11 +1138,17 @@ export function DishEditor({
             <label className="dish-editor__confirm">
               <input
                 type="checkbox"
-                checked={allergensChecked}
+                checked={allergensChecked && unanswered === 0}
+                disabled={unanswered > 0}
                 onChange={(event) => setAllergensChecked(event.target.checked)}
               />
               {t("I checked every allergen of this dish.")}
             </label>
+            {partlyAnswered ? (
+              <p className="dish-editor__note" role="note">
+                {t("Answer the rest to save. A row left blank is never taken as No.")}
+              </p>
+            ) : null}
           </div>
         ) : null}
         {problem ? (

@@ -712,9 +712,12 @@ test("@production one dish edited on the one-page menu: names, price, choices, a
       const sku = id(Number.parseInt(String(body.productReference).slice(-12), 16) - 100);
       pending.set(sku, String(body.priceMinor));
       if (body.allergens !== null)
+        // As the server records it: the No answers are never stored (WP-2423 M76).
         declared.set(
           sku,
-          body.allergens as { allergenReference: string; classification: string }[],
+          (body.allergens as { allergenReference: string; classification: string }[]).filter(
+            (a) => a.classification !== "None",
+          ),
         );
     }
     return route.fulfill({
@@ -771,8 +774,18 @@ test("@production one dish edited on the one-page menu: names, price, choices, a
   await editor.getByRole("checkbox", { name: "Spice level" }).check();
   await editor.getByLabel("Extra ($) for Hot").fill("0.50");
   await expect(editor.getByText("Allergens declared by staff")).toBeVisible();
-  await editor.getByRole("radiogroup", { name: "Peanuts 花生" }).getByLabel("Contains").check();
-  await editor.getByRole("radiogroup", { name: "Sesame 芝麻" }).getByLabel("May contain").check();
+  // WP-2423 (M76): every allergen starts unanswered; the tick waits until each one is answered.
+  await expect(
+    editor.getByRole("radiogroup", { name: "Wheat" }).getByLabel("No"),
+  ).not.toBeChecked();
+  await editor.getByRole("radiogroup", { name: "Peanuts" }).getByLabel("Contains").check();
+  await editor.getByRole("radiogroup", { name: "Sesame" }).getByLabel("May contain").check();
+  await expect(
+    editor.getByRole("checkbox", { name: "I checked every allergen of this dish." }),
+  ).toBeDisabled();
+  await expect(editor.getByText("1 allergen is not answered yet.", { exact: false })).toBeVisible();
+  await expect(editor.getByRole("button", { name: "Save dish" })).toBeDisabled();
+  await editor.getByRole("radiogroup", { name: "Wheat" }).getByLabel("No").check();
   await expect(
     editor.getByRole("checkbox", { name: "I checked every allergen of this dish." }),
   ).toBeChecked();
@@ -842,6 +855,7 @@ test("@production one dish edited on the one-page menu: names, price, choices, a
     allergens: [
       { allergenReference: peanut, classification: "Contains" },
       { allergenReference: sesame, classification: "CrossContactPossible" },
+      { allergenReference: wheat, classification: "None" },
     ],
   });
 
@@ -886,7 +900,9 @@ test("@production one dish edited on the one-page menu: names, price, choices, a
   await fresh.getByLabel("Chinese name").fill("酸辣汤");
   await fresh.getByLabel("Price ($)").fill("6.50");
   await fresh.getByRole("combobox", { name: "Section", exact: true }).selectOption("SOUPS-TEST");
-  await fresh.getByRole("radiogroup", { name: "Wheat 小麦" }).getByLabel("Contains").check();
+  await fresh.getByRole("radiogroup", { name: "Wheat" }).getByLabel("Contains").check();
+  await fresh.getByRole("radiogroup", { name: "Peanuts" }).getByLabel("No").check();
+  await fresh.getByRole("radiogroup", { name: "Sesame" }).getByLabel("No").check();
   // WP-2423 (v15 2026-11-05): a choice group the save cannot keep is named with where it is
   // fixed, never the menu's section rule.
   oneStoreRefusal = {
@@ -937,7 +953,11 @@ test("@production one dish edited on the one-page menu: names, price, choices, a
     nameZh: "酸辣汤",
     priceMinor: "650",
     choiceGroups: [],
-    allergens: [{ allergenReference: wheat, classification: "Contains" }],
+    allergens: [
+      { allergenReference: peanut, classification: "None" },
+      { allergenReference: sesame, classification: "None" },
+      { allergenReference: wheat, classification: "Contains" },
+    ],
   });
 
   // WP-2423 item 8 ⑦ (v15 2026-10-29): the per-head tea, a new dish declared in the editor as a
@@ -947,7 +967,7 @@ test("@production one dish edited on the one-page menu: names, price, choices, a
   await tea.getByLabel("English name").fill("Tea charge (TEST)");
   await tea.getByLabel("Chinese name").fill("茶位");
   await tea.getByLabel("Price ($)").fill("1.50");
-  const kind = tea.getByRole("radiogroup", { name: "What it is" });
+  const kind = tea.getByRole("radiogroup", { name: "What" });
   await expect(kind.getByLabel("A dish: declare its allergens")).toBeChecked();
   await kind
     .getByLabel(
@@ -957,7 +977,7 @@ test("@production one dish edited on the one-page menu: names, price, choices, a
   // WP-2423 item 8a: nothing more to mark; the tick shows it does not go to the kitchen.
   await expect(tea.getByText("A charge does not go to the kitchen.")).toBeVisible();
   await expect(tea.getByRole("checkbox", { name: /Not prepared by the kitchen/u })).toBeChecked();
-  await expect(tea.getByRole("radiogroup", { name: "Wheat 小麦" })).toHaveCount(0);
+  await expect(tea.getByRole("radiogroup", { name: "Wheat" })).toHaveCount(0);
   await expect(
     tea.getByText("Declared a charge that uses no stock ingredients (such as tea)", {
       exact: false,
@@ -978,7 +998,7 @@ test("@production one dish edited on the one-page menu: names, price, choices, a
   await expect(teaRow).toContainText("A charge, no stock ingredients");
   await page.getByRole("button", { name: "Edit Tea charge (TEST) 茶位" }).click();
   const declaredTea = page.getByRole("form", { name: "Tea charge (TEST)" });
-  await expect(declaredTea.getByRole("radiogroup", { name: "What it is" })).toHaveCount(0);
+  await expect(declaredTea.getByRole("radiogroup", { name: "What" })).toHaveCount(0);
   await expect(
     declaredTea.getByText("Declared a charge that uses no stock ingredients (such as tea)", {
       exact: false,

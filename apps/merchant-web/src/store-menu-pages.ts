@@ -31,6 +31,8 @@ export type MenuErrorCode =
   | "RealRecipe"
   /** WP-2423 item 8 ⑦: the dish was declared the other way (allergens, or no stock ingredients). */
   | "DeclaredOtherwise"
+  /** WP-2423 (M76): an allergen on the Brand's list was left unanswered. */
+  | "AllergensUnanswered"
   /** WP-2423 item 8 ⑥ (saving a dish): someone else's price changes wait to be listed. */
   | "OthersPending"
   /** The menu no longer has the chosen section. */
@@ -475,8 +477,16 @@ export interface SaveDishCommand {
    * null: not declared in this save. "NoIngredients" (WP-2423 item 8 ⑦): a charge with no stock
    * ingredients, such as the per-head tea.
    */
-  readonly allergens: DishAllergens["declared"] | "NoIngredients" | null;
+  readonly allergens: DishAllergenAnswers | "NoIngredients" | null;
 }
+/**
+ * WP-2423 (M76, Owner default 2026-11-06): a declaration answers every allergen on the Brand's
+ * list — Contains, May contain, or No ("None"). The server refuses one with a row unanswered.
+ */
+export type DishAllergenAnswers = readonly {
+  readonly allergenReference: string;
+  readonly classification: AllergenClassification | "None";
+}[];
 /** WP-2423 item 8 ⑥ part 4: a combo saved from the one-page menu. */
 export interface SaveComboCommand {
   readonly action: "SaveCombo";
@@ -1033,6 +1043,7 @@ const codes = new Set<MenuErrorCode>([
   "NoKitchenStation",
   "RealRecipe",
   "DeclaredOtherwise",
+  "AllergensUnanswered",
   "OthersPending",
   "NoSection",
   "ManySizes",

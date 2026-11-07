@@ -70,7 +70,13 @@ export class MerchantDishAllergenError extends Error {
       /** Declaring without review needs a Brand with exactly one store. */
       | "NotSingleStore"
       /** WP-2423 item 8 ⑦: the size was declared the other way (allergens, or no ingredients). */
-      | "DeclaredOtherwise",
+      | "DeclaredOtherwise"
+      /**
+       * WP-2423 (M76, Owner default 2026-11-06): an allergen on the Brand's list was left
+       * unanswered. Staff answer Contains, May contain or No for every one; a declaration never
+       * says "none" for an allergen nobody answered.
+       */
+      | "AllergensUnanswered",
   ) {
     super(code);
     this.name = "MerchantDishAllergenError";
@@ -88,9 +94,14 @@ export type DishAllergenCommandBody =
       readonly action: "DeclareDish";
       readonly operationReference: string;
       readonly skuReference: string;
+      /**
+       * WP-2423 (M76): one answer for every allergen on the Brand's current list — Contains, May
+       * contain (CrossContactPossible) or No ("None"). Only Contains and May contain are recorded
+       * as the dish's allergens; the No answers prove nothing was left unanswered.
+       */
       readonly allergens: readonly {
         readonly allergenReference: string;
-        readonly classification: "Contains" | "CrossContactPossible";
+        readonly classification: "Contains" | "CrossContactPossible" | "None";
       }[];
     }
   /**
@@ -136,12 +147,14 @@ export function parseDishAllergenCommandBody(value: unknown): DishAllergenComman
       a === null ||
       typeof a !== "object" ||
       Object.keys(a).sort().join(",") !== "allergenReference,classification" ||
-      (a.classification !== "Contains" && a.classification !== "CrossContactPossible")
+      (a.classification !== "Contains" &&
+        a.classification !== "CrossContactPossible" &&
+        a.classification !== "None")
     )
       return fail("Invalid");
     return {
       allergenReference: ref(a.allergenReference),
-      classification: a.classification as "Contains" | "CrossContactPossible",
+      classification: a.classification as "Contains" | "CrossContactPossible" | "None",
     };
   });
   if (new Set(allergens.map((a) => a.allergenReference)).size !== allergens.length)
@@ -218,11 +231,21 @@ export async function declareDishAllergens(
     readonly locale: string;
     readonly nextReference: () => string;
     readonly body: DishAllergenCommandBody;
+    /**
+     * Server-side only, never from a request: a combo declares no allergens of its own (each of
+     * its choices adds its dish's), so its empty declaration is not a list left unanswered.
+     */
+    readonly comboWithoutOwnAllergens?: true;
   },
 ) {
   const { may, body } = input;
   const noIngredients = body.action === "DeclareNoIngredients";
-  const declared = body.action === "DeclareDish" ? body.allergens : [];
+  const answers = body.action === "DeclareDish" ? body.allergens : [];
+  const declared = answers.flatMap((a) =>
+    a.classification === "None"
+      ? []
+      : [{ allergenReference: a.allergenReference, classification: a.classification }],
+  );
   const label = noIngredients ? "NoIngredientsDeclaredByStaff" : "AllergensDeclaredByStaff";
   const name = (names: Readonly<Record<string, string>>, fallback: string) =>
     names[input.locale] ?? Object.values(names)[0] ?? fallback;
@@ -262,7 +285,16 @@ export async function declareDishAllergens(
     const registry = await currentAllergenRegistry(tx as never, s);
     if (registry === null) return fail("RegistryMissing");
     const known = new Set(registry.entries.map((entry) => entry.allergenReference));
-    if (declared.some((a) => !known.has(a.allergenReference))) fail("Invalid");
+    if (answers.some((a) => !known.has(a.allergenReference))) fail("Invalid");
+    // WP-2423 (M76): every allergen on the list answered, else nothing is declared.
+    if (
+      body.action === "DeclareDish" &&
+      input.comboWithoutOwnAllergens !== true &&
+      registry.entries.some(
+        (entry) => !answers.some((a) => a.allergenReference === entry.allergenReference),
+      )
+    )
+      fail("AllergensUnanswered");
     const sources = await listStaffDeclaredAllergenSources(rtx, s);
     const source = sources.find(
       (candidate) => candidate.subject === "Dish" && candidate.skuReference === sku.skuReference,
@@ -629,7 +661,13 @@ export function createMerchantDishAllergens(options: {
     options.authentication
       .authorize({ sessionCookie: input.sessionCookie, csrf: input.csrf })
       .catch(onlyRefusal(() => fail("PermissionDenied")));
-  const command = async (input: { sessionCookie: unknown; csrf: unknown; body: unknown }) => {
+  const command = async (input: {
+    sessionCookie: unknown;
+    csrf: unknown;
+    body: unknown;
+    /** Set by the combo save only (never from a request): see `declareDishAllergens`. */
+    comboWithoutOwnAllergens?: true;
+  }) => {
     const body = parseDishAllergenCommandBody(input.body);
     const current = await session(input);
     return retryTransactionConflict(() =>
@@ -650,6 +688,9 @@ export function createMerchantDishAllergens(options: {
             locale: options.locale,
             nextReference: () => options.references.next(),
             body,
+            ...(input.comboWithoutOwnAllergens === true
+              ? { comboWithoutOwnAllergens: true as const }
+              : {}),
           });
         }),
       ),

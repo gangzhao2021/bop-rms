@@ -247,6 +247,10 @@ it("tea charge: a new dish declared with no stock ingredients is listed, chosen 
       );
       // TEST-ONLY Brand allergen list.
       const [peanut, wheat] = [id(60), id(62)];
+      const noAllergens = [peanut, wheat].map((allergenReference) => ({
+        allergenReference,
+        classification: "None",
+      }));
       await setup((t) =>
         createAllergenRegistryVersion(t, scope, {
           registryVersionReference: id(63),
@@ -503,7 +507,8 @@ it("tea charge: a new dish declared with no stock ingredients is listed, chosen 
             action: "DeclareDish",
             operationReference: op(),
             skuReference: tea,
-            allergens: [],
+            // WP-2423 (M76): every allergen on the list answered (No).
+            allergens: noAllergens,
           },
         }),
         { code: "DeclaredOtherwise" },
@@ -534,7 +539,7 @@ it("tea charge: a new dish declared with no stock ingredients is listed, chosen 
           action: "DeclareDish",
           operationReference: op(),
           skuReference: plainDish.skuReference,
-          allergens: [],
+          allergens: noAllergens,
         },
       });
       const declaredCharges = await asApi(async (tx) => {

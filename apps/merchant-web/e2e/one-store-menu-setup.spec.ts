@@ -502,7 +502,13 @@ async function setUp(page: Page, overrides: Partial<Fixture> = {}): Promise<Fixt
     if (body.allergens === "NoIngredients")
       target.allergens = { source: "StaffDeclared", declared: [], noIngredients: true };
     else if (Array.isArray(body.allergens))
-      target.allergens = { source: "StaffDeclared", declared: body.allergens };
+      // As the server records it: the No answers prove each row was answered, never stored.
+      target.allergens = {
+        source: "StaffDeclared",
+        declared: (body.allergens as { classification: string }[]).filter(
+          (a) => a.classification !== "None",
+        ),
+      };
     const waiting = target.allergens.source === "None" && body.choiceGroups.length > 0;
     return route.fulfill({
       headers,
@@ -789,7 +795,7 @@ test("@production Same as copies choices and marks, never the name, price or kin
   await expect(form.locator(".dish-editor__summary")).toContainText("Contains Milk.");
   await expect(tick(form)).not.toBeChecked();
   await form.getByRole("button", { name: "Change allergens" }).click();
-  await form.getByRole("radiogroup", { name: "Soy 大豆" }).getByLabel("May contain").check();
+  await form.getByRole("radiogroup", { name: "Soy" }).getByLabel("May contain").check();
   await expect(tick(form)).not.toBeChecked();
   await expect(form.locator(".dish-editor__summary")).toContainText(
     "Contains Milk. May contain Soy.",
@@ -875,8 +881,15 @@ test("@production Save and add another keeps the form and resets the names; the 
     .selectOption({ label: "Bar (TEST)" });
   await form.getByRole("checkbox", { name: /Contains alcohol/u }).check();
   await expect(addAnother).toBeDisabled();
-  await form.getByRole("radiogroup", { name: "Wheat 小麦" }).getByLabel("Contains").check();
-  // A first dish's allergen answer ticks the confirmation, as it always did.
+  await form.getByRole("radiogroup", { name: "Wheat" }).getByLabel("Contains").check();
+  // WP-2423 (M76): the other rows are still unanswered, so nothing is confirmed and the save waits.
+  await expect(tick(form)).toBeDisabled();
+  await expect(addAnother).toBeDisabled();
+  await expect(form.getByRole("button", { name: "Save dish" })).toBeDisabled();
+  await expect(form.getByText("A row left blank is never taken as No.")).toBeVisible();
+  await form.getByRole("radiogroup", { name: "Milk" }).getByLabel("No").check();
+  await form.getByRole("radiogroup", { name: "Soy" }).getByLabel("No").check();
+  // The last allergen answered ticks the confirmation.
   await expect(tick(form)).toBeChecked();
   await addAnother.click();
   await expect(form.locator(".dish-editor__result")).toContainText(
@@ -1059,7 +1072,7 @@ test("@production Use on other dishes adds what is missing, asks about allergens
     .check();
   await question.getByRole("radio", { name: "Yes" }).check();
   await expect(apply).toBeDisabled();
-  await question.getByRole("radiogroup", { name: "Milk 牛奶" }).getByLabel("Contains").check();
+  await question.getByRole("radiogroup", { name: "Milk" }).getByLabel("Contains").check();
   await expect(apply).toBeEnabled();
   for (const width of [1440, 1024, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
@@ -1085,6 +1098,7 @@ test("@production Use on other dishes adds what is missing, asks about allergens
     allergens: [
       { allergenReference: soy, classification: "CrossContactPossible" },
       { allergenReference: milk, classification: "Contains" },
+      { allergenReference: wheat, classification: "None" },
     ],
   });
   await panel.getByRole("button", { name: "Try again" }).click();
@@ -1349,15 +1363,17 @@ test("@production the dish on screen gains the allergens given for a choice it p
     name: "Does Cheese foam contain anything on your allergen list?",
   });
   await question.getByRole("radio", { name: "Yes" }).check();
-  await question.getByRole("radiogroup", { name: "Milk 牛奶" }).getByLabel("Contains").check();
+  await question.getByRole("radiogroup", { name: "Milk" }).getByLabel("Contains").check();
   await panel.getByRole("button", { name: /Apply to/u }).click();
   await expect(page.getByText("Applied to 2 dishes.", { exact: false })).toBeVisible();
-  // Fruit tea now offers cheese foam, so it declares milk too, keeping what it had.
+  // Fruit tea now offers cheese foam, so it declares milk too, keeping what it had; every other
+  // allergen on the list is answered No (WP-2423 M76), in the list's order.
   expect(f.dishCommands[0]).toMatchObject({
     productReference: fruitTea.product,
     allergens: [
-      { allergenReference: soy, classification: "CrossContactPossible" },
       { allergenReference: milk, classification: "Contains" },
+      { allergenReference: soy, classification: "CrossContactPossible" },
+      { allergenReference: wheat, classification: "None" },
     ],
   });
 });

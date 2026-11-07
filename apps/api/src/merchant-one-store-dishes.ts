@@ -138,14 +138,18 @@ export interface SaveDishBody {
   }[];
   /**
    * null: allergens not declared in this save. "NoIngredients" (WP-2423 item 8 ⑦, v15
-   * 2026-10-29): declared a charge with no stock ingredients, such as the per-head tea.
+   * 2026-10-29): declared a charge with no stock ingredients, such as the per-head tea. A list
+   * (WP-2423 M76): one answer for every allergen on the Brand's list, "None" for No. "ComboParts"
+   * is the combo save's own (never parsed from a request): no allergens of its own, its choices
+   * add their dishes'.
    */
   readonly allergens:
     | readonly {
         readonly allergenReference: string;
-        readonly classification: "Contains" | "CrossContactPossible";
+        readonly classification: "Contains" | "CrossContactPossible" | "None";
       }[]
     | "NoIngredients"
+    | "ComboParts"
     | null;
 }
 export interface ListAllBody {
@@ -354,12 +358,14 @@ export function parseOneStoreDishBody(value: unknown): SaveDishBody | ListAllBod
             a === null ||
             typeof a !== "object" ||
             Object.keys(a).sort().join(",") !== "allergenReference,classification" ||
-            (a.classification !== "Contains" && a.classification !== "CrossContactPossible")
+            (a.classification !== "Contains" &&
+              a.classification !== "CrossContactPossible" &&
+              a.classification !== "None")
           )
             return fail("Invalid");
           return {
             allergenReference: ref(a.allergenReference),
-            classification: a.classification as "Contains" | "CrossContactPossible",
+            classification: a.classification as "Contains" | "CrossContactPossible" | "None",
           };
         });
   // Only an existing dish can keep its place and price: a new one has neither yet.
@@ -958,8 +964,9 @@ export function createMerchantOneStoreDishes(options: {
                 action: "DeclareDish",
                 operationReference: step("allergens"),
                 skuReference: sku,
-                allergens: body.allergens,
+                allergens: body.allergens === "ComboParts" ? [] : body.allergens,
               },
+        ...(body.allergens === "ComboParts" ? { comboWithoutOwnAllergens: true as const } : {}),
       });
 
     // 6. A "no change" option recipe for each of its choices that has none yet, a few choices per
@@ -1169,7 +1176,7 @@ export function createMerchantOneStoreDishes(options: {
           (menu.sellables.find((x) => x.skuReference === current.skuReference)?.allergens?.source ??
             "None") !== "None"
             ? null
-            : [],
+            : "ComboParts",
       },
       new Map(
         slots.flatMap((slot) =>

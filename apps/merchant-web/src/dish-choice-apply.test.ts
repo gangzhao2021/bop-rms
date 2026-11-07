@@ -243,6 +243,7 @@ describe("WP-2423 item 3 F: what a run does to a dish", () => {
 
 describe("WP-2423 item 3 F: allergens a choice brings", () => {
   const add = (optionReference: string) => ({ optionReference, name: "x", dollars: "1.00" });
+  const list = ["soy", "milk", "egg", "peanut"].map((allergenReference) => ({ allergenReference }));
   it("adds to what the dish declared and keeps the stronger answer", () => {
     expect(
       mergedDeclaration(
@@ -258,17 +259,20 @@ describe("WP-2423 item 3 F: allergens a choice brings", () => {
           ["soy", "CrossContactPossible"],
           ["egg", "CrossContactPossible"],
         ]),
+        list,
       ),
     ).toEqual([
       { allergenReference: "soy", classification: "Contains" },
       { allergenReference: "milk", classification: "Contains" },
       { allergenReference: "egg", classification: "CrossContactPossible" },
+      // WP-2423 (M76): the rest of the list is answered No, never left out.
+      { allergenReference: "peanut", classification: "None" },
     ]);
   });
   it("leaves a recipe, an undeclared dish and one already saying so unchanged", () => {
     const milk = new Map([["milk", "Contains" as const]]);
-    expect(mergedDeclaration({ source: "Recipe", declared: [] }, milk)).toBeNull();
-    expect(mergedDeclaration({ source: "None", declared: [] }, milk)).toBeNull();
+    expect(mergedDeclaration({ source: "Recipe", declared: [] }, milk, list)).toBeNull();
+    expect(mergedDeclaration({ source: "None", declared: [] }, milk, list)).toBeNull();
     expect(
       mergedDeclaration(
         {
@@ -276,6 +280,7 @@ describe("WP-2423 item 3 F: allergens a choice brings", () => {
           declared: [{ allergenReference: "milk", classification: "Contains" }],
         },
         milk,
+        list,
       ),
     ).toBeNull();
   });

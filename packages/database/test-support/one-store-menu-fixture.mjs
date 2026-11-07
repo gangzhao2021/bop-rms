@@ -450,33 +450,43 @@ export async function createOneStoreMenuFixture(
         },
       })
     ).optionSet;
-  const saveDish = (overrides) =>
-    dishes.command({
-      ...session,
-      body: {
-        action: "SaveDish",
-        operationReference: op(),
-        menuReference,
-        productReference: null,
-        sectionCode: "DRINKS",
-        name: "Milk tea (TEST)",
-        nameZh: "奶茶",
-        description: "",
-        descriptionZh: "",
-        taxClassificationReference: taxClass,
-        priceMinor: "550",
-        // WP-2423 M70: the Brand price, for every Store (the one-Store menu has one).
-        priceScope: "AllStores",
-        expectedPriceMinor: null,
-        choiceGroups: [],
-        allergens: [],
-        ...overrides,
-        // No price sent, no scope (an edit keeping its price).
-        ...(overrides?.priceMinor === null && overrides.priceScope === undefined
-          ? { priceScope: null }
-          : {}),
-      },
-    });
+  // WP-2423 (M76): as the dish editor sends it, every allergen on the list is answered — the ones a
+  // test names, and No for the rest.
+  const answered = (allergens) =>
+    Array.isArray(allergens)
+      ? [
+          ...allergens,
+          ...Object.values(allergenList)
+            .filter((reference) => !allergens.some((a) => a.allergenReference === reference))
+            .map((allergenReference) => ({ allergenReference, classification: "None" })),
+        ]
+      : allergens;
+  const saveDish = (overrides) => {
+    const body = {
+      action: "SaveDish",
+      operationReference: op(),
+      menuReference,
+      productReference: null,
+      sectionCode: "DRINKS",
+      name: "Milk tea (TEST)",
+      nameZh: "奶茶",
+      description: "",
+      descriptionZh: "",
+      taxClassificationReference: taxClass,
+      priceMinor: "550",
+      // WP-2423 M70: the Brand price, for every Store (the one-Store menu has one).
+      priceScope: "AllStores",
+      expectedPriceMinor: null,
+      choiceGroups: [],
+      allergens: [],
+      ...overrides,
+      // No price sent, no scope (an edit keeping its price).
+      ...(overrides?.priceMinor === null && overrides.priceScope === undefined
+        ? { priceScope: null }
+        : {}),
+    };
+    return dishes.command({ ...session, body: { ...body, allergens: answered(body.allergens) } });
+  };
   const listAll = async () =>
     dishes.command({
       ...session,

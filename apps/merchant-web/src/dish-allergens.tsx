@@ -1,6 +1,11 @@
 import { allergenName, currentLanguage, listSeparator, t } from "./i18n/i18n.js";
 import type { MenuDish } from "./one-store-menu.js";
-import type { AllergenChoice, AllergenClassification } from "./store-menu-pages.js";
+import type {
+  AllergenChoice,
+  AllergenClassification,
+  DishAllergenAnswers,
+  DishAllergens,
+} from "./store-menu-pages.js";
 
 /**
  * WP-2423 item 8 ⑥ DEC-SINGLE-STORE-MENU: a dish's allergens declared by staff in the dish editor
@@ -48,11 +53,60 @@ export function choiceName(choice: AllergenChoice): string {
   return allergenName(choice.code ?? "", choice.name);
 }
 
+/**
+ * WP-2423 (M76, Owner default 2026-11-06): the answers a dish starts from. A dish staff declared
+ * answered every allergen then, so each one it did not declare reads No; a new dish (or one not
+ * declared yet) starts with every allergen unanswered, so a tick never declares "none" for rows
+ * nobody looked at.
+ */
+export function startingAllergenAnswers(
+  allergens: DishAllergens | undefined,
+  choices: readonly AllergenChoice[],
+): ReadonlyMap<string, AllergenAnswer> {
+  if (allergens?.source !== "StaffDeclared" || allergens.noIngredients === true) return new Map();
+  const answers = new Map<string, AllergenAnswer>(
+    choices.map((choice) => [choice.allergenReference, "None"]),
+  );
+  for (const declared of allergens.declared)
+    answers.set(declared.allergenReference, declared.classification);
+  return answers;
+}
+
+/** How many allergens on the list have no answer yet. */
+export function unansweredAllergens(
+  values: ReadonlyMap<string, AllergenAnswer>,
+  choices: readonly AllergenChoice[],
+): number {
+  return choices.filter((choice) => !values.has(choice.allergenReference)).length;
+}
+
+/** Every allergen's answer, as the server records it; null while any is unanswered. */
+export function everyAllergenAnswer(
+  values: ReadonlyMap<string, AllergenAnswer>,
+  choices: readonly AllergenChoice[],
+): DishAllergenAnswers | null {
+  if (unansweredAllergens(values, choices) > 0) return null;
+  return choices.map((choice) => ({
+    allergenReference: choice.allergenReference,
+    classification: values.get(choice.allergenReference) as AllergenAnswer,
+  }));
+}
+
 /** WP-2423 item 3: the allergens as the form now says, one line above the tick that confirms them. */
 export function allergenFormSummary(
   values: ReadonlyMap<string, AllergenAnswer>,
   choices: readonly AllergenChoice[],
 ): string {
+  const unanswered = unansweredAllergens(values, choices);
+  if (unanswered > 0)
+    return unanswered === 1
+      ? t("1 allergen is not answered yet. Answer Contains, May contain or No for each one.")
+      : t(
+          "{count} allergens are not answered yet. Answer Contains, May contain or No for each one.",
+          {
+            count: unanswered,
+          },
+        );
   const { contains, may } = declaredNames(
     [...values]
       .filter((entry): entry is [string, AllergenClassification] => entry[1] !== "None")
@@ -68,29 +122,40 @@ export function allergenFormSummary(
     .join(" ");
 }
 
-/** One row per allergen on the Brand's list: no, contains, or may contain. */
+/**
+ * One row per allergen on the Brand's list: no, contains, or may contain. A row with no answer
+ * shows none chosen (WP-2423 M76); `unansweredAs` reads a missing answer as that one instead (a
+ * choice's additions, where only what it adds is asked).
+ */
 export function AllergenFields({
   fieldKey,
   choices,
   values,
   onChange,
+  unansweredAs,
 }: {
   readonly fieldKey: string;
   readonly choices: readonly AllergenChoice[];
   readonly values: ReadonlyMap<string, AllergenAnswer>;
   readonly onChange: (allergenReference: string, value: AllergenAnswer) => void;
+  readonly unansweredAs?: AllergenAnswer;
 }) {
   return (
     <div className="dish-editor__allergens">
       {choices.map((choice) => {
-        const value = values.get(choice.allergenReference) ?? "None";
+        const value = values.get(choice.allergenReference) ?? unansweredAs;
         const set = (next: AllergenAnswer) => onChange(choice.allergenReference, next);
         // WP-2423 (M75): the name in the chosen language; in Chinese the English one under it,
         // so the owner can match the supplier's spec sheet.
         const name = choiceName(choice);
         const english = name === choice.name ? null : choice.name;
         return (
-          <div key={choice.allergenReference} role="radiogroup" aria-label={name}>
+          <div
+            key={choice.allergenReference}
+            role="radiogroup"
+            aria-label={name}
+            data-unanswered={value === undefined ? "" : undefined}
+          >
             <span className="dish-editor__allergen">
               {name}
               {english === null ? null : (

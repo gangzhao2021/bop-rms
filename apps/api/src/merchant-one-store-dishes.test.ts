@@ -731,10 +731,18 @@ describe("WP-2423 item 8 ⑥ one dish saved from the one-page menu", () => {
         productReference: id(10),
       }),
       save({ sectionCode: "noodles" }),
-      save({ allergens: [{ allergenReference: PEANUT, classification: "None" }] }),
+      save({ allergens: [{ allergenReference: PEANUT, classification: "Absent" }] }),
+      // WP-2423 (M76): the combo's own "no allergens of its own" is never taken from a request.
+      save({ allergens: "ComboParts" }),
       save({ choiceGroups: [{ optionSetReference: SPICE, options: [] }] }),
     ])
       expect(() => parseOneStoreDishBody(bad)).toThrow(MerchantOneStoreDishError);
+    // WP-2423 (M76): "No" is an answer, sent for every allergen the dish does not contain.
+    expect(
+      parseOneStoreDishBody(
+        save({ allergens: [{ allergenReference: PEANUT, classification: "None" }] }),
+      ).action,
+    ).toBe("SaveDish");
   });
 
   it("lists a dish no one decided at the store as offered, and leaves a hidden one hidden", async () => {

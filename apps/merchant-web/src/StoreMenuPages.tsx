@@ -103,6 +103,9 @@ export const menuErrorText: Record<MenuErrorCode | "Loading", string> = {
   DeclaredOtherwise: t(
     "This dish was already declared the other way (its allergens, or a charge with no stock ingredients). That record stays; ask BOP support to change it.",
   ),
+  AllergensUnanswered: t(
+    "Answer every allergen with Contains, May contain or No. Nothing was declared, so the dish is not on sale until every one is answered.",
+  ),
   OthersPending: t(
     "Someone else's price changes are waiting to be listed. They list them first, then try again.",
   ),

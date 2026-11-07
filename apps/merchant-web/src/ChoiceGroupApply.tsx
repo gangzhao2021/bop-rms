@@ -239,7 +239,11 @@ export function ChoiceGroupApply({
           source,
           optionSetReference: group.optionSetReference,
           plan,
-          allergens: mergedDeclaration(dish.allergens, additionsFor(plan, answerMap)),
+          allergens: mergedDeclaration(
+            dish.allergens,
+            additionsFor(plan, answerMap),
+            allergenChoices,
+          ),
         });
       },
       save: async (command) => {
@@ -403,6 +407,7 @@ export function ChoiceGroupApply({
                           fieldKey={`apply-${add.optionReference}`}
                           choices={allergenChoices}
                           values={answer.values}
+                          unansweredAs="None"
                           onChange={(allergen, next) =>
                             set({
                               contains: true,

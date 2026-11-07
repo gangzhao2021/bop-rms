@@ -517,7 +517,13 @@ it("one-page menu combo: saved, compiled into a dish, listed alone at one store,
             priceScope: priceMinor === null ? null : "AllStores",
             expectedPriceMinor: null,
             choiceGroups: [],
-            allergens,
+            // WP-2423 (M76): every allergen on the list answered; those not named are No.
+            allergens: [
+              ...allergens,
+              ...[peanut, wheat]
+                .filter((reference) => !allergens.some((a) => a.allergenReference === reference))
+                .map((allergenReference) => ({ allergenReference, classification: "None" })),
+            ],
           },
         });
         // Staff declared the dish's allergens: the item holding them (a combo choice adds it).

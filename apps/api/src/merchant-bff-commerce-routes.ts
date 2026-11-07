@@ -121,6 +121,7 @@ export function installMerchantCommerceRoutes(
     RealRecipe: 409,
     NotSingleStore: 409,
     DeclaredOtherwise: 409,
+    AllergensUnanswered: 409,
   } as const;
   router.post(
     "/commerce/dish-allergens/command",
