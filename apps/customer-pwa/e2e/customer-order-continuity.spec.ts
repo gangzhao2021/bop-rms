@@ -163,10 +163,14 @@ for (const viewport of [
       });
       await page.goto("/#qr=aaa.bbb.ccc");
       await expect(page.getByRole("heading", { name: "Your order 12", exact: true })).toBeVisible();
-      await expect(page.getByText("closes this order on this phone")).toBeVisible();
+      // M104: ordering more at a pickup keeps this order; this Store's code brings it back.
+      await expect(
+        page.getByText("Scan this store’s pickup code again to come back to it."),
+      ).toBeVisible();
+      await expect(page.getByText("closes this order on this phone")).toHaveCount(0);
       expect(entries).toBe(0);
       await noHorizontalOverflow(page);
-      await page.getByRole("button", { name: "Start a new order", exact: true }).click();
+      await page.getByRole("button", { name: "Order more", exact: true }).click();
       await expect(
         page.getByRole("heading", { name: "Ready to order", exact: true }),
       ).toBeVisible();

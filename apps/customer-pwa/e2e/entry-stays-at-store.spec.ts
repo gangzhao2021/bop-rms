@@ -285,9 +285,7 @@ test.describe("@production M02 a phone stays at the Store and table it scanned",
     await expectNoInternalText(page);
   });
 
-  test("'Start a new order' after a pickup order starts at Lane Dessert again", async ({
-    page,
-  }) => {
+  test("'Order more' after a pickup order starts at Lane Dessert again", async ({ page }) => {
     const orderReference = id(0x99);
     const state = await installation(page, {
       bootstrap: {
@@ -299,12 +297,13 @@ test.describe("@production M02 a phone stays at the Store and table it scanned",
     });
     await page.goto("/");
     await expect(page.getByRole("heading", { name: "Your order 12", exact: true })).toBeVisible();
-    await page.getByRole("button", { name: "Start a new order" }).click();
-    const main = page.getByRole("main");
-    await expect(main).toContainText("Pickup from Lane Dessert is selected.");
+    await page.getByRole("button", { name: "Order more" }).click();
+    // M104: ordering more goes on with this visit, straight back to Lane Dessert's menu.
+    await expect(page).toHaveURL(/\/menu$/u);
     await expect(page.getByText("DEMO Café")).toHaveCount(0);
-    expect(state.pickupRequests).toEqual(["?store=" + LANE]);
-    expect(scannedEntries(state)).toEqual([{ qrToken: lanePickup }]);
+    // The same visit at Lane Dessert: no other Store's code is fetched or scanned.
+    expect(state.pickupRequests).toEqual([]);
+    expect(scannedEntries(state)).toEqual([]);
   });
 
   test("a reload on the menu stays at Lane Dessert's menu, never 'which location'", async ({
