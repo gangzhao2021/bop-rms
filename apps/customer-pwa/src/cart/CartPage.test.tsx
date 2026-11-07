@@ -181,6 +181,32 @@ describe("CUST-CART page contract", () => {
     ).toContain("Prices have expired");
   });
 
+  it("Owner #26: the quote timer says how long to continue, never that prices are held", () => {
+    const atThreeMinutesLeft = () => Date.parse("2026-08-02T20:02:00.000Z");
+    const render = () =>
+      renderToStaticMarkup(
+        <MemoryRouter>
+          <CartPage
+            controller={controller({ status: "ready", cart: cart() })}
+            now={atThreeMinutesLeft}
+          />
+        </MemoryRouter>,
+      );
+    const english = render();
+    expect(english).toContain("Continue within about 3 minutes.");
+    expect(english).not.toMatch(/confirmed|held|lock/iu);
+    try {
+      renderToStaticMarkup(
+        createElement(LanguageRoot, { initial: "zh-Hans", children: () => null }),
+      );
+      const chinese = render();
+      expect(chinese).toContain("请在约 3 分钟内继续。");
+      expect(chinese).not.toMatch(/锁定|锁价|保留/u);
+    } finally {
+      renderToStaticMarkup(createElement(LanguageRoot, { initial: "en", children: () => null }));
+    }
+  });
+
   it("WP-2423: names the item and how many the store can make when more was asked", () => {
     const html = renderPage({
       status: "validation",
@@ -621,7 +647,8 @@ describe("WP-2423 item 6: a table that pays at the end", () => {
         warnings: ["QUOTE_EXPIRED"],
       }),
     });
-    expect(quoted).not.toContain("Prices confirmed for");
+    expect(quoted).not.toContain("Continue within");
+    expect(quoted).not.toMatch(/confirmed|held/iu);
     expect(quoted).not.toContain("Prices have expired");
     expect(quoted).toContain("$11.30");
   });

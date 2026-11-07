@@ -180,7 +180,12 @@ export const commonText = Object.freeze({
       ? t("Someone at your table is placing an order")
       : t("Another guest is checking out");
   },
-  pricesConfirmedFor: (remaining: string) => t("Prices confirmed for {remaining}.", { remaining }),
+  /**
+   * Owner #26 / WP-2423 item 20: how long this quoted total can be continued with. It is not a
+   * price hold (a menu change inside it still asks the guest to accept new prices), so the
+   * wording never promises one, the same as the checkout countdown.
+   */
+  continueWithin: (remaining: string) => t("Continue within {remaining}.", { remaining }),
 });
 
 // --- cart page (cart/CartPage.tsx) ---

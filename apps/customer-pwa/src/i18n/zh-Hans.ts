@@ -539,7 +539,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Price unavailable": "价格暂不可用",
   "Priced at checkout": "结账时计价",
   "Prices are being updated. Please try again in a moment.": "价格正在更新，请稍后再试。",
-  "Prices confirmed for {remaining}.": "价格锁定 {remaining}。",
+  "Continue within {remaining}.": "请在{remaining}内继续。",
   "Prices have expired. Checkout will price your order again.": "价格已过期，结账时会重新计价。",
   "Prices need a refresh": "价格需要刷新",
   "Print or save receipt": "打印或保存收据",

@@ -293,7 +293,7 @@ function CartSummary({
         <p className="cart-summary__validity">
           {remaining === null
             ? cartText.summary.pricesExpired
-            : commonText.pricesConfirmedFor(remaining)}
+            : commonText.continueWithin(remaining)}
         </p>
       )}
       {[
