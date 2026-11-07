@@ -157,7 +157,9 @@ export function createConfigureController({
     // starts and joins it, then the dish they configured goes in. Only a tap reaches here. A start
     // whose join was refused leaves a starter that only joins, though the visit already exists.
     // WP-2423 M115: at an open table this phone may join by QR but hasn't, the tap on Add joins it.
-    const joiner = getCustomerCsrfCredential() === null ? getGuestTableJoiner() : null;
+    // The entry's own CSRF credential is already held then (it only names the table, not a place
+    // at it), so the joiner is used whenever one is set; it is cleared once this phone joined.
+    const joiner = getGuestTableJoiner();
     const starter = getGuestTableStarter() ?? joiner;
     if (starter !== null || (getCustomerCsrfCredential() === null && isUnseatedTableScan())) {
       // Asked whether they're with the people here: that answer comes first, not a trip to staff.

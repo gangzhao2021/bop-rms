@@ -582,3 +582,92 @@ test.describe("@production CUST-ENTRY guest starts a free table", () => {
       await expectNoInternalText(page);
     });
 });
+
+// WP-2423 M115: at an open table a guest may look at the menu before joining; their tap on Add
+// joins the table by its QR code and the dish goes in. A join whose answer was lost is resumed by
+// the next tap (same operation, which the server replays), never a second join. After a reload the
+// menu sends the guest to the table's page to join, which offers the join.
+test.describe("@production CUST-ENTRY guest at an open table looks at the menu first", () => {
+  test.use({ serviceWorkers: "block", viewport: { width: 390, height: 844 } });
+  const open = () => ({ ...established(), json: { ...established().json, tableOpen: true } });
+  /** As the server does: a phone that has not joined the table gets no Cart there. */
+  const refuseUntilJoined = (page: Page, joins: string[]) =>
+    page.route("**/api/v1/carts**", (route) =>
+      joins.length > 0
+        ? route.fallback()
+        : route.fulfill({
+            status: 409,
+            headers: noStore,
+            json: {
+              schemaVersion: 1,
+              error: {
+                code: "cart_dining_not_seated",
+                messageKey: "customer.cart.dining_not_seated",
+              },
+            },
+          }),
+    );
+
+  test("their tap on Add joins the table and the dish goes in; a lost answer is resumed", async ({
+    page,
+  }) => {
+    await page.route("**/bff/customer/entry", (route) => route.fulfill(open()));
+    const joins: string[] = [];
+    await joining(page, joins);
+    // The join reaches the table but no answer comes back (the phone's own quick retries too).
+    const keys: string[] = [];
+    let lose = true;
+    await page.route("**/bff/customer/dining/qr-join", (route) => {
+      keys.push(route.request().headers()["idempotency-key"] ?? "");
+      return lose ? route.abort("failed") : route.fallback();
+    });
+    await menu(page);
+    const added: { quantity: number }[] = [];
+    await tableCart(page, added);
+    await refuseUntilJoined(page, joins);
+    await page.goto("/#qr=aaa.bbb.ccc");
+    const main = page.getByRole("main");
+    await expect(main.getByRole("button", { name: "Join this table", exact: true })).toBeVisible();
+    await main.getByRole("button", { name: "Look at the menu first" }).click();
+    await page.getByRole("link", { name: "View Synthetic tea", exact: true }).click();
+    await page.getByRole("button", { name: "Add to cart", exact: true }).click();
+    await expect(page.getByRole("alert")).toContainText(
+      "We couldn’t join you to this table just now.",
+    );
+    expect(added).toEqual([]);
+    const lost = keys.length;
+    lose = false;
+    await page.getByRole("button", { name: "Add to cart", exact: true }).click();
+    await expect.poll(() => added).toEqual([expect.objectContaining({ quantity: 1 })]);
+    // One join intent: the next tap resumed the same operation, never a second join.
+    expect(keys.length).toBeGreaterThan(lost);
+    expect(new Set(keys).size).toBe(1);
+    expect(joins).toEqual(["{}"]);
+    await expectNoInternalText(page);
+  });
+
+  test("after a reload on the menu the table's own page offers the join again", async ({
+    page,
+  }) => {
+    await page.route("**/bff/customer/entry", (route) => route.fulfill(open()));
+    const joins: string[] = [];
+    await joining(page, joins);
+    await menu(page);
+    const added: { quantity: number }[] = [];
+    await tableCart(page, added);
+    await page.goto("/#qr=aaa.bbb.ccc");
+    await page.getByRole("main").getByRole("button", { name: "Look at the menu first" }).click();
+    await page.getByRole("link", { name: "View Synthetic tea", exact: true }).click();
+    await page.reload();
+    // Never "wait for staff": the table is open, and its page joins it with one tap.
+    const main = page.getByRole("main");
+    await expect(main.getByRole("button", { name: "Join this table", exact: true })).toBeVisible();
+    await expect(page.getByText("You can order once staff seat you")).toHaveCount(0);
+    expect(joins).toEqual([]);
+    await main.getByRole("button", { name: "Join this table", exact: true }).click();
+    await expect(page).toHaveURL(/\/menu$/u);
+    expect(joins).toEqual(["{}"]);
+    expect(added).toEqual([]);
+    await expectNoInternalText(page);
+  });
+});

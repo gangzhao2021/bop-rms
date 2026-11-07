@@ -263,7 +263,8 @@ describe("WP-1702 in-memory Configurator state", () => {
   });
 
   it("M115: at an open table this phone browsed first, the tap on Add joins the table and adds the dish", async () => {
-    setCustomerCsrfCredential(null);
+    // The scan's entry already gave this phone a CSRF credential (for the table, not a place at it).
+    setCustomerCsrfCredential("csrf-entry");
     let refuse = true;
     const joins: string[] = [];
     setGuestTableJoiner(async (): Promise<GuestTableStartAnswer> => {
