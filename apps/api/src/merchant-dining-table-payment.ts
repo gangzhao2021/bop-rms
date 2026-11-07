@@ -570,16 +570,10 @@ export function createMerchantDiningTableOnlineRefund(options: {
           .send(approved.recorded.refund)
           // No answer: on record as on its way, and the background workload keeps sending it.
           .catch(() => false);
-      return await authorized(async (tx, scope, _actor, guard) =>
+      return await authorized(async (tx, scope, actorReference, guard) =>
         Object.freeze({
           status: approved.recorded.status,
-          ...(await view(
-            tx,
-            scope,
-            command.orderReference,
-            guard,
-            String(authority.scope.actorReference),
-          )),
+          ...(await view(tx, scope, command.orderReference, guard, actorReference)),
         }),
       );
     } catch (error) {
