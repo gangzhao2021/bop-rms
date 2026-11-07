@@ -59,14 +59,21 @@ const copy: Record<AvailabilityErrorCode | "Loading", string> = {
   Offline: offlineCheckBeforeRepeatText,
   Unavailable: serverProblemText,
 };
-const statusText = {
-  // WP-2423 M122: an item on sale ("可售"), not a free table ("空闲").
-  Available: t("On sale"),
-  SoldOut: t("Sold out"),
-  Unavailable: t("Not available here"),
-  NotOffered: t("Not offered at this Store"),
-  Varies: t("Available for some order types"),
-} as const;
+/**
+ * An item's or a choice's status in staff words. "Available to order", not "Available": in Chinese
+ * that word is the vacant-table one (空闲), and staff read 可售 for something guests can order.
+ */
+export function availabilityStatusText(
+  status: "Available" | "SoldOut" | "Unavailable" | "NotOffered" | "Varies",
+): string {
+  return {
+    Available: () => t("Available to order"),
+    SoldOut: () => t("Sold out"),
+    Unavailable: () => t("Not available here"),
+    NotOffered: () => t("Not offered at this Store"),
+    Varies: () => t("Available for some order types"),
+  }[status]();
+}
 
 /** The items of each product together, in the order the products first appear. */
 export function groupByProduct<T extends { readonly productName: string }>(
@@ -444,7 +451,7 @@ export function StoreAvailabilityPage({
                         ? t("Sold out to guests (stock)")
                         : item.status === "Available" && view.stockCheck === "NotChecked"
                           ? t("Offered")
-                          : statusText[item.status]}
+                          : availabilityStatusText(item.status)}
                     {item.stockSoldOut != null &&
                     (item.status === "Available" || item.status === "Varies") ? (
                       <p className="availability-note">
@@ -566,7 +573,7 @@ function OptionAvailability({
                   <td data-label={t("Status")}>
                     {option.status === "SoldOut"
                       ? soldOutText(option.soldOutUntil, timeZone)
-                      : t("Available")}
+                      : availabilityStatusText("Available")}
                   </td>
                   <td>
                     {!permissions.mayMarkSoldOut ? null : option.status === "SoldOut" ? (

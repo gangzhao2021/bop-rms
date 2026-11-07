@@ -239,3 +239,16 @@ it("WP-2423 (M24): lists choices with the dishes that offer them, and finds one 
     parseStoreAvailabilityView({ ...view, options: [{ ...pearls, status: "Maybe" }] }),
   ).toThrow();
 });
+
+it("WP-2423 (M24): says a dish or choice guests can order is 可售 in Chinese, never the vacant-table word", async () => {
+  const { availabilityStatusText } = await import("./StoreAvailabilityPage.js");
+  const { setLanguageForTest } = await import("./i18n/i18n.js");
+  expect(availabilityStatusText("Available")).toBe("Available to order");
+  setLanguageForTest("zh-Hans");
+  try {
+    expect(availabilityStatusText("Available")).toBe("可售");
+    expect(availabilityStatusText("SoldOut")).toBe("售罄");
+  } finally {
+    setLanguageForTest("en");
+  }
+});
