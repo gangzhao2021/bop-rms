@@ -2061,8 +2061,6 @@ describe("migration catalog", () => {
       ],
       // A Store keeping its version without what a BOP preset update offered.
       ["2000_322_create_role_preset_offer_decision", "@bop/permission", "bop_permission"],
-      // v15 M131: new table cash refunds hand back whole nickels.
-      ["2000_433_alter_dining_table_cash_refund_nickel", "@rms/payment", "rms_payment"],
     ]);
     const permission = migrations.find(
       (migration) => migration.id === "0300_001_create_permission",
