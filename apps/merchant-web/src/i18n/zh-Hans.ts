@@ -8522,8 +8522,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Sent by you": "由你提交",
   // merchant-outage-recovery M01: the workspace reconnecting by itself.
   "Can't connect right now": "暂时连不上",
-  "Retrying on its own. This page opens as soon as the system answers, and nothing you entered is lost. Keep serving with paper slips if it takes more than a few minutes.":
-    "正在自动重试，系统一回应这一页就会自己打开，已经录入的内容不会丢。如果几分钟还连不上，先用纸质点单继续营业。",
+  "Retrying on its own. This page opens as soon as the system answers. Orders already sent stay in the system. Keep serving with paper slips if it takes more than a few minutes.":
+    "正在自动重试，系统一回应这一页就会自己打开。已经发出的订单都还在系统里。如果几分钟还连不上，先用纸质点单继续营业。",
   "This device is offline": "这台设备没有联网",
   "Check the wifi. The page opens again by itself when the network is back.":
     "请检查无线网络。网络恢复后这一页会自己重新打开。",

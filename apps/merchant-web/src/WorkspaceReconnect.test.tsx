@@ -60,6 +60,9 @@ describe("merchant-outage-recovery M01: the kept workspace frame", () => {
     expect(html).toContain("Can&#x27;t connect right now");
     expect(html).toContain("may be refunded automatically");
     expect(html).toContain("Try now");
+    // A reload has already dropped anything unsaved: say only what is really kept.
+    expect(html).not.toContain("nothing you entered is lost");
+    expect(html).toContain("Orders already sent stay in the system.");
     expect(html).not.toContain("session and Store are required");
   });
 });

@@ -57,7 +57,7 @@ export function WorkspaceReconnectPanel({ reconnect }: { readonly reconnect: Wor
           {offline
             ? t("Check the wifi. The page opens again by itself when the network is back.")
             : t(
-                "Retrying on its own. This page opens as soon as the system answers, and nothing you entered is lost. Keep serving with paper slips if it takes more than a few minutes.",
+                "Retrying on its own. This page opens as soon as the system answers. Orders already sent stay in the system. Keep serving with paper slips if it takes more than a few minutes.",
               )}
         </p>
         {/* AGENTS.md "Warn before timeouts": the refund countdown cannot be read from here. */}
