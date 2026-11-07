@@ -407,7 +407,7 @@ export function createMerchantAvailability(options: {
       if (stockCheck === "NotChecked" && stock.size > 0)
         options.onUnexpected?.(
           "MERCHANT_AVAILABILITY_STOCK_UNREAD",
-          new Error("STOCK_ITEM_UNREAD"),
+          new Error("some items' stock could not be read"),
         );
     }
     return {
