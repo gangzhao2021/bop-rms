@@ -173,6 +173,8 @@ it("serializes separate financial facts without rewriting immutable receipts", a
     capturedMinor: 114n,
     confirmedRefundMinor: 10n,
     pendingRefundMinor: 20n,
+    unsentRefundMinor: 0n,
+    unrecordedMachineRefundMinor: 0n,
     unresolvedAttemptCount: 1,
     paidOnlineMinor: 100n,
     paidOnCardMachineMinor: 14n,

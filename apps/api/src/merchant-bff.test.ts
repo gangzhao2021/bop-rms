@@ -4585,6 +4585,7 @@ it("protects refund payment context and preserves unknown amounts", async () => 
     confirmedRefundMinor: null,
     pendingRefundMinor: null,
     canRequest: false,
+    requestBlocked: null,
   };
   const query = vi.fn<NonNullable<MerchantBffRouterOptions["refundPaymentContext"]>>(async () => ({
     ...data,

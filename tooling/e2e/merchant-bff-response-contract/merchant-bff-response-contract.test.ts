@@ -253,7 +253,12 @@ const dineIn = {
     paid: { amountMinor: "9200", method: "Cash", refundedMinor: "0" },
   },
   paidOnline: { amountMinor: "8000", currencyCode: "CAD" },
-  paymentPosition: { refundedMinor: "500", refundPendingMinor: "0" },
+  paymentPosition: {
+    refundedMinor: "500",
+    refundPendingMinor: "0",
+    refundNotSentMinor: "0",
+    refundOnMachineMinor: "0",
+  },
   heldStock: null,
   summary: {
     items: [{ name: "Ramen", option: "Large", quantity: 2 }],
@@ -645,7 +650,12 @@ const detailView = {
     },
   } as Queue["lines"],
   pickupContact: null,
-  paymentPosition: { refundedMinor: "500", refundPendingMinor: "0" },
+  paymentPosition: {
+    refundedMinor: "500",
+    refundPendingMinor: "0",
+    refundNotSentMinor: "0",
+    refundOnMachineMinor: "0",
+  },
   record: null,
   paidOrderWatch,
 } satisfies Queue;

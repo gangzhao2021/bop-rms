@@ -250,8 +250,10 @@ it("with the switch off, or never set, nothing changes: a wait, Accept, and the 
     assert.equal(Object.hasOwn(before, "paidOrderWatch"), false);
     const row = before.items.find((item) => item.orderReference === never.orderReference);
     assert.equal(row.batches[0].canRequestAcceptance, true);
-    for (const key of ["acceptedAutomaticallyAt", "canCantMake", "notSentAutomatically"])
+    for (const key of ["acceptedAutomaticallyAt", "notSentAutomatically"])
       assert.equal(Object.hasOwn(row.batches[0], key), false, key);
+    // WP-2423 M14: paid and waiting, whoever may accept may also decline ("Can't make it").
+    assert.equal(row.batches[0].canCantMake, true);
     // A person presses Accept; the wait workload then confirms it. As today.
     assert.deepEqual(await staff.accept(never), { status: "Created", acceptedOrderVersion: 2 });
     const resumed = await world.worker().run((tx) => paid.resume(tx, never.event.eventId));
