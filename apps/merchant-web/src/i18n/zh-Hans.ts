@@ -9110,4 +9110,16 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Adds no allergens": "不加过敏原",
   "Adds: {allergens}": "加：{allergens}",
   "Adds none": "都不加",
+  // WP-2423 shared-table-checkout (c): the table's unsent cart; staff remove a dish with a reason.
+  "In the cart (not ordered yet)": "购物车（还没下单）",
+  "The table's cart could not be read. It is read again with the table.":
+    "读不到这桌的购物车。会随这桌一起再读取。",
+  "A guest is paying for these dishes now.": "客人正在为这些菜付款。",
+  "The cart changed. Here it is as it stands now.": "购物车有变化，这是现在的样子。",
+  "A dish no longer on the menu": "已不在菜单上的菜",
+  "with options": "有选项",
+  "Why remove {dish}?": "为什么删除{dish}？",
+  "Guest left": "客人已离开",
+  "Can't make it": "做不了",
+  "Remove from cart": "从购物车删除",
 });

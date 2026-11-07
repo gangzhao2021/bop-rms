@@ -53,6 +53,7 @@ import { TableMerge } from "./TableMerge.js";
 import { TableBillTotal } from "./TableBillTotal.js";
 import { TableOrderRounds } from "./TableOrderRounds.js";
 import { RoundHoldSettingControl, TableHeldRounds, TablePanelPhones } from "./TablePhones.js";
+import { TableCartPanel } from "./TableCartPanel.js";
 import { TablesOfflineGuide } from "./TablesOfflineGuide.js";
 import {
   browserOffline,
@@ -1836,6 +1837,15 @@ function TablePanel({
             locked={locked}
             refreshKey={refreshKey + ":" + String(checkoutRevision)}
             onRounds={setRoundPhones}
+          />
+        ) : null}
+        {seated && canOperateTables && table.currentDiningSessionReference !== null ? (
+          <TableCartPanel
+            key={"cart:" + table.currentDiningSessionReference}
+            diningSessionReference={table.currentDiningSessionReference}
+            csrf={csrf}
+            locked={locked}
+            refreshKey={refreshKey + ":" + String(checkoutRevision)}
           />
         ) : null}
         <section className="table-panel__more" aria-label={t("More for this table")}>
