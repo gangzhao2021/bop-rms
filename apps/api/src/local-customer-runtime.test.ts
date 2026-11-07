@@ -464,7 +464,9 @@ describe("scoped local Customer runtime", () => {
       },
       body: "{}",
     });
-    expect(response.status).toBe(401);
+    // M126: the outer Identity store's database is down here, so the guest is told to try again
+    // (503), never that the visit expired.
+    expect(response.status).toBe(503);
     expect(f.run).toHaveBeenCalled();
     expect(forbidden).not.toHaveBeenCalled();
     expect(dining.write).not.toHaveBeenCalled();
