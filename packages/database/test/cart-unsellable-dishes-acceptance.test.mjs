@@ -295,6 +295,11 @@ it("WP-2423 (cart-unsellable-dishes): a hidden dish or a default choice turned o
       assert.equal(await validate(iced), "Rejected");
       await markIced(83, false, null, minute(10));
       assert.equal(await validate(iced), "Accepted");
+      // Another API instance whose clock runs ahead recorded a mark at minute 12; this one, at
+      // minute 11 by its own clock, still records the next version instead of a conflict.
+      assert.equal((await markIced(86, true, null, minute(12))).version, 4);
+      assert.equal((await markIced(87, false, null, minute(11))).version, 5);
+      assert.equal(await validate(iced), "Accepted");
       // The records are append-only for the api role.
       for (const sql of [
         "UPDATE rms_catalog.store_option_sold_out SET sold_out=false",
@@ -311,6 +316,8 @@ it("WP-2423 (cart-unsellable-dishes): a hidden dish or a default choice turned o
           [1, true, id(3)],
           [2, true, id(3)],
           [3, false, id(3)],
+          [4, true, id(3)],
+          [5, false, id(3)],
         ],
       );
 

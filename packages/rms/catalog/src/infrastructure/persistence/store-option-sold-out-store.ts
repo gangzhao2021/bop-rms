@@ -264,15 +264,20 @@ export async function changeStoreOptionSoldOut(
     );
     if (known.rows.length !== 1)
       throw new StoreOptionSoldOutError("STORE_OPTION_SOLD_OUT_INPUT_INVALID");
-    const current = (
-      await tx.query<Record<string, unknown>>(latestMarks, [
-        brand,
-        store,
-        [option],
-        input.observedAt,
-      ])
-    ).rows[0];
-    const version = (current === undefined ? 0 : Number(current.version)) + 1;
+    // The next version follows every mark recorded here, whatever its instant: a mark another
+    // API instance recorded a moment "later" by its clock must not make this one collide (and
+    // read as a conflict on every retry). Which mark is in effect stays bounded by time.
+    const latest = Number(
+      (
+        await tx.query<{ version: unknown }>(
+          "SELECT COALESCE(max(version),0) AS version FROM rms_catalog.store_option_sold_out WHERE brand_id=$1 AND store_id=$2 AND option_id=$3",
+          [brand, store, option],
+        )
+      ).rows[0]?.version ?? Number.NaN,
+    );
+    if (!Number.isSafeInteger(latest) || latest < 0)
+      throw new StoreOptionSoldOutError("STORE_OPTION_SOLD_OUT_UNAVAILABLE");
+    const version = latest + 1;
     await tx.query(
       "INSERT INTO rms_catalog.store_option_sold_out (tenant_id,brand_id,store_id,option_id,version,operation_id,sold_out,sold_out_until,actor_id,occurred_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
       [
