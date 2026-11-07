@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  createPostgresDiningCartParticipationStore,
   createPostgresDiningParticipationStore,
   createPostgresDiningHostParticipationFence,
   createPostgresDiningParticipantFence,
@@ -68,7 +69,12 @@ function fixture(result: unknown) {
       return (await action({ query })) as T;
     },
   };
-  return { store: createPostgresDiningParticipationStore(runner, scope), calls, query };
+  return {
+    store: createPostgresDiningParticipationStore(runner, scope),
+    cart: createPostgresDiningCartParticipationStore(runner, scope),
+    calls,
+    query,
+  };
 }
 describe("WP-2280 coherent current participation storage", () => {
   it("returns copied scalar table evidence with Session assignment rather than aggregate revision", async () => {
@@ -135,14 +141,32 @@ describe("WP-2280 coherent current participation storage", () => {
     });
   });
   it.each([
+    ["session", { phase: "Closed" }, "TableClosed"],
+    ["session", { phase: "Cancelled" }, "TableClosed"],
+    ["participant", { status: "Left", version: 2, leftAt: at }, "Left"],
+    ["table", { activeDiningSessionReference: null }, "Changed"],
+    ["table", { activeDiningSessionReference: id(90) }, "Changed"],
+  ])(
+    "M126 I.2: the guest cart's read says why its own place ended (%s %j: %s)",
+    async (owner, patch, reason) => {
+      const source = snapshot();
+      const { store, cart } = fixture({
+        rows: [
+          { ...source, [owner as string]: { ...source[owner as "session"], ...(patch as object) } },
+        ],
+      });
+      await expect(cart.readCurrent(input() as never)).rejects.toMatchObject({
+        name: "DiningParticipationEndedError",
+        reason,
+      });
+      // Every other reader (write fences, invitations) keeps its plain "no".
+      expect(await store.readCurrent(input() as never)).toBeNull();
+    },
+  );
+  it.each([
     ["session", { phase: "Closing" }],
-    ["session", { phase: "Closed" }],
-    ["session", { phase: "Cancelled" }],
-    ["participant", { status: "Left", version: 2, leftAt: at }],
     ["table", { lifecycle: "Draft", activeDiningSessionReference: null }],
     ["table", { operationalState: "TemporarilyBlocked", blockReasonCode: "MAINTENANCE" }],
-    ["table", { activeDiningSessionReference: null }],
-    ["table", { activeDiningSessionReference: id(90) }],
     ["table", { tableReference: id(90) }],
     ["table", { observedAt: "2026-09-09T15:04:00.000Z" }],
     ["participant", { joinedAt: "2026-09-09T15:04:00.000Z" }],

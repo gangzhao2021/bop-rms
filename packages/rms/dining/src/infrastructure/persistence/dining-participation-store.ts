@@ -11,7 +11,10 @@ import {
   captureSessionData,
   sessionDependency,
 } from "../../application/dining-session-snapshot.js";
-import type { DiningCartParticipationOptions } from "../../application/dining-cart-participation-query.js";
+import {
+  DiningParticipationEndedError,
+  type DiningCartParticipationOptions,
+} from "../../application/dining-cart-participation-query.js";
 import type { DiningTableStoreScope, DiningTableTransactionRunner } from "./dining-table-store.js";
 
 function closed(value: unknown, keys: readonly string[]) {
@@ -64,7 +67,8 @@ export function createPostgresDiningCartParticipationStore(
   runner: DiningTableTransactionRunner,
   scopeInput: DiningTableStoreScope,
 ): DiningCartParticipationOptions["repository"] {
-  return createParticipationStore(runner, scopeInput, "None", true);
+  // M126 I.2: the guest's own cart read says why its place at the table ended.
+  return createParticipationStore(runner, scopeInput, "None", true, true);
 }
 
 /** The staff call's write fence: the participant fence, with a table checking out still seated. */
@@ -102,6 +106,11 @@ function createParticipationStore(
   scopeInput: DiningTableStoreScope,
   fence: "None" | "Host" | "Participant",
   checkingOutSeated = false,
+  /**
+   * M126 I.2: say why this guest's own place ended (DiningParticipationEndedError) instead of
+   * null. Only the guest cart's read asks; write fences and other owners keep null.
+   */
+  endedReasons = false,
 ): DiningCartParticipationOptions["repository"] {
   const scope = closed(scopeInput, ["tenantReference", "brandReference", "storeReference"]);
   const tenant = parseDiningReference(scope.tenantReference);
@@ -202,10 +211,7 @@ function createParticipationStore(
           if (
             (fence === "Host" && session.hostParticipantReference !== input.participant) ||
             (fence !== "None" && session.tableReference !== lockedTable) ||
-            (session.phase !== "Active" && !(checkingOutSeated && session.phase === "Closing")) ||
-            participant.status !== "Active" ||
             currentTable.tableReference !== session.tableReference ||
-            currentTable.activeDiningSessionReference !== session.diningSessionReference ||
             currentTable.lifecycle !== "Published" ||
             currentTable.operationalState !== "Available" ||
             currentTable.observedAt > input.at ||
@@ -215,6 +221,18 @@ function createParticipationStore(
             participant.joinedAt > input.at
           )
             return null;
+          // M126 I.2: this guest's own place at its table ended; why (never an expired visit).
+          const ended = (reason: "Left" | "TableClosed" | "Changed"): null => {
+            if (endedReasons) throw new DiningParticipationEndedError(reason);
+            return null;
+          };
+          if (session.phase === "Closed" || session.phase === "Cancelled")
+            return ended("TableClosed");
+          if (session.phase !== "Active" && !(checkingOutSeated && session.phase === "Closing"))
+            return null;
+          if (participant.status !== "Active") return ended("Left");
+          if (currentTable.activeDiningSessionReference !== session.diningSessionReference)
+            return ended("Changed");
           const table = parseDiningTableStartEvidence({
             brandReference: brand,
             storeReference: store,
@@ -226,7 +244,8 @@ function createParticipationStore(
           });
           return Object.freeze({ session, participant, table });
         });
-      } catch {
+      } catch (error) {
+        if (error instanceof DiningParticipationEndedError) throw error;
         return sessionDependency();
       }
     },
