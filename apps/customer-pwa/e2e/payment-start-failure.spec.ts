@@ -719,28 +719,137 @@ test("@production after a card was offered, last orders never says it wasn't cha
     intents: (route, call) =>
       call === 1 ? created(route, call) : refused(409, "payment_store_closed")(route, call),
   });
+  let resultReads = 0;
+  let answer: "unreadable" | "pending" = "unreadable";
+  await page.route(`**/api/v1/checkout-sessions/${session}/payment-result`, (route) => {
+    resultReads++;
+    return answer === "unreadable"
+      ? route.fulfill({ status: 503, json: { schemaVersion: 1, error: { code: "x" } } })
+      : route.fulfill({
+          headers: { "cache-control": "no-store" },
+          json: {
+            schemaVersion: 1,
+            payment: {
+              checkoutSessionReference: session,
+              paymentIntentReference: id(11),
+              orderReference: id(12),
+              status: "Pending",
+              total: { amountMinor: "2260", currency: "CAD" },
+              payBy: new Date(Date.now() + 600_000).toISOString(),
+              failure: null,
+            },
+          },
+        });
+  });
   await goToPayment(page);
   const main = page.getByRole("main");
   await expect(main.getByText("Synthetic secure card component")).toBeVisible();
   await context.setOffline(true);
+  // WP-2423 M17: the card may have gone through; the page says not to pay again, offers nothing.
   await expect(
-    main.getByRole("heading", { name: "We can’t confirm where your payment stands" }),
+    main.getByRole("heading", { name: "Checking your payment — don’t pay again" }),
   ).toBeVisible();
-  await expect(main).toContainText("check the result first and don’t pay again");
   await expect(main).not.toContainText("charged");
+  await expect(main.getByRole("button", { name: "Continue to payment" })).toHaveCount(0);
   await context.setOffline(false);
-  const again = main.getByRole("button", { name: "Continue to payment", exact: true });
-  await expect(again).toBeEnabled();
-  await again.click();
-  await expect.poll(() => intentCalls.length).toBe(2);
-  await expect(
-    main.getByRole("heading", { name: "We can’t confirm where your payment stands" }),
-  ).toBeVisible();
-  await expect(main.getByRole("link", { name: "Check payment result" })).toBeVisible();
-  await expect(main).not.toContainText("charged");
-  await expect(main).not.toContainText("stopped taking orders");
-  await expect(main.getByRole("link", { name: "Back to checkout" })).toHaveCount(0);
-  expect(intentCalls[1]?.key).toBe(intentCalls[0]?.key);
+  // Back online the result is read by itself; still unreadable, still nothing to pay with.
+  await expect.poll(() => resultReads).toBeGreaterThan(0);
+  await expect(main.getByRole("button", { name: "Continue to payment" })).toHaveCount(0);
+  await expect(main.getByRole("button", { name: "Check now", exact: true })).toBeEnabled();
+  // The payment exists: the result page takes over, which offers that same attempt only.
+  answer = "pending";
+  await main.getByRole("button", { name: "Check now", exact: true }).click();
+  await expect(page).toHaveURL(/\/checkout\/result$/u);
+  expect(intentCalls).toHaveLength(1);
+});
+
+test("@production WP-2423 M17: a card that went through while the page lost track shows as paid by itself", async ({
+  page,
+  context,
+}) => {
+  await checkout(page, { channel: "Pickup", intents: created });
+  await page.route(`**/api/v1/checkout-sessions/${session}/payment-result`, (route) =>
+    route.fulfill({
+      headers: { "cache-control": "no-store" },
+      json: {
+        schemaVersion: 1,
+        payment: {
+          checkoutSessionReference: session,
+          paymentIntentReference: id(11),
+          orderReference: id(12),
+          status: "Succeeded",
+          total: { amountMinor: "2260", currency: "CAD" },
+          payBy: new Date(Date.now() + 600_000).toISOString(),
+          failure: null,
+        },
+      },
+    }),
+  );
+  await goToPayment(page);
+  const main = page.getByRole("main");
+  await expect(main.getByText("Synthetic secure card component")).toBeVisible();
+  await context.setOffline(true);
+  await context.setOffline(false);
+  await expect(page).toHaveURL(/\/checkout\/result$/u);
+  await expect(page.getByRole("heading", { name: "Payment confirmed", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Continue to payment" })).toHaveCount(0);
+  // WP-2423 M17: reconnecting never claims nothing was sent.
+  await expect(page.getByText("Nothing was sent", { exact: false })).toHaveCount(0);
+  await expectNoInternalText(page);
+});
+
+test("@production WP-2423 M19: the payment page says until when to pay, warns in the last minutes, and stops at the end", async ({
+  page,
+}) => {
+  await page.clock.install();
+  const now = Date.now();
+  // The server's clock: six minutes left.
+  const payBy = new Date(now + 6 * 60_000).toISOString();
+  await checkout(page, {
+    channel: "Pickup",
+    intents: (route) =>
+      route.fulfill({
+        status: 201,
+        json: {
+          schemaVersion: 1,
+          payment: {
+            checkoutSessionReference: session,
+            paymentIntentReference: id(11),
+            orderReference: id(12),
+            creationStatus: "Created",
+            total: { amountMinor: "2260", currency: "CAD" },
+            payBy,
+          },
+          serverNow: new Date(now).toISOString(),
+        },
+      }),
+  });
+  await goToPayment(page);
+  const main = page.getByRole("main");
+  await expect(main.getByText("Synthetic secure card component")).toBeVisible();
+  await expect(main.getByText(/^Pay by /u)).toBeVisible();
+  await expect(main.getByText("About 5 minutes left to pay.", { exact: false })).toHaveCount(0);
+  await page.clock.runFor(70_000);
+  await expect(main.getByRole("alert")).toContainText("About 5 minutes left to pay.");
+  await expect(main).toContainText("this order is cancelled and you won’t be charged");
+  await expectNoInternalText(page);
+  // At the end the card is no longer offered; the page reads what happened instead.
+  await page.clock.runFor(5 * 60_000);
+  await expect(main.getByText("Synthetic secure card component")).toHaveCount(0);
+  await expect(main.getByRole("button", { name: "Pay securely" })).toHaveCount(0);
+});
+
+test("@production WP-2423 M19: a payment whose time ran out before a card was offered says so, with a way back", async ({
+  page,
+}) => {
+  await checkout(page, { channel: "Pickup", intents: refused(422, "payment_window_ended") });
+  await goToPayment(page);
+  const main = page.getByRole("main");
+  await expect(main.getByRole("heading", { name: "Time to pay ran out" })).toBeVisible();
+  await expect(main).toContainText("Your order was cancelled and you haven’t been charged.");
+  await expect(main.getByRole("link", { name: "Back to menu" })).toBeVisible();
+  await expect(main.getByRole("button", { name: "Continue to payment" })).toHaveCount(0);
+  await expectNoInternalText(page);
 });
 
 test("@production the first card form failing to load says this payment wasn't charged, and tries again", async ({

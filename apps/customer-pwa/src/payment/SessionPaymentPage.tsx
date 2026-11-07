@@ -396,7 +396,7 @@ function PreparedSessionPaymentPage({
     let stopped = false;
     let timer: number | undefined;
     const read = async () => {
-      let answer: SessionPaymentResult | null = null;
+      let answer: SessionPaymentResult | null;
       try {
         answer = await createSessionPaymentResultClient().read(sessionReference);
       } catch {

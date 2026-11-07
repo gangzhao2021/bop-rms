@@ -304,10 +304,22 @@ for (const screen of [
           const confirm = page.getByRole("checkbox", {
             name: "I’ve read and agree to the policies above",
           });
-          const save = page.getByRole("button", { name: "Save details", exact: true });
+          // WP-2423 M113: Continue saves the details; there is no separate Save button.
+          const save = page.getByRole("button", {
+            name: /Continue to payment|Choose a tip to continue/u,
+          });
+          await expect(page.getByRole("button", { name: "Save details" })).toHaveCount(0);
           await expect(name).toHaveValue("Synthetic Guest");
           await expect(confirm).not.toBeChecked();
           await expect(save).toBeDisabled();
+          await page.getByRole("button", { name: "No tip", exact: true }).click();
+          // WP-2423 M112: Continue with the policies unticked goes to the tick, sending nothing.
+          await expect(save).toBeEnabled();
+          await save.click();
+          await expect(confirm).toBeFocused();
+          await expect(confirm).toHaveAttribute("aria-invalid", "true");
+          await expect(page.getByText("Tick this to continue", { exact: true })).toBeVisible();
+          expect(detailCalls).toHaveLength(0);
           await page.getByText("Synthetic checkout terms", { exact: true }).click();
           await expect(
             page.getByText("<script>window.policyExecuted=true</script>", { exact: false }),
@@ -315,6 +327,7 @@ for (const screen of [
           expect(await page.evaluate(() => Object.hasOwn(window, "policyExecuted"))).toBe(false);
           await confirm.focus();
           await page.keyboard.press("Space");
+          await expect(confirm).not.toHaveAttribute("aria-invalid", "true");
           await expect(save).toBeEnabled();
           await save.click();
           const retryDetails = page.getByRole("button", {
@@ -347,7 +360,6 @@ for (const screen of [
             policies: [policyDocument],
           });
           expect(detailCalls[0]?.body).not.toHaveProperty("orderType");
-          await expect(save).toBeDisabled();
           if (terminal.startsWith("payment")) {
             // Reconnection re-priced the cart automatically; the saved details still apply.
             await expect(page.getByRole("heading", { name: "Total", exact: true })).toBeVisible();
@@ -401,7 +413,7 @@ for (const screen of [
                           orderReference: id(12),
                           creationStatus:
                             paymentCalls.length === 2 ? "Processing" : "AlreadyCreated",
-                          total: { amountMinor: "238", currency: "CAD" },
+                          total: { amountMinor: "138", currency: "CAD" },
                         },
                       },
                     },
@@ -431,7 +443,7 @@ for (const screen of [
                           : terminal === "payment-failed"
                             ? "Failed"
                             : "Succeeded",
-                      total: { amountMinor: "238", currency: "CAD" },
+                      total: { amountMinor: "138", currency: "CAD" },
                       payBy: "2026-01-01T12:30:00.000Z",
                       failure:
                         resultCalls !== 1 && terminal === "payment-failed" ? "Declined" : null,
@@ -497,9 +509,17 @@ for (const screen of [
             await tip.fill("1.251");
             await expect(tip).toHaveAttribute("aria-invalid", "true");
             await expect(proceed).toBeDisabled();
+            // WP-2423 M132: a tip larger than the order itself is refused beside the field.
             await tip.fill("1.25");
+            await expect(
+              page.getByText("A tip can’t be more than the order itself ($1.00).", {
+                exact: false,
+              }),
+            ).toBeVisible();
+            await expect(proceed).toBeDisabled();
+            await tip.fill("0.25");
             await expect(proceed).toBeEnabled();
-            await expect(proceed).toContainText("$2.38");
+            await expect(proceed).toContainText("$1.38");
             await expectNoInternalText(page);
             await proceed.click();
             const retrySession = page.getByRole("button", { name: "Retry checkout", exact: true });
@@ -532,11 +552,11 @@ for (const screen of [
             expect(paymentCalls).toHaveLength(1);
             await retryPayment.click();
             // The amount only the server knows, with the tip inside it, once it has answered.
-            await expect(page.getByText("$2.38", { exact: true })).toBeVisible();
-            await expect(page.getByText("$1.25", { exact: true })).toBeVisible();
+            await expect(page.getByText("$1.38", { exact: true })).toBeVisible();
+            await expect(page.getByText("$0.25", { exact: true })).toBeVisible();
             expect(paymentCalls).toHaveLength(2);
             expect(paymentCalls[1]).toEqual(paymentCalls[0]);
-            expect(paymentCalls[0]?.body).toEqual({ tip: { amountMinor: "125", currency: "CAD" } });
+            expect(paymentCalls[0]?.body).toEqual({ tip: { amountMinor: "25", currency: "CAD" } });
             // SPA remount must preserve payment identity; synthetic Processing is never Paid.
             await page.evaluate(() => {
               history.pushState(null, "", "/cart");
@@ -651,18 +671,23 @@ for (const screen of [
             expect(failures).toEqual([]);
             return;
           }
-          await page.getByRole("button", { name: "Reload checkout details", exact: true }).click();
-          await expect(confirm).not.toBeChecked();
-          await expect(save).toBeDisabled();
+          // WP-2423 M113: no Reload button once the details loaded.
+          await expect(page.getByRole("button", { name: "Reload checkout details" })).toHaveCount(
+            0,
+          );
           expect(
             await page.evaluate(
               () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
             ),
           ).toBe(true);
           await page.clock.fastForward(600_001);
+          // WP-2423 M125: one message once the hold ended; never "saved" beside it.
           await expect(
-            page.getByText("Checkout information expired.", { exact: false }),
+            page.getByText("Price hold ended. Tap Refresh prices. Your details are kept.", {
+              exact: true,
+            }),
           ).toBeVisible();
+          await expect(page.getByText("Checkout details saved.", { exact: true })).toHaveCount(0);
           await expect(name).toBeDisabled();
           expect(detailCalls).toHaveLength(2);
           expect(failures).toEqual([]);

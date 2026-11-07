@@ -291,7 +291,7 @@ test.describe("@production member points when something is down", () => {
     ).toBeVisible();
     await page.getByRole("button", { name: "切换到中文" }).click();
     const panel = page.getByRole("region", { name: "加入会员，这单可以积 45 分" });
-    await expect(panel).toContainText("只有扫码点的单才能积分和使用积分");
+    await expect(panel).toContainText("积分只能在餐后结账的桌台账单上使用");
     await expect(panel).toContainText("手机号只用来发登录验证码");
     await page.goto("/member");
     await expect(page.getByRole("heading", { name: "640 分" })).toBeVisible();
