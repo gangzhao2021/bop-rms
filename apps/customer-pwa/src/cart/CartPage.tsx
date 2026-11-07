@@ -246,7 +246,20 @@ const tableOpenRoundByOther = (cart: CartView) => {
     ) ?? null
   );
 };
-/** WP-2423 (same-table-ordering, M38): what other phones' rounds mean for this cart. */
+/**
+ * WP-2423 M38: this phone's own newest round, when it is still open or will not be made, so the
+ * sender is told on the cart (not only at checkout) that it is not placed, waiting for staff, or
+ * was cancelled.
+ */
+const tableOwnRound = (cart: CartView, payLater: boolean) => {
+  const own = cart.cart.recentRounds?.find((round) => round.sentByThisPhone);
+  const text =
+    own === undefined || own.paymentState === null
+      ? null
+      : cartText.line.roundSentByThisPhone(own.roundNumber, own.paymentState, payLater);
+  return own === undefined || text === null ? null : { roundNumber: own.roundNumber, text };
+};
+/** WP-2423 (same-table-ordering, M38): what this table's rounds mean for this cart, newest first. */
 function TableRoundNotes({
   cart,
   payLater,
@@ -256,20 +269,26 @@ function TableRoundNotes({
   readonly payLater: boolean;
   readonly className?: string;
 }) {
-  const shown = tableRoundByOther(cart);
-  const open = tableOpenRoundByOther(cart);
+  const notes = [
+    tableOwnRound(cart, payLater),
+    ...[tableRoundByOther(cart), tableOpenRoundByOther(cart)].map((round) =>
+      round === null
+        ? null
+        : {
+            roundNumber: round.roundNumber,
+            text: cartText.line.roundSentByTable(round.roundNumber, round.paymentState, payLater),
+          },
+    ),
+  ]
+    .filter((note) => note !== null)
+    .sort((a, b) => b.roundNumber - a.roundNumber);
   return (
     <>
-      {shown === null ? null : (
-        <p className={className} role="status">
-          {cartText.line.roundSentByTable(shown.roundNumber, shown.paymentState, payLater)}
+      {notes.map((note) => (
+        <p key={note.roundNumber} className={className} role="status">
+          {note.text}
         </p>
-      )}
-      {open === null ? null : (
-        <p className={className} role="status">
-          {cartText.line.roundSentByTable(open.roundNumber, open.paymentState, payLater)}
-        </p>
-      )}
+      ))}
     </>
   );
 }

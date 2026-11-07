@@ -836,8 +836,36 @@ describe("WP-2423 item 6: a table that pays at the end", () => {
     expect(own).toContain("Someone at your table is still placing round 1.");
     // A held round staff cancelled was not unpaid.
     expect(
-      page({ status: "ready", cart: tableCart({ recentRounds: [sent(1, "Cancelled")] }) }),
+      page({ status: "ready", cart: tableCart({ recentRounds: [sent(1, "StaffDeclined")] }) }),
     ).toContain("Staff didn’t send round 1 to the kitchen.");
+    // A round the payment window closed was not touched by staff.
+    const closed = page({
+      status: "ready",
+      cart: tableCart({ recentRounds: [sent(1, "Cancelled")] }),
+    });
+    expect(closed).toContain("Round 1 wasn’t placed.");
+    expect(closed).not.toMatch(/Staff didn/u);
+    // The sender's own stuck round is said on the cart too, not only at checkout, beside a
+    // newer round another phone sent (newest first).
+    const stuck = page({
+      status: "ready",
+      cart: tableCart({ recentRounds: [sent(3, "PayLater"), sent(2, "AwaitingPayment", true)] }),
+    });
+    expect(stuck).toContain("Round 3 was sent by someone at your table.");
+    expect(stuck).toContain(
+      "Round 2 isn’t placed yet. If it still isn’t in a minute, ask staff to check it.",
+    );
+    expect(stuck.indexOf("Round 3 was sent")).toBeLessThan(stuck.indexOf("Round 2 isn’t placed"));
+    expect(
+      page({
+        status: "ready",
+        cart: tableCart({ recentRounds: [sent(1, "WaitingForStaff", true)] }),
+      }),
+    ).toContain("Round 1 is waiting for staff to send it to the kitchen.");
+    // Once the sender's round went to the kitchen there is nothing to add.
+    expect(
+      page({ status: "ready", cart: tableCart({ recentRounds: [sent(1, "PayLater", true)] }) }),
+    ).not.toContain("Round 1");
   });
 
   it("names a dish that ran out, and each other stop in plain words", () => {
