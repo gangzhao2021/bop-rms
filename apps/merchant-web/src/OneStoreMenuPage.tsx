@@ -1,4 +1,4 @@
-import { countOf, t } from "./i18n/i18n.js";
+import { countOf, currentLanguage, t } from "./i18n/i18n.js";
 import { browserOffline } from "./stale-read.js";
 import { StatePanel } from "@bop-rms/ui";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -125,6 +125,8 @@ export function OneStoreMenuPage({
   const [problemFixHref, setProblemFixHref] = useState<string | null>(null);
   // WP-2423 item 8a: a listing refused for a dish with no allergens points to the dishes concerned.
   const [problemNeedsAllergens, setProblemNeedsAllergens] = useState(false);
+  // WP-2423 (M151): the dish a refusal names, to open it from the refusal.
+  const [problemDish, setProblemDish] = useState<{ sku: string; name: string } | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
   // A read that failed while a form is open: the form and what is typed in it stay.
   const [readNotice, setReadNotice] = useState<string | null>(null);
@@ -553,12 +555,31 @@ export function OneStoreMenuPage({
             (dish) => dish.name === error.problem?.productName && dish.allergens.source === "None",
           ),
         );
+      // WP-2423 (M151): the dish named in the staff member's language, and a way to open it.
+      const named =
+        error instanceof MenuPageError && error.problem?.productName
+          ? rows
+              .flatMap((row) => row.dishes)
+              .find((dish) => dish.name === error.problem?.productName)
+          : undefined;
+      const namedText =
+        named === undefined
+          ? null
+          : currentLanguage() === "zh-Hans" && named.nameZh !== ""
+            ? named.nameZh
+            : named.name;
+      setProblemDish(
+        named === undefined || namedText === null || named.productReference === null
+          ? null
+          : { sku: named.skuReference, name: namedText },
+      );
       setProblem(
         error instanceof MenuPageError
           ? error.problem !== null
-            ? menuReviewProblemText(
-                undeclared ? { ...error.problem, storeName: null } : error.problem,
-              )
+            ? menuReviewProblemText({
+                ...(undeclared ? { ...error.problem, storeName: null } : error.problem),
+                ...(namedText === null ? {} : { productName: namedText }),
+              })
             : code === "Offline"
               ? t(
                   "The network dropped, so we can't tell whether the menu was listed. Tap List it again once you're connected; it won't be listed twice.",
@@ -1217,6 +1238,21 @@ export function OneStoreMenuPage({
             <>
               {" "}
               <Link to={problemFixHref}>{t("Set up the kitchen")}</Link>
+            </>
+          ) : null}
+          {problemDish !== null && mayEditDishes ? (
+            <>
+              {" "}
+              <button
+                type="button"
+                onClick={() => {
+                  setSearch("");
+                  setFilters(new Set());
+                  setEditing(problemDish.sku);
+                }}
+              >
+                {t("Open {item}", { item: problemDish.name })}
+              </button>
             </>
           ) : null}
           {problemNeedsAllergens ? (

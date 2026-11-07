@@ -1285,7 +1285,7 @@ test("@production a listing stopped by a dish with no allergens points to those 
   const review = page.getByRole("region", { name: "What goes live" });
   await expect(review.getByText("Answer allergens for 1 dish first: Coffee (TEST).")).toBeVisible();
   await review.getByRole("button", { name: "List it" }).click();
-  const refusal = page.getByText("Coffee (TEST) has no allergens declared.", { exact: false });
+  const refusal = page.getByText("Coffee (TEST) has no allergens answered.", { exact: false });
   await expect(refusal).toBeVisible();
   await expect(page.getByText("as a charge", { exact: false })).toHaveCount(0);
   await expect(page.getByText("assign its recipe", { exact: false })).toHaveCount(0);

@@ -321,7 +321,11 @@ describe("WP-2423 menu page helpers", () => {
       expect(text).not.toMatch(/guests see|Nothing changed/iu);
     }
     expect(menuReviewProblemText({ ...base, missing: "Recipe" })).toBe(
-      "Latte has no allergens declared. Declare its allergens in this menu, or publish a recipe under Recipes and assign it to this size. Then list it again.",
+      "Latte has no allergens answered. Open it and answer each allergen, then list again.",
+    );
+    // WP-2423 (M151): a recipe used at another Store only says what to do, in staff words.
+    expect(menuReviewProblemText({ ...base, missing: "Recipe", storeName: "Queen St" })).toBe(
+      "Latte at Queen St uses a recipe for another Store only. Open it under Recipes and use it for the whole Brand, or answer its allergens in this menu.",
     );
     expect(
       menuReviewProblemText({

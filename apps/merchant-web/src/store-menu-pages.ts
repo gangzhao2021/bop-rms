@@ -297,11 +297,11 @@ export function menuReviewProblemText(problem: MenuReviewProblem, saving = false
     case "Recipe":
       if (problem.storeName)
         return t(
-          "{item} has no recipe at {store}: its recipe is assigned to another Store only, or to none. Under Recipes, assign its recipe to this size for the whole Brand (not this store only), then list it again.",
+          "{item} at {store} uses a recipe for another Store only. Open it under Recipes and use it for the whole Brand, or answer its allergens in this menu.",
           { item: item, store: problem.storeName },
         );
       return t(
-        "{item} has no allergens declared. Declare its allergens in this menu, or publish a recipe under Recipes and assign it to this size. Then list it again.",
+        "{item} has no allergens answered. Open it and answer each allergen, then list again.",
         { item: item },
       );
     case "SubRecipe":
