@@ -5,6 +5,7 @@ import { SourceTime, StaffTime, StoreTimeZoneContext, storeDate } from "./StoreT
 import { useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { newOperationReference } from "./operation-reference.js";
+import { stockReasonText } from "./stock-reason-text.js";
 import {
   StoreWastePageError,
   availableQuantityText,
@@ -61,10 +62,7 @@ const heldStockNote = (available: string) =>
           "Only {available} is not held for open orders — recording more leaves those orders short; receive stock or recount.",
           { available: availableQuantityText(available) },
         );
-const reasonText = (code: string) =>
-  code === "KITCHEN_REMAKE_OPENED_BY_MISTAKE"
-    ? t("Remake cancelled — opened by mistake")
-    : code.charAt(0) + code.slice(1).toLowerCase().replaceAll("_", " ");
+const reasonText = stockReasonText;
 type State =
   | { readonly kind: "Loading" | StoreWasteErrorCode }
   | { readonly kind: "Found"; readonly view: StoreWasteView };

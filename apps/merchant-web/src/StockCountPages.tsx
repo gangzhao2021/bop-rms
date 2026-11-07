@@ -19,6 +19,7 @@ import {
   type StockCountListView,
   type StockShortageView,
 } from "./stock-count-pages.js";
+import { stockReasonText } from "./stock-reason-text.js";
 
 /** WP-2423 / DEC-INV-STOCK-COUNT: Store stock counts — blind counting, review and posting. */
 const copy: Record<StockCountErrorCode | "Loading", string> = {
@@ -59,8 +60,7 @@ const statusText: Record<string, string> = {
   Cancelled: t("Cancelled"),
   Posted: t("Posted"),
 };
-const reasonText = (code: string) =>
-  code.charAt(0) + code.slice(1).toLowerCase().replaceAll("_", " ");
+const reasonText = stockReasonText;
 
 type State<V> =
   { readonly kind: "Loading" | StockCountErrorCode } | { readonly kind: "Found"; readonly view: V };

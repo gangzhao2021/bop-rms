@@ -21,6 +21,7 @@ import {
 } from "./supply-item-pages.js";
 import { serverProblemText, offlineCheckBeforeRepeatText } from "./failure-words.js";
 import { PageDidNotLoad, readingAgain } from "./PageDidNotLoad.js";
+import { stockUnitName } from "./stock-reason-text.js";
 
 const copy: Record<SupplyItemErrorCode | "Loading", string> = {
   Loading: t("Loading inventory items…"),
@@ -486,7 +487,7 @@ function ItemForm({
         >
           {view.units.map((unit) => (
             <option key={unit.unitCode} value={unit.unitCode}>
-              {unit.label} ({systemText(unit.unitCode)})
+              {stockUnitName(unit.unitCode, unit.label)} ({systemText(unit.unitCode)})
             </option>
           ))}
         </select>

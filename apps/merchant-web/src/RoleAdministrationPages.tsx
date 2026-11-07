@@ -499,7 +499,11 @@ function Editor({
             <p>
               {t(
                 "{name} goes back to the BOP preset: removes {removed}, adds {added}. BOP updates will apply to it again.",
-                { name: role.name, removed: change.removed.length, added: change.added.length },
+                {
+                  name: systemText(role.name),
+                  removed: change.removed.length,
+                  added: change.added.length,
+                },
               )}
             </p>
           ) : null}
@@ -513,7 +517,9 @@ function Editor({
                 : t("Sent by {by}", { by: change.by })}{" "}
             · <StaffTime instant={change.at} />
           </p>
-          {change.name !== role.name ? <p>{t("New name: {name}", { name: change.name })}</p> : null}
+          {change.name !== role.name ? (
+            <p>{t("New name: {name}", { name: systemText(change.name) })}</p>
+          ) : null}
           {change.added.length > 0 ? (
             <p>{t("Adds: {list}", { list: listOf(catalog, change.added) })}</p>
           ) : null}
@@ -527,7 +533,7 @@ function Editor({
             <p>
               {t(
                 "Applies to the {count} staff who hold {name} once approved and turned on. Until then they keep what they have now.",
-                { count: role.memberCount, name: role.name },
+                { count: role.memberCount, name: systemText(role.name) },
               )}
             </p>
           ) : null}
@@ -738,7 +744,7 @@ function Editor({
                     [
                       request(role, "Duplicate", {
                         displayName: copyName.trim(),
-                        description: t("Based on {name}", { name: role.name }),
+                        description: t("Based on {name}", { name: systemText(role.name) }),
                         actions: [...role.permissions],
                       }),
                     ],
@@ -841,7 +847,7 @@ function NewRole({
                   }
                 : request(source, "Duplicate", {
                     displayName: name.trim(),
-                    description: t("Based on {name}", { name: source.name }),
+                    description: t("Based on {name}", { name: systemText(source.name) }),
                     actions: [...source.permissions],
                   }),
             ],

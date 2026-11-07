@@ -18,6 +18,7 @@ import {
 } from "./store-receipt-pages.js";
 import { serverProblemText } from "./failure-words.js";
 import { PageDidNotLoad, readingAgain } from "./PageDidNotLoad.js";
+import { stockReasonText } from "./stock-reason-text.js";
 
 const copy: Record<StoreReceiptErrorCode | "Loading", string> = {
   Loading: t("Loading receiving…"),
@@ -37,8 +38,7 @@ const copy: Record<StoreReceiptErrorCode | "Loading", string> = {
   Offline: t("Offline. The receipt was not confirmed; retry sends the same request again."),
   Unavailable: serverProblemText,
 };
-const reasonLabel = (reason: string) =>
-  reason.charAt(0) + reason.slice(1).toLowerCase().replaceAll("_", " ");
+const reasonLabel = stockReasonText;
 type State =
   | { readonly kind: "Loading" | StoreReceiptErrorCode }
   | { readonly kind: "Found"; readonly view: StoreReceiptPageView };
