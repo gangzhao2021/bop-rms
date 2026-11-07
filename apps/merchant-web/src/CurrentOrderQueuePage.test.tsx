@@ -290,6 +290,53 @@ it("keeps payments accessible on cancelled Dining without offering unavailable s
   expect(render("Fulfilled")).toContain("dining-rounds__status");
 });
 
+it("tells someone who can't read payments who refunds a paid order, and says nothing on an unpaid one", () => {
+  const order = {
+    orderReference: "01909968-0000-7000-8000-000000000001",
+    orderNumber: "ORD-1001",
+    orderType: "Pickup",
+    sourceChannel: "Web",
+    submittedAt: "2026-09-14T00:00:00.000Z",
+    observedAt: "2026-09-14T00:01:00.000Z",
+    initialBatchReference: "01909968-0000-7000-8000-000000000090",
+    batches: [],
+    canRequestAcceptance: false,
+    unfulfillable: null,
+    pickupNotCollected: false,
+    acceptBy: null,
+    awaitingPayment: false,
+    currentPhase: "Cancelled",
+    currentVersion: 2,
+  };
+  const item = parseCurrentOrderQueue({ items: [order], nextAfterOrderReference: null }).items[0];
+  if (!item) throw new Error("missing synthetic order");
+  const render = (patch: Partial<typeof item>) =>
+    renderToStaticMarkup(
+      <CurrentOrderDetails
+        order={{ ...item, ...patch }}
+        csrf="synthetic"
+        locked={false}
+        onBusy={() => undefined}
+      />,
+    );
+  const paid = { amountMinor: "1130", currencyCode: "CAD" as const };
+  const cashier = render({ canViewPayments: false, paidOnline: paid });
+  expect(cashier).toContain("Ask the manager or owner for refunds.");
+  expect(cashier).not.toContain("Payments and refunds");
+  const unpaid = render({ canViewPayments: false, paidOnline: null });
+  expect(unpaid).not.toContain("Ask the manager or owner for refunds.");
+  // Someone who may read payments gets the payments, not the hint.
+  const manager = render({ canViewPayments: true, paidOnline: paid });
+  expect(manager).toContain("Payments and refunds");
+  expect(manager).not.toContain("Ask the manager or owner for refunds.");
+  setLanguageForTest("zh-Hans");
+  try {
+    expect(render({ canViewPayments: false, paidOnline: paid })).toContain("退款请找店长或店主。");
+  } finally {
+    setLanguageForTest("en");
+  }
+});
+
 it("WP-2423: shows order times in the Store's time zone", () => {
   expect(storeTime("2026-10-08T01:30:00.000Z", "America/Toronto")).toBe("21:30");
   expect(storeTime("2026-10-08T01:30:00.000Z", "America/Toronto", true)).toBe(
