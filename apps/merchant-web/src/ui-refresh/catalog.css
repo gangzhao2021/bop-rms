@@ -220,6 +220,14 @@
 .availability-options__search input {
   min-height: 44px;
 }
+.availability-option {
+  display: grid;
+  gap: 2px;
+}
+.availability-option__dishes {
+  font-size: 13px;
+  color: var(--bop-color-text-muted);
+}
 .availability-menu > summary {
   display: inline-flex;
   min-height: 40px;

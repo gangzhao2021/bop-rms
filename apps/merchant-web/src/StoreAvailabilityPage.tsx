@@ -556,8 +556,12 @@ function OptionAvailability({
               return (
                 <tr key={option.optionReference}>
                   <td>
-                    {option.name}
-                    <p className="availability-note">{optionDishesText(option.dishNames)}</p>
+                    <div className="availability-option">
+                      <span>{option.name}</span>
+                      <span className="availability-option__dishes">
+                        {optionDishesText(option.dishNames)}
+                      </span>
+                    </div>
                   </td>
                   <td data-label={t("Status")}>
                     {option.status === "SoldOut"
