@@ -3761,7 +3761,9 @@ export function CurrentOrderQueuePage({
       paused={offline}
       operation={() => prepareAcceptance(order, batch)}
       onRejected={() => operations.current.delete(batch.orderBatchReference)}
-      onChanged={() => reload(after)}
+      // WP-2423 M10: reread in place, so the reason acceptance was refused (refunded in full,
+      // changed, ran out) stays on screen beside the button instead of being cleared by a reload.
+      onChanged={refreshInPlace}
       onAccepted={() => {
         operations.current.delete(batch.orderBatchReference);
         reload(after);
@@ -4602,7 +4604,7 @@ export function CurrentOrderQueuePage({
                               onRejected={() =>
                                 operations.current.delete(batch.orderBatchReference)
                               }
-                              onChanged={() => reload(after)}
+                              onChanged={refreshInPlace}
                               onAccepted={() => {
                                 operations.current.delete(batch.orderBatchReference);
                                 reload(after);
