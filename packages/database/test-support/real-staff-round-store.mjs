@@ -786,8 +786,9 @@ async function listRealMenu({
           if (priceMinor !== null) savedPrices.set(saved.productReference, priceMinor);
           return saved;
         });
-    const teaDish = await saveDish("Tea charge (TEST)", "茶位", "150");
-    await saveDish("Tea charge (TEST)", "茶位", "150", teaDish.productReference, "NoIngredients");
+    // WP-2423 (M76, Owner decision 16): a new dish is saved answered — the tea as a fee, the soup
+    // with its allergen answered (its real recipe is bound after).
+    const teaDish = await saveDish("Tea charge (TEST)", "茶位", "150", null, "NoIngredients");
     await asApi((tx) =>
       changeKitchenNotPreparedProduct(tx, ownerScope, {
         productReference: teaDish.productReference,
@@ -798,7 +799,15 @@ async function listRealMenu({
         observedAt: new Date().toISOString(),
       }),
     );
-    const soupDish = await saveDish("Hot and sour soup (TEST)", "酸辣汤", "650");
+    const soupDish = await saveDish("Hot and sour soup (TEST)", "酸辣汤", "650", null, [
+      { allergenReference: id(0x60), classification: "None" },
+    ]);
+    // TEST-ONLY history: the owner replaced the soup's declared allergens with its real recipe
+    // (as "Use this recipe" does, the declared one stops applying first).
+    await admin.query(
+      "INSERT INTO rms_recipe.recipe_scope_binding_end(recipe_scope_binding_id,brand_id,store_id,ended_at,reason_code,operation_id,actor_id,audit_id) SELECT b.recipe_scope_binding_id,b.brand_id,b.store_id,now(),'REMOVED',$3,$2,$4 FROM rms_recipe.recipe_scope_binding b WHERE b.sku_id=$1 AND b.option_binding_id IS NULL AND NOT EXISTS (SELECT 1 FROM rms_recipe.recipe_scope_binding_end e WHERE e.recipe_scope_binding_id=b.recipe_scope_binding_id) LIMIT 1",
+      [soupDish.skuReference, owner, op(), op()],
+    );
     await bindRecipe(soupDish.skuReference);
     const listAll = async () =>
       commands.command({

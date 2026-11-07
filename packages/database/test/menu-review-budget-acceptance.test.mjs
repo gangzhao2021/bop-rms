@@ -41,8 +41,9 @@ async function milkTeaWithFourteenToppings({ owner, reference }) {
     },
   ];
   // As the page does it: the drink first, then its toppings with its allergens declared (each
-  // topping gets its "no change" recipe from the drink's).
-  const drink = await owner.saveDish("Milk tea (TEST)", "奶茶", "550");
+  // topping gets its "no change" recipe from the drink's). WP-2423 (M76, Owner decision 16): a
+  // new dish is saved answered, here as declared (a charge with no stock ingredients).
+  const drink = await owner.saveDish("Milk tea (TEST)", "奶茶", "550", null, "NoIngredients");
   await owner.saveDish(
     "Milk tea (TEST)",
     "奶茶",
