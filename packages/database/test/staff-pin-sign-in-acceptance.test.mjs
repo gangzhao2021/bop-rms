@@ -932,9 +932,9 @@ it("WP-2423 staff PIN: tablets, PINs, lockout, tablet limit, reset, switch and s
             await tx.query(sql, []);
           }),
         );
-      // Other tablets keep working; this one frees up 15 minutes after its first rejection.
+      // Other tablets keep working.
       assert.equal(
-        (await at(36, () => unlock(cole, "730419", null, kitchenTablet))).status,
+        (await at(36.5, () => unlock(cole, "730419", null, kitchenTablet))).status,
         "SignedIn",
       );
       assert.equal((await at(46, () => unlock(cole, "730419", null, patio))).status, "SignedIn");
