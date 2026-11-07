@@ -4,6 +4,22 @@ import { expect, test, type Page } from "@playwright/test";
 import { expectNoInternalText } from "./internal-text-guard";
 
 /**
+ * WP-2423 M71: "List it" shows what goes live first; listing is confirmed there. A listing to
+ * continue goes straight on.
+ */
+async function listIt(page: Page) {
+  await page.getByRole("button", { name: "List it" }).click();
+  const review = page.getByRole("region", { name: "What goes live" });
+  if (
+    await review.waitFor({ timeout: 2000 }).then(
+      () => true,
+      () => false,
+    )
+  )
+    await review.getByRole("button", { name: "List it" }).click();
+}
+
+/**
  * WP-2423 item 8 ⑥ DEC-SINGLE-STORE-MENU part 1: a single store's one menu opens as one page —
  * sections and dishes in the guests' order with both names, prices, sold out and hidden; search by
  * either name and filter; sold out today and hide take effect at once; a dragged order is saved to
@@ -350,7 +366,7 @@ test("@production a single store's menu on one page: search, filters, sold out, 
 
   // WP-2423 item 8 ⑥ part 2: "List it" — no review at a single store.
   refuseListing = true;
-  await page.getByRole("button", { name: "List it" }).click();
+  await listIt(page);
   await expect(
     page.getByText("This Brand has more than one store, so the Brand Owner lists menu changes", {
       exact: false,
@@ -364,7 +380,7 @@ test("@production a single store's menu on one page: search, filters, sold out, 
     part: "Menu",
     problem: choiceGroupProblem("Soy milk (TEST)"),
   };
-  await page.getByRole("button", { name: "List it" }).click();
+  await listIt(page);
   await expect(
     page.getByText(
       "Soy milk (TEST): Serve (TEST) has no choice guests start with that is still offered. Under Option sets, open Serve (TEST) and offer that choice again, or let another choice be the default. Then list the menu again. Nothing was listed.",
@@ -378,7 +394,7 @@ test("@production a single store's menu on one page: search, filters, sold out, 
   // WP-2423 (v15 2026-11-05): a stop while carrying "no change" choices to a group's new
   // quantities comes before anything is listed: it says so, and the same listing goes again.
   oneStoreRefusal = { error: "ChoiceRecipesStopped", part: "OneStoreDish" };
-  await page.getByRole("button", { name: "List it" }).click();
+  await listIt(page);
   await expect(
     page.getByText(
       "Listing stopped before anything was listed: some choices were set to make no change at their new quantities, the rest not yet. Guests see nothing new. List it again to finish.",
@@ -390,7 +406,7 @@ test("@production a single store's menu on one page: search, filters, sold out, 
   // WP-2423 item 10: a stop on the server may be after the prices went live, so it does not say
   // guests see nothing new; listing again carries on as the same listing.
   listingStops = true;
-  await page.getByRole("button", { name: "List it" }).click();
+  await listIt(page);
   await expect(
     page.getByText(
       "Listing stopped part-way. New prices may already be showing to guests; the menu is not updated yet. List it again to finish.",
@@ -398,7 +414,7 @@ test("@production a single store's menu on one page: search, filters, sold out, 
   ).toBeVisible();
   const stopped = menuCommands.at(-1);
   listingStops = false;
-  await page.getByRole("button", { name: "List it" }).click();
+  await listIt(page);
   await expect.poll(() => menuCommands.at(-1)).not.toBe(stopped);
   expect(menuCommands.at(-1)?.operationReference).toBe(stopped?.operationReference);
   await expect(page.getByText("Listed. Guests see the menu as it is now.")).toBeVisible();
@@ -412,11 +428,14 @@ test("@production a single store's menu on one page: search, filters, sold out, 
   ).toHaveCount(0);
   const listings = menuCommands.filter((command) => command.action === "List");
   expect(listings).toHaveLength(5);
+  // WP-2423 M71: with the menu's price draft as the review showed it (none here).
   expect(Object.keys(listings[2] ?? {}).sort()).toEqual([
     "action",
+    "confirmedPriceBook",
     "menuReference",
     "operationReference",
   ]);
+  expect(listings[2]).toMatchObject({ confirmedPriceBook: null });
   // A refused listing is finished; the next press is a new listing, and a stopped one goes on.
   expect(listings[0]?.operationReference).not.toBe(listings[1]?.operationReference);
   expect(listings[1]?.operationReference).not.toBe(listings[2]?.operationReference);
@@ -493,6 +512,9 @@ test("@production one dish edited on the one-page menu: names, price, choices, a
         ...s,
         productReference: id(Number.parseInt(s.skuReference.slice(-12), 16) + 100),
         pendingPriceMinor: pending.get(s.skuReference) ?? null,
+        // TEST-ONLY: the mock's listing accepts these dishes (WP-2423 M69's review only waits for
+        // dishes the server reports unanswered).
+        allergensAnswered: true,
         allergens:
           s.skuReference === id(34)
             ? { source: "StaffDeclared", declared: [], noIngredients: true }
@@ -965,7 +987,7 @@ test("@production one dish edited on the one-page menu: names, price, choices, a
   await declaredTea.getByRole("button", { name: "Close" }).last().click();
 
   // List it: the price book, choice prices and menu together.
-  await page.getByRole("button", { name: "List it" }).click();
+  await listIt(page);
   await expect(page.getByText("Listed. Guests see the menu as it is now.")).toBeVisible();
   expect(dishCommands.at(-1)).toMatchObject({ action: "ListAll", menuReference: MENU });
 
@@ -1241,7 +1263,7 @@ test("@production a listing in progress shows as such, also after a reload, unti
   });
 
   await page.goto("/app/commerce/menus");
-  await page.getByRole("button", { name: "List it" }).click();
+  await listIt(page);
   await expect(
     page.getByText(
       "Listing… New prices go live first, then the menu. This can take up to a minute.",
@@ -1324,6 +1346,9 @@ test("@production a combo made on the one-page menu: parts, extra price, saved, 
         ...s,
         productReference: id(Number.parseInt(s.skuReference.slice(-12), 16) + 100),
         pendingPriceMinor: s.skuReference === combo ? "2880" : null,
+        // TEST-ONLY: the mock's listing accepts these dishes (WP-2423 M69's review only waits for
+        // dishes the server reports unanswered).
+        allergensAnswered: true,
         allergens: { source: "None", declared: [] },
       })),
       allergenChoices: [],
@@ -1529,7 +1554,7 @@ test("@production a combo made on the one-page menu: parts, extra price, saved, 
     }),
   );
   await expect(page.getByRole("alert")).toHaveCount(0);
-  await page.getByRole("button", { name: "List it" }).click();
+  await listIt(page);
   await expect(page.getByText("Listed. Guests see the menu as it is now.")).toBeVisible();
   expect(dishCommands.at(-1)).toMatchObject({ action: "ListAll", menuReference: MENU });
   await expect(page.getByRole("alert")).toHaveText(

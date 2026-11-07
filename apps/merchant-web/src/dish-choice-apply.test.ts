@@ -66,6 +66,7 @@ const source = (chosen: [string, [string, string][]][]): DishEditorSource => ({
   groups: [],
   chosen: new Map(chosen.map(([set, options]) => [set, new Map(options)])),
   usual: new Map(),
+  last: new Map(),
 });
 
 describe("WP-2423 item 3 F: which dishes can take a choice group", () => {
