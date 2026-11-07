@@ -138,6 +138,23 @@ async function presentedVisits(
   }
   return visits;
 }
+/** Renews the one visit an entry resumes; a store that can't answer is a retry. */
+async function renewResumed(
+  session: CustomerEntryCompositionOptions["session"],
+  credential: string,
+  observedAt: string,
+): Promise<PresentedVisit["result"]> {
+  try {
+    return await new GuestSessionService({
+      ...session,
+      admission: { consume: async () => null },
+    }).resumeForEntry({ sessionCredential: credential, activity: "Interactive", observedAt });
+  } catch (error) {
+    if ((error as { dependencyFailure?: unknown }).dependencyFailure === true)
+      throw new CustomerEntryServiceUnavailableError();
+    return Object.freeze({ status: "Unknown" as const });
+  }
+}
 /**
  * The earlier visits kept on the phone: one it can go on with, one whose receipts can still be
  * read, and one this Store can't see (it may be another Store's); never one that has fully ended.
@@ -286,8 +303,14 @@ export function createCustomerEntryComposition(
           if (operating.status !== "Available") return unavailable;
           operatingStatus = operating.operatingStatus;
         }
-        if (resumable !== undefined && resumable.result.status === "Usable") {
-          const session = resumable.result.session;
+        // Only the visit resumed is renewed, as any interactive use is; earlier visits the phone
+        // presented were read without extending them.
+        const renewed =
+          resumable !== undefined && resumable.result.status === "Usable"
+            ? await renewResumed(options.session, resumable.credential, requestedAt)
+            : null;
+        if (resumable !== undefined && renewed !== null && renewed.status === "Usable") {
+          const session = renewed.session;
           return Object.freeze({
             status: "Established" as const,
             ...publicContextFor(),
@@ -304,7 +327,7 @@ export function createCustomerEntryComposition(
               ),
             ).toISOString(),
             sessionCredential: resumable.credential as never,
-            csrfCredential: resumable.result.csrfCredential,
+            csrfCredential: renewed.csrfCredential,
             cookie: guestSessionCookie,
             resumed: true as const,
             earlierCredentials: Object.freeze(

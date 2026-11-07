@@ -650,6 +650,18 @@ describe("M104/M105: a rescan goes on with this phone's visit", () => {
     expect(f.create).toHaveBeenCalledOnce();
     expect(f.admission).toHaveBeenCalledOnce();
     expect(f.records.size).toBe(1);
+    // The resumed visit is renewed, once.
+    expect(f.options.session.store.touchInteractive).toHaveBeenCalledOnce();
+  });
+
+  it("never renews the earlier visits it only checks (a scan elsewhere doesn't extend them)", async () => {
+    const f = fixture();
+    const table = await first(f);
+    pickup(f);
+    const result = await again(f, [{ source: "Current", credential: table.sessionCredential }]);
+    expect(result).toMatchObject({ status: "Established", channel: "Pickup" });
+    expect(result).not.toHaveProperty("resumed");
+    expect(f.options.session.store.touchInteractive).not.toHaveBeenCalled();
   });
 
   it("resumes an existing visit while the Store is paused for new guests (it finishes as usual)", async () => {

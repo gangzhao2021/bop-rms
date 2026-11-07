@@ -916,7 +916,7 @@ describe("WP-2423 Q10 Guest cookie continuity", () => {
 });
 
 describe("M104/M105 a rescan resumes this phone's visit", () => {
-  it("resumes a usable visit, renewing it as any interactive use does, with its CSRF", async () => {
+  it("reads a usable visit without renewing it, with its CSRF", async () => {
     const f = await recoveryFixture();
     const result = await f.service.resumeForEntry({ sessionCredential, observedAt: now });
     expect(result).toMatchObject({
@@ -924,7 +924,22 @@ describe("M104/M105 a rescan resumes this phone's visit", () => {
       session: { sessionReference: ids.session },
       csrfCredential: f.credentials.deriveForegroundCsrf?.(sessionCredential),
     });
+    // Checking the visits a phone presents never extends them.
+    expect(f.store.touches).toBe(0);
+  });
+
+  it("renews the visit only when it is the one resumed (Interactive)", async () => {
+    const f = await recoveryFixture();
+    const result = await f.service.resumeForEntry({
+      sessionCredential,
+      activity: "Interactive",
+      observedAt: now,
+    });
+    expect(result).toMatchObject({ status: "Usable" });
     expect(f.store.touches).toBe(1);
+    await expect(
+      f.service.resumeForEntry({ sessionCredential, activity: "Later" as never }),
+    ).rejects.toMatchObject({ code: "GUEST_SESSION_INPUT_INVALID" });
   });
 
   it("says Ended for an idle or closed visit, and whether its receipts can still be read", async () => {

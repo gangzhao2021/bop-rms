@@ -334,13 +334,15 @@ export class GuestSessionService {
 
   /**
    * M104/M105: what a credential this phone presents at entry is to this Store: a visit it can go
-   * on with (renewed as any interactive use is, with its foreground CSRF), a visit of this Store
+   * on with (with its foreground CSRF; read without renewing it unless `activity` is
+   * "Interactive", so checking a phone's earlier visits never extends them), a visit of this Store
    * that has ended (and whether its receipts can still be read), or one this Store has no record
    * of. A store that can't answer throws with `dependencyFailure`, so the entry asks the guest to
    * retry and never silently replaces a visit it could not check.
    */
   async resumeForEntry(input: {
     readonly sessionCredential: unknown;
+    readonly activity?: "Interactive" | "Background";
     readonly observedAt?: unknown;
   }): Promise<
     | {
@@ -355,8 +357,11 @@ export class GuestSessionService {
       }
     | { readonly status: "Unknown" }
   > {
-    const raw = command(input, ["sessionCredential"], ["observedAt"]);
+    const raw = command(input, ["sessionCredential"], ["activity", "observedAt"]);
     const observedAt = this.#at(raw.observedAt);
+    const activity = raw.activity ?? "Background";
+    if (activity !== "Interactive" && activity !== "Background")
+      throw new GuestSessionError("GUEST_SESSION_INPUT_INVALID");
     let credential: GuestRawCredential;
     try {
       credential = parseGuestRawCredential(raw.sessionCredential);
@@ -371,7 +376,7 @@ export class GuestSessionService {
     try {
       const session = await this.resolve({
         sessionCredential: credential,
-        activity: "Interactive",
+        activity,
         observedAt,
       });
       if (!this.#credentials.deriveForegroundCsrf)
