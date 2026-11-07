@@ -1,6 +1,7 @@
 import { StoreGuestTableStart } from "./StoreGuestTableStart.js";
 import { StatePanel } from "@bop-rms/ui";
 import { useContext, useEffect, useMemo, useRef, useState } from "react";
+import { Link } from "react-router";
 import { t } from "./i18n/i18n.js";
 import { createCurrentOrderQueueClient } from "./current-order-queue-client.js";
 import { newOperationReference } from "./operation-reference.js";
@@ -334,7 +335,7 @@ export function StoreFeaturesPage({
       ) : paidWaiting.count > 0 ? (
         <p>
           {paidPickupWaitingText(paidWaiting, storeTimeZone)}{" "}
-          <a href="/operations/orders">{t("Open Orders")}</a>
+          <Link to="/operations/orders">{t("Open Orders")}</Link>
         </p>
       ) : null}
       <p>
