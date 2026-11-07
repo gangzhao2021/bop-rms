@@ -166,14 +166,71 @@ test("@production Accept all accepts each round with its own reference, in place
     .getByRole("button", { name: /^To accept/u })
     .click();
   await page.getByRole("button", { name: "Accept all 3" }).click();
-  await expect(page.getByText("Accepted 2 of 3.", { exact: false })).toBeVisible();
+  await expect(page.getByText("Accepted 2 of 3 orders.", { exact: false })).toBeVisible();
   await expect(
-    page.getByText("changed since it was loaded: check it.", { exact: false }),
+    page.getByText("ORD-2 changed since it was loaded: check it.", { exact: false }),
   ).toBeVisible();
   await expect(page.getByRole("heading", { name: "Loading orders" })).toHaveCount(0);
   expect(bodies.map((body) => body.orderReference)).toEqual([id(1), id(2), id(3)]);
   const references = new Set(bodies.map((body) => body.acceptanceReference));
   expect(references.size).toBe(3);
+});
+
+test("@production Accept all accepts two waiting rounds of one table, each at the order's version after the last", async ({
+  page,
+}) => {
+  // One dine-in order with rounds 1 and 2 both paid and waiting, plus a second order. The server
+  // checks the Order's current version, and every acceptance moves it forward by one.
+  let version = 1;
+  const acceptedRounds = new Set<string>();
+  let otherAccepted = false;
+  const bodies: Record<string, unknown>[] = [];
+  const table = () => {
+    const base = round(1, "2026-09-14T00:01:00.000Z", false);
+    const batch = (n: number, sequence: number) => ({
+      ...base.batches[0],
+      orderBatchReference: id(n),
+      sequence,
+      acceptanceStatus: acceptedRounds.has(id(n)) ? "Accepted" : "NotAccepted",
+      canRequestAcceptance: !acceptedRounds.has(id(n)),
+    });
+    return {
+      ...base,
+      batches: [batch(201, 1), batch(202, 2)],
+      canRequestAcceptance: acceptedRounds.size < 2,
+      currentPhase: acceptedRounds.size === 2 ? "Accepted" : "Submitted",
+      currentVersion: version,
+    };
+  };
+  await open(page, () => [round(2, "2026-09-14T00:02:00.000Z", otherAccepted), table()]);
+  await page.route("**/merchant/orders/accept", async (route) => {
+    const body = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>;
+    bodies.push(body);
+    if (body.orderReference === id(2)) {
+      otherAccepted = true;
+      return route.fulfill({ headers, json: { status: "Created", acceptedOrderVersion: 2 } });
+    }
+    if (body.expectedOrderVersion !== version)
+      return route.fulfill({ status: 409, headers, json: { error: "version_conflict" } });
+    version += 1;
+    acceptedRounds.add(String(body.orderBatchReference));
+    return route.fulfill({ headers, json: { status: "Created", acceptedOrderVersion: version } });
+  });
+  await page.goto("/operations/orders");
+  await expect(page.getByRole("heading", { name: "ORD-2", exact: true })).toBeVisible();
+  await page
+    .getByRole("group", { name: "Show orders" })
+    .getByRole("button", { name: /^To accept/u })
+    .click();
+  await page.getByRole("button", { name: "Accept all 3" }).click();
+  // Counted in orders: one table with two rounds is one order.
+  await expect(page.getByText("Accepted all 2 orders.", { exact: true })).toBeVisible();
+  await expect(page.getByText("changed since it was loaded", { exact: false })).toHaveCount(0);
+  const tableBodies = bodies.filter((body) => body.orderReference === id(1));
+  expect(tableBodies.map((body) => body.orderBatchReference)).toEqual([id(201), id(202)]);
+  expect(tableBodies.map((body) => body.expectedOrderVersion)).toEqual([1, 2]);
+  expect(acceptedRounds.size).toBe(2);
+  await expectNoInternalText(page);
 });
 
 test("@production a new order is marked until opened, and sound stays on across a reload", async ({

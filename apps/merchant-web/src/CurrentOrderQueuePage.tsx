@@ -3059,15 +3059,22 @@ export function CurrentOrderQueuePage({
   const prepareAcceptance = (
     order: CurrentOrderQueue["items"][number],
     batch: CurrentOrderQueue["items"][number]["batches"][number],
+    acceptedOrderVersion?: number,
   ) => {
-    let operation = operations.current.get(batch.orderBatchReference);
+    let operation =
+      acceptedOrderVersion === undefined
+        ? operations.current.get(batch.orderBatchReference)
+        : undefined;
     if (!operation) {
+      // An earlier round of this order was just accepted: the Order is now at the version that
+      // acceptance returned, not the one this list loaded. Anything prepared before it for this
+      // round names the old version, so it would only be refused as changed.
       operation = createOrderAcceptanceClient(fetcher).prepare({
         acceptanceReference: serviceOperationReference(),
         operationReference: serviceOperationReference(),
         orderReference: order.orderReference,
         orderBatchReference: batch.orderBatchReference,
-        expectedOrderVersion: order.currentVersion ?? 0,
+        expectedOrderVersion: acceptedOrderVersion ?? order.currentVersion ?? 0,
       });
       operations.current.set(batch.orderBatchReference, operation);
     }
@@ -3106,17 +3113,28 @@ export function CurrentOrderQueuePage({
     if (targets.length === 0) return;
     acceptAllRunning.current = true;
     setAcceptAll({ running: true, summary: null });
-    let accepted = 0;
+    // Several paid rounds of one table can wait together; each acceptance moves the Order's
+    // version forward, so a later round of the same order is sent at the version just returned.
+    const versions = new Map<string, number>();
+    const orders = new Set<string>();
+    const notAccepted = new Set<string>();
     const check: string[] = [];
     const unknown: string[] = [];
     const refused: string[] = [];
     for (const target of targets) {
       const reference = target.batch.orderBatchReference;
+      const orderReference = target.order.orderReference;
+      orders.add(orderReference);
       try {
-        await prepareAcceptance(target.order, target.batch).execute(csrf);
+        const result = await prepareAcceptance(
+          target.order,
+          target.batch,
+          versions.get(orderReference),
+        ).execute(csrf);
         operations.current.delete(reference);
-        accepted += 1;
+        versions.set(orderReference, result.acceptedOrderVersion);
       } catch (error) {
+        notAccepted.add(orderReference);
         if (error instanceof OrderAcceptanceClientError && error.code === "Conflict") {
           operations.current.delete(reference);
           check.push(target.label);
@@ -3126,27 +3144,52 @@ export function CurrentOrderQueuePage({
         } else unknown.push(target.label);
       }
     }
+    // Counted in orders, as staff count them: a table with two rounds is one order, accepted only
+    // when every round shown was.
+    const count = orders.size;
+    const accepted = count - notAccepted.size;
     const parts = [
-      t("Accepted {accepted} of {count}.", { accepted, count: targets.length }),
+      ...(accepted === count
+        ? [
+            count === 1
+              ? t("Accepted {orders}.", { orders: targets[0]?.label ?? "" })
+              : t("Accepted all {count} orders.", { count }),
+          ]
+        : count === 1
+          ? []
+          : [t("Accepted {accepted} of {count} orders.", { accepted, count })]),
       ...(check.length === 0
         ? []
-        : [t("{orders} changed since it was loaded: check it.", { orders: check.join(", ") })]),
+        : [
+            check.length === 1
+              ? t("{orders} changed since it was loaded: check it.", { orders: check[0] ?? "" })
+              : t("{orders} changed since they were loaded: check each one.", {
+                  orders: check.join(", "),
+                }),
+          ]),
       ...(refused.length === 0
         ? []
         : [
-            t("{orders} could not be accepted here: open it to see why.", {
-              orders: refused.join(", "),
-            }),
+            refused.length === 1
+              ? t("{orders} could not be accepted here: open it to see why.", {
+                  orders: refused[0] ?? "",
+                })
+              : t("{orders} could not be accepted here: open each one to see why.", {
+                  orders: refused.join(", "),
+                }),
           ]),
       ...(unknown.length === 0
         ? []
         : [
-            t(
-              "{orders}: the network dropped, so tap Accept on it again; it won't be accepted twice.",
-              {
-                orders: unknown.join(", "),
-              },
-            ),
+            unknown.length === 1
+              ? t(
+                  "{orders}: the network dropped, so tap Accept on it again; it won't be accepted twice.",
+                  { orders: unknown[0] ?? "" },
+                )
+              : t(
+                  "{orders}: the network dropped, so tap Accept on each one again; none will be accepted twice.",
+                  { orders: unknown.join(", ") },
+                ),
           ]),
     ];
     acceptAllRunning.current = false;

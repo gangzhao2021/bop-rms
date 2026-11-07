@@ -8543,8 +8543,15 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "round {sequence}": "第 {sequence} 轮",
   "Accepting…": "正在接单…",
   "Accept all {count}": "全部接单（{count}）",
-  "Accepted {accepted} of {count}.": "已接 {accepted} 单，共 {count} 单。",
+  "Accepted {accepted} of {count} orders.": "已接 {accepted} 单，共 {count} 单。",
+  "Accepted all {count} orders.": "{count} 单全部已接。",
+  "Accepted {orders}.": "{orders} 已接单。",
   "{orders} changed since it was loaded: check it.": "{orders} 读取后有变化，请查看。",
+  "{orders} changed since they were loaded: check each one.": "{orders} 读取后有变化，请逐一查看。",
+  "{orders} could not be accepted here: open each one to see why.":
+    "{orders} 在这里接不了单，请逐一打开看原因。",
+  "{orders}: the network dropped, so tap Accept on each one again; none will be accepted twice.":
+    "{orders}：网络断了，请在每一单上再按一次「接单」，不会重复接单。",
   "{orders}: the network dropped, so tap Accept on it again; it won't be accepted twice.":
     "{orders}：网络断了，请再按一次「接单」，不会重复接单。",
   "Accept is paused until the connection is back.": "网络恢复前暂时不能接单。",
