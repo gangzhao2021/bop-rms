@@ -204,7 +204,11 @@ export class CustomerOrderStatusHandler {
                         pickup:
                           sources.pickup === null
                             ? null
-                            : { notCollectedAt: sources.pickup.notCollectedAt },
+                            : {
+                                notCollectedAt: sources.pickup.notCollectedAt,
+                                // WP-2423 v15 M46: closed at the end of the day, or after the hold.
+                                reason: sources.pickup.reason,
+                              },
                       }),
                   ...(sources.unpaidCancellation === undefined
                     ? {}

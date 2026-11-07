@@ -341,6 +341,22 @@ describe("independent order status sources", () => {
     expect(parseOrderStatusView(withPickup, id(1)).sources?.pickup).toEqual({
       notCollectedAt: "2026-08-11T13:59:30.000Z",
     });
+    // WP-2423 v15 M46: with why the store closed it; only the two known reasons are read.
+    const atClosing = (reason: unknown) => ({
+      ...input,
+      sources: {
+        ...input.sources,
+        pickup: { notCollectedAt: "2026-08-11T13:59:30.000Z", reason },
+      },
+    });
+    expect(parseOrderStatusView(atClosing("StoreClosing"), id(1)).sources?.pickup).toEqual({
+      notCollectedAt: "2026-08-11T13:59:30.000Z",
+      reason: "StoreClosing",
+    });
+    expect(parseOrderStatusView(atClosing("NotCollected"), id(1)).sources?.pickup?.reason).toBe(
+      "NotCollected",
+    );
+    expect(() => parseOrderStatusView(atClosing("Hidden"), id(1))).toThrow();
     expect(
       parseOrderStatusView({ ...input, sources: { ...input.sources, pickup: null } }, id(1)).sources
         ?.pickup,

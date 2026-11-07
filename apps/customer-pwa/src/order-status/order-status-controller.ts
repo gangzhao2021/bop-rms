@@ -443,12 +443,22 @@ function parseSources(
   let pickup: OrderStatusSources["pickup"];
   if (Object.hasOwn(raw, "pickup")) {
     if (orderType !== "Pickup") return invalid();
-    pickup =
-      raw.pickup === null
-        ? null
-        : Object.freeze({
-            notCollectedAt: sourceInstant(exact(raw.pickup, ["notCollectedAt"]).notCollectedAt),
-          });
+    if (raw.pickup === null) pickup = null;
+    else {
+      // WP-2423 v15 M46: with why it was closed (an older server sends the time alone).
+      const withReason =
+        typeof raw.pickup === "object" && Object.hasOwn(raw.pickup as object, "reason");
+      const value = exact(
+        raw.pickup,
+        withReason ? ["notCollectedAt", "reason"] : ["notCollectedAt"],
+      );
+      if (withReason && value.reason !== "NotCollected" && value.reason !== "StoreClosing")
+        return invalid();
+      pickup = Object.freeze({
+        notCollectedAt: sourceInstant(value.notCollectedAt),
+        ...(withReason ? { reason: value.reason as "NotCollected" | "StoreClosing" } : {}),
+      });
+    }
   }
   // WP-2423 Q12: a pickup cancelled because its payment window ended unpaid (Pickup only).
   let unpaidCancellation: OrderStatusSources["unpaidCancellation"];

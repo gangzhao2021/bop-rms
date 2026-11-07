@@ -795,6 +795,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "具体金额和付款方式由服务端确定。",
   "The store": "门店",
   "The store cancelled it at your request.": "门店已按你的要求取消。",
+  "The store has closed": "门店已打烊",
+  "The store closed for the day before this pickup was collected. Contact the store about your order or a refund.":
+    "门店今天已打烊，这份自取单没有被取走。请联系门店处理订单或退款。",
   "The store closed this pickup after the pickup time ended. Contact the store about your order or a refund.":
     "取餐时间结束后，门店关闭了这笔自取订单。关于订单或退款，请联系门店。",
   "The store couldn’t accept your order, so your payment is being refunded to your original payment method.":

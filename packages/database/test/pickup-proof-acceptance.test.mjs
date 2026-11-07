@@ -539,6 +539,26 @@ async function prove(context) {
       await scopedCount(client, role, id(99), "rms_fulfillment.pickup_not_collected_record"),
       0,
     );
+    // WP-2423 v15 M46 review: the guest's order status reads why each pickup was closed (the
+    // customer read selects closed_at and reason) under the same table grant, scoped to its Store.
+    await client.query("BEGIN");
+    try {
+      await client.query("SELECT set_config('bop.brand_id', $1, true)", [id(2)]);
+      await client.query("SELECT set_config('bop.store_id', $1, true)", [id(3)]);
+      await client.query(`SET LOCAL ROLE ${role}`);
+      const reasons = await client.query(
+        "SELECT n.closed_at,n.reason FROM rms_fulfillment.pickup_not_collected_record n WHERE n.brand_id=$1 AND n.store_id=$2 ORDER BY n.reason",
+        [id(2), id(3)],
+      );
+      assert.deepEqual(
+        reasons.rows.map((row) => row.reason),
+        ["NotCollected", "StoreClosing"],
+      );
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw error;
+    }
     assert.equal(
       await scopedCount(client, role, id(3), "rms_fulfillment.pickup_in_person_verification"),
       1,

@@ -840,7 +840,9 @@ function StatusContent({
               ? [progress.collectedHeading, progress.collected]
               : // A pickup the store closed as not collected is reported as Cancelled; say why.
                 notCollected
-                ? [progress.notCollectedHeading, progress.notCollected]
+                ? view.sources?.pickup?.reason === "StoreClosing"
+                  ? [progress.closedForDayHeading, progress.closedForDay]
+                  : [progress.notCollectedHeading, progress.notCollected]
                 : view.order.canonicalPhase === "Cancelled"
                   ? [progress.cancelledHeading, progress.cancelled]
                   : view.order.canonicalPhase === "Rejected"

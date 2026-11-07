@@ -1092,6 +1092,15 @@ export const orderStatusText = Object.freeze({
         "The store closed this pickup after the pickup time ended. Contact the store about your order or a refund.",
       );
     },
+    // WP-2423 store-service-controls (v15 M46, Owner item 9): closed by staff at closing time.
+    get closedForDayHeading() {
+      return t("The store has closed");
+    },
+    get closedForDay() {
+      return t(
+        "The store closed for the day before this pickup was collected. Contact the store about your order or a refund.",
+      );
+    },
     get cancelled() {
       return t("Your order has been cancelled.");
     },

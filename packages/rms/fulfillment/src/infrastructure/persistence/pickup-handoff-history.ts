@@ -153,20 +153,24 @@ export async function listStoreUncollectedPickupOrders(
 
 /**
  * WP-2423: when the Store closed this pickup Order as not collected, for the customer's order status
- * (null when it was not). Caller authorizes the customer's access and owns the transaction.
+ * (null when it was not), and why (store-service-controls v15 M46: at closing, or after the hold).
+ * Caller authorizes the customer's access and owns the transaction.
  */
 export async function loadPickupNotCollected(
   tx: ConsumerTransaction,
   scope: { readonly brandReference: string; readonly storeReference: string },
   orderReference: string,
-): Promise<{ readonly closedAt: string } | null> {
+): Promise<{
+  readonly closedAt: string;
+  readonly reason: "NotCollected" | "StoreClosing";
+} | null> {
   await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
     scope.brandReference,
     scope.storeReference,
   ]);
   const rows = (
     await tx.query(
-      "SELECT n.closed_at FROM rms_fulfillment.pickup_not_collected_record n " +
+      "SELECT n.closed_at,n.reason FROM rms_fulfillment.pickup_not_collected_record n " +
         "JOIN rms_fulfillment.fulfillment f ON f.brand_id=n.brand_id AND f.store_id=n.store_id AND f.fulfillment_id=n.fulfillment_id " +
         "WHERE n.brand_id=$1 AND n.store_id=$2 AND f.order_id=$3 LIMIT 2",
       [scope.brandReference, scope.storeReference, orderReference],
@@ -179,5 +183,6 @@ export async function loadPickupNotCollected(
     row.closed_at instanceof Date
       ? row.closed_at.toISOString()
       : new Date(String(row.closed_at)).toISOString();
-  return Object.freeze({ closedAt });
+  if (row.reason !== "NotCollected" && row.reason !== "StoreClosing") return unavailable();
+  return Object.freeze({ closedAt, reason: row.reason });
 }

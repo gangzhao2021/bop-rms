@@ -766,7 +766,12 @@ export function createCustomerOrderStatusRead(
               payments,
               ...(pickup === undefined
                 ? {}
-                : { pickup: pickup === null ? null : { notCollectedAt: pickup.closedAt } }),
+                : {
+                    pickup:
+                      pickup === null
+                        ? null
+                        : { notCollectedAt: pickup.closedAt, reason: pickup.reason },
+                  }),
               ...(unpaid === undefined
                 ? {}
                 : {

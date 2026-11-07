@@ -168,13 +168,21 @@ it("WP-2423: serializes only the not-collected time of a pickup source", async (
       checkedAt: "2026-09-12T12:00:00.000Z",
       kitchen: null,
       payments: null,
-      pickup: { notCollectedAt: "2026-09-12T11:59:00.000Z", actorReference: "private" },
+      pickup: {
+        notCollectedAt: "2026-09-12T11:59:00.000Z",
+        reason: "StoreClosing",
+        actorReference: "private",
+      },
     },
   });
   const body = (await (await f.send()).json()) as {
     status: { sources: Record<string, unknown> };
   };
-  expect(body.status.sources.pickup).toEqual({ notCollectedAt: "2026-09-12T11:59:00.000Z" });
+  // WP-2423 v15 M46: with why the store closed it (at closing time here), never who did.
+  expect(body.status.sources.pickup).toEqual({
+    notCollectedAt: "2026-09-12T11:59:00.000Z",
+    reason: "StoreClosing",
+  });
   expect(JSON.stringify(body)).not.toContain("private");
   f.read.mockResolvedValue({
     ...f.result,

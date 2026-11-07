@@ -657,6 +657,29 @@ it("WP-2423: says a pickup was not collected and stops offering the pickup code"
   expect(html).not.toContain("Order collected");
 });
 
+it("WP-2423 v15 M46: a pickup staff closed at closing time says the store has closed, not that the pickup time ended", () => {
+  const state = readyState();
+  if (state.status !== "ready") throw new Error("fixture");
+  const html = render({
+    ...state,
+    view: {
+      ...state.view,
+      sources: {
+        checkedAt: "2026-08-11T14:00:00.000Z",
+        kitchen: null,
+        payments: null,
+        pickup: { notCollectedAt: "2026-08-11T13:59:00.000Z", reason: "StoreClosing" },
+      },
+    },
+  });
+  expect(html).toContain("The store has closed");
+  expect(html).toContain("The store closed for the day before this pickup was collected.");
+  expect(html).toContain("Contact the store about your order or a refund.");
+  expect(html).not.toContain("after the pickup time ended");
+  expect(html).not.toContain("pickup code");
+  expect(findInternalText([staticText(html)])).toEqual([]);
+});
+
 it("WP-2423 Q12: says an unpaid pickup was cancelled and stops offering the pickup code", () => {
   const state = readyState();
   if (state.status !== "ready") throw new Error("fixture");

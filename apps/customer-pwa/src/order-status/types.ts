@@ -39,7 +39,14 @@ export interface OrderStatusSources {
    */
   readonly refunds?: OrderRefunds;
   /** WP-2423: a pickup the Store closed as not collected after the pickup time (Pickup only). */
-  readonly pickup?: null | { readonly notCollectedAt: string };
+  readonly pickup?: null | {
+    readonly notCollectedAt: string;
+    /**
+     * WP-2423 store-service-controls (v15 M46): StoreClosing when staff closed it at the end of the
+     * day's service (it may still have been inside the pickup time); absent from an older server.
+     */
+    readonly reason?: "NotCollected" | "StoreClosing";
+  };
   /** WP-2423 Q12: when a pickup was cancelled because payment was not completed in time. */
   readonly unpaidCancellation?: null | { readonly cancelledAt: string };
   /** WP-2423 Q6: batches the Store cancelled after payment, before the kitchen started. */
