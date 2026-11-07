@@ -276,9 +276,11 @@ export function StoreTaxReviewPage({
             <StatePanel heading={t("Tax configuration ending soon")} tone="error" status>
               <p>
                 {t("Orders can be priced until")} <StoreDate value={c.endsAt} />
-                {t(", when {value}. Renew it before then or the Store cannot take orders.", {
-                  value: endText[c.endsBecause],
-                })}
+                {t(", when {value}.", { value: endText[c.endsBecause] })}{" "}
+                {/* WP-2423 store-service-controls (v15 M85, Owner item 19): who renews it. */}
+                {t(
+                  "BOP support renews tax setup: call BOP support before then, or the store cannot take orders after that.",
+                )}
               </p>
             </StatePanel>
           ) : null}

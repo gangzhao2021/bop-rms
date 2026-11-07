@@ -1,5 +1,9 @@
-import { describe, expect, it } from "vitest";
-import { fullServiceSetupText, waitingPickupOrders } from "./StoreFeaturesPage.js";
+import { describe, expect, it, vi } from "vitest";
+import {
+  fullServiceSetupText,
+  paidPickupAwaitingAccept,
+  waitingPickupOrders,
+} from "./StoreFeaturesPage.js";
 import { setLanguageForTest } from "./i18n/i18n.js";
 import { PickupClientError, type PickupClient } from "./pickup.js";
 
@@ -44,4 +48,28 @@ it("WP-2423 live minor 32: the full-service setup names points for guests among 
   } finally {
     setLanguageForTest("en");
   }
+});
+
+it("WP-2423 store-service-controls (v15 M128): counts paid pickup orders waiting for Accept across pages", async () => {
+  const page = (items: readonly object[], next: string | null) => ({
+    items,
+    nextAfterOrderReference: next,
+  });
+  const paid = (acceptBy: string) => ({ orderType: "Pickup", acceptBy });
+  const load = vi
+    .fn()
+    .mockResolvedValueOnce(
+      page([paid("2026-11-07T01:30:00.000Z"), { orderType: "DineIn", acceptBy: null }], "x"),
+    )
+    .mockResolvedValueOnce(
+      page([paid("2026-11-07T01:10:00.000Z"), { orderType: "Pickup", acceptBy: null }], null),
+    );
+  expect(await paidPickupAwaitingAccept({ load } as never)).toEqual({
+    count: 2,
+    earliestRefundAt: "2026-11-07T01:10:00.000Z",
+  });
+  expect(load.mock.calls[1]?.[0]).toBe("x");
+  expect(
+    await paidPickupAwaitingAccept({ load: vi.fn().mockRejectedValue(new Error("x")) } as never),
+  ).toBeNull();
 });

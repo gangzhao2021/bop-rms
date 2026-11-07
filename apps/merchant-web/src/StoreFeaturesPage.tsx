@@ -1,7 +1,8 @@
 import { StoreGuestTableStart } from "./StoreGuestTableStart.js";
 import { StatePanel } from "@bop-rms/ui";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { t } from "./i18n/i18n.js";
+import { displayLocale, t } from "./i18n/i18n.js";
+import { createCurrentOrderQueueClient } from "./current-order-queue-client.js";
 import { newOperationReference } from "./operation-reference.js";
 import { SourceTime } from "./StoreTime.js";
 import { WorkspacePage } from "./WorkspacePage.js";
@@ -34,6 +35,33 @@ export async function waitingPickupOrders(client: PickupClient): Promise<number 
       count += view.items.length;
       if (view.nextAfterFulfillmentReference === null) return count;
       after = view.nextAfterFulfillmentReference;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * WP-2423 store-service-controls (v15 M128): paid pickup orders still waiting for Accept (each with
+ * its automatic-refund deadline), from Orders' current queue, page by page; null when unreadable.
+ */
+export async function paidPickupAwaitingAccept(
+  orders: Pick<ReturnType<typeof createCurrentOrderQueueClient>, "load">,
+): Promise<{ readonly count: number; readonly earliestRefundAt: string | null } | null> {
+  let after: string | null = null;
+  let count = 0,
+    earliest: string | null = null;
+  try {
+    for (let page = 0; page < 20; page++) {
+      const view = await orders.load(after, new AbortController().signal);
+      for (const item of view.items)
+        if (item.orderType === "Pickup" && item.acceptBy !== null) {
+          count += 1;
+          if (earliest === null || item.acceptBy < earliest) earliest = item.acceptBy;
+        }
+      if (view.nextAfterOrderReference === null) return { count, earliestRefundAt: earliest };
+      after = view.nextAfterOrderReference;
     }
     return null;
   } catch {
@@ -127,14 +155,23 @@ export function StoreFeaturesPage({
   storeLabel,
   client: injected,
   pickup: injectedPickup,
+  orders: injectedOrders,
 }: {
   readonly csrf: string;
   readonly storeReference: string;
   readonly storeLabel: string;
   readonly client?: StoreFeaturesClient;
   readonly pickup?: PickupClient;
+  readonly orders?: Pick<ReturnType<typeof createCurrentOrderQueueClient>, "load">;
 }) {
   const client = useMemo(() => injected ?? createStoreFeaturesClient(csrf), [injected, csrf]);
+  const orderQueue = useMemo(
+    () => injectedOrders ?? createCurrentOrderQueueClient(),
+    [injectedOrders],
+  );
+  const [paidWaiting, setPaidWaiting] = useState<
+    "Reading" | Awaited<ReturnType<typeof paidPickupAwaitingAccept>>
+  >("Reading");
   const pickupQueue = useMemo(
     () => injectedPickup ?? createPickupClient({ csrf, storeReference, storeLabel }),
     [injectedPickup, csrf, storeReference, storeLabel],
@@ -145,6 +182,8 @@ export function StoreFeaturesPage({
     setConfirming(action);
     setWaiting("Reading");
     void waitingPickupOrders(pickupQueue).then(setWaiting);
+    setPaidWaiting("Reading");
+    void paidPickupAwaitingAccept(orderQueue).then(setPaidWaiting);
   };
   const [view, setView] = useState<StoreFeatures | null>(null);
   const [failed, setFailed] = useState<"Denied" | "Unavailable" | null>(null);
@@ -265,6 +304,30 @@ export function StoreFeaturesPage({
                     count: waiting,
                   })}
       </p>
+      {paidWaiting === "Reading" ? null : paidWaiting === null ? (
+        <p>
+          {t(
+            "Orders could not be read, so paid pickup orders waiting for Accept aren't known. Check Orders.",
+          )}
+        </p>
+      ) : paidWaiting.count > 0 ? (
+        <p>
+          {t(
+            "{count} paid pickup orders are waiting for Accept (refunded automatically from {time}). Accept or cancel them in Orders first.",
+            {
+              count: paidWaiting.count,
+              time:
+                paidWaiting.earliestRefundAt === null
+                  ? "—"
+                  : new Intl.DateTimeFormat(displayLocale(), {
+                      hour: "numeric",
+                      minute: "2-digit",
+                    }).format(new Date(paidWaiting.earliestRefundAt)),
+            },
+          )}{" "}
+          <a href="/operations/orders">{t("Open Orders")}</a>
+        </p>
+      ) : null}
       <p>
         {counterAfter
           ? t(
@@ -284,7 +347,7 @@ export function StoreFeaturesPage({
           type="button"
           className="store-features__save"
           // Asked once the waiting count is known (or known to be unreadable).
-          disabled={busy || waiting === "Reading"}
+          disabled={busy || waiting === "Reading" || paidWaiting === "Reading"}
           onClick={() => {
             const action = confirming;
             setConfirming(null);
