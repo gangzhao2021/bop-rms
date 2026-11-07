@@ -88,6 +88,8 @@ export async function exerciseEntryDiningJoin({
   /** DEC-DINING-GUEST-INVITATION: run the Host invitation journey (HumanCode table) and stop. */
   hostInvitation = false,
   runtimeOptions,
+  /** WP-2423 shared-table-checkout (b): the table QR scanned again, presenting a given cookie. */
+  rescan,
 }) {
   const scope = {
     tenantReference: binding.tenantReference,
@@ -463,6 +465,7 @@ export async function exerciseEntryDiningJoin({
         base,
         joinAndBind,
         enterAnother,
+        rescan,
         staffReplace: async () => {
           const current = await regeneration.resolveActiveJoin(
             started.session.diningSessionReference,

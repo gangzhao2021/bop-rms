@@ -386,7 +386,7 @@ export async function exercisePersistentProfileEntry({
     const address = runtime.server.address();
     assert.equal(typeof address, "object");
     assert.ok(address);
-    const request = (base = "http://127.0.0.1:" + address.port) =>
+    const request = (base = "http://127.0.0.1:" + address.port, cookie = undefined) =>
       globalThis.fetch(base + "/bff/customer/entry", {
         method: "POST",
         headers: {
@@ -394,6 +394,7 @@ export async function exercisePersistentProfileEntry({
           "content-type": "application/json",
           "sec-fetch-site": "same-origin",
           "sec-fetch-mode": "cors",
+          ...(cookie === undefined ? {} : { cookie }),
         },
         body: JSON.stringify({ qrToken: f.token() }),
       });
@@ -914,6 +915,7 @@ export async function exercisePersistentProfileEntry({
       },
       hostInvitation: diningInvitation,
       runtimeOptions,
+      rescan: (base, cookie) => request(base, cookie),
       enterAnother: async (base) => {
         const response = await request(base);
         assert.equal(response.status, 201);
