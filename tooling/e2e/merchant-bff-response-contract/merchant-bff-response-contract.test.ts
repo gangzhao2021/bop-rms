@@ -247,6 +247,8 @@ const dineIn = {
   tableBill: {
     totalMinor: "8000",
     writtenOffMinor: "0",
+    // v15 M176: a table merged into another says where its dishes are paid.
+    mergedInto: { tableLabel: "T3", paid: true },
     partlyPaid: { remainingMinor: "0", paidParts: 2, partCount: 2 },
     paid: { amountMinor: "9200", method: "Cash", refundedMinor: "0" },
   },
