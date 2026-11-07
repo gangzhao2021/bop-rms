@@ -107,6 +107,10 @@ describe("M29: a refused tea change says why, never that the system is busy", ()
     expect(teaRefusalText(view("Changed"))).toBe(
       "Someone else changed the guest count. Check it again.",
     );
+    // M28: taken off, not added back — said as that, not as "not confirmed".
+    expect(teaRefusalText({ ...view("NotAddedBack"), charged: 5 })).toBe(
+      "Tea was taken off but could not be added back: 5 charged, 7 wanted. Try again.",
+    );
     expect(teaRefusalText(view("Unavailable"))).toBeNull();
     expect(teaRefusalText({ ...view("CheckingOut"), status: "Charged" })).toBeNull();
   });

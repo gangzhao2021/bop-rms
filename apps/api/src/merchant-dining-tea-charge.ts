@@ -36,7 +36,7 @@ export class MerchantDiningTeaChargeError extends Error {
   }
 }
 export type TeaChargeProblem =
-  "NeedsManager" | "CheckingOut" | "AlreadyServed" | "Changed" | "Unavailable";
+  "NeedsManager" | "CheckingOut" | "AlreadyServed" | "Changed" | "NotAddedBack" | "Unavailable";
 /** M29: what a refused step means for staff, never "the system is busy" for a real refusal. */
 export function teaStepProblem(error: unknown): TeaChargeProblem {
   const code = String((error as { code?: unknown } | null)?.code ?? "");
@@ -53,6 +53,28 @@ export function teaStepProblem(error: unknown): TeaChargeProblem {
     return "AlreadyServed";
   if (code === "UNPAID_ITEM_REMOVAL_VERSION_CONFLICT") return "Changed";
   return "Unavailable";
+}
+/**
+ * M28: what staff are told once a change has run, from what the bill holds now. A change that
+ * did not reach the count is never silent; one that took tea off but could not add it back says
+ * so (fewer are charged than asked), not the generic "not confirmed".
+ */
+export function teaAfterCheckProblem(input: {
+  readonly problem: TeaChargeProblem | null;
+  readonly tookOff: boolean;
+  readonly expected: number | null;
+  readonly paid: boolean;
+  readonly charged: number;
+}): TeaChargeProblem | null {
+  if (input.expected === null || input.paid || input.charged === input.expected)
+    return input.problem;
+  if (
+    input.tookOff &&
+    input.charged < input.expected &&
+    (input.problem === null || input.problem === "Unavailable")
+  )
+    return "NotAddedBack";
+  return input.problem ?? "Unavailable";
 }
 const fail = (code: MerchantDiningTeaChargeErrorCode): never => {
   throw new MerchantDiningTeaChargeError(code);
@@ -91,7 +113,8 @@ export interface DiningTeaChargeView {
   /**
    * Why the charge could not be brought to the guests (M29): a manager must take tea off; the
    * table is paying; the tea was already served (comp it instead); someone else changed the count;
-   * or the system did not answer. Null when it matches or nothing was tried.
+   * (M28) tea was taken off but could not be added back, so fewer are charged than asked; or the
+   * system did not answer. Null when it matches or nothing was tried.
    */
   readonly problem: TeaChargeProblem | null;
   /**
@@ -412,6 +435,7 @@ export function createMerchantDiningTeaCharge(options: {
       };
       // Fewer guests: take tea lines off (newest first) until no more than the guests are charged.
       let charged = state.open.reduce((sum, line) => sum + line.quantity, 0);
+      let tookOff = false;
       // Newest line first, read again each time: a removal moves the Order's version, so the next
       // line must carry the current one (v15 2026-11-03, a drop spanning two lines failed).
       for (let left = state.open.length; left > 0 && charged > target; left -= 1) {
@@ -433,6 +457,7 @@ export function createMerchantDiningTeaCharge(options: {
           }),
         );
         if (!done) break;
+        tookOff = true;
         state = await readCurrent(input.sessionCookie, command.session);
         charged = state.open.reduce((sum, item) => sum + item.quantity, 0);
       }
@@ -462,13 +487,13 @@ export function createMerchantDiningTeaCharge(options: {
       // that took tea off but could not add it back must never pass silently as done.
       const after = await readCurrent(input.sessionCookie, command.session);
       const nowCharged = after.open.reduce((sum, item) => sum + item.quantity, 0);
-      if (
-        problem === null &&
-        after.expected !== null &&
-        !after.paid &&
-        nowCharged !== after.expected
-      )
-        problem = "Unavailable";
+      problem = teaAfterCheckProblem({
+        problem,
+        tookOff,
+        expected: after.expected,
+        paid: after.paid,
+        charged: nowCharged,
+      });
       return viewOf(after, problem);
     } catch (error) {
       if (error instanceof MerchantDiningTeaChargeError) throw error;

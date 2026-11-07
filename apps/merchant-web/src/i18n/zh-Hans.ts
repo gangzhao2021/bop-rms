@@ -559,6 +559,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{item} is already served for {count} guests. To charge fewer, comp the extra.":
     "已为 {count} 位上了{item}。要少收，请把多出的免单。",
   "Someone else changed the guest count. Check it again.": "别人刚改了人数，请再看一下。",
+  "{item} was taken off but could not be added back: {charged} charged, {expected} wanted. Try again.":
+    "{item}已撤下，但没能加回：现收 {charged} 份，应收 {expected} 份。请再试一次。",
   "Seated, nothing ordered": "已入座，还没点菜",
   "Cancelled, nothing to collect": "已取消，无需收款",
   "Round waiting for payment": "有一轮在等付款",

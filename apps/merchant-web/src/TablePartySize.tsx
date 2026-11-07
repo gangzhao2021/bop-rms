@@ -131,7 +131,13 @@ export interface TableTeaView {
   readonly charged: number;
   readonly expected: number | null;
   readonly problem:
-    "NeedsManager" | "CheckingOut" | "AlreadyServed" | "Changed" | "Unavailable" | null;
+    | "NeedsManager"
+    | "CheckingOut"
+    | "AlreadyServed"
+    | "Changed"
+    | "NotAddedBack"
+    | "Unavailable"
+    | null;
   /** The guests counted (the party size), when the server says. */
   readonly guests?: number | null;
   /** A tea count staff set for other than the guests, and why. */
@@ -184,9 +190,14 @@ export function createTableTeaClient(fetcher: typeof fetch = fetch): TableTeaCli
       !Number.isSafeInteger(raw.charged) ||
       (raw.expected !== null && !Number.isSafeInteger(raw.expected)) ||
       (raw.problem !== null &&
-        !["NeedsManager", "CheckingOut", "AlreadyServed", "Changed", "Unavailable"].includes(
-          String(raw.problem),
-        ))
+        ![
+          "NeedsManager",
+          "CheckingOut",
+          "AlreadyServed",
+          "Changed",
+          "NotAddedBack",
+          "Unavailable",
+        ].includes(String(raw.problem)))
     )
       throw new TablePartySizeError("Unavailable");
     return raw as unknown as TableTeaView;
@@ -251,6 +262,12 @@ export function teaRefusalText(tea: TableTeaView | null): string | null {
       count: String(tea.charged),
     });
   if (tea.problem === "Changed") return t("Someone else changed the guest count. Check it again.");
+  // M28: the change took the charge off and could not put it back; the bill charges fewer now.
+  if (tea.problem === "NotAddedBack")
+    return t(
+      "{item} was taken off but could not be added back: {charged} charged, {expected} wanted. Try again.",
+      { item, charged: String(tea.charged), expected: String(tea.expected ?? 0) },
+    );
   return null;
 }
 // A read that fails is tried again quietly, sooner at first (a busy moment passes).
