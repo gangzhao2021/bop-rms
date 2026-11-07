@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { PointsOffPage } from "./PointsOffPage.js";
+import { pilotHiddenRedirect } from "./pilot-routes.js";
 
 const render = (loading: boolean, href: string | null) =>
   renderToStaticMarkup(
@@ -25,5 +26,14 @@ describe("M129: the Points page never shows the internal placeholder", () => {
   it("no pilot route renders the Phase-3 list page any more", () => {
     const app = readFileSync(join(import.meta.dirname, "App.tsx"), "utf8");
     expect(app).not.toContain("LoyaltyProgramListPage");
+  });
+  it("a programme address opens the points page, never the old editor's placeholder", () => {
+    const app = readFileSync(join(import.meta.dirname, "App.tsx"), "utf8");
+    expect(app).not.toContain("LoyaltyProgramEditorPage");
+    const address = "/app/customers/loyalty-programs/01909985-0000-7000-8000-000000000042";
+    expect(pilotHiddenRedirect(address, null)).toBe("/app/customers/loyalty-programs");
+    expect(pilotHiddenRedirect(address, ["LOY-PROGRAM-LIST"])).toBe(
+      "/app/customers/loyalty-programs",
+    );
   });
 });

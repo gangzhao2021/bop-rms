@@ -177,7 +177,8 @@ export const merchantRoutes: readonly MerchantRoute[] = Object.freeze([
   route("/app/customers/:id", home),
   // WP-2423 取舍 18: served when the session lists it.
   listedRoute("/app/customers/loyalty-programs", "LOY-PROGRAM-LIST", home),
-  route("/app/customers/loyalty-programs/:id", home),
+  // M129 review: a programme address goes to the points page, never the old editor's placeholder.
+  route("/app/customers/loyalty-programs/:id", "/app/customers/loyalty-programs"),
   route("/app/customers/loyalty-accounts/:id", home),
   route("/app/customers/loyalty-exceptions", home),
   route("/app/customers/consents/:customerId", home),

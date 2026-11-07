@@ -232,10 +232,6 @@ const CustomerMergeReviewPage = lazyPage(
   () => import("./CustomerMergeReviewPage.js"),
   "CustomerMergeReviewPage",
 );
-const LoyaltyProgramEditorPage = lazyPage(
-  () => import("./LoyaltyProgramPages.js"),
-  "LoyaltyProgramEditorPage",
-);
 const MemberPointsPage = lazyPage(() => import("./MemberPointsPage.js"), "MemberPointsPage");
 const LoyaltyAccountDetailPage = lazyPage(
   () => import("./LoyaltyAccountPages.js"),
@@ -2058,7 +2054,12 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
             )
           }
         />
-        <Route path="/app/customers/loyalty-programs/:id" element={<LoyaltyProgramEditorPage />} />
+        {/* WP-2423 M129 review: a programme address opens the points page (rules live there);
+            the old programme editor only ever said "unavailable". */}
+        <Route
+          path="/app/customers/loyalty-programs/:id"
+          element={<Navigate replace to="/app/customers/loyalty-programs" />}
+        />
         <Route path="/app/customers/loyalty-accounts/:id" element={<LoyaltyAccountDetailPage />} />
         <Route path="/app/customers/loyalty-exceptions" element={<PointsReviewPage />} />
         <Route path="/app/customers/consents/:customerId" element={<ConsentPreferencePage />} />
