@@ -914,14 +914,17 @@ export function createMerchantPrices(options: {
               : {}),
           },
           after === undefined ? undefined : recordPurpose(prepared.s.owner, after),
+          // WP-2423 M71: Rebase closes the old draft in the same transaction, so the Brand never
+          // has the new draft beside the old one.
+          "discard" in prepared && prepared.discard !== undefined
+            ? {
+                sessionCookie: input.sessionCookie,
+                csrf: input.csrf,
+                action: "Archive",
+                input: prepared.discard,
+              }
+            : undefined,
         );
-        if ("discard" in prepared && prepared.discard !== undefined)
-          await commands.executeTransport({
-            sessionCookie: input.sessionCookie,
-            csrf: input.csrf,
-            action: "Archive",
-            input: prepared.discard,
-          });
         return {
           status: result.status,
           priceBookReference: result.aggregate.priceBookReference,

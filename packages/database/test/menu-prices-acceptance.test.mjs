@@ -36,7 +36,8 @@ const id = (n) => "01909a7f-0000-7000-8000-" + n.toString(16).padStart(12, "0");
  * 6. at the Store with its own price, "only this Store" changes it at once (recorded), "every Store"
  *    changes the Brand price and the Store keeps its own, no price sent writes nothing, and a
  *    Brand price for every Store needs Brand Owner authority;
- * 7. the purpose record is append-only.
+ * 7. the purpose record is append-only;
+ * 8. "Apply my changes" (Rebase) opens the new draft and closes the old one together or not at all.
  * Fails at bc7e2965: there the dish save and "List it" bodies have no price scope or confirmation
  * (refused as Invalid), price drafts carry no purpose, and "List it" publishes Wei's draft (step 3).
  */
@@ -388,9 +389,9 @@ it("two Stores: menu prices list as reviewed, Prices-page changes stay, nothing 
       assert.equal(first[0].purpose, "MenuListing");
       assert.match(first[0].code, new RegExp("^MENU-" + torontoDate + "-[0-9A-F]{6}$", "u"));
       await listAll();
-      for (const store of [store1, store2])
+      for (const staffAt of [one, two])
         for (const sku of [soup.skuReference, tea.skuReference])
-          await two.availability.command({
+          await staffAt.availability.command({
             ...session,
             body: { action: "Offer", operationReference: op(), skuReference: sku },
           });
@@ -560,9 +561,36 @@ it("two Stores: menu prices list as reviewed, Prices-page changes stay, nothing 
       await assert.rejects(listAll(waiting), (error) => error.code === "PricesMoved");
       assert.equal(await price(store1, tea.skuReference), "3.50");
       assert.equal(await price(store1, soup.skuReference), "9.00");
+      // "Apply my changes" is one change: if the old draft cannot be closed, no new draft is left
+      // beside it (the Brand never has two menu drafts), and pressing it again works.
+      const openMenuDrafts = async () =>
+        (await prices(one)).books.filter(
+          (b) => b.lifecycle === "Draft" && b.purpose === "MenuListing",
+        ).length;
+      await admin.query(
+        `CREATE FUNCTION rms_pricing.test_refuse_close() RETURNS trigger LANGUAGE plpgsql AS $$BEGIN RAISE EXCEPTION 'TEST-ONLY: closing this draft fails'; END$$`,
+      );
+      const closeTrigger = `CREATE TRIGGER test_refuse_close BEFORE UPDATE ON rms_pricing.price_book FOR EACH ROW WHEN (OLD.price_book_id = '${waiting.priceBookReference}'::uuid) EXECUTE FUNCTION rms_pricing.test_refuse_close()`;
+      await admin.query(closeTrigger);
+      const rebaseOperation = op();
+      try {
+        await assert.rejects(
+          priceCommand(one, {
+            action: "Rebase",
+            operationReference: rebaseOperation,
+            priceBookReference: waiting.priceBookReference,
+            expectedAggregateVersion: waiting.aggregateVersion,
+          }),
+        );
+      } finally {
+        await admin.query("DROP TRIGGER test_refuse_close ON rms_pricing.price_book");
+        await admin.query("DROP FUNCTION rms_pricing.test_refuse_close()");
+      }
+      assert.equal(await openMenuDrafts(), 1);
+      assert.equal((await menuDraft()).priceBookReference, waiting.priceBookReference);
       const restarted = await priceCommand(one, {
         action: "Rebase",
-        operationReference: op(),
+        operationReference: rebaseOperation,
         priceBookReference: waiting.priceBookReference,
         expectedAggregateVersion: waiting.aggregateVersion,
       });
