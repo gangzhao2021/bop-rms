@@ -61,7 +61,14 @@ describe("Staff removed a dish from the table's cart", () => {
   it("names the dish in the guest's language", () => {
     expect(staffRemovedDishes(tableCart(removed))).toEqual(["Mapo tofu"]);
     expect(staffRemovedDishes(tableCart())).toEqual([]);
-    expect(staffRemovedDishes(tableCart([{ ...removed[0], names: {} }]))).toEqual([]);
+  });
+
+  it("a dish on no current menu is still told, as a dish", () => {
+    const unnamed = tableCart([removed[0], { ...removed[0], names: {} }]);
+    expect(staffRemovedDishes(unnamed)).toEqual(["Mapo tofu", null]);
+    const html = page(unnamed);
+    expect(html).toContain("Staff removed Mapo tofu from the cart.");
+    expect(html).toContain("Staff removed a dish from the cart.");
   });
 
   it("the cart page tells every phone, without codes", () => {

@@ -226,20 +226,21 @@ export const tableRoundSentByOther = (cart: CartView): number | null => {
 
 /**
  * WP-2423 shared-table-checkout (c): the dishes staff took out of this table's cart lately, named
- * in the guest's language (the menu language when there is no such name; nothing when unnamed).
+ * in the guest's language (the menu language when there is no such name). A dish that is on no
+ * current menu has no name: it is still told, as "a dish" (null here).
  */
-export const staffRemovedDishes = (cart: CartView): readonly string[] =>
-  (cart.cart.staffRemoved ?? [])
-    .map((removal) => {
-      const names = removal.names;
-      const chosen =
-        currentLanguage() === "zh-Hans"
-          ? (names[CHINESE_LOCALE] ?? Object.values(names)[0])
-          : (Object.entries(names).find(([locale]) => locale.startsWith("en"))?.[1] ??
-            Object.values(names)[0]);
-      return chosen ?? "";
-    })
-    .filter((name) => name !== "");
+export const staffRemovedDishes = (cart: CartView): readonly (string | null)[] =>
+  (cart.cart.staffRemoved ?? []).map((removal) => {
+    const names = removal.names;
+    const chosen =
+      currentLanguage() === "zh-Hans"
+        ? (names[CHINESE_LOCALE] ?? Object.values(names)[0])
+        : (Object.entries(names).find(([locale]) => locale.startsWith("en"))?.[1] ??
+          Object.values(names)[0]);
+    return chosen === undefined || chosen.trim() === "" ? null : chosen;
+  });
+const staffRemovedNotice = (dish: string | null) =>
+  dish === null ? cartText.line.staffRemovedUnnamed : cartText.line.staffRemoved(dish);
 
 /** WP-2423 (guest-cart-503): the Store marked this line as not sellable now (stable fact). */
 const cartLineUnsellable = (item: CartView["cart"]["items"][number]) =>
@@ -657,7 +658,7 @@ function CartContent({
         {state.status === "ready"
           ? staffRemovedDishes(state.cart).map((dish, index) => (
               <p key={"staff-removed:" + String(index)} role="status">
-                {cartText.line.staffRemoved(dish)}
+                {staffRemovedNotice(dish)}
               </p>
             ))
           : null}
@@ -803,7 +804,7 @@ function CartContent({
       )}
       {staffRemovedDishes(cart).map((dish, index) => (
         <p key={"staff-removed:" + String(index)} className="cart-stale" role="status">
-          {cartText.line.staffRemoved(dish)}
+          {staffRemovedNotice(dish)}
         </p>
       ))}
       <div className="cart-layout" aria-busy={pending}>

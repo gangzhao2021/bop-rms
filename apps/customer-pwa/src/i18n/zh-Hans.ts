@@ -42,6 +42,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Dishes added since then are still in the cart.": "之后加的菜还在购物车里。",
   "Round {round} was sent by someone at your table.": "第 {round} 轮已由同桌送出。",
   "Staff removed {dish} from the cart.": "店员已从购物车删除{dish}。",
+  "Staff removed a dish from the cart.": "店员已从购物车删除一道菜。",
   "We couldn’t add you to the table just now. Please try again.":
     "暂时没能加入这一桌，请再试一次。",
   "If it still doesn’t work, ask staff for help.": "如果还是不行，请找店员帮忙。",

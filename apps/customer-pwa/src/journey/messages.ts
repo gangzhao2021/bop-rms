@@ -403,6 +403,10 @@ export const cartText = Object.freeze({
       t("Round {round} was sent by someone at your table.", { round: String(round) }),
     /** WP-2423 shared-table-checkout (c): staff took a dish out of the table's cart. */
     staffRemoved: (dish: string) => t("Staff removed {dish} from the cart.", { dish }),
+    /** The same, for a dish on no current menu (it has no name to show). */
+    get staffRemovedUnnamed() {
+      return t("Staff removed a dish from the cart.");
+    },
     get removeUnavailableFirst() {
       return t("Remove the dishes that aren’t available right now, then order.");
     },
