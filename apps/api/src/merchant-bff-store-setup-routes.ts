@@ -126,7 +126,8 @@ export function installMerchantStoreSetupRoutes(
               : error.code === "STORE_FEATURES_CHANGED" ||
                   error.code === "STORE_FEATURES_TEA_USES_STOCK" ||
                   error.code === "STORE_FEATURES_TEA_NOT_LISTED" ||
-                  error.code === "STORE_FEATURES_GUEST_START_NEEDS_PAY_FIRST"
+                  error.code === "STORE_FEATURES_GUEST_START_NEEDS_PAY_FIRST" ||
+                  error.code === "STORE_FEATURES_PHONE_REQUIRED"
                 ? 409
                 : 503;
         response
@@ -1121,6 +1122,9 @@ export function installMerchantStoreSetupRoutes(
         else if (error.code === "VersionConflict")
           response.status(409).json({ error: "profile_changed" });
         else if (error.code === "NoChange") response.status(409).json({ error: "no_change" });
+        // M109: the Store takes pickup orders; its phone stays on the profile.
+        else if (error.code === "PhoneRequired")
+          response.status(409).json({ error: "store_phone_required_for_pickup" });
         else if (error.code === "Invalid") response.status(422).json({ error: "invalid_details" });
         else response.status(503).json({ error: "public_profile_unavailable" });
       });

@@ -9,6 +9,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { OpeningList } from "./OpeningList.js";
 import { GuestIntakeNotice } from "./GuestIntakeNotice.js";
 import { createStoreKitchenSetupClient } from "./store-kitchen-setup-client.js";
+import { createStoreFeaturesClient } from "./store-features-client.js";
+import { createStorePublicProfileClient } from "./store-public-profile-client.js";
 import { useStaffSessionLive } from "./staff-session-reads.js";
 import { Link } from "react-router";
 import {
@@ -442,6 +444,8 @@ export function attentionItems(
   kitchenSetupHref: string | null = null,
   settlement: SettlementStatusRead = { kind: "Hidden" },
   staffRoles: StaffRolesWaiting = null,
+  /** M109: the Store takes pickup orders but has published no phone; where the owner adds it. */
+  storePhoneHref: string | null = null,
 ): readonly AttentionItem[] {
   const items: AttentionItem[] = [];
   const unread = [
@@ -462,6 +466,17 @@ export function attentionItems(
       tone: "danger",
       href: kitchenSetupHref,
       action: t("Set up the kitchen"),
+    });
+  // M109: pickup keeps taking orders (no silent switch-off); the owner is asked for the phone.
+  if (storePhoneHref !== null)
+    items.push({
+      key: "store-phone",
+      title: t("Add the store's phone number"),
+      detail: t("So pickup guests can reach you about allergies or their order."),
+      state: t("To check"),
+      tone: "warning",
+      href: storePhoneHref,
+      action: t("Add phone number"),
     });
   if (unread.length > 0)
     items.push({
@@ -719,6 +734,7 @@ export function NeedsAttention({
   approvals = null,
   staffRoles = null,
   kitchenSetupHref = null,
+  storePhoneHref = null,
   settlement = { kind: "Hidden" },
   system = { kind: "NotPermitted" },
   timeZone,
@@ -731,6 +747,8 @@ export function NeedsAttention({
   readonly approvals?: ApprovalsWaiting | null;
   readonly staffRoles?: StaffRolesWaiting;
   readonly kitchenSetupHref?: string | null;
+  /** M109: where the owner adds the Store's phone, while pickup is on without one. */
+  readonly storePhoneHref?: string | null;
   readonly settlement?: SettlementStatusRead;
   /** The store system's board: a real problem is a row here, not only in the status line. */
   readonly system?: OperationsAlertsRead;
@@ -751,11 +769,20 @@ export function NeedsAttention({
   );
   if (
     kitchenSetupHref === null &&
+    storePhoneHref === null &&
     urgent.length + later.length === 0 &&
     reads.every((read) => read.kind === "Hidden")
   )
     return <>{reminder}</>;
-  const work = attentionItems(state, approvals, null, kitchenSetupHref, settlement, staffRoles);
+  const work = attentionItems(
+    state,
+    approvals,
+    null,
+    kitchenSetupHref,
+    settlement,
+    staffRoles,
+    storePhoneHref,
+  );
   const items = [
     ...urgent,
     ...work.filter((item) => item.backlog !== true),
@@ -1140,6 +1167,31 @@ export function StoreOverview({
       live = false;
     };
   }, [csrf, fetcher, storeReference, permitted.kitchenSetup]);
+  // M109: told only to the owner who can fix it; a failed read says nothing here.
+  const [storePhoneHref, setStorePhoneHref] = useState<string | null>(null);
+  useEffect(() => {
+    if (!permitted.kitchenSetup) return;
+    let live = true;
+    void Promise.all([
+      createStoreFeaturesClient(csrf, fetcher ?? fetch).read(),
+      createStorePublicProfileClient({ csrf, ...(fetcher ? { fetcher } : {}) }).load(),
+    ]).then(
+      ([features, profile]) => {
+        if (live)
+          setStorePhoneHref(
+            features.modules.pickup &&
+              profile.canChange &&
+              (profile.current === null || profile.current.businessPhone === null)
+              ? `/app/organization/stores/${storeReference}/setup#store-public-profile`
+              : null,
+          );
+      },
+      () => undefined,
+    );
+    return () => {
+      live = false;
+    };
+  }, [csrf, fetcher, storeReference, permitted.kitchenSetup]);
   useEffect(() => {
     const view = pickupView.current;
     if (view !== null)
@@ -1272,6 +1324,7 @@ export function StoreOverview({
         approvals={approvals}
         staffRoles={staffRoles}
         kitchenSetupHref={kitchenSetupHref}
+        storePhoneHref={storePhoneHref}
         settlement={settlement}
         system={system.read}
         timeZone={timeZone}

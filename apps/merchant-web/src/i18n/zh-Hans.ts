@@ -2852,7 +2852,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Permissions ({size} selected)": "权限（已选 {size} 项）",
   "Phone ends in": "手机号末尾为",
   "Phone is dead, lost or left behind": "手机没电、丢失或忘带",
-  "Phone number (optional)": "电话号码（可选）",
   Photo: "照片",
   "Photo description (alt text)": "照片描述（替代文本）",
   "Photo description changed": "照片描述已更改",
@@ -7975,6 +7974,15 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "记录这笔申请还不会退款：批准后才会发送。",
   "Refresh payment amounts": "刷新付款金额",
   "Refresh payment": "刷新付款",
+  "Add the store's phone number": "添加门店电话",
+  "So pickup guests can reach you about allergies or their order.":
+    "方便自取客人就过敏或订单问题联系你。",
+  "Add phone number": "添加电话",
+  "Phone number (needed while the store takes pickup orders)": "电话号码（门店接自取订单时必填）",
+  "Pickup guests call this number about allergies or their order. Add a phone number, or turn pickup off in Store features first.":
+    "自取客人会打这个电话说过敏或订单的事。请填写电话号码，或先在门店功能里关闭自取。",
+  "Pickup guests need a phone number to reach the store. Add it under Name and contact shown to customers in Store setup, then turn pickup on.":
+    "自取客人需要电话才能联系门店。请先在门店设置的“向顾客显示的名称和联系方式”里添加电话，再打开自取。",
   "This payment belongs to another store. Switch to that store to refund it.":
     "这笔付款不属于当前门店，请切换到下单的门店再退款。",
   "Your role can't refund payments. Ask the owner or a manager.":

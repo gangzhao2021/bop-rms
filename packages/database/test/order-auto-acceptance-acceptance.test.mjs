@@ -19,6 +19,7 @@ import {
 import { createMerchantOrderStaffCancellation } from "../../../apps/api/src/merchant-order-staff-cancellation.ts";
 import { createMerchantPaidOrderAutoAcceptOff } from "../../../apps/api/src/merchant-paid-order-watch.ts";
 import { createMerchantStoreFeatures } from "../../../apps/api/src/merchant-store-features.ts";
+import { createMerchantStorePublicProfile } from "../../../apps/api/src/merchant-store-public-profile.ts";
 import { createOrderAutoAcceptedPickupExpiry } from "../../../apps/api/src/order-auto-accepted-pickup-expiry.ts";
 import { createPersistentMerchantOrderQueue } from "../../../apps/api/src/persistent-merchant-order-queue.ts";
 
@@ -936,6 +937,101 @@ it("a manager can turn automatic sending off from the floor and can't turn it on
         "SELECT version::int AS version,actor_id FROM rms_ordering.order_auto_acceptance_setting WHERE version=2",
       ),
       [{ version: 2, actor_id: manager.actor }],
+    );
+  });
+});
+
+// M109: pickup guests order from away from the counter and reach the Store by phone. Under the
+// restricted role with the rendered pilot ACL: pickup is turned on only once the published profile
+// has a phone, and a profile with no phone can't be published while pickup is on.
+it("M109: pickup turns on only with a store phone, and the phone can't be cleared while it is on", async () => {
+  await withAutoAcceptWorld({ caseId: "wp2423_aa_phone", orderType: "Pickup" }, async (world) => {
+    const { assert, admin, fresh, ownerScope, query } = world;
+    const owner = await world.session(
+      ["organization.manage", "organization.store.read", "organization.store.publish"],
+      "01a6aa07",
+    );
+    const features = createMerchantStoreFeatures({
+      persistence: { ...owner.persistence, now: world.now },
+      authentication: owner.authentication,
+      now: world.now,
+    });
+    const profile = createMerchantStorePublicProfile({
+      persistence: { ...owner.persistence, now: world.now },
+      authentication: owner.authentication,
+    });
+    // The Store took pickup off earlier (owner record), and has published no phone.
+    await admin.query(
+      "INSERT INTO rms_store.store_feature_setting (tenant_id,brand_id,store_id,version,operation_id,template_code,counter_order,pickup,inventory,loyalty,compliance_documents,actor_id,occurred_at) VALUES ($1,$2,$3,1,$4,'Custom',true,false,true,true,true,$5,date_trunc('milliseconds',now()))",
+      [
+        ownerScope.tenantReference,
+        ownerScope.brandReference,
+        ownerScope.storeReference,
+        fresh(),
+        owner.actor,
+      ],
+    );
+    const turnOn = () =>
+      features({
+        sessionCookie: owner.sessionCookie,
+        csrf: owner.csrf,
+        command: {
+          action: "Change",
+          operationReference: fresh(),
+          expectedVersion: 1,
+          modules: {
+            counterOrder: true,
+            pickup: true,
+            inventory: true,
+            loyalty: true,
+            alcohol: false,
+          },
+        },
+      });
+    await assert.rejects(turnOn(), { code: "STORE_FEATURES_PHONE_REQUIRED" });
+    assert.deepEqual(
+      await query(
+        "SELECT version::int AS version,pickup FROM rms_store.store_feature_setting ORDER BY version",
+      ),
+      [{ version: 1, pickup: false }],
+    );
+    // With pickup on, a profile with no phone is refused before anything is published.
+    await admin.query(
+      "INSERT INTO rms_store.store_feature_setting (tenant_id,brand_id,store_id,version,operation_id,template_code,counter_order,pickup,inventory,loyalty,compliance_documents,actor_id,occurred_at) VALUES ($1,$2,$3,2,$4,'Custom',true,true,true,true,true,$5,date_trunc('milliseconds',now()))",
+      [
+        ownerScope.tenantReference,
+        ownerScope.brandReference,
+        ownerScope.storeReference,
+        fresh(),
+        owner.actor,
+      ],
+    );
+    const before = await query("SELECT count(*)::int AS n FROM platform_audit.audit_record");
+    await assert.rejects(
+      profile({
+        sessionCookie: owner.sessionCookie,
+        csrf: owner.csrf,
+        command: {
+          expectedVersion: 0,
+          operationReference: fresh(),
+          details: {
+            storeDisplayNames: { "en-CA": "Synthetic Store" },
+            address: {
+              addressLines: ["1 Synthetic Street"],
+              locality: "Ottawa",
+              regionCode: "ON",
+              postalCode: "K1A 0A1",
+              countryCode: "CA",
+            },
+            businessPhone: "",
+          },
+        },
+      }),
+      { code: "PhoneRequired" },
+    );
+    assert.deepEqual(
+      await query("SELECT count(*)::int AS n FROM platform_audit.audit_record"),
+      before,
     );
   });
 });

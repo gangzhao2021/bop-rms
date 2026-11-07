@@ -1414,7 +1414,9 @@ test("@production a name and address published from the fold reach the page and 
   await profile.getByLabel("City or town").fill("Toronto");
   await profile.getByLabel("Province or territory").selectOption("ON");
   await profile.getByLabel("Postal code").fill("M5H 1A1");
-  await profile.getByLabel("Phone number (optional)").fill("(416) 555-0100");
+  await profile
+    .getByLabel("Phone number (needed while the store takes pickup orders)")
+    .fill("(416) 555-0100");
   await profile.getByRole("button", { name: "Publish name and contact details" }).click();
   // Nobody types the address twice: the page and Store setup's own records follow it.
   await expect(panel(page).getByLabel("Street address")).toHaveValue("2 Queen Street East");

@@ -902,6 +902,17 @@ describe("Figma v1 (2026-10-25): Home lists what needs attention now", () => {
     expect(items[0]).toMatchObject({ key: "kitchen-setup", href, action: "Set up the kitchen" });
     expect(attentionItems(state, null).some((item) => item.key === "kitchen-setup")).toBe(false);
   });
+  it("M109: a Store taking pickup orders with no phone asks the owner for it, with the link", () => {
+    const href = "/app/organization/stores/s/setup#store-public-profile";
+    const items = attentionItems(state, null, null, null, { kind: "Hidden" }, null, href);
+    expect(items[0]).toMatchObject({
+      key: "store-phone",
+      title: "Add the store's phone number",
+      href,
+      action: "Add phone number",
+    });
+    expect(attentionItems(state, null).some((item) => item.key === "store-phone")).toBe(false);
+  });
   it("puts the guests in front of you first: staff calls, orders to accept, then the backlog", () => {
     const items = attentionItems(state, { awaiting: 2, approvedNotSent: 0 });
     expect(items.map((item) => [item.title, item.state, item.href])).toEqual([

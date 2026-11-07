@@ -48,6 +48,7 @@ import { withMerchantTransactionAuthorization } from "./merchant-transaction-aut
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { onlyRefusal, withCause } from "./merchant-failure.js";
+import { readPublishedStoreBusinessPhone } from "./merchant-store-public-profile.js";
 
 export type MerchantStoreFeaturesErrorCode =
   | "STORE_FEATURES_INPUT_INVALID"
@@ -60,6 +61,8 @@ export type MerchantStoreFeaturesErrorCode =
   | "STORE_FEATURES_TEA_NOT_LISTED"
   /** DEC-DINING-GUEST-TABLE-START: guests start tables only where they pay each round first. */
   | "STORE_FEATURES_GUEST_START_NEEDS_PAY_FIRST"
+  /** M109: pickup guests need a phone to reach the Store; add it to the profile first. */
+  | "STORE_FEATURES_PHONE_REQUIRED"
   | "STORE_FEATURES_UNAVAILABLE";
 export class MerchantStoreFeaturesError extends Error {
   constructor(readonly code: MerchantStoreFeaturesErrorCode) {
@@ -438,6 +441,24 @@ export function createMerchantStoreFeatures(options: {
             };
             const runner = tx as unknown as Parameters<typeof loadStoreFeatureSetting>[0];
             let setting = await loadStoreFeatureSetting(runner, scope);
+            // M109: pickup turned on only once guests can call the Store. A Store already taking
+            // pickup orders without a phone keeps them (its Home asks for the phone instead).
+            const turningPickupOn =
+              change !== null &&
+              !setting.pickup &&
+              (change.template === "FullService"
+                ? fullServiceTemplate.pickup
+                : change.modules?.pickup) === true;
+            if (
+              turningPickupOn &&
+              (await readPublishedStoreBusinessPhone(
+                tx,
+                scope,
+                () => authority.guard(),
+                String(current.context.resolvedAt),
+              )) === null
+            )
+              return fail("STORE_FEATURES_PHONE_REQUIRED");
             if (change !== null)
               setting = await changeStoreFeatureSetting(runner, scope, {
                 operationReference: change.operationReference,

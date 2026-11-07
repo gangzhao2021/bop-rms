@@ -85,6 +85,8 @@ describe("WP-2423 DEC-STORE-CUSTOMER-NAME store name and contact client", () => 
     [422, { error: "invalid_details" }, "Invalid"],
     [409, { error: "profile_changed" }, "Conflict"],
     [409, { error: "no_change" }, "NoChange"],
+    // M109: the Store takes pickup orders, so its phone can't be left empty.
+    [409, { error: "store_phone_required_for_pickup" }, "PhoneRequired"],
     [503, null, "Unavailable"],
     [500, null, "OutcomeUnknown"],
   ] as const)("answers %i %j as %s", async (status, answer, code) => {

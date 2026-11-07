@@ -233,13 +233,19 @@ export function StorePublicProfilePanel({
                 )
               : code === "NoChange"
                 ? t("Nothing changed — customers already see these details.")
-                : code === "PermissionDenied"
+                : code === "PhoneRequired"
                   ? t(
-                      "Only the Owner can change these details. Sign in again if your session ended.",
+                      "Pickup guests call this number about allergies or their order. Add a phone number, or turn pickup off in Store features first.",
                     )
-                  : code === "OutcomeUnknown"
-                    ? t("We could not confirm the change. Try again — it is published once.")
-                    : t("The details could not be published. Check your connection and try again."),
+                  : code === "PermissionDenied"
+                    ? t(
+                        "Only the Owner can change these details. Sign in again if your session ended.",
+                      )
+                    : code === "OutcomeUnknown"
+                      ? t("We could not confirm the change. Try again — it is published once.")
+                      : t(
+                          "The details could not be published. Check your connection and try again.",
+                        ),
       });
       if (code === "Conflict") await load();
     } finally {
@@ -387,7 +393,7 @@ export function StorePublicProfilePanel({
         )}
         {input(
           "phone",
-          t("Phone number (optional)"),
+          t("Phone number (needed while the store takes pickup orders)"),
           fields.phone,
           (next) => update({ phone: next }),
           {

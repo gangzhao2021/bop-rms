@@ -116,6 +116,24 @@ describe("WP-2423 item 8 ⑦ Store features client", () => {
     });
     await expect(client.read()).rejects.toMatchObject({ code: "Changed" });
   });
+  it("M109: says pickup needs the store's phone first, not that someone else changed it", async () => {
+    const client = createStoreFeaturesClient("a".repeat(43), async () =>
+      Response.json({ error: "store_features_phone_required" }, { status: 409 }),
+    );
+    await expect(
+      client.change({
+        operationReference: "0190a7f2-0000-7000-8000-000000000002",
+        expectedVersion: 1,
+        modules: {
+          counterOrder: true,
+          pickup: true,
+          inventory: false,
+          loyalty: false,
+          alcohol: false,
+        },
+      }),
+    ).rejects.toMatchObject({ code: "PhoneRequired" });
+  });
   it("WP-2423 item 8 ⑦: sends the owner's tip choices against the version they saw", async () => {
     const sent: unknown[] = [];
     const client = createStoreFeaturesClient("a".repeat(43), async (_url, init) => {

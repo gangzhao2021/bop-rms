@@ -332,7 +332,11 @@ export function StoreFeaturesPage({
           text:
             error instanceof StoreFeaturesClientError && error.code === "Denied"
               ? t("Only the owner changes store features.")
-              : t("Not saved. Check the connection and try again."),
+              : error instanceof StoreFeaturesClientError && error.code === "PhoneRequired"
+                ? t(
+                    "Pickup guests need a phone number to reach the store. Add it under Name and contact shown to customers in Store setup, then turn pickup on.",
+                  )
+                : t("Not saved. Check the connection and try again."),
         });
     } finally {
       setBusy(false);

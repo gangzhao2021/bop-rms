@@ -44,7 +44,14 @@ export interface StorePublicProfileSaveBody {
 export class StorePublicProfileClientError extends Error {
   constructor(
     readonly code:
-      "PermissionDenied" | "Invalid" | "Conflict" | "NoChange" | "Unavailable" | "OutcomeUnknown",
+      | "PermissionDenied"
+      | "Invalid"
+      | "Conflict"
+      | "NoChange"
+      /** M109: the Store takes pickup orders, so its phone can't be left empty. */
+      | "PhoneRequired"
+      | "Unavailable"
+      | "OutcomeUnknown",
   ) {
     super(t("Store name and contact details are unavailable"));
     this.name = "StorePublicProfileClientError";
@@ -161,7 +168,13 @@ export function createStorePublicProfileClient(options: {
       if (response.status === 422 || response.status === 400) return fail("Invalid");
       if (response.status === 409) {
         const error = (await response.json().catch(() => null)) as { error?: unknown } | null;
-        return fail(error?.error === "no_change" ? "NoChange" : "Conflict");
+        return fail(
+          error?.error === "no_change"
+            ? "NoChange"
+            : error?.error === "store_phone_required_for_pickup"
+              ? "PhoneRequired"
+              : "Conflict",
+        );
       }
       if (response.status === 503) return fail("Unavailable");
       if (!response.ok) return fail("OutcomeUnknown");

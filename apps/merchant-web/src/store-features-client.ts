@@ -87,6 +87,8 @@ export class StoreFeaturesClientError extends Error {
       | "TeaUsesStock"
       | "TeaNotListed"
       | "GuestStartNeedsPayFirst"
+      /** M109: pickup turns on only once the Store's profile has a phone. */
+      | "PhoneRequired"
       | "Unavailable",
   ) {
     super("store features " + code);
@@ -280,7 +282,9 @@ export function createStoreFeaturesClient(csrf: string, fetcher: typeof fetch = 
             ? "TeaNotListed"
             : payload?.error === "store_features_guest_start_needs_pay_first"
               ? "GuestStartNeedsPayFirst"
-              : "Changed",
+              : payload?.error === "store_features_phone_required"
+                ? "PhoneRequired"
+                : "Changed",
       );
     }
     if (!response.ok) return fail();

@@ -9,6 +9,8 @@ import { parseOpaqueUuidV7, readClosedRecord } from "@bop/identity";
 import {
   canadianRegionCodes,
   createPostgresPublicStoreProfilePublisher,
+  loadStoreFeatureSetting,
+  normalizeStoreBusinessPhone,
   PublicStoreProfileEditError,
   type PublicStoreProfileCandidate,
 } from "@rms/store";
@@ -24,7 +26,9 @@ import { onlyRefusal } from "./merchant-failure.js";
 
 export class MerchantStorePublicProfileError extends Error {
   constructor(
-    readonly code: "Denied" | "VersionConflict" | "NoChange" | "Invalid" | "Unavailable",
+    /** PhoneRequired (M109): the Store takes pickup orders, so its phone can't be cleared. */
+    readonly code:
+      "Denied" | "VersionConflict" | "NoChange" | "Invalid" | "PhoneRequired" | "Unavailable",
   ) {
     super("Store public profile " + code);
     this.name = "MerchantStorePublicProfileError";
@@ -32,6 +36,30 @@ export class MerchantStorePublicProfileError extends Error {
 }
 
 const hash = (value: unknown) => "sha256:" + sha256Hex(canonicalizeRfc8785(value));
+
+/**
+ * M109: the business phone on the Store's current published profile (null: none, or no profile
+ * yet). Read only, inside the caller's authorized transaction.
+ */
+export async function readPublishedStoreBusinessPhone(
+  transaction: { query(sql: string, values: readonly unknown[]): Promise<unknown> },
+  scope: { tenantReference: string; brandReference: string; storeReference: string },
+  guard: () => Promise<boolean>,
+  observedAt: string,
+): Promise<string | null> {
+  const profile = await createPostgresPublicStoreProfilePublisher({
+    ...scope,
+    authorize: guard,
+    hash,
+    verifyMedia: async () => false,
+    appendAudit: async () => {
+      throw new Error("STORE_PUBLIC_PROFILE_READ_ONLY");
+    },
+    retentionPolicyCode: "CONFIGURATION_AUDIT",
+    retentionPolicyVersion: 1,
+  }).readCurrent(businessTransaction(transaction), observedAt);
+  return profile?.businessPhone ?? null;
+}
 
 /** What staff see: the published fields only (all public), never history or references. */
 function viewOf(profile: PublicStoreProfileCandidate | null) {
@@ -66,6 +94,19 @@ function viewOf(profile: PublicStoreProfileCandidate | null) {
  * Store setup (`organization.store.read`) see it; only the Owner (`organization.store.publish`)
  * publishes a new version. Receipts already issued keep the name they were issued with.
  */
+/** M109: the edit leaves the Store with no phone (a malformed edit is refused by its owner). */
+function clearsPhone(details: unknown): boolean {
+  if (details === null || typeof details !== "object" || !Object.hasOwn(details, "businessPhone"))
+    return false;
+  try {
+    return (
+      normalizeStoreBusinessPhone((details as { businessPhone: unknown }).businessPhone) === null
+    );
+  } catch {
+    return false;
+  }
+}
+
 export function createMerchantStorePublicProfile(options: {
   persistence: PersistentMerchantBffOptions;
   authentication: Pick<MerchantBffService, "authorize">;
@@ -218,6 +259,15 @@ export function createMerchantStorePublicProfile(options: {
               authenticated.sessionReference,
             ),
           async (current, guard) => {
+            // M109: pickup guests order from away from the counter; while the Store takes pickup
+            // orders its phone stays on the profile (they call it about allergies or the order).
+            if (clearsPhone(raw.details)) {
+              const features = await loadStoreFeatureSetting(
+                transaction as never,
+                scopeOf(current),
+              );
+              if (features.pickup) throw new MerchantStorePublicProfileError("PhoneRequired");
+            }
             const result = await publisherFor(current, scopeOf(current), guard).publish(
               businessTransaction(transaction),
               {

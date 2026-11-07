@@ -112,7 +112,9 @@ test("@production the Owner publishes the store name, address and phone customer
   await expect(panel.getByLabel("Store name customers see")).toHaveValue(
     "DEMO Store - Simulated payments only",
   );
-  await expect(panel.getByLabel("Phone number (optional)")).toHaveValue("(416) 555-0100");
+  await expect(
+    panel.getByLabel("Phone number (needed while the store takes pickup orders)"),
+  ).toHaveValue("(416) 555-0100");
   await expect(panel.getByLabel("Province or territory")).toHaveValue("ON");
   await expect(panel.getByText(/Last published/u)).toBeVisible();
 
@@ -138,7 +140,9 @@ test("@production the Owner publishes the store name, address and phone customer
   // Mistakes are explained next to the field before anything is sent.
   await panel.getByLabel("Store name customers see").fill("Maple #1");
   await panel.getByLabel("Postal code").fill("90210");
-  await panel.getByLabel("Phone number (optional)").fill("555-0100");
+  await panel
+    .getByLabel("Phone number (needed while the store takes pickup orders)")
+    .fill("555-0100");
   await panel.getByRole("button", { name: "Publish name and contact details" }).click();
   await expect(panel.getByText(/no # \* _ < >/u)).toBeVisible();
   await expect(panel.getByText(/Canadian postal code/u)).toBeVisible();
@@ -147,7 +151,9 @@ test("@production the Owner publishes the store name, address and phone customer
 
   await panel.getByLabel("Store name customers see").fill("Maple Noodle House");
   await panel.getByLabel("Postal code").fill("a1a 1a1");
-  await panel.getByLabel("Phone number (optional)").fill("416-555-0199");
+  await panel
+    .getByLabel("Phone number (needed while the store takes pickup orders)")
+    .fill("416-555-0199");
   await panel.getByRole("button", { name: "Publish name and contact details" }).click();
   await expect(panel.getByText(/Published\. Customers see these details/u)).toBeVisible();
   await expect(panel.getByText(/Receipts already issued keep the name/u).first()).toBeVisible();
@@ -167,7 +173,9 @@ test("@production the Owner publishes the store name, address and phone customer
   });
   // The form shows the published version, as the server stored it.
   await expect(panel.getByLabel("Store name customers see")).toHaveValue("Maple Noodle House");
-  await expect(panel.getByLabel("Phone number (optional)")).toHaveValue("(416) 555-0199");
+  await expect(
+    panel.getByLabel("Phone number (needed while the store takes pickup orders)"),
+  ).toHaveValue("(416) 555-0199");
 });
 
 test("@production staff who cannot change the store name see it read-only", async ({ page }) => {
