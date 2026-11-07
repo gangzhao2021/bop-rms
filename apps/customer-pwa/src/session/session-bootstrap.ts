@@ -38,6 +38,8 @@ export interface CustomerCurrentOrder {
   readonly orderReference: string;
   readonly orderNumber: string;
   readonly orderType: "Pickup" | "DineIn";
+  /** M104 (B.2): this visit's earlier orders on this phone, newest first (absent: none). */
+  readonly earlier?: readonly CustomerCurrentOrder[];
 }
 function currentOrder(value: unknown): CustomerCurrentOrder | null {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
@@ -235,6 +237,7 @@ export async function restoreCustomerSession(
           ("menuContext" in value ? 1 : 0) +
           ("checkoutSessionReference" in value ? 1 : 0) +
           ("currentOrder" in value ? 1 : 0) +
+          ("earlierOrders" in value ? 1 : 0) +
           ("visit" in value ? 1 : 0) ||
       !("schemaVersion" in value) ||
       value.schemaVersion !== 1 ||
@@ -245,8 +248,27 @@ export async function restoreCustomerSession(
       return false;
     const context = "menuContext" in value ? menuContext(value.menuContext) : undefined;
     if (context === null) return false;
-    const order = "currentOrder" in value ? currentOrder(value.currentOrder) : undefined;
-    if (order === null) return false;
+    const latest = "currentOrder" in value ? currentOrder(value.currentOrder) : undefined;
+    if (latest === null) return false;
+    // M104 (B.2): the visit's earlier orders, shown under the latest one.
+    const rawEarlier = "earlierOrders" in value ? value.earlierOrders : undefined;
+    const earlier =
+      rawEarlier === undefined
+        ? undefined
+        : Array.isArray(rawEarlier) &&
+            latest !== undefined &&
+            rawEarlier.length >= 1 &&
+            rawEarlier.length <= 4
+          ? rawEarlier.map(currentOrder)
+          : null;
+    if (earlier === null || earlier?.some((entry) => entry === null)) return false;
+    const order =
+      latest === undefined || earlier === undefined
+        ? latest
+        : Object.freeze({
+            ...latest,
+            earlier: Object.freeze(earlier as CustomerCurrentOrder[]),
+          });
     const visit = "visit" in value ? restoredVisit(value.visit) : undefined;
     if (visit === null || (visit !== undefined && context?.channel !== "DineIn")) return false;
     const checkout =

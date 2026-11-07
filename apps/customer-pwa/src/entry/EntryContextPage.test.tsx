@@ -335,6 +335,37 @@ describe("M116: a closed Store gives a menu to look at, never a dead end", () =>
   });
 });
 
+describe("M105 B.3: an order at another Store stays on this phone", () => {
+  const harbour = {
+    publicStoreReference: "018f2a1b-7c3d-7a4e-8b5c-1234567890ff",
+    storeDisplayName: "Harbour Store",
+  };
+  const pickup = { ...context, channel: "Pickup" as const, publicTableReference: null };
+  const at = (keptElsewhere: typeof harbour | null) =>
+    renderToStaticMarkup(
+      <MemoryRouter>
+        <EntryContextView
+          onContinue={vi.fn()}
+          state={{ kind: "Established", context: pickup }}
+          keptElsewhere={keptElsewhere}
+        />
+      </MemoryRouter>,
+    );
+  it("says how to go back to it, without blocking this Store's order", () => {
+    const html = at(harbour);
+    expect(html).toContain(
+      "Your order at Harbour Store is kept on this phone. Scan Harbour Store’s pickup QR code again to go back to it.",
+    );
+    expect(html).toContain("Continue to menu");
+  });
+  it("says nothing at the same Store, or with no order elsewhere", () => {
+    expect(at({ ...harbour, publicStoreReference: pickup.publicStoreReference })).not.toContain(
+      "is kept on this phone",
+    );
+    expect(at(null)).not.toContain("is kept on this phone");
+  });
+});
+
 describe("WP-2423 Q11 replaced table code", () => {
   it("tells the guest in plain words to ask staff, with no retry or internal code", () => {
     const replaced = render({ kind: "TableCodeRetired", replaced: true });
@@ -375,6 +406,21 @@ describe("WP-2423 Q10 continue the order in progress", () => {
     expect(html).not.toContain("closes this order");
     expect(html).not.toContain("24 hours");
     expect(html).not.toContain("Your table");
+  });
+  it("M104 B.2: lists every order of this visit with its status and receipt, newest first", () => {
+    const earlier = {
+      ...order,
+      orderReference: "018f2a1b-7c3d-7a4e-8b5c-1234567890ad",
+      orderNumber: "11",
+    };
+    const html = view({ order: { ...order, earlier: [earlier] }, onStartNew: vi.fn() });
+    expect(html).toContain("Orders on this phone");
+    expect(html.indexOf("Order 12")).toBeLessThan(html.indexOf("Order 11"));
+    expect(html).toContain(`href="/orders/${earlier.orderReference}/receipt"`);
+    expect(html).toContain(`href="/orders/${order.orderReference}/receipt"`);
+    // One order: no list (the order itself is the page).
+    expect(view({ order, onStartNew: vi.fn() })).not.toContain("Orders on this phone");
+    expect(zh["Orders on this phone"]).toBe("这部手机上的订单");
   });
   it("links a dine-in guest to the table and asks for a QR scan when no code was scanned", () => {
     const html = view({ order: { ...order, orderType: "DineIn" } });

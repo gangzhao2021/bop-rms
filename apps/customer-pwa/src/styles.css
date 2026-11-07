@@ -3227,3 +3227,27 @@ body {
 .menu-closed-notice__line {
   font-weight: 650;
 }
+/* M104 (B.2): this visit's orders on the start page, one row each, links at the end. */
+.entry-orders {
+  margin-top: var(--bop-space-4);
+}
+.entry-orders h3 {
+  margin: 0 0 var(--bop-space-2);
+  font-size: 1rem;
+}
+.entry-orders ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.entry-orders li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--bop-space-2) var(--bop-space-3);
+  align-items: baseline;
+  padding: var(--bop-space-2) 0;
+  border-top: 1px solid var(--bop-color-border-default);
+}
+.entry-orders li > span {
+  flex: 1 1 12rem;
+}

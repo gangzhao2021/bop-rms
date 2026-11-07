@@ -1,6 +1,7 @@
 import {
   createPostgresGuestCheckoutRecovery,
   findLatestGuestSessionOrder,
+  findRecentGuestSessionOrders,
   listStoreDiningSessionOrders,
   parseOrderingReference,
 } from "@rms/ordering";
@@ -74,10 +75,13 @@ export function createCustomerSessionBootstrapRead(
         });
         // WP-2423 Q10: a customer who reopens the app can go straight back to the order this
         // Guest Session placed (read only after the Session is confirmed in this transaction).
-        const latestOrder = await findLatestGuestSessionOrder(transaction, options.scope, {
+        // M104 (B.2): and every order of this visit, newest first (a pickup visit keeps ordering).
+        const recentOrders = await findRecentGuestSessionOrders(transaction, options.scope, {
           guestSessionReference: String(guest.sessionReference),
           observedAt: options.now(),
+          limit: 5,
         });
+        const latestOrder = recentOrders[0] ?? null;
         const current = await identity.resolve({ sessionCredential, activity: "Background" });
         if (JSON.stringify(current) !== JSON.stringify(guest))
           throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
@@ -91,6 +95,15 @@ export function createCustomerSessionBootstrapRead(
                   orderNumber: latestOrder.orderNumber,
                   orderType: latestOrder.orderType,
                 },
+              }
+            : {}),
+          ...(recentOrders.length > 1
+            ? {
+                earlierOrders: recentOrders.slice(1).map((order) => ({
+                  orderReference: order.orderReference,
+                  orderNumber: order.orderNumber,
+                  orderType: order.orderType,
+                })),
               }
             : {}),
           menuContext: {
@@ -269,6 +282,12 @@ export function createCustomerSessionBootstrapHandler(options?: {
             orderNumber: string;
             orderType: "Pickup" | "DineIn";
           };
+          /** M104 (B.2): this visit's earlier orders, newest first (at most 4). */
+          earlierOrders?: readonly {
+            orderReference: string;
+            orderNumber: string;
+            orderType: "Pickup" | "DineIn";
+          }[];
           menuContext: {
             publicStoreReference: string;
             channel: "DineIn" | "Pickup";
@@ -409,6 +428,26 @@ export function createCustomerSessionBootstrapHandler(options?: {
                         throw new Error("invalid order type");
                       })(),
             };
+      const rawEarlier = typeof result === "string" ? undefined : result.earlierOrders;
+      const earlierOrders =
+        rawEarlier === undefined || currentOrder === undefined
+          ? undefined
+          : rawEarlier.length < 1 || rawEarlier.length > 4
+            ? (() => {
+                throw new Error("invalid earlier orders");
+              })()
+            : rawEarlier.map((order) => {
+                if (
+                  !/^[1-9][0-9]{0,18}$/u.test(order.orderNumber) ||
+                  (order.orderType !== "Pickup" && order.orderType !== "DineIn")
+                )
+                  throw new Error("invalid earlier order");
+                return {
+                  orderReference: String(parseOrderingReference(order.orderReference)),
+                  orderNumber: order.orderNumber,
+                  orderType: order.orderType,
+                };
+              });
       const rawVisit = typeof result === "string" ? undefined : result.visit;
       const visit =
         rawVisit === undefined
@@ -431,6 +470,7 @@ export function createCustomerSessionBootstrapHandler(options?: {
         csrfToken,
         ...(checkoutSessionReference ? { checkoutSessionReference } : {}),
         ...(currentOrder ? { currentOrder } : {}),
+        ...(earlierOrders ? { earlierOrders } : {}),
         ...(menuContext
           ? {
               menuContext: {

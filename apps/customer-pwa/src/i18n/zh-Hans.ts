@@ -461,6 +461,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Ordering is paused": "点单已暂停",
   "Ordering is paused for a short while": "点单暂停一小会儿",
   "Closed now": "现在已打烊",
+  "Orders on this phone": "这部手机上的订单",
+  "Your order at {storeDisplayName} is kept on this phone. Scan {storeDisplayName}’s pickup QR code again to go back to it.":
+    "你在{storeDisplayName}的订单仍保存在这部手机上，再扫{storeDisplayName}的自取二维码就能回去。",
   "This table’s visit has ended": "这桌的用餐已结束",
   "Open your table to see its bill and receipt.": "打开“你的桌位”查看账单和收据。",
   "Your party’s table changed": "你们换桌了",

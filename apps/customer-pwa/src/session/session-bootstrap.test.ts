@@ -336,3 +336,37 @@ it("M02: restores a dine-in visit's table and joined state, only at a table and 
     expect(getCustomerCsrfCredential()).toBeNull();
   }
 });
+
+it("M104 B.2: restores this visit's earlier orders under the latest, and refuses a malformed list", async () => {
+  const currentOrder = {
+    orderReference: "0190fa21-0000-7000-8000-000000000003",
+    orderNumber: "12",
+    orderType: "Pickup",
+  };
+  const earlier = {
+    orderReference: "0190fa21-0000-7000-8000-000000000002",
+    orderNumber: "11",
+    orderType: "Pickup",
+  };
+  const restore = (body: object, onOrder = vi.fn()) =>
+    restoreCustomerSession(
+      vi
+        .fn()
+        .mockResolvedValue(
+          response({ schemaVersion: 1, csrfToken: "B".repeat(43), menuContext, ...body }),
+        ),
+      undefined,
+      onOrder,
+    );
+  const onOrder = vi.fn();
+  expect(await restore({ currentOrder, earlierOrders: [earlier] }, onOrder)).toBe(true);
+  expect(onOrder).toHaveBeenCalledWith({ ...currentOrder, earlier: [earlier] });
+  for (const body of [
+    { currentOrder, earlierOrders: [] },
+    { currentOrder, earlierOrders: [{ ...earlier, orderNumber: "0" }] },
+    { earlierOrders: [earlier] },
+  ]) {
+    setCustomerCsrfCredential(null);
+    expect(await restore(body)).toBe(false);
+  }
+});

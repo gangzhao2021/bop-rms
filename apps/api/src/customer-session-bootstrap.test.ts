@@ -256,6 +256,55 @@ it("WP-2423 Q10: returns the Session's latest order so a reopened app can contin
   }
 });
 
+it("M104 B.2: lists this visit's earlier orders under the latest, whitelisted", async () => {
+  const f = await setup();
+  const menuContext = {
+    publicStoreReference: "0190fa21-0000-7000-8000-000000000001",
+    channel: "Pickup",
+    locale: "en-CA",
+    brandDisplayName: "DEMO Brand",
+    storeDisplayName: "DEMO Store",
+  };
+  const currentOrder = {
+    orderReference: "0190fa21-0000-7000-8000-000000000003",
+    orderNumber: "12",
+    orderType: "Pickup",
+  };
+  const earlier = {
+    orderReference: "0190fa21-0000-7000-8000-000000000002",
+    orderNumber: "11",
+    orderType: "Pickup",
+  };
+  f.read.mockResolvedValue({
+    csrfToken: "B".repeat(43),
+    currentOrder,
+    earlierOrders: [{ ...earlier, createdAt: "must-not-leak" }],
+    menuContext,
+  });
+  const r = await f.request();
+  expect(r.status).toBe(200);
+  expect(await r.json()).toEqual({
+    schemaVersion: 1,
+    csrfToken: "B".repeat(43),
+    currentOrder,
+    earlierOrders: [earlier],
+    menuContext,
+  });
+  for (const earlierOrders of [
+    [],
+    [{ ...earlier, orderNumber: "0" }],
+    Array.from({ length: 5 }, () => earlier),
+  ]) {
+    f.read.mockResolvedValue({
+      csrfToken: "B".repeat(43),
+      currentOrder,
+      earlierOrders,
+      menuContext,
+    });
+    expect((await f.request()).status).toBe(503);
+  }
+});
+
 it("M02: passes a dine-in visit's table and joined state, whitelisted, and refuses a malformed one", async () => {
   const f = await setup();
   const menuContext = {

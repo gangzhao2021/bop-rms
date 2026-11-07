@@ -202,6 +202,14 @@ export function App({
               currentOrder={currentOrder}
               store={store}
               storeProfile={demo ? null : undefined}
+              restoredStore={
+                initialMenuContext === undefined
+                  ? undefined
+                  : {
+                      publicStoreReference: initialMenuContext.publicStoreReference,
+                      storeDisplayName: initialMenuContext.storeDisplayName,
+                    }
+              }
             />
           }
         />

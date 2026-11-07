@@ -70,6 +70,9 @@ export interface EntryContextPageProps {
   readonly store?: CustomerStoreContext | undefined;
   /** The Store's hours and address once the visit starts; null shows none (previews). */
   readonly storeProfile?: StoreProfileLoader | null | undefined;
+  /** M105 (B.3): the Store of the visit this phone restored, before this scan. */
+  readonly restoredStore?:
+    { readonly publicStoreReference: string; readonly storeDisplayName: string } | undefined;
 }
 
 const browserStoreProfile: StoreProfileLoader = createStoreProfileClient();
@@ -87,8 +90,13 @@ export function EntryContextPage({
   currentOrder,
   store,
   storeProfile,
+  restoredStore,
 }: EntryContextPageProps) {
   const [holding, setHolding] = useState(currentOrder !== undefined);
+  // M105 (B.3): a pickup order at another Store stays on this phone; its own code comes back to it.
+  const [keptElsewhere] = useState(() =>
+    currentOrder?.orderType === "Pickup" && restoredStore !== undefined ? restoredStore : null,
+  );
   const initial = (): CustomerEntryScreenState =>
     client.hasEntry ? Object.freeze({ kind: "Loading" }) : Object.freeze({ kind: "Missing" });
   const [result, setResult] = useState<{
@@ -310,6 +318,7 @@ export function EntryContextPage({
       starting={answered === "Start" || answered === "NewParty"}
       state={state}
       storeProfile={storeProfile === undefined ? browserStoreProfile : storeProfile}
+      keptElsewhere={keptElsewhere}
     />
   );
 }
@@ -402,6 +411,24 @@ export function CurrentOrderView({
               <Link to="/dine-in/session">{t("Your table")}</Link>
             ) : null}
           </div>
+          {/* M104 (B.2): every order of this visit stays reachable from here, newest first. */}
+          {order.earlier === undefined || order.earlier.length === 0 ? null : (
+            <section className="entry-orders" aria-labelledby="entry-orders-heading">
+              <h3 id="entry-orders-heading">{t("Orders on this phone")}</h3>
+              <ul>
+                {[order, ...order.earlier].map((entry) => (
+                  <li key={entry.orderReference}>
+                    <span>
+                      {t("Order {orderNumber}", { orderNumber: entry.orderNumber })} ·{" "}
+                      {entry.orderType === "DineIn" ? t("Dine in") : t("Pickup")}
+                    </span>
+                    <Link to={`/orders/${entry.orderReference}`}>{t("Status")}</Link>
+                    <Link to={`/orders/${entry.orderReference}/receipt`}>{t("Receipt")}</Link>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
           {onStartNew ? (
             <>
               {/* M104: said as it works. Order more goes on with this pickup visit, and this
@@ -452,6 +479,9 @@ export interface EntryContextViewProps {
   readonly state: CustomerEntryScreenState;
   /** Shown under a started visit: the Store's hours, address and phone. */
   readonly storeProfile?: StoreProfileLoader | null | undefined;
+  /** M105 (B.3): the Store where this phone still has a pickup order (null: none). */
+  readonly keptElsewhere?:
+    { readonly publicStoreReference: string; readonly storeDisplayName: string } | null | undefined;
 }
 
 export function EntryContextView({
@@ -465,6 +495,7 @@ export function EntryContextView({
   starting,
   state,
   storeProfile = null,
+  keptElsewhere = null,
 }: EntryContextViewProps) {
   const established =
     state.kind === "Established" || state.kind === "Resumed" ? state.context : null;
@@ -509,6 +540,17 @@ export function EntryContextView({
           state={state}
         />
       </section>
+      {/* M105 (B.3): a notice, not a block: the order at the other Store is still on this phone. */}
+      {established !== null &&
+      keptElsewhere !== null &&
+      keptElsewhere.publicStoreReference !== established.publicStoreReference ? (
+        <p className="entry-context entry-kept-elsewhere" role="note">
+          {t(
+            "Your order at {storeDisplayName} is kept on this phone. Scan {storeDisplayName}’s pickup QR code again to go back to it.",
+            { storeDisplayName: keptElsewhere.storeDisplayName },
+          )}
+        </p>
+      ) : null}
       {/* Below the started visit, so its arrival moves nothing the guest is reading. */}
       {established ? <StoreIdentityCard load={storeProfile} /> : null}
       {/* Not under the short loading notice, where the arriving answer would push it down. */}

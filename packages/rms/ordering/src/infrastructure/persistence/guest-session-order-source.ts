@@ -57,6 +57,63 @@ export async function findLatestGuestSessionOrder(
   });
 }
 
+/**
+ * M104 (B.2): the Orders this exact Guest Session placed in this Store, newest first (at most
+ * `limit`, up to 5), so the guest sees every order on this phone, not only the latest. The caller
+ * must have authorized the Guest Session in the same transaction, as for the latest Order.
+ */
+export async function findRecentGuestSessionOrders(
+  transaction: { query(text: string, values: readonly unknown[]): Promise<unknown> },
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  input: {
+    readonly guestSessionReference: string;
+    readonly observedAt: string;
+    readonly limit?: number;
+  },
+): Promise<readonly GuestSessionLatestOrder[]> {
+  const brand = parseOrderingReference(scope.brandReference),
+    store = parseOrderingReference(scope.storeReference),
+    guest = parseOrderingReference(input.guestSessionReference),
+    observedAt = parseOrderingInstant(input.observedAt),
+    limit = input.limit ?? 5;
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 5) return fail();
+  await transaction.query(
+    "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+    [brand, store],
+  );
+  const result = (await transaction.query(
+    "SELECT h.order_id::text AS order_id,h.order_number,h.order_type," +
+      "to_char(h.created_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') AS created_at " +
+      "FROM rms_ordering.order_header h JOIN rms_ordering.order_submission_record s " +
+      "ON s.order_id=h.order_id AND s.brand_id=h.brand_id AND s.store_id=h.store_id AND s.submission_kind='Initial' " +
+      "WHERE h.brand_id=$1 AND h.store_id=$2 AND s.guest_session_id=$3 AND h.created_at<=$4::timestamptz " +
+      "ORDER BY h.created_at DESC,h.order_id DESC LIMIT $5",
+    [brand, store, guest, observedAt, limit],
+  )) as { readonly rows?: unknown } | null;
+  const rows = result?.rows;
+  if (!Array.isArray(rows) || rows.length > limit) return fail();
+  return Object.freeze(
+    rows.map((value: unknown) => {
+      const row = value as Record<string, unknown>;
+      if (
+        row === null ||
+        typeof row !== "object" ||
+        Object.keys(row).length !== 4 ||
+        typeof row.order_number !== "string" ||
+        !/^[1-9][0-9]{0,18}$/u.test(row.order_number) ||
+        (row.order_type !== "Pickup" && row.order_type !== "DineIn")
+      )
+        return fail();
+      return Object.freeze({
+        orderReference: String(parseOrderingReference(row.order_id)),
+        orderNumber: row.order_number,
+        orderType: row.order_type,
+        createdAt: String(parseOrderingInstant(row.created_at)),
+      });
+    }),
+  );
+}
+
 /** WP-2423 Q10: the customer-facing number and type of one Order (for a message about it). */
 export async function loadOrderCustomerSummary(
   transaction: { query(text: string, values: readonly unknown[]): Promise<unknown> },
