@@ -4,6 +4,7 @@ import { MemoryRouter } from "react-router";
 import { describe, expect, it, vi } from "vitest";
 import {
   choicesComplete,
+  counterOrderLines,
   estimatedLineMinor,
   paidAtInstant,
   placeErrorText,
@@ -234,6 +235,48 @@ describe("counter order (OPS-ORDER-ENTRY) — WP-2423 Q7", () => {
       ),
     );
     expect(withdrawnOptions(paused.lines[0] ?? line)).toEqual(["Oat milk"]);
+  });
+
+  it("WP-2423 M53: a counter line sends the guest's kitchen note; a line without one sends none", async () => {
+    const item = parseCounterMenu(counterMenuResponse()).sections[0]?.items[0];
+    if (!item) throw new Error("fixture");
+    const options = [{ optionReference: id(10), name: "Oat milk", quantity: 1 }];
+    const lines = counterOrderLines([
+      { key: "a", item, quantity: 2, options, note: "No green onion" },
+      { key: "b", item, quantity: 1, options: [], note: null },
+      { key: "c", item, quantity: 1, options: [] },
+    ]);
+    expect(lines[0]).toEqual({
+      sellableReference: item.sellableReference,
+      quantity: 2,
+      optionSelections: [{ optionReference: id(10), quantity: 1 }],
+      customerNote: "No green onion",
+    });
+    for (const plain of [lines[1], lines[2]]) expect(plain).not.toHaveProperty("customerNote");
+    const fetcher = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>(
+      async () => new Response("{}"),
+    );
+    await createCounterOrderClient("a".repeat(43), fetcher as unknown as typeof fetch)
+      .placeOrder({
+        operationReference: id(30),
+        lines,
+        tip: { kind: "None" },
+        recordedAfterOutage: false,
+      })
+      .catch(() => null);
+    const sent = JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body)) as {
+      lines: Record<string, unknown>[];
+    };
+    expect(sent.lines.map((line) => line.customerNote ?? "none")).toEqual([
+      "No green onion",
+      "none",
+      "none",
+    ]);
+    expect(sent.lines.map((line) => Object.hasOwn(line, "customerNote"))).toEqual([
+      true,
+      false,
+      false,
+    ]);
   });
 
   it("WP-2423 item 3b: a choice repeated at the table counts each repeat, and prices each", () => {

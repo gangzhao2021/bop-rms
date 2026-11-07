@@ -45,8 +45,27 @@ interface Line {
   readonly item: CounterMenuItem;
   readonly quantity: number;
   readonly options: readonly { optionReference: string; name: string; quantity: number }[];
-  /** WP-2423 Q7 slice 2: the guest's note for the kitchen (table rounds only). */
+  /** WP-2423 Q7 slice 2 / M53: the guest's note for the kitchen (table rounds and counter). */
   readonly note?: string | null;
+}
+
+/**
+ * WP-2423 M53: the counter order's lines as sent: a line's kitchen note goes with it, and a line
+ * without one sends no note field at all.
+ */
+export function counterOrderLines(lines: readonly Line[]) {
+  return lines.map((line) => {
+    const sent = {
+      sellableReference: line.item.sellableReference,
+      quantity: line.quantity,
+      optionSelections: line.options.map((option) => ({
+        optionReference: option.optionReference,
+        quantity: option.quantity,
+      })),
+    };
+    const note = line.note ?? null;
+    return note === null ? sent : { ...sent, customerNote: note };
+  });
 }
 
 /** What staff see for an item: about its base price plus chosen options (the order total decides). */
@@ -871,11 +890,7 @@ export function StaffOrderEntryPage({
             })
           : await client.placeOrder({
               operationReference: placeOperation.current,
-              // WP-2423 M53: a line's note goes to the kitchen; a line without one sends none.
-              lines: chosen.map((line, index) => {
-                const note = lines[index]?.note ?? null;
-                return note === null ? line : { ...line, customerNote: note };
-              }),
+              lines: counterOrderLines(lines),
               tip: chosenTip,
               recordedAfterOutage: paper,
             });
