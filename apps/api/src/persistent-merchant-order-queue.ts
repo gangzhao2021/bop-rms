@@ -96,7 +96,11 @@ import {
   type BatchPaymentOutcome,
 } from "./dining-batch-payment-due.js";
 import { listRoundsWaitingForStaff } from "./dining-waiting-rounds.js";
-import { emptyOrderRecordFacts, nameOrderRecord } from "./merchant-order-record-people.js";
+import {
+  emptyOrderRecordFacts,
+  nameOrderRecord,
+  ordinaryRefundRecordEntries,
+} from "./merchant-order-record-people.js";
 
 /** Read-only merchant intent; session identity and selected scope are resolved inside its transaction. */
 export function createPersistentMerchantOrderQueue(options: {
@@ -1626,32 +1630,22 @@ export function createPersistentMerchantOrderQueue(options: {
                         actor: handoff.actorReference,
                         at: handoff.handedOverAt,
                       });
-                  // Ordinary refunds: who asked, and who approved (a second person, or the sole
-                  // operator on their own under DEC-SOLE-OPERATOR).
-                  const approvals = new Map(
-                    (
+                  // Ordinary refunds Payment sent back: who asked, and who approved (a second
+                  // person, or the sole operator on their own under DEC-SOLE-OPERATOR).
+                  recordFacts.refunds.push(
+                    ...ordinaryRefundRecordEntries(
+                      await listOrderOrdinaryRefundRequesters(
+                        businessTransaction,
+                        scoped,
+                        only.orderReference,
+                      ),
                       await listOrderOrdinaryRefundApprovers(
                         businessTransaction,
                         scoped,
                         only.orderReference,
-                      )
-                    ).map((approval) => [approval.requestReference, approval] as const),
+                      ),
+                    ),
                   );
-                  for (const request of await listOrderOrdinaryRefundRequesters(
-                    businessTransaction,
-                    scoped,
-                    only.orderReference,
-                  )) {
-                    const approval = approvals.get(request.requestReference);
-                    recordFacts.refunds.push({
-                      // Payment's record of the request says how the money goes back.
-                      method: request.method,
-                      amountMinor: request.amountMinor,
-                      actor: request.actorReference,
-                      approver: approval?.approverReference ?? null,
-                      at: approval?.approvedAt ?? request.requestedAt,
-                    });
-                  }
                   const named = await nameOrderRecord(businessTransaction, scoped, {
                     viewer: String(resolved.actorReference),
                     at: String(source.now()),

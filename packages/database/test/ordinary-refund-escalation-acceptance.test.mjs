@@ -17,6 +17,7 @@ import { createBrand, createStore, createTenantContext } from "../../bop/tenant/
 import { createStripeOrdinaryRefundAdapter } from "../../rms/payment/src/infrastructure/stripe/stripe-ordinary-refund-adapter.ts";
 import { createPostgresOrdinaryRefundReconciliationRuntime } from "../../rms/payment/src/infrastructure/ordinary-refund-reconciliation-runtime.ts";
 import { createPostgresOrdinaryRefundPositionSource } from "../../rms/payment/src/infrastructure/ordinary-refund-position-source.ts";
+import { listOrderOrdinaryRefundRequesters } from "../../rms/payment/src/infrastructure/persistence/ordinary-refund-request-store.ts";
 import { createMerchantWorkforcePermissionSource } from "../../../apps/api/src/merchant-workforce-authority-source.ts";
 import { createMerchantMfaStepUp } from "../../../apps/api/src/merchant-mfa-step-up.ts";
 import { createMerchantOrdinaryRefundRequest } from "../../../apps/api/src/merchant-ordinary-refund-request.ts";
@@ -900,6 +901,22 @@ it("escalated ordinary refund: request, step-ups, independent approval and one P
         "WRONG_ITEM",
       );
 
+      // WP-2423 M61 review: the order's record reads, as the restricted API role, what became of
+      // each ordinary refund; a request waiting for approval is not money going back.
+      const recordRefunds = (order) =>
+        transactions().run(async (tx) =>
+          (
+            await listOrderOrdinaryRefundRequesters(
+              tx,
+              { brandReference: brand, storeReference: store },
+              order,
+            )
+          ).map((entry) => [entry.requestReference, entry.state, entry.goingBackMinor]),
+        );
+      assert.deepEqual(await recordRefunds(first.order), [
+        [firstRequest.requestReference, "Requested", "0"],
+      ]);
+
       // ── 4. Both see it awaiting approval; only a different approver may approve.
       /** WP-2423 query budgets: statements each refund read ran (asserted after step 7). */
       const queries = {};
@@ -1028,6 +1045,11 @@ it("escalated ordinary refund: request, step-ups, independent approval and one P
       ).rows;
       assert.deepEqual(observation, [
         { outcome_kind: "RefundObservation", refund: providerRefunds[0].id },
+      ]);
+
+      // Approved and sent: the full amount goes back.
+      assert.deepEqual(await recordRefunds(first.order), [
+        [firstRequest.requestReference, "Sent", String(CAPTURED_MINOR)],
       ]);
 
       // ── 7. Retrying the same approval never sends again.
@@ -1294,6 +1316,10 @@ it("escalated ordinary refund: request, step-ups, independent approval and one P
         ).rows,
         [{ actor: approver, reason_code: "ENTERED_IN_ERROR" }],
       );
+      // The order's record does not read a declined request as a refund.
+      assert.deepEqual(await recordRefunds(third.order), [
+        [thirdRequest.requestReference, "Declined", "0"],
+      ]);
       // Closed for good: not listed, never approved.
       assert.ok(
         !(await approvals({ sessionCookie: "approver" })).entries.some(

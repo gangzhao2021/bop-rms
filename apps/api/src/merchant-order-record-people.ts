@@ -46,6 +46,42 @@ export function emptyOrderRecordFacts(): OrderRecordFacts {
   };
 }
 
+/**
+ * WP-2423 M61 review: the order record's ordinary refunds. Only money Payment actually sent back
+ * is a refund (for the amount not failed at the Provider); a request waiting for approval or not
+ * sent yet, declined, withdrawn by its sole operator, or failed at the Provider is not.
+ */
+export function ordinaryRefundRecordEntries(
+  requests: readonly {
+    readonly requestReference: string;
+    readonly actorReference: string;
+    readonly requestedAt: string;
+    readonly method: "Online";
+    readonly state: "Requested" | "Declined" | "Withdrawn" | "Sent" | "Failed";
+    readonly goingBackMinor: string;
+  }[],
+  approvals: readonly {
+    readonly requestReference: string;
+    readonly approverReference: string;
+    readonly approvedAt: string;
+  }[],
+): OrderRecordFacts["refunds"] {
+  const approved = new Map(approvals.map((approval) => [approval.requestReference, approval]));
+  return requests
+    .filter((request) => request.state === "Sent")
+    .map((request) => {
+      const approval = approved.get(request.requestReference);
+      return {
+        // Payment's record of the request says how the money goes back.
+        method: request.method,
+        amountMinor: request.goingBackMinor,
+        actor: request.actorReference,
+        approver: approval?.approverReference ?? null,
+        at: approval?.approvedAt ?? request.requestedAt,
+      };
+    });
+}
+
 export interface OrderRecordPerson {
   readonly name: string;
   readonly at: string;

@@ -993,8 +993,17 @@ export async function readOrdinaryRefundRequestNote(
 
 /**
  * WP-2423 M61: who asked for each ordinary refund of one Order, how much and when, for the order's
- * record (oldest first). Payment's own append-only records; the caller authorizes and owns the
- * transaction. Approvals are read apart ({@link listOrderOrdinaryRefundApprovers}).
+ * record (oldest first), and what became of it. Payment's own append-only records; the caller
+ * authorizes and owns the transaction. Approvals are read apart
+ * ({@link listOrderOrdinaryRefundApprovers}).
+ *
+ * A request is money going back only once Payment prepared it for the Provider (on its own, or
+ * after the approval it needed). Until then it is `Requested` (waiting for approval, or not yet
+ * sent); an independent decline is `Declined` and the sole operator taking back their own request
+ * is `Withdrawn` (both recorded in `ordinary_refund_decline`, which only exists while nothing was
+ * prepared). A prepared leg the Provider reported failed or canceled does not go back:
+ * `goingBackMinor` is the prepared legs' amount less those, and a request with nothing left going
+ * back is `Failed`.
  */
 export async function listOrderOrdinaryRefundRequesters(
   tx: ConsumerTransaction,
@@ -1012,6 +1021,9 @@ export async function listOrderOrdinaryRefundRequesters(
      * Card-machine refunds are the card-machine payment's own records, never these.
      */
     readonly method: "Online";
+    readonly state: "Requested" | "Declined" | "Withdrawn" | "Sent" | "Failed";
+    /** Cents going back to the guest: "0" unless `Sent`. */
+    readonly goingBackMinor: string;
   }[]
 > {
   const brand = String(parsePaymentReference(scope.brandReference));
@@ -1021,7 +1033,11 @@ export async function listOrderOrdinaryRefundRequesters(
     store,
   ]);
   const result = await tx.query(
-    "SELECT request_id::text AS request,actor_id::text AS actor,amount_minor::text AS amount,requested_at,record_json::text AS record FROM rms_payment.ordinary_refund_request WHERE brand_id=$1 AND store_id=$2 AND order_id=$3 ORDER BY requested_at,request_id LIMIT 101",
+    "SELECT r.request_id::text AS request,r.actor_id::text AS actor,r.amount_minor::text AS amount,r.requested_at,r.record_json::text AS record," +
+      "(SELECT y.decline_mode FROM rms_payment.ordinary_refund_decline y WHERE y.brand_id=r.brand_id AND y.store_id=r.store_id AND y.request_id=r.request_id) AS declined," +
+      "(SELECT count(*) FROM rms_payment.ordinary_refund_operation o WHERE o.brand_id=r.brand_id AND o.store_id=r.store_id AND o.request_id=r.request_id)::text AS prepared," +
+      "(SELECT COALESCE(sum(o.amount_minor),0) FROM rms_payment.ordinary_refund_operation o WHERE o.brand_id=r.brand_id AND o.store_id=r.store_id AND o.request_id=r.request_id AND NOT EXISTS (SELECT 1 FROM rms_payment.ordinary_refund_observation b WHERE b.brand_id=o.brand_id AND b.store_id=o.store_id AND b.operation_id=o.operation_id AND b.outcome_kind='RefundObservation' AND b.record_json#>>'{outcome,status}' IN ('failed','canceled')))::text AS going_back " +
+      "FROM rms_payment.ordinary_refund_request r WHERE r.brand_id=$1 AND r.store_id=$2 AND r.order_id=$3 ORDER BY r.requested_at,r.request_id LIMIT 101",
     [brand, store, String(parsePaymentReference(orderReference))],
   );
   if (result.rows.length > 100) return fail("ORDINARY_REFUND_REQUEST_UNAVAILABLE");
@@ -1033,16 +1049,40 @@ export async function listOrderOrdinaryRefundRequesters(
         recorded.payments.length === 0
       )
         return fail("ORDINARY_REFUND_REQUEST_UNAVAILABLE");
+      const amountMinor = BigInt(String(row.amount));
+      const prepared = BigInt(String(row.prepared));
+      const goingBack = BigInt(String(row.going_back));
+      const declined = row.declined ?? null;
+      if (
+        (declined !== null && declined !== "Independent" && declined !== "SoleOperator") ||
+        // A decline exists only while nothing was prepared; the legs never exceed the request.
+        (declined !== null && prepared !== 0n) ||
+        goingBack < 0n ||
+        goingBack > amountMinor
+      )
+        return fail("ORDINARY_REFUND_REQUEST_UNAVAILABLE");
+      const state =
+        declined === "Independent"
+          ? ("Declined" as const)
+          : declined === "SoleOperator"
+            ? ("Withdrawn" as const)
+            : prepared === 0n
+              ? ("Requested" as const)
+              : goingBack === 0n
+                ? ("Failed" as const)
+                : ("Sent" as const);
       return Object.freeze({
         requestReference: String(parsePaymentReference(row.request)),
         actorReference: String(parsePaymentReference(row.actor)),
-        amountMinor: String(BigInt(String(row.amount))),
+        amountMinor: amountMinor.toString(),
         requestedAt: String(
           parsePaymentInstant(
             row.requested_at instanceof Date ? row.requested_at.toISOString() : row.requested_at,
           ),
         ),
         method: "Online" as const,
+        state,
+        goingBackMinor: state === "Sent" ? goingBack.toString() : "0",
       });
     }),
   );
