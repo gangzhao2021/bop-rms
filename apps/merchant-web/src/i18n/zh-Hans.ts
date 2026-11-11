@@ -8247,6 +8247,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "门店有供自取客人联系的电话，或不提供自取。",
   "This setup offers pickup, and pickup guests call the store about allergies or their order. Add the store's phone number under Name and contact shown to customers, or take pickup out of the service modes in step 3.":
     "这份设置提供自取，自取客人要打电话问门店过敏或订单的事。请在“向顾客显示的名称和联系方式”里添加门店电话，或在第 3 步的服务方式里去掉自取。",
+  "This setup offers pickup, and pickup guests call the store about allergies or their order, so it was not sent. Add the store's phone number under Name and contact shown to customers, or take pickup out of the service modes in step 3, then send it again.":
+    "这份设置提供自取，自取客人要打电话问门店过敏或订单的事，所以没有送审。请在“向顾客显示的名称和联系方式”里添加门店电话，或在第 3 步的服务方式里去掉自取，然后再送审。",
   "Pickup guests call the store about allergies or their order, so pickup needs the store's phone number. Enter it above, or untick Pickup, then press the button again.":
     "自取客人要打电话问门店过敏或订单的事，所以提供自取需要门店电话。请在上面填写电话，或取消勾选“自取”，然后再按一次按钮。",
   "Phone number (needed while the store takes pickup orders)": "电话号码（门店接自取订单时必填）",

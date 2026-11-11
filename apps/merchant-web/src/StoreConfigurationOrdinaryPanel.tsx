@@ -343,6 +343,9 @@ const messages: Record<StoreSetupClientError["code"], string> = {
   ReceiptTemplateUnavailable: t(
     "This Store has no receipt template in use yet, so nothing was created. In step 5, choose or create this Store's receipt template and save the setup, then create the configuration again.",
   ),
+  StorePhoneRequired: t(
+    "This setup offers pickup, and pickup guests call the store about allergies or their order, so it was not sent. Add the store's phone number under Name and contact shown to customers, or take pickup out of the service modes in step 3, then send it again.",
+  ),
 };
 /** WP-2423 (v15 D6): the latest configuration was created from exactly this saved setup (its
  * setup revision), so step 8 says what became of it rather than "the configuration changed after

@@ -645,5 +645,9 @@ describe("v15 2026-11-01: a saved setting that cannot be used here is named", ()
     await expect(ordinaryConflictReason(answer({ error: "store_setup_incomplete" }))).resolves.toBe(
       "SetupIncomplete",
     );
+    // M109: the phone a setup with pickup needs.
+    await expect(ordinaryConflictReason(answer({ error: "store_phone_required" }))).resolves.toBe(
+      "StorePhoneRequired",
+    );
   });
 });

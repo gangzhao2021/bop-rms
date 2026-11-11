@@ -503,6 +503,8 @@ export async function exercisePilotStoreSetupPublication(input) {
         command: command(selected, "Submit", workspace.body.expectedHead),
       });
       assert.equal(refused.status, 409, JSON.stringify(refused.body));
+      // M109: the refusal names the phone, not a generic rejection.
+      assert.deepEqual(refused.body, { error: "store_phone_required" });
       assert.deepEqual(await counts(), beforeRefusal);
     });
 

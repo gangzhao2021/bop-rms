@@ -532,6 +532,11 @@ it("names the refusals an Owner can act on (WP-2423 v15 D2/D3)", async () => {
       new StoreConfigurationAdministrationServiceError("STORE_CONFIGURATION_NOT_YOUR_CHANGE"),
       "not_your_change",
     ],
+    // M109: the phone the setup's pickup needs is named, not a generic refusal.
+    [
+      new StoreConfigurationAdministrationServiceError("STORE_CONFIGURATION_STORE_PHONE_REQUIRED"),
+      "store_phone_required",
+    ],
     // WP-2423 (v15 2026-10-16): approved alone while sole operator was off; not publishable.
     [new MerchantSoleOperatorBasisError(), "sole_operator_approval_invalid"],
   ] as const) {

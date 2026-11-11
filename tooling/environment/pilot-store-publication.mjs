@@ -171,8 +171,12 @@ export function createStoreConfigurationV2Ports(resources, context) {
         authorize: run.authorize,
       });
       if (!storeConfigurationPublicationReady(checks))
+        // M109: the phone is named, so the Owner is told where to add it even when the check
+        // changed after the screen read it.
         throw new StoreConfigurationAdministrationServiceError(
-          "STORE_CONFIGURATION_REFERENCE_INVALID",
+          checks.checks.some((check) => check.code === "StorePhone" && check.outcome === "Fail")
+            ? "STORE_CONFIGURATION_STORE_PHONE_REQUIRED"
+            : "STORE_CONFIGURATION_REFERENCE_INVALID",
         );
       return {
         validUntil: new Date(

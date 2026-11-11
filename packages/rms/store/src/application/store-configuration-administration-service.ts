@@ -30,6 +30,9 @@ export type StoreConfigurationAdministrationServiceErrorCode =
   // WP-2423 DEC-SOLE-OPERATOR-APPROVAL: the person who made or sent a change approves it only
   // alone as sole operator, explicitly asked.
   | "STORE_CONFIGURATION_SELF_APPROVAL"
+  // M109 (DEC-STORE-PHONE-BEFORE-PICKUP): the configuration starts offering pickup and the Store
+  // has published no phone pickup guests can call.
+  | "STORE_CONFIGURATION_STORE_PHONE_REQUIRED"
   | "STORE_CONFIGURATION_DEPENDENCY_UNAVAILABLE";
 
 export class StoreConfigurationAdministrationServiceError extends Error {

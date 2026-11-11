@@ -100,7 +100,10 @@ export function installMerchantStoreConfigurationRoutes(
               ? "store_configuration_withdrawn"
               : code === "STORE_CONFIGURATION_NOT_YOUR_CHANGE"
                 ? "not_your_change"
-                : null;
+                : // M109: the setup offers pickup and the Store has no published phone.
+                  code === "STORE_CONFIGURATION_STORE_PHONE_REQUIRED"
+                  ? "store_phone_required"
+                  : null;
     if (reason !== null) {
       response.status(409).set("Cache-Control", NO_STORE).json({ error: reason });
       return;

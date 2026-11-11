@@ -348,6 +348,7 @@ export async function ordinaryConflictReason(
   | "NotYourChange"
   | "SoleOperatorApprovalInvalid"
   | "ReceiptTemplateUnavailable"
+  | "StorePhoneRequired"
   | null
 > {
   try {
@@ -369,7 +370,9 @@ export async function ordinaryConflictReason(
               ? "NotYourChange"
               : error === "sole_operator_approval_invalid"
                 ? "SoleOperatorApprovalInvalid"
-                : null;
+                : error === "store_phone_required"
+                  ? "StorePhoneRequired"
+                  : null;
   } catch {
     return null;
   }
