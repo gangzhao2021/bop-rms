@@ -3837,13 +3837,20 @@ async function scanUnsupported(root, module, diagnostics) {
           ) &&
           moduleRelative === "src/infrastructure/persistence/cart-staff-line-store.ts";
         // WP-2423 shared-table-cart-staff-round M38: a round its guest stopped paying for comes
-        // back to the table cart once, recorded in its own append-only record.
+        // back to the table cart once, recorded in its own append-only record; a dish that came
+        // back from the pay-first waiting list, or a line the payer's choice split, is rebuilt
+        // from those records (2000_520).
         const acceptedDiningRoundCartReturnAsset =
           module.packageName === "@rms/ordering" &&
           module.manifest.ownedDatabase?.schema === "rms_ordering" &&
-          ["cart", "cart_line", "dining_round_cart_return"].every((table) =>
-            module.manifest.ownedDatabase?.tables?.includes(table),
-          ) &&
+          [
+            "cart",
+            "cart_line",
+            "dining_round_cart_return",
+            "dining_checkout_scope",
+            "dining_cart_waiting_line",
+            "dining_cart_waiting_line_resolution",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
           moduleRelative === "src/infrastructure/persistence/dining-round-cart-return-store.ts";
         // WP-2423 shared-table-checkout (a): the paying phone's choice of dishes at a pay-first
         // table, the dishes set aside for the next round and their return to the cart (2000_520).

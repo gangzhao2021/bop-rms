@@ -128,8 +128,10 @@ export async function returnDiningRoundToCart(
   const locked = await createPostgresCartQueryStore(lent(tx), scope).load(cartReference);
   if (locked === null) return unavailable();
   // Each dish as it was in the cart when it was sent: the newest of the last guest operation on
-  // its line and, for a dish an earlier stop put back (no cart operation added that line), the
-  // line as that return recorded it.
+  // its line; for a dish an earlier stop put back (no cart operation added that line), the line as
+  // that return recorded it; and for a dish that came back from the pay-first waiting list
+  // (2000_520, no cart operation either), the line as it was set aside. A line the payer's choice
+  // of dishes split (part of it waited) went on with fewer: its newest such split says how many.
   const items = rowsOf(
     await tx.query(
       `SELECT i.source_cart_line_id::text AS line, i.quantity,
@@ -146,8 +148,44 @@ export async function returnDiningRoundToCart(
               jsonb_array_elements(x.returned_items_json) AS item
             WHERE x.brand_id=$1 AND x.store_id=$2 AND x.cart_id=$5::uuid
               AND i.source_cart_line_id = ANY (x.cart_line_ids)
-              AND item->>'cartItemReference' = i.source_cart_line_id::text) k
-          ORDER BY k.version DESC LIMIT 1) AS item
+              AND item->>'cartItemReference' = i.source_cart_line_id::text
+            UNION ALL
+            SELECT jsonb_build_object(
+                'cartItemReference', r.returned_cart_line_id, 'cartReference', r.cart_id,
+                'sellableReference', w.sellable_id, 'quantity', w.quantity,
+                'optionSelections', w.option_selections_json, 'customerNote', w.customer_note,
+                'catalogSelectionEvidence', w.catalog_selection_evidence_json,
+                'addedByActorReference', w.added_by_actor_id,
+                'addedByParticipantReference', w.added_by_participant_id,
+                'addedAt', to_char(w.added_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+              ) AS item, r.cart_version AS version
+            FROM rms_ordering.dining_cart_waiting_line_resolution r
+            JOIN rms_ordering.dining_cart_waiting_line w ON w.brand_id=r.brand_id
+              AND w.store_id=r.store_id AND w.waiting_line_id=r.waiting_line_id
+            WHERE r.brand_id=$1 AND r.store_id=$2 AND r.cart_id=$5::uuid
+              AND r.returned_cart_line_id=i.source_cart_line_id) k
+          ORDER BY k.version DESC LIMIT 1) AS item,
+         (SELECT jsonb_build_object('version', s.cart_version_to,
+              'remaining', w.origin_quantity - w.quantity)
+            FROM rms_ordering.dining_cart_waiting_line w
+            JOIN rms_ordering.dining_checkout_scope s ON s.brand_id=w.brand_id
+              AND s.store_id=w.store_id AND s.scope_id=w.scope_id
+            WHERE w.brand_id=$1 AND w.store_id=$2 AND w.cart_id=$5::uuid
+              AND w.origin_cart_line_id=i.source_cart_line_id
+            ORDER BY s.cart_version_to DESC LIMIT 1) AS split,
+         (SELECT max(v.version) FROM (
+            SELECT o.result_aggregate_version AS version
+            FROM rms_ordering.cart_operation_record o
+            WHERE o.brand_id=$1 AND o.store_id=$2 AND o.cart_id=$5::uuid
+              AND o.cart_line_id=i.source_cart_line_id AND o.action_code IN ('Add','Update')
+            UNION ALL
+            SELECT x.result_aggregate_version FROM rms_ordering.dining_round_cart_return x
+            WHERE x.brand_id=$1 AND x.store_id=$2 AND x.cart_id=$5::uuid
+              AND i.source_cart_line_id = ANY (x.cart_line_ids)
+            UNION ALL
+            SELECT r.cart_version FROM rms_ordering.dining_cart_waiting_line_resolution r
+            WHERE r.brand_id=$1 AND r.store_id=$2 AND r.cart_id=$5::uuid
+              AND r.returned_cart_line_id=i.source_cart_line_id) v) AS item_version
        FROM rms_ordering.order_item i
        WHERE i.brand_id=$1 AND i.store_id=$2 AND i.order_id=$3 AND i.order_batch_id=$4
        ORDER BY i.ordinal, i.order_item_id`,
@@ -159,9 +197,21 @@ export async function returnDiningRoundToCart(
     if (row.line === null || row.item === null || typeof row.item !== "object")
       return unavailable();
     const original = parseCartItem(row.item);
-    if (original.quantity !== Number(row.quantity)) return unavailable();
+    // The payer's choice of dishes split this line after it was last recorded: the round took
+    // what stayed (the rest waited and came back on its own line).
+    const split = row.split as { version?: unknown; remaining?: unknown } | null;
+    const quantity =
+      split !== null &&
+      typeof split === "object" &&
+      Number(split.version) > Number(row.item_version) &&
+      Number(split.remaining) >= 1 &&
+      Number(split.remaining) < original.quantity
+        ? Number(split.remaining)
+        : original.quantity;
+    if (quantity !== Number(row.quantity)) return unavailable();
     return parseCartItem({
       ...original,
+      quantity,
       cartItemReference: parseOrderingReference(input.newLineReference()),
       cartReference,
       addedAt: at,

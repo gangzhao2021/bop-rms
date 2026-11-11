@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import pg from "pg";
 import { it, vi } from "vitest";
+import { createCustomerDiningCheckoutScope } from "../../../apps/api/src/customer-dining-checkout-scope.ts";
 import { createCustomerDiningRoundWithdraw } from "../../../apps/api/src/customer-dining-round-withdraw.ts";
 import { createInternalBatchCancellation } from "../../../tooling/environment/pilot-batch-cancellation.mjs";
 import { applyWorkflowRelease } from "../../../tooling/environment/workflow-release-install.mjs";
@@ -392,6 +393,254 @@ it("M38: the payer stops before paying; the round is cancelled unpaid and both p
       );
       assert.equal(await states(), 1);
       // The rendered pilot role ran it.
+      const who = await store.asApi(async (tx) => {
+        const seen = await tx.query(
+          "SELECT current_user AS who,(SELECT rolbypassrls FROM pg_roles WHERE rolname=current_user) AS bypass",
+          [],
+        );
+        return seen.rows[0];
+      });
+      assert.deepEqual(who, { who: api, bypass: false });
+    } finally {
+      vi.unstubAllEnvs();
+      if (store !== null) await store.close();
+      for (const name of [api, api + "_w"]) {
+        await admin.query("DROP OWNED BY " + name).catch(() => undefined);
+        await admin.query("DROP ROLE " + name).catch(() => undefined);
+      }
+      await admin.end();
+    }
+  });
+});
+
+/**
+ * WP-2423 shared-table-checkout (a) with shared-table-cart-staff-round M38: at a pay-first table
+ * the payer pays only part of a line (one of their two teas); the rest of the table's dishes wait
+ * (2000_520) and come back once the round is sent. The payer then stops before paying: the round's
+ * tea comes back with the quantity the round took, though no cart operation recorded the split.
+ * The dishes are then sent whole and stopped again: the lines that came back from the waiting list
+ * (no cart operation added them either) come back as they were set aside. Every dish once, with
+ * its quantity, note, evidence and the phone that added it. Restricted pilot API role.
+ */
+it("M38 with a split line: the payer pays one of two teas, stops, and every dish comes back once with its quantity", async () => {
+  await withIsolatedDatabase({ caseId: "wp2423_wdsplit" }, async (context) => {
+    const admin = new Client(context.clientConfig);
+    await admin.connect();
+    vi.stubEnv("NODE_ENV", "development");
+    const api = await createPilotApiRole(admin, context, "wp2423_wds");
+    let store = null;
+    try {
+      store = await prepareRealStaffRoundStore({ admin, context, api, paymentTiming: "PayFirst" });
+      const { tea, soup, tableReference, reference, now } = store;
+      const label = (n) => "01a0fd00-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+      const hex = (Date.now() - 600_000).toString(16).padStart(12, "0");
+      await admin.query("BEGIN");
+      const release = await applyWorkflowRelease(
+        admin,
+        {
+          release: "UnpaidDineInBatchCancellation",
+          tenantReference: store.tenantReference,
+          brandReference: store.ownerScope.brandReference,
+          operatorReference: label(0x10),
+          approvedByReference: label(0x11),
+          approvalEvidenceReference: label(0x12),
+          operationReference: `${hex.slice(0, 8)}-${hex.slice(8, 12)}-7000-8000-000000000002`,
+        },
+        () => Date.now() - 600_000 + 1000,
+      );
+      await admin.query("COMMIT");
+      assert.equal(release.status, "Applied");
+      const server = await store.staff(label(0x700), [
+        "ordering.order.create_staff",
+        "dining.operate",
+        "dining.session.close",
+      ]);
+      const as = { sessionCookie: server.sessionCookie, csrf: server.csrf };
+      let pipeline = null;
+      await store.counterFor(server, { decorateStaffRoundPipeline: (real) => (pipeline = real) });
+      const configured = await store.customerEntryFor(server);
+      const table = await pipeline.openTable(as, { tableReference });
+      assert.equal(table.status, "Opened");
+      const phone = async () => {
+        const entered = await pipeline.enter({ tableReference, requestedAt: now() });
+        assert.equal(entered.status, "Established");
+        const issued = await pipeline.openTable(as, { tableReference });
+        const joined = await pipeline.join(entered.credentials, {
+          joinCredential: issued.joinCredential,
+          operationReference: reference(),
+        });
+        return (
+          await pipeline.bind(entered.credentials, {
+            operationReference: reference(),
+            admissionReference: joined.admissionReference,
+          })
+        ).credentials;
+      };
+      const a = await phone();
+      const b = await phone();
+      const cartOf = (who) =>
+        pipeline.selectCart(who, { operationReference: reference(), requestedAt: now() });
+      const add = async (who, sellableReference, quantity) => {
+        const cart = await cartOf(who);
+        const added = await pipeline.addItem(who, {
+          operationReference: reference(),
+          cartReference: cart.cartReference,
+          expectedCartVersion: cart.cartVersion,
+          sellableReference,
+          quantity,
+          optionSelections: [],
+          customerNote: quantity > 1 ? "no ice" : null,
+          requestedAt: now(),
+        });
+        assert.equal(added.status, "Applied");
+      };
+      await add(a, tea.skuReference, 2);
+      await add(b, soup.skuReference, 1);
+      const lines = async (cartReference) =>
+        (
+          await admin.query(
+            "SELECT cart_line_id::text AS line, sellable_id::text AS sku, quantity, customer_note AS note, added_by_participant_id::text AS adder, catalog_selection_evidence_json AS evidence FROM rms_ordering.cart_line WHERE cart_id=$1 ORDER BY sellable_id, added_at, cart_line_id",
+            [cartReference],
+          )
+        ).rows;
+      const before = await cartOf(a);
+      const cartReference = before.cartReference;
+      const sent = await lines(cartReference);
+      assert.deepEqual(
+        sent.map((line) => [line.sku, line.quantity]).sort(),
+        [
+          [soup.skuReference, 1],
+          [tea.skuReference, 2],
+        ].sort(),
+      );
+      const teaLine = sent.find((line) => line.sku === tea.skuReference);
+      // Per dish, how many units are in the table's cart, with what a guest reads of each.
+      const units = async () => {
+        const now = await lines(cartReference);
+        const by = new Map();
+        for (const line of now) {
+          const key = JSON.stringify([line.sku, line.note, line.adder, line.evidence]);
+          by.set(key, (by.get(key) ?? 0) + line.quantity);
+        }
+        return [...by.entries()].sort();
+      };
+      const original = await units();
+
+      const scopePort = createCustomerDiningCheckoutScope({
+        scope: { tenantReference: store.tenantReference, ...store.ownerScope },
+        transactions: { run: (work) => store.asApi(work) },
+        credentials: configured.entry.session.credentials,
+        binding: configured.diningStaffCall.binding,
+        newReference: reference,
+        now,
+      });
+      const scoped = (who, command) =>
+        scopePort.apply({ ...who, operationReference: reference(), command });
+      // A pays one of the two teas: the other tea and B's soup wait.
+      const chosen = await scoped(a, {
+        action: "Choose",
+        cartReference,
+        expectedCartVersion: before.cartVersion,
+        choice: "Chosen",
+        lines: [{ cartItemReference: teaLine.line, quantity: 1 }],
+      });
+      assert.equal(chosen.status, "Chosen", JSON.stringify(chosen));
+      assert.equal(chosen.setAsideUnits, 2);
+      const continueToPayment = async (who, cart) => {
+        const quoted = await pipeline.quote(who, {
+          operationReference: reference(),
+          cartReference: cart.cartReference,
+          cartVersion: cart.cartVersion,
+          requestedAt: now(),
+        });
+        assert.equal(quoted.status, "Quoted");
+        await pipeline.saveDetails(who, {
+          operationReference: reference(),
+          detailsReference: reference(),
+          cartReference: cart.cartReference,
+          cartVersion: cart.cartVersion,
+          quoteReference: quoted.quoteReference,
+        });
+        const checkout = await pipeline.startCheckout(who, {
+          createOperationReference: reference(),
+          cartReference: cart.cartReference,
+          cartVersion: cart.cartVersion,
+          quoteReference: quoted.quoteReference,
+        });
+        assert.equal(checkout.status, "Started");
+        await pipeline.preparePayment(who, {
+          checkoutSessionReference: checkout.checkoutSessionReference,
+          selectionReference: reference(),
+          tip: { amountMinor: 0n, currencyCode: "CAD" },
+          recordedAfterOutage: false,
+        });
+      };
+      const roundCart = await cartOf(a);
+      // The round's cart is that one tea; the rest waits.
+      assert.deepEqual(
+        (await lines(cartReference)).map((line) => [line.line, line.sku, line.quantity]),
+        [[teaLine.line, tea.skuReference, 1]],
+      );
+      await continueToPayment(a, roundCart);
+      // The round is sent: the waiting dishes come back to the table's cart once.
+      const back = await scoped(b, { action: "Return" });
+      assert.equal(back.status, "Returned", JSON.stringify(back));
+      assert.equal(back.returnedUnits, 2);
+
+      const cancellation = await createInternalBatchCancellation(store.resources, {
+        loadWorkflow: async () => ({
+          environment: "InternalTest",
+          database: context.clientConfig.database,
+          scope: { tenantReference: store.tenantReference, ...store.ownerScope },
+          definition: release.plan.published,
+        }),
+        expectedDatabaseName: context.clientConfig.database,
+        systemActorReference: label(0x20),
+        providerAccountReference: label(0x21),
+      });
+      const unexpected = [];
+      const withdraw = createCustomerDiningRoundWithdraw({
+        scope: { tenantReference: store.tenantReference, ...store.ownerScope },
+        transactions: { run: (work) => store.asApi(work) },
+        credentials: configured.entry.session.credentials,
+        binding: configured.diningStaffCall.binding,
+        resolvePayment: async () => ({ status: "NoPayment" }),
+        cancellation,
+        newReference: reference,
+        now,
+        onUnexpected: (error) => unexpected.push(error),
+      }).withdraw;
+      const latestRound = async () =>
+        (
+          await admin.query(
+            `SELECT (SELECT count(*)::int FROM rms_ordering.order_batch o
+               WHERE o.order_id=b.order_id AND (o.submitted_at, o.order_batch_id) <= (b.submitted_at, b.order_batch_id)) AS n
+             FROM rms_ordering.order_batch b ORDER BY b.submitted_at DESC, b.order_batch_id DESC LIMIT 1`,
+          )
+        ).rows[0].n;
+      // A stops: the tea the round took (one, from the split line) comes back.
+      const first = await withdraw({ ...a, operationReference: reference(), roundNumber: 1 });
+      assert.deepEqual(first, { status: "Returned" }, String(unexpected[0]?.stack ?? ""));
+      assert.deepEqual(await units(), original, "every dish once after the split round");
+
+      // Everything is sent whole, by B this time (the waiting tea and soup came back on their own
+      // lines), and B stops it: those lines come back as they were set aside.
+      const whole = await cartOf(b);
+      assert.equal(
+        whole.pendingItems.reduce((sum, item) => sum + item.quantity, 0),
+        3,
+      );
+      await continueToPayment(b, whole);
+      const n = await latestRound();
+      const again = await withdraw({ ...b, operationReference: reference(), roundNumber: n });
+      assert.deepEqual(again, { status: "Returned" }, String(unexpected[0]?.stack ?? ""));
+      assert.deepEqual(await units(), original, "every dish once after the whole round");
+      const returns = (
+        await admin.query(
+          "SELECT count(*)::int AS n, sum(jsonb_array_length(returned_items_json))::int AS items FROM rms_ordering.dining_round_cart_return",
+        )
+      ).rows[0];
+      assert.deepEqual(returns, { n: 2, items: 1 + 3 });
       const who = await store.asApi(async (tx) => {
         const seen = await tx.query(
           "SELECT current_user AS who,(SELECT rolbypassrls FROM pg_roles WHERE rolname=current_user) AS bypass",
