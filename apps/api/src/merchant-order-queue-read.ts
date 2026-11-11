@@ -403,6 +403,25 @@ export function createMerchantOrderQueueRead(options: {
                     observedAt,
                   })
                 : null;
+            // v15 batch-5 (shared-table-staff-round): an Order whose every round was cancelled
+            // unpaid still lists those rounds, each Cancelled, so staff read them as "not charged"
+            // and its totals are never the sum of dishes nobody owes (display only; no command
+            // reads this).
+            const cancelledRounds =
+              execution === null && cancelled !== null
+                ? await createPostgresDiningOrderItemStateReader({
+                    ...ownerScope,
+                    authorize: allowed,
+                    includeCancelled: true,
+                  }).load({
+                    transaction,
+                    ...ownerScope,
+                    orderReference: item.orderReference,
+                    diningSessionReference: original.order.diningSessionReference,
+                    guestSessionReference: original.guestSessionReference,
+                    observedAt,
+                  })
+                : null;
             return execution === null
               ? {
                   phase: cancelled?.phase ?? null,
@@ -411,7 +430,12 @@ export function createMerchantOrderQueueRead(options: {
                   readyToServeItemCount: 0,
                   remakingItemCount: 0,
                   kitchenPhase: null,
-                  batches: [],
+                  batches: (cancelledRounds?.batches ?? []).map((batch) => ({
+                    orderBatchReference: batch.orderBatchReference,
+                    sequence: batch.sequence,
+                    submittedAt: batch.submittedAt,
+                    acceptanceStatus: "Cancelled" as const,
+                  })),
                 }
               : {
                   phase: progress?.phase ?? unavailable(),

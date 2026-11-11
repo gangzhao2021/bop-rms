@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   earlierOpen: vi.fn(),
   earlierPaidWaiting: vi.fn(),
   state: vi.fn(),
+  cancelledState: vi.fn(),
   fence: vi.fn(),
   remakes: vi.fn(async (): Promise<unknown[]> => []),
 }));
@@ -34,7 +35,9 @@ vi.mock("@rms/ordering", () => ({
   readOrderCreationQuoteVersion: async () => 2,
   createPostgresOrderAcceptanceReader: () => ({ loadByBatch: async () => null }),
   createPostgresOrderExecutionReader: vi.fn(),
-  createPostgresDiningOrderItemStateReader: () => ({ load: mocks.state }),
+  createPostgresDiningOrderItemStateReader: (options: { includeCancelled?: boolean }) => ({
+    load: options.includeCancelled === true ? mocks.cancelledState : mocks.state,
+  }),
   createPostgresDiningOrderPreparationSource: () => ({ resolveCancelled: mocks.cancelled }),
   createPostgresOrderCreationQueryStore: () => ({
     withCurrentSubmission: async (ref: string, work: (...args: unknown[]) => unknown) =>
@@ -72,6 +75,8 @@ beforeEach(() => {
   mocks.earlierPaidWaiting.mockResolvedValue([]);
   mocks.state.mockReset();
   mocks.state.mockResolvedValue(null);
+  mocks.cancelledState.mockReset();
+  mocks.cancelledState.mockResolvedValue(null);
   mocks.fence.mockReset();
   mocks.fence.mockResolvedValue(undefined);
   mocks.list.mockReset();
@@ -366,6 +371,38 @@ it("v15 batch 7: an earlier day's Order with a paid round never accepted is list
   mocks.earlierPaidWaiting.mockRejectedValue(new Error("unavailable"));
   const without = await run({ sessionCookie: "synthetic", afterOrderReference: null, limit: 50 });
   expect(without.items.map((item) => item.orderReference)).toEqual([id(111)]);
+});
+
+it("v15 batch-5: a table whose every round was cancelled unpaid still lists its rounds, each Cancelled", async () => {
+  mocks.cancelled.mockResolvedValue({ phase: "Cancelled", orderVersion: 4 });
+  mocks.cancelledState.mockResolvedValue({
+    orderVersion: 4,
+    batches: [
+      { orderBatchReference: id(5), sequence: 1, submittedAt: "2026-11-11T07:00:00.000Z" },
+      { orderBatchReference: id(11), sequence: 2, submittedAt: "2026-11-11T07:05:00.000Z" },
+    ],
+  });
+  const result = await read();
+  expect(result.items[0]).toMatchObject({ currentPhase: "Cancelled", currentVersion: 4 });
+  expect(result.items[0]?.batches).toEqual([
+    {
+      orderBatchReference: id(5),
+      sequence: 1,
+      submittedAt: "2026-11-11T07:00:00.000Z",
+      acceptanceStatus: "Cancelled",
+    },
+    {
+      orderBatchReference: id(11),
+      sequence: 2,
+      submittedAt: "2026-11-11T07:05:00.000Z",
+      acceptanceStatus: "Cancelled",
+    },
+  ]);
+  // An Order with no cancellation history is never read again as cancelled.
+  mocks.cancelled.mockResolvedValue(null);
+  mocks.cancelledState.mockClear();
+  expect((await read()).items[0]?.batches).toEqual([]);
+  expect(mocks.cancelledState).not.toHaveBeenCalled();
 });
 
 it("WP-2423: counts a table's items ready to serve in any round, as the Tables close dialog does", async () => {

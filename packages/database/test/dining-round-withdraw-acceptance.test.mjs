@@ -8,6 +8,7 @@ import { applyWorkflowRelease } from "../../../tooling/environment/workflow-rele
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 import { prepareRealStaffRoundStore } from "../test-support/real-staff-round-store.mjs";
 import { createPilotApiRole } from "../test-support/sole-operator-brand-gate.mjs";
+import { createPersistentMerchantOrderQueue } from "../../../apps/api/src/persistent-merchant-order-queue.ts";
 
 const { Client } = pg;
 
@@ -264,6 +265,30 @@ it("M38: the payer stops before paying; the round is cancelled unpaid and both p
           reason_code: "GUEST_CANCELLED_UNPAID",
         },
       ]);
+      // v15 batch-5 (shared-table-staff-round): the table's only round is now cancelled unpaid.
+      // Staff still read it on the table's order, as cancelled and not charged, never as a total
+      // of dishes nobody owes (the read used to list no round and every dish in the totals).
+      const floor = await store.staff(label(0x701), []);
+      const queue = createPersistentMerchantOrderQueue({
+        persistence: { ...floor.persistence, now },
+        quoteVersion: 1,
+        acceptanceConfigured: true,
+      });
+      const detail = await queue({
+        sessionCookie: floor.sessionCookie,
+        afterOrderReference: null,
+        orderReference: batch.order,
+      });
+      assert.deepEqual(
+        detail.items[0].batches.map((round) => [
+          round.orderBatchReference,
+          round.sequence,
+          round.acceptanceStatus,
+          round.staffCancellation,
+        ]),
+        [[batch.batch, 1, "Cancelled", null]],
+      );
+      assert.equal(detail.lines.items.length, 2);
       // Each dish as it was: how many, the note, its Catalog evidence, and whose phone added it.
       const back = await lines(emptied.cartReference);
       assert.deepEqual(
