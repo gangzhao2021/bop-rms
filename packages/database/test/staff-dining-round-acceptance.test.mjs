@@ -173,6 +173,42 @@ const commandBudgets = {
   "order accept": 230,
   "refund request": 120,
 };
+/**
+ * WP-2423 M35 (DEC-STAFF-ROUND-SPEED): a staff round must reach the card machine in under 2 s.
+ * Every statement this process sends to PostgreSQL while one real staff round is sent is counted
+ * (the per-connection SET ROLE this test's pool adds is not: the pilot logs in as its role). At
+ * about 0.33 ms a statement on the pilot's container, the count is the time. Before (564b8217):
+ * about 9,550 statements, 3.1–3.5 s; now about 5,600 (one-trip transaction setup, scope settings
+ * sent only when they change, repeated stable reads answered inside a transaction, each guest
+ * check of the table cart in one transaction).
+ */
+const roundStatements = { on: false, count: 0 };
+const clientQuery = pg.Client.prototype.query;
+pg.Client.prototype.query = function (config, ...rest) {
+  const text = typeof config === "string" ? config : config?.text;
+  if (roundStatements.on && !(typeof text === "string" && text.startsWith("SET ROLE ")))
+    roundStatements.count += 1;
+  return clientQuery.call(this, config, ...rest);
+};
+async function withinRoundBudget(label, budget, work) {
+  roundStatements.count = 0;
+  roundStatements.on = true;
+  const started = performance.now();
+  let result;
+  try {
+    result = await work();
+  } finally {
+    roundStatements.on = false;
+  }
+  const cost = { statements: roundStatements.count, ms: Math.round(performance.now() - started) };
+  if (process.env.WP2423_COST_LOG)
+    await appendFile(process.env.WP2423_COST_LOG, label + " " + JSON.stringify(cost) + "\n");
+  assert.ok(
+    cost.statements <= budget,
+    label + " ran " + cost.statements + " statements (budget " + budget + ")",
+  );
+  return result;
+}
 async function withinBudget(label, work) {
   const before = restricted.statements,
     started = performance.now();
@@ -1559,11 +1595,14 @@ it("the real staff round command takes a round from table entry to the card mach
       // all integer minor units. The amount staff charge is its total.
       const firstOperation = reference();
       const firstLines = [line(2, soup.skuReference, "no onions")];
-      const first = await send(server, {
-        operationReference: firstOperation,
-        lines: firstLines,
-        tip: { kind: "Percent", percent: 15 },
-      });
+      // M35: the round that opens the table, from Send to the card machine's amount.
+      const first = await withinRoundBudget("staff round (opens the table)", 5200, () =>
+        send(server, {
+          operationReference: firstOperation,
+          lines: firstLines,
+          tip: { kind: "Percent", percent: 15 },
+        }),
+      );
       assert.deepEqual(
         [
           first.status,
@@ -1636,7 +1675,10 @@ it("the real staff round command takes a round from table entry to the card mach
       assert.deepEqual(await balance(), held);
 
       // A later round of the table's Order, a paper round taken during an outage.
-      const second = await send(server, { lines: [line(1)], recordedAfterOutage: true });
+      // M35: a later round of an open table.
+      const second = await withinRoundBudget("staff round (later round)", 5200, () =>
+        send(server, { lines: [line(1)], recordedAfterOutage: true }),
+      );
       assert.deepEqual(
         [second.status, second.orderReference, second.recordedAfterOutage, second.totalMinor],
         ["Placed", first.orderReference, true, "735"],
