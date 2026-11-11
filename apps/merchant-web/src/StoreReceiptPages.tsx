@@ -1,4 +1,4 @@
-import { systemText, t } from "./i18n/i18n.js";
+import { t } from "./i18n/i18n.js";
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { SourceTime, StaffTime } from "./StoreTime.js";
@@ -18,7 +18,7 @@ import {
 } from "./store-receipt-pages.js";
 import { serverProblemText } from "./failure-words.js";
 import { PageDidNotLoad, readingAgain } from "./PageDidNotLoad.js";
-import { stockReasonText } from "./stock-reason-text.js";
+import { stockReasonText, unitText } from "./stock-reason-text.js";
 
 const copy: Record<StoreReceiptErrorCode | "Loading", string> = {
   Loading: t("Loading receiving…"),
@@ -315,7 +315,7 @@ export function StoreReceiptFormPage({
                 >
                   {view.items.map((option) => (
                     <option key={option.itemReference} value={option.itemReference}>
-                      {option.name} ({systemText(option.unitCode)})
+                      {option.name} ({unitText(option.unitCode)})
                     </option>
                   ))}
                 </select>
@@ -361,7 +361,7 @@ export function StoreReceiptFormPage({
               ) : null}
               <label>
                 {t("Accepted (")}
-                {systemText(item?.unitCode)})
+                {unitText(item?.unitCode)})
                 <input
                   inputMode="decimal"
                   value={line.accepted}
@@ -402,7 +402,7 @@ export function StoreReceiptFormPage({
                 </label>
               ) : null}
               <label>
-                {t("Unit cost per")} {systemText(item?.unitCode)} ($)
+                {t("Unit cost per")} {unitText(item?.unitCode)} ($)
                 <input
                   required
                   inputMode="decimal"
@@ -546,7 +546,7 @@ export function StoreReceiptDetailPage({
               <td>{locations.get(line.locationReference)?.name ?? line.locationReference}</td>
               <td>{[line.lotCode, line.expiryDate].filter(Boolean).join(" · ")}</td>
               <td>
-                {line.acceptedQuantity} {systemText(items.get(line.itemReference)?.unitCode)}
+                {line.acceptedQuantity} {unitText(items.get(line.itemReference)?.unitCode)}
               </td>
               <td>{line.rejectedQuantity}</td>
               <td>{line.damagedQuantity}</td>

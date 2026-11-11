@@ -1,11 +1,11 @@
-import { listSeparator, systemText, t } from "./i18n/i18n.js";
+import { listSeparator, t } from "./i18n/i18n.js";
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { SourceTime, StaffTime, StoreTimeZoneContext, storeDate } from "./StoreTime.js";
 import { useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router";
 import { newOperationReference } from "./operation-reference.js";
-import { stockReasonText } from "./stock-reason-text.js";
+import { staffLabel, stockReasonText, unitText } from "./stock-reason-text.js";
 import {
   StoreWastePageError,
   availableQuantityText,
@@ -131,7 +131,7 @@ export function StoreWasteListPage({
   if (state.kind !== "Found") return <Failure code={state.kind} onRetry={reload} />;
   const view = state.view;
   const itemName = (reference: string) =>
-    view.items.find((item) => item.itemReference === reference)?.name ?? "Item";
+    view.items.find((item) => item.itemReference === reference)?.name ?? t("Item");
   return (
     <AppFrame title={t("Waste")} description="">
       <header className="screen-heading">
@@ -189,18 +189,18 @@ export function StoreWasteListPage({
                         <StaffTime instant={record.recordedAt} />
                       </Link>
                     </td>
-                    <td>{view.people[record.recordedBy] ?? t("Staff member")}</td>
+                    <td>{staffLabel(view.people[record.recordedBy])}</td>
                     <td>
                       {[
                         ...record.lines.map(
                           (line) =>
-                            `${itemName(line.itemReference)} ${line.quantity} ${line.unitCode}`,
+                            `${itemName(line.itemReference)} ${line.quantity} ${unitText(line.unitCode)}`,
                         ),
                         ...(record.shortfalls ?? [])
                           .filter((short) => short.recordedQuantity === "0")
                           .map(
                             (short) =>
-                              `${itemName(short.itemReference)} ${short.wastedQuantity} ${short.unitCode}`,
+                              `${itemName(short.itemReference)} ${short.wastedQuantity} ${unitText(short.unitCode)}`,
                           ),
                       ].join(", ")}
                       {record.shortfalls?.length ? t(" · stock was short, count needed") : ""}
@@ -282,7 +282,7 @@ export function StoreWasteFormPage({
   const rowsFor = (line: EditableLine) =>
     view.stock.filter((row) => row.itemReference === line.itemReference);
   const placeName = (reference: string) =>
-    view.locations.find((item) => item.locationReference === reference)?.name ?? "Location";
+    view.locations.find((item) => item.locationReference === reference)?.name ?? t("Location");
   const submit = async () => {
     if (!client.command) return;
     for (const line of lines) {
@@ -393,7 +393,7 @@ export function StoreWasteFormPage({
                 >
                   {stockItems.map((option) => (
                     <option key={option.itemReference} value={option.itemReference}>
-                      {option.name} ({systemText(option.unitCode)})
+                      {option.name} ({unitText(option.unitCode)})
                     </option>
                   ))}
                 </select>
@@ -438,7 +438,7 @@ export function StoreWasteFormPage({
               ) : null}
               <label>
                 {t("Quantity (")}
-                {systemText(item?.unitCode)}){selected ? ` — ${stockText(selected)}` : ""}
+                {unitText(item?.unitCode)}){selected ? ` — ${stockText(selected)}` : ""}
                 <input
                   required
                   inputMode="decimal"
@@ -542,10 +542,10 @@ export function StoreWasteDetailPage({
   const view = state.view;
   const record = view.records[0] as WasteRecordView;
   const itemName = (reference: string) =>
-    view.items.find((item) => item.itemReference === reference)?.name ?? "Item";
+    view.items.find((item) => item.itemReference === reference)?.name ?? t("Item");
   const placeName = (reference: string) =>
-    view.locations.find((item) => item.locationReference === reference)?.name ?? "Location";
-  const person = (reference: string) => view.people[reference] ?? t("Staff member");
+    view.locations.find((item) => item.locationReference === reference)?.name ?? t("Location");
+  const person = (reference: string) => staffLabel(view.people[reference]);
   const review = async (decision: "Accepted" | "Voided", reasonCode: string) => {
     if (!client.command) return;
     setBusy(true);
@@ -583,11 +583,17 @@ export function StoreWasteDetailPage({
               valueMinor: centsText(record.valueMinor),
               value: record.costUnknown ? t(" (some costs unknown)") : "",
               value2: record.review
-                ? t(" · {value} by {reviewedBy} ({reasonCode})", {
-                    value: record.review.decision === "Voided" ? "voided" : "reviewed",
-                    reviewedBy: person(record.review.reviewedBy),
-                    reasonCode: reasonText(record.review.reasonCode),
-                  })
+                ? // WP-2423 M122 (v15 live check): one whole sentence per decision, so the
+                  // Chinese text has no English "voided" inside it.
+                  record.review.decision === "Voided"
+                  ? t(" · voided by {reviewedBy} ({reasonCode})", {
+                      reviewedBy: person(record.review.reviewedBy),
+                      reasonCode: reasonText(record.review.reasonCode),
+                    })
+                  : t(" · reviewed by {reviewedBy} ({reasonCode})", {
+                      reviewedBy: person(record.review.reviewedBy),
+                      reasonCode: reasonText(record.review.reasonCode),
+                    })
                 : "",
             })}
           </p>
@@ -611,7 +617,7 @@ export function StoreWasteDetailPage({
               <td>{itemName(line.itemReference)}</td>
               <td>{placeName(line.locationReference)}</td>
               <td>
-                {line.quantity} {systemText(line.unitCode)}
+                {line.quantity} {unitText(line.unitCode)}
               </td>
               <td>
                 {reasonText(line.reasonCode)}
@@ -640,11 +646,11 @@ export function StoreWasteDetailPage({
                     itemReference: itemName(short.itemReference),
                     locationReference: placeName(short.locationReference),
                     wastedQuantity: short.wastedQuantity,
-                    unitCode: short.unitCode,
+                    unitCode: unitText(short.unitCode),
                     recordedQuantity: short.recordedQuantity,
-                    unitCode2: short.unitCode,
+                    unitCode2: unitText(short.unitCode),
                     missingQuantity: short.missingQuantity,
-                    unitCode3: short.unitCode,
+                    unitCode3: unitText(short.unitCode),
                   },
                 )}
               </li>

@@ -138,20 +138,8 @@ export function allergenText(input: {
     .filter(Boolean)
     .join(" · ");
 }
-const unitNames: Readonly<Record<string, string>> = {
-  EACH: "each",
-  EA: "each",
-  PCS: "pieces",
-  KG: "kg",
-  G: "g",
-  L: "L",
-  ML: "mL",
-};
 /** A measurement unit as staff write it: "kg", "mL", "each" (never the code EACH/KG). */
-export function unitText(unitCode: string | undefined): string {
-  if (unitCode === undefined || unitCode === "") return "unit";
-  return unitNames[unitCode] ?? unitCode.toLowerCase();
-}
+export { unitText } from "./stock-reason-text.js";
 export interface RecipeDetail extends RecipeSummary {
   readonly draft: RecipeDraft;
   readonly ingredientAllergens?: readonly IngredientLineAllergens[];
