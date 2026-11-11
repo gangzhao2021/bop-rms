@@ -113,3 +113,16 @@ it("rejects expired evidence without reading history", async () => {
   await expect(f.source.load({ evidence: f.evidence })).rejects.toThrow();
   expect(f.load).not.toHaveBeenCalled();
 });
+it("Owner #26 (DEC-PRICE-HOLD): a menu listed since the configured quote keeps its price", async () => {
+  const f = fixture();
+  const listed = {
+    ...f.evidence,
+    catalogLines: f.evidence.catalogLines.map((line) => ({
+      ...line,
+      menuVersionReference: String(f.quote.storeReference),
+    })),
+  };
+  const line = required((await f.source.load({ evidence: listed }))[0]);
+  expect(line.total.amountMinor).toBe(2825n);
+  expect(line.unitPrice.amountMinor).toBe(1250n);
+});

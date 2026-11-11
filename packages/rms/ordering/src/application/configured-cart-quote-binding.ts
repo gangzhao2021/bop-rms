@@ -83,7 +83,8 @@ export function bindConfiguredCartQuote(input: {
         catalog.sellableReference !== item.sellableReference ||
         catalog.skuReference !== item.sellableReference ||
         catalog.productVersionReference !== evidence.productVersionReference ||
-        catalog.menuVersionReference !== evidence.menuVersionReference ||
+        // Owner #26 (DEC-PRICE-HOLD): the menu may have been listed again since the quote; until
+        // the quote's hold ends (checked above) the same dish keeps the quoted price.
         catalog.capturedAt < quote.createdAt ||
         catalog.capturedAt > observedAt ||
         evidence.validatedAt > quote.createdAt ||

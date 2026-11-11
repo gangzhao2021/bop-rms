@@ -114,8 +114,10 @@ function createVersionedOrderSubmissionSource<V extends 1 | 2>(
           if (
             !line ||
             line.sellableReference !== item.sellableReference ||
-            line.menuVersionReference !== item.catalogSelectionEvidence?.menuVersionReference ||
-            line.productVersionReference !== item.catalogSelectionEvidence?.productVersionReference
+            // Owner #26 (DEC-PRICE-HOLD): the validated menu may be newer than the one the guest's
+            // price was confirmed on, inside the quote's hold (validUntil never outlasts it).
+            item.catalogSelectionEvidence === null ||
+            line.productVersionReference !== item.catalogSelectionEvidence.productVersionReference
           )
             throw new OrderSubmissionSourceError();
         }

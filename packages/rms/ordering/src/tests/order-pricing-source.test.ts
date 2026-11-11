@@ -114,7 +114,7 @@ it.each(["missing", "version", "digest", "catalog", "blocked", "malformed"] as c
         ...f.quote,
         lines: f.quote.lines.map((line) => ({
           ...line,
-          menuVersionReference: f.quote.cartReference,
+          productVersionReference: f.quote.cartReference,
         })),
       });
     if (mode === "blocked")
@@ -126,6 +126,23 @@ it.each(["missing", "version", "digest", "catalog", "blocked", "malformed"] as c
     });
   },
 );
+it("Owner #26 (DEC-PRICE-HOLD): a menu listed since the quote still charges the quoted price", async () => {
+  const f = fixture();
+  const listed = {
+    ...f.evidence,
+    catalogLines: f.evidence.catalogLines.map((line) => ({
+      ...line,
+      menuVersionReference: String(f.quote.storeReference),
+    })),
+  };
+  const lines = await f.source.load({ evidence: listed });
+  expect(lines.map((line) => line.unitPrice.amountMinor)).toEqual(
+    f.quote.lines.map((line) => line.unitPrice.amountMinor),
+  );
+  expect(lines.map((line) => line.total.amountMinor)).toEqual(
+    f.quote.lines.map((line) => line.total.amountMinor),
+  );
+});
 it.each(["expiry", "regression"] as const)("rejects clock %s across history I/O", async (mode) => {
   const f = fixture();
   f.load.mockImplementation(async () => {

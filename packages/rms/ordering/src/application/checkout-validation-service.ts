@@ -137,8 +137,11 @@ function catalogEvidence(
       resultValidatedAt !== observedAt
     )
       return fail("CHECKOUT_DEPENDENCY_UNAVAILABLE");
+    // Owner #26 (DEC-PRICE-HOLD): a menu listed since the guest's price was confirmed does not
+    // ask for a new price while the quote's hold lasts (the caller refused an ended quote): the
+    // dish is checked as sold now and its price stays the quote's. The dish itself must be the one
+    // that was priced (same product version, choices and rules), or it is priced again.
     if (
-      resultMenuVersionReference !== attached.menuVersionReference ||
       resultProductVersionReference !== attached.productVersionReference ||
       result.catalogChannelCode !== attached.catalogChannelCode ||
       result.catalogOrderTypeCode !== attached.catalogOrderTypeCode ||

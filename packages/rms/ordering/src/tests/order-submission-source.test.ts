@@ -59,6 +59,37 @@ it("assembles owner snapshots at the original observation and satisfies actual O
   ).toHaveLength(1);
   expect(Object.isFrozen(result.lines)).toBe(true);
 });
+it("Owner #26 (DEC-PRICE-HOLD): a cart priced on the menu before the latest listing is still ordered inside the hold", async () => {
+  const f = fixture();
+  const earlier = "01a7ee00-0000-7000-8000-00000000beef";
+  const cart = {
+    ...f.input.cart,
+    items: f.input.cart.items.map((item) => ({
+      ...item,
+      catalogSelectionEvidence:
+        item.catalogSelectionEvidence === null
+          ? null
+          : { ...item.catalogSelectionEvidence, menuVersionReference: earlier },
+    })),
+  };
+  f.load.mockResolvedValue(cart);
+  const result = await f.source.load({ evidence: f.evidence } as never);
+  // The dish is recorded as the menu sells it now, and priced as the quote priced it.
+  expect(result.lines[0]?.catalog).toEqual(f.input.lines[0]?.catalog);
+  expect(result.lines[0]?.pricing).toEqual(f.input.lines[0]?.pricing);
+  // A changed dish (another product version) is never held.
+  f.load.mockResolvedValue({
+    ...cart,
+    items: cart.items.map((item) => ({
+      ...item,
+      catalogSelectionEvidence:
+        item.catalogSelectionEvidence === null
+          ? null
+          : { ...item.catalogSelectionEvidence, productVersionReference: earlier },
+    })),
+  });
+  await expect(f.source.load({ evidence: f.evidence } as never)).rejects.toThrow();
+});
 it("denies foreign scope without reading Cart", async () => {
   const f = fixture();
   await expect(

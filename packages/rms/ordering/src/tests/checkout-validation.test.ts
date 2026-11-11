@@ -426,6 +426,31 @@ describe("WP-1220 Checkout Validation", () => {
     );
   });
 
+  it("Owner #26 (DEC-PRICE-HOLD): a menu listed inside the quote's hold keeps the confirmed price", async () => {
+    // The restaurant listed a new menu version since the guest was priced; the dish is the same.
+    const listed = acceptedCatalog({ menuVersionReference: id(96) });
+    const result = await fixture({ catalog: listed }).service.validate(input());
+    expect(result.quoteReference).toBe(ids.quote);
+    expect(result.validUntil <= quote().quoteExpiresAt).toBe(true);
+    // The evidence says what the menu sells now; the price stays the quote's.
+    expect(result.catalogLines[0]).toMatchObject({
+      menuVersionReference: id(96),
+      productVersionReference: ids.productVersion,
+    });
+    // Once the hold has ended the guest is priced again, whatever was listed.
+    await rejects(
+      fixture({
+        catalog: listed,
+        quote: quote({
+          quoteExpiresAt: at as never,
+          attachedAt: "2026-08-02T14:59:30.000Z" as never,
+          idempotencyExpiresAt: "2026-08-03T14:59:30.000Z" as never,
+        }),
+      }).service,
+      "CHECKOUT_QUOTE_EXPIRED",
+    );
+  });
+
   it.each([
     ["STORE_CLOSED", "CHECKOUT_STORE_CLOSED"],
     ["CAPACITY_UNAVAILABLE", "CHECKOUT_CAPACITY_UNAVAILABLE"],

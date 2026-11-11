@@ -76,8 +76,9 @@ export function createConfiguredOrderPricingSource(options: {
             if (
               !catalog ||
               String(line.sellableReference) !== catalog.sellableReference ||
-              String(line.productVersionReference) !== catalog.productVersionReference ||
-              String(line.menuVersionReference) !== catalog.menuVersionReference
+              // Owner #26 (DEC-PRICE-HOLD): inside the quote's hold the menu checked now may be
+              // newer than the quote's; the same dish is charged the quoted price.
+              String(line.productVersionReference) !== catalog.productVersionReference
             )
               throw new ConfiguredOrderPricingSourceError();
             const price = line.resolvedPrice,

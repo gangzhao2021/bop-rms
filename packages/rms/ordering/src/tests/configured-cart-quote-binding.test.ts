@@ -41,6 +41,20 @@ describe("configured Quote Cart binding", () => {
       expect.objectContaining({ code: "CART_QUOTE_INVALID" }),
     );
   });
+  it("Owner #26 (DEC-PRICE-HOLD): binds a quote to the same dish on a menu listed since, until the hold ends", () => {
+    const f = fixture(),
+      row = f.catalogLines[0];
+    if (row === undefined) throw new Error("synthetic fixture missing");
+    Object.assign(row.snapshot, { menuVersionReference: id(83) });
+    expect(bindConfiguredCartQuote(f)).toEqual(f.quote);
+    expect(() => bindConfiguredCartQuote({ ...f, observedAt: f.quote.expiresAt })).toThrowError(
+      expect.objectContaining({ code: "CART_QUOTE_EXPIRED" }),
+    );
+    Object.assign(row.snapshot, { productVersionReference: id(84) });
+    expect(() => bindConfiguredCartQuote(f)).toThrowError(
+      expect.objectContaining({ code: "CART_QUOTE_INVALID" }),
+    );
+  });
   it("rejects expiry while retaining the dedicated refresh outcome", () => {
     const f = fixture();
     expect(() => bindConfiguredCartQuote({ ...f, observedAt: f.quote.expiresAt })).toThrowError(
