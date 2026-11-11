@@ -4126,6 +4126,9 @@ async function journey(journeyEnding) {
             kind: "Comp",
             percent: null,
             amountMinor: second.total.toString(),
+            // The comp before tax, as the printed bill shows it (DEC-TAX-WHOLE-RECEIPT): the dish less
+            // its comp adds up to the Subtotal, and its tax is what the comp total adds on top.
+            netMinor: second.net.toString(),
           });
           // Closing summary: the table is open, checking out, and owes exactly its bill.
           const beforePaying = await tonightFacts();
