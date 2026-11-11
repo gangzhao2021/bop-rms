@@ -79,6 +79,11 @@ export interface KitchenBoardItem {
   /** WP-2423 M10: names of the staff who refunded them ("stop making it too"); absent: unknown. */
   readonly refundedBy?: readonly string[];
   /**
+   * WP-2423 M10: the refund role of those who refunded them without a name on record ("the
+   * owner"); absent: none.
+   */
+  readonly refundedByRoles?: readonly ("Owner" | "Manager" | "Staff")[];
+  /**
    * WP-2423 item 8 ⑧ (decision 5): the dish's kitchen section (档口); null: no section. Absent from
    * older servers (no section filter then).
    */
@@ -449,6 +454,11 @@ function item(value: unknown): KitchenBoardItem {
     value !== null &&
     typeof value === "object" &&
     Object.hasOwn(value, "refundedBy");
+  const hasRefundedByRoles =
+    hasRefunded &&
+    value !== null &&
+    typeof value === "object" &&
+    Object.hasOwn(value, "refundedByRoles");
   const hasSection =
     value !== null && typeof value === "object" && Object.hasOwn(value, "kitchenSection");
   const hasPartSections =
@@ -480,6 +490,7 @@ function item(value: unknown): KitchenBoardItem {
     ...(hasCheckId ? ["checkId"] : []),
     ...(hasRefunded ? ["refundedQuantity"] : []),
     ...(hasRefundedBy ? ["refundedBy"] : []),
+    ...(hasRefundedByRoles ? ["refundedByRoles"] : []),
     ...(hasSection ? ["kitchenSection"] : []),
     ...(hasPartSections ? ["comboPartSections"] : []),
     ...(hasPlacedAt ? ["placedAt"] : []),
@@ -519,6 +530,14 @@ function item(value: unknown): KitchenBoardItem {
         input.refundedBy.length > 10 ||
         input.refundedBy.some(
           (name: unknown) => typeof name !== "string" || name.length < 1 || name.length > 120,
+        ))) ||
+    (hasRefundedByRoles &&
+      (!Array.isArray(input.refundedByRoles) ||
+        input.refundedByRoles.length < 1 ||
+        input.refundedByRoles.length > 3 ||
+        new Set(input.refundedByRoles).size !== input.refundedByRoles.length ||
+        input.refundedByRoles.some(
+          (role: unknown) => role !== "Owner" && role !== "Manager" && role !== "Staff",
         )))
   )
     throw new Error("KITCHEN_BOARD_INVALID");
@@ -543,6 +562,13 @@ function item(value: unknown): KitchenBoardItem {
     ...(hasRefunded ? { refundedQuantity: Number(input.refundedQuantity) } : {}),
     ...(hasRefundedBy
       ? { refundedBy: Object.freeze([...(input.refundedBy as readonly string[])]) }
+      : {}),
+    ...(hasRefundedByRoles
+      ? {
+          refundedByRoles: Object.freeze([
+            ...(input.refundedByRoles as readonly ("Owner" | "Manager" | "Staff")[]),
+          ]),
+        }
       : {}),
     ...(chase === null
       ? {}

@@ -138,6 +138,8 @@ function item(value: unknown) {
     ...("refundedQuantity" in raw ? { refundedQuantity: raw.refundedQuantity } : {}),
     // WP-2423 M10: who refunded them (names), when this server gives them.
     ...("refundedBy" in raw ? { refundedBy: raw.refundedBy } : {}),
+    // WP-2423 M10: and the role of those without a name on record, when this server gives them.
+    ...("refundedByRoles" in raw ? { refundedByRoles: raw.refundedByRoles } : {}),
     // WP-2423 item 8 ⑧: the dish's kitchen section, when this source gives it.
     ...("kitchenSection" in raw ? { kitchenSection: raw.kitchenSection } : {}),
     status: raw.status,

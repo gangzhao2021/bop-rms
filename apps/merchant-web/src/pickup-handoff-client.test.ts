@@ -257,7 +257,7 @@ it("WP-2423 M10: a pickup with refunded units hands over only what is still owed
   // v15 batch 5, order 24: 3 ordered, 1 refunded with "Stop making it too", 2 in the bag. The
   // handover sent 3 and was refused, leaving the order at Ready.
   const fetcher = vi.fn<typeof fetch>().mockImplementation(async () => response());
-  const execution = item.execution!;
+  const execution = item.execution as NonNullable<PickupQueueItem["execution"]>;
   const owed = (lines: NonNullable<PickupQueueItem["execution"]>["items"]) =>
     createPickupHandoffClient(fetcher)
       .prepare({ ...input(), item: { ...item, execution: { ...execution, items: lines } } })

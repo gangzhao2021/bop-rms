@@ -60,4 +60,14 @@ it("WP-2423 M10: refunded units the kitchen is told not to make, never more than
   expect(() =>
     parseKitchenWorkItemView({ ...item, refundedQuantity: 1, refundedBy: [] }),
   ).toThrow();
+  // Someone without a name on record: their refund role, with the refunded units only.
+  expect(
+    parseKitchenWorkItemView({ ...item, refundedQuantity: 1, refundedByRoles: ["Owner"] })
+      .refundedByRoles,
+  ).toEqual(["Owner"]);
+  expect(() => parseKitchenWorkItemView({ ...item, refundedByRoles: ["Owner"] })).toThrow();
+  for (const roles of [[], ["Cook"], ["Owner", "Owner"]])
+    expect(() =>
+      parseKitchenWorkItemView({ ...item, refundedQuantity: 1, refundedByRoles: roles }),
+    ).toThrow();
 });

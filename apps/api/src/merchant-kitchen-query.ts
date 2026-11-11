@@ -53,7 +53,7 @@ import { createMerchantBusinessDayWindows } from "./merchant-business-day-window
 import { comboPartsByOrderItem, type ComboPart } from "./merchant-combo-parts.js";
 import { readPaidOrderWatch } from "./merchant-paid-order-watch.js";
 import { readPickupRefundDeadlines } from "./pickup-acceptance-deadline.js";
-import { readRefundWithdrawnLines } from "./order-refund-withdrawal.js";
+import { readRefundRequesterRoles, readRefundWithdrawnLines } from "./order-refund-withdrawal.js";
 import { loadStoreMember } from "@bop/membership";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
@@ -217,20 +217,34 @@ export function kitchenComboPartFields(parts: readonly ComboPart[] | undefined) 
     ),
   };
 }
-/** WP-2423 M10: refunded units of one dish and the names of who refunded them (may be empty). */
+/**
+ * WP-2423 M10: refunded units of one dish, the names of who refunded them, and the refund role of
+ * those whose name can't be read (either may be empty).
+ */
 interface RefundedLine {
   readonly quantity: number;
   readonly names: readonly string[];
+  readonly roles?: readonly RefunderRole[];
 }
+type RefunderRole = "Owner" | "Manager" | "Staff";
 const refundedFields = (
   line: RefundedLine | undefined,
   requiredQuantity: number,
-): { refundedQuantity?: number; refundedBy?: readonly string[] } =>
+): {
+  refundedQuantity?: number;
+  refundedBy?: readonly string[];
+  refundedByRoles?: readonly RefunderRole[];
+} =>
   line === undefined || line.quantity < 1
     ? {}
     : {
         refundedQuantity: Math.min(line.quantity, requiredQuantity),
         ...(line.names.length > 0 ? { refundedBy: line.names } : {}),
+        // v15 batch 5: an owner with no name in the member directory refunded a dish and the
+        // ticket said nobody; the ticket names them by role instead ("the owner").
+        ...(line.roles !== undefined && line.roles.length > 0
+          ? { refundedByRoles: line.roles }
+          : {}),
       };
 const itemView = (
   item: KitchenQueueItemView,
@@ -809,7 +823,14 @@ export function createMerchantKitchenQuery(options: {
                 readRefundWithdrawnLines(tx, authority, [
                   ...new Set(items.map((item) => String(item.orderReference))),
                 ]),
-              new Map<string, { quantity: number; actorReferences: readonly string[] }>(),
+              new Map<
+                string,
+                {
+                  quantity: number;
+                  actorReferences: readonly string[];
+                  requestByActor: ReadonlyMap<string, string>;
+                }
+              >(),
             );
             const names = new Map<string, string | null>();
             for (const line of lines.values())
@@ -823,15 +844,47 @@ export function createMerchantKitchenQuery(options: {
                       null,
                     ),
                   );
+            const named = (actor: string) => {
+              const name = names.get(actor);
+              return typeof name === "string" && name.length > 0 ? name : null;
+            };
+            // Without a name: the refund role they held when they asked (unread: left out).
+            const unnamed = [...lines.values()].flatMap((line) =>
+              line.actorReferences.flatMap((actor) =>
+                named(actor) === null && line.requestByActor.has(actor)
+                  ? [line.requestByActor.get(actor) as string]
+                  : [],
+              ),
+            );
+            const roles =
+              unnamed.length === 0
+                ? new Map<string, RefunderRole>()
+                : await withOptionalRead(
+                    tx,
+                    () => readRefundRequesterRoles(tx, authority, unnamed),
+                    new Map<string, RefunderRole>(),
+                  );
             return new Map<string, RefundedLine>(
               [...lines].map(([item, line]) => [
                 item,
                 {
                   quantity: line.quantity,
                   names: line.actorReferences.flatMap((actor) => {
-                    const name = names.get(actor);
-                    return typeof name === "string" && name.length > 0 ? [name] : [];
+                    const name = named(actor);
+                    return name === null ? [] : [name];
                   }),
+                  roles: [
+                    ...new Set(
+                      line.actorReferences.flatMap((actor) => {
+                        const request = line.requestByActor.get(actor);
+                        const role =
+                          named(actor) === null && request !== undefined
+                            ? roles.get(request)
+                            : undefined;
+                        return role === undefined ? [] : [role];
+                      }),
+                    ),
+                  ],
                 },
               ]),
             );

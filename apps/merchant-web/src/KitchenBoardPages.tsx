@@ -51,6 +51,26 @@ export const kitchenRefreshIntervalMs = 10_000;
 /** Waiting-time tiers that colour a ticket's age (TEST-ONLY defaults until Store policy carries them). */
 export const kitchenWarningMinutes = 8;
 export const kitchenLateMinutes = 15;
+
+/**
+ * WP-2423 M10: who refunded the dish, on the cook's ticket: their names, and for those without a
+ * name on record their role ("the owner"); empty when not known.
+ */
+export function kitchenRefundedByText(
+  item: Pick<KitchenBoardItem, "refundedBy" | "refundedByRoles">,
+): string {
+  const roleLabel = {
+    Owner: t("the owner"),
+    Manager: t("a manager"),
+    Staff: t("a staff member"),
+  } as const;
+  const who = [
+    ...(item.refundedBy ?? []),
+    ...(item.refundedByRoles ?? []).map((role) => roleLabel[role]),
+  ];
+  return who.length === 0 ? "" : " · " + t("Refunded by {names}", { names: who.join(t(", ")) });
+}
+
 export function kitchenAgeTier(minutes: number): "ok" | "warning" | "late" {
   return minutes >= kitchenLateMinutes
     ? "late"
@@ -1572,9 +1592,7 @@ function WorkCard({
                   count: item.refundedQuantity,
                   left: item.requiredQuantity - item.refundedQuantity,
                 })}
-            {item.refundedBy === undefined
-              ? null
-              : " · " + t("Refunded by {names}", { names: item.refundedBy.join(t(", ")) })}
+            {kitchenRefundedByText(item)}
           </p>
         )}
         {item.comboPartOf === undefined ? null : (

@@ -456,6 +456,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Refunded · stop, don't make it · press Finished to clear it":
     "已退款 · 停止制作 · 按“做好了”清掉这道菜",
   "Refunded by {names}": "退款人：{names}",
+  "the owner": "店主",
+  "a manager": "店长",
+  "a staff member": "店员",
   "Nothing was recorded. This refund needs the owner's approval, so the kitchen isn't told now. Untick Stop making it too to ask for approval; for a dish the kitchen hasn't started, use Cancel items on the order.":
     "没有记录。这笔退款要店主批准，所以现在不通知后厨。取消勾选“不再制作这道菜”再提交审批；后厨还没开始做的菜，请在订单上用“取消商品”。",
   "This refund needs the owner's approval, so the kitchen isn't told now. Untick Stop making it too to ask for approval; for a dish the kitchen hasn't started, use Cancel items on the order.":

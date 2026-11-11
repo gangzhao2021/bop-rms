@@ -13,7 +13,35 @@ const doubles = vi.hoisted(() => ({
   get: vi.fn(),
   roundDates: vi.fn(),
   today: vi.fn(),
+  withdrawn: vi.fn(),
+  roles: vi.fn(),
+  member: vi.fn(),
 }));
+// WP-2423 M10: who refunded a dish; the real reads unless a test answers them.
+vi.mock("./order-refund-withdrawal.js", async (original) => {
+  const real = await original<typeof import("./order-refund-withdrawal.js")>();
+  return {
+    ...real,
+    readRefundWithdrawnLines: (...args: Parameters<typeof real.readRefundWithdrawnLines>) =>
+      doubles.withdrawn.getMockImplementation()
+        ? doubles.withdrawn(...args)
+        : real.readRefundWithdrawnLines(...args),
+    readRefundRequesterRoles: (...args: Parameters<typeof real.readRefundRequesterRoles>) =>
+      doubles.roles.getMockImplementation()
+        ? doubles.roles(...args)
+        : real.readRefundRequesterRoles(...args),
+  };
+});
+vi.mock("@bop/membership", async (original) => {
+  const real = await original<typeof import("@bop/membership")>();
+  return {
+    ...real,
+    loadStoreMember: (...args: Parameters<typeof real.loadStoreMember>) =>
+      doubles.member.getMockImplementation()
+        ? doubles.member(...args)
+        : real.loadStoreMember(...args),
+  };
+});
 vi.mock("./merchant-round-business-date.js", async (original) => ({
   ...(await original<object>()),
   createMerchantRoundBusinessDates: () => doubles.roundDates,
@@ -574,6 +602,58 @@ it("WP-2423 v15: names today's orders waiting for acceptance on the first page o
     query: { ...f.input.query, cursor: { afterWorkItemReference: id(5) } },
   })) as Record<string, unknown>;
   expect(Object.hasOwn(next, "awaitingAcceptance")).toBe(false);
+});
+
+it("WP-2423 M10: a dish refunded by someone without a name on record names them by refund role", async () => {
+  // v15 batch 5: the owner, with no name in the member directory, refunded a dish with "stop
+  // making it too"; the ticket said nobody. A named refunder stays named.
+  const f = setup();
+  doubles.list.mockResolvedValue({
+    items: [
+      {
+        workItemReference: id(5),
+        ticketReference: id(7),
+        orderReference: id(6),
+        orderItemReference: id(30),
+        requiredQuantity: 3,
+        ticketAggregateVersion: 9007199254740993n,
+        workItemVersion: 2n,
+      },
+    ],
+  });
+  doubles.withdrawn.mockResolvedValue(
+    new Map([
+      [
+        id(30),
+        {
+          quantity: 2,
+          actorReferences: [id(40), id(41)],
+          requestByActor: new Map([
+            [id(40), id(50)],
+            [id(41), id(51)],
+          ]),
+        },
+      ],
+    ]),
+  );
+  doubles.member.mockImplementation(async (_tx: unknown, _scope: unknown, actor: string) => ({
+    displayName: actor === id(40) ? "Mia" : null,
+  }));
+  doubles.roles.mockResolvedValue(new Map([[id(51), "Owner"]]));
+  const result = (await f.operation(f.input)) as { items: Record<string, unknown>[] };
+  expect(result.items[0]).toMatchObject({
+    refundedQuantity: 2,
+    refundedBy: ["Mia"],
+    refundedByRoles: ["Owner"],
+  });
+  // Only the unnamed refunder's request is asked for its role.
+  expect(doubles.roles).toHaveBeenCalledWith(expect.anything(), expect.anything(), [id(51)]);
+  // Everyone named: no role read, no role on the ticket.
+  doubles.member.mockImplementation(async () => ({ displayName: "Mia" }));
+  doubles.roles.mockClear();
+  const named = (await f.operation(f.input)) as { items: Record<string, unknown>[] };
+  expect(Object.hasOwn(named.items[0] ?? {}, "refundedByRoles")).toBe(false);
+  expect(doubles.roles).not.toHaveBeenCalled();
 });
 
 describe("combos by section on the wire", () => {

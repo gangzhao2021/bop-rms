@@ -783,6 +783,8 @@ const kitchenItem = (n: number, status: "Queued" | "Completed"): KitchenList["it
   // WP-2423 M10: one unit refunded and not to be made, and who refunded it.
   refundedQuantity: 1,
   refundedBy: ["Mia"],
+  // And the role of someone who refunded it without a name on record.
+  refundedByRoles: ["Owner"],
   workItemCreatedAt: at(16),
   // merchant-outage-recovery M120: when the round was sent (the wait counts from it).
   placedAt: at(15),
@@ -1082,27 +1084,26 @@ describe("merchant BFF responses carry every read-model field the browser parses
   it("WP-2423 M10/M14: Can't make it on a paid pickup still waiting reaches the page", async () => {
     // v15 batch 5: the read model offered it, the BFF kept it only for an automatic acceptance,
     // so a cashier saw Accept alone on a paid order nobody had accepted yet.
-    const {
-      acceptedAutomaticallyAt: _at,
-      reachedKitchen: _reached,
-      kept: _kept,
-      canKeep: _canKeep,
-      notSentAutomatically: _notSent,
-      ...waitingBatch
-    } = heldPickup.batches[0]!;
-    const waiting = {
-      ...heldPickup,
-      orderReference: id(0x903),
-      acceptanceHold: null,
-      batches: [{ ...waitingBatch, canCantMake: true }],
-    } as unknown as QueueItem;
+    // The batch as the read model gives it for an ordinary acceptance: no automatic facts.
+    const automatic = new Set([
+      "acceptedAutomaticallyAt",
+      "reachedKitchen",
+      "kept",
+      "canKeep",
+      "notSentAutomatically",
+    ]);
+    const waitingBatch = Object.fromEntries(
+      Object.entries(heldPickup.batches[0] ?? {}).filter(([key]) => !automatic.has(key)),
+    );
     for (const offered of [true, false]) {
       stub("orderQueue").mockResolvedValue({
         ...queueView,
         items: [
           {
-            ...waiting,
-            batches: [{ ...waiting.batches[0]!, canCantMake: offered }],
+            ...heldPickup,
+            orderReference: id(0x903),
+            acceptanceHold: null,
+            batches: [{ ...waitingBatch, canCantMake: offered }],
           } as unknown as QueueItem,
         ],
       });

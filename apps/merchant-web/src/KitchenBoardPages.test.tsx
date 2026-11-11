@@ -169,6 +169,37 @@ describe("WP-1804 Kitchen Board screens", () => {
     expect(stopped).toContain("Refunded · stop, don&#x27;t make it · press Finished to clear it");
     expect(stopped).toContain('<s class="kitchen-work-item__count-refunded">2×</s> 0×');
     expect(stopped).not.toContain("Refunded by");
+    // v15 batch 5: an owner with no name on record is named by role, beside a named manager.
+    const byRole = parseKitchenBoardView({
+      ...kitchenBoardFixture(),
+      items: [
+        {
+          ...kitchenItemFixture(),
+          status: "In Progress",
+          refundedQuantity: 1,
+          refundedBy: ["Mia"],
+          refundedByRoles: ["Owner"],
+        },
+      ],
+    });
+    const owner = renderToStaticMarkup(
+      <MemoryRouter>
+        <KitchenBoardScreen view={byRole} />
+      </MemoryRouter>,
+    );
+    expect(owner).toContain("make 1 · Refunded by Mia, the owner");
+    setLanguageForTest("zh-Hans");
+    try {
+      expect(
+        renderToStaticMarkup(
+          <MemoryRouter>
+            <KitchenBoardScreen view={byRole} />
+          </MemoryRouter>,
+        ),
+      ).toContain("退款人：Mia、店主");
+    } finally {
+      setLanguageForTest("en");
+    }
   });
   it("groups work items into station lanes without inventing missing queue facts", () => {
     const second = {

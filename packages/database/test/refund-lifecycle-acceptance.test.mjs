@@ -9,7 +9,11 @@ import {
 import { seedJourneyStorePublication } from "../test-support/dine-in-journey-seed.mjs";
 import { listStoreKitchenOrderItemStates } from "../../rms/kitchen/src/index.ts";
 import { createMerchantOrdinaryRefundRequest } from "../../../apps/api/src/merchant-ordinary-refund-request.ts";
-import { readRefundWithdrawnUnits } from "../../../apps/api/src/order-refund-withdrawal.ts";
+import {
+  readRefundRequesterRoles,
+  readRefundWithdrawnLines,
+  readRefundWithdrawnUnits,
+} from "../../../apps/api/src/order-refund-withdrawal.ts";
 import { measureDatabaseClockOffset } from "../../../tooling/environment/pilot-database-clock.mjs";
 import { refundAuthorityCurrent } from "../../../tooling/environment/pilot-refund-workforce.mjs";
 
@@ -456,6 +460,20 @@ it("a dish refunded with stop making it too is recorded with the refund and coun
         readRefundWithdrawnUnits(tx, world.ownerScope, [order.orderReference]),
       );
       assert.deepEqual([...units], [[line.item, 1]]);
+      // WP-2423 M10 (v15 batch 5): who refunded it, with their request, and that request's
+      // refund role, so the cook's ticket names a refunder without a directory name by role.
+      const refunders = await transactions().run((tx) =>
+        readRefundWithdrawnLines(tx, world.ownerScope, [order.orderReference]),
+      );
+      assert.deepEqual(refunders.get(line.item)?.actorReferences, [manager.actor]);
+      assert.deepEqual(
+        [...(refunders.get(line.item)?.requestByActor ?? [])],
+        [[manager.actor, first.requestReference]],
+      );
+      const roles = await transactions().run((tx) =>
+        readRefundRequesterRoles(tx, world.ownerScope, [first.requestReference, fresh()]),
+      );
+      assert.deepEqual([...roles], [[first.requestReference, "Manager"]]);
       // Not every unit is refunded, so the order still goes ahead: Accept is not refused.
       const staff = await world.session([], "01a6ab13");
       const accept = await world.acceptanceFor(staff);
