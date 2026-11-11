@@ -152,9 +152,25 @@ test("@production turning pickup on without the store's phone is refused and say
     await page.setViewportSize({ width, height });
     await page.reload();
     await pickup.check();
-    await page.getByRole("button", { name: "Save", exact: true }).click();
-    await expect(page.getByRole("alert")).toContainText(
+    const save = page.getByRole("button", { name: "Save", exact: true });
+    await save.click();
+    const refusal = page.getByRole("alert");
+    await expect(refusal).toContainText(
       "Pickup guests need a phone number to reach the store. Add it under Name and contact shown to customers in Store setup, then turn pickup on.",
+    );
+    // v15 batch 8: the refusal is right under the Save that was tapped, in view without
+    // scrolling, and the box shows pickup still off (nothing was saved), with the way to the phone.
+    await expect(refusal).toBeInViewport();
+    const saveBox = await save.boundingBox();
+    const refusalBox = await refusal.boundingBox();
+    expect(
+      (refusalBox?.y ?? Infinity) - ((saveBox?.y ?? 0) + (saveBox?.height ?? 0)),
+      `refusal under Save at ${width}`,
+    ).toBeLessThan(120);
+    await expect(pickup).not.toBeChecked();
+    await expect(refusal.getByRole("link", { name: "Add phone number" })).toHaveAttribute(
+      "href",
+      "/app/organization/stores/" + store + "/setup#store-public-profile",
     );
     // Nothing was turned on behind the refusal: the page still shows pickup off once read again.
     await page.reload();

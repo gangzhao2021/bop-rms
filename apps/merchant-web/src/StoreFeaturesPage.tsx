@@ -171,6 +171,9 @@ const tipsDraftOf = (value: StoreFeatures) => ({
   tiers: value.tips.tierPercents.map(String) as [string, string, string],
 });
 
+/** v15 batch 8: which Save on the page a message answers (it is shown right under it). */
+type SavedPart = "Template" | "Modules" | "Services" | "Tips";
+
 export function StoreFeaturesPage({
   csrf,
   storeReference,
@@ -222,7 +225,16 @@ export function StoreFeaturesPage({
     null,
   );
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState<{ tone: "status" | "alert"; text: string } | null>(null);
+  /**
+   * v15 batch 8: what the last save said, shown under the Save that was tapped (`at`), never at the
+   * page end where staff don't see it. `phone` links a pickup refusal to the store's phone.
+   */
+  const [message, setMessage] = useState<{
+    tone: "status" | "alert";
+    text: string;
+    at: SavedPart;
+    phone?: boolean;
+  } | null>(null);
   const [refresh, setRefresh] = useState(0);
   // Turning guests' pickup off is asked once more (what staff do with pickups still waiting).
   const [confirming, setConfirming] = useState<null | "Template" | "Save">(null);
@@ -302,12 +314,14 @@ export function StoreFeaturesPage({
       (operationReference) =>
         client.applyFullService({ operationReference, expectedVersion: view.version }),
       t("The full-service restaurant setup is in use."),
+      "Template",
     );
   const save = () =>
     void run(
       (operationReference) =>
         client.change({ operationReference, expectedVersion: view.version, modules: draft }),
       t("Saved. Staff see the change the next time a page opens."),
+      "Modules",
     );
   // Whether this change turns guests' pickup off, and what staff then hand over where.
   const pickupOff = (counterAfter: boolean) => (
@@ -377,6 +391,7 @@ export function StoreFeaturesPage({
   const run = async (
     action: (operationReference: string) => Promise<StoreFeatures>,
     done: string,
+    at: SavedPart,
   ) => {
     if (busy) return;
     setBusy(true);
@@ -389,7 +404,7 @@ export function StoreFeaturesPage({
       setDraft(modulesOf(next));
       setServices(servicesOf(next));
       setTips(tipsDraftOf(next));
-      setMessage({ tone: "status", text: done });
+      setMessage({ tone: "status", text: done, at });
     } catch (error) {
       if (error instanceof StoreFeaturesClientError && error.code === "Changed") {
         operation.current = null;
@@ -398,11 +413,17 @@ export function StoreFeaturesPage({
           text: t(
             "Someone else changed these settings. The page now shows them; check and save again.",
           ),
+          at,
         });
         setRefresh((value) => value + 1);
-      } else
+      } else {
+        const phone = error instanceof StoreFeaturesClientError && error.code === "PhoneRequired";
+        // Not saved: the boxes show what is in use again, so nobody leaves thinking pickup is on.
+        if (phone) setDraft(modulesOf(view));
         setMessage({
           tone: "alert",
+          at,
+          phone,
           text:
             error instanceof StoreFeaturesClientError && error.code === "Denied"
               ? t("Only the owner changes store features.")
@@ -412,10 +433,25 @@ export function StoreFeaturesPage({
                   )
                 : t("Not saved. Check the connection and try again."),
         });
+      }
     } finally {
       setBusy(false);
     }
   };
+  const said = (at: SavedPart) =>
+    message === null || message.at !== at ? null : (
+      <p role={message.tone} className="store-features__message">
+        {message.text}
+        {message.phone === true ? (
+          <>
+            {" "}
+            <Link to={`/app/organization/stores/${storeReference}/setup#store-public-profile`}>
+              {t("Add phone number")}
+            </Link>
+          </>
+        ) : null}
+      </p>
+    );
   return (
     <WorkspacePage title={t("Store features")}>
       <div className="store-features">
@@ -439,6 +475,7 @@ export function StoreFeaturesPage({
             </button>
           )}
           {confirming === "Template" ? pickupOff(false) : null}
+          {said("Template")}
         </section>
         <fieldset className="store-features__modules" disabled={busy}>
           <legend>{t("What this store uses")}</legend>
@@ -474,6 +511,7 @@ export function StoreFeaturesPage({
             </span>
           )}
         </div>
+        {said("Modules")}
         {confirming === "Save" ? pickupOff(draft.counterOrder) : null}
         <fieldset className="store-features__modules" disabled={busy}>
           <legend>{t("At the table")}</legend>
@@ -551,12 +589,14 @@ export function StoreFeaturesPage({
                     ...services,
                   }),
                 t("Saved. Staff see the change the next time a page opens."),
+                "Services",
               )
             }
           >
             {t("Save table settings")}
           </button>
         </div>
+        {said("Services")}
         {/* WP-2423 DEC-PAID-ORDER-AUTO-ACCEPT: Ordering's own setting, saved on its own. */}
         <StorePaidOrderAutoAccept
           view={view}
@@ -667,6 +707,7 @@ export function StoreFeaturesPage({
                 tips.enabled
                   ? t("Saved. Guests and staff are offered these tips from now on.")
                   : t("Saved. No one is asked for a tip from now on."),
+                "Tips",
               )
             }
           >
@@ -678,11 +719,7 @@ export function StoreFeaturesPage({
             </span>
           )}
         </div>
-        {message === null ? null : (
-          <p role={message.tone} className="store-features__message">
-            {message.text}
-          </p>
-        )}
+        {said("Tips")}
       </div>
     </WorkspacePage>
   );
