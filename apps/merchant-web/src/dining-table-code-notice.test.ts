@@ -189,7 +189,7 @@ it("WP-2423: warns on the table while a paid round waits for staff to accept it"
   };
   expect(paidRoundAcceptanceNotice(waiting, now)).toEqual({
     tier: "urgent",
-    text: "Round 2 paid 13 min ago and still not accepted · open the order now: accept it, or use Can't make it · refund (and 1 more paid round)",
+    text: "Round 2 paid 13 min ago and still not accepted · open the order now: accept it, or turn it down there for a full refund (and 1 more paid round)",
   });
   expect(
     paidRoundAcceptanceNotice(
