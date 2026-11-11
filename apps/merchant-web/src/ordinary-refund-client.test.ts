@@ -138,11 +138,14 @@ it("binds item queries to order and denies selectable units on uncaptured batche
       refundedByCancellation: false,
       paymentIntentReference: id(31),
       paymentMethod: "Online",
+      kitchen: "Started",
+      withdrawnQuantity: 1,
     },
     data = {
       orderReference: id(1),
       orderNumber: "12",
       canRequest: true,
+      canWithdraw: true,
       claimVersion: 1,
       recentRequests: [
         {
@@ -164,11 +167,68 @@ it("binds item queries to order and denies selectable units on uncaptured batche
     .fn<typeof fetch>()
     .mockResolvedValueOnce(response(data))
     .mockResolvedValueOnce(response({ ...data, items: [{ ...item, paymentCaptured: false }] }))
-    .mockResolvedValueOnce(response({ ...data, orderReference: id(99) }));
+    .mockResolvedValueOnce(response({ ...data, orderReference: id(99) }))
+    // WP-2423 M10: more withdrawn units than the line has, or a kitchen state it doesn't know.
+    .mockResolvedValueOnce(response({ ...data, items: [{ ...item, withdrawnQuantity: 3 }] }))
+    .mockResolvedValueOnce(response({ ...data, items: [{ ...item, kitchen: "Cooking" }] }));
   const client = createOrdinaryRefundClient(fetcher);
   await expect(client.items(id(1), csrf)).resolves.toEqual(data);
-  await expect(client.items(id(1), csrf)).rejects.toMatchObject({ code: "Unavailable" });
-  await expect(client.items(id(1), csrf)).rejects.toMatchObject({ code: "Unavailable" });
+  for (let i = 0; i < 4; i++)
+    await expect(client.items(id(1), csrf)).rejects.toMatchObject({ code: "Unavailable" });
+});
+it("WP-2423 M10: an older server's items read as not known and not withdrawable; stop making it too is sent for refunded units only", async () => {
+  const older = {
+    orderReference: id(1),
+    orderNumber: "12",
+    canRequest: true,
+    claimVersion: 0,
+    recentRequests: [],
+    items: [
+      {
+        orderBatchReference: id(4),
+        orderItemReference: id(5),
+        label: "Latte",
+        quantity: 2,
+        unclaimedQuantity: 2,
+        paymentCaptured: true,
+        refundedByCancellation: false,
+        paymentIntentReference: id(31),
+        paymentMethod: "Online",
+      },
+    ],
+  };
+  const read = await createOrdinaryRefundClient(
+    vi.fn<typeof fetch>().mockResolvedValueOnce(response(older)),
+  ).items(id(1), csrf);
+  expect(read.canWithdraw).toBe(false);
+  expect(read.items[0]).toMatchObject({ kitchen: null, withdrawnQuantity: 0 });
+  const refunded = command().items[0];
+  if (refunded === undefined) throw new Error("fixture");
+  const client = createOrdinaryRefundClient(vi.fn<typeof fetch>());
+  expect(() =>
+    client.prepareRequest({
+      ...command(),
+      withdraw: [{ orderItemReference: id(77), quantity: 1 }],
+    }),
+  ).toThrow();
+  expect(() =>
+    client.prepareRequest({
+      ...command(),
+      withdraw: [
+        { orderItemReference: refunded.orderItemReference, quantity: refunded.quantity + 1 },
+      ],
+    }),
+  ).toThrow();
+  const sending = vi.fn<typeof fetch>().mockResolvedValueOnce(response(preview));
+  await createOrdinaryRefundClient(sending)
+    .prepareRequest({
+      ...command(),
+      withdraw: [{ orderItemReference: refunded.orderItemReference, quantity: refunded.quantity }],
+    })
+    .preview(csrf);
+  expect(JSON.parse(String(sending.mock.calls[0]?.[1]?.body)).withdraw).toEqual([
+    { orderItemReference: refunded.orderItemReference, quantity: refunded.quantity },
+  ]);
 });
 
 it("v15 2026-10-18: a read that changed while loading is read once more, never shown as a refusal", async () => {
@@ -180,6 +240,7 @@ it("v15 2026-10-18: a read that changed while loading is read once more, never s
     recentRequests: [],
     items: [],
   };
+  const answer = { ...data, canWithdraw: false };
   const changed = () => response({ error: "changed_while_loading" }, 409);
   const busy = () => response({ error: "retry_later" }, 503);
   // Changed once: read again at once, and the latest is shown.
@@ -187,14 +248,14 @@ it("v15 2026-10-18: a read that changed while loading is read once more, never s
     .fn<typeof fetch>()
     .mockResolvedValueOnce(changed())
     .mockResolvedValueOnce(response(data));
-  await expect(createOrdinaryRefundClient(fetcher).items(id(1), csrf)).resolves.toEqual(data);
+  await expect(createOrdinaryRefundClient(fetcher).items(id(1), csrf)).resolves.toEqual(answer);
   expect(fetcher).toHaveBeenCalledTimes(2);
   // Busy once: read again after a pause.
   fetcher = vi
     .fn<typeof fetch>()
     .mockResolvedValueOnce(busy())
     .mockResolvedValueOnce(response(data));
-  await expect(createOrdinaryRefundClient(fetcher).items(id(1), csrf)).resolves.toEqual(data);
+  await expect(createOrdinaryRefundClient(fetcher).items(id(1), csrf)).resolves.toEqual(answer);
   expect(fetcher).toHaveBeenCalledTimes(2);
   // Still changing: one retry only, then "changed" (not "Denied").
   fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(changed()).mockResolvedValueOnce(changed());

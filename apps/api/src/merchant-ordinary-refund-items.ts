@@ -1,5 +1,8 @@
 import { staffContentName } from "./staff-content-locale.js";
 import { createPostgresReceiptOrderSource } from "@rms/ordering";
+import { listStoreKitchenOrderItemStates } from "@rms/kitchen";
+import { readRefundWithdrawnUnits } from "./order-refund-withdrawal.js";
+import { withOptionalRead } from "./merchant-round-business-date.js";
 import { MemberDirectoryError, loadStoreMember } from "@bop/membership";
 import type { ConsumerTransaction } from "@bop/eventing";
 import { readClosedRecord, parseOpaqueUuidV7 } from "@bop/identity";
@@ -180,6 +183,24 @@ export function createMerchantOrdinaryRefundItems(options: {
             businessTransaction,
             { orderReference, observedAt },
           );
+          // WP-2423 M10 (DEC-OWNER-DEFAULTS-2026-11-06 item 4): whether the kitchen has started each
+          // dish, so "stop making it too" is ticked for a dish not started yet, and the units
+          // already withdrawn. Read before the refund fence; unreadable: not known (null).
+          const kitchen = await withOptionalRead(
+            businessTransaction,
+            () =>
+              listStoreKitchenOrderItemStates(businessTransaction, scope, [
+                ...new Set(order.items.map(({ snapshot }) => String(snapshot.orderBatchReference))),
+              ]),
+            null,
+          );
+          const withdrawn = await withOptionalRead(
+            businessTransaction,
+            () => readRefundWithdrawnUnits(businessTransaction, scope, [orderReference]),
+            new Map<string, number>(),
+          );
+          const canWithdraw =
+            (await current.authorizeAction("ordering.order.cancel"))?.effect === "Allow";
           // v15 2026-10-18 (dd750045): the refund history is read at a time taken once the Order's
           // refund fence is held, not at the session's resolution: a request recorded for this
           // Order meanwhile is part of the history read, never "inconsistent history".
@@ -279,6 +300,16 @@ export function createMerchantOrdinaryRefundItems(options: {
                 paymentCaptured && !cancelledWithRefund ? snapshot.quantity - occupied.length : 0,
               paymentCaptured,
               refundedByCancellation: cancelledWithRefund,
+              // WP-2423 M10: the kitchen's state of this dish (null: no kitchen work yet, or not
+              // known), and how many of its units staff already said not to make.
+              kitchen:
+                kitchen === null
+                  ? null
+                  : (kitchen.get(String(snapshot.orderItemReference)) ?? null),
+              withdrawnQuantity: Math.min(
+                withdrawn.get(String(snapshot.orderItemReference)) ?? 0,
+                snapshot.quantity,
+              ),
               paymentIntentReference: paid.get(snapshot.orderBatchReference) ?? null,
               paymentMethod: !paymentCaptured
                 ? null
@@ -359,6 +390,8 @@ export function createMerchantOrdinaryRefundItems(options: {
           return Object.freeze({
             orderReference,
             canRequest: viewer.canRequest,
+            // WP-2423 M10: may say "stop making it too" (Ordering's ordering.order.cancel).
+            canWithdraw,
             orderNumber: order.orderNumber,
             claimVersion: context.history.length,
             items: Object.freeze(items),

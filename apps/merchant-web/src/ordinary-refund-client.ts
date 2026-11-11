@@ -145,6 +145,12 @@ export interface RefundItem {
   readonly refundedByCancellation: boolean;
   readonly paymentIntentReference: string | null;
   readonly paymentMethod: "Online" | "CardMachine" | null;
+  /**
+   * WP-2423 M10: the kitchen's state of this dish (null: no kitchen work yet, or not known; an
+   * older server also reads null), and how many units staff already said not to make.
+   */
+  readonly kitchen: "NotStarted" | "Started" | "Cancelled" | null;
+  readonly withdrawnQuantity: number;
 }
 export interface RefundRequestCommand {
   readonly orderReference: string;
@@ -159,9 +165,18 @@ export interface RefundRequestCommand {
     readonly orderItemReference: string;
     readonly quantity: number;
   }[];
+  /**
+   * WP-2423 M10 (DEC-OWNER-DEFAULTS-2026-11-06 item 4): "stop making it too", per refunded item
+   * (at most the units refunded); left out when none.
+   */
+  readonly withdraw?: readonly {
+    readonly orderItemReference: string;
+    readonly quantity: number;
+  }[];
 }
 function command(value: RefundRequestCommand) {
   const withNote = Object.prototype.hasOwnProperty.call(value, "note");
+  const withWithdraw = Object.prototype.hasOwnProperty.call(value, "withdraw");
   const raw = exact(value, [
     "orderReference",
     "requestReference",
@@ -170,6 +185,7 @@ function command(value: RefundRequestCommand) {
     "reasonCode",
     "items",
     ...(withNote ? ["note"] : []),
+    ...(withWithdraw ? ["withdraw"] : []),
   ]);
   if (
     (raw.reasonCode === "OTHER") !== withNote ||
@@ -200,6 +216,23 @@ function command(value: RefundRequestCommand) {
     new Set(items.map((item) => item.orderBatchReference)).size > 100
   )
     return fail();
+  // WP-2423 M10: "stop making it too" only for refunded items, never more units than refunded.
+  const withdraw = !withWithdraw
+    ? []
+    : Array.isArray(raw.withdraw) && raw.withdraw.length >= 1 && raw.withdraw.length <= 100
+      ? Array.from(raw.withdraw, (value) => {
+          const entry = exact(value, ["orderItemReference", "quantity"]);
+          const orderItemReference = ref(entry.orderItemReference);
+          const refunded = items.find((item) => item.orderItemReference === orderItemReference);
+          if (refunded === undefined) return fail();
+          return Object.freeze({
+            orderItemReference,
+            quantity: count(entry.quantity, 1, refunded.quantity),
+          });
+        })
+      : fail();
+  if (new Set(withdraw.map((entry) => entry.orderItemReference)).size !== withdraw.length)
+    return fail();
   return Object.freeze({
     orderReference: ref(raw.orderReference),
     requestReference: ref(raw.requestReference),
@@ -208,6 +241,7 @@ function command(value: RefundRequestCommand) {
     reasonCode: raw.reasonCode,
     items: Object.freeze(items),
     ...(withNote ? { note: String(raw.note).trim() } : {}),
+    ...(withdraw.length > 0 ? { withdraw: Object.freeze(withdraw) } : {}),
   });
 }
 /** A card-machine refund slip's approval/reference code; too many digits could be a card number. */
@@ -571,24 +605,24 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
     async items(orderReference: string, csrf: string, signal?: AbortSignal) {
       ref(orderReference);
       return boundary(async () => {
-        const data = exact(
-          await send(
-            "/merchant/payments/refunds/items",
-            JSON.stringify({ orderReference }),
-            csrf,
-            200,
-            signal,
-          ),
-          [
-            "orderReference",
-            "orderNumber",
-            "canRequest",
-            "claimVersion",
-            "items",
-            "recentRequests",
-          ],
-        );
+        const rawItems = (await send(
+          "/merchant/payments/refunds/items",
+          JSON.stringify({ orderReference }),
+          csrf,
+          200,
+          signal,
+        )) as Record<string, unknown> | null;
+        const data = exact(rawItems, [
+          "orderReference",
+          "orderNumber",
+          "canRequest",
+          "claimVersion",
+          "items",
+          "recentRequests",
+          ...("canWithdraw" in (rawItems ?? {}) ? ["canWithdraw"] : []),
+        ]);
         if (typeof data.canRequest !== "boolean") return fail();
+        if ("canWithdraw" in data && typeof data.canWithdraw !== "boolean") return fail();
         if (
           data.orderReference !== orderReference ||
           !Array.isArray(data.items) ||
@@ -596,6 +630,7 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
         )
           return fail();
         const items = data.items.map((value) => {
+          const withKitchen = value !== null && typeof value === "object" && "kitchen" in value;
           const item = exact(value, [
               "orderBatchReference",
               "orderItemReference",
@@ -606,9 +641,19 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
               "refundedByCancellation",
               "paymentIntentReference",
               "paymentMethod",
+              ...(withKitchen ? ["kitchen", "withdrawnQuantity"] : []),
             ]),
             quantity = count(item.quantity, 1, 999),
-            unclaimedQuantity = count(item.unclaimedQuantity, 0, quantity);
+            unclaimedQuantity = count(item.unclaimedQuantity, 0, quantity),
+            withdrawnQuantity = withKitchen ? count(item.withdrawnQuantity, 0, quantity) : 0;
+          if (
+            withKitchen &&
+            item.kitchen !== null &&
+            item.kitchen !== "NotStarted" &&
+            item.kitchen !== "Started" &&
+            item.kitchen !== "Cancelled"
+          )
+            return fail();
           if (
             typeof item.paymentCaptured !== "boolean" ||
             typeof item.refundedByCancellation !== "boolean" ||
@@ -634,6 +679,10 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
                 : fail(),
             /** WP-2423 item 4: refunded on the store's card machine, or online. */
             paymentMethod: item.paymentMethod as "Online" | "CardMachine" | null,
+            kitchen: withKitchen
+              ? (item.kitchen as "NotStarted" | "Started" | "Cancelled" | null)
+              : null,
+            withdrawnQuantity,
           });
         });
         if (new Set(items.map((item) => item.orderItemReference)).size !== items.length)
@@ -724,6 +773,8 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
           recentRequests: Object.freeze(recentRequests),
           orderReference,
           canRequest: data.canRequest,
+          /** WP-2423 M10: may say "stop making it too" (false from an older server). */
+          canWithdraw: data.canWithdraw === true,
           orderNumber: label(data.orderNumber),
           claimVersion: count(data.claimVersion, 0, 1000),
           items: Object.freeze(items),

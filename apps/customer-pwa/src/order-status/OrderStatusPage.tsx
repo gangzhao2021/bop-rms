@@ -803,6 +803,15 @@ function StatusContent({
   const remakes = view.sources?.remakes ?? [];
   const remaking = (orderItemReference: string) =>
     remakes.find((entry) => entry.orderItemReference === orderItemReference);
+  // WP-2423 M10: units the store refunded and will not make or hand over.
+  const withdrawals = view.sources?.withdrawals ?? [];
+  const withdrawnOf = (orderItemReference: string) =>
+    withdrawals.find((entry) => entry.orderItemReference === orderItemReference)?.quantity ?? 0;
+  const allItems = view.order.batches.flatMap((batch) => batch.items);
+  const nothingToCollect =
+    withdrawals.length > 0 &&
+    allItems.length > 0 &&
+    allItems.every((item) => withdrawnOf(item.orderItemReference) >= item.quantity);
   const pickup = view.order.orderType === "Pickup";
   // DEC-DINING-GUEST-TABLE-START: nobody brings dishes to a table a guest started.
   const calledByNumber = view.sources?.startedByGuest === true;
@@ -838,57 +847,61 @@ function StatusContent({
               : [progress.unpaidHeading, progress.unpaid(formatClockTime(pickupDue.payBy))]
             : complete
               ? [progress.collectedHeading, progress.collected]
-              : // A pickup the store closed as not collected is reported as Cancelled; say why.
-                notCollected
-                ? view.sources?.pickup?.reason === "StoreClosing"
-                  ? [progress.closedForDayHeading, progress.closedForDay]
-                  : [progress.notCollectedHeading, progress.notCollected]
-                : view.order.canonicalPhase === "Cancelled"
-                  ? [progress.cancelledHeading, progress.cancelled]
-                  : view.order.canonicalPhase === "Rejected"
-                    ? [progress.notAcceptedHeading, progress.rejected]
-                    : remakes.length > 0
-                      ? pickup
-                        ? [progress.remakingPickupHeading, progress.remakingPickup]
-                        : [
-                            progress.remakingDineInHeading,
-                            calledByNumber
-                              ? progress.remakingByNumber(view.order.orderNumber)
-                              : progress.remakingDineIn,
-                          ]
-                      : allServed
-                        ? [progress.servedHeading, progress.served]
-                        : view.order.canonicalPhase === "Fulfilled"
-                          ? pickup
-                            ? [progress.completeHeading, progress.complete]
-                            : // Dine-in: everything was served; the table may still order more.
-                              [progress.servedHeading, progress.served]
-                          : kitchenLabel === "AwaitingPayment"
-                            ? [
-                                progress.awaitingPaymentHeading,
-                                someServed
-                                  ? progress.awaitingPaymentSomeServed
-                                  : progress.awaitingPayment,
-                              ]
-                            : someServed
-                              ? [progress.servingHeading, progress.serving]
-                              : stage === "Ready"
-                                ? pickup
-                                  ? [progress.readyPickupHeading, progress.readyPickup]
-                                  : [
-                                      progress.readyDineInHeading,
-                                      calledByNumber
-                                        ? progress.readyByNumber(view.order.orderNumber)
-                                        : progress.readyDineIn,
-                                    ]
-                                : stage === "Preparing"
-                                  ? [progress.preparingHeading, progress.preparing]
-                                  : stage === "Accepted"
-                                    ? [
-                                        progress.acceptedHeading,
-                                        pickup ? progress.acceptedPickup : progress.acceptedDineIn,
+              : nothingToCollect
+                ? [progress.refundedNothingToCollectHeading, progress.refundedNothingToCollect]
+                : // A pickup the store closed as not collected is reported as Cancelled; say why.
+                  notCollected
+                  ? view.sources?.pickup?.reason === "StoreClosing"
+                    ? [progress.closedForDayHeading, progress.closedForDay]
+                    : [progress.notCollectedHeading, progress.notCollected]
+                  : view.order.canonicalPhase === "Cancelled"
+                    ? [progress.cancelledHeading, progress.cancelled]
+                    : view.order.canonicalPhase === "Rejected"
+                      ? [progress.notAcceptedHeading, progress.rejected]
+                      : remakes.length > 0
+                        ? pickup
+                          ? [progress.remakingPickupHeading, progress.remakingPickup]
+                          : [
+                              progress.remakingDineInHeading,
+                              calledByNumber
+                                ? progress.remakingByNumber(view.order.orderNumber)
+                                : progress.remakingDineIn,
+                            ]
+                        : allServed
+                          ? [progress.servedHeading, progress.served]
+                          : view.order.canonicalPhase === "Fulfilled"
+                            ? pickup
+                              ? [progress.completeHeading, progress.complete]
+                              : // Dine-in: everything was served; the table may still order more.
+                                [progress.servedHeading, progress.served]
+                            : kitchenLabel === "AwaitingPayment"
+                              ? [
+                                  progress.awaitingPaymentHeading,
+                                  someServed
+                                    ? progress.awaitingPaymentSomeServed
+                                    : progress.awaitingPayment,
+                                ]
+                              : someServed
+                                ? [progress.servingHeading, progress.serving]
+                                : stage === "Ready"
+                                  ? pickup
+                                    ? [progress.readyPickupHeading, progress.readyPickup]
+                                    : [
+                                        progress.readyDineInHeading,
+                                        calledByNumber
+                                          ? progress.readyByNumber(view.order.orderNumber)
+                                          : progress.readyDineIn,
                                       ]
-                                    : [progress.submittedHeading, progress.submitted];
+                                  : stage === "Preparing"
+                                    ? [progress.preparingHeading, progress.preparing]
+                                    : stage === "Accepted"
+                                      ? [
+                                          progress.acceptedHeading,
+                                          pickup
+                                            ? progress.acceptedPickup
+                                            : progress.acceptedDineIn,
+                                        ]
+                                      : [progress.submittedHeading, progress.submitted];
   const payments = view.sources?.payments;
   const paid = paidTotal(view);
   const refunded = view.sources?.refunds?.refunded ?? null;
@@ -1032,7 +1045,8 @@ function StatusContent({
       !notCollected &&
       !unpaidPickupCancelled &&
       !storeCancelled &&
-      !notAccepted ? (
+      !notAccepted &&
+      !nothingToCollect ? (
         <PickupCodePanel
           orderReference={view.order.orderReference}
           orderNumber={view.order.orderNumber}
@@ -1197,6 +1211,15 @@ function StatusContent({
                       ) : notPaid.has(batch.orderBatchReference) ? (
                         <span className="order-status__item-cancelled">
                           {orderStatusText.itemNotPaid}
+                        </span>
+                      ) : withdrawnOf(item.orderItemReference) > 0 ? (
+                        <span className="order-status__item-refunded">
+                          {withdrawnOf(item.orderItemReference) >= item.quantity
+                            ? orderStatusText.itemRefundedNotProvided
+                            : orderStatusText.itemRefundedNotProvidedOf(
+                                withdrawnOf(item.orderItemReference),
+                                item.quantity,
+                              )}
                         </span>
                       ) : refundedItems.has(item.orderItemReference) ? (
                         <span className="order-status__item-refunded">

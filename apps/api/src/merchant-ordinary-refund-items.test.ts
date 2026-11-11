@@ -56,6 +56,18 @@ vi.mock("@bop/membership", async (original) => ({
   ...(await original<object>()),
   loadStoreMember: d.member,
 }));
+// WP-2423 M10: the kitchen's dish states and the withdrawn units (owner reads), none by default.
+vi.mock("@rms/kitchen", async (original) => ({
+  ...(await original<object>()),
+  listStoreKitchenOrderItemStates: async () =>
+    new Map([["01909974-0000-7000-8000-00000000000c", "NotStarted"]]),
+}));
+vi.mock("./order-refund-withdrawal.js", () => ({
+  readRefundWithdrawnUnits: async () => new Map(),
+}));
+vi.mock("./merchant-round-business-date.js", () => ({
+  withOptionalRead: async (_tx: unknown, work: () => Promise<unknown>) => work(),
+}));
 vi.mock("@rms/ordering", async (original) => ({
   ...(await original<object>()),
   createPostgresReceiptOrderSource: () => d.order,
@@ -73,6 +85,7 @@ function setup() {
     actorReference: id(4),
     allowed,
     kdsOperatorProfileAllows: () => true,
+    authorizeAction: vi.fn(async () => ({ effect: "Allow" })),
   };
   d.resolve.mockResolvedValue(current);
   const run = vi.fn(async (work: (tx: object) => Promise<unknown>) => work(tx));
@@ -153,6 +166,7 @@ it("returns paid unclaimed units and current claim version without private facts
   expect(await f.operation(f.input)).toEqual({
     orderReference: id(8),
     canRequest: true,
+    canWithdraw: true,
     orderNumber: "12",
     claimVersion: 1,
     recentRequests: [
@@ -180,6 +194,9 @@ it("returns paid unclaimed units and current claim version without private facts
         refundedByCancellation: false,
         paymentIntentReference: id(31),
         paymentMethod: "Online",
+        // WP-2423 M10: the kitchen has not started it, so "stop making it too" is the default.
+        kitchen: "NotStarted",
+        withdrawnQuantity: 0,
       },
       {
         orderBatchReference: id(21),
@@ -191,6 +208,8 @@ it("returns paid unclaimed units and current claim version without private facts
         refundedByCancellation: false,
         paymentIntentReference: null,
         paymentMethod: null,
+        kitchen: null,
+        withdrawnQuantity: 0,
       },
     ],
   });

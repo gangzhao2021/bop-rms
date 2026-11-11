@@ -567,3 +567,10 @@ export * from "./infrastructure/persistence/pay-later-item-cancellation-store.js
 export * from "./infrastructure/persistence/order-item-price-reduction-store.js";
 export * from "./infrastructure/persistence/order-tax-rounding-store.js";
 export * from "./application/bill-tax-rounding.js";
+// WP-2423 M10: refunded units the kitchen stops making and the counter does not hand over.
+export {
+  listOrderItemRefundWithdrawals,
+  recordOrderItemRefundWithdrawals,
+  orderItemRefundWithdrawalMaximumLines,
+  type OrderItemRefundWithdrawal,
+} from "./infrastructure/persistence/order-item-refund-withdrawal-store.js";

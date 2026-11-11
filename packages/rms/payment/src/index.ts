@@ -216,6 +216,7 @@ export {
   createPostgresOrdinaryRefundRequestContextSource,
   listOrderOrdinaryRefundRequesters,
   observeOrdinaryRefundOrderAfterFence,
+  listDeclinedOrdinaryRefundRequests,
 } from "./infrastructure/persistence/ordinary-refund-request-store.js";
 
 export { createPostgresOrdinaryRefundRequestRuntime } from "./infrastructure/ordinary-refund-request-runtime.js";

@@ -36,6 +36,8 @@ export interface PickupExecution {
     readonly orderedQuantity: number;
     readonly readyQuantity: number;
     readonly handedOverQuantity: number;
+    /** WP-2423 M10: of the ordered units, refunded and not to be handed over (absent: none). */
+    readonly refundedQuantity?: number;
     /** WP-2423: the item's name as ordered (absent when it could not be read). */
     readonly name?: string;
     /** WP-2423: the options chosen with it, as ordered. */
@@ -305,13 +307,23 @@ export function parsePickupExecution(value: unknown): PickupExecution {
   }
   const items = raw.items.map((value) => {
     const named = !!value && typeof value === "object" && Object.hasOwn(value, "name");
+    const refunded =
+      !!value && typeof value === "object" && Object.hasOwn(value, "refundedQuantity");
     const item = closed(value, [
       "fulfillmentItemReference",
       "orderedQuantity",
       "readyQuantity",
       "handedOverQuantity",
+      ...(refunded ? ["refundedQuantity"] : []),
       ...(named ? ["name", "options"] : []),
     ]);
+    if (
+      refunded &&
+      (!Number.isSafeInteger(item.refundedQuantity) ||
+        Number(item.refundedQuantity) < 1 ||
+        Number(item.refundedQuantity) > Number(item.orderedQuantity))
+    )
+      throw new Error("PICKUP_VIEW_INVALID");
     const options = named ? itemOptions(item.options) : [];
     if (named && (typeof item.name !== "string" || !SAFE_NAME.test(item.name)))
       throw new Error("PICKUP_VIEW_INVALID");
@@ -329,6 +341,7 @@ export function parsePickupExecution(value: unknown): PickupExecution {
       orderedQuantity: Number(item.orderedQuantity),
       readyQuantity: Number(item.readyQuantity),
       handedOverQuantity: Number(item.handedOverQuantity),
+      ...(refunded ? { refundedQuantity: Number(item.refundedQuantity) } : {}),
       ...(named ? { name: item.name as string, options } : {}),
     });
   });

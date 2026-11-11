@@ -72,6 +72,11 @@ export interface KitchenBoardItem {
   /** WP-2423 (M93): the dish contains alcohol; check ID (19+) when serving it. */
   readonly checkId?: boolean;
   /**
+   * WP-2423 M10: units of this dish staff refunded and said not to make (1..requiredQuantity);
+   * absent when none.
+   */
+  readonly refundedQuantity?: number;
+  /**
    * WP-2423 item 8 ⑧ (decision 5): the dish's kitchen section (档口); null: no section. Absent from
    * older servers (no section filter then).
    */
@@ -435,6 +440,8 @@ function item(value: unknown): KitchenBoardItem {
   const hasPaper =
     value !== null && typeof value === "object" && Object.hasOwn(value, "takenOnPaper");
   const hasCheckId = value !== null && typeof value === "object" && Object.hasOwn(value, "checkId");
+  const hasRefunded =
+    value !== null && typeof value === "object" && Object.hasOwn(value, "refundedQuantity");
   const hasSection =
     value !== null && typeof value === "object" && Object.hasOwn(value, "kitchenSection");
   const hasPartSections =
@@ -464,6 +471,7 @@ function item(value: unknown): KitchenBoardItem {
     ...(hasChase ? ["chase"] : []),
     ...(hasPaper ? ["takenOnPaper"] : []),
     ...(hasCheckId ? ["checkId"] : []),
+    ...(hasRefunded ? ["refundedQuantity"] : []),
     ...(hasSection ? ["kitchenSection"] : []),
     ...(hasPartSections ? ["comboPartSections"] : []),
     ...(hasPlacedAt ? ["placedAt"] : []),
@@ -492,7 +500,11 @@ function item(value: unknown): KitchenBoardItem {
     Number(input.requiredQuantity) < 1 ||
     !Number.isSafeInteger(input.completedQuantity) ||
     Number(input.completedQuantity) < 0 ||
-    Number(input.completedQuantity) > Number(input.requiredQuantity)
+    Number(input.completedQuantity) > Number(input.requiredQuantity) ||
+    (hasRefunded &&
+      (!Number.isSafeInteger(input.refundedQuantity) ||
+        Number(input.refundedQuantity) < 1 ||
+        Number(input.refundedQuantity) > Number(input.requiredQuantity)))
   )
     throw new Error("KITCHEN_BOARD_INVALID");
   return Object.freeze({
@@ -513,6 +525,7 @@ function item(value: unknown): KitchenBoardItem {
             throw new Error("KITCHEN_BOARD_INVALID");
           })()
       : {}),
+    ...(hasRefunded ? { refundedQuantity: Number(input.refundedQuantity) } : {}),
     ...(chase === null
       ? {}
       : {

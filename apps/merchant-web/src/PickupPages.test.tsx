@@ -476,9 +476,23 @@ it("Owner 2026-11-03: the same dish made the same way is one line; a different o
   expect(
     mergedPickupLines([line("a", "Noodles"), line("b", "Noodles"), line("c", "Noodles", "Spicy")]),
   ).toEqual([
-    { key: "a", quantity: 2, label: "Noodles" },
-    { key: "c", quantity: 1, label: "Noodles (Spicy)" },
+    { key: "a", quantity: 2, refunded: 0, label: "Noodles" },
+    { key: "c", quantity: 1, refunded: 0, label: "Noodles (Spicy)" },
   ]);
+});
+it("WP-2423 M10: a refunded dish is left out of the bag and the line says so", () => {
+  expect(
+    mergedPickupLines([
+      {
+        fulfillmentItemReference: "a",
+        orderedQuantity: 2,
+        readyQuantity: 2,
+        handedOverQuantity: 0,
+        refundedQuantity: 1,
+        name: "Fries",
+      },
+    ]),
+  ).toEqual([{ key: "a", quantity: 1, refunded: 1, label: "Fries" }]);
 });
 it("Owner 2026-11-03: a card shows no empty facts and no second status", () => {
   const html = renderToStaticMarkup(

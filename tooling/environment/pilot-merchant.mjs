@@ -709,6 +709,8 @@ export async function createInternalMerchant(
     retentionPolicyVersion: 1,
     businessDate: refundBusinessDate,
     soleOperator: (...args) => refundSoleOperator(...args),
+    // WP-2423 M10: "stop making it too" withdrawals recorded with the request.
+    nextReference: () => resources.credentials.reference(),
   });
   // WP-2423 item 4: staff record an item refund of a card-machine payment made on the machine.
   // When the Order has a digital receipt (a dine-in table that also paid rounds online), the

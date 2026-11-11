@@ -6191,6 +6191,24 @@
       "privilege": "INSERT",
       "principal": "api",
       "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); WP-2423 sold-out-and-allergen-safety (M178): the Store's kitchen says which allergens it handles and which equipment it shares, shown to guests (ticks only) (append-only)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_item_refund_withdrawal",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); WP-2423 DEC-OWNER-DEFAULTS-2026-11-06 item 4 (M10): staff refunding a dish choose \"stop making it too\"; the kitchen, pickup and guest reads leave those units out (append-only)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_item_refund_withdrawal",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); WP-2423 DEC-OWNER-DEFAULTS-2026-11-06 item 4 (M10): staff refunding a dish choose \"stop making it too\"; the kitchen, pickup and guest reads leave those units out (append-only)"
     }
   ]
 }

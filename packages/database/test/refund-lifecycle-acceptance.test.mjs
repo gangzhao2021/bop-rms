@@ -3,6 +3,9 @@ import { withAutoAcceptWorld } from "../test-support/auto-accept-world.mjs";
 import { createMerchantOrderStaffCancellation } from "../../../apps/api/src/merchant-order-staff-cancellation.ts";
 import { createPersistentMerchantOrderQueue } from "../../../apps/api/src/persistent-merchant-order-queue.ts";
 import { createPostgresOrdinaryRefundRequestRuntime } from "../../rms/payment/src/index.ts";
+import { listStoreKitchenOrderItemStates } from "../../rms/kitchen/src/index.ts";
+import { createMerchantOrdinaryRefundRequest } from "../../../apps/api/src/merchant-ordinary-refund-request.ts";
+import { readRefundWithdrawnUnits } from "../../../apps/api/src/order-refund-withdrawal.ts";
 import { measureDatabaseClockOffset } from "../../../tooling/environment/pilot-database-clock.mjs";
 import { refundAuthorityCurrent } from "../../../tooling/environment/pilot-refund-workforce.mjs";
 
@@ -303,4 +306,155 @@ it("refund authority is never refused because the application clock trails the d
       globalThis.Date = SystemDate;
     }
   });
+});
+
+/**
+ * WP-2423 M10 (DEC-OWNER-DEFAULTS-2026-11-06 item 4). Under the restricted API role with the
+ * rendered pilot ACL: a manager refunds one of two units of a paid pickup and answers "stop making
+ * it too": the withdrawal is recorded with the refund request, in that transaction, in their name;
+ * the kitchen, pickup and guest reads count it; someone who may not take dishes off an order is
+ * refused before anything is written; the record never changes.
+ */
+it("a dish refunded with stop making it too is recorded with the refund and counted by the kitchen and pickup reads", async () => {
+  await withAutoAcceptWorld(
+    { caseId: "wp2423_rl_withdraw", orderType: "Pickup" },
+    async (world) => {
+      const { assert, paid, kitchenScreen, transactions, seedPaidPickup, query, fresh } = world;
+      await kitchenScreen.seenNow();
+      const order = await seedPaidPickup({ quantity: 2 });
+      assert.equal(
+        (await transactions().run((tx) => paid.consume(tx, order.event))).result.status,
+        "AwaitingOrderAcceptance",
+      );
+      const line = (
+        await query(
+          "SELECT order_item_id::text AS item,quantity FROM rms_ordering.order_item WHERE order_batch_id=$1 ORDER BY order_item_id LIMIT 1",
+          [order.orderBatchReference],
+        )
+      )[0];
+      assert.equal(line.quantity, 2);
+      const command = (staff, withdraw) =>
+        createMerchantOrdinaryRefundRequest({
+          persistence: { ...staff.persistence, now: world.now },
+          authentication: staff.authentication,
+          resolveConfiguration: async () => ({
+            providerAccountReference: world.provider,
+            environment: "Test",
+            roleMapping: { Manager: [staff.roleCode], Owner: [], Finance: [] },
+          }),
+          newAuditReference: fresh,
+          retentionPolicyCode: "FINANCIAL_COMPLIANCE",
+          retentionPolicyVersion: 1,
+          nextReference: fresh,
+        })({
+          sessionCookie: staff.sessionCookie,
+          csrf: staff.csrf,
+          command: {
+            orderReference: order.orderReference,
+            requestReference: withdraw.requestReference,
+            operationReference: withdraw.operationReference,
+            expectedClaimVersion: withdraw.claimVersion ?? 0,
+            reasonCode: "QUALITY_ISSUE",
+            items: [
+              {
+                orderBatchReference: order.orderBatchReference,
+                orderItemReference: line.item,
+                quantity: 1,
+              },
+            ],
+            withdraw: [{ orderItemReference: line.item, quantity: withdraw.quantity }],
+          },
+        });
+      const rows = () =>
+        query(
+          "SELECT withdrawn_quantity,actor_id::text AS actor,permission_code,refund_request_id::text AS request FROM rms_ordering.order_item_refund_withdrawal WHERE order_id=$1",
+          [order.orderReference],
+        );
+      const requests = () =>
+        query(
+          "SELECT count(*)::int AS n FROM rms_payment.ordinary_refund_request WHERE order_id=$1",
+          [order.orderReference],
+        ).then((found) => found[0].n);
+      // A manager without Ordering's cancel permission: refused before any request is recorded.
+      const noCancel = await world.session(["payment.refund.request"], "01a6ab11");
+      noCancel.roleCode = "synthetic_acceptance_01a6ab11";
+      await assert.rejects(
+        command(noCancel, { requestReference: fresh(), operationReference: fresh(), quantity: 1 }),
+        { message: "ORDINARY_REFUND_WITHDRAW_DENIED" },
+      );
+      assert.equal(await requests(), 0);
+      assert.deepEqual(await rows(), []);
+      const manager = await world.session(
+        ["payment.refund.request", "ordering.order.cancel"],
+        "01a6ab12",
+      );
+      manager.roleCode = "synthetic_acceptance_01a6ab12";
+      // More units withdrawn than this request refunds: refused, nothing written.
+      await assert.rejects(
+        command(manager, { requestReference: fresh(), operationReference: fresh(), quantity: 2 }),
+        { message: "ORDINARY_REFUND_WITHDRAW_DENIED" },
+      );
+      assert.equal(await requests(), 0);
+      // One of two units, "stop making it too": recorded with the request, in the manager's name.
+      const first = { requestReference: fresh(), operationReference: fresh(), quantity: 1 };
+      const recorded = await command(manager, first);
+      assert.equal(recorded.status, "Created");
+      assert.deepEqual(await rows(), [
+        {
+          withdrawn_quantity: 1,
+          actor: manager.actor,
+          permission_code: "ordering.order.cancel",
+          request: first.requestReference,
+        },
+      ]);
+      // The same request again (a retry) writes nothing more.
+      await command(manager, first);
+      assert.equal((await rows()).length, 1);
+      // What the kitchen board, the pickup card and the guest's page read, as the API role.
+      const units = await transactions().run((tx) =>
+        readRefundWithdrawnUnits(tx, world.ownerScope, [order.orderReference]),
+      );
+      assert.deepEqual([...units], [[line.item, 1]]);
+      // Not every unit is refunded, so the order still goes ahead: Accept is not refused.
+      const staff = await world.session([], "01a6ab13");
+      const accept = await world.acceptanceFor(staff);
+      const accepted = await accept({
+        sessionCookie: staff.sessionCookie,
+        csrf: staff.csrf,
+        command: {
+          acceptanceReference: fresh(),
+          operationReference: fresh(),
+          orderReference: order.orderReference,
+          orderBatchReference: order.orderBatchReference,
+          expectedOrderVersion: 1,
+        },
+      });
+      assert.ok(accepted);
+      // The kitchen has not started the dish: the refund page ticks "stop making it too".
+      await world.seedKitchenTicket(order);
+      const states = await transactions().run(async (tx) => {
+        await tx.query(
+          "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+          [world.ownerScope.brandReference, world.ownerScope.storeReference],
+        );
+        return listStoreKitchenOrderItemStates(tx, world.ownerScope, [order.orderBatchReference]);
+      });
+      assert.equal(states.get(line.item), "NotStarted");
+      // History stays as recorded for the API role.
+      for (const sql of [
+        "UPDATE rms_ordering.order_item_refund_withdrawal SET withdrawn_quantity=2",
+        "DELETE FROM rms_ordering.order_item_refund_withdrawal",
+      ])
+        await assert.rejects(
+          transactions().run(async (tx) => {
+            await tx.query(
+              "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+              [world.ownerScope.brandReference, world.ownerScope.storeReference],
+            );
+            await tx.query(sql);
+          }),
+        );
+      assert.equal((await rows()).length, 1);
+    },
+  );
 });

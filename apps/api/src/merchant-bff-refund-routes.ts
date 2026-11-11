@@ -413,7 +413,11 @@ export function installMerchantRefundRoutes(
             refundedByCancellation: item.refundedByCancellation,
             paymentIntentReference: item.paymentIntentReference,
             paymentMethod: item.paymentMethod,
+            // WP-2423 M10: whether the kitchen started it, and units already not to be made.
+            kitchen: item.kitchen,
+            withdrawnQuantity: item.withdrawnQuantity,
           })),
+          canWithdraw: result.canWithdraw,
         }),
       )
       .catch((error: unknown) => refundReadFailure(response, error));

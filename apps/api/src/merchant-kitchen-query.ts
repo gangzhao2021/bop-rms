@@ -53,6 +53,7 @@ import { createMerchantBusinessDayWindows } from "./merchant-business-day-window
 import { comboPartsByOrderItem, type ComboPart } from "./merchant-combo-parts.js";
 import { readPaidOrderWatch } from "./merchant-paid-order-watch.js";
 import { readPickupRefundDeadlines } from "./pickup-acceptance-deadline.js";
+import { readRefundWithdrawnUnits } from "./order-refund-withdrawal.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 
@@ -220,8 +221,19 @@ const itemView = (
   preparation: KitchenPreparation,
   parts: ReadonlyMap<string, readonly ComboPart[]> = new Map(),
   chases: ReadonlyMap<string, { count: number; lastChasedAt: string }> = new Map(),
+  withdrawn: ReadonlyMap<string, number> = new Map(),
 ) => ({
   ...item,
+  // WP-2423 M10: units of this dish staff refunded and said not to make ("1 refunded – don't
+  // make it"; all of them: "Refunded – stop"). Absent when none.
+  ...((withdrawn.get(String(item.orderItemReference)) ?? 0) > 0
+    ? {
+        refundedQuantity: Math.min(
+          withdrawn.get(String(item.orderItemReference)) ?? 0,
+          item.requiredQuantity,
+        ),
+      }
+    : {}),
   // WP-2423 item 8 ⑦: a server chased this dish (the ticket turns red and sounds).
   ...(chases.has(String(item.workItemReference))
     ? { chase: chases.get(String(item.workItemReference)) }
@@ -779,6 +791,16 @@ export function createMerchantKitchenQuery(options: {
                 ),
               new Map<string, { count: number; lastChasedAt: string }>(),
             );
+          // WP-2423 M10: refunded units not to be made; without the read nothing is marked.
+          const withdrawnOf = (items: readonly KitchenQueueItemView[]) =>
+            withOptionalRead(
+              tx,
+              () =>
+                readRefundWithdrawnUnits(tx, authority, [
+                  ...new Set(items.map((item) => String(item.orderReference))),
+                ]),
+              new Map<string, number>(),
+            );
           const operatorStatus = (projection: ProjectionMetadata) =>
             kdsOperatorStatus({ session, ...authority, projection });
           if (query.kind === "List") {
@@ -797,6 +819,7 @@ export function createMerchantKitchenQuery(options: {
             const preparation = await kitchenPreparation(tx, authority, items, roundDates);
             const parts = await comboParts(items);
             const chases = await chasesOf(items);
+            const withdrawn = await withdrawnOf(items);
             const canCloseEarlierDayTickets =
               (await scope.authorizeAction(kitchenStaleTicketClosePermission))?.effect === "Allow";
             // DEC-PAID-ORDER-AUTO-ACCEPT: at a Store sending paid orders straight here, what waits
@@ -922,6 +945,7 @@ export function createMerchantKitchenQuery(options: {
                   preparation.get(item.workItemReference) ?? noPreparation,
                   parts,
                   chases,
+                  withdrawn,
                 ),
               ),
             };
@@ -933,6 +957,7 @@ export function createMerchantKitchenQuery(options: {
           const preparation = await kitchenPreparation(tx, authority, [result.item], roundDates);
           const parts = await comboParts([result.item]);
           const chases = await chasesOf([result.item]);
+          const withdrawn = await withdrawnOf([result.item]);
           return {
             ...result,
             operatorStatus: operatorStatus(result),
@@ -942,6 +967,7 @@ export function createMerchantKitchenQuery(options: {
               preparation.get(result.item.workItemReference) ?? noPreparation,
               parts,
               chases,
+              withdrawn,
             ),
           };
         },

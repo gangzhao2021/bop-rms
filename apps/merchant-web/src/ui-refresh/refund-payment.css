@@ -542,3 +542,16 @@
     transition: none;
   }
 }
+
+/* WP-2423 M10: "Stop making it too" under a refunded dish; words, no box. */
+.refund-line__stop {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  flex-basis: 100%;
+  min-height: 44px;
+}
+.refund-line__stop .refund-line__meta {
+  flex-basis: 100%;
+}

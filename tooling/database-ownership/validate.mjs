@@ -2358,6 +2358,11 @@ async function scanUnsupported(root, module, diagnostics) {
               "order_payment_disposition_record",
             ],
           },
+          // WP-2423 M10: refunded units the kitchen stops making and the counter does not hand over.
+          "src/infrastructure/persistence/order-item-refund-withdrawal-store.ts": {
+            owner: "ordering",
+            tables: ["order_item_refund_withdrawal"],
+          },
           // WP-2423 item 8 ① segment 2: manager comps and discounts before the table pays.
           "src/infrastructure/persistence/order-item-price-reduction-store.ts": {
             owner: "ordering",

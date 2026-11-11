@@ -1,3 +1,5 @@
+import { readRefundWithdrawnUnits } from "./order-refund-withdrawal.js";
+import { withOptionalRead } from "./merchant-round-business-date.js";
 import {
   createDiningOrderDeliveryProgress,
   servedOrderItemFacts,
@@ -595,6 +597,28 @@ export function createCustomerOrderStatusRead(
                 orderItemReference: entry.orderItemReference,
                 quantity: entry.openQuantity,
               });
+          // WP-2423 M10: units the Store refunded and said it will not make or hand over, so the
+          // guest reads "Refunded – not provided" for them. Unreadable: not said.
+          const withdrawals: { orderItemReference: string; quantity: number }[] = [];
+          if (await stillAuthorized()) {
+            const shownQuantity = new Map(
+              result.order.batches.flatMap((batch) =>
+                batch.items.map(
+                  (item) => [String(item.orderItemReference), item.quantity] as const,
+                ),
+              ),
+            );
+            for (const [orderItemReference, quantity] of await withOptionalRead(
+              transaction,
+              () => readRefundWithdrawnUnits(transaction, options.scope, [orderReference]),
+              new Map<string, number>(),
+            ))
+              if (shownQuantity.has(orderItemReference))
+                withdrawals.push({
+                  orderItemReference,
+                  quantity: Math.min(quantity, shownQuantity.get(orderItemReference) ?? quantity),
+                });
+          }
           // WP-2423 D5: each item's frozen price before tax, so the page prints item prices, then
           // the subtotal and tax, like the receipt. Ordering's own frozen order items; only for the
           // items this projection shows. If they can't be read, the page keeps the totals it has.
@@ -780,6 +804,7 @@ export function createCustomerOrderStatusRead(
               ...(staffCancellations.length === 0 ? {} : { staffCancellations }),
               ...(itemCancellations.length === 0 ? {} : { itemCancellations }),
               ...(remakes.length === 0 ? {} : { remakes }),
+              ...(withdrawals.length === 0 ? {} : { withdrawals }),
               ...(refunds === null ? {} : { refunds }),
               ...(itemPrices === null ? {} : { itemPrices }),
               ...(tips === null ? {} : { tips }),

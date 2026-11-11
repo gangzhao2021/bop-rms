@@ -252,8 +252,10 @@ export function PickupHandoffForm({
       setStatus("Rejected");
     }
   };
-  const lines =
-    item.execution?.items.filter((line) => line.readyQuantity > line.handedOverQuantity) ?? [];
+  // WP-2423 M10: units refunded and not to be handed over are left out of what staff hand over.
+  const toHandOver = (line: NonNullable<typeof item.execution>["items"][number]) =>
+    Math.max(0, line.readyQuantity - line.handedOverQuantity - (line.refundedQuantity ?? 0));
+  const lines = item.execution?.items.filter((line) => toHandOver(line) > 0) ?? [];
   const orderNumber =
     item.publicOrderNumber ?? item.execution?.publicOrderReference ?? t("reference unavailable");
   return (
@@ -265,7 +267,7 @@ export function PickupHandoffForm({
               <li key={line.fulfillmentItemReference}>
                 {t("{line}: {value} to hand over", {
                   line: pickupItemLabel(line, index),
-                  value: line.readyQuantity - line.handedOverQuantity,
+                  value: toHandOver(line),
                 })}
               </li>
             ))}
@@ -357,8 +359,12 @@ export function PickupHandoffForm({
             <li key={line.fulfillmentItemReference}>
               {t("{line}: {value} to hand over", {
                 line: pickupItemLabel(line, index),
-                value: line.readyQuantity - line.handedOverQuantity,
+                value: toHandOver(line),
               })}
+              {(line.refundedQuantity ?? 0) > 0
+                ? " · " +
+                  t("{count} refunded, not in the bag", { count: line.refundedQuantity ?? 0 })
+                : ""}
             </li>
           ))}
         </ul>

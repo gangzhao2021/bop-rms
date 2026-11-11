@@ -93,6 +93,14 @@ const databaseAccessManifestInput = {
       piiClassification: ["indirect_identifier"],
     },
     {
+      table: "order_item_refund_withdrawal",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/ordering" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "transactional",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       table: "order_item_price_reduction",
       classification: "append-only-record",
       writeOwner: { kind: "module", id: "@rms/ordering" },
@@ -532,6 +540,26 @@ const databaseAccessManifestInput = {
       readPattern: null,
       source:
         "packages/rms/ordering/src/infrastructure/persistence/order-item-price-reduction-store.ts",
+    },
+    {
+      id: "order-item-refund-withdrawal.read.order_item_refund_withdrawal",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "order_item_refund_withdrawal" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/ordering/src/infrastructure/persistence/order-item-refund-withdrawal-store.ts",
+    },
+    {
+      id: "order-item-refund-withdrawal.write.order_item_refund_withdrawal",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "order_item_refund_withdrawal" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: null,
+      source:
+        "packages/rms/ordering/src/infrastructure/persistence/order-item-refund-withdrawal-store.ts",
     },
     {
       id: "pay-later-item-cancellation.read.order_item_staff_cancellation",

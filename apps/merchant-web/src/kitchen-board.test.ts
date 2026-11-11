@@ -44,3 +44,12 @@ it("Owner 2026-11-03: a round from a paper slip stays marked on the board", () =
   ).toBe(true);
   expect(parseKitchenWorkItemView(kitchenItemFixture()).takenOnPaper).toBeUndefined();
 });
+it("WP-2423 M10: refunded units the kitchen is told not to make, never more than the dish has", () => {
+  const item = kitchenItemFixture();
+  expect(parseKitchenWorkItemView({ ...item, refundedQuantity: 1 }).refundedQuantity).toBe(1);
+  expect(parseKitchenWorkItemView(item).refundedQuantity).toBeUndefined();
+  expect(() =>
+    parseKitchenWorkItemView({ ...item, refundedQuantity: Number(item.requiredQuantity) + 1 }),
+  ).toThrow();
+  expect(() => parseKitchenWorkItemView({ ...item, refundedQuantity: 0 })).toThrow();
+});

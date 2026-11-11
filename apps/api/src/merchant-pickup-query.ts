@@ -1,3 +1,5 @@
+import { withOptionalRead } from "./merchant-round-business-date.js";
+import { readRefundWithdrawnUnits } from "./order-refund-withdrawal.js";
 import { staffNameLocales } from "./staff-content-locale.js";
 import { readStoreFeatures } from "./merchant-store-features.js";
 import { readClosedRecord } from "@bop/identity";
@@ -241,6 +243,30 @@ export function createMerchantPickupQuery(options: {
               }),
             );
       }
+      // WP-2423 M10: units staff refunded and said not to hand over. A pickup with every unit
+      // refunded and nothing handed over has nothing left to collect: it leaves the queue like a
+      // cancelled one. Unreadable: nothing is subtracted.
+      const withdrawn = await withOptionalRead(
+        tx,
+        () =>
+          readRefundWithdrawnUnits(
+            tx,
+            selected,
+            result.items
+              .filter((item) => !cancelled.has(String(item.orderReference)))
+              .map((item) => String(item.orderReference)),
+          ),
+        new Map<string, number>(),
+      );
+      const refundedOf = (line: (typeof result.items)[number]["items"][number]) =>
+        line.orderItemReference === undefined
+          ? 0
+          : Math.min(withdrawn.get(String(line.orderItemReference)) ?? 0, line.orderedQuantity);
+      const nothingToCollect = (item: (typeof result.items)[number]) =>
+        item.items.length > 0 &&
+        item.items.every(
+          (line) => line.handedOverQuantity === 0 && refundedOf(line) >= line.orderedQuantity,
+        );
       // WP-2423 item 8 ⑦ (v15 finding v): guests' pickup ordering is off; staff still hand over
       // the orders already placed here. Unreadable: not said.
       const features = await readStoreFeatures(
@@ -257,7 +283,7 @@ export function createMerchantPickupQuery(options: {
         storeReference: selected.storeReference,
         guestPickupOff: !features.pickup,
         items: result.items
-          .filter((item) => !cancelled.has(String(item.orderReference)))
+          .filter((item) => !cancelled.has(String(item.orderReference)) && !nothingToCollect(item))
           .map((item) =>
             Object.freeze({
               ...item,
@@ -277,6 +303,8 @@ export function createMerchantPickupQuery(options: {
                   orderedQuantity: line.orderedQuantity,
                   readyQuantity: line.readyQuantity,
                   handedOverQuantity: line.handedOverQuantity,
+                  // WP-2423 M10: of these, refunded and not to be handed over (absent: none).
+                  ...(refundedOf(line) > 0 ? { refundedQuantity: refundedOf(line) } : {}),
                   // WP-2423: the item's name and options, so staff match what they hand over.
                   ...(label === undefined ? {} : { name: label.name, options: label.options }),
                 });

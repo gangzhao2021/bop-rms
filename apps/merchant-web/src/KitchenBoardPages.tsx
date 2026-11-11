@@ -257,7 +257,8 @@ export function mergeIdenticalKitchenItems(items: readonly KitchenBoardItem[]) {
       item.completedQuantity === 0 &&
       item.comboParts === undefined &&
       item.comboPartOf === undefined &&
-      item.chase === undefined;
+      item.chase === undefined &&
+      item.refundedQuantity === undefined;
     // DEC-KITCHEN-ONE-TAP: a merged line never spans rounds, so a tap never takes a dish of a round
     // the cook has not read.
     const key = mergeable
@@ -1554,6 +1555,17 @@ function WorkCard({
             {t("Cancelled · don't make it")}
           </p>
         ) : null}
+        {item.refundedQuantity === undefined || !isActiveKitchenWork(item) ? null : (
+          // WP-2423 M10: the guest was refunded for these and the store said not to make them.
+          <p className="kitchen-work-item__cancelled" role="alert">
+            {item.refundedQuantity >= item.requiredQuantity
+              ? t("Refunded · stop, don't make it")
+              : t("{count} refunded · don't make it · make {left}", {
+                  count: item.refundedQuantity,
+                  left: item.requiredQuantity - item.refundedQuantity,
+                })}
+          </p>
+        )}
         {item.comboPartOf === undefined ? null : (
           <p className="kitchen-work-item__combo-note">{kitchenComboDishNote(item.comboPartOf)}</p>
         )}

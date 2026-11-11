@@ -42,6 +42,7 @@ const client = createOrdinaryRefundClient();
 const approvalClient = createRefundApprovalClient();
 type Context = Awaited<ReturnType<typeof client.context>>;
 type Items = Awaited<ReturnType<typeof client.items>>;
+type RefundItem = Items["items"][number];
 type Intent = ReturnType<typeof client.prepareRequest>;
 type Preview = Awaited<ReturnType<Intent["preview"]>>;
 type Submitted = Awaited<ReturnType<Intent["submit"]>>;
@@ -601,6 +602,8 @@ function RefundWizard({
 }) {
   const [items, setItems] = useState<Items | null>(null),
     [quantities, setQuantities] = useState<Record<string, number>>({}),
+    // WP-2423 M10: per dish, staff's answer to "stop making it too?" (absent: the default).
+    [stopMaking, setStopMaking] = useState<Record<string, boolean>>({}),
     [reason, setReason] = useState(""),
     [note, setNote] = useState(""),
     [approvals, setApprovals] = useState<ReadonlyMap<string, RefundApprovalEntry>>(new Map()),
@@ -839,7 +842,19 @@ function RefundWizard({
     setMessage("");
     clearPreview();
     try {
-      const key = JSON.stringify([items.claimVersion, selection, reason, note.trim()]);
+      // WP-2423 M10: the units of each refunded dish the kitchen stops making (never more than
+      // are left to make).
+      const withdraw = chosen
+        .filter((item) => stops(item))
+        .map((item) => ({
+          orderItemReference: item.orderItemReference,
+          quantity: Math.min(
+            quantities[item.orderItemReference] ?? 0,
+            item.quantity - item.withdrawnQuantity,
+          ),
+        }))
+        .filter((entry) => entry.quantity > 0);
+      const key = JSON.stringify([items.claimVersion, selection, reason, note.trim(), withdraw]);
       if (previewIdentity.current?.key !== key)
         previewIdentity.current = {
           key,
@@ -855,6 +870,7 @@ function RefundWizard({
         reasonCode: reason,
         items: selection,
         ...(reason === "OTHER" ? { note: note.trim() } : {}),
+        ...(withdraw.length > 0 ? { withdraw } : {}),
       });
       operation.current = intent;
       const result = await intent.preview(csrf, controller.signal);
@@ -994,6 +1010,14 @@ function RefundWizard({
     setQuantities((prior) => ({ ...prior, [reference]: quantity }));
     clearPreview();
   };
+  // WP-2423 M10 (DEC-OWNER-DEFAULTS-2026-11-06 item 4): "stop making it too" is offered to staff who
+  // may take dishes off an order, Yes by default while the kitchen has not started the dish.
+  const stopOffered = (item: RefundItem) =>
+    items?.canWithdraw === true &&
+    item.kitchen !== "Cancelled" &&
+    item.withdrawnQuantity < item.quantity;
+  const stops = (item: RefundItem) =>
+    stopOffered(item) && (stopMaking[item.orderItemReference] ?? item.kitchen !== "Started");
   // The items and requests load by themselves; rereading them is offered when it has a purpose:
   // a failed read, an unknown result, a recorded request, or a follower watching the list.
   const refresh =
@@ -1180,6 +1204,36 @@ function RefundWizard({
                         <span className="refund-line__meta">{t("Paid on card machine")}</span>
                       ) : null}
                     </label>
+                    {(quantities[item.orderItemReference] ?? 0) > 0 && stopOffered(item) ? (
+                      // WP-2423 M10: the kitchen and the counter follow the refund.
+                      <label className="refund-line__stop">
+                        <input
+                          type="checkbox"
+                          checked={stops(item)}
+                          onChange={(event) => {
+                            const checked = event.target.checked;
+                            setStopMaking((prior) => ({
+                              ...prior,
+                              [item.orderItemReference]: checked,
+                            }));
+                            clearPreview();
+                          }}
+                        />{" "}
+                        {t("Stop making it too")}
+                        <span className="refund-line__meta">
+                          {stops(item)
+                            ? t("The kitchen and the counter leave it out.")
+                            : item.kitchen === "Started"
+                              ? t("Already being made: the guest keeps the food.")
+                              : t("The guest keeps the food.")}
+                        </span>
+                      </label>
+                    ) : null}
+                    {item.withdrawnQuantity > 0 ? (
+                      <span className="refund-line__meta">
+                        {t("{count} not made, refunded", { count: item.withdrawnQuantity })}
+                      </span>
+                    ) : null}
                     {item.unclaimedQuantity === 0 ? (
                       <span className="refund-line__meta">{t("Already in a refund")}</span>
                     ) : (

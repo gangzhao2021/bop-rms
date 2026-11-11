@@ -255,6 +255,15 @@ export class CustomerOrderStatusHandler {
                           quantity: remake.quantity,
                         })),
                       }),
+                  // WP-2423 M10: refunded units the Store does not make or hand over.
+                  ...(sources.withdrawals === undefined
+                    ? {}
+                    : {
+                        withdrawals: sources.withdrawals.map((entry) => ({
+                          orderItemReference: entry.orderItemReference,
+                          quantity: entry.quantity,
+                        })),
+                      }),
                   // WP-2423 (v15 3cd0f8dd M3): confirmed refunds, as the latest receipt states them.
                   ...(sources.refunds === undefined
                     ? {}

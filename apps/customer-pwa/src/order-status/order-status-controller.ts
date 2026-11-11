@@ -198,6 +198,9 @@ function parseSources(
     ...(value !== null && typeof value === "object" && Object.hasOwn(value, "remakes")
       ? ["remakes"]
       : []),
+    ...(value !== null && typeof value === "object" && Object.hasOwn(value, "withdrawals")
+      ? ["withdrawals"]
+      : []),
     ...(value !== null && typeof value === "object" && Object.hasOwn(value, "tips")
       ? ["tips"]
       : []),
@@ -622,6 +625,40 @@ function parseSources(
       }),
     );
   }
+  // WP-2423 M10: refunded units the store will not make or hand over; each item at most once,
+  // never more units than the item has.
+  let withdrawals: OrderStatusSources["withdrawals"];
+  if (Object.hasOwn(raw, "withdrawals")) {
+    const items = new Map(
+      batches.flatMap((batch) =>
+        batch.items.map((item) => [item.orderItemReference, item] as const),
+      ),
+    );
+    if (
+      !Array.isArray(raw.withdrawals) ||
+      raw.withdrawals.length < 1 ||
+      raw.withdrawals.length > items.size
+    )
+      return invalid();
+    const seen = new Set<string>();
+    withdrawals = Object.freeze(
+      raw.withdrawals.map((value: unknown) => {
+        const entry = exact(value, ["orderItemReference", "quantity"]);
+        const orderItemReference = parseReference(entry.orderItemReference);
+        const item = items.get(orderItemReference);
+        if (
+          item === undefined ||
+          seen.has(orderItemReference) ||
+          !Number.isSafeInteger(entry.quantity) ||
+          Number(entry.quantity) < 1 ||
+          Number(entry.quantity) > item.quantity
+        )
+          return invalid();
+        seen.add(orderItemReference);
+        return Object.freeze({ orderItemReference, quantity: Number(entry.quantity) });
+      }),
+    );
+  }
   // WP-2423 D5: every shown item's price before tax and its tax, adding up to its total.
   let itemPrices: OrderStatusSources["itemPrices"];
   if (Object.hasOwn(raw, "itemPrices")) {
@@ -793,6 +830,7 @@ function parseSources(
     ...(refunds === undefined ? {} : { refunds }),
     ...(tips === undefined ? {} : { tips }),
     ...(remakes === undefined ? {} : { remakes }),
+    ...(withdrawals === undefined ? {} : { withdrawals }),
     ...(itemPrices === undefined ? {} : { itemPrices }),
     ...(dining ? { dining } : {}),
     ...(pickup === undefined ? {} : { pickup }),

@@ -4363,10 +4363,13 @@ it("protects refund items transport and strips private nested data", async () =>
     refundedByCancellation: false,
     paymentIntentReference: id(31),
     paymentMethod: "Online" as const,
+    kitchen: "NotStarted" as const,
+    withdrawnQuantity: 0,
   };
   const query = vi.fn<NonNullable<MerchantBffRouterOptions["ordinaryRefundItems"]>>(async () => ({
     orderReference: id(1),
     canRequest: true,
+    canWithdraw: true,
     orderNumber: "12",
     claimVersion: 1,
     recentRequests: [
@@ -4436,6 +4439,7 @@ it("protects refund items transport and strips private nested data", async () =>
       },
     ],
     items: [item],
+    canWithdraw: true,
   });
   query.mockRejectedValueOnce(new Error("private"));
   expect(await (await send()).json()).toEqual({ error: "retry_later" });

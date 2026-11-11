@@ -1098,6 +1098,15 @@ export const orderStatusText = Object.freeze({
     get collected() {
       return t("Your order has been collected. Enjoy!");
     },
+    /** WP-2423 M10: every item was refunded and the store will not make it. */
+    get refundedNothingToCollectHeading() {
+      return t("Refunded, nothing to collect");
+    },
+    get refundedNothingToCollect() {
+      return t(
+        "The store refunded everything on this order and won't make it. The money goes back to your original payment.",
+      );
+    },
     get notCollectedHeading() {
       return t("Not collected");
     },
@@ -1390,6 +1399,12 @@ export const orderStatusText = Object.freeze({
   get itemBeingRemade() {
     return t("Being remade");
   },
+  /** WP-2423 M10: the store refunded these and will not make or hand them over. */
+  get itemRefundedNotProvided() {
+    return t("Refunded – not provided");
+  },
+  itemRefundedNotProvidedOf: (count: number, quantity: number) =>
+    t("{count} of {quantity} refunded – not provided", { count, quantity }),
   itemServedOf: (served: number | undefined, quantity: number) =>
     t("Served {value1} of {quantity}", { value1: served ?? "", quantity }),
   get discountsAndFees() {

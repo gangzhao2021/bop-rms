@@ -7,7 +7,11 @@ import {
   createOrdinaryRefundRoleResolver,
   observeOrdinaryRefundOrderAfterFence,
 } from "@rms/payment";
-import { createPostgresOrderAcceptanceReader } from "@rms/ordering";
+import {
+  createPostgresOrderAcceptanceReader,
+  orderItemRefundWithdrawalMaximumLines,
+  recordOrderItemRefundWithdrawals,
+} from "@rms/ordering";
 import { cardMachineWholeRefundSource } from "./merchant-card-machine-refund.js";
 import {
   everyBatchUnitClaimed,
@@ -62,6 +66,8 @@ export function createMerchantOrdinaryRefundRequest(options: {
   /** WP-2423 Q19 (DEC-SOLE-OPERATOR-APPROVAL): an Owner may request while sole operator is in
    * effect for them; absent, only a Manager may request (unchanged). */
   soleOperator?: MerchantRefundSoleOperatorResolver;
+  /** WP-2423 M10: references for the "stop making it too" withdrawals; absent: none accepted. */
+  nextReference?: () => string;
 }) {
   const resolve = createMerchantStoreScope(options.persistence);
   const deny = (): never => {
@@ -78,6 +84,40 @@ export function createMerchantOrdinaryRefundRequest(options: {
   const notAccepted = (): never => {
     throw new Error("ORDINARY_REFUND_ORDER_NOT_ACCEPTED");
   };
+  /**
+   * WP-2423 M10 (DEC-OWNER-DEFAULTS-2026-11-06 item 4): "stop making it too" asked by someone who
+   * may not take dishes off an order (`ordering.order.cancel`), or for more units than this request
+   * refunds. Refused before anything is written.
+   */
+  const withdrawNotAllowed = (): never => {
+    throw new Error("ORDINARY_REFUND_WITHDRAW_DENIED");
+  };
+  const parseWithdraw = (value: unknown) => {
+    if (
+      !Array.isArray(value) ||
+      value.length < 1 ||
+      value.length > orderItemRefundWithdrawalMaximumLines
+    )
+      return deny();
+    const lines = value.map((entry: unknown) => {
+      const line = readClosedRecord(entry, ["orderItemReference", "quantity"]);
+      if (
+        typeof line.quantity !== "number" ||
+        !Number.isInteger(line.quantity) ||
+        line.quantity < 1 ||
+        line.quantity > 999
+      )
+        return deny();
+      return Object.freeze({
+        orderItemReference: String(
+          parseOpaqueUuidV7(line.orderItemReference, "ACTOR_REFERENCE_INVALID"),
+        ),
+        quantity: line.quantity,
+      });
+    });
+    if (new Set(lines.map((line) => line.orderItemReference)).size !== lines.length) return deny();
+    return lines;
+  };
   const resolveCommand = async (
     input: { sessionCookie: unknown; csrf: unknown; command: unknown },
     preview: boolean,
@@ -91,11 +131,20 @@ export function createMerchantOrdinaryRefundRequest(options: {
       "reasonCode",
       "items",
     ];
-    const withNote =
+    const has = (key: string) =>
       input.command !== null &&
       typeof input.command === "object" &&
-      Object.prototype.hasOwnProperty.call(input.command, "note");
-    const raw = readClosedRecord(input.command, withNote ? [...keys, "note"] : keys);
+      Object.prototype.hasOwnProperty.call(input.command, key);
+    const withNote = has("note"),
+      withWithdraw = has("withdraw");
+    const commandRecord = readClosedRecord(input.command, [
+      ...keys,
+      ...(withNote ? ["note"] : []),
+      ...(withWithdraw ? ["withdraw"] : []),
+    ]);
+    const { withdraw: rawWithdraw, ...raw } = commandRecord as Record<string, unknown>;
+    const withdraw = withWithdraw ? parseWithdraw(rawWithdraw) : null;
+    if (withdraw !== null && options.nextReference === undefined) return withdrawNotAllowed();
     const orderReference = String(parseOpaqueUuidV7(raw.orderReference, "ACTOR_REFERENCE_INVALID"));
     if (!ordinaryRefundReasonCodes.includes(raw.reasonCode as never)) return deny();
     // "Other" needs a note of 1–200 characters; no other reason carries one.
@@ -160,6 +209,14 @@ export function createMerchantOrdinaryRefundRequest(options: {
             brandReference: String(current.context.brand.brandReference),
             storeReference: String(current.store.storeReference),
           };
+          // WP-2423 M10: taking dishes off the order is Ordering's `ordering.order.cancel`, checked
+          // with the request and again before the commit.
+          if (withdraw !== null) {
+            const mayCancel = async () =>
+              (await current.authorizeAction("ordering.order.cancel"))?.effect === "Allow";
+            if (!(await mayCancel())) return withdrawNotAllowed();
+            authority.recheckBeforeReply(mayCancel);
+          }
           const configuration = await options.resolveConfiguration(businessTransaction, scope);
           const workforce = createMerchantWorkforcePermissionSource({
             resolveContext: async () => ({
@@ -356,6 +413,45 @@ export function createMerchantOrdinaryRefundRequest(options: {
             );
             if (unaccepted.some((units) => everyBatchUnitClaimed(units, claimed, asked)))
               return notAccepted();
+          }
+          // WP-2423 M10: "stop making it too", for units this request refunds, recorded with it.
+          if (withdraw !== null) {
+            const lines = withdraw.map((entry) => {
+              const claimed = result.request.payments.flatMap((payment) =>
+                payment.items.filter(
+                  (item) => String(item.orderItemReference) === entry.orderItemReference,
+                ),
+              );
+              const units = claimed.reduce((sum, item) => sum + item.refundUnitOrdinals.length, 0);
+              const asked = (Array.isArray(raw.items) ? raw.items : []).find(
+                (item: unknown) =>
+                  item !== null &&
+                  typeof item === "object" &&
+                  (item as { orderItemReference?: unknown }).orderItemReference ===
+                    entry.orderItemReference,
+              ) as { orderBatchReference?: unknown } | undefined;
+              if (
+                claimed.length === 0 ||
+                entry.quantity > units ||
+                typeof asked?.orderBatchReference !== "string"
+              )
+                return withdrawNotAllowed();
+              return {
+                orderBatchReference: asked.orderBatchReference,
+                orderItemReference: entry.orderItemReference,
+                quantity: entry.quantity,
+              };
+            });
+            if (!preview)
+              await recordOrderItemRefundWithdrawals(businessTransaction, scope, {
+                orderReference,
+                refundRequestReference: String(result.request.requestReference),
+                operationReference: String(result.request.operationReference),
+                actorReference: String(current.actorReference),
+                recordedAt: String(result.request.requestedAt),
+                nextReference: options.nextReference as () => string,
+                lines,
+              });
           }
           const components = {
             netAmountMinor: 0n,

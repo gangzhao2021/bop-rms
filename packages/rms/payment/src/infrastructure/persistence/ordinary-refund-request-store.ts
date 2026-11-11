@@ -1093,3 +1093,31 @@ export async function listOrderOrdinaryRefundRequesters(
     }),
   );
 }
+
+/**
+ * WP-2423 M10: which of the given ordinary refund requests of the Store were declined (they
+ * refund nothing). A read only, under no refund fence: an Ordering withdrawal tied to a declined
+ * request stops counting. Caller authorizes the Store.
+ */
+export async function listDeclinedOrdinaryRefundRequests(
+  tx: ConsumerTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  requestReferences: readonly string[],
+): Promise<ReadonlySet<string>> {
+  if (requestReferences.length === 0) return new Set();
+  if (requestReferences.length > 1000) throw new Error("ORDINARY_REFUND_DECLINE_UNAVAILABLE");
+  const brand = String(parsePaymentReference(scope.brandReference)),
+    store = String(parsePaymentReference(scope.storeReference));
+  const requests = [
+    ...new Set(requestReferences.map((value) => String(parsePaymentReference(value)))),
+  ];
+  await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+    brand,
+    store,
+  ]);
+  const found = await tx.query<{ request: string }>(
+    "SELECT request_id::text AS request FROM rms_payment.ordinary_refund_decline WHERE brand_id=$1 AND store_id=$2 AND request_id=ANY($3::uuid[])",
+    [brand, store, requests],
+  );
+  return new Set(found.rows.map((row) => String(parsePaymentReference(row.request))));
+}

@@ -99,6 +99,11 @@ export interface OrderStatusSources {
     readonly orderItemReference: string;
     readonly quantity: number;
   }[];
+  /** WP-2423 M10: units the store refunded and will not make or hand over, per Order item. */
+  readonly withdrawals?: readonly {
+    readonly orderItemReference: string;
+    readonly quantity: number;
+  }[];
   /**
    * WP-2423 Q9-G1: the Store did not accept this paid pickup in time and it is refunded
    * automatically, or it is waiting for the Store after an outage (Pickup only).

@@ -123,15 +123,23 @@ export function fromEarlierDay(item: PickupQueueItem, today: string | null | und
 export function mergedPickupLines(
   lines: readonly NonNullable<PickupQueueItem["execution"]>["items"][number][],
 ) {
-  const merged = new Map<string, { key: string; quantity: number; label: string }>();
+  const merged = new Map<
+    string,
+    { key: string; quantity: number; refunded: number; label: string }
+  >();
   lines.forEach((line, index) => {
     const label = pickupItemLabel(line, index);
+    // WP-2423 M10: refunded units are not in the bag; the line says how many were refunded.
+    const refunded = line.refundedQuantity ?? 0;
     const same = merged.get(label);
-    if (same) same.quantity += line.orderedQuantity;
-    else
+    if (same) {
+      same.quantity += line.orderedQuantity - refunded;
+      same.refunded += refunded;
+    } else
       merged.set(label, {
         key: line.fulfillmentItemReference,
-        quantity: line.orderedQuantity,
+        quantity: line.orderedQuantity - refunded,
+        refunded,
         label,
       });
   });
@@ -223,6 +231,9 @@ function PickupCard({
             {mergedPickupLines(contents).map((line) => (
               <li key={line.key}>
                 {line.quantity} × {line.label}
+                {line.refunded > 0
+                  ? " · " + t("{count} refunded, not in the bag", { count: line.refunded })
+                  : ""}
               </li>
             ))}
           </ul>
