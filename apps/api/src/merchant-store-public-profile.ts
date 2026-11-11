@@ -38,6 +38,20 @@ export class MerchantStorePublicProfileError extends Error {
 const hash = (value: unknown) => "sha256:" + sha256Hex(canonicalizeRfc8785(value));
 
 /**
+ * DEC-STORE-PHONE-BEFORE-PICKUP (M109): turning pickup on and leaving the profile without a phone
+ * each read the other fact. Both take this Store's one hold first, so two people saving at the
+ * same moment are answered one after the other and the second sees what the first committed.
+ */
+export async function holdStorePickupPhone(
+  transaction: { query(sql: string, values: readonly unknown[]): Promise<unknown> },
+  scope: { brandReference: string; storeReference: string },
+): Promise<void> {
+  await transaction.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+    "StorePickupPhone:" + scope.brandReference + ":" + scope.storeReference,
+  ]);
+}
+
+/**
  * M109: the business phone on the Store's current published profile (null: none, or no profile
  * yet). Read only, inside the caller's authorized transaction.
  */
@@ -262,6 +276,7 @@ export function createMerchantStorePublicProfile(options: {
             // M109: pickup guests order from away from the counter; while the Store takes pickup
             // orders its phone stays on the profile (they call it about allergies or the order).
             if (clearsPhone(raw.details)) {
+              await holdStorePickupPhone(transaction, scopeOf(current));
               const features = await loadStoreFeatureSetting(
                 transaction as never,
                 scopeOf(current),

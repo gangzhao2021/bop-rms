@@ -48,7 +48,10 @@ import { withMerchantTransactionAuthorization } from "./merchant-transaction-aut
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { onlyRefusal, withCause } from "./merchant-failure.js";
-import { readPublishedStoreBusinessPhone } from "./merchant-store-public-profile.js";
+import {
+  holdStorePickupPhone,
+  readPublishedStoreBusinessPhone,
+} from "./merchant-store-public-profile.js";
 
 export type MerchantStoreFeaturesErrorCode =
   | "STORE_FEATURES_INPUT_INVALID"
@@ -449,13 +452,16 @@ export function createMerchantStoreFeatures(options: {
               (change.template === "FullService"
                 ? fullServiceTemplate.pickup
                 : change.modules?.pickup) === true;
+            // One at a time with a profile edit leaving the Store without a phone (the hold).
+            if (turningPickupOn) await holdStorePickupPhone(tx, scope);
             if (
               turningPickupOn &&
               (await readPublishedStoreBusinessPhone(
                 tx,
                 scope,
                 () => authority.guard(),
-                String(current.context.resolvedAt),
+                // Read after the hold: a profile published while this waited is current by now.
+                new Date(Date.parse(options.now())).toISOString(),
               )) === null
             )
               return fail("STORE_FEATURES_PHONE_REQUIRED");
