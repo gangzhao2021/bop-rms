@@ -2344,10 +2344,42 @@ async function journey(journeyEnding) {
               .toString(),
             paid: null,
           });
-          // DEC-TAX-WHOLE-RECEIPT: each Order's detail (the table panel's "This table's order")
-          // carries its own rounds' share of the bill's tax rounding; the host's and the merged
-          // table's details add up to the bill the panel's whole-bill line and checkout show.
+          // DEC-TAX-WHOLE-RECEIPT (v15 batch 7): the bill's tax rounding is one line of the bill,
+          // on the host's Order (the one that holds the bill); the merged table's Order keeps what
+          // it ordered. The two details still add up to the bill checkout takes.
+          // A manager takes $0.50 off T-M's dish (a recorded, attributed discount): the merged
+          // bill's tax is then rounded once over both tables, so there is a rounding to place.
+          await createMerchantDiningItemComp({
+            persistence: persistenceOf(manager),
+            authentication: manager.authentication,
+            nextReference: fresh,
+            installContext: async (tx, selected) => {
+              await tx.query(
+                "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id',$3,true)",
+                [selected.tenantReference, selected.brandReference, selected.storeReference],
+              );
+            },
+          })({
+            ...as(manager),
+            command: {
+              orderReference: mOrder,
+              orderItemReferences: [String(mItems[0].orderItemReference)],
+              kind: "Amount",
+              percent: null,
+              amountOffMinor: "50",
+              reasonCode: "GOODWILL",
+              operationReference: fresh(),
+            },
+          });
           const mergedBill = await bill();
+          // The rounding is real here, and the bill's own allocation would put it on T-M's round.
+          assert.notEqual(mergedBill.taxRoundingMinor, "0");
+          assert.notEqual(
+            mergedBill.rounds
+              .filter((round) => round.orderReference === mOrder)
+              .reduce((sum, round) => sum + BigInt(round.taxRoundingMinor), 0n),
+            0n,
+          );
           const details = [];
           for (const reference of [orderReference, mOrder])
             details.push(
@@ -2361,18 +2393,28 @@ async function journey(journeyEnding) {
                 orderReference: reference,
               }),
             );
-          const shareOf = (reference) =>
-            mergedBill.rounds
-              .filter((round) => round.orderReference === reference)
-              .reduce((sum, round) => sum + BigInt(round.taxRoundingMinor), 0n);
           assert.deepEqual(
             details.map((detail) => detail.lines.totals.taxRounding.amountMinor),
-            [shareOf(orderReference).toString(), shareOf(mOrder).toString()],
+            [mergedBill.taxRoundingMinor, "0"],
           );
+          // The merged table's Order totals exactly what it ordered (its dishes' own totals).
           assert.equal(
-            details
-              .reduce((sum, detail) => sum + BigInt(detail.lines.totals.total.amountMinor), 0n)
+            details[1].lines.totals.total.amountMinor,
+            details[1].lines.items
+              .reduce((sum, line) => sum + BigInt(line.total.amountMinor), 0n)
               .toString(),
+          );
+          // An Order's Total is before its comps (shown apart), so the comps come off the sum.
+          const compsMinor = mergedBill.rounds
+            .flatMap((round) => round.items)
+            .reduce((sum, item) => sum + BigInt(item.reduction?.amountMinor ?? "0"), 0n);
+          assert.equal(
+            (
+              details.reduce(
+                (sum, detail) => sum + BigInt(detail.lines.totals.total.amountMinor),
+                0n,
+              ) - compsMinor
+            ).toString(),
             mergedBill.owed.totalMinor,
           );
 
