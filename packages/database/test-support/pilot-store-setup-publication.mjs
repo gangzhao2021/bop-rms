@@ -15,6 +15,7 @@ import {
 } from "../../rms/pricing/src/index.ts";
 import { parseStoreConfigurationOrdinaryCommand } from "../../rms/store/src/index.ts";
 import { createMerchantBffRouter } from "../../../apps/api/dist/merchant-bff.js";
+import { createMerchantStorePublicProfile } from "../../../apps/api/dist/merchant-store-public-profile.js";
 import { renderPilotAclSql } from "../../../tooling/environment/pilot-acl-render.mjs";
 import { createInternalStoreSetupBff } from "../../../tooling/environment/pilot-store-setup.mjs";
 import {
@@ -78,6 +79,9 @@ export async function exercisePilotStoreSetupPublication(input) {
     const grantFrom = new Date(Date.now() - 60000).toISOString(),
       grantUntil = new Date(Date.now() + 3600000).toISOString();
     for (const action of [
+      // M109: the Owner publishes the store's phone the setup's pickup needs.
+      "organization.store.read",
+      "organization.store.publish",
       "store.service.read",
       "store.service.save-draft",
       "store.service.validate",
@@ -99,8 +103,9 @@ export async function exercisePilotStoreSetupPublication(input) {
         );
       }
       for (const rolePrefix of ["01902431", "01902433"])
+        // A caller may have granted the Owner's profile actions already (receipt issuer setup).
         await admin.query(
-          "INSERT INTO bop_permission.permission_grant VALUES($1,$2,$3,$4,$5,'Active',$6,$7,1,$6,$6)",
+          "INSERT INTO bop_permission.permission_grant VALUES($1,$2,$3,$4,$5,'Active',$6,$7,1,$6,$6) ON CONFLICT DO NOTHING",
           [
             next(),
             rolePrefix + "-0000-7000-8000-000000000004",
@@ -489,6 +494,8 @@ export async function exercisePilotStoreSetupPublication(input) {
         EffectiveDate: "Pass",
         Fees: "Pass",
         GoLive: "Pass",
+        // M109: the setup offers pickup and the Store has published no phone yet.
+        StorePhone: "Fail",
       });
       const beforeRefusal = await counts();
       const refused = await send("store-configuration/ordinary-command", {
@@ -590,6 +597,34 @@ export async function exercisePilotStoreSetupPublication(input) {
       await readInternalQuoteTaxConfiguration(resources, filePolicy(taxReference), now()),
       { ready: false, reason: "TaxConfigurationMismatch" },
     );
+
+    // M109: the Owner publishes the store's phone (Name and contact shown to customers).
+    const storeProfile = createMerchantStorePublicProfile({
+      persistence: persistenceFor(session),
+      authentication: session.authentication,
+    });
+    const shown = await storeProfile.read({ sessionCookie: session.sessionCookie });
+    const phoned = await storeProfile({
+      sessionCookie: session.sessionCookie,
+      csrf: session.csrf,
+      command: {
+        expectedVersion: 0,
+        operationReference: next(),
+        details: {
+          storeDisplayNames: Object.fromEntries(
+            shown.locales.map((locale) => [locale, "Synthetic Store"]),
+          ),
+          address: {
+            addressLines: ["1 Synthetic Street"],
+            locality: "Toronto",
+            regionCode: "ON",
+            postalCode: "M5H 1A1",
+          },
+          businessPhone: "416-555-0142",
+        },
+      },
+    });
+    assert.equal(phoned.current.businessPhone, "+14165550142");
 
     // Every check passes; the Owner sends it for approval and cannot approve their own change.
     let pending;
