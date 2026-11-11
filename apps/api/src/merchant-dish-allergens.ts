@@ -41,6 +41,7 @@ import {
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { recipeIngredientItems } from "./recipe-ingredient-items.js";
+import { recordRecipeAllergenChange } from "./recipe-allergen-change.js";
 import { retryTransactionConflict } from "./transaction-conflict-retry.js";
 import { onlyRefusal } from "./merchant-failure.js";
 
@@ -726,7 +727,18 @@ export async function declareChoiceAllergens(
       readonly classification: "Contains" | "CrossContactPossible";
     }[];
   },
-): Promise<{ readonly itemReference: string }> {
+): Promise<{
+  readonly itemReference: string;
+  /**
+   * WP-2423 (M166 with M77): what this answer adds, or makes stronger, against the choice's
+   * answer before it (every allergen of a first answer: the choice added nothing before). The same
+   * answer from a retried save reports the same additions. Empty: guests lose nothing they need.
+   */
+  readonly adds: readonly {
+    readonly allergenReference: string;
+    readonly classification: "Contains" | "CrossContactPossible";
+  }[];
+}> {
   const { may } = input;
   for (const action of [
     "catalog.allergen.declare",
@@ -843,6 +855,18 @@ export async function declareChoiceAllergens(
       d.itemVersionReference === item?.configurationOperationReference &&
       Date.parse(d.validUntil) > Date.parse(input.at),
   );
+  // The answer before this save (a retried save's own answer is not "before").
+  const previous = history.find((d) => d.evidenceReference !== step("choice-declaration"));
+  const before = new Map(
+    (previous?.allergens ?? []).map((a) => [String(a.allergenReference), a.classification]),
+  );
+  const adds =
+    previous !== undefined && allergenKey(previous.allergens) === allergenKey(input.declared)
+      ? []
+      : input.declared.filter((a) => {
+          const was = before.get(a.allergenReference);
+          return was === undefined || (was !== "Contains" && a.classification === "Contains");
+        });
   if (latest === undefined || allergenKey(latest.allergens) !== allergenKey(input.declared))
     await recordIngredientAllergenDeclaration(tx as never, s, {
       evidenceReference: step("choice-declaration"),
@@ -860,7 +884,7 @@ export async function declareChoiceAllergens(
       at: input.at,
       auditReference: step("choice-declaration-audit"),
     });
-  return { itemReference: item.itemReference };
+  return { itemReference: item.itemReference, adds: Object.freeze(adds) };
 }
 
 export function createMerchantDishAllergens(options: {
@@ -962,5 +986,57 @@ export function createMerchantDishAllergens(options: {
       ),
     );
   };
-  return { command, declareChoice };
+  /**
+   * WP-2423 (M166 with M77): choices answered in one dish save added allergens (or made one
+   * stronger). Their option recipes are used at once, so, as for a recipe bound after listing,
+   * the dish's allergens now (its own with what the choices add) are recorded as a staff change:
+   * guests and the kitchen read them with the listed ones, and the Menu page says the allergens
+   * changed since listing, until the menu is listed again. The whole dish carries them until then
+   * (it never leaves an allergen out). Not a route; called by the dish save once its choices are
+   * covered. Retrying the same save records nothing more.
+   */
+  const recordChoiceAllergenChange = async (input: {
+    sessionCookie: unknown;
+    csrf: unknown;
+    operationReference: string;
+    skuReference: string;
+    adds: readonly {
+      readonly allergenReference: string;
+      readonly classification: "Contains" | "CrossContactPossible";
+    }[];
+  }) => {
+    if (input.adds.length === 0) return;
+    const current = await session(input);
+    await retryTransactionConflict(() =>
+      options.persistence.transactions.run((tx: Tx) =>
+        withRememberedBrandAuthorization(tx, async () => {
+          const scope = await resolveBrand(tx, input.sessionCookie, current.sessionReference).catch(
+            onlyRefusal(() => fail("PermissionDenied")),
+          );
+          if ((await scope.authorizeAction("catalog.allergen.declare"))?.effect !== "Allow")
+            return fail("PermissionDenied");
+          await recordRecipeAllergenChange(tx, {
+            scope: {
+              tenantReference: String(scope.tenantReference),
+              brandReference: String(scope.context.brand.brandReference),
+              storeReference: String(scope.selectedStoreReference),
+            },
+            skuReference: input.skuReference,
+            storeReference: null,
+            cause: "StaffDeclared",
+            actorReference: String(scope.actorReference),
+            operationReference: derivedReference(
+              input.operationReference,
+              "choice-allergen-change",
+            ),
+            changeReference: options.references.next(),
+            at: options.persistence.now(),
+            locale: options.locale,
+            alsoAllergens: input.adds,
+          });
+        }),
+      ),
+    );
+  };
+  return { command, declareChoice, recordChoiceAllergenChange };
 }

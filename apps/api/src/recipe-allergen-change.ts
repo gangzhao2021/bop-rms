@@ -42,6 +42,14 @@ export async function recordRecipeAllergenChange(
     readonly changeReference: string;
     readonly at: string;
     readonly locale: string;
+    /**
+     * WP-2423 (M166 with M77): allergens a choice of the dish adds, recorded with the dish's own
+     * (the listed dish names every allergen a choice can add, so the change does too).
+     */
+    readonly alsoAllergens?: readonly {
+      readonly allergenReference: string;
+      readonly classification: "Contains" | "CrossContactPossible";
+    }[];
   },
 ): Promise<{ readonly allergens: readonly SellableAllergenNow[] | null } | null> {
   const t = tx as Tx;
@@ -84,6 +92,11 @@ export async function recordRecipeAllergenChange(
         if (before !== "Contains" && before !== "Unverified")
           strongest.set(String(assertion.allergenReference), assertion.classification);
       }
+    for (const added of input.alsoAllergens ?? []) {
+      const before = strongest.get(added.allergenReference);
+      if (before !== "Contains" && before !== "Unverified")
+        strongest.set(added.allergenReference, added.classification);
+    }
     if (![...strongest.values()].includes("Unverified"))
       allergens = resolved.allergens.registry
         .filter((entry) => strongest.has(String(entry.allergenReference)))

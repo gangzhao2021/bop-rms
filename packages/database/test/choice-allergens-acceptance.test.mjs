@@ -119,6 +119,36 @@ it("WP-2423 (M166): a choice's own allergens reach the listed menu for that choi
       assert.equal((await f.listAll()).status, "Listed");
       const after = await guestSees();
       assert.equal(after.byOption?.[fried], undefined);
+      assert.ok(!codes(after.items).includes("MILK"));
+
+      // On the listed menu, staff now answer that egg fried rice adds milk (standing in for egg)
+      // and nobody lists the menu again. Inventory uses the new choice recipe at once, so guests
+      // read milk on the dish now, and the Menu page knows the allergens changed since listing.
+      await f.saveDish({
+        productReference: dish.productReference,
+        name: "Curry chicken (TEST)",
+        nameZh: "咖喱鸡",
+        priceMinor: null,
+        sectionCode: null,
+        allergens: null,
+        choiceGroups,
+        choiceAllergens: [
+          {
+            optionReference: fried,
+            name: "Egg fried rice",
+            declared: [{ allergenReference: milk, classification: "Contains" }],
+          },
+        ],
+      });
+      const changes = (
+        await admin.query(
+          "SELECT cause,allergens_json allergens FROM rms_catalog.sellable_allergen_change WHERE sku_id=$1 ORDER BY recorded_at DESC,change_id DESC",
+          [dish.skuReference],
+        )
+      ).rows;
+      assert.equal(changes[0]?.cause, "StaffDeclared");
+      assert.deepEqual(codes(changes[0]?.allergens), ["MILK", "WHEAT"]);
+      assert.ok(codes((await guestSees()).items).includes("MILK"));
     } finally {
       await f.close();
       await admin.end();

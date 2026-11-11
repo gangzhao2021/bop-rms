@@ -1051,6 +1051,14 @@ export function createMerchantOneStoreDishes(options: {
     // change" or an earlier answer; a real recipe change set under Option recipes is kept.
     const restated = new Set<string>();
     const answeredItems = new Map<string, string>();
+    // WP-2423 (M166 with M77): what the answers in this save add to the dish.
+    const choiceAdds = new Map<
+      string,
+      {
+        readonly allergenReference: string;
+        readonly classification: "Contains" | "CrossContactPossible";
+      }
+    >();
     for (const choice of body.choiceAllergens ?? []) {
       restated.add(choice.optionReference);
       const declared = await options.dishAllergens.declareChoice({
@@ -1063,6 +1071,9 @@ export function createMerchantOneStoreDishes(options: {
       });
       if (choice.declared.length > 0)
         answeredItems.set(choice.optionReference, declared.itemReference);
+      for (const added of declared.adds)
+        if (choiceAdds.get(added.allergenReference)?.classification !== "Contains")
+          choiceAdds.set(added.allergenReference, added);
     }
     if (wanted.size > 0) {
       const choices = new Map(
@@ -1096,6 +1107,14 @@ export function createMerchantOneStoreDishes(options: {
         left = round.remaining;
       }
     }
+    // Choices now in use that add an allergen reach guests and the kitchen on the listed menu.
+    if (!choicesWaiting && choiceAdds.size > 0)
+      await options.dishAllergens.recordChoiceAllergenChange({
+        ...session,
+        operationReference: body.operationReference,
+        skuReference: sku,
+        adds: [...choiceAdds.values()],
+      });
     return {
       status: "Saved" as const,
       productReference,
