@@ -6,7 +6,7 @@ import { expectNoInternalText } from "./internal-text-guard";
  * WP-2423 (v15 batch 5, menu-authoring-prices), at a Brand with several Stores: a dish's price
  * saved "Only at this Store" says guests here pay it from now (and that nothing else waits for
  * "List it"); a save whose answer the dropped network lost goes again unchanged as the same save;
- * "What goes live" names each extra price and the dishes the other Stores do not sell yet. 1440,
+ * "What goes live" names each extra price and every new dish at each other Store, with a count. 1440,
  * 1024 and 390 wide. Synthetic, TEST-only data.
  */
 const id = (n: number) => "0190996c-0000-7000-8000-" + n.toString(16).padStart(12, "0");
@@ -339,7 +339,12 @@ test("@production What goes live names each extra price and the dishes the other
           toMinor: "120",
         },
       ],
-      otherStores: { storeCount: 1, notDecided: [id(30)], listingOffers: true },
+      otherStores: {
+        storeCount: 1,
+        notDecided: [id(30)],
+        stores: [{ storeName: "Midtown (TEST)", notDecided: [id(30)] }],
+        listingOffers: true,
+      },
     }),
   );
   await page.route("**/merchant/commerce/one-store-dishes/command", (route) =>
@@ -358,9 +363,10 @@ test("@production What goes live names each extra price and the dishes the other
   ).toBeVisible();
   await expect(
     review.getByText(
-      "Guests at the other Stores can order these once listed: Har gow (TEST). A Store that should not sell one hides it there.",
+      "New dishes go on sale at the other Stores once listed. A Store that should not sell one hides it there.",
     ),
   ).toBeVisible();
+  await expect(review.getByText("Midtown (TEST), 1 dish: Har gow (TEST)")).toBeVisible();
   await noSideScroll(page, "listing-review-extras");
   const axe = await new AxeBuilder({ page }).include(".one-menu").analyze();
   expect(axe.violations).toEqual([]);
