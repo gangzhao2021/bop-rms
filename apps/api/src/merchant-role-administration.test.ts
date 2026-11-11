@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { storePermissionCatalog } from "@bop/permission";
 import {
   createMerchantRoleAdministration,
   generatedRoleCode,
@@ -366,6 +367,50 @@ describe("WP-2423 role administration authorization", () => {
         body: { ...command({ operation: "ApproveAlone" }), confirmed: true },
       }),
     ).rejects.toMatchObject({ code: "WouldWidenOwnAccess" });
+    expect(d.execute).not.toHaveBeenCalled();
+  });
+  it("a sole owner's approval of a new role with more permissions than one scope read decides is read in groups", async () => {
+    // v15 2026-11-11: the starter Counter role holds over fifteen permissions, and the Store scope
+    // refuses outright a read of more than fifteen, so approving it alone answered "no access".
+    const codes = storePermissionCatalog()
+      .map((entry) => entry.code)
+      .slice(0, 22);
+    expect(codes.length).toBe(22);
+    const pending = {
+      ...record,
+      lifecycle: "InReview",
+      submittedByReference: id(5),
+      selections: codes.map((action) => ({ action })),
+    };
+    const f = setup();
+    d.load.mockResolvedValue(roleView({ record: pending, opening: pending, effective: null }));
+    let denied: string | null = null;
+    f.authorizeActions.mockImplementation(async (actions: readonly string[]) => {
+      // The real Store scope's bound (merchant-store-scope.ts authorizeActions).
+      if (actions.length < 1 || actions.length > 15)
+        throw new Error("STORE_SERVICE_PERMISSION_DENIED");
+      return new Map(
+        actions.map((action) => [
+          action,
+          Object.freeze({
+            effect: (action === denied ? "Deny" : "Allow") as "Allow" | "Deny",
+            action,
+            scopeKind: "Store",
+          }),
+        ]),
+      );
+    });
+    const approveAlone = () =>
+      f.service.command({
+        ...f.input,
+        body: { ...command({ operation: "ApproveAlone" }), confirmed: true },
+      });
+    // Every permission held: the approval goes on to the sole-operator check (not wired here).
+    await expect(approveAlone()).rejects.toMatchObject({ code: "SoleOperatorNotInEffect" });
+    expect(f.authorizeActions.mock.calls.every(([actions]) => actions.length <= 15)).toBe(true);
+    // One the owner lacks, beyond the first group, still stops a widening of their own access.
+    denied = codes[20] ?? null;
+    await expect(approveAlone()).rejects.toMatchObject({ code: "WouldWidenOwnAccess" });
     expect(d.execute).not.toHaveBeenCalled();
   });
   it("answers a retried command from what the first attempt recorded", async () => {

@@ -250,8 +250,15 @@ it("role presets: edit, approve alone, remove, create, upgrade, restore and the 
           sessionReference: id(0x800 + Object.keys(cookies).indexOf(cookie)),
           allowed: async () => (await decide(action))?.effect === "Allow",
           authorizeAction: decide,
-          authorizeActions: async (actions) =>
-            new Map(await Promise.all(actions.map(async (item) => [item, await decide(item)]))),
+          // The real Store scope decides 1 to 15 actions a read and refuses any other count
+          // (merchant-store-scope.ts): a role with more permissions is read in groups.
+          authorizeActions: async (actions) => {
+            if (actions.length < 1 || actions.length > 15)
+              throw new Error("STORE_SERVICE_PERMISSION_DENIED");
+            return new Map(
+              await Promise.all(actions.map(async (item) => [item, await decide(item)])),
+            );
+          },
           kdsOperatorProfileAllows: (requested) =>
             kdsOperatorProfileAllows({ policy: { code: "WorkforceStandard" } }, requested),
         };

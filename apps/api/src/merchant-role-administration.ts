@@ -323,6 +323,9 @@ export function presetUpdateOf(
   return added.length === 0 && removed.length === 0 ? null : { added, removed };
 }
 
+/** The most actions the merchant Store scope decides in one read (`authorizeActions`). */
+const scopeActionLimit = 15;
+
 export function createMerchantRoleAdministration(options: {
   persistence: PersistentMerchantBffOptions;
   authentication: Pick<MerchantBffService, "authorize">;
@@ -389,11 +392,21 @@ export function createMerchantRoleAdministration(options: {
     brandReference: String(scope.context.brand.brandReference),
     storeReference: String(scope.store.storeReference),
   });
-  /** Codes among `codes` the signed-in person does not hold at the Store now. */
+  /**
+   * Codes among `codes` the signed-in person does not hold at the Store now. The Store scope
+   * decides at most `scopeActionLimit` actions per read (one permission packet), and a role holds
+   * more (a starter Counter role has over twenty): read them in groups (v15 2026-11-11: a sole
+   * owner's approval of a new role was refused outright by the limit).
+   */
   async function notHeld(scope: Scope, codes: readonly string[]): Promise<readonly string[]> {
-    if (codes.length === 0) return [];
-    const decisions = await scope.authorizeActions(codes);
-    return codes.filter((code) => decisions.get(code)?.effect !== "Allow");
+    const unique = [...new Set(codes)];
+    const lacking: string[] = [];
+    for (let start = 0; start < unique.length; start += scopeActionLimit) {
+      const group = unique.slice(start, start + scopeActionLimit);
+      const decisions = await scope.authorizeActions(group);
+      lacking.push(...group.filter((code) => decisions.get(code)?.effect !== "Allow"));
+    }
+    return codes.filter((code) => lacking.includes(code));
   }
   /** The Store's role approval gate as the signed-in person sees it (null when not wired). */
   async function gateFor(tx: Tx, scope: Scope, at: string, mayApprove: boolean) {
