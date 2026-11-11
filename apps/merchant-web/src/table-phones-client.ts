@@ -229,5 +229,42 @@ export function createHeldRoundClient(fetcher: typeof fetch = fetch) {
         canChange: value.canChange,
       });
     },
+    /**
+     * WP-2423 同桌结账: what guests paying on their phones at a shared table start with — the whole
+     * table (default) or what each guest added — and whether you may change it.
+     */
+    async checkoutScope(
+      csrf: string,
+      change?: {
+        readonly expectedVersion: number;
+        readonly defaultScope: "WholeTable" | "OwnDishes";
+        readonly operationReference: string;
+      },
+    ): Promise<{
+      readonly version: number;
+      readonly defaultScope: "WholeTable" | "OwnDishes";
+      readonly canChange: boolean;
+    }> {
+      const value = exact(
+        await post(
+          "/merchant/dining/checkout-scope-setting",
+          csrf,
+          change === undefined ? { action: "Read" } : { action: "Change", ...change },
+        ),
+        ["version", "defaultScope", "canChange"],
+      );
+      if (
+        !Number.isSafeInteger(value.version) ||
+        Number(value.version) < 0 ||
+        (value.defaultScope !== "WholeTable" && value.defaultScope !== "OwnDishes") ||
+        typeof value.canChange !== "boolean"
+      )
+        return fail();
+      return Object.freeze({
+        version: Number(value.version),
+        defaultScope: value.defaultScope,
+        canChange: value.canChange,
+      });
+    },
   });
 }

@@ -417,6 +417,32 @@ export function installMerchantDiningRoutes(
       .then((result) => response.set("Cache-Control", NO_STORE).json(result))
       .catch((error: unknown) => heldRoundFailure(response, error));
   });
+  // WP-2423 同桌结账: what guests paying on their phones start with (the whole table or their own).
+  router.post(
+    "/dining/checkout-scope-setting",
+    sameOriginMutation(options),
+    (request, response) => {
+      const sessionCookie = cookie(request, "__Host-bop-merchant"),
+        csrf = exactHeader(request, "x-bop-csrf");
+      if (
+        sessionCookie === null ||
+        csrf === null ||
+        csrf.length === 0 ||
+        Object.keys(request.query).length !== 0
+      ) {
+        denied(response);
+        return;
+      }
+      if (!options.diningCheckoutScopeSetting) {
+        response.status(503).json({ error: "dining_checkout_scope_setting_unavailable" });
+        return;
+      }
+      void options
+        .diningCheckoutScopeSetting({ sessionCookie, csrf, command: request.body })
+        .then((result) => response.set("Cache-Control", NO_STORE).json(result))
+        .catch((error: unknown) => heldRoundFailure(response, error));
+    },
+  );
   // WP-2423 item 8 ⑤ DEC-DINING-QR-JOIN: phones at the table, pause/resume QR joining, remove.
   router.post("/dining/sessions/qr-join", sameOriginMutation(options), (request, response) => {
     const sessionCookie = cookie(request, "__Host-bop-merchant"),

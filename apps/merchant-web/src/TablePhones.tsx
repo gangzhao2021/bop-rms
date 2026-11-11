@@ -417,6 +417,93 @@ export function RoundHoldSettingControl({
 }
 
 /**
+ * WP-2423 同桌结账 (DEC-OWNER-DEFAULTS-2026-11-06; 门店可在设置里改默认): what guests paying on their
+ * phones at a shared table start with — the whole table (the default) or what each guest added.
+ * Guests can always choose the other, or choose dishes. Everyone running tables sees it; a manager
+ * changes it.
+ */
+export function CheckoutScopeSettingControl({
+  csrf,
+  locked,
+  fetcher,
+}: {
+  readonly csrf: string;
+  readonly locked: boolean;
+  readonly fetcher?: typeof fetch | undefined;
+}) {
+  const client = useMemo(() => createHeldRoundClient(fetcher), [fetcher]);
+  const [setting, setSetting] = useState<{
+    readonly version: number;
+    readonly defaultScope: "WholeTable" | "OwnDishes";
+    readonly canChange: boolean;
+  } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  // Same operation until it is answered: a lost answer is resent, never a second change.
+  const pending = useRef<{ scope: string; reference: string } | null>(null);
+  useEffect(() => {
+    let live = true;
+    void client
+      .checkoutScope(csrf)
+      .then((value) => {
+        if (live) setSetting(value);
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [client, csrf]);
+  if (setting === null) return null;
+  const change = async (defaultScope: "WholeTable" | "OwnDishes") => {
+    setBusy(true);
+    setProblem(null);
+    if (pending.current?.scope !== defaultScope)
+      pending.current = { scope: defaultScope, reference: serviceOperationReference() };
+    try {
+      setSetting(
+        await client.checkoutScope(csrf, {
+          expectedVersion: setting.version,
+          defaultScope,
+          operationReference: pending.current.reference,
+        }),
+      );
+      pending.current = null;
+    } catch {
+      setProblem(t("That didn't go through. Read the table again and retry."));
+      setSetting(await client.checkoutScope(csrf).catch(() => setting));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <fieldset
+      className="round-hold-setting"
+      aria-describedby="checkout-scope-setting-note"
+      disabled={!setting.canChange || locked || busy}
+    >
+      <legend>{t("When guests at one table pay on their phones, start with")}</legend>
+      {(["WholeTable", "OwnDishes"] as const).map((scope) => (
+        <label key={scope}>
+          <input
+            type="radio"
+            name="checkout-scope-setting"
+            checked={setting.defaultScope === scope}
+            onChange={() => void change(scope)}
+          />{" "}
+          {scope === "WholeTable" ? t("The whole table") : t("What each guest added")}
+        </label>
+      ))}
+      <p className="round-hold-setting__note" id="checkout-scope-setting-note">
+        {setting.canChange
+          ? t("Guests can always choose the other, or pick the dishes they pay for.")
+          : t("A manager changes this.")}
+      </p>
+      {problem ? <p role="alert">{problem}</p> : null}
+    </fieldset>
+  );
+}
+
+/**
  * WP-2423 item 8 ⑤ decision 4: which phone sent each round of a table's Order (Orders page), read
  * from the table's phone list. Empty while it is read, for staff who may not read it, or on error.
  */

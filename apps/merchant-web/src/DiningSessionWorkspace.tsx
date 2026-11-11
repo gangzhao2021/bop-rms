@@ -52,7 +52,12 @@ import { TableMove } from "./TableMove.js";
 import { TableMerge } from "./TableMerge.js";
 import { TableBillTotal } from "./TableBillTotal.js";
 import { TableOrderRounds } from "./TableOrderRounds.js";
-import { RoundHoldSettingControl, TableHeldRounds, TablePanelPhones } from "./TablePhones.js";
+import {
+  CheckoutScopeSettingControl,
+  RoundHoldSettingControl,
+  TableHeldRounds,
+  TablePanelPhones,
+} from "./TablePhones.js";
 import { TableCartPanel } from "./TableCartPanel.js";
 import { TablesOfflineGuide } from "./TablesOfflineGuide.js";
 import {
@@ -1464,6 +1469,7 @@ export function DiningSessionWorkspace({
         <details className="table-settings">
           <summary>{t("Table settings")}</summary>
           <RoundHoldSettingControl csrf={csrf} locked={locked} />
+          <CheckoutScopeSettingControl csrf={csrf} locked={locked} />
         </details>
       ) : null}
     </WorkspacePage>

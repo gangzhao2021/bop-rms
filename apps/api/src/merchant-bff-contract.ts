@@ -171,6 +171,7 @@ import type { createMerchantDiningQrJoin } from "./merchant-dining-qr-join.js";
 import type { createMerchantDiningTableCart } from "./merchant-dining-table-cart.js";
 import type {
   createMerchantDiningHeldRound,
+  createMerchantDiningCheckoutScopeSetting,
   createMerchantDiningRoundHoldSetting,
 } from "./merchant-dining-held-round.js";
 import type { createMerchantDiningJoinRegenerate } from "./merchant-dining-join-regenerate.js";
@@ -662,6 +663,8 @@ export interface MerchantBffRouterOptions {
   readonly diningHeldRound?: ReturnType<typeof createMerchantDiningHeldRound>;
   /** WP-2423 item 8 ⑤: the Store's "a new phone's first round waits for staff". */
   readonly diningRoundHoldSetting?: ReturnType<typeof createMerchantDiningRoundHoldSetting>;
+  /** WP-2423 同桌结账: what guests paying on their phones start with (Store setting). */
+  readonly diningCheckoutScopeSetting?: ReturnType<typeof createMerchantDiningCheckoutScopeSetting>;
   /** WP-2423 item 8 ⑦ DEC-STORE-FEATURES: the modules the Store uses (Store features page). */
   readonly storeFeatures?: ReturnType<typeof createMerchantStoreFeatures>;
   /** WP-2423 (M178): the Store kitchen's cross-contact statement. */

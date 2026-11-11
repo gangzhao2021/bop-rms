@@ -42,6 +42,7 @@ import { createMerchantDiningJoinState } from "../../apps/api/dist/merchant-dini
 import { createMerchantDiningQrJoin } from "../../apps/api/dist/merchant-dining-qr-join.js";
 import { createMerchantDiningTableCart } from "../../apps/api/dist/merchant-dining-table-cart.js";
 import {
+  createMerchantDiningCheckoutScopeSetting,
   createMerchantDiningHeldRound,
   createMerchantDiningRoundHoldSetting,
 } from "../../apps/api/dist/merchant-dining-held-round.js";
@@ -1737,6 +1738,12 @@ export async function createInternalMerchant(
       diningTableCart,
       // WP-2423 item 8 ⑤ decision 5: "a new phone's first round waits for staff".
       diningRoundHoldSetting: createMerchantDiningRoundHoldSetting({
+        persistence,
+        authentication: service,
+        now: resources.now,
+      }),
+      // WP-2423 同桌结账: what guests paying on their phones start with.
+      diningCheckoutScopeSetting: createMerchantDiningCheckoutScopeSetting({
         persistence,
         authentication: service,
         now: resources.now,

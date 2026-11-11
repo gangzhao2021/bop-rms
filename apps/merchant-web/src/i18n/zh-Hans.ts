@@ -6781,6 +6781,11 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Tables that pay at the end. Rapid ordering always waits: a phone's 4th round or a table's 7th within 10 minutes.":
     "只用于最后结账的桌。短时间大量下单总会先等确认：同一台手机 10 分钟内第 4 轮，或同一桌第 7 轮。",
   "A manager changes this.": "由店长修改。",
+  "When guests at one table pay on their phones, start with": "同桌客人用手机付款时，默认：",
+  "The whole table": "付全桌",
+  "What each guest added": "各付各加的菜",
+  "Guests can always choose the other, or pick the dishes they pay for.":
+    "客人随时可以改选另一种，或自己选要付的菜。",
   "Remove phone {number} from this table": "把手机 {number} 移出这桌",
   "Check it belongs to this table. If not, remove it below. To stop it joining again by scan, also pause joining by scan.":
     "检查它是不是这桌的。不是的话在下面移出；要防止它再扫码加入，还要暂停扫码加入。",

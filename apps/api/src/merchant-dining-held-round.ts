@@ -1,7 +1,10 @@
 import type { ConsumerTransaction } from "@bop/eventing";
 import { readClosedRecord } from "@bop/identity";
 import {
+  changeDiningCheckoutScopeSetting,
   changeDiningRoundHoldSetting,
+  loadDiningCheckoutScopeSetting,
+  type DiningCheckoutDefaultScope,
   DiningSessionError,
   loadDiningRoundHoldSetting,
 } from "@rms/dining";
@@ -306,6 +309,125 @@ export function createMerchantDiningRoundHoldSetting(options: {
             return Object.freeze({
               version: setting.version,
               firstRoundNeedsStaff: setting.firstRoundNeedsStaff,
+              canChange,
+            });
+          },
+        ),
+      );
+    } catch (error) {
+      if (error instanceof MerchantDiningHeldRoundError) throw error;
+      if (
+        error instanceof DiningSessionError &&
+        error.code === "DINING_SESSION_IDEMPOTENCY_CONFLICT"
+      )
+        throw new MerchantDiningHeldRoundError("HELD_ROUND_CHANGED");
+      throw withCause(new MerchantDiningHeldRoundError("HELD_ROUND_UNAVAILABLE"), error);
+    }
+  };
+}
+
+/**
+ * WP-2423 同桌结账 (DEC-OWNER-DEFAULTS-2026-11-06; 门店可在设置里改默认): what a guest paying on
+ * their phone at a shared table starts with — the whole table (default) or only what they added.
+ * Anyone running tables reads it; a manager (`dining.session.close`) changes it, each change the
+ * next recorded version.
+ */
+export function createMerchantDiningCheckoutScopeSetting(options: {
+  persistence: PersistentMerchantBffOptions;
+  authentication: Pick<MerchantBffService, "authorize">;
+  now(): string;
+}) {
+  const resolve = createMerchantStoreScope(options.persistence);
+  return async (input: {
+    sessionCookie: unknown;
+    csrf: unknown;
+    command: unknown;
+  }): Promise<{
+    readonly version: number;
+    readonly defaultScope: DiningCheckoutDefaultScope;
+    readonly canChange: boolean;
+  }> => {
+    const authenticated = await options.authentication.authorize(input);
+    let change: null | {
+      operationReference: string;
+      expectedVersion: number;
+      defaultScope: DiningCheckoutDefaultScope;
+    } = null;
+    try {
+      const action =
+        input.command !== null && typeof input.command === "object"
+          ? Object.getOwnPropertyDescriptor(input.command, "action")?.value
+          : undefined;
+      if (action === "Read") readClosedRecord(input.command, ["action"]);
+      else {
+        const raw = readClosedRecord(input.command, [
+          "action",
+          "operationReference",
+          "expectedVersion",
+          "defaultScope",
+        ]);
+        if (
+          raw.action !== "Change" ||
+          (raw.defaultScope !== "WholeTable" && raw.defaultScope !== "OwnDishes") ||
+          !Number.isSafeInteger(raw.expectedVersion) ||
+          Number(raw.expectedVersion) < 0
+        )
+          return fail("HELD_ROUND_INPUT_INVALID");
+        change = {
+          operationReference: String(parseOrderingReference(raw.operationReference)),
+          expectedVersion: Number(raw.expectedVersion),
+          defaultScope: raw.defaultScope,
+        };
+      }
+    } catch {
+      return fail("HELD_ROUND_INPUT_INVALID");
+    }
+    try {
+      return await options.persistence.transactions.run((tx) =>
+        withMerchantTransactionAuthorization(
+          {
+            transaction: tx,
+            resolve: async () => {
+              const current = await resolve(
+                tx,
+                input.sessionCookie,
+                "dining.operate",
+                authenticated.sessionReference,
+              ).catch(onlyRefusal(() => fail("HELD_ROUND_PERMISSION_DENIED")));
+              const decisions = await current.authorizeActions([
+                "dining.operate",
+                "dining.session.close",
+              ]);
+              if (decisions.get("dining.operate")?.effect !== "Allow")
+                return fail("HELD_ROUND_PERMISSION_DENIED");
+              return {
+                current,
+                canChange: decisions.get("dining.session.close")?.effect === "Allow",
+              };
+            },
+            recheck: async ({ current }) => (await current.allowed()) === true,
+            denied: () => fail("HELD_ROUND_PERMISSION_DENIED"),
+          },
+          async (authority) => {
+            const { current, canChange } = authority.scope;
+            const scope = {
+              tenantReference: String(current.selected.tenantReference),
+              brandReference: String(current.context.brand.brandReference),
+              storeReference: String(current.store.storeReference),
+            };
+            const runner = tx as unknown as Parameters<typeof loadDiningCheckoutScopeSetting>[0];
+            let setting = await loadDiningCheckoutScopeSetting(runner, scope);
+            if (change !== null) {
+              if (!canChange) return fail("HELD_ROUND_PERMISSION_DENIED");
+              setting = await changeDiningCheckoutScopeSetting(runner, scope, {
+                ...change,
+                actorReference: String(current.actorReference),
+                observedAt: new Date(Date.parse(options.now())).toISOString(),
+              });
+            }
+            return Object.freeze({
+              version: setting.version,
+              defaultScope: setting.defaultScope,
               canChange,
             });
           },
