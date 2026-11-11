@@ -174,7 +174,11 @@ export function NotSentCard({
         </h3>
         {done === null ? (
           <p className="refund-approval-card__waiting">
-            {t("Asked by {name}, waiting for you to send", { name: person(entry) })}
+            {canSend
+              ? t("Asked by {name}, waiting for you to send", { name: person(entry) })
+              : t("Asked by {name}, waiting for a manager or the owner to send", {
+                  name: person(entry),
+                })}
           </p>
         ) : null}
       </header>

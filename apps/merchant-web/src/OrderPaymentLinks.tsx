@@ -14,7 +14,6 @@ const DENIED_TEXT = t(
   "Payments and refunds for this order are handled by a manager. Ask a manager if the guest needs a refund.",
 );
 
-/** What staff are told when a payment or refund read or command fails. */
 /** WP-2423 M10: why "Stop making it too" was not done as asked; nothing was recorded. */
 const withdrawRefusalText = (code: string) =>
   code === "WithdrawNeedsApproval"
@@ -40,7 +39,11 @@ const withdrawRefusalText = (code: string) =>
             : t(
                 "Nothing was recorded. The kitchen just started one of these dishes. Look again and choose.",
               );
-export const refundErrorText = (error: unknown) =>
+/**
+ * What staff are told when a payment or refund read or command fails. `canSend`: the reader sends
+ * refunds (a manager or the owner); a cashier records requests and has other controls.
+ */
+export const refundErrorText = (error: unknown, canSend = true) =>
   needsFullSignIn(error)
     ? FULL_SIGN_IN_REQUIRED_TEXT
     : error instanceof OrdinaryRefundClientError && error.code === "Denied"
@@ -48,11 +51,16 @@ export const refundErrorText = (error: unknown) =>
       : error instanceof OrdinaryRefundClientError && error.code === "Changed"
         ? t("This order changed while it was loading. Refresh to see the latest.")
         : error instanceof OrdinaryRefundClientError && error.code === "OrderNotAccepted"
-          ? // WP-2423 M10: refunding every dish before acceptance is a refusal of the order. Only a
-            // manager or owner reaches this page, and Orders offers them "Refuse and refund".
-            t(
-              "This order hasn't been accepted. Use Refuse and refund on the order to refund it in full.",
-            )
+          ? // WP-2423 M10: refunding every dish before acceptance is a refusal of the order. Orders
+            // offers a manager or the owner "Refuse and refund"; whoever else may accept it,
+            // "Can't make it" (DEC-OWNER-DEFAULTS-2026-11-06 item 2).
+            canSend
+            ? t(
+                "This order hasn't been accepted. Use Refuse and refund on the order to refund it in full.",
+              )
+            : t(
+                "Nothing was recorded. This order hasn't been accepted yet, so refunding all of it means turning it down: use Can't make it on the order, which refunds the guest in full. If you don't see it there, ask a manager.",
+              )
           : error instanceof OrdinaryRefundClientError && error.code === "CashUnderNickel"
             ? t(
                 "Nothing was recorded. Cash goes back in 5-cent steps, so a refund under 3 cents can't be handed back in cash.",

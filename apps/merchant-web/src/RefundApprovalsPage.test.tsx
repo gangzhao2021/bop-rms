@@ -106,6 +106,11 @@ it("WP-2423 M14: a cashier's request waits for someone who may send it; they sen
   expect(manager).toContain("<button");
   const cashier = render(false);
   expect(cashier).toContain("A manager or the owner sends it.");
+  // v15 batch 5: a cashier reading their own request was told it waited "for you to send".
+  expect(cashier).not.toContain("waiting for you to send");
+  expect(render(false, { ...asked, requestedByYou: true })).toContain(
+    "Asked by You, waiting for a manager or the owner to send",
+  );
   expect(cashier).not.toContain("<button");
   expect(render(true, { ...asked, paymentMethod: "CardMachine" })).toContain(
     "refund it on the machine, then record it on the payment page",

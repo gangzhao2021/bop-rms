@@ -292,6 +292,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "这单已全额退款。请按“做不了”结束。",
   "This order hasn't been accepted. Use Refuse and refund on the order to refund it in full.":
     "这单还没接。请在这单上用“拒单并退款”全额退款。",
+  "Nothing was recorded. This order hasn't been accepted yet, so refunding all of it means turning it down: use Can't make it on the order, which refunds the guest in full. If you don't see it there, ask a manager.":
+    "没有记录任何内容。这单还没接，全部退款就是拒掉这单：请在这单上用“做不了”，会给顾客全额退款。如果看不到这个按钮，请找店长。",
   "This order was refunded in full. Close it with Refuse and refund.":
     "这单已全额退款。请按“拒单并退款”结束。",
   "This order was refunded in full. Close it with Refund instead.":
@@ -519,6 +521,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   Note: "备注",
   "Open the payment": "打开这笔付款",
   "Asked by {name}, waiting for you to send": "{name} 提交，等你发送",
+  "Asked by {name}, waiting for a manager or the owner to send": "{name} 提交，等店长或店主发送",
   "Recorded, not sent yet. The guest has not been refunded.":
     "已记录，还没发出。顾客还没收到退款。",
   "Paid on the store's card machine: refund it on the machine, then record it on the payment page.":
@@ -8229,6 +8232,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Recording refund…": "正在记录退款…",
   "Recording this request does not refund anything yet: it is sent once approved.":
     "记录这笔申请还不会退款：批准后才会发送。",
+  "Recording this request does not refund anything yet: a manager or the owner sends it from Approvals.":
+    "记录这笔申请还不会退款：由店长或店主在“审批”里发出。",
   "Refresh payment amounts": "刷新付款金额",
   "Refresh payment": "刷新付款",
   "This contact was already removed. The order and payment are not changed.":

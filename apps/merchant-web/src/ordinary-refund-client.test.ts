@@ -780,6 +780,11 @@ it("WP-2423 M10: a full refund of an order nobody accepted is told to use Refuse
   expect(refundErrorText(error)).toBe(
     "This order hasn't been accepted. Use Refuse and refund on the order to refund it in full.",
   );
+  // v15 batch 5: a cashier has no Refuse and refund; whoever may accept has Can't make it.
+  const cashier = refundErrorText(error, false);
+  expect(cashier).not.toContain("Refuse and refund");
+  expect(cashier).toContain("Can't make it");
+  expect(cashier).toContain("Nothing was recorded.");
 });
 
 it("WP-2423 M10: stop making it too that can't be done as asked says why and that nothing was recorded", async () => {

@@ -16,6 +16,7 @@ import {
   paymentRefundStateLabel,
   paymentStateLabel,
   refundEverythingQuantities,
+  refundSendsOnConfirm,
   refundWizardSections,
   requestBlockedMessage,
   requestFinished,
@@ -474,4 +475,14 @@ it("WP-2423 M10/M14: a cashier, whose request a manager sends, is pointed to Can
   expect(refundStopForCashierText({ ...dish, kitchen: "Cancelled" }, true, false)).toBeNull();
   setLanguageForTest("zh-Hans");
   expect(refundStopForCashierText(dish, true, false)).toContain("取消商品");
+});
+
+it("WP-2423 M14: a cashier's review never says the refund is sent on confirming", () => {
+  // v15 batch 5: the cashier read "Send $15.68 refund" and "as soon as you confirm", though
+  // pressing it only records a request a manager or the owner sends.
+  expect(refundSendsOnConfirm({ approvalRequired: false }, false, true)).toBe(true);
+  expect(refundSendsOnConfirm({ approvalRequired: false }, false, false)).toBe(false);
+  expect(refundSendsOnConfirm({ approvalRequired: true }, false, true)).toBe(false);
+  expect(refundSendsOnConfirm({ approvalRequired: false }, true, true)).toBe(false);
+  expect(refundSendsOnConfirm(null, false, true)).toBe(false);
 });

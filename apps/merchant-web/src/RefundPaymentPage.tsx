@@ -678,6 +678,15 @@ export const refundStopForCashierText = (
         "A manager sends this refund, so the kitchen isn't told now. To stop making a dish the kitchen hasn't started, use Cancel items on the order, or ask a manager.",
       )
     : null;
+/**
+ * WP-2423 item 6: an online refund needing no approval is sent on the same confirmation ("Send
+ * $X refund"). M14: never for a cashier, whose request a manager or the owner sends.
+ */
+export const refundSendsOnConfirm = (
+  preview: { readonly approvalRequired?: boolean | null } | null,
+  onMachine: boolean,
+  canSend: boolean,
+) => canSend && preview !== null && !onMachine && preview.approvalRequired !== true;
 function RefundWizard({
   orderReference,
   paymentIntentReference,
@@ -766,7 +775,7 @@ function RefundWizard({
     runFailure !== null && refundRunUncertain(runFailure) && run.current?.mayHaveSent === true;
   const sections = refundWizardSections(state, preview !== null, requestable, sendUnconfirmed);
   // WP-2423 item 6: an online refund that needs no approval is sent on the same confirmation.
-  const sendsNow = preview !== null && !previewOnMachine && preview.approvalRequired !== true;
+  const sendsNow = refundSendsOnConfirm(preview, previewOnMachine, canSend);
   const verificationCurrent = () =>
     verifiedUntil !== null && Date.parse(verifiedUntil) > Date.now();
   const clearPreview = () => {
@@ -854,7 +863,7 @@ function RefundWizard({
       }
     } catch (error) {
       if (!controller.signal.aborted) {
-        setMessage(errorMessage(error));
+        setMessage(errorMessage(error, canSend));
         setState(wasUnknown ? "Unknown" : wasRecorded ? "Recorded" : "Idle");
       }
     } finally {
@@ -983,7 +992,7 @@ function RefundWizard({
     } catch (error) {
       if (!controller.signal.aborted) {
         clearPreview();
-        setMessage(errorMessage(error));
+        setMessage(errorMessage(error, canSend));
         setState("Idle");
       }
     } finally {
@@ -1099,7 +1108,7 @@ function RefundWizard({
           run.current = null;
           setState("Idle");
           clearPreview();
-          setMessage(errorMessage(cause));
+          setMessage(errorMessage(cause, canSend));
         }
       }
     } finally {
@@ -1493,9 +1502,15 @@ function RefundWizard({
                   })
                 : ""}
             </p>
-          ) : (
+          ) : canSend || preview.approvalRequired === true ? (
             <p>
               {t("Recording this request does not refund anything yet: it is sent once approved.")}
+            </p>
+          ) : (
+            <p>
+              {t(
+                "Recording this request does not refund anything yet: a manager or the owner sends it from Approvals.",
+              )}
             </p>
           )}
           {preview.approvalRequired === true && previewStops ? (
