@@ -4,6 +4,8 @@ import type { ConsumerTransaction } from "@bop/eventing";
 import { createPostgresAdditionalDiningBatchStore } from "../infrastructure/persistence/additional-dining-batch-store.js";
 import { encodeAdditionalDiningBatchSnapshot } from "../domain/additional-dining-batch-codec.js";
 import { parseAdditionalDiningBatchSnapshot } from "../domain/additional-dining-batch.js";
+import { CheckoutValidationError } from "../domain/checkout-validation.js";
+import { OrderCreationError } from "../domain/order-creation.js";
 import { orderWriteFixture, orderCapacityLinkFixture } from "./order-creation-store.fixture.js";
 vi.mock("@bop/audit", async (original) => ({
   ...(await original<typeof import("@bop/audit")>()),
@@ -47,6 +49,7 @@ function fixture() {
     } as Record<string, unknown>,
 
     requiredPolicies: [] as unknown[],
+    finalizeRefusal: null as unknown,
     policyValidUntil: original.request.checkoutValidationEvidence.validUntil as string,
 
     details: {
@@ -148,6 +151,7 @@ function fixture() {
       if (state.expireDuringFinalize)
         state.observedAt = original.request.checkoutValidationEvidence.validUntil;
       if (state.failFinalize) throw new Error("synthetic finalization failure");
+      if (state.finalizeRefusal !== null) throw state.finalizeRefusal;
     },
   });
   return {
@@ -509,4 +513,69 @@ it("WP-2423 Q6: the table may order again after a round was cancelled, never aft
     f.parent.kind = kind;
     await expect(f.append()).rejects.toThrow();
   }
+});
+
+/**
+ * WP-2423 staff-wording-and-expected-refusals (v15 2026-11-11): the current gates find, while the
+ * round is being sent, that a dish ran out, came off the menu, or the menu or checkout window moved
+ * on. Nothing was written; the guest is told that plainly (items ran out / the cart prices again),
+ * never "unavailable, try again". Recognized by shape too: the pilot's gates may raise a second copy.
+ */
+it.each([
+  [
+    new CheckoutValidationError("CHECKOUT_STOCK_SHORT"),
+    "OrderCreationError",
+    "ORDER_CREATE_STOCK_SHORT",
+  ],
+  [
+    new CheckoutValidationError("CHECKOUT_REQUOTE_REQUIRED"),
+    "CheckoutValidationError",
+    "CHECKOUT_REQUOTE_REQUIRED",
+  ],
+  [
+    new CheckoutValidationError("CHECKOUT_ITEM_UNAVAILABLE"),
+    "CheckoutValidationError",
+    "CHECKOUT_ITEM_UNAVAILABLE",
+  ],
+  [
+    new CheckoutValidationError("CHECKOUT_QUOTE_EXPIRED"),
+    "CheckoutValidationError",
+    "CHECKOUT_QUOTE_EXPIRED",
+  ],
+  [
+    new OrderCreationError("ORDER_CREATE_TABLE_MOVED"),
+    "OrderCreationError",
+    "ORDER_CREATE_TABLE_MOVED",
+  ],
+  [
+    Object.assign(new Error("checkout is unavailable"), {
+      name: "CheckoutValidationError",
+      code: "CHECKOUT_REQUOTE_REQUIRED",
+    }),
+    "CheckoutValidationError",
+    "CHECKOUT_REQUOTE_REQUIRED",
+  ],
+])(
+  "WP-2423: a round refused by its current gates says so as $1 $2, nothing written",
+  async (refusal, name, code) => {
+    const f = fixture();
+    f.state.finalizeRefusal = refusal;
+    const error = await f.append().then(
+      () => null,
+      (caught: unknown) => caught,
+    );
+    expect(error).toBeInstanceOf(
+      name === "OrderCreationError" ? OrderCreationError : CheckoutValidationError,
+    );
+    expect(error).toMatchObject({ name, code });
+    expect(f.calls.slice(-2).map(({ sql }) => sql)).toEqual([
+      "ROLLBACK TO SAVEPOINT ordering_additional_batch",
+      "RELEASE SAVEPOINT ordering_additional_batch",
+    ]);
+  },
+);
+it("a real failure of the current gates is still unavailable", async () => {
+  const f = fixture();
+  f.state.finalizeRefusal = new CheckoutValidationError("CHECKOUT_DEPENDENCY_UNAVAILABLE");
+  await expect(f.append()).rejects.toThrow("additional Dining batch persistence is unavailable");
 });

@@ -13,6 +13,7 @@ import {
   type OrderCapacityLink,
 } from "../../domain/order-capacity-link.js";
 import {
+  CheckoutValidationError,
   parseCheckoutValidationEvidence,
   parseConfiguredCheckoutValidationEvidence,
 } from "../../domain/checkout-validation.js";
@@ -58,6 +59,33 @@ export class AdditionalDiningBatchStoreError extends Error {
 const fail = (): never => {
   throw new AdditionalDiningBatchStoreError();
 };
+/**
+ * WP-2423 expected refusals: the business answers a round meets in ordinary service, found by the
+ * current gates while the round is being sent. Nothing was written (the savepoint rolled back) and
+ * nothing will be charged, so the guest (or staff member) is told what happened instead of
+ * "unavailable, try again": the stock ran out after checkout, staff moved the party, a dish came
+ * off the menu, or the menu or checkout window moved on (the cart prices again). Recognized by name
+ * and code, not class identity: the pilot composes the current gates from owner sources, so the
+ * refusal can come from a second copy of this module. Re-raised as this module's own error.
+ */
+function roundRefusal(error: unknown): Error | null {
+  if (error === null || typeof error !== "object") return null;
+  const { name, code } = error as { name?: unknown; code?: unknown };
+  if (name === "OrderCreationError") {
+    if (code === "ORDER_CREATE_STOCK_SHORT" || code === "ORDER_CREATE_TABLE_MOVED")
+      return error instanceof OrderCreationError ? error : new OrderCreationError(code);
+    return null;
+  }
+  if (name !== "CheckoutValidationError") return null;
+  if (code === "CHECKOUT_STOCK_SHORT") return new OrderCreationError("ORDER_CREATE_STOCK_SHORT");
+  if (
+    code === "CHECKOUT_REQUOTE_REQUIRED" ||
+    code === "CHECKOUT_ITEM_UNAVAILABLE" ||
+    code === "CHECKOUT_QUOTE_EXPIRED"
+  )
+    return error instanceof CheckoutValidationError ? error : new CheckoutValidationError(code);
+  return null;
+}
 export function createPostgresAdditionalDiningBatchStore(options: {
   brandReference: string;
   storeReference: string;
@@ -510,12 +538,8 @@ export function createPostgresAdditionalDiningBatchStore(options: {
       } catch (error) {
         await tx.query("ROLLBACK TO SAVEPOINT ordering_additional_batch", []);
         await tx.query("RELEASE SAVEPOINT ordering_additional_batch", []);
-        // WP-2423: the stock ran out after checkout; the guest is told plainly, nothing charged.
-        if (error instanceof OrderCreationError && error.code === "ORDER_CREATE_STOCK_SHORT")
-          throw error;
-        // WP-2423: staff moved the party while the round was being sent; nothing was written.
-        if (error instanceof OrderCreationError && error.code === "ORDER_CREATE_TABLE_MOVED")
-          throw error;
+        const refused = roundRefusal(error);
+        if (refused !== null) throw refused;
         return fail();
       }
       return Object.freeze({ status: "Created" as const, snapshot });
