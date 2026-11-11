@@ -348,22 +348,6 @@ it("two Stores: a listed dish is on sale at both, a Store's hide stays, a Store 
         }
       };
 
-      const prices = (at) => at.prices.query({ ...session, priceBookReference: null });
-      const priceCommand = (at, body) => at.prices.command({ ...session, body });
-      const purposes = () =>
-        owned(
-          "SELECT b.stable_code code,p.purpose,p.actor_id::text actor FROM rms_pricing.price_book_draft_purpose p JOIN rms_pricing.price_book b USING (price_book_id) WHERE p.brand_id=$1 ORDER BY p.recorded_at",
-          [brandReference],
-        );
-      const torontoDate = new Intl.DateTimeFormat("en-CA", {
-        timeZone: "America/Toronto",
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-      })
-        .format(new Date())
-        .replaceAll("-", "");
-
       const status = async (at, sku) =>
         (await at.availability.query(session)).items.find((item) => item.skuReference === sku)
           ?.status;
