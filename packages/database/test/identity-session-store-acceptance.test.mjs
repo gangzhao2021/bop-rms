@@ -45,6 +45,8 @@ async function prove(context) {
       { table_name: "session_revocation_request" },
       { table_name: "staff_pin_attempt" },
       { table_name: "staff_pin_credential" },
+      // WP-2423 M63 (2000_510): an owner's or manager's PIN check past a paused tablet's limit.
+      { table_name: "staff_pin_device_limit_clear" },
       { table_name: "staff_pin_session" },
       { table_name: "store_sign_in_device" },
       // WP-2423 DEC-COGNITO-STORE-STAFF: Store staff invitations and their Cognito accounts.
@@ -386,6 +388,7 @@ async function prove(context) {
       [
         "check_order_recovery_consumption",
         "check_staff_pin_attempt",
+        "check_staff_pin_device_limit_clear",
         "check_staff_pin_session",
         "check_store_staff_account",
         "enforce_api_client_revision",

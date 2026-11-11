@@ -132,20 +132,11 @@ export async function verifyPickupQuoteLab(origin, pickup) {
               }),
             );
           });
-        await page.getByRole("button", { name: "Reload checkout details", exact: true }).click();
+        // WP-2423 M112: there is no Save or Reload button; Continue checks and saves the details.
         await expect(page.getByLabel("Pickup name", { exact: true })).toHaveValue("");
         await page.getByLabel("Pickup name", { exact: true }).fill("Synthetic Guest");
         await page.getByLabel("Contact method").selectOption("Email");
         await page.getByLabel("Pickup email", { exact: true }).fill("synthetic@example.invalid");
-        await page.getByRole("button", { name: "Save details", exact: true }).click();
-        await expect(page.getByText("Checkout details saved.", { exact: true })).toBeVisible();
-        const detailsResponses = responses.filter((response) => response.kind === "details");
-        assert(detailsResponses.length >= 3);
-        assert(
-          detailsResponses.every(
-            (response) => [200, 201].includes(response.status) && response.noStore,
-          ),
-        );
         await page.getByRole("button", { name: "No tip", exact: true }).click();
         let droppedFirstSessionResponse = false;
         await page.route("**/api/v1/carts/*/checkout-sessions", async (route) => {
@@ -218,6 +209,14 @@ export async function verifyPickupQuoteLab(origin, pickup) {
             );
           });
         await page.unroute("**/api/v1/carts/*/checkout-sessions");
+        // The details were read (current and policy) and saved by Continue, never cached.
+        const detailsResponses = responses.filter((response) => response.kind === "details");
+        assert(detailsResponses.length >= 3, JSON.stringify(detailsResponses));
+        assert(
+          detailsResponses.every(
+            (response) => [200, 201].includes(response.status) && response.noStore,
+          ),
+        );
         await expect(
           page.getByRole("heading", { name: "Online payment is unavailable", exact: true }),
         ).toBeVisible();

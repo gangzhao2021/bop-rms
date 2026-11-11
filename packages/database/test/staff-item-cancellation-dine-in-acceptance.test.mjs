@@ -1392,7 +1392,8 @@ it("after staff cancel one line of a dine-in round, the kitchen completes the re
           expectedTableAssignmentVersion: ready.tableAssignmentVersion,
         },
       });
-      await assert.rejects(serve(serveCommand(2)), /DINING_SERVE_COMMAND_DENIED/u);
+      // WP-2423 M147: a stale version is "changed" (409, read again), never a permission refusal.
+      await assert.rejects(serve(serveCommand(2)), /DINING_SERVE_COMMAND_CHANGED/u);
 
       // ── WP-2423 "Serve all ready items": the same serve command, once per line, each in its own
       // restricted-role transaction, with operation references derived from the request's.

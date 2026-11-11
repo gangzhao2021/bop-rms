@@ -556,6 +556,8 @@ async function prove(context) {
         pastLastOrders: false,
         upcoming: [],
         nextOpening: { localDate: "2026-08-17", startLocalTime: "09:00:00" },
+        // M117: Sunday 04:00 is in no period (none from Saturday runs past midnight).
+        currentPeriod: null,
       });
       assert.equal(
         await entryOperating.readCurrent({ ...query, publicStoreReference: id(93) }),

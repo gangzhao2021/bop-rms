@@ -105,7 +105,15 @@ export async function exerciseEntryDiningHandoff({
   assert.equal(body.schemaVersion, 1);
   // Do not include even this synthetic client secret in assertion output.
   assert(body.clientSecret === clientSecret);
-  assert.deepEqual(Object.keys(body).sort(), ["clientSecret", "schemaVersion"]);
+  // WP-2423 M19: the effective deadline the admission refuses at, with the server's time.
+  assert.deepEqual(Object.keys(body).sort(), [
+    "clientSecret",
+    "payBy",
+    "schemaVersion",
+    "serverNow",
+  ]);
+  assert.ok(Number.isFinite(Date.parse(body.payBy)), body.payBy);
+  assert.ok(Number.isFinite(Date.parse(body.serverNow)), body.serverNow);
   assert.equal(reads, 1);
   const stale = await request(oldCookie);
   assert.equal(stale.status, 404);

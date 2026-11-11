@@ -646,9 +646,13 @@ export async function exerciseSubmissionInventoryPayment({
           "checkoutSessionReference",
           "creationStatus",
           "orderReference",
+          "payBy",
           "paymentIntentReference",
           "total",
         ]);
+        // WP-2423 M19: the payment window's end, with the server's time to count it from.
+        assert.ok(Number.isFinite(Date.parse(body.payment.payBy)), body.payment.payBy);
+        assert.ok(Number.isFinite(Date.parse(body.serverNow)), body.serverNow);
       }
     } else {
       await assert.rejects(paymentService.create(serviceInput), {

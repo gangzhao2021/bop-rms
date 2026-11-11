@@ -430,10 +430,14 @@ export async function exercisePersistentProfileEntry({
         "address",
         "brandDisplayName",
         "hours",
+        "kitchenStatement",
         "phone",
         "storeDisplayName",
         "timeZone",
       ]);
+      // WP-2423 (M178): read under the restricted role; this Store has no statement (null, not
+      // left out as an unreadable read would be).
+      assert.equal(identityBody.store.kitchenStatement, null);
       assert.equal(identityBody.store.storeDisplayName, body.storeDisplayName);
       assert.equal(identityBody.store.brandDisplayName, body.brandDisplayName);
       assert.ok(identityBody.store.address.addressLines.length >= 1);

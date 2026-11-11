@@ -5646,7 +5646,8 @@ async function journey(journeyEnding) {
           const restTotal = BigInt(
             rest.bill.split.parts.find((part) => part.partNumber === 3).payment.totalMinor,
           );
-          await assert.rejects(cashRefund((restTotal + 1n).toString()), {
+          // v15 M131: cash goes back in whole nickels, so the first nickel above the part.
+          await assert.rejects(cashRefund(((restTotal / 5n + 1n) * 5n).toString()), {
             code: "TABLE_PAYMENT_TOO_MUCH",
           });
           assert.equal((await cashRefund("100")).status, "Recorded");
