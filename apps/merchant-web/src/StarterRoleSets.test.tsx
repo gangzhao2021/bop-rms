@@ -72,7 +72,7 @@ it("shows a tea shop what it adds, keeps and may remove, and what stays because 
   expect(html).toContain("<strong>Counter</strong>");
   expect(html).toContain("<strong>Drink maker</strong>");
   expect(html).toContain("Keeps: Store Manager.");
-  expect(html).toContain("Also remove Kitchen.");
+  expect(html).toContain("Also remove the roles this kind of shop doesn&#x27;t use: Kitchen.");
   expect(html).toContain("Front of House stays: 3 staff hold it.");
   expect(html).toContain("Use these roles");
   noInternals(html);

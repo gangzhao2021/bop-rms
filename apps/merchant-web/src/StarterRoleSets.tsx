@@ -147,7 +147,7 @@ function SetPreview({
             onChange={(event) => onPutAway(event.currentTarget.checked)}
           />{" "}
           {t(
-            "Also remove {list}. This kind of shop doesn't use them and nobody holds them; you can bring any back.",
+            "Also remove the roles this kind of shop doesn't use: {list}. Nobody holds them, and you can bring any back.",
             { list: names(removable) },
           )}
         </label>

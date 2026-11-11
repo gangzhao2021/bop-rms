@@ -1489,7 +1489,10 @@ export function StoreSetupDraftPage({
           </footer>
         </FirstStoreFold>
       )}
-      {id === storeReference && workspace && !deciding && staffRoles !== undefined ? (
+      {id === storeReference &&
+      !deciding &&
+      (opening !== "Loading" || setupAnswered) &&
+      staffRoles !== undefined ? (
         <Suspense fallback={null}>{staffRoles}</Suspense>
       ) : null}
     </AppFrame>

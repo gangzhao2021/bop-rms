@@ -10243,12 +10243,13 @@ tr[data-drop-target="true"] {
 }
 .starter-roles__kinds {
   display: grid;
-  gap: var(--bop-space-2);
+  gap: 0;
   margin: 0;
   padding: 0;
   border: 0;
 }
 .starter-roles__kinds legend {
+  min-height: 0;
   padding: 0;
   margin-bottom: var(--bop-space-2);
   font-weight: 600;
@@ -10257,9 +10258,11 @@ tr[data-drop-target="true"] {
 .starter-roles__put-away {
   display: flex;
   gap: var(--bop-space-2);
-  align-items: baseline;
+  align-items: center;
   min-height: 44px;
-  align-content: center;
+  margin: 0;
+  font-size: 16px;
+  font-weight: 400;
 }
 .starter-roles__preview {
   display: grid;

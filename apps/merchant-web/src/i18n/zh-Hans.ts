@@ -9217,11 +9217,11 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "You already have a role called {name}, so it isn't added.":
     "店里已有叫 {name} 的角色，所以不再添加。",
   "Keeps: {list}.": "保留：{list}。",
-  "Also remove {list}. This kind of shop doesn't use them and nobody holds them; you can bring any back.":
-    "同时移除 {list}。这类店用不到，也没有人持有；以后随时可以恢复使用。",
-  "{name} stays: {count} staff hold it.": "{name} 保留：有 {count} 位员工持有。",
+  "Also remove the roles this kind of shop doesn't use: {list}. Nobody holds them, and you can bring any back.":
+    "同时移除这类店用不到的角色：{list}。没有人持有，以后随时可以恢复使用。",
+  "{name} stays: {count} staff hold it.": "{name}保留：有 {count} 位员工持有。",
   "{name} stays: a change or staff request for it is waiting.":
-    "{name} 保留：它有一项等待中的改动或员工角色申请。",
+    "{name}保留：它有一项等待中的改动或员工角色申请。",
   "Roles for your kind of shop": "按店型设置角色",
   "Offline. The roles for your kind of shop show again when you're back online.":
     "网络断开。恢复联网后会再显示按店型的角色。",
