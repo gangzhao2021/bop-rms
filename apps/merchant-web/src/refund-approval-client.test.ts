@@ -123,6 +123,7 @@ it("WP-2423 Q5: reads the approval list strictly", async () => {
   // An older server names no request operation: nothing can be sent from the list.
   expect(view.entries[0]).toEqual({
     ...entry,
+    cashGivenBackMinor: null,
     requestOperationReference: null,
     paymentAttemptReferences: [],
   });
@@ -388,4 +389,27 @@ it("WP-2423 M14: a request nobody sent is read with what Send names, and never a
     paymentAttemptReferences: [id(31)],
   });
   await expect(client.approvals()).rejects.toMatchObject({ code: "Unavailable" });
+});
+
+it("v15 batch 8: reads the cash a counter cash refund gives back, and refuses it anywhere else", async () => {
+  const view = (value: Record<string, unknown>) =>
+    json({
+      observedAt: "2026-10-12T15:01:00.000Z",
+      canApprove: true,
+      soleOperator: null,
+      entries: [{ ...entry, ...value }],
+    });
+  const fetcher = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(view({ paymentMethod: "CardMachine", cashGivenBackMinor: "365" }))
+    .mockResolvedValueOnce(view({ paymentMethod: "CardMachine", cashGivenBackMinor: null }))
+    // Cash only on a counter payment, and only in whole nickels.
+    .mockResolvedValueOnce(view({ paymentMethod: "Online", cashGivenBackMinor: "365" }))
+    .mockResolvedValueOnce(view({ paymentMethod: "CardMachine", cashGivenBackMinor: "367" }))
+    .mockResolvedValueOnce(view({ paymentMethod: "CardMachine", cashGivenBackMinor: 365 }));
+  const client = createRefundApprovalClient(fetcher);
+  expect((await client.approvals()).entries[0]?.cashGivenBackMinor).toBe("365");
+  expect((await client.approvals()).entries[0]?.cashGivenBackMinor).toBeNull();
+  for (let n = 0; n < 3; n += 1)
+    await expect(client.approvals()).rejects.toMatchObject({ code: "Unavailable" });
 });

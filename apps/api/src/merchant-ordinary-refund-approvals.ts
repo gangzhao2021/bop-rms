@@ -197,6 +197,10 @@ export function createMerchantOrdinaryRefundApprovals(options: {
                 paymentAttemptReferences: entry.paymentAttemptReferences,
                 paymentIntentReferences: entry.paymentIntentReferences,
                 paymentMethod: entry.paymentMethod,
+                // v15 batch 8: a counter cash payment: the whole nickels the drawer gives back
+                // (never on the card machine); null for a card or online payment.
+                cashGivenBackMinor:
+                  entry.cashGivenBackMinor === null ? null : entry.cashGivenBackMinor.toString(),
                 currencyCode: entry.currencyCode,
                 amountMinor: entry.amountMinor.toString(),
                 reasonCode: entry.reasonCode,

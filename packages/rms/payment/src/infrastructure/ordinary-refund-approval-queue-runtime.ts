@@ -14,6 +14,8 @@ import {
 } from "./persistence/ordinary-refund-approval-store.js";
 import { createPostgresOrdinaryRefundPricingSource } from "./ordinary-refund-pricing-source.js";
 import { createPostgresCardMachinePaymentStore } from "./persistence/card-machine-payment-store.js";
+import { cardMachineRefundGivenBackMinor } from "../application/card-machine-payment.js";
+import { ordinaryRefundPaymentAmount } from "../application/ordinary-refund-request.js";
 
 interface Scope {
   readonly tenantReference: string;
@@ -177,13 +179,35 @@ export function createPostgresOrdinaryRefundApprovalQueueRuntime(options: {
         scope: { brandReference: scope.brandReference, storeReference: scope.storeReference },
         authorize: (t, query) => byOrder(t as ConsumerTransaction, query),
       });
-      for (const payment of current.request.payments)
-        if ((await cards.loadByIntent(tx, payment.paymentIntentReference)) !== null)
-          paymentMethod = "CardMachine";
+      // v15 batch 8: a counter cash payment goes back in cash from the drawer, in whole nickels:
+      // what the drawer gives back for this request, by the status source's rule (null: not all
+      // of it was paid in cash). A recorded refund leaves the queue, so it is always still to give.
+      let cashGivenBackMinor: bigint | null = null;
+      let allCash = current.request.payments.length > 0;
+      for (const payment of current.request.payments) {
+        const card = await cards.loadByIntent(tx, payment.paymentIntentReference);
+        if (card === null) {
+          allCash = false;
+          continue;
+        }
+        paymentMethod = "CardMachine";
+        if (card.cash === undefined) {
+          allCash = false;
+          continue;
+        }
+        const handedBack = (await cards.refunds(tx, card.cardMachinePaymentReference))
+          .filter((refund) => refund.recordedAt <= evaluated.observedAt)
+          .reduce((sum, refund) => sum + refund.amountMinor, 0n);
+        cashGivenBackMinor =
+          (cashGivenBackMinor ?? 0n) +
+          cardMachineRefundGivenBackMinor(card, ordinaryRefundPaymentAmount(payment), handedBack);
+      }
+      if (!allCash) cashGivenBackMinor = null;
       entries.push(
         Object.freeze({
           orderReference: current.request.orderReference,
           paymentMethod,
+          cashGivenBackMinor,
           requestReference: current.request.requestReference,
           operationReference: current.request.operationReference,
           requesterReference: current.requesterReference,

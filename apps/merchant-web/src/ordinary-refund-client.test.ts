@@ -296,6 +296,7 @@ const context = {
   paymentState: "Captured",
   paymentMethod: "Online",
   paidInCash: false,
+  cashLeftMinor: null,
   currencyCode: "CAD",
   capturedAmountMinor: "2260",
   confirmedRefundMinor: "0",
@@ -378,18 +379,35 @@ it("v15 batch 8: reads a counter cash payment, and an older server's answer as n
   const machine = { ...context, paymentMethod: "CardMachine" };
   const older: Record<string, unknown> = { ...machine };
   delete older.paidInCash;
+  delete older.cashLeftMinor;
+  const noLeft: Record<string, unknown> = { ...machine, paidInCash: true };
+  delete noLeft.cashLeftMinor;
   const fetcher = vi
     .fn<typeof fetch>()
-    .mockResolvedValueOnce(response({ ...machine, paidInCash: true }))
+    .mockResolvedValueOnce(response({ ...machine, paidInCash: true, cashLeftMinor: "1075" }))
     .mockResolvedValueOnce(response(older))
+    // A server before the drawer's cash was read: cash, without a cap.
+    .mockResolvedValueOnce(response(noLeft))
     // Cash is only ever a payment taken at the counter, and the answer is a yes or no.
     .mockResolvedValueOnce(response({ ...context, paidInCash: true }))
-    .mockResolvedValueOnce(response({ ...machine, paidInCash: "yes" }));
+    .mockResolvedValueOnce(response({ ...machine, paidInCash: "yes" }))
+    // The drawer's cash is only a cash payment's, and is a whole amount in cents.
+    .mockResolvedValueOnce(response({ ...machine, paidInCash: false, cashLeftMinor: "100" }))
+    .mockResolvedValueOnce(response({ ...machine, paidInCash: true, cashLeftMinor: "-5" }));
   const client = createOrdinaryRefundClient(fetcher);
-  await expect(client.context(id(6), csrf)).resolves.toMatchObject({ paidInCash: true });
-  await expect(client.context(id(6), csrf)).resolves.toMatchObject({ paidInCash: false });
-  await expect(client.context(id(6), csrf)).rejects.toThrow();
-  await expect(client.context(id(6), csrf)).rejects.toThrow();
+  await expect(client.context(id(6), csrf)).resolves.toMatchObject({
+    paidInCash: true,
+    cashLeftMinor: "1075",
+  });
+  await expect(client.context(id(6), csrf)).resolves.toMatchObject({
+    paidInCash: false,
+    cashLeftMinor: null,
+  });
+  await expect(client.context(id(6), csrf)).resolves.toMatchObject({
+    paidInCash: true,
+    cashLeftMinor: null,
+  });
+  for (let n = 0; n < 4; n += 1) await expect(client.context(id(6), csrf)).rejects.toThrow();
 });
 it.each([
   { ...context, paymentIntentReference: id(99) },

@@ -526,6 +526,21 @@ it("WP-2423 M52: the counter takes cash by the table's rules; replay, concurrenc
           ),
         ),
       );
+      // v15 batch 8: Approvals and the payment page read the cash given back from the payment's
+      // refunds as the pilot API role (what the drawer still holds), and nothing more goes back.
+      const givenBack = await asApi((tx) =>
+        cards().refunds(tx, dishesPaid.record.cardMachinePaymentReference),
+      );
+      assert.deepEqual(
+        givenBack.map((refund) => refund.amountMinor),
+        [2245n],
+      );
+      assert.equal(
+        cardMachinePaymentTakenMinor(dishesPaid.record) -
+          givenBack.reduce((sum, refund) => sum + refund.amountMinor, 0n),
+        0n,
+      );
+      assert.equal(cardMachineRefundGivenBackMinor(dishesPaid.record, 438n, 2245n), 0n);
       // The drawer is empty: the 2 cents of the Order it never held can't be requested (all of it
       // is taken), and a request already made revalidates as it was.
       assert.equal((await balance(request(4n)))[0].otherOccupiedAmountMinor, 2247n);

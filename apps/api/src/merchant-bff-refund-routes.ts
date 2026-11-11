@@ -419,6 +419,8 @@ export function installMerchantRefundRoutes(
           paymentMethod: result.paymentMethod,
           // v15 batch 8: a counter cash payment, given back in cash from the drawer.
           paidInCash: result.paidInCash,
+          // v15 batch 8: what the drawer still holds of a cash payment (null otherwise).
+          cashLeftMinor: result.cashLeftMinor,
           currencyCode: result.currencyCode,
           capturedAmountMinor: result.capturedAmountMinor,
           confirmedRefundMinor: result.confirmedRefundMinor,

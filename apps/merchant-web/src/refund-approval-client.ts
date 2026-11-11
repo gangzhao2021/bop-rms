@@ -140,6 +140,11 @@ export interface RefundApprovalEntry {
   readonly paymentIntentReferences: readonly string[];
   /** WP-2423 item 4: refunded on the store's card machine (staff record it) or sent online. */
   readonly paymentMethod: "Online" | "CardMachine";
+  /**
+   * v15 batch 8: paid in cash at the counter: the whole nickels the drawer gives back for this
+   * request (never on the card machine). Null for a card or online payment, or an older server.
+   */
+  readonly cashGivenBackMinor: string | null;
   readonly currencyCode: "CAD";
   readonly amountMinor: string;
   readonly reasonCode: string;
@@ -173,7 +178,11 @@ function entry(value: unknown): RefundApprovalEntry {
     value !== null &&
     typeof value === "object" &&
     Object.hasOwn(value, "requestOperationReference");
+  // v15 batch 8: absent from an older server (the payment is then not known as cash).
+  const withCash =
+    value !== null && typeof value === "object" && Object.hasOwn(value, "cashGivenBackMinor");
   const raw = record(value, [
+    ...(withCash ? ["cashGivenBackMinor"] : []),
     "orderReference",
     "orderNumber",
     "requestReference",
@@ -201,6 +210,12 @@ function entry(value: unknown): RefundApprovalEntry {
     (raw.soleOperatorApproval && (!raw.requestedByYou || !raw.canApprove)) ||
     raw.currencyCode !== "CAD" ||
     (raw.paymentMethod !== "Online" && raw.paymentMethod !== "CardMachine") ||
+    (withCash &&
+      raw.cashGivenBackMinor !== null &&
+      (raw.paymentMethod !== "CardMachine" ||
+        typeof raw.cashGivenBackMinor !== "string" ||
+        !/^(0|[1-9][0-9]{0,17})$/u.test(raw.cashGivenBackMinor) ||
+        BigInt(raw.cashGivenBackMinor) % 5n !== 0n)) ||
     (raw.state !== "AwaitingApproval" && raw.state !== "Approved" && raw.state !== "NotSent") ||
     (raw.state === "NotSent" && (!sendable || raw.canApprove !== false)) ||
     (sendable &&
@@ -235,6 +250,7 @@ function entry(value: unknown): RefundApprovalEntry {
     ),
     paymentIntentReferences: Object.freeze(raw.paymentIntentReferences.map(ref)),
     paymentMethod: raw.paymentMethod,
+    cashGivenBackMinor: withCash ? (raw.cashGivenBackMinor as string | null) : null,
     currencyCode: "CAD" as const,
     amountMinor: money(raw.amountMinor),
     reasonCode: raw.reasonCode,

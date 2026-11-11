@@ -4,6 +4,7 @@ import type { ConsumerTransaction } from "@bop/eventing";
 import { readClosedRecord, parseOpaqueUuidV7 } from "@bop/identity";
 import {
   cardMachineOrderRefundedMinor,
+  cardMachinePaymentTakenMinor,
   createPostgresCardMachinePaymentStore,
   createPostgresOrdinaryRefundPositionSource,
   createPostgresPaymentIntentBindingSource,
@@ -263,6 +264,15 @@ export function createMerchantRefundPaymentContext(options: {
           paymentMethod: "CardMachine" as const,
           // v15 batch 8: a counter cash payment's refunds go back in cash from the drawer.
           paidInCash: card.cash !== undefined,
+          // v15 batch 8: the cash the drawer still holds of it (taken, rounding included, less
+          // every refund given back), so the page names the whole nickels a new request gives back.
+          cashLeftMinor:
+            card.cash === undefined
+              ? null
+              : (() => {
+                  const left = cardMachinePaymentTakenMinor(card) - handedBack;
+                  return (left > 0n ? left : 0n).toString();
+                })(),
           currencyCode: "CAD" as const,
           capturedAmountMinor: captured.toString(),
           confirmedRefundMinor: confirmed.toString(),
@@ -308,6 +318,7 @@ export function createMerchantRefundPaymentContext(options: {
           paymentState: terminal === null ? ("Unresolved" as const) : ("Failed" as const),
           paymentMethod: "Online" as const,
           paidInCash: false,
+          cashLeftMinor: null,
           currencyCode: null,
           capturedAmountMinor: null,
           confirmedRefundMinor: null,
@@ -344,6 +355,7 @@ export function createMerchantRefundPaymentContext(options: {
         paymentState: "Captured" as const,
         paymentMethod: "Online" as const,
         paidInCash: false,
+        cashLeftMinor: null,
         currencyCode: "CAD" as const,
         capturedAmountMinor: terminal.amount.amountMinor.toString(),
         confirmedRefundMinor: position.confirmedMinor.toString(),

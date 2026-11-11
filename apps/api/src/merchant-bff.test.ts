@@ -4862,6 +4862,7 @@ it("protects refund payment context and preserves unknown amounts", async () => 
     paymentState: "Unresolved" as const,
     paymentMethod: "Online" as const,
     paidInCash: false as const,
+    cashLeftMinor: null,
     currencyCode: null,
     capturedAmountMinor: null,
     confirmedRefundMinor: null,
