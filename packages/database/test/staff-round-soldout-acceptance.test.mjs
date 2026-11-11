@@ -263,9 +263,11 @@ it("a guest's sold-out dish is marked; staff remove it and send the rest, a dish
       });
       const elapsed = Math.round(performance.now() - started);
       assert.equal(placed.status, "Placed");
-      // Recorded, not a gate here: on this container database most of it is the existing
-      // checkout and payment preparation (about 2.2 s of 3.6 s on 2026-11-10); the decision adds
-      // one read-only check and one removal transaction. The < 2 s budget is checked live on v15.
+      // Recorded, not a gate here: the bundle's < 2 s budget is NOT met and is an Owner-visible
+      // exception in WP-2423 (2026-11-10). Measured per step on this container database
+      // (4.1 s in all): payment preparation 1.95 s, checkout 0.64 s, quote 0.48 s, the table
+      // guest and cart steps 0.85 s; the staff decision adds one read-only check and one removal
+      // transaction (about 0.2 s). v15 measured 2.34 s for a staff round before this bundle.
       stdout.write(`[M35] staff round with a guest line removed and one sent: ${elapsed} ms\n`);
       assert.deepEqual(await orderedItems(admin, placed.orderBatchReference), [
         { sku: tea.skuReference, quantity: 1 },
