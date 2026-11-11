@@ -1041,7 +1041,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Available for some order types": "部分订单类型可供应",
   "Available to order": "可售",
   "Available query coverage": "可用的查询范围",
-  "Awaiting card-machine payment": "等待刷卡机付款",
   "Awaiting customer action": "等待顾客操作",
   "Awaiting payment": "待付款",
   "Awaiting payment method": "等待付款方式",
@@ -1238,9 +1237,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Charge each on the card machine and record it here before its time ends, or it is released and its items go back to stock.":
     "请逐一在刷卡机上收款，并在时间结束前在此记录，否则会被释放，商品退回库存。",
   "Charge of {amountMinor} taken": "已扣款 {amountMinor}",
-  "Charge on card machine": "用刷卡机收款",
-  "Charge on card machine by {at} · released if unpaid":
-    "请在 {at} 前用刷卡机收款 · 未付款将被释放",
+  "Take payment by {at} · released if unpaid": "请在 {at} 前收款 · 未付款将释放",
   "Charge that matches no order": "没有对应订单的扣款",
   "Charge the payment provider took that matches no order: {count} · {amountMinor}. Review it in":
     "支付方收取但没有对应订单的款项：{count} · {amountMinor}。请在以下位置核查：",
@@ -2593,9 +2590,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Not on the list? Sign in with your account and choose “My PIN” to set one.":
     '名单上没有你？请用你的账号登录并选择"我的 PIN"来设置。',
   "Not paid in time · being cancelled automatically": "未按时付款 · 正在自动取消",
-  "Not paid on the card machine.": "未在刷卡机上付款。",
-  "Not paid yet: charge it on the card machine, then record it below (or from Counter order).":
-    "尚未付款：请在刷卡机上收款，再在下方记录（或在柜台点单页记录）。",
+  "Not paid.": "未付款。",
+  "Not paid yet: take payment on the card machine or in cash, then record it below (or from Counter order).":
+    "尚未付款：请用刷卡机或现金收款，然后在下方记录（或在“柜台点单”记录）。",
   "Not paid · cancelled automatically at {at}{soon} unless paid":
     "未付款 · 若未付款将于 {at}{soon} 自动取消",
   "Not present": "不含",
@@ -6004,7 +6001,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{status} · as of {value}": "{status} · 截至 {value}",
   "{store} · Dine-in · added to the table's order · paid on the store's card machine":
     "{store} · 堂食 · 加到该桌的订单 · 在门店刷卡机付款",
-  "{store} · Pickup · paid on the store's card machine": "{store} · 自取 · 在门店刷卡机付款",
   "{store} · Dine-in · added to the table's bill · the table pays at the end":
     "{store} · 堂食 · 记入本桌账单 · 最后一起结账",
   "{subject} has a new round that is not accepted yet — accept it on Orders.":
@@ -9027,10 +9023,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "卡被拒？换一张卡。客人不付了？取消订单，菜品退回库存。",
   "Card declined? Try another card. Guest not paying? Ask a manager to cancel it; otherwise it is released at {payBy}.":
     "卡被拒？换一张卡。客人不付了？请经理取消；否则在 {payBy} 自动释放。",
-  "Charge each on the card machine and record it here before its time ends. A guest who isn't paying: cancel the order so its items go back to stock.":
-    "在刷卡机上逐单收款，并在时间结束前在这里录入。客人不付款的，取消订单，菜品退回库存。",
-  "Charge each on the card machine and record it here before its time ends. A guest who isn't paying: ask a manager to cancel it; otherwise it is released at its time and its items go back to stock.":
-    "在刷卡机上逐单收款，并在时间结束前在这里录入。客人不付款的，请经理取消；否则到时自动释放，菜品退回库存。",
+  "Take payment for each, on the card machine or in cash, and record it here before its time ends. A guest who isn't paying: cancel the order so its items go back to stock.":
+    "逐单收款（刷卡机或现金），并在时间结束前在这里录入。客人不付款的，取消订单，菜品退回库存。",
+  "Take payment for each, on the card machine or in cash, and record it here before its time ends. A guest who isn't paying: ask a manager to cancel it; otherwise it is released at its time and its items go back to stock.":
+    "逐单收款（刷卡机或现金），并在时间结束前在这里录入。客人不付款的，请经理取消；否则到时自动释放，菜品退回库存。",
   "Cancelled before payment by staff · {reason}": "付款前由员工取消 · {reason}",
   "Name not added yet": "尚未填写姓名",
   "{name} · signed in with PIN": "{name} · 已用 PIN 登录",
@@ -9321,4 +9317,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "已送出。请收现金 {amount}，含税和小费（按 5 分取整）。",
   "Cash total (rounded to 5 cents)": "现金合计（按 5 分取整）",
   "Sent and paid in cash: {amount} with tax and tip.": "已送出并现金付款：{amount}，含税和小费。",
+  "Take {amount} in cash (rounded to 5 cents), count it, then record it here. The kitchen starts this order once it is recorded.":
+    "收现金 {amount}（按 5 分取整），点清后在这里记录。记录后厨房才开始做这单。",
+  "Awaiting payment at the counter": "等待柜台收款",
+  "Paid in cash": "现金付款",
 });

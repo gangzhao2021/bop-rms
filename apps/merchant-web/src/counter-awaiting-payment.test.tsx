@@ -118,7 +118,7 @@ it("reads a sent, unpaid counter order's release time, amount and the person's c
 
 it("warns before the release time in staff words, urgently in the last minutes", () => {
   expect(counterPayByText(payBy, "America/Toronto", now)).toBe(
-    "Charge on card machine by 13:20 · released if unpaid",
+    "Take payment by 13:20 · released if unpaid",
   );
   expect(counterPayByTier(payBy, now)).toBe("warning");
   const late = Date.parse(payBy) - 4 * 60_000;
@@ -136,8 +136,10 @@ it("Orders offers the card-machine charge on the row and says when it is release
       now={now}
     />,
   );
-  expect(html).toContain("Charge on card machine by 13:20 · released if unpaid");
-  expect(html).toContain("Not paid yet: charge it on the card machine, then record it below");
+  expect(html).toContain("Take payment by 13:20 · released if unpaid");
+  expect(html).toContain(
+    "Not paid yet: take payment on the card machine or in cash, then record it below",
+  );
   expect(html).not.toContain("from Counter order.");
 });
 
@@ -145,7 +147,7 @@ it("the counter charge form names the order and warns before release", () => {
   const html = renderToStaticMarkup(
     <StaffRoundPaymentAction
       subject="order"
-      label="Charge on card machine"
+      label="Take payment"
       csrf="csrf"
       orderReference={ref(1)}
       orderBatchReference={ref(2)}
@@ -155,7 +157,7 @@ it("the counter charge form names the order and warns before release", () => {
       onRecorded={() => undefined}
     />,
   );
-  expect(html).toContain("Charge on card machine · $11.30");
+  expect(html).toContain("Take payment · $11.30");
 });
 
 it("Payments and refunds is hidden from people who can't read payments", () => {

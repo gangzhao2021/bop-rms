@@ -992,14 +992,16 @@ test("@production a sent, unpaid counter order is charged after a reload, from C
   // Orders: the row warns when it is released and offers the charge; no Payments and refunds.
   await page.goto("/operations/orders");
   const orderRow = page.locator("li.order-row").first();
-  await expect(orderRow).toContainText(/Charge on card machine by \d\d:\d\d · released if unpaid/u);
+  await expect(orderRow).toContainText(/Take payment by \d\d:\d\d · released if unpaid/u);
   await expect(page.getByText("1 order.", { exact: true })).toBeVisible();
   // The only order on the page opens on its own.
   await expect(orderRow).toHaveAttribute("data-open", "true");
   const entry = orderPanel(page);
-  await expect(entry.getByText(/Not paid yet: charge it on the card machine/u)).toBeVisible();
+  await expect(
+    entry.getByText(/Not paid yet: take payment on the card machine or in cash/u),
+  ).toBeVisible();
   await expect(entry.getByRole("button", { name: "Payments and refunds" })).toHaveCount(0);
-  await expect(entry.getByRole("button", { name: "Charge on card machine" })).toBeVisible();
+  await expect(entry.getByRole("button", { name: "Take payment" })).toBeVisible();
   for (const width of [1440, 1024, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
     expect(
@@ -1016,7 +1018,7 @@ test("@production a sent, unpaid counter order is charged after a reload, from C
   await page.goto("/operations/order-entry");
   const awaiting = page.getByRole("region", { name: "Sent, not paid yet" });
   await expect(awaiting).toContainText("Order 21");
-  await expect(awaiting).toContainText(/Charge on card machine by \d\d:\d\d · released if unpaid/u);
+  await expect(awaiting).toContainText(/Take payment by \d\d:\d\d · released if unpaid/u);
   for (const width of [1440, 1024, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
     expect(
@@ -1025,7 +1027,7 @@ test("@production a sent, unpaid counter order is charged after a reload, from C
     await page.screenshot({ path: `test-results/counter-awaiting-${width}.png`, fullPage: true });
   }
   await page.setViewportSize({ width: 1440, height: 900 });
-  await awaiting.getByRole("button", { name: "Charge on card machine" }).click();
+  await awaiting.getByRole("button", { name: "Take payment" }).click();
   const form = awaiting.getByRole("form", { name: "Record card-machine payment" });
   await expect(form).toContainText("Charge $11.30 on the card machine first");
   await expect(form).toContainText(/Record the payment by \d\d:\d\d/u);

@@ -84,20 +84,49 @@ export function CounterAwaitingPayment({
             <dt>{t("Order")}</dt>
             <dd>{recorded.orderNumber}</dd>
           </div>
-          <div>
-            <dt>{t("Paid on card machine")}</dt>
-            <dd>
-              <strong>
-                {orderMoney({ amountMinor: recorded.payment.amountMinor, currencyCode: "CAD" })}
-              </strong>
-            </dd>
-          </div>
+          {recorded.payment.cash !== null ? (
+            // WP-2423 M52: paid in cash — the cash taken and the change to give back.
+            <>
+              <div>
+                <dt>{t("Paid in cash")}</dt>
+                <dd>
+                  <strong>
+                    {orderMoney({
+                      amountMinor: recorded.payment.cash.cashTotalMinor,
+                      currencyCode: "CAD",
+                    })}
+                  </strong>
+                </dd>
+              </div>
+              <div>
+                <dt>{t("Change to give")}</dt>
+                <dd>
+                  <strong>
+                    {orderMoney({
+                      amountMinor: recorded.payment.cash.changeMinor,
+                      currencyCode: "CAD",
+                    })}
+                  </strong>
+                </dd>
+              </div>
+            </>
+          ) : (
+            <div>
+              <dt>{t("Paid on card machine")}</dt>
+              <dd>
+                <strong>
+                  {orderMoney({ amountMinor: recorded.payment.amountMinor, currencyCode: "CAD" })}
+                </strong>
+              </dd>
+            </div>
+          )}
         </dl>
         <p role="status">
           {paidNoteText({
             tableMode: false,
             recordedAfterOutage: recorded.payment.recordingReason === "RecordedAfterOutage",
             acceptance: recorded.payment.acceptance,
+            cash: recorded.payment.cash,
           })}
         </p>
         <div className="card-actions">
@@ -182,10 +211,10 @@ export function CounterAwaitingPayment({
                 manager, as the counter's charge step says. */}
             {shown.some((order) => order.counter?.canCancelUnpaid === true)
               ? t(
-                  "Charge each on the card machine and record it here before its time ends. A guest who isn't paying: cancel the order so its items go back to stock.",
+                  "Take payment for each, on the card machine or in cash, and record it here before its time ends. A guest who isn't paying: cancel the order so its items go back to stock.",
                 )
               : t(
-                  "Charge each on the card machine and record it here before its time ends. A guest who isn't paying: ask a manager to cancel it; otherwise it is released at its time and its items go back to stock.",
+                  "Take payment for each, on the card machine or in cash, and record it here before its time ends. A guest who isn't paying: ask a manager to cancel it; otherwise it is released at its time and its items go back to stock.",
                 )}
           </p>
         )}
@@ -216,7 +245,7 @@ export function CounterAwaitingPayment({
                       // WP-2423 M96: a paper order was paid during the outage; it is recorded only.
                       order.counter?.recordedAfterOutage
                         ? t("Record the paper order's payment")
-                        : t("Charge on card machine")
+                        : t("Take payment")
                     }
                     csrf={csrf}
                     fetcher={fetcher}

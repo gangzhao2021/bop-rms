@@ -371,3 +371,144 @@ test("@production a cancelled cash counter order is given back in cash from the 
     },
   ]);
 });
+
+test("@production after a reload the cashier takes cash for a sent counter order from the list", async ({
+  page,
+}) => {
+  await signIn(page);
+  const payBy = new Date(Date.now() + 20 * 60_000).toISOString();
+  const row = (amountDueMinor: string | null) => ({
+    orderReference: id(60),
+    orderNumber: "21",
+    orderType: "Pickup",
+    sourceChannel: "Pos",
+    submittedAt: new Date(Date.now() - 3 * 60_000).toISOString(),
+    observedAt: new Date().toISOString(),
+    initialBatchReference: id(61),
+    counter: { recordedAfterOutage: false, paidOnCardMachine: null, payBy, amountDueMinor },
+    canRecordCardMachinePayment: true,
+    canViewPayments: false,
+    batches: [
+      {
+        orderBatchReference: id(61),
+        sequence: 1,
+        acceptanceStatus: "NotAccepted",
+        canRequestAcceptance: false,
+        canCancel: false,
+        staffCancellation: null,
+        canCancelItems: false,
+      },
+    ],
+    canRequestAcceptance: false,
+    currentPhase: "Submitted",
+    currentVersion: 1,
+    unfulfillable: null,
+    pickupNotCollected: false,
+    acceptBy: null,
+    awaitingPayment: true,
+  });
+  await page.route("**/merchant/counter/menu", (route) => route.fulfill({ headers, json: menu }));
+  await page.route("**/merchant/orders", (route) =>
+    route.fulfill({ headers, json: { items: [row(null)], nextAfterOrderReference: null } }),
+  );
+  await page.route("**/merchant/orders/detail?*", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        screenId: "OPS-ORDER-DETAIL",
+        pickupContact: null,
+        order: row("1133"),
+        lines: {
+          items: [
+            {
+              orderItemReference: id(62),
+              orderBatchReference: id(61),
+              name: "Flat White",
+              options: [],
+              quantity: 2,
+              customerNote: null,
+              unitPrice: { amountMinor: "450", currencyCode: "CAD" },
+              subtotal: { amountMinor: "900", currencyCode: "CAD" },
+              discount: { amountMinor: "0", currencyCode: "CAD" },
+              tax: { amountMinor: "117", currencyCode: "CAD" },
+              fee: { amountMinor: "0", currencyCode: "CAD" },
+              total: { amountMinor: "1017", currencyCode: "CAD" },
+              canCancel: false,
+              cancellation: null,
+            },
+          ],
+          totals: {
+            subtotal: { amountMinor: "900", currencyCode: "CAD" },
+            discount: { amountMinor: "0", currencyCode: "CAD" },
+            tax: { amountMinor: "117", currencyCode: "CAD" },
+            fee: { amountMinor: "0", currencyCode: "CAD" },
+            total: { amountMinor: "1017", currencyCode: "CAD" },
+            tip: { amountMinor: "116", currencyCode: "CAD" },
+          },
+        },
+      },
+    }),
+  );
+  const payments: Record<string, unknown>[] = [];
+  await page.route("**/merchant/orders/card-machine-payment", (route) => {
+    const body = route.request().postDataJSON() as Record<string, unknown>;
+    payments.push(body);
+    return route.fulfill({
+      headers,
+      json: {
+        status: "Recorded",
+        orderReference: id(60),
+        orderBatchReference: id(61),
+        amountMinor: "1133",
+        recordingReason: "AtCounter",
+        takenAt: new Date().toISOString(),
+        recordedAt: new Date().toISOString(),
+        cash: {
+          cashTotalMinor: "1135",
+          roundingMinor: "2",
+          tenderedMinor: "2000",
+          changeMinor: "865",
+        },
+        acceptance: "Accepted",
+      },
+    });
+  });
+  await page.goto("/operations/order-entry");
+  const awaiting = page.getByRole("region", { name: "Sent, not paid yet" });
+  await expect(awaiting).toContainText(/Take payment by \d\d:\d\d · released if unpaid/u);
+  await awaiting.getByRole("button", { name: "Take payment" }).click();
+  const form = awaiting.getByRole("form", { name: "Record card-machine payment" });
+  await form.getByRole("radio", { name: "Cash" }).check();
+  await expect(form).toContainText("Take $11.35 in cash (rounded to 5 cents)");
+  await form.getByRole("button", { name: "$20.00", exact: true }).click();
+  await expect(form).toContainText("Change $8.65");
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.screenshot({
+      path: `test-results/counter-cash-awaiting-${width}.png`,
+      fullPage: true,
+    });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await form.getByRole("button", { name: "Cash received · $11.35" }).click();
+  const paidPanel = page.getByRole("region", { name: "Order 21 paid" });
+  await expect(paidPanel).toContainText("Paid in cash$11.35");
+  await expect(paidPanel).toContainText("Change to give$8.65");
+  await expect(paidPanel.getByRole("status")).toHaveText(
+    "Cash recorded. Give $8.65 change. Sent to the kitchen.",
+  );
+  expect(payments).toEqual([
+    {
+      operationReference: expect.stringMatching(/^[0-9a-f-]{36}$/u),
+      orderReference: id(60),
+      orderBatchReference: id(61),
+      expectedTotalMinor: "1133",
+      slipReference: null,
+      takenAt: null,
+      tenderedMinor: "2000",
+    },
+  ]);
+});

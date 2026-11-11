@@ -2,6 +2,7 @@ import { t } from "./i18n/i18n.js";
 import { useEffect, useId, useRef, useState } from "react";
 import { validSlipReference } from "./CardMachineRefundAction.js";
 import { orderMoney } from "./order-money.js";
+import { CashTenderFields, cashTender } from "./CashTenderFields.js";
 import { serviceOperationReference } from "./service-control-client.js";
 import {
   CounterOrderClientError,
@@ -12,6 +13,7 @@ import {
   paidAtDayNote,
   paidAtInstant,
   paidAtRefusal,
+  paidNoteText,
   payErrorText,
   paymentWindowNotice,
 } from "./counter-payment.js";
@@ -93,6 +95,9 @@ export function StaffRoundPaymentAction({
 }) {
   const [open, setOpen] = useState(false);
   const [slip, setSlip] = useState("");
+  // WP-2423 M52: a counter order (not a table round) may be paid in cash, by the table's rules.
+  const [tender, setTender] = useState<"CardMachine" | "Cash">("CardMachine");
+  const [received, setReceived] = useState("");
   const [paidAt, setPaidAt] = useState("");
   const [amount, setAmount] = useState(amountDueMinor);
   const [reading, setReading] = useState<"Idle" | "Reading" | "Failed" | "NotDue">("Idle");
@@ -186,10 +191,20 @@ export function StaffRoundPaymentAction({
         </div>
       </div>
     );
+  const inCash = subject === "order" && tender === "Cash";
+  const cash = inCash ? cashTender(BigInt(amount), received) : null;
   const record = async () => {
-    if (busy || amount === null || !validSlipReference(slip.trim())) return;
+    if (busy || amount === null) return;
+    if (cash !== null ? !cash.ready : !validSlipReference(slip.trim())) return;
     if (recordedAfterOutage && paperInstant === null) return;
-    const intent = JSON.stringify([orderBatchReference, amount, slip.trim(), paperInstant]);
+    const tenderedMinor = cash?.receivedMinor?.toString() ?? null;
+    const intent = JSON.stringify([
+      orderBatchReference,
+      amount,
+      inCash ? "" : slip.trim(),
+      paperInstant,
+      tenderedMinor,
+    ]);
     if (operation.current?.key !== intent)
       operation.current = { key: intent, reference: serviceOperationReference() };
     setBusy(true);
@@ -201,13 +216,21 @@ export function StaffRoundPaymentAction({
         orderReference,
         orderBatchReference,
         expectedTotalMinor: amount,
-        slipReference: slip.trim() === "" ? null : slip.trim(),
+        slipReference: inCash || slip.trim() === "" ? null : slip.trim(),
         takenAt: recordedAfterOutage ? paperInstant : null,
+        ...(tenderedMinor === null ? {} : { tenderedMinor }),
       });
       setMessage(
-        result.acceptance === "Accepted"
-          ? t("Paid and sent to the kitchen.")
-          : t("Paid, but not sent to the kitchen yet. Accept it on this order now."),
+        result.cash !== null
+          ? paidNoteText({
+              tableMode: false,
+              recordedAfterOutage,
+              acceptance: result.acceptance,
+              cash: result.cash,
+            })
+          : result.acceptance === "Accepted"
+            ? t("Paid and sent to the kitchen.")
+            : t("Paid, but not sent to the kitchen yet. Accept it on this order now."),
       );
       onRecorded(result);
     } catch (error) {
@@ -236,7 +259,14 @@ export function StaffRoundPaymentAction({
         void record();
       }}
     >
-      <p>{chargeFirstText(amount, subject, recordedAfterOutage)}</p>
+      <p>
+        {cash !== null && !recordedAfterOutage
+          ? t(
+              "Take {amount} in cash (rounded to 5 cents), count it, then record it here. The kitchen starts this order once it is recorded.",
+              { amount: cad(cash.cashDueMinor.toString()) },
+            )
+          : chargeFirstText(amount, subject, recordedAfterOutage)}
+      </p>
       {payBy !== null
         ? (() => {
             const notice = paymentWindowNotice({
@@ -256,16 +286,52 @@ export function StaffRoundPaymentAction({
             );
           })()
         : null}
-      <label>
-        {t("Slip reference (optional)")}
-        <input
-          value={slip}
-          maxLength={40}
-          autoComplete="off"
-          aria-invalid={!validSlipReference(slip.trim())}
-          onChange={(event) => setSlip(event.currentTarget.value)}
+      {subject === "order" ? (
+        <fieldset className="counter-order__tender" disabled={busy}>
+          <legend>{t("How the guest pays")}</legend>
+          <label>
+            <input
+              type="radio"
+              name={"tender-" + orderBatchReference}
+              checked={tender === "CardMachine"}
+              onChange={() => setTender("CardMachine")}
+            />
+            {t("Card machine")}
+          </label>
+          <label>
+            <input
+              type="radio"
+              name={"tender-" + orderBatchReference}
+              checked={tender === "Cash"}
+              onChange={() => setTender("Cash")}
+            />
+            {t("Cash")}
+          </label>
+        </fieldset>
+      ) : null}
+      {inCash ? (
+        <CashTenderFields
+          idPrefix={"cash-" + orderBatchReference}
+          dueMinor={BigInt(amount)}
+          received={received}
+          onReceived={(value) => {
+            setReceived(value);
+            setMessage(null);
+          }}
+          disabled={busy}
         />
-      </label>
+      ) : (
+        <label>
+          {t("Slip reference (optional)")}
+          <input
+            value={slip}
+            maxLength={40}
+            autoComplete="off"
+            aria-invalid={!validSlipReference(slip.trim())}
+            onChange={(event) => setSlip(event.currentTarget.value)}
+          />
+        </label>
+      )}
       {recordedAfterOutage ? (
         <>
           <label>
@@ -303,11 +369,15 @@ export function StaffRoundPaymentAction({
           type="submit"
           disabled={
             busy ||
-            !validSlipReference(slip.trim()) ||
+            (cash !== null ? !cash.ready : !validSlipReference(slip.trim())) ||
             (recordedAfterOutage && paperInstant === null)
           }
         >
-          {busy ? t("Recording…") : t("Paid on card machine · {amount}", { amount: cad(amount) })}
+          {busy
+            ? t("Recording…")
+            : cash !== null
+              ? t("Cash received · {amount}", { amount: cad(cash.cashDueMinor.toString()) })
+              : t("Paid on card machine · {amount}", { amount: cad(amount) })}
         </button>
         <button type="button" disabled={busy} onClick={() => setOpen(false)}>
           {t("Cancel")}

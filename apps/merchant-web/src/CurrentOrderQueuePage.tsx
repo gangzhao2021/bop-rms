@@ -1910,7 +1910,7 @@ function OrderPhase({
     >
       {order.awaitingPayment
         ? order.counter !== null
-          ? t("Awaiting card-machine payment")
+          ? t("Awaiting payment at the counter")
           : t("Awaiting payment")
         : order.pickupNotCollected
           ? t("Not collected")
@@ -2599,9 +2599,9 @@ function OrderDetailBody({
         <p className="order-counter-note" role="note">
           {counterAwaitingCardMachine(order, now ?? Date.now())
             ? t(
-                "Not paid yet: charge it on the card machine, then record it below (or from Counter order).",
+                "Not paid yet: take payment on the card machine or in cash, then record it below (or from Counter order).",
               )
-            : t("Not paid on the card machine.")}
+            : t("Not paid.")}
         </p>
       ) : null}
       {order.counter?.recordedAfterOutage ? (
@@ -4487,7 +4487,7 @@ export function CurrentOrderQueuePage({
                       <StaffRoundPaymentAction
                         key={"counter-pay-" + batch.orderBatchReference}
                         subject="order"
-                        label={t("Charge on card machine")}
+                        label={t("Take payment")}
                         csrf={csrf}
                         fetcher={fetcher}
                         orderReference={order.orderReference}

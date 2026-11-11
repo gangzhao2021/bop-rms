@@ -182,7 +182,7 @@ export function counterPayByText(payBy: string, timeZone: string | undefined, no
   const minutes = Math.max(1, Math.ceil(left / 60_000));
   return minutes <= paymentUrgentMinutes
     ? t("{minutes} min left to charge · released at {at} if unpaid", { minutes: minutes, at: at })
-    : t("Charge on card machine by {at} · released if unpaid", { at: at });
+    : t("Take payment by {at} · released if unpaid", { at: at });
 }
 
 /**
