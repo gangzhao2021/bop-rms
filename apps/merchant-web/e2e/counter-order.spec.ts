@@ -1413,3 +1413,276 @@ test("@production a paper order paid in cash is recorded with the send", async (
     await page.screenshot({ path: `test-results/counter-paper-cash-${width}.png`, fullPage: true });
   }
 });
+
+/** An unpaid counter order as the Orders read lists it (the one-order read wraps it). */
+const unpaidCounterRow = (input: {
+  readonly orderNumber: string;
+  readonly payBy: string;
+  readonly recordedAfterOutage: boolean;
+  readonly canCancelUnpaid: boolean;
+  readonly amountDueMinor: string | null;
+}) => ({
+  orderReference: id(70),
+  orderNumber: input.orderNumber,
+  orderType: "Pickup",
+  sourceChannel: "Pos",
+  submittedAt: new Date(Date.now() - 60_000).toISOString(),
+  observedAt: new Date().toISOString(),
+  initialBatchReference: id(71),
+  batches: [
+    {
+      orderBatchReference: id(71),
+      sequence: 1,
+      acceptanceStatus: "NotAccepted",
+      canRequestAcceptance: false,
+      canCancel: false,
+      staffCancellation: null,
+      canCancelItems: false,
+    },
+  ],
+  canRequestAcceptance: false,
+  unfulfillable: null,
+  pickupNotCollected: false,
+  acceptBy: null,
+  awaitingPayment: true,
+  currentPhase: "Submitted",
+  currentVersion: 1,
+  counter: {
+    recordedAfterOutage: input.recordedAfterOutage,
+    paidOnCardMachine: null,
+    payBy: input.payBy,
+    amountDueMinor: input.amountDueMinor,
+    canCancelUnpaid: input.canCancelUnpaid,
+    cancelledBeforePayment: null,
+  },
+  canRecordCardMachinePayment: true,
+  canViewPayments: false,
+});
+const counterDetail = (order: ReturnType<typeof unpaidCounterRow>) => ({
+  screenId: "OPS-ORDER-DETAIL",
+  pickupContact: null,
+  order,
+  lines: {
+    items: [
+      {
+        orderItemReference: id(72),
+        orderBatchReference: id(71),
+        name: "Banana Bread",
+        options: [],
+        quantity: 1,
+        customerNote: null,
+        unitPrice: { amountMinor: "1000", currencyCode: "CAD" },
+        subtotal: { amountMinor: "1000", currencyCode: "CAD" },
+        discount: { amountMinor: "0", currencyCode: "CAD" },
+        tax: { amountMinor: "132", currencyCode: "CAD" },
+        fee: { amountMinor: "0", currencyCode: "CAD" },
+        total: { amountMinor: "1132", currencyCode: "CAD" },
+        canCancel: false,
+        cancellation: null,
+      },
+    ],
+    totals: {
+      subtotal: { amountMinor: "1000", currencyCode: "CAD" },
+      discount: { amountMinor: "0", currencyCode: "CAD" },
+      tax: { amountMinor: "132", currencyCode: "CAD" },
+      fee: { amountMinor: "0", currencyCode: "CAD" },
+      total: { amountMinor: "1132", currencyCode: "CAD" },
+      tip: { amountMinor: "0", currencyCode: "CAD" },
+    },
+  },
+});
+
+// DEC-PAPER-ORDER-PAID-AT-SEND decisions 2 and 4 (v15 batch-5 review): a paper order whose
+// payment didn't record with the send is recorded from Orders in the same paper words as on the
+// counter, and its cash at the cash total (its change was given during the outage).
+test("@production a paper order is recorded from Orders by its cash total, never charged", async ({
+  page,
+}) => {
+  await signIn(page);
+  const payBy = new Date(Date.now() + 25 * 60_000).toISOString();
+  const row = (amountDueMinor: string | null) =>
+    unpaidCounterRow({
+      orderNumber: "31",
+      payBy,
+      recordedAfterOutage: true,
+      canCancelUnpaid: true,
+      amountDueMinor,
+    });
+  await page.route("**/merchant/orders", (route) =>
+    route.fulfill({ headers, json: { items: [row(null)], nextAfterOrderReference: null } }),
+  );
+  await page.route("**/merchant/orders/detail?*", (route) =>
+    route.fulfill({ headers, json: counterDetail(row("1132")) }),
+  );
+  const payments: Record<string, unknown>[] = [];
+  await page.route("**/merchant/orders/card-machine-payment", (route) => {
+    const body = route.request().postDataJSON() as Record<string, unknown>;
+    payments.push(body);
+    return route.fulfill({
+      headers,
+      json: {
+        status: "Recorded",
+        orderReference: id(70),
+        orderBatchReference: id(71),
+        amountMinor: "1132",
+        recordingReason: "RecordedAfterOutage",
+        takenAt: body.takenAt,
+        recordedAt: new Date().toISOString(),
+        cash: {
+          cashTotalMinor: "1130",
+          roundingMinor: "-2",
+          tenderedMinor: "1130",
+          changeMinor: "0",
+        },
+        acceptance: "Accepted",
+      },
+    });
+  });
+  await page.goto("/operations/orders");
+  const entry = orderPanel(page);
+  await entry.getByRole("button", { name: "Record the paper order's payment" }).click();
+  const form = entry.getByRole("form", { name: "Record the paper order's payment" });
+  await expect(form).toContainText("Already paid on paper.");
+  await expect(form).toContainText("Record this paper order's payment now.");
+  await expect(form).not.toContainText(/released|Charge|charged the card machine/u);
+  const tender = form.getByRole("group", { name: "How it was paid during the outage" });
+  await expect(form.getByRole("group", { name: "How the guest pays" })).toHaveCount(0);
+  await tender.getByRole("radio", { name: "Cash" }).check();
+  // No cash received to type and no change to give: both happened during the outage.
+  await expect(form.getByRole("textbox", { name: /Cash received/u })).toHaveCount(0);
+  await expect(form).toContainText(
+    "Paid in cash during the outage: $11.30. Its change was given then.",
+  );
+  const paid = new Date(Date.now() - 40 * 60_000);
+  await form
+    .getByLabel("Paid at (store time)")
+    .fill(new Date(paid.getTime() - paid.getTimezoneOffset() * 60_000).toISOString().slice(0, 16));
+  await expect(form.getByRole("button", { name: /Cash received/u })).toHaveCount(0);
+  await form.getByRole("button", { name: "Record paper payment · $11.30" }).click();
+  await expect(
+    entry.getByText("Cash recorded after the outage and accepted.", { exact: false }),
+  ).toBeVisible();
+  expect(payments).toEqual([
+    {
+      operationReference: expect.stringMatching(/^[0-9a-f-]{36}$/u),
+      orderReference: id(70),
+      orderBatchReference: id(71),
+      expectedTotalMinor: "1132",
+      slipReference: null,
+      takenAt: expect.stringMatching(/Z$/u),
+      tenderedMinor: "1130",
+    },
+  ]);
+  await expect(entry).not.toContainText(/Change to give|Give \$/u);
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.screenshot({ path: `test-results/orders-paper-cash-${width}.png`, fullPage: true });
+  }
+});
+
+// DEC-PAPER-ORDER-PAID-AT-SEND (v15 batch-5 review): a retry of a paper send after no answer, with
+// the tender changed, finds the first payment recorded; the sale is shown as recorded, never as
+// "isn't recorded yet" or something to check before charging.
+test("@production a paper send whose payment is already recorded reads as recorded", async ({
+  page,
+}) => {
+  await signIn(page);
+  await page.route("**/merchant/counter/menu", (route) => route.fulfill({ headers, json: menu }));
+  await page.route("**/merchant/counter/orders", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        status: "AlreadyPlaced",
+        orderReference: id(20),
+        orderBatchReference: id(21),
+        orderNumber: "8",
+        orderVersion: 1,
+        orderMinor: "423",
+        tipMinor: "0",
+        totalMinor: "423",
+        payBy: new Date(Date.now() + 30 * 60_000).toISOString(),
+        recordedAfterOutage: true,
+        paymentError: "already_paid",
+      },
+    }),
+  );
+  await page.goto("/operations/order-entry");
+  await page.getByRole("button", { name: "Add Banana Bread" }).click();
+  await page.getByRole("checkbox", { name: "Recorded after an outage (taken on paper)" }).check();
+  const paid = new Date(Date.now() - 60 * 60_000);
+  await page
+    .getByLabel("Paid at (store time, from the paper order)")
+    .fill(new Date(paid.getTime() - paid.getTimezoneOffset() * 60_000).toISOString().slice(0, 16));
+  await page.getByRole("button", { name: "Send and record paper order" }).click();
+  await expect(page.getByRole("heading", { name: "Order 8 paid" })).toBeVisible();
+  await expect(
+    page.getByText("This paper order's payment is already recorded and in the day's takings."),
+  ).toBeVisible();
+  await expect(page.locator("main")).not.toContainText(
+    /isn't recorded yet|before charging|To charge/u,
+  );
+});
+
+// WP-2423 M127 (v15 batch-5 review): the order being charged is not on the Orders read's first page
+// (a busy Store, or the list lags the send): it is read on its own, so an owner still gets Cancel;
+// staff who may not read Orders are told to ask a manager.
+for (const variant of ["off the first page", "no Orders access"] as const)
+  test(`@production the charge step learns who cancels when the order is ${variant}`, async ({
+    page,
+  }) => {
+    await signIn(page);
+    await page.route("**/merchant/counter/menu", (route) => route.fulfill({ headers, json: menu }));
+    const payBy = new Date(Date.now() + 30 * 60_000).toISOString();
+    await page.route("**/merchant/counter/orders", (route) =>
+      route.fulfill({
+        headers,
+        json: {
+          status: "Placed",
+          orderReference: id(70),
+          orderBatchReference: id(71),
+          orderNumber: "14",
+          orderVersion: 1,
+          orderMinor: "593",
+          tipMinor: "0",
+          totalMinor: "593",
+          payBy,
+          recordedAfterOutage: false,
+        },
+      }),
+    );
+    let sent = false;
+    await page.route("**/merchant/orders", (route) =>
+      sent && variant === "no Orders access"
+        ? route.fulfill({ status: 403, headers, json: { error: "forbidden" } })
+        : route.fulfill({ headers, json: { items: [], nextAfterOrderReference: null } }),
+    );
+    await page.route("**/merchant/orders/detail?*", (route) =>
+      route.fulfill({
+        headers,
+        json: counterDetail(
+          unpaidCounterRow({
+            orderNumber: "14",
+            payBy,
+            recordedAfterOutage: false,
+            canCancelUnpaid: true,
+            amountDueMinor: "593",
+          }),
+        ),
+      }),
+    );
+    await page.goto("/operations/order-entry");
+    await page.getByRole("button", { name: "Add Banana Bread" }).click();
+    sent = true;
+    await page.getByRole("button", { name: "Send order" }).click();
+    const charge = page.locator(".counter-order__charge");
+    if (variant === "off the first page") {
+      await expect(charge.getByRole("button", { name: "Cancel order" })).toBeVisible();
+      await expect(charge).not.toContainText("Ask a manager");
+    } else {
+      await expect(charge).toContainText("Guest not paying? Ask a manager to cancel it");
+      await expect(charge.getByRole("button", { name: "Cancel order" })).toHaveCount(0);
+    }
+  });
