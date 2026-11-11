@@ -2397,6 +2397,27 @@ async function journey(journeyEnding) {
             details.map((detail) => detail.lines.totals.taxRounding.amountMinor),
             [mergedBill.taxRoundingMinor, "0"],
           );
+          // v15 batch 7 review: the figure under the comps on the host table ("Whole bill to pay
+          // after comps") is the whole merged bill less the comp, as checkout takes it: it drops
+          // by the comp, and the merged-away table's Order says where it pays, with no amount.
+          const compedMinor = mergedBill.rounds
+            .flatMap((round) => round.items)
+            .reduce((sum, item) => sum + BigInt(item.reduction?.amountMinor ?? "0"), 0n);
+          assert.ok(compedMinor > 0n);
+          assert.equal(
+            BigInt(queued.items[0].tableBill.totalMinor) -
+              BigInt(details[0].items[0].tableBill.totalMinor),
+            compedMinor - BigInt(mergedBill.taxRoundingMinor),
+          );
+          assert.deepEqual(details[0].items[0].tableBill, {
+            totalMinor: mergedBill.owed.totalMinor,
+            paid: null,
+          });
+          assert.deepEqual(details[1].items[0].tableBill, {
+            totalMinor: "0",
+            paid: null,
+            mergedInto: { tableLabel: dining.table.stableLabel, paid: false },
+          });
           // The merged table's Order totals exactly what it ordered (its dishes' own totals).
           assert.equal(
             details[1].lines.totals.total.amountMinor,
