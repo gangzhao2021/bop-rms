@@ -15,6 +15,18 @@ describe("WP-2423 Q28 staff call answer", () => {
         nextCallAt: null,
       }).open?.reason,
     ).toBe("OrderProblem");
+    // WP-2423 (M171): an allergy question is a reason the server may send back.
+    expect(
+      parseDiningStaffCallView({
+        open: {
+          callReference: call,
+          reason: "AllergyQuestion",
+          calledAt: "2026-10-25T18:00:00.000Z",
+        },
+        recentlyClosed: null,
+        nextCallAt: null,
+      }).open?.reason,
+    ).toBe("AllergyQuestion");
     for (const bad of [
       { open: null, recentlyClosed: null },
       {

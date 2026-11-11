@@ -16,6 +16,8 @@ export const diningStaffCallReasons = [
   "TableNeeds",
   "OrderProblem",
   "ReadyToPay",
+  // WP-2423 (M171, Owner decision 17): an allergy question; the guest tells staff in person.
+  "AllergyQuestion",
 ] as const;
 export type DiningStaffCallReason = (typeof diningStaffCallReasons)[number];
 

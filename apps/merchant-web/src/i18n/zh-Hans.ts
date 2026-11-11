@@ -8945,4 +8945,5 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{item} is back on.": "{item} 已恢复供应。",
   "Back on": "恢复供应",
   "Open {item}": "打开 {item}",
+  "Allergy question": "过敏问题",
 });

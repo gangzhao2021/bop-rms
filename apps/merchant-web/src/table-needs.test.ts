@@ -364,3 +364,30 @@ describe("DEC-DINING-GUEST-TABLE-START: a table a guest started", () => {
     expect(tableNeed(blocked(5), null, now).detail).toBe("guests can start it now");
   });
 });
+
+it("WP-2423 (M171): an allergy question is named, red at once, and comes before every other call", () => {
+  const allergy = tableNeed(
+    table(6, {
+      staffCall: {
+        callReference: id(10),
+        reason: "AllergyQuestion",
+        calledAt: "2026-10-27T19:41:00.000Z",
+      },
+    }),
+    facts(),
+    now,
+  );
+  expect(allergy).toMatchObject({
+    tone: "action",
+    urgent: true,
+    detail: "1 min ago · Allergy question",
+  });
+  const question = tableNeed(
+    table(5, {
+      staffCall: { callReference: id(9), reason: "Question", calledAt: "2026-10-27T19:30:00.000Z" },
+    }),
+    facts(),
+    now,
+  );
+  expect(allergy.rank).toBeLessThan(question.rank);
+});

@@ -27,15 +27,17 @@ export interface TableNeed {
 
 /** WP-2423 Q28 DEC-DINING-STAFF-CALL: what the guest asked for, in staff words. */
 export function staffCallReasonText(
-  reason: "Question" | "TableNeeds" | "OrderProblem" | "ReadyToPay",
+  reason: "Question" | "TableNeeds" | "OrderProblem" | "ReadyToPay" | "AllergyQuestion",
 ): string {
-  return reason === "TableNeeds"
-    ? t("Something for the table")
-    : reason === "OrderProblem"
-      ? t("A problem with their order")
-      : reason === "ReadyToPay"
-        ? t("Ready to pay")
-        : t("A question");
+  return reason === "AllergyQuestion"
+    ? t("Allergy question")
+    : reason === "TableNeeds"
+      ? t("Something for the table")
+      : reason === "OrderProblem"
+        ? t("A problem with their order")
+        : reason === "ReadyToPay"
+          ? t("Ready to pay")
+          : t("A question");
 }
 
 /** WP-2423 item 8 ⑤: why a guest's round waits for staff, in staff words. */
@@ -134,10 +136,13 @@ export function tableNeed(
   const call = table.staffCall;
   if (call !== null && call !== undefined) {
     const minutes = minutesAgo(call.calledAt, now);
+    // WP-2423 (M171): an allergy question comes first and in red at once — a guest may be about
+    // to order something that harms them.
+    const allergy = call.reason === "AllergyQuestion";
     return {
       tone: "action",
-      rank: 0,
-      urgent: minutes >= 5,
+      rank: allergy ? -1 : 0,
+      urgent: allergy || minutes >= 5,
       since: call.calledAt,
       words: t("Asked for staff"),
       detail:

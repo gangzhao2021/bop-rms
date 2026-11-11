@@ -133,7 +133,8 @@ export interface StaffHeldRound {
   readonly reason: StaffHeldRoundReason;
   readonly heldAt: string;
 }
-export type StaffDiningCallReason = "Question" | "TableNeeds" | "OrderProblem" | "ReadyToPay";
+export type StaffDiningCallReason =
+  "Question" | "TableNeeds" | "OrderProblem" | "ReadyToPay" | "AllergyQuestion";
 export interface StaffDiningCall {
   readonly callReference: string;
   readonly reason: StaffDiningCallReason;
@@ -435,7 +436,7 @@ export function createDiningSessionClient(fetcher: typeof fetch = fetch) {
           if (
             currentDiningSessionReference === null ||
             Object.keys(call).length !== 3 ||
-            !["Question", "TableNeeds", "OrderProblem", "ReadyToPay"].includes(
+            !["Question", "TableNeeds", "OrderProblem", "ReadyToPay", "AllergyQuestion"].includes(
               String(call.reason),
             ) ||
             typeof call.calledAt !== "string" ||

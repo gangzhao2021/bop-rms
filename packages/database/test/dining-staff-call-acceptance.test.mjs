@@ -721,6 +721,23 @@ it("lets a seated guest call staff once at a time, within a budget, and staff an
       assert.equal(ready.status, "Called", JSON.stringify(ready));
       assert.equal(ready.call.reason, "ReadyToPay");
       assert.equal(await staff((store, tx) => store.countOpen(tx, allowed)), 1);
+      // WP-2423 (M171, Owner decision 17): a guest may ask an allergy question; only the reason is
+      // recorded (the guest tells staff in person).
+      assert.deepEqual(
+        await calls().withdraw(asGuest(guest, sessionId, 97, 50), ready.call.callReference),
+        { status: "Closed", kind: "Withdrawn" },
+      );
+      const allergy = await calls().call(asGuest(guest, sessionId, 98, 50), "AllergyQuestion");
+      assert.equal(allergy.status, "Called", JSON.stringify(allergy));
+      assert.equal(allergy.call.reason, "AllergyQuestion");
+      assert.equal(
+        (
+          await admin.query("SELECT reason FROM rms_dining.dining_staff_call WHERE call_id=$1", [
+            allergy.call.callReference,
+          ])
+        ).rows[0].reason,
+        "AllergyQuestion",
+      );
       // The table closed (TEST-only owner fixture standing in for the closing command): no one is
       // seated for calls any more.
       await admin.query(
