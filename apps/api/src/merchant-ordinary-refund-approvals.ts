@@ -102,7 +102,8 @@ export function createMerchantOrdinaryRefundApprovals(options: {
                   orderReference: query.orderReference,
                   actorReference: query.requesterReference,
                   permissionCode: "payment.refund.request",
-                  observedAt,
+                  // The role they held when they asked (DEC-OWNER-DEFAULTS-2026-11-06 item 2).
+                  observedAt: query.requestedAt,
                 });
                 await tx.query("RELEASE SAVEPOINT refund_requester_may_send", []);
                 return facts.role !== "Staff";

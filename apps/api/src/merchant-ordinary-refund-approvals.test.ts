@@ -22,6 +22,8 @@ vi.mock("@rms/payment", async (original) => ({
 }));
 const id = (n: number) => "01909990-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 const at = "2026-11-10T12:00:00.000Z";
+// The request was recorded earlier than the queue is read.
+const asked = "2026-11-10T11:59:30.000Z";
 
 function setup() {
   const queries: string[] = [];
@@ -45,7 +47,7 @@ function setup() {
       await (d.maySend as NonNullable<typeof d.maySend>)(transaction, {
         orderReference: id(6),
         requesterReference: id(7),
-        requestedAt: at,
+        requestedAt: asked,
       }),
     );
     return [];
@@ -89,6 +91,8 @@ it("WP-2423 M14: a cashier's role read in its savepoint lists the request at onc
     d.authority.mockResolvedValue({ role });
     await f.approvals({ sessionCookie: "synthetic" });
     expect(f.results).toEqual([waits]);
+    // The role held when they asked, not the one held now.
+    expect(d.authority.mock.calls[0]?.[1]).toMatchObject({ observedAt: asked });
     expect(f.queries.filter((sql) => sql.includes("refund_requester_may_send"))).toEqual([
       "SAVEPOINT refund_requester_may_send",
       "RELEASE SAVEPOINT refund_requester_may_send",
