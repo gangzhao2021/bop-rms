@@ -1,3 +1,4 @@
+import { listOrderItemRefundWithdrawals } from "@rms/ordering";
 import { parseOpaqueUuidV7, readClosedRecord } from "@bop/identity";
 import {
   createPostgresOrdinaryRefundDeclineStore,
@@ -119,6 +120,17 @@ export function createMerchantOrdinaryRefundDecline(options: {
                 retentionPolicyVersion: options.retentionPolicyVersion,
               },
             );
+            // WP-2423 M10: a refund that stopped dishes changed the kitchen's and the counter's
+            // records with it; declining it would leave the guest with neither the food nor the
+            // money. Read under the request's refund fence the decline holds, so a request
+            // recording its withdrawals meanwhile is seen.
+            if (
+              result.status !== "AlreadyCommitted" &&
+              (await listOrderItemRefundWithdrawals(tx, scope, [orderReference])).some(
+                (row) => row.refundRequestReference === requestReference,
+              )
+            )
+              throw new MerchantRefundApprovalError("DishesStopped");
             return Object.freeze({
               status: "Declined" as const,
               declinedAt: String(result.declinedAt),

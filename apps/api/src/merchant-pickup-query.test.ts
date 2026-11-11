@@ -362,12 +362,14 @@ it("WP-2423: keeps the queue readable when an order's item snapshots can't be re
 });
 
 it("WP-2423 M10: the workspace's waiting count leaves out a pickup refunded in full, as the queue does", async () => {
-  const line = (n: number, quantity: number) => ({
+  // Fulfillment records the refunded units of each line with the refund (withdrawnQuantity).
+  const line = (n: number, quantity: number, withdrawnQuantity: number) => ({
     fulfillmentItemReference: id(70 + n),
     orderItemReference: id(80 + n),
     orderedQuantity: quantity,
     readyQuantity: 0,
     handedOverQuantity: 0,
+    withdrawnQuantity,
   });
   const item = (n: number, lines: ReturnType<typeof line>[]) => ({
     fulfillmentReference: id(40 + n),
@@ -380,15 +382,10 @@ it("WP-2423 M10: the workspace's waiting count leaves out a pickup refunded in f
     source: "CurrentFulfillment",
     observedAt: "2026-09-19T12:00:00.000Z",
     // Order 1: both units refunded, not to be handed over. Order 2: one of two refunded.
-    items: [item(1, [line(1, 2)]), item(2, [line(2, 2)])],
+    items: [item(1, [line(1, 2, 2)]), item(2, [line(2, 2, 1)])],
     nextAfterFulfillmentReference: null,
   });
-  doubles.withdrawn.mockResolvedValue(
-    new Map([
-      [id(81), 2],
-      [id(82), 1],
-    ]),
-  );
+  doubles.withdrawn.mockResolvedValue(new Map());
   const tx = { query: vi.fn(async () => ({ rows: [{ brand: null, store: null }], rowCount: 1 })) };
   const count = () =>
     waitingPickupOrders(tx, {
@@ -399,12 +396,10 @@ it("WP-2423 M10: the workspace's waiting count leaves out a pickup refunded in f
       storeReference: id(4),
     });
   expect(await count()).toBe(1);
-  expect(doubles.withdrawn).toHaveBeenCalledWith(
-    expect.anything(),
-    { brandReference: id(3), storeReference: id(4) },
-    [id(51), id(52)],
-  );
-  // Refunds unreadable: nothing is subtracted (never a smaller count than is true).
+  // A refund made before the pickup existed is in Ordering only: counted too.
+  doubles.withdrawn.mockResolvedValue(new Map([[id(82), 2]]));
+  expect(await count()).toBe(0);
+  // Ordering unreadable: Fulfillment's own count (never a smaller count than is true).
   doubles.withdrawn.mockRejectedValue(new Error("ORDERING_UNAVAILABLE"));
-  expect(await count()).toBe(2);
+  expect(await count()).toBe(1);
 });

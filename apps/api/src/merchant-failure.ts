@@ -69,6 +69,10 @@ const changedCodes: ReadonlySet<string> = new Set([
   // WP-2423 M10: every dish of an order nobody accepted (the refund routes answer it 409
   // refund_order_not_accepted; anywhere else it is a conflict, never "try again").
   "ORDINARY_REFUND_ORDER_NOT_ACCEPTED",
+  // WP-2423 M10: "stop making it too" the kitchen or the counter can't do as asked.
+  "ORDINARY_REFUND_WITHDRAW_NEEDS_APPROVAL",
+  "ORDINARY_REFUND_WITHDRAW_HANDED_OVER",
+  "ORDINARY_REFUND_WITHDRAW_EVERYTHING",
 ]);
 const retryCodes: ReadonlySet<string> = new Set([
   "Unavailable",

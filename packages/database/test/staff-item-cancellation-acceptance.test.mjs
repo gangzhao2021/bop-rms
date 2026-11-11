@@ -29,6 +29,7 @@ import {
   createPostgresStaffOrderCancellationReader,
   listStoreCancelledDishes,
   parseFulfillmentCompletedEnvelope,
+  recordOrderItemRefundWithdrawals,
 } from "../../rms/ordering/src/index.ts";
 import {
   createFulfillmentReadinessService,
@@ -43,6 +44,7 @@ import {
 import { appendAuditRecordInTransaction } from "../../bop/audit/src/index.ts";
 import { loadOutboxEnvelope } from "../../bop/eventing/src/index.ts";
 import { createMerchantPickupHandoff } from "../../../apps/api/src/merchant-pickup-handoff.ts";
+import { applyRefundWithdrawalRecords } from "../../../apps/api/src/order-refund-withdrawal-records.ts";
 import { createPickupReadinessCurrentSource } from "../../../tooling/environment/pilot-pickup-readiness.mjs";
 import {
   createPaymentProviderSnapshot,
@@ -1068,7 +1070,8 @@ it("staff cancel item lines of a paid order before the kitchen starts them, refu
       const journey = await seedOrder(7000); // scenario 9
       const bottles = await seedOrder(8000, { kitchenTicket: false }); // scenario 10
       const withFee = await seedOrder(9000, { workLines: [0] }); // scenario 11
-      assert.deepEqual(await stock(), { onHand: "50", reserved: "27" });
+      const refunded = await seedOrder(10000); // scenario 12 (WP-2423 M10)
+      assert.deepEqual(await stock(), { onHand: "50", reserved: "30" });
 
       // Store business-date publication for Payment's businessDate port (synthetic Store
       // configuration, actual published owner records and proof).
@@ -1388,7 +1391,7 @@ it("staff cancel item lines of a paid order before the kitchen starts them, refu
         [pickup.batch.reservations[0]]: "0",
         [pickup.batch.reservations[1]]: "1",
       });
-      assert.deepEqual(await stock(), { onHand: "50", reserved: "25" });
+      assert.deepEqual(await stock(), { onHand: "50", reserved: "28" });
       const releases = (
         await admin.query(
           "SELECT record_json FROM rms_inventory.stock_movement WHERE movement_type='Release'",
@@ -2600,6 +2603,336 @@ it("staff cancel item lines of a paid order before the kitchen starts them, refu
             )
           ).rows,
           [{ item: refs.items[0], status: "Queued" }],
+        );
+      }
+
+      // ── Scenario 12 (WP-2423 M10, DEC-OWNER-DEFAULTS-2026-11-06 item 4): a refund after
+      // acceptance with "stop making it too" changes the kitchen's, the counter's and the stock's
+      // own records in the refund transaction, as the API role. Line A (4, not started): its
+      // kitchen work is cancelled, its pickup line cancelled and its stock released. Line B (2,
+      // being made): 1 refunded; Kitchen keeps the work, Fulfillment records 1 withdrawn, and the
+      // handover counts and records only the 1 still owed. Before this, the refund wrote nothing
+      // there and the handover recorded both units of B as handed over.
+      {
+        merchant.allowed = () => true;
+        merchant.store = store;
+        const refs = refunded.batch;
+        const now = () => new Date().toISOString();
+        const derive = (prefix) => (purpose, identity) => {
+          const digest = createHash("sha256")
+            .update(purpose + ":" + identity)
+            .digest("hex");
+          return (
+            prefix +
+            "-" +
+            digest.slice(0, 4) +
+            "-7" +
+            digest.slice(4, 7) +
+            "-8" +
+            digest.slice(7, 10) +
+            "-" +
+            digest.slice(10, 22)
+          );
+        };
+        const audit = {
+          append: ({ transaction, record }) => appendAuditRecordInTransaction(transaction, record),
+        };
+        const resolveConfirmation = async (transaction, orderReference) => {
+          assert.equal(orderReference, refunded.order);
+          const stored = await createPostgresOrderPaymentDispositionReader(
+            scope,
+          ).loadByPaymentEvent({ transaction, paymentEventReference: refs.event });
+          return stored.orderConfirmedEvent;
+        };
+        const fulfillmentSource = createPostgresOrderFulfillmentSourceStore({
+          brandReference: brand,
+          storeReference: store,
+          quoteVersion: 1,
+          sha256: sha,
+          authorize: async () => true,
+        });
+        const validateCurrentSource = createPickupReadinessCurrentSource({
+          scope: { brandReference: brand, storeReference: store },
+          sha256: sha,
+          now,
+          authorize: () => true,
+          resolveConfirmation,
+          quoteVersion: 1,
+        });
+        const confirmed = await scoped((tx) => resolveConfirmation(tx, refunded.order));
+        const created = await scoped((tx) =>
+          createPickupFulfillmentService({
+            authorization: { authorize: async () => true },
+            orderingSource: {
+              resolve: (input) => fulfillmentSource.resolve({ transaction: tx, query: input }),
+            },
+            references: { derive: derive("0190fb32") },
+            digests: { sha256: sha },
+            repository: createPostgresPickupFulfillmentStore({
+              brandReference: brand,
+              storeReference: store,
+              sha256: sha,
+              authorize: async () => true,
+              validateCurrentSource: async () => true,
+            }),
+            audit,
+          }).consume(tx, confirmed),
+        );
+        assert.equal(created.status, "Created");
+        const fulfillment = created.effect.aggregate;
+        const itemOf = (j) =>
+          fulfillment.items.find((line) => String(line.orderItemReference) === refs.items[j]);
+        // Line B is being made.
+        const lane = kitchen(refunded);
+        assert.equal((await lane.accept(1)).outcome, "Accepted");
+        assert.equal((await lane.start(1)).outcome, "Started");
+        const refundRequest = fresh(),
+          refundOperation = fresh();
+        const withdraw = (lines, request = refundRequest, operation = refundOperation) =>
+          scoped(async (tx) => {
+            const withdrawals = await recordOrderItemRefundWithdrawals(tx, scope, {
+              orderReference: refunded.order,
+              refundRequestReference: request,
+              operationReference: operation,
+              actorReference: staff,
+              recordedAt: now(),
+              nextReference: fresh,
+              lines: lines.map(([j, quantity]) => ({
+                orderBatchReference: refs.batch,
+                orderItemReference: refs.items[j],
+                quantity,
+              })),
+            });
+            return applyRefundWithdrawalRecords(tx, {
+              scope: { tenantReference: tenant, brandReference: brand, storeReference: store },
+              orderReference: refunded.order,
+              actorReference: staff,
+              recordedAt: withdrawals[0].recordedAt,
+              operationReference: operation,
+              withdrawals,
+              nextReference: fresh,
+              now,
+              allowed: async () => true,
+            });
+          });
+        // Every dish refunded and stopped would leave a pickup nobody can close: refused, and
+        // the whole transaction (Ordering's withdrawals included) rolls back.
+        const nothingBefore = await counts();
+        await assert.rejects(
+          withdraw(
+            [
+              [0, LINES[0].quantity],
+              [1, LINES[1].quantity],
+            ],
+            fresh(),
+            fresh(),
+          ),
+          { message: "ORDINARY_REFUND_WITHDRAW_EVERYTHING" },
+        );
+        assert.deepEqual(await counts(), nothingBefore);
+        const applied = await withdraw([
+          [0, LINES[0].quantity],
+          [1, 1],
+        ]);
+        assert.deepEqual(applied, {
+          kitchenCancelled: [refs.items[0]],
+          markedOnTicket: [refs.items[1]],
+        });
+        // Kitchen: A's work cancelled (not started), B still being made.
+        assert.deepEqual(await itemStatuses(refs.ticket), ["Cancelled", "In Progress"]);
+        // Stock: A's reservation released, B's kept (its dish is being made).
+        assert.deepEqual(await reservations(refs.reservations), {
+          [refs.reservations[0]]: "0",
+          [refs.reservations[1]]: LINES[1].stock,
+        });
+        // Fulfillment: A's pickup line cancelled; 1 of B's 2 units withdrawn, in the staff
+        // member's name, linked to Ordering's withdrawal.
+        assert.deepEqual(
+          (
+            await admin.query(
+              "SELECT order_item_id::text AS item FROM rms_fulfillment.fulfillment_item_cancellation WHERE order_id=$1",
+              [refunded.order],
+            )
+          ).rows,
+          [{ item: refs.items[0] }],
+        );
+        const withdrawnRows = await admin.query(
+          "SELECT w.order_item_id::text AS item,w.withdrawn_quantity AS quantity,w.actor_id::text AS actor,w.phase,o.refund_request_id::text AS request FROM rms_fulfillment.fulfillment_item_withdrawal w JOIN rms_ordering.order_item_refund_withdrawal o ON o.withdrawal_id=w.order_withdrawal_id WHERE w.order_id=$1",
+          [refunded.order],
+        );
+        assert.deepEqual(withdrawnRows.rows, [
+          {
+            item: refs.items[1],
+            quantity: 1,
+            actor: staff,
+            phase: "Pending",
+            request: refundRequest,
+          },
+        ]);
+        // The kitchen finishes B; the pickup is Ready with only B, 1 unit owed.
+        assert.equal((await lane.complete(1)).outcome, "CompletedAndOrderItemReady");
+        const readyEvent = (
+          await admin.query(
+            "SELECT event_id::text AS id FROM platform_eventing.outbox_event WHERE event_type='KitchenItemReady' AND payload_json->>'orderReference'=$1",
+            [refunded.order],
+          )
+        ).rows;
+        assert.equal(readyEvent.length, 1);
+        const itemReady = parseKitchenItemReadyEnvelope(
+          await scoped((tx) => loadOutboxEnvelope(tx, readyEvent[0].id)),
+        );
+        const readinessOptions = {
+          brandReference: brand,
+          storeReference: store,
+          sha256: sha,
+          now,
+          authorize: async () => true,
+          validateCurrentSource,
+        };
+        const ready = await scoped((tx) =>
+          createFulfillmentReadinessService({
+            authorization: { authorize: async () => true },
+            references: { derive: derive("0190fb33") },
+            digests: { sha256: sha },
+            repository: createPostgresFulfillmentReadinessStore(readinessOptions),
+            audit,
+          }).consume(tx, itemReady),
+        );
+        // Kitchen's ready fact is unchanged by the refund: the whole line, as Kitchen made it.
+        assert.equal(ready.effect.result.readyQuantity, LINES[1].quantity);
+        assert.equal(ready.effect.operation.phaseAfter, "Ready");
+        // Other scenarios' pickups are on the same queue; their own sources are checked there.
+        const queued = await transactions().runSnapshot((tx) =>
+          createPostgresFulfillmentReadinessStore({
+            ...readinessOptions,
+            validateCurrentSource: (transaction, order) =>
+              order === refunded.order ? validateCurrentSource(transaction, order) : true,
+            authorizeQueue: async () => true,
+          }).listPickupQueue({
+            transaction: tx,
+            afterFulfillmentReference: null,
+            limit: 50,
+            includeCompleted: false,
+          }),
+        );
+        const listed = queued.items.find((item) => String(item.orderReference) === refunded.order);
+        assert.deepEqual(
+          listed.items.map((line) => ({
+            item: String(line.orderItemReference),
+            ordered: line.orderedQuantity,
+            ready: line.readyQuantity,
+            withdrawn: line.withdrawnQuantity,
+          })),
+          [{ item: refs.items[1], ordered: 2, ready: 2, withdrawn: 1 }],
+        );
+        const handoffState = await scoped((tx) =>
+          createPostgresFulfillmentReadinessStore(readinessOptions).lockPickupHandoffByOrder({
+            brandReference: brand,
+            storeReference: store,
+            transaction: tx,
+            orderReference: refunded.order,
+          }),
+        );
+        assert.deepEqual(
+          handoffState.source.items.map((line) => [
+            String(line.fulfillmentItemReference),
+            line.orderedQuantity,
+            line.readyQuantity,
+          ]),
+          [[String(itemOf(1).fulfillmentItemReference), 1, 1]],
+        );
+        // Staff hand over in person (no code was issued for this pickup).
+        const workstation = { pickupLocationReference: id(7901), deviceReference: id(7902) };
+        const handOver = (quantity) =>
+          createMerchantPickupHandoff({
+            persistence: persistence(null),
+            authentication,
+            installContext,
+            nextReference: fresh,
+            store: {
+              sha256: sha,
+              validateCurrentSource,
+              deriveCompletionReference: derive("0190fb39"),
+              admit: async () => true,
+              appendAudit: async (transaction, entry) =>
+                appendAuditRecordInTransaction(transaction, {
+                  auditId: entry.auditReference,
+                  brandId: brand,
+                  storeId: store,
+                  actor: { type: "User", reference: entry.actorReference },
+                  actionCode: entry.actionCode,
+                  targetType: "Fulfillment",
+                  targetId: entry.fulfillmentReference,
+                  afterSummary: { action: entry.purpose },
+                  reasonCode: "PICKUP_HANDOFF",
+                  correlationId: entry.correlationReference,
+                  occurredAt: entry.occurredAt,
+                  sourceChannel: "MERCHANT_WEB",
+                  dataClassification: "Confidential",
+                  retentionPolicyCode: "FULFILLMENT_BUSINESS_RECORD",
+                  retentionPolicyVersion: 1,
+                }),
+            },
+          })({
+            ...session,
+            command: {
+              orderReference: refunded.order,
+              storeReference: store,
+              fulfillmentReference: fulfillment.fulfillmentReference,
+              expectedAggregateVersion: String(handoffState.source.aggregateVersion),
+              identityCheck: "OrderNumberAndName",
+              recipientType: "Customer",
+              recipientDisplayMask: "S***",
+              ...workstation,
+              quantities: [
+                { fulfillmentItemReference: itemOf(1).fulfillmentItemReference, quantity },
+              ],
+              idempotencyReference: fresh(),
+              correlationReference: refs.correlation,
+            },
+          });
+        // Both units of B (the refunded one too): refused, nothing handed over.
+        await assert.rejects(handOver(2), { code: "PICKUP_HANDOFF_NOT_READY" });
+        const handed = await handOver(1);
+        assert.equal(handed.nextPhase, "Completed");
+        assert.deepEqual(
+          (
+            await admin.query(
+              "SELECT i.fulfillment_item_id::text AS item,i.handed_over_quantity AS quantity FROM rms_fulfillment.pickup_handoff_item i JOIN rms_fulfillment.fulfillment f ON f.brand_id=i.brand_id AND f.store_id=i.store_id AND f.fulfillment_id=i.fulfillment_id WHERE f.order_id=$1",
+              [refunded.order],
+            )
+          ).rows,
+          [{ item: String(itemOf(1).fulfillmentItemReference), quantity: 1 }],
+        );
+        // Handed over: the last unit can no longer be stopped; nothing more is written.
+        await assert.rejects(withdraw([[1, 1]], fresh(), fresh()), {
+          message: "ORDINARY_REFUND_WITHDRAW_HANDED_OVER",
+        });
+        assert.equal(
+          (
+            await admin.query(
+              "SELECT count(*)::int AS n FROM rms_fulfillment.fulfillment_item_withdrawal WHERE order_id=$1",
+              [refunded.order],
+            )
+          ).rows[0].n,
+          1,
+        );
+        // Fulfillment's withdrawal history stays as recorded for the API role.
+        for (const sql of [
+          "UPDATE rms_fulfillment.fulfillment_item_withdrawal SET withdrawn_quantity=2",
+          "DELETE FROM rms_fulfillment.fulfillment_item_withdrawal",
+        ])
+          await scoped(async (tx) => {
+            await tx.query(sql, []).catch(() => undefined);
+          });
+        assert.equal(
+          (
+            await admin.query(
+              "SELECT count(*)::int AS n,sum(withdrawn_quantity)::int AS q FROM rms_fulfillment.fulfillment_item_withdrawal WHERE order_id=$1",
+              [refunded.order],
+            )
+          ).rows[0].q,
+          1,
         );
       }
 

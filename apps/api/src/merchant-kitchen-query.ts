@@ -53,7 +53,8 @@ import { createMerchantBusinessDayWindows } from "./merchant-business-day-window
 import { comboPartsByOrderItem, type ComboPart } from "./merchant-combo-parts.js";
 import { readPaidOrderWatch } from "./merchant-paid-order-watch.js";
 import { readPickupRefundDeadlines } from "./pickup-acceptance-deadline.js";
-import { readRefundWithdrawnUnits } from "./order-refund-withdrawal.js";
+import { readRefundWithdrawnLines } from "./order-refund-withdrawal.js";
+import { loadStoreMember } from "@bop/membership";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 
@@ -216,24 +217,32 @@ export function kitchenComboPartFields(parts: readonly ComboPart[] | undefined) 
     ),
   };
 }
+/** WP-2423 M10: refunded units of one dish and the names of who refunded them (may be empty). */
+interface RefundedLine {
+  readonly quantity: number;
+  readonly names: readonly string[];
+}
+const refundedFields = (
+  line: RefundedLine | undefined,
+  requiredQuantity: number,
+): { refundedQuantity?: number; refundedBy?: readonly string[] } =>
+  line === undefined || line.quantity < 1
+    ? {}
+    : {
+        refundedQuantity: Math.min(line.quantity, requiredQuantity),
+        ...(line.names.length > 0 ? { refundedBy: line.names } : {}),
+      };
 const itemView = (
   item: KitchenQueueItemView,
   preparation: KitchenPreparation,
   parts: ReadonlyMap<string, readonly ComboPart[]> = new Map(),
   chases: ReadonlyMap<string, { count: number; lastChasedAt: string }> = new Map(),
-  withdrawn: ReadonlyMap<string, number> = new Map(),
+  withdrawn: ReadonlyMap<string, RefundedLine> = new Map(),
 ) => ({
   ...item,
   // WP-2423 M10: units of this dish staff refunded and said not to make ("1 refunded – don't
-  // make it"; all of them: "Refunded – stop"). Absent when none.
-  ...((withdrawn.get(String(item.orderItemReference)) ?? 0) > 0
-    ? {
-        refundedQuantity: Math.min(
-          withdrawn.get(String(item.orderItemReference)) ?? 0,
-          item.requiredQuantity,
-        ),
-      }
-    : {}),
+  // make it"; all of them: "Refunded – stop"), and who refunded them. Absent when none.
+  ...refundedFields(withdrawn.get(String(item.orderItemReference)), item.requiredQuantity),
   // WP-2423 item 8 ⑦: a server chased this dish (the ticket turns red and sounds).
   ...(chases.has(String(item.workItemReference))
     ? { chase: chases.get(String(item.workItemReference)) }
@@ -791,16 +800,42 @@ export function createMerchantKitchenQuery(options: {
                 ),
               new Map<string, { count: number; lastChasedAt: string }>(),
             );
-          // WP-2423 M10: refunded units not to be made; without the read nothing is marked.
-          const withdrawnOf = (items: readonly KitchenQueueItemView[]) =>
-            withOptionalRead(
+          // WP-2423 M10: refunded units not to be made, and who refunded them; without the read
+          // nothing is marked, and a name that can't be read is left out.
+          const withdrawnOf = async (items: readonly KitchenQueueItemView[]) => {
+            const lines = await withOptionalRead(
               tx,
               () =>
-                readRefundWithdrawnUnits(tx, authority, [
+                readRefundWithdrawnLines(tx, authority, [
                   ...new Set(items.map((item) => String(item.orderReference))),
                 ]),
-              new Map<string, number>(),
+              new Map<string, { quantity: number; actorReferences: readonly string[] }>(),
             );
+            const names = new Map<string, string | null>();
+            for (const line of lines.values())
+              for (const actor of line.actorReferences)
+                if (!names.has(actor))
+                  names.set(
+                    actor,
+                    await withOptionalRead(
+                      tx,
+                      async () => (await loadStoreMember(tx, authority, actor)).displayName,
+                      null,
+                    ),
+                  );
+            return new Map<string, RefundedLine>(
+              [...lines].map(([item, line]) => [
+                item,
+                {
+                  quantity: line.quantity,
+                  names: line.actorReferences.flatMap((actor) => {
+                    const name = names.get(actor);
+                    return typeof name === "string" && name.length > 0 ? [name] : [];
+                  }),
+                },
+              ]),
+            );
+          };
           const operatorStatus = (projection: ProjectionMetadata) =>
             kdsOperatorStatus({ session, ...authority, projection });
           if (query.kind === "List") {

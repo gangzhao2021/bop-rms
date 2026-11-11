@@ -30,6 +30,18 @@ function refundRequestFailed(response: express.Response, error: unknown) {
       .json({ error: "refund_order_not_accepted" });
     return;
   }
+  // WP-2423 M10: "stop making it too" that the kitchen or the counter can't do as asked; the page
+  // says why and what to do instead. Nothing was recorded.
+  for (const [code, answer] of [
+    ["ORDINARY_REFUND_WITHDRAW_NEEDS_APPROVAL", "refund_withdraw_needs_approval"],
+    ["ORDINARY_REFUND_WITHDRAW_HANDED_OVER", "refund_withdraw_handed_over"],
+    ["ORDINARY_REFUND_WITHDRAW_EVERYTHING", "refund_withdraw_everything"],
+    ["ORDINARY_REFUND_WITHDRAW_KITCHEN_CHANGED", "refund_withdraw_kitchen_changed"],
+  ] as const)
+    if (failureNamed(error, code)) {
+      response.status(409).set("Cache-Control", NO_STORE).json({ error: answer });
+      return;
+    }
   failed(response, error);
 }
 
@@ -50,6 +62,9 @@ function refundDecisionFailure(response: express.Response, error: MerchantRefund
     response.status(409).json({ error: "refund_already_prepared" });
   else if (error.code === "AlreadyDeclined")
     response.status(409).json({ error: "refund_already_declined" });
+  // WP-2423 M10: the kitchen and the counter already left this refund's dishes out.
+  else if (error.code === "DishesStopped")
+    response.status(409).json({ error: "refund_dishes_stopped" });
   else response.status(409).json({ error: "refund_changed" });
 }
 

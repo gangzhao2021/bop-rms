@@ -14,10 +14,21 @@ const d = vi.hoisted(() => ({
   accepted: vi.fn(),
   units: vi.fn(),
   claimed: vi.fn(),
+  requesterRole: vi.fn(async () => undefined),
+  order: [] as string[],
+  fence: vi.fn(),
+  withdrawals: vi.fn(),
+  applyRecords: vi.fn(),
+}));
+// WP-2423 M10: the Order's disposition fence, Ordering's withdrawals and the records they change.
+vi.mock("./order-refund-withdrawal-records.js", () => ({
+  applyRefundWithdrawalRecords: d.applyRecords,
 }));
 vi.mock("@rms/ordering", async (original) => ({
   ...(await original<object>()),
   createPostgresOrderAcceptanceReader: () => ({ loadByBatch: d.accepted }),
+  acquireOrderDispositionFence: d.fence,
+  recordOrderItemRefundWithdrawals: d.withdrawals,
 }));
 // WP-2423 M10: the units of a round nobody accepted, and the units refunds claim.
 vi.mock("./order-batch-refund-coverage.js", async (original) => ({
@@ -38,6 +49,8 @@ vi.mock("@rms/payment", async (original) => ({
   createPostgresCardMachinePaymentStore: () => d.cards(),
   createPostgresOrdinaryRefundRequestRuntime: d.compose,
   createPostgresCapturedBatchPaymentSource: () => ({ load: d.capture }),
+  // WP-2423 M14: the requester's role kept with the request (its own tests check the record).
+  recordOrdinaryRefundRequesterRole: d.requesterRole,
   observeOrdinaryRefundOrderAfterFence: async (
     _tx: unknown,
     _s: unknown,
@@ -358,4 +371,88 @@ it("WP-2423 M10: refunding every dish of a paid order nobody accepted is refused
   // Accepted: a full refund is an ordinary refund.
   d.accepted.mockResolvedValue({ acceptedOrderVersion: 2 });
   await expect(f.operation(f.input)).resolves.toMatchObject({ status: "Created" });
+});
+
+it("WP-2423 M10: stop making it too takes the Order's fence before the refund, changes the records with it, and is refused while the refund needs approval", async () => {
+  const f = setup();
+  d.fence.mockImplementation(async () => void d.order.push("fence"));
+  const original = d.record.getMockImplementation();
+  // The request claims unit 1 of the dish it stops.
+  const recordOnce = async (tx: unknown, value: unknown) => {
+    const result = await original?.(tx, value);
+    return {
+      ...result,
+      request: {
+        ...result.request,
+        payments: result.request.payments.map((payment: { items: object[] }) => ({
+          ...payment,
+          items: payment.items.map((item) => ({
+            ...item,
+            orderItemReference: id(12),
+            refundUnitOrdinals: [1],
+          })),
+        })),
+      },
+    };
+  };
+  d.record.mockImplementation(async (tx, value) => {
+    d.order.push("refund");
+    return recordOnce(tx, value);
+  });
+  const row = { withdrawalReference: id(40), orderItemReference: id(12) };
+  d.withdrawals.mockImplementation(async () => {
+    d.order.push("withdrawals");
+    return [row];
+  });
+  d.applyRecords.mockImplementation(async () => {
+    d.order.push("records");
+    return { kitchenCancelled: [id(12)], markedOnTicket: [] };
+  });
+  const operation = createMerchantOrdinaryRefundRequest({
+    persistence: {
+      transactions: { run: f.run },
+      now: () => at,
+    } as unknown as Options["persistence"],
+    authentication: { authorize: f.authorize } as unknown as Options["authentication"],
+    resolveConfiguration: f.configure,
+    newAuditReference: () => id(7),
+    retentionPolicyCode: "FINANCIAL_COMPLIANCE",
+    retentionPolicyVersion: 1,
+    nextReference: () => id(41),
+  });
+  d.resolve.mockResolvedValue({
+    ...(await d.resolve.getMockImplementation()?.()),
+    selected: { tenantReference: id(1) },
+    context: { brand: { brandReference: id(2) }, resolvedAt: at },
+    store: { storeReference: id(3) },
+    actorReference: id(4),
+    allowed: async () => true,
+    authorizeAction: async () => ({ effect: "Allow" }),
+  });
+  const input = {
+    ...f.input,
+    command: { ...f.input.command, withdraw: [{ orderItemReference: id(12), quantity: 1 }] },
+  };
+  await expect(operation(input)).resolves.toMatchObject({ status: "Created" });
+  expect(d.order).toEqual(["fence", "refund", "withdrawals", "records"]);
+  expect(d.applyRecords.mock.calls[0]?.[1]).toMatchObject({
+    orderReference: id(8),
+    actorReference: id(4),
+    withdrawals: [row],
+  });
+  // The manager's refund role is kept with the request.
+  expect((d.requesterRole.mock.calls[0] as unknown[] | undefined)?.[2]).toMatchObject({
+    requestReference: id(9),
+    role: "Manager",
+  });
+  // A refund that waits for the owner's approval may still be declined: nothing is stopped.
+  d.order.length = 0;
+  d.applyRecords.mockClear();
+  d.record.mockImplementation(async (tx, value) => ({
+    ...(await recordOnce(tx, value)),
+    escalation: { requiresIndependentApproval: true, reasons: ["AMOUNT"] },
+  }));
+  await expect(operation(input)).rejects.toThrow("ORDINARY_REFUND_WITHDRAW_NEEDS_APPROVAL");
+  expect(d.applyRecords).not.toHaveBeenCalled();
+  expect(d.order).toEqual(["fence"]);
 });

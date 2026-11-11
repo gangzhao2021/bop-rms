@@ -414,6 +414,23 @@ it("a dish refunded with stop making it too is recorded with the refund and coun
       // The same request again (a retry) writes nothing more.
       await command(manager, first);
       assert.equal((await rows()).length, 1);
+      // WP-2423 M14: the manager's refund role is kept with the request, once.
+      assert.deepEqual(
+        await query(
+          "SELECT requester_role FROM rms_payment.ordinary_refund_requester_role WHERE request_id=$1",
+          [first.requestReference],
+        ),
+        [{ requester_role: "Manager" }],
+      );
+      // Before acceptance there is no ticket or pickup yet: nothing in Kitchen or Fulfillment
+      // (the handover records the units first, before it counts the bag).
+      assert.deepEqual(
+        await query(
+          "SELECT (SELECT count(*)::int FROM rms_kitchen.kitchen_work_cancellation WHERE order_id=$1) AS kitchen,(SELECT count(*)::int FROM rms_fulfillment.fulfillment_item_withdrawal WHERE order_id=$1) AS pickup",
+          [order.orderReference],
+        ),
+        [{ kitchen: 0, pickup: 0 }],
+      );
       // What the kitchen board, the pickup card and the guest's page read, as the API role.
       const units = await transactions().run((tx) =>
         readRefundWithdrawnUnits(tx, world.ownerScope, [order.orderReference]),
@@ -606,27 +623,47 @@ it("a cashier's refund request is recorded, never sent by them, and listed for a
           ...(requesterMaySend === undefined ? {} : { requesterMaySend }),
         })(tx, { observedAt: world.now() }),
       );
+    // The role is the one the cashier held when asking, recorded with the request (2000_424):
+    // listed at once whatever their role reads as now, and their role is not read again.
     assert.deepEqual(
-      (await listed(undefined)).map((entry) => entry.requestReference),
-      [command.requestReference],
-    );
-    assert.deepEqual(
-      (await listed(async () => true)).map((entry) => entry.requestReference),
-      [command.requestReference],
-    );
-    const asked = [];
-    assert.deepEqual(
-      (
-        await listed(async (_tx, value) => {
-          asked.push(value.requesterReference);
-          return false;
-        })
-      ).map((entry) => [entry.requestReference, entry.state]),
+      await query(
+        "SELECT requester_role,actor_id::text AS actor FROM rms_payment.ordinary_refund_requester_role WHERE request_id=ANY($1::uuid[]) ORDER BY recorded_at,request_id",
+        [[command.requestReference, second.requestReference]],
+      ),
       [
-        [second.requestReference, "NotSent"],
-        [command.requestReference, "NotSent"],
+        { requester_role: "Staff", actor: cashier.actor },
+        { requester_role: "Staff", actor: cashier.actor },
       ],
     );
-    assert.deepEqual(asked, [cashier.actor]);
+    const asked = [];
+    for (const requesterMaySend of [
+      undefined,
+      async (_tx, value) => {
+        asked.push(value.requesterReference);
+        return true;
+      },
+    ])
+      assert.deepEqual(
+        (await listed(requesterMaySend)).map((entry) => [entry.requestReference, entry.state]),
+        [
+          [second.requestReference, "NotSent"],
+          [command.requestReference, "NotSent"],
+        ],
+      );
+    assert.deepEqual(asked, []);
+    // Append-only for the API role.
+    for (const sql of [
+      "UPDATE rms_payment.ordinary_refund_requester_role SET requester_role='Manager'",
+      "DELETE FROM rms_payment.ordinary_refund_requester_role",
+    ])
+      await assert.rejects(
+        transactions().run(async (tx) => {
+          await tx.query(
+            "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+            [world.ownerScope.brandReference, world.ownerScope.storeReference],
+          );
+          await tx.query(sql);
+        }),
+      );
   });
 });

@@ -1,7 +1,17 @@
 import { beforeEach, expect, it, vi } from "vitest";
 import { createMerchantOrdinaryRefundDecline } from "./merchant-ordinary-refund-decline.js";
 import { MerchantRefundApprovalError } from "./merchant-ordinary-refund-approval.js";
-const doubles = vi.hoisted(() => ({ scope: vi.fn(), store: vi.fn(), decline: vi.fn() }));
+const doubles = vi.hoisted(() => ({
+  scope: vi.fn(),
+  store: vi.fn(),
+  decline: vi.fn(),
+  withdrawals: vi.fn(),
+}));
+// WP-2423 M10: the dishes refunds stopped, read under the refund fence the decline holds.
+vi.mock("@rms/ordering", async (original) => ({
+  ...(await original<object>()),
+  listOrderItemRefundWithdrawals: doubles.withdrawals,
+}));
 vi.mock("./merchant-store-scope.js", () => ({ createMerchantStoreScope: () => doubles.scope }));
 vi.mock("./merchant-ordinary-refund-authority.js", () => ({
   createMerchantOrdinaryRefundAuthority: () => ({}),
@@ -39,6 +49,7 @@ function setup() {
     allowed,
   });
   doubles.store.mockReturnValue(doubles.decline);
+  doubles.withdrawals.mockResolvedValue([]);
   doubles.decline.mockImplementation(async (tx: object) => {
     const owner = doubles.store.mock.calls[0]?.[0] as { authorize: Authorize };
     during.push(await owner.authorize(tx, query));
@@ -106,4 +117,22 @@ it("WP-2423: a permission withdrawn or Session ended during the decline refuses 
   expect(f.rolledBack()).toBeInstanceOf(MerchantRefundApprovalError);
   expect(doubles.decline).toHaveBeenCalledOnce();
   expect(f.allowed).toHaveBeenCalledTimes(2);
+});
+it("WP-2423 M10: a refund whose dishes the kitchen and the counter already left out is not declined", async () => {
+  const f = setup();
+  // Another request's withdrawal on the same order does not stop this decline.
+  doubles.withdrawals.mockResolvedValueOnce([{ refundRequestReference: id(70) }]);
+  await expect(f.decline(f.input)).resolves.toMatchObject({ status: "Declined" });
+  const g = setup();
+  doubles.withdrawals.mockResolvedValue([{ refundRequestReference: id(7) }]);
+  const error = await g.decline(g.input).catch((value: unknown) => value);
+  expect(error).toBeInstanceOf(MerchantRefundApprovalError);
+  expect(error).toMatchObject({ code: "DishesStopped" });
+  // Thrown inside the transaction: the decline is rolled back with it.
+  expect(g.rolledBack()).toBeInstanceOf(MerchantRefundApprovalError);
+  expect(doubles.withdrawals).toHaveBeenLastCalledWith(
+    expect.anything(),
+    expect.objectContaining({ brandReference: id(3), storeReference: id(4) }),
+    [id(6)],
+  );
 });

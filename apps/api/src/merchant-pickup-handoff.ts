@@ -7,7 +7,8 @@ import {
   completePickupHandoffPermission,
   pickupCodeNotShownCauses,
 } from "@rms/fulfillment";
-import { listStoreCounterOrders } from "@rms/ordering";
+import { acquireOrderDispositionFence, listStoreCounterOrders } from "@rms/ordering";
+import { catchUpPickupWithdrawals } from "./order-refund-withdrawal-records.js";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import type { MerchantBffService } from "./merchant-bff.js";
@@ -154,6 +155,24 @@ export function createMerchantPickupHandoff(options: {
           };
           authority.bind(tx);
           await options.installContext(tx, selected);
+          // WP-2423 M10: refunded units staff said not to hand over, recorded with the pickup
+          // before it is handed over (a refund made before acceptance had no pickup to record
+          // them on), so the handover never counts them. The Order's disposition fence first:
+          // the first lock every writer of this Order takes.
+          await acquireOrderDispositionFence(tx, {
+            brandReference: String(selected.brandReference),
+            storeReference: String(selected.storeReference),
+            orderReference,
+          });
+          await catchUpPickupWithdrawals(tx, {
+            scope: {
+              brandReference: String(selected.brandReference),
+              storeReference: String(selected.storeReference),
+            },
+            orderReference,
+            now: options.persistence.now,
+            nextReference: options.nextReference,
+          });
           const store = createPostgresPickupHandoffStore({
             ...options.store,
             ...selected,

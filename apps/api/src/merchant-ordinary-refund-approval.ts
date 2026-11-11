@@ -34,7 +34,9 @@ export class MerchantRefundApprovalError extends Error {
       | "AlreadyDeclined"
       | "RequesterNotEligible"
       /** WP-2423 Q19: self-approval asked for, but sole operator is not in effect now. */
-      | "SoleOperatorNotInEffect",
+      | "SoleOperatorNotInEffect"
+      /** WP-2423 M10: the kitchen and the counter already left this refund's dishes out. */
+      | "DishesStopped",
     readonly party: RefundVerificationParty | null = null,
   ) {
     super("Refund approval was not recorded");

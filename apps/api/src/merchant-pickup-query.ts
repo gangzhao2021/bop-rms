@@ -243,20 +243,25 @@ export function createMerchantPickupQuery(options: {
               }),
             );
       }
-      // WP-2423 M10: units staff refunded and said not to hand over. A pickup with every unit
-      // refunded and nothing handed over has nothing left to collect: it leaves the queue like a
-      // cancelled one. Unreadable: nothing is subtracted.
-      const withdrawn = await withOptionalRead(
-        tx,
-        () =>
-          readRefundWithdrawnUnits(
-            tx,
-            selected,
-            result.items
-              .filter((item) => !cancelled.has(String(item.orderReference)))
-              .map((item) => String(item.orderReference)),
-          ),
-        new Map<string, number>(),
+      // WP-2423 M10: units staff refunded and said not to hand over: as Fulfillment recorded them
+      // with the refund (its handoff counts only the rest), or as Ordering recorded them with a
+      // refund made before the pickup existed (the handoff records those first). A pickup with
+      // every unit refunded and nothing handed over has nothing left to collect: it leaves the
+      // queue. Ordering unreadable: Fulfillment's own count.
+      const withdrawn = mostWithdrawn(
+        pickupWithdrawnUnits(result.items),
+        await withOptionalRead(
+          tx,
+          () =>
+            readRefundWithdrawnUnits(
+              tx,
+              selected,
+              result.items
+                .filter((item) => !cancelled.has(String(item.orderReference)))
+                .map((item) => String(item.orderReference)),
+            ),
+          new Map<string, number>(),
+        ),
       );
       const refundedOf = (line: (typeof result.items)[number]["items"][number]) =>
         pickupLineRefunded(line, withdrawn);
@@ -316,6 +321,34 @@ interface PickupLine {
   readonly orderedQuantity: number;
   readonly handedOverQuantity: number;
 }
+/** WP-2423 M10: per Order item, the units Fulfillment recorded as refunded, never handed over. */
+export const pickupWithdrawnUnits = (
+  items: readonly {
+    readonly items: readonly {
+      readonly orderItemReference?: unknown;
+      readonly withdrawnQuantity?: number;
+    }[];
+  }[],
+): ReadonlyMap<string, number> =>
+  new Map(
+    items.flatMap((item) =>
+      item.items.flatMap((line) =>
+        line.orderItemReference !== undefined && (line.withdrawnQuantity ?? 0) > 0
+          ? [[String(line.orderItemReference), line.withdrawnQuantity ?? 0] as const]
+          : [],
+      ),
+    ),
+  );
+/** WP-2423 M10: per Order item, the larger of two counts of the same refunded units. */
+const mostWithdrawn = (
+  fulfillment: ReadonlyMap<string, number>,
+  ordering: ReadonlyMap<string, number>,
+): ReadonlyMap<string, number> => {
+  const result = new Map(fulfillment);
+  for (const [item, quantity] of ordering)
+    result.set(item, Math.max(result.get(item) ?? 0, quantity));
+  return result;
+};
 /** WP-2423 M10: of a pickup line's units, how many staff refunded and said not to hand over. */
 export const pickupLineRefunded = (line: PickupLine, withdrawn: ReadonlyMap<string, number>) =>
   line.orderItemReference === undefined
@@ -381,16 +414,19 @@ export async function waitingPickupOrders(
         includeCompleted: false,
       });
       // WP-2423 M10: a pickup refunded in full with nothing handed over is not waiting (the
-      // Pickup page leaves it out too). Unreadable: nothing is subtracted.
-      const withdrawn = await withOptionalRead(
-        tx,
-        () =>
-          readRefundWithdrawnUnits(
-            tx,
-            { brandReference: options.brandReference, storeReference: options.storeReference },
-            result.items.map((item) => String(item.orderReference)),
-          ),
-        new Map<string, number>(),
+      // Pickup page leaves it out too). Ordering unreadable: Fulfillment's own count.
+      const withdrawn = mostWithdrawn(
+        pickupWithdrawnUnits(result.items),
+        await withOptionalRead(
+          tx,
+          () =>
+            readRefundWithdrawnUnits(
+              tx,
+              { brandReference: options.brandReference, storeReference: options.storeReference },
+              result.items.map((item) => String(item.orderReference)),
+            ),
+          new Map<string, number>(),
+        ),
       );
       count += result.items.filter((item) => !pickupNothingToCollect(item, withdrawn)).length;
       if (result.nextAfterFulfillmentReference === null) {

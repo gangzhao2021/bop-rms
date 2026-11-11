@@ -6,13 +6,17 @@ import {
   createPostgresOrdinaryRefundRequestRuntime,
   createOrdinaryRefundRoleResolver,
   observeOrdinaryRefundOrderAfterFence,
+  recordOrdinaryRefundRequesterRole,
+  type OrdinaryRefundRequesterRole,
 } from "@rms/payment";
 import {
+  acquireOrderDispositionFence,
   createPostgresOrderAcceptanceReader,
   orderItemRefundWithdrawalMaximumLines,
   recordOrderItemRefundWithdrawals,
 } from "@rms/ordering";
 import { cardMachineWholeRefundSource } from "./merchant-card-machine-refund.js";
+import { applyRefundWithdrawalRecords } from "./order-refund-withdrawal-records.js";
 import {
   everyBatchUnitClaimed,
   readBatchUnits,
@@ -91,6 +95,14 @@ export function createMerchantOrdinaryRefundRequest(options: {
    */
   const withdrawNotAllowed = (): never => {
     throw new Error("ORDINARY_REFUND_WITHDRAW_DENIED");
+  };
+  /**
+   * WP-2423 M10: "stop making it too" on a refund that waits for the owner's approval. The
+   * kitchen and the counter are changed only by a refund nobody can decline any more, so the
+   * page offers it only without approval; for a dish not started, Cancel items needs none.
+   */
+  const withdrawNeedsApproval = (): never => {
+    throw new Error("ORDINARY_REFUND_WITHDRAW_NEEDS_APPROVAL");
   };
   const parseWithdraw = (value: unknown) => {
     if (
@@ -209,6 +221,12 @@ export function createMerchantOrdinaryRefundRequest(options: {
             brandReference: String(current.context.brand.brandReference),
             storeReference: String(current.store.storeReference),
           };
+          // WP-2423 M10 lock order: a refund that stops dishes changes Kitchen, Fulfillment and
+          // stock after Payment's refund fence, so it takes the Order's disposition fence first,
+          // the first lock every writer of this Order takes (a staff item cancellation takes it
+          // before Kitchen and Payment). The two never interleave on one Order.
+          if (withdraw !== null)
+            await acquireOrderDispositionFence(businessTransaction, { ...scope, orderReference });
           // WP-2423 M10: taking dishes off the order is Ordering's `ordering.order.cancel`, checked
           // with the request and again before the commit.
           if (withdraw !== null) {
@@ -241,24 +259,32 @@ export function createMerchantOrdinaryRefundRequest(options: {
             );
             return (await soleOperatorStatus) === "Effective";
           };
-          /** The requester's role from their current workforce authority (Manager, or an Owner
-           * while sole operator is in effect for them). */
-          const requesterRole = async () => {
+          /** The requester's refund role from their current workforce authority (Manager, an
+           * Owner while sole operator is in effect for them, or Staff), or null. */
+          let requesterRoleSeen: OrdinaryRefundRequesterRole | null = null;
+          const requesterRoleOf = async (): Promise<OrdinaryRefundRequesterRole | null> => {
             const decided = await workforce(businessTransaction, {
               ...scope,
               actorReference: String(current.actorReference),
               observedAt: current.context.resolvedAt,
               permissionCode: "payment.refund.request",
             });
-            if (decided.decision.effect !== "Allow") return false;
+            if (decided.decision.effect !== "Allow") return null;
             const requestRole = role("payment.refund.request", decided.activeRoleCodes);
-            return (
-              requestRole === "Manager" ||
+            return requestRole === "Manager" ||
               // WP-2423 M14 (DEC-OWNER-DEFAULTS-2026-11-06 item 2): a cashier records a request
               // with a reason; a manager or the owner sends it.
               requestRole === "Staff" ||
               (requestRole === "Owner" && (await soleOperatorEffective()))
-            );
+              ? requestRole
+              : null;
+          };
+          const requesterRole = async () => {
+            const seen = await requesterRoleOf();
+            // Rechecked before commit: the role recorded with the request must be the one held.
+            if (requesterRoleSeen !== null && seen !== requesterRoleSeen) return false;
+            requesterRoleSeen = seen;
+            return seen !== null;
           };
           // Read once for this run (Payment asks several times per request) and again before commit.
           let requester: Promise<boolean> | null = null;
@@ -445,17 +471,46 @@ export function createMerchantOrdinaryRefundRequest(options: {
                 quantity: entry.quantity,
               };
             });
-            if (!preview)
-              await recordOrderItemRefundWithdrawals(businessTransaction, scope, {
-                orderReference,
-                refundRequestReference: String(result.request.requestReference),
-                operationReference: String(result.request.operationReference),
-                actorReference: String(current.actorReference),
-                recordedAt: String(result.request.requestedAt),
-                nextReference: options.nextReference as () => string,
-                lines,
-              });
+            if (!preview) {
+              if (result.escalation?.requiresIndependentApproval === true)
+                return withdrawNeedsApproval();
+              const withdrawals = await recordOrderItemRefundWithdrawals(
+                businessTransaction,
+                scope,
+                {
+                  orderReference,
+                  refundRequestReference: String(result.request.requestReference),
+                  operationReference: String(result.request.operationReference),
+                  actorReference: String(current.actorReference),
+                  recordedAt: String(result.request.requestedAt),
+                  nextReference: options.nextReference as () => string,
+                  lines,
+                },
+              );
+              // A replay found everything recorded the first time, records included.
+              if (result.status !== "AlreadyCommitted")
+                await applyRefundWithdrawalRecords(businessTransaction, {
+                  scope,
+                  orderReference,
+                  actorReference: String(current.actorReference),
+                  recordedAt: String(result.request.requestedAt),
+                  operationReference: String(result.request.operationReference),
+                  withdrawals,
+                  nextReference: options.nextReference as () => string,
+                  now: options.persistence.now,
+                  allowed,
+                });
+            }
           }
+          // WP-2423 M14: the requester's refund role as held now, kept with the request.
+          if (!preview && result.status === "Created" && requesterRoleSeen !== null)
+            await recordOrdinaryRefundRequesterRole(businessTransaction, scope, {
+              orderReference,
+              requestReference: String(result.request.requestReference),
+              actorReference: String(current.actorReference),
+              requestedAt: String(result.request.requestedAt),
+              role: requesterRoleSeen,
+            });
           const components = {
             netAmountMinor: 0n,
             taxAmountMinor: 0n,
