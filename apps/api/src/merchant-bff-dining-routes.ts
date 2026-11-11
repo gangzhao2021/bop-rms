@@ -725,6 +725,34 @@ export function installMerchantDiningRoutes(
       .catch((error: unknown) => failed(response, error));
   });
 
+  // WP-2423 (M171): staff mark the allergens a table must avoid (ticks, no free text).
+  router.post("/dining/table-allergies", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant"),
+      csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.diningTableAllergies) {
+      response.status(503).json({ error: "dining_table_allergies_unavailable" });
+      return;
+    }
+    void options
+      .diningTableAllergies({ sessionCookie, csrf, command: request.body })
+      .then((result) =>
+        response
+          .status(result.status === "Invalid" ? 422 : result.status === "Conflict" ? 409 : 200)
+          .set("Cache-Control", NO_STORE)
+          .json(result),
+      )
+      .catch((error: unknown) => failed(response, error));
+  });
+
   // WP-2423 DEC-DINE-IN-PAY-LATER: the Store's dine-in payment timing (Owner, Store Manager).
   router.post("/dining/payment-timing", sameOriginMutation(options), (request, response) => {
     const sessionCookie = cookie(request, "__Host-bop-merchant"),

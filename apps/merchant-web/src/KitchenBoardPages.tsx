@@ -1,5 +1,5 @@
 import { LanguageSwitch } from "./i18n/LanguageSwitch.js";
-import { listSeparator, t, saidTable, systemText } from "./i18n/i18n.js";
+import { allergenName, listSeparator, t, saidTable, systemText } from "./i18n/i18n.js";
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { useKitchenActions, type KitchenStepTarget } from "./use-kitchen-actions.js";
 import type { KitchenTap } from "./kitchen-step-queue.js";
@@ -308,7 +308,41 @@ function KitchenOrderOrigin({ label }: { readonly label: KitchenOrderLabel | nul
       ? t("Merged from table {table}", { table: saidTable(label.mergedFromTableLabel) })
       : null,
   ].filter((fact) => fact !== null);
-  return facts.length === 0 ? null : <p className="kitchen-ticket__origin">{facts.join(" · ")}</p>;
+  return (
+    <>
+      <KitchenTableAllergies label={label} />
+      {facts.length === 0 ? null : <p className="kitchen-ticket__origin">{facts.join(" · ")}</p>}
+    </>
+  );
+}
+
+/** WP-2423 (M171, Owner decision 17): the allergens staff marked for this table, in red. */
+export function KitchenTableAllergies({
+  label,
+}: {
+  readonly label: KitchenOrderLabel | null | undefined;
+}) {
+  const allergies = label?.tableAllergies;
+  if (allergies === undefined || allergies.length === 0) return null;
+  return (
+    <p className="kitchen-ticket__table-allergy" role="alert">
+      {t("Table allergy: {list}", {
+        list: allergies
+          .map((allergy) => allergenName(allergy.code, allergy.name))
+          .join(listSeparator()),
+      })}
+    </p>
+  );
+}
+
+/** WP-2423 (M171): a dish whose menu allergens include one the table must avoid. */
+export function containsTableAllergy(item: KitchenBoardItem): boolean {
+  const allergies = item.orderLabel?.tableAllergies;
+  const allergens = item.allergens;
+  if (allergies === undefined || allergens === undefined || allergens.status !== "Declared")
+    return false;
+  const named = new Set([...allergens.contains, ...allergens.mayContain]);
+  return allergies.some((allergy) => named.has(allergy.name));
 }
 
 /** WP-2423 Q2: a lane's items with each Order's work together, oldest Order first. */
@@ -1586,6 +1620,12 @@ function WorkCard({
           </ul>
         ) : null}
         <KitchenAllergenLine item={item} />
+        {containsTableAllergy(item) ? (
+          <p className="kitchen-work-item__table-allergy" role="alert">
+            {t("Contains a table allergy")}
+          </p>
+        ) : null}
+        {!inTicket ? <KitchenTableAllergies label={item.orderLabel} /> : null}
         {!inTicket && item.orderLabel?.enteredByStaff ? (
           <p className="kitchen-work-item__staff">{t("Entered by staff")}</p>
         ) : null}

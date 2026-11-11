@@ -38,6 +38,10 @@ import {
   listDiningSessionMovedFrom,
   listDiningSessionTableLabels,
 } from "@rms/dining";
+import {
+  listOpenDiningTableAllergies,
+  tableAllergenChoices,
+} from "./merchant-dining-table-allergies.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import {
@@ -148,6 +152,11 @@ export interface KitchenOrderLabel {
    * table round entered by staff), so the kitchen reads "Entered by staff".
    */
   readonly enteredByStaff: boolean;
+  /**
+   * WP-2423 (M171): the allergens staff marked for this table (codes with their list names), only
+   * while the table is open and marked.
+   */
+  readonly tableAllergies?: readonly { readonly code: string; readonly name: string }[];
 }
 export interface KitchenPreparation {
   readonly allergens: KitchenItemAllergens;
@@ -303,6 +312,31 @@ export async function kitchenPreparation(
   const tables = await listDiningSessionTableLabels(transaction, scope, diningSessions);
   const movedFrom = await listDiningSessionMovedFrom(transaction, scope, diningSessions);
   const mergedInto = await listDiningSessionMergedInto(transaction, scope, diningSessions);
+  // WP-2423 (M171, Owner decision 17): what each open table must avoid, named from the Brand's
+  // allergen list (only when any table is marked).
+  const tableAllergyCodes = await listOpenDiningTableAllergies(
+    transaction as never,
+    scope,
+    diningSessions,
+  );
+  const allergyNames =
+    tableAllergyCodes.size === 0
+      ? new Map<string, string>()
+      : new Map(
+          (await tableAllergenChoices(transaction as never, scope)).map(
+            (choice) => [choice.code, choice.name] as const,
+          ),
+        );
+  const tableAllergiesOf = (session: string | null) => {
+    const codes = session === null ? undefined : tableAllergyCodes.get(session);
+    return codes === undefined
+      ? {}
+      : {
+          tableAllergies: Object.freeze(
+            codes.map((code) => Object.freeze({ code, name: allergyNames.get(code) ?? code })),
+          ),
+        };
+  };
   // WP-2423 item 8 ⑧ (decision 5): each dish's kitchen section, for the screen's section filter.
   const sections = await listKitchenWorkItemSections(
     transaction,
@@ -369,6 +403,7 @@ export async function kitchenPreparation(
                       ? null
                       : (mergedInto.get(order.diningSessionReference)?.fromTableLabel ?? null),
                   enteredByStaff,
+                  ...tableAllergiesOf(order.diningSessionReference),
                 }),
         }),
       ] as const;

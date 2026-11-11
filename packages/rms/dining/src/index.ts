@@ -82,6 +82,7 @@ export * from "./infrastructure/persistence/dining-qr-join-store.js";
 export * from "./domain/dining-guest-table-start.js";
 export * from "./infrastructure/persistence/dining-guest-table-start-store.js";
 export * from "./infrastructure/persistence/dining-staff-call-store.js";
+export * from "./infrastructure/persistence/dining-table-allergy-store.js";
 
 export { createDiningExceptionEpisodeResolution } from "./application/dining-exception-episode-resolution.js";
 export * from "./domain/dining-payment-timing.js";

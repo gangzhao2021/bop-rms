@@ -50,6 +50,12 @@ vi.mock("@rms/payment", async (original) => ({
   listStoreOrderBatchesPaidOnline: mock.paidOnline,
 }));
 vi.mock("./merchant-store-scope.js", () => ({ createMerchantStoreScope: () => mock.resolve }));
+// WP-2423 (M171): the table allergy reads (proven against PostgreSQL in staff-dining-round).
+vi.mock("./merchant-dining-table-allergies.js", () => ({
+  listOpenDiningTableAllergies: async (_tx: unknown, _scope: unknown, sessions: string[]) =>
+    new Map(sessions.filter((s) => s.endsWith("0005")).map((s) => [s, ["PEANUT"]])),
+  tableAllergenChoices: async () => [{ code: "PEANUT", name: "Peanuts", nameZh: "" }],
+}));
 const timing = vi.hoisted(() => ({
   store: "PayFirst" as "PayFirst" | "PayLater",
   sessions: new Map<string, "PayFirst" | "PayLater">(),

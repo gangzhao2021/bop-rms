@@ -36,6 +36,10 @@ import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js"
 import { runMerchantSnapshotRead } from "./merchant-snapshot-read.js";
 import { listRoundsWaitingForStaff } from "./dining-waiting-rounds.js";
 import { merchantDiningStaffCallStore } from "./merchant-dining-staff-calls.js";
+import {
+  listOpenDiningTableAllergies,
+  tableAllergenChoices,
+} from "./merchant-dining-table-allergies.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 /** The Tables page's own permission first, then the actions it offers. */
 const tableCloseActions = ["dining.session.close", "order.close", "dining.item.serve"] as const;
@@ -522,6 +526,20 @@ export function createMerchantDiningTables(options: {
               })),
             );
           }
+          // WP-2423 (M171): the allergens staff marked for each open table, and the list they
+          // tick from (one read each).
+          const tableAllergies = await listOpenDiningTableAllergies(
+            tx as never,
+            {
+              brandReference: String(current.context.brand.brandReference),
+              storeReference: String(current.store.storeReference),
+            },
+            activeReferences.map((reference) => String(reference)),
+          );
+          // Marking needs dining.operate, which this read already requires.
+          const allergenChoices = await tableAllergenChoices(tx, {
+            brandReference: String(current.context.brand.brandReference),
+          });
           // WP-2423 Q28 DEC-DINING-STAFF-CALL: the open call of each open session (one read).
           const staffCalls = await merchantDiningStaffCallStore(tx, {
             tenantReference: String(current.selected.tenantReference),
@@ -558,6 +576,8 @@ export function createMerchantDiningTables(options: {
           };
           return Object.freeze({
             canOperateTables,
+            // WP-2423 (M171): the allergens staff may mark a table with (sent only when any).
+            ...(allergenChoices.length > 0 ? { allergenChoices } : {}),
             canCloseSessions,
             canTransferHost,
             canCancelUnpaidRounds,
@@ -681,6 +701,15 @@ export function createMerchantDiningTables(options: {
                           guestStart.get(String(table.activeDiningSessionReference)) ?? {
                             closesByItselfAt: null,
                           },
+                        ),
+                      }
+                    : {}),
+                  // WP-2423 (M171): what this table must avoid, only when staff marked it.
+                  ...(table.activeDiningSessionReference !== null &&
+                  tableAllergies.has(String(table.activeDiningSessionReference))
+                    ? {
+                        tableAllergies: tableAllergies.get(
+                          String(table.activeDiningSessionReference),
                         ),
                       }
                     : {}),

@@ -6,6 +6,7 @@ import type {
   createMerchantDiningStaffCallAnswer,
   createMerchantDiningStaffCallCount,
 } from "./merchant-dining-staff-calls.js";
+import type { createMerchantDiningTableAllergies } from "./merchant-dining-table-allergies.js";
 import type {
   createMerchantDiningPaymentTimingChange,
   createMerchantDiningPaymentTimingRead,
@@ -681,6 +682,8 @@ export interface MerchantBffRouterOptions {
   /** WP-2423 Q28: guests waiting for staff (navigation count) and answering a call. */
   readonly diningStaffCallCount?: ReturnType<typeof createMerchantDiningStaffCallCount>;
   readonly diningStaffCallAnswer?: ReturnType<typeof createMerchantDiningStaffCallAnswer>;
+  /** WP-2423 (M171): staff mark the allergens a table must avoid. */
+  readonly diningTableAllergies?: ReturnType<typeof createMerchantDiningTableAllergies>;
   /** WP-2423 DEC-DINE-IN-PAY-LATER: the Store's dine-in payment timing. */
   readonly diningPaymentTimingRead?: ReturnType<typeof createMerchantDiningPaymentTimingRead>;
   readonly diningPaymentTimingChange?: ReturnType<typeof createMerchantDiningPaymentTimingChange>;

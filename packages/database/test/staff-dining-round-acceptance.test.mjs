@@ -8,6 +8,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { URL } from "node:url";
 import pg from "pg";
 import { it, vi } from "vitest";
+import { createAllergenRegistryVersion } from "../../rms/catalog/src/index.ts";
 import {
   createDiningGuestBindingQuery,
   createPostgresDiningCheckoutCommitmentStore,
@@ -75,6 +76,7 @@ import { exerciseReceiptTemplate } from "../test-support/receipt-template.mjs";
 import { assertLateRoundBusinessDate } from "../test-support/round-business-date-assertions.mjs";
 import { createMerchantStaffDiningRound } from "../../../apps/api/src/merchant-staff-dining-round.ts";
 import { createMerchantDiningTables } from "../../../apps/api/src/merchant-dining-tables.ts";
+import { createMerchantDiningTableAllergies } from "../../../apps/api/src/merchant-dining-table-allergies.ts";
 import {
   fullServiceTemplate,
   navigationForStoreFeatures,
@@ -1171,6 +1173,99 @@ it("enters a dine-in round by staff, takes its card-machine payment and marks it
       assert.equal(kitchen.get(pay1.workItems[0]).orderLabel.enteredByStaff, false);
       assert.equal(kitchen.get(id(0x2501)).orderLabel.enteredByStaff, true);
       assert.equal(kitchen.get(id(0x2501)).orderLabel.orderType, "DineIn");
+
+      // WP-2423 (M171, Owner decision 17): front of house ticks the allergens this table must
+      // avoid (from the Brand's TEST-only list); every kitchen ticket of the table shows them,
+      // and an empty set clears them. Codes only, append-only, through the real command under
+      // the restricted role.
+      await admin.query("BEGIN");
+      await admin.query(
+        "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id','',true)",
+        [tenant, scope.brandReference],
+      );
+      await createAllergenRegistryVersion(admin, ownerScope, {
+        registryVersionReference: id(0x2790),
+        jurisdictionCode: "CA",
+        policyDocument: "TEST-ONLY synthetic allergen list",
+        entries: [
+          { allergenReference: id(0x2791), code: "PEANUT", localizedNames: { "en-CA": "Peanuts" } },
+          { allergenReference: id(0x2792), code: "SESAME", localizedNames: { "en-CA": "Sesame" } },
+        ],
+        actorReference: frontOfHouse,
+        at: time(-minutes(40)),
+        auditReference: id(0x2793),
+      });
+      await admin.query("COMMIT");
+      const tableAllergies = createMerchantDiningTableAllergies({
+        persistence: { ...staffSession.persistence, now },
+        authentication: staffSession.authentication,
+        references: { next: fresh },
+      });
+      const markAllergies = (operationReference, allergenCodes) =>
+        tableAllergies({
+          sessionCookie: staffSession.sessionCookie,
+          csrf: staffSession.csrf,
+          command: {
+            operationReference,
+            diningSessionReference: dining.session.diningSessionReference,
+            allergenCodes,
+          },
+        });
+      assert.deepEqual(await markAllergies(id(0x2794), ["SESAME", "PEANUT"]), {
+        status: "Applied",
+        allergenCodes: ["PEANUT", "SESAME"],
+      });
+      // The same operation again records nothing more; a code off the list is refused.
+      assert.equal(
+        (await markAllergies(id(0x2794), ["PEANUT", "SESAME"])).status,
+        "AlreadyApplied",
+      );
+      assert.deepEqual(await markAllergies(id(0x2795), ["SHELLFISH"]), { status: "Invalid" });
+      const ticketsNow = async () =>
+        transactions().run((tx) =>
+          kitchenPreparation(tx, scope, [
+            {
+              workItemReference: id(0x2501),
+              orderReference,
+              orderBatchReference: R2.batch.orderBatchReference,
+            },
+          ]),
+        );
+      assert.deepEqual((await ticketsNow()).get(id(0x2501)).orderLabel.tableAllergies, [
+        { code: "PEANUT", name: "Peanuts" },
+        { code: "SESAME", name: "Sesame" },
+      ]);
+      // The Tables page reads the table's marks and the list staff tick from.
+      const marked = (
+        await createMerchantDiningTables({
+          persistence: { ...staffSession.persistence, now },
+          authentication: staffSession.authentication,
+        })({
+          sessionCookie: staffSession.sessionCookie,
+          csrf: staffSession.csrf,
+          query: { afterTableReference: null, limit: 50 },
+        })
+      ).items.find((entry) => entry.tableAllergies !== undefined);
+      assert.deepEqual(marked?.tableAllergies, ["PEANUT", "SESAME"]);
+      assert.equal(
+        (
+          await admin.query(
+            "SELECT count(*)::int AS n FROM rms_dining.dining_table_allergy_mark WHERE session_id=$1",
+            [dining.session.diningSessionReference],
+          )
+        ).rows[0].n,
+        1,
+      );
+      await assert.rejects(
+        admin.query("UPDATE rms_dining.dining_table_allergy_mark SET allergen_codes='{}'"),
+        /append-only table allergy history/u,
+      );
+      await assert.rejects(
+        admin.query("DELETE FROM rms_dining.dining_table_allergy_mark"),
+        /append-only table allergy history/u,
+      );
+      assert.equal((await markAllergies(id(0x2796), [])).status, "Applied");
+      assert.equal((await ticketsNow()).get(id(0x2501)).orderLabel.tableAllergies, undefined);
 
       // WP-2423 D4: the staff round is its own business day's work. The Order opened with round 1;
       // a business day that started between the two rounds (the table left open overnight) lists

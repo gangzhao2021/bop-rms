@@ -8946,4 +8946,16 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Back on": "恢复供应",
   "Open {item}": "打开 {item}",
   "Allergy question": "过敏问题",
+  "Table allergy: {list}": "本桌过敏：{list}",
+  "Contains a table allergy": "含本桌过敏原",
+  "Allergies at this table": "这桌的过敏",
+  "Kitchen tickets for this table will show: {list}.": "这桌的后厨单会显示：{list}。",
+  "No allergies marked for this table.": "这桌没有标过敏。",
+  "Save allergies": "保存过敏",
+  "This table is no longer open.": "这桌已经不在用餐中了。",
+  "Allergies couldn't be saved. Try again.": "过敏没有保存上，请再试一次。",
+  "Ticks only: ask the guest, and never write their name or health details.":
+    "只打勾：问清客人，不要写名字或健康情况。",
+  "Table {table}: no allergies marked.": "{table} 号桌：没有标过敏。",
+  "Table {table}: kitchen tickets will show {list}.": "{table} 号桌：后厨单会显示 {list}。",
 });

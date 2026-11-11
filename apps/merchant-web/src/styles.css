@@ -2008,6 +2008,15 @@
   color: var(--bop-color-danger);
   font-weight: 700;
 }
+/* WP-2423 (M171): a table's marked allergens, and a dish that holds one, in red. */
+.kitchen-ticket__table-allergy,
+.kitchen-work-item__table-allergy {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--bop-color-danger);
+  font-size: 15px;
+  font-weight: 700;
+}
 .kitchen-work-item__allergens[data-kind="none"],
 .kitchen-work-item__allergens[data-kind="unavailable"],
 .kitchen-work-item__allergens-modifiers {
@@ -10232,4 +10241,39 @@ tr[data-drop-target="true"] {
   display: block;
   margin-top: 4px;
   font-size: 14px;
+}
+
+/* WP-2423 (M171): what a table must avoid — ticks in a row, hairline above, no box. */
+.table-allergies {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--bop-color-border-default);
+}
+.table-allergies h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+.table-allergies__hint,
+.table-allergies__now {
+  margin: 0;
+  color: var(--bop-color-text-muted);
+  font-size: 13px;
+}
+.table-allergies__choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+}
+.table-allergies__choice {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+}
+.table-allergies__problem {
+  margin: 0;
+  color: var(--bop-color-danger);
 }

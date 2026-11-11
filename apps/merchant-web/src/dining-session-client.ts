@@ -123,6 +123,14 @@ export interface StaffDiningTable {
    * answered yet. Null when nobody is waiting (and from an older server).
    */
   staffCall?: StaffDiningCall | null;
+  /** WP-2423 (M171): allergen codes staff marked for this open table (absent: none). */
+  tableAllergies?: readonly string[] | undefined;
+}
+/** WP-2423 (M171): an allergen staff may mark a table with (the Brand's list). */
+export interface StaffTableAllergenChoice {
+  readonly code: string;
+  readonly name: string;
+  readonly nameZh: string;
 }
 export type StaffHeldRoundReason = "FirstOrder" | "PhoneRapid" | "TableRapid";
 export interface StaffHeldRound {
@@ -496,6 +504,20 @@ export function createDiningSessionClient(fetcher: typeof fetch = fetch) {
           ...(r.blockedSince === undefined || r.blockedSince === null
             ? {}
             : { blockedSince: instant(r.blockedSince) }),
+          ...(r.tableAllergies === undefined
+            ? {}
+            : {
+                tableAllergies:
+                  currentDiningSessionReference !== null &&
+                  Array.isArray(r.tableAllergies) &&
+                  r.tableAllergies.length >= 1 &&
+                  r.tableAllergies.length <= 14 &&
+                  (r.tableAllergies as unknown[]).every(
+                    (code) => typeof code === "string" && /^[A-Z][A-Z0-9_-]{1,39}$/u.test(code),
+                  )
+                    ? Object.freeze([...(r.tableAllergies as string[])])
+                    : fail(),
+              }),
         } as StaffDiningTable;
       });
       const next = data.nextAfterTableReference === null ? null : ref(data.nextAfterTableReference);
@@ -504,6 +526,31 @@ export function createDiningSessionClient(fetcher: typeof fetch = fetch) {
         items,
         next,
         canOperateTables: data.canOperateTables,
+        /** WP-2423 (M171): the allergens staff may mark a table with (empty: no list). */
+        allergenChoices: Object.freeze(
+          data.allergenChoices === undefined
+            ? []
+            : Array.isArray(data.allergenChoices) && data.allergenChoices.length <= 64
+              ? (data.allergenChoices as unknown[]).map((entry) => {
+                  const choice = obj(entry);
+                  if (
+                    Object.keys(choice).length !== 3 ||
+                    typeof choice.code !== "string" ||
+                    !/^[A-Z][A-Z0-9_-]{1,39}$/u.test(choice.code) ||
+                    typeof choice.name !== "string" ||
+                    choice.name.length > 80 ||
+                    typeof choice.nameZh !== "string" ||
+                    choice.nameZh.length > 80
+                  )
+                    return fail();
+                  return Object.freeze({
+                    code: choice.code,
+                    name: choice.name,
+                    nameZh: choice.nameZh,
+                  }) as StaffTableAllergenChoice;
+                })
+              : fail(),
+        ),
         /** WP-2423 D4: the staff member may close a table's session (and its Order) here. */
         canCloseSessions: data.canCloseSessions === true,
         /**
@@ -699,6 +746,40 @@ export function createDiningSessionClient(fetcher: typeof fetch = fetch) {
       )
         return fail();
       return data.open;
+    },
+    /**
+     * WP-2423 (M171): the allergens this open table must avoid now (empty clears them); repeat
+     * the same operation only to recover.
+     */
+    async setTableAllergies(
+      csrf: string,
+      operationReference: string,
+      diningSessionReference: string,
+      allergenCodes: readonly string[],
+    ) {
+      const data = await send(
+        "/merchant/dining/table-allergies",
+        JSON.stringify({
+          operationReference: ref(operationReference),
+          diningSessionReference: ref(diningSessionReference),
+          allergenCodes: [...allergenCodes],
+        }),
+        csrf,
+        undefined,
+        true,
+      );
+      if (data.status === "TableNotOpen" && Object.keys(data).length === 1)
+        return { status: "TableNotOpen" as const };
+      if (
+        Object.keys(data).length !== 2 ||
+        (data.status !== "Applied" && data.status !== "AlreadyApplied") ||
+        !Array.isArray(data.allergenCodes)
+      )
+        throw new DiningSessionClientError("Unknown");
+      return {
+        status: data.status as "Applied" | "AlreadyApplied",
+        allergenCodes: Object.freeze((data.allergenCodes as unknown[]).map(String)),
+      };
     },
     /** WP-2423 Q28: staff went to the table; repeat the same operation only to recover. */
     async answerStaffCall(csrf: string, operationReference: string, callReference: string) {

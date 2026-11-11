@@ -41,6 +41,8 @@ export interface KitchenOrderLabel {
   readonly movedFromTableLabel?: string | null;
   /** WP-2423 item 8 ⑨: the table the party was merged from (null or absent: not merged). */
   readonly mergedFromTableLabel?: string | null;
+  /** WP-2423 (M171): the allergens staff marked for this table (absent: none marked). */
+  readonly tableAllergies?: readonly { readonly code: string; readonly name: string }[];
 }
 
 export interface KitchenBoardItem {
@@ -260,7 +262,31 @@ export function parseKitchenOrderLabel(value: unknown): KitchenOrderLabel | null
     ...(has("enteredByStaff") ? ["enteredByStaff"] : []),
     ...(has("movedFromTableLabel") ? ["movedFromTableLabel"] : []),
     ...(has("mergedFromTableLabel") ? ["mergedFromTableLabel"] : []),
+    ...(has("tableAllergies") ? ["tableAllergies"] : []),
   ]);
+  const tableAllergies =
+    input.tableAllergies === undefined
+      ? undefined
+      : Array.isArray(input.tableAllergies) &&
+          input.tableAllergies.length >= 1 &&
+          input.tableAllergies.length <= 14 &&
+          input.orderType === "DineIn"
+        ? Object.freeze(
+            (input.tableAllergies as unknown[]).map((entry) => {
+              const allergy = closed(entry, ["code", "name"]);
+              if (
+                typeof allergy.code !== "string" ||
+                !/^[A-Z][A-Z0-9_-]{1,39}$/u.test(allergy.code) ||
+                typeof allergy.name !== "string" ||
+                !SAFE_TEXT.test(allergy.name)
+              )
+                throw new Error("KITCHEN_BOARD_INVALID");
+              return Object.freeze({ code: allergy.code, name: allergy.name });
+            }),
+          )
+        : (() => {
+            throw new Error("KITCHEN_BOARD_INVALID");
+          })();
   const movedFrom = input.movedFromTableLabel ?? null;
   const mergedFrom = input.mergedFromTableLabel ?? null;
   if (
@@ -288,6 +314,7 @@ export function parseKitchenOrderLabel(value: unknown): KitchenOrderLabel | null
     enteredByStaff: input.enteredByStaff === true,
     movedFromTableLabel: movedFrom as string | null,
     mergedFromTableLabel: mergedFrom as string | null,
+    ...(tableAllergies === undefined ? {} : { tableAllergies }),
   });
 }
 /** WP-2423: an order waiting for acceptance, with a pickup's refund deadline when one runs. */

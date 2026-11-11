@@ -2917,6 +2917,14 @@ async function scanUnsupported(root, module, diagnostics) {
             "dining_staff_call_closure",
           ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
           moduleRelative === "src/infrastructure/persistence/dining-staff-call-store.ts";
+        // WP-2423 (M171): the allergens staff marked for an open table (codes only).
+        const acceptedDiningTableAllergyAsset =
+          module.packageName === "@rms/dining" &&
+          module.manifest.ownedDatabase?.schema === "rms_dining" &&
+          ["dining_session", "dining_table_allergy_mark"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/dining-table-allergy-store.ts";
         // WP-2423 DEC-DINE-IN-PAY-LATER: exact scoped Store dine-in payment timing and each Session's.
         const acceptedDiningPaymentTimingAsset =
           module.packageName === "@rms/dining" &&
@@ -3990,6 +3998,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedDiningQrJoinAsset &&
           !acceptedDiningGuestTableStartAsset &&
           !acceptedDiningStaffCallAsset &&
+          !acceptedDiningTableAllergyAsset &&
           !acceptedDiningPaymentTimingAsset &&
           !acceptedOrderPayLaterConfirmationAsset &&
           !acceptedDiningMoveAsset &&

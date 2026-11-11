@@ -1,5 +1,5 @@
 import { PaidOrderSwitchLine } from "./PaidOrderSwitchLine.js";
-import { t, saidTable } from "./i18n/i18n.js";
+import { listSeparator, t, saidTable } from "./i18n/i18n.js";
 import { createTableCheckoutClient } from "./table-checkout-client.js";
 import {
   clearLastBills,
@@ -38,7 +38,9 @@ import {
   DiningSessionClientError,
   longOpenSessionMinutes,
   type StaffDiningTable,
+  type StaffTableAllergenChoice,
 } from "./dining-session-client.js";
+import { TableAllergies, tableAllergenText } from "./TableAllergies.js";
 import { serviceOperationReference } from "./service-control-client.js";
 import { storeTime } from "./StoreTime.js";
 import { newOperationReference } from "./operation-reference.js";
@@ -487,6 +489,8 @@ export function DiningSessionWorkspace({
     readonly startsBusy: boolean;
   } | null>(null);
   const guestStartsNow = useRef<typeof guestStarts>(null);
+  // WP-2423 (M171): the Brand's allergen list, for marking what a table must avoid.
+  const [allergenChoices, setAllergenChoices] = useState<readonly StaffTableAllergenChoice[]>([]);
   const [canOperateTables, setCanOperateTables] = useState(false),
     [blockReasonCode, setBlockReasonCode] = useState(""),
     [checkoutRevision, setCheckoutRevision] = useState(0),
@@ -614,6 +618,7 @@ export function DiningSessionWorkspace({
         setTables(items);
         setNext(loaded.next);
         setCanOperateTables(loaded.canOperateTables);
+        setAllergenChoices(loaded.allergenChoices);
         setCanCloseSessions(loaded.canCloseSessions);
         setCanTransferHost(loaded.canTransferHost);
         setCanCancelUnpaidRounds(loaded.canCancelUnpaidRounds);
@@ -1405,6 +1410,39 @@ export function DiningSessionWorkspace({
                         }),
                   }),
                 );
+              }}
+            />
+          ) : null}
+          {selected ? (
+            <TableAllergies
+              key={`allergies-${selected.tableReference}-${String(selected.currentDiningSessionReference)}-${(selected.tableAllergies ?? []).join(",")}`}
+              table={selected}
+              choices={allergenChoices}
+              csrf={csrf}
+              locked={locked || paused}
+              onSaved={(codes) => {
+                setTables((current) =>
+                  current.map((entry) =>
+                    entry.tableReference === selected.tableReference
+                      ? { ...entry, tableAllergies: codes.length === 0 ? undefined : codes }
+                      : entry,
+                  ),
+                );
+                setResult({
+                  text:
+                    codes.length === 0
+                      ? t("Table {table}: no allergies marked.", {
+                          table: saidTable(selected.stableLabel),
+                        })
+                      : t("Table {table}: kitchen tickets will show {list}.", {
+                          table: saidTable(selected.stableLabel),
+                          list: codes
+                            .map((code) => allergenChoices.find((c) => c.code === code))
+                            .filter((c): c is StaffTableAllergenChoice => c !== undefined)
+                            .map(tableAllergenText)
+                            .join(listSeparator()),
+                        }),
+                });
               }}
             />
           ) : tables.length === 0 ? null : (

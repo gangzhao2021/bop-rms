@@ -70,6 +70,7 @@ import {
   createMerchantDiningStaffCallAnswer,
   createMerchantDiningStaffCallCount,
 } from "../../apps/api/dist/merchant-dining-staff-calls.js";
+import { createMerchantDiningTableAllergies } from "../../apps/api/dist/merchant-dining-table-allergies.js";
 import { createMerchantDiningClosingCommand } from "../../apps/api/dist/merchant-dining-closing-command.js";
 import {
   createMerchantDiningPaymentTimingChange,
@@ -1090,6 +1091,12 @@ export async function createInternalMerchant(
     persistence,
     authentication: service,
   });
+  // WP-2423 (M171): front-of-house marks the allergens a table must avoid.
+  const diningTableAllergies = createMerchantDiningTableAllergies({
+    persistence,
+    authentication: service,
+    references: { next: () => resources.credentials.reference() },
+  });
   // WP-2423 DEC-DINE-IN-PAY-LATER: the Store's dine-in payment timing (Owner, Store Manager).
   const diningPaymentTimingRead = createMerchantDiningPaymentTimingRead({
     persistence,
@@ -1820,6 +1827,7 @@ export async function createInternalMerchant(
       diningServeReady,
       diningStaffCallCount,
       diningStaffCallAnswer,
+      diningTableAllergies,
       diningPaymentTimingRead,
       diningPaymentTimingChange,
       guestTableStartOff,

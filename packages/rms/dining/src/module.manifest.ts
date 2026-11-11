@@ -73,6 +73,7 @@ const moduleManifestInput =
         "dining_session_tea_override",
         "dining_staff_call",
         "dining_staff_call_closure",
+        "dining_table_allergy_mark",
         "store_dining_payment_timing",
         "dining_session_payment_timing",
       ],

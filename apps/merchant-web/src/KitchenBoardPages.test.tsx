@@ -31,6 +31,8 @@ import {
   kitchenLineKey,
   kitchenScreenLines,
   KitchenAllergenLine,
+  KitchenTableAllergies,
+  containsTableAllergy,
   newKitchenCancellations,
   newQueuedReferences,
   unansweredArrivals,
@@ -1935,5 +1937,59 @@ describe("combos by section: what each kitchen section's screen shows", () => {
       "Drinks",
     );
     expect(newQueuedReferences(previous, next)).toEqual([]);
+  });
+});
+
+describe("WP-2423 (M171): a table's marked allergens on its tickets", () => {
+  const marked = (allergens: unknown, tableAllergies?: unknown) =>
+    parseKitchenBoardView({
+      ...kitchenBoardFixture(),
+      items: [
+        {
+          ...kitchenItemFixture(),
+          allergens,
+          orderLabel: {
+            orderNumber: "14",
+            orderType: "DineIn",
+            tableLabel: "T4",
+            ...(tableAllergies === undefined ? {} : { tableAllergies }),
+          },
+        },
+      ],
+    }).items[0] as KitchenBoardItem;
+  const peanut = [{ code: "PEANUT", name: "Peanuts" }];
+  it("names the table's allergies in red, and flags a dish that holds one", () => {
+    const item = marked(
+      { status: "Declared", contains: ["Peanuts"], mayContain: [], forChoices: true },
+      [...peanut, { code: "SESAME", name: "Sesame" }],
+    );
+    const ticket = renderToStaticMarkup(<KitchenTableAllergies label={item.orderLabel} />);
+    expect(ticket).toContain('role="alert"');
+    expect(ticket).toContain("Table allergy: Peanuts, Sesame");
+    expect(containsTableAllergy(item)).toBe(true);
+    // A dish that holds none of them is not flagged; a table with none shows nothing.
+    expect(
+      containsTableAllergy(
+        marked(
+          { status: "Declared", contains: ["Milk"], mayContain: [], forChoices: true },
+          peanut,
+        ),
+      ),
+    ).toBe(false);
+    const plain = marked({ status: "Declared", contains: [], mayContain: [], forChoices: true });
+    expect(renderToStaticMarkup(<KitchenTableAllergies label={plain.orderLabel} />)).toBe("");
+    setLanguageForTest("zh-Hans");
+    try {
+      expect(renderToStaticMarkup(<KitchenTableAllergies label={item.orderLabel} />)).toContain(
+        "本桌过敏：花生、芝麻",
+      );
+    } finally {
+      setLanguageForTest("en");
+    }
+  });
+  it("refuses a table allergy that is not an allergen code", () => {
+    expect(() =>
+      marked({ status: "Unavailable" }, [{ code: "peanut; drop", name: "Peanuts" }]),
+    ).toThrow("KITCHEN_BOARD_INVALID");
   });
 });
