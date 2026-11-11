@@ -344,6 +344,9 @@ function stockRejection(error: unknown): ExplicitRejection | undefined {
     return "requote_required";
   if (error instanceof OrderCreationError && error.code === "ORDER_CREATE_TABLE_MOVED")
     return "table_moved";
+  // WP-2423 expected refusals: Ordering's own "the Store is not taking orders" says so plainly.
+  if (error instanceof CheckoutSessionServiceError && error.code === "STORE_CLOSED")
+    return "store_closed";
   return undefined;
 }
 /** WP-2423 Q20: what the customer needs to know when another card cannot be tried. */

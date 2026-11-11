@@ -7,6 +7,7 @@ import { createCustomerCheckoutSessionAuthorization } from "../../apps/api/dist/
 import { createCustomerAdditionalDiningHistoryAuthorization } from "../../apps/api/dist/customer-additional-dining-history-authorization.js";
 import { createInternalOrderSourceOptions } from "./pilot-order-sources.mjs";
 import { createInternalCheckout } from "./pilot-checkout.mjs";
+import { customerRoundRefusalLine } from "../../apps/api/dist/customer-round-refusal.js";
 export async function createInternalAdditionalSubmission(
   resources,
   checkout,
@@ -227,6 +228,12 @@ export async function createInternalAdditionalSubmission(
         )
           throw new Error("ADDITIONAL_CATALOG_CHANGED");
       } catch (error) {
+        // WP-2423 expected refusals: a dish ran out or the menu moved on since checkout.
+        const refused = customerRoundRefusalLine("CUSTOMER_ADDITIONAL_ROUND_REFUSED", error);
+        if (refused !== null) {
+          console.log(refused);
+          throw error;
+        }
         const code = error?.code ?? error?.message;
         console.error(
           JSON.stringify({

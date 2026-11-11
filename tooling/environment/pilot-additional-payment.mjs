@@ -10,6 +10,7 @@ import { createCustomerAdmittedAdditionalDiningPayment } from "../../apps/api/di
 import { createCustomerAdditionalDiningPaymentAdmission } from "../../apps/api/dist/customer-additional-dining-payment-store.js";
 import { createInternalAdditionalSubmission } from "./pilot-additional-submission.mjs";
 import { pilotProviderEnvironment } from "./pilot-environment.mjs";
+import { customerRoundRefusalLine } from "../../apps/api/dist/customer-round-refusal.js";
 function frozen(value) {
   for (const child of Object.values(value)) if (child && typeof child === "object") frozen(child);
   return Object.freeze(value);
@@ -156,6 +157,13 @@ export async function createInternalAdditionalPayment(
       try {
         return await (await resolveRequest(input)).service.create(input);
       } catch (error) {
+        // WP-2423 expected refusals: staff moved the table, a dish ran out, the menu changed. The
+        // guest is told plainly and nothing was placed or charged: information, not an error.
+        const refused = customerRoundRefusalLine("CUSTOMER_ADDITIONAL_ROUND_REFUSED", error);
+        if (refused !== null) {
+          console.log(refused);
+          throw error;
+        }
         console.error(
           JSON.stringify({
             event: "INTERNAL_ADDITIONAL_PAYMENT_UNAVAILABLE",

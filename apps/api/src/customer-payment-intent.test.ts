@@ -24,6 +24,7 @@ import {
 import { createApp } from "./app.js";
 import { CustomerStoreClosedError } from "./customer-store-open-gate.js";
 import { CustomerDiningPayLaterError } from "./customer-dining-pay-later-round.js";
+import { customerRoundRefusal, customerRoundRefusalLine } from "./customer-round-refusal.js";
 import {
   CustomerPaymentIntentHandler,
   type CustomerPaymentIntentPort,
@@ -508,4 +509,65 @@ it("WP-2423 item 8 ⑤: a round that waits for staff is answered 202 Held with w
     totalMinor: 2260n,
   });
   expect((await send({ sendToKitchen: true })).status).toBe(503);
+});
+
+it.each([
+  [new OrderCreationError("ORDER_CREATE_TABLE_MOVED"), "TABLE_MOVED"],
+  [new OrderCreationError("ORDER_CREATE_STOCK_SHORT"), "ITEMS_SHORT"],
+  [new CheckoutSessionServiceError("ITEM_SHORT"), "ITEMS_SHORT"],
+  [new CheckoutSessionServiceError("REQUOTE_REQUIRED"), "REQUOTE_REQUIRED"],
+  [new CheckoutSessionServiceError("STORE_CLOSED"), "STORE_CLOSED"],
+  [new CustomerStoreClosedError(), "STORE_CLOSED"],
+  [new PaymentTipSelectionError("PAYMENT_TIP_TURNED_OFF"), "TIPS_TURNED_OFF"],
+  [new CustomerDiningPayLaterError("PayLater"), "PAY_LATER_TABLE"],
+  [new CustomerDiningPayLaterError("PayFirst"), "PAY_FIRST_TABLE"],
+] as const)(
+  "WP-2423 expected refusals: %s is told to the guest in plain words and logged as information",
+  async (error, refusal) => {
+    const f = await setup();
+    f.create.mockRejectedValue(error);
+    const response = await f.send();
+    expect(response.status).toBe(409);
+    expect(((await response.json()) as { error: { code: string } }).error.code).toBe(
+      "payment_" + refusal.toLowerCase(),
+    );
+    expect(customerRoundRefusal(error)).toBe(refusal);
+    expect(JSON.parse(customerRoundRefusalLine("CUSTOMER_ROUND_REFUSED", error) ?? "null")).toEqual(
+      { level: 30, time: expect.any(String), event: "CUSTOMER_ROUND_REFUSED", code: refusal },
+    );
+  },
+);
+it("WP-2423 expected refusals: a refused next card is information; anything else stays a failure", async () => {
+  for (const [code, refusal] of [
+    ["PAYMENT_INTENT_RETRY_LIMIT_REACHED", "RETRY_LIMIT"],
+    ["PAYMENT_INTENT_RETRY_NOT_ALLOWED", "RETRY_PENDING"],
+    ["PAYMENT_INTENT_ALREADY_PAID", "ALREADY_PAID"],
+    ["PAYMENT_INTENT_PREPARATION_EXPIRED", "WINDOW_ENDED"],
+  ] as const) {
+    const f = await setup();
+    f.retry.mockRejectedValue(new PaymentIntentCreationError(code));
+    const response = await f.sendRetry();
+    expect(((await response.json()) as { error: { code: string } }).error.code).toBe(
+      "payment_" + refusal.toLowerCase(),
+    );
+    expect(customerRoundRefusal(new PaymentIntentCreationError(code))).toBe(refusal);
+  }
+  // Shape, not class identity: a second copy of the owner module refuses the same way.
+  expect(
+    customerRoundRefusal({ name: "OrderCreationError", code: "ORDER_CREATE_TABLE_MOVED" }),
+  ).toBe("TABLE_MOVED");
+  for (const error of [
+    new OrderCreationError("ORDER_CREATE_PERMISSION_DENIED"),
+    new CheckoutSessionServiceError("DEPENDENCY_UNAVAILABLE"),
+    new PaymentIntentCreationError("PAYMENT_INTENT_DEPENDENCY_UNAVAILABLE"),
+    new PaymentTipSelectionError("PAYMENT_TIP_UNAVAILABLE"),
+    new CustomerDiningPayLaterError("Unavailable"),
+    new Error("ORDER_CREATE_TABLE_MOVED"),
+    { name: "toString", code: "x" },
+    null,
+    "TABLE_MOVED",
+  ]) {
+    expect(customerRoundRefusal(error)).toBeNull();
+    expect(customerRoundRefusalLine("CUSTOMER_ROUND_REFUSED", error)).toBeNull();
+  }
 });

@@ -1,7 +1,9 @@
 import { isPilotPaymentProvider } from "./pilot-stripe-provider.mjs";
 import { matchesPilotEnvironment } from "./pilot-environment.mjs";
 import { createHash } from "node:crypto";
+import console from "node:console";
 import { reportUnexpected } from "./pilot-unexpected.mjs";
+import { customerRoundRefusalLine } from "../../apps/api/dist/customer-round-refusal.js";
 import { pilotCreateIntentIdempotencyKey } from "./pilot-open-payment-resolution.mjs";
 import { createInternalExpiryCutoff } from "./pilot-expiry-cutoff.mjs";
 import { createCustomerSessionPaymentIntent } from "../../apps/api/dist/customer-session-payment-intent.js";
@@ -212,6 +214,13 @@ export async function createInternalPaymentIntent(
       try {
         return await (await resolveRequest(input)).service.create(input);
       } catch (error) {
+        // WP-2423 expected refusals: told to the guest plainly (nothing placed or charged), so
+        // logged as information with its own code, not as an unexpected failure.
+        const refused = customerRoundRefusalLine("CUSTOMER_ROUND_REFUSED", error);
+        if (refused !== null) {
+          console.log(refused);
+          throw error;
+        }
         // The guest only sees "preparing payment": the cause must reach the log (codes only).
         reportUnexpected("CUSTOMER_PAYMENT_INTENT_UNAVAILABLE", error);
         throw error;
