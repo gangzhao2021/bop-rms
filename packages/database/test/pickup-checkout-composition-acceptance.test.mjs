@@ -105,7 +105,14 @@ import {
   createGuestSessionCredentialProvider,
   createGuestSessionRecord,
 } from "../../bop/identity/src/index.ts";
-import { createPostgresAsapCapacityStore } from "../../rms/fulfillment/src/index.ts";
+import {
+  createPostgresAsapCapacityStore,
+  createPostgresCurrentPickupCapacityStore,
+  readCurrentPickupHour,
+} from "../../rms/fulfillment/src/index.ts";
+import { createServer } from "node:http";
+import { createApp } from "../../../apps/api/src/app.ts";
+import { CustomerCheckoutSessionHandler } from "../../../apps/api/src/customer-checkout-session.ts";
 import { createCustomerPickupCapacitySources } from "../../../apps/api/src/customer-pickup-capacity-sources.ts";
 import {
   createCustomerPickupCheckoutComposition,
@@ -134,9 +141,12 @@ it.each([
   // DEC-PAPER-ORDER-PAID-AT-SEND: a paper counter order paid in cash during the outage is recorded
   // as the send records it, at its cash total with no change.
   [true, true, true, "Cash"],
+  // DEC-CHECKOUT-SESSION-OUTAGE (review): the pickup hour is full. Fulfillment's real refusal goes
+  // through the real capacity composition, session validation, session service and HTTP handler.
+  [true, false, false, "CardMachine", true],
 ])(
-  "prepares Pickup through persisted Identity, Cart, Quote and shared capacity with original recovery (configured=%s, positive=%s, counter=%s, paper=%s)",
-  async (configured, positive, counter, paperTender = "CardMachine") => {
+  "prepares Pickup through persisted Identity, Cart, Quote and shared capacity with original recovery (configured=%s, positive=%s, counter=%s, paper=%s, full=%s)",
+  async (configured, positive, counter, paperTender = "CardMachine", full = false) => {
     await withIsolatedDatabase({ caseId: "wp2402_pickup" }, async (env) => {
       const checkoutJourney = { tenantReference: id(1) };
       const admin = new Client(env.clientConfig);
@@ -314,7 +324,8 @@ it.each([
             roles[2],
         );
         await admin.query(
-          "GRANT SELECT,INSERT ON rms_fulfillment.capacity_asap_commitment TO " + roles[2],
+          "GRANT SELECT,INSERT ON rms_fulfillment.capacity_asap_commitment,rms_fulfillment.capacity_asap_refusal TO " +
+            roles[2],
         );
         await admin.query("GRANT USAGE ON SCHEMA rms_payment,platform_audit TO " + roles[3]);
         await admin.query(
@@ -585,8 +596,8 @@ it.each([
           ],
         );
         await admin.query(
-          "INSERT INTO rms_fulfillment.capacity_slot_configuration (brand_id,store_id,slot_id,config_version,capacity_limit,published_at) VALUES ($1,$2,$3,1,1,$4)",
-          [scope.brandReference, scope.storeReference, id(90007), shift(-120000)],
+          "INSERT INTO rms_fulfillment.capacity_slot_configuration (brand_id,store_id,slot_id,config_version,capacity_limit,published_at) VALUES ($1,$2,$3,1,$5,$4)",
+          [scope.brandReference, scope.storeReference, id(90007), shift(-120000), full ? 0 : 1],
         );
         const sources = (
           configured
@@ -608,6 +619,8 @@ it.each([
           sources,
           capacity: {
             repository,
+            // DEC-CHECKOUT-SESSION-OUTAGE: an online order the hour could not take, for staff.
+            refusals: createPostgresCurrentPickupCapacityStore(runner(roles[2]), scope),
             audit: {
               prepare: async (record) =>
                 audit(
@@ -698,16 +711,27 @@ it.each([
         ).allocate(allocationRecord, allocationAuthority);
         assert.deepEqual(persistedAllocation, allocationRecord);
         await assert.rejects(composition.prepare({ ...input, csrfCredential: "x".repeat(43) }));
-        const result = await composition.prepareForOrdering(input);
-        assert.equal(lost, true);
-        assert.equal(result.status, "Existing");
-        assert.equal(result.record.units, 1);
-        assert.equal(result.record.guestSessionReference, guest.session.sessionReference);
-        assert.deepEqual((await composition.prepare(input)).record, result.record);
+        let result;
+        if (full) {
+          // The hour has no room: Fulfillment refuses, nothing is held.
+          await assert.rejects(composition.prepareForOrdering(input), {
+            code: "ASAP_CAPACITY_INSUFFICIENT",
+          });
+        } else {
+          result = await composition.prepareForOrdering(input);
+          assert.equal(lost, true);
+          assert.equal(result.status, "Existing");
+          assert.equal(result.record.units, 1);
+          assert.equal(result.record.guestSessionReference, guest.session.sessionReference);
+          assert.deepEqual((await composition.prepare(input)).record, result.record);
+        }
         const counts = await admin.query(
           "SELECT (SELECT count(*)::int FROM rms_fulfillment.capacity_asap_commitment) AS records,(SELECT count(*)::int FROM platform_audit.audit_record WHERE action_code='FULFILLMENT_ASAP_CAPACITY_PREPARED') AS audits",
         );
-        assert.deepEqual(counts.rows[0], { records: 1, audits: 1 });
+        assert.deepEqual(
+          counts.rows[0],
+          full ? { records: 0, audits: 0 } : { records: 1, audits: 1 },
+        );
         const cartReader = createPostgresCartQueryStore(runner(roles[1]), scope);
         const quoteReader = (
           configured ? createPostgresConfiguredCartQuoteReader : createPostgresCartQuoteReader
@@ -831,6 +855,92 @@ it.each([
             quoteVersion: configured ? 2 : 1,
           },
         };
+        if (full) {
+          await assert.rejects(sessionValidation(sessionValidationInput), {
+            name: "CheckoutSessionServiceError",
+            code: "PICKUP_FULL",
+          });
+          const fullCreator = createCustomerCheckoutSessionComposition({
+            ...sessionAccessOptions,
+            quoteVersion: 2,
+            nextReference: () => id(++sequence),
+            allocationAudit,
+            audit: (record) =>
+              audit(
+                ++sequence,
+                "ORDERING_CHECKOUT_SESSION_CREATE",
+                "CheckoutSession",
+                record.checkoutSessionReference,
+                "AUTHORIZED_CHECKOUT_CREATE",
+                record.createdAt,
+              ),
+            validate: sessionValidation,
+          });
+          const origin = "https://customer.example";
+          const server = createServer(
+            createApp({
+              customerCheckoutSession: new CustomerCheckoutSessionHandler({
+                port: { quoteVersion: 2, create: (value) => fullCreator.create(value) },
+                allowedOrigin: origin,
+              }),
+            }),
+          );
+          await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+          try {
+            for (let attempt = 0; attempt < 2; attempt++) {
+              const response = await globalThis.fetch(
+                "http://127.0.0.1:" +
+                  server.address().port +
+                  "/api/v1/carts/" +
+                  cart.cartReference +
+                  "/checkout-sessions",
+                {
+                  method: "POST",
+                  headers: {
+                    origin,
+                    "sec-fetch-site": "same-origin",
+                    "content-type": "application/json",
+                    "idempotency-key": allocationRecord.createOperationReference,
+                    "x-csrf-token": csrfCredential,
+                    cookie: "__Host-bop-guest=" + sessionCredential,
+                  },
+                  body: JSON.stringify({
+                    cartVersion: cart.aggregateVersion,
+                    quoteReference: quote.quoteReference,
+                  }),
+                },
+              );
+              // A full hour is the guest's to act on, never "the service is down"; no promised wait.
+              assert.equal(response.status, 409);
+              assert.equal(response.headers.get("retry-after"), null);
+              assert.equal((await response.json()).error.code, "checkout_session_pickup_full");
+            }
+          } finally {
+            await new Promise((resolve) => server.close(resolve));
+          }
+          // Nothing was held or opened; the guest (one Cart, four tries) is turned away once, and
+          // staff read it on Orders as the pilot API role does.
+          const fullCounts = await admin.query(
+            "SELECT (SELECT count(*)::int FROM rms_fulfillment.capacity_asap_commitment) AS commitments,(SELECT count(*)::int FROM rms_ordering.checkout_session_record) AS sessions,(SELECT count(*)::int FROM rms_fulfillment.capacity_asap_refusal WHERE cart_id=$1 AND slot_id=$2) AS refusals",
+            [cart.cartReference, id(90007)],
+          );
+          assert.deepEqual(fullCounts.rows[0], { commitments: 0, sessions: 0, refusals: 1 });
+          const hour = await runner(roles[2]).run(async (tx) => {
+            await tx.query(
+              "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+              [scope.brandReference, scope.storeReference],
+            );
+            return readCurrentPickupHour(tx, scope, new Date().toISOString());
+          });
+          assert.deepEqual(hour, {
+            endsAt: shift(1800000),
+            capacityLimit: 0,
+            occupiedUnits: 0,
+            full: true,
+            turnedAway: 1,
+          });
+          return;
+        }
         const sessionEvidence = await sessionValidation(sessionValidationInput);
         assert.equal(
           sessionEvidence.fulfillment.evidenceReference,
