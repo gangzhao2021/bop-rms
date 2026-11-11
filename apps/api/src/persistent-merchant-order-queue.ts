@@ -577,6 +577,12 @@ export function createPersistentMerchantOrderQueue(options: {
                * order; holders of ordering.order.cancel, as for an unpaid table round).
                */
               canCancelUnpaid: boolean;
+              /**
+               * DEC-PAPER-ORDER-NEVER-RELEASED: an unpaid paper order the caller may close as entered
+               * again from its paper slip, once its pay-by time has passed (managers, as for a
+               * cancel); the server checks the time and the new order again.
+               */
+              canCloseAsReentered: boolean;
               /** WP-2423 M127: staff cancelled it before payment (why and when), else null. */
               cancelledBeforePayment: { reasonCode: string; cancelledAt: string } | null;
             }
@@ -837,6 +843,11 @@ export function createPersistentMerchantOrderQueue(options: {
                   cancelAllowed &&
                   payBy !== null &&
                   !entry.recordedAfterOutage &&
+                  !counterCancelled.has(order),
+                canCloseAsReentered:
+                  cancelAllowed &&
+                  payBy !== null &&
+                  entry.recordedAfterOutage &&
                   !counterCancelled.has(order),
                 // Who cancelled is said only on the order's record, by name (never an identifier).
                 cancelledBeforePayment:
@@ -1700,8 +1711,9 @@ export function createPersistentMerchantOrderQueue(options: {
           const counterFor = (item: (typeof result.items)[number]) => {
             const current = counter.get(item.orderReference);
             if (current === undefined) return null;
-            return current.canCancelUnpaid && item.currentPhase !== "Submitted"
-              ? { ...current, canCancelUnpaid: false }
+            return (current.canCancelUnpaid || current.canCloseAsReentered) &&
+              item.currentPhase !== "Submitted"
+              ? { ...current, canCancelUnpaid: false, canCloseAsReentered: false }
               : current;
           };
           // WP-2423 M61: who accepted, handed over, took payment, cancelled, refunded and approved.

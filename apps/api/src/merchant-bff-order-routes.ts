@@ -389,6 +389,10 @@ export function installMerchantOrderRoutes(
             COUNTER_CANCEL_NOT_CANCELLABLE: [409, "counter_cancel_not_cancellable"],
             COUNTER_CANCEL_VERSION_CONFLICT: [409, "order_version_conflict"],
             COUNTER_CANCEL_STOCK_NOT_RELEASABLE: [409, "counter_cancel_stock_not_releasable"],
+            // DEC-PAPER-ORDER-NEVER-RELEASED: closing a paper order as entered again.
+            COUNTER_CANCEL_PAPER_STILL_RECORDABLE: [409, "paper_order_still_recordable"],
+            COUNTER_CANCEL_REENTRY_INVALID: [409, "paper_reentry_invalid"],
+            COUNTER_CANCEL_REENTRY_USED: [409, "paper_reentry_used"],
             COUNTER_CANCEL_UNAVAILABLE: [503, "counter_cancellation_unavailable"],
           } as const
         )[error.code];

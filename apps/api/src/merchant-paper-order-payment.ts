@@ -129,9 +129,19 @@ export type PaperOrderPaymentAnswer =
   | { readonly paymentError: string; readonly paymentTotalMinor?: string };
 
 /**
+ * DEC-PAPER-ORDER-NEVER-RELEASED: how long the send waits before recording a paper payment again
+ * after the system failed to (a brief database hiccup), in the same request. The same payment
+ * operation is sent each time, so it is recorded once.
+ */
+export const paperPaymentRetryDelaysMs: readonly number[] = Object.freeze([300, 1_200]);
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/**
  * Records the paper order's payment with the order. The order is placed either way, so a refusal
  * or failure here is part of the answer (the page then shows the payment step to record it again),
- * never an error of the order.
+ * never an error of the order. A failure of the system itself (not a refusal) is tried again
+ * twice in the same request before it is answered, so a brief outage rarely leaves a placed paper
+ * sale without its payment.
  */
 export async function recordPaperOrderPayment(
   record: (input: {
@@ -147,9 +157,26 @@ export async function recordPaperOrderPayment(
   },
   payment: PaperOrderPayment,
   onUnexpected?: (error: unknown) => void,
+  retry: { readonly delaysMs: readonly number[]; wait(ms: number): Promise<void> } = {
+    delaysMs: paperPaymentRetryDelaysMs,
+    wait: sleep,
+  },
 ): Promise<PaperOrderPaymentAnswer> {
+  const command = paperOrderPaymentCommand(placed, payment);
+  const failedOnly = (error: unknown) =>
+    !(error instanceof CardMachinePaymentCommandError) || error.code === "CARD_MACHINE_UNAVAILABLE";
+  const attempt = async (index: number): Promise<Awaited<ReturnType<typeof record>>> => {
+    try {
+      return await record({ ...auth, command });
+    } catch (error) {
+      const delay = retry.delaysMs[index];
+      if (delay === undefined || !failedOnly(error)) throw error;
+      await retry.wait(delay);
+      return attempt(index + 1);
+    }
+  };
   try {
-    const result = await record({ ...auth, command: paperOrderPaymentCommand(placed, payment) });
+    const result = await attempt(0);
     return {
       payment: {
         status: result.status,

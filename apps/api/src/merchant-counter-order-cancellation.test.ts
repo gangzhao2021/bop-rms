@@ -12,11 +12,14 @@ const d = vi.hoisted(() => ({
   commitment: vi.fn(),
   releaseFactory: vi.fn(),
   release: vi.fn(),
+  batchOf: vi.fn(),
+  loadByBatch: vi.fn(),
 }));
 vi.mock("./merchant-store-scope.js", () => ({ createMerchantStoreScope: () => d.scope }));
 vi.mock("@rms/ordering", async (original) => ({
   ...(await original<object>()),
   loadCounterOrderCapacityLink: d.link,
+  loadCounterOrderBatch: d.batchOf,
   createPostgresCounterUnpaidCancellation: d.cancellation,
 }));
 vi.mock("@rms/payment", async (original) => ({
@@ -62,7 +65,14 @@ function setup() {
   });
   d.fence.mockReturnValue({ acquire: d.acquire });
   d.acquire.mockResolvedValue(undefined);
-  d.cardMachine.mockReturnValue({ lockAndLoadByBatch: d.lockBatch });
+  d.cardMachine.mockReturnValue({ lockAndLoadByBatch: d.lockBatch, loadByBatch: d.loadByBatch });
+  d.batchOf.mockResolvedValue({
+    orderBatchReference: id(41),
+    recordedAfterOutage: true,
+    submittedAt: "2026-11-06T11:50:00.000Z",
+    ended: false,
+  });
+  d.loadByBatch.mockResolvedValue({ orderReference: id(40) });
   d.lockBatch.mockResolvedValue(null);
   d.capacity.mockReturnValue({
     withCurrentSubmission: async (
@@ -239,4 +249,75 @@ it("WP-2423 M127: an outage or unexpected answer is 'not confirmed', never 'no p
   await expect(operation(input())).rejects.toMatchObject({ code: "COUNTER_CANCEL_UNAVAILABLE" });
   d.commitment.mockResolvedValueOnce(null);
   await expect(operation(input())).rejects.toMatchObject({ code: "COUNTER_CANCEL_UNAVAILABLE" });
+});
+
+it("DEC-PAPER-ORDER-NEVER-RELEASED: a manager closes a paper order past its time as entered again, naming the new paper order whose payment is recorded", async () => {
+  const { operation, input } = setup();
+  d.link.mockResolvedValue({
+    link: { paymentOperationReference: id(8), submissionReference: id(7) },
+    recordedAfterOutage: true,
+  });
+  d.commitment.mockResolvedValue({
+    orderReference: id(5),
+    orderBatchReference: id(6),
+    state: "PaymentPending",
+    capacityExpiresAt: "2026-11-06T11:40:00.000Z",
+  });
+  const reentry = { reasonCode: "COUNTER_PAPER_REENTERED", reenteredOrderReference: id(40) };
+  expect(await operation(input(reentry))).toEqual({
+    status: "Cancelled",
+    cancelledAt: record.terminatedAt,
+  });
+  // The new order's payment is read from Payment, and the termination names the new order.
+  expect(d.loadByBatch).toHaveBeenCalledWith(expect.anything(), id(40), id(41));
+  expect(d.cancel).toHaveBeenCalledWith(
+    expect.anything(),
+    expect.objectContaining({
+      reasonCode: "COUNTER_PAPER_REENTERED",
+      reenteredOrderReference: id(40),
+    }),
+  );
+  // Without the new order named, a paper order is still never cancelled; with it, a live order
+  // is not closed this way.
+  await expect(operation(input({ reasonCode: "COUNTER_GUEST_LEFT_UNPAID" }))).rejects.toMatchObject(
+    { code: "COUNTER_CANCEL_PAPER_ORDER" },
+  );
+  await expect(operation(input({ reasonCode: "COUNTER_PAPER_REENTERED" }))).rejects.toMatchObject({
+    code: "COUNTER_CANCEL_INPUT_INVALID",
+  });
+  // The new order has no recorded payment, is not a paper order, or ended: nothing is closed.
+  d.loadByBatch.mockResolvedValueOnce(null);
+  await expect(operation(input(reentry))).rejects.toMatchObject({
+    code: "COUNTER_CANCEL_REENTRY_INVALID",
+  });
+  d.batchOf.mockResolvedValueOnce({
+    orderBatchReference: id(41),
+    recordedAfterOutage: false,
+    submittedAt: "2026-11-06T11:50:00.000Z",
+    ended: false,
+  });
+  await expect(operation(input(reentry))).rejects.toMatchObject({
+    code: "COUNTER_CANCEL_REENTRY_INVALID",
+  });
+  d.cancel.mockResolvedValueOnce({ status: "NotEligible", reason: "ReentryUsed" });
+  await expect(operation(input(reentry))).rejects.toMatchObject({
+    code: "COUNTER_CANCEL_REENTRY_USED",
+  });
+  // While its window is open, its payment is recorded on it instead.
+  d.commitment.mockResolvedValueOnce({
+    orderReference: id(5),
+    orderBatchReference: id(6),
+    state: "PaymentPending",
+    capacityExpiresAt: "2026-11-06T12:10:00.000Z",
+  });
+  await expect(operation(input(reentry))).rejects.toMatchObject({
+    code: "COUNTER_CANCEL_PAPER_STILL_RECORDABLE",
+  });
+  d.link.mockResolvedValueOnce({
+    link: { paymentOperationReference: id(8), submissionReference: id(7) },
+    recordedAfterOutage: false,
+  });
+  await expect(operation(input(reentry))).rejects.toMatchObject({
+    code: "COUNTER_CANCEL_NOT_CANCELLABLE",
+  });
 });

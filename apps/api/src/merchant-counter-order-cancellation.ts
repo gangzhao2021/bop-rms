@@ -4,6 +4,7 @@ import { createPostgresAsapCapacityStore } from "@rms/fulfillment";
 import {
   counterUnpaidCancellationReasons,
   createPostgresCounterUnpaidCancellation,
+  loadCounterOrderBatch,
   loadCounterOrderCapacityLink,
   parseOrderingInstant,
   parseOrderingReference,
@@ -30,6 +31,15 @@ export const counterCancellationErrorCodes = [
   "COUNTER_CANCEL_NOT_CANCELLABLE",
   "COUNTER_CANCEL_VERSION_CONFLICT",
   "COUNTER_CANCEL_STOCK_NOT_RELEASABLE",
+  /**
+   * DEC-PAPER-ORDER-NEVER-RELEASED: the paper order's payment can still be recorded on it (its
+   * payment window has not ended), so it is recorded there, not entered again.
+   */
+  "COUNTER_CANCEL_PAPER_STILL_RECORDABLE",
+  /** The new order is not a paper order of this Store, sent after this one, with its payment. */
+  "COUNTER_CANCEL_REENTRY_INVALID",
+  /** The new order already stands for another paper order. */
+  "COUNTER_CANCEL_REENTRY_USED",
   "COUNTER_CANCEL_UNAVAILABLE",
 ] as const;
 export type CounterCancellationErrorCode = (typeof counterCancellationErrorCodes)[number];
@@ -60,6 +70,14 @@ const fail = (code: CounterCancellationErrorCode): never => {
  * 5. the reserved stock released in the same transaction (all or nothing).
  * The cancelled order stays on Orders as cancelled before payment by that staff member. Same
  * operation reference → the original outcome, nothing written.
+ *
+ * DEC-PAPER-ORDER-NEVER-RELEASED: a paper order is never cancelled, and its payment window never
+ * releases it. When its payment could not be recorded before that window ended, staff enter it
+ * again from the paper slip as a new paper order (whose payment is recorded with it); a manager
+ * then closes the old one as entered again (`COUNTER_PAPER_REENTERED`), naming the new order: only
+ * after the old one's window ended, only a paper counter order of this Store sent after it whose
+ * payment Payment holds, and each new order once. The sale is then in the books once, as the new
+ * order, and the old one reads on Orders as entered again.
  */
 export function createMerchantCounterOrderCancellation(options: {
   persistence: PersistentMerchantBffOptions;
@@ -81,15 +99,23 @@ export function createMerchantCounterOrderCancellation(options: {
       orderBatchReference: string,
       operationReference: string,
       expectedOrderVersion: number,
-      reasonCode: CounterUnpaidCancellationReason;
+      reasonCode: CounterUnpaidCancellationReason,
+      reenteredOrderReference: string | null = null;
     try {
+      const reentry =
+        input.command !== null &&
+        typeof input.command === "object" &&
+        (input.command as { reasonCode?: unknown }).reasonCode === "COUNTER_PAPER_REENTERED";
       const intent = readClosedRecord(input.command, [
         "operationReference",
         "orderReference",
         "orderBatchReference",
         "expectedOrderVersion",
         "reasonCode",
+        ...(reentry ? ["reenteredOrderReference"] : []),
       ]);
+      if (reentry)
+        reenteredOrderReference = String(parseOrderingReference(intent.reenteredOrderReference));
       orderReference = String(parseOrderingReference(intent.orderReference));
       orderBatchReference = String(parseOrderingReference(intent.orderBatchReference));
       operationReference = String(parseOrderingReference(intent.operationReference));
@@ -142,7 +168,12 @@ export function createMerchantCounterOrderCancellation(options: {
             const identity = { orderReference, orderBatchReference };
             const counter = await loadCounterOrderCapacityLink(tx, selected, identity);
             if (counter === null) return fail("COUNTER_CANCEL_NOT_FOUND");
-            if (counter.recordedAfterOutage) return fail("COUNTER_CANCEL_PAPER_ORDER");
+            if (counter.recordedAfterOutage !== (reenteredOrderReference !== null))
+              return fail(
+                counter.recordedAfterOutage
+                  ? "COUNTER_CANCEL_PAPER_ORDER"
+                  : "COUNTER_CANCEL_NOT_CANCELLABLE",
+              );
             const link = counter.link;
             await createPostgresPaymentOperationFence({
               brandReference: selected.brandReference,
@@ -178,6 +209,23 @@ export function createMerchantCounterOrderCancellation(options: {
             )
               return fail("COUNTER_CANCEL_UNAVAILABLE");
             if (commitment.state === "Consumed") return fail("COUNTER_CANCEL_ALREADY_PAID");
+            if (reenteredOrderReference !== null) {
+              // Its payment is recorded on it while its window is open; only after it is it
+              // entered again.
+              const endsAt = commitment.capacityExpiresAt ?? commitment.preparationValidUntil;
+              if (String(parseOrderingInstant(options.persistence.now())) < String(endsAt))
+                return fail("COUNTER_CANCEL_PAPER_STILL_RECORDABLE");
+              // The new order's payment is Payment's fact.
+              const reentered = await loadCounterOrderBatch(tx, selected, reenteredOrderReference);
+              if (reentered === null || !reentered.recordedAfterOutage || reentered.ended)
+                return fail("COUNTER_CANCEL_REENTRY_INVALID");
+              const reenteredPayment = await createPostgresCardMachinePaymentStore({
+                scope: selected,
+                authorize: async (_t, value) =>
+                  value.orderReference === reenteredOrderReference && (await allowed()),
+              }).loadByBatch(tx, reenteredOrderReference, reentered.orderBatchReference);
+              if (reenteredPayment === null) return fail("COUNTER_CANCEL_REENTRY_INVALID");
+            }
             const cancelled = await createPostgresCounterUnpaidCancellation({
               brandReference: selected.brandReference,
               storeReference: selected.storeReference,
@@ -192,6 +240,7 @@ export function createMerchantCounterOrderCancellation(options: {
               expectedOrderVersion,
               actorReference,
               reasonCode,
+              ...(reenteredOrderReference === null ? {} : { reenteredOrderReference }),
               cancelledAt: parseOrderingInstant(options.persistence.now()),
               terminationReference: options.nextReference(),
               auditReference: options.nextReference(),
@@ -202,11 +251,15 @@ export function createMerchantCounterOrderCancellation(options: {
                   ? "COUNTER_CANCEL_ALREADY_PAID"
                   : cancelled.reason === "PaperOrder"
                     ? "COUNTER_CANCEL_PAPER_ORDER"
-                    : cancelled.reason === "VersionConflict"
-                      ? "COUNTER_CANCEL_VERSION_CONFLICT"
-                      : cancelled.reason === "NotCounter"
-                        ? "COUNTER_CANCEL_NOT_FOUND"
-                        : "COUNTER_CANCEL_NOT_CANCELLABLE",
+                    : cancelled.reason === "ReentryInvalid"
+                      ? "COUNTER_CANCEL_REENTRY_INVALID"
+                      : cancelled.reason === "ReentryUsed"
+                        ? "COUNTER_CANCEL_REENTRY_USED"
+                        : cancelled.reason === "VersionConflict"
+                          ? "COUNTER_CANCEL_VERSION_CONFLICT"
+                          : cancelled.reason === "NotCounter"
+                            ? "COUNTER_CANCEL_NOT_FOUND"
+                            : "COUNTER_CANCEL_NOT_CANCELLABLE",
               );
             const record = cancelled.record;
             // The ledger movement names the staff member; a replay verifies the earlier release.

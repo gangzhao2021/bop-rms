@@ -630,6 +630,12 @@ export const counterUnpaidCancellationReasons = [
   "COUNTER_GUEST_CHANGED_MIND",
   "COUNTER_ENTERED_WRONG",
   "COUNTER_GUEST_LEFT_UNPAID",
+  /**
+   * DEC-PAPER-ORDER-NEVER-RELEASED: a paper order whose payment could not be recorded before its
+   * payment window ended was entered again from its paper slip as a new paper order whose payment
+   * is recorded. Only that reason ends a paper order, and only naming the new order (once each).
+   */
+  "COUNTER_PAPER_REENTERED",
 ] as const;
 export type CounterUnpaidCancellationReason = (typeof counterUnpaidCancellationReasons)[number];
 export type CounterUnpaidCancellationResult = Readonly<
@@ -642,9 +648,70 @@ export type CounterUnpaidCancellationResult = Readonly<
         | "Accepted"
         | "Terminated"
         | "PaymentRecorded"
-        | "VersionConflict";
+        | "VersionConflict"
+        /** COUNTER_PAPER_REENTERED for an order that is not a paper order. */
+        | "NotPaperOrder"
+        /**
+         * The re-entered order is not a paper counter order of this Store sent after this one and
+         * still open, or it is this order.
+         */
+        | "ReentryInvalid"
+        /** The re-entered order already stands for another paper order. */
+        | "ReentryUsed";
     }
 >;
+
+/** One re-entry per new order: the same new order can never close two paper orders. */
+function paperReentryOperationReference(brand: string, store: string, reentered: string) {
+  const h = createHash("sha256")
+    .update(canonicalizeRfc8785(["CounterPaperReentry/v1", brand, store, reentered]))
+    .digest("hex");
+  return parseOrderingReference(
+    reentered.slice(0, 14) + "7" + h.slice(0, 3) + "-8" + h.slice(3, 6) + "-" + h.slice(6, 18),
+  );
+}
+
+/**
+ * DEC-PAPER-ORDER-NEVER-RELEASED: the batch of a counter order, whether it was entered from paper,
+ * when it was sent and whether it has ended. Null when the Order is not a counter order of this
+ * Store. Caller authorizes and owns the transaction.
+ */
+export async function loadCounterOrderBatch(
+  transaction: ConsumerTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  orderReference: string,
+): Promise<{
+  readonly orderBatchReference: string;
+  readonly recordedAfterOutage: boolean;
+  readonly submittedAt: string;
+  readonly ended: boolean;
+} | null> {
+  const brand = parseOrderingReference(scope.brandReference),
+    store = parseOrderingReference(scope.storeReference),
+    order = parseOrderingReference(orderReference);
+  await scoped(transaction, brand, store);
+  const found = await transaction.query(
+    `SELECT b.order_batch_id::text AS batch,e.recorded_after_outage AS paper,
+      to_char(b.submitted_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS submitted,
+      EXISTS (SELECT 1 FROM rms_ordering.order_termination_record t
+        WHERE t.brand_id=b.brand_id AND t.store_id=b.store_id AND t.order_id=b.order_id) AS ended
+    FROM rms_ordering.order_batch b
+    JOIN rms_ordering.counter_order_entry e ON e.brand_id=b.brand_id AND e.store_id=b.store_id
+      AND e.cart_id=b.source_cart_id
+    WHERE b.brand_id=$1 AND b.store_id=$2 AND b.order_id=$3 LIMIT 2`,
+    [brand, store, order],
+  );
+  if (found.rows.length > 1) return fail();
+  const row = found.rows[0];
+  if (row === undefined) return null;
+  if (typeof row.paper !== "boolean" || typeof row.ended !== "boolean") return fail();
+  return Object.freeze({
+    orderBatchReference: String(parseOrderingReference(row.batch)),
+    recordedAfterOutage: row.paper,
+    submittedAt: parseOrderingInstant(row.submitted),
+    ended: row.ended,
+  });
+}
 
 /**
  * The counter Order's capacity link (the Payment operation and submission it was placed with), so
@@ -708,6 +775,10 @@ export function createPostgresCounterUnpaidCancellation(options: {
       transaction: ConsumerTransaction,
       value: unknown,
     ): Promise<CounterUnpaidCancellationResult> {
+      const reentry =
+        value !== null &&
+        typeof value === "object" &&
+        (value as { reasonCode?: unknown }).reasonCode === "COUNTER_PAPER_REENTERED";
       const raw = readClosedRecord(value, [
         "orderReference",
         "orderBatchReference",
@@ -718,12 +789,22 @@ export function createPostgresCounterUnpaidCancellation(options: {
         "cancelledAt",
         "terminationReference",
         "auditReference",
+        // DEC-PAPER-ORDER-NEVER-RELEASED: the new paper order this one was entered again as.
+        ...(reentry ? ["reenteredOrderReference"] : []),
       ]);
       const identity = Object.freeze({
         orderReference: parseOrderingReference(raw.orderReference),
         orderBatchReference: parseOrderingReference(raw.orderBatchReference),
       });
-      const operationReference = parseOrderingReference(raw.operationReference),
+      const reenteredOrderReference = reentry
+        ? parseOrderingReference(raw.reenteredOrderReference)
+        : null;
+      // A re-entry's operation is the new order's own (UNIQUE per Store), so one new order closes
+      // at most one paper order, whatever reference the caller sent.
+      const operationReference =
+          reenteredOrderReference === null
+            ? parseOrderingReference(raw.operationReference)
+            : paperReentryOperationReference(brand, store, reenteredOrderReference),
         actorReference = parseOrderingReference(raw.actorReference),
         cancelledAt = parseOrderingInstant(raw.cancelledAt),
         terminationReference = parseOrderingReference(raw.terminationReference),
@@ -749,9 +830,35 @@ export function createPostgresCounterUnpaidCancellation(options: {
         identity,
       );
       if (counter === null) return answer({ status: "NotEligible", reason: "NotCounter" });
-      // A paper order is a sale that happened during the outage: recorded and paid, never cancelled.
-      if (counter.recordedAfterOutage)
+      // A paper order is a sale that happened during the outage: recorded and paid, never cancelled
+      // — only closed as entered again, naming the new paper order whose payment is recorded.
+      if (counter.recordedAfterOutage && reenteredOrderReference === null)
         return answer({ status: "NotEligible", reason: "PaperOrder" });
+      if (!counter.recordedAfterOutage && reenteredOrderReference !== null)
+        return answer({ status: "NotEligible", reason: "NotPaperOrder" });
+      if (reenteredOrderReference !== null) {
+        if (reenteredOrderReference === identity.orderReference)
+          return answer({ status: "NotEligible", reason: "ReentryInvalid" });
+        const used = await transaction.query(
+          "SELECT order_id::text AS order_id FROM rms_ordering.order_termination_record WHERE brand_id=$1 AND store_id=$2 AND operation_id=$3 LIMIT 2",
+          [brand, store, operationReference],
+        );
+        if (used.rows.length > 1) return fail();
+        if (used.rows.length === 1 && used.rows[0]?.order_id !== identity.orderReference)
+          return answer({ status: "NotEligible", reason: "ReentryUsed" });
+        const owner = { brandReference: brand, storeReference: store };
+        const mine = await loadCounterOrderBatch(transaction, owner, identity.orderReference);
+        const reentered = await loadCounterOrderBatch(transaction, owner, reenteredOrderReference);
+        if (mine === null) return fail();
+        if (
+          used.rows.length === 0 &&
+          (reentered === null ||
+            !reentered.recordedAfterOutage ||
+            reentered.ended ||
+            reentered.submittedAt < mine.submittedAt)
+        )
+          return answer({ status: "NotEligible", reason: "ReentryInvalid" });
+      }
       const link = counter.link;
       // Same Order disposition fence as acceptance, payment outcome and termination.
       const sole = await createPostgresPickupOrderCompletionLookup({
@@ -787,10 +894,12 @@ export function createPostgresCounterUnpaidCancellation(options: {
         });
         // The same staff member's retry of their own cancellation answers with what was recorded
         // (its first reason), even when they picked another reason before retrying a lost answer.
+        // A re-entry is the new order's own operation: any manager linking the same new order
+        // again is told it is already done.
         if (
           prior.rows.length !== 1 ||
           record.actorType !== "User" ||
-          record.actorReference !== actorReference ||
+          (reenteredOrderReference === null && record.actorReference !== actorReference) ||
           record.purposeCode !== counterUnpaidCancellationPolicy.purposeCode
         )
           return fail();
@@ -839,7 +948,11 @@ export function createPostgresCounterUnpaidCancellation(options: {
         reasonCode,
         workflowVersionReference: policy.workflowVersionReference,
         transitionReference: policy.transitionReference,
-        sourceDigest: sha256({ kind: "CounterUnpaidCancellation/v1", link, reasonCode }),
+        sourceDigest: sha256(
+          reenteredOrderReference === null
+            ? { kind: "CounterUnpaidCancellation/v1", link, reasonCode }
+            : { kind: "CounterPaperReentry/v1", link, reasonCode, reenteredOrderReference },
+        ),
         terminatedAt: cancelledAt,
       });
       const result = await createPostgresOrderTerminationStore({

@@ -12,6 +12,7 @@ import {
   parseSubmissionInventoryFinalValidation,
 } from "../../rms/inventory/src/index.ts";
 import {
+  createPostgresCounterUnpaidCancellation,
   createOrderTerminatedPaymentDisposition,
   createPostgresOrderExecutionReader,
   createPostgresOrderInitialExecutionReader,
@@ -244,6 +245,7 @@ it("closes unpaid pickup orders after the payment window, returns their stock on
           lines = null,
           // DEC-PAPER-ORDER-NEVER-RELEASED: a counter order staff entered from a paper slip after
           // an outage (its counter Cart and entry), whose payment record did not go through.
+          // "live": a counter order staff took live (not from paper).
           paper = false,
         },
       ) {
@@ -407,7 +409,7 @@ it("closes unpaid pickup orders after the payment window, returns their stock on
             record,
           ],
         );
-        if (paper) {
+        if (paper !== false) {
           await admin.query(
             "INSERT INTO rms_ordering.cart (cart_id,brand_id,store_id,order_type,source_channel,dining_session_id,created_by_actor_id,aggregate_version,created_at,updated_at,lifecycle_status,lifecycle_policy_version_id,lifecycle_policy_digest,idle_timeout_seconds,absolute_timeout_seconds,idle_expires_at,absolute_expires_at) VALUES ($1,$2,$3,'Pickup','Pos',NULL,$4,1,$5,$5,'Active',$6,$7,1800,14400,$8,$9)",
             [
@@ -423,7 +425,7 @@ it("closes unpaid pickup orders after the payment window, returns their stock on
             ],
           );
           await admin.query(
-            "INSERT INTO rms_ordering.counter_order_entry (brand_id,store_id,operation_id,intent_hash,actor_id,guest_session_id,cart_id,tip_selection_id,order_type,source_channel,recorded_after_outage,created_at,audit_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'Pickup','Pos',true,$9,$10)",
+            "INSERT INTO rms_ordering.counter_order_entry (brand_id,store_id,operation_id,intent_hash,actor_id,guest_session_id,cart_id,tip_selection_id,order_type,source_channel,recorded_after_outage,created_at,audit_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'Pickup','Pos',$11,$9,$10)",
             [
               brand,
               store,
@@ -435,6 +437,7 @@ it("closes unpaid pickup orders after the payment window, returns their stock on
               id(base100 + 97),
               createdAt,
               id(base100 + 98),
+              paper === true,
             ],
           );
         }
@@ -708,7 +711,13 @@ it("closes unpaid pickup orders after the payment window, returns their stock on
       const abandoned = await submit(6, { quantity: "1", intent: true });
       // DEC-PAPER-ORDER-NEVER-RELEASED: a paper order past its window whose payment isn't recorded.
       const paperOrder = await submit(7, { quantity: "1", paper: true });
-      assert.deepEqual(await stock(), { onHand: "10", reserved: "8" });
+      // The paper orders it may be entered again as (sent after it, their payment recorded), and a
+      // second paper order past its window.
+      const reentered = await submit(8, { quantity: "0.25", paper: true, paid: "Wait" });
+      const reenteredAgain = await submit(9, { quantity: "0.25", paper: true, paid: "Wait" });
+      const secondPaper = await submit(10, { quantity: "0.25", paper: true });
+      const liveCounter = await submit(11, { quantity: "0.25", paper: "live", paid: "Wait" });
+      assert.deepEqual(await stock(), { onHand: "10", reserved: "9" });
 
       let allowed = true;
       let references = 0x7000;
@@ -765,7 +774,7 @@ it("closes unpaid pickup orders after the payment window, returns their stock on
       assert.equal(closed.status, "Closed");
       assert.equal(closed.paymentEvidence, "NoPaymentStarted");
       assert.deepEqual(closed.inventory, { status: "Released", entryCount: 2 });
-      assert.deepEqual(await stock(), { onHand: "10", reserved: "6" });
+      assert.deepEqual(await stock(), { onHand: "10", reserved: "7" });
       const after = await counts();
       assert.deepEqual(after, {
         reservations: before.reservations + 2,
@@ -854,7 +863,7 @@ it("closes unpaid pickup orders after the payment window, returns their stock on
       assert.deepEqual(replay.inventory, { status: "AlreadyApplied", entryCount: 2 });
       assert.deepEqual(await counts(), after);
       assert.deepEqual(await discover(), [open.refs.order, abandoned.refs.order]);
-      assert.deepEqual(await stock(), { onHand: "10", reserved: "6" });
+      assert.deepEqual(await stock(), { onHand: "10", reserved: "7" });
 
       // A payment captured after the closure: Ordering classifies it SubmissionCancelled (refunded
       // by compensation) and the paid-outcome stock release finds the stock already returned.
@@ -937,7 +946,7 @@ it("closes unpaid pickup orders after the payment window, returns their stock on
         })(tx, late),
       );
       assert.deepEqual(lateRelease, { status: "NothingToRelease", reason: "AlreadyReleased" });
-      assert.deepEqual(await stock(), { onHand: "10", reserved: "6" });
+      assert.deepEqual(await stock(), { onHand: "10", reserved: "7" });
       assert.equal((await counts()).movements, after.movements);
 
       // Payment intent created at checkout but never confirmed (Provider still asks the customer to
@@ -946,7 +955,7 @@ it("closes unpaid pickup orders after the payment window, returns their stock on
       assert.equal(unconfirmed.status, "Closed");
       assert.equal(unconfirmed.paymentEvidence, "PaymentUnresolved");
       assert.deepEqual(unconfirmed.inventory, { status: "Released", entryCount: 1 });
-      assert.deepEqual(await stock(), { onHand: "10", reserved: "5" });
+      assert.deepEqual(await stock(), { onHand: "10", reserved: "6" });
       assert.deepEqual(await discover(), [open.refs.order]);
 
       // WP-2423 abandoned pickup payment: the closed Order's card payment is then settled with the
@@ -1067,7 +1076,7 @@ it("closes unpaid pickup orders after the payment window, returns their stock on
       assert.equal(await sweep.runOnce(), 0);
       assert.equal(providerCalls.length, 2);
       assert.deepEqual(await discover(), [open.refs.order]);
-      assert.deepEqual(await stock(), { onHand: "10", reserved: "5" });
+      assert.deepEqual(await stock(), { onHand: "10", reserved: "6" });
       vi.unstubAllEnvs();
 
       // History stays append-only; another Store cannot see or close the Order.
@@ -1224,6 +1233,78 @@ it("closes unpaid pickup orders after the payment window, returns their stock on
         ),
         null,
       );
+      // Once it was entered again from its slip (a new paper order whose payment is recorded), a
+      // manager closes it as entered again, naming the new order: the pilot API role holding the
+      // rendered pilot ACL writes the termination and its audit, and one new order closes at most
+      // one paper order.
+      const reentry = createPostgresCounterUnpaidCancellation({
+        brandReference: brand,
+        storeReference: store,
+        authorize: async () => true,
+      });
+      let reentryKey = 0x7f00;
+      const cancelPaper = (target, values) =>
+        scoped((tx) =>
+          reentry.cancel(tx, {
+            orderReference: target.refs.order,
+            orderBatchReference: target.refs.batch,
+            operationReference: id(reentryKey++),
+            expectedOrderVersion: 1,
+            actorReference: actor,
+            cancelledAt: new Date().toISOString(),
+            terminationReference: id(reentryKey++),
+            auditReference: id(reentryKey++),
+            ...values,
+          }),
+        );
+      const reenter = (target, reenteredOrderReference) =>
+        cancelPaper(target, { reasonCode: "COUNTER_PAPER_REENTERED", reenteredOrderReference });
+      // A paper order is still never cancelled for an ordinary reason.
+      assert.deepEqual(await cancelPaper(paperOrder, { reasonCode: "COUNTER_GUEST_LEFT_UNPAID" }), {
+        status: "NotEligible",
+        reason: "PaperOrder",
+      });
+      // Only a paper order is closed as entered again, and only by another paper order.
+      assert.deepEqual(await reenter(liveCounter, reentered.refs.order), {
+        status: "NotEligible",
+        reason: "NotPaperOrder",
+      });
+      for (const wrong of [paperOrder.refs.order, waiting.refs.order, id(0x7eff)])
+        assert.deepEqual(await reenter(paperOrder, wrong), {
+          status: "NotEligible",
+          reason: "ReentryInvalid",
+        });
+      assert.deepEqual(await counts(), beforePaper);
+      const closedAsReentered = await reenter(paperOrder, reentered.refs.order);
+      assert.equal(closedAsReentered.status, "Cancelled");
+      assert.equal(closedAsReentered.record.reasonCode, "COUNTER_PAPER_REENTERED");
+      assert.equal(closedAsReentered.record.actorType, "User");
+      assert.equal(closedAsReentered.record.actorReference, actor);
+      assert.deepEqual(await counts(), {
+        ...beforePaper,
+        terminations: beforePaper.terminations + 1,
+        revisions: beforePaper.revisions + 1,
+        audits: beforePaper.audits + 1,
+      });
+      assert.deepEqual(
+        (
+          await admin.query(
+            "SELECT actor_type,actor_reference,reason_code FROM platform_audit.audit_record WHERE target_id=$1 AND action_code='ORDER_TERMINATED'",
+            [paperOrder.refs.order],
+          )
+        ).rows,
+        [{ actor_type: "User", actor_reference: actor, reason_code: "COUNTER_PAPER_REENTERED" }],
+      );
+      // Linking the same new order again answers with what was recorded and writes nothing; the
+      // same new order never closes a second paper order, another new order does.
+      const afterReentry = await counts();
+      assert.equal((await reenter(paperOrder, reentered.refs.order)).status, "AlreadyCancelled");
+      assert.deepEqual(await reenter(secondPaper, reentered.refs.order), {
+        status: "NotEligible",
+        reason: "ReentryUsed",
+      });
+      assert.deepEqual(await counts(), afterReentry);
+      assert.equal((await reenter(secondPaper, reenteredAgain.refs.order)).status, "Cancelled");
       // Another Store cannot close it.
       await assert.rejects(
         scoped((tx) =>
