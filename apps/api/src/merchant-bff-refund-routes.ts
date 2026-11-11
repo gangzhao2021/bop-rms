@@ -39,6 +39,8 @@ function refundRequestFailed(response: express.Response, error: unknown) {
     ["ORDINARY_REFUND_WITHDRAW_EVERYTHING", "refund_withdraw_everything"],
     ["ORDINARY_REFUND_WITHDRAW_KITCHEN_CHANGED", "refund_withdraw_kitchen_changed"],
     ["ORDINARY_REFUND_WITHDRAW_STOCK_NOT_RELEASABLE", "refund_withdraw_stock_not_releasable"],
+    // WP-2423 M52/M131: cash goes back in whole nickels; under 3 cents can't be handed back.
+    ["ORDINARY_REFUND_CASH_UNDER_NICKEL", "refund_cash_under_nickel"],
   ] as const)
     if (failureNamed(error, code)) {
       response.status(409).set("Cache-Control", NO_STORE).json({ error: answer });

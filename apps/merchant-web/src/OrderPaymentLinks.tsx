@@ -53,11 +53,15 @@ export const refundErrorText = (error: unknown) =>
             t(
               "This order hasn't been accepted. Use Refuse and refund on the order to refund it in full.",
             )
-          : error instanceof OrdinaryRefundClientError && error.code.startsWith("Withdraw")
-            ? withdrawRefusalText(error.code)
-            : error instanceof OrdinaryRefundClientError && error.code === "Conflict"
-              ? t("The payment or refund selection changed. Refresh before trying again.")
-              : t("Unable to refresh this information. Try again.");
+          : error instanceof OrdinaryRefundClientError && error.code === "CashUnderNickel"
+            ? t(
+                "Nothing was recorded. Cash goes back in 5-cent steps, so a refund under 3 cents can't be handed back in cash.",
+              )
+            : error instanceof OrdinaryRefundClientError && error.code.startsWith("Withdraw")
+              ? withdrawRefusalText(error.code)
+              : error instanceof OrdinaryRefundClientError && error.code === "Conflict"
+                ? t("The payment or refund selection changed. Refresh before trying again.")
+                : t("Unable to refresh this information. Try again.");
 
 export function OrderPaymentLinks({
   orderReference,

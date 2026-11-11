@@ -466,6 +466,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "没有记录。后厨刚开始做其中一道菜。请重新看一下再选。",
   "Nothing was recorded. A manager sends this refund, so the kitchen isn't told now. Untick Stop making it too to record the request; for a dish the kitchen hasn't started, use Cancel items on the order, or ask a manager.":
     "没有记录。这笔退款由经理发出，所以现在不通知后厨。取消勾选“不再制作这道菜”再记录申请；后厨还没开始做的菜，请在订单上用“取消商品”，或请经理处理。",
+  "Nothing was recorded. Cash goes back in 5-cent steps, so a refund under 3 cents can't be handed back in cash.":
+    "没有记录。现金按 5 分退还，不足 3 分的退款无法用现金退还。",
   "Nothing was recorded. This dish's stock can't be returned on its own, so it can't be stopped with the refund. Untick Stop making it too: the refund is recorded and the guest keeps the food. To take the dish off the order instead, use Cancel items.":
     "没有记录。这道菜的库存不能单独退回，所以不能随退款停做。请取消勾选“不再制作这道菜”：退款照常记录，顾客保留餐品。要把这道菜从订单上去掉，请用“取消商品”。",
   "A manager sends this refund, so the kitchen isn't told now. To stop making a dish the kitchen hasn't started, use Cancel items on the order, or ask a manager.":

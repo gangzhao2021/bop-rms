@@ -521,3 +521,18 @@ it.each(["/payments/refunds/preview", "/payments/refunds/request"])(
     expect(refused.reported).toEqual([]);
   },
 );
+
+// WP-2423 M52/M131: a cash refund under 3 cents can't be handed back; said so, never a fault.
+it.each(["/payments/refunds/preview", "/payments/refunds/request"])(
+  "POST %s of a cash refund under 3 cents answers 409",
+  async (path) => {
+    const key = path.endsWith("preview") ? "ordinaryRefundPreview" : "ordinaryRefundRequest";
+    const refused = await serve({
+      [key]: rejecting(new Error("ORDINARY_REFUND_CASH_UNDER_NICKEL")),
+    } as never);
+    const response = await refused.post(path);
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: "refund_cash_under_nickel" });
+    expect(refused.reported).toEqual([]);
+  },
+);

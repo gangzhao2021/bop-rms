@@ -33,6 +33,8 @@ export class OrdinaryRefundClientError extends Error {
       | "WithdrawKitchenChanged"
       /** The dish's stock can't be returned dish by dish; trying again never helps. */
       | "WithdrawStockNotReleasable"
+      /** WP-2423 M52/M131: a cash refund under 3 cents can't be handed back (nothing recorded). */
+      | "CashUnderNickel"
       | "Unavailable"
       | "OutcomeUnknown"
       | "NotFound",
@@ -384,7 +386,9 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
                               ? "WithdrawNeedsSender"
                               : error === "refund_withdraw_stock_not_releasable"
                                 ? "WithdrawStockNotReleasable"
-                                : "Conflict",
+                                : error === "refund_cash_under_nickel"
+                                  ? "CashUnderNickel"
+                                  : "Conflict",
           );
         if (error === "retry_later") throw new RetryLater();
         return fail();
@@ -440,6 +444,7 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
             error.code === "WithdrawKitchenChanged" ||
             error.code === "WithdrawNeedsSender" ||
             error.code === "WithdrawStockNotReleasable" ||
+            error.code === "CashUnderNickel" ||
             (!mutation && error.code === "Changed"))
         )
           throw error;
