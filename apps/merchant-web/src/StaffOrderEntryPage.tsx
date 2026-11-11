@@ -2337,7 +2337,10 @@ export function StaffOrderEntryPage({
                   </dd>
                 </div>
               )}
-              {changeDue !== null && (phase === "Paid" || phase === "Accepted") ? (
+              {/* A paper order's change was given during the outage. */}
+              {changeDue !== null &&
+              !placed.recordedAfterOutage &&
+              (phase === "Paid" || phase === "Accepted") ? (
                 <div>
                   <dt>{t("Change to give")}</dt>
                   <dd>

@@ -1401,6 +1401,7 @@ test("@production a paper order paid in cash is recorded with the send", async (
     page.getByText("Cash recorded after the outage and accepted.", { exact: false }),
   ).toBeVisible();
   expect(placedBodies[0]?.paperPayment).toMatchObject({ tender: "Cash", slipReference: null });
+  await expect(page.getByText("Change to give")).toHaveCount(0);
   expect(separate).toHaveLength(0);
   await expect(page.locator("main")).not.toContainText(/To charge|released|Take \$|Ask a manager/u);
   for (const width of [1440, 1024, 390]) {
