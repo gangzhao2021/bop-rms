@@ -3379,6 +3379,7 @@ async function serveCounter(
     | "cardMachineRefund"
     | "cardMachineOrdinaryRefund"
     | "staffDiningRound"
+    | "paperPaidAtCheck"
   > = {},
 ) {
   const app = express();
@@ -3780,15 +3781,23 @@ it("DEC-PAPER-ORDER-PAID-AT-SEND: a paper order records its payment with the sen
   const staffDiningRound = vi.fn<NonNullable<MerchantBffRouterOptions["staffDiningRound"]>>(
     async () => placedRound,
   );
-  const root = await serveCounter({ counterOrder, cardMachinePayment, staffDiningRound });
+  const paperPaidAtCheck = vi.fn<NonNullable<MerchantBffRouterOptions["paperPaidAtCheck"]>>(
+    async () => undefined,
+  );
+  const root = await serveCounter({
+    counterOrder,
+    cardMachinePayment,
+    staffDiningRound,
+    paperPaidAtCheck,
+  });
   const headers = {
     ...safeHeaders,
     Cookie: "__Host-bop-merchant=" + sessionCookie,
     "X-BOP-CSRF": csrf,
     "Content-Type": "application/json",
   };
-  const submit = (body: unknown, path = "/merchant/counter/orders") =>
-    request(root, path, { method: "POST", body: JSON.stringify(body), headers });
+  const submit = (body: unknown, path = "/merchant/counter/orders", at = root) =>
+    request(at, path, { method: "POST", body: JSON.stringify(body), headers });
   const card = {
     operationReference: payOp,
     tender: "CardMachine",
@@ -3812,6 +3821,42 @@ it("DEC-PAPER-ORDER-PAID-AT-SEND: a paper order records its payment with the sen
   }
   expect(counterOrder).not.toHaveBeenCalled();
   expect(cardMachinePayment).not.toHaveBeenCalled();
+
+  // v15 batch-5 review: the paid-at is checked as the payment record will check it before anything
+  // is placed (a device clock ahead of the server, past the back-entry window, before the Store's
+  // records begin), so a certain refusal never leaves a placed, unpaid paper order behind. An
+  // outage of the check is the route's own "unavailable", never a refusal of the person.
+  for (const [code, status, error, path] of [
+    ["CARD_MACHINE_TAKEN_BEFORE_RECORDS", 409, "taken_before_records", undefined],
+    ["CARD_MACHINE_INPUT_INVALID", 409, "paper_paid_at_out_of_range", undefined],
+    ["CARD_MACHINE_PERMISSION_DENIED", 403, "counter_order_permission_denied", undefined],
+    ["CARD_MACHINE_UNAVAILABLE", 503, "counter_order_unavailable", undefined],
+    [
+      "CARD_MACHINE_TAKEN_BEFORE_RECORDS",
+      409,
+      "taken_before_records",
+      "/merchant/dining/staff-rounds",
+    ],
+    ["CARD_MACHINE_UNAVAILABLE", 503, "staff_round_unavailable", "/merchant/dining/staff-rounds"],
+  ] as const) {
+    paperPaidAtCheck.mockRejectedValueOnce(new CardMachinePaymentCommandError(code));
+    const refused = await submit({ ...command, paperPayment: card }, path);
+    expect(refused.status).toBe(status);
+    expect(await refused.json()).toEqual({ error });
+  }
+  expect(paperPaidAtCheck).toHaveBeenLastCalledWith({
+    sessionCookie,
+    csrf,
+    takenAt: "2026-10-13T16:00:00.000Z",
+  });
+  expect(counterOrder).not.toHaveBeenCalled();
+  expect(staffDiningRound).not.toHaveBeenCalled();
+  expect(cardMachinePayment).not.toHaveBeenCalled();
+  // Without the check, a paper order is never placed unchecked.
+  const unchecked = await serveCounter({ counterOrder, cardMachinePayment, staffDiningRound });
+  const noCheck = await submit({ ...command, paperPayment: card }, undefined, unchecked);
+  expect(noCheck.status).toBe(503);
+  expect(counterOrder).not.toHaveBeenCalled();
 
   // Card machine: the order, then its payment at the server's total, as one answer.
   const sent = await submit({ ...command, paperPayment: card });
@@ -3887,7 +3932,9 @@ it("DEC-PAPER-ORDER-PAID-AT-SEND: a paper order records its payment with the sen
     "/merchant/dining/staff-rounds",
   );
   expect(roundSent.status).toBe(200);
-  expect((await roundSent.json()).payment.status).toBe("Recorded");
+  expect(((await roundSent.json()) as { payment: { status: string } }).payment.status).toBe(
+    "Recorded",
+  );
   expect(cardMachinePayment.mock.calls.length).toBe(calls + 1);
   const cashRound = await submit(
     { ...command, paperPayment: { ...card, tender: "Cash", slipReference: null } },

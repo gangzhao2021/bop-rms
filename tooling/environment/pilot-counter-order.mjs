@@ -39,7 +39,10 @@ import {
   createMerchantCounterOrder,
 } from "../../apps/api/dist/merchant-counter-order.js";
 import { createMerchantCounterMenu } from "../../apps/api/dist/merchant-counter-menu.js";
-import { createMerchantCardMachinePayment } from "../../apps/api/dist/merchant-card-machine-payment.js";
+import {
+  createMerchantCardMachinePayment,
+  createMerchantPaperPaidAtCheck,
+} from "../../apps/api/dist/merchant-card-machine-payment.js";
 import { createMerchantCardMachineCancellationRefund } from "../../apps/api/dist/merchant-card-machine-refund.js";
 import { createMerchantStaffDiningRound } from "../../apps/api/dist/merchant-staff-dining-round.js";
 import { createDiningPayLaterRound } from "../../apps/api/dist/dining-pay-later-round.js";
@@ -309,6 +312,12 @@ export async function createInternalCounterOrder(
       pipeline,
       nextReference: reference,
       onUnexpected: (error) => reportUnexpected("INTERNAL_COUNTER_ORDER_UNAVAILABLE", error),
+    }),
+    // DEC-PAPER-ORDER-PAID-AT-SEND: a paper order's paid-at is checked before it is placed.
+    paperPaidAtCheck: createMerchantPaperPaidAtCheck({
+      persistence,
+      authentication,
+      onUnexpected: (error) => reportUnexpected("INTERNAL_PAPER_PAID_AT_CHECK_UNAVAILABLE", error),
     }),
     cardMachinePayment: createMerchantCardMachinePayment({
       persistence,

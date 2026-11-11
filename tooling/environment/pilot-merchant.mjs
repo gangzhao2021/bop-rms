@@ -1635,6 +1635,9 @@ export async function createInternalMerchant(
               ...(counter.counterOrder === undefined
                 ? {}
                 : { counterOrder: storePresence.wrap(presenceScope, counter.counterOrder) }),
+              ...(counter.paperPaidAtCheck === undefined
+                ? {}
+                : { paperPaidAtCheck: counter.paperPaidAtCheck }),
               // WP-2423 D1: the server accepts a card-machine-paid order or table round with its
               // payment record (staff member's acceptance authority, the Order's current version).
               ...(counter.cardMachinePayment === undefined

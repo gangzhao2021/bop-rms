@@ -529,3 +529,86 @@ export function withPaidBatchAcceptance(
     return Object.freeze({ ...paid, acceptance });
   };
 }
+
+/**
+ * WP-2423 (DEC-PAPER-ORDER-PAID-AT-SEND, v15 batch-5 review): the paid-at time a paper order says
+ * it was paid at during the outage, checked as its payment record will check it — not after the
+ * server's own now, within the back-entry window, and not before the Store's records begin —
+ * before the order is placed. A refusal the payment record would certainly make then never leaves
+ * a placed, unpaid paper order behind (a sale that would otherwise be released at its pickup hold
+ * unless staff entered it again). Nothing is written; an outage of this read refuses the send as
+ * unavailable (never as no permission), so staff send again.
+ */
+export function createMerchantPaperPaidAtCheck(options: {
+  persistence: PersistentMerchantBffOptions;
+  authentication: Pick<MerchantBffService, "authorize">;
+  onUnexpected?(error: unknown): void;
+}) {
+  const resolveScope = createMerchantStoreScope(options.persistence);
+  return async (input: {
+    sessionCookie: unknown;
+    csrf: unknown;
+    takenAt: string;
+  }): Promise<void> => {
+    const session = await options.authentication.authorize(input);
+    let takenAt: string;
+    try {
+      takenAt = String(parsePaymentInstant(input.takenAt));
+    } catch {
+      return fail("CARD_MACHINE_INPUT_INVALID");
+    }
+    try {
+      await options.persistence.transactions.run((transaction) =>
+        withMerchantTransactionAuthorization(
+          {
+            transaction,
+            resolve: async () => {
+              const current = await resolveScope(
+                transaction,
+                input.sessionCookie,
+                counterOrderPermission,
+                session.sessionReference,
+              ).catch(onlyRefusal(() => fail("CARD_MACHINE_PERMISSION_DENIED")));
+              if ((await current.allowed()) !== true) return fail("CARD_MACHINE_PERMISSION_DENIED");
+              return current;
+            },
+            recheck: async (current) => (await current.allowed()) === true,
+            denied: () => fail("CARD_MACHINE_PERMISSION_DENIED"),
+          },
+          async (authority) => {
+            const now = String(parsePaymentInstant(options.persistence.now()));
+            if (
+              takenAt > now ||
+              Date.parse(now) - Date.parse(takenAt) > cardMachineBackEntryWindowMs
+            )
+              return fail("CARD_MACHINE_INPUT_INVALID");
+            const resolved = authority.scope;
+            const opening = await readStoreFirstConfigurationGoverningFrom(
+              transaction as unknown as ConsumerTransaction,
+              {
+                brandReference: String(resolved.context.brand.brandReference),
+                storeReference: String(resolved.store.storeReference),
+              },
+              // The caller's permission was resolved above: this read failing is an outage.
+            ).catch(keepingCause(() => fail("CARD_MACHINE_UNAVAILABLE")));
+            if (opening !== null && takenAt < opening)
+              return fail("CARD_MACHINE_TAKEN_BEFORE_RECORDS");
+          },
+        ),
+      );
+    } catch (error) {
+      if (
+        error instanceof CardMachinePaymentCommandError &&
+        error.code !== "CARD_MACHINE_UNAVAILABLE"
+      )
+        throw error;
+      try {
+        options.onUnexpected?.(error);
+      } catch {
+        // Reporting never changes the answer.
+      }
+      if (error instanceof CardMachinePaymentCommandError) throw error;
+      return keepingCause(() => fail("CARD_MACHINE_UNAVAILABLE"))(error);
+    }
+  };
+}

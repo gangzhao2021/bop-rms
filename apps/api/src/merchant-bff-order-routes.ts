@@ -21,6 +21,7 @@ import { StaffDiningRoundError } from "./merchant-staff-dining-round.js";
 import { CardMachinePaymentCommandError } from "./merchant-card-machine-payment.js";
 import {
   cardMachinePaymentHttpErrors,
+  paperPaidAtRefusal,
   recordPaperOrderPayment,
   splitPaperOrderPayment,
 } from "./merchant-paper-order-payment.js";
@@ -404,7 +405,10 @@ export function installMerchantOrderRoutes(
     // DEC-PAPER-ORDER-PAID-AT-SEND: a paper order says how it was paid during the outage, and that
     // payment is recorded with it, so a sale that already happened is never left "to charge".
     const split = splitPaperOrderPayment(request.body, { cashAllowed: true, required: true });
-    if (split === null || (split.payment !== null && !options.cardMachinePayment)) {
+    if (
+      split === null ||
+      (split.payment !== null && (!options.cardMachinePayment || !options.paperPaidAtCheck))
+    ) {
       response
         .status(split === null ? 400 : 503)
         .set("Cache-Control", NO_STORE)
@@ -414,8 +418,17 @@ export function installMerchantOrderRoutes(
       return;
     }
     const recordPayment = options.cardMachinePayment;
-    void options
-      .counterOrder({ ...auth, command: split.command })
+    const paperPayment = split.payment;
+    const check = options.paperPaidAtCheck;
+    const placeOrder = options.counterOrder;
+    // The paid-at is checked as its payment record will check it before anything is placed, so a
+    // refusal that is certain never leaves a placed, unpaid paper order behind.
+    void (
+      paperPayment === null || check === undefined
+        ? Promise.resolve()
+        : check({ ...auth, takenAt: paperPayment.takenAt })
+    )
+      .then(() => placeOrder({ ...auth, command: split.command }))
       .then(async (result) => {
         const paid =
           split.payment === null || recordPayment === undefined || !result.recordedAfterOutage
@@ -440,6 +453,11 @@ export function installMerchantOrderRoutes(
       })
       .catch((error: unknown) => {
         noteFailure(response, error);
+        const paidAt = paperPaidAtRefusal(error, "counter_order");
+        if (paidAt !== null) {
+          response.status(paidAt[0]).set("Cache-Control", NO_STORE).json({ error: paidAt[1] });
+          return;
+        }
         if (!(error instanceof CounterOrderError)) {
           failed(response, error);
           return;
@@ -500,7 +518,10 @@ export function installMerchantOrderRoutes(
     // DEC-PAPER-ORDER-PAID-AT-SEND: a paper round the table pays now carries how it was paid
     // (card machine only: a table's cash is taken at checkout) and is recorded with it.
     const split = splitPaperOrderPayment(request.body, { cashAllowed: false, required: false });
-    if (split === null || (split.payment !== null && !options.cardMachinePayment)) {
+    if (
+      split === null ||
+      (split.payment !== null && (!options.cardMachinePayment || !options.paperPaidAtCheck))
+    ) {
       response
         .status(split === null ? 400 : 503)
         .set("Cache-Control", NO_STORE)
@@ -508,8 +529,15 @@ export function installMerchantOrderRoutes(
       return;
     }
     const recordPayment = options.cardMachinePayment;
-    void options
-      .staffDiningRound({ ...auth, command: split.command })
+    const paperPayment = split.payment;
+    const check = options.paperPaidAtCheck;
+    const placeRound = options.staffDiningRound;
+    void (
+      paperPayment === null || check === undefined
+        ? Promise.resolve()
+        : check({ ...auth, takenAt: paperPayment.takenAt })
+    )
+      .then(() => placeRound({ ...auth, command: split.command }))
       .then(async (result) => {
         const paid =
           split.payment === null ||
@@ -539,6 +567,11 @@ export function installMerchantOrderRoutes(
       })
       .catch((error: unknown) => {
         noteFailure(response, error);
+        const paidAt = paperPaidAtRefusal(error, "staff_round");
+        if (paidAt !== null) {
+          response.status(paidAt[0]).set("Cache-Control", NO_STORE).json({ error: paidAt[1] });
+          return;
+        }
         if (!(error instanceof StaffDiningRoundError)) {
           failed(response, error);
           return;

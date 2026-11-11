@@ -101,6 +101,7 @@ import type { createMerchantStaffDiningRound } from "./merchant-staff-dining-rou
 import type {
   CardMachinePaymentAcceptance,
   createMerchantCardMachinePayment,
+  createMerchantPaperPaidAtCheck,
 } from "./merchant-card-machine-payment.js";
 import type { createMerchantCardMachineCancellationRefund } from "./merchant-card-machine-refund.js";
 import type { createMerchantCardMachineOrdinaryRefund } from "./merchant-card-machine-ordinary-refund.js";
@@ -553,6 +554,11 @@ export interface MerchantBffRouterOptions {
       readonly acceptance?: CardMachinePaymentAcceptance;
     }
   >;
+  /**
+   * DEC-PAPER-ORDER-PAID-AT-SEND: a paper order's paid-at checked before it is placed (as its
+   * payment record will check it), so a certain refusal never leaves it placed and unpaid.
+   */
+  readonly paperPaidAtCheck?: ReturnType<typeof createMerchantPaperPaidAtCheck>;
   /** WP-2423 Q7: staff record the card-machine refund of a cancelled card-machine order. */
   readonly cardMachineRefund?: ReturnType<typeof createMerchantCardMachineCancellationRefund>;
   /** WP-2423 item 4: staff record an item refund of a card-machine payment made on the machine. */

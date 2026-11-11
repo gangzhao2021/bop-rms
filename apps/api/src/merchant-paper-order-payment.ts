@@ -176,3 +176,28 @@ export async function recordPaperOrderPayment(
     return { paymentError: "card_machine_payment_unavailable" };
   }
 }
+
+/**
+ * The answer to a paper order whose paid-at time was refused before it was placed (nothing was
+ * placed or recorded), or null when the error is not that check's. `route` names the order route
+ * (its permission and outage codes). A time after the server's now (a device clock ahead) or
+ * outside the back-entry window, and a time before the Store's records begin, are refusals staff
+ * correct in the paid-at field; an outage of the check is the route's own "unavailable" (send
+ * again), never a refusal of the person.
+ */
+export function paperPaidAtRefusal(
+  error: unknown,
+  route: "counter_order" | "staff_round",
+): readonly [number, string] | null {
+  if (!(error instanceof CardMachinePaymentCommandError)) return null;
+  switch (error.code) {
+    case "CARD_MACHINE_TAKEN_BEFORE_RECORDS":
+      return [409, "taken_before_records"];
+    case "CARD_MACHINE_INPUT_INVALID":
+      return [409, "paper_paid_at_out_of_range"];
+    case "CARD_MACHINE_PERMISSION_DENIED":
+      return [403, route + "_permission_denied"];
+    default:
+      return [503, route + "_unavailable"];
+  }
+}
