@@ -468,7 +468,20 @@ describe("IDR-0039 named KDS Operator profile", () => {
       "catalog.sku.sold_out.mark",
     ]);
   });
+  it.each(["store.service.pause", "store.service.resume"])(
+    "WP-2423 M30: allows %s (pause ordering from the kitchen display) when the Actor's roles allow it",
+    async (action) => {
+      ports.session.mockResolvedValue(session(2, "NamedKdsOperator"));
+      const scope = await resolve(action);
+      expect(await scope.allowed()).toBe(true);
+      expect(ports.authorize.mock.calls.map(([request]) => request.action)).toEqual([
+        "merchant.access",
+        action,
+      ]);
+    },
+  );
   it.each([
+    "store.service.read",
     "fulfillment.operate",
     "payment.refund",
     "catalog.manage",

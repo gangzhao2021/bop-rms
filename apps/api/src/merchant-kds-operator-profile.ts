@@ -3,7 +3,10 @@
  * including a remake; DEC-KITCHEN-STALE-TICKETS: a manager signed in at the kitchen screen closing
  * an earlier day's ticket; WP-2423 Q17: marking an item sold out for today and bringing today's
  * mark back, without the manager-level availability permission — the Actor's roles must still
- * allow each).
+ * allow each). WP-2423 store-service-controls (v15 M30 live check): pausing and resuming online
+ * ordering for a while (store.service.pause / store.service.resume, which also let the board read
+ * whether the Store is paused): the cook who sees the kitchen drowning is the one at this screen.
+ * The Actor's roles still decide; it moves no money and every pause is recorded under their name.
  *
  * One definition for every scope that authorizes a merchant Session (Store, Brand and current
  * Brand), so the limit cannot drift between them (Owner approval 2026-10-14: "批准收紧").
@@ -14,6 +17,8 @@ export const kdsOperatorProfileActions: ReadonlySet<string> = new Set([
   "kitchen.work_item.rework",
   "kitchen.ticket.close_stale",
   "catalog.sku.sold_out.mark",
+  "store.service.pause",
+  "store.service.resume",
 ]);
 
 const kdsOperatorPolicyCode = "NamedKdsOperator";
