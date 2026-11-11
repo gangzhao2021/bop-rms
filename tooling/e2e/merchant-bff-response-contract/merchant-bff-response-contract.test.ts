@@ -521,6 +521,8 @@ const earlierCounterPickup = {
       takenAt: at(0),
       recordedAfterOutage: false,
       refundedMinor: "0",
+      // WP-2423 M52: sent only when paid in cash; paid in cash here so the cash fields are carried.
+      cash: { tenderedMinor: "2000", changeMinor: "500", roundingMinor: "0" },
     },
     payBy: null,
     amountDueMinor: null,

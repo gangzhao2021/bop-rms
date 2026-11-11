@@ -10,16 +10,18 @@ const id = (n) => "01a7ef00-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 
 /**
  * WP-2423 item 6: two guests share a table's Cart, and the one-tap order runs quote, details and
- * checkout as separate requests. When another guest's add or Quote lands between them, opening the
- * checkout can never succeed as asked. It used to answer 503 with Retry-After: a guest waited 45
- * seconds and was told the order might have been placed, for ever. It answers a conflict now.
+ * checkout as separate requests. When another guest's add lands between them, opening the checkout
+ * can never succeed as asked. It used to answer 503 with Retry-After: a guest waited 45 seconds and
+ * was told the order might have been placed, for ever. It answers a conflict now. Another guest's
+ * Quote of the same cart version while its price is held answers the held Quote (Owner #26,
+ * DEC-PRICE-HOLD), so it no longer moves the checkout on.
  *
  * The pilot's own composition (tooling/environment: table QR entry, join, binding, the table's Cart,
  * configured Quote, details, dine-in checkout with its later-round path), as the restricted
  * NOBYPASSRLS API role holding only the rendered pilot ACL. The HTTP status of each refusal is the
  * session handler's table (customer-checkout-session.test.ts: INTENT_CONFLICT is 409).
  */
-it("a checkout after another guest's add or Quote is told the cart moved on, for a first and a later round", async () => {
+it("a checkout after another guest's add is told the cart moved on, and her Quote of the same version answers the held one, for a first and a later round", async () => {
   await withIsolatedDatabase({ caseId: "wp2423_moved_on" }, async (context) => {
     const admin = new Client(context.clientConfig);
     await admin.connect();
@@ -40,6 +42,13 @@ it("a checkout after another guest's add or Quote is told the cart moved on, for
         (
           await admin.query(
             "SELECT (SELECT count(*)::int FROM rms_ordering.checkout_session_record) AS sessions,(SELECT count(*)::int FROM rms_ordering.order_batch) AS batches",
+          )
+        ).rows[0];
+
+      const quoteCounts = async () =>
+        (
+          await admin.query(
+            "SELECT (SELECT count(*)::int FROM rms_pricing.price_quote) AS quotes,(SELECT count(*)::int FROM rms_pricing.price_quote_request) AS requests,(SELECT count(*)::int FROM rms_ordering.cart_quote_attachment) AS attachments",
           )
         ).rows[0];
 
@@ -106,19 +115,29 @@ it("a checkout after another guest's add or Quote is told the cart moved on, for
         const before = await counts();
         let cart = await add(selected);
 
-        // Dad's quote, then Mom's tap attaches hers to the same cart version: his is no longer it.
+        // Dad's quote, then Mom's tap prices the same cart version while its price is held: she
+        // is answered Dad's price (Owner #26, DEC-PRICE-HOLD), and no other price is made, so
+        // Dad's quote is still the cart's.
         const dadsQuote = await quote(cart);
-        await quote(cart);
-        const operation = reference();
-        await refusedAsMovedOn(open(cart, dadsQuote, operation));
+        const priced = await quoteCounts();
+        assert.equal(
+          await quote(cart),
+          dadsQuote,
+          `Mom is answered Dad's held price (${round} round)`,
+        );
+        assert.deepEqual(await quoteCounts(), priced, `no other price was made (${round} round)`);
 
-        // Dad's phone asks again with the same key after Mom added a dish: the same fixed answer,
-        // never an outage to wait out, and the same request can't go through later.
+        // Mom adds a dish before Dad's phone opens the checkout: he is told the cart moved on.
         const dadsCart = cart;
         cart = await add(cart);
+        const operation = reference();
         await refusedAsMovedOn(open(dadsCart, dadsQuote, operation));
 
-        // A cart version that moved on before the checkout was first asked for.
+        // Dad's phone asks again with the same key: the same fixed answer, never an outage to
+        // wait out, and the same request can't go through later.
+        await refusedAsMovedOn(open(dadsCart, dadsQuote, operation));
+
+        // A key never asked before, for a cart version that had already moved on.
         await refusedAsMovedOn(open(dadsCart, dadsQuote));
         assert.deepEqual(await counts(), before, `nothing was created (${round} round)`);
 

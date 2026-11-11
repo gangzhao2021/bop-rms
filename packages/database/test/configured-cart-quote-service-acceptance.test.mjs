@@ -59,6 +59,9 @@ it.each([false, true])(
           candidateCalls = 0;
         let entry, policy, runtime;
         let mismatchedCandidate = false;
+        // Owner #26 (DEC-PRICE-HOLD): while the Cart version's latest Quote is held, pricing it
+        // again answers that Quote. Switched off below so the later steps genuinely price anew.
+        let answerHeldQuote = true;
         const references = {
           generateReference: () => id(next++),
           hashIntent: (value) => "sha256:" + createHash("sha256").update(value).digest("hex"),
@@ -104,6 +107,14 @@ it.each([false, true])(
                 await client.query("SET LOCAL statement_timeout='5s'");
                 const value = await action({
                   async query(sql, values) {
+                    if (
+                      !pricing &&
+                      !answerHeldQuote &&
+                      sql.startsWith(
+                        "SELECT operation_id FROM rms_ordering.cart_quote_attachment WHERE",
+                      )
+                    )
+                      return { rows: [] }; // no latest attached Quote: priced anew
                     if (
                       !pricing &&
                       failAttachmentAudit &&
@@ -527,6 +538,17 @@ it.each([false, true])(
             .rows[0].snapshot;
           assert.equal(wireItem.pricing.optionPrices[0].chargedQuantity, "4");
           assert.deepEqual(decodeConfiguredOrderItemSnapshot(wireItem), transactionItems[0]);
+          // Owner #26 (DEC-PRICE-HOLD): another tap prices the same Cart version while its Quote is
+          // held: the confirmed Quote is answered again, nothing is priced, attached or audited.
+          const heldCalls = candidateCalls;
+          const heldCounts = await counts();
+          const held = await service.attach({ ...command, operationReference: id(909) });
+          assert.equal(held.status, "Held");
+          assert.deepEqual(held.attachment, original);
+          assert.equal(candidateCalls, heldCalls);
+          assert.deepEqual(await counts(), heldCounts);
+          // The steps below each price the Cart anew (as after a hold or a changed dish).
+          answerHeldQuote = false;
           const retryCommand = { ...command, operationReference: id(901) };
           failAttachmentAudit = true;
           await assert.rejects(service.attach(retryCommand), {
