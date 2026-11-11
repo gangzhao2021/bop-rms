@@ -234,7 +234,7 @@ async function install(
         ["Draft", "PendingApproval", "Approved"].includes(latest.lifecycle)
           ? {
               publicationChecks: {
-                profile: "StoreConfigurationPublicationChecksV1",
+                profile: "StoreConfigurationPublicationChecksV2",
                 configurationReference: latest.configurationReference,
                 checkedAt: observedAt,
                 checks: [
@@ -246,6 +246,7 @@ async function install(
                   "EffectiveDate",
                   "Fees",
                   "GoLive",
+                  "StorePhone",
                 ].map((code) => ({
                   code,
                   outcome: control.failing?.includes(code) ? "Fail" : "Pass",
@@ -861,6 +862,53 @@ test("publication checks say what blocks publication and who must approve, at 14
     ).toEqual([]);
     await expectNoInternalText(page);
   }
+  expect(state.errors).toEqual([]);
+});
+
+test("M109: a setup offering pickup can't be sent until the store has a phone, and says where to add it, at 1440, 1024 and 390 @production", async ({
+  page,
+}) => {
+  const state = await install(page);
+  state.failing = ["StorePhone"];
+  await enter(page);
+  await panel(page).getByRole("button", { name: "Create configuration from saved setup" }).click();
+  const checks = panel(page).getByRole("region", { name: "Publication checks" });
+  // Created and confirmed before the page is read again at each width.
+  await expect(checks).toContainText("1 check needs attention");
+  for (const [width, height] of [
+    [1440, 900],
+    [1024, 768],
+    [390, 844],
+  ] as const) {
+    await page.setViewportSize({ width, height });
+    await reloadReview(page);
+    await expect(checks).toContainText("1 check needs attention");
+    await expect(checks).toContainText(
+      "Needs attention: This setup offers pickup, and pickup guests call the store about allergies or their order. Add the store's phone number under Name and contact shown to customers, or take pickup out of the service modes in step 3.",
+    );
+    await expect(
+      panel(page).getByRole("button", { name: "Submit configuration for review" }),
+    ).toBeDisabled();
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      `no horizontal overflow at ${width}`,
+    ).toBe(true);
+    const axe = await new AxeBuilder({ page }).include(".store-setup-draft-page").analyze();
+    expect(
+      axe.violations.filter((v) => v.impact === "critical" || v.impact === "serious"),
+      `axe at ${width}`,
+    ).toEqual([]);
+    await expectNoInternalText(page);
+  }
+  // The phone published: the check passes and the setup can be sent.
+  state.failing = [];
+  await reloadReview(page);
+  await expect(checks).toContainText(
+    "Ready: The store has a phone number for pickup guests, or does not offer pickup.",
+  );
+  await expect(
+    panel(page).getByRole("button", { name: "Submit configuration for review" }),
+  ).toBeEnabled();
   expect(state.errors).toEqual([]);
 });
 
