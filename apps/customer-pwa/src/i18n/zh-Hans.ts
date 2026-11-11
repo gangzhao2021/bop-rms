@@ -1786,7 +1786,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Only what I added (nothing of yours is left to pay)": "只付我加的（你加的菜都已有人付）",
   "Only what I added ({count} · {amount})": "只付我加的（{count} 道 · {amount}）",
   "Choose dishes to pay for": "选择要付的菜",
-  "A dish": "一道菜",
   "you added": "你加的",
   "{count} left": "还剩 {count} 份",
   "One less {dish}": "{dish} 少一份",
