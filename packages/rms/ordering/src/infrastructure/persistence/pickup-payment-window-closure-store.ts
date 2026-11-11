@@ -63,6 +63,10 @@ function closureOperationReference(brand: string, store: string, order: string) 
  * outcome), no acceptance, termination or completion, whose capacity link is at least 30 minutes
  * old (no payment window can end earlier). The closure decides the actual window from Fulfillment
  * and Payment under fences; a scan result never authorizes a closure.
+ *
+ * DEC-PAPER-ORDER-NEVER-RELEASED: a paper order (a counter order staff entered after an outage) is
+ * a sale that already happened, so it is never a candidate: it stays open, its stock stays set
+ * aside and staff see it until its payment is recorded or it is re-entered from the paper slip.
  */
 export function createPostgresPickupPaymentWindowCandidates(options: {
   brandReference: string;
@@ -106,6 +110,9 @@ export function createPostgresPickupPaymentWindowCandidates(options: {
               WHERE w.brand_id=h.brand_id AND w.store_id=h.store_id AND w.order_id=h.order_id)
             AND NOT EXISTS (SELECT 1 FROM rms_ordering.order_payment_disposition_record d
               WHERE d.brand_id=h.brand_id AND d.store_id=h.store_id AND d.order_id=h.order_id)
+            AND NOT EXISTS (SELECT 1 FROM rms_ordering.counter_order_entry e
+              WHERE e.brand_id=b.brand_id AND e.store_id=b.store_id AND e.cart_id=b.source_cart_id
+                AND e.recorded_after_outage)
           ORDER BY h.order_id LIMIT $5`,
           [brand, store, at, after, limit],
         );
@@ -139,8 +146,14 @@ export function createPostgresPickupPaymentWindowCandidates(options: {
 
 export type PickupPaymentWindowClosureResult = Readonly<
   | { status: "Closed" | "AlreadyClosed"; record: OrderTerminationRecord }
-  /** Accepted/terminated otherwise, or a payment is recorded: the paid-outcome path owns it. */
-  | { status: "NotEligible"; reason: "Accepted" | "Terminated" | "PaymentRecorded" }
+  /**
+   * Accepted/terminated otherwise, or a payment is recorded: the paid-outcome path owns it. A paper
+   * order is never closed (DEC-PAPER-ORDER-NEVER-RELEASED).
+   */
+  | {
+      status: "NotEligible";
+      reason: "Accepted" | "Terminated" | "PaymentRecorded" | "PaperOrder";
+    }
 >;
 
 /**
@@ -168,6 +181,19 @@ export function createPostgresPickupPaymentWindowClosure(options: {
     const n = result.rows[0]?.n;
     if (result.rows.length !== 1 || typeof n !== "number") return fail();
     return n !== 0;
+  };
+  const paperOrder = async (tx: ConsumerTransaction, link: OrderCapacityLink) => {
+    const result = await tx.query(
+      `SELECT e.recorded_after_outage AS paper FROM rms_ordering.order_batch b
+      JOIN rms_ordering.counter_order_entry e ON e.brand_id=b.brand_id AND e.store_id=b.store_id
+        AND e.cart_id=b.source_cart_id
+      WHERE b.brand_id=$1 AND b.store_id=$2 AND b.order_id=$3 AND b.order_batch_id=$4 LIMIT 2`,
+      [brand, store, link.orderReference, link.orderBatchReference],
+    );
+    if (result.rows.length > 1) return fail();
+    const paper = result.rows[0]?.paper;
+    if (result.rows.length === 1 && typeof paper !== "boolean") return fail();
+    return paper === true;
   };
   const linked = async (tx: ConsumerTransaction, link: OrderCapacityLink) => {
     const result = await tx.query(
@@ -289,6 +315,12 @@ export function createPostgresPickupPaymentWindowClosure(options: {
           reason: "PaymentRecorded" as const,
         });
       }
+      // DEC-PAPER-ORDER-NEVER-RELEASED: re-checked here, under the closure's own fences, whatever
+      // the scan said: a sale taken on paper during an outage is never released by its window.
+      if (await paperOrder(transaction, link)) {
+        if (!(await allowed(transaction))) return fail();
+        return Object.freeze({ status: "NotEligible" as const, reason: "PaperOrder" as const });
+      }
       const policy = pickupPaymentWindowClosurePolicy;
       const record = parseOrderTerminationRecord({
         terminationReference,
@@ -326,7 +358,8 @@ export function createPostgresPickupPaymentWindowClosure(options: {
           tx === transaction &&
           candidate.operationReference === operationReference &&
           (await linked(tx, link)) &&
-          !(await paymentRecorded(tx, link.orderReference)),
+          !(await paymentRecorded(tx, link.orderReference)) &&
+          !(await paperOrder(tx, link)),
         audit: async (candidate) => ({
           auditId: auditReference,
           brandId: brand,

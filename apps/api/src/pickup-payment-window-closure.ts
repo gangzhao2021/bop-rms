@@ -29,7 +29,11 @@ export type PickupPaymentWindowClosureOutcome = Readonly<
   | { status: "NotDue"; windowEndsAt: string }
   /** Payment captured (or capacity consumed): the paid-outcome path accepts or refunds it. */
   | { status: "Paid" }
-  | { status: "NotEligible"; reason: "Accepted" | "Terminated" | "PaymentRecorded" }
+  /** PaperOrder: DEC-PAPER-ORDER-NEVER-RELEASED, a sale taken on paper is never released. */
+  | {
+      status: "NotEligible";
+      reason: "Accepted" | "Terminated" | "PaymentRecorded" | "PaperOrder";
+    }
   | {
       status: "Closed" | "AlreadyClosed";
       paymentEvidence: PickupPaymentWindowEvidence | null;

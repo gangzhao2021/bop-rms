@@ -242,6 +242,9 @@ it("closes unpaid pickup orders after the payment window, returns their stock on
           intent = false,
           // Per-line (schema 2) quantities on the one stock account, as a multi-unit order holds.
           lines = null,
+          // DEC-PAPER-ORDER-NEVER-RELEASED: a counter order staff entered from a paper slip after
+          // an outage (its counter Cart and entry), whose payment record did not go through.
+          paper = false,
         },
       ) {
         assert.ok(lines === null || lines.length <= 2);
@@ -404,6 +407,37 @@ it("closes unpaid pickup orders after the payment window, returns their stock on
             record,
           ],
         );
+        if (paper) {
+          await admin.query(
+            "INSERT INTO rms_ordering.cart (cart_id,brand_id,store_id,order_type,source_channel,dining_session_id,created_by_actor_id,aggregate_version,created_at,updated_at,lifecycle_status,lifecycle_policy_version_id,lifecycle_policy_digest,idle_timeout_seconds,absolute_timeout_seconds,idle_expires_at,absolute_expires_at) VALUES ($1,$2,$3,'Pickup','Pos',NULL,$4,1,$5,$5,'Active',$6,$7,1800,14400,$8,$9)",
+            [
+              refs.cart,
+              brand,
+              store,
+              refs.guest,
+              createdAt,
+              id(base100 + 95),
+              hash(["cart-policy", n]),
+              new Date(Date.parse(createdAt) + minutes(30)).toISOString(),
+              new Date(Date.parse(createdAt) + minutes(240)).toISOString(),
+            ],
+          );
+          await admin.query(
+            "INSERT INTO rms_ordering.counter_order_entry (brand_id,store_id,operation_id,intent_hash,actor_id,guest_session_id,cart_id,tip_selection_id,order_type,source_channel,recorded_after_outage,created_at,audit_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'Pickup','Pos',true,$9,$10)",
+            [
+              brand,
+              store,
+              id(base100 + 96),
+              hash(["counter", n]),
+              actor,
+              refs.guest,
+              refs.cart,
+              id(base100 + 97),
+              createdAt,
+              id(base100 + 98),
+            ],
+          );
+        }
         await admin.query(
           "INSERT INTO rms_ordering.order_number_allocation " +
             "(order_id,brand_id,store_id,business_date,sequence,order_number,allocated_at," +
@@ -672,7 +706,9 @@ it("closes unpaid pickup orders after the payment window, returns their stock on
       const settled = await submit(4, { quantity: "0.5", paid: "Disposition" });
       const dineIn = await submit(5, { quantity: "1", type: "DineIn" });
       const abandoned = await submit(6, { quantity: "1", intent: true });
-      assert.deepEqual(await stock(), { onHand: "10", reserved: "7" });
+      // DEC-PAPER-ORDER-NEVER-RELEASED: a paper order past its window whose payment isn't recorded.
+      const paperOrder = await submit(7, { quantity: "1", paper: true });
+      assert.deepEqual(await stock(), { onHand: "10", reserved: "8" });
 
       let allowed = true;
       let references = 0x7000;
@@ -696,7 +732,8 @@ it("closes unpaid pickup orders after the payment window, returns their stock on
         (
           await closure.discover({ observedAt: new Date().toISOString(), after: null, limit: 10 })
         ).map((candidate) => candidate.orderReference);
-      // Only pickups with no recorded payment are candidates; dine-in has its own expiry.
+      // Only pickups with no recorded payment are candidates; dine-in has its own expiry, and a
+      // paper order is never one.
       assert.deepEqual(await discover(), [
         expired.refs.order,
         open.refs.order,
@@ -728,7 +765,7 @@ it("closes unpaid pickup orders after the payment window, returns their stock on
       assert.equal(closed.status, "Closed");
       assert.equal(closed.paymentEvidence, "NoPaymentStarted");
       assert.deepEqual(closed.inventory, { status: "Released", entryCount: 2 });
-      assert.deepEqual(await stock(), { onHand: "10", reserved: "5" });
+      assert.deepEqual(await stock(), { onHand: "10", reserved: "6" });
       const after = await counts();
       assert.deepEqual(after, {
         reservations: before.reservations + 2,
@@ -817,7 +854,7 @@ it("closes unpaid pickup orders after the payment window, returns their stock on
       assert.deepEqual(replay.inventory, { status: "AlreadyApplied", entryCount: 2 });
       assert.deepEqual(await counts(), after);
       assert.deepEqual(await discover(), [open.refs.order, abandoned.refs.order]);
-      assert.deepEqual(await stock(), { onHand: "10", reserved: "5" });
+      assert.deepEqual(await stock(), { onHand: "10", reserved: "6" });
 
       // A payment captured after the closure: Ordering classifies it SubmissionCancelled (refunded
       // by compensation) and the paid-outcome stock release finds the stock already returned.
@@ -900,7 +937,7 @@ it("closes unpaid pickup orders after the payment window, returns their stock on
         })(tx, late),
       );
       assert.deepEqual(lateRelease, { status: "NothingToRelease", reason: "AlreadyReleased" });
-      assert.deepEqual(await stock(), { onHand: "10", reserved: "5" });
+      assert.deepEqual(await stock(), { onHand: "10", reserved: "6" });
       assert.equal((await counts()).movements, after.movements);
 
       // Payment intent created at checkout but never confirmed (Provider still asks the customer to
@@ -909,7 +946,7 @@ it("closes unpaid pickup orders after the payment window, returns their stock on
       assert.equal(unconfirmed.status, "Closed");
       assert.equal(unconfirmed.paymentEvidence, "PaymentUnresolved");
       assert.deepEqual(unconfirmed.inventory, { status: "Released", entryCount: 1 });
-      assert.deepEqual(await stock(), { onHand: "10", reserved: "4" });
+      assert.deepEqual(await stock(), { onHand: "10", reserved: "5" });
       assert.deepEqual(await discover(), [open.refs.order]);
 
       // WP-2423 abandoned pickup payment: the closed Order's card payment is then settled with the
@@ -1030,7 +1067,7 @@ it("closes unpaid pickup orders after the payment window, returns their stock on
       assert.equal(await sweep.runOnce(), 0);
       assert.equal(providerCalls.length, 2);
       assert.deepEqual(await discover(), [open.refs.order]);
-      assert.deepEqual(await stock(), { onHand: "10", reserved: "4" });
+      assert.deepEqual(await stock(), { onHand: "10", reserved: "5" });
       vi.unstubAllEnvs();
 
       // History stays append-only; another Store cannot see or close the Order.
@@ -1169,6 +1206,24 @@ it("closes unpaid pickup orders after the payment window, returns their stock on
         status: "NotEligible",
         reason: "NotAcceptanceLapse",
       });
+      // DEC-PAPER-ORDER-NEVER-RELEASED: a paper order (a sale taken during an outage) whose
+      // payment record did not go through is never released when its window ends: it is no
+      // candidate, closing it directly writes nothing, and its stock stays set aside.
+      const beforePaper = await counts();
+      const paperStock = await stock();
+      assert.equal((await discover()).includes(paperOrder.refs.order), false);
+      assert.deepEqual(await closure.close({ link: paperOrder.link }), {
+        status: "NotEligible",
+        reason: "PaperOrder",
+      });
+      assert.deepEqual(await counts(), beforePaper);
+      assert.deepEqual(await stock(), paperStock);
+      assert.equal(
+        await scoped(async (tx) =>
+          loadPickupPaymentWindowClosure(tx, scope, paperOrder.refs.order),
+        ),
+        null,
+      );
       // Another Store cannot close it.
       await assert.rejects(
         scoped((tx) =>
