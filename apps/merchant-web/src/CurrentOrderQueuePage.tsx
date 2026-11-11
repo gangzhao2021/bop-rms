@@ -1885,8 +1885,10 @@ export function acceptsInRow(
       (batch.staffCancellation?.refundMethod === "CardMachine" &&
         batch.staffCancellation.refundStatus === "Pending") ||
       (batch.sequence === 1 && cardMachineOwed(order) !== null)
-    ) &&
-    !(batch.canCancel || batch.canCancelItems)
+    )
+    // Live v15 2026-11-10: a manager's or owner's "Refuse and refund" is a choice beside Accept,
+    // never a step before it (every paid order waiting is refusable), so it stays in the order's
+    // panel and does not take Accept or Accept all off the list.
   );
 }
 /** Orders v2 (Owner 2026-10-26): an order's status words, the same in its row and its panel. */

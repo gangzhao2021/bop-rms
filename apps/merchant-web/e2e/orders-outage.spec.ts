@@ -233,6 +233,49 @@ test("@production Accept all accepts two waiting rounds of one table, each at th
   await expectNoInternalText(page);
 });
 
+for (const width of [390, 1024, 1440])
+  test(`@production a manager who may also refuse and refund gets Accept all and the row's Accept at ${width}`, async ({
+    page,
+  }) => {
+    // Live v15 2026-11-10: a paid order waiting for acceptance is always cancellable by a manager
+    // or owner, so the refusal must not take the plain Accept off the list.
+    await page.setViewportSize({ width, height: 900 });
+    const accepted = new Set<number>();
+    const managed = (n: number, at: string) => {
+      const order = round(n, at, accepted.has(n));
+      return {
+        ...order,
+        batches: order.batches.map((batch) => ({
+          ...batch,
+          canCancel: !accepted.has(n),
+        })),
+      };
+    };
+    await open(page, () => [
+      managed(2, "2026-09-14T00:02:00.000Z"),
+      managed(1, "2026-09-14T00:01:00.000Z"),
+    ]);
+    await page.route("**/merchant/orders/accept", async (route) => {
+      const body = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>;
+      accepted.add([1, 2].find((value) => body.orderReference === id(value)) ?? 0);
+      return route.fulfill({ headers, json: { status: "Created", acceptedOrderVersion: 2 } });
+    });
+    await page.goto("/operations/orders");
+    await expect(page.getByRole("heading", { name: "ORD-2", exact: true })).toBeVisible();
+    await page
+      .getByRole("group", { name: "Show orders" })
+      .getByRole("button", { name: /^To accept/u })
+      .click();
+    for (const n of [1, 2])
+      await expect(
+        page.getByRole("button", { name: `Accept ORD-${n}`, exact: true }),
+      ).toBeVisible();
+    await page.getByRole("button", { name: "Accept all 2" }).click();
+    await expect(page.getByText("Accepted all 2 orders.", { exact: true })).toBeVisible();
+    expect([...accepted].sort()).toEqual([1, 2]);
+    await expectNoInternalText(page);
+  });
+
 test("@production a new order is marked until opened, and sound stays on across a reload", async ({
   page,
 }) => {
