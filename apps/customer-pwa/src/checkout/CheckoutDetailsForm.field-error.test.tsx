@@ -26,7 +26,11 @@ const json = (value: unknown, status = 200) =>
     status,
     headers: { "content-type": "application/json", "cache-control": "no-store" },
   });
-beforeEach(() => setCustomerCsrfCredential("c".repeat(43)));
+beforeEach(() => {
+  setCustomerCsrfCredential("c".repeat(43));
+  // jsdom has no layout: the marked field is still brought into view in a browser.
+  Element.prototype.scrollIntoView = vi.fn();
+});
 afterEach(() => {
   vi.unstubAllGlobals();
   setCustomerCsrfCredential(null);

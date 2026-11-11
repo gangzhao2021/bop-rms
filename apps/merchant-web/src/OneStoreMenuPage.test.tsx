@@ -404,6 +404,9 @@ it("WP-2423 (M77, M167): a recipe that changed a listed dish's allergens offers 
     "A recipe changed what some dishes contain. Guests and the kitchen already see those allergens with the listed ones; list the menu to make them the reviewed list.",
   );
   expect(container.textContent).toContain("Allergens changed since this menu was listed.");
+  // WP-2423 M71: "List it" shows what goes live first; confirming it lists the menu as it is now.
+  await click(buttonNamed(container, "List it"));
+  expect(container.textContent).toContain("What goes live");
   await click(buttonNamed(container, "List it"));
   await settle(10);
   expect(sent.map((command) => command.action)).toEqual(["ListAll"]);

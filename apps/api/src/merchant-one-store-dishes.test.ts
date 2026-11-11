@@ -469,7 +469,13 @@ describe("WP-2423 item 8 ⑥ one dish saved from the one-page menu", () => {
       calls.length = 0;
       await dishes.command({
         ...session,
-        body: save({ productReference: id(10), allergens: null, priceMinor: "1388" }),
+        // WP-2423 M70: an edit's price is compared with the one the editor saw.
+        body: save({
+          productReference: id(10),
+          allergens: null,
+          priceMinor: "1388",
+          expectedPriceMinor: "1288",
+        }),
       });
       expect(calls).not.toContain("allergens:DeclareDish");
       expect(calls).toContain("price:SaveDraft");

@@ -213,7 +213,8 @@ describe("WP-2423 item 8 ② tonight's closing summary", () => {
       "Cash taken back after a refund made by mistake",
       // Table cash $86.95 + $5.00 taken back; the batch $219.50 + $1.25 charged on the machine.
       "$91.95",
-      "The batch total should be $220.75",
+      // v15 M57: the machine figure is what this system recorded on it.
+      "this system recorded $220.75 on the card machine today",
     ])
       expect(html, text).toContain(text);
     // Refunds and net taken stay as they were.
