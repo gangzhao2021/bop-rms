@@ -181,6 +181,8 @@ function paymentRoutes({
         async resume(input) {
           return (await terminal.confirm(input, confirmation, { resume: true })).created;
         },
+        // v15 batch-5: a stale page confirming a round its payer stopped is told at once.
+        stoppedByGuest: (input) => terminal.stoppedByGuest(input),
       },
     });
     router.post(

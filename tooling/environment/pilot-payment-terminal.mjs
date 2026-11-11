@@ -12,6 +12,7 @@ import {
 } from "../../packages/rms/payment/src/index.ts";
 import { createCustomerSessionPaymentResult } from "../../apps/api/dist/customer-session-payment-result.js";
 import { isPilotRuntime, pilotProviderEnvironment } from "./pilot-environment.mjs";
+import { isDiningRoundReturnedToCart } from "../../packages/rms/ordering/src/index.ts";
 /** InternalTest simulated channel only. Does not perform Ordering settlement. */
 export function createInternalPaymentTerminal(
   resources,
@@ -79,7 +80,10 @@ export function createInternalPaymentTerminal(
   const stripeRecorder = isStripeProvider(simulator)
     ? createStripeTerminalRecorder(resources, { provider: simulator, providerAccountReference })
     : null;
-  const resultOptions = { access: checkout.accessOptions, history, terminal };
+  // v15 batch-5: a payment whose round its payer stopped (dishes back in the cart) says so.
+  const returned = (orderBatchReference) =>
+    transactions.run((tx) => isDiningRoundReturnedToCart(tx, scope, orderBatchReference));
+  const resultOptions = { access: checkout.accessOptions, history, terminal, returned };
   const reader = createCustomerSessionPaymentResult(resultOptions);
   const service = createPaymentTerminalService({
     source: createPostgresPaymentTerminalSource(
@@ -160,6 +164,18 @@ export function createInternalPaymentTerminal(
   }
   return {
     resultOptions,
+    /** v15 batch-5: the guest's own payment result says its payer stopped this round. */
+    async stoppedByGuest(input) {
+      return (
+        (
+          await reader.read({
+            sessionCredential: input.sessionCredential,
+            csrfCredential: input.csrfCredential,
+            checkoutSessionReference: input.checkoutSessionReference,
+          })
+        ).failure === "StoppedByGuest"
+      );
+    },
     async reconcile(input) {
       const before = await reader.read(input);
       if (

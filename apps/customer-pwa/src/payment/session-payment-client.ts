@@ -51,6 +51,8 @@ export class SessionPaymentClientError extends Error {
       | "already_ordered"
       /** WP-2423: staff moved the table while this round was being sent; nothing was charged. */
       | "table_moved"
+      /** v15 batch-5: the guest paying for this round stopped it; nothing was charged. */
+      | "round_returned"
       | "unknown",
     /** already_ordered: the guest's own order that holds these dishes, when the server named it. */
     readonly placedOrder: {
@@ -121,6 +123,7 @@ export function createSessionPaymentClient() {
     payment_requote_required: "requote_required",
     payment_already_ordered: "already_ordered",
     payment_table_moved: "table_moved",
+    payment_round_returned: "round_returned",
   } as const;
   async function post(
     session: string,

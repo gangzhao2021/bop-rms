@@ -61,7 +61,11 @@ export function ResumePaymentPanel({
   const stop = (error: unknown) => {
     if (
       error instanceof SessionPaymentClientError &&
-      (error.code === "already_paid" || error.code === "retry_pending" || error.code === "conflict")
+      (error.code === "already_paid" ||
+        error.code === "retry_pending" ||
+        error.code === "conflict" ||
+        // v15 batch-5: the round's payer stopped it: the result says so.
+        error.code === "round_returned")
     ) {
       setState({ step: "offer" });
       onSettled();

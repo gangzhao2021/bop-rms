@@ -100,12 +100,15 @@ async function setup(enabled = true) {
   const sendToKitchen = vi
     .fn<NonNullable<CustomerPaymentIntentPort["sendToKitchen"]>>()
     .mockResolvedValue({ status: "Sent", orderReference: id(40), totalMinor: 2260n });
+  const stoppedByGuest = vi
+    .fn<NonNullable<CustomerPaymentIntentPort["stoppedByGuest"]>>()
+    .mockResolvedValue(false);
   const server = createServer(
     createApp(
       enabled
         ? {
             customerPaymentIntent: new CustomerPaymentIntentHandler({
-              port: { create, retry, resume, sendToKitchen },
+              port: { create, retry, resume, sendToKitchen, stoppedByGuest },
               allowedOrigin: "https://customer.example",
               now: () => "2026-08-03T15:01:00.000Z",
             }),
@@ -145,7 +148,7 @@ async function setup(enabled = true) {
       headers: { ...retryHeaders, ...extra },
       body: JSON.stringify(payload),
     });
-  return { result, create, retry, resume, sendToKitchen, body, send, sendRetry };
+  return { result, create, retry, resume, sendToKitchen, stoppedByGuest, body, send, sendRetry };
 }
 it.each([
   ["Created", 201],
@@ -270,6 +273,31 @@ it.each([
     schemaVersion: 1,
     error: { code: "payment_items_short", messageKey: "customer.payment.items_short" },
   });
+});
+
+it("v15 batch-5: a payment for a round its payer stopped is refused as that at once, not as an outage", async () => {
+  const f = await setup();
+  f.create.mockRejectedValue(new Error("SIMULATION_OUTCOME_CONFLICT"));
+  // Not stopped (or the answer can't be read): still the outage it was.
+  expect((await f.send()).status).toBe(503);
+  f.stoppedByGuest.mockRejectedValueOnce(new Error("synthetic outage"));
+  expect((await f.send()).status).toBe(503);
+  f.stoppedByGuest.mockResolvedValue(true);
+  const response = await f.send();
+  expect(response.status).toBe(409);
+  expect(await response.json()).toEqual({
+    schemaVersion: 1,
+    error: { code: "payment_round_returned", messageKey: "customer.payment.round_returned" },
+  });
+  expect(f.stoppedByGuest).toHaveBeenLastCalledWith({
+    sessionCredential: "s".repeat(43),
+    csrfCredential: "c".repeat(43),
+    checkoutSessionReference: id(31),
+  });
+  // An answer the guest can act on is never replaced by it.
+  f.create.mockRejectedValue(new OrderCreationError("ORDER_CREATE_TABLE_MOVED"));
+  expect((await f.send()).status).toBe(409);
+  expect(f.stoppedByGuest).toHaveBeenCalledTimes(3);
 });
 
 it("WP-2423: says staff moved the table while the round was being sent (nothing placed or charged)", async () => {

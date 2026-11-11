@@ -9,6 +9,7 @@ import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 import { prepareRealStaffRoundStore } from "../test-support/real-staff-round-store.mjs";
 import { createPilotApiRole } from "../test-support/sole-operator-brand-gate.mjs";
 import { createPersistentMerchantOrderQueue } from "../../../apps/api/src/persistent-merchant-order-queue.ts";
+import { isDiningRoundReturnedToCart } from "../../../packages/rms/ordering/src/index.ts";
 
 const { Client } = pg;
 
@@ -289,6 +290,16 @@ it("M38: the payer stops before paying; the round is cancelled unpaid and both p
         [[batch.batch, 1, "Cancelled", null]],
       );
       assert.equal(detail.lines.items.length, 2);
+      // v15 batch-5: a stale payment page asks Ordering whether this round came back to the
+      // cart; as the pilot API role, it has, and a round it never saw has not.
+      assert.equal(
+        await store.asApi((tx) => isDiningRoundReturnedToCart(tx, store.ownerScope, batch.batch)),
+        true,
+      );
+      assert.equal(
+        await store.asApi((tx) => isDiningRoundReturnedToCart(tx, store.ownerScope, label(0x7ff))),
+        false,
+      );
       // Each dish as it was: how many, the note, its Catalog evidence, and whose phone added it.
       const back = await lines(emptied.cartReference);
       assert.deepEqual(

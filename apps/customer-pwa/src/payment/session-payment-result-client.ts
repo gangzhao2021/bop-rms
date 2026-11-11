@@ -19,7 +19,8 @@ export interface SessionPaymentResult {
   /** WP-2423 abandoned payment: until when this payment can still be finished. */
   readonly payBy: string | null;
   /** Failed only: declined, or never finished and cancelled when its time ran out. */
-  readonly failure: "Declined" | "NotCompleted" | null;
+  /** v15 batch-5: `StoppedByGuest`: its payer stopped the round; the dishes are back in the cart. */
+  readonly failure: "Declined" | "NotCompleted" | "StoppedByGuest" | null;
 }
 function exact(value: unknown, fields: readonly string[]) {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error();
@@ -74,7 +75,11 @@ export function createSessionPaymentResultClient() {
         "failure",
       ]);
       const failure =
-        raw.failure === "Declined" || raw.failure === "NotCompleted" ? raw.failure : null;
+        raw.failure === "Declined" ||
+        raw.failure === "NotCompleted" ||
+        raw.failure === "StoppedByGuest"
+          ? raw.failure
+          : null;
       if (
         (raw.failure !== null && failure === null) ||
         (raw.status === "Failed") !== (failure !== null) ||

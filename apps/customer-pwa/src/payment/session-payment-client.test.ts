@@ -118,6 +118,21 @@ it("WP-2423: tells a menu update after checkout began apart from other refusals"
   });
 });
 
+it("v15 batch-5: says the round's payer stopped it, so a stale page stops waiting", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () =>
+      Response.json(
+        { schemaVersion: 1, error: { code: "payment_round_returned" } },
+        { status: 409 },
+      ),
+    ),
+  );
+  await expect(createSessionPaymentClient().simulate(id(1), id(4), "0")).rejects.toMatchObject({
+    code: "round_returned",
+  });
+});
+
 it("WP-2423: says staff moved the table while the round was being sent", async () => {
   vi.stubGlobal(
     "fetch",

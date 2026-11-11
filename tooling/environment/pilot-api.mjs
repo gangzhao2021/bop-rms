@@ -120,6 +120,8 @@ export async function createRuntime(
       // WP-2423 Q4: payment does not start once the Store stops taking this order.
       paymentIntent: {
         ...paymentIntent,
+        // v15 batch-5: a stale page paying a round its payer stopped is told at once.
+        stoppedByGuest: (input) => paymentTerminal.stoppedByGuest(input),
         async create(input) {
           if (!(await diningCheckout.takesOrder(input))) throw new CustomerStoreClosedError();
           if (payLater !== null && (await payLater.tableTiming(input)) === "PayLater")

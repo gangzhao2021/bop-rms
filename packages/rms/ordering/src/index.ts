@@ -148,6 +148,7 @@ export {
 } from "./infrastructure/persistence/cart-staff-line-store.js";
 export {
   findGuestDiningRound,
+  isDiningRoundReturnedToCart,
   returnDiningRoundToCart,
   type DiningRoundCartReturn,
   type DiningRoundCartReturnInput,

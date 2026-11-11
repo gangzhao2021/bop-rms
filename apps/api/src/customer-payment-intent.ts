@@ -53,6 +53,12 @@ export interface CustomerPaymentIntentPort {
   retry?(input: CustomerPaymentRetryInput): Promise<unknown>;
   /** WP-2423 abandoned payment: the same guest returns to the checkout's open payment. */
   resume?(input: CustomerPaymentRetryInput): Promise<unknown>;
+  /**
+   * v15 batch-5: after a payment call failed with no answer the guest can act on, whether the
+   * guest paying for this checkout's round stopped it before paying (its dishes are back in the
+   * table's cart), from the guest's own payment result. Rejects or false: not said.
+   */
+  stoppedByGuest?(input: CustomerPaymentRetryInput): Promise<boolean>;
 }
 function protect(response: Response) {
   response.setHeader("Cache-Control", "no-store");
@@ -80,7 +86,12 @@ type ExplicitRejection =
    * WP-2423 (table-move-payment review): staff moved the party while this round was being sent;
    * nothing was placed or charged, and checkout starts again at the party's current table.
    */
-  | "table_moved";
+  | "table_moved"
+  /**
+   * v15 batch-5: the guest paying for this round stopped it before paying ("Don't pay. Put the
+   * dishes back"); nothing was charged and its dishes are back in the table's cart.
+   */
+  | "round_returned";
 /**
  * WP-2423 M03: the guest's own Order that already holds these dishes, so the page can open it.
  * Only references the guest already holds; never another guest's Order.
@@ -470,7 +481,25 @@ export class CustomerPaymentIntentHandler {
           return;
         }
         const explicit = retry ? retryRejection(error) : stockRejection(error);
-        reject(response, failure(error), explicit);
+        const status = failure(error);
+        // v15 batch-5: a stale payment page confirming a round its payer already stopped is told
+        // so at once, not left retrying an outage until its time runs out.
+        if (
+          explicit === undefined &&
+          status === 503 &&
+          this.#port.stoppedByGuest !== undefined &&
+          (await this.#port
+            .stoppedByGuest({
+              sessionCredential: input.sessionCredential,
+              csrfCredential: input.csrfCredential,
+              checkoutSessionReference: input.checkoutSessionReference,
+            })
+            .catch(() => false))
+        ) {
+          reject(response, 409, "round_returned");
+          return;
+        }
+        reject(response, status, explicit);
         return;
       }
       try {

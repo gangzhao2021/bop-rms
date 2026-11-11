@@ -18,6 +18,11 @@ export interface CustomerSessionPaymentResultOptions {
   readonly access: CustomerCheckoutSessionAuthorizationOptions;
   readonly history: Pick<PaymentIntentCreationPorts["repository"], "resolveOperation">;
   readonly terminal: Pick<ReturnType<typeof createPostgresPaymentTerminalStore>, "read">;
+  /**
+   * v15 batch-5: Ordering's record that this round's dishes went back to the table's cart because
+   * the guest paying for it stopped before paying (absent: not composed; a failed read: not said).
+   */
+  readonly returned?: (orderBatchReference: string) => Promise<boolean>;
 }
 export interface CustomerSessionPaymentResult {
   readonly checkoutSessionReference: string;
@@ -37,9 +42,11 @@ export interface CustomerSessionPaymentResult {
   readonly payBy: string | null;
   /**
    * Why a failed payment failed: the card was declined, or the payment was never finished and was
-   * cancelled when its time ran out (`NotCompleted`). Null unless Failed.
+   * cancelled when its time ran out (`NotCompleted`), or (v15 batch-5) the guest paying for the
+   * round stopped before paying and its dishes went back to the cart (`StoppedByGuest`). Null
+   * unless Failed.
    */
-  readonly failure: "Declined" | "NotCompleted" | null;
+  readonly failure: "Declined" | "NotCompleted" | "StoppedByGuest" | null;
 }
 const unavailable = (): never => {
   throw new CheckoutSessionServiceError("DEPENDENCY_UNAVAILABLE");
@@ -130,6 +137,12 @@ export function createCustomerSessionPaymentResult(options: CustomerSessionPayme
           status = expectedOutcome;
           if (expectedOutcome === "Failed")
             failure = fact.failureReason === "Cancelled" ? "NotCompleted" : "Declined";
+          // v15 batch-5: a payment the round's payer stopped (its dishes are back in the cart) is
+          // said as that, never as one whose time ran out. Unreadable: said as before.
+          if (failure === "NotCompleted" && options.returned !== undefined)
+            failure = (await options.returned(String(p.orderBatchReference)).catch(() => false))
+              ? "StoppedByGuest"
+              : failure;
         }
         result = Object.freeze({
           checkoutSessionReference: session.checkoutSessionReference,

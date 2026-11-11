@@ -380,3 +380,32 @@ export async function findGuestDiningRound(
         returned: row.returned === true,
       });
 }
+
+/**
+ * v15 batch-5: whether this round's dishes came back to the table's cart because the guest paying
+ * for it stopped before paying (2000_412), so a stale payment page says that, never that its time
+ * ran out. Read only, on the caller's transaction, under the Store's own row security.
+ */
+export async function isDiningRoundReturnedToCart(
+  tx: CartQueryTransaction,
+  scopeInput: { readonly brandReference: string; readonly storeReference: string },
+  orderBatchReference: string,
+): Promise<boolean> {
+  const brand = parseOrderingReference(scopeInput.brandReference);
+  const store = parseOrderingReference(scopeInput.storeReference);
+  const batch = parseOrderingReference(orderBatchReference);
+  await tx.query(
+    "SELECT set_config('bop.brand_id', $1, true), set_config('bop.store_id', $2, true)",
+    [brand, store],
+  );
+  const rows = rowsOf(
+    await tx.query(
+      `SELECT EXISTS (SELECT 1 FROM rms_ordering.dining_round_cart_return x
+         WHERE x.brand_id=$1 AND x.store_id=$2 AND x.order_batch_id=$3) AS returned`,
+      [brand, store, batch],
+    ),
+  );
+  const returned = rows[0]?.returned;
+  if (rows.length !== 1 || typeof returned !== "boolean") throw new CartError("CART_UNAVAILABLE");
+  return returned;
+}

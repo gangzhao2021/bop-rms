@@ -368,6 +368,11 @@ function PreparedSessionPaymentPage({
         setStatus("denied");
         return;
       }
+      // v15 batch-5: the round's payer stopped it (another tab): its result says so at once.
+      if (error instanceof SessionPaymentClientError && error.code === "round_returned") {
+        void navigate("/checkout/result", { replace: true });
+        return;
+      }
       const failure = paymentStartFailureState(error, wasCheckoutCardOffered());
       if (failure === "already_ordered" && error instanceof SessionPaymentClientError)
         setPlacedOrder(error.placedOrder);
@@ -467,7 +472,17 @@ function PreparedSessionPaymentPage({
         selectedTip.amountMinor,
       );
       if (alive.current && inContext()) void navigate("/checkout/result", { replace: true });
-    } catch {
+    } catch (error) {
+      // v15 batch-5: the round's payer stopped it (another tab): its result says so at once.
+      if (
+        alive.current &&
+        inContext() &&
+        error instanceof SessionPaymentClientError &&
+        error.code === "round_returned"
+      ) {
+        void navigate("/checkout/result", { replace: true });
+        return;
+      }
       if (alive.current) setStatus(inContext() ? "unknown" : "denied");
     } finally {
       flight.current = false;

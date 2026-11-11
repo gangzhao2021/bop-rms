@@ -104,7 +104,7 @@ export class CustomerPaymentResultHandler {
           !(
             result.failure === null ||
             (result.status === "Failed" &&
-              ["Declined", "NotCompleted"].includes(String(result.failure)))
+              ["Declined", "NotCompleted", "StoppedByGuest"].includes(String(result.failure)))
           ) ||
           (result.status === "Failed") !== (result.failure !== null) ||
           !(

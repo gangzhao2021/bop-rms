@@ -82,6 +82,22 @@ it("preserves pending/unknown/failed and rejects responses after credential repl
     );
     expect((await createSessionPaymentResultClient().read(id(1))).status).toBe(status);
   }
+  // v15 batch-5: a payment its round's payer stopped (dishes back in the cart) is read as that.
+  vi.stubGlobal(
+    "fetch",
+    vi
+      .fn()
+      .mockResolvedValue(
+        Response.json(
+          {
+            schemaVersion: 1,
+            payment: { ...success, status: "Failed", failure: "StoppedByGuest" },
+          },
+          { headers: { "cache-control": "no-store" } },
+        ),
+      ),
+  );
+  expect((await createSessionPaymentResultClient().read(id(1))).failure).toBe("StoppedByGuest");
   // WP-2423 abandoned payment: a failure reason only with a failed payment, from a closed set.
   for (const payment of [
     { ...success, failure: "Declined" },

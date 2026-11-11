@@ -19,7 +19,7 @@ const mocks = vi.hoisted(() => ({ read: vi.fn() }));
 vi.mock("./customer-checkout-session-read.js", () => ({
   createCustomerCheckoutSessionRead: () => ({ read: mocks.read }),
 }));
-async function fixture() {
+async function fixture(returned?: (orderBatchReference: string) => Promise<boolean>) {
   const original = await createPaymentIntentCreationService(
     harness({ prepared: preparation({ committedAt: at }) }).ports,
   ).create(command({ tipSelectionReference: id(30) }));
@@ -78,6 +78,7 @@ async function fixture() {
     access: { now: () => now } as CustomerCheckoutSessionAuthorizationOptions,
     history,
     terminal,
+    ...(returned === undefined ? {} : { returned }),
   });
   const p = original.record.intent.preparation;
   const fact = {
@@ -229,4 +230,42 @@ it("reports a committed failure without implying successful payment", async () =
     status: "Failed",
     failure: "NotCompleted",
   });
+});
+
+it("v15 batch-5: a cancelled attempt whose round its payer stopped is said as stopped, never as timed out", async () => {
+  const asked: string[] = [];
+  for (const [answer, failure] of [
+    [async () => true, "StoppedByGuest"],
+    [async () => false, "NotCompleted"],
+    // Ordering can't be read: said as before, never an outage.
+    [
+      async () => {
+        throw new Error("synthetic outage");
+      },
+      "NotCompleted",
+    ],
+  ] as const) {
+    const f = await fixture(async (batch) => {
+      asked.push(batch);
+      return answer();
+    });
+    const cancelled = {
+      ...f.success,
+      outcome: "Failed" as const,
+      amount: null,
+      failureReason: "Cancelled" as const,
+      retryDisposition: "Never" as const,
+    };
+    f.terminal.read.mockResolvedValue({
+      ...cancelled,
+      event: createPaymentTerminalEnvelope({
+        eventReference: id(87),
+        correlationReference: refs.operation,
+        fact: cancelled as never,
+      }),
+    });
+    expect(await f.service.read(f.input)).toMatchObject({ status: "Failed", failure });
+  }
+  expect(asked).toHaveLength(3);
+  expect(new Set(asked).size).toBe(1);
 });
