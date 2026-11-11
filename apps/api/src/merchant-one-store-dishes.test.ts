@@ -619,6 +619,35 @@ describe("WP-2423 item 8 ⑥ one dish saved from the one-page menu", () => {
     expect(calls.slice(0, 3)).toEqual(["product:read", "menu:Revise", "product:SaveDraft"]);
     expect(calls).toContain("storePrice:ChangeStorePrice");
     expect(renamed).toMatchObject({ listingNeeded: true, price: { storePriceMinor: "1400" } });
+    // Its answer was lost and staff press Save again unchanged: the dish is already renamed, so
+    // nothing new is written, but the new name still waits for "List it".
+    calls.length = 0;
+    const again = await dishes.command({
+      ...session,
+      body: save({
+        productReference: id(10),
+        operationReference: id(141),
+        name: "Dan dan noodles, spicy (TEST)",
+        priceMinor: "1400",
+        priceScope: "ThisStore",
+        expectedPriceMinor: "1350",
+      }),
+    });
+    expect(calls).not.toContain("menu:Revise");
+    expect(again).toMatchObject({ listingNeeded: true, price: { storePriceMinor: "1400" } });
+    // A later price at this Store only, with that name still unlisted: something still waits.
+    const later = await dishes.command({
+      ...session,
+      body: save({
+        productReference: id(10),
+        operationReference: id(143),
+        name: "Dan dan noodles, spicy (TEST)",
+        priceMinor: "1450",
+        priceScope: "ThisStore",
+        expectedPriceMinor: "1400",
+      }),
+    });
+    expect(later).toMatchObject({ listingNeeded: true, price: { storePriceMinor: "1450" } });
   });
 
   it("WP-2423 (v15 batch 5): changed allergens on a listed dish are listed with the menu", async () => {

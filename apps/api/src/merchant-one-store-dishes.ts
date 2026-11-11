@@ -1191,9 +1191,12 @@ export function createMerchantOneStoreDishes(options: {
       choicesWaiting,
       // WP-2423 M70: the dish's prices as this save left them (null: no price was sent).
       price,
-      // WP-2423 (v15 batch 5): something this save changed goes live with "List it" (false: a
-      // price at this Store only, live now, and nothing else changed).
-      listingNeeded: opened.listingNeeded,
+      // WP-2423 (v15 batch 5): something waits for "List it" — what this save changed, or what an
+      // earlier save (or this one's own lost first answer) left in the menu's open draft. False
+      // only when the menu is listed as it is: a price at this Store only, live now.
+      listingNeeded:
+        opened.listingNeeded ||
+        (await loadMenu(session, body.menuReference)).publication?.state !== "Published",
     };
   };
 
