@@ -270,6 +270,19 @@ export function teaRefusalText(tea: TableTeaView | null): string | null {
     );
   return null;
 }
+/**
+ * M29 (v15 batch 5): a paid (or written-off) table's guest count can still be corrected, for the
+ * day's guest numbers, but its bill is settled: the per-head charge stays as paid. Said whenever
+ * the count and the charge differ, so a change never looks as if the bill followed it.
+ */
+export function teaPaidText(tea: TableTeaView | null): string | null {
+  if (tea === null || tea.status !== "Paid" || tea.expected === null) return null;
+  if (tea.expected === tea.charged) return null;
+  return t(
+    "This table has paid, so {item} on the bill stays at {charged}. If a guest should get money back, a manager refunds it on the order.",
+    { item: teaItemName(tea), charged: String(tea.charged) },
+  );
+}
 // A read that fails is tried again quietly, sooner at first (a busy moment passes).
 const teaReadRetryMs = (attempt: number) => (attempt < 6 ? 5_000 : 15_000);
 /**
@@ -680,7 +693,7 @@ export function TablePartySize({
         </p>
       ) : (
         <p className="table-panel__tea">
-          {tea.status === "Mismatch"
+          {tea.status === "Mismatch" || teaPaidText(tea) !== null
             ? t("{item} on the bill: {charged} · guests: {expected}", {
                 item: teaItemName(tea),
                 charged: tea.charged,
@@ -782,6 +795,8 @@ export function TablePartySize({
         <p role="alert">{needsManagerLabel(tea)}</p>
       ) : teaRefusalText(tea) !== null ? (
         <p role="alert">{teaRefusalText(tea)}</p>
+      ) : teaPaidText(tea) !== null ? (
+        <p role="status">{teaPaidText(tea)}</p>
       ) : teaUnconfirmed !== null ? (
         <p role="alert">
           {teaNotConfirmed(tea, teaUnconfirmed)}{" "}

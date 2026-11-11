@@ -190,3 +190,155 @@ test("@production staff record how many guests sit at a table and change it", as
   expect(sent.at(-1)).toMatchObject({ action: "Record", expectedVersion: 2, partySize: 5 });
   await expectNoInternalText(page, ["Mark unavailable"]);
 });
+
+test("@production M29: changing the guests at a paid table says the per-head charge stays as paid", async ({
+  page,
+}) => {
+  const scope = {
+    brandLabel: "Synthetic Brand",
+    storeLabel: "Synthetic Store",
+    storeReference: id(99),
+    timeZone: "America/Toronto",
+  };
+  await page.route("**/merchant/session", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        authenticated: true,
+        csrf,
+        workspace: {
+          screenId: "HOME-OVERVIEW",
+          selectedScope: scope,
+          authorizedStores: [scope],
+          businessDate: "2026-10-28",
+          storeStatus: "Open",
+          freshness: "Current",
+          dashboardAvailability: "UnavailableUntilWP1905",
+          navigation: [
+            {
+              screenId: "DIN-FLOOR-BOARD",
+              label: "Tables",
+              href: "/operations/dining",
+              permission: "dining.operate",
+            },
+          ],
+        },
+      },
+    }),
+  );
+  await page.route("**/merchant/dining/tables", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        canOperateTables: true,
+        canCloseSessions: false,
+        items: [
+          {
+            tableReference: id(1),
+            stableLabel: "T6",
+            areaCode: "MAIN",
+            capacity: 4,
+            lifecycle: "Published",
+            operationalState: "Available",
+            blockReasonCode: null,
+            aggregateVersion: 2,
+            currentDiningSessionReference: id(2),
+            elapsedMinutes: 40,
+            qrCodeValidUntil: "2027-04-12T13:00:00.000Z",
+            paymentTiming: "PayFirst",
+            session: { phase: "Active", version: 3, orderReference: null },
+            staffRoundsAwaitingPayment: [],
+          },
+        ],
+        nextAfterTableReference: null,
+      },
+    }),
+  );
+  await page.route("**/merchant/dining/sessions/qr-join", (route) =>
+    route.fulfill({
+      headers,
+      json: { diningSessionReference: id(2), paused: false, phones: [], rounds: [] },
+    }),
+  );
+  const party = { partySize: 2 as number | null, version: 1 };
+  const sent: Record<string, unknown>[] = [];
+  let conflictOnce = false;
+  await page.route("**/merchant/dining/party-size", (route) => {
+    const body = route.request().postDataJSON() as Record<string, unknown>;
+    sent.push(body);
+    if (body.action === "Read")
+      return route.fulfill({
+        headers,
+        json: {
+          askPartySize: true,
+          partySizes:
+            party.partySize === null
+              ? []
+              : [
+                  {
+                    diningSessionReference: id(2),
+                    partySize: party.partySize,
+                    version: party.version,
+                  },
+                ],
+        },
+      });
+    if (conflictOnce) {
+      conflictOnce = false;
+      // Another server recorded 6 first.
+      party.partySize = 6;
+      party.version += 1;
+      return route.fulfill({ headers, status: 409, json: { error: "party_size_changed" } });
+    }
+    if (body.expectedVersion !== party.version)
+      return route.fulfill({ headers, status: 409, json: { error: "party_size_changed" } });
+    party.partySize = body.partySize as number;
+    party.version += 1;
+    return route.fulfill({
+      headers,
+      json: { diningSessionReference: id(2), partySize: party.partySize, version: party.version },
+    });
+  });
+  // WP-2423 item 8 ⑦ 4b-2: the tea follows the guests recorded (the server adds or takes it off).
+  const teaSent: Record<string, unknown>[] = [];
+  // The table paid for two teas; its bill is settled.
+  let tea = {
+    status: "Paid",
+    charged: 2,
+    expected: 2 as number | null,
+    problem: null,
+    itemName: "Tea",
+  };
+  await page.route("**/merchant/dining/tea-charge", (route) => {
+    const body = route.request().postDataJSON() as Record<string, unknown>;
+    teaSent.push(body);
+    tea = { ...tea, expected: party.partySize };
+    return route.fulfill({ headers, json: tea });
+  });
+  const said =
+    "This table has paid, so Tea on the bill stays at 2. If a guest should get money back, a manager refunds it on the order.";
+  for (const width of [390, 1024, 1440]) {
+    party.partySize = 2;
+    tea = { ...tea, expected: 2 };
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await page.goto("/operations/dining");
+    await page.getByRole("button", { name: "Select T6", exact: true }).click();
+    const guests = page.getByRole("region", { name: "Guests at this table" });
+    await expect(guests).toContainText("2 guests");
+    await expect(guests).toContainText("Tea on the bill: 2");
+    await expect(guests.getByText(said)).toHaveCount(0);
+    // One guest left early: the count is corrected; the paid bill does not change with it.
+    await guests.getByRole("button", { name: "Change", exact: true }).click();
+    await guests.getByRole("textbox", { name: "Number of guests" }).fill("1");
+    await guests.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(guests).toContainText("1 guest");
+    await expect(guests).toContainText("Tea on the bill: 2 · guests: 1");
+    await expect(guests.getByRole("status").filter({ hasText: said })).toBeVisible();
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    const axe = await new AxeBuilder({ page }).include(".table-panel__party").analyze();
+    expect(axe.violations).toEqual([]);
+  }
+  await expectNoInternalText(page, ["Mark unavailable"]);
+});

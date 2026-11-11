@@ -699,6 +699,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "No waste recorded yet.": "还没有报损记录。",
   "Nothing is waiting for review.": "没有等待复核的记录。",
   "The bill is being paid, so {item} can't change now.": "正在结账，{item}现在不能改。",
+  "This table has paid, so {item} on the bill stays at {charged}. If a guest should get money back, a manager refunds it on the order.":
+    "这桌已经付款，账单上的{item}仍按 {charged} 位收。如需给客人退钱，请经理在订单上退款。",
   "{item} is already served for {count} guests. To charge fewer, comp the extra.":
     "已为 {count} 位上了{item}。要少收，请把多出的免单。",
   "Someone else changed the guest count. Check it again.": "别人刚改了人数，请再看一下。",

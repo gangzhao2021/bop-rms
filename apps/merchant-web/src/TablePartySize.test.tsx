@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   TablePartySize,
   TablePartySizeError,
+  teaPaidText,
   teaRefusalText,
   type TablePartySizeClient,
   type TableTeaClient,
@@ -113,5 +114,23 @@ describe("M29: a refused tea change says why, never that the system is busy", ()
     );
     expect(teaRefusalText(view("Unavailable"))).toBeNull();
     expect(teaRefusalText({ ...view("CheckingOut"), status: "Charged" })).toBeNull();
+  });
+});
+
+describe("M29 (v15 batch 5): a paid table's guest count changing says the bill stays as paid", () => {
+  const paid = (charged: number, expected: number | null): TableTeaView => ({
+    status: "Paid",
+    charged,
+    expected,
+    problem: null,
+    itemName: "Tea",
+  });
+  it("explains a count that no longer matches the paid charge, and nothing when it matches", () => {
+    expect(teaPaidText(paid(2, 1))).toBe(
+      "This table has paid, so Tea on the bill stays at 2. If a guest should get money back, a manager refunds it on the order.",
+    );
+    expect(teaPaidText(paid(2, 2))).toBeNull();
+    expect(teaPaidText(paid(2, null))).toBeNull();
+    expect(teaPaidText({ ...paid(2, 1), status: "Charged" })).toBeNull();
   });
 });
