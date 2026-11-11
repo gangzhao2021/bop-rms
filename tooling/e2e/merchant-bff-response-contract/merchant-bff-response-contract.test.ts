@@ -406,6 +406,8 @@ const dineIn = {
       waitingForStaff: null,
     },
   ],
+  // WP-2423 (M23): sent only when a dish sold out since it was ordered; the type wants it.
+  soldOutNow: true as const,
 } satisfies QueueItem;
 const heldPickup = {
   orderReference: id(0x902),
@@ -486,6 +488,8 @@ const heldPickup = {
       waitingForStaff: null,
     },
   ],
+  // WP-2423 (M23): sent only when a dish sold out since it was ordered; the type wants it.
+  soldOutNow: true as const,
 } satisfies QueueItem;
 const earlierCounterPickup = {
   orderReference: id(0x801),
@@ -575,6 +579,8 @@ const earlierCounterPickup = {
       waitingForStaff: null,
     },
   ],
+  // WP-2423 (M23): sent only when a dish sold out since it was ordered; the type wants it.
+  soldOutNow: true as const,
 } satisfies QueueItem;
 // DEC-PAID-ORDER-AUTO-ACCEPT: sent only at a Store that uses it; the type wants it always.
 const paidOrderWatch = {
@@ -634,6 +640,8 @@ const line = (n: number, batch: string, canCancel: boolean) => ({
   // The detail adds what staff may do with each line (absent from the list's lines type).
   canCancel,
   cancellation: null,
+  // WP-2423 (M23): sold out here since it was ordered (sent only when so).
+  unavailableNow: "SoldOut" as const,
 });
 const detailView = {
   items: [dineIn],
@@ -768,6 +776,8 @@ const kitchenItem = (n: number, status: "Queued" | "Completed"): KitchenList["it
   comboPartSections: { [id(0x650 + n)]: null },
   chase: { count: 1, lastChasedAt: at(20) },
   takenOnPaper: true,
+  // WP-2423 (M93): the dish contains alcohol; check ID when serving it (sent only then).
+  checkId: true,
   // WP-2423 M10: one unit refunded and not to be made.
   refundedQuantity: 1,
   workItemCreatedAt: at(16),
@@ -784,6 +794,8 @@ const kitchenItem = (n: number, status: "Queued" | "Completed"): KitchenList["it
           items: [{ code: "PEANUT", name: "Peanuts", classification: "Contains" }],
           // WP-2423 ⑪: whether these are for exactly the options chosen on the item.
           forChoices: true,
+          // WP-2423 (M77): a recipe changed them since the menu was listed (sent only when so).
+          changedSinceListed: true as const,
         }
       : { status: "Unavailable" },
   orderLabel: {
@@ -793,6 +805,8 @@ const kitchenItem = (n: number, status: "Queued" | "Completed"): KitchenList["it
     movedFromTableLabel: null,
     mergedFromTableLabel: null,
     enteredByStaff: false,
+    // WP-2423 (M171): what the table must avoid (sent only when marked).
+    tableAllergies: [{ code: "PEANUT", name: "Peanuts" }],
   },
   businessDate: "2026-10-16",
   customerNote: n === 1 ? "No peanuts" : null,
@@ -816,6 +830,8 @@ const kitchenView = {
       notSent: { reason: "KitchenScreenOff", itemCount: 2 },
       // WP-2423 M04: sent only when so; the type wants all.
       acceptedNotInKitchen: true as const,
+      // WP-2423 (M171): a pickup has no table, so nothing is sent; the type wants the field.
+      ...({} as { readonly tableAllergies: readonly { code: string; name: string }[] }),
     },
     {
       orderNumber: "T7-13",
@@ -826,6 +842,7 @@ const kitchenView = {
       acceptBy: null,
       notSent: { reason: "HasAlcohol", itemCount: 1 },
       acceptedNotInKitchen: true as const,
+      tableAllergies: [{ code: "PEANUT", name: "Peanuts" }],
     },
   ],
   paidOrderWatch: { ...paidOrderWatch, canAcceptOrders: false },
@@ -860,6 +877,8 @@ const tablesView = {
       // A guest started this table by scanning; it closes by itself unless staff take it over.
       guestStart: { closesByItselfAt: at(80), endedLastParty: true as const },
       blockedSince: at(20),
+      // WP-2423 (M171): the allergens this table must avoid (sent only when marked).
+      tableAllergies: ["PEANUT"],
       paymentTiming: "PayLater",
       staffCall: null,
       heldRounds: [],
@@ -884,6 +903,8 @@ const tablesView = {
     },
   ],
   nextAfterTableReference: null,
+  // WP-2423 (M171): the allergens staff can mark a table with (sent when the Brand has a list).
+  allergenChoices: [{ code: "PEANUT", name: "Peanuts", nameZh: "花生" }],
 } satisfies Output<"diningTables">;
 
 const run = {
