@@ -1,4 +1,4 @@
-import type { RefundRecoveryView } from "./ordinary-refund-client.js";
+import { OrdinaryRefundClientError, type RefundRecoveryView } from "./ordinary-refund-client.js";
 import { MemoryRouter } from "react-router";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, expect, it, vi } from "vitest";
@@ -7,6 +7,7 @@ import {
   CardMachineRefundDone,
   cardMachineRefundToRecord,
   MoneyTakenBack,
+  moneyTakenBackFailure,
   cardMachineRequestsToCheck,
   nextFinancialSummary,
   onlineSendControl,
@@ -19,6 +20,7 @@ import {
   requestBlockedMessage,
   requestFinished,
   requestProgressLabel,
+  stopMakingByDefault,
 } from "./RefundPaymentPage.js";
 import { StoreTimeZoneContext } from "./StoreTime.js";
 import { setLanguageForTest } from "./i18n/i18n.js";
@@ -427,4 +429,26 @@ it("WP-2423 M14: a cashier's unsent request is never read as approved, and Send 
   expect(onlineSendControl(notSent, { state: "AwaitingApproval" }, true)).toBe("AwaitingApproval");
   expect(onlineSendControl(notSent, { state: "Approved" }, true)).toBe("ApprovedNotSent");
   expect(onlineSendControl({ ...notSent, method: "CardMachine" }, null, true)).toBeNull();
+});
+
+it("WP-2423 M163: an attempt already recorded with other details is said plainly, never retried forever", () => {
+  const conflict = moneyTakenBackFailure(new OrdinaryRefundClientError("RecoveryConflict"));
+  expect(conflict.message).toContain("already recorded with other details");
+  expect(conflict.message).not.toContain("Press Record again");
+  expect(conflict).toMatchObject({ attemptAnswered: true, reread: true });
+  // Only an unknown result keeps the attempt, so pressing Record again never records it twice.
+  expect(moneyTakenBackFailure(new OrdinaryRefundClientError("OutcomeUnknown"))).toMatchObject({
+    attemptAnswered: false,
+    message: "Couldn't confirm it was recorded. Press Record again: it is never recorded twice.",
+  });
+  expect(
+    moneyTakenBackFailure(new OrdinaryRefundClientError("RecoveryAboveRefunded")).attemptAnswered,
+  ).toBe(true);
+});
+
+it("WP-2423 M10: stop making it too is ticked by default only for a dish known not to be made", () => {
+  expect(stopMakingByDefault("NotStarted")).toBe(true);
+  expect(stopMakingByDefault("Started")).toBe(false);
+  // Not known (the kitchen could not be read): never preselected.
+  expect(stopMakingByDefault(null)).toBe(false);
 });

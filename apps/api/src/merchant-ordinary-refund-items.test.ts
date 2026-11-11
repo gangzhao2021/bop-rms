@@ -14,6 +14,7 @@ const d = vi.hoisted(() => ({
   member: vi.fn(),
   status: vi.fn(),
   cancelledRound: vi.fn(),
+  kitchenFails: false,
 }));
 // Rounds refunded whole by their cancellation (Ordering owner reads), none unless a test says so.
 vi.mock("./merchant-round-cancellation-refund.js", () => ({
@@ -59,14 +60,22 @@ vi.mock("@bop/membership", async (original) => ({
 // WP-2423 M10: the kitchen's dish states and the withdrawn units (owner reads), none by default.
 vi.mock("@rms/kitchen", async (original) => ({
   ...(await original<object>()),
-  listStoreKitchenOrderItemStates: async () =>
-    new Map([["01909974-0000-7000-8000-00000000000c", "NotStarted"]]),
+  listStoreKitchenOrderItemStates: async () => {
+    if (d.kitchenFails) throw new Error("KITCHEN_UNAVAILABLE");
+    return new Map([["01909974-0000-7000-8000-00000000000c", "Started"]]);
+  },
 }));
 vi.mock("./order-refund-withdrawal.js", () => ({
   readRefundWithdrawnUnits: async () => new Map(),
 }));
 vi.mock("./merchant-round-business-date.js", () => ({
-  withOptionalRead: async (_tx: unknown, work: () => Promise<unknown>) => work(),
+  withOptionalRead: async (_tx: unknown, work: () => Promise<unknown>, fallback: unknown) => {
+    try {
+      return await work();
+    } catch {
+      return fallback;
+    }
+  },
 }));
 vi.mock("@rms/ordering", async (original) => ({
   ...(await original<object>()),
@@ -194,8 +203,8 @@ it("returns paid unclaimed units and current claim version without private facts
         refundedByCancellation: false,
         paymentIntentReference: id(31),
         paymentMethod: "Online",
-        // WP-2423 M10: the kitchen has not started it, so "stop making it too" is the default.
-        kitchen: "NotStarted",
+        // WP-2423 M10: the kitchen has started it, so "stop making it too" is not the default.
+        kitchen: "Started",
         withdrawnQuantity: 0,
       },
       {
@@ -208,7 +217,8 @@ it("returns paid unclaimed units and current claim version without private facts
         refundedByCancellation: false,
         paymentIntentReference: null,
         paymentMethod: null,
-        kitchen: null,
+        // No kitchen work yet (read, nothing there): not made.
+        kitchen: "NotStarted",
         withdrawnQuantity: 0,
       },
     ],
@@ -229,6 +239,16 @@ it.each(["actorReference", "observedAt", "storeReference"])("rejects injected %s
     f.operation({ ...f.input, query: { ...f.input.query, [key]: id(99) } }),
   ).rejects.toThrow();
   expect(f.run).not.toHaveBeenCalled();
+});
+it("WP-2423 M10: a kitchen read that failed is not known, never read as not made", async () => {
+  d.kitchenFails = true;
+  try {
+    const f = setup();
+    const read = (await f.operation(f.input)) as { items: { kitchen: unknown }[] };
+    expect(read.items.map((item) => item.kitchen)).toEqual([null, null]);
+  } finally {
+    d.kitchenFails = false;
+  }
 });
 it("rejects non-Manager role before reading financial information", async () => {
   const f = setup();

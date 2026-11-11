@@ -300,12 +300,13 @@ export function createMerchantOrdinaryRefundItems(options: {
                 paymentCaptured && !cancelledWithRefund ? snapshot.quantity - occupied.length : 0,
               paymentCaptured,
               refundedByCancellation: cancelledWithRefund,
-              // WP-2423 M10: the kitchen's state of this dish (null: no kitchen work yet, or not
-              // known), and how many of its units staff already said not to make.
+              // WP-2423 M10: the kitchen's state of this dish (read and no kitchen work yet: not
+              // made, NotStarted; null only when it could not be read), and how many of its units
+              // staff already said not to make.
               kitchen:
                 kitchen === null
                   ? null
-                  : (kitchen.get(String(snapshot.orderItemReference)) ?? null),
+                  : (kitchen.get(String(snapshot.orderItemReference)) ?? "NotStarted"),
               withdrawnQuantity: Math.min(
                 withdrawn.get(String(snapshot.orderItemReference)) ?? 0,
                 snapshot.quantity,

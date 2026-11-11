@@ -637,6 +637,12 @@ function QuantityStepper({
     </div>
   );
 }
+/**
+ * WP-2423 M10 (DEC-OWNER-DEFAULTS-2026-11-06 item 4): "stop making it too" is Yes by default only
+ * when the dish is known not to be made yet. Started, or not known (the kitchen could not be
+ * read), leaves it unticked: staff tick it themselves after checking with the kitchen.
+ */
+export const stopMakingByDefault = (kitchen: RefundItem["kitchen"]) => kitchen === "NotStarted";
 function RefundWizard({
   orderReference,
   paymentIntentReference,
@@ -1080,7 +1086,7 @@ function RefundWizard({
     item.kitchen !== "Cancelled" &&
     item.withdrawnQuantity < item.quantity;
   const stops = (item: RefundItem) =>
-    stopOffered(item) && (stopMaking[item.orderItemReference] ?? item.kitchen !== "Started");
+    stopOffered(item) && (stopMaking[item.orderItemReference] ?? stopMakingByDefault(item.kitchen));
   // The items and requests load by themselves; rereading them is offered when it has a purpose:
   // a failed read, an unknown result, a recorded request, or a follower watching the list.
   const refresh =
@@ -1289,7 +1295,11 @@ function RefundWizard({
                             ? t("The kitchen and the counter leave it out.")
                             : item.kitchen === "Started"
                               ? t("Already being made: the guest keeps the food.")
-                              : t("The guest keeps the food.")}
+                              : item.kitchen === null
+                                ? t(
+                                    "The kitchen's progress couldn't be read. Check with the kitchen; unticked, the guest keeps the food.",
+                                  )
+                                : t("The guest keeps the food.")}
                         </span>
                       </label>
                     ) : null}
@@ -1997,6 +2007,44 @@ const recoveryReasons = [
  * guest gives the money back. A Store Manager or the Owner records it on the order, in their name,
  * on today's business day; the refund stays as it was. Lists what was already taken back.
  */
+/**
+ * WP-2423 M163: what staff are told when money taken back was not confirmed as recorded, and
+ * whether that attempt is answered (a new Record starts a new one). Only an unknown result keeps
+ * the attempt, so pressing Record again can never record it twice; an attempt already recorded
+ * with other details says so plainly instead of asking for the same Record forever.
+ */
+export function moneyTakenBackFailure(error: unknown): {
+  readonly message: string;
+  readonly attemptAnswered: boolean;
+  readonly reread: boolean;
+} {
+  const code = error instanceof OrdinaryRefundClientError ? error.code : null;
+  if (code === "RecoveryAboveRefunded")
+    return {
+      message: t("That is more than was refunded on this order. Nothing was recorded."),
+      attemptAnswered: true,
+      reread: false,
+    };
+  if (code === "RecoveryConflict")
+    return {
+      message: t(
+        "This was already recorded with other details, shown in the list. Nothing more was recorded. Check the list before recording again.",
+      ),
+      attemptAnswered: true,
+      reread: true,
+    };
+  if (code === "Denied")
+    return {
+      message: t("Only a store manager or the owner records money taken back."),
+      attemptAnswered: true,
+      reread: false,
+    };
+  return {
+    message: t("Couldn't confirm it was recorded. Press Record again: it is never recorded twice."),
+    attemptAnswered: false,
+    reread: false,
+  };
+}
 export function MoneyTakenBack({
   context,
   csrf,
@@ -2065,15 +2113,12 @@ export function MoneyTakenBack({
       setMessage(t("Recorded: {amount} taken back.", { amount: amount(amountMinor) }));
       onRecorded();
     } catch (error) {
-      setMessage(
-        error instanceof OrdinaryRefundClientError && error.code === "RecoveryAboveRefunded"
-          ? t("That is more than was refunded on this order. Nothing was recorded.")
-          : error instanceof OrdinaryRefundClientError && error.code === "Denied"
-            ? t("Only a store manager or the owner records money taken back.")
-            : t(
-                "Couldn't confirm it was recorded. Press Record again: it is never recorded twice.",
-              ),
-      );
+      const failure = moneyTakenBackFailure(error);
+      setMessage(failure.message);
+      // The attempt is answered (refused, or recorded earlier with other details): the next
+      // Record is a new one. The list is read again so what was recorded is in front of staff.
+      if (failure.attemptAnswered) operation.current = null;
+      if (failure.reread) onRecorded();
     } finally {
       setBusy(false);
     }

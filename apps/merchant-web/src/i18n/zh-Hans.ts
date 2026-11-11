@@ -497,6 +497,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Request recorded for {total}. Nothing is refunded yet: a manager or the owner sends it from Approvals.":
     "已记录 {total} 的退款申请。还没有退款：由店长或店主在“审批”里发出。",
   "A manager or the owner sends it.": "由店长或店主发出。",
+  "The kitchen's progress couldn't be read. Check with the kitchen; unticked, the guest keeps the food.":
+    "读不到厨房进度。请先问厨房；不勾选时，菜照常给客人。",
+  "This was already recorded with other details, shown in the list. Nothing more was recorded. Check the list before recording again.":
+    "这次已按另一组内容记录过，见列表。没有再记录。再次记录前请先核对列表。",
   "Asked by staff, not sent yet. Send it here or from Approvals.":
     "员工已申请，还没发出。可在这里发出，或在“审批”里发出。",
   "Not sent yet. A manager or the owner sends it from Approvals.":
