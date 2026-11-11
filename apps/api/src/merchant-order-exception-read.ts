@@ -55,6 +55,24 @@ export const RESOLVED_PAGE_SIZE = 25;
  * Raw source digests, payment references and financial facts never enter the browser DTO, except
  * a business day's totals (see MerchantExceptionReconciliationDetail).
  */
+/**
+ * WP-2423 (outage-reads-and-retry): not even one reconciliation detail could be read. Each card
+ * says its details could not be loaded (the cases stay on the page), and what failed is reported.
+ */
+function unreadableDetails(
+  sources: readonly OrderExceptionSource[],
+  error: unknown,
+  report: ((error: unknown) => void) | undefined,
+): ReadonlyMap<string, MerchantExceptionReconciliationDetail> {
+  report?.(error);
+  return new Map(
+    sources.map((source) => [
+      source.sourceReference,
+      Object.freeze({ type: "Unavailable" as const }),
+    ]),
+  );
+}
+
 export function createMerchantOrderExceptionRead(options: {
   readonly transactions: { run<T>(work: (tx: ConsumerTransaction) => Promise<T>): Promise<T> };
   /**
@@ -117,6 +135,8 @@ export function createMerchantOrderExceptionRead(options: {
     scope: MerchantExceptionScope,
     sources: readonly OrderExceptionSource[],
   ): Promise<ReadonlyMap<string, MerchantExceptionReconciliationDetail>>;
+  /** Not even one reconciliation detail could be read: what failed (each card then says so). */
+  reconciliationDetailsFailed?(error: unknown): void;
   metadata(
     tx: ConsumerTransaction,
     scope: MerchantExceptionScope,
@@ -282,15 +302,12 @@ export function createMerchantOrderExceptionRead(options: {
                 options.causeTransactions ?? options.transactions,
                 scope,
                 Object.freeze(reconciliationSources),
-              ).catch(
-                // Not even one could be read: each card says its details could not be loaded.
-                () =>
-                  new Map(
-                    reconciliationSources.map((source) => [
-                      source.sourceReference,
-                      Object.freeze({ type: "Unavailable" as const }),
-                    ]),
-                  ),
+              ).catch((error: unknown) =>
+                unreadableDetails(
+                  reconciliationSources,
+                  error,
+                  options.reconciliationDetailsFailed,
+                ),
               )
             : new Map<string, MerchantExceptionReconciliationDetail>();
         const build = (causes: ReadonlyMap<string, MerchantExceptionOrderCause>) =>

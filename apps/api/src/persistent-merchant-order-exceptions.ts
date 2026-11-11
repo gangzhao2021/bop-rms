@@ -224,6 +224,7 @@ export function createPersistentMerchantOrderExceptions(options: {
         })(tx, source.sourceReference);
         return result.assigned;
       },
+      reconciliationDetailsFailed: (error) => options.onUnexpected?.(error),
       reconciliationDetails: async (detailTransactions, scope, sources) => {
         // WP-2423 (outage-reads-and-retry): in its own short read-only transactions after the
         // cases (see causeTransactions), for the scope the cases' transaction just rechecked in
