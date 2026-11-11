@@ -183,6 +183,48 @@ export function cardMachineRefundGivenBackMinor(
   return amount < left ? amount : left;
 }
 
+/**
+ * WP-2423 M52/M131: how much of the Order this payment's recorded refunds gave back, in the
+ * Order's terms (never the drawer's). On the card machine a refund is the Order's to the cent, so
+ * it is `nominalMinor` itself. Cash goes back in whole nickels, so `nominalMinor` (each ordinary
+ * request at its own amount, every other refund at what it handed back) can differ from the Order's
+ * by the cash rounding; once the drawer has given back all the cash it took for the payment
+ * (`handedBackMinor`, every recorded refund), nothing more can go back, so the Order is refunded in
+ * full less what is still pending: no shortfall of a few cents stays open, and rounding handed back
+ * beyond the Order's amount is never a refund of the Order.
+ */
+export function cardMachineOrderRefundedMinor(
+  record: CardMachinePaymentRecord,
+  input: {
+    readonly nominalMinor: bigint;
+    readonly pendingMinor: bigint;
+    readonly handedBackMinor: bigint;
+  },
+): bigint {
+  if (record.cash === undefined) return input.nominalMinor;
+  const open = record.preparation.total.amountMinor - input.pendingMinor;
+  if (open < 0n) return input.nominalMinor;
+  return input.handedBackMinor >= cardMachinePaymentTakenMinor(record) || input.nominalMinor > open
+    ? open
+    : input.nominalMinor;
+}
+
+/**
+ * WP-2423 M52/M131: a refund request on a counter cash payment that cannot be handed back in cash
+ * (under 3 cents rounds to nothing), or for which the drawer holds nothing more of the payment.
+ */
+export function cardMachineCashRequestRefusal(
+  record: CardMachinePaymentRecord,
+  requestMinor: bigint,
+  handedBackMinor: bigint,
+): "UnderNickel" | "DrawerEmpty" | null {
+  if (record.cash === undefined) return null;
+  if (handedBackMinor >= cardMachinePaymentTakenMinor(record)) return "DrawerEmpty";
+  return requestMinor > 0n && roundCashTotal(requestMinor).roundedMinor === 0n
+    ? "UnderNickel"
+    : null;
+}
+
 function parseCashTender(value: unknown, totalMinor: bigint): CardMachineCashTender {
   const raw = exact(value, ["roundingMinor", "tenderedMinor", "changeMinor"]);
   const { roundingMinor, tenderedMinor, changeMinor } = raw;

@@ -1,9 +1,14 @@
 import { createPostgresOrdinaryRefundPositionSource } from "../ordinary-refund-position-source.js";
 import type { ConsumerTransaction } from "@bop/eventing";
 import {
+  ordinaryRefundPaymentAmount,
   parseOrdinaryRefundRequest,
   type OrdinaryRefundRequest,
 } from "../../application/ordinary-refund-request.js";
+import {
+  cardMachineCashRequestRefusal,
+  cardMachinePaymentTakenMinor,
+} from "../../application/card-machine-payment.js";
 import { parsePaymentInstant } from "../../application/payment-intent-creation.js";
 import { parsePaymentReference } from "../../application/payment-provider-adapter.js";
 import { createPostgresPaymentIntentCreationStore } from "./payment-intent-creation-store.js";
@@ -158,13 +163,36 @@ export function createPostgresOrdinaryRefundCaptureSource(options: {
           card.cardMachinePaymentReference,
       ]);
       const refunds = await cards.refunds(tx, card.cardMachinePaymentReference);
-      const other = refunds
+      const handedBack = refunds.reduce((sum, refund) => sum + refund.amountMinor, 0n);
+      let other = refunds
         .filter((refund) => refund.sourceKind !== "OrdinaryRefund")
         .reduce((sum, refund) => sum + refund.amountMinor, 0n);
       if (
         refunds.some((refund) => refund.orderReference !== request.orderReference) ||
-        refunds.reduce((sum, refund) => sum + refund.amountMinor, 0n) >
-          card.preparation.total.amountMinor ||
+        handedBack > cardMachinePaymentTakenMinor(card)
+      )
+        return fail();
+      // WP-2423 M52/M131: cash from a counter cash payment goes back in whole nickels. What the
+      // Order has left is counted in the Order's terms (a cancellation's cash rounding is the
+      // drawer's); once the drawer gave back all the cash it took, nothing is left to request, and a
+      // request under 3 cents can't be handed back in cash. Both refuse a new request (never an
+      // outage); a request already recorded is revalidated as it was made.
+      if (card.cash !== undefined) {
+        const counted = input.history.some(
+          (previous) => previous.requestReference === request.requestReference,
+        );
+        const refusal = counted
+          ? null
+          : cardMachineCashRequestRefusal(card, ordinaryRefundPaymentAmount(payment), handedBack);
+        if (refusal === "UnderNickel") throw new Error("ORDINARY_REFUND_CASH_UNDER_NICKEL");
+        other =
+          refusal === "DrawerEmpty"
+            ? card.preparation.total.amountMinor
+            : other < card.preparation.total.amountMinor
+              ? other
+              : card.preparation.total.amountMinor;
+      }
+      if (
         (await options.validatePricing(tx, {
           request,
           payment,

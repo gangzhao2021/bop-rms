@@ -3,6 +3,7 @@ import { withOptionalRead } from "./merchant-round-business-date.js";
 import type { ConsumerTransaction } from "@bop/eventing";
 import { readClosedRecord, parseOpaqueUuidV7 } from "@bop/identity";
 import {
+  cardMachineOrderRefundedMinor,
   createPostgresCardMachinePaymentStore,
   createPostgresOrdinaryRefundPositionSource,
   createPostgresPaymentIntentBindingSource,
@@ -226,11 +227,27 @@ export function createMerchantRefundPaymentContext(options: {
           paymentAttemptReference: card.paymentAttemptReference,
           observedAt,
         });
-        const refunds = await cards.refunds(businessTransaction, card.cardMachinePaymentReference);
+        const refunds = (
+          await cards.refunds(businessTransaction, card.cardMachinePaymentReference)
+        ).filter((refund) => refund.recordedAt <= observedAt);
         const captured = card.preparation.total.amountMinor;
-        const confirmed = refunds
-          .filter((refund) => refund.recordedAt <= observedAt)
-          .reduce((sum, refund) => sum + refund.amountMinor, 0n);
+        const handedBack = refunds.reduce((sum, refund) => sum + refund.amountMinor, 0n);
+        // WP-2423 M52/M131: cash goes back in whole nickels, so what a counter cash payment's
+        // refunds gave the Order is counted in the Order's terms (each request at its own amount,
+        // a cancellation at the rest of the Order once the drawer gave back all the cash it took),
+        // never the drawer's: the rounding is the drawer's, as for a table's cash.
+        const confirmed =
+          card.cash === undefined
+            ? handedBack
+            : cardMachineOrderRefundedMinor(card, {
+                nominalMinor:
+                  ordinary.confirmedMinor +
+                  refunds
+                    .filter((refund) => refund.sourceKind !== "OrdinaryRefund")
+                    .reduce((sum, refund) => sum + refund.amountMinor, 0n),
+                pendingMinor: ordinary.pendingMinor,
+                handedBackMinor: handedBack,
+              });
         let pending = ordinary.pendingMinor;
         const whole = await cardMachineWholeRefundSource(businessTransaction, scope, card);
         if (whole !== null && !refunds.some((refund) => refund.sourceReference === whole.reference))

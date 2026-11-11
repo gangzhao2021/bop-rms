@@ -6,6 +6,7 @@ import { createPostgresCardMachinePaymentStore } from "./persistence/card-machin
 import { createPostgresDiningTableSettlementStore } from "./persistence/dining-table-settlement-store.js";
 import { exactPaymentObject, parsePaymentInstant } from "../application/payment-intent-creation.js";
 import { parsePaymentReference } from "../application/payment-provider-adapter.js";
+import { cardMachineOrderRefundedMinor } from "../application/card-machine-payment.js";
 const fail = (): never => {
   throw new Error("ORDER_FINANCIAL_POSITION_UNAVAILABLE");
 };
@@ -229,14 +230,21 @@ export function createPostgresOrderFinancialPosition(options: {
           if (refund.sourceKind === "ItemCancellation") itemMinor += refund.amountMinor;
           else wholeMinor += refund.amountMinor;
         }
-        // WP-2423 M52/M131: cash from a counter cash payment goes back in whole nickels, its last
-        // refund taking what the drawer still held (the cash rounding included). The Order's
-        // amounts never count the rounding (as for a table's cash): what came back beyond the
-        // payment's amount is rounding handed back, not a refund of the Order.
+        // WP-2423 M52/M131: cash from a counter cash payment goes back in whole nickels. The Order's
+        // amounts never count the rounding (as for a table's cash): rounding handed back beyond the
+        // payment's amount is not a refund of the Order, and once the drawer gave back all the cash
+        // it took, the few cents left of the Order are refunded too (the cancellation's share).
         if (payment.cash !== undefined) {
-          const beyond =
-            ordinary.confirmedMinor + itemMinor + wholeMinor + ordinary.pendingMinor - captureMinor;
-          if (beyond > 0n) wholeMinor -= beyond < wholeMinor ? beyond : wholeMinor;
+          const nominalMinor = ordinary.confirmedMinor + itemMinor + wholeMinor;
+          wholeMinor +=
+            cardMachineOrderRefundedMinor(payment, {
+              nominalMinor,
+              pendingMinor: ordinary.pendingMinor,
+              handedBackMinor: recorded
+                .filter((refund) => refund.recordedAt <= query.observedAt)
+                .reduce((sum, refund) => sum + refund.amountMinor, 0n),
+            }) - nominalMinor;
+          if (wholeMinor < 0n) return fail();
         }
         const confirmedMinor = ordinary.confirmedMinor + itemMinor + wholeMinor,
           pendingMinor = ordinary.pendingMinor;

@@ -447,3 +447,92 @@ it("B759: rejects a card-machine payment of another environment or refunds above
   ]);
   await expect(setup().read()).rejects.toThrow("ORDER_FINANCIAL_POSITION_UNAVAILABLE");
 });
+// WP-2423 M52/M131: a counter cash payment gives cash back in whole nickels; the Order's amounts
+// never count the rounding, and once the drawer gave back all the cash it took the Order is
+// refunded in full.
+const cashPayment = (n: number, order: bigint, tip: bigint, roundingMinor: bigint) => ({
+  ...machinePayment(n, order, tip),
+  slipReference: null,
+  cash: { roundingMinor, tenderedMinor: order + tip + roundingMinor, changeMinor: 0n },
+});
+it("M52: a cancelled cash order rounded down is refunded in full though the drawer gave back 2 cents less", async () => {
+  onlineOnlyRefunds();
+  mock.refund.mockResolvedValue(noRefund);
+  // $22.47 paid as $22.45 cash; the cancellation gives back the $22.45 the drawer took.
+  mock.machine.mockResolvedValue([
+    {
+      payment: cashPayment(60, 2047n, 200n, -2n),
+      refunds: [machineRefund(70, 60, "StaffCancellation", 2245n)],
+    },
+  ]);
+  const result = await setup().read();
+  expect(result.settlement.confirmedRefundMinor).toBe(2247n);
+  expect(result.settlement.refundAllocation).toEqual({
+    orderMinor: 2047n,
+    tipMinor: 200n,
+    unallocatedMinor: 0n,
+  });
+});
+it("M52: a dish refunded in cash, then the rest cancelled, leaves no few cents of the Order open", async () => {
+  onlineOnlyRefunds();
+  // $4.38 of dishes went back as $4.40; the cancellation then gave back the $18.05 left.
+  mock.refund.mockResolvedValue({
+    ...noRefund,
+    confirmedMinor: 438n,
+    confirmedOrderAllocationMinor: 438n,
+  });
+  mock.machine.mockResolvedValue([
+    {
+      payment: cashPayment(60, 2047n, 200n, -2n),
+      refunds: [
+        machineRefund(70, 60, "OrdinaryRefund", 440n),
+        machineRefund(71, 60, "StaffCancellation", 1805n),
+      ],
+    },
+  ]);
+  const result = await setup().read();
+  expect(result.settlement.confirmedRefundMinor).toBe(2247n);
+  expect(result.settlement.pendingRefundMinor).toBe(0n);
+  expect(result.settlement.refundAllocation).toEqual({
+    orderMinor: 2047n,
+    tipMinor: 200n,
+    unallocatedMinor: 0n,
+  });
+});
+it("M52: cash rounding handed back beyond the Order's amount is not a refund of the Order", async () => {
+  onlineOnlyRefunds();
+  mock.refund.mockResolvedValue({
+    ...noRefund,
+    confirmedMinor: 437n,
+    confirmedOrderAllocationMinor: 437n,
+  });
+  // $22.43 paid as $22.45: $4.37 went back as $4.35, the cancellation gave back $18.10.
+  mock.machine.mockResolvedValue([
+    {
+      payment: cashPayment(60, 2043n, 200n, 2n),
+      refunds: [
+        machineRefund(70, 60, "OrdinaryRefund", 435n),
+        machineRefund(71, 60, "StaffCancellation", 1810n),
+      ],
+    },
+  ]);
+  const result = await setup().read();
+  expect(result.settlement.confirmedRefundMinor).toBe(2243n);
+  expect(result.settlement.refundAllocation.unallocatedMinor).toBe(0n);
+});
+it("M52: a cash payment with refunds still in the drawer counts what each refund gave the Order", async () => {
+  onlineOnlyRefunds();
+  mock.refund.mockResolvedValue({
+    ...noRefund,
+    confirmedMinor: 438n,
+    confirmedOrderAllocationMinor: 438n,
+  });
+  mock.machine.mockResolvedValue([
+    {
+      payment: cashPayment(60, 2047n, 200n, -2n),
+      refunds: [machineRefund(70, 60, "OrdinaryRefund", 440n)],
+    },
+  ]);
+  const result = await setup().read();
+  expect(result.settlement.confirmedRefundMinor).toBe(438n);
+});

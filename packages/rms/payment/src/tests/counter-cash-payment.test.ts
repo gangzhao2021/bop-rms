@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { parseOrderPaymentPreparationEvidence } from "@rms/ordering";
 
 import {
+  cardMachineCashRequestRefusal,
+  cardMachineOrderRefundedMinor,
   cardMachinePaymentTakenMinor,
   cardMachineRefundGivenBackMinor,
   parseCardMachinePaymentRecord,
@@ -111,5 +113,61 @@ describe("counter cash payment (WP-2423 M52, the table's cash rules)", () => {
     // On the card machine the amount is the request's own, to the cent.
     const card = parseCardMachinePaymentRecord(record({ slipReference: "AUTH 1" }));
     expect(cardMachineRefundGivenBackMinor(card, 437n, 0n)).toBe(437n);
+  });
+
+  it("counts cash given back in the Order's terms, closing the few cents once the drawer is empty", () => {
+    // $22.47 taken as $22.45.
+    const saved = parseCardMachinePaymentRecord(
+      record({ cash: planCounterCashTender(prepared, 3_000n) }),
+    );
+    const refunded = (nominalMinor: bigint, handedBackMinor: bigint, pendingMinor = 0n) =>
+      cardMachineOrderRefundedMinor(saved, { nominalMinor, pendingMinor, handedBackMinor });
+    // $4.38 requested, $4.40 handed back: the Order got $4.38.
+    expect(refunded(438n, 440n)).toBe(438n);
+    // Then the cancellation gave back the $18.05 left: the Order is refunded in full.
+    expect(refunded(438n + 1_805n, 2_245n)).toBe(2_247n);
+    // A request still pending stays pending.
+    expect(refunded(438n + 1_805n, 2_245n, 4n)).toBe(2_243n);
+    // Rounding handed back beyond the Order is not the Order's ($22.43 taken as $22.45).
+    const up = parseCardMachinePaymentRecord(
+      record({
+        preparation: parseOrderPaymentPreparationEvidence(
+          preparation({
+            orderAllocation: { amountMinor: 2_043n, currencyCode: "CAD" },
+            tip: { amountMinor: 200n, currencyCode: "CAD" },
+            total: { amountMinor: 2_243n, currencyCode: "CAD" },
+          }),
+        ),
+        cash: { roundingMinor: 2n, tenderedMinor: 2_245n, changeMinor: 0n },
+      }),
+    );
+    expect(
+      cardMachineOrderRefundedMinor(up, {
+        nominalMinor: 2_245n,
+        pendingMinor: 0n,
+        handedBackMinor: 2_245n,
+      }),
+    ).toBe(2_243n);
+    // The card machine is the Order's to the cent.
+    const card = parseCardMachinePaymentRecord(record({ slipReference: "AUTH 1" }));
+    expect(
+      cardMachineOrderRefundedMinor(card, {
+        nominalMinor: 2_000n,
+        pendingMinor: 0n,
+        handedBackMinor: 2_247n,
+      }),
+    ).toBe(2_000n);
+  });
+
+  it("refuses a cash request under 3 cents, and any once the drawer gave everything back", () => {
+    const saved = parseCardMachinePaymentRecord(
+      record({ cash: planCounterCashTender(prepared, 3_000n) }),
+    );
+    expect(cardMachineCashRequestRefusal(saved, 2n, 0n)).toBe("UnderNickel");
+    expect(cardMachineCashRequestRefusal(saved, 3n, 0n)).toBeNull();
+    expect(cardMachineCashRequestRefusal(saved, 438n, 440n)).toBeNull();
+    expect(cardMachineCashRequestRefusal(saved, 4n, 2_245n)).toBe("DrawerEmpty");
+    const card = parseCardMachinePaymentRecord(record({ slipReference: "AUTH 1" }));
+    expect(cardMachineCashRequestRefusal(card, 2n, 0n)).toBeNull();
   });
 });

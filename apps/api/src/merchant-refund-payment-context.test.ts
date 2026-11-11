@@ -1,4 +1,4 @@
-import { beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMerchantRefundPaymentContext } from "./merchant-refund-payment-context.js";
 import { kdsOperatorProfileAllows } from "./merchant-kds-operator-profile.js";
 const d = vi.hoisted(() => ({
@@ -12,6 +12,11 @@ const d = vi.hoisted(() => ({
   terminal: vi.fn(),
   position: vi.fn(),
   bindingOptions: vi.fn(),
+  ordinary: vi.fn(),
+  whole: vi.fn(async (): Promise<unknown> => null),
+}));
+vi.mock("./merchant-card-machine-refund.js", () => ({
+  cardMachineWholeRefundSource: d.whole,
 }));
 vi.mock("./merchant-store-scope.js", () => ({ createMerchantStoreScope: () => d.resolve }));
 vi.mock("./merchant-workforce-authority-source.js", () => ({
@@ -41,6 +46,7 @@ vi.mock("@rms/payment", async (original) => ({
   },
   createPostgresPaymentTerminalStore: () => ({ read: d.terminal }),
   createPostgresOrderPaymentRefundPosition: () => d.position,
+  createPostgresOrdinaryRefundPositionSource: () => d.ordinary,
 }));
 // WP-2423 M163: money taken back on the order (owner read), none unless a test says so.
 vi.mock("./merchant-refund-recovery.js", async (original) => ({
@@ -249,4 +255,69 @@ it("rejects client supplied scope and clock", async () => {
     f.operation({ ...f.input, query: { ...f.input.query, observedAt: at } }),
   ).rejects.toThrow();
   expect(f.run).not.toHaveBeenCalled();
+});
+
+// WP-2423 M52/M131: a counter order paid in cash. Its refunds give back whole nickels; the page
+// reads what they gave the Order, so a fully given back cash order is refunded, never refused.
+describe("a counter cash payment", () => {
+  const card = (totalMinor: bigint, roundingMinor: bigint) => ({
+    ...binding,
+    cardMachinePaymentReference: id(20),
+    recordedAt: at,
+    slipReference: null,
+    preparation: { total: { amountMinor: totalMinor, currencyCode: "CAD" } },
+    cash: { roundingMinor, tenderedMinor: totalMinor + roundingMinor, changeMinor: 0n },
+  });
+  const refund = (sourceKind: string, amountMinor: bigint, sourceReference = id(30)) => ({
+    cardMachinePaymentReference: id(20),
+    sourceKind,
+    sourceReference,
+    amountMinor,
+    recordedAt: at,
+  });
+  function cash(payment: ReturnType<typeof card>, refunds: unknown[]) {
+    d.cards = () => ({
+      loadByIntent: async () => payment,
+      loadByBatch: async () => null,
+      refunds: async () => refunds,
+    });
+  }
+  afterEach(() => {
+    d.cards = () => ({ loadByIntent: async () => null, loadByBatch: async () => null });
+  });
+  it("$22.43 paid as $22.45 and cancelled: refunded in full, not refused", async () => {
+    cash(card(2243n, 2n), [refund("StaffCancellation", 2245n)]);
+    d.ordinary.mockResolvedValue({ confirmedMinor: 0n, pendingMinor: 0n });
+    d.whole.mockResolvedValue({ reference: id(30) });
+    const f = setup();
+    expect(await f.operation(f.input)).toMatchObject({
+      paymentMethod: "CardMachine",
+      capturedAmountMinor: "2243",
+      confirmedRefundMinor: "2243",
+      pendingRefundMinor: "0",
+    });
+  });
+  it("$22.47 paid as $22.45: a dish then the cancellation leaves nothing of the Order open", async () => {
+    cash(card(2247n, -2n), [
+      refund("OrdinaryRefund", 440n, id(31)),
+      refund("StaffCancellation", 1805n),
+    ]);
+    d.ordinary.mockResolvedValue({ confirmedMinor: 438n, pendingMinor: 0n });
+    d.whole.mockResolvedValue({ reference: id(30) });
+    const f = setup();
+    expect(await f.operation(f.input)).toMatchObject({
+      confirmedRefundMinor: "2247",
+      pendingRefundMinor: "0",
+    });
+  });
+  it("a cancellation still to give back owes the rest of the Order", async () => {
+    cash(card(2243n, 2n), [refund("OrdinaryRefund", 435n, id(31))]);
+    d.ordinary.mockResolvedValue({ confirmedMinor: 437n, pendingMinor: 0n });
+    d.whole.mockResolvedValue({ reference: id(30) });
+    const f = setup();
+    expect(await f.operation(f.input)).toMatchObject({
+      confirmedRefundMinor: "437",
+      pendingRefundMinor: "1806",
+    });
+  });
 });
