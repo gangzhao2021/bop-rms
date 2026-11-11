@@ -270,6 +270,9 @@ export function parseOperationsAlertView(value: unknown): OperationsAlertView {
   };
 }
 
+/** v15 batch 8: a first failed alerts read is read again after this long before it is listed. */
+export const OPERATIONS_ALERTS_RETRY_MS = 4_000;
+
 export function createOperationsAlertsClient(fetcher: typeof fetch = fetch) {
   return Object.freeze({
     async load(signal?: AbortSignal): Promise<OperationsAlertView> {
@@ -642,8 +645,16 @@ export function StoreSystemLine({
  * server) hides it and stops reading, so front-of-house staff never poll it again and no refusal
  * shows in their browser.
  */
-export function useOperationsAlerts(fetcher?: typeof fetch) {
+export function useOperationsAlerts(
+  fetcher?: typeof fetch,
+  /** v15 batch 8: how long a first failed read waits before it is read again (tests shorten it). */
+  retryMs = OPERATIONS_ALERTS_RETRY_MS,
+) {
   const [client] = useState(() => createOperationsAlertsClient(fetcher));
+  // v15 batch 8: one failed read (a busy moment, the reload after switching language) is read
+  // again shortly before Home lists "could not be checked"; only a failure that repeats is listed.
+  const failures = useRef(0);
+  const retry = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [read, setRead] = useState<OperationsAlertsRead>({ kind: "Loading" });
   const [busy, setBusy] = useState(false);
   const active = useRef<AbortController | null>(null);
@@ -654,12 +665,15 @@ export function useOperationsAlerts(fetcher?: typeof fetch) {
   const load = useCallback(async () => {
     if (stopped.current) return;
     active.current?.abort();
+    if (retry.current !== null) clearTimeout(retry.current);
+    retry.current = null;
     const controller = new AbortController();
     active.current = controller;
     setBusy(true);
     try {
       const value = await client.load(controller.signal);
       if (!controller.signal.aborted) {
+        failures.current = 0;
         support.current = value.support;
         setRead({ kind: "Ready", value });
       }
@@ -670,11 +684,20 @@ export function useOperationsAlerts(fetcher?: typeof fetch) {
         if (timer.current !== null) clearInterval(timer.current);
         timer.current = null;
         setRead({ kind: "NotPermitted" });
-      } else setRead({ kind: "Unavailable", support: support.current });
+      } else if (failures.current === 0) {
+        // What was read last stays in view meanwhile (or nothing, before the first answer).
+        failures.current = 1;
+        retry.current = setTimeout(() => void loadRef.current?.(), retryMs);
+      } else {
+        failures.current += 1;
+        setRead({ kind: "Unavailable", support: support.current });
+      }
     } finally {
       if (!controller.signal.aborted) setBusy(false);
     }
-  }, [client]);
+  }, [client, retryMs]);
+  const loadRef = useRef<(() => Promise<void>) | null>(null);
+  loadRef.current = load;
   // v15 cbff9d6f: no reads once this screen's sign-in has ended; again at once if it is live.
   const live = useStaffSessionLive();
   useEffect(() => {
@@ -686,6 +709,8 @@ export function useOperationsAlerts(fetcher?: typeof fetch) {
     return () => {
       if (timer.current !== null) clearInterval(timer.current);
       timer.current = null;
+      if (retry.current !== null) clearTimeout(retry.current);
+      retry.current = null;
       active.current?.abort();
     };
   }, [live, load]);
