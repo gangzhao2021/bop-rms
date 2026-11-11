@@ -2578,11 +2578,7 @@ async function exerciseCardMachinePartialRefund({
     [cashierPage.canRequest, cashierPage.canSend, cashierPage.pendingRefundMinor],
     [true, false, String(amountA)],
   );
-  assert.deepEqual(
-    [pending.canRequest, pending.canSend],
-    [true, true],
-    "the manager may send it",
-  );
+  assert.deepEqual([pending.canRequest, pending.canSend], [true, true], "the manager may send it");
   await assert.rejects(machineRefund()(recordA({}, "cashier")), {
     code: "CARD_MACHINE_REFUND_PERMISSION_DENIED",
   });

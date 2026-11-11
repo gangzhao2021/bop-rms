@@ -163,6 +163,8 @@ export function createMerchantRefundPaymentContext(options: {
           role,
           current.kdsOperatorProfileAllows,
           soleOperatorEffective,
+          // b9: an owner who only approves still sends here, as on Approvals.
+          true,
         );
         viewer.canRequest = access.canRequest;
         viewer.requestBlocked = access.requestBlocked;

@@ -26,6 +26,12 @@ export async function refundReadAccess(
   profileAllows: (action: string) => boolean,
   /** WP-2423 Q19: an Owner may also request while sole operator is in effect for them. */
   soleOperatorEffective?: () => Promise<boolean>,
+  /**
+   * b9: also decide whether an Owner/Finance approver may send (one more permission read). Only
+   * readers that offer or perform sending ask (the payment page, the card-machine record); the
+   * plain refund reads leave the approver's `canSend` false and keep their query budget.
+   */
+  approverSend = false,
 ): Promise<{
   readonly canRead: boolean;
   readonly canRequest: boolean;
@@ -81,6 +87,7 @@ export async function refundReadAccess(
     // b9 refund-cashier-authorization: the approver may still send (a cashier's request, or
     // record the card-machine refund) when they hold execute, as Approvals lets them.
     canSend:
+      approverSend &&
       canRead &&
       (await workforce(tx, { ...base, permissionCode: "payment.refund.execute" })).decision
         .effect === "Allow",

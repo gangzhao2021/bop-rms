@@ -24,7 +24,7 @@ it("names sole operator off for an owner, nothing for a manager or finance", asy
   const off = async () => false;
   const on = async () => true;
   expect(
-    await refundReadAccess(workforce(["owner"]), {} as never, base, role, () => true, off),
+    await refundReadAccess(workforce(["owner"]), {} as never, base, role, () => true, off, true),
   ).toEqual({
     canRead: true,
     canRequest: false,
@@ -40,7 +40,21 @@ it("names sole operator off for an owner, nothing for a manager or finance", asy
   ).toEqual({ canRead: true, canRequest: true, requestBlocked: null, canSend: true });
   expect(
     await refundReadAccess(workforce(["finance"]), {} as never, base, role, () => true),
-  ).toEqual({ canRead: true, canRequest: false, requestBlocked: null, canSend: true });
+  ).toEqual({ canRead: true, canRequest: false, requestBlocked: null, canSend: false });
+  // Asked by a reader that offers sending (the payment page, the card-machine record).
+  expect(
+    (
+      await refundReadAccess(
+        workforce(["finance"]),
+        {} as never,
+        base,
+        role,
+        () => true,
+        undefined,
+        true,
+      )
+    ).canSend,
+  ).toBe(true);
 });
 
 // b9 refund-cashier-authorization: sending (online, or recording the card-machine refund) needs
@@ -50,7 +64,9 @@ it("lets an approver send only while they hold execute", async () => {
     decision: { effect: query.permissionCode === "payment.refund.execute" ? "Deny" : "Allow" },
     activeRoleCodes: ["finance"],
   })) as never;
-  expect(await refundReadAccess(without, {} as never, base, role, () => true)).toEqual({
+  expect(
+    await refundReadAccess(without, {} as never, base, role, () => true, undefined, true),
+  ).toEqual({
     canRead: true,
     canRequest: false,
     requestBlocked: null,

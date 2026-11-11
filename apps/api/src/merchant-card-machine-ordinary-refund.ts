@@ -176,6 +176,8 @@ export function createMerchantCardMachineOrdinaryRefund(options: {
                   { ...scope, actorReference, observedAt },
                   role,
                   current.kdsOperatorProfileAllows,
+                  undefined,
+                  true,
                 );
                 return access.canRead && access.canSend;
               };
