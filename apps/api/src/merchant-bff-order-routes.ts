@@ -19,6 +19,11 @@ import express, { type Response as ExpressResponse, type Router } from "express"
 import { CounterOrderError } from "./merchant-counter-order.js";
 import { StaffDiningRoundError } from "./merchant-staff-dining-round.js";
 import { CardMachinePaymentCommandError } from "./merchant-card-machine-payment.js";
+import {
+  cardMachinePaymentHttpErrors,
+  recordPaperOrderPayment,
+  splitPaperOrderPayment,
+} from "./merchant-paper-order-payment.js";
 import { CardMachineRefundCommandError } from "./merchant-card-machine-refund.js";
 import { AcceptanceHoldRefundError } from "./merchant-order-acceptance-hold-refund.js";
 import { StaffOrderCancellationError } from "./merchant-order-staff-cancellation.js";
@@ -396,9 +401,28 @@ export function installMerchantOrderRoutes(
       response.status(503).json({ error: "counter_order_unavailable" });
       return;
     }
+    // DEC-PAPER-ORDER-PAID-AT-SEND: a paper order says how it was paid during the outage, and that
+    // payment is recorded with it, so a sale that already happened is never left "to charge".
+    const split = splitPaperOrderPayment(request.body, { cashAllowed: true, required: true });
+    if (split === null || (split.payment !== null && !options.cardMachinePayment)) {
+      response
+        .status(split === null ? 400 : 503)
+        .set("Cache-Control", NO_STORE)
+        .json({
+          error: split === null ? "counter_order_input_invalid" : "counter_order_unavailable",
+        });
+      return;
+    }
+    const recordPayment = options.cardMachinePayment;
     void options
-      .counterOrder({ ...auth, command: request.body })
-      .then((result) => {
+      .counterOrder({ ...auth, command: split.command })
+      .then(async (result) => {
+        const paid =
+          split.payment === null || recordPayment === undefined || !result.recordedAfterOutage
+            ? {}
+            : await recordPaperOrderPayment(recordPayment, auth, result, split.payment, (error) =>
+                noteFailure(response, error),
+              );
         response.set("Cache-Control", NO_STORE);
         response.json({
           status: result.status,
@@ -411,6 +435,7 @@ export function installMerchantOrderRoutes(
           totalMinor: result.totalMinor,
           payBy: result.payBy,
           recordedAfterOutage: result.recordedAfterOutage,
+          ...paid,
         });
       })
       .catch((error: unknown) => {
@@ -472,11 +497,32 @@ export function installMerchantOrderRoutes(
       response.status(503).json({ error: "staff_round_unavailable" });
       return;
     }
+    // DEC-PAPER-ORDER-PAID-AT-SEND: a paper round the table pays now carries how it was paid
+    // (card machine only: a table's cash is taken at checkout) and is recorded with it.
+    const split = splitPaperOrderPayment(request.body, { cashAllowed: false, required: false });
+    if (split === null || (split.payment !== null && !options.cardMachinePayment)) {
+      response
+        .status(split === null ? 400 : 503)
+        .set("Cache-Control", NO_STORE)
+        .json({ error: split === null ? "staff_round_input_invalid" : "staff_round_unavailable" });
+      return;
+    }
+    const recordPayment = options.cardMachinePayment;
     void options
-      .staffDiningRound({ ...auth, command: request.body })
-      .then((result) => {
+      .staffDiningRound({ ...auth, command: split.command })
+      .then(async (result) => {
+        const paid =
+          split.payment === null ||
+          recordPayment === undefined ||
+          !result.recordedAfterOutage ||
+          result.payLater
+            ? {}
+            : await recordPaperOrderPayment(recordPayment, auth, result, split.payment, (error) =>
+                noteFailure(response, error),
+              );
         response.set("Cache-Control", NO_STORE);
         response.json({
+          ...paid,
           status: result.status,
           orderReference: result.orderReference,
           orderBatchReference: result.orderBatchReference,
@@ -591,21 +637,7 @@ export function installMerchantOrderRoutes(
           failed(response, error);
           return;
         }
-        const [status, code] = (
-          {
-            CARD_MACHINE_INPUT_INVALID: [400, "card_machine_input_invalid"],
-            CARD_MACHINE_PERMISSION_DENIED: [403, "card_machine_permission_denied"],
-            CARD_MACHINE_NOT_FOUND: [404, "counter_order_not_found"],
-            CARD_MACHINE_NOT_PAYABLE: [409, "order_not_payable"],
-            CARD_MACHINE_AMOUNT_CHANGED: [409, "amount_changed"],
-            CARD_MACHINE_PAYMENT_WINDOW_CLOSED: [409, "payment_window_closed"],
-            CARD_MACHINE_ALREADY_PAID: [409, "already_paid"],
-            CARD_MACHINE_IDEMPOTENCY_CONFLICT: [409, "card_machine_conflict"],
-            CARD_MACHINE_TAKEN_BEFORE_RECORDS: [409, "taken_before_records"],
-            CARD_MACHINE_CASH_TENDER_SHORT: [409, "cash_tender_short"],
-            CARD_MACHINE_UNAVAILABLE: [503, "card_machine_payment_unavailable"],
-          } as const
-        )[error.code];
+        const [status, code] = cardMachinePaymentHttpErrors[error.code];
         response
           .status(status)
           .set("Cache-Control", NO_STORE)

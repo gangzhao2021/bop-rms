@@ -3740,6 +3740,173 @@ it("WP-2423 item 4: records an item refund made on the card machine and maps ref
   ).toBe(503);
 });
 
+it("DEC-PAPER-ORDER-PAID-AT-SEND: a paper order records its payment with the send, never left to charge", async () => {
+  const order = "0190fa01-0000-7000-8000-000000000021",
+    batch = "0190fa01-0000-7000-8000-000000000022",
+    payOp = "0190fa01-0000-7000-8000-000000000023";
+  const placed = {
+    status: "Placed" as const,
+    orderReference: order,
+    orderBatchReference: batch,
+    orderNumber: "5",
+    orderVersion: 1,
+    orderMinor: "333",
+    tipMinor: "0",
+    totalMinor: "333",
+    payBy: "2026-10-13T18:30:00.000Z",
+    recordedAfterOutage: true,
+  };
+  const counterOrder = vi.fn<NonNullable<MerchantBffRouterOptions["counterOrder"]>>(
+    async () => placed,
+  );
+  const recorded = {
+    status: "Recorded" as const,
+    orderReference: order,
+    orderBatchReference: batch,
+    amountMinor: "333",
+    recordingReason: "RecordedAfterOutage" as const,
+    takenAt: "2026-10-13T16:00:00.000Z",
+    recordedAt: "2026-10-13T18:01:00.000Z",
+    acceptance: "Accepted" as const,
+  };
+  const cardMachinePayment = vi.fn<NonNullable<MerchantBffRouterOptions["cardMachinePayment"]>>(
+    async () => recorded,
+  );
+  const placedRound = {
+    ...placed,
+    tableLabel: "T4",
+    payLater: false,
+  };
+  const staffDiningRound = vi.fn<NonNullable<MerchantBffRouterOptions["staffDiningRound"]>>(
+    async () => placedRound,
+  );
+  const root = await serveCounter({ counterOrder, cardMachinePayment, staffDiningRound });
+  const headers = {
+    ...safeHeaders,
+    Cookie: "__Host-bop-merchant=" + sessionCookie,
+    "X-BOP-CSRF": csrf,
+    "Content-Type": "application/json",
+  };
+  const submit = (body: unknown, path = "/merchant/counter/orders") =>
+    request(root, path, { method: "POST", body: JSON.stringify(body), headers });
+  const card = {
+    operationReference: payOp,
+    tender: "CardMachine",
+    slipReference: "A1B2",
+    takenAt: "2026-10-13T16:00:00.000Z",
+  };
+  const command = { operationReference: "x", lines: [], recordedAfterOutage: true };
+
+  // A paper order must say how it was paid; only a paper order may; the payment is checked first.
+  for (const body of [
+    command,
+    { ...command, recordedAfterOutage: false, paperPayment: card },
+    { ...command, paperPayment: { ...card, tender: "Voucher" } },
+    { ...command, paperPayment: { ...card, takenAt: "yesterday" } },
+    { ...command, paperPayment: { ...card, tender: "Cash" } },
+    { ...command, paperPayment: { ...card, extra: 1 } },
+  ]) {
+    const refused = await submit(body);
+    expect(refused.status).toBe(400);
+    expect(await refused.json()).toEqual({ error: "counter_order_input_invalid" });
+  }
+  expect(counterOrder).not.toHaveBeenCalled();
+  expect(cardMachinePayment).not.toHaveBeenCalled();
+
+  // Card machine: the order, then its payment at the server's total, as one answer.
+  const sent = await submit({ ...command, paperPayment: card });
+  expect(sent.status).toBe(200);
+  expect(await sent.json()).toEqual({
+    ...placed,
+    payment: {
+      status: "Recorded",
+      amountMinor: "333",
+      recordingReason: "RecordedAfterOutage",
+      takenAt: "2026-10-13T16:00:00.000Z",
+      recordedAt: "2026-10-13T18:01:00.000Z",
+      acceptance: "Accepted",
+    },
+  });
+  expect(counterOrder).toHaveBeenLastCalledWith({ sessionCookie, csrf, command });
+  expect(cardMachinePayment).toHaveBeenLastCalledWith({
+    sessionCookie,
+    csrf,
+    command: {
+      operationReference: payOp,
+      orderReference: order,
+      orderBatchReference: batch,
+      expectedTotalMinor: "333",
+      slipReference: "A1B2",
+      takenAt: "2026-10-13T16:00:00.000Z",
+    },
+  });
+
+  // Cash: the cash total (rounded to 5 cents) was taken during the outage, change given then.
+  await submit({ ...command, paperPayment: { ...card, tender: "Cash", slipReference: null } });
+  expect(cardMachinePayment).toHaveBeenLastCalledWith({
+    sessionCookie,
+    csrf,
+    command: {
+      operationReference: payOp,
+      orderReference: order,
+      orderBatchReference: batch,
+      expectedTotalMinor: "333",
+      slipReference: null,
+      takenAt: "2026-10-13T16:00:00.000Z",
+      tenderedMinor: "335",
+    },
+  });
+
+  // The order is in even when its payment is refused or fails: the page records it again.
+  cardMachinePayment.mockRejectedValueOnce(
+    new CardMachinePaymentCommandError("CARD_MACHINE_TAKEN_BEFORE_RECORDS"),
+  );
+  const refusedPayment = await submit({ ...command, paperPayment: card });
+  expect(refusedPayment.status).toBe(200);
+  expect(await refusedPayment.json()).toEqual({ ...placed, paymentError: "taken_before_records" });
+  cardMachinePayment.mockRejectedValueOnce(
+    new CardMachinePaymentCommandError("CARD_MACHINE_AMOUNT_CHANGED", "350"),
+  );
+  expect(await (await submit({ ...command, paperPayment: card })).json()).toEqual({
+    ...placed,
+    paymentError: "amount_changed",
+    paymentTotalMinor: "350",
+  });
+  cardMachinePayment.mockRejectedValueOnce(new Error("database went away"));
+  const failedPayment = await submit({ ...command, paperPayment: card });
+  expect(failedPayment.status).toBe(200);
+  expect(await failedPayment.json()).toEqual({
+    ...placed,
+    paymentError: "card_machine_payment_unavailable",
+  });
+
+  // A table round paid now records it with the round; card machine only; pay-later records none.
+  const calls = cardMachinePayment.mock.calls.length;
+  const roundSent = await submit(
+    { ...command, paperPayment: card },
+    "/merchant/dining/staff-rounds",
+  );
+  expect(roundSent.status).toBe(200);
+  expect((await roundSent.json()).payment.status).toBe("Recorded");
+  expect(cardMachinePayment.mock.calls.length).toBe(calls + 1);
+  const cashRound = await submit(
+    { ...command, paperPayment: { ...card, tender: "Cash", slipReference: null } },
+    "/merchant/dining/staff-rounds",
+  );
+  expect(cashRound.status).toBe(400);
+  staffDiningRound.mockResolvedValueOnce({
+    ...placedRound,
+    payBy: null,
+    payLater: true,
+    tipMinor: "0",
+  } as never);
+  const later = await submit({ ...command, paperPayment: card }, "/merchant/dining/staff-rounds");
+  expect(await later.json()).not.toHaveProperty("payment");
+  const laterWithout = await submit(command, "/merchant/dining/staff-rounds");
+  expect(laterWithout.status).toBe(200);
+  expect(cardMachinePayment.mock.calls.length).toBe(calls + 1);
+});
+
 it("WP-2423 Q7 slice 2: protects the staff table round transport and maps refusals to stable codes", async () => {
   const placed = {
     status: "Placed" as const,
