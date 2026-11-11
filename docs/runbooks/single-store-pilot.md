@@ -872,6 +872,9 @@ a stuck phone payment from the table's checkout (`Stop the phone payment`).
 |  _  | __________________ | ________________ |
 |  _  | __________________ | ________________ |
 | Allergy asked? [ ] yes -> see manager       |
+| Table allergies (tick): [ ]peanut [ ]tree nut|
+|  [ ]milk [ ]egg [ ]wheat [ ]soy [ ]sesame    |
+|  [ ]fish [ ]shellfish [ ]mustard [ ]sulphite |
 |---------------------------------------------|
 | Total incl. tax $______  Tip $______        |
 | Card machine total $______                  |
@@ -887,6 +890,15 @@ a stuck phone payment from the table's checkout (`Stop the phone payment`).
 
 Allergy requests are not taken on paper beyond "ask the manager": the Kitchen board's allergen cues
 are not available on paper, so the manager checks the recipe before the item is made (IDR-0041).
+Tick the table's allergies on every slip of that table (WP-2423 M171), the same ticks staff set
+under `Tables` → the table → `Allergies at this table` when screens work; never write a guest's
+name or health details. When screens return, set the same ticks on the table so its later tickets
+show them in red.
+
+A choice or extra that runs out while screens are down (pearls, say): tell the kitchen at once,
+strike it on the printed menu at the counter, and write "no ___" on every slip that would have
+had it. When screens return, mark it under `Item availability` → `Extras and choices` (WP-2423
+M24) so guests stop seeing it.
 
 #### Incident sheet
 
@@ -898,6 +910,48 @@ Cause: [ ] store network [ ] host [ ] Provider [ ] card machine [ ] tablet
 |      |                             |               |                                      |                        |
 Notes (possible duplicates, refunds, goodwill given):
 ```
+
+#### Allergic reaction at the table (WP-2423 M168)
+
+The product has no incident screen for this; this paper procedure is the pilot's path.
+
+1. Call 911 at once if the guest has trouble breathing, swelling of the face or throat, or feels
+   faint. Help them use their own auto-injector if they have one. Do not give food or drink.
+2. Stop serving the dish: `Item availability` → the dish → `Sold out until further notice`. For a
+   shared extra (a sauce, pearls), use `Extras and choices` instead. On paper, strike it on the
+   printed menu and tell the kitchen.
+3. Tell the manager or owner at once.
+4. Fill in the paper **Allergic reaction log** below. Write "reaction reported", nothing more about
+   the guest's health, and no guest name on it. If contact details are needed (the guest asks to
+   be called back), the manager writes them on a separate sheet kept locked in the office.
+5. Keep the kitchen ticket (or slip) of that order, and print the dish's allergen answers from
+   `Allergens` (or photograph the Menu page row) the same day.
+6. The manager checks the dish's allergen answers and recipe (`Menu` → the dish, and `Recipes`)
+   before putting it back on with `Back on`.
+
+Keep the log with the store's food-safety records (how long is an external fact for the Owner to
+confirm with the local health unit; until then keep it at least two years).
+
+```text
+ALLERGIC REACTION LOG          Store ____________  Page ___
+| Date | Time | Table / order no. | Dish and choices (as on the ticket) | Action taken (911? dish stopped?) | Who was told | Outcome | Signed |
+|      |      |                   |                                     |                                   |              |         |        |
+```
+
+#### Food-safety paper records (WP-2423 M170)
+
+The product's temperature and cleaning pages are not part of the pilot; these records are kept on
+paper in a binder at the kitchen pass, and the manager signs each page at close.
+
+- **Fridge and freezer temperatures**, twice a day (opening and mid-afternoon): unit, time, °C,
+  initials. Fridge 4 °C or below, freezer −18 °C or below; anything warmer is written down with
+  what was done (moved stock, called for repair).
+- **Deliveries**: the delivery's own temperature is recorded on `Receiving` when it is entered
+  (°C for chilled and frozen lines). If the screen is down, write it on the delivery note.
+- **Cleaning and sanitising**: area, time, product used, initials, daily.
+- **Food handler certificates**: a copy for each staff member who handles food, with its expiry.
+- For an inspector: the binder, plus `Receiving`, `Waste`, `Stock counts` and `Allergens` on the
+  screen (print each page from the browser).
 
 ### 3a. Tables that pay at the end (pay later) during an outage
 
