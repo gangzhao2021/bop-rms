@@ -935,8 +935,50 @@ describe("WP-2423 shared-table-checkout (b): a re-scan on a phone already at the
         alreadyAtTable: true,
       },
     });
-    expect(urls).toEqual(["/bff/customer/entry", "/api/v1/customer/session/csrf"]);
+    // This page had no continuity token yet: it asks for one for its seat (lost-cookie re-scan).
+    await Promise.resolve();
+    expect(urls).toEqual([
+      "/bff/customer/entry",
+      "/api/v1/customer/session/csrf",
+      "/api/v1/dine-in/continuity",
+    ]);
     expect(getCustomerCsrfCredential()).toBe("B".repeat(43));
+  });
+
+  it("WP-2423 shared-table-checkout (b): a phone that lost its cookie sends its token and keeps the new one", async () => {
+    const stored = new Map<string, string>([["bop.customer.table-continuity", "T".repeat(43)]]);
+    vi.stubGlobal("window", {
+      localStorage: {
+        getItem: (key: string) => stored.get(key) ?? null,
+        setItem: (key: string, value: string) => void stored.set(key, value),
+      },
+    });
+    const bodies: unknown[] = [];
+    const urls: string[] = [];
+    const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      urls.push(String(input));
+      if (String(input) === "/api/v1/customer/session/csrf")
+        return response(200, { schemaVersion: 1, csrfToken: "B".repeat(43) });
+      bodies.push(JSON.parse(String(init?.body)));
+      return response(200, { ...already, continuityToken: "U".repeat(43) });
+    });
+    try {
+      const client = createCustomerEntryClient({
+        fetch,
+        hash: "#qr=aaa.bbb.ccc",
+        pathname: "/",
+        search: "",
+        replaceState: () => undefined,
+        online: () => true,
+      });
+      expect((await client.start()).kind).toBe("Resumed");
+      expect(bodies).toEqual([{ qrToken: "aaa.bbb.ccc", continuity: "T".repeat(43) }]);
+      expect(stored.get("bop.customer.table-continuity")).toBe("U".repeat(43));
+      // It already holds a token: nothing more is asked.
+      expect(urls).not.toContain("/api/v1/dine-in/continuity");
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("if the visit's CSRF can't be read back, says the step failed (a retry asks again)", async () => {

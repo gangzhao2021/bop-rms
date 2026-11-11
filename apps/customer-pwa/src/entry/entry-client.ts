@@ -1,3 +1,8 @@
+import {
+  readContinuityToken,
+  refreshContinuityToken,
+  rememberContinuityToken,
+} from "./table-continuity.js";
 import { guestReadRetryWaitsMs } from "../network/read-retry.js";
 import type {
   CustomerEntryBrowseContext,
@@ -184,7 +189,16 @@ function parseAlreadyAtTable(value: unknown) {
     "publicTableReference",
     "channel",
     "locale",
+    // WP-2423 shared-table-checkout (b): a phone back after losing its cookie gets a new token.
+    ...(value !== null && typeof value === "object" && "continuityToken" in value
+      ? ["continuityToken"]
+      : []),
   ]);
+  if (
+    raw.continuityToken !== undefined &&
+    !/^[A-Za-z0-9_-]{43}$/u.test(String(raw.continuityToken))
+  )
+    throw new TypeError("malformed entry result");
   if (
     raw.schemaVersion !== 2 ||
     raw.status !== "AlreadyAtTable" ||
@@ -547,6 +561,7 @@ export function createCustomerEntryClient(
         controller.abort();
       }, 15_000);
     });
+    const continuity = readContinuityToken();
     const request = async () => {
       guard();
       const response = await fetcher("/bff/customer/entry", {
@@ -558,15 +573,18 @@ export function createCustomerEntryClient(
         referrerPolicy: "no-referrer",
         signal: controller.signal,
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(
-          replay
+        body: JSON.stringify({
+          ...(replay
             ? intent === null
               ? { resume: true }
               : { resume: true, intent }
             : intent === null
               ? { qrToken: token }
-              : { qrToken: token, intent },
-        ),
+              : { qrToken: token, intent }),
+          // WP-2423 shared-table-checkout (b): only used by the server when this browser has no
+          // seated cookie: the same phone comes back instead of joining as a new one.
+          ...(continuity === null ? {} : { continuity }),
+        }),
       });
       try {
         guard();
@@ -662,6 +680,11 @@ export function createCustomerEntryClient(
         // (Restoring it starts a new CSRF context, so only the connection is checked after.)
         if (!(await restoreCustomerSession(fetcher))) throw new Error("entry unavailable");
         if (!online()) throw new Error("entry unavailable");
+        // WP-2423 shared-table-checkout (b): back after a lost cookie, with a new token; or the
+        // cookie was there and this page has none yet.
+        const token = (body as { continuityToken?: unknown } | null)?.continuityToken;
+        if (token !== undefined) rememberContinuityToken(token);
+        else if (readContinuityToken() === null) void refreshContinuityToken(fetcher);
         return Object.freeze({ kind: "Resumed", context });
       }
       const error = parseError(status, body, retryAfter, replay);

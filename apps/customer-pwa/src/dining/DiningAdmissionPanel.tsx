@@ -1,3 +1,4 @@
+import { refreshContinuityToken } from "../entry/table-continuity.js";
 import { t } from "../i18n/i18n.js";
 import { useEffect, useRef, useState, type FormEvent, type RefObject } from "react";
 import {
@@ -217,8 +218,11 @@ export function DiningAdmissionPanel({
               Reflect.ownKeys(descriptors).length === 2 &&
               descriptors.status?.value === "Bound" &&
               descriptors.operationReference?.value === expected;
-            if (valid && navigator.onLine) setState("Bound");
-            else unknownAfter(resume, current);
+            if (valid && navigator.onLine) {
+              setState("Bound");
+              // WP-2423 shared-table-checkout (b): seated now; keep the token for a lost cookie.
+              void refreshContinuityToken();
+            } else unknownAfter(resume, current);
           } catch {
             unknownAfter(resume, current);
           }
