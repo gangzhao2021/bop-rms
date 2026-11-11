@@ -23,8 +23,22 @@
 8. **结账开始后、送单（或付款）前又上架一次**（相隔几秒，客人已点“下单”或“付款”）：保留期内照常送出，按确认价建单，不打断客人、不要求重新核价；只有菜本身改了、卖不了或保留期已过才重新报价（2026-11-11 复核修正：原先这里回答“请重新核价”，与 M165“保留期内照收”不符）。
 9. **保留期正好在读回时结束**：再报价的读回途中保留期到点，这次请求按现价报价，回答和任何新报价一样（列出改价的菜），不当成服务暂不可用。
 
+## 菜的内容、降价与刷新后的改动（2026-11-11 v15 第 6 批实测补充）
+
+v15 实测发现四处与上面决定不符，按真实门店定下：
+
+10. **“菜本身改了”按客人看到的内容判断，不只看产品版本。** 店主在一页菜单里改菜名、改过敏原后上架，草稿产品版本是原地改的（同一个 `product_version_id`），原来的“另一个产品版本”栅栏永远不触发，客人按保留价付了一道名字和过敏原都没再看过的菜。现在 Catalog 比较这道菜在“确认价格时的菜单版本”和“现在的菜单版本”上发布给客人的菜名（各语言）和过敏原说明（`published_menu_projection_sellable`，当前或已退役的代都保留、不改不删）：任一不同，就不保留价格。保留期内再报价、开始结账、建单（先付桌付款前、后付桌送单前）三处都查；读不出旧版本的同一道菜，按“改了”处理（重新报价、重新给客人看），不当成没改；比较时数据库不可用是“请稍后再试”（503），不是无权限、也不按保留价放行。
+11. **保留期内客人付保留价和现价中较低的那个。** 保留期内再报价时先按现价试算（只算不记），总价比保留价低就不保留、按现价出新报价（新的 5 分钟）；涨价仍保留原价；试算失败照旧保留原价（客人已确认的价）。店里“只改本店价格”立即生效、不经上架，也一样传递。后付桌一键下单在“确认总价”停下后，第二次点按会再报价一次：保留中照原价，期间降价就按降价下单，比刚确认的总价高才再停一次。**比原要求窄的地方**：按整单总价取低，不是逐道菜取低（同一单一道涨、一道降，按现价整单更低时用现价，涨的那道按现价收）；结账页已点“继续付款”后到刷卡这段时间内的降价不再回头比较。交付报告须单列。
+12. **刷新后仍说出“加入后改了什么”，以门店记录为准。** 客人端只在页面内存里记“第一次看到的价格”（客人端规则：不在浏览器里存交易数据），刷新就丢，于是刷新后显示“购物车已是最新”，一键按新价下单。现在报价回答带上每一行在本购物车**第一次被报价时**的价格和数量（`cart_quote_attachment_line` 只追加，任何购物车版本、任何手机），以及菜名、过敏原从那时起是否改了（同第 10 条的比较）；客人页以它为“第一次看到的价格”（本页已接受的价格不被它覆盖）。改价、改名、改过敏原都在购物车或结账页逐道列出（改名写“X 在你加入购物车后改了名”，过敏原写现在的过敏原，菜单还没读到时请客人问店员）；涨价、改名、改过敏原都要勾“我已看过这些改动”才能下单或付款，降价只列出。刷新后若还在同一报价上，再勾一次（确认不跨刷新记住，宁可多问一次）。
+13. **后付桌的购物车一显示就报价一次（每个购物车版本一次）。** 后付桌“下单”就是结账，购物车页就是客人确认价格的地方：显示时报价，门店为这位客人保留这个价 5 分钟（第 1 条），下单时直接用这张报价；报价失败什么都不改（下单时再报价）。先付桌和自取在结账页报价确认，购物车页不报价。
+14. **售完提示只留一个“修改购物车”。** 结账页因售完拒绝时，主按钮就是“修改购物车”，提示句里不再重复同一个链接。
+
+记录照旧只追加：报价、报价挂接、订单项快照都不改已有行；订单项记“现在卖的菜”和客人最后确认的价格。
+
 ## 与原要求的差异（交付时须写明）
 
+- 第 11 项：“客人付保留价和现价中较低的”按整单总价取低，不是逐道菜取低；结账页点“继续付款”之后到刷卡之间的降价不再回头比较。
+- 第 12 项：“我已看过这些改动”的勾选不跨刷新记住，刷新后仍在同一报价上会再问一次。
 - 第 4 项：Owner 规则写“客人再确认一次”。本决定只对**涨价**要求勾选确认；**降价**直接列出原价和新价，付款即确认，不多加一步。这是按真实门店定的（降价不让客人多付，多一步只会让客人犹豫或放弃），但比原要求窄，交付报告须单列，不算“全部照要求做完”。
 
 ## 实现位置
@@ -33,4 +47,5 @@
 - 结账后又上架的送单（后付桌的后续一轮，结账凭证早于上架）：目录只能读现在的菜单，`order-submission-source.ts` 先按结账时刻读，读不回且菜单已换时，按送单这一刻把所有菜再读一次（同一时刻），订单项记现在卖的菜、确认的价；`order-item-snapshot.ts` 不再要求订单项菜单版本等于结账时的版本；`customer-additional-dining-session-submission.ts` 用这次读取的时刻作订单项快照时间；试点送单前的最后核对 `tooling/environment/pilot-additional-submission.mjs` 不比菜单版本（仍比产品版本）。
 - 保留期内再报价返回原报价：`configured-cart-quote-service.ts`（`repository.loadLatest`）、`customer-configured-quote-composition.ts`、`customer-quote-composition.ts`（`Held`）。
 - 文案：`apps/customer-pwa/src/journey/messages.ts`、`zh-Hans.ts`、`CartPage.tsx`、`CheckoutPage.tsx`。
+- 菜的内容比较（第 10、12 条）：`packages/rms/catalog/src/infrastructure/persistence/published-menu-query-store.ts`（`listPublishedDishChanges`）、`current-selection-facts-store.ts`（`dishChanges`）；栅栏在 `configured-cart-quote-service.ts`、`configured-checkout-validation-service.ts`、`order-submission-source.ts`。降价（第 11 条）：`configured-cart-quote-service.ts`（`pricing.estimate`）、`customer-configured-quote-composition.ts`；客人端第二次点按 `send-round.ts`。第一次报价（第 12 条）：`cart-quote-store.ts`（`createPostgresCartLineFirstQuoteReader`）、`customer-configured-quote-composition.ts`（`sinceAdded`）、`customer-quote.ts`；客人端 `dish-changes.tsx`、`seen-prices.ts`、`CartPage.tsx`、`CheckoutPage.tsx`。验收 `packages/database/test/price-hold-dish-changes-acceptance.test.mjs`（受限角色：改名、改过敏原、降价、保留期后列出第一次的价格），浏览器 `apps/customer-pwa/e2e/price-hold-dish-changes.spec.ts`（390/1024/1440）。
 - 验收：`packages/database/test/price-hold-acceptance.test.mjs`（受限角色：后付桌保留期内改价、保留期后改价、重放；先付桌结账后、付款前改价上架，订单和应付金额按确认价到分）；`listing-crosses-open-cart-acceptance.test.mjs`（结账开始后、送单前上架，直接送出、只送一次）。
