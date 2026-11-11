@@ -175,6 +175,31 @@ it("price-hold-dish-changes (DEC-PRICE-HOLD §3): a dish renamed or given other 
   const kept = await f.source.load({ evidence: f.evidence } as never);
   expect(kept.lines[0]?.pricing).toEqual(f.input.lines[0]?.pricing);
 });
+it("price-hold-dish-changes (DEC-PRICE-HOLD §10): a dish comparison that fails is a source outage, never read as a menu update", async () => {
+  const f = fixture();
+  const listedSince = "01a7ee00-0000-7000-8000-00000000cafe";
+  f.capture.mockResolvedValue({ ...f.input.lines[0]?.catalog, menuVersionReference: listedSince });
+  // The menu did move on, so only the cause decides: Catalog could not compare the dishes now.
+  const source = createOrderSubmissionSource({
+    scope: {
+      brandReference: f.input.cart.brandReference,
+      storeReference: f.input.cart.storeReference,
+    },
+    carts: { load: f.load },
+    pricing: { load: f.pricing },
+    catalog: {
+      capture: f.capture,
+      dishChanges: async () => {
+        throw Object.assign(new Error("catalog down"), { code: "CATALOG_DEPENDENCY_UNAVAILABLE" });
+      },
+    },
+    clock: { now: () => new Date(Date.parse(f.input.snapshotCapturedAt) + 50).toISOString() },
+    currentMenuVersion: async () => listedSince,
+  });
+  await expect(source.load({ evidence: f.evidence } as never)).rejects.toMatchObject({
+    code: "ORDER_SUBMISSION_SOURCE_UNAVAILABLE",
+  });
+});
 it("denies foreign scope without reading Cart", async () => {
   const f = fixture();
   await expect(

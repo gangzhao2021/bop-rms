@@ -35,6 +35,9 @@ export class OrderSubmissionSourceError extends Error {
     this.name = "OrderSubmissionSourceError";
   }
 }
+
+/** The dish comparison (name, allergens) could not be made now: answered as the source failing. */
+class DishComparisonUnavailable extends Error {}
 export interface OrderSubmissionSourceOptions {
   readonly scope: Readonly<{ brandReference: string; storeReference: string }>;
   readonly carts: { load(reference: string): Promise<unknown> };
@@ -267,7 +270,14 @@ function createVersionedOrderSubmissionSource<V extends 1 | 2>(
           const dishChanges = options.catalog.dishChanges;
           if (dishChanges === undefined)
             throw new CheckoutValidationError("CHECKOUT_REQUOTE_REQUIRED");
-          const changes = await dishChanges(moved);
+          // A comparison that could not be made is "please try again" (DEC-PRICE-HOLD §10), never
+          // read as a menu update: the menu did move, but that is not why this failed.
+          let changes: readonly (readonly unknown[])[];
+          try {
+            changes = await dishChanges(moved);
+          } catch {
+            throw new DishComparisonUnavailable();
+          }
           if (
             !Array.isArray(changes) ||
             changes.length !== moved.length ||
@@ -281,6 +291,7 @@ function createVersionedOrderSubmissionSource<V extends 1 | 2>(
       } catch (error) {
         if (error instanceof CheckoutValidationError && error.code === "CHECKOUT_REQUOTE_REQUIRED")
           throw error;
+        if (error instanceof DishComparisonUnavailable) throw new OrderSubmissionSourceError();
         if (await menuMovedOn(options, validatedLines))
           throw new CheckoutValidationError("CHECKOUT_REQUOTE_REQUIRED");
         throw new OrderSubmissionSourceError();
