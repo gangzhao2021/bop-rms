@@ -5566,6 +5566,14 @@ async function journey(journeyEnding) {
           );
           assert.equal(half.owed.totalMinor, (totalMinor - unitMinor).toString());
           assert.equal(half.rounds[0].paid, false);
+          // Phone A still showed "Pay the whole table" (no split when it opened): the table
+          // changed, it is told so (never "invalid"), and nothing is started or recorded.
+          const intentsBefore = created();
+          await assert.rejects(
+            payments.start(a, { operationReference: fresh(), tip: none, choice: null }),
+            { code: "TABLE_ONLINE_PAYMENT_BILL_CHANGED" },
+          );
+          assert.equal(created(), intentsBefore);
           assert.equal(paidB.bill.split.paidInFull, false);
           // The whole table is no longer one payment: staff take the rest (or a guest pays it).
           assert.equal(half.split.restMinor, (totalMinor - unitMinor).toString());

@@ -361,6 +361,10 @@ export function createDiningTableOnlinePayments(options: DiningTableOnlinePaymen
     if (current.waitingRounds.length > 0) return fail("TABLE_ONLINE_PAYMENT_ROUNDS_WAITING");
     if (!current.consistent) return fail("TABLE_ONLINE_PAYMENT_BILL_CHANGED");
     if (choice !== null) return guestPlan(current, tip, choice, participantReference);
+    // WP-2423 同桌结账: another guest started paying by dish while this phone showed the whole
+    // table. The table changed: the guest is shown the dishes left (and "the rest of the table").
+    if (partNumber === null && current.split?.mode === "ByGuests")
+      return fail("TABLE_ONLINE_PAYMENT_BILL_CHANGED");
     if ((current.split === null) !== (partNumber === null))
       return fail("TABLE_ONLINE_PAYMENT_INPUT_INVALID");
     const part =
