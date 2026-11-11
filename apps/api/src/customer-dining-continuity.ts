@@ -14,6 +14,7 @@ import {
   type GuestSessionServiceOptions,
 } from "@bop/identity";
 import {
+  DiningReadmissionError,
   createPostgresDiningGuestBindingStore,
   parseDiningInstant,
   parseDiningReference,
@@ -177,7 +178,7 @@ export function createCustomerDiningContinuity(options: CustomerDiningContinuity
      * The same phone back: in one transaction the old session is rotated into a new one at the same
      * seat, the token used, Dining's readmission recorded and a fresh token issued. Null (nothing
      * written) when the token no longer finds a live seated session or Dining refuses (the guest
-     * left, the table closed): the caller makes it an ordinary entry.
+     * left, the table closed): the caller makes it an ordinary entry. Rejects on an outage.
      */
     async readmit(
       token: unknown,
@@ -244,12 +245,25 @@ export function createCustomerDiningContinuity(options: CustomerDiningContinuity
             continuityToken: await issueFor(tx, rotated.toGuestSessionReference, observedAt),
           });
         });
-      } catch {
-        // The rotation rolled back with it: an ordinary entry follows.
-        return null;
+      } catch (error) {
+        // The rotation rolled back with it. Dining refused (the guest left, the table closed) or
+        // the token was just used by a scan racing this one: an ordinary entry follows. Anything
+        // else is an outage: the caller answers a retry, never a new seat.
+        if (readmissionRefused(error)) return null;
+        throw error;
       }
     },
   });
+}
+
+/** Dining's refusal of this readmission, or the token's single use taken by a racing scan. */
+export function readmissionRefused(error: unknown): boolean {
+  if (error instanceof DiningReadmissionError) return error.code === "DINING_READMISSION_REFUSED";
+  return (
+    error !== null &&
+    typeof error === "object" &&
+    (error as { code?: unknown }).code === "23505"
+  );
 }
 
 const credential = /^[A-Za-z0-9_-]{43}$/u;

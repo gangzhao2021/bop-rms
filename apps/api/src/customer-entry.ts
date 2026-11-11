@@ -233,7 +233,8 @@ export interface CustomerEntryHandlerOptions {
    * WP-2423 shared-table-checkout (b), lost cookie: with no seated cookie, the page's continuity
    * token finds the phone's earlier seat (same answers as `presentedTable`); when the entry then
    * answers AlreadyAtTable, `readmit` makes this browser that same phone again (a new cookie for
-   * the same participant). A readmission that can't be made is an ordinary entry.
+   * the same participant). A readmission refused (the seat changed, the token was used) is null,
+   * an ordinary entry; either call rejects when it can't be answered, and the entry is a 503 retry.
    */
   readonly continuity?: {
     table(
@@ -1010,10 +1011,10 @@ export class CustomerEntryHandler {
           intent === undefined &&
           continuityToken !== undefined &&
           continuity !== undefined;
+        // A token lookup that can't be answered (Identity or Dining down) is the entry's 503 retry
+        // below, never a new seat: joining as a new phone would lose the guest's own dishes.
         if (viaContinuity)
-          presentedTable = await continuity
-            .table(continuityToken as string, requestedAt)
-            .catch(() => null);
+          presentedTable = await continuity.table(continuityToken as string, requestedAt);
         const establish = (seat: typeof presentedTable) =>
           this.#port.establish(
             Object.freeze({
@@ -1034,10 +1035,12 @@ export class CustomerEntryHandler {
         if (viaContinuity && result.status === "AlreadyAtTable") {
           // The same phone at the same seat: one transaction rotates its old session into this
           // browser's new cookie. If that can't be done (the seat changed meanwhile), the scan is
-          // an ordinary entry.
-          const readmitted = await continuity
-            .readmit(continuityToken as string, operationReference, requestedAt)
-            .catch(() => null);
+          // an ordinary entry. A readmission that can't be made for an outage is the 503 retry.
+          const readmitted = await continuity.readmit(
+            continuityToken as string,
+            operationReference,
+            requestedAt,
+          );
           if (readmitted !== null) {
             forget();
             response.append("Set-Cookie", serializeCookie(readmitted.sessionCredential as never));

@@ -495,4 +495,56 @@ describe("WP-2423 shared-table-checkout (b): a phone that lost its cookie scans 
     await withToken(serverPort);
     expect(calls[0]?.presentedTableUnconfirmed).toEqual(seated);
   });
+  it("an outage finding the token's seat or readmitting the phone is a retry, never a new seat", async () => {
+    for (const continuity of [
+      {
+        table: async () => {
+          throw new Error("identity down");
+        },
+        readmit: async () => null,
+      },
+      {
+        table: async () => seated,
+        readmit: async () => {
+          throw new Error("database down");
+        },
+      },
+    ]) {
+      const calls: CustomerEntryPortInput[] = [];
+      const serverPort = await listen(
+        handler(
+          {
+            establish: async (input) => (
+              calls.push(input),
+              input.presentedTable !== undefined
+                ? (already as CustomerEntryPortResult)
+                : // A new seat, which must never be what the guest gets here.
+                  ({ status: "EntryUnavailable" } as CustomerEntryPortResult)
+            ),
+          },
+          continuity,
+        ),
+      );
+      const response = await withToken(serverPort);
+      expect(response.status).toBe(503);
+      expect(response.headers.getSetCookie().some((v) => v.startsWith("__Host-bop-guest="))).toBe(
+        false,
+      );
+      expect(calls.filter((input) => input.presentedTable === undefined)).toHaveLength(0);
+    }
+  });
+});
+
+describe("WP-2423 shared-table-checkout (b): which readmission failures are a plain entry", () => {
+  it("Dining's refusal and a racing scan's used token are; an outage is not", async () => {
+    const { readmissionRefused } = await import("./customer-dining-continuity.js");
+    const { DiningReadmissionError } = await import("@rms/dining");
+    expect(readmissionRefused(new DiningReadmissionError("DINING_READMISSION_REFUSED"))).toBe(true);
+    expect(readmissionRefused(Object.assign(new Error("duplicate"), { code: "23505" }))).toBe(true);
+    expect(readmissionRefused(new DiningReadmissionError("DINING_READMISSION_UNAVAILABLE"))).toBe(
+      false,
+    );
+    expect(readmissionRefused(Object.assign(new Error("down"), { code: "57P01" }))).toBe(false);
+    expect(readmissionRefused(new Error("connection refused"))).toBe(false);
+  });
 });
