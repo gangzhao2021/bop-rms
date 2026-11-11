@@ -58,6 +58,8 @@ export const fullSignInMutationPaths: ReadonlySet<string> = new Set([
   "/commerce/tax-classifications/command",
   "/organization/roles/command",
   "/organization/roles/offer-decline",
+  // WP-2423 store-type starter roles: creates roles and sends them for approval.
+  "/organization/roles/starter-sets/apply",
   "/organization/staff/command",
   "/organization/sole-operator",
   "/store-setup/payment-configuration",

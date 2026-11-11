@@ -397,6 +397,62 @@ export function installMerchantOrganizationRoutes(
       .then((result) => response.json(result))
       .catch((error: unknown) => roleAdministrationFailure(response, error));
   });
+  // WP-2423 store-type starter roles: what each kind of shop would start from, and starting from it.
+  router.post(
+    "/organization/roles/starter-sets",
+    sameOriginMutation(options),
+    (request, response) => {
+      const sessionCookie = cookie(request, "__Host-bop-merchant");
+      const csrf = exactHeader(request, "x-bop-csrf");
+      const body = request.body as Record<string, unknown> | undefined;
+      if (
+        sessionCookie === null ||
+        csrf === null ||
+        csrf.length === 0 ||
+        Object.keys(request.query).length !== 0 ||
+        body === undefined ||
+        body === null ||
+        typeof body !== "object" ||
+        Object.keys(body).length !== 0
+      ) {
+        denied(response);
+        return;
+      }
+      if (!options.roleAdministration) {
+        response.status(503).json({ error: "role_administration_unavailable" });
+        return;
+      }
+      void options.roleAdministration
+        .starterSets({ sessionCookie, csrf })
+        .then((result) => response.json(result))
+        .catch((error: unknown) => roleAdministrationFailure(response, error));
+    },
+  );
+  router.post(
+    "/organization/roles/starter-sets/apply",
+    sameOriginMutation(options),
+    (request, response) => {
+      const sessionCookie = cookie(request, "__Host-bop-merchant");
+      const csrf = exactHeader(request, "x-bop-csrf");
+      if (
+        sessionCookie === null ||
+        csrf === null ||
+        csrf.length === 0 ||
+        Object.keys(request.query).length !== 0
+      ) {
+        denied(response);
+        return;
+      }
+      if (!options.roleAdministration) {
+        response.status(503).json({ error: "role_administration_unavailable" });
+        return;
+      }
+      void options.roleAdministration
+        .applyStarterSet({ sessionCookie, csrf, body: request.body })
+        .then((result) => response.json(result))
+        .catch((error: unknown) => roleAdministrationFailure(response, error));
+    },
+  );
 
   // WP-2423: IAM-USER-LIST / IAM-USER-DETAIL reads and staff role assignment commands.
   const staffStatus = {

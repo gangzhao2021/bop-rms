@@ -6,6 +6,9 @@ import {
   parseRoleCommandInput,
   presetUpdateOf,
   roleCommandIntentDigest,
+  parseStarterSetApply,
+  starterSetView,
+  starterStepReference,
 } from "./merchant-role-administration.js";
 
 const id = (n: number) => "01909a0a-0000-7000-8000-" + n.toString(16).padStart(12, "0");
@@ -94,6 +97,7 @@ const d = vi.hoisted(() => ({
   plan: vi.fn(),
   execute: vi.fn(),
   prior: vi.fn(),
+  selections: vi.fn(async (actions: readonly string[]) => actions.map((action) => ({ action }))),
 }));
 vi.mock("./merchant-staff-labels.js", () => ({
   createStaffLabels: async () => (actor: string) => (actor === id(5) ? "You" : "Mia"),
@@ -111,6 +115,8 @@ vi.mock("@bop/permission", async (original) => ({
   planRoleAdministrationChange: d.plan,
   executeRoleAdministration: d.execute,
   findRoleAdministrationOperation: d.prior,
+  buildRolePermissionSelections: (_tx: unknown, actions: readonly string[]) =>
+    d.selections(actions),
 }));
 type Options = Parameters<typeof createMerchantRoleAdministration>[0];
 const record = {
@@ -523,5 +529,175 @@ describe("WP-2423 role presets: what BOP changed in a preset since the Store mad
       { ...body, extra: true },
     ])
       expect(() => parsePresetOfferDecline(bad)).toThrow(/Invalid/u);
+  });
+});
+
+describe("WP-2423 store-type starter roles", () => {
+  beforeEach(() => vi.clearAllMocks());
+  const active = (code: string, name: string, extra: Record<string, unknown> = {}) => {
+    const version = {
+      ...record,
+      code,
+      displayName: name,
+      lifecycle: "Active",
+      roleReference: id(0x40 + name.length),
+      ...extra,
+    };
+    return roleView({ record: version, effective: version, opening: null });
+  };
+  it("accepts a closed apply for a known kind of shop only", () => {
+    const body = { storeType: "Hotpot", operationReference: id(9), putAway: true };
+    expect(parseStarterSetApply(body)).toEqual(body);
+    for (const bad of [
+      { ...body, storeType: "Bakery" },
+      { ...body, putAway: "yes" },
+      { ...body, operationReference: "not-a-reference" },
+      { ...body, actions: ["merchant.access"] },
+      { storeType: "Hotpot", operationReference: id(9) },
+    ])
+      expect(() => parseStarterSetApply(bad)).toThrow();
+  });
+  it("names each step of an apply with its own version 7 reference, the same on a retry", () => {
+    const first = starterStepReference(id(9), "Hotpot:floor:Create");
+    expect(first).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u);
+    expect(first.slice(0, 13)).toBe(id(9).slice(0, 13));
+    expect(starterStepReference(id(9), "Hotpot:floor:Create")).toBe(first);
+    expect(starterStepReference(id(9), "Hotpot:floor:Submit")).not.toBe(first);
+    expect(starterStepReference(id(10), "Hotpot:floor:Create")).not.toBe(first);
+  });
+  it("reads each starter role against the Store's roles: to add, already here, removed or a name taken", () => {
+    const removed = {
+      ...record,
+      code: "starter_runner",
+      displayName: "Runner",
+      lifecycle: "Deactivated",
+      roleReference: id(0x51),
+    };
+    const roles = [
+      active("starter_floor", "Floor"),
+      roleView({ record: removed, effective: removed, opening: null }),
+      // The owner already made their own "cashier": the starter Cashier is not added.
+      active("custom_0123456789ab", "cashier"),
+      active("kitchen", "Kitchen"),
+      active("front_of_house", "Front of House", { roleReference: id(0x60) }),
+      active("inventory_manager", "Inventory Manager"),
+      active("store_manager", "Store Manager"),
+    ];
+    const hotpot = starterSetView(roles as never, "Hotpot");
+    expect(hotpot.roles.map((role) => [role.key, role.state])).toEqual([
+      ["floor", "Added"],
+      ["runner", "Removed"],
+      ["cashier", "NameTaken"],
+    ]);
+    expect(hotpot.keep.map((role) => role.name)).toEqual([
+      "Store Manager",
+      "Kitchen",
+      "Inventory Manager",
+    ]);
+    expect(hotpot.putAway).toEqual([
+      { roleReference: id(0x60), name: "Front of House", held: false, memberCount: 0 },
+    ]);
+    // Staff holding Front of House keep it: it is shown as staying, never put away.
+    const held = starterSetView(
+      roles.map((role) =>
+        role.record.code === "front_of_house" ? { ...role, memberCount: 2 } : role,
+      ) as never,
+      "Hotpot",
+    );
+    expect(held.putAway[0]).toMatchObject({ held: true, memberCount: 2 });
+    expect(starterSetView([] as never, "TeaShop").roles.map((role) => role.state)).toEqual([
+      "ToAdd",
+      "ToAdd",
+    ]);
+  });
+  it("applies with create and change, and remove only when asked, re-checked before commit", async () => {
+    const f = setup();
+    d.list.mockResolvedValue([]);
+    d.plan.mockImplementation((input: { operation: string }) => ({
+      ...record,
+      code: "starter_counter",
+      version: input.operation === "Create" ? 1 : 2,
+    }));
+    d.execute.mockImplementation(async (input: { operation: string }) => ({
+      roleReference: id(0x70),
+      version: input.operation === "Create" ? 1 : 2,
+      lifecycle: input.operation === "Create" ? "Draft" : "InReview",
+    }));
+    d.load.mockResolvedValue(roleView({ record: { ...record, version: 1 } }));
+    await expect(
+      f.service.applyStarterSet({
+        ...f.input,
+        body: { storeType: "CounterOnly", operationReference: id(9), putAway: false },
+      }),
+    ).resolves.toEqual({ storeType: "CounterOnly", added: 1, putAway: 0 });
+    expect(f.authorizeActions.mock.calls[0]?.[0]).toEqual([
+      "identity.role.read",
+      "identity.role.create",
+      "identity.role.change",
+    ]);
+    expect(
+      d.execute.mock.calls.map((call) => (call[0] as { operation: string }).operation),
+    ).toEqual(["Create", "Submit"]);
+    // The starter role is created under its fixed code, never a generated one.
+    const created = d.plan.mock.calls[0]?.[0] as { draft: { code: string; displayName: string } };
+    expect(created.draft).toMatchObject({ code: "starter_counter", displayName: "Counter" });
+  });
+  it("refuses to apply without permission to remove when removing is asked", async () => {
+    const f = setup();
+    f.authorizeActions.mockImplementation(
+      async (actions: readonly string[]) =>
+        new Map(
+          actions.map((action) => [
+            action,
+            Object.freeze({
+              effect: (action === "identity.role.deactivate" ? "Deny" : "Allow") as
+                "Allow" | "Deny",
+              action,
+              scopeKind: "Store",
+            }),
+          ]),
+        ),
+    );
+    await expect(
+      f.service.applyStarterSet({
+        ...f.input,
+        body: { storeType: "TeaShop", operationReference: id(9), putAway: true },
+      }),
+    ).rejects.toMatchObject({ code: "PermissionDenied" });
+    expect(d.execute).not.toHaveBeenCalled();
+  });
+  it("the same reference for another kind of shop is a conflict, never a second set", async () => {
+    const f = setup();
+    const teaStep = starterStepReference(id(9), "TeaShop:counter:Create");
+    d.prior.mockImplementation(async (_tx: unknown, _scope: unknown, reference: string) =>
+      reference === teaStep ? { roleReference: id(0x70) } : null,
+    );
+    await expect(
+      f.service.applyStarterSet({
+        ...f.input,
+        body: { storeType: "DessertShop", operationReference: id(9), putAway: false },
+      }),
+    ).rejects.toMatchObject({ code: "Conflict" });
+    expect(d.execute).not.toHaveBeenCalled();
+  });
+  it("reads the sets with the three role actions, and says who may apply", async () => {
+    const f = setup();
+    d.list.mockResolvedValue([]);
+    const view = await f.service.starterSets(f.input);
+    expect(view.mayApply).toBe(true);
+    expect(view.started).toBe(false);
+    expect(view.sets.map((set) => set.storeType)).toEqual([
+      "TeaShop",
+      "DessertShop",
+      "Hotpot",
+      "FullService",
+      "CounterOnly",
+    ]);
+    expect(f.authorizeActions.mock.calls[0]?.[0]).toEqual([
+      "identity.role.read",
+      "identity.role.create",
+      "identity.role.change",
+      "identity.role.deactivate",
+    ]);
   });
 });

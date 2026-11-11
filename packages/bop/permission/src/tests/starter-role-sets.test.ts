@@ -58,6 +58,9 @@ describe("starter role sets per kind of shop", () => {
       expect(presetCodes.has(role.roleCode)).toBe(false);
       expect(rolePresetActions(role.roleCode, "Store")).toBeNull();
       expect(role.actions).toContain("merchant.access");
+      // Stored as a role's name and description (1 to 180 characters).
+      expect(role.displayName.length).toBeLessThanOrEqual(80);
+      expect(role.description.length).toBeLessThanOrEqual(180);
       expect(new Set(role.actions).size).toBe(role.actions.length);
       for (const action of role.actions) expect(catalog.has(action), action).toBe(true);
     }

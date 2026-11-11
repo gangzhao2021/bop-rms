@@ -71,6 +71,7 @@ describe("staff PIN HTTP", () => {
       "/pricing/price-books",
       "/tax-config/authoring/commands",
       "/organization/roles/command",
+      "/organization/roles/starter-sets/apply",
       "/organization/staff/command",
       "/store-setup/payment-configuration",
     ])

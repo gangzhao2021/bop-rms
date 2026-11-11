@@ -30,6 +30,11 @@ import {
   type RoleAdministrationTransaction,
   type RoleAdministrationVersionRecord,
   type RoleAssignmentTransaction,
+  starterRole,
+  starterRoleOfCode,
+  starterRoleSet,
+  starterStoreTypes,
+  type StarterStoreType,
 } from "@bop/permission";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
@@ -729,6 +734,276 @@ export function createMerchantRoleAdministration(options: {
     );
   };
 
+  /**
+   * One role command inside an authorized run (`decisions` hold its action). A starter role is
+   * created under its fixed `roleCode`; any other new role gets one from its operation reference.
+   */
+  async function executeCommand(
+    tx: Tx,
+    scope: Scope,
+    decisions: ReadonlyMap<string, Decision>,
+    guard: (transaction?: unknown) => Promise<boolean>,
+    command: RoleCommandInput,
+    intentDigest: string,
+    roleCode?: string,
+  ): Promise<{
+    readonly roleReference: string;
+    readonly version: number;
+    readonly status: string;
+  }> {
+    const action = operationAction[command.operation];
+    const ownerScope = ownerScopeOf(scope);
+    const viewer = String(scope.actorReference);
+    const now = options.persistence.now();
+    // A retry answers from what the first attempt recorded (never a second role).
+    const prior = await findRoleAdministrationOperation(
+      asRoleTx(tx),
+      ownerScope,
+      command.operationReference,
+    );
+    if (prior !== null) {
+      if (
+        prior.commandType !== command.operation ||
+        prior.actorReference !== viewer ||
+        prior.intentDigest !== intentDigest
+      )
+        return fail("Conflict");
+      return {
+        roleReference: prior.roleReference,
+        version: prior.version,
+        status: prior.lifecycle,
+      };
+    }
+    let role: RoleAdministrationRoleView | null = null;
+    if (command.roleReference !== null) {
+      try {
+        role = await loadRoleAdministration(asRoleTx(tx), ownerScope, command.roleReference, now);
+      } catch (error) {
+        if (error instanceof RoleAdministrationStoreError) return fail("NotFound");
+        throw error;
+      }
+      if (role.record.storeReference === null) fail("PermissionDenied");
+      if (role.record.version !== command.expectedVersion) fail("Conflict");
+    }
+    const current = role?.record ?? null;
+    // A name is unique among this Store's roles in use or waiting (removed ones keep theirs).
+    // Bringing a removed role back and restoring a preset change the name without a draft:
+    // they carry the removed role's name and the preset's own name.
+    const restoring = command.operation === "RestoreDefault" && current !== null;
+    const bringingBack =
+      command.operation === "Activate" && current !== null && current.lifecycle !== "Approved";
+    const name =
+      command.draft !== null
+        ? command.draft.displayName
+        : restoring
+          ? rolePresetProfile(current.code, current.storeReference === null ? "Brand" : "Store")
+              ?.displayName
+          : bringingBack
+            ? (current.lifecycle === "Rejected" || current.lifecycle === "Withdrawn") &&
+              role?.effective != null
+              ? role.effective.displayName
+              : current.displayName
+            : undefined;
+    if (name !== undefined) {
+      // One naming at a time per Store, so two Creates or Revises never commit one name.
+      // The run already holds the Brand's permission fence shared (authorization) and a
+      // Create later takes it exclusive, so waiting here would deadlock: a second naming
+      // backs off instead, and its rerun reads the first one's name.
+      const free = (
+        await asRoleTx(tx).query(
+          "SELECT pg_try_advisory_xact_lock(hashtextextended($1,0)) locked",
+          [
+            "bop_permission.role_name:" +
+              ownerScope.brandReference +
+              ":" +
+              ownerScope.storeReference,
+          ],
+        )
+      ).rows[0]?.locked;
+      if (free !== true) throw new RoleNamingBusy();
+      const others = (await listRoleAdministration(asRoleTx(tx), ownerScope, now)).filter(
+        (other) =>
+          other.record.roleReference !==
+            (command.operation === "Duplicate" ? null : current?.roleReference) &&
+          other.effective?.lifecycle !== "Deactivated",
+      );
+      if (
+        others.some(
+          (other) =>
+            sameName(other.record.displayName, name) ||
+            (other.effective !== null && sameName(other.effective.displayName, name)),
+        )
+      )
+        fail("NameTaken");
+    }
+    const change = role === null ? null : changeOf(role);
+    if (command.operation === "Approve" && change !== null) {
+      // The approver must hold every flagged permission the change adds: a widely held
+      // role is never widened to money powers by someone who lacks them.
+      const flagged = change.added.filter((code) => flaggedPermissionCodes.has(code));
+      if ((await notHeld(scope, flagged)).length > 0) fail("ApproverLacksAccess");
+    }
+    if (command.operation === "ApproveAlone" && change !== null) {
+      // Approving alone never widens a role past what the approver holds.
+      if ((await notHeld(scope, change.added)).length > 0) fail("WouldWidenOwnAccess");
+    }
+    if (
+      command.operation === "Activate" &&
+      current !== null &&
+      current.lifecycle === "Approved" &&
+      change?.restore === true &&
+      !equalsPreset(actionsOf(current), presetCatalogCodes(current))
+    )
+      // BOP updated the preset after this restore was approved: check it again.
+      fail("PresetChanged");
+    let gateFailure: unknown = null;
+    const ports = createPostgresRoleAdministrationPorts({
+      transaction: asRoleTx(tx),
+      scope: ownerScope,
+      operation: command.operation,
+      operationReference: command.operationReference,
+      actorReference: scope.actorReference,
+      authorization: {
+        // The decision taken at the start of this run (no query); the run re-checks it in
+        // full before the commit.
+        authorize: async (request) => {
+          if (!(await guard(tx)) || String(request.action) !== action)
+            return fail("PermissionDenied");
+          return decisions.get(action) ?? fail("PermissionDenied");
+        },
+      },
+      clock: { now: () => now },
+      nextReference: () => options.references.next(),
+      intentDigest,
+    });
+    const wired = options.soleOperator;
+    const soleOperator =
+      command.operation !== "ApproveAlone" || wired === undefined
+        ? undefined
+        : {
+            confirm: async () => {
+              try {
+                return await requireMerchantStoreSoleOperator(tx as never, {
+                  tenantReference: String(
+                    (scope as { selected: { tenantReference: string } }).selected.tenantReference,
+                  ),
+                  brandReference: ownerScope.brandReference,
+                  storeReference: ownerScope.storeReference,
+                  actorReference: viewer,
+                  permissionCode: staffRoleApprovalPermission,
+                  observedAt: now,
+                  resolveContext: wired.resolveContext(tx, scope),
+                  allowed: async () => guard(tx),
+                  includeBrandHolders: true,
+                });
+              } catch (error) {
+                gateFailure = error;
+                throw error;
+              } finally {
+                await asRoleTx(tx).query(
+                  "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+                  [ownerScope.brandReference, ownerScope.storeReference],
+                );
+              }
+            },
+          };
+    if (command.operation === "ApproveAlone" && soleOperator === undefined)
+      fail("SoleOperatorNotInEffect");
+    const policyVersion = await ports.policy.currentVersion(ownerScope.brandReference);
+    const selections = (actions: readonly string[]) =>
+      buildRolePermissionSelections(asRoleTx(tx), actions).catch((error: unknown) => {
+        // A permission the catalog no longer offers: read the role again. A failed read
+        // carries on as itself and is logged.
+        if (merchantFailureCode(error) === "ROLE_ADMIN_NOT_FOUND") return fail("Conflict");
+        throw error;
+      });
+    const restore = command.operation === "RestoreDefault";
+    const presetProfile =
+      current === null
+        ? null
+        : rolePresetProfile(current.code, current.storeReference === null ? "Brand" : "Store");
+    if (restore && (current === null || presetOf(current) === null)) fail("Invalid");
+    const draftActions = restore
+      ? presetCatalogCodes(current as RoleAdministrationVersionRecord)
+      : (command.draft?.actions ?? null);
+    let next: RoleAdministrationVersionRecord;
+    try {
+      next = planRoleAdministrationChange({
+        operation: command.operation,
+        current,
+        effective: role?.effective ?? null,
+        scope: {
+          brandReference: ownerScope.brandReference,
+          storeReference: ownerScope.storeReference,
+        },
+        actorReference: scope.actorReference,
+        policyVersion,
+        changedAt: now,
+        reasonCode: restore ? rolePresetRestoreReason : command.reasonCode,
+        nextReference: () => options.references.next(),
+        draft:
+          draftActions === null
+            ? null
+            : {
+                ...(command.operation === "Create" || command.operation === "Duplicate"
+                  ? { code: roleCode ?? generatedRoleCode(command.operationReference) }
+                  : {}),
+                // A restore brings back the preset's own name and description too.
+                displayName: restore
+                  ? (presetProfile?.displayName ?? "")
+                  : (command.draft?.displayName ?? ""),
+                description: restore
+                  ? (presetProfile?.description ?? "")
+                  : (command.draft?.description ?? ""),
+                selections: await selections(draftActions),
+              },
+      });
+    } catch (error) {
+      if (error instanceof MerchantRoleAdministrationError) throw error;
+      return fail("Invalid");
+    }
+    try {
+      const result = await executeRoleAdministration(
+        {
+          tenantContext: scope.context,
+          operation: command.operation,
+          expectedVersion: (current?.version ?? null) as never,
+          idempotencyKey: command.operationReference,
+          current,
+          effective: role?.effective ?? null,
+          next,
+          auditId: options.references.next() as never,
+          correlationId: command.operationReference as never,
+          sourceChannel: "MERCHANT_WEB",
+        },
+        { ...ports, ...(soleOperator === undefined ? {} : { soleOperator }) },
+      );
+      return {
+        roleReference: result.roleReference,
+        version: result.version,
+        status: result.lifecycle,
+      };
+    } catch (error) {
+      if (gateFailure instanceof MerchantSoleOperatorGateError)
+        return fail(
+          gateFailure.code === "NeedsReverification"
+            ? "NeedsReverification"
+            : "SoleOperatorNotInEffect",
+        );
+      if (error instanceof RoleAdministrationServiceError)
+        return fail(
+          error.code === "ROLE_ADMIN_PERMISSION_DENIED"
+            ? "PermissionDenied"
+            : error.code === "ROLE_ADMIN_ROLE_IN_USE"
+              ? "InUse"
+              : error.code === "ROLE_ADMIN_MUTATION_INVALID"
+                ? "Invalid"
+                : "Conflict",
+        );
+      if (error instanceof RoleAdministrationContractError) return fail("Invalid");
+      throw error;
+    }
+  }
   const command = async (input: { sessionCookie: unknown; csrf: unknown; body: unknown }) => {
     const command = parseRoleCommandInput(input.body);
     const intentDigest = roleCommandIntentDigest(command);
@@ -742,272 +1017,8 @@ export function createMerchantRoleAdministration(options: {
           current0.sessionReference,
           [action],
           [action],
-          async (scope, decisions, guard) => {
-            const ownerScope = ownerScopeOf(scope);
-            const viewer = String(scope.actorReference);
-            const now = options.persistence.now();
-            // A retry answers from what the first attempt recorded (never a second role).
-            const prior = await findRoleAdministrationOperation(
-              asRoleTx(tx),
-              ownerScope,
-              command.operationReference,
-            );
-            if (prior !== null) {
-              if (
-                prior.commandType !== command.operation ||
-                prior.actorReference !== viewer ||
-                prior.intentDigest !== intentDigest
-              )
-                return fail("Conflict");
-              return {
-                roleReference: prior.roleReference,
-                version: prior.version,
-                status: prior.lifecycle,
-              };
-            }
-            let role: RoleAdministrationRoleView | null = null;
-            if (command.roleReference !== null) {
-              try {
-                role = await loadRoleAdministration(
-                  asRoleTx(tx),
-                  ownerScope,
-                  command.roleReference,
-                  now,
-                );
-              } catch (error) {
-                if (error instanceof RoleAdministrationStoreError) return fail("NotFound");
-                throw error;
-              }
-              if (role.record.storeReference === null) fail("PermissionDenied");
-              if (role.record.version !== command.expectedVersion) fail("Conflict");
-            }
-            const current = role?.record ?? null;
-            // A name is unique among this Store's roles in use or waiting (removed ones keep theirs).
-            // Bringing a removed role back and restoring a preset change the name without a draft:
-            // they carry the removed role's name and the preset's own name.
-            const restoring = command.operation === "RestoreDefault" && current !== null;
-            const bringingBack =
-              command.operation === "Activate" &&
-              current !== null &&
-              current.lifecycle !== "Approved";
-            const name =
-              command.draft !== null
-                ? command.draft.displayName
-                : restoring
-                  ? rolePresetProfile(
-                      current.code,
-                      current.storeReference === null ? "Brand" : "Store",
-                    )?.displayName
-                  : bringingBack
-                    ? (current.lifecycle === "Rejected" || current.lifecycle === "Withdrawn") &&
-                      role?.effective != null
-                      ? role.effective.displayName
-                      : current.displayName
-                    : undefined;
-            if (name !== undefined) {
-              // One naming at a time per Store, so two Creates or Revises never commit one name.
-              // The run already holds the Brand's permission fence shared (authorization) and a
-              // Create later takes it exclusive, so waiting here would deadlock: a second naming
-              // backs off instead, and its rerun reads the first one's name.
-              const free = (
-                await asRoleTx(tx).query(
-                  "SELECT pg_try_advisory_xact_lock(hashtextextended($1,0)) locked",
-                  [
-                    "bop_permission.role_name:" +
-                      ownerScope.brandReference +
-                      ":" +
-                      ownerScope.storeReference,
-                  ],
-                )
-              ).rows[0]?.locked;
-              if (free !== true) throw new RoleNamingBusy();
-              const others = (await listRoleAdministration(asRoleTx(tx), ownerScope, now)).filter(
-                (other) =>
-                  other.record.roleReference !==
-                    (command.operation === "Duplicate" ? null : current?.roleReference) &&
-                  other.effective?.lifecycle !== "Deactivated",
-              );
-              if (
-                others.some(
-                  (other) =>
-                    sameName(other.record.displayName, name) ||
-                    (other.effective !== null && sameName(other.effective.displayName, name)),
-                )
-              )
-                fail("NameTaken");
-            }
-            const change = role === null ? null : changeOf(role);
-            if (command.operation === "Approve" && change !== null) {
-              // The approver must hold every flagged permission the change adds: a widely held
-              // role is never widened to money powers by someone who lacks them.
-              const flagged = change.added.filter((code) => flaggedPermissionCodes.has(code));
-              if ((await notHeld(scope, flagged)).length > 0) fail("ApproverLacksAccess");
-            }
-            if (command.operation === "ApproveAlone" && change !== null) {
-              // Approving alone never widens a role past what the approver holds.
-              if ((await notHeld(scope, change.added)).length > 0) fail("WouldWidenOwnAccess");
-            }
-            if (
-              command.operation === "Activate" &&
-              current !== null &&
-              current.lifecycle === "Approved" &&
-              change?.restore === true &&
-              !equalsPreset(actionsOf(current), presetCatalogCodes(current))
-            )
-              // BOP updated the preset after this restore was approved: check it again.
-              fail("PresetChanged");
-            let gateFailure: unknown = null;
-            const ports = createPostgresRoleAdministrationPorts({
-              transaction: asRoleTx(tx),
-              scope: ownerScope,
-              operation: command.operation,
-              operationReference: command.operationReference,
-              actorReference: scope.actorReference,
-              authorization: {
-                // The decision taken at the start of this run (no query); the run re-checks it in
-                // full before the commit.
-                authorize: async (request) => {
-                  if (!(await guard(tx)) || String(request.action) !== action)
-                    return fail("PermissionDenied");
-                  return decisions.get(action) ?? fail("PermissionDenied");
-                },
-              },
-              clock: { now: () => now },
-              nextReference: () => options.references.next(),
-              intentDigest,
-            });
-            const wired = options.soleOperator;
-            const soleOperator =
-              command.operation !== "ApproveAlone" || wired === undefined
-                ? undefined
-                : {
-                    confirm: async () => {
-                      try {
-                        return await requireMerchantStoreSoleOperator(tx as never, {
-                          tenantReference: String(
-                            (scope as { selected: { tenantReference: string } }).selected
-                              .tenantReference,
-                          ),
-                          brandReference: ownerScope.brandReference,
-                          storeReference: ownerScope.storeReference,
-                          actorReference: viewer,
-                          permissionCode: staffRoleApprovalPermission,
-                          observedAt: now,
-                          resolveContext: wired.resolveContext(tx, scope),
-                          allowed: async () => guard(tx),
-                          includeBrandHolders: true,
-                        });
-                      } catch (error) {
-                        gateFailure = error;
-                        throw error;
-                      } finally {
-                        await asRoleTx(tx).query(
-                          "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
-                          [ownerScope.brandReference, ownerScope.storeReference],
-                        );
-                      }
-                    },
-                  };
-            if (command.operation === "ApproveAlone" && soleOperator === undefined)
-              fail("SoleOperatorNotInEffect");
-            const policyVersion = await ports.policy.currentVersion(ownerScope.brandReference);
-            const selections = (actions: readonly string[]) =>
-              buildRolePermissionSelections(asRoleTx(tx), actions).catch((error: unknown) => {
-                // A permission the catalog no longer offers: read the role again. A failed read
-                // carries on as itself and is logged.
-                if (merchantFailureCode(error) === "ROLE_ADMIN_NOT_FOUND") return fail("Conflict");
-                throw error;
-              });
-            const restore = command.operation === "RestoreDefault";
-            const presetProfile =
-              current === null
-                ? null
-                : rolePresetProfile(
-                    current.code,
-                    current.storeReference === null ? "Brand" : "Store",
-                  );
-            if (restore && (current === null || presetOf(current) === null)) fail("Invalid");
-            const draftActions = restore
-              ? presetCatalogCodes(current as RoleAdministrationVersionRecord)
-              : (command.draft?.actions ?? null);
-            let next: RoleAdministrationVersionRecord;
-            try {
-              next = planRoleAdministrationChange({
-                operation: command.operation,
-                current,
-                effective: role?.effective ?? null,
-                scope: {
-                  brandReference: ownerScope.brandReference,
-                  storeReference: ownerScope.storeReference,
-                },
-                actorReference: scope.actorReference,
-                policyVersion,
-                changedAt: now,
-                reasonCode: restore ? rolePresetRestoreReason : command.reasonCode,
-                nextReference: () => options.references.next(),
-                draft:
-                  draftActions === null
-                    ? null
-                    : {
-                        ...(command.operation === "Create" || command.operation === "Duplicate"
-                          ? { code: generatedRoleCode(command.operationReference) }
-                          : {}),
-                        // A restore brings back the preset's own name and description too.
-                        displayName: restore
-                          ? (presetProfile?.displayName ?? "")
-                          : (command.draft?.displayName ?? ""),
-                        description: restore
-                          ? (presetProfile?.description ?? "")
-                          : (command.draft?.description ?? ""),
-                        selections: await selections(draftActions),
-                      },
-              });
-            } catch (error) {
-              if (error instanceof MerchantRoleAdministrationError) throw error;
-              return fail("Invalid");
-            }
-            try {
-              const result = await executeRoleAdministration(
-                {
-                  tenantContext: scope.context,
-                  operation: command.operation,
-                  expectedVersion: (current?.version ?? null) as never,
-                  idempotencyKey: command.operationReference,
-                  current,
-                  effective: role?.effective ?? null,
-                  next,
-                  auditId: options.references.next() as never,
-                  correlationId: command.operationReference as never,
-                  sourceChannel: "MERCHANT_WEB",
-                },
-                { ...ports, ...(soleOperator === undefined ? {} : { soleOperator }) },
-              );
-              return {
-                roleReference: result.roleReference,
-                version: result.version,
-                status: result.lifecycle,
-              };
-            } catch (error) {
-              if (gateFailure instanceof MerchantSoleOperatorGateError)
-                return fail(
-                  gateFailure.code === "NeedsReverification"
-                    ? "NeedsReverification"
-                    : "SoleOperatorNotInEffect",
-                );
-              if (error instanceof RoleAdministrationServiceError)
-                return fail(
-                  error.code === "ROLE_ADMIN_PERMISSION_DENIED"
-                    ? "PermissionDenied"
-                    : error.code === "ROLE_ADMIN_ROLE_IN_USE"
-                      ? "InUse"
-                      : error.code === "ROLE_ADMIN_MUTATION_INVALID"
-                        ? "Invalid"
-                        : "Conflict",
-                );
-              if (error instanceof RoleAdministrationContractError) return fail("Invalid");
-              throw error;
-            }
-          },
+          (scope, decisions, guard) =>
+            executeCommand(tx, scope, decisions, guard, command, intentDigest),
         ),
       ),
     );
@@ -1076,7 +1087,288 @@ export function createMerchantRoleAdministration(options: {
       ),
     );
   };
-  return { list, detail, command, waiting, declineOffer };
+  /**
+   * WP-2423 store-type starter roles (DEC-STORE-TYPE-STARTER-ROLES): what each kind of shop would
+   * start from at the selected Store, read against the Store's roles now.
+   */
+  const starterSets = async (input: { sessionCookie: unknown; csrf: unknown }) => {
+    const current = await session(input);
+    return retryTransactionConflict(() =>
+      options.persistence.transactions.run((tx) =>
+        authorizedRun(
+          tx,
+          input.sessionCookie,
+          current.sessionReference,
+          starterActions,
+          [],
+          async (scope, decisions) => {
+            const now = options.persistence.now();
+            const roles = await listRoleAdministration(asRoleTx(tx), ownerScopeOf(scope), now);
+            const allow = (code: string) => decisions.get(code)?.effect === "Allow";
+            return {
+              screenId: "IAM-ROLE-LIST" as const,
+              sourceAsOf: now,
+              mayApply: allow("identity.role.create") && allow("identity.role.change"),
+              mayPutAway: allow("identity.role.deactivate"),
+              started: roles.some(
+                (role) =>
+                  role.record.storeReference !== null &&
+                  starterRoleOfCode(role.record.code) !== null,
+              ),
+              sets: starterStoreTypes.map((storeType) => starterSetView(roles, storeType)),
+            };
+          },
+        ),
+      ),
+    );
+  };
+  /**
+   * Starts the Store's roles from a kind of shop's set, in one transaction: each starter role the
+   * Store does not have is created under its fixed code and sent for approval (approved by another
+   * person, or by a sole owner alone, then turned on like any role), and, when asked, each preset
+   * the shop does not use that nobody holds is removed (it can be brought back). A retry under the
+   * same reference finds everything done and changes nothing; the same reference for another kind
+   * of shop is a conflict.
+   */
+  const applyStarterSet = async (input: {
+    sessionCookie: unknown;
+    csrf: unknown;
+    body: unknown;
+  }) => {
+    const request = parseStarterSetApply(input.body);
+    const needed = [
+      "identity.role.create",
+      "identity.role.change",
+      ...(request.putAway ? ["identity.role.deactivate"] : []),
+    ];
+    const current0 = await session(input);
+    return retryTransactionConflict(() =>
+      options.persistence.transactions.run((tx) =>
+        authorizedRun(
+          tx,
+          input.sessionCookie,
+          current0.sessionReference,
+          needed,
+          needed,
+          async (scope, decisions, guard) => {
+            if (needed.some((code) => decisions.get(code)?.effect !== "Allow"))
+              return fail("PermissionDenied");
+            const ownerScope = ownerScopeOf(scope);
+            const step = (storeType: StarterStoreType, label: string) =>
+              starterStepReference(request.operationReference, storeType + ":" + label);
+            for (const other of starterStoreTypes) {
+              if (other === request.storeType) continue;
+              const set = starterRoleSet(other);
+              for (const label of [
+                ...set.add.map((key) => key + ":Create"),
+                ...set.putAway.map((code) => code + ":Deactivate"),
+              ])
+                if (
+                  (await findRoleAdministrationOperation(
+                    asRoleTx(tx),
+                    ownerScope,
+                    step(other, label),
+                  )) !== null
+                )
+                  return fail("Conflict");
+            }
+            const roles = await listRoleAdministration(
+              asRoleTx(tx),
+              ownerScope,
+              options.persistence.now(),
+            );
+            const plan = starterSetView(roles, request.storeType);
+            let added = 0,
+              putAway = 0;
+            for (const role of plan.roles) {
+              if (role.state !== "ToAdd") continue;
+              const definition = starterRole(role.key);
+              const create: RoleCommandInput = {
+                operation: "Create",
+                roleReference: null,
+                expectedVersion: null,
+                operationReference: step(request.storeType, role.key + ":Create"),
+                reasonCode: starterSetReason,
+                draft: {
+                  displayName: definition.displayName,
+                  description: definition.description,
+                  actions: [...definition.actions],
+                },
+              };
+              const created = await executeCommand(
+                tx,
+                scope,
+                decisions,
+                guard,
+                create,
+                roleCommandIntentDigest(create),
+                definition.roleCode,
+              );
+              const submit: RoleCommandInput = {
+                operation: "Submit",
+                roleReference: created.roleReference,
+                expectedVersion: created.version,
+                operationReference: step(request.storeType, role.key + ":Submit"),
+                reasonCode: starterSetReason,
+                draft: null,
+              };
+              await executeCommand(
+                tx,
+                scope,
+                decisions,
+                guard,
+                submit,
+                roleCommandIntentDigest(submit),
+              );
+              added += 1;
+            }
+            if (request.putAway)
+              for (const preset of plan.putAway) {
+                if (preset.held) continue;
+                const role = roles.find(
+                  (item) => item.record.roleReference === preset.roleReference,
+                );
+                if (role === undefined) continue;
+                const remove: RoleCommandInput = {
+                  operation: "Deactivate",
+                  roleReference: preset.roleReference,
+                  expectedVersion: role.record.version,
+                  operationReference: step(request.storeType, role.record.code + ":Deactivate"),
+                  reasonCode: starterSetReason,
+                  draft: null,
+                };
+                await executeCommand(
+                  tx,
+                  scope,
+                  decisions,
+                  guard,
+                  remove,
+                  roleCommandIntentDigest(remove),
+                );
+                putAway += 1;
+              }
+            if (!(await guard(tx))) return fail("PermissionDenied");
+            return { storeType: request.storeType, added, putAway };
+          },
+        ),
+      ),
+    );
+  };
+  return { list, detail, command, waiting, declineOffer, starterSets, applyStarterSet };
+}
+
+/** The reason every starter-set step is recorded with. */
+export const starterSetReason = "ROLE_STARTER_SET";
+const starterActions = [
+  "identity.role.create",
+  "identity.role.change",
+  "identity.role.deactivate",
+] as const;
+/**
+ * A step of a starter-set apply: its own operation reference, derived from the apply's, so a retry
+ * names the same steps. It keeps the apply reference's time and is a version 7 UUID.
+ */
+export function starterStepReference(operationReference: string, label: string): string {
+  const hash = createHash("sha256")
+    .update(operationReference + ":" + label)
+    .digest("hex");
+  const variant = ((parseInt(hash.slice(3, 4), 16) & 0x3) | 0x8).toString(16);
+  return (
+    operationReference.slice(0, 13) +
+    "-7" +
+    hash.slice(0, 3) +
+    "-" +
+    variant +
+    hash.slice(4, 7) +
+    "-" +
+    hash.slice(7, 19)
+  );
+}
+const shownName = (role: RoleAdministrationRoleView) => (role.effective ?? role.record).displayName;
+/** One kind of shop's set against the Store's roles now. */
+export function starterSetView(
+  roles: readonly RoleAdministrationRoleView[],
+  storeType: StarterStoreType,
+) {
+  const store = roles.filter((role) => role.record.storeReference !== null);
+  const byCode = new Map(store.map((role) => [String(role.record.code), role]));
+  const named = store.filter((role) => role.effective?.lifecycle !== "Deactivated");
+  const taken = (name: string) =>
+    named.some(
+      (role) =>
+        sameName(role.record.displayName, name) ||
+        (role.effective !== null && sameName(role.effective.displayName, name)),
+    );
+  const set = starterRoleSet(storeType);
+  return {
+    storeType,
+    label: set.label,
+    roles: set.add.map((key) => {
+      const definition = starterRole(key);
+      const have = byCode.get(definition.roleCode);
+      return {
+        key,
+        name: definition.displayName,
+        description: definition.description,
+        permissions: [...definition.actions].sort(),
+        state:
+          have === undefined
+            ? taken(definition.displayName)
+              ? ("NameTaken" as const)
+              : ("ToAdd" as const)
+            : have.effective?.lifecycle === "Deactivated"
+              ? ("Removed" as const)
+              : ("Added" as const),
+        roleReference: have?.record.roleReference ?? null,
+      };
+    }),
+    keep: set.keep.flatMap((code) => {
+      const role = byCode.get(code);
+      return role === undefined || role.effective?.lifecycle !== "Active"
+        ? []
+        : [{ roleReference: role.record.roleReference, name: shownName(role) }];
+    }),
+    putAway: set.putAway.flatMap((code) => {
+      const role = byCode.get(code);
+      if (role === undefined || role.effective?.lifecycle !== "Active" || lockedRoleCodes.has(code))
+        return [];
+      // Staff hold it, a staff role request would give it, or a change to it waits: it stays.
+      const held =
+        role.memberCount > 0 || role.openAssignmentChanges > 0 || role.effective !== role.record;
+      return [
+        {
+          roleReference: role.record.roleReference,
+          name: shownName(role),
+          held,
+          memberCount: role.memberCount,
+        },
+      ];
+    }),
+  };
+}
+export interface StarterSetApplyInput {
+  readonly storeType: StarterStoreType;
+  readonly operationReference: string;
+  readonly putAway: boolean;
+}
+export function parseStarterSetApply(value: unknown): StarterSetApplyInput {
+  const r = value as Record<string, unknown> | null;
+  if (
+    r === null ||
+    typeof r !== "object" ||
+    Array.isArray(r) ||
+    Object.keys(r).sort().join(",") !== "operationReference,putAway,storeType" ||
+    !starterStoreTypes.includes(r.storeType as StarterStoreType) ||
+    typeof r.operationReference !== "string" ||
+    !uuid.test(r.operationReference) ||
+    typeof r.putAway !== "boolean"
+  )
+    return fail("Invalid");
+  return {
+    storeType: r.storeType as StarterStoreType,
+    operationReference: r.operationReference,
+    putAway: r.putAway,
+  };
 }
 
 export interface PresetOfferDeclineInput {
