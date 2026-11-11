@@ -236,3 +236,67 @@ test("@production while a guest is paying, staff can't take dishes out and are t
   await panel.screenshot({ path: "test-results/table-cart-paying-390.png" });
   expect(sent.every((body) => body.action === "Read")).toBe(true);
 });
+
+// v15 batch 7 (DEC-DINING-PAY-CHOICE-STAFF-REMOVAL): phone 1 chose which dishes it pays and hasn't
+// paid. Staff see who is choosing and until when, and may still take a dish out; that ends the
+// choice (the phone is asked to choose again), so the note goes with the next version.
+test("@production staff see that a phone is choosing what it pays and may still take a dish out", async ({
+  page,
+}) => {
+  await openTable(page);
+  const until = new Date(Date.now() + 4 * 60_000);
+  until.setUTCMilliseconds(0);
+  const cart: Record<string, unknown> & { lines: ReturnType<typeof line>[]; cartVersion: number } =
+    {
+      cartReference: id(3),
+      cartVersion: 8,
+      guestPaying: false,
+      guestChoosing: { phoneNumber: 1, until: until.toISOString() },
+      lines: [line(21, { "en-CA": "Lemon tea" }), line(22, { "en-CA": "Mapo tofu" })],
+    };
+  const removes: Record<string, unknown>[] = [];
+  await page.route("**/merchant/dining/sessions/table-cart", (route) => {
+    const body = route.request().postDataJSON() as Record<string, unknown>;
+    if (body.action === "Remove") {
+      removes.push(body);
+      cart.lines = cart.lines.filter((entry) => entry.cartItemReference !== body.cartItemReference);
+      cart.cartVersion += 1;
+      cart.guestChoosing = null;
+    }
+    return route.fulfill({ headers, json: { cart } });
+  });
+  await page.goto("/operations/dining");
+  await page.getByRole("button", { name: "Select T6", exact: true }).click();
+  await page.locator("details.table-panel__manage").evaluate((node) => {
+    (node as HTMLDetailsElement).open = true;
+  });
+  const panel = page.getByRole("region", { name: "In the cart (not ordered yet)" });
+  const note = panel.getByRole("note");
+  await expect(note).toContainText("Phone 1 is choosing which of these dishes to pay, until");
+  await expect(note).toContainText(
+    "Taking a dish out ends their choice: their phone asks them to choose again.",
+  );
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await panel.scrollIntoViewIfNeeded();
+    await panel.screenshot({ path: `test-results/table-cart-choosing-${width}.png` });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const axe = await new AxeBuilder({ page }).include(".table-cart").analyze();
+  expect(axe.violations).toEqual([]);
+  await panel
+    .getByRole("listitem")
+    .filter({ hasText: "Lemon tea" })
+    .getByRole("button", { name: "Remove from cart" })
+    .click();
+  await panel.getByRole("button", { name: "Guest asked" }).click();
+  await expect(panel).not.toContainText("Lemon tea");
+  await expect(panel.getByRole("note")).toHaveCount(0);
+  expect(removes).toMatchObject([
+    { cartItemReference: id(21), expectedCartVersion: 8, reason: "GuestAsked" },
+  ]);
+  await expectNoInternalText(page, ["Mark unavailable"]);
+});
