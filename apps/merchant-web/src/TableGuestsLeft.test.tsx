@@ -3,6 +3,7 @@ import {
   guestsLeftRoundText,
   kitchenMayHaveStartedRound,
   closeOutButtonText,
+  closeOutSummaryText,
   nothingRefundedText,
 } from "./TableGuestsLeft.js";
 import { setLanguageForTest } from "./i18n/i18n.js";
@@ -383,4 +384,41 @@ it("WP-2423 M123: the close-out button says refund only when a round took money"
   expect(closeOutButtonText([unpaid])).toBe("取消这一轮");
   expect(closeOutButtonText([unpaid, unpaid])).toBe("取消 2 轮");
   setLanguageForTest("en");
+});
+
+it("WP-2423 M123 (v15 live check): the close-out summary is whole sentences, in Chinese too", () => {
+  const paid = round({ state: "PaidNotSent" });
+  const unpaid = round({ state: "NotPaid", refund: null });
+  const none = { online: null, unknownPartly: false, machine: null };
+  expect(closeOutSummaryText([paid], { ...none, online: "$28.25" })).toBe(
+    "Closing out this round refunds $28.25 to the guest online. The reason recorded is “Guests left”.",
+  );
+  expect(closeOutSummaryText([paid, paid], { ...none, online: "$11.30", machine: "$5.93" })).toBe(
+    "Closing out these 2 rounds refunds $11.30 to the guest online and $5.93 to refund on the card machine. The reason recorded is “Guests left”.",
+  );
+  expect(closeOutSummaryText([paid], { ...none, machine: "$5.93" })).toBe(
+    "Closing out this round leaves $5.93 to refund on the card machine. The reason recorded is “Guests left”.",
+  );
+  expect(closeOutSummaryText([unpaid], none)).toBe(
+    "Closing out this round refunds nothing: no money was taken. The reason recorded is “Guests left”.",
+  );
+  setLanguageForTest("zh-Hans");
+  try {
+    expect(closeOutSummaryText([paid], { ...none, online: "$28.25" })).toBe(
+      "结束这一轮将在线向顾客退款 $28.25。记录的原因为“顾客已离开”。",
+    );
+    expect(closeOutSummaryText([paid, paid], { ...none, machine: "$5.93" })).toBe(
+      "结束这 2 轮后，还需在刷卡机上退款 $5.93。记录的原因为“顾客已离开”。",
+    );
+    expect(closeOutSummaryText([unpaid], none)).toBe(
+      "结束这一轮不退款：没有收过钱。记录的原因为“顾客已离开”。",
+    );
+    for (const text of [
+      closeOutSummaryText([paid], { ...none, online: "$1.00", unknownPartly: true }),
+      closeOutSummaryText([unpaid], none),
+    ])
+      expect(text).not.toMatch(/[A-Za-z]{2,}/u);
+  } finally {
+    setLanguageForTest("en");
+  }
 });

@@ -54,6 +54,46 @@ export function nothingRefundedText(actionable: readonly TableCloseRound[]): str
 }
 
 /**
+ * WP-2423 M123 (v15 live check): what closing out the rounds does, as whole sentences in the staff
+ * language (the Chinese text was pieced from "Closing out" + "this round" + "refunds …" before).
+ * `online`/`machine`: the amounts to refund, already as money text; null when there is none.
+ */
+export function closeOutSummaryText(
+  actionable: readonly TableCloseRound[],
+  amounts: {
+    readonly online: string | null;
+    readonly unknownPartly: boolean;
+    readonly machine: string | null;
+  },
+): string {
+  const rounds =
+    actionable.length === 1
+      ? t("this round")
+      : t("these {length} rounds", { length: String(actionable.length) });
+  const what =
+    amounts.online !== null
+      ? t("Closing out {rounds} refunds {online} to the guest online{value}{value2}.", {
+          rounds,
+          online: amounts.online,
+          value: amounts.unknownPartly ? t(" plus the items not marked started") : "",
+          value2:
+            amounts.machine !== null
+              ? t(" and {machine} to refund on the card machine", { machine: amounts.machine })
+              : "",
+        })
+      : amounts.machine !== null
+        ? t("Closing out {rounds} leaves {machine} to refund on the card machine.", {
+            rounds,
+            machine: amounts.machine,
+          })
+        : t("Closing out {rounds} {refunds}.", {
+            rounds,
+            refunds: nothingRefundedText(actionable),
+          });
+  return t("{what} The reason recorded is “Guests left”.", { what });
+}
+
+/**
  * WP-2423 M123: the close-out button says "and refund" only when a round took money; rounds that
  * were never paid (or are waiting for staff, or whose payment never finished) are only cancelled.
  */
@@ -431,27 +471,11 @@ export function TableGuestsLeft({
       {actionable.length > 0 ? (
         <>
           <p>
-            {t("Closing out")}{" "}
-            {actionable.length === 1
-              ? t("this round")
-              : t("these {length} rounds", { length: String(actionable.length) })}{" "}
-            {online > 0n || unknownPartly ? (
-              <>
-                {t("refunds {online} to the guest online{value}{value2}", {
-                  online: cad(online),
-                  value: unknownPartly ? t(" plus the items not marked started") : "",
-                  value2:
-                    machine > 0n
-                      ? t(" and {machine} to refund on the card machine", { machine: cad(machine) })
-                      : "",
-                })}
-              </>
-            ) : machine > 0n ? (
-              t("leaves {machine} to refund on the card machine", { machine: cad(machine) })
-            ) : (
-              nothingRefundedText(actionable)
-            )}
-            {t(". The reason recorded is “Guests left”.")}
+            {closeOutSummaryText(actionable, {
+              online: online > 0n || unknownPartly ? cad(online) : null,
+              unknownPartly,
+              machine: machine > 0n ? cad(machine) : null,
+            })}
           </p>
           {run === "Unknown" || run === "FullSignInRequired" ? null : (
             <label>
