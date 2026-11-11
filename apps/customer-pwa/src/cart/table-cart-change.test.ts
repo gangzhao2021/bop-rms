@@ -111,6 +111,7 @@ describe("WP-2423 same-table-ordering: what happened at the table while this pho
       roundNumber: 2,
       byThisPhone: false,
       paymentState: "Paid",
+      enteredByStaff: false,
       cartHasDishes: true,
     });
     expect(checkoutText.tableCartSent(2, false, false)).toBe(
@@ -168,6 +169,53 @@ describe("WP-2423 same-table-ordering: what happened at the table while this pho
     expect(cartText.line.roundSentByTable(1, "Paid")).toBe(
       "Round 1 was sent by someone at your table.",
     );
+  });
+  it("v15 batch-5: a staff round is charged on the card machine, and only a phone with a dish in it is told so", () => {
+    const staff = { enteredByStaff: true, withThisPhoneDishes: true };
+    expect(cartText.line.roundSentByTable(1, "AwaitingPayment", false, staff)).toBe(
+      "Staff are taking payment for round 1 on the card machine. Your dishes are in it.",
+    );
+    // Phone 2, whose only dish staff took out: not "someone is paying", not "your dishes".
+    expect(
+      cartText.line.roundSentByTable(1, "AwaitingPayment", false, {
+        ...staff,
+        withThisPhoneDishes: false,
+      }),
+    ).toBe("Staff are taking payment for round 1 on the card machine.");
+    expect(
+      cartText.line.roundSentByTable(1, "AwaitingPayment", false, {
+        enteredByStaff: false,
+        withThisPhoneDishes: false,
+      }),
+    ).toBe("Someone at your table is paying for round 1 now.");
+    expect(
+      cartText.line.roundSentByTable(2, "AwaitingPayment", true, {
+        ...staff,
+        withThisPhoneDishes: false,
+      }),
+    ).toBe("Staff are placing round 2.");
+    expect(checkoutText.tableCartSent(1, false, false, "AwaitingPayment", true)).toBe(
+      "Staff are taking payment for round 1 on the card machine. Your dishes are in it.",
+    );
+    const awaiting = view(
+      6,
+      [],
+      [
+        {
+          roundNumber: 1,
+          sentAt: "2026-11-06T16:00:00.000Z",
+          sentByThisPhone: false,
+          cartItemReferences: [id(10)],
+          paymentState: "AwaitingPayment",
+          enteredByStaff: true,
+          withThisPhoneDishes: true,
+        },
+      ],
+    );
+    expect(tableCartChange(view(3, [mine]), awaiting)).toMatchObject({
+      kind: "sent",
+      enteredByStaff: true,
+    });
   });
   it("M38: at a table that pays at the end nobody is told a round is being paid now", () => {
     for (const byThisPhone of [false, true]) {

@@ -291,7 +291,10 @@ function TableRoundNotes({
         ? null
         : {
             roundNumber: round.roundNumber,
-            text: cartText.line.roundSentByTable(round.roundNumber, round.paymentState, payLater),
+            text: cartText.line.roundSentByTable(round.roundNumber, round.paymentState, payLater, {
+              enteredByStaff: round.enteredByStaff === true,
+              withThisPhoneDishes: round.withThisPhoneDishes !== false,
+            }),
           },
     ),
   ]

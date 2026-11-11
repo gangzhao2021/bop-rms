@@ -52,6 +52,17 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "你正在为第 {round} 轮付款，付款后才会送到厨房。",
   "Someone at your table is paying for round {round} now. Your dishes are in it.":
     "同桌有人正在为第 {round} 轮付款，你的菜也在里面。",
+  "Someone at your table is paying for round {round} now.": "同桌有人正在为第 {round} 轮付款。",
+  "Staff are taking payment for round {round} on the card machine. Your dishes are in it.":
+    "店员正在用刷卡机收第 {round} 轮的款，你的菜也在里面。",
+  "Staff are taking payment for round {round} on the card machine.":
+    "店员正在用刷卡机收第 {round} 轮的款。",
+  "Staff are placing round {round}. Your dishes are in it.":
+    "店员正在下第 {round} 轮，你的菜也在里面。",
+  "Staff are placing round {round}.": "店员正在下第 {round} 轮。",
+  "Someone at your table is still placing round {round}.": "同桌有人正在下第 {round} 轮。",
+  "Round {round} from someone at your table is waiting for staff to send it to the kitchen.":
+    "同桌点的第 {round} 轮正在等店员送到厨房。",
   "Round {round} wasn’t paid, so it wasn’t sent to the kitchen. Add the dishes again to order them.":
     "第 {round} 轮没有付款，所以没有送到厨房。要点这些菜，请重新加入购物车。",
   "Staff didn’t send round {round} to the kitchen. Add the dishes again to order them, or ask staff.":

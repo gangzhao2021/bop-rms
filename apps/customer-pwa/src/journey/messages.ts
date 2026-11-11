@@ -109,36 +109,68 @@ export function tableCartAddedDishes(
     .join(t(", "));
 }
 
+/**
+ * v15 batch-5: another phone's or staff's round, as this phone reads it: whether staff entered it
+ * (they take its payment on the card machine; no guest pays it on a phone) and whether a dish
+ * this phone added is in it (a phone whose dishes were all taken out is not told "yours").
+ */
+export interface TableRoundSender {
+  readonly enteredByStaff: boolean;
+  readonly withThisPhoneDishes: boolean;
+}
+const someoneAtTheTable: TableRoundSender = { enteredByStaff: false, withThisPhoneDishes: true };
 /** WP-2423 M38: a pay-first round whose payment is still open. */
-function roundBeingPaid(round: number, byThisPhone: boolean): string {
-  return byThisPhone
-    ? t("You’re paying for round {round}. It goes to the kitchen once it’s paid.", {
-        round: String(round),
-      })
-    : t("Someone at your table is paying for round {round} now. Your dishes are in it.", {
-        round: String(round),
-      });
+function roundBeingPaid(round: number, byThisPhone: boolean, sender: TableRoundSender): string {
+  const values = { round: String(round) };
+  if (byThisPhone)
+    return t("You’re paying for round {round}. It goes to the kitchen once it’s paid.", values);
+  if (sender.enteredByStaff)
+    return sender.withThisPhoneDishes
+      ? t(
+          "Staff are taking payment for round {round} on the card machine. Your dishes are in it.",
+          values,
+        )
+      : t("Staff are taking payment for round {round} on the card machine.", values);
+  return sender.withThisPhoneDishes
+    ? t("Someone at your table is paying for round {round} now. Your dishes are in it.", values)
+    : t("Someone at your table is paying for round {round} now.", values);
 }
 /**
  * WP-2423 M38/M101: at a table that pays at the end nobody pays for a round now; one neither
  * sent nor cancelled is a send whose answer did not come back yet.
  */
-function roundNotPlacedYet(round: number, byThisPhone: boolean): string {
-  return byThisPhone
-    ? t("Round {round} isn’t placed yet. If it still isn’t in a minute, ask staff to check it.", {
-        round: String(round),
-      })
-    : t("Someone at your table is still placing round {round}. Your dishes are in it.", {
-        round: String(round),
-      });
+function roundNotPlacedYet(round: number, byThisPhone: boolean, sender: TableRoundSender): string {
+  const values = { round: String(round) };
+  if (byThisPhone)
+    return t(
+      "Round {round} isn’t placed yet. If it still isn’t in a minute, ask staff to check it.",
+      values,
+    );
+  if (sender.enteredByStaff)
+    return sender.withThisPhoneDishes
+      ? t("Staff are placing round {round}. Your dishes are in it.", values)
+      : t("Staff are placing round {round}.", values);
+  return sender.withThisPhoneDishes
+    ? t("Someone at your table is still placing round {round}. Your dishes are in it.", values)
+    : t("Someone at your table is still placing round {round}.", values);
 }
 /** WP-2423 M38: a guest round held for staff (a new phone's first, or many rounds quickly). */
-function roundWaitingForStaff(round: number, byThisPhone: boolean): string {
-  return byThisPhone
-    ? t("Round {round} is waiting for staff to send it to the kitchen.", { round: String(round) })
-    : t(
+function roundWaitingForStaff(
+  round: number,
+  byThisPhone: boolean,
+  sender: TableRoundSender,
+): string {
+  const values = { round: String(round) };
+  if (byThisPhone)
+    return t("Round {round} is waiting for staff to send it to the kitchen.", values);
+  return sender.withThisPhoneDishes
+    ? t(
         "Round {round} from someone at your table is waiting for staff to send it to the kitchen. Your dishes are in it.",
-        { round: String(round) },
+        values,
+      )
+    : t(
+        "Round {round} from someone at your table is waiting for staff to send it to the kitchen.",
+        values,
       );
 }
 /**
@@ -194,10 +226,13 @@ function roundStillOpen(
   byThisPhone: boolean,
   payLater: boolean,
   paymentState: CartRoundPaymentState | null,
+  sender: TableRoundSender = someoneAtTheTable,
 ): string | null {
-  if (paymentState === "WaitingForStaff") return roundWaitingForStaff(round, byThisPhone);
+  if (paymentState === "WaitingForStaff") return roundWaitingForStaff(round, byThisPhone, sender);
   if (paymentState === "AwaitingPayment")
-    return payLater ? roundNotPlacedYet(round, byThisPhone) : roundBeingPaid(round, byThisPhone);
+    return payLater
+      ? roundNotPlacedYet(round, byThisPhone, sender)
+      : roundBeingPaid(round, byThisPhone, sender);
   if (
     paymentState === "Cancelled" ||
     paymentState === "StaffDeclined" ||
@@ -540,8 +575,9 @@ export const cartText = Object.freeze({
       round: number,
       paymentState: CartRoundPaymentState | null = null,
       payLater = false,
+      sender: TableRoundSender = someoneAtTheTable,
     ) =>
-      roundStillOpen(round, false, payLater, paymentState) ??
+      roundStillOpen(round, false, payLater, paymentState, sender) ??
       t("Round {round} was sent by someone at your table.", { round: String(round) }),
     /** WP-2423 M38: the guest paying for their round stops and puts its dishes back. */
     get roundWithdraw() {
@@ -921,8 +957,13 @@ export const checkoutText = Object.freeze({
     byThisPhone: boolean,
     payLater: boolean,
     paymentState: CartRoundPaymentState | null = null,
+    enteredByStaff = false,
   ) =>
-    roundStillOpen(round, byThisPhone, payLater, paymentState) ??
+    // The round took this cart's dishes, so this phone's dishes are in it.
+    roundStillOpen(round, byThisPhone, payLater, paymentState, {
+      enteredByStaff,
+      withThisPhoneDishes: true,
+    }) ??
     (byThisPhone
       ? t("You already sent these dishes (round {round}).", { round: String(round) })
       : payLater

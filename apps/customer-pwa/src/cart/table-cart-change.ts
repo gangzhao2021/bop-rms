@@ -46,6 +46,8 @@ export type TableCartChange =
       readonly byThisPhone: boolean;
       /** WP-2423 M38: where that round's payment stands (null: not said). */
       readonly paymentState: CartRoundPaymentState | null;
+      /** v15 batch-5: staff entered that round and take its payment on the card machine. */
+      readonly enteredByStaff: boolean;
       /** Dishes are in the cart again (added after that round). */
       readonly cartHasDishes: boolean;
     };
@@ -77,6 +79,7 @@ export function tableCartChange(loaded: CartView, current: CartView | null): Tab
         roundNumber: round.roundNumber,
         byThisPhone: round.sentByThisPhone,
         paymentState: round.paymentState,
+        enteredByStaff: round.enteredByStaff === true,
         cartHasDishes: (current?.cart.items.length ?? 0) > 0,
       });
   }

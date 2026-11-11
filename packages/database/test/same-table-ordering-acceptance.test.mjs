@@ -266,16 +266,23 @@ it("WP-2423 (same-table-ordering): a round sent from the cart is reported with i
           cartItemReferences: f.cart.items.map((item) => item.cartItemReference).sort(),
           // M38: a pay-first round nobody has paid yet is never called paid.
           paymentState: "AwaitingPayment",
+          // v15 batch-5: a guest sent it, and its dishes are those of the phones that added them.
+          enteredByStaff: false,
+          adderParticipantReferences: [
+            ...new Set(f.cart.items.map((item) => item.addedByParticipantReference)),
+          ].sort(),
         },
       ];
       const rounds = await lookup.recentRounds({
         cartReference: f.cart.cartReference,
         observedAt: now,
       });
-      assert.deepEqual(
-        rounds.map((round) => ({ ...round, cartItemReferences: [...round.cartItemReferences] })),
-        expected,
-      );
+      const plain = (round) => ({
+        ...round,
+        cartItemReferences: [...round.cartItemReferences],
+        adderParticipantReferences: [...round.adderParticipantReferences].sort(),
+      });
+      assert.deepEqual(rounds.map(plain), expected);
       // M139: the round is labelled by the phone that sent it (the payer), not by the phone that
       // added its first dish.
       const diningSession = (
@@ -326,6 +333,13 @@ it("WP-2423 (same-table-ordering): a round sent from the cart is reported with i
         (await runner.run((tx) => listDiningSessionRoundSenders(tx, f.scope, diningSession)))[0]
           .staffEntered,
         true,
+      );
+      // v15 batch-5: the phones read it as staff's round, charged on the card machine.
+      assert.deepEqual(
+        (await lookup.recentRounds({ cartReference: f.cart.cartReference, observedAt: now })).map(
+          (round) => round.enteredByStaff,
+        ),
+        [true],
       );
       // Someone adds a dish after the round (the cart moves on twice): the round is still found.
       await admin.query(

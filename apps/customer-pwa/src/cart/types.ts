@@ -93,6 +93,12 @@ export interface CartRecentRound {
    * (then the round is described without claiming it was paid).
    */
   readonly paymentState: CartRoundPaymentState | null;
+  /**
+   * v15 batch-5: staff entered the round for the table and take its payment on the card machine,
+   * and whether a dish this phone added is in it (absent from an older server).
+   */
+  readonly enteredByStaff?: boolean;
+  readonly withThisPhoneDishes?: boolean;
 }
 /**
  * WP-2423 M38: AwaitingPayment is neither paid nor sent (pay-first: its checkout is open;

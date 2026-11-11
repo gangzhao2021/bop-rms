@@ -593,6 +593,7 @@ export function CheckoutPage({
               tableChange.byThisPhone,
               payLater,
               tableChange.paymentState,
+              tableChange.enteredByStaff,
             )}
           </p>
           {tableChange.cartHasDishes ? <p>{checkoutText.tableCartSentMore}</p> : null}

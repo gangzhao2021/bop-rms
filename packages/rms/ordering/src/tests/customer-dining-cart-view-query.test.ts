@@ -249,6 +249,9 @@ describe("safe shared Dining Cart display", () => {
         sentByThisPhone: false,
         cartItemReferences: [id(50)],
         paymentState: "AwaitingPayment",
+        // An older store says neither: not staff's, and (as before) "your dishes are in it".
+        enteredByStaff: false,
+        withThisPhoneDishes: true,
       },
       {
         roundNumber: 1,
@@ -256,9 +259,44 @@ describe("safe shared Dining Cart display", () => {
         sentByThisPhone: true,
         cartItemReferences: [id(51), id(52)],
         paymentState: "Paid",
+        enteredByStaff: false,
+        withThisPhoneDishes: true,
       },
     ]);
     expect(recent).toHaveBeenCalledWith({ cartReference: id(4), observedAt: at });
+    // v15 batch-5: a staff round charged on the card machine, with or without this phone's dish
+    // (this phone is participant 31).
+    const staffRound = (adders: readonly string[]) =>
+      createCustomerDiningCartViewQuery({
+        reads: { read: base.read },
+        stores: { getPublicStore: async () => profile() },
+        catalog: { describeMany: base.describeMany },
+        rounds: {
+          recent: async () => [
+            {
+              roundNumber: 1,
+              sentAt: "2026-09-08T11:59:30.000Z",
+              guestSessionReference: id(77),
+              cartItemReferences: [id(51)],
+              paymentState: "AwaitingPayment" as const,
+              enteredByStaff: true,
+              adderParticipantReferences: adders,
+            },
+          ],
+        },
+      });
+    expect(
+      (await staffRound([id(42), id(31)]).read(request))?.cart.recentRounds?.map((round) => [
+        round.enteredByStaff,
+        round.withThisPhoneDishes,
+      ]),
+    ).toEqual([[true, true]]);
+    expect(
+      (await staffRound([id(42)]).read(request))?.cart.recentRounds?.map((round) => [
+        round.enteredByStaff,
+        round.withThisPhoneDishes,
+      ]),
+    ).toEqual([[true, false]]);
     // Can't be read: absent (unknown), never an empty "no rounds".
     const failing = createCustomerDiningCartViewQuery({
       reads: { read: base.read },

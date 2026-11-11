@@ -618,6 +618,10 @@ export interface RecentCartRound {
   readonly participantReference: string | null;
   readonly cartItemReferences: readonly string[];
   readonly paymentState: RecentCartRoundPaymentState;
+  /** v15 batch-5: staff entered it for the table (Ordering's staff round entry for its session). */
+  readonly enteredByStaff: boolean;
+  /** v15 batch-5: the table participants whose phones added its dishes (from the dishes). */
+  readonly adderParticipantReferences: readonly string[];
 }
 export async function readRecentCartRounds(
   transaction: OrderCreationQueryTransaction,
@@ -641,7 +645,13 @@ export async function readRecentCartRounds(
            FILTER (WHERE i.source_cart_line_id IS NOT NULL)
          FROM rms_ordering.order_item i WHERE i.brand_id=$1 AND i.store_id=$2
            AND i.order_batch_id=r.order_batch_id), '{}') AS "cartItemReferences",
-       r.payment_state AS "paymentState"
+       r.payment_state AS "paymentState",
+       EXISTS (SELECT 1 FROM rms_ordering.staff_dining_round_entry e
+         WHERE e.brand_id=$1 AND e.store_id=$2 AND e.guest_session_id=r.guest_session_id) AS "enteredByStaff",
+       COALESCE((SELECT array_agg(DISTINCT i.transaction_snapshot_json->>'addedByParticipantReference')
+           FILTER (WHERE i.transaction_snapshot_json->>'addedByParticipantReference' IS NOT NULL)
+         FROM rms_ordering.order_item i WHERE i.brand_id=$1 AND i.store_id=$2
+           AND i.order_batch_id=r.order_batch_id), '{}') AS "adderParticipantReferences"
      FROM (SELECT q.*, CASE
              WHEN EXISTS (SELECT 1 FROM rms_ordering.order_payment_disposition_record x
                WHERE x.brand_id=$1 AND x.store_id=$2 AND x.order_batch_id=q.order_batch_id
@@ -703,8 +713,13 @@ export async function readRecentCartRounds(
         "participantReference",
         "cartItemReferences",
         "paymentState",
+        "enteredByStaff",
+        "adderParticipantReferences",
       ]);
       if (
+        typeof raw.enteredByStaff !== "boolean" ||
+        !Array.isArray(raw.adderParticipantReferences) ||
+        raw.adderParticipantReferences.length > 100 ||
         !recentCartRoundPaymentStates.includes(raw.paymentState as RecentCartRoundPaymentState) ||
         typeof raw.roundNumber !== "number" ||
         !Number.isSafeInteger(raw.roundNumber) ||
@@ -725,6 +740,12 @@ export async function readRecentCartRounds(
           raw.cartItemReferences.map((reference: unknown) => parseOrderingReference(reference)),
         ),
         paymentState: raw.paymentState as RecentCartRoundPaymentState,
+        enteredByStaff: raw.enteredByStaff,
+        adderParticipantReferences: Object.freeze(
+          raw.adderParticipantReferences.map((reference: unknown) =>
+            parseOrderingReference(reference),
+          ),
+        ),
       });
     }),
   );

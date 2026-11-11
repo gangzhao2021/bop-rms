@@ -281,6 +281,9 @@ function recentRounds(value: unknown): readonly CartRecentRound[] {
           raw.cartItemReferences.map((reference: unknown) => string(reference, uuidV7)),
         ),
         paymentState,
+        ...(typeof raw.enteredByStaff === "boolean" && typeof raw.withThisPhoneDishes === "boolean"
+          ? { enteredByStaff: raw.enteredByStaff, withThisPhoneDishes: raw.withThisPhoneDishes }
+          : {}),
       });
     }),
   );

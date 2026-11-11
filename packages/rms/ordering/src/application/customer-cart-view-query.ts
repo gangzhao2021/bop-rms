@@ -157,6 +157,10 @@ export interface CustomerCartRecentRound {
   readonly cartItemReferences: readonly string[];
   /** WP-2423 M38: where the round's payment stands, so no phone calls an unpaid round paid. */
   readonly paymentState: CustomerCartRoundPaymentState;
+  /** v15 batch-5: staff entered it for the table and charge it on the card machine. */
+  readonly enteredByStaff: boolean;
+  /** v15 batch-5: a dish this phone added is in it (true when Ordering does not say). */
+  readonly withThisPhoneDishes: boolean;
 }
 export type CustomerCartRoundPaymentState =
   | "AwaitingPayment"
@@ -192,6 +196,10 @@ export interface CustomerCartRecentRoundsPort {
       readonly participantReference?: string | null;
       readonly cartItemReferences: readonly string[];
       readonly paymentState: CustomerCartRoundPaymentState;
+      /** v15 batch-5: absent from an older store (then not entered by staff). */
+      readonly enteredByStaff?: boolean;
+      /** v15 batch-5: whose phones added its dishes; absent when not read. */
+      readonly adderParticipantReferences?: readonly string[];
     }[]
   >;
 }
@@ -610,6 +618,15 @@ function createViewQuery(ports: ViewPorts, mode: "Pickup" | "DineIn") {
                       ),
                     ),
                     paymentState: round.paymentState,
+                    enteredByStaff: round.enteredByStaff === true,
+                    withThisPhoneDishes:
+                      round.adderParticipantReferences === undefined
+                        ? true
+                        : round.adderParticipantReferences.some(
+                            (reference: string) =>
+                              parseOrderingReference(reference) ===
+                              first.viewer?.participantReference,
+                          ),
                   });
                 }),
               );

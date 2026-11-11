@@ -104,6 +104,10 @@ export interface CustomerCartView {
         | "StaffCancelled"
         | "PaidNotMade"
         | "Returned";
+      /** v15 batch-5: staff entered it for the table and take its payment on the card machine. */
+      readonly enteredByStaff?: boolean;
+      /** v15 batch-5: whether a dish this phone added is in it. */
+      readonly withThisPhoneDishes?: boolean;
     }[];
     /** WP-2423 shared-table-checkout (c): dishes staff took out of this table's cart lately. */
     readonly staffRemoved?: readonly {
@@ -704,13 +708,23 @@ function recentRoundsView(
     throw new TypeError("invalid rounds");
   return Object.freeze(
     value.map((candidate) => {
+      // v15 batch-5: who entered the round and whether this phone's dishes are in it (absent from
+      // an older Ordering read).
+      const described =
+        candidate !== null && typeof candidate === "object" && "enteredByStaff" in candidate;
       const raw = closed(candidate, [
         "roundNumber",
         "sentAt",
         "sentByThisPhone",
         "cartItemReferences",
         "paymentState",
+        ...(described ? ["enteredByStaff", "withThisPhoneDishes"] : []),
       ]);
+      if (
+        described &&
+        (typeof raw.enteredByStaff !== "boolean" || typeof raw.withThisPhoneDishes !== "boolean")
+      )
+        throw new TypeError("invalid round");
       if (
         (raw.paymentState !== "AwaitingPayment" &&
           raw.paymentState !== "WaitingForStaff" &&
@@ -734,6 +748,12 @@ function recentRoundsView(
           raw.cartItemReferences.map((reference: unknown) => scalar(reference, uuidV7)),
         ),
         paymentState: raw.paymentState,
+        ...(described
+          ? {
+              enteredByStaff: raw.enteredByStaff as boolean,
+              withThisPhoneDishes: raw.withThisPhoneDishes as boolean,
+            }
+          : {}),
       });
     }),
   );
