@@ -276,6 +276,65 @@ for (const width of [390, 1024, 1440])
     await expectNoInternalText(page);
   });
 
+for (const width of [390, 1024, 1440])
+  test(`@production Accept all never says the network dropped while every accept is answered, at ${width}`, async ({
+    page,
+  }) => {
+    // v15 2026-11-11: while Accept all ran, and until the list was read again, the first order
+    // read "Accept again" and "The network dropped…" although every accept answered 200.
+    await page.setViewportSize({ width, height: 900 });
+    const accepted = new Set<number>();
+    const acceptBy = new Date(Date.now() + 30 * 60_000).toISOString();
+    let slowList = false;
+    await page.route("**/merchant/session", (route) => route.fulfill({ headers, json: session }));
+    for (const pattern of ["**/merchant/orders?*", "**/merchant/orders"])
+      await page.route(pattern, async (route) => {
+        // The list is read again slowly after the accepts, as on a busy evening.
+        if (slowList) await new Promise((resolve) => setTimeout(resolve, 2500));
+        await route.fulfill({
+          headers,
+          json: {
+            // Paid pickup orders, each with its time to accept running (as at the Store).
+            items: [2, 1].map((n) => ({
+              ...round(n, new Date(Date.now() - n * 60_000).toISOString(), accepted.has(n)),
+              orderType: "Pickup",
+              sourceChannel: "Qr",
+              acceptBy: accepted.has(n) ? null : acceptBy,
+            })),
+            nextAfterOrderReference: null,
+          },
+        });
+      });
+    await page.route("**/merchant/orders/accept", async (route) => {
+      slowList = true;
+      const body = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>;
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      accepted.add([1, 2].find((value) => body.orderReference === id(value)) ?? 0);
+      return route.fulfill({ headers, json: { status: "Created", acceptedOrderVersion: 2 } });
+    });
+    await page.goto("/operations/orders");
+    await expect(page.getByRole("heading", { name: "ORD-2", exact: true })).toBeVisible();
+    await page
+      .getByRole("group", { name: "Show orders" })
+      .getByRole("button", { name: /^To accept/u })
+      .click();
+    await page.getByRole("button", { name: "Accept all 2" }).click();
+    const dropped = page.getByText("The network dropped", { exact: false });
+    const again = page.getByRole("button", { name: /^Accept again/u });
+    // Looked at as it is at each moment (not waited out): during the accepts, and after the
+    // summary until the list has been read again.
+    for (let i = 0; i < 12; i++) {
+      expect(await dropped.count()).toBe(0);
+      expect(await again.count()).toBe(0);
+      await page.waitForTimeout(150);
+    }
+    await expect(page.getByText("Accepted all 2 orders.", { exact: true })).toBeVisible();
+    expect(await dropped.count()).toBe(0);
+    expect(await again.count()).toBe(0);
+    expect([...accepted].sort()).toEqual([1, 2]);
+    await expectNoInternalText(page);
+  });
+
 test("@production a new order is marked until opened, and sound stays on across a reload", async ({
   page,
 }) => {

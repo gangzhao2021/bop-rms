@@ -15,6 +15,7 @@ export function OrderAcceptanceAction({
   onAccepted,
   onRejected,
   onChanged,
+  onUnknown,
   resumeUnknown = false,
   paused = false,
   closeWith = null,
@@ -36,6 +37,11 @@ export function OrderAcceptanceAction({
   readonly operation: () => Operation;
   readonly onAccepted: () => void;
   readonly onRejected: () => void;
+  /**
+   * v15 2026-11-11: this attempt ended with no answer, so the round's other copies of the button
+   * (and this one, shown again) offer "Accept again" for the same operation.
+   */
+  readonly onUnknown?: () => void;
   /** WP-2423 D1: the order changed or was accepted meanwhile; the list reloads its current state. */
   readonly onChanged?: () => void;
   /**
@@ -71,12 +77,10 @@ export function OrderAcceptanceAction({
         if (error instanceof OrderAcceptanceClientError && error.conflict !== null) {
           setState(error.conflict);
           onChanged?.();
-        } else
-          setState(
-            error instanceof OrderAcceptanceClientError && error.code === "OutcomeUnknown"
-              ? "Unknown"
-              : "Denied",
-          );
+        } else if (error instanceof OrderAcceptanceClientError && error.code === "OutcomeUnknown") {
+          onUnknown?.();
+          setState("Unknown");
+        } else setState("Denied");
       }
     } finally {
       if (pending.current === controller) pending.current = null;

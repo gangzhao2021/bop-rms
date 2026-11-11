@@ -3412,6 +3412,10 @@ export function CurrentOrderQueuePage({
   const operations = useRef(
     new Map<string, ReturnType<ReturnType<typeof createOrderAcceptanceClient>["prepare"]>>(),
   );
+  // v15 2026-11-11: rounds whose last Accept ended with no answer (the network dropped). Only these
+  // offer "Accept again"; a round being accepted right now (Accept all, another copy of the button)
+  // keeps its operation in `operations` too, but its outcome is not unknown.
+  const unknownOutcomes = useRef(new Set<string>());
   const servingOrders = useRef(new Set<string>());
   const [servingBusy, setServingBusy] = useState(false);
   // Coordinator 2026-10-30: per round, dishes that couldn't come off the bill and what to do.
@@ -3866,16 +3870,22 @@ export function CurrentOrderQueuePage({
           versions.get(orderReference),
         ).execute(csrf);
         operations.current.delete(reference);
+        unknownOutcomes.current.delete(reference);
         versions.set(orderReference, result.acceptedOrderVersion);
       } catch (error) {
         notAccepted.add(orderReference);
         if (error instanceof OrderAcceptanceClientError && error.code === "Conflict") {
           operations.current.delete(reference);
+          unknownOutcomes.current.delete(reference);
           check.push(target.label);
         } else if (error instanceof OrderAcceptanceClientError && error.code !== "OutcomeUnknown") {
           operations.current.delete(reference);
+          unknownOutcomes.current.delete(reference);
           refused.push(target.label);
-        } else unknown.push(target.label);
+        } else {
+          unknownOutcomes.current.add(reference);
+          unknown.push(target.label);
+        }
       }
     }
     // Counted in orders, as staff count them: a table with two rounds is one order, accepted only
@@ -3945,7 +3955,7 @@ export function CurrentOrderQueuePage({
   ) => (
     <OrderAcceptanceAction
       key={batch.orderBatchReference}
-      resumeUnknown={operations.current.has(batch.orderBatchReference)}
+      resumeUnknown={unknownOutcomes.current.has(batch.orderBatchReference)}
       csrf={csrf}
       closeWith={acceptanceCloseControl(batch)}
       orderNumber={
@@ -3953,12 +3963,17 @@ export function CurrentOrderQueuePage({
       }
       paused={offline}
       operation={() => prepareAcceptance(order, batch)}
-      onRejected={() => operations.current.delete(batch.orderBatchReference)}
+      onUnknown={() => unknownOutcomes.current.add(batch.orderBatchReference)}
+      onRejected={() => {
+        operations.current.delete(batch.orderBatchReference);
+        unknownOutcomes.current.delete(batch.orderBatchReference);
+      }}
       // WP-2423 M10: reread in place, so the reason acceptance was refused (refunded in full,
       // changed, ran out) stays on screen beside the button instead of being cleared by a reload.
       onChanged={refreshInPlace}
       onAccepted={() => {
         operations.current.delete(batch.orderBatchReference);
+        unknownOutcomes.current.delete(batch.orderBatchReference);
         reload(after);
       }}
     />
@@ -4778,7 +4793,7 @@ export function CurrentOrderQueuePage({
                           accept={
                             <OrderAcceptanceAction
                               key={batch.orderBatchReference}
-                              resumeUnknown={operations.current.has(batch.orderBatchReference)}
+                              resumeUnknown={unknownOutcomes.current.has(batch.orderBatchReference)}
                               paused={offline}
                               csrf={csrf}
                               closeWith="RefundInstead"
@@ -4801,12 +4816,17 @@ export function CurrentOrderQueuePage({
                                 }
                                 return operation;
                               }}
-                              onRejected={() =>
-                                operations.current.delete(batch.orderBatchReference)
+                              onUnknown={() =>
+                                unknownOutcomes.current.add(batch.orderBatchReference)
                               }
+                              onRejected={() => {
+                                operations.current.delete(batch.orderBatchReference);
+                                unknownOutcomes.current.delete(batch.orderBatchReference);
+                              }}
                               onChanged={refreshInPlace}
                               onAccepted={() => {
                                 operations.current.delete(batch.orderBatchReference);
+                                unknownOutcomes.current.delete(batch.orderBatchReference);
                                 reload(after);
                               }}
                             />
