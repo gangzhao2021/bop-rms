@@ -25,6 +25,7 @@ import {
   type RoleCommandRequest,
 } from "./role-administration-pages.js";
 import { SoleOperatorSelfApproval } from "./SoleOperatorSelfApproval.js";
+import { StarterRoleSetOffer } from "./StarterRoleSets.js";
 import { actionAccessDeniedText, noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { serverProblemText } from "./failure-words.js";
 import { PageDidNotLoad, readingAgain } from "./PageDidNotLoad.js";
@@ -970,6 +971,9 @@ export function RoleAdministrationScreen({
         </>
       ) : (
         <>
+          {view.mayManage ? (
+            <StarterRoleSetOffer client={client} csrf={csrf} place="Roles" onChanged={reload} />
+          ) : null}
           <div className="list-filters" role="search">
             <label>
               {t("Find a role")}

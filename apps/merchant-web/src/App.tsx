@@ -90,6 +90,10 @@ const StoreSoleOperatorPanel = lazyPage(
   () => import("./SoleOperatorSection.js"),
   "StoreSoleOperatorPanel",
 );
+const StoreStarterRolesPanel = lazyPage(
+  () => import("./StarterRoleSets.js"),
+  "StoreStarterRolesPanel",
+);
 const StorePublicProfilePanel = lazyPage(
   () => import("./StorePublicProfilePanel.js"),
   "StorePublicProfilePanel",
@@ -1018,6 +1022,12 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                       (item) => item.screenId === "CAT-TAX-CLASSIFICATION-LIST",
                     )
                       ? { taxClassificationsHref: "/app/commerce/tax-classifications" }
+                      : {})}
+                    /* WP-2423 store-type starter roles: for people who see Roles. */
+                    {...(state.workspace.navigation.some(
+                      (item) => item.screenId === "IAM-ROLE-LIST",
+                    )
+                      ? { staffRoles: <StoreStarterRolesPanel csrf={state.csrf} /> }
                       : {})}
                   >
                     {/* WP-2423 DEC-STORE-CUSTOMER-NAME: the name, address and phone customers see. */}

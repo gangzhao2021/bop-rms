@@ -424,6 +424,7 @@ export function StoreSetupDraftPage({
   children,
   taxClassificationsHref,
   fetcher,
+  staffRoles,
 }: {
   readonly storeReference: string;
   readonly csrf: string;
@@ -435,6 +436,11 @@ export function StoreSetupDraftPage({
   readonly taxClassificationsHref?: string;
   /** Test seam: the opening read's transport. */
   readonly fetcher?: typeof fetch;
+  /**
+   * WP-2423 store-type starter roles: "Who does what", shown on a first Store's one page too (never
+   * folded), for people who may change roles.
+   */
+  readonly staffRoles?: ReactNode;
 }) {
   const { id } = useParams(),
     client = useMemo(() => injected ?? createStoreSetupClient(), [injected]),
@@ -1483,6 +1489,9 @@ export function StoreSetupDraftPage({
           </footer>
         </FirstStoreFold>
       )}
+      {id === storeReference && workspace && !deciding && staffRoles !== undefined ? (
+        <Suspense fallback={null}>{staffRoles}</Suspense>
+      ) : null}
     </AppFrame>
   );
 }

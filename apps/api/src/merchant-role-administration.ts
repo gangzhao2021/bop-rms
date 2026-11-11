@@ -1302,7 +1302,6 @@ export function starterSetView(
   const set = starterRoleSet(storeType);
   return {
     storeType,
-    label: set.label,
     roles: set.add.map((key) => {
       const definition = starterRole(key);
       const have = byCode.get(definition.roleCode);

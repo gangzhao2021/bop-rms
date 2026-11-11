@@ -9202,4 +9202,72 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Take {name} out of this round": "把 {name} 从这一轮删掉",
   "Send {name} with this round": "把 {name} 一起送",
   "Taken out": "已删掉",
+  "Offline. Nothing was confirmed; Try again sends the same request again.":
+    "网络断开，没有确认成功；按“再试一次”会发送同一个请求。",
+  "Your roles changed meanwhile. Check the list again, then choose.":
+    "角色刚被别人改过，请重新看一下列表再选。",
+  "You cannot approve these on your own now: someone else also approves roles, or Sole operator is off.":
+    "现在不能自己批准：还有别人能批准角色，或者独立经营没有开启。",
+  "Your access doesn't allow changing roles. Ask the owner.": "你的权限不能修改角色，请找店主。",
+  "Adds these roles:": "会添加这些角色：",
+  "Every role in this set is already here.": "这一组的角色店里都已经有了。",
+  "{name} is already here.": "{name} 已经有了。",
+  "{name} was removed here, so it isn't added again. Bring it back on Roles.":
+    "{name} 之前被移除了，所以不会再加；需要的话在“角色”里恢复使用。",
+  "You already have a role called {name}, so it isn't added.":
+    "店里已有叫 {name} 的角色，所以不再添加。",
+  "Keeps: {list}.": "保留：{list}。",
+  "Also remove {list}. This kind of shop doesn't use them and nobody holds them; you can bring any back.":
+    "同时移除 {list}。这类店用不到，也没有人持有；以后随时可以恢复使用。",
+  "{name} stays: {count} staff hold it.": "{name} 保留：有 {count} 位员工持有。",
+  "{name} stays: a change or staff request for it is waiting.":
+    "{name} 保留：它有一项等待中的改动或员工角色申请。",
+  "Roles for your kind of shop": "按店型设置角色",
+  "Offline. The roles for your kind of shop show again when you're back online.":
+    "网络断开。恢复联网后会再显示按店型的角色。",
+  "The roles for your kind of shop didn't load. Nothing was changed.":
+    "按店型的角色没有读到，什么都没改。",
+  "Done. The roles this kind of shop doesn't use were removed.": "好了，这类店用不到的角色已移除。",
+  "Added {count} roles. Each is on once it is approved.": "已添加 {count} 个角色，批准后启用。",
+  "Your new roles are on. Give them to staff on Staff.": "新角色已启用，可以在“员工”里分给员工。",
+  "Waiting for approval: {list}.": "等待批准：{list}。",
+  "Staff can be given them once they are approved and turned on.": "批准并启用后才能分给员工。",
+  "New roles: {list}.": "新角色：{list}。",
+  "these new roles": "这些新角色",
+  "Approve them on my own and turn them on": "我自己批准并启用",
+  "You sent these roles": "这些角色是你送审的",
+  "Someone else who approves roles must approve them.": "需要另一位能批准角色的人来批准。",
+  "Approved, not on yet: {list}.": "已批准、还没启用：{list}。",
+  "Turn them on": "启用",
+  "Choose what kind of shop this is. You start with the roles that kind of shop usually has, and you can change, add or remove any of them afterwards.":
+    "选一下这是什么类型的店。会先给你这类店通常有的角色，之后可以随时修改、添加或移除。",
+  "What kind of shop is this?": "这是什么类型的店？",
+  "Use these roles": "用这些角色",
+  "Who does what": "谁做什么",
+  "Your roles are set up for your kind of shop.": "角色已按你的店型设置好。",
+  "Change them on Roles": "到“角色”里修改",
+  "Start from the roles of another kind of shop": "按另一种店型添加角色",
+  "Bubble tea or tea shop": "奶茶店或茶饮店",
+  "Dessert shop": "甜品店",
+  "Hotpot restaurant": "火锅店",
+  "Full-service Chinese restaurant": "中餐正餐（桌边服务）",
+  "Counter service only, no table service": "只有柜台点单，没有桌边服务",
+  "Drink maker": "饮品师",
+  "Dessert maker": "甜品师",
+  Floor: "楼面",
+  Runner: "传菜",
+  Cashier: "收银",
+  "Takes orders and payment at the counter, hands over pickups, seats pay-first tables and marks items sold out":
+    "柜台点单收款、交付自取、安排先付款的桌位、标记售罄",
+  "Makes drinks from the order screen, remakes a wrong one, marks items sold out and hands orders over":
+    "按订单屏做饮品、做错重做、标记售罄、交付订单",
+  "Makes desserts from the order screen, remakes a wrong one, marks items sold out and hands orders over":
+    "按订单屏做甜品、做错重做、标记售罄、交付订单",
+  "Seats guests, takes table orders, accepts guests' rounds, serves dishes and answers table calls":
+    "带位、桌边点单、接收客人下的单、上菜、处理呼叫",
+  "Brings dishes from the kitchen to the tables and marks them served":
+    "把菜从后厨送到桌上并标记已上",
+  "Starts table checkout, takes card and cash, closes paid tables, takes takeout orders and hands them over, and records refund requests":
+    "开始结账、收刷卡和现金、关闭已付清的桌、接外带单并交付、登记退款申请",
+  "Added 1 role. It is on once it is approved.": "已添加 1 个角色，批准后启用。",
 });

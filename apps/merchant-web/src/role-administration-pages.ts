@@ -183,6 +183,9 @@ export interface RoleAdministrationPageClient {
   loadRole(roleReference: string): Promise<unknown>;
   command?(request: RoleCommandRequest): Promise<{ readonly roleReference: string }>;
   declineOffer?(request: RolePresetOfferDeclineRequest): Promise<void>;
+  /** WP-2423 store-type starter roles. */
+  starterSets?(): Promise<StarterRoleSetsView>;
+  applyStarterSet?(request: StarterRoleSetApplyRequest): Promise<void>;
 }
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
   instant = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u,
@@ -438,6 +441,146 @@ export function parseRoleChangesWaiting(value: unknown): readonly RoleChangeWait
     }),
   );
 }
+/** WP-2423 store-type starter roles: the kinds of shop a Store can start its roles from. */
+export const starterStoreTypes = [
+  "TeaShop",
+  "DessertShop",
+  "Hotpot",
+  "FullService",
+  "CounterOnly",
+] as const;
+export type StarterStoreType = (typeof starterStoreTypes)[number];
+/** The kind of shop in the owner's words, in the language shown now. */
+export function starterStoreTypeLabel(type: StarterStoreType): string {
+  return type === "TeaShop"
+    ? t("Bubble tea or tea shop")
+    : type === "DessertShop"
+      ? t("Dessert shop")
+      : type === "Hotpot"
+        ? t("Hotpot restaurant")
+        : type === "FullService"
+          ? t("Full-service Chinese restaurant")
+          : t("Counter service only, no table service");
+}
+export interface StarterRoleView {
+  readonly key: string;
+  readonly name: string;
+  readonly description: string;
+  readonly permissions: readonly string[];
+  /** ToAdd: added by this set. Added: already here. Removed: the owner removed it. NameTaken:
+   * another role here already has its name, so it is not added. */
+  readonly state: "ToAdd" | "Added" | "Removed" | "NameTaken";
+  readonly roleReference: string | null;
+}
+export interface StarterRoleSetView {
+  readonly storeType: StarterStoreType;
+  readonly roles: readonly StarterRoleView[];
+  readonly keep: readonly { readonly roleReference: string; readonly name: string }[];
+  /** Presets this kind of shop does not use; `held` ones stay (staff hold them or a change waits). */
+  readonly putAway: readonly {
+    readonly roleReference: string;
+    readonly name: string;
+    readonly held: boolean;
+    readonly memberCount: number;
+  }[];
+}
+export interface StarterRoleSetsView {
+  readonly sourceAsOf: string;
+  readonly mayApply: boolean;
+  readonly mayPutAway: boolean;
+  /** The Store has at least one starter role (any kind of shop). */
+  readonly started: boolean;
+  readonly sets: readonly StarterRoleSetView[];
+}
+export interface StarterRoleSetApplyRequest {
+  readonly storeType: StarterStoreType;
+  readonly operationReference: string;
+  readonly putAway: boolean;
+}
+export function parseStarterRoleSetsView(value: unknown): StarterRoleSetsView {
+  const input = closed(value, [
+    "screenId",
+    "sourceAsOf",
+    "mayApply",
+    "mayPutAway",
+    "started",
+    "sets",
+  ]);
+  if (
+    input.screenId !== "IAM-ROLE-LIST" ||
+    typeof input.mayApply !== "boolean" ||
+    typeof input.mayPutAway !== "boolean" ||
+    typeof input.started !== "boolean" ||
+    !Array.isArray(input.sets)
+  )
+    invalid();
+  const sets = (input.sets as unknown[]).map((value) => {
+    const set = closed(value, ["storeType", "roles", "keep", "putAway"]);
+    if (
+      !starterStoreTypes.includes(set.storeType as StarterStoreType) ||
+      !Array.isArray(set.roles) ||
+      !Array.isArray(set.keep) ||
+      !Array.isArray(set.putAway)
+    )
+      invalid();
+    return Object.freeze({
+      storeType: set.storeType as StarterStoreType,
+      roles: Object.freeze(
+        (set.roles as unknown[]).map((item) => {
+          const role = closed(item, [
+            "key",
+            "name",
+            "description",
+            "permissions",
+            "state",
+            "roleReference",
+          ]);
+          if (!["ToAdd", "Added", "Removed", "NameTaken"].includes(String(role.state))) invalid();
+          return Object.freeze({
+            key: text(role.key),
+            name: text(role.name),
+            description: text(role.description),
+            permissions: actions(role.permissions),
+            state: role.state as StarterRoleView["state"],
+            roleReference:
+              role.roleReference === null
+                ? null
+                : parseRoleAdministrationRouteReference(role.roleReference),
+          });
+        }),
+      ),
+      keep: Object.freeze(
+        (set.keep as unknown[]).map((item) => {
+          const role = closed(item, ["roleReference", "name"]);
+          return Object.freeze({
+            roleReference: parseRoleAdministrationRouteReference(role.roleReference),
+            name: text(role.name),
+          });
+        }),
+      ),
+      putAway: Object.freeze(
+        (set.putAway as unknown[]).map((item) => {
+          const role = closed(item, ["roleReference", "name", "held", "memberCount"]);
+          if (typeof role.held !== "boolean") invalid();
+          return Object.freeze({
+            roleReference: parseRoleAdministrationRouteReference(role.roleReference),
+            name: text(role.name),
+            held: role.held as boolean,
+            memberCount: count(role.memberCount),
+          });
+        }),
+      ),
+    });
+  });
+  if (new Set(sets.map((set) => set.storeType)).size !== sets.length) invalid();
+  return Object.freeze({
+    sourceAsOf: when(input.sourceAsOf),
+    mayApply: input.mayApply as boolean,
+    mayPutAway: input.mayPutAway as boolean,
+    started: input.started as boolean,
+    sets: Object.freeze(sets),
+  });
+}
 export const unavailableRoleAdministrationPageClient: RoleAdministrationPageClient = {
   loadRoles: async () => {
     throw new RoleAdministrationPageError("Unavailable");
@@ -469,6 +612,8 @@ export function createRoleAdministrationPageClient(
   command(request: RoleCommandRequest): Promise<{ readonly roleReference: string }>;
   declineOffer(request: RolePresetOfferDeclineRequest): Promise<void>;
   waiting(): Promise<readonly RoleChangeWaitingView[]>;
+  starterSets(): Promise<StarterRoleSetsView>;
+  applyStarterSet(request: StarterRoleSetApplyRequest): Promise<void>;
 } {
   const post = async (path: string, body: unknown) => {
     let response: Response;
@@ -507,5 +652,10 @@ export function createRoleAdministrationPageClient(
     },
     waiting: async () =>
       parseRoleChangesWaiting(await post("/merchant/organization/roles/waiting", {})),
+    starterSets: async () =>
+      parseStarterRoleSetsView(await post("/merchant/organization/roles/starter-sets", {})),
+    async applyStarterSet(request) {
+      await post("/merchant/organization/roles/starter-sets/apply", request);
+    },
   };
 }

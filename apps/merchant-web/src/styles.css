@@ -10230,6 +10230,65 @@ tr[data-drop-target="true"] {
   flex-wrap: wrap;
   gap: var(--bop-space-2);
 }
+/* WP-2423 store-type starter roles: plain text and one choice list, no boxes (brief section 2). */
+.starter-roles {
+  display: grid;
+  gap: var(--bop-space-3);
+  max-width: 44rem;
+  margin: var(--bop-space-6) 0;
+}
+.starter-roles h3,
+.starter-roles p {
+  margin: 0;
+}
+.starter-roles__kinds {
+  display: grid;
+  gap: var(--bop-space-2);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.starter-roles__kinds legend {
+  padding: 0;
+  margin-bottom: var(--bop-space-2);
+  font-weight: 600;
+}
+.starter-roles__kinds label,
+.starter-roles__put-away {
+  display: flex;
+  gap: var(--bop-space-2);
+  align-items: baseline;
+  min-height: 44px;
+  align-content: center;
+}
+.starter-roles__preview {
+  display: grid;
+  gap: var(--bop-space-2);
+}
+.starter-roles__role {
+  display: grid;
+  gap: var(--bop-space-1);
+  padding: var(--bop-space-3) 0;
+  border-bottom: 1px solid var(--bop-color-border-default);
+}
+.starter-roles__role:last-child {
+  border-bottom: 0;
+}
+.starter-roles__role span {
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+.starter-roles__approval {
+  display: grid;
+  gap: var(--bop-space-2);
+}
+.starter-roles__failure {
+  color: var(--bop-color-danger);
+}
+.starter-roles__again summary {
+  cursor: pointer;
+  min-height: 44px;
+}
 /* WP-2423 M135: why a points rule number can't be used, under that field. */
 .member-points__rules .field-problem {
   display: block;

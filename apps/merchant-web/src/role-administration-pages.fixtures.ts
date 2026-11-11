@@ -99,3 +99,165 @@ export const roleWaitingFixture = {
     },
   ],
 } as const;
+/** WP-2423 store-type starter roles: what each kind of shop would start from (synthetic). */
+const starter = (
+  key: string,
+  name: string,
+  description: string,
+  state = "ToAdd",
+  roleReference: string | null = null,
+) => ({
+  key,
+  name,
+  description,
+  permissions: ["merchant.access", "ordering.order.read"],
+  state,
+  roleReference,
+});
+const counter = starter(
+  "counter",
+  "Counter",
+  "Takes orders and payment at the counter, hands over pickups, seats pay-first tables and marks items sold out",
+);
+const fohPreset = {
+  roleReference: "018f2195-0000-7000-8000-000000000001",
+  name: "Front of House",
+  held: true,
+  memberCount: 3,
+};
+const kitchenPreset = {
+  roleReference: "018f2195-0000-7000-8000-000000000003",
+  name: "Kitchen",
+  held: false,
+  memberCount: 0,
+};
+const manager = { roleReference: "018f2195-0000-7000-8000-000000000004", name: "Store Manager" };
+export const starterSetsFixture = {
+  screenId: "IAM-ROLE-LIST",
+  sourceAsOf: "2026-11-06T17:00:00.000Z",
+  mayApply: true,
+  mayPutAway: true,
+  started: false,
+  sets: [
+    {
+      storeType: "TeaShop",
+      roles: [
+        counter,
+        starter(
+          "drink_maker",
+          "Drink maker",
+          "Makes drinks from the order screen, remakes a wrong one, marks items sold out and hands orders over",
+        ),
+      ],
+      keep: [manager],
+      putAway: [fohPreset, kitchenPreset],
+    },
+    {
+      storeType: "DessertShop",
+      roles: [
+        counter,
+        starter(
+          "dessert_maker",
+          "Dessert maker",
+          "Makes desserts from the order screen, remakes a wrong one, marks items sold out and hands orders over",
+        ),
+      ],
+      keep: [manager],
+      putAway: [fohPreset, kitchenPreset],
+    },
+    {
+      storeType: "Hotpot",
+      roles: [
+        starter(
+          "floor",
+          "Floor",
+          "Seats guests, takes table orders, accepts guests' rounds, serves dishes and answers table calls",
+        ),
+        starter(
+          "runner",
+          "Runner",
+          "Brings dishes from the kitchen to the tables and marks them served",
+          "NameTaken",
+        ),
+        starter(
+          "cashier",
+          "Cashier",
+          "Starts table checkout, takes card and cash, closes paid tables, takes takeout orders and hands them over, and records refund requests",
+        ),
+      ],
+      keep: [manager, { roleReference: kitchenPreset.roleReference, name: "Kitchen" }],
+      putAway: [fohPreset],
+    },
+    {
+      storeType: "FullService",
+      roles: [
+        starter(
+          "runner",
+          "Runner",
+          "Brings dishes from the kitchen to the tables and marks them served",
+          "NameTaken",
+        ),
+        starter(
+          "cashier",
+          "Cashier",
+          "Starts table checkout, takes card and cash, closes paid tables, takes takeout orders and hands them over, and records refund requests",
+        ),
+      ],
+      keep: [manager, { roleReference: fohPreset.roleReference, name: "Front of House" }],
+      putAway: [],
+    },
+    { storeType: "CounterOnly", roles: [counter], keep: [manager], putAway: [fohPreset] },
+  ],
+} as const;
+/** The same Store once the tea shop set was sent: Counter and Drink maker wait on its sole owner. */
+const waitingStarter = (roleReference: string, name: string) => ({
+  ...role,
+  roleReference,
+  name,
+  description: name,
+  kind: "Custom",
+  state: "NotOn",
+  memberCount: 0,
+  permissions: [],
+  change: {
+    ...role.change,
+    name,
+    description: name,
+    permissions: ["ordering.order.read"],
+    added: ["ordering.order.read"],
+    by: "You",
+    approval: {
+      mine: true,
+      soleOperator: { status: "Effective", otherApprovers: [], verifiedUntil: null },
+      needsHolderOf: [],
+    },
+  },
+  operations: ["Withdraw", "ApproveAlone"],
+  history: [],
+});
+export const starterTeaReference = "018f2195-0000-7000-8000-000000000010",
+  starterMakerReference = "018f2195-0000-7000-8000-000000000011";
+export const starterStartedRolesFixture = {
+  ...roleListFixture,
+  roles: [
+    ...roleListFixture.roles,
+    waitingStarter(starterTeaReference, "Counter"),
+    waitingStarter(starterMakerReference, "Drink maker"),
+  ],
+} as const;
+export const starterStartedSetsFixture = {
+  ...starterSetsFixture,
+  started: true,
+  sets: starterSetsFixture.sets.map((set) =>
+    set.storeType !== "TeaShop"
+      ? set
+      : {
+          ...set,
+          roles: [
+            { ...set.roles[0], state: "Added", roleReference: starterTeaReference },
+            { ...set.roles[1], state: "Added", roleReference: starterMakerReference },
+          ],
+          putAway: [fohPreset],
+        },
+  ),
+};
