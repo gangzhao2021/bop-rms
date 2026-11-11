@@ -13,6 +13,7 @@ import {
   OverviewToday,
   StoreOverview,
   attentionItems,
+  storePhoneStepHref,
   countShown,
   initialOverviewState,
   summarizeExceptions,
@@ -902,6 +903,21 @@ describe("Figma v1 (2026-10-25): Home lists what needs attention now", () => {
     const items = attentionItems(state, null, null, href);
     expect(items[0]).toMatchObject({ key: "kitchen-setup", href, action: "Set up the kitchen" });
     expect(attentionItems(state, null).some((item) => item.key === "kitchen-setup")).toBe(false);
+  });
+  it("M109: only a Store whose configuration in force offers pickup is asked for the phone", () => {
+    const ask = {
+      pickupFeature: true,
+      serviceModes: ["DineIn", "Pickup"] as const,
+      canChangeProfile: true,
+      businessPhone: null,
+      storeReference: "s",
+    };
+    expect(storePhoneStepHref(ask)).toBe("/app/organization/stores/s/setup#store-public-profile");
+    // Store features defaults pickup on, but a dine-in-only Store does not take pickup orders.
+    expect(storePhoneStepHref({ ...ask, serviceModes: ["DineIn"] })).toBeNull();
+    expect(storePhoneStepHref({ ...ask, pickupFeature: false })).toBeNull();
+    expect(storePhoneStepHref({ ...ask, canChangeProfile: false })).toBeNull();
+    expect(storePhoneStepHref({ ...ask, businessPhone: "+14165550142" })).toBeNull();
   });
   it("M109: a Store taking pickup orders with no phone asks the owner for it, with the link", () => {
     const href = "/app/organization/stores/s/setup#store-public-profile";

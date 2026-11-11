@@ -12,6 +12,7 @@ import { GuestIntakeNotice } from "./GuestIntakeNotice.js";
 import { createStoreKitchenSetupClient } from "./store-kitchen-setup-client.js";
 import { createStoreFeaturesClient } from "./store-features-client.js";
 import { createStorePublicProfileClient } from "./store-public-profile-client.js";
+import { createServiceControlClient, type ServiceMode } from "./service-control-client.js";
 import { useStaffSessionLive } from "./staff-session-reads.js";
 import { Link } from "react-router";
 import {
@@ -430,6 +431,25 @@ export interface AttentionItem {
   readonly backlog?: boolean;
   /** Who to call about it, when the row sends them to BOP support. */
   readonly call?: { readonly phone: string; readonly testOnly: boolean };
+}
+/**
+ * M109: where Home asks the owner for the Store's phone, or null. Only a Store that takes pickup
+ * orders now: pickup is on in Store features (on by default) and the configuration in force
+ * offers Pickup. A dine-in-only Store is never asked.
+ */
+export function storePhoneStepHref(input: {
+  readonly pickupFeature: boolean;
+  readonly serviceModes: readonly ServiceMode[];
+  readonly canChangeProfile: boolean;
+  readonly businessPhone: string | null;
+  readonly storeReference: string;
+}): string | null {
+  return input.pickupFeature &&
+    input.serviceModes.includes("Pickup") &&
+    input.canChangeProfile &&
+    input.businessPhone === null
+    ? `/app/organization/stores/${input.storeReference}/setup#store-public-profile`
+    : null;
 }
 /**
  * Figma v1 (2026-10-25), reordered after the Owner's 2026-11-03 walkthrough: the work on Home that
@@ -1182,24 +1202,29 @@ export function StoreOverview({
   useEffect(() => {
     if (!permitted.kitchenSetup) return;
     let live = true;
+    const controller = new AbortController();
     void Promise.all([
       createStoreFeaturesClient(csrf, fetcher ?? fetch).read(),
       createStorePublicProfileClient({ csrf, ...(fetcher ? { fetcher } : {}) }).load(),
+      createServiceControlClient(fetcher ?? fetch).load(storeReference, controller.signal),
     ]).then(
-      ([features, profile]) => {
+      ([features, profile, service]) => {
         if (live)
           setStorePhoneHref(
-            features.modules.pickup &&
-              profile.canChange &&
-              (profile.current === null || profile.current.businessPhone === null)
-              ? `/app/organization/stores/${storeReference}/setup#store-public-profile`
-              : null,
+            storePhoneStepHref({
+              pickupFeature: features.modules.pickup,
+              serviceModes: service.enabledServiceModes,
+              canChangeProfile: profile.canChange,
+              businessPhone: profile.current?.businessPhone ?? null,
+              storeReference,
+            }),
           );
       },
       () => undefined,
     );
     return () => {
       live = false;
+      controller.abort();
     };
   }, [csrf, fetcher, storeReference, permitted.kitchenSetup]);
   useEffect(() => {

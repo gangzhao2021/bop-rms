@@ -172,8 +172,36 @@ test("@production Home asks the owner for the phone of a store taking pickup ord
 }) => {
   await session(page);
   let phone: string | null = null;
+  let modes = ["DineIn", "Pickup"];
   await page.route("**/merchant/store/features", (route) =>
     route.fulfill({ headers, json: features(true) }),
+  );
+  // The configuration in force (Hours and service): whether the Store takes pickup orders.
+  await page.route("**/merchant/service-control", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        hours: {
+          configurationSource: "StoreOverride",
+          effectiveFrom: "2026-11-01T04:00:00.000Z",
+          effectiveUntil: null,
+          businessDayStartLocalTime: "04:00:00",
+          weeklySchedule: Array.from({ length: 7 }, (_, index) => ({
+            isoWeekday: index + 1,
+            intervals: [],
+          })),
+          exceptions: [],
+        },
+        screenId: "STORE-HOURS-SERVICE",
+        storeReference: store,
+        configurationReference: id(98),
+        timeZone: "America/Toronto",
+        enabledServiceModes: modes,
+        observedAt: new Date().toISOString(),
+        expectedVersion: 0,
+        activePauses: [],
+      },
+    }),
   );
   await page.route("**/merchant/store/public-profile", (route) =>
     route.fulfill({ headers, json: profile(phone) }),
@@ -193,7 +221,18 @@ test("@production Home asks the owner for the phone of a store taking pickup ord
     );
     await fits(page, width, "main");
   }
+  // A dine-in-only Store is not asked, although Store features has pickup on by default.
+  modes = ["DineIn"];
+  await Promise.all([
+    page.waitForResponse("**/merchant/store/features"),
+    page.waitForResponse("**/merchant/store/public-profile"),
+    page.waitForResponse("**/merchant/service-control"),
+    page.reload(),
+  ]);
+  await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+  await expect(page.getByText("Add the store's phone number")).toHaveCount(0);
   // Once the phone is published the step is gone.
+  modes = ["DineIn", "Pickup"];
   phone = "+14165550142";
   await page.reload();
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
