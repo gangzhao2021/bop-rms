@@ -788,6 +788,8 @@ it("WP-2423 M10: stop making it too that can't be done as asked says why and tha
     ["refund_withdraw_handed_over", "WithdrawHandedOver", "already handed over"],
     ["refund_withdraw_everything", "WithdrawEverything", "Cancel order"],
     ["refund_withdraw_kitchen_changed", "WithdrawKitchenChanged", "just started"],
+    ["refund_withdraw_needs_sender", "WithdrawNeedsSender", "A manager sends this refund"],
+    ["refund_withdraw_stock_not_releasable", "WithdrawStockNotReleasable", "stock"],
   ] as const) {
     const fetcher = vi
       .fn<typeof fetch>()

@@ -19,6 +19,8 @@ import {
   refundWizardSections,
   requestBlockedMessage,
   requestFinished,
+  refundStopForCashierText,
+  refundStopOffered,
   requestProgressLabel,
   stopMakingByDefault,
 } from "./RefundPaymentPage.js";
@@ -450,4 +452,18 @@ it("WP-2423 M10: stop making it too is ticked by default only for a dish known n
   expect(stopMakingByDefault("Started")).toBe(false);
   // Not known (the kitchen could not be read): never preselected.
   expect(stopMakingByDefault(null)).toBe(false);
+});
+
+it("WP-2423 M10/M14: a cashier, whose request a manager sends, is pointed to Cancel items instead of Stop making it too", () => {
+  const dish = { kitchen: "NotStarted" as const, withdrawnQuantity: 0, quantity: 2 };
+  expect(refundStopOffered(dish, true, true)).toBe(true);
+  expect(refundStopForCashierText(dish, true, true)).toBeNull();
+  // A cashier who may take dishes off an order: no checkbox, a note saying what to do.
+  expect(refundStopOffered(dish, true, false)).toBe(false);
+  expect(refundStopForCashierText(dish, true, false)).toContain("use Cancel items on the order");
+  // Nobody is told about a dish they couldn't stop anyway.
+  expect(refundStopForCashierText(dish, false, false)).toBeNull();
+  expect(refundStopForCashierText({ ...dish, kitchen: "Cancelled" }, true, false)).toBeNull();
+  setLanguageForTest("zh-Hans");
+  expect(refundStopForCashierText(dish, true, false)).toContain("取消商品");
 });

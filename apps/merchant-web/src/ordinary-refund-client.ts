@@ -26,9 +26,13 @@ export class OrdinaryRefundClientError extends Error {
        * started). Nothing was recorded.
        */
       | "WithdrawNeedsApproval"
+      /** A cashier's request: a manager or the owner sends it, so the kitchen isn't told now. */
+      | "WithdrawNeedsSender"
       | "WithdrawHandedOver"
       | "WithdrawEverything"
       | "WithdrawKitchenChanged"
+      /** The dish's stock can't be returned dish by dish; trying again never helps. */
+      | "WithdrawStockNotReleasable"
       | "Unavailable"
       | "OutcomeUnknown"
       | "NotFound",
@@ -376,7 +380,11 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
                           ? "WithdrawEverything"
                           : error === "refund_withdraw_kitchen_changed"
                             ? "WithdrawKitchenChanged"
-                            : "Conflict",
+                            : error === "refund_withdraw_needs_sender"
+                              ? "WithdrawNeedsSender"
+                              : error === "refund_withdraw_stock_not_releasable"
+                                ? "WithdrawStockNotReleasable"
+                                : "Conflict",
           );
         if (error === "retry_later") throw new RetryLater();
         return fail();
@@ -430,6 +438,8 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
             error.code === "WithdrawHandedOver" ||
             error.code === "WithdrawEverything" ||
             error.code === "WithdrawKitchenChanged" ||
+            error.code === "WithdrawNeedsSender" ||
+            error.code === "WithdrawStockNotReleasable" ||
             (!mutation && error.code === "Changed"))
         )
           throw error;

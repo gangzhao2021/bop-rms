@@ -643,6 +643,29 @@ function QuantityStepper({
  * read), leaves it unticked: staff tick it themselves after checking with the kitchen.
  */
 export const stopMakingByDefault = (kitchen: RefundItem["kitchen"]) => kitchen === "NotStarted";
+/**
+ * WP-2423 M10/M14 (DEC-OWNER-DEFAULTS-2026-11-06 items 2 and 4): "stop making it too" is offered
+ * to staff who may take dishes off an order and who send what they request. A cashier's request
+ * waits for a manager or the owner, who may still decline it, so the kitchen isn't told by it:
+ * the cashier is pointed to Cancel items (the server refuses the combination too).
+ */
+export const refundStopOffered = (
+  item: Pick<RefundItem, "kitchen" | "withdrawnQuantity" | "quantity">,
+  canWithdraw: boolean,
+  canSend: boolean,
+) =>
+  canSend && canWithdraw && item.kitchen !== "Cancelled" && item.withdrawnQuantity < item.quantity;
+/** What a cashier who could otherwise stop the dish is told instead, or null. */
+export const refundStopForCashierText = (
+  item: Pick<RefundItem, "kitchen" | "withdrawnQuantity" | "quantity">,
+  canWithdraw: boolean,
+  canSend: boolean,
+) =>
+  !canSend && refundStopOffered(item, canWithdraw, true)
+    ? t(
+        "A manager sends this refund, so the kitchen isn't told now. To stop making a dish the kitchen hasn't started, use Cancel items on the order, or ask a manager.",
+      )
+    : null;
 function RefundWizard({
   orderReference,
   paymentIntentReference,
@@ -1085,9 +1108,7 @@ function RefundWizard({
   // WP-2423 M10 (DEC-OWNER-DEFAULTS-2026-11-06 item 4): "stop making it too" is offered to staff who
   // may take dishes off an order, Yes by default while the kitchen has not started the dish.
   const stopOffered = (item: RefundItem) =>
-    items?.canWithdraw === true &&
-    item.kitchen !== "Cancelled" &&
-    item.withdrawnQuantity < item.quantity;
+    refundStopOffered(item, items?.canWithdraw === true, canSend);
   const stops = (item: RefundItem) =>
     stopOffered(item) && (stopMaking[item.orderItemReference] ?? stopMakingByDefault(item.kitchen));
   // The items and requests load by themselves; rereading them is offered when it has a purpose:
@@ -1305,6 +1326,13 @@ function RefundWizard({
                                 : t("The guest keeps the food.")}
                         </span>
                       </label>
+                    ) : null}
+                    {(quantities[item.orderItemReference] ?? 0) > 0 &&
+                    refundStopForCashierText(item, items?.canWithdraw === true, canSend) !==
+                      null ? (
+                      <span className="refund-line__meta">
+                        {refundStopForCashierText(item, items?.canWithdraw === true, canSend)}
+                      </span>
                     ) : null}
                     {item.withdrawnQuantity > 0 ? (
                       <span className="refund-line__meta">

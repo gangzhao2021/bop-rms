@@ -29,9 +29,17 @@ const withdrawRefusalText = (code: string) =>
         ? t(
             "Nothing was recorded. This would refund and stop every dish of the pickup, leaving nothing to collect. If the kitchen hasn't started, use Cancel order on the order; otherwise untick Stop making it too: the guest keeps the food.",
           )
-        : t(
-            "Nothing was recorded. The kitchen just started one of these dishes. Look again and choose.",
-          );
+        : code === "WithdrawNeedsSender"
+          ? t(
+              "Nothing was recorded. A manager sends this refund, so the kitchen isn't told now. Untick Stop making it too to record the request; for a dish the kitchen hasn't started, use Cancel items on the order, or ask a manager.",
+            )
+          : code === "WithdrawStockNotReleasable"
+            ? t(
+                "Nothing was recorded. This dish's stock can't be returned on its own, so it can't be stopped with the refund. Untick Stop making it too: the refund is recorded and the guest keeps the food. To take the dish off the order instead, use Cancel items.",
+              )
+            : t(
+                "Nothing was recorded. The kitchen just started one of these dishes. Look again and choose.",
+              );
 export const refundErrorText = (error: unknown) =>
   needsFullSignIn(error)
     ? FULL_SIGN_IN_REQUIRED_TEXT
