@@ -158,6 +158,10 @@ vi.mock("../../apps/api/dist/merchant-card-machine-payment.js", () => ({
     seen.commands.payment = options;
     return "payment";
   },
+  createMerchantPaperPaidAtCheck: (options) => {
+    seen.commands.paperPaidAt = options;
+    return "paper paid-at check";
+  },
 }));
 vi.mock("../../apps/api/dist/merchant-card-machine-refund.js", () => ({
   createMerchantCardMachineCancellationRefund: (options) => {
@@ -313,6 +317,7 @@ it("logs an unexpected failure as its code and source frames only", async () => 
     seen.commands.order.onUnexpected(error);
     seen.commands.payment.onUnexpected(new Error("CARD_MACHINE_SOMETHING"));
     seen.commands.refund.onUnexpected(new Error("free text"));
+    seen.commands.paperPaidAt.onUnexpected(new Error("CARD_MACHINE_UNAVAILABLE"));
     const lines = log.mock.calls.map(([line]) => JSON.parse(line));
     expect(lines).toEqual([
       {
@@ -327,6 +332,10 @@ it("logs an unexpected failure as its code and source frames only", async () => 
         code: "CARD_MACHINE_SOMETHING",
       }),
       expect.objectContaining({ event: "INTERNAL_CARD_MACHINE_REFUND_UNAVAILABLE", code: "Error" }),
+      expect.objectContaining({
+        event: "INTERNAL_PAPER_PAID_AT_CHECK_UNAVAILABLE",
+        code: "CARD_MACHINE_UNAVAILABLE",
+      }),
     ]);
     expect(log.mock.calls.join("\n")).not.toMatch(/Jane|555|free text/u);
   } finally {
