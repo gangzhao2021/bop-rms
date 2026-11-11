@@ -9412,4 +9412,22 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Not recorded by {at} · enter the paper order again": "{at} 前未录入 · 请重新录入纸质订单",
   "Paid during the outage · record it by {at}, or it is taken off":
     "停电/断网时已付款 · 请在 {at} 前录入，否则会被撤下",
+  "This paper order's payment is no longer waiting to be recorded (already recorded, or the order was taken off). The list will update.":
+    "这张纸质订单的付款已不需要录入（已经录入，或订单已被撤下）。列表会自动更新。",
+  "Paid in cash during the outage: {amount}. Its change was given then.":
+    "停电/断网时已收现金：{amount}。找零当时已经给过。",
+  "Check the paid-at time on the paper slip, then record it again.":
+    "请核对纸质单上的付款时间，然后再录入一次。",
+  "This paper order's payment is already recorded and in the day's takings. Don't record it or charge the guest again; Orders shows it.":
+    "这张纸质订单的付款已经录入，已计入当天营业额。不要再录入，也不要再向客人收款；可在订单页查看。",
+  "Cash recorded after the outage. It is not in the kitchen yet: accept it in Orders now (or ask a manager to); an order that isn't accepted in time expires and the cash must be given back.":
+    "停电/断网后的现金已录入。它还没进厨房：请现在在订单页接单（或请经理接单）；没有按时接单的订单会过期，现金需退还客人。",
+  "Paper orders were paid during the outage: record each from its paper slip, don't charge again. Take payment for the others on the card machine or in cash; a guest who isn't paying: cancel it so its items go back to stock.":
+    "纸质订单在停电/断网时已经付款：请按纸质单逐一录入，不要再收一次。其他订单用刷卡机或现金收款；客人不付款：取消该单，菜品退回库存。",
+  "Paper orders were paid during the outage: record each from its paper slip, don't charge again. Take payment for the others on the card machine or in cash; a guest who isn't paying: ask a manager to cancel it.":
+    "纸质订单在停电/断网时已经付款：请按纸质单逐一录入，不要再收一次。其他订单用刷卡机或现金收款；客人不付款：请经理取消。",
+  "That paid-at time is before this store started recording sales in the system. Nothing was sent. Check the time on the paper slip, then send again.":
+    "这个付款时间早于本店开始在系统里记录销售的时间。订单没有发送。请核对纸质单上的时间后再发送。",
+  "That paid-at time is later than now, or more than 3 days ago, by the system's clock. Nothing was sent. Check the time on the paper slip and this device's clock, then send again.":
+    "按系统时间，这个付款时间晚于现在，或早于 3 天前。订单没有发送。请核对纸质单上的时间和这台设备的时钟后再发送。",
 });

@@ -25,6 +25,38 @@ export const COUNTER_AWAITING_REFRESH_MS = 30_000;
 type Order = CurrentOrderQueue["items"][number];
 
 /**
+ * WP-2423 M127 and DEC-PAPER-ORDER-PAID-AT-SEND: what the "Sent, not paid yet" list tells staff.
+ * Only those who may cancel are told to cancel (front of house asks a manager), and a paper order,
+ * paid during the outage, is only ever recorded: the charge and cancel words never apply to it.
+ */
+export function awaitingListGuidance(shown: readonly Order[]): string {
+  return shown.every((order) => order.counter?.recordedAfterOutage === true)
+    ? // DEC-PAPER-ORDER-PAID-AT-SEND: paper orders were paid during the outage.
+      t(
+        "These paper orders were paid during the outage, but their payment isn't recorded yet. Record each from its paper slip before its time ends; don't charge again.",
+      )
+    : shown.some((order) => order.counter?.recordedAfterOutage === true)
+      ? // A mix: the charge and cancel words never apply to the paper rows.
+        shown.some(
+          (order) =>
+            order.counter?.recordedAfterOutage !== true && order.counter?.canCancelUnpaid === true,
+        )
+        ? t(
+            "Paper orders were paid during the outage: record each from its paper slip, don't charge again. Take payment for the others on the card machine or in cash; a guest who isn't paying: cancel it so its items go back to stock.",
+          )
+        : t(
+            "Paper orders were paid during the outage: record each from its paper slip, don't charge again. Take payment for the others on the card machine or in cash; a guest who isn't paying: ask a manager to cancel it.",
+          )
+      : shown.some((order) => order.counter?.canCancelUnpaid === true)
+        ? t(
+            "Take payment for each, on the card machine or in cash, and record it here before its time ends. A guest who isn't paying: cancel the order so its items go back to stock.",
+          )
+        : t(
+            "Take payment for each, on the card machine or in cash, and record it here before its time ends. A guest who isn't paying: ask a manager to cancel it; otherwise it is released at its time and its items go back to stock.",
+          );
+}
+
+/**
  * WP-2423 (v15 751dd768, operating continuity): counter orders that were sent but not yet recorded
  * as paid on the card machine, read from the server (the Orders list), so a reload, a closed tab or
  * another tablet never loses the charge step. Each can be charged and recorded here until it is
@@ -41,7 +73,9 @@ export function CounterAwaitingPayment({
 }: {
   /**
    * WP-2423 M127: whether the order this page is charging may be cancelled by this staff member
-   * (it is unpaid and they may cancel orders), from the same read.
+   * (it is unpaid and they may cancel orders), from the same read. Told only once it is known: the
+   * order as listed (or, when it is not on the list's first page, as its own read says), and false
+   * when this staff member may not read Orders at all (they ask a manager).
    */
   readonly onExcludedCancellable?: ((cancellable: boolean) => void) | undefined;
   readonly csrf: string;
@@ -84,7 +118,21 @@ export function CounterAwaitingPayment({
             <dt>{t("Order")}</dt>
             <dd>{recorded.orderNumber}</dd>
           </div>
-          {recorded.payment.cash !== null ? (
+          {recorded.payment.cash !== null &&
+          recorded.payment.recordingReason === "RecordedAfterOutage" ? (
+            // DEC-PAPER-ORDER-PAID-AT-SEND decision 2: its change was given during the outage.
+            <div>
+              <dt>{t("Paid in cash during the outage")}</dt>
+              <dd>
+                <strong>
+                  {orderMoney({
+                    amountMinor: recorded.payment.cash.cashTotalMinor,
+                    currencyCode: "CAD",
+                  })}
+                </strong>
+              </dd>
+            </div>
+          ) : recorded.payment.cash !== null ? (
             // WP-2423 M52: paid in cash — the cash taken and the change to give back.
             <>
               <div>
@@ -112,7 +160,11 @@ export function CounterAwaitingPayment({
             </>
           ) : (
             <div>
-              <dt>{t("Paid on card machine")}</dt>
+              <dt>
+                {recorded.payment.recordingReason === "RecordedAfterOutage"
+                  ? t("Paid on the card machine during the outage")
+                  : t("Paid on card machine")}
+              </dt>
               <dd>
                 <strong>
                   {orderMoney({ amountMinor: recorded.payment.amountMinor, currencyCode: "CAD" })}
@@ -153,12 +205,28 @@ export function CounterAwaitingPayment({
         if (controller.signal.aborted) return;
         setNow(Date.now());
         setOrders(view.items.filter((order) => counterAwaitingCardMachine(order)));
-        onExcluded.current?.(
-          view.items.some(
-            (order) =>
-              order.orderReference === excluded.current && order.counter?.canCancelUnpaid === true,
-          ),
-        );
+        const charging = excluded.current;
+        const listed =
+          charging == null
+            ? undefined
+            : view.items.find((order) => order.orderReference === charging);
+        if (listed !== undefined) onExcluded.current?.(listed.counter?.canCancelUnpaid === true);
+        else if (charging != null && onExcluded.current !== undefined)
+          // A busy Store's newest orders may fill the first page, or the list may lag the send:
+          // the order is read on its own, so nobody is told to ask a manager before it is known.
+          client
+            .loadDetail(charging, controller.signal)
+            .then((detail) => {
+              if (controller.signal.aborted || excluded.current !== charging) return;
+              const counter = detail.order.counter;
+              if (counter !== null && counter.paidOnCardMachine === null)
+                onExcluded.current?.(counter.canCancelUnpaid === true);
+            })
+            .catch((error: unknown) => {
+              if (controller.signal.aborted || excluded.current !== charging) return;
+              if (error instanceof CurrentOrderQueueError && error.code === "PermissionDenied")
+                onExcluded.current?.(false);
+            });
         setFailed(false);
       })
       .catch((error: unknown) => {
@@ -167,6 +235,8 @@ export function CounterAwaitingPayment({
         if (error instanceof CurrentOrderQueueError && error.code === "PermissionDenied") {
           setOrders([]);
           setFailed(false);
+          // WP-2423 M127: without Orders access they cannot cancel either; they ask a manager.
+          onExcluded.current?.(false);
         } else setFailed(true);
       });
   }, [client]);
@@ -209,18 +279,7 @@ export function CounterAwaitingPayment({
           <p className="bop-muted">
             {/* WP-2423 M127: only those who may cancel are told to cancel; front of house asks a
                 manager, as the counter's charge step says. */}
-            {shown.every((order) => order.counter?.recordedAfterOutage === true)
-              ? // DEC-PAPER-ORDER-PAID-AT-SEND: paper orders were paid during the outage.
-                t(
-                  "These paper orders were paid during the outage, but their payment isn't recorded yet. Record each from its paper slip before its time ends; don't charge again.",
-                )
-              : shown.some((order) => order.counter?.canCancelUnpaid === true)
-                ? t(
-                    "Take payment for each, on the card machine or in cash, and record it here before its time ends. A guest who isn't paying: cancel the order so its items go back to stock.",
-                  )
-                : t(
-                    "Take payment for each, on the card machine or in cash, and record it here before its time ends. A guest who isn't paying: ask a manager to cancel it; otherwise it is released at its time and its items go back to stock.",
-                  )}
+            {awaitingListGuidance(shown)}
           </p>
         )}
         <ul className="counter-order__awaiting-list">

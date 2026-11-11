@@ -12,7 +12,10 @@ import {
   counterPayByText,
   counterPayByTier,
   paidNoteText,
+  paperPaymentProblem,
 } from "./counter-payment.js";
+import { awaitingListGuidance } from "./CounterAwaitingPayment.js";
+import { CounterOrderClientError } from "./staff-order-entry.js";
 import { refundErrorText } from "./OrderPaymentLinks.js";
 import { OrdinaryRefundClientError } from "./ordinary-refund-client.js";
 import { StaffRoundPaymentAction } from "./StaffRoundPaymentAction.js";
@@ -277,4 +280,53 @@ it("v15 f971cecb: a payment recorded from the list reads like a direct charge", 
   expect(
     paidNoteText({ tableMode: true, recordedAfterOutage: false, acceptance: "Accepted" }),
   ).toBe("Paid and sent to the kitchen. It shows on the table's order as entered by staff.");
+});
+
+it("DEC-PAPER-ORDER-PAID-AT-SEND: a list of paper and ordinary orders never asks to charge or cancel the paper ones", () => {
+  const listed = (...counters: Record<string, unknown>[]) =>
+    parseCurrentOrderQueue({
+      items: counters.map((counter, index) =>
+        counterItem(
+          { orderReference: ref(30 - index) },
+          { cancelledBeforePayment: null, canCancelUnpaid: false, ...counter },
+        ),
+      ),
+      nextAfterOrderReference: null,
+    }).items;
+  const mixed = awaitingListGuidance(
+    listed({ recordedAfterOutage: true }, { recordedAfterOutage: false }),
+  );
+  expect(mixed).toContain("Paper orders were paid during the outage");
+  expect(mixed).toContain("don't charge again");
+  expect(mixed).toContain("Take payment for the others");
+  expect(mixed).toContain("ask a manager to cancel it");
+  expect(mixed).not.toContain("Take payment for each");
+  // Only an ordinary order's own cancel right decides the cancel words.
+  expect(
+    awaitingListGuidance(
+      listed({ recordedAfterOutage: true }, { recordedAfterOutage: false, canCancelUnpaid: true }),
+    ),
+  ).toContain("a guest who isn't paying: cancel it so its items go back to stock");
+  expect(awaitingListGuidance(listed({ recordedAfterOutage: true }))).toContain(
+    "These paper orders were paid during the outage",
+  );
+});
+
+it("DEC-PAPER-ORDER-PAID-AT-SEND: a paper order's refusals and its recorded cash never ask for cash received or change", () => {
+  // There is no cash-received field for a paper cash order: only the paid-at time is checked.
+  expect(paperPaymentProblem(new CounterOrderClientError("Invalid"), true)).toBe(
+    "Check the paid-at time on the paper slip, then record it again.",
+  );
+  // Already recorded (an earlier try or another tablet): in the takings, never "to charge".
+  const recorded = paperPaymentProblem(new CounterOrderClientError("AlreadyPaid"));
+  expect(recorded).toContain("already recorded and in the day's takings");
+  expect(recorded).not.toMatch(/before charging/u);
+  const notAccepted = paidNoteText({
+    tableMode: false,
+    recordedAfterOutage: true,
+    acceptance: "NotAccepted",
+    cash: { changeMinor: "0" },
+  });
+  expect(notAccepted).toContain("Cash recorded after the outage.");
+  expect(notAccepted).not.toContain("change");
 });

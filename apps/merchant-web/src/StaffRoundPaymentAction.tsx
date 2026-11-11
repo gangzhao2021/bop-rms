@@ -14,9 +14,12 @@ import {
   paidAtInstant,
   paidAtRefusal,
   paidNoteText,
+  paperAlreadyRecordedText,
+  paperPaymentProblem,
   payErrorText,
   paymentWindowNotice,
 } from "./counter-payment.js";
+import { cashTotalMinor } from "./table-checkout-client.js";
 
 const cad = (amountMinor: string) => orderMoney({ amountMinor, currencyCode: "CAD" });
 
@@ -164,13 +167,18 @@ export function StaffRoundPaymentAction({
       <div className="staff-round-payment" role="status">
         <p>
           {reading === "NotDue"
-            ? subject === "order"
-              ? t(
-                  "This order is no longer waiting for a card-machine payment (paid or released). The list will update.",
+            ? recordedAfterOutage
+              ? // DEC-PAPER-ORDER-PAID-AT-SEND: a paper order is recorded or taken off, never charged.
+                t(
+                  "This paper order's payment is no longer waiting to be recorded (already recorded, or the order was taken off). The list will update.",
                 )
-              : t(
-                  "This round is no longer waiting for a card-machine payment. The order list will update.",
-                )
+              : subject === "order"
+                ? t(
+                    "This order is no longer waiting for a card-machine payment (paid or released). The list will update.",
+                  )
+                : t(
+                    "This round is no longer waiting for a card-machine payment. The order list will update.",
+                  )
             : reading === "Failed" || loadAmountDue === undefined
               ? t("Couldn't read the amount to charge. Try again.")
               : t("Reading the amount to charge…")}
@@ -196,12 +204,19 @@ export function StaffRoundPaymentAction({
       </div>
     );
   const inCash = subject === "order" && tender === "Cash";
-  const cash = inCash ? cashTender(BigInt(amount), received, largeChangeConfirmed) : null;
+  // DEC-PAPER-ORDER-PAID-AT-SEND decision 2: a paper order's cash was taken, and its change given,
+  // during the outage. Its cash total is what is recorded (no cash received to type, no change),
+  // the same as when it is recorded with the send or on the counter's own step.
+  const paperCash = inCash && recordedAfterOutage;
+  const cash =
+    inCash && !paperCash ? cashTender(BigInt(amount), received, largeChangeConfirmed) : null;
+  const paperCashMinor = paperCash ? cashTotalMinor(BigInt(amount)).toString() : null;
+  const ready =
+    (cash !== null ? cash.ready : paperCash || validSlipReference(slip.trim())) &&
+    (!recordedAfterOutage || paperInstant !== null);
   const record = async () => {
-    if (busy || amount === null) return;
-    if (cash !== null ? !cash.ready : !validSlipReference(slip.trim())) return;
-    if (recordedAfterOutage && paperInstant === null) return;
-    const tenderedMinor = cash?.receivedMinor?.toString() ?? null;
+    if (busy || amount === null || !ready) return;
+    const tenderedMinor = paperCashMinor ?? cash?.receivedMinor?.toString() ?? null;
     const intent = JSON.stringify([
       orderBatchReference,
       amount,
@@ -225,9 +240,9 @@ export function StaffRoundPaymentAction({
         ...(tenderedMinor === null ? {} : { tenderedMinor }),
       });
       setMessage(
-        result.cash !== null
+        result.cash !== null || recordedAfterOutage
           ? paidNoteText({
-              tableMode: false,
+              tableMode: subject === "round",
               recordedAfterOutage,
               acceptance: result.acceptance,
               cash: result.cash,
@@ -244,12 +259,23 @@ export function StaffRoundPaymentAction({
           ? error
           : new CounterOrderClientError("Unavailable");
       if (failure.code !== "OutcomeUnknown") operation.current = null;
-      setCashUnanswered(inCash && failure.code === "OutcomeUnknown");
+      setCashUnanswered(cash !== null && failure.code === "OutcomeUnknown");
       if (failure.code === "AmountChanged" && failure.totalMinor !== null)
         setAmount(failure.totalMinor);
+      if (recordedAfterOutage && failure.code === "AlreadyPaid") {
+        // A paper order's payment already recorded (another tablet, or an earlier try): the sale
+        // is in the day's takings, so staff are never sent to think about charging.
+        setMessage(paperAlreadyRecordedText());
+        onRecorded();
+        return;
+      }
       // A cash Record with no answer says so beside the cash received it keeps.
       setMessage(
-        inCash && failure.code === "OutcomeUnknown" ? null : payErrorText(failure, inCash),
+        recordedAfterOutage
+          ? paperPaymentProblem(failure, inCash)
+          : cash !== null && failure.code === "OutcomeUnknown"
+            ? null
+            : payErrorText(failure, inCash),
       );
       if (recordedAfterOutage && paidAtRefusal(failure)) {
         setPaidAtRefused(true);
@@ -262,7 +288,11 @@ export function StaffRoundPaymentAction({
   return (
     <form
       className="staff-round-payment"
-      aria-label={t("Record card-machine payment")}
+      aria-label={
+        recordedAfterOutage
+          ? t("Record the paper order's payment")
+          : t("Record card-machine payment")
+      }
       onSubmit={(event) => {
         event.preventDefault();
         void record();
@@ -283,6 +313,7 @@ export function StaffRoundPaymentAction({
               now: Date.now(),
               tableMode: subject === "round",
               timeZone,
+              paper: recordedAfterOutage,
             });
             return (
               <p
@@ -297,7 +328,9 @@ export function StaffRoundPaymentAction({
         : null}
       {subject === "order" ? (
         <fieldset className="counter-order__tender" disabled={busy || cashUnanswered}>
-          <legend>{t("How the guest pays")}</legend>
+          <legend>
+            {recordedAfterOutage ? t("How it was paid during the outage") : t("How the guest pays")}
+          </legend>
           <label>
             <input
               type="radio"
@@ -318,7 +351,13 @@ export function StaffRoundPaymentAction({
           </label>
         </fieldset>
       ) : null}
-      {inCash ? (
+      {paperCashMinor !== null ? (
+        <p className="field-hint">
+          {t("Paid in cash during the outage: {amount}. Its change was given then.", {
+            amount: cad(paperCashMinor),
+          })}
+        </p>
+      ) : cash !== null ? (
         <CashTenderFields
           idPrefix={"cash-" + orderBatchReference}
           dueMinor={BigInt(amount)}
@@ -377,19 +416,14 @@ export function StaffRoundPaymentAction({
       ) : null}
       {message !== null && !paidAtRefused ? <p role="status">{message}</p> : null}
       <div className="card-actions">
-        <button
-          type="submit"
-          disabled={
-            busy ||
-            (cash !== null ? !cash.ready : !validSlipReference(slip.trim())) ||
-            (recordedAfterOutage && paperInstant === null)
-          }
-        >
+        <button type="submit" disabled={busy || !ready}>
           {busy
             ? t("Recording…")
-            : cash !== null
-              ? t("Cash received · {amount}", { amount: cad(cash.cashDueMinor.toString()) })
-              : t("Paid on card machine · {amount}", { amount: cad(amount) })}
+            : recordedAfterOutage
+              ? t("Record paper payment · {amount}", { amount: cad(paperCashMinor ?? amount) })
+              : cash !== null
+                ? t("Cash received · {amount}", { amount: cad(cash.cashDueMinor.toString()) })
+                : t("Paid on card machine · {amount}", { amount: cad(amount) })}
         </button>
         <button type="button" disabled={busy} onClick={() => setOpen(false)}>
           {t("Cancel")}

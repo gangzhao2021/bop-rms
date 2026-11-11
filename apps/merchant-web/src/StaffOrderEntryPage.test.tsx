@@ -891,6 +891,29 @@ describe("DEC-PAPER-ORDER-PAID-AT-SEND: a paper order is recorded with its payme
       }),
     ).rejects.toThrow();
   });
+  it("v15 batch-5 review: a paid-at refused before the order is placed says nothing was sent", async () => {
+    const answers = [
+      [409, { error: "taken_before_records" }],
+      [409, { error: "paper_paid_at_out_of_range" }],
+    ] as const;
+    let at = 0;
+    const fetcher = vi.fn(async () => {
+      const [status, body] = answers[at++] ?? [500, {}];
+      return new Response(JSON.stringify(body), { status });
+    });
+    const client = createCounterOrderClient("a".repeat(43), fetcher as unknown as typeof fetch);
+    for (const [place, code] of [
+      [() => client.placeOrder(command), "TakenBeforeRecords"],
+      [() => client.placeOrder(command), "PaidAtOutOfRange"],
+    ] as const)
+      await expect(place()).rejects.toMatchObject({ code });
+    expect(placeErrorText(new CounterOrderClientError("TakenBeforeRecords"), [])).toContain(
+      "Nothing was sent.",
+    );
+    expect(placeErrorText(new CounterOrderClientError("PaidAtOutOfRange"), [])).toBe(
+      "That paid-at time is later than now, or more than 3 days ago, by the system's clock. Nothing was sent. Check the time on the paper slip and this device's clock, then send again.",
+    );
+  });
   it("never tells staff to charge a paper order, and warns before the system takes it off", () => {
     const payBy = "2026-10-15T16:30:00.000Z";
     const notice = (now: string) =>

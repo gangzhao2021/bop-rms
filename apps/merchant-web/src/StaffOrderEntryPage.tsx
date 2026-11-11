@@ -22,6 +22,7 @@ import {
   paidAtRefusal,
   payErrorText,
   paidNoteText,
+  paperAlreadyRecordedText,
   paperPaymentProblem,
   payIntentKey,
   paymentUrgentMinutes,
@@ -522,6 +523,15 @@ export function placeErrorText(
         { left: left, name: line.item.name, ordered: ordered, name2: line.item.name, left2: left },
       );
     }
+    // v15 batch-5 review: a paper order's paid-at refused before it was placed (nothing was sent).
+    case "TakenBeforeRecords":
+      return t(
+        "That paid-at time is before this store started recording sales in the system. Nothing was sent. Check the time on the paper slip, then send again.",
+      );
+    case "PaidAtOutOfRange":
+      return t(
+        "That paid-at time is later than now, or more than 3 days ago, by the system's clock. Nothing was sent. Check the time on the paper slip and this device's clock, then send again.",
+      );
     case "StoreNotTakingOrders":
       return table !== null
         ? t(
@@ -770,6 +780,8 @@ export function StaffOrderEntryPage({
   const [paidAtRefused, setPaidAtRefused] = useState(false);
   const [focusPaidAt, setFocusPaidAt] = useState(0);
   const chargePaidAt = useRef<HTMLInputElement>(null);
+  // The paid-at typed before sending, focused when the server refuses it (nothing was sent).
+  const sendPaidAt = useRef<HTMLInputElement>(null);
   const chargeHeading = useRef<HTMLHeadingElement>(null);
   const ticketHeading = useRef<HTMLHeadingElement>(null);
   const chooseHeading = useRef<HTMLHeadingElement>(null);
@@ -837,8 +849,9 @@ export function StaffOrderEntryPage({
   // After the charge heading takes focus on returning to Charge: a refused paid-at takes it instead.
   useEffect(() => {
     if (focusPaidAt === 0) return;
-    chargePaidAt.current?.focus();
-    chargePaidAt.current?.select?.();
+    const input = chargePaidAt.current ?? sendPaidAt.current;
+    input?.focus();
+    input?.select?.();
   }, [focusPaidAt]);
   // The item's options open over the menu (a sheet on a phone), so the order stays where it is.
   const choosingItem = choosing?.item.sellableReference ?? null;
@@ -1203,6 +1216,12 @@ export function StaffOrderEntryPage({
             cash: recorded.cash,
           }),
         );
+      } else if (paperOutcome?.error.code === "AlreadyPaid") {
+        // A retry minted a new payment operation (the tender, slip or time was changed after no
+        // answer) but the first one was recorded: the sale is in the takings, never "to charge".
+        setPhase("Paid");
+        setChangeDue(null);
+        setPaidNote(paperAlreadyRecordedText());
       } else {
         if (paperOutcome !== null && paperPayment !== undefined) {
           // Placed, but its payment was not recorded: the same payment, recorded again below.
@@ -1252,6 +1271,12 @@ export function StaffOrderEntryPage({
         ),
       );
       setProblemNeedsTableCode(failure.code === "TableHasNoQr");
+      // v15 batch-5 review: the paper paid-at was refused before anything was placed; staff
+      // correct it where they typed it.
+      if (failure.code === "TakenBeforeRecords" || failure.code === "PaidAtOutOfRange") {
+        setPaidAtRefused(true);
+        setFocusPaidAt((value) => value + 1);
+      }
       // WP-2423 M35: with the guests' lines on screen, a cart that changed is read again and
       // staff decide on it as it is now; the server's own list only when it can't be read here.
       const liveList =
@@ -1329,6 +1354,17 @@ export function StaffOrderEntryPage({
           ? error
           : new CounterOrderClientError("Unavailable");
       if (failure.code !== "OutcomeUnknown") payOperation.current = null;
+      if (placed.recordedAfterOutage && failure.code === "AlreadyPaid") {
+        // DEC-PAPER-ORDER-PAID-AT-SEND: its payment is already recorded (an earlier try, or
+        // another tablet): the sale is in the takings and nothing is charged.
+        setCashUnanswered(false);
+        setProblem(null);
+        setChangeDue(null);
+        setPaidNote(paperAlreadyRecordedText());
+        setPhase("Paid");
+        setAwaitingKey((value) => value + 1);
+        return;
+      }
       setCashUnanswered(inCash && !paperCash && failure.code === "OutcomeUnknown");
       if (failure.code === "AmountChanged" && failure.totalMinor !== null)
         setPlaced({ ...placed, totalMinor: failure.totalMinor });
@@ -2064,13 +2100,15 @@ export function StaffOrderEntryPage({
                 <label>
                   {t("Paid at (store time, from the paper order)")}
                   <input
+                    ref={sendPaidAt}
                     type="datetime-local"
                     value={paidAt}
-                    aria-invalid={paperInstant === null}
+                    aria-invalid={paperInstant === null || paidAtRefused}
                     aria-describedby="counter-paper-hint"
                     onChange={(event) => {
                       placeOperation.current = null;
                       setPaidAt(event.currentTarget.value);
+                      setPaidAtRefused(false);
                     }}
                   />
                 </label>

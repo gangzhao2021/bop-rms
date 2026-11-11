@@ -96,9 +96,26 @@ export function paperPaymentProblem(error: CounterOrderClientError, inCash = fal
       return t(
         "The order is in, but its payment from the paper slip isn't recorded yet. Record it again below: the same payment is never counted twice.",
       );
+    case "AlreadyPaid":
+      return paperAlreadyRecordedText();
+    case "Invalid":
+      // A paper order's cash is its cash total (nothing to type); only the slip and time are entered.
+      return inCash
+        ? t("Check the paid-at time on the paper slip, then record it again.")
+        : t("Check the slip reference and the paid-at time.");
     default:
       return payErrorText(error, inCash);
   }
+}
+
+/**
+ * DEC-PAPER-ORDER-PAID-AT-SEND: a paper order whose payment is already recorded (an earlier try
+ * that got no answer, or another tablet). The sale is in the day's takings; nothing is charged.
+ */
+export function paperAlreadyRecordedText(): string {
+  return t(
+    "This paper order's payment is already recorded and in the day's takings. Don't record it or charge the guest again; Orders shows it.",
+  );
 }
 
 /**
@@ -295,6 +312,11 @@ export function paidNoteText(input: {
 }): string {
   if (input.cash != null) {
     const change = orderMoney({ amountMinor: input.cash.changeMinor, currencyCode: "CAD" });
+    // DEC-PAPER-ORDER-PAID-AT-SEND decision 2: a paper order's change was given during the outage.
+    if (input.acceptance === "NotAccepted" && input.recordedAfterOutage)
+      return t(
+        "Cash recorded after the outage. It is not in the kitchen yet: accept it in Orders now (or ask a manager to); an order that isn't accepted in time expires and the cash must be given back.",
+      );
     if (input.acceptance === "NotAccepted")
       return t(
         "Cash recorded. Give {change} change. It is not in the kitchen yet: accept it in Orders now (or ask a manager to); an order that isn't accepted in time expires and the cash must be given back.",

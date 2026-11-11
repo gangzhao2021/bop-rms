@@ -56,6 +56,11 @@ export class CounterOrderClientError extends Error {
       | "PaymentWindowClosed"
       /** WP-2423 M160: the paid-at time is before the Store started recording sales here. */
       | "TakenBeforeRecords"
+      /**
+       * DEC-PAPER-ORDER-PAID-AT-SEND: a paper order's paid-at is after the server's now or past
+       * the back-entry window; refused before the order was placed (nothing was sent).
+       */
+      | "PaidAtOutOfRange"
       /** WP-2423 M52: less cash handed over than the cash total. Nothing was recorded. */
       | "CashShort"
       | "AlreadyPaid"
@@ -795,6 +800,10 @@ export function createCounterOrderClient(csrf: string, fetcher: typeof fetch = f
       // WP-2423: the server's own answer that it could not send the round (nothing was ordered or
       // charged; the next send is a new attempt), as opposed to no answer at all (OutcomeUnknown).
       if (code === "staff_round_unavailable") throw new CounterOrderClientError("SystemProblem");
+      // A paper round's paid-at refused before it was placed (nothing was sent).
+      if (code === "taken_before_records") throw new CounterOrderClientError("TakenBeforeRecords");
+      if (code === "paper_paid_at_out_of_range")
+        throw new CounterOrderClientError("PaidAtOutOfRange");
       if (response.status === 400) throw new CounterOrderClientError("Invalid");
       throw new CounterOrderClientError(response.status >= 500 ? "OutcomeUnknown" : "Unavailable");
     },
@@ -840,6 +849,10 @@ export function createCounterOrderClient(csrf: string, fetcher: typeof fetch = f
       // WP-2423: a definite answer from the server that it could not place the order, as opposed
       // to no answer at all (a gateway or network failure keeps OutcomeUnknown).
       if (code === "counter_order_unavailable") throw new CounterOrderClientError("SystemProblem");
+      // A paper order's paid-at refused before it was placed (nothing was sent).
+      if (code === "taken_before_records") throw new CounterOrderClientError("TakenBeforeRecords");
+      if (code === "paper_paid_at_out_of_range")
+        throw new CounterOrderClientError("PaidAtOutOfRange");
       if (response.status === 400) throw new CounterOrderClientError("Invalid");
       throw new CounterOrderClientError(response.status >= 500 ? "OutcomeUnknown" : "Unavailable");
     },
