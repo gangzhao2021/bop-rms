@@ -799,6 +799,11 @@
 .workspace-page.tables-v3 .table-panel__notice[data-tier="urgent"] {
   color: var(--bop-color-danger);
 }
+/* v15 batch 7: the link to the order whose paid round waits (Accept, Can't make it · refund). */
+.workspace-page.tables-v3 .table-panel__notice-action {
+  margin: 4px 0 0;
+  font-size: 14px;
+}
 .workspace-page.tables-v3 .table-panel__more {
   display: flex;
   flex-wrap: wrap;

@@ -43,7 +43,7 @@ export function tableRoundWaitText(roundNumber: number, paidAt: string, now: num
   const waited = minutes < 1 ? t("just now") : t("{minutes} min ago", { minutes: minutes });
   return tier === "urgent"
     ? t(
-        "Round {roundNumber} paid {waited} and still not accepted · accept it on the Orders page now",
+        "Round {roundNumber} paid {waited} and still not accepted · open the order now: accept it, or use Can't make it · refund",
         { roundNumber: roundNumber, waited: waited },
       )
     : t(

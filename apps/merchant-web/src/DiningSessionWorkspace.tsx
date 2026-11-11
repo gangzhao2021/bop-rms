@@ -1601,6 +1601,15 @@ function TablePanel({
           {notice.text}
         </p>
       ))}
+      {table.roundsAwaitingAcceptance.length > 0 && table.session?.orderReference ? (
+        // v15 batch 7: straight to the order, where Accept and Can't make it · refund are, on
+        // whatever day or page of Orders it was placed.
+        <p className="table-panel__notice-action">
+          <Link to={`/operations/orders/${table.session.orderReference}`}>
+            {t("Open the order to accept it")}
+          </Link>
+        </p>
+      ) : null}
       {canCancelUnpaidRounds && table.guestRoundsAwaitingPayment.length > 0 ? (
         <section aria-label={t("Unpaid rounds")}>
           {unpaidHint ? <p className="table-panel__notice">{unpaidHint}</p> : null}

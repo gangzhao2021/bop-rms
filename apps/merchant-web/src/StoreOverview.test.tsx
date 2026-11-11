@@ -573,7 +573,7 @@ describe("v15 finding: the store system card follows the server's answer, not th
       "Round 2 paid just now · accept it on the Orders page to send it to the kitchen",
     );
     expect(tableRoundWaitText(2, paidAt, at(6))).toBe(
-      "Round 2 paid 6 min ago and still not accepted · accept it on the Orders page now",
+      "Round 2 paid 6 min ago and still not accepted · open the order now: accept it, or use Can't make it · refund",
     );
   });
 });

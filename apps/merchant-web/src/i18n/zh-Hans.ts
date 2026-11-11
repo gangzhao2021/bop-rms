@@ -3677,8 +3677,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Round cancelled. The customer's refund has started.": "这一轮已取消。顾客的退款已开始。",
   "Round {batchSequence} · Item {itemOrdinal}": "第 {batchSequence} 轮 · 第 {itemOrdinal} 项",
   "Round {roundNumber}": "第 {roundNumber} 轮",
-  "Round {roundNumber} paid {waited} and still not accepted · accept it on the Orders page now":
-    "第 {roundNumber} 轮已付款 {waited}，仍未接单 · 请立即在订单页接单",
+  "Round {roundNumber} paid {waited} and still not accepted · open the order now: accept it, or use Can't make it · refund":
+    "第 {roundNumber} 轮已付款 {waited}，仍未接单 · 请立即打开订单：接单，或选择“做不了 · 退款”",
+  "Open the order to accept it": "打开订单去接单",
   "Round {roundNumber} paid {waited} · accept it on the Orders page to send it to the kitchen":
     "第 {roundNumber} 轮已付款 {waited} · 请在订单页接单以发送到后厨",
   "Round {sequence}": "第 {sequence} 轮",

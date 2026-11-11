@@ -66,10 +66,13 @@ test("@production WP-2423: Tables says how long a paid round has waited for acce
         canCancelUnpaidRounds: false,
         items: [
           table(1, "DEMO-01", [{ roundNumber: 1, paidAt: minutesAgo(3) }]),
-          table(2, "DEMO-02", [
-            { roundNumber: 2, paidAt: minutesAgo(12) },
-            { roundNumber: 3, paidAt: minutesAgo(2) },
-          ]),
+          {
+            ...table(2, "DEMO-02", [
+              { roundNumber: 2, paidAt: minutesAgo(12) },
+              { roundNumber: 3, paidAt: minutesAgo(2) },
+            ]),
+            session: { phase: "Active", version: 1, orderReference: id(40) },
+          },
         ],
         nextAfterTableReference: null,
       },
@@ -88,7 +91,13 @@ test("@production WP-2423: Tables says how long a paid round has waited for acce
   await expect(tile("DEMO-02")).toHaveAttribute("data-urgent", "true");
   await tile("DEMO-02").getByRole("button", { name: "Select DEMO-02", exact: true }).click();
   await expect(page.getByRole("note").filter({ hasText: "and still not accepted" })).toContainText(
-    /Round 2 paid 1[23] min ago and still not accepted · accept it on the Orders page now \(and 1 more paid round\)/u,
+    /Round 2 paid 1[23] min ago and still not accepted · open the order now: accept it, or use Can't make it · refund \(and 1 more paid round\)/u,
+  );
+  // v15 batch 7: one tap to the order itself (Accept, or Can't make it · refund), whatever day or
+  // page of Orders it is on.
+  await expect(page.getByRole("link", { name: "Open the order to accept it" })).toHaveAttribute(
+    "href",
+    new RegExp(`/operations/orders/${id(40)}$`, "u"),
   );
   const note = page.getByRole("note").filter({ hasText: "Round 2 paid" });
   await expect(note).toBeVisible();
