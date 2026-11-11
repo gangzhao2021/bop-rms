@@ -13,6 +13,17 @@ export interface StoreHoursInterval {
 }
 
 export interface StoreProfile {
+  /**
+   * WP-2423 (M178): what the Store's kitchen says about cross-contact (null: not set; absent: an
+   * older server or not read now).
+   */
+  readonly kitchenStatement?:
+    | {
+        readonly handled: readonly { readonly code: string; readonly name: string }[];
+        readonly sharedEquipment: readonly string[];
+      }
+    | null
+    | undefined;
   readonly storeDisplayName: string;
   /** The Store's IANA time zone: the clock its hours, last orders and pauses are written in. */
   readonly timeZone: string;
@@ -129,7 +140,12 @@ const nullable = <T>(value: unknown, parse: (value: unknown) => T): T | null =>
 export function parseStoreProfile(value: unknown): StoreProfile {
   const root = record(value, ["schemaVersion", "store"]);
   if (root.schemaVersion !== 1) throw new TypeError("store profile invalid");
+  const withStatement =
+    root.store !== null &&
+    typeof root.store === "object" &&
+    Object.hasOwn(root.store, "kitchenStatement");
   const store = record(root.store, [
+    ...(withStatement ? ["kitchenStatement"] : []),
     "storeDisplayName",
     "brandDisplayName",
     "timeZone",
@@ -235,6 +251,32 @@ export function parseStoreProfile(value: unknown): StoreProfile {
     }),
     phone: store.phone,
     hours,
+    ...(withStatement ? { kitchenStatement: kitchenStatement(store.kitchenStatement) } : {}),
+  });
+}
+
+const equipment = ["Woks", "FryerOil", "Grill", "Utensils", "PrepSurfaces", "Steamers"];
+function kitchenStatement(value: unknown): StoreProfile["kitchenStatement"] {
+  if (value === null) return null;
+  const raw = record(value, ["handled", "sharedEquipment"]);
+  if (
+    !Array.isArray(raw.handled) ||
+    raw.handled.length > 30 ||
+    !Array.isArray(raw.sharedEquipment) ||
+    raw.sharedEquipment.length > 6 ||
+    raw.sharedEquipment.some((item) => !equipment.includes(String(item)))
+  )
+    throw new TypeError("store profile invalid");
+  return Object.freeze({
+    handled: Object.freeze(
+      raw.handled.map((entry: unknown) => {
+        const allergen = record(entry, ["code", "name"]);
+        if (typeof allergen.code !== "string" || !/^[A-Z][A-Z0-9_-]{1,39}$/u.test(allergen.code))
+          throw new TypeError("store profile invalid");
+        return Object.freeze({ code: allergen.code, name: text(allergen.name, 80) });
+      }),
+    ),
+    sharedEquipment: Object.freeze(raw.sharedEquipment.map(String)),
   });
 }
 

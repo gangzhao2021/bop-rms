@@ -7,6 +7,7 @@ import type {
   createMerchantDiningStaffCallCount,
 } from "./merchant-dining-staff-calls.js";
 import type { createMerchantDiningTableAllergies } from "./merchant-dining-table-allergies.js";
+import type { createMerchantKitchenStatement } from "./merchant-kitchen-statement.js";
 import type {
   createMerchantDiningPaymentTimingChange,
   createMerchantDiningPaymentTimingRead,
@@ -649,6 +650,8 @@ export interface MerchantBffRouterOptions {
   readonly diningRoundHoldSetting?: ReturnType<typeof createMerchantDiningRoundHoldSetting>;
   /** WP-2423 item 8 ⑦ DEC-STORE-FEATURES: the modules the Store uses (Store features page). */
   readonly storeFeatures?: ReturnType<typeof createMerchantStoreFeatures>;
+  /** WP-2423 (M178): the Store kitchen's cross-contact statement. */
+  readonly kitchenStatement?: ReturnType<typeof createMerchantKitchenStatement>;
   /** WP-2423 item 8 ⑦: a server chases a dish not yet served (the kitchen sees it). */
   readonly diningChase?: ReturnType<typeof createMerchantDiningChase>;
   /** WP-2423 item 8 ⑦ (decision 2): how many guests sit at a table. */

@@ -1,4 +1,4 @@
-import { listSeparator, t } from "../i18n/i18n.js";
+import { currentLanguage, listSeparator, t } from "../i18n/i18n.js";
 import { useEffect, useState } from "react";
 import { endSentence, formatLocalityLine, formatStoreLocalTime } from "../journey/format.js";
 import { formatStorePhone } from "../journey/StoreContact.js";
@@ -393,4 +393,46 @@ export function storeServiceNoticeText(
     };
   }
   return null;
+}
+
+/** WP-2423 (M178): shared kitchen equipment in the guest's words. */
+function equipmentWords(item: string): string {
+  return item === "Woks"
+    ? t("woks")
+    : item === "FryerOil"
+      ? t("fryer oil")
+      : item === "Grill"
+        ? t("the grill")
+        : item === "Utensils"
+          ? t("utensils")
+          : item === "PrepSurfaces"
+            ? t("prep surfaces")
+            : t("steamers");
+}
+
+/** WP-2423 (M178): the kitchen's cross-contact statement in one sentence; null when none. */
+export function kitchenStatementText(statement: StoreProfile["kitchenStatement"]): string | null {
+  if (statement === null || statement === undefined) return null;
+  if (statement.handled.length === 0 && statement.sharedEquipment.length === 0) return null;
+  const uses = statement.handled.map((entry) => entry.name).join(listSeparator());
+  const shares = statement.sharedEquipment.map(equipmentWords).join(listSeparator());
+  const first =
+    uses !== "" && shares !== ""
+      ? t("Our kitchen uses {uses}, and shares {shares}.", { uses, shares })
+      : uses !== ""
+        ? t("Our kitchen uses {uses}.", { uses })
+        : t("Our kitchen shares {shares}.", { shares });
+  return first + (currentLanguage() === "zh-Hans" ? "" : " ") + t("Any dish may contain traces.");
+}
+
+/** WP-2423 (M178): above the menu, what the kitchen says about cross-contact. */
+export function KitchenStatementLine({ load }: { readonly load: StoreProfileLoader | null }) {
+  const profile = useStoreProfile(load);
+  const text = kitchenStatementText(profile?.kitchenStatement);
+  if (text === null) return null;
+  return (
+    <p className="menu-help-line" role="note">
+      {text}
+    </p>
+  );
 }

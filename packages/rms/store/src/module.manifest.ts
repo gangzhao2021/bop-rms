@@ -44,6 +44,7 @@ const moduleManifestInput = {
       "store_presence_session",
       "store_receipt_profile",
       "store_feature_setting",
+      "store_kitchen_allergen_statement",
     ],
   },
   ownedJobs: [],

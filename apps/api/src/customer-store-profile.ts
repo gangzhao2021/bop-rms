@@ -1,3 +1,5 @@
+import { loadStoreKitchenStatement } from "@rms/store";
+import { kitchenStatementAllergens } from "./kitchen-statement-allergens.js";
 import {
   createPublicStoreProfileService,
   parseGetPublicStoreRequest,
@@ -91,6 +93,14 @@ export interface CustomerStoreProfileView {
   readonly phone: string | null;
   /** Null when the published hours can't be read now; the page then states no hours at all. */
   readonly hours: CustomerStoreHours | null;
+  /**
+   * WP-2423 (M178): what the Store's kitchen says about cross-contact (allergens it handles, in the
+   * guest's language, and the equipment it shares). Null when none is set; absent when unread.
+   */
+  readonly kitchenStatement?: {
+    readonly handled: readonly { readonly code: string; readonly name: string }[];
+    readonly sharedEquipment: readonly string[];
+  } | null;
 }
 
 const seconds = (value: string): number => {
@@ -275,8 +285,52 @@ export function createCustomerStoreProfileRead(options: CustomerStoreProfileRead
         } catch {
           hours = null;
         }
+        // WP-2423 (M178): an advisory read; if it fails the menu still shows (savepoint).
+        let kitchenStatement: CustomerStoreProfileView["kitchenStatement"];
+        await (transaction as { query(sql: string, values: unknown[]): Promise<unknown> }).query(
+          "SAVEPOINT kitchen_statement",
+          [],
+        );
+        try {
+          const owner = {
+            brandReference: options.scope.brandReference,
+            storeReference: options.scope.storeReference,
+          };
+          const statement = await loadStoreKitchenStatement(transaction as never, owner);
+          if (statement === null) kitchenStatement = null;
+          else {
+            const names = new Map(
+              (await kitchenStatementAllergens(transaction, owner)).map((entry) => [
+                entry.code,
+                entry.names[guest.locale] ??
+                  (guest.locale.startsWith("zh") ? entry.names["zh-Hans"] : undefined) ??
+                  entry.names["en-CA"] ??
+                  entry.code,
+              ]),
+            );
+            kitchenStatement = Object.freeze({
+              handled: Object.freeze(
+                statement.handledAllergenCodes
+                  .filter((code) => names.has(code))
+                  .map((code) => Object.freeze({ code, name: names.get(code) ?? code })),
+              ),
+              sharedEquipment: Object.freeze([...statement.sharedEquipment]),
+            });
+          }
+          await (transaction as { query(sql: string, values: unknown[]): Promise<unknown> }).query(
+            "RELEASE SAVEPOINT kitchen_statement",
+            [],
+          );
+        } catch {
+          await (transaction as { query(sql: string, values: unknown[]): Promise<unknown> }).query(
+            "ROLLBACK TO SAVEPOINT kitchen_statement",
+            [],
+          );
+          kitchenStatement = undefined;
+        }
         const { address } = profile.profile;
         return Object.freeze({
+          ...(kitchenStatement === undefined ? {} : { kitchenStatement }),
           storeDisplayName: profile.profile.storeDisplayName,
           brandDisplayName: profile.profile.brandDisplayName,
           timeZone: profile.profile.timeZone,
@@ -311,6 +365,20 @@ export function customerStoreProfileJson(view: CustomerStoreProfileView) {
         countryCode: view.address.countryCode,
       },
       phone: view.phone,
+      ...(view.kitchenStatement === undefined
+        ? {}
+        : {
+            kitchenStatement:
+              view.kitchenStatement === null
+                ? null
+                : {
+                    handled: view.kitchenStatement.handled.map((entry) => ({
+                      code: entry.code,
+                      name: entry.name,
+                    })),
+                    sharedEquipment: [...view.kitchenStatement.sharedEquipment],
+                  },
+          }),
       hours:
         view.hours === null
           ? null

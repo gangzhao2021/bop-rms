@@ -8968,4 +8968,20 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "This guest ordered before {dish} sold out. Offer a swap, or cancel that dish with a refund (reason: sold out).":
     "这位客人在 {dish} 售罄前已下单。可以请客人换一道，或取消这道菜并退款（原因：售罄）。",
   "Check ID (19+)": "查证件（19 岁以上）",
+  Woks: "炒锅",
+  "Fryer oil": "炸油",
+  Grill: "烤架",
+  Utensils: "厨具",
+  "Prep surfaces": "备菜台面",
+  Steamers: "蒸笼",
+  "Kitchen allergens": "后厨过敏原",
+  "Tick what your kitchen uses and shares. Guests read it above every dish's allergens.":
+    "勾选后厨使用和共用的东西。顾客会在每道菜的过敏原上方看到。",
+  "Not set yet.": "还没有设置。",
+  "Our kitchen uses:": "本店后厨使用：",
+  "Shared in our kitchen:": "后厨共用：",
+  "Saved. Guests see it on the menu.": "已保存，顾客在菜单上能看到。",
+  "Save kitchen allergens": "保存后厨过敏原",
+  "Guests read: {statement}": "顾客会看到：{statement}",
+  "The kitchen's allergen statement could not be read.": "读不到后厨过敏原说明。",
 });

@@ -6173,6 +6173,24 @@
       "privilege": "INSERT",
       "principal": "api",
       "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); WP-2423 sold-out-and-allergen-safety (M171, Owner decision 17): staff mark the allergens a table must avoid (codes only) so its kitchen tickets show them in red (append-only)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_kitchen_allergen_statement",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); WP-2423 sold-out-and-allergen-safety (M178): the Store's kitchen says which allergens it handles and which equipment it shares, shown to guests (ticks only) (append-only)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_kitchen_allergen_statement",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); WP-2423 sold-out-and-allergen-safety (M178): the Store's kitchen says which allergens it handles and which equipment it shares, shown to guests (ticks only) (append-only)"
     }
   ]
 }

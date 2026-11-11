@@ -62,6 +62,7 @@ import {
   type StoreProfileLoader,
 } from "../store/store-profile-client.js";
 import {
+  KitchenStatementLine,
   OrdersStoppedNotice,
   StoreInfoSection,
   StoreStatusStrip,
@@ -605,6 +606,15 @@ export function MenuScreen({
               state.kind !== "PermissionDenied" &&
               state.kind !== "MissingContext" ? (
                 <AllergenHelpLine />
+              ) : null}
+              {/* WP-2423 (M178): what the kitchen says about cross-contact. */}
+              {mode !== "detail" &&
+              context !== undefined &&
+              state.kind !== "PermissionDenied" &&
+              state.kind !== "MissingContext" ? (
+                <KitchenStatementLine
+                  load={storeProfile === undefined ? browserStoreProfile : storeProfile}
+                />
               ) : null}
               {state.kind === "MissingContext" ? null : search}
               {state.kind === "Found" && mode === "search" ? (

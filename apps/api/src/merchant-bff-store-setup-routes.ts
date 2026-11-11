@@ -101,6 +101,33 @@ export function installMerchantStoreSetupRoutes(
       .then((rule) => response.set("Cache-Control", NO_STORE).json(rule))
       .catch((error: unknown) => memberPointsFailure(response, error));
   });
+  // WP-2423 (M178): read or change the Store kitchen's cross-contact statement.
+  router.post("/store/kitchen-statement", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant"),
+      csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.kitchenStatement) {
+      response.status(503).json({ error: "kitchen_statement_unavailable" });
+      return;
+    }
+    void options
+      .kitchenStatement({ sessionCookie, csrf, command: request.body })
+      .then((result) =>
+        response
+          .status(result.status === "Invalid" ? 422 : result.status === "Conflict" ? 409 : 200)
+          .set("Cache-Control", NO_STORE)
+          .json(result),
+      )
+      .catch((error: unknown) => failed(response, error));
+  });
   // WP-2423 item 8 ⑦ DEC-STORE-FEATURES: read or change the modules the Store uses.
   router.post("/store/features", sameOriginMutation(options), (request, response) => {
     const sessionCookie = cookie(request, "__Host-bop-merchant"),

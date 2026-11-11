@@ -1,3 +1,4 @@
+import { StoreKitchenStatement } from "./StoreKitchenStatement.js";
 import { StoreGuestTableStart } from "./StoreGuestTableStart.js";
 import { StatePanel } from "@bop-rms/ui";
 import { useContext, useEffect, useMemo, useRef, useState } from "react";
@@ -573,6 +574,8 @@ export function StoreFeaturesPage({
         />
         {/* WP-2423 item 8 ⑧ (decision 5): the kitchen sections a kitchen screen shows. */}
         <StoreKitchenSections csrf={csrf} locked={busy} />
+        {/* WP-2423 (M178): what the kitchen says about cross-contact, shown to guests. */}
+        <StoreKitchenStatement csrf={csrf} locked={busy} />
         {/* WP-2423 item 8 ⑦ 4b-2: the per-head tea charge (Dining's own setting). */}
         <StoreTeaCharge
           view={view}

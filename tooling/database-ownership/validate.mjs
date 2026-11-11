@@ -1347,6 +1347,12 @@ async function scanUnsupported(root, module, diagnostics) {
             "store_service_resume_content",
           ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
           moduleRelative === "src/infrastructure/persistence/service-control-store.ts";
+        // WP-2423 (M178): the Store kitchen's cross-contact statement (ticks only, versioned).
+        const acceptedStoreKitchenStatementAsset =
+          module.packageName === "@rms/store" &&
+          module.manifest.ownedDatabase?.schema === "rms_store" &&
+          module.manifest.ownedDatabase?.tables?.includes("store_kitchen_allergen_statement") &&
+          moduleRelative === "src/infrastructure/persistence/store-kitchen-statement-store.ts";
         const acceptedStoreWeeklyScheduleAsset =
           module.packageName === "@rms/store" &&
           module.manifest.ownedDatabase?.schema === "rms_store" &&
@@ -3927,6 +3933,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedPublicStoreProfileTimingAsset &&
           !acceptedPublicStoreProfileAsset &&
           !acceptedStoreServiceControlAsset &&
+          !acceptedStoreKitchenStatementAsset &&
           !acceptedStoreWeeklyScheduleAsset &&
           !acceptedStoreBusinessDateAsset &&
           !acceptedCurrentMembershipAsset &&

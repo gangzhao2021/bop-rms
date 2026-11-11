@@ -3,6 +3,15 @@ const databaseAccessManifestInput = {
   module: { moduleName: "store", packageName: "@rms/store", layer: "RMS" },
   tables: [
     {
+      // WP-2423 (M178): what the Store's kitchen says about cross-contact (versioned, ticks only).
+      table: "store_kitchen_allergen_statement",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/store" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       // WP-2423 item 8 ⑦ DEC-STORE-FEATURES: the modules a Store uses (versioned).
       table: "store_feature_setting",
       classification: "append-only-record",
@@ -212,6 +221,24 @@ const databaseAccessManifestInput = {
       principal: { kind: "module", id: "@rms/store" },
       readPattern: "owner-repository",
       source: "packages/rms/store/src/infrastructure/persistence/owner-published-setup-source.ts",
+    },
+    {
+      id: "kitchen-statement.read.store_kitchen_allergen_statement",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_store", table: "store_kitchen_allergen_statement" },
+      principal: { kind: "module", id: "@rms/store" },
+      readPattern: "owner-repository",
+      source: "packages/rms/store/src/infrastructure/persistence/store-kitchen-statement-store.ts",
+    },
+    {
+      id: "kitchen-statement.write.store_kitchen_allergen_statement",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_store", table: "store_kitchen_allergen_statement" },
+      principal: { kind: "module", id: "@rms/store" },
+      readPattern: null,
+      source: "packages/rms/store/src/infrastructure/persistence/store-kitchen-statement-store.ts",
     },
     {
       id: "store-features.read.store_feature_setting",

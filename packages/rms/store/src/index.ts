@@ -28,6 +28,7 @@ export * from "./infrastructure/persistence/publication-content-source.js";
 export * from "./infrastructure/current-publication-proof.js";
 
 export * from "./infrastructure/persistence/service-control-store.js";
+export * from "./infrastructure/persistence/store-kitchen-statement-store.js";
 
 export * from "./infrastructure/persistence/configuration-authoring-store.js";
 

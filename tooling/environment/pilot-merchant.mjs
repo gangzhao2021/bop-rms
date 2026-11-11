@@ -71,6 +71,7 @@ import {
   createMerchantDiningStaffCallCount,
 } from "../../apps/api/dist/merchant-dining-staff-calls.js";
 import { createMerchantDiningTableAllergies } from "../../apps/api/dist/merchant-dining-table-allergies.js";
+import { createMerchantKitchenStatement } from "../../apps/api/dist/merchant-kitchen-statement.js";
 import { createMerchantDiningClosingCommand } from "../../apps/api/dist/merchant-dining-closing-command.js";
 import {
   createMerchantDiningPaymentTimingChange,
@@ -1711,6 +1712,12 @@ export async function createInternalMerchant(
         now: resources.now,
       }),
       // WP-2423 item 8 ⑦ DEC-STORE-FEATURES: the Store features page.
+      // WP-2423 (M178): the Store kitchen's cross-contact statement.
+      kitchenStatement: createMerchantKitchenStatement({
+        persistence,
+        authentication: service,
+        references: { next: () => resources.credentials.reference() },
+      }),
       storeFeatures: createMerchantStoreFeatures({
         persistence,
         authentication: service,
