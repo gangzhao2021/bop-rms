@@ -2,7 +2,10 @@
 import type { createMerchantRefundRecovery } from "./merchant-refund-recovery.js";
 import type { createMerchantGuestTableStartOff } from "./merchant-dining-guest-table-start.js";
 import type { createMerchantStoreOpening } from "./merchant-store-opening.js";
-import type { createMerchantCounterOrderCancellation } from "./merchant-counter-order-cancellation.js";
+import type {
+  createMerchantCounterOrderCancellation,
+  createMerchantPaperReentryCandidates,
+} from "./merchant-counter-order-cancellation.js";
 import type {
   createMerchantDiningStaffCallAnswer,
   createMerchantDiningStaffCallCount,
@@ -543,6 +546,11 @@ export interface MerchantBffRouterOptions {
   readonly counterOrder?: ReturnType<typeof createMerchantCounterOrder>;
   /** WP-2423 M127: a manager cancels a counter order nobody paid for; its stock goes back. */
   readonly counterOrderCancellation?: ReturnType<typeof createMerchantCounterOrderCancellation>;
+  /**
+   * DEC-PAPER-ORDER-NEVER-RELEASED: the new paper orders a manager may link to a paper order
+   * entered again, with both orders' amounts (any business day).
+   */
+  readonly paperReentryCandidates?: ReturnType<typeof createMerchantPaperReentryCandidates>;
   /** WP-2423 Q7 slice 2: staff enter a dine-in round for a table (or a paper round afterwards). */
   readonly staffDiningRound?: ReturnType<typeof createMerchantStaffDiningRound>;
   /** WP-2423 Q7: staff record a payment the Store's card machine approved (and, D1, the server

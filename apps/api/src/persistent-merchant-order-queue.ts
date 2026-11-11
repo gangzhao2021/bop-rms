@@ -583,8 +583,16 @@ export function createPersistentMerchantOrderQueue(options: {
                * cancel); the server checks the time and the new order again.
                */
               canCloseAsReentered: boolean;
-              /** WP-2423 M127: staff cancelled it before payment (why and when), else null. */
-              cancelledBeforePayment: { reasonCode: string; cancelledAt: string } | null;
+              /**
+               * WP-2423 M127: staff cancelled it before payment (why and when), else null.
+               * DEC-PAPER-ORDER-NEVER-RELEASED: a paper order closed as entered again also names the
+               * number of the new order now carrying its sale.
+               */
+              cancelledBeforePayment: {
+                reasonCode: string;
+                cancelledAt: string;
+                reenteredOrderNumber?: string;
+              } | null;
             }
           >();
           /**
@@ -856,6 +864,9 @@ export function createPersistentMerchantOrderQueue(options: {
                     : {
                         reasonCode: cancelledCounter.reasonCode,
                         cancelledAt: cancelledCounter.cancelledAt,
+                        ...(cancelledCounter.reentered === null
+                          ? {}
+                          : { reenteredOrderNumber: cancelledCounter.reentered.orderNumber }),
                       },
                 recordedAfterOutage: entry.recordedAfterOutage,
                 paidOnCardMachine:

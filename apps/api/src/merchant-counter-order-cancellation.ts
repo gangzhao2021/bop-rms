@@ -4,6 +4,7 @@ import { createPostgresAsapCapacityStore } from "@rms/fulfillment";
 import {
   counterUnpaidCancellationReasons,
   createPostgresCounterUnpaidCancellation,
+  listPaperReentryCandidates,
   loadCounterOrderBatch,
   loadCounterOrderCapacityLink,
   parseOrderingInstant,
@@ -11,6 +12,7 @@ import {
   type CounterUnpaidCancellationReason,
 } from "@rms/ordering";
 import {
+  cardMachinePaymentTakenMinor,
   createPostgresCardMachinePaymentStore,
   createPostgresPaymentOperationFence,
 } from "@rms/payment";
@@ -40,6 +42,11 @@ export const counterCancellationErrorCodes = [
   "COUNTER_CANCEL_REENTRY_INVALID",
   /** The new order already stands for another paper order. */
   "COUNTER_CANCEL_REENTRY_USED",
+  /**
+   * The new order's sale (dishes with tax, before tip) is lower than the paper order's: it cannot
+   * carry that sale.
+   */
+  "COUNTER_CANCEL_REENTRY_AMOUNT_LOWER",
   "COUNTER_CANCEL_UNAVAILABLE",
 ] as const;
 export type CounterCancellationErrorCode = (typeof counterCancellationErrorCodes)[number];
@@ -255,11 +262,13 @@ export function createMerchantCounterOrderCancellation(options: {
                       ? "COUNTER_CANCEL_REENTRY_INVALID"
                       : cancelled.reason === "ReentryUsed"
                         ? "COUNTER_CANCEL_REENTRY_USED"
-                        : cancelled.reason === "VersionConflict"
-                          ? "COUNTER_CANCEL_VERSION_CONFLICT"
-                          : cancelled.reason === "NotCounter"
-                            ? "COUNTER_CANCEL_NOT_FOUND"
-                            : "COUNTER_CANCEL_NOT_CANCELLABLE",
+                        : cancelled.reason === "ReentryAmountLower"
+                          ? "COUNTER_CANCEL_REENTRY_AMOUNT_LOWER"
+                          : cancelled.reason === "VersionConflict"
+                            ? "COUNTER_CANCEL_VERSION_CONFLICT"
+                            : cancelled.reason === "NotCounter"
+                              ? "COUNTER_CANCEL_NOT_FOUND"
+                              : "COUNTER_CANCEL_NOT_CANCELLABLE",
               );
             const record = cancelled.record;
             // The ledger movement names the staff member; a replay verifies the earlier release.
@@ -291,6 +300,119 @@ export function createMerchantCounterOrderCancellation(options: {
           },
         ),
       );
+    } catch (error) {
+      if (error instanceof CounterCancellationError) throw error;
+      return keepingCause(() => fail("COUNTER_CANCEL_UNAVAILABLE"))(error);
+    }
+  };
+}
+
+/** DEC-PAPER-ORDER-NEVER-RELEASED: what a manager chooses from when linking a re-entered order. */
+export type PaperReentryCandidates = Readonly<{
+  /** The paper order to close: its number and sale (dishes with tax, before tip). */
+  paperOrder: Readonly<{ orderNumber: string; saleMinor: string; currencyCode: string }>;
+  /**
+   * Paper orders of this Store sent no earlier, still open, standing for no other paper order and
+   * with their payment recorded, newest first, from any business day. `coversSale` is false when
+   * the new order's sale is lower than the paper order's (it cannot be linked).
+   */
+  candidates: readonly Readonly<{
+    orderReference: string;
+    orderNumber: string;
+    submittedAt: string;
+    saleMinor: string;
+    paidMinor: string;
+    coversSale: boolean;
+  }>[];
+}>;
+
+/**
+ * DEC-PAPER-ORDER-NEVER-RELEASED (v15 batch-8 review): the new paper orders a manager may link to
+ * a paper order entered again from its slip, read on the server across business days (a re-entered
+ * order is paid at send and may be accepted, made and gone from the counter's current list by the
+ * time a manager opens the dialog), with both orders' amounts so a cheaper order is never chosen.
+ * Same people who may close it (`ordering.order.cancel`); the close checks everything again.
+ */
+export function createMerchantPaperReentryCandidates(options: {
+  persistence: PersistentMerchantBffOptions;
+  installContext(
+    transaction: ConsumerTransaction,
+    scope: { tenantReference: string; brandReference: string; storeReference: string },
+  ): Promise<void>;
+}) {
+  const resolveScope = createMerchantStoreScope(options.persistence);
+  return async (input: {
+    sessionCookie: unknown;
+    orderReference: unknown;
+  }): Promise<PaperReentryCandidates> => {
+    let orderReference: string;
+    try {
+      orderReference = String(parseOrderingReference(input.orderReference));
+    } catch {
+      return fail("COUNTER_CANCEL_INPUT_INVALID");
+    }
+    try {
+      return await options.persistence.transactions.run(async (transaction) => {
+        const current = await resolveScope(
+          transaction,
+          input.sessionCookie,
+          staffOrderCancellationPermission,
+        ).catch(onlyRefusal(() => fail("COUNTER_CANCEL_PERMISSION_DENIED")));
+        const allowed = async () => (await current.allowed()) === true;
+        if (!(await allowed())) return fail("COUNTER_CANCEL_PERMISSION_DENIED");
+        const tx = transaction as unknown as ConsumerTransaction;
+        const selected = {
+          tenantReference: String(current.selected.tenantReference),
+          brandReference: String(current.context.brand.brandReference),
+          storeReference: String(current.store.storeReference),
+        };
+        await options.installContext(tx, selected);
+        const paper = await loadCounterOrderBatch(tx, selected, orderReference);
+        if (paper === null || !paper.recordedAfterOutage || paper.sale === null)
+          return fail("COUNTER_CANCEL_NOT_FOUND");
+        const sale = paper.sale;
+        const listed = await listPaperReentryCandidates(tx, selected, orderReference);
+        const references = new Set(listed.map((candidate) => candidate.orderReference));
+        // Whether each one's payment is recorded is Payment's fact.
+        const paid = await createPostgresCardMachinePaymentStore({
+          scope: selected,
+          authorize: async (_t, value) => references.has(value.orderReference) && (await allowed()),
+        }).listByBatches(
+          tx,
+          listed.map((candidate) => ({
+            orderReference: candidate.orderReference,
+            orderBatchReference: candidate.orderBatchReference,
+          })),
+        );
+        if (!(await allowed())) return fail("COUNTER_CANCEL_PERMISSION_DENIED");
+        const candidates = listed.flatMap((candidate) => {
+          const payment = paid.get(candidate.orderBatchReference);
+          if (
+            payment === undefined ||
+            candidate.sale === null ||
+            candidate.sale.currencyCode !== sale.currencyCode
+          )
+            return [];
+          return [
+            Object.freeze({
+              orderReference: candidate.orderReference,
+              orderNumber: candidate.orderNumber,
+              submittedAt: candidate.submittedAt,
+              saleMinor: candidate.sale.amountMinor.toString(),
+              paidMinor: cardMachinePaymentTakenMinor(payment).toString(),
+              coversSale: candidate.sale.amountMinor >= sale.amountMinor,
+            }),
+          ];
+        });
+        return Object.freeze({
+          paperOrder: Object.freeze({
+            orderNumber: paper.orderNumber,
+            saleMinor: sale.amountMinor.toString(),
+            currencyCode: sale.currencyCode,
+          }),
+          candidates: Object.freeze(candidates),
+        });
+      });
     } catch (error) {
       if (error instanceof CounterCancellationError) throw error;
       return keepingCause(() => fail("COUNTER_CANCEL_UNAVAILABLE"))(error);

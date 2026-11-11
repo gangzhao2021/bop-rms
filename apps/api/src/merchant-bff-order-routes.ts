@@ -393,9 +393,55 @@ export function installMerchantOrderRoutes(
             COUNTER_CANCEL_PAPER_STILL_RECORDABLE: [409, "paper_order_still_recordable"],
             COUNTER_CANCEL_REENTRY_INVALID: [409, "paper_reentry_invalid"],
             COUNTER_CANCEL_REENTRY_USED: [409, "paper_reentry_used"],
+            COUNTER_CANCEL_REENTRY_AMOUNT_LOWER: [409, "paper_reentry_amount_lower"],
             COUNTER_CANCEL_UNAVAILABLE: [503, "counter_cancellation_unavailable"],
           } as const
         )[error.code];
+        response.status(status).set("Cache-Control", NO_STORE).json({ error: code });
+      });
+  });
+  // DEC-PAPER-ORDER-NEVER-RELEASED: the new paper orders a manager may link to a paper order
+  // entered again from its slip (any business day), with both orders' amounts.
+  router.get("/counter/orders/paper-reentry", safeRead(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const order = request.query.order;
+    if (
+      request.method !== "GET" ||
+      request.body !== undefined ||
+      sessionCookie === null ||
+      Object.keys(request.query).some((key) => key !== "order") ||
+      typeof order !== "string" ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(order) ||
+      rawHeaderValues(request, "origin").length > 1 ||
+      rawHeaderValues(request, "sec-fetch-site").length !== 1
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.paperReentryCandidates) {
+      response.status(503).json({ error: "counter_cancellation_unavailable" });
+      return;
+    }
+    void options
+      .paperReentryCandidates({ sessionCookie, orderReference: order })
+      .then((result) => {
+        response.set("Cache-Control", NO_STORE);
+        response.json({ paperOrder: result.paperOrder, candidates: result.candidates });
+      })
+      .catch((error: unknown) => {
+        noteFailure(response, error);
+        if (!(error instanceof CounterCancellationError)) {
+          failed(response, error);
+          return;
+        }
+        const [status, code] =
+          error.code === "COUNTER_CANCEL_PERMISSION_DENIED"
+            ? ([403, "order_cancellation_permission_denied"] as const)
+            : error.code === "COUNTER_CANCEL_NOT_FOUND"
+              ? ([404, "counter_cancel_not_found"] as const)
+              : error.code === "COUNTER_CANCEL_INPUT_INVALID"
+                ? ([400, "counter_cancel_input_invalid"] as const)
+                : ([503, "counter_cancellation_unavailable"] as const);
         response.status(status).set("Cache-Control", NO_STORE).json({ error: code });
       });
   });

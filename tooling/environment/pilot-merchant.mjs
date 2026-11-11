@@ -150,7 +150,10 @@ import {
   createMerchantOrderStaffCancellationPreview,
 } from "../../apps/api/dist/merchant-order-staff-cancellation.js";
 import { createMerchantUnpaidRoundCancellation } from "../../apps/api/dist/merchant-unpaid-round-cancellation.js";
-import { createMerchantCounterOrderCancellation } from "../../apps/api/dist/merchant-counter-order-cancellation.js";
+import {
+  createMerchantCounterOrderCancellation,
+  createMerchantPaperReentryCandidates,
+} from "../../apps/api/dist/merchant-counter-order-cancellation.js";
 import { createMerchantEndedOrderStockRelease } from "../../apps/api/dist/merchant-stock-holding-orders.js";
 import { createMerchantPickupContactRemoval } from "../../apps/api/dist/merchant-pickup-contact-removal.js";
 import { createMerchantBusinessDayWindows } from "../../apps/api/dist/merchant-business-day-window.js";
@@ -1607,6 +1610,11 @@ export async function createInternalMerchant(
         authentication: service,
         installContext: installSelectedContext,
         nextReference: () => resources.credentials.reference(),
+      }),
+      // DEC-PAPER-ORDER-NEVER-RELEASED: the new paper orders a manager may link (any business day).
+      paperReentryCandidates: createMerchantPaperReentryCandidates({
+        persistence,
+        installContext: installSelectedContext,
       }),
       endedOrderStockRelease,
       pickupContactRemoval,

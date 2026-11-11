@@ -14,12 +14,15 @@ const d = vi.hoisted(() => ({
   release: vi.fn(),
   batchOf: vi.fn(),
   loadByBatch: vi.fn(),
+  candidates: vi.fn(),
+  listByBatches: vi.fn(),
 }));
 vi.mock("./merchant-store-scope.js", () => ({ createMerchantStoreScope: () => d.scope }));
 vi.mock("@rms/ordering", async (original) => ({
   ...(await original<object>()),
   loadCounterOrderCapacityLink: d.link,
   loadCounterOrderBatch: d.batchOf,
+  listPaperReentryCandidates: d.candidates,
   createPostgresCounterUnpaidCancellation: d.cancellation,
 }));
 vi.mock("@rms/payment", async (original) => ({
@@ -34,7 +37,10 @@ vi.mock("@rms/fulfillment", async (original) => ({
 vi.mock("./submission-inventory-release.js", () => ({
   createSubmissionInventoryRelease: d.releaseFactory,
 }));
-import { createMerchantCounterOrderCancellation } from "./merchant-counter-order-cancellation.js";
+import {
+  createMerchantCounterOrderCancellation,
+  createMerchantPaperReentryCandidates,
+} from "./merchant-counter-order-cancellation.js";
 
 const id = (n: number) => "01909986-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 type Options = Parameters<typeof createMerchantCounterOrderCancellation>[0];
@@ -65,7 +71,11 @@ function setup() {
   });
   d.fence.mockReturnValue({ acquire: d.acquire });
   d.acquire.mockResolvedValue(undefined);
-  d.cardMachine.mockReturnValue({ lockAndLoadByBatch: d.lockBatch, loadByBatch: d.loadByBatch });
+  d.cardMachine.mockReturnValue({
+    lockAndLoadByBatch: d.lockBatch,
+    loadByBatch: d.loadByBatch,
+    listByBatches: d.listByBatches,
+  });
   d.batchOf.mockResolvedValue({
     orderBatchReference: id(41),
     recordedAfterOutage: true,
@@ -303,6 +313,11 @@ it("DEC-PAPER-ORDER-NEVER-RELEASED: a manager closes a paper order past its time
   await expect(operation(input(reentry))).rejects.toMatchObject({
     code: "COUNTER_CANCEL_REENTRY_USED",
   });
+  // v15 batch-8 review: a cheaper new order never closes the paper order's sale.
+  d.cancel.mockResolvedValueOnce({ status: "NotEligible", reason: "ReentryAmountLower" });
+  await expect(operation(input(reentry))).rejects.toMatchObject({
+    code: "COUNTER_CANCEL_REENTRY_AMOUNT_LOWER",
+  });
   // While its window is open, its payment is recorded on it instead.
   d.commitment.mockResolvedValueOnce({
     orderReference: id(5),
@@ -319,5 +334,93 @@ it("DEC-PAPER-ORDER-NEVER-RELEASED: a manager closes a paper order past its time
   });
   await expect(operation(input(reentry))).rejects.toMatchObject({
     code: "COUNTER_CANCEL_NOT_CANCELLABLE",
+  });
+});
+
+it("DEC-PAPER-ORDER-NEVER-RELEASED: the link dialog reads the paper order's sale and the paid new paper orders from the server, marking a cheaper one", async () => {
+  setup();
+  const tx = { query: vi.fn() };
+  const run = vi.fn(async (work: (tx: object) => Promise<unknown>) => work(tx));
+  const allowed = vi.fn(async () => true);
+  d.scope.mockResolvedValue({
+    actorReference: id(2),
+    selected: { tenantReference: id(10) },
+    context: { brand: { brandReference: id(3) } },
+    store: { storeReference: id(4) },
+    allowed,
+  });
+  d.batchOf.mockResolvedValue({
+    orderBatchReference: id(6),
+    recordedAfterOutage: true,
+    submittedAt: "2026-11-06T11:00:00.000Z",
+    ended: false,
+    orderNumber: "31",
+    sale: { amountMinor: 20000n, currencyCode: "CAD" },
+  });
+  const candidate = (n: number, amountMinor: bigint) => ({
+    orderReference: id(n),
+    orderBatchReference: id(n + 1),
+    orderNumber: String(n),
+    submittedAt: "2026-11-06T11:50:00.000Z",
+    sale: { amountMinor, currencyCode: "CAD" },
+  });
+  d.candidates.mockResolvedValue([
+    candidate(50, 500n),
+    candidate(60, 20000n),
+    candidate(70, 20000n),
+  ]);
+  const paid = (amountMinor: bigint) => ({
+    preparation: { total: { amountMinor } },
+    roundingMinor: 0n,
+  });
+  // Order 70 has no recorded payment yet: it is not offered.
+  d.listByBatches.mockResolvedValue(
+    new Map([
+      [id(51), paid(500n)],
+      [id(61), paid(23000n)],
+    ]),
+  );
+  const installContext = vi.fn(async () => undefined);
+  const read = createMerchantPaperReentryCandidates({
+    persistence: { transactions: { run }, now: () => at } as unknown as Options["persistence"],
+    installContext,
+  });
+  expect(await read({ sessionCookie: "synthetic-cookie", orderReference: id(5) })).toEqual({
+    paperOrder: { orderNumber: "31", saleMinor: "20000", currencyCode: "CAD" },
+    candidates: [
+      expect.objectContaining({ orderNumber: "50", saleMinor: "500", coversSale: false }),
+      expect.objectContaining({ orderNumber: "60", saleMinor: "20000", coversSale: true }),
+    ],
+  });
+  expect(d.candidates).toHaveBeenCalledWith(
+    expect.anything(),
+    expect.objectContaining({ brandReference: id(3), storeReference: id(4) }),
+    id(5),
+  );
+  // Not a paper order: not found. No permission: refused. An outage: unavailable (never "no
+  // permission").
+  d.batchOf.mockResolvedValueOnce({
+    orderBatchReference: id(6),
+    recordedAfterOutage: false,
+    submittedAt: "2026-11-06T11:00:00.000Z",
+    ended: false,
+    orderNumber: "31",
+    sale: { amountMinor: 20000n, currencyCode: "CAD" },
+  });
+  await expect(read({ sessionCookie: "c", orderReference: id(5) })).rejects.toMatchObject({
+    code: "COUNTER_CANCEL_NOT_FOUND",
+  });
+  allowed.mockResolvedValueOnce(false);
+  await expect(read({ sessionCookie: "c", orderReference: id(5) })).rejects.toMatchObject({
+    code: "COUNTER_CANCEL_PERMISSION_DENIED",
+  });
+  d.candidates.mockRejectedValueOnce(new Error("connection reset"));
+  await expect(read({ sessionCookie: "c", orderReference: id(5) })).rejects.toMatchObject({
+    code: "COUNTER_CANCEL_UNAVAILABLE",
+  });
+  await expect(
+    read({ sessionCookie: "c", orderReference: "not-a-reference" }),
+  ).rejects.toMatchObject({
+    code: "COUNTER_CANCEL_INPUT_INVALID",
   });
 });
