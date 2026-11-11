@@ -19,7 +19,13 @@ choose the staff member's language (`contentName`, `staffContentLocale`).
 every language any of them names it in, each taken from the most recently published menu that has
 it (generation rebuilt time, then generation, then placement). An older English-only menu adds
 nothing over a newer Chinese name; a name only an older menu has is still shown. Another Store's
-menu never contributes. Nothing written changes; the guest's own phone is unchanged.
+menu never contributes. Nothing written changes.
+
+**The guest's phone too.** Two guest reads use the same Catalog read, so their names change the
+same way (an improvement, not a separate decision): the payer's list of the other guests' waiting
+dishes (`apps/api/src/customer-cart-table-pay.ts`) and the "staff took these dishes out" notice
+every phone at the table gets (`staffRemovals` in `apps/api/src/local-customer-runtime.ts`). The
+guest's phone still picks the language from those names as before.
 
 **Alternatives rejected.** Naming each line from the exact menu version it was chosen from would
 need Catalog's selection-display reads (rules, channel, order type) per line on every Tables poll,
@@ -43,7 +49,38 @@ submission and the first-round payment log these as a level-30 line
 `TABLE_MOVED`), codes only. Everything else (outage, permission, conflict, unknown) keeps its
 error line; an outage never reads as a refusal or as no permission.
 
-**Guest answer.** The table-moved answer was already right. The sweep found Ordering's own
+**Review follow-up (same day).** The first pass logged the additional round's "a dish ran out" and
+"the menu changed" as information and then failed it anyway: the additional batch store passed on
+only Ordering's stock-short and table-moved refusals, so a checkout refusal raised by the current
+check became "unavailable" (an error line and a 503 "try again" for the guest). Now:
+
+- The additional batch store (`additional-dining-batch-store.ts`) passes on, by name and code, the
+  refusals its current gates raise in ordinary service: stock short (as Ordering's
+  `ORDER_CREATE_STOCK_SHORT`, so the guest is told the items ran out and staff rounds say the dish is
+  unavailable), menu changed (`CHECKOUT_REQUOTE_REQUIRED`), a dish off the menu
+  (`CHECKOUT_ITEM_UNAVAILABLE`), quote expired (`CHECKOUT_QUOTE_EXPIRED`) and table moved. Anything
+  else is still "unavailable".
+- The pilot's current check no longer raises a plain `ADDITIONAL_CATALOG_CHANGED`: a menu that moved
+  on since checkout, or a checkout window that lapsed while the guest decided, is
+  `CHECKOUT_REQUOTE_REQUIRED` (the guest's "the menu changed", the cart prices again). The round's
+  time ahead of the server clock, which no moment of service produces, is `ADDITIONAL_CLOCK_AHEAD`
+  and stays an error. The current check logs nothing for a refusal; the payment's catch writes the
+  one information line for the attempt.
+- Also expected, so listed: another guest at the table is paying (`CHECKOUT_IN_PROGRESS`, routine on
+  shared tables), a dish came off the menu (`ITEM_UNAVAILABLE`, `CHECKOUT_ITEM_UNAVAILABLE`), and
+  the checkout window lapsed (`CHECKOUT_QUOTE_EXPIRED`, `ORDER_CREATE_VALIDATION_EXPIRED`), logged
+  as `ITEM_UNAVAILABLE` / `CHECKOUT_EXPIRED` / `CHECKOUT_IN_PROGRESS`.
+- Not listed, on purpose: `PAYMENT_INTENT_ORDER_NOT_READY`. Its causes are an unparseable or
+  mismatched preparation record, a request time ahead of the server clock, a preparation window that
+  is not the fixed 30 minutes, or a missing prior operation; integrity or clock failures, so an
+  operator must see them.
+- Table moved is recognized however it arrives (`isTableMoved`): Ordering's
+  `ORDER_CREATE_TABLE_MOVED`, or Dining's own `DINING_CHECKOUT_STORE_TABLE_MOVED` /
+  `DINING_CHECKOUT_TABLE_MOVED` reaching the catch without `refuseRoundOfMovedTable` or the latch.
+  The payment handler answers those Dining refusals as table moved (409) too; before, they were a 503. The `code` on the v15 `INTERNAL_ADDITIONAL_PAYMENT_UNAVAILABLE` line was not read (no v15
+  access in this change), so every shape is covered rather than assuming one.
+
+**Guest answer.** The table-moved answer was already right for Ordering's refusal. The sweep found Ordering's own
 `STORE_CLOSED` checkout refusal answered as a generic conflict; it now answers `store_closed`
 (the same plain "the restaurant stopped taking orders" the guest already gets from the Store gate).
 
@@ -51,4 +88,9 @@ error line; an outage never reads as a refusal or as no permission.
 role; fails on the old DISTINCT ON read), `apps/api/src/customer-payment-intent.test.ts` (every
 listed refusal is the handler's plain answer and an information line; others are not),
 `tooling/environment/pilot-additional-payment.test.mjs` and `pilot-payment-intent.test.mjs`
-(fail before the change).
+(fail before the change). Review follow-up: `packages/rms/ordering/src/tests/additional-dining-batch-store.test.ts`
+(each current-gate refusal passed on as itself; 5 fail before),
+`tooling/environment/pilot-additional-submission.test.mjs` (menu moved on or window lapsed is
+"the menu changed", no error line; 3 fail before) and `apps/api/src/customer-payment-intent.test.ts`
+(the added refusals and Dining's table-moved shapes; 9 fail before). The three staff screens choose
+the name's language with `contentName` as before; only the read changed, so no new render test.
