@@ -67,6 +67,7 @@ const moduleManifestInput =
         "dining_participant_removal",
         "dining_round_hold_setting",
         "dining_checkout_scope_setting",
+        "dining_participant_readmission",
         "dining_service_setting",
         "dining_session_party_size",
         "dining_session_guest_start",

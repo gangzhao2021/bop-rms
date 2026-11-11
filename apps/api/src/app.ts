@@ -55,6 +55,11 @@ import {
   unavailableCustomerDiningRoundWithdrawHandler,
 } from "./customer-dining-round-withdraw.js";
 import {
+  customerDiningContinuityRoute,
+  type CustomerDiningContinuityHandler,
+  unavailableCustomerDiningContinuityHandler,
+} from "./customer-dining-continuity.js";
+import {
   customerDiningCheckoutScopeRoute,
   type CustomerDiningCheckoutScopeHandler,
   unavailableCustomerDiningCheckoutScopeHandler,
@@ -198,6 +203,8 @@ export interface AppOptions {
   customerDiningRoundWithdraw?: CustomerDiningRoundWithdrawHandler;
   /** WP-2423 shared-table-checkout (a): the payer at a pay-first table chooses the round's dishes. */
   customerDiningCheckoutScope?: CustomerDiningCheckoutScopeHandler;
+  /** WP-2423 shared-table-checkout (b): a seated phone's continuity token (lost cookie). */
+  customerDiningContinuity?: CustomerDiningContinuityHandler;
   customerSessionBootstrap?: ReturnType<typeof createCustomerSessionBootstrapHandler>;
   /** WP-2423: the guest's Store — published address, phone, open now and today's hours. */
   customerStoreProfile?: ReturnType<typeof createCustomerStoreProfileHandler>;
@@ -292,6 +299,7 @@ export function createApp({
   customerDiningStaffCall,
   customerDiningRoundWithdraw,
   customerDiningCheckoutScope,
+  customerDiningContinuity,
   customerSessionBootstrap,
   customerStoreProfile,
   customerPickupCode,
@@ -514,6 +522,10 @@ export function createApp({
     customerDiningRoundWithdraw?.handler() ?? unavailableCustomerDiningRoundWithdrawHandler,
     customerDiningCheckoutScopeRoute,
     customerDiningCheckoutScope?.handler() ?? unavailableCustomerDiningCheckoutScopeHandler,
+  );
+  app.post(
+    customerDiningContinuityRoute,
+    customerDiningContinuity?.handler() ?? unavailableCustomerDiningContinuityHandler,
   );
   app.post(
     customerOrderSubmissionRoute,

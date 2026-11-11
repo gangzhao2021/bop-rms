@@ -52,6 +52,10 @@ import {
   CustomerDiningCheckoutScopeHandler,
   createCustomerDiningCheckoutScope,
 } from "./customer-dining-checkout-scope.js";
+import {
+  CustomerDiningContinuityHandler,
+  createCustomerDiningContinuity,
+} from "./customer-dining-continuity.js";
 import { CustomerDiningBindingHandler } from "./customer-dining-binding.js";
 import {
   createCustomerDiningJoinComposition,
@@ -751,6 +755,28 @@ export function createLocalCustomerRuntime(options: LocalCustomerRuntimeOptions)
             }),
           });
         })();
+  // WP-2423 shared-table-checkout (b): a seated phone's continuity token, and its lost-cookie re-scan.
+  const diningContinuity =
+    options.diningStaffCall === undefined
+      ? undefined
+      : (() => {
+          const { tenantReference, transactions, binding, newReference } = options.diningStaffCall;
+          return createCustomerDiningContinuity({
+            scope: { tenantReference, ...scope },
+            transactions,
+            binding,
+            newReference,
+            credentials: entry.session.credentials,
+            now,
+          });
+        })();
+  const customerDiningContinuity =
+    diningContinuity === undefined
+      ? undefined
+      : new CustomerDiningContinuityHandler({
+          allowedOrigin: options.allowedOrigin,
+          port: diningContinuity,
+        });
   const payment = options.payment;
   const paymentAccess =
     payment === undefined
@@ -931,6 +957,7 @@ export function createLocalCustomerRuntime(options: LocalCustomerRuntimeOptions)
     ...(customerDiningStaffCall === undefined ? {} : { customerDiningStaffCall }),
     ...(customerDiningRoundWithdraw === undefined ? {} : { customerDiningRoundWithdraw }),
     ...(customerDiningCheckoutScope === undefined ? {} : { customerDiningCheckoutScope }),
+    ...(customerDiningContinuity === undefined ? {} : { customerDiningContinuity }),
     ...(configuredQuote !== undefined
       ? {
           customerQuote: new CustomerQuoteHandler({
@@ -982,6 +1009,7 @@ export function createLocalCustomerRuntime(options: LocalCustomerRuntimeOptions)
               now,
             }),
           }),
+      ...(diningContinuity === undefined ? {} : { continuity: diningContinuity }),
       ...(options.entryCodeCheck === undefined ? {} : { codeCheck: options.entryCodeCheck }),
       port: customerEntry,
       allowedOrigin: options.allowedOrigin,

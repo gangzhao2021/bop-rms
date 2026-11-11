@@ -88,3 +88,4 @@ export { createDiningExceptionEpisodeResolution } from "./application/dining-exc
 export * from "./domain/dining-payment-timing.js";
 export * from "./infrastructure/persistence/dining-payment-timing-store.js";
 export * from "./infrastructure/persistence/dining-combo-part-store.js";
+export * from "./infrastructure/persistence/dining-participant-readmission-store.js";

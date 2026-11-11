@@ -8,6 +8,7 @@ import {
   createPostgresDiningGuestBindingStore,
   createPostgresDiningGuestTableStartStore,
   createPostgresDiningQrJoinStore,
+  isDiningGuestSessionSuperseded,
 } from "../../packages/rms/dining/src/index.ts";
 import { createPilotGuestTableClose } from "./pilot-guest-table-close.mjs";
 export async function createInternalCustomerEntry(
@@ -39,6 +40,12 @@ export async function createInternalCustomerEntry(
       repository: createPostgresDiningGuestBindingStore(runner, owner.scope),
       contexts: d,
       now: resources.now,
+      // WP-2423 shared-table-checkout (b): a phone that came back on a later session (lost
+      // cookie) replaces this one as the participant's phone.
+      superseded: (session) =>
+        runner.run((tx) =>
+          isDiningGuestSessionSuperseded(tx, owner.scope, String(session.sessionReference)),
+        ),
     });
   };
   /**

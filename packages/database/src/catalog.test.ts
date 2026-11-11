@@ -842,7 +842,9 @@ describe("migration catalog", () => {
       "2000_520_create_dining_checkout_scope",
       "2000_521_create_cart_staff_line_removal",
       "2000_522_create_dining_checkout_scope_setting",
+      "2000_523_create_guest_session_continuity",
       "2000_524_alter_dining_table_split_by_guests",
+      "2000_525_create_dining_participant_readmission",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),

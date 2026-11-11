@@ -392,3 +392,107 @@ describe("Dining's own answer whether a phone is still seated", () => {
     expect(diningSeatOf(value)).toBe(expected);
   });
 });
+
+describe("WP-2423 shared-table-checkout (b): a phone that lost its cookie scans with its continuity token", () => {
+  const already = {
+    status: "AlreadyAtTable",
+    brandDisplayName: "BOP Kitchen",
+    storeDisplayName: "Synthetic Market Store",
+    publicStoreReference: STORE,
+    publicTableReference: TABLE,
+    locale: "en-CA",
+  } as const;
+  const established = (input: CustomerEntryPortInput) =>
+    input.presentedTable !== undefined
+      ? (already as CustomerEntryPortResult)
+      : ({ status: "EntryUnavailable" } as CustomerEntryPortResult);
+  const CONTINUITY = "C".repeat(43);
+  const withToken = (port: number, token: unknown = CONTINUITY) =>
+    fetch(`http://127.0.0.1:${port}/bff/customer/entry`, {
+      method: "POST",
+      body: JSON.stringify({ qrToken: TOKEN, continuity: token }),
+      headers: {
+        "content-type": "application/json",
+        origin: ORIGIN,
+        "sec-fetch-mode": "cors",
+        "sec-fetch-site": "same-origin",
+      },
+    });
+  const handler = (
+    port: CustomerEntryPort,
+    continuity: NonNullable<ConstructorParameters<typeof CustomerEntryHandler>[0]["continuity"]>,
+  ) =>
+    new CustomerEntryHandler({
+      allowedOrigin: ORIGIN,
+      now: () => "2026-07-30T05:00:00.000Z",
+      port,
+      uuidV7Factory: references(),
+      requestAdmission: { consume: async () => ({ status: "Allowed" }) },
+      continuity,
+    });
+
+  it("is the same phone again: a new cookie for its seat and a new token, no new visit", async () => {
+    const calls: CustomerEntryPortInput[] = [];
+    const readmit = vi.fn(async () => ({
+      sessionCredential: "N".repeat(43),
+      continuityToken: "T".repeat(43),
+    }));
+    const serverPort = await listen(
+      handler(
+        { establish: async (input) => (calls.push(input), established(input)) },
+        { table: async () => seated, readmit },
+      ),
+    );
+    const response = await withToken(serverPort);
+    expect(response.status).toBe(200);
+    expect(
+      response.headers
+        .getSetCookie()
+        .filter((value) => value.startsWith("__Host-bop-guest=" + "N".repeat(43))),
+    ).toHaveLength(1);
+    expect(await response.json()).toMatchObject({
+      status: "AlreadyAtTable",
+      continuityToken: "T".repeat(43),
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.presentedTable).toEqual(seated);
+    expect(readmit).toHaveBeenCalledTimes(1);
+  });
+
+  it("a token whose phone is not seated, a seat that changed meanwhile, or a bad token is an ordinary entry", async () => {
+    for (const [table, readmitted] of [
+      [null, null],
+      [seated, null],
+    ] as const) {
+      const calls: CustomerEntryPortInput[] = [];
+      const serverPort = await listen(
+        handler(
+          { establish: async (input) => (calls.push(input), established(input)) },
+          { table: async () => table, readmit: async () => readmitted },
+        ),
+      );
+      const response = await withToken(serverPort);
+      expect(response.status).not.toBe(200);
+      expect(calls.at(-1)?.presentedTable).toBeUndefined();
+    }
+    const serverPort = await listen(
+      handler(
+        { establish: async (input) => established(input) },
+        { table: async () => seated, readmit: async () => null },
+      ),
+    );
+    expect((await withToken(serverPort, "not a token")).status).toBe(400);
+  });
+
+  it("Dining that can't be read is the table's retry, never a join", async () => {
+    const calls: CustomerEntryPortInput[] = [];
+    const serverPort = await listen(
+      handler(
+        { establish: async (input) => (calls.push(input), established(input)) },
+        { table: async () => ({ unconfirmed: seated }), readmit: async () => null },
+      ),
+    );
+    await withToken(serverPort);
+    expect(calls[0]?.presentedTableUnconfirmed).toEqual(seated);
+  });
+});

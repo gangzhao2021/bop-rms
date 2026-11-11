@@ -27,6 +27,8 @@ const moduleManifestInput = {
       "guest_dining_binding_preparation",
       "guest_session",
       "guest_session_operation",
+      "guest_session_continuity",
+      "guest_session_continuity_use",
       "guest_entry_admission",
       "oidc_authorization_transaction",
       "session_revocation_request",

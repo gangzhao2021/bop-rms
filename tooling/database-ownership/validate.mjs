@@ -352,6 +352,18 @@ async function scanUnsupported(root, module, diagnostics) {
             (table) => module.manifest.ownedDatabase?.tables?.includes(table),
           ) &&
           moduleRelative === "src/infrastructure/persistence/guest-dining-binding-store.ts";
+        // WP-2423 shared-table-checkout (b): a seated phone's continuity token and its one use
+        // rotating the session into a successor at the same seat (2000_523).
+        const acceptedGuestSessionContinuityAsset =
+          module.packageName === "@bop/identity" &&
+          module.manifest.ownedDatabase?.schema === "bop_identity" &&
+          [
+            "guest_session",
+            "guest_session_operation",
+            "guest_session_continuity",
+            "guest_session_continuity_use",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/guest-session-continuity-store.ts";
         const acceptedGuestBindingAsset =
           module.packageName === "@bop/identity" &&
           module.manifest.ownedDatabase?.schema === "bop_identity" &&
@@ -2987,6 +2999,15 @@ async function scanUnsupported(root, module, diagnostics) {
             "dining_checkout_scope_setting",
           ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
           moduleRelative === "src/infrastructure/persistence/dining-qr-join-store.ts";
+        // WP-2423 shared-table-checkout (b): a participant back on a later phone session (2000_525).
+        const acceptedDiningParticipantReadmissionAsset =
+          module.packageName === "@rms/dining" &&
+          module.manifest.ownedDatabase?.schema === "rms_dining" &&
+          ["dining_session", "dining_participant", "dining_participant_readmission"].every(
+            (table) => module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative ===
+            "src/infrastructure/persistence/dining-participant-readmission-store.ts";
         // WP-2423 DEC-DINING-GUEST-TABLE-START: exact scoped guest start store.
         const acceptedDiningGuestTableStartAsset =
           module.packageName === "@rms/dining" &&
@@ -3900,6 +3921,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedGuestEntryAsset &&
           !acceptedGuestBindingAsset &&
           !acceptedGuestDiningBindingAsset &&
+          !acceptedGuestSessionContinuityAsset &&
           !acceptedPublishedMenuAsset &&
           !acceptedCategoryRepositoryAsset &&
           !acceptedProductCategoryAssignmentAsset &&
@@ -4057,6 +4079,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedDiningHostTransferAsset &&
           !acceptedDiningGuestInvitationAsset &&
           !acceptedDiningQrJoinAsset &&
+          !acceptedDiningParticipantReadmissionAsset &&
           !acceptedDiningGuestTableStartAsset &&
           !acceptedDiningStaffCallAsset &&
           !acceptedDiningTableAllergyAsset &&

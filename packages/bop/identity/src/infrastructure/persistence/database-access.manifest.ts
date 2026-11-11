@@ -75,6 +75,22 @@ const databaseAccessManifestInput = {
       piiClassification: ["indirect_identifier", "credential"],
     },
     {
+      table: "guest_session_continuity",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@bop/identity" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "privacy-governance",
+      piiClassification: ["indirect_identifier", "credential"],
+    },
+    {
+      table: "guest_session_continuity_use",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@bop/identity" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "privacy-governance",
+      piiClassification: ["indirect_identifier", "credential"],
+    },
+    {
       table: "guest_session_operation",
       classification: "append-only-record",
       writeOwner: { kind: "module", id: "@bop/identity" },

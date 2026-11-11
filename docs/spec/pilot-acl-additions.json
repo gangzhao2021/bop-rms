@@ -6443,6 +6443,60 @@
       "privilege": "SELECT",
       "principal": "api",
       "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); WP-2423 shared-table-checkout (a) pay first: the payer chooses the whole table, only what they added or dishes they pick; the dishes not chosen wait and come back (DEC-OWNER-DEFAULTS-2026-11-06 同桌结账, 2000_520)"
+    },
+    {
+      "type": "table",
+      "schema": "bop_identity",
+      "object": "guest_session_continuity",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); WP-2423 shared-table-checkout (b) lost cookie: a phone that lost its cookie but kept its page storage scans the table again and is the same phone at the table (no login, no contact) (2000_523, 2000_525)"
+    },
+    {
+      "type": "table",
+      "schema": "bop_identity",
+      "object": "guest_session_continuity",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); WP-2423 shared-table-checkout (b) lost cookie: a phone that lost its cookie but kept its page storage scans the table again and is the same phone at the table (no login, no contact) (2000_523, 2000_525)"
+    },
+    {
+      "type": "table",
+      "schema": "bop_identity",
+      "object": "guest_session_continuity_use",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); WP-2423 shared-table-checkout (b) lost cookie: a phone that lost its cookie but kept its page storage scans the table again and is the same phone at the table (no login, no contact) (2000_523, 2000_525)"
+    },
+    {
+      "type": "table",
+      "schema": "bop_identity",
+      "object": "guest_session_continuity_use",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); WP-2423 shared-table-checkout (b) lost cookie: a phone that lost its cookie but kept its page storage scans the table again and is the same phone at the table (no login, no contact) (2000_523, 2000_525)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_dining",
+      "object": "dining_participant_readmission",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); WP-2423 shared-table-checkout (b) lost cookie: a phone that lost its cookie but kept its page storage scans the table again and is the same phone at the table (no login, no contact) (2000_523, 2000_525)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_dining",
+      "object": "dining_participant_readmission",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); WP-2423 shared-table-checkout (b) lost cookie: a phone that lost its cookie but kept its page storage scans the table again and is the same phone at the table (no login, no contact) (2000_523, 2000_525)"
     }
   ]
 }

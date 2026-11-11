@@ -65,6 +65,12 @@ export function createCustomerDiningSessionBinding(options: {
   readonly repository: DiningGuestBindingOptions["repository"];
   readonly contexts: CustomerDiningBindingCompositionOptions["contexts"];
   readonly now: () => unknown;
+  /**
+   * WP-2423 shared-table-checkout (b): Dining's readmission record. A session whose participant
+   * has since come back on a later session (lost cookie, 2000_525) is no longer that participant's
+   * phone. Rejects when it can't be read (then "Unavailable", never a seat).
+   */
+  readonly superseded?: (session: GuestSession) => Promise<boolean>;
 }): GuestSessionServiceOptions["binding"] {
   const rawScope = readClosedRecord(options.scope, ["brandReference", "storeReference"]);
   const scope = Object.freeze({
@@ -84,6 +90,8 @@ export function createCustomerDiningSessionBinding(options: {
         if ((await options.binding.validate(session, observedAt)) !== "Current")
           return "Unavailable";
         if (session.channel === "Pickup" || session.diningState === "ContextOnly") return "Current";
+        if (options.superseded !== undefined && (await options.superseded(session)))
+          return "Unavailable";
         const context = assertCurrentDiningGuestTableContext(
           contextInput(session, observedAt),
           await options.contexts.resolve(

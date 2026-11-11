@@ -48,6 +48,7 @@ import type { CustomerDiningInvitationHandler } from "./customer-dining-invitati
 import type { CustomerDiningStaffCallHandler } from "./customer-dining-staff-call.js";
 import type { CustomerDiningRoundWithdrawHandler } from "./customer-dining-round-withdraw.js";
 import type { CustomerDiningCheckoutScopeHandler } from "./customer-dining-checkout-scope.js";
+import type { CustomerDiningContinuityHandler } from "./customer-dining-continuity.js";
 import { CustomerOrderStatusHandler } from "./customer-order-status.js";
 import {
   createCustomerPaymentResultHandler,
@@ -147,6 +148,8 @@ export interface ApiServerRuntimeOptions {
   customerDiningRoundWithdraw?: CustomerDiningRoundWithdrawHandler;
   /** WP-2423 shared-table-checkout (a): the payer at a pay-first table chooses the round's dishes. */
   customerDiningCheckoutScope?: CustomerDiningCheckoutScopeHandler;
+  /** WP-2423 shared-table-checkout (b): a seated phone's continuity token (lost cookie). */
+  customerDiningContinuity?: CustomerDiningContinuityHandler;
   customerEntry?: CustomerEntryHandler;
   customerMenu?: CustomerMenuHandler;
   customerQuote?: CustomerQuoteHandler;
@@ -244,6 +247,7 @@ export function createApiServerRuntime({
   customerDiningStaffCall,
   customerDiningRoundWithdraw,
   customerDiningCheckoutScope,
+  customerDiningContinuity,
   customerEntry,
   customerMenu,
   customerQuote,
@@ -389,6 +393,7 @@ export function createApiServerRuntime({
     ...(customerDiningStaffCall === undefined ? {} : { customerDiningStaffCall }),
     ...(customerDiningRoundWithdraw === undefined ? {} : { customerDiningRoundWithdraw }),
     ...(customerDiningCheckoutScope === undefined ? {} : { customerDiningCheckoutScope }),
+    ...(customerDiningContinuity === undefined ? {} : { customerDiningContinuity }),
     ...(customerEntry === undefined ? {} : { customerEntry }),
     healthReadiness,
     ...(customerMenu === undefined ? {} : { customerMenu }),

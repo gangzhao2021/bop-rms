@@ -274,6 +274,7 @@ export type {
 export * from "./contracts/guest-dining-binding-preparation.js";
 
 export * from "./infrastructure/persistence/guest-dining-binding-store.js";
+export * from "./infrastructure/persistence/guest-session-continuity-store.js";
 
 export * from "./application/guest-dining-binding-service.js";
 export * from "./application/ports/guest-dining-binding-ports.js";

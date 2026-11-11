@@ -229,6 +229,25 @@ export interface CustomerEntryHandlerOptions {
   ) => Promise<
     CustomerEntryPresentedTable | null | { readonly unconfirmed: CustomerEntryPresentedTable }
   >;
+  /**
+   * WP-2423 shared-table-checkout (b), lost cookie: with no seated cookie, the page's continuity
+   * token finds the phone's earlier seat (same answers as `presentedTable`); when the entry then
+   * answers AlreadyAtTable, `readmit` makes this browser that same phone again (a new cookie for
+   * the same participant). A readmission that can't be made is an ordinary entry.
+   */
+  readonly continuity?: {
+    table(
+      token: string,
+      observedAt: string,
+    ): Promise<
+      CustomerEntryPresentedTable | null | { readonly unconfirmed: CustomerEntryPresentedTable }
+    >;
+    readmit(
+      token: string,
+      operationReference: string,
+      observedAt: string,
+    ): Promise<{ readonly sessionCredential: string; readonly continuityToken: string } | null>;
+  };
 }
 
 const guestCookieName = "__Host-bop-guest";
@@ -406,9 +425,20 @@ export function presentedGuestCredentials(header: unknown): CustomerEntryPresent
   return presented;
 }
 
-type EntryBody =
+type EntryBody = (
   | { readonly qrToken: string; readonly intent: CustomerEntryIntent | undefined }
-  | { readonly resume: true; readonly intent: CustomerEntryIntent | undefined };
+  | { readonly resume: true; readonly intent: CustomerEntryIntent | undefined }
+) & {
+  /** WP-2423 shared-table-checkout (b): the page's continuity token (lost cookie). */
+  readonly continuity?: string;
+};
+const continuityPattern = /^[A-Za-z0-9_-]{43}$/u;
+function parseContinuity(value: unknown): { readonly continuity?: string } {
+  if (value === undefined) return {};
+  if (typeof value !== "string" || !continuityPattern.test(value))
+    throw new TypeError("invalid entry request");
+  return { continuity: value };
+}
 
 function parseIntent(value: unknown): CustomerEntryIntent | undefined {
   if (value !== undefined && value !== "Start" && value !== "Join" && value !== "NewParty")
@@ -418,13 +448,19 @@ function parseIntent(value: unknown): CustomerEntryIntent | undefined {
 
 function parseBody(value: unknown): EntryBody {
   const withIntent = value !== null && typeof value === "object" && Object.hasOwn(value, "intent");
+  const extra = [
+    ...(withIntent ? ["intent"] : []),
+    ...(value !== null && typeof value === "object" && Object.hasOwn(value, "continuity")
+      ? ["continuity"]
+      : []),
+  ];
   // M02: `{resume:true}`: the code is this browser's scan cookie, not the body.
   if (value !== null && typeof value === "object" && Object.hasOwn(value, "resume")) {
-    const body = closedRecord(value, withIntent ? ["resume", "intent"] : ["resume"]);
+    const body = closedRecord(value, ["resume", ...extra]);
     if (body.resume !== true) throw new TypeError("invalid entry request");
-    return { resume: true, intent: parseIntent(body.intent) };
+    return { resume: true, intent: parseIntent(body.intent), ...parseContinuity(body.continuity) };
   }
-  const body = closedRecord(value, withIntent ? ["qrToken", "intent"] : ["qrToken"]);
+  const body = closedRecord(value, ["qrToken", ...extra]);
   if (
     typeof body.qrToken !== "string" ||
     body.qrToken.length < 1 ||
@@ -437,7 +473,11 @@ function parseBody(value: unknown): EntryBody {
   ) {
     throw new TypeError("invalid entry request");
   }
-  return { qrToken: body.qrToken, intent: body.intent as CustomerEntryIntent | undefined };
+  return {
+    qrToken: body.qrToken,
+    intent: body.intent as CustomerEntryIntent | undefined,
+    ...parseContinuity(body.continuity),
+  };
 }
 
 function parseOrigin(value: string): string {
@@ -850,6 +890,7 @@ export class CustomerEntryHandler {
   readonly #requestAdmission: CustomerEntryRequestAdmission | undefined;
   readonly #codeCheck: ((qrToken: string) => Promise<boolean>) | undefined;
   readonly #presentedTable: CustomerEntryHandlerOptions["presentedTable"];
+  readonly #continuity: CustomerEntryHandlerOptions["continuity"];
 
   constructor({
     allowedOrigin,
@@ -859,6 +900,7 @@ export class CustomerEntryHandler {
     requestAdmission,
     codeCheck,
     presentedTable,
+    continuity,
   }: CustomerEntryHandlerOptions) {
     this.#allowedOrigin = parseOrigin(allowedOrigin);
     this.#now = now;
@@ -867,6 +909,7 @@ export class CustomerEntryHandler {
     this.#requestAdmission = requestAdmission;
     this.#codeCheck = codeCheck;
     this.#presentedTable = presentedTable;
+    this.#continuity = continuity;
   }
 
   handler(): RequestHandler {
@@ -885,10 +928,12 @@ export class CustomerEntryHandler {
 
       let qrToken: string;
       let intent: CustomerEntryIntent | undefined;
+      let continuityToken: string | undefined;
       const remembered = scannedCode(request.get("cookie"));
       try {
         const body = parseBody(request.body);
         intent = body.intent;
+        continuityToken = body.continuity;
         if ("resume" in body) {
           // Nothing scanned here that is still waiting: the app asks the guest to scan.
           if (remembered === null) {
@@ -953,12 +998,24 @@ export class CustomerEntryHandler {
         const presented = presentedGuestCredentials(request.get("cookie"));
         // WP-2423 shared-table-checkout (b): the table this browser is already seated at, if any.
         const presentedCredential = presentedGuestCredential(request.get("cookie"));
-        const presentedTable =
+        let presentedTable =
           presentedCredential === null || this.#presentedTable === undefined
             ? null
             : await this.#presentedTable(presentedCredential, requestedAt).catch(() => null);
-        const result = parsePortResult(
-          await this.#port.establish(
+        // WP-2423 shared-table-checkout (b): no seated cookie, but the page kept its continuity
+        // token: the seat that token's phone holds, answered exactly like a presented cookie.
+        const continuity = this.#continuity;
+        const viaContinuity =
+          presentedTable === null &&
+          intent === undefined &&
+          continuityToken !== undefined &&
+          continuity !== undefined;
+        if (viaContinuity)
+          presentedTable = await continuity
+            .table(continuityToken as string, requestedAt)
+            .catch(() => null);
+        const establish = (seat: typeof presentedTable) =>
+          this.#port.establish(
             Object.freeze({
               entryRequestReference,
               operationReference,
@@ -966,15 +1023,39 @@ export class CustomerEntryHandler {
               requestedAt,
               ...(intent === undefined ? {} : { intent }),
               ...(presented.length === 0 ? {} : { presentedCredentials: Object.freeze(presented) }),
-              ...(presentedTable === null
+              ...(seat === null
                 ? {}
-                : "unconfirmed" in presentedTable
-                  ? { presentedTableUnconfirmed: presentedTable.unconfirmed }
-                  : { presentedTable }),
+                : "unconfirmed" in seat
+                  ? { presentedTableUnconfirmed: seat.unconfirmed }
+                  : { presentedTable: seat }),
             }),
-          ),
-          requestedAt,
-        );
+          );
+        let result = parsePortResult(await establish(presentedTable), requestedAt);
+        if (viaContinuity && result.status === "AlreadyAtTable") {
+          // The same phone at the same seat: one transaction rotates its old session into this
+          // browser's new cookie. If that can't be done (the seat changed meanwhile), the scan is
+          // an ordinary entry.
+          const readmitted = await continuity
+            .readmit(continuityToken as string, operationReference, requestedAt)
+            .catch(() => null);
+          if (readmitted !== null) {
+            forget();
+            response.append("Set-Cookie", serializeCookie(readmitted.sessionCredential as never));
+            response.status(200).json({
+              schemaVersion: 2,
+              status: "AlreadyAtTable",
+              brandDisplayName: result.brandDisplayName,
+              storeDisplayName: result.storeDisplayName,
+              publicStoreReference: result.publicStoreReference,
+              publicTableReference: result.publicTableReference,
+              channel: "DineIn",
+              locale: result.locale,
+              continuityToken: readmitted.continuityToken,
+            });
+            return;
+          }
+          result = parsePortResult(await establish(null), requestedAt);
+        }
         if (result.status === "InvalidRequest") {
           sendError(response, "entry_request_invalid");
           return;

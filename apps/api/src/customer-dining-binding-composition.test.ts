@@ -611,3 +611,34 @@ describe("WP-2326 shared current Dining binding guard", () => {
     },
   );
 });
+
+describe("WP-2423 shared-table-checkout (b): a phone that came back on a later session", () => {
+  it("leaves the earlier session no longer the participant's phone, and a read that fails no seat", async () => {
+    for (const [superseded, expected] of [
+      [async () => false, "Current"],
+      [async () => true, "Unavailable"],
+      [
+        async () => {
+          throw new Error("dining down");
+        },
+        "Unavailable",
+      ],
+    ] as const) {
+      const f = fixture();
+      const prepared = await f.service.prepare(f.input);
+      f.setTime(1);
+      await f.service.activate(f.activation(prepared));
+      const check = vi.fn(superseded);
+      const guard = createCustomerDiningSessionBinding({
+        scope: f.options.scope,
+        binding: f.options.session.binding,
+        repository: f.options.dining.binding,
+        contexts: f.options.contexts,
+        now: f.options.now,
+        superseded: check,
+      });
+      expect(await guard.validate(f.saved().candidate.session, at(1))).toBe(expected);
+      expect(check).toHaveBeenCalledTimes(1);
+    }
+  });
+});
