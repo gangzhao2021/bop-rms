@@ -1458,3 +1458,56 @@ test("@production a table checking out the queue never brings reads paid once th
   await expect(row).not.toContainText("Checking the bill");
   expect(billReads).toBeGreaterThan(firstReads);
 });
+
+for (const width of [390, 1024, 1440])
+  test(`@production a bill that is slow to read tells staff it is still coming, then shows, at ${width}`, async ({
+    page,
+  }) => {
+    // v15 2026-11-11: on a busy evening a merged table's bill took 7–8 s, with only "Reading the
+    // bill…" on screen, and staff wondered whether to tap again.
+    await page.setViewportSize({ width, height: 900 });
+    await floor(page, { phase: "Closing", version: 7 });
+    await page.route("**/merchant/dining/table-close-plan", (route) =>
+      route.fulfill({
+        headers,
+        json: {
+          orderReference: id(3),
+          diningSessionReference: id(2),
+          orderVersion: 4,
+          observedAt: "2026-10-15T19:00:00.000Z",
+          rounds: [],
+          closeBlockers: [],
+          totals: { onlineMinor: "0", cardMachineMinor: "0" },
+        },
+      }),
+    );
+    await page.route("**/merchant/dining/table-bill", async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 5_000));
+      await route.fulfill({
+        headers,
+        json: {
+          ...unpaidBill("Closing", 7),
+          taxRoundingMinor: "0",
+          owed: { subtotalMinor: "3003", taxMinor: "390", totalMinor: "3393" },
+          tips: { enabled: false, tierPercents: [12, 18, 20] },
+        },
+      });
+    });
+    await page.goto("/operations/dining");
+    await page.getByRole("button", { name: "Select T2", exact: true }).click();
+    const checkout = page.getByRole("region", { name: "Checkout" });
+    await expect(checkout.getByText("Reading the bill…")).toBeVisible();
+    await expect(
+      checkout.getByText("Still working; the system is busy.", { exact: false }),
+    ).toBeVisible({
+      timeout: 4_500,
+    });
+    await expect(checkout.getByText("Round 1")).toBeVisible({ timeout: 8_000 });
+    await expect(
+      checkout.getByText("Still working; the system is busy.", { exact: false }),
+    ).toHaveCount(0);
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await expectNoInternalText(page);
+  });

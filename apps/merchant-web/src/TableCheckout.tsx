@@ -240,6 +240,8 @@ export function TableCheckout({
   const sessionReference = table.currentDiningSessionReference as string;
   const [bill, setBill] = useState<TableBill | null>(null);
   const [reload, setReload] = useState(0);
+  /** True while a read of the bill is on its way (the periodic re-read waits for it). */
+  const billReading = useRef(false);
   const [problem, setProblem] = useState<string | null>(null);
   // merchant-outage-recovery M100: why the bill could not be read again, apart from what an action
   // said. The next read that works clears it.
@@ -282,6 +284,7 @@ export function TableCheckout({
       return;
     }
     const controller = new AbortController();
+    billReading.current = true;
     client
       .bill(csrf, sessionReference, controller.signal)
       .then((value) => {
@@ -291,8 +294,14 @@ export function TableCheckout({
       })
       .catch((error: unknown) => {
         if (!controller.signal.aborted) setReadProblem(errorText(error));
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) billReading.current = false;
       });
-    return () => controller.abort();
+    return () => {
+      controller.abort();
+      billReading.current = false;
+    };
   }, [client, csrf, sessionReference, session.phase, session.version, reload]);
 
   // S4: while a guest pays on their phone, the bill is read again until it ends.
@@ -301,7 +310,12 @@ export function TableCheckout({
   // so an open bill keeps being read while the table checks out.
   useEffect(() => {
     if (session.phase !== "Closing" || paidNow || bill?.writeOff != null) return;
-    const timer = window.setInterval(() => setReload((value) => value + 1), 5000);
+    // v15 2026-11-11: a read still running is never cut off by the next one. On a busy evening a
+    // merged table's bill took 7–8 s, so restarting every 5 s left staff on "Reading the bill…"
+    // until one read happened to finish in time (and each cut-off read still loaded the server).
+    const timer = window.setInterval(() => {
+      if (!billReading.current) setReload((value) => value + 1);
+    }, 5000);
     return () => window.clearInterval(timer);
   }, [session.phase, paidNow, bill?.writeOff]);
   // M100: once the table has paid, a warning left by an earlier lost answer no longer applies.
@@ -658,7 +672,12 @@ export function TableCheckout({
       ) : null}
       {bill === null ? (
         problem || readProblem !== null ? null : (
-          <p role="status">{t("Reading the bill…")}</p>
+          <>
+            <p role="status">{t("Reading the bill…")}</p>
+            {/* v15 2026-11-11: on a busy evening a merged table's bill took 7–8 s to read, with only
+                "Reading the bill…" shown. After a few seconds staff are told it is still coming. */}
+            <SlowWaitNotice busy />
+          </>
         )
       ) : (
         <>
