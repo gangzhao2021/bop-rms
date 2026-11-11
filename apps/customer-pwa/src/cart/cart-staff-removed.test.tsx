@@ -17,7 +17,7 @@ const removed = [
     names: { "en-CA": "Mapo tofu", "zh-Hans-CA": "麻婆豆腐" },
   },
 ];
-function tableCart(staffRemoved?: unknown): CartView {
+function tableCart(staffRemoved?: unknown, recentRounds?: unknown): CartView {
   return {
     schemaVersion: 1,
     cart: {
@@ -35,6 +35,7 @@ function tableCart(staffRemoved?: unknown): CartView {
       quote: null,
       warnings: [],
       ...(staffRemoved === undefined ? {} : { staffRemoved }),
+      ...(recentRounds === undefined ? {} : { recentRounds }),
     },
   } as unknown as CartView;
 }
@@ -75,6 +76,23 @@ describe("Staff removed a dish from the table's cart", () => {
     const html = page(tableCart(removed));
     expect(html).toContain("Staff removed Mapo tofu from the cart.");
     expect(html).not.toMatch(/018f5300/u);
+  });
+
+  it("an empty cart after another phone's round still says what staff took out", () => {
+    // v15 batch-5: phone 2's only dish was taken out on the staff round; its cart is empty.
+    const html = page(
+      tableCart(removed, [
+        {
+          roundNumber: 1,
+          sentAt: "2026-08-02T20:10:00.000Z",
+          sentByThisPhone: false,
+          cartItemReferences: [id(7)],
+          paymentState: "AwaitingPayment",
+        },
+      ]),
+    );
+    expect(html).toContain("Staff removed Mapo tofu from the cart.");
+    expect(html).toContain("Your cart is empty");
   });
 
   it("the cart client reads the removals the store sends", async () => {

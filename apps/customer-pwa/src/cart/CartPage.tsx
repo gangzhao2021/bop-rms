@@ -814,6 +814,12 @@ function CartContent({
       // WP-2423 (same-table-ordering): another phone's round took this cart's dishes, or (M38)
       // this phone is paying for the round that did.
       <StateMessage heading={commonText.emptyCartHeading}>
+        {/* v15 batch-5: a phone whose only dish staff took out is told so here too. */}
+        {staffRemovedDishes(state.cart).map((dish, index) => (
+          <p key={"staff-removed:" + String(index)} role="status">
+            {staffRemovedNotice(dish)}
+          </p>
+        ))}
         <TableRoundNotes cart={state.cart} payLater={timing === "PayLater"} />
         {(() => {
           const own = withdrawableOwnRound(state.cart, timing === "PayLater");
