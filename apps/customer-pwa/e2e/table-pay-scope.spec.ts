@@ -427,6 +427,61 @@ for (const screen of [
       await expectNoInternalText(page);
       expect(errors).toEqual([]);
     });
+
+    test("back on their own cart the payer is warned too, keeps the dishes, and never gives them back by itself", async ({
+      page,
+    }) => {
+      const errors: string[] = [];
+      page.on("pageerror", () => errors.push("page error"));
+      const table: Table = {
+        version: 5,
+        items: [{ reference: 2, name: "Synthetic noodles", quantity: 2, other: false }],
+        tablePay: {
+          ...idle(),
+          payer: {
+            thisPhone: true,
+            choice: "Mine",
+            expiresAt: new Date(Date.now() + 45_000).toISOString(),
+            reserved: true,
+          },
+          waiting: [
+            {
+              waitingLineReference: id(9),
+              quantity: 1,
+              names: { "en-CA": "Synthetic tea" },
+              withOptions: false,
+              mine: false,
+            },
+          ],
+          // Even if a read said so, the payer's own phone never sends "Return".
+          returnable: true,
+        },
+      };
+      const calls = await stubTable(page, table, (body) => {
+        if (body.action !== "Extend") return { status: "NotLive" };
+        const expiresAt = new Date(Date.now() + 300_000).toISOString();
+        table.tablePay = {
+          ...table.tablePay,
+          payer: { thisPhone: true, choice: "Mine", expiresAt, reserved: true },
+        };
+        return { status: "Extended", expiresAt };
+      });
+      await enterTable(page, "/cart");
+      await expect(
+        page.getByText(/The dishes you chose are kept for \d+ more seconds\./u),
+      ).toBeVisible();
+      await noHorizontalScroll(page);
+      await page.screenshot({
+        path: `test-results/table-pay-cart-warning-${screen.width}.png`,
+        fullPage: true,
+      });
+      await expect(page.getByText("Putting these dishes back in the cart…")).toHaveCount(0);
+      await page.getByRole("button", { name: "Keep them", exact: true }).click();
+      await expect(page.getByText(/The dishes you chose are kept for/u)).toHaveCount(0);
+      expect(calls.map((call) => call.body)).toEqual([{ action: "Extend" }]);
+      await expectNoInternalText(page);
+      expect(errors).toEqual([]);
+    });
   });
 }
 

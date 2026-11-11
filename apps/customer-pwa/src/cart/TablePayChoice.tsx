@@ -74,7 +74,7 @@ export function TableWaitingDishes({ tablePay }: { readonly tablePay: CartTableP
         <>
           <h2 id="cart-waiting-heading">{t("Next round")}</h2>
           <p className="cart-waiting__note">
-            {tablePay.returnable
+            {tablePay.returnable && tablePay.payer?.thisPhone !== true
               ? t("Putting these dishes back in the cart…")
               : t("These dishes come back to the cart when the payment is done.")}
           </p>
