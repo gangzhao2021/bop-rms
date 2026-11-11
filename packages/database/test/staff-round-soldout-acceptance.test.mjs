@@ -120,6 +120,7 @@ async function soldOutTable(store, label) {
     );
   return {
     server,
+    actor: label(0x700),
     pipeline: () => pipeline,
     mark,
     send,
@@ -151,20 +152,27 @@ const orderedItems = async (admin, orderBatchReference) =>
       [orderBatchReference],
     )
   ).rows;
-/** The Cart remove of a line: by whom (the guest session) and its audit record. */
+/**
+ * WP-2423 M06/M35: the staff removal of a line: by whom (the staff member), why, at which cart
+ * version, and its audit record. The guest Cart's own remove is never used for another's line.
+ */
 const removal = async (admin, cartReference, line) =>
   (
     await admin.query(
-      "SELECT o.guest_session_id::text AS guest,o.result_aggregate_version AS version,(SELECT count(*)::int FROM platform_audit.audit_record a WHERE a.action_code='ORDERING_CART_ITEM_REMOVE' AND a.target_id::text=$1 AND a.occurred_at=o.occurred_at) AS audits FROM rms_ordering.cart_operation_record o WHERE o.cart_id::text=$1 AND o.cart_line_id::text=$2 AND o.action_code='Remove'",
+      "SELECT r.actor_id::text AS actor,r.reason_code AS reason,r.result_aggregate_version AS version,(SELECT count(*)::int FROM platform_audit.audit_record a WHERE a.audit_id=r.audit_id AND a.action_code='ORDERING_CART_ITEM_REMOVE_BY_STAFF') AS audits FROM rms_ordering.cart_staff_line_removal r WHERE r.cart_id::text=$1 AND r.cart_line_id::text=$2",
       [cartReference, line],
     )
   ).rows;
-const latestEntryGuest = async (admin) =>
+const guestRemoves = async (admin, cartReference, line) =>
   (
     await admin.query(
-      "SELECT guest_session_id::text AS guest FROM rms_ordering.staff_dining_round_entry ORDER BY created_at DESC LIMIT 1",
+      "SELECT count(*)::int AS n FROM rms_ordering.cart_operation_record WHERE cart_id::text=$1 AND cart_line_id::text=$2 AND action_code='Remove'",
+      [cartReference, line],
     )
-  ).rows[0].guest;
+  ).rows[0].n;
+const entryCount = async (admin) =>
+  (await admin.query("SELECT count(*)::int AS n FROM rms_ordering.staff_dining_round_entry"))
+    .rows[0].n;
 const restrictedRoleRan = async (store, api) =>
   assert.deepEqual(
     await store.asApi(async (tx) => {
@@ -196,74 +204,80 @@ it("a guest's sold-out dish is marked; staff remove it and send the rest, a dish
         [t.teaLine, t.soupLine],
       );
 
-      // Sent as it was before: the guests' items are named.
+      // Sent as it was before: the guests' items are named at once, read only (WP-2423 M35):
+      // no table guest joined and nothing about the round was recorded.
       const first = await t.refusal(t.send());
       assert.equal(first.code, "STAFF_ROUND_TABLE_CART_HAS_ITEMS");
-      // Taking the whole Cart in without deciding on the soup: refused the same way, never
-      // "the system couldn't send it" (v15 8911a4c1: 503 staff_round_unavailable).
+      assert.deepEqual(
+        first.pendingItems.map((item) => item.cartItemReference),
+        [t.teaLine, t.soupLine],
+      );
+      assert.equal(first.tableCart.cartVersion, before.version);
+      assert.equal(await entryCount(admin), 0, "a refusal before the table leaves no entry");
+      // Taking the whole Cart in without deciding on the soup: refused, never "the system
+      // couldn't send it" (v15 8911a4c1: 503 staff_round_unavailable); the soup is marked.
       const whole = await t.refusal(
         t.send({ includeTableCart: { expectedCartVersion: before.version } }),
       );
       assert.equal(whole.code, "STAFF_ROUND_TABLE_CART_HAS_ITEMS");
-      // The soup is marked as sold out, the tea as sellable.
-      for (const refused of [first, whole]) {
-        assert.deepEqual(
-          refused.pendingItems.map((item) => [item.cartItemReference, item.standing]),
-          [
-            [t.teaLine, "Available"],
-            [t.soupLine, "Unavailable"],
-          ],
-        );
-        assert.equal(refused.tableCart.cartVersion, before.version);
-      }
+      assert.deepEqual(
+        whole.pendingItems.map((item) => [item.cartItemReference, item.standing]),
+        [
+          [t.teaLine, "Available"],
+          [t.soupLine, "Unavailable"],
+        ],
+      );
+      assert.equal(whole.tableCart.cartVersion, before.version);
       assert.equal((await facts(admin, t.cartReference)).version, before.version);
 
-      // Naming the tea (it can still be sold) as well: the owner keeps the tea; staff see the
-      // Cart again and nothing of theirs is in it.
-      const keptTea = await t.refusal(
+      // Decisions for a cart version that moved on: refused read only, nothing removed.
+      const entriesBefore = await entryCount(admin);
+      const stale = await t.refusal(
         t.send({
           includeTableCart: {
-            expectedCartVersion: before.version,
-            removeUnavailable: [t.teaLine, t.soupLine],
+            expectedCartVersion: before.version - 1,
+            lines: [
+              { cartItemReference: t.teaLine, decision: "Send" },
+              { cartItemReference: t.soupLine, decision: "Remove", reason: "CantMake" },
+            ],
           },
         }),
       );
-      assert.equal(keptTea.code, "STAFF_ROUND_TABLE_CART_HAS_ITEMS");
-      const afterKept = await facts(admin, t.cartReference);
-      assert.ok(
-        afterKept.lines.some((line) => line.line === t.teaLine),
-        "the tea stays",
-      );
-      assert.equal(afterKept.batches, before.batches);
-      assert.deepEqual(await removal(admin, t.cartReference, t.teaLine), []);
+      assert.equal(stale.code, "STAFF_ROUND_TABLE_CART_HAS_ITEMS");
+      assert.equal(await entryCount(admin), entriesBefore);
+      assert.deepEqual(await removal(admin, t.cartReference, t.soupLine), []);
 
-      // As staff decide on what they were shown now: the soup out, the tea and the round sent.
-      const shown = keptTea.pendingItems;
+      // As staff decide on each line: the soup out (the kitchen can't make it), the tea sent.
+      // M35: one request, measured on this test database (the pilot's own composition).
+      const started = performance.now();
       const placed = await t.send({
         includeTableCart: {
-          expectedCartVersion: keptTea.tableCart.cartVersion,
-          removeUnavailable: shown
-            .filter((item) => item.standing !== "Available")
-            .map((item) => item.cartItemReference),
+          expectedCartVersion: before.version,
+          lines: [
+            { cartItemReference: t.teaLine, decision: "Send" },
+            { cartItemReference: t.soupLine, decision: "Remove", reason: "CantMake" },
+          ],
         },
       });
+      const elapsed = Math.round(performance.now() - started);
       assert.equal(placed.status, "Placed");
+      // Recorded, not a gate here: on this container database most of it is the existing
+      // checkout and payment preparation (about 2.2 s of 3.6 s on 2026-11-10); the decision adds
+      // one read-only check and one removal transaction. The < 2 s budget is checked live on v15.
+      console.info(`[M35] staff round with a guest line removed and one sent: ${elapsed} ms`);
       assert.deepEqual(await orderedItems(admin, placed.orderBatchReference), [
         { sku: tea.skuReference, quantity: 1 },
         { sku: tea.skuReference, quantity: 2 },
       ]);
-      // The soup left the Cart by the Cart's own remove, attributed to a staff round's table
-      // guest and audited, at the next Cart version; it was never ordered.
+      // The soup left the Cart as the staff member's own removal, with why, audited, at the next
+      // Cart version; never by the guest Cart's remove, and it was never ordered.
       const removed = await removal(admin, t.cartReference, t.soupLine);
       assert.equal(removed.length, 1);
-      assert.equal(removed[0].audits, 1);
-      assert.ok(removed[0].version > before.version);
-      const guests = (
-        await admin.query(
-          "SELECT guest_session_id::text AS guest FROM rms_ordering.staff_dining_round_entry",
-        )
-      ).rows.map((row) => row.guest);
-      assert.ok(guests.includes(removed[0].guest), "removed by a staff round's table guest");
+      assert.deepEqual(
+        [removed[0].actor, removed[0].reason, removed[0].audits, removed[0].version],
+        [t.actor, "CantMake", 1, before.version + 1],
+      );
+      assert.equal(await guestRemoves(admin, t.cartReference, t.soupLine), 0);
       assert.equal(
         (
           await admin.query(
@@ -334,14 +348,11 @@ it("pay later: a guest's dish sold out just before the quote is marked, the roun
       assert.equal(afterRace.batches, before.batches);
       assert.equal(raced.tableCart.cartVersion, afterRace.version);
 
-      // Read again, the Cart now marks the soup itself.
+      // Read again (read only, before the table): both lines are listed to decide on.
       const markedNow = await t.refusal(t.send());
       assert.deepEqual(
-        markedNow.pendingItems.map((item) => [item.cartItemReference, item.standing]),
-        [
-          [t.teaLine, "Available"],
-          [t.soupLine, "Unavailable"],
-        ],
+        markedNow.pendingItems.map((item) => item.cartItemReference),
+        [t.teaLine, t.soupLine],
       );
       // Staff remove it as they were shown it at the quote, and send the rest: to the kitchen,
       // to be paid at the end.
@@ -358,10 +369,10 @@ it("pay later: a guest's dish sold out just before the quote is marked, the roun
         { sku: tea.skuReference, quantity: 1 },
         { sku: tea.skuReference, quantity: 2 },
       ]);
-      assert.equal((await removal(admin, t.cartReference, t.soupLine)).length, 1);
-      assert.equal(
-        (await removal(admin, t.cartReference, t.soupLine))[0].guest,
-        await latestEntryGuest(admin),
+      // The earlier screens' form: the listed line leaves as the staff member's removal too.
+      assert.deepEqual(
+        (await removal(admin, t.cartReference, t.soupLine)).map((row) => [row.actor, row.reason]),
+        [[t.actor, "CantMake"]],
       );
       // A retry of the same command returns the same round and orders nothing twice.
       const counted = await facts(admin, t.cartReference);

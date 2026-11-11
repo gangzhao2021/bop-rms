@@ -7,6 +7,7 @@ import {
   listStaffCartRemovals,
   readStaffDiningCart,
   removeStaffDiningCartLine,
+  removeStaffDiningCartLines,
 } from "../../rms/ordering/src/index.ts";
 import { orderWriteFixture } from "../../rms/ordering/src/tests/order-creation-store.fixture.ts";
 import { seedSubmissionCart } from "../test-support/dining-order-submission-seed.mjs";
@@ -328,6 +329,245 @@ it("WP-2423 (shared-table-checkout): staff remove a dish from a table cart, reco
         { code: "23514" },
       );
       assert.equal((await written()).removals, before.removals + 1);
+    } finally {
+      await admin.end();
+    }
+  });
+}, 600_000);
+
+/**
+ * WP-2423 M06/M35 (shared-table-cart-staff-round): staff decide on every guest line at once with
+ * their round. As the restricted pilot API role: all the lines staff take out leave in one
+ * transaction, each its own recorded and audited removal at consecutive cart versions, or none
+ * does: a decision on a cart that moved on (another version, or not exactly its lines) and a
+ * failure part-way (the second line's checkout hold can't be read) leave the cart as it was with
+ * nothing recorded. The same operations replay without writing again.
+ */
+it("WP-2423 M06/M35: staff take several guest lines out at once, or none", async () => {
+  await withIsolatedDatabase({ caseId: "wp2423_cart_lines" }, async (context) => {
+    const admin = new Client(context.clientConfig);
+    await admin.connect();
+    const api = "wp2423_staffcartl_" + context.runId;
+    try {
+      await admin.query(
+        "CREATE ROLE " + api + " NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE",
+      );
+      await grantPilotApiAcl(admin, api);
+      const inTransaction = async (action) => {
+        const client = new Client(context.clientConfig);
+        await client.connect();
+        try {
+          await client.query("BEGIN");
+          await client.query("SET LOCAL ROLE " + api);
+          const value = await action({ query: (sql, values) => client.query(sql, [...values]) });
+          await client.query("COMMIT");
+          return value;
+        } catch (error) {
+          await client.query("ROLLBACK");
+          throw error;
+        } finally {
+          await client.end();
+        }
+      };
+      const now = await dbNow(admin);
+      const f = orderWriteFixture({ namespace: "01902522", at: now, dineIn: true });
+      await seedSubmissionCart(admin, f);
+      const scope = f.scope;
+      const cart = f.cart;
+      const session = String(cart.diningSessionReference);
+      // Three lines at the table: the seeded ones, and copies from other phones up to three.
+      const columns = (
+        await admin.query(
+          "SELECT column_name FROM information_schema.columns WHERE table_schema='rms_ordering' AND table_name='cart_line' ORDER BY ordinal_position",
+        )
+      ).rows.map((row) => row.column_name);
+      const seeded = (
+        await admin.query(
+          "SELECT cart_line_id::text AS line FROM rms_ordering.cart_line WHERE cart_id=$1 ORDER BY added_at, cart_line_id",
+          [cart.cartReference],
+        )
+      ).rows.map((row) => row.line);
+      const lines = [...seeded];
+      for (let n = 0; lines.length < 3; n += 1) {
+        const copy = id(600 + n);
+        await admin.query(
+          `INSERT INTO rms_ordering.cart_line (${columns.join(",")}) SELECT ${columns
+            .map((column) => (column === "cart_line_id" ? "$2::uuid" : column))
+            .join(",")} FROM rms_ordering.cart_line WHERE cart_line_id=$1`,
+          [seeded[0], copy],
+        );
+        lines.push(copy);
+      }
+      const staff = id(501);
+      const at = new Date(Math.max(Date.now(), Date.parse(cart.updatedAt) + 1000)).toISOString();
+      let audits = 900;
+      const decision = (keep, out, change = {}) => ({
+        diningSessionReference: session,
+        cartReference: String(cart.cartReference),
+        expectedCartVersion: cart.aggregateVersion,
+        keep,
+        lines: out.map(([line, reason, operation]) => ({
+          cartItemReference: line,
+          reason,
+          operationReference: id(operation),
+          audit: {
+            auditId: id(++audits),
+            brandId: scope.brandReference,
+            storeId: scope.storeReference,
+            actor: { type: "User", reference: staff },
+            actionCode: "ORDERING_CART_ITEM_REMOVE_BY_STAFF",
+            targetType: "OrderingCart",
+            targetId: String(cart.cartReference),
+            reasonCode: reason === "CantMake" ? "STAFF_CART_CANT_MAKE" : "STAFF_CART_GUEST_ASKED",
+            correlationId: id(700),
+            occurredAt: at,
+            sourceChannel: "API",
+            dataClassification: "Internal",
+            retentionPolicyCode: "AUDIT_DEFAULT",
+            retentionPolicyVersion: 1,
+          },
+        })),
+        actorReference: staff,
+        observedAt: at,
+        hashIntent,
+        checkoutHeld: async () => false,
+        ...change,
+      });
+      const written = async () =>
+        (
+          await admin.query(
+            `SELECT (SELECT count(*)::int FROM rms_ordering.cart_staff_line_removal WHERE cart_id=$1) AS removals,
+               (SELECT count(*)::int FROM platform_audit.audit_record WHERE target_id=$1) AS audits,
+               (SELECT aggregate_version FROM rms_ordering.cart WHERE cart_id=$1) AS version,
+               (SELECT count(*)::int FROM rms_ordering.cart_line WHERE cart_id=$1) AS lines`,
+            [cart.cartReference],
+          )
+        ).rows[0];
+      const before = await written();
+      assert.equal(before.lines, 3);
+      const [a, b, c] = lines;
+
+      // Decided on a cart that isn't the one now: another version, a line not decided on, or a
+      // line the cart doesn't hold. Refused with nothing written.
+      for (const [keep, out, change] of [
+        [
+          [c],
+          [
+            [a, "GuestAsked", 10],
+            [b, "CantMake", 11],
+          ],
+          { expectedCartVersion: cart.aggregateVersion + 1 },
+        ],
+        [
+          [],
+          [
+            [a, "GuestAsked", 12],
+            [b, "CantMake", 13],
+          ],
+          {},
+        ],
+        [
+          [c, id(99)],
+          [
+            [a, "GuestAsked", 14],
+            [b, "CantMake", 15],
+          ],
+          {},
+        ],
+      ])
+        await assert.rejects(
+          inTransaction((tx) => removeStaffDiningCartLines(tx, scope, decision(keep, out, change))),
+          { code: "CART_VERSION_CONFLICT" },
+        );
+      assert.deepEqual(await written(), before);
+
+      // A failure part-way (the second line's hold can't be read): the first line is not gone.
+      await assert.rejects(
+        inTransaction((tx) =>
+          removeStaffDiningCartLines(
+            tx,
+            scope,
+            decision(
+              [c],
+              [
+                [a, "GuestAsked", 16],
+                [b, "CantMake", 17],
+              ],
+              {
+                checkoutHeld: async (version) => {
+                  if (version > cart.aggregateVersion) throw new Error("dining unavailable");
+                  return false;
+                },
+              },
+            ),
+          ),
+        ),
+        { code: "CART_DEPENDENCY_UNAVAILABLE" },
+      );
+      assert.deepEqual(await written(), before);
+
+      // Both lines out, one transaction: two records, two Audit records, the next two versions.
+      const removed = await inTransaction((tx) =>
+        removeStaffDiningCartLines(
+          tx,
+          scope,
+          decision(
+            [c],
+            [
+              [a, "GuestAsked", 20],
+              [b, "CantMake", 21],
+            ],
+          ),
+        ),
+      );
+      assert.deepEqual(removed, { status: "Removed", cartVersion: cart.aggregateVersion + 2 });
+      assert.deepEqual(await written(), {
+        removals: before.removals + 2,
+        audits: before.audits + 2,
+        version: cart.aggregateVersion + 2,
+        lines: 1,
+      });
+      assert.deepEqual(
+        (
+          await admin.query(
+            "SELECT cart_line_id::text AS line, reason_code AS reason, result_aggregate_version AS v, actor_id::text AS actor FROM rms_ordering.cart_staff_line_removal WHERE cart_id=$1 ORDER BY result_aggregate_version",
+            [cart.cartReference],
+          )
+        ).rows,
+        [
+          { line: a, reason: "GuestAsked", v: cart.aggregateVersion + 1, actor: staff },
+          { line: b, reason: "CantMake", v: cart.aggregateVersion + 2, actor: staff },
+        ],
+      );
+      // The same decision again (a retry after a lost answer): nothing more is written.
+      const again = await inTransaction((tx) =>
+        removeStaffDiningCartLines(
+          tx,
+          scope,
+          decision(
+            [c],
+            [
+              [a, "GuestAsked", 20],
+              [b, "CantMake", 21],
+            ],
+          ),
+        ),
+      );
+      assert.deepEqual(again, { status: "AlreadyRemoved", cartVersion: cart.aggregateVersion + 2 });
+      assert.equal((await written()).removals, before.removals + 2);
+      // Another Store sees nothing to remove there.
+      await assert.rejects(
+        inTransaction((tx) =>
+          removeStaffDiningCartLines(
+            tx,
+            { ...scope, storeReference: id(88) },
+            decision([], [[c, "GuestAsked", 30]], {
+              expectedCartVersion: cart.aggregateVersion + 2,
+            }),
+          ),
+        ),
+      );
+      assert.equal((await written()).lines, 1);
     } finally {
       await admin.end();
     }
