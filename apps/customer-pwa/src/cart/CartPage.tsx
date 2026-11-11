@@ -544,7 +544,17 @@ function ErrorState({
     "participation-ended": failure.participationEnded,
     "not-seated": failure.notSeated,
     "command-failed": failure.commandFailed,
-    unavailable: failure.unavailable,
+    // WP-2423 (outage-reads-and-retry): the store's system said it is busy and when to try again
+    // (503 with Retry-After): a read loads again by itself then; a change is the guest's to redo.
+    unavailable:
+      state.retryAfterSeconds === null
+        ? failure.unavailable
+        : ([
+            failure.busyHeading,
+            state.fromRead === true
+              ? failure.busyRead(state.retryAfterSeconds)
+              : failure.busyChange(state.retryAfterSeconds),
+          ] as const),
   } as const;
   const message = messages[state.status as keyof typeof messages];
   if (message === undefined) return null;
@@ -572,7 +582,12 @@ function ErrorState({
   return (
     <StateMessage
       heading={specific ?? message[0]}
-      tone={state.status === "conflict" ? "warning" : "error"}
+      tone={
+        state.status === "conflict" ||
+        (state.status === "unavailable" && state.retryAfterSeconds !== null)
+          ? "warning"
+          : "error"
+      }
     >
       {specific === null ? <p>{message[1]}</p> : null}
       {issues
@@ -1298,6 +1313,11 @@ export function cartPollShouldRead(
   );
 }
 
+/** WP-2423 (outage-reads-and-retry): the wait a busy answer asked for, between 1 s and 60 s. */
+export function busyRetryDelayMs(retryAfterSeconds: number): number {
+  return Math.min(60, Math.max(1, Math.ceil(retryAfterSeconds))) * 1000;
+}
+
 /** Cart prices come from a full menu read; an ordinary guest gets one tap once it's in. */
 const menuPriceWaitMs = 2_000;
 
@@ -1395,6 +1415,19 @@ function OpenCartPage({
   );
   // Owner 2026-10-23: item names come from the Store in the chosen language.
   useReloadOnLanguageChange(() => void controller.load());
+  // WP-2423 (outage-reads-and-retry): a read the store's system answered "busy, try again in N
+  // seconds" is read again every N seconds until it loads (a table cart's poll may read sooner),
+  // as the page says; a quiet read that fails again leaves the message as it is.
+  const busyReadSeconds =
+    state.status === "unavailable" && state.fromRead === true ? state.retryAfterSeconds : null;
+  useEffect(() => {
+    if (busyReadSeconds === null) return;
+    const timer = window.setInterval(
+      () => void controller.refresh(),
+      busyRetryDelayMs(busyReadSeconds),
+    );
+    return () => window.clearInterval(timer);
+  }, [busyReadSeconds, controller]);
   useEffect(() => {
     void controller.load();
     const offline = () => controller.setOnline(false);

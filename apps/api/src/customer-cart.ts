@@ -791,8 +791,9 @@ function sendError(
   },
 ): void {
   const contract = errors[errorCode];
-  // WP-2423 (outage-reads-and-retry): "busy, try again" says when, as the menu's 503 does, so the
-  // phone waits it out instead of showing an error (a route with its own wait keeps it).
+  // WP-2423 (outage-reads-and-retry): "busy, try again" says when, as the menu's 503 does: the
+  // phone keeps its cart, says the store's system is busy and when to retry, and reads the cart
+  // again by itself then (a change stays the guest's to redo). A route with its own wait keeps it.
   if (errorCode === "cart_service_unavailable" && response.getHeader("Retry-After") === undefined)
     response.setHeader("Retry-After", "5");
   response.status(contract.status).json({

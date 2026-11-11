@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { afterEach, describe, expect, it } from "vitest";
-import { CartPage, cartPollIntervalMs, cartPollShouldRead } from "./CartPage.js";
+import { busyRetryDelayMs, CartPage, cartPollIntervalMs, cartPollShouldRead } from "./CartPage.js";
 import type { CartState, CartStateController } from "./cart-state.js";
 import { checkoutInProgressMessage, type CartView } from "./types.js";
 import type { SendRoundController, SendRoundState } from "../checkout/send-round.js";
@@ -1154,6 +1154,39 @@ describe("WP-2423 item 6: a table that pays at the end", () => {
     );
     const error = blocked.slice(blocked.indexOf("cart-state"), blocked.indexOf("cart-layout"));
     expect(error).not.toMatch(/付款|结账/u);
+  });
+});
+
+describe("WP-2423 outage-reads-and-retry: the store's system says it is busy", () => {
+  afterEach(() => {
+    renderToStaticMarkup(createElement(LanguageRoot, { initial: "en", children: () => null }));
+  });
+  const busy = (fromRead: boolean, retryAfterSeconds: number | null = 5): CartState => ({
+    status: "unavailable",
+    cart: cart(),
+    issueCodes: [],
+    retryAfterSeconds,
+    canRetrySameOperation: false,
+    ...(fromRead ? { fromRead: true as const } : {}),
+  });
+  it("a read says the cart is kept and loads again by itself; a change says to try again, in either language", () => {
+    const read = renderPage(busy(true));
+    expect(read).toContain("The store’s system is busy");
+    expect(read).toContain("Your cart is kept. It loads again by itself in 5 seconds.");
+    expect(read).not.toContain("We couldn’t load your cart");
+    expect(renderPage(busy(false))).toContain("Nothing was changed. Try again in 5 seconds.");
+    // Without a wait from the store it stays the plain "couldn't load" answer.
+    expect(renderPage(busy(true, null))).toContain("We couldn’t load your cart");
+    renderToStaticMarkup(createElement(LanguageRoot, { initial: "zh-Hans", children: () => null }));
+    const zh = renderPage(busy(true));
+    expect(zh).toContain("店里的系统有点忙");
+    expect(zh).toContain("购物车还在，5 秒后会自动重新加载。");
+    expect(renderPage(busy(false))).toContain("这次没有改动，请 5 秒后再试。");
+  });
+  it("waits what the store asked, between 1 and 60 seconds", () => {
+    expect(busyRetryDelayMs(5)).toBe(5000);
+    expect(busyRetryDelayMs(0)).toBe(1000);
+    expect(busyRetryDelayMs(600)).toBe(60_000);
   });
 });
 

@@ -788,6 +788,14 @@ export const cartText = Object.freeze({
         t("Your cart is kept and nothing was changed. Try loading it again."),
       ] as const;
     },
+    /** WP-2423 (outage-reads-and-retry): the store's system said it is busy and when to retry. */
+    get busyHeading() {
+      return t("The store’s system is busy");
+    },
+    busyRead: (seconds: number) =>
+      t("Your cart is kept. It loads again by itself in {seconds} seconds.", { seconds }),
+    busyChange: (seconds: number) =>
+      t("Nothing was changed. Try again in {seconds} seconds.", { seconds }),
     get notEnoughLeftHeading() {
       return t("Not enough left");
     },

@@ -1058,6 +1058,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "We couldn’t continue this checkout. Review your cart and scan the QR code again if needed.":
     "无法继续这次结账。请检查购物车，必要时重新扫描二维码。",
   "We couldn’t load your cart": "无法加载你的购物车",
+  "The store’s system is busy": "店里的系统有点忙",
+  "Your cart is kept. It loads again by itself in {seconds} seconds.":
+    "购物车还在，{seconds} 秒后会自动重新加载。",
+  "Nothing was changed. Try again in {seconds} seconds.": "这次没有改动，请 {seconds} 秒后再试。",
   "We couldn’t load your checkout details. Refresh your checkout to try again.":
     "无法加载结账信息，请刷新结账后重试。",
   "We couldn’t load your order status. Please try again.": "无法加载订单状态，请重试。",
