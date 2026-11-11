@@ -647,7 +647,13 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
         )
           return fail();
         const payments = data.payments.map((value) => {
+          // WP-2423 M52/M131: a counter cash payment says what goes back in cash (whole nickels).
+          const inCash =
+            value !== null &&
+            typeof value === "object" &&
+            Object.hasOwn(value, "cashGivenBackMinor");
           const entry = exact(value, [
+            ...(inCash ? ["cashGivenBackMinor"] : []),
             "paymentAttemptReference",
             "paymentIntentReference",
             "state",
@@ -710,7 +716,15 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
                 ? null
                 : fail()
               : ref(entry.executionApprovalReference);
+          const cashGivenBackMinor = inCash ? money(entry.cashGivenBackMinor) : null;
+          if (
+            cashGivenBackMinor !== null &&
+            (entry.method !== "CardMachine" || BigInt(cashGivenBackMinor) % 5n !== 0n)
+          )
+            return fail();
           return Object.freeze({
+            /** WP-2423 M52: the cash to hand back, or handed back (absent: not a cash payment). */
+            ...(cashGivenBackMinor === null ? {} : { cashGivenBackMinor }),
             executionOperationReference,
             executionApprovalReference,
             paymentAttemptReference: ref(entry.paymentAttemptReference),

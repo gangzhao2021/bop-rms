@@ -384,7 +384,7 @@ export function SettlementReport({
           ) : null}
           <p className="bop-muted">
             {t(
-              "Cash our system recorded for tables. The till also holds cash from your own register, so compare this part only.",
+              "Cash our system recorded for tables and counter orders. The till also holds cash from your own register, so compare this part only.",
             )}
           </p>
         </section>

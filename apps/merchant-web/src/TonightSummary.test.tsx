@@ -157,7 +157,7 @@ describe("WP-2423 item 8 ② tonight's closing summary", () => {
       "$191.60",
       "$219.50",
       "$91.95",
-      "Table cash this system recorded (not the whole cash drawer)",
+      "Cash this system recorded (not the whole cash drawer)",
       "$86.95",
       "$503.05",
       "$491.05",

@@ -328,7 +328,7 @@ export function TonightSummaryView({
               />
             ) : null}
             <Row
-              label={t("Table cash this system recorded (not the whole cash drawer)")}
+              label={t("Cash this system recorded (not the whole cash drawer)")}
               value={money(drawer)}
             />
           </dl>
@@ -348,7 +348,7 @@ export function TonightSummaryView({
             // WP-2423 M163: its own line, never less refunds or a sale; in the drawer and batch.
             <Row
               label={t("Money taken back after refunds made by mistake")}
-              detail={t("Counted in the table cash and the card-machine batch")}
+              detail={t("Counted in the cash and the card-machine batch")}
               value={money(s.moneyTakenBackMinor)}
             />
           ) : null}
@@ -367,7 +367,7 @@ export function TonightSummaryView({
           {/* Owner addition (c): the drawer also holds the merchant's own register cash. */}
           <li>
             {t(
-              "The cash drawer also holds cash taken on your own register. This figure is only the table cash this system recorded: count the two apart.",
+              "The cash drawer also holds cash taken on your own register. This figure is only the cash this system recorded (tables and counter orders): count the two apart.",
             )}
           </li>
         </ul>
@@ -655,7 +655,7 @@ function TonightOffline({
       {children ? <p>{children}</p> : null}
       <p>
         {t(
-          "Card and cash taken since then are not counted yet. At closing, check the card machine's batch and the table cash this system recorded against your paper slips; once the slips are entered, this page and the settlement made when this business day ends include them.",
+          "Card and cash taken since then are not counted yet. At closing, check the card machine's batch and the cash this system recorded against your paper slips; once the slips are entered, this page and the settlement made when this business day ends include them.",
         )}
       </p>
     </section>

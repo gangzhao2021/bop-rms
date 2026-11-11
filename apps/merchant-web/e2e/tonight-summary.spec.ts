@@ -86,7 +86,7 @@ test("@production tonight's summary adds up, checks the card machine and drawer,
   const takings = page.getByRole("region", { name: /^Taken, by payment method/u });
   await expect(takings.getByRole("table")).toContainText("Card machine8$27.40$219.50");
   await expect(takings).toContainText(
-    "Table cash this system recorded (not the whole cash drawer)$86.95",
+    "Cash this system recorded (not the whole cash drawer)$86.95",
   );
   await expect(takings).toContainText("Total taken$503.05");
   await expect(takings).toContainText("Net taken$491.05");
@@ -128,7 +128,7 @@ test("@production tonight's summary adds up, checks the card machine and drawer,
   const offline = page.getByRole("status", { name: "Can't reach the store system" });
   await expect(offline).toContainText("showing the figures from 21:42");
   await expect(offline).toContainText(
-    "check the card machine's batch and the table cash this system recorded",
+    "check the card machine's batch and the cash this system recorded",
   );
   await expect(sales).toContainText("Net sales$394.25");
   await page.setViewportSize({ width: 390, height: 844 });

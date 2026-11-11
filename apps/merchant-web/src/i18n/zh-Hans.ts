@@ -530,7 +530,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "The refund stays as it was.": "退款保持不变。",
   "Cash taken back after a refund made by mistake": "误退后收回的现金",
   "Money taken back after refunds made by mistake": "误退后收回的钱",
-  "Counted in the table cash and the card-machine batch": "已计入桌台现金和刷卡机批次",
+  "Counted in the cash and the card-machine batch": "已计入现金和刷卡机批次",
   "The kitchen's progress couldn't be read. Check with the kitchen; unticked, the guest keeps the food.":
     "读不到厨房进度。请先问厨房；不勾选时，菜照常给客人。",
   "This was already recorded with other details, shown in the list. Nothing more was recorded. Check the list before recording again.":
@@ -6358,8 +6358,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Cash rounding {roundingMinor}": "现金取整 {roundingMinor}",
   "{recordedAfterOutageCount} cash payment(s) were recorded after an outage; they count on the day they were paid.":
     "{recordedAfterOutageCount} 笔现金收款是断网后补录的，按实际收款那天计入。",
-  "Cash our system recorded for tables. The till also holds cash from your own register, so compare this part only.":
-    "这是本系统为桌台记录的现金。钱箱里还有你们自己收银机收的现金，只对这一部分。",
+  "Cash our system recorded for tables and counter orders. The till also holds cash from your own register, so compare this part only.":
+    "这是本系统为桌台和柜台订单记录的现金。钱箱里还有你们自己收银机收的现金，只对这一部分。",
   "Problem with the food": "菜品有问题",
   "Guest asked": "客人要求",
   "Charged too much": "多收了",
@@ -6682,14 +6682,13 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   Method: "方式",
   Taken: "实收",
   "Cash given back": "现金退款",
-  "Table cash this system recorded (not the whole cash drawer)":
-    "本系统记下的桌台现金（不是钱箱总数）",
+  "Cash this system recorded (not the whole cash drawer)": "本系统记下的现金（不是钱箱总数）",
   "Total taken": "合计实收",
   "Net taken": "净实收",
   "Card machine: when you close, run its batch (settlement). The batch total should be {amount} (tips included, refunds taken off). If it differs, check each table's card payment.":
     "刷卡机：打烊时做一次批结。批结单总额应是 {amount}（含小费，已减退款）。对不上时逐桌核对刷卡记录。",
-  "The cash drawer also holds cash taken on your own register. This figure is only the table cash this system recorded: count the two apart.":
-    "钱箱里还有你们自己收银机收的现金。这里只算本系统记下的桌台现金，两者分开数。",
+  "The cash drawer also holds cash taken on your own register. This figure is only the cash this system recorded (tables and counter orders): count the two apart.":
+    "钱箱里还有你们自己收银机收的现金。这里只算本系统记下的现金（桌台和柜台订单），两者分开数。",
   "Tables not paid yet": "还没结账的桌",
   "Every table is paid": "桌都结完了",
   "{tables} · {amount} to take before closing": "{tables} · 打烊前要收 {amount}",
@@ -6716,8 +6715,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Can't reach the store system": "连不上门店系统",
   "Can't reach the store system · showing the figures from {time}":
     "连不上门店系统 · 显示 {time} 的数字",
-  "Card and cash taken since then are not counted yet. At closing, check the card machine's batch and the table cash this system recorded against your paper slips; once the slips are entered, this page and the settlement made when this business day ends include them.":
-    "此后收的刷卡和现金还没算进来。打烊时用刷卡机批结单和钱箱里本系统记下的桌台现金对照纸单；纸单补录后，这一页和营业日结束时的日结都会算上。",
+  "Card and cash taken since then are not counted yet. At closing, check the card machine's batch and the cash this system recorded against your paper slips; once the slips are entered, this page and the settlement made when this business day ends include them.":
+    "此后收的刷卡和现金还没算进来。打烊时用刷卡机批结单和钱箱里本系统记下的现金对照纸单；纸单补录后，这一页和营业日结束时的日结都会算上。",
   "Business day from {startsAt}": "营业日从 {startsAt} 开始",
   "Paid, guests still seated": "已付清，客人还在座",
   "{name}: {openItemCount} not served yet. Serve them when they're ready (Serve all on the table). Dishes the kitchen hasn't marked started can come off the bill before the table pays.":
@@ -9281,4 +9280,36 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Added 1 role. It is on once it is approved.": "已添加 1 个角色，批准后启用。",
   "{name} wasn't approved, or was withdrawn, so nobody can be given it yet. These roles send it for approval again.":
     "{name} 没有被批准或已撤回，现在还不能分给员工；用这些角色会把它重新送审。",
+  "Record cash given back": "记录已退还现金",
+  "Order {orderNumber} was paid in cash. Hand {amount} back to the guest from the drawer first (whole nickels, rounded to 5 cents), then record it here.":
+    "订单 {orderNumber} 是现金付款。请先从钱箱把 {amount} 退给客人（按 5 分取整），再在这里记录。",
+  "Gave back {amount} in cash": "已退还现金 {amount}",
+  "Cash given back recorded: {amount} at {time}.": "已记录退还现金：{time} 退还 {amount}。",
+  "The guest paid in cash. Hand back {cash} from the drawer (the refund of {amount}, in whole nickels), then record it here.":
+    "客人是现金付款。请从钱箱退还 {cash}（退款 {amount}，按 5 分取整），再在这里记录。",
+  "Given back earlier, while the system was unreachable": "系统连不上时已经退还",
+  " (cash)": "（现金）",
+  "Paid in cash ": "已现金付款 ",
+  " · change {change}": " · 找零 {change}",
+  " · given back in full": " · 已全部退还",
+  " · {refunded} given back": " · 已退还 {refunded}",
+  "Cash given back in full, including any tip.": "现金已全部退还，含小费。",
+  "Give back {value} in cash, then record it here.": "请退还现金 {value}，再在这里记录。",
+  "It was paid in cash: give back {value} in cash, then record it here.":
+    "这单是现金付款：请退还现金 {value}，再在这里记录。",
+  "The cash was given back.": "现金已退还。",
+  "Paid in cash. To give it all back before the kitchen starts, cancel the order. To give back some items, a manager opens Payments and refunds and records the refund; the cash goes back in whole nickels (rounded to 5 cents).":
+    "现金付款。厨房开始做之前要全部退还，请取消订单。只退部分菜品，由店长在“付款与退款”里记录退款；现金按 5 分取整退还。",
+  "Cash to give back": "需要退还的现金",
+  "Take {amount} in cash": "收现金 {amount}",
+  "How the guest pays": "客人怎么付",
+  "Count the cash before you record it. Once recorded, only a manager can give it back.":
+    "先点清现金再记录。记录后只有店长能退还。",
+  "Paid in cash.": "已现金付款。",
+  "Cash recorded. Give {change} change. It is not in the kitchen yet: accept it in Orders now (or ask a manager to); an order that isn't accepted in time expires and the cash must be given back.":
+    "现金已记录。请找零 {change}。还没送到厨房：请现在在“订单”里接单（或请店长接单）；没有及时接单的订单会过期，现金要退还给客人。",
+  "Cash recorded after the outage and accepted. If it was already made and handed over, mark it ready in Kitchen and handed over in Pickup.":
+    "断网期间收的现金已补录并接单。如果已经做好并交给客人，请在“厨房”标为已做好，在“取餐”标为已交付。",
+  "Cash recorded. Give {change} change. Sent to the kitchen.":
+    "现金已记录。请找零 {change}。已送到厨房。",
 });

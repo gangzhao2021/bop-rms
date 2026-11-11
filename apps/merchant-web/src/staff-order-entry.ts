@@ -56,6 +56,8 @@ export class CounterOrderClientError extends Error {
       | "PaymentWindowClosed"
       /** WP-2423 M160: the paid-at time is before the Store started recording sales here. */
       | "TakenBeforeRecords"
+      /** WP-2423 M52: less cash handed over than the cash total. Nothing was recorded. */
+      | "CashShort"
       | "AlreadyPaid"
       | "NotPayable"
       | "Invalid"
@@ -515,6 +517,15 @@ export interface RecordedCardPayment {
   readonly takenAt: string;
   /** WP-2423 D1: the server accepted it with the payment (it is in the kitchen), or not. */
   readonly acceptance: "Accepted" | "NotAccepted";
+  /**
+   * WP-2423 M52: paid in cash at the counter — the cash total (rounded to 5 cents), what the guest
+   * handed over and the change to give back. Null when paid on the card machine.
+   */
+  readonly cash: {
+    readonly cashTotalMinor: string;
+    readonly tenderedMinor: string;
+    readonly changeMinor: string;
+  } | null;
 }
 
 async function errorOf(response: Response): Promise<Record<string, unknown>> {
@@ -696,10 +707,14 @@ export function createCounterOrderClient(csrf: string, fetcher: typeof fetch = f
       readonly expectedTotalMinor: string;
       readonly slipReference: string | null;
       readonly takenAt: string | null;
+      /** WP-2423 M52: the cash handed over (cents); absent when paid on the card machine. */
+      readonly tenderedMinor?: string;
     }): Promise<RecordedCardPayment> {
       const response = await post("/merchant/orders/card-machine-payment", command);
       if (response.ok) {
-        const raw = record(await response.json(), [
+        const body: unknown = await response.json();
+        const paidInCash = body !== null && typeof body === "object" && Object.hasOwn(body, "cash");
+        const raw = record(body, [
           "status",
           "orderReference",
           "orderBatchReference",
@@ -708,7 +723,29 @@ export function createCounterOrderClient(csrf: string, fetcher: typeof fetch = f
           "takenAt",
           "recordedAt",
           "acceptance",
+          ...(paidInCash ? ["cash"] : []),
         ]);
+        let cash: RecordedCardPayment["cash"] = null;
+        if (paidInCash) {
+          const c = record(raw.cash, [
+            "cashTotalMinor",
+            "roundingMinor",
+            "tenderedMinor",
+            "changeMinor",
+          ]);
+          if (
+            [c.cashTotalMinor, c.tenderedMinor, c.changeMinor].some(
+              (value) => typeof value !== "string" || !minorPattern.test(value),
+            ) ||
+            command.tenderedMinor === undefined
+          )
+            return invalid();
+          cash = Object.freeze({
+            cashTotalMinor: c.cashTotalMinor as string,
+            tenderedMinor: c.tenderedMinor as string,
+            changeMinor: c.changeMinor as string,
+          });
+        }
         if (
           (raw.status !== "Recorded" && raw.status !== "AlreadyRecorded") ||
           (raw.acceptance !== "Accepted" && raw.acceptance !== "NotAccepted") ||
@@ -725,6 +762,7 @@ export function createCounterOrderClient(csrf: string, fetcher: typeof fetch = f
           recordingReason: raw.recordingReason,
           takenAt: raw.takenAt,
           acceptance: raw.acceptance,
+          cash,
         });
       }
       const body = await errorOf(response);
@@ -745,6 +783,7 @@ export function createCounterOrderClient(csrf: string, fetcher: typeof fetch = f
         throw new CounterOrderClientError("NotPayable");
       if (code === "card_machine_conflict") throw new CounterOrderClientError("Conflict");
       if (code === "taken_before_records") throw new CounterOrderClientError("TakenBeforeRecords");
+      if (code === "cash_tender_short") throw new CounterOrderClientError("CashShort");
       if (response.status === 400) throw new CounterOrderClientError("Invalid");
       throw new CounterOrderClientError(response.status >= 500 ? "OutcomeUnknown" : "Unavailable");
     },

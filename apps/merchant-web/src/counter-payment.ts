@@ -30,6 +30,8 @@ export function payErrorText(error: CounterOrderClientError) {
       );
     case "Invalid":
       return t("Check the slip reference and the paid-at time.");
+    case "CashShort":
+      return t("The cash received is less than the cash total.");
     case "TakenBeforeRecords":
       return t(
         "That paid-at time is before this store started recording sales in the system. Check when it was paid and enter it again.",
@@ -192,7 +194,22 @@ export function paidNoteText(input: {
   readonly tableMode: boolean;
   readonly recordedAfterOutage: boolean;
   readonly acceptance: "Accepted" | "NotAccepted";
+  /** WP-2423 M52: paid in cash at the counter (the change to give back). */
+  readonly cash?: { readonly changeMinor: string } | null | undefined;
 }): string {
+  if (input.cash != null) {
+    const change = orderMoney({ amountMinor: input.cash.changeMinor, currencyCode: "CAD" });
+    if (input.acceptance === "NotAccepted")
+      return t(
+        "Cash recorded. Give {change} change. It is not in the kitchen yet: accept it in Orders now (or ask a manager to); an order that isn't accepted in time expires and the cash must be given back.",
+        { change },
+      );
+    return input.recordedAfterOutage
+      ? t(
+          "Cash recorded after the outage and accepted. If it was already made and handed over, mark it ready in Kitchen and handed over in Pickup.",
+        )
+      : t("Cash recorded. Give {change} change. Sent to the kitchen.", { change });
+  }
   if (input.acceptance === "NotAccepted")
     return t(
       "Paid, but not sent to the kitchen yet. Accept it in Orders now (or ask a manager to): an order that isn't accepted in time expires and must be refunded on the card machine.",

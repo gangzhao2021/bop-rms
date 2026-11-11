@@ -338,7 +338,15 @@ it("v15 2026-10-17: the payment page lists this payment's card-machine refunds s
     entry: first,
     amountMinor: "480",
     approval: null,
+    cashMinor: null,
   });
+  // WP-2423 M52/M131: a counter cash payment says what goes back from the drawer (whole nickels).
+  const inCash = status("NotDispatched");
+  const cashPayment = { ...inCash.payments[0], cashGivenBackMinor: "480" };
+  expect(
+    cardMachineRefundToRecord(id(1), first, { ...inCash, payments: [cashPayment] } as never, null)
+      ?.cashMinor,
+  ).toBe("480");
   // Already recorded, or a request of another payment of the same order: not offered here.
   expect(cardMachineRefundToRecord(id(1), first, status("Confirmed"), null)).toBeNull();
   expect(cardMachineRefundToRecord(id(1), first, status("NotDispatched", id(9)), null)).toBeNull();

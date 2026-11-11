@@ -298,13 +298,23 @@ function parseCounter(value: unknown, sourceChannel: unknown) {
   if (typeof raw.recordedAfterOutage !== "boolean" || sourceChannel !== "Pos") return fail();
   let paid = null;
   if (raw.paidOnCardMachine !== null) {
+    // WP-2423 M52: a counter order paid in cash (amountMinor is then the cash taken).
+    const inCash =
+      typeof raw.paidOnCardMachine === "object" && Object.hasOwn(raw.paidOnCardMachine, "cash");
     const p = exact(raw.paidOnCardMachine, [
       "amountMinor",
       "takenAt",
       "recordedAfterOutage",
       "refundedMinor",
+      ...(inCash ? ["cash"] : []),
     ]);
+    const c = inCash ? exact(p.cash, ["tenderedMinor", "changeMinor", "roundingMinor"]) : null;
     if (
+      (c !== null &&
+        (typeof c.tenderedMinor !== "string" ||
+          !minorPattern.test(c.tenderedMinor) ||
+          typeof c.changeMinor !== "string" ||
+          !minorPattern.test(c.changeMinor))) ||
       typeof p.amountMinor !== "string" ||
       !minorPattern.test(p.amountMinor) ||
       typeof p.refundedMinor !== "string" ||
@@ -319,6 +329,14 @@ function parseCounter(value: unknown, sourceChannel: unknown) {
       takenAt: instant(p.takenAt),
       recordedAfterOutage: p.recordedAfterOutage,
       refundedMinor: p.refundedMinor,
+      /** WP-2423 M52: paid in cash — what the guest handed over and the change (else null). */
+      cash:
+        c === null
+          ? null
+          : Object.freeze({
+              tenderedMinor: c.tenderedMinor as string,
+              changeMinor: c.changeMinor as string,
+            }),
     });
   }
   const payBy = withPayBy && raw.payBy !== null ? instant(raw.payBy) : null;

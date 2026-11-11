@@ -22,7 +22,14 @@ export function cardMachineRefundRecordedText(
   requestedMinor: string,
   /** The Store's time zone (UTC, labelled, when not known). */
   timeZone: string | undefined,
+  /** WP-2423 M52: the payment was cash (it went back from the drawer). */
+  inCash = false,
 ): string {
+  if (inCash)
+    return t("Cash given back recorded: {amount} at {time}.", {
+      amount: orderMoney({ amountMinor: result.amountMinor, currencyCode: "CAD" }),
+      time: storeTime(result.refundedAt, timeZone, true),
+    });
   const amount =
     result.amountMinor === requestedMinor
       ? amountLabel
@@ -58,11 +65,17 @@ export function CardMachineRequestRefund({
   amountLabel,
   csrf,
   onRecorded,
+  cashMinor = null,
   client = defaultClient,
 }: {
   readonly orderReference: string;
   readonly requestReference: string;
   readonly amountMinor: string;
+  /**
+   * WP-2423 M52/M131: the payment was cash at the counter — what to hand back from the drawer
+   * (whole nickels, the server's amount). Null for the card machine.
+   */
+  readonly cashMinor?: string | null;
   /** The amount as the page around it writes it (one money style per page). */
   readonly amountLabel?: string;
   readonly csrf: string;
@@ -79,9 +92,11 @@ export function CardMachineRequestRefund({
   const [done, setDone] = useState<string | null>(null);
   const amount = amountLabel ?? orderMoney({ amountMinor, currencyCode: "CAD" });
   const madeAtInstant = earlier ? paidAtInstant(madeAt, Date.now(), timeZone) : null;
+  const inCash = cashMinor !== null;
+  const cash = orderMoney({ amountMinor: cashMinor ?? "0", currencyCode: "CAD" });
   const ready =
     outcome !== "Pending" &&
-    validSlipReference(slip.trim()) &&
+    (inCash || validSlipReference(slip.trim())) &&
     (!earlier || madeAtInstant !== null);
   const id = "card-request-refund-" + requestReference;
   const submit = async () => {
@@ -94,14 +109,20 @@ export function CardMachineRequestRefund({
           operationReference: operation.current,
           orderReference,
           requestReference,
-          slipReference: slip.trim() === "" ? null : slip.trim(),
+          slipReference: inCash || slip.trim() === "" ? null : slip.trim(),
           refundedAt: earlier ? madeAtInstant : null,
         },
         csrf,
       );
       operation.current = null;
       setOutcome("Idle");
-      const confirmation = cardMachineRefundRecordedText(result, amount, amountMinor, timeZone);
+      const confirmation = cardMachineRefundRecordedText(
+        result,
+        amount,
+        amountMinor,
+        timeZone,
+        inCash,
+      );
       setDone(confirmation);
       onRecorded(confirmation);
     } catch (error) {
@@ -126,25 +147,36 @@ export function CardMachineRequestRefund({
         }}
       >
         <p id={id + "-title"}>
-          {t(
-            "Refund {amount} on the store's card machine to the card the customer paid with, then record it here.",
-            { amount },
-          )}
+          {inCash
+            ? t(
+                "The guest paid in cash. Hand back {cash} from the drawer (the refund of {amount}, in whole nickels), then record it here.",
+                { cash, amount },
+              )
+            : t(
+                "Refund {amount} on the store's card machine to the card the customer paid with, then record it here.",
+                { amount },
+              )}
         </p>
-        <label>
-          {t("Slip reference (optional)")}
-          <input
-            value={slip}
-            maxLength={40}
-            autoComplete="off"
-            aria-describedby={id + "-hint"}
-            aria-invalid={!validSlipReference(slip.trim())}
-            onChange={(event) => setSlip(event.currentTarget.value)}
-          />
-        </label>
-        <p id={id + "-hint"} className="field-hint">
-          {t("The approval or reference code printed on the refund slip. Never the card number.")}
-        </p>
+        {inCash ? null : (
+          <>
+            <label>
+              {t("Slip reference (optional)")}
+              <input
+                value={slip}
+                maxLength={40}
+                autoComplete="off"
+                aria-describedby={id + "-hint"}
+                aria-invalid={!validSlipReference(slip.trim())}
+                onChange={(event) => setSlip(event.currentTarget.value)}
+              />
+            </label>
+            <p id={id + "-hint"} className="field-hint">
+              {t(
+                "The approval or reference code printed on the refund slip. Never the card number.",
+              )}
+            </p>
+          </>
+        )}
         <label>
           <input
             type="checkbox"
@@ -154,7 +186,9 @@ export function CardMachineRequestRefund({
               setEarlier(event.currentTarget.checked);
             }}
           />
-          {t("Refunded earlier, while the system was unreachable")}
+          {inCash
+            ? t("Given back earlier, while the system was unreachable")
+            : t("Refunded earlier, while the system was unreachable")}
         </label>
         {earlier ? (
           <label>
@@ -200,7 +234,9 @@ export function CardMachineRequestRefund({
         <button type="submit" className="refund-primary" disabled={!ready}>
           {outcome === "Pending"
             ? t("Recording…")
-            : t("Refunded {amount} on card machine", { amount })}
+            : inCash
+              ? t("Gave back {amount} in cash", { amount: cash })
+              : t("Refunded {amount} on card machine", { amount })}
         </button>
       </form>
       {/* Outside the form: the verification step has its own form. */}

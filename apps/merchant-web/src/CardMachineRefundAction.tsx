@@ -108,9 +108,12 @@ export function CardMachineRefundAction({
         : null;
   if (amountMinor === null) return null;
   const amount = orderMoney({ amountMinor, currencyCode: "CAD" });
+  // WP-2423 M52/M131: a counter order paid in cash is given back in cash (whole nickels; the
+  // server's amount), with no machine slip.
+  const inCash = order.counter?.paidOnCardMachine?.cash != null;
   const titleId = "card-refund-" + batch.orderBatchReference;
   const submit = async () => {
-    if (outcome === "Pending" || !validSlipReference(slip.trim())) return;
+    if (outcome === "Pending" || (!inCash && !validSlipReference(slip.trim()))) return;
     operation.current ??= serviceOperationReference();
     setOutcome("Pending");
     let next: Exclude<Outcome, "Idle" | "Pending">;
@@ -125,7 +128,7 @@ export function CardMachineRefundAction({
           operationReference: operation.current,
           orderReference: order.orderReference,
           orderBatchReference: batch.orderBatchReference,
-          slipReference: slip.trim() === "" ? null : slip.trim(),
+          slipReference: inCash || slip.trim() === "" ? null : slip.trim(),
           refundedAt: null,
         }),
       });
@@ -152,7 +155,7 @@ export function CardMachineRefundAction({
   return (
     <div className="card-actions card-machine-refund-action">
       <button type="button" onClick={() => dialog.current?.showModal()}>
-        {t("Record card-machine refund")}
+        {inCash ? t("Record cash given back") : t("Record card-machine refund")}
       </button>
       <dialog
         ref={dialog}
@@ -162,12 +165,21 @@ export function CardMachineRefundAction({
           if (outcome === "Pending") event.preventDefault();
         }}
       >
-        <h2 id={titleId}>{t("Refund {amount} on the card machine", { amount: amount })}</h2>
+        <h2 id={titleId}>
+          {inCash
+            ? t("Give back {amount} in cash", { amount: amount })
+            : t("Refund {amount} on the card machine", { amount: amount })}
+        </h2>
         <p>
-          {t(
-            "Order {orderNumber} was paid on the store's card machine. Refund {amount} to the customer's card on the machine first, then record it here.",
-            { orderNumber: order.orderNumber, amount: amount },
-          )}
+          {inCash
+            ? t(
+                "Order {orderNumber} was paid in cash. Hand {amount} back to the guest from the drawer first (whole nickels, rounded to 5 cents), then record it here.",
+                { orderNumber: order.orderNumber, amount: amount },
+              )
+            : t(
+                "Order {orderNumber} was paid on the store's card machine. Refund {amount} to the customer's card on the machine first, then record it here.",
+                { orderNumber: order.orderNumber, amount: amount },
+              )}
         </p>
         <form
           onSubmit={(event) => {
@@ -175,32 +187,40 @@ export function CardMachineRefundAction({
             void submit();
           }}
         >
-          <label>
-            {t("Slip reference (optional)")}
-            <input
-              value={slip}
-              maxLength={40}
-              autoComplete="off"
-              inputMode="text"
-              aria-describedby={titleId + "-hint"}
-              aria-invalid={!validSlipReference(slip.trim())}
-              onChange={(event) => setSlip(event.currentTarget.value)}
-            />
-          </label>
-          <p id={titleId + "-hint"} className="field-hint">
-            {t("The approval or reference code printed on the refund slip. Never the card number.")}
-          </p>
+          {inCash ? null : (
+            <>
+              <label>
+                {t("Slip reference (optional)")}
+                <input
+                  value={slip}
+                  maxLength={40}
+                  autoComplete="off"
+                  inputMode="text"
+                  aria-describedby={titleId + "-hint"}
+                  aria-invalid={!validSlipReference(slip.trim())}
+                  onChange={(event) => setSlip(event.currentTarget.value)}
+                />
+              </label>
+              <p id={titleId + "-hint"} className="field-hint">
+                {t(
+                  "The approval or reference code printed on the refund slip. Never the card number.",
+                )}
+              </p>
+            </>
+          )}
           {outcome === FULL_SIGN_IN_REQUIRED ? null : (
             <CardMachineRefundStatus outcome={outcome} csrf={csrf} fetcher={fetcher} />
           )}
           <div className="card-actions">
             <button
               type="submit"
-              disabled={outcome === "Pending" || !validSlipReference(slip.trim())}
+              disabled={outcome === "Pending" || (!inCash && !validSlipReference(slip.trim()))}
             >
               {outcome === "Pending"
                 ? t("Recording…")
-                : t("Refunded {amount} on card machine", { amount: amount })}
+                : inCash
+                  ? t("Gave back {amount} in cash", { amount: amount })
+                  : t("Refunded {amount} on card machine", { amount: amount })}
             </button>
             <button
               type="button"

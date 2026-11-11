@@ -153,12 +153,22 @@ export function CardMachineRefundDone({
   amountMinor,
   refundedAt,
   slipReference,
+  cashMinor = null,
 }: {
   readonly amountMinor: string;
   readonly refundedAt: string;
   /** The reference printed on the refund slip, as staff entered it (null: none entered). */
   readonly slipReference: string | null;
+  /** WP-2423 M52: the cash handed back for a counter cash payment (null: card machine). */
+  readonly cashMinor?: string | null;
 }) {
+  if (cashMinor != null)
+    return (
+      <>
+        {t("Gave back {amount} in cash", { amount: amount(cashMinor) })}{" "}
+        <SourceTime instant={refundedAt} />
+      </>
+    );
   return (
     <>
       {t("Refunded {amount} on the store's card machine", { amount: amount(amountMinor) })}{" "}
@@ -420,6 +430,7 @@ function RecordedRequestStatus({
                         amountMinor={payment.amountMinor}
                         refundedAt={payment.refundedOnCardMachineAt}
                         slipReference={payment.cardMachineSlipReference}
+                        cashMinor={payment.cashGivenBackMinor ?? null}
                       />
                     </p>
                   ) : approval?.state === "AwaitingApproval" ? (
@@ -435,6 +446,7 @@ function RecordedRequestStatus({
                       requestReference={entry.requestReference}
                       amountMinor={payment.amountMinor}
                       amountLabel={amount(payment.amountMinor)}
+                      cashMinor={payment.cashGivenBackMinor ?? null}
                       csrf={csrf}
                       onRecorded={recorded}
                     />
@@ -1722,6 +1734,8 @@ export interface CardMachineRefundToRecord {
   readonly entry: RequestEntry;
   readonly amountMinor: string;
   readonly approval: RefundApprovalEntry | null;
+  /** WP-2423 M52: cash to hand back for a counter cash payment (null: card machine). */
+  readonly cashMinor: string | null;
 }
 /** Recorded, not declined card-machine requests that may still be owed (status decides). */
 export function cardMachineRequestsToCheck(items: Items): readonly RequestEntry[] {
@@ -1749,7 +1763,12 @@ export function cardMachineRefundToRecord(
       value.method === "CardMachine" && value.paymentIntentReference === paymentIntentReference,
   );
   if (payment === undefined || payment.state === "Confirmed") return null;
-  return { entry, amountMinor: payment.amountMinor, approval };
+  return {
+    entry,
+    amountMinor: payment.amountMinor,
+    approval,
+    cashMinor: payment.cashGivenBackMinor ?? null,
+  };
 }
 /**
  * WP-2423 item 4 (v15 2026-10-17): on the payment page itself, each recorded refund of this
@@ -1836,7 +1855,11 @@ export function PendingCardMachineRefunds({
       aria-labelledby="card-machine-refunds-heading"
       className="card-machine-refunds-to-record refund-requests"
     >
-      <h2 id="card-machine-refunds-heading">{t("Refunds to make on the card machine")}</h2>
+      <h2 id="card-machine-refunds-heading">
+        {refunds !== null && refunds.length > 0 && refunds.every((r) => r.cashMinor !== null)
+          ? t("Cash to give back")
+          : t("Refunds to make on the card machine")}
+      </h2>
       {notice !== null ? <p role="status">{notice}</p> : null}
       {message !== "" ? (
         <div role="status">
@@ -1852,7 +1875,7 @@ export function PendingCardMachineRefunds({
       ) : null}
       {refunds !== null && refunds.length > 0 ? (
         <ul>
-          {refunds.map(({ entry, amountMinor, approval }) => (
+          {refunds.map(({ entry, amountMinor, approval, cashMinor }) => (
             <li key={entry.requestReference} className="refund-request">
               <RequestRow
                 entry={entry}
@@ -1874,6 +1897,7 @@ export function PendingCardMachineRefunds({
                     requestReference={entry.requestReference}
                     amountMinor={amountMinor}
                     amountLabel={amount(amountMinor)}
+                    cashMinor={cashMinor}
                     csrf={csrf}
                     onRecorded={(confirmation) => {
                       setNotice(confirmation);

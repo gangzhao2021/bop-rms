@@ -640,7 +640,11 @@ export function orderRefundRows(
       (order.orderType === "Pickup"
         ? t("Order cancellation refund")
         : t("Round {sequence} cancellation refund", { sequence: batch.sequence })) +
-      (cancellation.refundMethod === "CardMachine" ? t(" (card machine)") : "");
+      (cancellation.refundMethod === "CardMachine"
+        ? order.counter?.paidOnCardMachine?.cash != null
+          ? t(" (cash)")
+          : t(" (card machine)")
+        : "");
     if (cancellation.refundAmountMinor === null) {
       known = false;
       rows.push({ label, amount: null });
@@ -807,9 +811,28 @@ export function cardMachineOwed(order: CurrentOrderQueue["items"][number]): stri
  * as refunded on the machine (cancellations of rounds or items, and ordinary refunds), as the
  * order's settlement counts it.
  */
-export function cardMachinePaymentText(paid: bigint, refunded: bigint, toRefund = 0n): string {
+export function cardMachinePaymentText(
+  paid: bigint,
+  refunded: bigint,
+  toRefund = 0n,
+  /** WP-2423 M52: a counter order paid in cash ("Paid in cash $22.45 · change $27.55"). */
+  cash: { readonly changeMinor: string } | null = null,
+): string {
   const money = (minor: bigint) =>
     orderMoney({ amountMinor: minor.toString(), currencyCode: "CAD" });
+  if (cash !== null)
+    return (
+      t("Paid in cash ") +
+      money(paid) +
+      (BigInt(cash.changeMinor) > 0n
+        ? t(" · change {change}", { change: money(BigInt(cash.changeMinor)) })
+        : "") +
+      (refunded >= paid
+        ? t(" · given back in full")
+        : refunded > 0n
+          ? t(" · {refunded} given back", { refunded: money(refunded) })
+          : "")
+    );
   return (
     t("Paid on card machine ") +
     money(paid) +
@@ -2359,14 +2382,24 @@ function OrderDetailBody({
           </span>
           <span>
             {batch.staffCancellation.refundMethod === "CardMachine"
-              ? batch.staffCancellation.refundStatus === "Refunded"
-                ? t("Refunded in full on the store's card machine, including any tip.")
-                : t("Refund {value} on the store's card machine, then record it here.", {
-                    value: orderMoney({
-                      amountMinor: batch.staffCancellation.refundAmountMinor ?? "0",
-                      currencyCode: "CAD",
-                    }),
-                  })
+              ? order.counter?.paidOnCardMachine?.cash != null
+                ? // WP-2423 M52/M131: a counter order paid in cash is given back in cash.
+                  batch.staffCancellation.refundStatus === "Refunded"
+                  ? t("Cash given back in full, including any tip.")
+                  : t("Give back {value} in cash, then record it here.", {
+                      value: orderMoney({
+                        amountMinor: batch.staffCancellation.refundAmountMinor ?? "0",
+                        currencyCode: "CAD",
+                      }),
+                    })
+                : batch.staffCancellation.refundStatus === "Refunded"
+                  ? t("Refunded in full on the store's card machine, including any tip.")
+                  : t("Refund {value} on the store's card machine, then record it here.", {
+                      value: orderMoney({
+                        amountMinor: batch.staffCancellation.refundAmountMinor ?? "0",
+                        currencyCode: "CAD",
+                      }),
+                    })
               : batch.staffCancellation.refundAmountMinor !== null &&
                   batch.staffCancellation.refundAmountMinor !== "0"
                 ? // 46940b76 L2: what is left of the payment (items refunded earlier are listed
@@ -2507,6 +2540,8 @@ function OrderDetailBody({
       ? cardMachinePaymentText(
           BigInt(order.counter.paidOnCardMachine.amountMinor),
           BigInt(order.counter.paidOnCardMachine.refundedMinor),
+          0n,
+          order.counter.paidOnCardMachine.cash,
         )
       : null,
     cardMachineRoundsText(order),
@@ -2578,19 +2613,28 @@ function OrderDetailBody({
       {order.unfulfillable !== null ? (
         <p className="order-workbench-closed" role="note">
           {unfulfillableText[order.unfulfillable]}{" "}
-          {order.counter?.paidOnCardMachine
+          {order.counter?.paidOnCardMachine?.cash != null
             ? cardMachineOwed(order) !== null
-              ? t(
-                  "It was paid on the store's card machine: refund {value} on the card machine, then record it here.",
-                  {
-                    value: orderMoney({
-                      amountMinor: cardMachineOwed(order) ?? "0",
-                      currencyCode: "CAD",
-                    }),
-                  },
-                )
-              : t("It was refunded on the store's card machine.")
-            : t("The payment was refunded automatically; this order cannot be accepted.")}
+              ? t("It was paid in cash: give back {value} in cash, then record it here.", {
+                  value: orderMoney({
+                    amountMinor: cardMachineOwed(order) ?? "0",
+                    currencyCode: "CAD",
+                  }),
+                })
+              : t("The cash was given back.")
+            : order.counter?.paidOnCardMachine
+              ? cardMachineOwed(order) !== null
+                ? t(
+                    "It was paid on the store's card machine: refund {value} on the card machine, then record it here.",
+                    {
+                      value: orderMoney({
+                        amountMinor: cardMachineOwed(order) ?? "0",
+                        currencyCode: "CAD",
+                      }),
+                    },
+                  )
+                : t("It was refunded on the store's card machine.")
+              : t("The payment was refunded automatically; this order cannot be accepted.")}
         </p>
       ) : null}
       {order.orderType === "DineIn" && detail !== undefined
@@ -3073,9 +3117,13 @@ export function CurrentOrderDetails({
         <details className="order-refund-howto">
           <summary>{t("How do refunds work?")}</summary>
           <p>
-            {t(
-              "Paid on the store's card machine. To refund it in full before the kitchen starts, cancel the order. To refund some items, a manager opens Payments and refunds, records the refund, makes it on the card machine and records it there.",
-            )}
+            {order.counter.paidOnCardMachine.cash != null
+              ? t(
+                  "Paid in cash. To give it all back before the kitchen starts, cancel the order. To give back some items, a manager opens Payments and refunds and records the refund; the cash goes back in whole nickels (rounded to 5 cents).",
+                )
+              : t(
+                  "Paid on the store's card machine. To refund it in full before the kitchen starts, cancel the order. To refund some items, a manager opens Payments and refunds, records the refund, makes it on the card machine and records it there.",
+                )}
           </p>
         </details>
       ) : null}

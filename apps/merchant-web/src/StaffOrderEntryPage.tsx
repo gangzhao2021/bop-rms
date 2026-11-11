@@ -14,6 +14,7 @@ import { storeTime } from "./StoreTime.js";
 import { WorkspacePage } from "./WorkspacePage.js";
 import { CounterAwaitingPayment } from "./CounterAwaitingPayment.js";
 import { CounterCancelAction } from "./CounterCancelAction.js";
+import { CashTenderFields, cashTender } from "./CashTenderFields.js";
 import { loadOftenOrdered, recordOrdered } from "./counter-often-ordered.js";
 import {
   paidAtDayNote,
@@ -714,6 +715,10 @@ export function StaffOrderEntryPage({
   const [paper, setPaper] = useState(false);
   const [paidAt, setPaidAt] = useState("");
   const [slip, setSlip] = useState("");
+  // WP-2423 M52 (DEC-COUNTER-CASH): how the counter guest pays, and the cash they handed over.
+  const [tender, setTender] = useState<"CardMachine" | "Cash">("CardMachine");
+  const [received, setReceived] = useState("");
+  const [changeDue, setChangeDue] = useState<string | null>(null);
   const [placed, setPlaced] = useState<PlacedCounterOrder | null>(null);
   const [phase, setPhase] = useState<
     "Building" | "Sending" | "Charge" | "Recording" | "Paid" | "Accepted" | "Sent"
@@ -1198,14 +1203,19 @@ export function StaffOrderEntryPage({
   };
 
   const recordPayment = async (expectedTotalMinor: string) => {
-    if (placed === null || phase !== "Charge" || !validSlipReference(slip.trim())) return;
+    if (placed === null || phase !== "Charge") return;
+    const inCash = tender === "Cash" && !tableMode;
+    const cash = inCash ? cashTender(BigInt(expectedTotalMinor), received) : null;
+    if (cash !== null ? !cash.ready : !validSlipReference(slip.trim())) return;
     if (placed.recordedAfterOutage && paperInstant === null) return;
     const takenAt = placed.recordedAfterOutage ? paperInstant : null;
+    const tenderedMinor = cash?.receivedMinor?.toString() ?? null;
     const intent = JSON.stringify([
       placed.orderBatchReference,
       expectedTotalMinor,
-      slip.trim(),
+      inCash ? "" : slip.trim(),
       takenAt,
+      tenderedMinor,
     ]);
     if (payOperation.current?.key !== intent)
       payOperation.current = { key: intent, reference: serviceOperationReference() };
@@ -1220,8 +1230,9 @@ export function StaffOrderEntryPage({
         orderReference: placed.orderReference,
         orderBatchReference: placed.orderBatchReference,
         expectedTotalMinor,
-        slipReference: slip.trim() === "" ? null : slip.trim(),
+        slipReference: inCash || slip.trim() === "" ? null : slip.trim(),
         takenAt,
+        ...(tenderedMinor === null ? {} : { tenderedMinor }),
       });
     } catch (error) {
       const failure =
@@ -1244,11 +1255,13 @@ export function StaffOrderEntryPage({
     // WP-2423 D1: the server accepts the paid order or round with the payment record (at the
     // Order's current version), so it reaches the kitchen even if this page is closed now.
     setPhase(recorded.acceptance === "Accepted" ? "Accepted" : "Paid");
+    setChangeDue(recorded.cash?.changeMinor ?? null);
     setPaidNote(
       paidNoteText({
         tableMode,
         recordedAfterOutage: placed.recordedAfterOutage,
         acceptance: recorded.acceptance,
+        cash: recorded.cash,
       }),
     );
   };
@@ -1259,6 +1272,8 @@ export function StaffOrderEntryPage({
     setPlaced(null);
     setPaidAt("");
     setSlip("");
+    setReceived("");
+    setChangeDue(null);
     setProblem(null);
     setPaidNote(null);
     setRemovedNote(null);
@@ -1277,6 +1292,9 @@ export function StaffOrderEntryPage({
     setPaper(false);
     setPaidAt("");
     setSlip("");
+    setTender("CardMachine");
+    setReceived("");
+    setChangeDue(null);
     setProblem(null);
     setProblemNeedsTableCode(false);
     setPaidNote(null);
@@ -1287,6 +1305,8 @@ export function StaffOrderEntryPage({
     setPhase("Building");
   };
 
+  /** WP-2423 M52: this counter order is being paid in cash (tables pay cash at checkout). */
+  const counterCash = tender === "Cash" && !tableMode;
   const pageTitle = tableMode
     ? tableLabel === null
       ? t("Table order")
@@ -2077,9 +2097,15 @@ export function StaffOrderEntryPage({
                   ? t("Paper order {orderNumber}: record the payment taken during the outage", {
                       orderNumber: placed.orderNumber,
                     })
-                  : t("Charge {totalMinor} on the card machine", {
-                      totalMinor: cad(placed.totalMinor),
-                    })}
+                  : counterCash
+                    ? t("Take {amount} in cash", {
+                        amount: cad(
+                          cashTender(BigInt(placed.totalMinor), "").cashDueMinor.toString(),
+                        ),
+                      })
+                    : t("Charge {totalMinor} on the card machine", {
+                        totalMinor: cad(placed.totalMinor),
+                      })}
             </h2>
             {removedNote !== null ? (
               <p className="order-accept-by" data-tier="warning" role="note">
@@ -2105,6 +2131,14 @@ export function StaffOrderEntryPage({
                   <strong>{cad(placed.totalMinor)}</strong>
                 </dd>
               </div>
+              {changeDue !== null && (phase === "Paid" || phase === "Accepted") ? (
+                <div>
+                  <dt>{t("Change to give")}</dt>
+                  <dd>
+                    <strong>{cad(changeDue)}</strong>
+                  </dd>
+                </div>
+              ) : null}
             </dl>
             {phase === "Charge" || phase === "Recording" ? (
               <>
@@ -2131,22 +2165,68 @@ export function StaffOrderEntryPage({
                     void recordPayment(placed.totalMinor);
                   }}
                 >
-                  <label>
-                    {t("Slip reference (optional)")}
-                    <input
-                      value={slip}
-                      maxLength={40}
-                      autoComplete="off"
-                      aria-invalid={!validSlipReference(slip.trim())}
-                      aria-describedby="counter-slip-hint"
-                      onChange={(event) => setSlip(event.currentTarget.value)}
+                  {tableMode ? null : (
+                    // WP-2423 M52 (DEC-COUNTER-CASH): a counter guest pays on the card machine or
+                    // in cash, by the table's cash rules.
+                    <fieldset className="counter-order__tender" disabled={phase === "Recording"}>
+                      <legend>{t("How the guest pays")}</legend>
+                      <label>
+                        <input
+                          type="radio"
+                          name="counter-tender"
+                          checked={tender === "CardMachine"}
+                          onChange={() => {
+                            setTender("CardMachine");
+                            setProblem(null);
+                          }}
+                        />
+                        {t("Card machine")}
+                      </label>
+                      <label>
+                        <input
+                          type="radio"
+                          name="counter-tender"
+                          checked={tender === "Cash"}
+                          onChange={() => {
+                            setTender("Cash");
+                            setProblem(null);
+                          }}
+                        />
+                        {t("Cash")}
+                      </label>
+                    </fieldset>
+                  )}
+                  {counterCash ? (
+                    <CashTenderFields
+                      idPrefix="counter-cash"
+                      dueMinor={BigInt(placed.totalMinor)}
+                      received={received}
+                      onReceived={(value) => {
+                        setReceived(value);
+                        setProblem(null);
+                      }}
+                      disabled={phase === "Recording"}
                     />
-                  </label>
-                  <p id="counter-slip-hint" className="field-hint">
-                    {t(
-                      "The approval or reference code on the card machine slip, to match the machine's day total. Never the card number.",
-                    )}
-                  </p>
+                  ) : (
+                    <>
+                      <label>
+                        {t("Slip reference (optional)")}
+                        <input
+                          value={slip}
+                          maxLength={40}
+                          autoComplete="off"
+                          aria-invalid={!validSlipReference(slip.trim())}
+                          aria-describedby="counter-slip-hint"
+                          onChange={(event) => setSlip(event.currentTarget.value)}
+                        />
+                      </label>
+                      <p id="counter-slip-hint" className="field-hint">
+                        {t(
+                          "The approval or reference code on the card machine slip, to match the machine's day total. Never the card number.",
+                        )}
+                      </p>
+                    </>
+                  )}
                   {placed.recordedAfterOutage ? (
                     <>
                       <label>
@@ -2195,15 +2275,23 @@ export function StaffOrderEntryPage({
                       className="counter-order__primary"
                       disabled={
                         phase === "Recording" ||
-                        !validSlipReference(slip.trim()) ||
+                        (counterCash
+                          ? !cashTender(BigInt(placed.totalMinor), received).ready
+                          : !validSlipReference(slip.trim())) ||
                         (placed.recordedAfterOutage && paperInstant === null)
                       }
                     >
                       {phase === "Recording"
                         ? t("Recording…")
-                        : t("Paid on card machine · {totalMinor}", {
-                            totalMinor: cad(placed.totalMinor),
-                          })}
+                        : counterCash
+                          ? t("Cash received · {amount}", {
+                              amount: cad(
+                                cashTender(BigInt(placed.totalMinor), "").cashDueMinor.toString(),
+                              ),
+                            })
+                          : t("Paid on card machine · {totalMinor}", {
+                              totalMinor: cad(placed.totalMinor),
+                            })}
                     </button>
                   </div>
                 </form>
@@ -2213,14 +2301,18 @@ export function StaffOrderEntryPage({
                         "Card declined? Try another card. Nothing goes to the kitchen until this is recorded; after {payBy} it can no longer be paid here and must be sent again.",
                         { payBy: storeTime(placed.payBy ?? "", timeZone) },
                       )
-                    : placedCancellable
+                    : counterCash
                       ? t(
-                          "Card declined? Try another card. Guest not paying? Cancel the order so its items go back to stock.",
+                          "Count the cash before you record it. Once recorded, only a manager can give it back.",
                         )
-                      : t(
-                          "Card declined? Try another card. Guest not paying? Ask a manager to cancel it; otherwise it is released at {payBy}.",
-                          { payBy: storeTime(placed.payBy ?? "", timeZone) },
-                        )}
+                      : placedCancellable
+                        ? t(
+                            "Card declined? Try another card. Guest not paying? Cancel the order so its items go back to stock.",
+                          )
+                        : t(
+                            "Card declined? Try another card. Guest not paying? Ask a manager to cancel it; otherwise it is released at {payBy}.",
+                            { payBy: storeTime(placed.payBy ?? "", timeZone) },
+                          )}
                 </p>
                 {!tableMode && placedCancellable && !placed.recordedAfterOutage ? (
                   <div className="card-actions">
@@ -2249,7 +2341,10 @@ export function StaffOrderEntryPage({
               </>
             ) : (
               <>
-                <p role="status">{paidNote ?? t("Paid on the card machine.")}</p>
+                <p role="status">
+                  {paidNote ??
+                    (changeDue !== null ? t("Paid in cash.") : t("Paid on the card machine."))}
+                </p>
                 <div className="card-actions">
                   <button type="button" onClick={startOver}>
                     {tableMode ? t("Another order for this table") : t("New counter order")}

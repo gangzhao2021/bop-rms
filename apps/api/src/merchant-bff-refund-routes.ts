@@ -371,6 +371,11 @@ export function installMerchantRefundRoutes(
             refundedOnCardMachineAt: payment.refundedOnCardMachineAt,
             // The reference on the machine's refund slip (not secret; never a card number).
             cardMachineSlipReference: payment.cardMachineSlipReference,
+            // WP-2423 M52/M131: a counter cash payment gives back whole nickels (what was, or is
+            // to be, handed back); absent for card and online payments.
+            ...("cashGivenBackMinor" in payment && typeof payment.cashGivenBackMinor === "string"
+              ? { cashGivenBackMinor: payment.cashGivenBackMinor }
+              : {}),
             executionOperationReference: payment.executionOperationReference,
             executionApprovalReference: payment.executionApprovalReference,
             amountMinor: payment.amountMinor,

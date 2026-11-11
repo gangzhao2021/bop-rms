@@ -8056,6 +8056,47 @@ body:has(.product-complete-draft) .bop-shell__header,
   display: grid;
   gap: var(--bop-space-3);
 }
+/* WP-2423 M52: cash at the counter — the cash total, cash received, quick amounts and change. */
+.counter-order__tender {
+  grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+}
+.counter-order__tender legend {
+  grid-column: 1 / -1;
+}
+.cash-tender {
+  display: grid;
+  gap: var(--bop-space-2);
+  min-width: 0;
+}
+.cash-tender p {
+  margin: 0;
+}
+.cash-tender__due {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.cash-tender input {
+  width: 8rem;
+  font-variant-numeric: tabular-nums;
+}
+.cash-tender__quick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--bop-space-2);
+}
+.cash-tender__quick button {
+  min-height: 44px;
+  font-variant-numeric: tabular-nums;
+}
+.cash-tender__change {
+  min-height: 1.5em;
+  font-size: 18px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.cash-tender__change[data-short="true"] {
+  color: var(--bop-color-danger);
+}
 .order-counter-paid,
 .order-counter-outage {
   display: block;
