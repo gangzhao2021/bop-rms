@@ -29,11 +29,21 @@ M147, M29). Internal test stage; no migration, grant, catalog or role change.
    If the reread fails or one is still open, it is still "try again" (503); a payment still being
    processed stays "the guest is paying". This never treats an outage as stopped.
 
-4. **A paid table's guest count may still be corrected; its bill does not follow.** The count is a
-   fact of the day (guest numbers). Once the table has paid or was written off, the per-head charge
-   stays as paid and staff see "This table has paid, so Tea on the bill stays at 2. If a guest
-   should get money back, a manager refunds it on the order." The line shows both numbers. Money is
-   only given back through the recorded refund path, never by silently changing a paid bill.
+4. **A settled table's guest count may still be corrected; its bill does not follow.** The count
+   is a fact of the day (guest numbers). Once the table's bill is settled the per-head charge stays,
+   the line shows both numbers, and the tea read says how the bill was settled (`settledBy`: Paid or
+   WrittenOff) so staff are told what is true:
+   - guests paid and fewer remain: "This table has paid, so Tea on the bill stays at 2. If a guest
+     should get money back, a manager refunds it on the order.";
+   - guests paid and more arrived: "…stays at 2 and the extra guests' Tea isn't charged. To charge
+     it, take a new order for it." (no refund is mentioned: nobody is owed money);
+   - written off (guests left without paying): "This table was recorded as left without paying, so
+     Tea on the bill stays at 2. Nothing is charged or refunded for the change." (it took no money);
+   - an older server that does not say how: "This table's bill is settled, so Tea on the bill stays
+     at 2." (fits both, no refund step).
+
+   Money is only given back through the recorded refund path, never by silently changing a paid
+   bill.
 
 ## Operating continuity
 
