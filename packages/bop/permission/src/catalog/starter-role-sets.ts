@@ -33,6 +33,12 @@ export interface StarterRoleDefinition {
   readonly roleCode: string;
   /** English source text; staff read it in their language. */
   readonly displayName: string;
+  /**
+   * The name as staff read it in each other language (merchant-web shows `displayName` through its
+   * system wording). A Store's role already called by any of these names takes the starter role's
+   * name: the Roles and Staff pages never show two roles under one name.
+   */
+  readonly shownNames: { readonly "zh-Hans": string };
   readonly description: string;
   /** Catalog codes only; legacy equivalents are added when the role is built. */
   readonly actions: readonly string[];
@@ -79,6 +85,7 @@ const roles: Readonly<Record<StarterRoleKey, StarterRoleDefinition>> = Object.fr
     key: "counter",
     roleCode: "starter_counter",
     displayName: "Counter",
+    shownNames: { "zh-Hans": "柜台" },
     description:
       "Takes orders and payment at the counter, hands over pickups, seats pay-first tables and marks items sold out",
     // What Front of House does, at a counter: the same permissions under the shop's own word.
@@ -104,6 +111,7 @@ const roles: Readonly<Record<StarterRoleKey, StarterRoleDefinition>> = Object.fr
     key: "drink_maker",
     roleCode: "starter_drink_maker",
     displayName: "Drink maker",
+    shownNames: { "zh-Hans": "饮品师" },
     description:
       "Makes drinks from the order screen, remakes a wrong one, marks items sold out and hands orders over",
     actions: maker,
@@ -112,6 +120,7 @@ const roles: Readonly<Record<StarterRoleKey, StarterRoleDefinition>> = Object.fr
     key: "dessert_maker",
     roleCode: "starter_dessert_maker",
     displayName: "Dessert maker",
+    shownNames: { "zh-Hans": "甜品师" },
     description:
       "Makes desserts from the order screen, remakes a wrong one, marks items sold out and hands orders over",
     actions: maker,
@@ -120,6 +129,7 @@ const roles: Readonly<Record<StarterRoleKey, StarterRoleDefinition>> = Object.fr
     key: "floor",
     roleCode: "starter_floor",
     displayName: "Floor",
+    shownNames: { "zh-Hans": "楼面" },
     description:
       "Seats guests, takes table orders, accepts guests' rounds, serves dishes and answers table calls",
     actions: [
@@ -138,13 +148,21 @@ const roles: Readonly<Record<StarterRoleKey, StarterRoleDefinition>> = Object.fr
     key: "runner",
     roleCode: "starter_runner",
     displayName: "Runner",
+    shownNames: { "zh-Hans": "传菜" },
     description: "Brings dishes from the kitchen to the tables and marks them served",
-    actions: ["merchant.access", "ordering.order.read", ...tablesPage, "dining.item.serve", ...tasks],
+    actions: [
+      "merchant.access",
+      "ordering.order.read",
+      ...tablesPage,
+      "dining.item.serve",
+      ...tasks,
+    ],
   },
   cashier: {
     key: "cashier",
     roleCode: "starter_cashier",
     displayName: "Cashier",
+    shownNames: { "zh-Hans": "收银" },
     description:
       "Starts table checkout, takes card and cash, closes paid tables, takes takeout orders and hands them over, and records refund requests",
     actions: [
@@ -218,4 +236,25 @@ export function starterRoleSet(storeType: StarterStoreType): StarterRoleSetDefin
 /** The starter role a role code belongs to, or null when it is not one. */
 export function starterRoleOfCode(roleCode: string): StarterRoleDefinition | null {
   return Object.values(roles).find((role) => role.roleCode === roleCode) ?? null;
+}
+const nameKey = (name: string) => name.trim().toLowerCase();
+/**
+ * Every name a role called `name` is shown under: a starter role's name in English and in each
+ * language staff read it in; any other name only as written.
+ */
+export function starterRoleNameForms(name: string): readonly string[] {
+  const key = nameKey(name);
+  const role = Object.values(roles).find(
+    (item) =>
+      nameKey(item.displayName) === key ||
+      Object.values(item.shownNames).some((shown) => nameKey(shown) === key),
+  );
+  return role === undefined
+    ? [key]
+    : [nameKey(role.displayName), ...Object.values(role.shownNames).map(nameKey)];
+}
+/** Whether two role names are shown as the same name in any language staff read. */
+export function sameShownRoleName(a: string, b: string): boolean {
+  const forms = starterRoleNameForms(b);
+  return starterRoleNameForms(a).some((form) => forms.includes(form));
 }

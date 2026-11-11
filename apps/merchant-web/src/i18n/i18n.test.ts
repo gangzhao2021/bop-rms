@@ -24,6 +24,10 @@ import {
   permissionGroupLabels,
   permissionWarning,
 } from "../../../../packages/bop/permission/src/catalog/permission-staff-wording.js";
+import {
+  starterRole,
+  starterRoleKeys,
+} from "../../../../packages/bop/permission/src/catalog/starter-role-sets.js";
 
 afterEach(() => setLanguageForTest("en"));
 
@@ -103,6 +107,15 @@ it("Owner 2026-10-24: every staff text has its Simplified Chinese wording, with 
     for (const name of placeholders(chinese))
       expect(allowed.has(name), `${english} → ${name}`).toBe(true);
     expect(chinese.trim(), english).not.toBe("");
+  }
+});
+
+it("shows each starter role under the Chinese name the server checks names against", () => {
+  // WP-2423: the server refuses a second role under a name staff would read alike, by these names.
+  for (const key of starterRoleKeys) {
+    const role = starterRole(key);
+    expect(zhHans[role.displayName], role.displayName).toBe(role.shownNames["zh-Hans"]);
+    expect(zhHans[role.description], role.description).toBeTruthy();
   }
 });
 

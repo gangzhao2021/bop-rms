@@ -299,6 +299,20 @@ describe("WP-2423 role administration authorization", () => {
     ).rejects.toMatchObject({ code: "NameTaken" });
     expect(d.execute).not.toHaveBeenCalled();
   });
+  it("refuses a starter role's name when a role here is already shown under it in Chinese", async () => {
+    const f = setup();
+    d.list.mockResolvedValue([
+      roleView(),
+      roleView({ record: { ...record, roleReference: id(9), displayName: "收银" } }),
+    ]);
+    await expect(
+      f.service.command({
+        ...f.input,
+        body: command({ operation: "SaveDraft", draft: { ...draft, displayName: "Cashier" } }),
+      }),
+    ).rejects.toMatchObject({ code: "NameTaken" });
+    expect(d.execute).not.toHaveBeenCalled();
+  });
   it("a naming while another is being saved at the Store backs off and is retried, never waited on", async () => {
     const f = setup();
     f.tx.query.mockResolvedValue({ rows: [{ locked: false }] });
@@ -584,6 +598,12 @@ describe("WP-2423 store-type starter roles", () => {
       active("store_manager", "Store Manager"),
     ];
     const hotpot = starterSetView(roles as never, "Hotpot");
+    // An owner's own 楼面 is how Floor reads in Chinese: Floor is not added a second time.
+    expect(
+      starterSetView([active("custom_0123456789ac", "楼面")] as never, "Hotpot").roles.map(
+        (role) => role.state,
+      ),
+    ).toEqual(["NameTaken", "ToAdd", "ToAdd"]);
     expect(hotpot.roles.map((role) => [role.key, role.state])).toEqual([
       ["floor", "Added"],
       ["runner", "Removed"],

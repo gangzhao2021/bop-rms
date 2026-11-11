@@ -30,6 +30,7 @@ import {
   type RoleAdministrationTransaction,
   type RoleAdministrationVersionRecord,
   type RoleAssignmentTransaction,
+  sameShownRoleName,
   starterRole,
   starterRoleOfCode,
   starterRoleSet,
@@ -250,7 +251,11 @@ const pendingLifecycles = new Set(["Draft", "InReview", "Approved"]);
 const noLongerOffered = (codes: readonly string[] | undefined) =>
   (codes ?? []).filter((code) => !catalog.has(code) && !(code in legacyPermissionReplacements))
     .length;
-const sameName = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+/**
+ * Two names are one when staff would read them alike: case and spacing aside, and a starter role's
+ * name in any language it is shown in ("Cashier" is 收银 in Chinese).
+ */
+const sameName = sameShownRoleName;
 /** What staff hold now and what a waiting change would add or take away. */
 function changeOf(role: RoleAdministrationRoleView) {
   const pending = pendingLifecycles.has(role.record.lifecycle) ? role.record : null;

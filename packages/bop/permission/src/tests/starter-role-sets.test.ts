@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   lockedRoleCodes,
   rolePresetActions,
+  sameShownRoleName,
   starterRole,
   starterRoleKeys,
   starterRoleSet,
@@ -36,7 +37,11 @@ describe("starter role sets per kind of shop", () => {
     expect(names("FullService")).toEqual(["Runner", "Cashier"]);
     expect(names("CounterOnly")).toEqual(["Counter"]);
     // The presets each kind of shop keeps working with (hotpot and full service keep Kitchen).
-    expect(starterRoleSet("Hotpot").keep).toEqual(["store_manager", "kitchen", "inventory_manager"]);
+    expect(starterRoleSet("Hotpot").keep).toEqual([
+      "store_manager",
+      "kitchen",
+      "inventory_manager",
+    ]);
     expect(starterRoleSet("FullService").keep).toEqual([
       "store_manager",
       "front_of_house",
@@ -123,5 +128,17 @@ describe("starter role sets per kind of shop", () => {
     expect(can("cashier", "payment.refund.request")).toBe(true);
     expect(can("cashier", "fulfillment.pickup.complete")).toBe(true);
     expect(can("cashier", "kitchen.work_item.read")).toBe(false);
+  });
+
+  it("treats a starter role's name and its Chinese name as one name", () => {
+    expect(sameShownRoleName("收银", "Cashier")).toBe(true);
+    expect(sameShownRoleName(" cashier ", "收银")).toBe(true);
+    expect(sameShownRoleName("楼面", "Floor")).toBe(true);
+    expect(sameShownRoleName("柜台", "counter")).toBe(true);
+    expect(sameShownRoleName("收银", "Floor")).toBe(false);
+    expect(sameShownRoleName("Bar", "bar")).toBe(true);
+    expect(sameShownRoleName("Bar", "Cashier")).toBe(false);
+    for (const key of starterRoleKeys)
+      expect(starterRole(key).shownNames["zh-Hans"]).toMatch(/^\p{Script=Han}+$/u);
   });
 });
