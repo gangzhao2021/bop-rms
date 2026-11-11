@@ -1113,11 +1113,19 @@ Do these in order, before resuming online ordering.
      order)" from the slip (within the last 3 days), add the same items, options and tip;
    - check "To charge" equals the card machine total on the slip; if it differs, stop and give the
      slip to the incident lead (gap G4);
-   - `Send order` (the page says "This paper order was paid during the outage: don't charge
-     again"), then enter the slip reference and press `Paid on card machine`. The page says
-     "Recorded after the outage and accepted. If it was already made and handed over, mark it ready
-     in Kitchen and handed over in Pickup." Do that for each one (gap G5); in Pickup it is one tap,
-     `Called and handed over · Order N`. A paper order is never cancelled: it was paid;
+   - choose how it was paid during the outage (card machine with the slip's approval code, or cash)
+     and press `Send and record paper order` (发送并录入纸质订单): the order and its payment are
+     recorded together ([DEC-PAPER-ORDER-PAID-AT-SEND](../spec/design/paper-order-paid-at-send.md)).
+     The page says "Recorded after the outage and accepted. If it was already made and handed over,
+     mark it ready in Kitchen and handed over in Pickup." Do that for each one (gap G5); in Pickup it
+     is one tap, `Called and handed over · Order N`. A paper order is never cancelled: it was paid;
+   - if the page says "Paper order N: its payment isn't recorded yet" (纸质订单 N：付款还没录入),
+     record it there from the slip before the time shown. The order is never taken off by its time
+     ([DEC-PAPER-ORDER-NEVER-RELEASED](../spec/design/paper-order-never-released.md)): if the time
+     passes, it stays on `Sent, not paid yet` (已发送、未付款) and on Home ("Paper orders whose
+     payment isn't recorded"). Enter the slip again as a new paper order, then a manager or the
+     Owner taps `Link the re-entered order` (关联重新录入的订单) on the old one and picks the new
+     order; the old one closes as "Entered again from its paper slip" and the sale counts once;
    - write the order number on the paper slip ("entered as order no.").
    - Pressing `Send order` again with the same screen never creates a second order; if the screen
      reports that it did not go through, nothing was charged and it can be sent again.
