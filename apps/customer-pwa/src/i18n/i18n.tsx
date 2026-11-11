@@ -24,11 +24,14 @@ let current: CustomerLanguage = "en";
  */
 function fill(text: string, values: Readonly<Record<string, string | number>> | undefined) {
   if (values === undefined) return text;
-  return text.replace(/\{([a-zA-Z][a-zA-Z0-9]*)\}(\.(?!\.))?/gu, (whole, name: string, stop?: string) => {
-    if (!Object.hasOwn(values, name)) return whole;
-    const value = String(values[name]);
-    return stop !== undefined && !value.endsWith(".") ? value + stop : value;
-  });
+  return text.replace(
+    /\{([a-zA-Z][a-zA-Z0-9]*)\}(\.(?!\.))?/gu,
+    (whole, name: string, stop?: string) => {
+      if (!Object.hasOwn(values, name)) return whole;
+      const value = String(values[name]);
+      return stop !== undefined && !value.endsWith(".") ? value + stop : value;
+    },
+  );
 }
 
 // v15 2026-11-01: as on the staff screens, a table the owner named is said as they wrote it.
