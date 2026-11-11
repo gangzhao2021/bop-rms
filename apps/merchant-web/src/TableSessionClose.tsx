@@ -27,10 +27,20 @@ import type { StaffDiningTable, StaffDiningTableSession } from "./dining-session
  */
 export function tableCloseBlockers(
   table: Pick<StaffDiningTable, "staffRoundsAwaitingPayment"> &
-    Partial<Pick<StaffDiningTable, "paymentTiming">>,
+    Partial<Pick<StaffDiningTable, "paymentTiming" | "roundsAwaitingAcceptance">>,
   progress: Pick<DiningProgress, "items"> | null,
-  /** The unserved dishes are already explained by the close plan (rounds paid with the table). */
-  { unservedExplained = false }: { readonly unservedExplained?: boolean } = {},
+  {
+    unservedExplained = false,
+    paidItems,
+  }: {
+    /** The unserved dishes are already explained by the close plan (rounds paid with the table). */
+    readonly unservedExplained?: boolean;
+    /**
+     * v15 batch 8: the dishes of rounds the guest paid that staff have not accepted (default: this
+     * table's paid rounds by number, from `progress`).
+     */
+    readonly paidItems?: ReadonlySet<string>;
+  } = {},
 ): readonly string[] {
   const blockers: string[] = [];
   const awaiting = table.staffRoundsAwaitingPayment.length;
@@ -53,12 +63,37 @@ export function tableCloseBlockers(
       round.orderBatchReference === undefined ? [] : [round.orderBatchReference],
     ),
   );
-  const waiting = open.filter(
+  // v15 batch 8: a round the guest paid is never "ask the guest to finish paying"; staff accept it.
+  const paidRounds = new Set((table.roundsAwaitingAcceptance ?? []).map((r) => r.roundNumber));
+  const paid =
+    paidItems ??
+    new Set(
+      (progress?.items ?? [])
+        .filter((item) => paidRounds.has(item.batchSequence))
+        .map((item) => item.orderItemReference),
+    );
+  // v15 batch 8: counted in servings (2 × Beef noodles is 2), as each round's own note counts.
+  const units = (items: readonly (typeof open)[number][]) =>
+    items.reduce((sum, item) => sum + item.remainingQuantity, 0);
+  const submitted = open.filter(
     (item) => item.phase === "Submitted" && !staffRounds.has(item.orderBatchReference),
-  ).length;
-  const unserved = open.filter((item) =>
-    ["Accepted", "InProgress", "Ready"].includes(item.phase),
-  ).length;
+  );
+  const paidWaiting = units(submitted.filter((item) => paid.has(item.orderItemReference)));
+  const waiting = units(submitted.filter((item) => !paid.has(item.orderItemReference)));
+  const unserved = units(
+    open.filter((item) => ["Accepted", "InProgress", "Ready"].includes(item.phase)),
+  );
+  if (paidWaiting > 0)
+    blockers.push(
+      paidWaiting === 1
+        ? t(
+            "1 item is paid and waits for you to accept it. Accept it on the Orders page, or turn the round down there for a full refund.",
+          )
+        : t(
+            "{count} items are paid and wait for you to accept them. Accept them on the Orders page, or turn the round down there for a full refund.",
+            { count: paidWaiting },
+          ),
+    );
   if (waiting > 0 && table.paymentTiming === "PayLater")
     // DEC-DINE-IN-PAY-LATER: a round just sent is on its way to the kitchen (nothing to pay now).
     blockers.push(
@@ -320,7 +355,19 @@ export function TableSessionClose({
                     ...(check.merged ?? []).flatMap((merged) => merged.items),
                   ],
                 },
-            { unservedExplained: plan?.paidWithTable === true },
+            {
+              unservedExplained: plan?.paidWithTable === true,
+              // Merged tables' Orders number their rounds on their own: only this table's.
+              paidItems: new Set(
+                (progress?.items ?? [])
+                  .filter((item) =>
+                    (table.roundsAwaitingAcceptance ?? []).some(
+                      (round) => round.roundNumber === item.batchSequence,
+                    ),
+                  )
+                  .map((item) => item.orderItemReference),
+              ),
+            },
           ),
           // WP-2423 (B759): when no round is left to close out, the close evaluation's own reasons.
           ...(plan && plan.open === 0

@@ -73,6 +73,8 @@ test("@production WP-2423: Tables says how long a paid round has waited for acce
             ]),
             session: { phase: "Active", version: 1, orderReference: id(40) },
           },
+          // v15 batch 8: a round paid last week and never accepted (Test Merchant 2, Nov 4).
+          table(3, "DEMO-03", [{ roundNumber: 1, paidAt: minutesAgo(9823) }]),
         ],
         nextAfterTableReference: null,
       },
@@ -91,14 +93,19 @@ test("@production WP-2423: Tables says how long a paid round has waited for acce
   await expect(tile("DEMO-02")).toHaveAttribute("data-urgent", "true");
   await tile("DEMO-02").getByRole("button", { name: "Select DEMO-02", exact: true }).click();
   await expect(page.getByRole("note").filter({ hasText: "and still not accepted" })).toContainText(
-    /Round 2 paid 1[23] min ago and still not accepted · open the order now: accept it, or use Can't make it · refund \(and 1 more paid round\)/u,
+    /Round 2 paid 1[23] min ago and still not accepted · open the order now: accept it, or turn it down there for a full refund \(and 1 more paid round\)/u,
   );
-  // v15 batch 7: one tap to the order itself (Accept, or Can't make it · refund), whatever day or
-  // page of Orders it is on.
+  // v15 batch 8: Tables names no button the person may not have; the order's panel offers theirs.
+  await expect(page.getByText(/Can't make it/u)).toHaveCount(0);
+  // v15 batch 7: one tap to the order itself (Accept, or turn it down), whatever day or page of
+  // Orders it is on.
   await expect(page.getByRole("link", { name: "Open the order to accept it" })).toHaveAttribute(
     "href",
     new RegExp(`/operations/orders/${id(40)}$`, "u"),
   );
+  // v15 batch 8: a week-old paid round reads in days, never thousands of minutes.
+  await expect(tile("DEMO-03")).toContainText(/Paid round to accept\s*paid 6 days ago/u);
+  await expect(tile("DEMO-03")).not.toContainText(/\d{4} min/u);
   const note = page.getByRole("note").filter({ hasText: "Round 2 paid" });
   await expect(note).toBeVisible();
   // Staff words only: no references or codes.

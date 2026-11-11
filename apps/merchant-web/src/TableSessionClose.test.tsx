@@ -288,3 +288,40 @@ it("WP-2423 B759: a table left in Closing continues from there — order closed,
   expect(bodies[0]).toMatchObject({ expectedOrderVersion: 38, reasonCode: "ORDER_CANCELLED" });
   expect(bodies[1]).toMatchObject({ action: "Finalize", expectedSessionVersion: 20 });
 });
+
+it("v15 batch 8: the close block counts servings, as each round's own note does", () => {
+  // One round: 1 + 2 Beef noodles, nothing served yet.
+  const noodles = { ...item("Accepted", 2, 31), orderedQuantity: 2, deliveredQuantity: 0 };
+  const more = item("Accepted", 1, 32);
+  expect(
+    tableCloseBlockers(
+      { staffRoundsAwaitingPayment: [], paymentTiming: "PayLater" },
+      { items: [noodles, more] },
+    ),
+  ).toEqual([
+    "3 items haven't been served yet. Mark them served or cancel them on the Orders page.",
+  ]);
+  expect(tableCloseBlockers({ staffRoundsAwaitingPayment: [] }, { items: [noodles] })).toEqual([
+    "2 items haven't been served yet. Mark them served or cancel them on the Orders page.",
+  ]);
+});
+
+it("v15 batch 8: a round the guest paid that staff have not accepted is never 'ask the guest to pay'", () => {
+  const paidRound = { ...item("Submitted", 1, 41), batchSequence: 1 };
+  const unpaidRound = { ...item("Submitted", 1, 42), batchSequence: 2 };
+  const paidTable = {
+    staffRoundsAwaitingPayment: [],
+    paymentTiming: "PayFirst" as const,
+    roundsAwaitingAcceptance: [{ roundNumber: 1, paidAt: "2026-11-11T20:00:00.000Z" }],
+  };
+  const blockers = tableCloseBlockers(paidTable, { items: [paidRound] });
+  expect(blockers).toEqual([
+    "1 item is paid and waits for you to accept it. Accept it on the Orders page, or turn the round down there for a full refund.",
+  ]);
+  expect(blockers.join(" ")).not.toMatch(/finish paying/u);
+  // Beside a round still unpaid, each is said once with its own step.
+  expect(tableCloseBlockers(paidTable, { items: [paidRound, unpaidRound] })).toEqual([
+    "1 item is paid and waits for you to accept it. Accept it on the Orders page, or turn the round down there for a full refund.",
+    "1 item is waiting for payment or for the kitchen to accept it. Ask the guest to finish paying on their phone, or cancel the unpaid round below (if the guests left) or on the Orders page.",
+  ]);
+});

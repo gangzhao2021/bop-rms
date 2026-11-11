@@ -1,5 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { setLanguageForTest } from "./i18n/i18n.js";
+import { DiningRoundsContext } from "./DiningRounds.js";
 import { describe, expect, it } from "vitest";
 import {
   readCurrentOrders,
@@ -1562,6 +1563,52 @@ it("WP-2423: lines of a round cancelled for a failed payment are marked and not 
   expect(renderToStaticMarkup(<CurrentOrderLines lines={detail.lines} />)).not.toContain(
     "Cancelled unpaid rounds",
   );
+  // v15 batch 8: in a table's rounds (Tables panel, Orders), a cancelled dish's line says how it
+  // was cancelled once; its serving state never adds "Cancelled" again.
+  const progressItem = (n: number, batch: number, sequence: number, phase: string) => ({
+    orderItemReference: unpaidId(200 + n),
+    orderBatchReference: unpaidId(batch),
+    displayName: "Synthetic dish " + n,
+    batchSequence: sequence,
+    itemOrdinal: 1,
+    phase,
+    orderedQuantity: 1,
+    deliveredQuantity: 0,
+    remainingQuantity: phase === "Cancelled" ? 0 : 1,
+    itemServiceVersion: 1,
+  });
+  const roundsHtml = renderToStaticMarkup(
+    <DiningRoundsContext.Provider
+      value={
+        {
+          view: {
+            sessionPhase: "Active",
+            closureStatus: "Open",
+            chaseDish: false,
+            items: [progressItem(1, 90, 1, "Accepted"), progressItem(2, 91, 2, "Cancelled")],
+          },
+          unavailable: null,
+          busy: false,
+          retrying: new Set(),
+          serveItem: () => undefined,
+          serveRound: () => undefined,
+          serveComboPart: () => undefined,
+          chaseItem: () => undefined,
+        } as never
+      }
+    >
+      <CurrentOrderLines
+        lines={detail.lines}
+        rounds={{ batches: detail.view.items[0]?.batches ?? [] }}
+        cancelledBatches={storeCancelledBatches(detail.view)}
+        unpaidCancelledBatches={unpaid}
+      />
+    </DiningRoundsContext.Provider>,
+  );
+  expect(roundsHtml.match(/Cancelled · not paid/gu)).toHaveLength(1);
+  expect(roundsHtml).not.toMatch(/dining-round-item__state">Cancelled</u);
+  // A dish still going keeps its serving state.
+  expect(roundsHtml).toContain("Sent to the kitchen");
 });
 it("WP-2423 item 8 ⑤: a round waiting for staff OK is listed apart and left out of the total", () => {
   const line = (n: number, batch: number, amount: string) => ({

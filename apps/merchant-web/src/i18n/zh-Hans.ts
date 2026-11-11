@@ -720,8 +720,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Phone payment stopped. Take the payment here.": "已停止手机付款。请在这里收款。",
   "Already served on another screen, or the dish changed. Updated, check it again.":
     "已在另一台屏上上菜，或这道菜有变化。已刷新，请再看一下。",
-  "Accept now · paid {minutes} min ago. It is never refunded automatically. If it can't be made, use Can't make it · refund: the guest gets a full refund.":
-    "请立即接单 · {minutes} 分钟前已付款。不会自动退款。如果做不了，请用“做不了 · 退款”，客人会全额退款。",
   "Accept a Kitchen work item": "接受后厨工作项",
   "Accept a submitted order batch": "接受已提交的订单批次",
   "Accept or refund it by {decideBy}; otherwise it is refunded automatically.":
@@ -3002,8 +3000,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "门店离线时{value}已在线付款，没有自动退款。{value2}如果已按纸质小票做好，请先接单，再照常标记做好并交付。",
   "Paid online minus refunded": "在线付款减去已退款",
   "Paid without a fulfillable order": "已付款但订单无法完成",
-  "Paid {minutes} min ago · the guest is waiting. Accept it to send it to the kitchen":
-    "{minutes} 分钟前已付款 · 顾客在等待。接单后会发送到后厨",
   "Paid · the kitchen gets it once you accept it": "已付款 · 接单后后厨才会收到",
   "Paid, but not sent to the kitchen yet. Accept it in Orders now (or ask a manager to): an order that isn't accepted in time expires and must be refunded on the card machine.":
     "已付款，但尚未发送到后厨。请立即在订单页接单（或请店长接单）：未及时接单的订单会过期，需在刷卡机上退款。",
@@ -3682,11 +3678,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Round cancelled. The customer's refund has started.": "这一轮已取消。顾客的退款已开始。",
   "Round {batchSequence} · Item {itemOrdinal}": "第 {batchSequence} 轮 · 第 {itemOrdinal} 项",
   "Round {roundNumber}": "第 {roundNumber} 轮",
-  "Round {roundNumber} paid {waited} and still not accepted · open the order now: accept it, or use Can't make it · refund":
-    "第 {roundNumber} 轮已付款 {waited}，仍未接单 · 请立即打开订单：接单，或选择“做不了 · 退款”",
   "Open the order to accept it": "打开订单去接单",
   "Round {roundNumber} paid {waited} · accept it on the Orders page to send it to the kitchen":
-    "第 {roundNumber} 轮已付款 {waited} · 请在订单页接单以发送到后厨",
+    "第 {roundNumber} 轮{waited}已付款 · 请在订单页接单以发送到后厨",
   "Round {sequence}": "第 {sequence} 轮",
   "Round {sequence} cancellation refund": "第 {sequence} 轮取消退款",
   "Round {sequence} cancelled": "第 {sequence} 轮已取消",
@@ -6606,7 +6600,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "ask the guest": "请问客人",
   "being cancelled": "正在取消",
   "{minutes} min left": "还剩 {minutes} 分钟",
-  "paid {minutes} min ago": "{minutes} 分钟前已付",
   "Food quality": "菜品质量问题",
   "Wrong dish served": "上错菜",
   Goodwill: "致歉/好意",
@@ -9592,4 +9585,23 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "{name}：未付款，没有收取任何费用。现在会被取消（否则也会自动取消）；不会退款。",
   "{name}: not paid, no money was taken. It will be cancelled now (otherwise automatically at {at}); nothing is refunded.":
     "{name}：未付款，没有收取任何费用。现在会被取消（否则会在 {at} 自动取消）；不会退款。",
+  "{hours} h ago": "{hours} 小时前",
+  "{hours} h {rest} min ago": "{hours} 小时 {rest} 分钟前",
+  "1 day ago": "1 天前",
+  "{days} days ago": "{days} 天前",
+  "paid {waited}": "{waited}已付",
+  "Paid {waited} · the guest is waiting. Accept it to send it to the kitchen":
+    "{waited}已付款 · 顾客在等待。接单后会发送到后厨",
+  "Accept now · paid {waited}. It is never refunded automatically. If it can't be made, use Can't make it · refund: the guest gets a full refund.":
+    "请立即接单 · {waited}已付款。不会自动退款。如果做不了，请用“做不了 · 退款”，客人会全额退款。",
+  "Accept now · paid {waited}. It is never refunded automatically. If it can't be made, use Refuse and refund: the guest gets a full refund.":
+    "请立即接单 · {waited}已付款。不会自动退款。如果做不了，请用“拒单并退款”，客人会全额退款。",
+  "Accept now · paid {waited}. It is never refunded automatically. If it can't be made, ask a manager to refuse it: the guest gets a full refund.":
+    "请立即接单 · {waited}已付款。不会自动退款。如果做不了，请找经理拒单，客人会全额退款。",
+  "Round {roundNumber} paid {waited} and still not accepted · open the order now: accept it, or turn it down there for a full refund":
+    "第 {roundNumber} 轮{waited}已付款，仍未接单 · 请立即打开订单：接单，或在订单里拒单并全额退款",
+  "1 item is paid and waits for you to accept it. Accept it on the Orders page, or turn the round down there for a full refund.":
+    "1 项客人已付款，等你接单。请在订单页接单，或在那里拒掉这一轮并全额退款。",
+  "{count} items are paid and wait for you to accept them. Accept them on the Orders page, or turn the round down there for a full refund.":
+    "{count} 项客人已付款，等你接单。请在订单页接单，或在那里拒掉这一轮并全额退款。",
 });

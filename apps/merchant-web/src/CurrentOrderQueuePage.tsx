@@ -460,7 +460,16 @@ export function CurrentOrderLines({
       </span>
       <span className="order-line-amount">{orderMoney(item.subtotal)}</span>
       {rounds === undefined ? null : (
-        <DiningRoundItemState orderItemReference={item.orderItemReference} />
+        <DiningRoundItemState
+          orderItemReference={item.orderItemReference}
+          // v15 batch 8: the line already says how it was cancelled; never "Cancelled" again.
+          cancellationShown={
+            item.cancellation !== null ||
+            cancelledBatches?.has(item.orderBatchReference) === true ||
+            unpaidLine(item) ||
+            removedLine(item)
+          }
+        />
       )}
     </li>
   );
@@ -2549,7 +2558,7 @@ function OrderDetailBody({
             className="order-accept-by"
             data-tier={paidRoundWait(batch.awaitingAcceptanceSince, now).tier}
           >
-            {paidRoundWaitText(batch.awaitingAcceptanceSince, now)}
+            {paidRoundWaitText(batch.awaitingAcceptanceSince, now, acceptanceCloseControl(batch))}
           </span>
         </p>
       ) : order.orderType === "Pickup" || batch.acceptanceStatus === "Accepted" ? null : (

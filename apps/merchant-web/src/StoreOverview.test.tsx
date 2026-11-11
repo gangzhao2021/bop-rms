@@ -33,7 +33,9 @@ import {
   awaitingAcceptanceText,
   paidRoundWaitText,
   tableRoundWaitText,
+  waitedAgoText,
 } from "./paid-round-wait.js";
+import { setLanguageForTest } from "./i18n/i18n.js";
 
 describe("WP-2423 P2 store overview", () => {
   it("Owner 2026-11-04: a pickup closed as not collected is not an open order", () => {
@@ -640,16 +642,46 @@ describe("v15 finding: the store system card follows the server's answer, not th
     expect(paidRoundWaitText(paidAt, at(4))).toBe(
       "Paid 4 min ago · the guest is waiting. Accept it to send it to the kitchen",
     );
-    // M41: the urgent text names the control staff really have, never "a manager can cancel it".
-    expect(paidRoundWaitText(paidAt, at(5))).toBe(
+    // M41, v15 batch 8: the urgent text names the control this person has on the order, the
+    // words on its button ("Can't make it · refund" or "Refuse and refund"), or else a manager.
+    expect(paidRoundWaitText(paidAt, at(5), "CantMake")).toBe(
       "Accept now · paid 5 min ago. It is never refunded automatically. If it can't be made, use Can't make it · refund: the guest gets a full refund.",
+    );
+    expect(paidRoundWaitText(paidAt, at(5), "RefuseAndRefund")).toBe(
+      "Accept now · paid 5 min ago. It is never refunded automatically. If it can't be made, use Refuse and refund: the guest gets a full refund.",
+    );
+    expect(paidRoundWaitText(paidAt, at(5), null)).toBe(
+      "Accept now · paid 5 min ago. It is never refunded automatically. If it can't be made, ask a manager to refuse it: the guest gets a full refund.",
     );
     expect(tableRoundWaitText(2, paidAt, at(0))).toBe(
       "Round 2 paid just now · accept it on the Orders page to send it to the kitchen",
     );
+    // Tables names no button: the order's panel offers whichever this person has.
     expect(tableRoundWaitText(2, paidAt, at(6))).toBe(
-      "Round 2 paid 6 min ago and still not accepted · open the order now: accept it, or use Can't make it · refund",
+      "Round 2 paid 6 min ago and still not accepted · open the order now: accept it, or turn it down there for a full refund",
     );
+  });
+  it("v15 batch 8: a paid round's age reads in hours or days, never thousands of minutes", () => {
+    expect(waitedAgoText(0)).toBe("just now");
+    expect(waitedAgoText(59)).toBe("59 min ago");
+    expect(waitedAgoText(60)).toBe("1 h ago");
+    expect(waitedAgoText(135)).toBe("2 h 15 min ago");
+    expect(waitedAgoText(1440)).toBe("1 day ago");
+    // Test Merchant 2's round paid on Nov 4 and never accepted.
+    expect(waitedAgoText(9823)).toBe("6 days ago");
+    const paidAt = "2026-11-04T21:00:00.000Z";
+    const later = Date.parse(paidAt) + 9823 * 60_000;
+    expect(tableRoundWaitText(1, paidAt, later)).toBe(
+      "Round 1 paid 6 days ago and still not accepted · open the order now: accept it, or turn it down there for a full refund",
+    );
+    setLanguageForTest("zh-Hans");
+    try {
+      expect(tableRoundWaitText(1, paidAt, later)).toBe(
+        "第 1 轮6 天前已付款，仍未接单 · 请立即打开订单：接单，或在订单里拒单并全额退款",
+      );
+    } finally {
+      setLanguageForTest("en");
+    }
   });
 });
 

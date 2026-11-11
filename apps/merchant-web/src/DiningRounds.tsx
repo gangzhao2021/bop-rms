@@ -471,14 +471,19 @@ function without(set: ReadonlySet<string>, key: string): ReadonlySet<string> {
 /** A dish's serving state and its one-tap "Served", inside a round. */
 export function DiningRoundItemState({
   orderItemReference,
+  cancellationShown = false,
 }: {
   readonly orderItemReference: string;
+  /** The dish's line already says how it was cancelled (its status is not said twice). */
+  readonly cancellationShown?: boolean;
 }) {
   const rounds = useDiningRounds();
   const sending = useContext(KitchenSendingContext);
   const waits = useContext(RoundPaymentWaitContext);
   const item = rounds?.view?.items.find((entry) => entry.orderItemReference === orderItemReference);
   if (rounds === null || rounds.view === null || item === undefined) return null;
+  // A cancelled dish has nothing to serve, chase or remake: its line's own words are enough.
+  if (cancellationShown && item.phase === "Cancelled") return null;
   // A table checking out (Closing) still gets its last dishes served before it closes.
   const open =
     (rounds.view.sessionPhase === "Active" || rounds.view.sessionPhase === "Closing") &&

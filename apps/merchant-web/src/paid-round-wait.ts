@@ -2,8 +2,8 @@ import { countOf, t } from "./i18n/i18n.js";
 /**
  * WP-2423 (v15 2026-10-16, decision DEC-DINE-IN-PAID-ROUND-WAIT): a paid dine-in round reaches the
  * kitchen only when staff accept it, and it is never cancelled or refunded automatically — the
- * guest has paid and is at the table, so only staff decide (accept it, or use "Can't make it ·
- * refund" for a full refund). Orders, Tables and Home therefore say how long a paid round has
+ * guest has paid and is at the table, so only staff decide (accept it, or turn it down for a full
+ * refund). Orders, Tables and Home therefore say how long a paid round has
  * waited: a warning from 3 minutes, urgent from 5 (Owner default 12, 2026-11-06: no automatic
  * refund for tables; alert staff at 5 minutes).
  */
@@ -23,27 +23,69 @@ export function paidRoundWait(paidAt: string, now: number) {
   return { minutes, tier };
 }
 
-/** The Orders page line next to Accept. */
-export function paidRoundWaitText(paidAt: string, now: number): string {
-  const { minutes, tier } = paidRoundWait(paidAt, now);
-  if (tier === "ok") return t("Paid · the kitchen gets it once you accept it");
-  if (tier === "warning")
-    return t("Paid {minutes} min ago · the guest is waiting. Accept it to send it to the kitchen", {
-      minutes: minutes,
-    });
-  return t(
-    "Accept now · paid {minutes} min ago. It is never refunded automatically. If it can't be made, use Can't make it · refund: the guest gets a full refund.",
-    { minutes: minutes },
-  );
+/**
+ * v15 batch 8: how long ago, in words staff read at a glance: minutes for the first hour, then
+ * hours and minutes, then days (a paid round from last week is "6 days ago", never "9823 min ago").
+ */
+export function waitedAgoText(minutes: number): string {
+  if (minutes < 1) return t("just now");
+  if (minutes < 60) return t("{minutes} min ago", { minutes: String(minutes) });
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) {
+    const rest = minutes % 60;
+    return rest === 0
+      ? t("{hours} h ago", { hours: String(hours) })
+      : t("{hours} h {rest} min ago", { hours: String(hours), rest: String(rest) });
+  }
+  const days = Math.floor(hours / 24);
+  return days === 1 ? t("1 day ago") : t("{days} days ago", { days: String(days) });
 }
 
-/** The Tables page line for a table with a paid round waiting. */
+/**
+ * The control the order panel offers this person to turn a paid round down (it refunds in full):
+ * "Can't make it · refund" or "Refuse and refund"; null when they have neither.
+ */
+export type PaidRoundRefusal = "CantMake" | "RefuseAndRefund" | null;
+
+/** The Orders page line next to Accept: it names only a button this person has. */
+export function paidRoundWaitText(
+  paidAt: string,
+  now: number,
+  refusal: PaidRoundRefusal = null,
+): string {
+  const { minutes, tier } = paidRoundWait(paidAt, now);
+  if (tier === "ok") return t("Paid · the kitchen gets it once you accept it");
+  const waited = waitedAgoText(minutes);
+  if (tier === "warning")
+    return t("Paid {waited} · the guest is waiting. Accept it to send it to the kitchen", {
+      waited,
+    });
+  return refusal === "CantMake"
+    ? t(
+        "Accept now · paid {waited}. It is never refunded automatically. If it can't be made, use Can't make it · refund: the guest gets a full refund.",
+        { waited },
+      )
+    : refusal === "RefuseAndRefund"
+      ? t(
+          "Accept now · paid {waited}. It is never refunded automatically. If it can't be made, use Refuse and refund: the guest gets a full refund.",
+          { waited },
+        )
+      : t(
+          "Accept now · paid {waited}. It is never refunded automatically. If it can't be made, ask a manager to refuse it: the guest gets a full refund.",
+          { waited },
+        );
+}
+
+/**
+ * The Tables page line for a table with a paid round waiting. The order's own panel offers the
+ * refusal this person has, so the line names no button (v15 batch 8: it named one staff lacked).
+ */
 export function tableRoundWaitText(roundNumber: number, paidAt: string, now: number): string {
   const { minutes, tier } = paidRoundWait(paidAt, now);
-  const waited = minutes < 1 ? t("just now") : t("{minutes} min ago", { minutes: minutes });
+  const waited = waitedAgoText(minutes);
   return tier === "urgent"
     ? t(
-        "Round {roundNumber} paid {waited} and still not accepted · open the order now: accept it, or use Can't make it · refund",
+        "Round {roundNumber} paid {waited} and still not accepted · open the order now: accept it, or turn it down there for a full refund",
         { roundNumber: roundNumber, waited: waited },
       )
     : t(

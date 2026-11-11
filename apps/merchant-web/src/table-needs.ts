@@ -1,6 +1,6 @@
 import { t } from "./i18n/i18n.js";
 import { orderMoney } from "./order-money.js";
-import { paidRoundUrgentMinutes } from "./paid-round-wait.js";
+import { paidRoundUrgentMinutes, waitedAgoText } from "./paid-round-wait.js";
 import { isPaymentUnconfirmed } from "./UnpaidRoundCancelAction.js";
 import { longOpenSessionMinutes, type StaffDiningTable } from "./dining-session-client.js";
 import type { TableOrderFacts } from "./table-order-facts.js";
@@ -145,10 +145,7 @@ export function tableNeed(
       urgent: allergy || minutes >= 5,
       since: call.calledAt,
       words: t("Asked for staff"),
-      detail:
-        (minutes === 0 ? t("just now") : t("{minutes} min ago", { minutes: String(minutes) })) +
-        " · " +
-        staffCallReasonText(call.reason),
+      detail: waitedAgoText(minutes) + " · " + staffCallReasonText(call.reason),
       step: "Handled",
     };
   }
@@ -163,10 +160,7 @@ export function tableNeed(
       urgent: waited >= 5,
       since: held.heldAt,
       words: t("Round waiting for your OK"),
-      detail:
-        heldRoundReasonText(held.reason) +
-        " · " +
-        (waited === 0 ? t("just now") : t("{minutes} min ago", { minutes: String(waited) })),
+      detail: heldRoundReasonText(held.reason) + " · " + waitedAgoText(waited),
       step: null,
     };
   }
@@ -183,7 +177,8 @@ export function tableNeed(
       urgent: waited >= paidRoundUrgentMinutes,
       since: oldestPaid.paidAt,
       words: t("Paid round to accept"),
-      detail: t("paid {minutes} min ago", { minutes: String(waited) }),
+      // v15 batch 8: a round paid last week reads "paid 6 days ago", never in thousands of minutes.
+      detail: t("paid {waited}", { waited: waitedAgoText(waited) }),
       step: null,
     };
   }
