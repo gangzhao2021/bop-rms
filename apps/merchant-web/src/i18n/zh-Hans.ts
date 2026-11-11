@@ -6821,8 +6821,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Record that the guests at table {table} left without paying the dishes still unpaid ({amount})? What guests already paid stays paid. It is recorded under your name and stays in the reports as written off.":
     "记录 {table} 桌客人没付剩下的菜（{amount}）就走了？客人已付的照旧算已付。会记在你名下，并作为坏账留在报表里。",
   "What each guest added": "各付各加的菜",
-  "Tables that pay at the end. Guests can always choose the other, or pick the dishes they pay for.":
-    "只用于最后结账的桌。客人随时可以改选另一种，或自己选要付的菜。",
+  "For tables that pay per round and tables that pay at the end. Guests can always choose the other, or pick the dishes they pay for.":
+    "先付款和最后结账的桌都适用。客人随时可以改选另一种，或自己选要付的菜。",
   "Remove phone {number} from this table": "把手机 {number} 移出这桌",
   "Check it belongs to this table. If not, remove it below. To stop it joining again by scan, also pause joining by scan.":
     "检查它是不是这桌的。不是的话在下面移出；要防止它再扫码加入，还要暂停扫码加入。",

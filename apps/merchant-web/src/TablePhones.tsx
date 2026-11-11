@@ -496,7 +496,7 @@ export function CheckoutScopeSettingControl({
       <p className="round-hold-setting__note" id="checkout-scope-setting-note">
         {setting.canChange
           ? t(
-              "Tables that pay at the end. Guests can always choose the other, or pick the dishes they pay for.",
+              "For tables that pay per round and tables that pay at the end. Guests can always choose the other, or pick the dishes they pay for.",
             )
           : t("A manager changes this.")}
       </p>
