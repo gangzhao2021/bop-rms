@@ -35,6 +35,8 @@ for (const screen of [
       "dish sold out meanwhile",
       // WP-2423 (M166, M178): Iced adds milk of its own; the kitchen's statement above the menu.
       "iced adds milk",
+      // b7: staff answered that Hot adds none, so guests are not asked to check about it.
+      "hot answered none",
     ] as const)
       test(scenario, async ({ page }) => {
         const failures: string[] = [];
@@ -45,7 +47,8 @@ for (const screen of [
         let hotOff =
           scenario !== "refused meanwhile" &&
           scenario !== "dish sold out meanwhile" &&
-          scenario !== "iced adds milk";
+          scenario !== "iced adds milk" &&
+          scenario !== "hot answered none";
         if (scenario === "iced adds milk")
           await page.route("**/api/v1/customer/store", (route) =>
             route.fulfill({
@@ -163,7 +166,7 @@ for (const screen of [
                           },
                         ],
                         allergenDisclosure:
-                          scenario === "iced adds milk"
+                          scenario === "iced adds milk" || scenario === "hot answered none"
                             ? {
                                 registryVersionReference: id(11),
                                 items: [
@@ -178,6 +181,7 @@ for (const screen of [
                                 assistanceCode: "ALLERGEN_ASSISTANCE_REQUIRED",
                                 byOption: {
                                   [iced]: [{ code: "MILK", classification: "Contains" }],
+                                  ...(scenario === "hot answered none" ? { [hot]: [] } : {}),
                                 },
                               }
                             : {
@@ -309,6 +313,20 @@ for (const screen of [
           ).toBeVisible();
           await page.screenshot({
             path: `test-results/choice-adds-${screen.width}.png`,
+            fullPage: true,
+          });
+        } else if (scenario === "hot answered none") {
+          // Every choice is answered: Iced says what it adds, Hot (adds none) says nothing and
+          // claims nothing, and the check-with-staff line is gone.
+          await expect(page.getByText("Adds: Milk", { exact: true })).toBeVisible();
+          await expect(page.getByText(/^Adds:/u)).toHaveCount(1);
+          await expect(
+            page.getByText(
+              "A choice can add allergens not listed here. If you have an allergy, ask staff before ordering.",
+            ),
+          ).toHaveCount(0);
+          await page.screenshot({
+            path: `test-results/choice-answered-none-${screen.width}.png`,
             fullPage: true,
           });
         } else if (scenario === "all off") {

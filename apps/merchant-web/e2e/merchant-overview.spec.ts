@@ -293,8 +293,11 @@ test("@production Merchant Overview uses the authorized workspace snapshot at de
   const needs = page.getByRole("region", { name: "Needs attention" });
   const now = page.getByRole("region", { name: "Right now" });
   await expect(needs.getByText("1 awaiting acceptance")).toBeVisible();
-  // b7 (M23): Home names the order holding a dish sold out since it was ordered, with what to do.
-  await expect(needs.getByText("Orders with a dish sold out since it was ordered")).toBeVisible();
+  // b7 (M23): Home names the order holding a dish sold out or taken off the menu since it was
+  // ordered, with what to do.
+  await expect(
+    needs.getByText("Orders with a dish sold out or taken off the menu since it was ordered"),
+  ).toBeVisible();
   await expect(
     needs.getByText(
       "1 order waiting to be accepted. Open each on Orders: offer the guest a swap, or cancel that dish with a refund.",
