@@ -92,12 +92,15 @@ function bound(guest: GuestSession, scope: CustomerDiningRoundWithdrawOptions["s
     String(guest.storeReference) !== scope.storeReference ||
     guest.channel !== "DineIn" ||
     guest.diningState !== "DiningBound" ||
-    guest.diningSessionReference === null
+    guest.diningSessionReference === null ||
+    guest.diningParticipantReference === null
   )
     throw new CustomerDiningRoundWithdrawError("NotJoined");
   return Object.freeze({
     guestSessionReference: String(guest.sessionReference),
     diningSessionReference: String(guest.diningSessionReference),
+    // The phone at the table: a later Guest Session of it may stop the round it sent.
+    participantReference: String(guest.diningParticipantReference),
   });
 }
 
@@ -184,12 +187,15 @@ export function createCustomerDiningRoundWithdraw(options: CustomerDiningRoundWi
       }
       try {
         // 1. This phone's own round, read only.
-        const round = await asGuest(credentials, async (transaction, member) => {
-          const found = await findGuestDiningRound(transaction as never, owner, {
+        const own = (transaction: ConsumerTransaction, member: ReturnType<typeof bound>) =>
+          findGuestDiningRound(transaction as never, owner, {
             diningSessionReference: member.diningSessionReference,
             guestSessionReference: member.guestSessionReference,
+            participantReference: member.participantReference,
             roundNumber,
           });
+        const round = await asGuest(credentials, async (transaction, member) => {
+          const found = await own(transaction, member);
           if (found === null) return null;
           const identity = await loadDiningRoundPaymentIdentity(transaction, owner, found);
           return identity === null ? null : { ...found, ...identity };
@@ -204,6 +210,14 @@ export function createCustomerDiningRoundWithdraw(options: CustomerDiningRoundWi
           return Object.freeze({ status: "PaymentPending" as const });
         // 3. One transaction: cancelled unpaid, and the dishes back in the table's cart.
         return await asGuest(credentials, async (transaction, member, stillTheGuest) => {
+          // Still this phone's round, as it was read before the Provider was asked.
+          const again = await own(transaction, member);
+          if (
+            again === null ||
+            again.orderBatchReference !== round.orderBatchReference ||
+            again.submittedGuestSessionReference !== round.submittedGuestSessionReference
+          )
+            return Object.freeze({ status: "NotWithdrawable" as const });
           await fenceTableBill(transaction, owner, [round.orderReference]);
           const cancelled = await options.cancellation.cancelUnpaidForGuest(transaction, {
             operationReference,
@@ -224,6 +238,8 @@ export function createCustomerDiningRoundWithdraw(options: CustomerDiningRoundWi
             orderReference: round.orderReference,
             orderBatchReference: round.orderBatchReference,
             guestSessionReference: member.guestSessionReference,
+            participantReference: member.participantReference,
+            submittedGuestSessionReference: round.submittedGuestSessionReference,
             operationReference,
             observedAt,
             newLineReference: options.newReference,

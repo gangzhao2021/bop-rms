@@ -109,34 +109,37 @@ it("M38: the payer stops before paying; the round is cancelled unpaid and both p
       const sent = await lines(before.cartReference);
       assert.equal(sent.length, 2);
 
-      // Phone A presses "Continue to payment": the round is submitted unpaid, the cart emptied.
-      const quoted = await pipeline.quote(a, {
-        operationReference: reference(),
-        cartReference: before.cartReference,
-        cartVersion: before.cartVersion,
-        requestedAt: now(),
-      });
-      assert.equal(quoted.status, "Quoted");
-      await pipeline.saveDetails(a, {
-        operationReference: reference(),
-        detailsReference: reference(),
-        cartReference: before.cartReference,
-        cartVersion: before.cartVersion,
-        quoteReference: quoted.quoteReference,
-      });
-      const checkout = await pipeline.startCheckout(a, {
-        createOperationReference: reference(),
-        cartReference: before.cartReference,
-        cartVersion: before.cartVersion,
-        quoteReference: quoted.quoteReference,
-      });
-      assert.equal(checkout.status, "Started");
-      await pipeline.preparePayment(a, {
-        checkoutSessionReference: checkout.checkoutSessionReference,
-        selectionReference: reference(),
-        tip: { amountMinor: 0n, currencyCode: "CAD" },
-        recordedAfterOutage: false,
-      });
+      // "Continue to payment": the round is submitted unpaid, the cart emptied.
+      const continueToPayment = async (who, cart) => {
+        const quoted = await pipeline.quote(who, {
+          operationReference: reference(),
+          cartReference: cart.cartReference,
+          cartVersion: cart.cartVersion,
+          requestedAt: now(),
+        });
+        assert.equal(quoted.status, "Quoted");
+        await pipeline.saveDetails(who, {
+          operationReference: reference(),
+          detailsReference: reference(),
+          cartReference: cart.cartReference,
+          cartVersion: cart.cartVersion,
+          quoteReference: quoted.quoteReference,
+        });
+        const checkout = await pipeline.startCheckout(who, {
+          createOperationReference: reference(),
+          cartReference: cart.cartReference,
+          cartVersion: cart.cartVersion,
+          quoteReference: quoted.quoteReference,
+        });
+        assert.equal(checkout.status, "Started");
+        await pipeline.preparePayment(who, {
+          checkoutSessionReference: checkout.checkoutSessionReference,
+          selectionReference: reference(),
+          tip: { amountMinor: 0n, currencyCode: "CAD" },
+          recordedAfterOutage: false,
+        });
+      };
+      await continueToPayment(a, before);
       const emptied = await cartOf(a);
       assert.equal(emptied.pendingItems.length, 0);
       const counts = async () =>
@@ -283,6 +286,102 @@ it("M38: the payer stops before paying; the round is cancelled unpaid and both p
       assert.deepEqual(await ask(a, operation), { status: "AlreadyReturned" });
       assert.deepEqual(await ask(a, reference()), { status: "AlreadyReturned" });
       assert.deepEqual(await counts(), after);
+
+      // The returned dishes are sent again (by phone B this time) and stopped again by a later
+      // Guest Session of phone B (the same phone at the table), then sent and stopped once more:
+      // they come back each time, as they were, though no cart operation added those lines.
+      // TEST-ONLY: the later session is B's row copied with fresh credentials (the rotation a
+      // re-bound phone gets), and B's own session then ends.
+      const guestCredentials = configured.entry.session.credentials;
+      const laterSessionOf = async (who) => {
+        const next = {
+          sessionCredential: guestCredentials.generateCredential("Session"),
+          csrfCredential: guestCredentials.generateCredential("Csrf"),
+        };
+        const old = (
+          await admin.query(
+            "SELECT guest_session_id::text AS id FROM bop_identity.guest_session WHERE session_selector_hash=decode($1,'hex')",
+            [guestCredentials.hashCredential("Session", who.sessionCredential)],
+          )
+        ).rows[0].id;
+        await admin.query("SET session_replication_role = replica");
+        await admin.query(
+          `INSERT INTO bop_identity.guest_session (guest_session_id, session_selector_hash, csrf_selector_hash, operation_id,
+             operation_intent_hash, brand_id, store_id, public_store_id, public_table_id, channel, locale,
+             qr_id, qr_revocation_version, dining_state, status, created_at, last_seen_at, idle_expires_at,
+             absolute_expires_at, order_closed_at, closure_expires_at, rotated_from_guest_session_id,
+             revocation_reason, revoked_at, version, dining_session_id, dining_participant_id)
+           SELECT $2, decode($3,'hex'), decode($4,'hex'), $5, operation_intent_hash, brand_id, store_id,
+             public_store_id, public_table_id, channel, locale, qr_id, qr_revocation_version, dining_state,
+             'Active', created_at, last_seen_at, idle_expires_at, absolute_expires_at, NULL, NULL, $1::uuid,
+             NULL, NULL, 1, dining_session_id, dining_participant_id
+           FROM bop_identity.guest_session WHERE guest_session_id=$1::uuid`,
+          [
+            old,
+            reference(),
+            guestCredentials.hashCredential("Session", next.sessionCredential),
+            guestCredentials.hashCredential("Csrf", next.csrfCredential),
+            reference(),
+          ],
+        );
+        await admin.query(
+          "UPDATE bop_identity.guest_session SET status='Revoked', revocation_reason='Rotated', revoked_at=now(), version=version+1 WHERE guest_session_id=$1",
+          [old],
+        );
+        await admin.query("SET session_replication_role = origin");
+        return next;
+      };
+      const roundAgain = async (who) => {
+        const cart = await cartOf(who);
+        assert.equal(cart.pendingItems.length, 2);
+        await continueToPayment(who, cart);
+        const latest = (
+          await admin.query(
+            `SELECT b.order_batch_id::text AS batch, (SELECT count(*)::int FROM rms_ordering.order_batch o
+               WHERE o.order_id=b.order_id AND (o.submitted_at, o.order_batch_id) <= (b.submitted_at, b.order_batch_id)) AS n
+             FROM rms_ordering.order_batch b ORDER BY b.submitted_at DESC, b.order_batch_id DESC LIMIT 1`,
+          )
+        ).rows[0];
+        assert.notEqual(latest.batch, batch.batch);
+        return latest;
+      };
+      let laterB = null;
+      for (const n of [2, 3]) {
+        // Round 2 is sent by B's first session, round 3 by the later one.
+        const round = await roundAgain(laterB ?? b);
+        if (laterB === null) laterB = await laterSessionOf(b);
+        const who = laterB;
+        assert.equal((await lines(emptied.cartReference)).length, 0, "round " + n);
+        // Phone A can't stop it.
+        assert.deepEqual(await ask(a, reference(), round.n), { status: "NotWithdrawable" });
+        unexpected.length = 0;
+        const again = await ask(who, reference(), round.n).catch((error) => ({
+          error: String(error),
+        }));
+        assert.deepEqual(
+          again,
+          { status: "Returned" },
+          "round " + n + ": " + String(unexpected[0]?.stack ?? ""),
+        );
+        const backAgain = await lines(emptied.cartReference);
+        assert.deepEqual(
+          backAgain.map((line) => [line.sku, line.quantity, line.note, line.adder, line.evidence]),
+          sent.map((line) => [line.sku, line.quantity, line.note, line.adder, line.evidence]),
+          "round " + n,
+        );
+      }
+      const recorded = (
+        await admin.query(
+          "SELECT guest_session_id=submitted_guest_session_id AS same, jsonb_array_length(returned_items_json) AS n FROM rms_ordering.dining_round_cart_return ORDER BY occurred_at",
+        )
+      ).rows;
+      // Round 1 asked by the session that sent it; round 2 by a later session of the same phone
+      // (sent by B's first session); round 3 sent and stopped by that later session.
+      assert.deepEqual(recorded, [
+        { same: true, n: 2 },
+        { same: false, n: 2 },
+        { same: true, n: 2 },
+      ]);
       // Append-only: the return can't be changed or deleted, even by the API role.
       await assert.rejects(
         store.asApi((tx) =>

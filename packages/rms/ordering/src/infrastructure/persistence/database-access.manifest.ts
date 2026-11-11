@@ -369,7 +369,8 @@ const databaseAccessManifestInput = {
       writeOwner: { kind: "module", id: "@rms/ordering" },
       allowedReadPatterns: ["owner-repository"],
       retentionCategory: "transactional",
-      piiClassification: ["indirect_identifier"],
+      // Each returned line as it came back, with its note (as cart_line).
+      piiClassification: ["indirect_identifier", "personal", "health"],
     },
     {
       table: "cart_staff_line_removal",

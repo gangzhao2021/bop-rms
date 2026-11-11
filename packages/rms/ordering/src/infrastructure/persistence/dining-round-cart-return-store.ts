@@ -24,7 +24,12 @@ import { createPostgresDiningCartReadStore } from "./dining-cart-read-store.js";
 export interface DiningRoundCartReturnInput {
   readonly orderReference: string;
   readonly orderBatchReference: string;
+  /** The Guest Session asking: the one that sent the round, or a later one of the same phone. */
   readonly guestSessionReference: string;
+  /** Its table participant (the phone at the table). */
+  readonly participantReference: string;
+  /** The Guest Session that sent the round (findGuestDiningRound). */
+  readonly submittedGuestSessionReference: string;
   readonly operationReference: string;
   readonly observedAt: string;
   /** A fresh reference for each returned line. */
@@ -61,6 +66,8 @@ export async function returnDiningRoundToCart(
   const order = parseOrderingReference(input.orderReference);
   const batch = parseOrderingReference(input.orderBatchReference);
   const guest = parseOrderingReference(input.guestSessionReference);
+  const participant = parseOrderingReference(input.participantReference);
+  const submitter = parseOrderingReference(input.submittedGuestSessionReference);
   const operation = parseOrderingReference(input.operationReference);
   const at = parseOrderingInstant(input.observedAt);
   const scope = { brandReference: brand, storeReference: store };
@@ -120,16 +127,27 @@ export async function returnDiningRoundToCart(
     return unavailable();
   const locked = await createPostgresCartQueryStore(lent(tx), scope).load(cartReference);
   if (locked === null) return unavailable();
-  // Each dish as it was in the cart when it was sent: the last guest operation on its line.
+  // Each dish as it was in the cart when it was sent: the newest of the last guest operation on
+  // its line and, for a dish an earlier stop put back (no cart operation added that line), the
+  // line as that return recorded it.
   const items = rowsOf(
     await tx.query(
       `SELECT i.source_cart_line_id::text AS line, i.quantity,
-         (SELECT item FROM rms_ordering.cart_operation_record o,
-            jsonb_array_elements(o.result_cart_snapshot_json->'items') AS item
-          WHERE o.brand_id=$1 AND o.store_id=$2 AND o.cart_id=$5::uuid
-            AND o.cart_line_id=i.source_cart_line_id AND o.action_code IN ('Add','Update')
-            AND item->>'cartItemReference' = i.source_cart_line_id::text
-          ORDER BY o.result_aggregate_version DESC LIMIT 1) AS item
+         (SELECT k.item FROM (
+            SELECT item, o.result_aggregate_version AS version
+            FROM rms_ordering.cart_operation_record o,
+              jsonb_array_elements(o.result_cart_snapshot_json->'items') AS item
+            WHERE o.brand_id=$1 AND o.store_id=$2 AND o.cart_id=$5::uuid
+              AND o.cart_line_id=i.source_cart_line_id AND o.action_code IN ('Add','Update')
+              AND item->>'cartItemReference' = i.source_cart_line_id::text
+            UNION ALL
+            SELECT item, x.result_aggregate_version AS version
+            FROM rms_ordering.dining_round_cart_return x,
+              jsonb_array_elements(x.returned_items_json) AS item
+            WHERE x.brand_id=$1 AND x.store_id=$2 AND x.cart_id=$5::uuid
+              AND i.source_cart_line_id = ANY (x.cart_line_ids)
+              AND item->>'cartItemReference' = i.source_cart_line_id::text) k
+          ORDER BY k.version DESC LIMIT 1) AS item
        FROM rms_ordering.order_item i
        WHERE i.brand_id=$1 AND i.store_id=$2 AND i.order_id=$3 AND i.order_batch_id=$4
        ORDER BY i.ordinal, i.order_item_id`,
@@ -206,8 +224,8 @@ export async function returnDiningRoundToCart(
     rowsOf(
       await tx.query(
         `INSERT INTO rms_ordering.dining_round_cart_return
-         (order_batch_id,brand_id,store_id,order_id,dining_session_id,cart_id,result_aggregate_version,cart_line_ids,operation_id,guest_session_id,occurred_at,audit_id)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8::uuid[],$9,$10,$11,$12) RETURNING order_batch_id`,
+         (order_batch_id,brand_id,store_id,order_id,dining_session_id,cart_id,result_aggregate_version,cart_line_ids,returned_items_json,operation_id,guest_session_id,participant_id,submitted_guest_session_id,occurred_at,audit_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8::uuid[],$9::jsonb,$10,$11,$12,$13,$14,$15) RETURNING order_batch_id`,
         [
           batch,
           brand,
@@ -217,8 +235,11 @@ export async function returnDiningRoundToCart(
           cartReference,
           nextVersion,
           references,
+          JSON.stringify(lines),
           operation,
           guest,
+          participant,
+          submitter,
           at,
           audit.auditId,
         ],
@@ -237,7 +258,9 @@ export async function returnDiningRoundToCart(
 
 /**
  * WP-2423 M38: the round of this table (its number at the table, as the cart's rounds number them)
- * that this Guest Session sent, or null. Read only; the caller then proves it unpaid.
+ * that this phone sent, or null: sent by this Guest Session, or by an earlier Guest Session of the
+ * same table participant as Ordering recorded it opening this table's Cart (the rule the cart's
+ * rounds use for "sent by this phone"). Read only; the caller then proves it unpaid.
  */
 export async function findGuestDiningRound(
   tx: CartQueryTransaction,
@@ -245,11 +268,14 @@ export async function findGuestDiningRound(
   input: {
     readonly diningSessionReference: string;
     readonly guestSessionReference: string;
+    readonly participantReference: string;
     readonly roundNumber: number;
   },
 ): Promise<{
   readonly orderReference: string;
   readonly orderBatchReference: string;
+  /** The Guest Session that sent it. */
+  readonly submittedGuestSessionReference: string;
   /** Its dishes already came back to the cart (2000_412): nothing more to do. */
   readonly returned: boolean;
 } | null> {
@@ -264,6 +290,7 @@ export async function findGuestDiningRound(
   const rows = rowsOf(
     await tx.query(
       `SELECT r.order_id::text AS "order", r.order_batch_id::text AS batch,
+         r.guest_session_id::text AS submitter,
          EXISTS (SELECT 1 FROM rms_ordering.dining_round_cart_return x
            WHERE x.brand_id=$1 AND x.store_id=$2 AND x.order_batch_id=r.order_batch_id) AS returned
        FROM (SELECT b.order_id, b.order_batch_id, s.guest_session_id,
@@ -277,7 +304,10 @@ export async function findGuestDiningRound(
                JOIN rms_ordering.cart c ON c.cart_id=o.source_cart_id AND c.brand_id=o.brand_id
                  AND c.store_id=o.store_id AND c.order_type='DineIn'
                WHERE o.brand_id=$1 AND o.store_id=$2 AND c.dining_session_id=$3)) r
-       WHERE r.round_number=$5 AND r.guest_session_id=$4
+       WHERE r.round_number=$5 AND (r.guest_session_id=$4 OR EXISTS (
+         SELECT 1 FROM rms_ordering.dining_cart_operation o
+         WHERE o.brand_id=$1 AND o.store_id=$2 AND o.dining_session_id=$3
+           AND o.guest_session_id=r.guest_session_id AND o.participant_id=$6))
        LIMIT 2`,
       [
         brand,
@@ -285,6 +315,7 @@ export async function findGuestDiningRound(
         parseOrderingReference(input.diningSessionReference),
         parseOrderingReference(input.guestSessionReference),
         input.roundNumber,
+        parseOrderingReference(input.participantReference),
       ],
     ),
   );
@@ -295,6 +326,7 @@ export async function findGuestDiningRound(
     : Object.freeze({
         orderReference: String(parseOrderingReference(row.order)),
         orderBatchReference: String(parseOrderingReference(row.batch)),
+        submittedGuestSessionReference: String(parseOrderingReference(row.submitter)),
         returned: row.returned === true,
       });
 }
