@@ -612,7 +612,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Price unavailable": "价格暂不可用",
   "Priced at checkout": "结账时计价",
   "Prices are being updated. Please try again in a moment.": "价格正在更新，请稍后再试。",
-  "Continue within {remaining}.": "请在{remaining}内继续。",
+  "Your price is kept for {remaining}.": "价格为你保留{remaining}。",
   "Prices have expired. Checkout will price your order again.": "价格已过期，结账时会重新计价。",
   "Prices need a refresh": "价格需要刷新",
   "Print or save receipt": "打印或保存收据",
@@ -1725,11 +1725,11 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "这单还未付款。请在 {time} 前付款，否则会取消，不会扣款。",
   "This order was cancelled because it wasn’t paid in time. You weren’t charged.":
     "这单因未按时付款已取消，没有扣款。",
-  "Time to continue has ended. Tap Refresh prices. Your details are kept.":
-    "继续时间已过。请点“刷新价格”，已填信息会保留。",
-  "Continue within {left}": "请在 {left} 内继续",
-  "1 minute left. Continue now, or we’ll check prices again.":
-    "还剩 1 分钟。请现在继续，否则会重新核价。",
+  "We’ve stopped keeping your price. Tap Refresh prices: any price that changed is shown before you pay. Your details are kept.":
+    "价格保留时间已到。请点“刷新价格”：有改价的菜会在付款前列出。已填信息会保留。",
+  "Your price is kept for {left}": "价格为你保留 {left}",
+  "Your price is kept for 1 more minute. Continue now, or we’ll check prices again.":
+    "价格只再为你保留 1 分钟。请现在继续，否则会重新核价。",
   "New total {total}": "新合计 {total}",
   "I accept the new prices": "我接受新价格",
   "A tip can’t be more than the order itself ({subtotal}). Ask staff if you’d like to leave more.":

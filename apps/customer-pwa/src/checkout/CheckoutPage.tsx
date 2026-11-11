@@ -541,7 +541,7 @@ export function CheckoutPage({
           serviceMode: cart.cart.orderType,
         }
       : undefined);
-  // WP-2423 M125: how long this total can be continued with, updated every 30 s, then every second.
+  // Owner #26 (DEC-PRICE-HOLD) / M125: how long the price is kept, every 30 s, then every second.
   const hold = quote === null ? null : priceHold(quote.expiresAt, now());
   useEffect(() => {
     if (hold?.nextUpdateMs == null) return;
@@ -739,10 +739,10 @@ export function CheckoutPage({
               ) : payLater ? null : (
                 <>
                   <p className="checkout-totals__validity">
-                    {hold === null ? "" : checkoutText.continueWithin(hold.left)}
+                    {hold === null ? "" : checkoutText.priceKeptFor(hold.left)}
                   </p>
                   {hold?.phase === "last-minute" ? (
-                    <p role="alert">{checkoutText.continueLastMinute}</p>
+                    <p role="alert">{commonText.priceKeptLastMinute}</p>
                   ) : null}
                 </>
               )}

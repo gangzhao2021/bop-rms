@@ -386,6 +386,20 @@ function CartSummary({
   /** WP-2423 item 6: the table pays at the end: no checkout to point at, no prices to lock. */
   readonly payLater: boolean;
 }) {
+  // Owner #26 (DEC-PRICE-HOLD), warn before timeouts: shown again when the hold's last minute
+  // starts and when it ends.
+  const [, setClock] = useState(0);
+  const heldUntil = payLater ? null : (cart.cart.quote?.expiresAt ?? null);
+  useEffect(() => {
+    if (heldUntil === null) return;
+    const left = Date.parse(heldUntil) - now();
+    if (!Number.isFinite(left) || left <= 0) return;
+    const timer = window.setTimeout(
+      () => setClock((value) => value + 1),
+      Math.min((left > 60_000 ? left - 60_000 : left) + 20, 2_147_483_647),
+    );
+    return () => window.clearTimeout(timer);
+  });
   if (cart.cart.lifecycle.status !== "Active")
     return (
       <section className="cart-summary" aria-labelledby="cart-summary-heading">
@@ -449,11 +463,12 @@ function CartSummary({
       </dl>
       {payLater ? null : (
         <p className="cart-summary__validity">
-          {remaining === null
-            ? cartText.summary.pricesExpired
-            : commonText.continueWithin(remaining)}
+          {remaining === null ? cartText.summary.pricesExpired : commonText.priceKeptFor(remaining)}
         </p>
       )}
+      {!payLater && remaining !== null && Date.parse(quote.expiresAt) - now() <= 60_000 ? (
+        <p role="alert">{commonText.priceKeptLastMinute}</p>
+      ) : null}
       {[
         ...quote.blockingReasons.map((code) => quoteIssueMessage(code, true)),
         ...quote.warnings.map((code) => quoteIssueMessage(code, false)),

@@ -663,7 +663,7 @@ for (const screen of [
           // WP-2423 M125: one message once the hold ended; never "saved" beside it.
           await expect(
             page.getByText(
-              "Time to continue has ended. Tap Refresh prices. Your details are kept.",
+              "We’ve stopped keeping your price. Tap Refresh prices: any price that changed is shown before you pay. Your details are kept.",
               {
                 exact: true,
               },

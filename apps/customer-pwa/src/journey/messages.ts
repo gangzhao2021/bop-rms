@@ -347,11 +347,14 @@ export const commonText = Object.freeze({
       : t("Another guest is checking out");
   },
   /**
-   * Owner #26 / WP-2423 item 20: how long this quoted total can be continued with. It is not a
-   * price hold (a menu change inside it still asks the guest to accept new prices), so the
-   * wording never promises one, the same as the checkout countdown.
+   * Owner #26 (DEC-PRICE-HOLD): how long the price of this cart is kept. A menu change inside it
+   * does not change what the guest pays; after it the cart is priced again.
    */
-  continueWithin: (remaining: string) => t("Continue within {remaining}.", { remaining }),
+  priceKeptFor: (remaining: string) => t("Your price is kept for {remaining}.", { remaining }),
+  /** Owner #26 (DEC-PRICE-HOLD), AGENTS.md warn before timeouts: the hold's last minute. */
+  get priceKeptLastMinute() {
+    return t("Your price is kept for 1 more minute. Continue now, or we’ll check prices again.");
+  },
 });
 
 // --- cart page (cart/CartPage.tsx) ---
@@ -821,17 +824,15 @@ export const checkoutText = Object.freeze({
     return t("Tip");
   },
   get pricesExpired() {
-    return t("Time to continue has ended. Tap Refresh prices. Your details are kept.");
+    return t(
+      "We’ve stopped keeping your price. Tap Refresh prices: any price that changed is shown before you pay. Your details are kept.",
+    );
   },
   /**
-   * WP-2423 M125: how long this total can be continued with (m:ss). It is not a price hold: a
-   * menu change inside it still asks the guest to accept the new prices (Owner #26 shortfall,
-   * WP-2423), so the wording never promises one.
+   * Owner #26 (DEC-PRICE-HOLD) / WP-2423 M125: how long the confirmed price is kept (m:ss). Inside
+   * it a menu change does not change what the guest pays.
    */
-  continueWithin: (left: string) => t("Continue within {left}", { left }),
-  get continueLastMinute() {
-    return t("1 minute left. Continue now, or we’ll check prices again.");
-  },
+  priceKeptFor: (left: string) => t("Your price is kept for {left}", { left }),
   /** WP-2423 M74: after the dishes whose price changed. */
   newTotal: (total: string) => t("New total {total}", { total }),
   get acceptNewPrices() {

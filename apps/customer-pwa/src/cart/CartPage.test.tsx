@@ -188,27 +188,30 @@ describe("CUST-CART page contract", () => {
     ).toContain("Prices have expired");
   });
 
-  it("Owner #26: the quote timer says how long to continue, never that prices are held", () => {
-    const atThreeMinutesLeft = () => Date.parse("2026-08-02T20:02:00.000Z");
-    const render = () =>
+  it("Owner #26 (DEC-PRICE-HOLD): the quote timer says how long the price is kept, and warns in its last minute", () => {
+    const render = (at: string) =>
       renderToStaticMarkup(
         <MemoryRouter>
           <CartPage
             controller={controller({ status: "ready", cart: cart() })}
-            now={atThreeMinutesLeft}
+            now={() => Date.parse(at)}
           />
         </MemoryRouter>,
       );
-    const english = render();
-    expect(english).toContain("Continue within about 3 minutes.");
-    expect(english).not.toMatch(/confirmed|held|lock/iu);
+    const english = render("2026-08-02T20:02:00.000Z");
+    expect(english).toContain("Your price is kept for about 3 minutes.");
+    expect(english).not.toContain('role="alert"');
+    expect(render("2026-08-02T20:04:30.000Z")).toContain(
+      '<p role="alert">Your price is kept for 1 more minute. Continue now, or we’ll check prices again.</p>',
+    );
     try {
       renderToStaticMarkup(
         createElement(LanguageRoot, { initial: "zh-Hans", children: () => null }),
       );
-      const chinese = render();
-      expect(chinese).toContain("请在约 3 分钟内继续。");
-      expect(chinese).not.toMatch(/锁定|锁价|保留/u);
+      expect(render("2026-08-02T20:02:00.000Z")).toContain("价格为你保留约 3 分钟。");
+      expect(render("2026-08-02T20:04:30.000Z")).toContain(
+        "价格只再为你保留 1 分钟。请现在继续，否则会重新核价。",
+      );
     } finally {
       renderToStaticMarkup(createElement(LanguageRoot, { initial: "en", children: () => null }));
     }
@@ -654,7 +657,7 @@ describe("WP-2423 item 6: a table that pays at the end", () => {
         warnings: ["QUOTE_EXPIRED"],
       }),
     });
-    expect(quoted).not.toContain("Continue within");
+    expect(quoted).not.toContain("Your price is kept");
     expect(quoted).not.toMatch(/confirmed|held/iu);
     expect(quoted).not.toContain("Prices have expired");
     expect(quoted).toContain("$11.30");
