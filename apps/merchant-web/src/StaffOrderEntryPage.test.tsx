@@ -847,7 +847,6 @@ describe("DEC-PAPER-ORDER-PAID-AT-SEND: a paper order is recorded with its payme
       { ...placed, paymentError: "taken_before_records" },
       { ...placed, paymentError: "amount_changed", paymentTotalMinor: "390" },
       { ...placed, paymentError: "card_machine_payment_unavailable" },
-      // A payment answer for an order sent without one is not believed.
       { ...placed, paymentError: "taken_before_records" },
     ];
     const bodies: unknown[] = [];
@@ -882,8 +881,15 @@ describe("DEC-PAPER-ORDER-PAID-AT-SEND: a paper order is recorded with its payme
     expect(failed.paperPayment?.kind === "NotRecorded" && failed.paperPayment.error.code).toBe(
       "Unavailable",
     );
-    const { paperPayment: _, ...unpaid } = command;
-    await expect(client.placeOrder({ ...unpaid, recordedAfterOutage: false })).rejects.toThrow();
+    // A payment answer for an order sent without one is not believed.
+    await expect(
+      client.placeOrder({
+        operationReference: command.operationReference,
+        lines: [],
+        tip: command.tip,
+        recordedAfterOutage: false,
+      }),
+    ).rejects.toThrow();
   });
   it("never tells staff to charge a paper order, and warns before the system takes it off", () => {
     const payBy = "2026-10-15T16:30:00.000Z";

@@ -207,6 +207,19 @@ test("@production staff take a counter pickup order, charge it on the card machi
         totalMinor: "672",
         payBy: new Date(Date.now() + 30 * 60_000).toISOString(),
         recordedAfterOutage: body.recordedAfterOutage === true,
+        // DEC-PAPER-ORDER-PAID-AT-SEND: a paper order's payment is recorded with it.
+        ...(body.paperPayment === undefined
+          ? {}
+          : {
+              payment: {
+                status: "Recorded",
+                amountMinor: "672",
+                recordingReason: "RecordedAfterOutage",
+                takenAt: (body.paperPayment as { takenAt: string }).takenAt,
+                recordedAt: new Date().toISOString(),
+                acceptance: "Accepted",
+              },
+            }),
       },
     });
   });
@@ -331,42 +344,66 @@ test("@production staff take a counter pickup order, charge it on the card machi
   expect(accepted).toHaveLength(0);
   await expect(page.locator("body")).not.toContainText(id(20));
 
-  // A paper order taken during an outage: entered with the time it was paid, not sent again.
+  // A paper order taken during an outage: entered with the time and way it was paid, and
+  // recorded with its payment in one step (DEC-PAPER-ORDER-PAID-AT-SEND), never left to charge.
   await page.getByRole("button", { name: "New counter order" }).click();
   await page.getByRole("button", { name: "Add Flat White" }).click();
   await page.getByRole("button", { name: "Add to order" }).click();
   await page.getByRole("checkbox", { name: "Recorded after an outage (taken on paper)" }).check();
-  await expect(page.getByRole("button", { name: "Send order" })).toBeDisabled();
+  const sendPaper = page.getByRole("button", { name: "Send and record paper order" });
+  await expect(sendPaper).toBeDisabled();
   const paid = new Date(Date.now() - 2 * 60 * 60_000);
   const local = (value: Date) =>
     new Date(value.getTime() - value.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
   await page.getByLabel("Paid at (store time, from the paper order)").fill(local(paid));
-  await page.getByRole("button", { name: "Send order" }).click();
-  // WP-2423 M96: a paper order was paid during the outage: record it, never charge it again.
+  const how = page.getByRole("group", { name: "How it was paid during the outage" });
+  await expect(how.getByRole("radio", { name: "Card machine" })).toBeChecked();
+  const paperSlip = page.getByRole("textbox", { name: "Slip reference (optional)" });
+  await paperSlip.fill("1234 5678 9012 3456");
+  await expect(sendPaper).toBeDisabled();
+  await paperSlip.fill("AUTH 7701");
   await expect(
-    page.getByRole("heading", {
-      name: "Paper order 12: record the payment taken during the outage",
-    }),
-  ).toBeVisible();
-  await expect(
-    page.getByText(
-      "Sent. This paper order was paid during the outage: don't charge again, record it below.",
-    ),
-  ).toBeVisible();
-  expect(placedBodies.at(-1)?.recordedAfterOutage).toBe(true);
-  await page.getByRole("button", { name: "Paid on card machine · $6.72" }).click();
-  await expect(
-    page.getByText("Recorded after the outage and accepted.", {
+    page.getByText("Sending records the order and the payment on the slip together.", {
       exact: false,
     }),
   ).toBeVisible();
-  expect(payments.at(-1)?.takenAt).toEqual(expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/u));
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await expect(sendPaper).toBeVisible();
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.screenshot({ path: `test-results/counter-paper-form-${width}.png`, fullPage: true });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const recordedBefore = payments.length;
+  await sendPaper.click();
+  await expect(page.getByRole("heading", { name: "Order 12 paid" })).toBeVisible();
+  await expect(
+    page.getByText("Recorded after the outage and accepted.", { exact: false }),
+  ).toBeVisible();
+  expect(placedBodies.at(-1)).toMatchObject({
+    recordedAfterOutage: true,
+    paperPayment: {
+      operationReference: expect.stringMatching(/^[0-9a-f-]{36}$/u),
+      tender: "CardMachine",
+      slipReference: "AUTH 7701",
+      takenAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/u),
+    },
+  });
+  // No separate charge step, and nothing on screen asks to charge, release or cancel it.
+  expect(payments).toHaveLength(recordedBefore);
+  await expect(page.locator("main")).not.toContainText(
+    /To charge|released|Ask a manager|Charge \$|Paid on card machine ·/u,
+  );
   expect(accepted).toHaveLength(0);
 });
 
 // WP-2423 (v15 fabf0261 F1): the server refuses a paper order's paid-at (here: before the store
-// started recording sales). The time is corrected in the charge step, where it is shown, and
-// recorded as a new payment; a retry after no answer with the same time is the same payment.
+// started recording sales) when it records the payment sent with the order
+// (DEC-PAPER-ORDER-PAID-AT-SEND). The order is in; the time is corrected in the record-again step,
+// where it is shown, and recorded as a new payment; a retry after no answer with the same time is
+// the same payment. Nothing there asks staff to charge the guest, or says it is released.
 for (const language of ["en", "zh-Hans"] as const)
   test(`@production a refused paper paid-at is corrected in the charge step and recorded (${language})`, async ({
     page,
@@ -378,8 +415,10 @@ for (const language of ["en", "zh-Hans"] as const)
     const zh = language === "zh-Hans";
     await signIn(page);
     await page.route("**/merchant/counter/menu", (route) => route.fulfill({ headers, json: menu }));
-    await page.route("**/merchant/counter/orders", (route) =>
-      route.fulfill({
+    const placedBodies: Record<string, unknown>[] = [];
+    await page.route("**/merchant/counter/orders", (route) => {
+      placedBodies.push(route.request().postDataJSON() as Record<string, unknown>);
+      return route.fulfill({
         headers,
         json: {
           status: "Placed",
@@ -392,16 +431,15 @@ for (const language of ["en", "zh-Hans"] as const)
           totalMinor: "672",
           payBy: new Date(Date.now() + 30 * 60_000).toISOString(),
           recordedAfterOutage: true,
+          paymentError: "taken_before_records",
         },
-      }),
-    );
+      });
+    });
     const payments: Record<string, unknown>[] = [];
     await page.route("**/merchant/orders/card-machine-payment", (route) => {
       const body = route.request().postDataJSON() as Record<string, unknown>;
       payments.push(body);
-      if (payments.length === 1)
-        return route.fulfill({ status: 409, headers, json: { error: "taken_before_records" } });
-      if (payments.length === 2) return route.abort("connectionreset");
+      if (payments.length === 1) return route.abort("connectionreset");
       return route.fulfill({
         headers,
         json: {
@@ -445,14 +483,28 @@ for (const language of ["en", "zh-Hans"] as const)
       })
       .check();
     await page.getByLabel(paidAtLabel).fill(storeLocal(Date.now() - 2 * 60 * 60_000));
-    await page.getByRole("button", { name: zh ? "发送订单" : "Send order" }).click();
+    await page
+      .getByRole("button", { name: zh ? "发送并录入纸质订单" : "Send and record paper order" })
+      .click();
     const pay = page.getByRole("button", {
-      name: zh ? "已用刷卡机付款 · $6.72" : "Paid on card machine · $6.72",
+      name: zh ? "录入纸单付款 · $6.72" : "Record paper payment · $6.72",
     });
     await expect(pay).toBeVisible();
-    // Sent: the one paid-at field is the charge step's, holding the time from the paper order.
+    await expect(
+      page.getByRole("heading", {
+        name: zh ? "纸质订单 12：付款还没录入" : "Paper order 12: its payment isn't recorded yet",
+      }),
+    ).toBeVisible();
+    // Sent: the one paid-at field is the record-again step's, holding the time from the paper order.
     await expect(page.getByLabel(paidAtLabel)).toHaveCount(1);
-    await pay.click();
+    await expect(page.locator("main")).not.toContainText(
+      zh ? /应收|释放|请经理取消/u : /To charge|released|Ask a manager|Charge \$/u,
+    );
+    await expect(page.locator("main")).toContainText(
+      zh
+        ? "录入前这笔销售不计入当天营业额"
+        : "Until it is recorded the sale isn't in the day's takings",
+    );
     const refusal = page.getByRole("alert").filter({
       hasText: zh
         ? "早于本店开始在系统里记录销售的时间"
@@ -489,7 +541,11 @@ for (const language of ["en", "zh-Hans"] as const)
     await chargePaidAt.fill(corrected);
     await expect(chargePaidAt).toHaveAttribute("aria-invalid", "false");
     await pay.click();
-    await expect(page.getByRole("alert")).toBeVisible();
+    await expect(
+      page.getByRole("alert").filter({
+        hasText: zh ? "订单已录入，但纸质单上的付款还没录入" : "The order is in, but its payment",
+      }),
+    ).toBeVisible();
     // No answer: pressed again with the same time, it is the same payment (never counted twice).
     await expect(chargePaidAt).toBeEnabled();
     await pay.click();
@@ -498,11 +554,13 @@ for (const language of ["en", "zh-Hans"] as const)
         exact: false,
       }),
     ).toBeVisible();
-    expect(payments).toHaveLength(3);
-    expect(payments[1]?.operationReference).not.toBe(payments[0]?.operationReference);
-    expect(payments[1]?.takenAt).not.toBe(payments[0]?.takenAt);
-    expect(payments[2]?.operationReference).toBe(payments[1]?.operationReference);
-    expect(payments[2]?.takenAt).toBe(payments[1]?.takenAt);
+    const sentWith = placedBodies[0]?.paperPayment as Record<string, unknown>;
+    expect(sentWith).toMatchObject({ tender: "CardMachine", slipReference: null });
+    expect(payments).toHaveLength(2);
+    expect(payments[0]?.operationReference).not.toBe(sentWith.operationReference);
+    expect(payments[0]?.takenAt).not.toBe(sentWith.takenAt);
+    expect(payments[1]?.operationReference).toBe(payments[0]?.operationReference);
+    expect(payments[1]?.takenAt).toBe(payments[0]?.takenAt);
     await expect(page.locator("body")).not.toContainText(id(20));
   });
 
@@ -1166,4 +1224,191 @@ test("@production staff search the menu, change a line and see what they order o
       name: "Add Banana Bread",
     }),
   ).toBeVisible();
+});
+
+// WP-2423 M127 (v15 batch 5): straight after Send, while the counter still reads who may cancel,
+// nobody is told to ask a manager (or offered Cancel); then the owner gets Cancel and Back to edit,
+// and front of house is told to ask a manager.
+for (const role of ["owner", "cashier"] as const)
+  test(`@production the charge step says who cancels only once it is known (${role})`, async ({
+    page,
+  }) => {
+    await signIn(page);
+    await page.route("**/merchant/counter/menu", (route) => route.fulfill({ headers, json: menu }));
+    const payBy = new Date(Date.now() + 30 * 60_000).toISOString();
+    await page.route("**/merchant/counter/orders", (route) =>
+      route.fulfill({
+        headers,
+        json: {
+          status: "Placed",
+          orderReference: id(20),
+          orderBatchReference: id(21),
+          orderNumber: "12",
+          orderVersion: 1,
+          orderMinor: "593",
+          tipMinor: "0",
+          totalMinor: "593",
+          payBy,
+          recordedAfterOutage: false,
+        },
+      }),
+    );
+    let answer: () => void = () => undefined;
+    const answered = new Promise<void>((resolve) => (answer = resolve));
+    let sent = false;
+    const row = {
+      orderReference: id(20),
+      orderNumber: "12",
+      orderType: "Pickup",
+      sourceChannel: "Pos",
+      submittedAt: new Date().toISOString(),
+      observedAt: new Date().toISOString(),
+      initialBatchReference: id(21),
+      batches: [
+        {
+          orderBatchReference: id(21),
+          sequence: 1,
+          acceptanceStatus: "NotAccepted",
+          canRequestAcceptance: false,
+          canCancel: false,
+          staffCancellation: null,
+          canCancelItems: false,
+        },
+      ],
+      canRequestAcceptance: false,
+      unfulfillable: null,
+      pickupNotCollected: false,
+      acceptBy: null,
+      awaitingPayment: true,
+      currentPhase: "Submitted",
+      currentVersion: 1,
+      counter: {
+        recordedAfterOutage: false,
+        paidOnCardMachine: null,
+        payBy,
+        amountDueMinor: null,
+        canCancelUnpaid: role === "owner",
+        cancelledBeforePayment: null,
+      },
+      canRecordCardMachinePayment: true,
+      canViewPayments: role === "owner",
+    };
+    await page.route("**/merchant/orders", async (route) => {
+      if (sent) await answered;
+      return route.fulfill({
+        headers,
+        json: { items: sent ? [row] : [], nextAfterOrderReference: null },
+      });
+    });
+    await page.goto("/operations/order-entry");
+    await page.getByRole("button", { name: "Add Banana Bread" }).click();
+    sent = true;
+    await page.getByRole("button", { name: "Send order" }).click();
+    await expect(
+      page.getByRole("heading", { name: "Charge $5.93 on the card machine" }),
+    ).toBeVisible();
+    const charge = page.locator(".counter-order__charge");
+    await expect(
+      charge.getByText("Card declined? Try another card.", { exact: true }),
+    ).toBeVisible();
+    await expect(charge).not.toContainText("Ask a manager");
+    await expect(charge.getByRole("button", { name: "Cancel order" })).toHaveCount(0);
+    answer();
+    if (role === "owner") {
+      await expect(charge.getByRole("button", { name: "Cancel order" })).toBeVisible();
+      await expect(charge.getByRole("button", { name: "Back to edit" })).toBeVisible();
+      await expect(charge).toContainText("Guest not paying? Cancel the order so its items go back");
+      await expect(charge).not.toContainText("Ask a manager");
+    } else {
+      await expect(charge).toContainText("Guest not paying? Ask a manager to cancel it");
+      await expect(charge.getByRole("button", { name: "Cancel order" })).toHaveCount(0);
+    }
+    for (const width of [1440, 1024, 390]) {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+      await expect(charge).toBeVisible();
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true);
+      await page.screenshot({
+        path: `test-results/counter-charge-${role}-${width}.png`,
+        fullPage: true,
+      });
+    }
+  });
+
+// DEC-PAPER-ORDER-PAID-AT-SEND: a paper order paid in cash during the outage is recorded with the
+// send at its cash total (the change was given then); nothing asks to take the cash again.
+test("@production a paper order paid in cash is recorded with the send", async ({ page }) => {
+  await signIn(page);
+  await page.route("**/merchant/counter/menu", (route) => route.fulfill({ headers, json: menu }));
+  const placedBodies: Record<string, unknown>[] = [];
+  await page.route("**/merchant/counter/orders", (route) => {
+    const body = route.request().postDataJSON() as Record<string, unknown>;
+    placedBodies.push(body);
+    return route.fulfill({
+      headers,
+      json: {
+        status: "Placed",
+        orderReference: id(20),
+        orderBatchReference: id(21),
+        orderNumber: "5",
+        orderVersion: 1,
+        orderMinor: "423",
+        tipMinor: "0",
+        totalMinor: "423",
+        payBy: new Date(Date.now() + 30 * 60_000).toISOString(),
+        recordedAfterOutage: true,
+        payment: {
+          status: "Recorded",
+          amountMinor: "423",
+          recordingReason: "RecordedAfterOutage",
+          takenAt: (body.paperPayment as { takenAt: string }).takenAt,
+          recordedAt: new Date().toISOString(),
+          cash: {
+            cashTotalMinor: "425",
+            roundingMinor: "2",
+            tenderedMinor: "425",
+            changeMinor: "0",
+          },
+          acceptance: "Accepted",
+        },
+      },
+    });
+  });
+  const separate: unknown[] = [];
+  await page.route("**/merchant/orders/card-machine-payment", (route) => {
+    separate.push(route.request().postDataJSON());
+    return route.abort();
+  });
+  await page.goto("/operations/order-entry");
+  await page.getByRole("button", { name: "Add Banana Bread" }).click();
+  await page.getByRole("checkbox", { name: "Recorded after an outage (taken on paper)" }).check();
+  const paid = new Date(Date.now() - 60 * 60_000);
+  await page
+    .getByLabel("Paid at (store time, from the paper order)")
+    .fill(new Date(paid.getTime() - paid.getTimezoneOffset() * 60_000).toISOString().slice(0, 16));
+  await page
+    .getByRole("group", { name: "How it was paid during the outage" })
+    .getByRole("radio", { name: "Cash" })
+    .check();
+  await expect(page.getByRole("textbox", { name: "Slip reference (optional)" })).toHaveCount(0);
+  await expect(
+    page.getByText("Sending records the order and the cash taken during the outage together."),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Send and record paper order" }).click();
+  await expect(page.getByRole("heading", { name: "Order 5 paid" })).toBeVisible();
+  await expect(
+    page.getByText("Cash recorded after the outage and accepted.", { exact: false }),
+  ).toBeVisible();
+  expect(placedBodies[0]?.paperPayment).toMatchObject({ tender: "Cash", slipReference: null });
+  expect(separate).toHaveLength(0);
+  await expect(page.locator("main")).not.toContainText(/To charge|released|Take \$|Ask a manager/u);
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await expect(page.getByRole("heading", { name: "Order 5 paid" })).toBeVisible();
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.screenshot({ path: `test-results/counter-paper-cash-${width}.png`, fullPage: true });
+  }
 });
