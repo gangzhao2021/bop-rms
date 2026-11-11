@@ -177,8 +177,17 @@ export async function withTenantContextTransaction<T>(
   let client: PoolClient;
   try {
     client = await pool.connect();
-  } catch {
-    throw new TenantContextDatabaseError("TENANT_DATABASE_ACQUIRE_FAILED");
+  } catch (error) {
+    // WP-2423 M68: a bounded acquire (connection-acquire) already says why, safely.
+    if (
+      error instanceof TenantContextDatabaseError &&
+      error.code === "TENANT_DATABASE_ACQUIRE_FAILED"
+    )
+      throw error;
+    throw new TenantContextDatabaseError(
+      "TENANT_DATABASE_ACQUIRE_FAILED",
+      tenantContextDatabaseDiagnostic(error),
+    );
   }
   // WP-2423 pilot resilience: the pool listens for errors only on idle clients. A checked-out
   // connection the server terminates between queries (25P03 idle-in-transaction timeout, 57P01

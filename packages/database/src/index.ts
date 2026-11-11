@@ -40,6 +40,13 @@ export {
   type TenantDatabaseScope,
 } from "./tenant-context.ts";
 export {
+  acquireTenantConnection,
+  isTransientConnectionAcquireFailure,
+  tenantConnectionRetryBaseMs,
+  tenantConnectionRetryMinimumMs,
+  type TenantConnectionAcquirePolicy,
+} from "./connection-acquire.ts";
+export {
   createTenantTransactionRunner,
   isRetryableTransactionConflict,
   type DatabaseTransaction,

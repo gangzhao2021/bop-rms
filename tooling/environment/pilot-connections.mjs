@@ -3,6 +3,7 @@ import { readFile, lstat, realpath } from "node:fs/promises";
 import { createRequire } from "node:module";
 import process from "node:process";
 import { createTenantTransactionRunner } from "../../packages/database/dist/transaction-runner.js";
+import { acquireTenantConnection } from "../../packages/database/dist/connection-acquire.js";
 import { isPilotRuntime } from "./pilot-environment.mjs";
 import {
   isPilotEntryProcess,
@@ -43,6 +44,21 @@ export function guardPilotPoolConnections(pool, write = (line) => process.stderr
   pool.on("error", report);
   pool.on("connect", (client) => client.on("error", report));
   return pool;
+}
+/**
+ * WP-2423 M68 (a): a connection taken outside the transaction runner (admission, joins, snapshot
+ * reads) gets the same bounded retry with jitter within the pool's acquire limit before the
+ * request answers "busy, try again" (never a refusal).
+ */
+export async function acquirePilotConnection(pool, policy = {}) {
+  try {
+    return await acquireTenantConnection(pool, {
+      budgetMs: pool.options.connectionTimeoutMillis,
+      ...policy,
+    });
+  } catch {
+    throw new Error("LOCAL_DATABASE_UNAVAILABLE");
+  }
 }
 /** This role's usable connections, read from the database itself; null when it can't be read. */
 export async function readPilotRoleLimit(config) {
@@ -127,13 +143,7 @@ export async function createApplicationDatabase(
   let closing;
   return Object.freeze({
     transactions: (scope) => createTenantTransactionRunner(pool, scope),
-    async acquire() {
-      try {
-        return await pool.connect();
-      } catch {
-        throw new Error("LOCAL_DATABASE_UNAVAILABLE");
-      }
-    },
+    acquire: () => acquirePilotConnection(pool),
     async probe() {
       if (closing) return "not_ready";
       try {

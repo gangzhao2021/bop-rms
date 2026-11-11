@@ -7,6 +7,7 @@ import {
 } from "./tenant-context.js";
 import { createTransactionStatementMemo } from "./transaction-statement-memo.js";
 import { snapshotReadStatement } from "./snapshot-read.js";
+import { acquireTenantConnection } from "./connection-acquire.js";
 
 const retryableSqlStates: ReadonlySet<string> = new Set(["55P03", "40001", "40P01"]);
 function sqlState(error: unknown): string {
@@ -86,12 +87,18 @@ export function createTenantTransactionRunner(
   const fixedScope = Object.freeze(
     Object.defineProperties({}, Object.getOwnPropertyDescriptors(scope)),
   ) as TenantDatabaseScope;
+  // WP-2423 M68 (a): a brief pool exhaustion is retried a few times with jitter, all within the
+  // pool's own acquire limit, before the request answers "busy, try again".
+  const budgetMs = pool.options.connectionTimeoutMillis as number;
+  const connections = Object.freeze({
+    connect: () => acquireTenantConnection(pool, { budgetMs }),
+  }) as Pick<Pool, "connect">;
   const execute = <T>(
     mode: "ReadWrite" | "Snapshot",
     action: (transaction: DatabaseTransaction) => Promise<T>,
   ): Promise<T> =>
     withTenantContextTransaction(
-      pool,
+      connections,
       fixedScope,
       async (client) => {
         let active = true;
