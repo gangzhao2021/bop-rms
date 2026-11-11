@@ -153,7 +153,7 @@ describe("DEC-PERM-CATALOG Store permission catalog", () => {
       expect(floor, code).toContain(code);
     for (const code of [
       "payment.refund.approve",
-      "payment.refund.request",
+      // v27 (WP-2423 M14): a cashier records refund requests; approving and sending stay away.
       "payment.refund.execute",
       "ordering.order.write_off",
       "ordering.order.cancel",
@@ -250,8 +250,15 @@ describe("DEC-PERM-CATALOG Store permission catalog", () => {
     expect(storeRoleTemplateActions("front-of-house")).not.toContain("organization.manage");
     expect(storeRoleTemplateActions("kitchen")).not.toContain("operations.ordering.pause");
   });
+  it("v27 WP-2423 M14: a cashier records refund requests and never approves or sends one", () => {
+    const frontOfHouse = storeRoleTemplateActions("front-of-house");
+    expect(frontOfHouse).toContain("payment.refund.request");
+    expect(frontOfHouse).not.toContain("payment.refund.approve");
+    expect(frontOfHouse).not.toContain("payment.refund.execute");
+    expect(storeRoleTemplateActions("kitchen")).not.toContain("payment.refund.request");
+  });
   it("v24 WP-2423 取舍 18: the Owner changes the points rules; managers read members; others neither", () => {
-    expect(storePermissionCatalogVersion).toBe(26);
+    expect(storePermissionCatalogVersion).toBe(27);
     expect(storeRoleTemplateActions("owner")).toEqual(
       expect.arrayContaining(["loyalty.program.manage", "loyalty.member.read"]),
     );

@@ -83,8 +83,12 @@
  * v26 (2026-11-05, WP-2423 DEC-PAID-ORDER-AUTO-ACCEPT, Owner's recommended default): Front of House
  * also holds operations.ordering.pause, the brake on a busy night once paid orders go straight to
  * the kitchen (it moves no money). Turning automatic sending on stays the Owner's.
+ * v27 (2026-11-10, WP-2423 M14, DEC-OWNER-DEFAULTS-2026-11-06 item 2, Owner accepted): Front of
+ * House also holds payment.refund.request: a cashier records a refund request with a reason; it
+ * never approves or sends one (payment.refund.approve and payment.refund.execute stay with the
+ * Store Manager and the Owner), so a manager or the owner sends it.
  */
-export const storePermissionCatalogVersion = 26 as const;
+export const storePermissionCatalogVersion = 27 as const;
 export type PermissionRisk = "Low" | "Medium" | "High";
 export interface StorePermissionDefinition {
   readonly code: string;
@@ -603,6 +607,8 @@ export const storeRoleTemplates: Readonly<Record<StoreRoleTemplateCode, readonly
       "catalog.sku.sold_out.mark",
       // v26 (DEC-PAID-ORDER-AUTO-ACCEPT): pause and resume ordering at a busy moment; moves no money.
       "operations.ordering.pause",
+      // v27 (WP-2423 M14): record a refund request with a reason; a manager or the owner sends it.
+      "payment.refund.request",
       "task.read",
       "task.claim",
       "task.complete",

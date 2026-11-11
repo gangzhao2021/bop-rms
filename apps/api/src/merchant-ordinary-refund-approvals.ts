@@ -48,7 +48,9 @@ export function createMerchantOrdinaryRefundApprovals(options: {
             const canApprove = await can("payment.refund.approve");
             const canRequest = await can("payment.refund.request");
             if (!canApprove && !canRequest) return denied();
-            return Object.freeze({ current, can, canApprove, canRequest });
+            // WP-2423 M14: who may send a refund that needs no approval and nobody sent yet.
+            const canSend = await can("payment.refund.execute");
+            return Object.freeze({ current, can, canApprove, canRequest, canSend });
           },
           recheck: async ({ can, canApprove, canRequest }) =>
             (canApprove && (await can("payment.refund.approve"))) ||
@@ -56,7 +58,7 @@ export function createMerchantOrdinaryRefundApprovals(options: {
           denied,
         },
         async (authorized) => {
-          const { current, canApprove } = authorized.scope;
+          const { current, canApprove, canSend } = authorized.scope;
           const still = () => authorized.guard();
           const tx = businessTransaction(transaction);
           const actorReference = String(current.actorReference);
@@ -166,6 +168,9 @@ export function createMerchantOrdinaryRefundApprovals(options: {
                 orderReference: entry.orderReference,
                 orderNumber,
                 requestReference: entry.requestReference,
+                // WP-2423 M14: what Send names for a request nobody sent (the request's own).
+                requestOperationReference: entry.operationReference,
+                paymentAttemptReferences: entry.paymentAttemptReferences,
                 paymentIntentReferences: entry.paymentIntentReferences,
                 paymentMethod: entry.paymentMethod,
                 currencyCode: entry.currencyCode,
@@ -183,6 +188,7 @@ export function createMerchantOrdinaryRefundApprovals(options: {
                 approverName:
                   entry.approval === null ? null : await name(entry.approval.approverReference),
                 canApprove:
+                  entry.state !== "NotSent" &&
                   canApprove &&
                   (entry.requesterReference !== actorReference || soleOperator === "Effective") &&
                   (entry.approval === null || entry.approval.approverReference === actorReference),
@@ -195,6 +201,7 @@ export function createMerchantOrdinaryRefundApprovals(options: {
           return Object.freeze({
             observedAt,
             canApprove,
+            canSend,
             soleOperator,
             entries: Object.freeze(result),
           });

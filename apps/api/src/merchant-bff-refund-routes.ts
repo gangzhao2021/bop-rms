@@ -129,11 +129,15 @@ export function installMerchantRefundRoutes(
         response.set("Cache-Control", NO_STORE).json({
           observedAt: view.observedAt,
           canApprove: view.canApprove,
+          // WP-2423 M14: the viewer may send a refund nobody sent (payment.refund.execute).
+          canSend: view.canSend,
           soleOperator: view.soleOperator,
           entries: view.entries.map((entry) => ({
             orderReference: entry.orderReference,
             orderNumber: entry.orderNumber,
             requestReference: entry.requestReference,
+            requestOperationReference: entry.requestOperationReference,
+            paymentAttemptReferences: entry.paymentAttemptReferences,
             paymentIntentReferences: entry.paymentIntentReferences,
             paymentMethod: entry.paymentMethod,
             currencyCode: entry.currencyCode,
@@ -343,6 +347,8 @@ export function installMerchantRefundRoutes(
           canRequest: result.canRequest,
           // WP-2423 M13: why they may not record a request (the page names the way forward).
           requestBlocked: result.requestBlocked,
+          // WP-2423 M14: whether they send what they request (a cashier's waits for a manager).
+          canSend: result.canSend,
         }),
       )
       .catch((error: unknown) => {
@@ -496,6 +502,11 @@ export function installMerchantRefundRoutes(
           escalationReasons: result.escalationReasons,
           approveAlone: result.approveAlone,
           replayed: result.status === "AlreadyCommitted",
+          // WP-2423 M16: legs already prepared by the server; the browser sends them next.
+          prepared: (result.prepared ?? []).map((leg) => ({
+            paymentAttemptReference: leg.paymentAttemptReference,
+            operationReference: leg.operationReference,
+          })),
         });
       })
       .catch((error: unknown) => refundRequestFailed(response, error));

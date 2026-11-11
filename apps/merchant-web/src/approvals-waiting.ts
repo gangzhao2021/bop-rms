@@ -15,14 +15,17 @@ export const APPROVALS_WAITING_REFRESH_MS = 60_000;
 export interface ApprovalsWaiting {
   readonly awaiting: number;
   readonly approvedNotSent: number;
+  /** WP-2423 M14/M16: recorded, needing no approval, and not sent (a cashier's request). */
+  readonly notSent: number;
 }
 
 export function summarizeApprovalsWaiting(
-  entries: readonly { readonly state: "AwaitingApproval" | "Approved" }[],
+  entries: readonly { readonly state: "AwaitingApproval" | "Approved" | "NotSent" }[],
 ): ApprovalsWaiting {
   return {
     awaiting: entries.filter((entry) => entry.state === "AwaitingApproval").length,
     approvedNotSent: entries.filter((entry) => entry.state === "Approved").length,
+    notSent: entries.filter((entry) => entry.state === "NotSent").length,
   };
 }
 
@@ -84,7 +87,7 @@ export function approvalsBadgeCount(
   staffRoles: StaffRolesWaiting,
 ): number {
   return (
-    (approvals === null ? 0 : approvals.awaiting + approvals.approvedNotSent) +
+    (approvals === null ? 0 : approvals.awaiting + approvals.approvedNotSent + approvals.notSent) +
     (typeof staffRoles === "number" ? staffRoles : 0)
   );
 }

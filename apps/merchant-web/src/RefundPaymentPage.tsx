@@ -591,6 +591,7 @@ function RefundWizard({
   csrf,
   onFinancialChange,
   blockedMessage = null,
+  canSend = true,
 }: {
   readonly orderReference: string;
   /** The payment this page is for: what "Refund everything" means when items can't be mixed. */
@@ -599,6 +600,11 @@ function RefundWizard({
   readonly onFinancialChange: () => void;
   /** WP-2423 Q5: why no new request can be recorded here (history stays visible). */
   readonly blockedMessage?: ReactNode;
+  /**
+   * WP-2423 M14: they send what they request. A cashier's request is recorded with its reason and
+   * a manager or the owner sends it from Approvals.
+   */
+  readonly canSend?: boolean;
 }) {
   const [items, setItems] = useState<Items | null>(null),
     [quantities, setQuantities] = useState<Record<string, number>>({}),
@@ -906,7 +912,7 @@ function RefundWizard({
       run.current = createRefundRun<Submitted>({
         orderReference,
         newReference: serviceOperationReference,
-        sendAfterRequest: !previewOnMachine,
+        sendAfterRequest: !previewOnMachine && canSend,
         ports: refundRunPorts(orderReference, csrf, (signal) => intent.submit(csrf, signal)),
       });
     }
@@ -951,10 +957,15 @@ function RefundWizard({
                         "Request recorded for {total}. Nothing is refunded yet: it is sent once the owner approves it. Ask the owner to open Approvals on this device or theirs. If more than 15 minutes pass after your verification, you'll be asked to verify again here.",
                         { total },
                       )
-                    : t(
-                        "Request recorded for {total}. Now refund it on the store's card machine and record it under the request above.",
-                        { total },
-                      )),
+                    : !canSend
+                      ? t(
+                          "Request recorded for {total}. Nothing is refunded yet: a manager or the owner sends it from Approvals.",
+                          { total },
+                        )
+                      : t(
+                          "Request recorded for {total}. Now refund it on the store's card machine and record it under the request above.",
+                          { total },
+                        )),
         );
         // The request appears in the list (and its units leave the selection) straight away.
         void reloadRequests();
@@ -1270,6 +1281,10 @@ function RefundWizard({
               })}
             </p>
           ) : null}
+          {canSend ? null : (
+            // WP-2423 M14: a cashier asks; a manager or the owner sends the refund.
+            <p className="refund-form__hint">{t("A manager or the owner sends it.")}</p>
+          )}
           <div className="refund-form__field">
             <label htmlFor="refund-reason">{t("Reason")}</label>
             <select
@@ -1885,6 +1900,7 @@ function PaymentContent({
               paymentIntentReference={paymentIntentReference}
               csrf={csrf}
               blockedMessage={requestBlockedMessage(context)}
+              canSend={context.canSend}
             />
           )}
         </>

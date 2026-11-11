@@ -12,17 +12,24 @@ it("WP-2423 Q35: counts refunds to approve apart from approved ones not sent yet
       { state: "Approved" },
       { state: "AwaitingApproval" },
     ]),
-  ).toEqual({ awaiting: 2, approvedNotSent: 1 });
-  expect(summarizeApprovalsWaiting([])).toEqual({ awaiting: 0, approvedNotSent: 0 });
+  ).toEqual({ awaiting: 2, approvedNotSent: 1, notSent: 0 });
+  expect(summarizeApprovalsWaiting([])).toEqual({ awaiting: 0, approvedNotSent: 0, notSent: 0 });
+  // WP-2423 M14: a cashier's request that needs no approval waits for someone to send it.
+  expect(summarizeApprovalsWaiting([{ state: "NotSent" }]).notSent).toBe(1);
 });
 
 it("WP-2423 Q35: the home page says what waits for the approver, and nothing when not read", () => {
-  const render = (approvals: { awaiting: number; approvedNotSent: number } | null) =>
+  const render = (
+    approvals: { awaiting: number; approvedNotSent: number; notSent?: number } | null,
+  ) =>
     renderToStaticMarkup(
       createElement(
         MemoryRouter,
         null,
-        createElement(NeedsAttention, { state: initialOverviewState, approvals }),
+        createElement(NeedsAttention, {
+          state: initialOverviewState,
+          approvals: approvals === null ? null : { notSent: 0, ...approvals },
+        }),
       ),
     );
   const html = render({ awaiting: 1, approvedNotSent: 0 });
@@ -35,12 +42,17 @@ it("WP-2423 Q35: the home page says what waits for the approver, and nothing whe
   expect(notSent).toContain("1 approved, not sent yet");
   expect(render({ awaiting: 0, approvedNotSent: 0 })).not.toContain("Refunds waiting for approval");
   expect(render(null)).not.toContain("Refunds waiting for approval");
+  // WP-2423 M14: a cashier asked; a manager is told on Home to send it.
+  const asked = render({ awaiting: 0, approvedNotSent: 0, notSent: 1 });
+  expect(asked).toContain("Refunds not sent yet");
+  expect(asked).toContain("1 asked by staff, waiting for you to send");
+  expect(asked).toContain('href="/app/approvals"');
 });
 
 it("WP-2423 M07: the Approvals badge adds staff roles waiting, and only refunds if that read failed", () => {
-  const refunds = { awaiting: 1, approvedNotSent: 1 };
-  expect(approvalsBadgeCount(refunds, 2)).toBe(4);
-  expect(approvalsBadgeCount(refunds, null)).toBe(2);
+  const refunds = { awaiting: 1, approvedNotSent: 1, notSent: 1 };
+  expect(approvalsBadgeCount(refunds, 2)).toBe(5);
+  expect(approvalsBadgeCount(refunds, null)).toBe(3);
   // A Store Manager without refund approval: the refund read is refused, roles still count.
   expect(approvalsBadgeCount(null, 1)).toBe(1);
   expect(approvalsBadgeCount(null, null)).toBe(0);

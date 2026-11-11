@@ -116,6 +116,7 @@ it("binds actual captured payment and returns distinct confirmed and pending ref
     pendingRefundMinor: "1130",
     canRequest: true,
     requestBlocked: null,
+    canSend: true,
   });
   expect(d.position.mock.calls[0]?.[1]).toEqual({
     orderReference: id(9),
@@ -141,6 +142,7 @@ it.each([null, { ...terminal, outcome: "Failed" }])(
       pendingRefundMinor: null,
       canRequest: true,
       requestBlocked: null,
+      canSend: true,
     });
     expect(d.position).not.toHaveBeenCalled();
   },
@@ -189,8 +191,9 @@ it("WP-2423: resolves the caller in full exactly twice (start and before the rep
   await f.operation(f.input);
   expect(d.resolve).toHaveBeenCalledOnce();
   expect(f.allowed).toHaveBeenCalledTimes(2);
-  // Who may read refunds is decided at the start and re-decided before the reply.
-  expect(d.workforce).toHaveBeenCalledTimes(2);
+  // Who may read refunds is decided at the start and re-decided before the reply (WP-2423 M14:
+  // each time with whether they may send what they request).
+  expect(d.workforce).toHaveBeenCalledTimes(4);
 });
 it("WP-2423: a permission withdrawn or Session ended during the read refuses the reply", async () => {
   const f = setup();

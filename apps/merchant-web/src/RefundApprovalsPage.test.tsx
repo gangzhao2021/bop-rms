@@ -2,7 +2,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { describe, expect, it } from "vitest";
 import { noAccessHeading } from "./access-denied.js";
+import type { RefundApprovalEntry } from "./refund-approval-client.js";
 import {
+  NotSentCard,
   StaffRoleRequestsSection,
   waitingText,
   type StaffRoleRead,
@@ -65,4 +67,47 @@ describe("WP-2423 M07: staff roles on Approvals for a viewer without refund appr
     expect(html).toContain("Staff roles waiting for you");
     expect(html).toContain("/app/organization/users/0190a5a0-0000-7000-8000-000000000001");
   });
+});
+
+it("WP-2423 M14: a cashier's request waits for someone who may send it; they send it from Approvals", () => {
+  const asked: RefundApprovalEntry = {
+    orderReference: "01909974-0000-7000-8000-000000000001",
+    orderNumber: "12",
+    requestReference: "01909974-0000-7000-8000-000000000002",
+    requestOperationReference: "01909974-0000-7000-8000-000000000003",
+    paymentAttemptReferences: ["01909974-0000-7000-8000-000000000004"],
+    paymentIntentReferences: ["01909974-0000-7000-8000-000000000005"],
+    paymentMethod: "Online" as const,
+    currencyCode: "CAD" as const,
+    amountMinor: "1130",
+    reasonCode: "WRONG_ITEM",
+    note: null,
+    escalationReasons: [],
+    requestedAt: "2026-11-10T12:00:00.000Z",
+    requesterName: "Sam",
+    requestedByYou: false,
+    requesterVerifiedUntil: null,
+    state: "NotSent" as const,
+    approvalReference: null,
+    approvedAt: null,
+    approverName: null,
+    canApprove: false,
+    soleOperatorApproval: false,
+  };
+  const render = (canSend: boolean, entry: RefundApprovalEntry = asked) =>
+    renderToStaticMarkup(
+      <MemoryRouter>
+        <NotSentCard entry={entry} csrf="c" canSend={canSend} onChanged={() => undefined} />
+      </MemoryRouter>,
+    );
+  const manager = render(true);
+  expect(manager).toContain("Asked by Sam, waiting for you to send");
+  expect(manager).toContain("Recorded, not sent yet. The guest has not been refunded.");
+  expect(manager).toContain("<button");
+  const cashier = render(false);
+  expect(cashier).toContain("A manager or the owner sends it.");
+  expect(cashier).not.toContain("<button");
+  expect(render(true, { ...asked, paymentMethod: "CardMachine" })).toContain(
+    "refund it on the machine, then record it on the payment page",
+  );
 });

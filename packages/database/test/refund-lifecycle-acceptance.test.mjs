@@ -2,7 +2,11 @@ import { it } from "vitest";
 import { withAutoAcceptWorld } from "../test-support/auto-accept-world.mjs";
 import { createMerchantOrderStaffCancellation } from "../../../apps/api/src/merchant-order-staff-cancellation.ts";
 import { createPersistentMerchantOrderQueue } from "../../../apps/api/src/persistent-merchant-order-queue.ts";
-import { createPostgresOrdinaryRefundRequestRuntime } from "../../rms/payment/src/index.ts";
+import {
+  createPostgresOrdinaryRefundApprovalQueueRuntime,
+  createPostgresOrdinaryRefundRequestRuntime,
+} from "../../rms/payment/src/index.ts";
+import { seedJourneyStorePublication } from "../test-support/dine-in-journey-seed.mjs";
 import { listStoreKitchenOrderItemStates } from "../../rms/kitchen/src/index.ts";
 import { createMerchantOrdinaryRefundRequest } from "../../../apps/api/src/merchant-ordinary-refund-request.ts";
 import { readRefundWithdrawnUnits } from "../../../apps/api/src/order-refund-withdrawal.ts";
@@ -457,4 +461,125 @@ it("a dish refunded with stop making it too is recorded with the refund and coun
       assert.equal((await rows()).length, 1);
     },
   );
+});
+
+/**
+ * WP-2423 M14 (DEC-OWNER-DEFAULTS-2026-11-06 item 2). Under the restricted API role: a cashier
+ * (mapped as Staff, holding payment.refund.request only) records a refund request with a reason;
+ * nothing is prepared or sent; once it has waited a minute the Store's approval queue lists it as
+ * not sent, for a manager or the owner to send.
+ */
+it("a cashier's refund request is recorded, never sent by them, and listed for a manager to send", async () => {
+  await withAutoAcceptWorld({ caseId: "wp2423_rl_staff", orderType: "Pickup" }, async (world) => {
+    const { assert, paid, kitchenScreen, transactions, seedPaidPickup, query, fresh } = world;
+    await kitchenScreen.seenNow();
+    const order = await seedPaidPickup({ quantity: 2, paidMinutesAgo: 6 });
+    assert.equal(
+      (await transactions().run((tx) => paid.consume(tx, order.event))).result.status,
+      "AwaitingOrderAcceptance",
+    );
+    const { businessDate } = await seedJourneyStorePublication({
+      client: world.admin,
+      scope: world.ownerScope,
+      publishedAt: world.time(-world.minutes(24 * 60)),
+      businessDayStart: "00:00:00",
+      prefix: "01a6ab30",
+      allWeek: true,
+    });
+    const line = (
+      await query(
+        "SELECT order_item_id::text AS item FROM rms_ordering.order_item WHERE order_batch_id=$1 ORDER BY order_item_id LIMIT 1",
+        [order.orderBatchReference],
+      )
+    )[0];
+    // The cashier signed in and asked two minutes ago (the clock of this process).
+    world.clock.offset = -world.minutes(2);
+    const cashier = await world.session(["payment.refund.request"], "01a6ab31");
+    const mapping = {
+      Manager: [],
+      Owner: [],
+      Finance: [],
+      Staff: ["synthetic_acceptance_01a6ab31"],
+    };
+    const request = createMerchantOrdinaryRefundRequest({
+      persistence: { ...cashier.persistence, now: world.now },
+      authentication: cashier.authentication,
+      resolveConfiguration: async () => ({
+        providerAccountReference: world.provider,
+        environment: "Test",
+        roleMapping: mapping,
+      }),
+      newAuditReference: fresh,
+      retentionPolicyCode: "FINANCIAL_COMPLIANCE",
+      retentionPolicyVersion: 1,
+      businessDate,
+    });
+    const command = {
+      orderReference: order.orderReference,
+      requestReference: fresh(),
+      operationReference: fresh(),
+      expectedClaimVersion: 0,
+      reasonCode: "WRONG_ITEM",
+      items: [
+        {
+          orderBatchReference: order.orderBatchReference,
+          orderItemReference: line.item,
+          quantity: 1,
+        },
+      ],
+    };
+    let recorded;
+    try {
+      recorded = await request({
+        sessionCookie: cashier.sessionCookie,
+        csrf: cashier.csrf,
+        command,
+      });
+    } finally {
+      world.clock.offset = 0;
+    }
+    assert.equal(recorded.status, "Created");
+    assert.equal(recorded.approvalRequired, false);
+    // Recorded in the cashier's name with the reason; nothing prepared.
+    assert.deepEqual(
+      await query(
+        "SELECT r.actor_id::text AS actor,r.record_json->>'reasonCode' AS reason,(SELECT count(*)::int FROM rms_payment.ordinary_refund_operation o WHERE o.request_id=r.request_id) AS prepared FROM rms_payment.ordinary_refund_request r WHERE r.request_id=$1",
+        [command.requestReference],
+      ),
+      [{ actor: cashier.actor, reason: "WRONG_ITEM", prepared: 0 }],
+    );
+    // Without the Staff group a cashier's request is refused.
+    await assert.rejects(
+      createMerchantOrdinaryRefundRequest({
+        persistence: { ...cashier.persistence, now: world.now },
+        authentication: cashier.authentication,
+        resolveConfiguration: async () => ({
+          providerAccountReference: world.provider,
+          environment: "Test",
+          roleMapping: { Manager: [], Owner: [], Finance: [] },
+        }),
+        newAuditReference: fresh,
+        retentionPolicyCode: "FINANCIAL_COMPLIANCE",
+        retentionPolicyVersion: 1,
+      })({
+        sessionCookie: cashier.sessionCookie,
+        csrf: cashier.csrf,
+        command: { ...command, requestReference: fresh(), operationReference: fresh() },
+      }),
+    );
+    // The Store's approval queue, as the API role: listed as not sent, for someone to send.
+    const queue = await transactions().run((tx) =>
+      createPostgresOrdinaryRefundApprovalQueueRuntime({
+        scope: world.ownerScope,
+        providerAccountReference: world.provider,
+        environment: "Test",
+        authorize: async () => true,
+        businessDate,
+      })(tx, { observedAt: world.now() }),
+    );
+    assert.deepEqual(
+      queue.map((entry) => [entry.requestReference, entry.state, entry.requesterReference]),
+      [[command.requestReference, "NotSent", cashier.actor]],
+    );
+  });
 });

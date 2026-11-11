@@ -254,6 +254,9 @@ export function createMerchantOrdinaryRefundRequest(options: {
             const requestRole = role("payment.refund.request", decided.activeRoleCodes);
             return (
               requestRole === "Manager" ||
+              // WP-2423 M14 (DEC-OWNER-DEFAULTS-2026-11-06 item 2): a cashier records a request
+              // with a reason; a manager or the owner sends it.
+              requestRole === "Staff" ||
               (requestRole === "Owner" && (await soleOperatorEffective()))
             );
           };

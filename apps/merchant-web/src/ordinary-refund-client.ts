@@ -362,6 +362,7 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
           signal,
         );
         const withBlocked = Object.hasOwn(reply, "requestBlocked");
+        const withSend = Object.hasOwn(reply, "canSend");
         const data = exact(reply, [
           "paymentIntentReference",
           "paymentAttemptReference",
@@ -376,8 +377,10 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
           "pendingRefundMinor",
           "canRequest",
           ...(withBlocked ? ["requestBlocked"] : []),
+          ...(withSend ? ["canSend"] : []),
         ]);
         if (typeof data.canRequest !== "boolean") return fail();
+        if (withSend && typeof data.canSend !== "boolean") return fail();
         // WP-2423 M13: why they may not record a request (absent from an older server).
         const requestBlocked = withBlocked ? data.requestBlocked : null;
         if (requestBlocked !== null && requestBlocked !== "SoleOperatorOff") return fail();
@@ -436,6 +439,11 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
           canRequest: data.canRequest,
           /** WP-2423 M13: an Owner whose sole operator is off approves, and is told how to record. */
           requestBlocked: requestBlocked as "SoleOperatorOff" | null,
+          /**
+           * WP-2423 M14: they send what they request; a cashier's request is recorded only and a
+           * manager or the owner sends it. An older server: whoever may request sends.
+           */
+          canSend: withSend ? (data.canSend as boolean) : data.canRequest,
         });
       }, false);
     },
@@ -946,8 +954,25 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
                 "approvalRequired",
                 "escalationReasons",
                 "replayed",
+                ...(recorded !== null && typeof recorded === "object" && "prepared" in recorded
+                  ? ["prepared"]
+                  : []),
               ]),
             );
+            // WP-2423 M16: payments the server prepared with the request (sent next from here).
+            const prepared = !("prepared" in data)
+              ? []
+              : Array.isArray(data.prepared) && data.prepared.length <= 100
+                ? data.prepared.map((value: unknown) => {
+                    const leg = exact(value, ["paymentAttemptReference", "operationReference"]);
+                    const attempt = ref(leg.paymentAttemptReference);
+                    if (!preview.paymentAttemptReferences.includes(attempt)) return fail();
+                    return Object.freeze({
+                      paymentAttemptReference: attempt,
+                      operationReference: ref(leg.operationReference),
+                    });
+                  })
+                : fail();
             if (
               data.status !== "RequestRecorded" ||
               data.requestReference !== snapshot.requestReference ||
@@ -971,6 +996,7 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
               ...escalation(data.approvalRequired, data.escalationReasons),
               approveAlone: alone(data),
               replayed: data.replayed,
+              prepared: Object.freeze(prepared),
             });
           }, true);
         },

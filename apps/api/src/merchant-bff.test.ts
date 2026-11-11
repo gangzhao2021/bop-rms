@@ -4313,6 +4313,8 @@ it("protects refund request transport and returns only request evidence", async 
     escalationReasons: ["OrderOrdinaryTotalAboveCad100"],
     approveAlone: false,
     replayed: false,
+    // WP-2423 M16: nothing prepared with a request that waits for approval.
+    prepared: [],
   });
   command.mockResolvedValueOnce({ ...data, status: "AlreadyCommitted" });
   expect(await (await send()).json()).toMatchObject({ status: "RequestRecorded", replayed: true });
@@ -4590,6 +4592,7 @@ it("protects refund payment context and preserves unknown amounts", async () => 
     pendingRefundMinor: null,
     canRequest: false,
     requestBlocked: null,
+    canSend: false,
   };
   const query = vi.fn<NonNullable<MerchantBffRouterOptions["refundPaymentContext"]>>(async () => ({
     ...data,

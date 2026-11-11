@@ -6,7 +6,8 @@ type Workforce = ReturnType<typeof createMerchantWorkforcePermissionSource>;
 type Role = ReturnType<typeof createOrdinaryRefundRoleResolver>;
 /**
  * WP-2423 Q5: who may read a payment's refund summary and history. A Store Manager who may
- * request refunds, or an Owner/Finance member who may approve them. Reading grants no request,
+ * request refunds (WP-2423 M14: or a cashier, Staff, who records requests a manager sends), or an
+ * Owner/Finance member who may approve them. Reading grants no request,
  * approval or execution (the catalog has no separate payment read permission yet).
  */
 export async function refundReadAccess(
@@ -34,9 +35,19 @@ export async function refundReadAccess(
    * operator is not in effect. null when they may request, or only approve (Finance).
    */
   readonly requestBlocked: "SoleOperatorOff" | null;
+  /**
+   * WP-2423 M14: this reader may send what they request (payment.refund.execute). A cashier's
+   * request is recorded only; a manager or the owner sends it.
+   */
+  readonly canSend: boolean;
 }> {
   if (!profileAllows("payment.refund.request") || !profileAllows("payment.refund.approve"))
-    return Object.freeze({ canRead: false, canRequest: false, requestBlocked: null });
+    return Object.freeze({
+      canRead: false,
+      canRequest: false,
+      requestBlocked: null,
+      canSend: false,
+    });
   const request = await workforce(tx, { ...base, permissionCode: "payment.refund.request" });
   const requestRole =
     request.decision.effect === "Allow"
@@ -44,10 +55,19 @@ export async function refundReadAccess(
       : null;
   const canRequest =
     requestRole === "Manager" ||
+    requestRole === "Staff" ||
     (requestRole === "Owner" &&
       soleOperatorEffective !== undefined &&
       (await soleOperatorEffective()));
-  if (canRequest) return Object.freeze({ canRead: true, canRequest, requestBlocked: null });
+  if (canRequest) {
+    const execute = await workforce(tx, { ...base, permissionCode: "payment.refund.execute" });
+    return Object.freeze({
+      canRead: true,
+      canRequest,
+      requestBlocked: null,
+      canSend: execute.decision.effect === "Allow" && requestRole !== "Staff",
+    });
+  }
   const approve = await workforce(tx, { ...base, permissionCode: "payment.refund.approve" });
   const approver = role("payment.refund.approve", approve.activeRoleCodes);
   return Object.freeze({
@@ -55,5 +75,6 @@ export async function refundReadAccess(
       approve.decision.effect === "Allow" && (approver === "Owner" || approver === "Finance"),
     canRequest: false,
     requestBlocked: requestRole === "Owner" ? "SoleOperatorOff" : null,
+    canSend: false,
   });
 }

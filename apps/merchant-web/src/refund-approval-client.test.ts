@@ -120,7 +120,13 @@ it("WP-2423 Q5: reads the approval list strictly", async () => {
     .mockResolvedValueOnce(json({ error: "request_denied" }, 403));
   const client = createRefundApprovalClient(fetcher);
   const view = await client.approvals();
-  expect(view.entries[0]).toEqual(entry);
+  // An older server names no request operation: nothing can be sent from the list.
+  expect(view.entries[0]).toEqual({
+    ...entry,
+    requestOperationReference: null,
+    paymentAttemptReferences: [],
+  });
+  expect(view.canSend).toBe(false);
   expect(fetcher.mock.calls[0]?.[1]).toMatchObject({ method: "GET", credentials: "same-origin" });
   await expect(client.approvals()).rejects.toMatchObject({ code: "Unavailable" });
   await expect(client.approvals()).rejects.toMatchObject({ code: "Unavailable" });
@@ -343,4 +349,43 @@ it("WP-2423: an approval refused on a PIN sign-in shows the verification step", 
   );
   expect(failed).toContain("Your session has ended.");
   expect(failed).not.toContain("You signed in with a PIN");
+});
+
+it("WP-2423 M14: a request nobody sent is read with what Send names, and never as approvable", async () => {
+  const notSent = {
+    ...entry,
+    state: "NotSent",
+    canApprove: false,
+    requestOperationReference: id(30),
+    paymentAttemptReferences: [id(31)],
+  };
+  const fetcher = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(
+      json({
+        observedAt: "2026-10-12T15:01:00.000Z",
+        canApprove: false,
+        canSend: true,
+        soleOperator: null,
+        entries: [notSent],
+      }),
+    )
+    .mockResolvedValueOnce(
+      json({
+        observedAt: "2026-10-12T15:01:00.000Z",
+        canApprove: true,
+        canSend: true,
+        soleOperator: null,
+        entries: [{ ...notSent, canApprove: true }],
+      }),
+    );
+  const client = createRefundApprovalClient(fetcher);
+  const view = await client.approvals();
+  expect(view.canSend).toBe(true);
+  expect(view.entries[0]).toMatchObject({
+    state: "NotSent",
+    requestOperationReference: id(30),
+    paymentAttemptReferences: [id(31)],
+  });
+  await expect(client.approvals()).rejects.toMatchObject({ code: "Unavailable" });
 });

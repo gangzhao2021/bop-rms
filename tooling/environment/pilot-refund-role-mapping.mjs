@@ -25,29 +25,38 @@ export const standardRefundRoleMapping = Object.freeze({
     brandRoleTemplateProfiles["brand-owner"].roleCode,
   ]),
   Finance: Object.freeze([]),
+  // WP-2423 M14 (DEC-OWNER-DEFAULTS-2026-11-06 item 2): a cashier records refund requests with a
+  // reason; a manager or the owner sends them. Front of House holds payment.refund.request only.
+  Staff: Object.freeze([storeRoleTemplateProfiles["front-of-house"].roleCode]),
 });
 const catalogRoleCodes = new Set([
   ...Object.values(storeRoleTemplateProfiles).map((profile) => profile.roleCode),
   ...Object.values(brandRoleTemplateProfiles).map((profile) => profile.roleCode),
 ]);
 const groups = ["Manager", "Owner", "Finance"];
+/** WP-2423 M14: optional, so a runtime file written before it stays valid until rewritten. */
+const optionalGroups = ["Staff"];
 const invalid = () => {
   throw new Error("PILOT_REFUND_ROLE_MAPPING_INVALID");
 };
 
-/** Closed { Manager, Owner, Finance } of catalog role codes, each code in one group only. */
+/** Closed { Manager, Owner, Finance[, Staff] } of catalog role codes, each code in one group only. */
 export function validateRefundRoleMapping(value) {
+  const present =
+    value !== null && typeof value === "object"
+      ? [...groups, ...optionalGroups.filter((group) => Object.hasOwn(value, group))]
+      : groups;
   if (
     value === null ||
     typeof value !== "object" ||
     Object.getPrototypeOf(value) !== Object.prototype ||
-    Reflect.ownKeys(value).length !== groups.length ||
-    !groups.every((group) => Object.hasOwn(value, group))
+    Reflect.ownKeys(value).length !== present.length ||
+    !present.every((group) => Object.hasOwn(value, group))
   )
     return invalid();
   const seen = new Set();
   const result = {};
-  for (const group of groups) {
+  for (const group of present) {
     const list = value[group];
     if (!Array.isArray(list) || list.length > 100) return invalid();
     for (const code of list) {
@@ -61,7 +70,7 @@ export function validateRefundRoleMapping(value) {
 }
 
 const sameMapping = (a, b) =>
-  groups.every(
+  [...groups, ...optionalGroups].every(
     (group) => JSON.stringify([...a[group]].sort()) === JSON.stringify([...b[group]].sort()),
   );
 
@@ -79,6 +88,7 @@ export async function applyStandardRefundRoleMapping({ directory, write }) {
       Manager: before.Manager ?? [],
       Owner: before.Owner ?? [],
       Finance: before.Finance ?? [],
+      Staff: before.Staff ?? [],
     },
     standardRefundRoleMapping,
   );

@@ -444,12 +444,26 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "还有退款正在进行（在线退款，或尚未在刷卡机上记录退款）。请在订单页记录刷卡机退款，或几分钟后再查看。",
   "A refund of {amount} is recorded and waiting for approval. It is sent once it is approved under Approvals.":
     "一笔 {amount} 的退款已记录，正在等待批准。在“审批”里批准后才会发出。",
-  "A refund of {amount} is approved but not sent yet. The approver sends it from Approvals.":
-    "一笔 {amount} 的退款已批准，还没发出。由批准人在“审批”里发送。",
+  "A refund of {amount} is approved and is being sent. If it is still not sent in a minute, send it from Approvals.":
+    "一笔 {amount} 的退款已批准，正在发出。如果一分钟后还没发出，请在“审批”里发送。",
+  "A refund of {amount} was asked for and is not sent yet. A manager or the owner sends it from Approvals.":
+    "一笔 {amount} 的退款已提交，还没发出。由店长或店主在“审批”里发出。",
   "A refund of {amount} is recorded but not sent yet. Open the payment under Payments and refunds to see whether it waits for approval, or to send it.":
     "一笔 {amount} 的退款已记录，还没发出。请在“付款与退款”里打开这笔付款，看它是否在等批准，或去发送。",
   "Refunded · stop, don't make it": "已退款 · 停止制作",
   "Stop making it too": "不再制作这道菜",
+  Note: "备注",
+  "Open the payment": "打开这笔付款",
+  "Asked by {name}, waiting for you to send": "{name} 提交，等你发送",
+  "Recorded, not sent yet. The guest has not been refunded.":
+    "已记录，还没发出。顾客还没收到退款。",
+  "Paid on the store's card machine: refund it on the machine, then record it on the payment page.":
+    "这笔是在门店刷卡机上付的：请在刷卡机上退款，再到付款页面登记。",
+  "Refunds not sent yet": "还没发出的退款",
+  "{count} asked by staff, waiting for you to send": "{count} 笔员工提交的退款，等你发送",
+  "Request recorded for {total}. Nothing is refunded yet: a manager or the owner sends it from Approvals.":
+    "已记录 {total} 的退款申请。还没有退款：由店长或店主在“审批”里发出。",
+  "A manager or the owner sends it.": "由店长或店主发出。",
   "The kitchen and the counter leave it out.": "后厨不做，柜台也不交付。",
   "Already being made: the guest keeps the food.": "已经在做了：顾客保留餐品。",
   "The guest keeps the food.": "顾客保留餐品。",

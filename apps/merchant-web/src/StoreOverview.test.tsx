@@ -915,7 +915,7 @@ describe("Figma v1 (2026-10-25): Home lists what needs attention now", () => {
     expect(attentionItems(state, null).some((item) => item.key === "store-phone")).toBe(false);
   });
   it("puts the guests in front of you first: staff calls, orders to accept, then the backlog", () => {
-    const items = attentionItems(state, { awaiting: 2, approvedNotSent: 0 });
+    const items = attentionItems(state, { awaiting: 2, approvedNotSent: 0, notSent: 0 });
     expect(items.map((item) => [item.title, item.state, item.href])).toEqual([
       ["1 table asking for staff", "Waiting", "/operations/dining"],
       ["Orders waiting to be accepted", "To accept", "/operations/orders"],

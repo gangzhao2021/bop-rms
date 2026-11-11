@@ -573,15 +573,22 @@ export function attentionItems(
       href: "/operations/dining",
       action: t("View tables"),
     });
-  if (approvals !== null && approvals.awaiting + approvals.approvedNotSent > 0)
+  if (approvals !== null && approvals.awaiting + approvals.approvedNotSent + approvals.notSent > 0)
     items.push({
       key: "approvals",
-      title: t("Refunds waiting for approval"),
+      title:
+        approvals.awaiting + approvals.approvedNotSent === 0
+          ? t("Refunds not sent yet")
+          : t("Refunds waiting for approval"),
       detail: [
         approvals.awaiting === 0 ? null : t("{count} to approve", { count: approvals.awaiting }),
         approvals.approvedNotSent === 0
           ? null
           : t("{count} approved, not sent yet", { count: approvals.approvedNotSent }),
+        // WP-2423 M14/M16: asked by a cashier (or recorded and never sent): someone sends it.
+        approvals.notSent === 0
+          ? null
+          : t("{count} asked by staff, waiting for you to send", { count: approvals.notSent }),
       ]
         .filter((part) => part !== null)
         .join(" · "),

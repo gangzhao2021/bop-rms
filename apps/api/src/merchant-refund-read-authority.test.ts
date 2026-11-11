@@ -25,14 +25,38 @@ it("names sole operator off for an owner, nothing for a manager or finance", asy
   const on = async () => true;
   expect(
     await refundReadAccess(workforce(["owner"]), {} as never, base, role, () => true, off),
-  ).toEqual({ canRead: true, canRequest: false, requestBlocked: "SoleOperatorOff" });
+  ).toEqual({
+    canRead: true,
+    canRequest: false,
+    requestBlocked: "SoleOperatorOff",
+    canSend: false,
+  });
   expect(
     await refundReadAccess(workforce(["owner"]), {} as never, base, role, () => true, on),
-  ).toEqual({ canRead: true, canRequest: true, requestBlocked: null });
+  ).toEqual({ canRead: true, canRequest: true, requestBlocked: null, canSend: true });
   expect(
     await refundReadAccess(workforce(["manager"]), {} as never, base, role, () => true),
-  ).toEqual({ canRead: true, canRequest: true, requestBlocked: null });
+  ).toEqual({ canRead: true, canRequest: true, requestBlocked: null, canSend: true });
   expect(
     await refundReadAccess(workforce(["finance"]), {} as never, base, role, () => true),
-  ).toEqual({ canRead: true, canRequest: false, requestBlocked: null });
+  ).toEqual({ canRead: true, canRequest: false, requestBlocked: null, canSend: false });
+});
+
+// WP-2423 M14 (DEC-OWNER-DEFAULTS-2026-11-06 item 2): a cashier records a refund request; a
+// manager or the owner sends it.
+it("lets a cashier (Staff) request, never send", async () => {
+  const withStaff = createOrdinaryRefundRoleResolver({
+    Manager: ["manager"],
+    Owner: ["owner"],
+    Finance: ["finance"],
+    Staff: ["front_of_house"],
+  });
+  expect(
+    await refundReadAccess(workforce(["front_of_house"]), {} as never, base, withStaff, () => true),
+  ).toEqual({ canRead: true, canRequest: true, requestBlocked: null, canSend: false });
+  // Before the mapping names Staff, a cashier reads nothing.
+  expect(
+    (await refundReadAccess(workforce(["front_of_house"]), {} as never, base, role, () => true))
+      .canRead,
+  ).toBe(false);
 });

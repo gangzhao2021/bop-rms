@@ -38,3 +38,13 @@ it("does not invoke accessor role lists or accept sparse input", () => {
   expect(invoked).toBe(false);
   expect(() => resolve("payment.refund.approve", new Array(1))).toThrow();
 });
+
+it("WP-2423 M14: a cashier (Staff) is named for a request only, and the group is optional", () => {
+  const resolve = create({ ...config(), Staff: ["front_of_house"] });
+  expect(resolve("payment.refund.request", ["front_of_house"])).toBe("Staff");
+  expect(resolve("payment.refund.request", ["front_of_house", "store_manager"])).toBe("Manager");
+  expect(resolve("payment.refund.approve", ["front_of_house"])).toBeNull();
+  // Without the group a cashier holds no refund role.
+  expect(create(config())("payment.refund.request", ["front_of_house"])).toBeNull();
+  expect(() => create({ ...config(), Staff: ["store_manager"] })).toThrow();
+});

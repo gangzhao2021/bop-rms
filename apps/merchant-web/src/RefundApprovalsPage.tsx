@@ -29,6 +29,7 @@ import {
   type RoleChangeWaitingView,
 } from "./role-administration-pages.js";
 import { needsFullSignIn } from "./full-sign-in.js";
+import { RefundSendAction } from "./RefundExecutionAction.js";
 import type { SoleOperatorStatus } from "./refund-approval-client.js";
 import {
   createStaffPageClient,
@@ -141,6 +142,96 @@ export function waitingText(requestedAt: string, now: number): string {
 
 const person = (entry: RefundApprovalEntry) =>
   entry.requestedByYou ? t("You") : (entry.requesterName ?? t("The staff member who asked"));
+
+/**
+ * WP-2423 M14/M16 (DEC-OWNER-DEFAULTS-2026-11-06 items 2 and 3): a refund that needs no approval
+ * and nobody has sent (a cashier asked for it). Whoever may send refunds sends it here with one
+ * confirmation; a card-machine one is made on the machine and recorded on the payment page.
+ */
+export function NotSentCard({
+  entry,
+  csrf,
+  canSend,
+  onChanged,
+}: {
+  readonly entry: RefundApprovalEntry;
+  readonly csrf: string;
+  readonly canSend: boolean;
+  readonly onChanged: () => void;
+}) {
+  const [done, setDone] = useState<string | null>(null);
+  const paymentPage =
+    "/app/operations/payments/" + (entry.paymentIntentReferences[0] ?? "") + "/refund";
+  const onMachine = entry.paymentMethod === "CardMachine";
+  return (
+    <li className="refund-approval-card">
+      <header className="refund-approval-card__header">
+        <h3>
+          {t("Refund {amountMinor}", { amountMinor: formatCad(entry.amountMinor) })} ·{" "}
+          <Link to={"/operations/orders/" + entry.orderReference}>
+            {t("Order {orderNumber}", { orderNumber: entry.orderNumber })}
+          </Link>
+        </h3>
+        {done === null ? (
+          <p className="refund-approval-card__waiting">
+            {t("Asked by {name}, waiting for you to send", { name: person(entry) })}
+          </p>
+        ) : null}
+      </header>
+      <dl>
+        <div>
+          <dt>{t("Reason")}</dt>
+          <dd>{describeRefundReason(entry.reasonCode)}</dd>
+        </div>
+        <div>
+          <dt>{t("Asked by")}</dt>
+          <dd>
+            {person(entry)} · <SourceTime instant={entry.requestedAt} />
+          </dd>
+        </div>
+        {entry.note !== null ? (
+          <div>
+            <dt>{t("Note")}</dt>
+            <dd>{entry.note}</dd>
+          </div>
+        ) : null}
+        <div>
+          <dt>{t("Status")}</dt>
+          <dd>{done ?? t("Recorded, not sent yet. The guest has not been refunded.")}</dd>
+        </div>
+      </dl>
+      {done !== null ? null : onMachine ? (
+        <p>
+          {t(
+            "Paid on the store's card machine: refund it on the machine, then record it on the payment page.",
+          )}{" "}
+          <Link to={paymentPage}>{t("Open the payment")}</Link>
+        </p>
+      ) : !canSend || entry.requestOperationReference === null ? (
+        <p>{t("A manager or the owner sends it.")}</p>
+      ) : (
+        entry.paymentAttemptReferences.map((attempt) => (
+          <RefundSendAction
+            key={attempt}
+            orderReference={entry.orderReference}
+            requestReference={entry.requestReference}
+            requestOperationReference={entry.requestOperationReference as string}
+            paymentAttemptReference={attempt}
+            preparedOperationReference={null}
+            approvalReference={null}
+            amountLabel={formatCad(entry.amountMinor)}
+            csrf={csrf}
+            onPending={() => undefined}
+            onDone={(confirmation) => {
+              setDone(confirmation);
+              onChanged();
+            }}
+          />
+        ))
+      )}
+    </li>
+  );
+}
 
 /** One refund awaiting approval: who asked, why, and the in-person approval that sends it. */
 function ApprovalCard({
@@ -1002,18 +1093,28 @@ export function RefundApprovalsPage({
                 {t("Last checked")} <SourceTime instant={view.observedAt} />.
               </p>
               <ul className="refund-approval-list">
-                {view.entries.map((entry) => (
-                  <ApprovalCard
-                    key={entry.requestReference + ":" + (entry.approvalReference ?? "")}
-                    entry={entry}
-                    csrf={csrf}
-                    viewerVerifiedUntil={viewerVerifiedUntil}
-                    onViewerVerified={setViewerVerifiedUntil}
-                    onChanged={reload}
-                    fetcher={fetcher}
-                    soleOperator={view.soleOperator}
-                  />
-                ))}
+                {view.entries.map((entry) =>
+                  entry.state === "NotSent" ? (
+                    <NotSentCard
+                      key={entry.requestReference}
+                      entry={entry}
+                      csrf={csrf}
+                      canSend={view.canSend}
+                      onChanged={reload}
+                    />
+                  ) : (
+                    <ApprovalCard
+                      key={entry.requestReference + ":" + (entry.approvalReference ?? "")}
+                      entry={entry}
+                      csrf={csrf}
+                      viewerVerifiedUntil={viewerVerifiedUntil}
+                      onViewerVerified={setViewerVerifiedUntil}
+                      onChanged={reload}
+                      fetcher={fetcher}
+                      soleOperator={view.soleOperator}
+                    />
+                  ),
+                )}
               </ul>
             </>
           ) : null}

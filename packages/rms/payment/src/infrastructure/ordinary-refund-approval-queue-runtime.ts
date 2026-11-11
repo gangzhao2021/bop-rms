@@ -21,6 +21,8 @@ interface Scope {
 }
 type EscalationOptions = Parameters<typeof createPostgresOrdinaryRefundEscalationSource>[0];
 const queueDays = 30;
+/** WP-2423 M16: a request recorded and not sent this long is listed for someone to send. */
+export const notSentAfterMilliseconds = 60_000;
 
 /** Escalation of one recorded request evaluated now (database clock) on the actual capture,
  * Pricing and Store Business Date sources; the returned observedAt is that clock. */
@@ -73,7 +75,7 @@ export function createPostgresOrdinaryRefundCurrentEscalationSource(options: {
 
 /**
  * WP-2423 Q5: refunds at this Store waiting for an independent Owner/Finance decision, or approved
- * and not yet sent for every payment. Escalation is evaluated now (RF-D01–D03), on the same owner
+ * and not yet sent for every payment (WP-2423 M14: or needing no approval and not sent, NotSent). Escalation is evaluated now (RF-D01–D03), on the same owner
  * sources as approval and first dispatch. Read model only: nothing here approves or sends.
  */
 export function createPostgresOrdinaryRefundApprovalQueueRuntime(options: {
@@ -112,9 +114,18 @@ export function createPostgresOrdinaryRefundApprovalQueueRuntime(options: {
         requestReference: candidate.requestReference,
       };
       const evaluated = await escalation(tx, query);
-      if (candidate.approvalReference === null && !evaluated.decision.requiresIndependentApproval)
-        continue;
+      // WP-2423 M14/M16: a request needing no approval that nobody prepared (a cashier's, who
+      // may not send it) is listed for a manager or the owner to send, once it has waited a
+      // minute (a manager's own request is prepared with it and sent at once).
+      const notSent =
+        candidate.approvalReference === null && !evaluated.decision.requiresIndependentApproval;
       const current = await subject(tx, { ...query, observedAt: evaluated.observedAt });
+      if (
+        notSent &&
+        Date.parse(evaluated.observedAt) - Date.parse(current.request.requestedAt) <
+          notSentAfterMilliseconds
+      )
+        continue;
       const approval =
         candidate.approvalReference === null
           ? null
@@ -157,7 +168,11 @@ export function createPostgresOrdinaryRefundApprovalQueueRuntime(options: {
             current.request.payments.map((payment) => payment.paymentAttemptReference),
           ),
           escalationReasons: evaluated.decision.reasons,
-          state: approval === null ? ("AwaitingApproval" as const) : ("Approved" as const),
+          state: notSent
+            ? ("NotSent" as const)
+            : approval === null
+              ? ("AwaitingApproval" as const)
+              : ("Approved" as const),
           approval:
             approval === null
               ? null

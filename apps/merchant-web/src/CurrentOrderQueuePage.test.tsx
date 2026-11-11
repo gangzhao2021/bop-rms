@@ -647,7 +647,7 @@ it("WP-2423 M16: a refund recorded but never sent is not called on its way", () 
   // payment page (which can only say it waits); approved and unread states are said as they are.
   const withApprovals = (
     p: ReturnType<typeof position>,
-    approvals: { amountMinor: string; state: "AwaitingApproval" | "Approved" }[] | null,
+    approvals: { amountMinor: string; state: "AwaitingApproval" | "Approved" | "NotSent" }[] | null,
   ) => renderToStaticMarkup(<OnlineRefundNote order={order} position={p} approvals={approvals} />);
   const waiting = withApprovals(position("1569", "1569"), [
     { amountMinor: "1569", state: "AwaitingApproval" },
@@ -659,7 +659,13 @@ it("WP-2423 M16: a refund recorded but never sent is not called on its way", () 
   expect(
     withApprovals(position("1569", "1569"), [{ amountMinor: "1569", state: "Approved" }]),
   ).toContain(
-    "A refund of $15.69 is approved but not sent yet. The approver sends it from Approvals.",
+    "A refund of $15.69 is approved and is being sent. If it is still not sent in a minute, send it from Approvals.",
+  );
+  // WP-2423 M14: a cashier's request waits for a manager to send it.
+  expect(
+    withApprovals(position("1569", "1569"), [{ amountMinor: "1569", state: "NotSent" }]),
+  ).toContain(
+    "A refund of $15.69 was asked for and is not sent yet. A manager or the owner sends it from Approvals.",
   );
   const mixed = withApprovals(position("3137", "3137"), [
     { amountMinor: "1000", state: "AwaitingApproval" },

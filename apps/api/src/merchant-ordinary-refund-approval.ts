@@ -274,7 +274,8 @@ export function createMerchantOrdinaryRefundApproval(options: {
         if (!effective(approver) || !effective(requester))
           throw new MerchantRefundApprovalError("SoleOperatorNotInEffect");
       } else {
-        if (requester.role !== "Manager" || !requester.allowed)
+        // WP-2423 M14: a cashier's (Staff) escalated request is approved as a manager's is.
+        if ((requester.role !== "Manager" && requester.role !== "Staff") || !requester.allowed)
           throw new MerchantRefundApprovalError("RequesterNotEligible");
         if ((approver.role !== "Owner" && approver.role !== "Finance") || !approver.allowed)
           throw new MerchantRefundApprovalError("Denied");

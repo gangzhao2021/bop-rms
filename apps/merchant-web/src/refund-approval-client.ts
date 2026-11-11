@@ -148,7 +148,14 @@ export interface RefundApprovalEntry {
   readonly requesterName: string | null;
   readonly requestedByYou: boolean;
   readonly requesterVerifiedUntil: string | null;
-  readonly state: "AwaitingApproval" | "Approved";
+  /**
+   * WP-2423 M14: NotSent is a request needing no approval that nobody sent yet (a cashier's): a
+   * manager or the owner sends it.
+   */
+  readonly state: "AwaitingApproval" | "Approved" | "NotSent";
+  /** The request's operation and its payments, for Send (absent from an older server: null). */
+  readonly requestOperationReference: string | null;
+  readonly paymentAttemptReferences: readonly string[];
   readonly approvalReference: string | null;
   readonly approvedAt: string | null;
   readonly approverName: string | null;
@@ -160,10 +167,15 @@ export interface RefundApprovalEntry {
 export type SoleOperatorStatus = "Effective" | "NotSet" | "OtherApprovers";
 
 function entry(value: unknown): RefundApprovalEntry {
+  const sendable =
+    value !== null &&
+    typeof value === "object" &&
+    Object.hasOwn(value, "requestOperationReference");
   const raw = record(value, [
     "orderReference",
     "orderNumber",
     "requestReference",
+    ...(sendable ? ["requestOperationReference", "paymentAttemptReferences"] : []),
     "paymentIntentReferences",
     "paymentMethod",
     "currencyCode",
@@ -187,7 +199,12 @@ function entry(value: unknown): RefundApprovalEntry {
     (raw.soleOperatorApproval && (!raw.requestedByYou || !raw.canApprove)) ||
     raw.currencyCode !== "CAD" ||
     (raw.paymentMethod !== "Online" && raw.paymentMethod !== "CardMachine") ||
-    (raw.state !== "AwaitingApproval" && raw.state !== "Approved") ||
+    (raw.state !== "AwaitingApproval" && raw.state !== "Approved" && raw.state !== "NotSent") ||
+    (raw.state === "NotSent" && (!sendable || raw.canApprove !== false)) ||
+    (sendable &&
+      (!Array.isArray(raw.paymentAttemptReferences) ||
+        raw.paymentAttemptReferences.length < 1 ||
+        raw.paymentAttemptReferences.length > 100)) ||
     typeof raw.requestedByYou !== "boolean" ||
     typeof raw.canApprove !== "boolean" ||
     typeof raw.reasonCode !== "string" ||
@@ -210,6 +227,10 @@ function entry(value: unknown): RefundApprovalEntry {
     orderReference: ref(raw.orderReference),
     orderNumber: text(raw.orderNumber),
     requestReference: ref(raw.requestReference),
+    requestOperationReference: sendable ? ref(raw.requestOperationReference) : null,
+    paymentAttemptReferences: Object.freeze(
+      sendable ? (raw.paymentAttemptReferences as unknown[]).map(ref) : [],
+    ),
     paymentIntentReferences: Object.freeze(raw.paymentIntentReferences.map(ref)),
     paymentMethod: raw.paymentMethod,
     currencyCode: "CAD" as const,
@@ -354,9 +375,13 @@ export function createRefundApprovalClient(fetcher: typeof fetch = fetch) {
         throw new RefundApprovalClientError("Denied");
       if (response.status !== 200 || response.headers.get("cache-control") !== "no-store")
         throw new RefundApprovalClientError("Unavailable");
-      const raw = record(await body(response), [
+      const reply = await body(response);
+      const withSend =
+        reply !== null && typeof reply === "object" && Object.hasOwn(reply, "canSend");
+      const raw = record(reply, [
         "observedAt",
         "canApprove",
+        ...(withSend ? ["canSend"] : []),
         "soleOperator",
         "entries",
       ]);
@@ -366,6 +391,7 @@ export function createRefundApprovalClient(fetcher: typeof fetch = fetch) {
           raw.soleOperator !== "NotSet" &&
           raw.soleOperator !== "OtherApprovers") ||
         typeof raw.canApprove !== "boolean" ||
+        (withSend && typeof raw.canSend !== "boolean") ||
         !Array.isArray(raw.entries) ||
         raw.entries.length > 100
       )
@@ -375,6 +401,8 @@ export function createRefundApprovalClient(fetcher: typeof fetch = fetch) {
       return Object.freeze({
         observedAt: instant(raw.observedAt),
         canApprove: raw.canApprove,
+        /** WP-2423 M14: may send a refund nobody sent (false from an older server). */
+        canSend: withSend ? (raw.canSend as boolean) : false,
         soleOperator: raw.soleOperator as SoleOperatorStatus | null,
         entries: Object.freeze(entries),
       });

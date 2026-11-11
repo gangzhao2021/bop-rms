@@ -125,6 +125,7 @@ export function createMerchantRefundPaymentContext(options: {
       const viewer = {
         canRequest: false as boolean,
         requestBlocked: null as "SoleOperatorOff" | null,
+        canSend: false as boolean,
       };
       // WP-2423 Q19: read once per request (display only; the request command rechecks).
       let soleOperatorStatus: Promise<string> | null = null;
@@ -161,6 +162,7 @@ export function createMerchantRefundPaymentContext(options: {
         );
         viewer.canRequest = access.canRequest;
         viewer.requestBlocked = access.requestBlocked;
+        viewer.canSend = access.canSend;
         return access.canRead;
       };
       if (!(await readAccess())) return deny();
@@ -231,6 +233,7 @@ export function createMerchantRefundPaymentContext(options: {
           pendingRefundMinor: pending.toString(),
           canRequest: viewer.canRequest,
           requestBlocked: viewer.requestBlocked,
+          canSend: viewer.canSend,
         });
       }
       const binding = await createPostgresPaymentIntentBindingSource({
@@ -273,6 +276,7 @@ export function createMerchantRefundPaymentContext(options: {
           pendingRefundMinor: null,
           canRequest: viewer.canRequest,
           requestBlocked: viewer.requestBlocked,
+          canSend: viewer.canSend,
         });
       }
       if (
@@ -307,6 +311,8 @@ export function createMerchantRefundPaymentContext(options: {
         // WP-2423 Q5: only a Manager records a refund request; Owners/Finance read and approve.
         canRequest: viewer.canRequest,
         requestBlocked: viewer.requestBlocked,
+        // WP-2423 M14: a cashier's request is recorded only; a manager or the owner sends it.
+        canSend: viewer.canSend,
       });
     }
   };

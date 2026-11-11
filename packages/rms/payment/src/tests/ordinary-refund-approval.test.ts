@@ -351,3 +351,41 @@ it("admits an Owner requester only while sole operator is in effect", () => {
     }),
   ).toThrow();
 });
+
+it("WP-2423 M14: a cashier (Staff) may record a request, escalated and approved by the same rules", () => {
+  const f = fixture();
+  const staff = { ...f.requester, role: "Staff" };
+  expect(() =>
+    assertOrdinaryRefundRequester({
+      expected: {
+        tenantReference: id(1),
+        brandReference: id(2),
+        storeReference: id(3),
+        orderReference: id(4),
+        actorReference: id(7),
+      },
+      observedAt: at,
+      authority: { ...staff, recentMfaAt: null },
+    }),
+  ).not.toThrow();
+  // An Owner/Finance member approves a cashier's escalated request as they would a manager's.
+  expect(
+    evaluate({
+      subject: f.subject,
+      approval: f.approval,
+      requester: staff,
+      approver: f.approver,
+      observedAt: at,
+    }).status,
+  ).toBe("ApprovalCurrent");
+  // A cashier never approves.
+  expect(
+    evaluate({
+      subject: f.subject,
+      approval: f.approval,
+      requester: f.requester,
+      approver: { ...f.approver, role: "Staff" },
+      observedAt: at,
+    }).status,
+  ).toBe("NeedsReapproval");
+});

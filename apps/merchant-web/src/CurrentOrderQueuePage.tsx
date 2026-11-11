@@ -983,7 +983,10 @@ export function OnlineRefundNote({
   const awaiting = notSent < queued("AwaitingApproval") ? notSent : queued("AwaitingApproval"),
     approvedLeft = notSent - awaiting,
     approved = approvedLeft < queued("Approved") ? approvedLeft : queued("Approved"),
-    toSend = notSent - awaiting - approved;
+    // WP-2423 M14: asked by a cashier (needs no approval), waiting for a manager to send it.
+    askedLeft = notSent - awaiting - approved,
+    asked = askedLeft < queued("NotSent") ? askedLeft : queued("NotSent"),
+    toSend = notSent - awaiting - approved - asked;
   if (refunded === 0n && pending === 0n) return null;
   const amount = (minor: bigint) =>
     orderMoney({
@@ -1005,11 +1008,19 @@ export function OnlineRefundNote({
         : ""}
       {approved > 0n
         ? " " +
+          // WP-2423 M16: the system sends an approved refund; Approvals sends it if it did not.
           t(
-            "A refund of {amount} is approved but not sent yet. The approver sends it from Approvals.",
+            "A refund of {amount} is approved and is being sent. If it is still not sent in a minute, send it from Approvals.",
             {
               amount: amount(approved),
             },
+          )
+        : ""}
+      {asked > 0n
+        ? " " +
+          t(
+            "A refund of {amount} was asked for and is not sent yet. A manager or the owner sends it from Approvals.",
+            { amount: amount(asked) },
           )
         : ""}
       {toSend > 0n

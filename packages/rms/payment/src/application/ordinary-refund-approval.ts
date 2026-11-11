@@ -73,7 +73,7 @@ function authority(value: unknown) {
     return fail();
   const scope = parseScope(raw);
   if (
-    !["Manager", "Owner", "Finance"].includes(String(raw.role)) ||
+    !["Manager", "Owner", "Finance", "Staff"].includes(String(raw.role)) ||
     typeof raw.active !== "boolean" ||
     typeof raw.allowed !== "boolean" ||
     !["payment.refund.request", "payment.refund.approve"].includes(String(raw.permissionCode))
@@ -147,7 +147,8 @@ export function evaluateOrdinaryRefundIndependentApproval(value: unknown) {
         requester.soleOperator === "Effective" &&
         approver.soleOperator === "Effective"
       : requesterReference !== approverReference &&
-        requester.role === "Manager" &&
+        // WP-2423 M14: a cashier's (Staff) request escalated by the same rules as a manager's.
+        ["Manager", "Staff"].includes(String(requester.role)) &&
         ["Owner", "Finance"].includes(String(approver.role));
     if (
       JSON.stringify(expected) !== JSON.stringify(approvedSubject) ||
@@ -293,8 +294,11 @@ export function assertOrdinaryRefundRequester(value: unknown) {
     if (parsePaymentReference(expected[key]) !== current[key])
       throw new Error("ORDINARY_REFUND_REQUESTER_DENIED");
   // WP-2423 Q19: an Owner may request only while sole operator is in effect for them.
+  // WP-2423 M14 (DEC-OWNER-DEFAULTS-2026-11-06 item 2): a cashier (Staff) records requests too;
+  // only someone holding payment.refund.execute ever prepares or sends one.
   const roleAllowed =
     current.role === "Manager" ||
+    current.role === "Staff" ||
     (current.role === "Owner" && current.soleOperator === "Effective");
   if (
     !roleAllowed ||

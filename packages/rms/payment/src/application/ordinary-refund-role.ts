@@ -3,7 +3,13 @@ const fail = (): never => {
   throw new Error("ORDINARY_REFUND_ROLE_MAPPING_INVALID");
 };
 const roles = ["Manager", "Owner", "Finance"] as const;
-type RefundRole = (typeof roles)[number];
+/**
+ * WP-2423 M14 (DEC-OWNER-DEFAULTS-2026-11-06 item 2): Staff (a cashier) may record a refund request
+ * with a reason; they never approve or send it. Optional in the mapping, so an installation not yet
+ * given it keeps working with the three groups.
+ */
+const optionalRoles = ["Staff"] as const;
+type RefundRole = (typeof roles)[number] | (typeof optionalRoles)[number];
 function codes(value: unknown): readonly string[] {
   if (!Array.isArray(value) || value.length > 1024) return fail();
   const result: string[] = [];
@@ -28,9 +34,14 @@ function codes(value: unknown): readonly string[] {
  * independent actors and MFA are still required by approval evaluation.
  */
 export function createOrdinaryRefundRoleResolver(value: unknown) {
-  const raw = exactPaymentObject(value, roles);
+  const withStaff =
+    value !== null &&
+    typeof value === "object" &&
+    Object.prototype.hasOwnProperty.call(value, "Staff");
+  const groups: readonly RefundRole[] = withStaff ? [...roles, ...optionalRoles] : roles;
+  const raw = exactPaymentObject(value, groups);
   const bindings = new Map<string, RefundRole>();
-  for (const role of roles) {
+  for (const role of groups) {
     for (const code of codes(raw[role])) {
       if (bindings.has(code)) return fail();
       bindings.set(code, role);
@@ -41,7 +52,13 @@ export function createOrdinaryRefundRoleResolver(value: unknown) {
     // WP-2423 Q19: an Owner resolves as "Owner" for a request; Payment accepts an Owner's
     // request only while sole operator is in effect for them (approval evaluation), never otherwise.
     if (permissionCode === "payment.refund.request")
-      return current.has("Manager") ? "Manager" : current.has("Owner") ? "Owner" : null;
+      return current.has("Manager")
+        ? "Manager"
+        : current.has("Owner")
+          ? "Owner"
+          : current.has("Staff")
+            ? "Staff"
+            : null;
     if (permissionCode === "payment.refund.approve") {
       if (current.has("Owner")) return "Owner";
       if (current.has("Finance")) return "Finance";

@@ -38,6 +38,7 @@ const context = {
   pendingRefundMinor: "593",
   canRequest: true,
   requestBlocked: null as "SoleOperatorOff" | null,
+  canSend: true,
 };
 
 it("WP-2423: the payment summary says Paid, never the internal Captured state", () => {

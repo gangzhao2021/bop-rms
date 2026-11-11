@@ -62,6 +62,8 @@ it("freezes nested selection and retries the exact request after response loss",
     ...recorded,
     replayed: true,
     approveAlone: false,
+    // An older server says nothing of server preparation: nothing was prepared.
+    prepared: [],
   });
   for (const call of fetcher.mock.calls)
     expect(JSON.parse(String(call[1]?.body))).toEqual(command());
@@ -299,7 +301,24 @@ const context = {
   pendingRefundMinor: "1130",
   canRequest: true,
   requestBlocked: null,
+  canSend: true,
 };
+it("WP-2423 M14: a cashier's context says they request but do not send; an older server's means whoever requests sends", async () => {
+  const older: Partial<typeof context> = { ...context };
+  delete older.canSend;
+  const fetcher = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(response({ ...context, canSend: false }))
+    .mockResolvedValueOnce(response(older))
+    .mockResolvedValueOnce(response({ ...context, canSend: "yes" }));
+  const client = createOrdinaryRefundClient(fetcher);
+  await expect(client.context(id(6), csrf)).resolves.toMatchObject({
+    canRequest: true,
+    canSend: false,
+  });
+  await expect(client.context(id(6), csrf)).resolves.toMatchObject({ canSend: true });
+  await expect(client.context(id(6), csrf)).rejects.toThrow();
+});
 it("payment context preserves separate capture, confirmed and pending amounts", async () => {
   const fetcher = vi.fn<typeof fetch>().mockResolvedValue(response(context));
   await expect(createOrdinaryRefundClient(fetcher).context(id(6), csrf)).resolves.toEqual(context);

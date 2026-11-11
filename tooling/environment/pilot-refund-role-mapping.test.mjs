@@ -21,7 +21,16 @@ it("WP-2423 Q5: maps the real Store/Brand roles; Finance stays empty until a fin
     Manager: ["store_manager", "area_manager"],
     Owner: ["store_owner", "brand_owner"],
     Finance: [],
+    // WP-2423 M14: a cashier requests; a manager or the owner sends.
+    Staff: ["front_of_house"],
   });
+  // A runtime file from before Staff stays valid until it is rewritten.
+  expect(
+    validateRefundRoleMapping({ Manager: ["store_manager"], Owner: ["store_owner"], Finance: [] }),
+  ).toEqual({ Manager: ["store_manager"], Owner: ["store_owner"], Finance: [] });
+  expect(() =>
+    validateRefundRoleMapping({ ...standardRefundRoleMapping, Staff: ["store_manager"] }),
+  ).toThrow("PILOT_REFUND_ROLE_MAPPING_INVALID");
   expect(validateRefundRoleMapping({ ...standardRefundRoleMapping })).toEqual(
     standardRefundRoleMapping,
   );
