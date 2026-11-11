@@ -11,7 +11,8 @@ const id = (n) => "01a7ef00-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 /**
  * WP-2423 DEC-MERCHANT-LOCK-SCOPE: an owner can now list at 7 pm with the tables full. A guest who
  * already has dishes in the cart must still be able to send them, seeing the price that is true
- * now, without touching a line. Under the restricted role with the rendered pilot ACL, through the
+ * now, without touching a line; a listing while the guest's price is held keeps that price
+ * (Owner #26, DEC-PRICE-HOLD). Under the restricted role with the rendered pilot ACL, through the
  * same owner ports the customer app's handlers call, and the Owner's real one-page menu commands.
  */
 it("a guest's open cart still sends after the owner lists a change to another dish", async () => {
@@ -160,7 +161,9 @@ it("a guest's open cart still sends after the owner lists a change to another di
           cartVersion: second.cartVersion,
           quoteReference: result.quoteReference,
         });
-      const stale = await priced();
+      // Owner #26 (DEC-PRICE-HOLD): the guest's price is kept while the Owner lists, so the
+      // checkout starts on the price the guest confirmed and the round is sent once.
+      const held = await priced();
       await owner.saveDish(
         "Tea charge (TEST)",
         "茶位",
@@ -169,13 +172,14 @@ it("a guest's open cart still sends after the owner lists a change to another di
         "NoIngredients",
       );
       await owner.listAll();
-      const refused = await startFor(stale);
-      assert.equal(refused.status, "RequoteRequired", "the guest's page is told to price again");
-
-      // Priced again and started; the Owner lists once more before the send lands.
-      const freshQuote = await priced();
-      const started = await startFor(freshQuote);
-      assert.equal(started.status, "Started", "the same cart checks out at the true price");
+      const again = await priced();
+      assert.equal(again.quoteReference, held.quoteReference, "priced again: the confirmed price");
+      const started = await startFor(held);
+      assert.equal(
+        started.status,
+        "Started",
+        "a listing inside the hold never asks to price again",
+      );
       await owner.saveDish(
         "Tea charge (TEST)",
         "茶位",
@@ -184,25 +188,25 @@ it("a guest's open cart still sends after the owner lists a change to another di
         "NoIngredients",
       );
       await owner.listAll();
-      const send = () =>
+      // A listing between checkout start and send: the page is told to price again, which
+      // answers the same confirmed price (still held), starts again and sends it, once.
+      const send = (checkoutSessionReference) =>
         guests.submitPayLater(phone, {
-          checkoutSessionReference: checkoutRef,
+          checkoutSessionReference,
           selectionReference: fresh(),
           recordedAfterOutage: false,
         });
-      let checkoutRef = started.checkoutSessionReference;
       await assert.rejects(
-        send,
+        () => send(started.checkoutSessionReference),
         (error) => error.code === "CHECKOUT_REQUOTE_REQUIRED",
         "price again",
       );
-
-      // The page prices again once more, starts a new checkout and the round is sent, once.
-      const finalQuote = await priced();
-      const restarted = await startFor(finalQuote);
+      const still = await priced();
+      assert.equal(still.quoteReference, held.quoteReference, "the same confirmed price");
+      assert.equal(still.totalMinor, held.totalMinor, "to the cent");
+      const restarted = await startFor(still);
       assert.equal(restarted.status, "Started", "a stale checkout does not block the new one");
-      checkoutRef = restarted.checkoutSessionReference;
-      const secondSent = await send();
+      const secondSent = await send(restarted.checkoutSessionReference);
       assert.ok(secondSent.submissionReference, "the second round reached the kitchen");
       const { rows } = await admin.query(
         "SELECT count(*)::int AS rounds FROM rms_ordering.order_submission_record WHERE store_id=$1",

@@ -83,7 +83,10 @@ export function createCustomerSubmissionInventorySource(
             catalog.skuReference !== item.sellableReference ||
             catalog.capturedAt > at ||
             catalog.options.length !== item.optionSelections.length ||
-            catalog.menuVersionReference !== item.catalogSelectionEvidence?.menuVersionReference ||
+            // Owner #26 (DEC-PRICE-HOLD): inside the quote's hold the dish is captured on the menu
+            // in force now, which may be newer than the one the cart was priced on; the recipe
+            // follows the dish (its product version), which must be the one priced.
+            item.catalogSelectionEvidence === null ||
             catalog.productVersionReference !==
               item.catalogSelectionEvidence.productVersionReference ||
             item.optionSelections.some(
