@@ -250,14 +250,10 @@ for (const screen of [
         if (body.action !== "Choose") return { status: "NothingToReturn", cartVersion: 5 };
         table.version = 5;
         table.items = table.items.filter((item) => !item.other);
+        const expiresAt = new Date(Date.now() + 300_000).toISOString();
         table.tablePay = {
           ...idle(),
-          payer: {
-            thisPhone: true,
-            choice: "Mine",
-            expiresAt: new Date(Date.now() + 300_000).toISOString(),
-            reserved: true,
-          },
+          payer: { thisPhone: true, choice: "Mine", expiresAt, reserved: true },
           waiting: [
             {
               waitingLineReference: id(60),
@@ -271,7 +267,7 @@ for (const screen of [
         return {
           status: "Chosen",
           cartVersion: 5,
-          expiresAt: table.tablePay.payer.expiresAt,
+          expiresAt,
           setAsideUnits: 1,
         };
       });
