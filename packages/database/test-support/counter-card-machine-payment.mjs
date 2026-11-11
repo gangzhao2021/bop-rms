@@ -613,6 +613,19 @@ async function exerciseCounterUnpaidCancellation({
     cancelledAt: cancelled.cancelledAt,
   });
   assert.equal(after.counter.canCancelUnpaid, false);
+  // WP-2423 M61/M127: the order's record says who cancelled it, by name and never an id.
+  const recorded = (
+    await queue({
+      sessionCookie: managerSession.sessionCookie,
+      afterOrderReference: null,
+      orderReference,
+    })
+  ).record;
+  assert.deepEqual(
+    recorded.cancellations.map((entry) => [entry.what, entry.by]),
+    [["Order", "You"]],
+  );
+  assert.doesNotMatch(JSON.stringify(recorded), /[0-9a-f]{8}-[0-9a-f]{4}-/u);
 
   // A lost answer retried (even after picking another reason) answers with what was recorded;
   // nothing is written twice. Another cancellation of the same order is refused.

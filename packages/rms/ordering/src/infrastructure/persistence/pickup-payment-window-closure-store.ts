@@ -854,12 +854,22 @@ export async function listCounterUnpaidCancellations(
 ): Promise<
   ReadonlyMap<
     string,
-    { readonly reasonCode: CounterUnpaidCancellationReason; readonly cancelledAt: string }
+    {
+      readonly reasonCode: CounterUnpaidCancellationReason;
+      readonly cancelledAt: string;
+      /** WP-2423 M61: the staff member who cancelled (for the order's record; never shown as is). */
+      readonly actorReference: string;
+    }
   >
 > {
   const result = new Map<
     string,
-    { readonly reasonCode: CounterUnpaidCancellationReason; readonly cancelledAt: string }
+    {
+      readonly reasonCode: CounterUnpaidCancellationReason;
+      readonly cancelledAt: string;
+      /** WP-2423 M61: the staff member who cancelled (for the order's record; never shown as is). */
+      readonly actorReference: string;
+    }
   >();
   if (orderReferences.length === 0) return result;
   if (orderReferences.length > 500) return fail();
@@ -868,16 +878,17 @@ export async function listCounterUnpaidCancellations(
     orders = orderReferences.map((value) => parseOrderingReference(value));
   await scoped(transaction, brand, store);
   const found = await transaction.query(
-    "SELECT order_id::text AS order_id,reason_code,to_char(terminated_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') AS at FROM rms_ordering.order_termination_record " +
+    "SELECT order_id::text AS order_id,reason_code,actor_id::text AS actor_id,to_char(terminated_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') AS at FROM rms_ordering.order_termination_record " +
       "WHERE brand_id=$1 AND store_id=$2 AND order_id=ANY($3::uuid[]) AND actor_type='User' AND purpose_code=$4",
     [brand, store, orders, counterUnpaidCancellationPolicy.purposeCode],
   );
   for (const row of found.rows) {
     const reasonCode = counterUnpaidCancellationReasons.find((code) => code === row.reason_code);
-    if (reasonCode === undefined) return fail();
+    if (reasonCode === undefined || row.actor_id === null) return fail();
     result.set(String(parseOrderingReference(row.order_id)), {
       reasonCode,
       cancelledAt: parseOrderingInstant(row.at),
+      actorReference: String(parseOrderingReference(row.actor_id)),
     });
   }
   return result;

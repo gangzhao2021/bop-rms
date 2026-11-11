@@ -715,6 +715,14 @@ export function createPersistentMerchantOrderQueue(options: {
               [...entries.keys()],
             );
             for (const [order, entry] of entries) {
+              const cancelledCounter = counterCancelled.get(order);
+              // WP-2423 M61/M127: an unpaid counter order cancelled by staff names who cancelled it.
+              if (cancelledCounter !== undefined)
+                recordFacts?.cancellations.push({
+                  what: "Order",
+                  actor: cancelledCounter.actorReference,
+                  at: cancelledCounter.cancelledAt,
+                });
               const paid = counterPayments.get(order)?.[0];
               if (paid !== undefined) addCardMachineTip(paid.payment);
               if (paid !== undefined && recordFacts !== null) {
@@ -776,7 +784,14 @@ export function createPersistentMerchantOrderQueue(options: {
                   payBy !== null &&
                   !entry.recordedAfterOutage &&
                   !counterCancelled.has(order),
-                cancelledBeforePayment: counterCancelled.get(order) ?? null,
+                // Who cancelled is said only on the order's record, by name (never an identifier).
+                cancelledBeforePayment:
+                  cancelledCounter === undefined
+                    ? null
+                    : {
+                        reasonCode: cancelledCounter.reasonCode,
+                        cancelledAt: cancelledCounter.cancelledAt,
+                      },
                 recordedAfterOutage: entry.recordedAfterOutage,
                 paidOnCardMachine:
                   paid === undefined
