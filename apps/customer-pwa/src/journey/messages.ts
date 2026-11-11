@@ -496,6 +496,16 @@ export const cartText = Object.freeze({
   get confirmChangesToOrder() {
     return t("Tick the box above to place your order.");
   },
+  get readChangesBeforeOrdering() {
+    return t(
+      "A dish changed since you added it. Nothing was ordered. Read the changes above, tick the box, then place your order.",
+    );
+  },
+  get changesNotChecked() {
+    return t(
+      "We couldn’t check whether a dish changed since you added it, so nothing was ordered or charged. Try again, or ask staff.",
+    );
+  },
   get someonePlacedIt() {
     return t("Someone at your table just placed this order.");
   },

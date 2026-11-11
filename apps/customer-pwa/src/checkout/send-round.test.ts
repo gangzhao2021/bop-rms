@@ -383,6 +383,95 @@ describe("WP-2423 item 6: placing a round from the cart", () => {
     expect(rise.ports.saveDetails).not.toHaveBeenCalled();
   });
 
+  const renamed = (reference: string): CheckoutQuote =>
+    quote({
+      quoteReference: reference,
+      sinceAdded: [
+        {
+          cartItemReference: id(50),
+          quantity: 1,
+          subtotal: cad("2000"),
+          changes: ["Name", "Allergens"],
+        },
+      ],
+    });
+
+  it("price-hold-dish-changes: the first tap prices the cart again, so a cut made while the cart was open is passed on", async () => {
+    const { controller, ports } = setUp();
+    ports.quote.mockResolvedValueOnce(
+      quote({ quoteReference: id(31), subtotal: cad("1950"), total: cad("2204") }),
+    );
+    // The cart showed (and the Store held) $20.00; the owner cut it to $19.50 and listed it.
+    await controller.send(cart(), seen, quote({ quoteReference: id(30) }));
+    expect(controller.getState()).toEqual({ status: "sent", held: false });
+    expect(ports.quote).toHaveBeenCalledTimes(1);
+    expect(ports.saveDetails.mock.calls[0]?.[0].quoteReference).toBe(id(31));
+    expect(ports.createSession.mock.calls[0]?.[0].quoteReference).toBe(id(31));
+  });
+
+  it("price-hold-dish-changes: a dish renamed or re-declared after the cart was shown stops the round until the guest ticks that quote", async () => {
+    const { controller, ports } = setUp();
+    // Shown at $20.00 with nothing changed; at the tap the Store already prices the changed dish.
+    ports.quote.mockResolvedValue(renamed(id(32)));
+    await controller.send(cart(), seen, quote({ quoteReference: id(30) }));
+    expect(controller.getState()).toEqual({ status: "confirm-changes", quote: renamed(id(32)) });
+    expect(ports.saveDetails).not.toHaveBeenCalled();
+    expect(ports.createSession).not.toHaveBeenCalled();
+    expect(ports.send).not.toHaveBeenCalled();
+    // The guest read and ticked that quote on the cart page: the same answer goes on.
+    await controller.send(cart(), seen, renamed(id(32)));
+    expect(controller.getState()).toEqual({ status: "sent", held: false });
+    expect(ports.send).toHaveBeenCalledTimes(1);
+  });
+
+  it("price-hold-dish-changes: a menu update answered at checkout re-prices, and a renamed dish at the same price still stops", async () => {
+    const { controller, ports } = setUp();
+    ports.quote
+      .mockResolvedValueOnce(quote({ quoteReference: id(30) }))
+      .mockResolvedValueOnce(renamed(id(33)));
+    ports.createSession.mockRejectedValueOnce(new CheckoutSessionClientError("requote_required"));
+    await controller.send(cart(), seen, quote({ quoteReference: id(30) }));
+    // Same total, so no confirm-total: only the changed dish stops it.
+    expect(controller.getState()).toEqual({ status: "confirm-changes", quote: renamed(id(33)) });
+    expect(ports.createSession).toHaveBeenCalledTimes(1);
+    expect(ports.send).not.toHaveBeenCalled();
+  });
+
+  it("price-hold-dish-changes: the send to the kitchen answering a menu update stops for a changed dish too", async () => {
+    const { controller, ports } = setUp();
+    ports.quote
+      .mockResolvedValueOnce(quote({ quoteReference: id(30) }))
+      .mockResolvedValueOnce(renamed(id(34)));
+    ports.send.mockRejectedValueOnce(new SessionPaymentClientError("requote_required"));
+    await controller.send(cart(), seen, quote({ quoteReference: id(30) }));
+    expect(controller.getState()).toEqual({ status: "confirm-changes", quote: renamed(id(34)) });
+    expect(ports.send).toHaveBeenCalledTimes(1);
+  });
+
+  it("price-hold-dish-changes: the re-price after a confirmed total stops for a changed dish the guest has not read", async () => {
+    const { controller, ports } = setUp();
+    ports.quote
+      .mockResolvedValueOnce(quote({ subtotal: cad("2200"), total: cad("2486") }))
+      .mockResolvedValueOnce(renamed(id(35)));
+    await controller.send(cart(), seen);
+    expect(controller.getState()).toMatchObject({ status: "confirm-total" });
+    await controller.send(cart(), seen);
+    expect(controller.getState()).toEqual({ status: "confirm-changes", quote: renamed(id(35)) });
+    expect(ports.saveDetails).not.toHaveBeenCalled();
+  });
+
+  it("price-hold-dish-changes: a quote that cannot say whether a dish changed is try again, never placed", async () => {
+    const { controller, ports } = setUp();
+    ports.quote.mockResolvedValueOnce(quote({ sinceAddedUnknown: true }));
+    await controller.send(cart(), seen, quote({ quoteReference: id(30) }));
+    expect(controller.getState()).toEqual({ status: "changes-unknown" });
+    expect(ports.saveDetails).not.toHaveBeenCalled();
+    expect(ports.send).not.toHaveBeenCalled();
+    // The guest's try again prices once more; the Store can say now.
+    await controller.send(cart(), seen, quote({ quoteReference: id(30) }));
+    expect(controller.getState()).toEqual({ status: "sent", held: false });
+  });
+
   it("a total the same or lower goes straight through", async () => {
     const { controller, ports } = setUp({
       quote: vi.fn<SendRoundPorts["quote"]>(async () => quote({ subtotal: cad("1800") })),

@@ -28,7 +28,12 @@ import {
   quotePricedLines,
 } from "./checkout-decisions.js";
 import { acceptSeenPrices, recordFirstSeenPrices, seenPriceChanges } from "../cart/seen-prices.js";
-import { DishChangeList, quoteDishChanges, recordFirstPricedLines } from "../cart/dish-changes.js";
+import {
+  DishChangeList,
+  hasDishChanges,
+  quoteDishChanges,
+  recordFirstPricedLines,
+} from "../cart/dish-changes.js";
 import { PriceChangeList } from "./PriceChangeList.js";
 import { createBrowserCustomerCartClient, type CustomerCartClient } from "../cart/cart-client.js";
 import { startTableCartPoll } from "../cart/table-cart-poll.js";
@@ -53,7 +58,7 @@ import {
 const browserCheckoutStoreProfile: StoreProfileLoader = createStoreProfileClient();
 import { sendFailureState } from "./send-round.js";
 import { paymentConfiguration } from "../payment/payment-configuration.js";
-import { quoteConsistentLinePrices, usePublishedMenu } from "../menu/menu-line-prices.js";
+import { quoteConsistentLinePrices, usePublishedMenuRead } from "../menu/menu-line-prices.js";
 import type { CustomerMenuClient, MenuJourneyContext } from "../menu/types.js";
 import { CustomerPage, PageHeading, type CustomerStoreContext } from "../journey/CustomerPage.js";
 import { currencySymbol, formatMoney, percentOfMinor } from "../journey/format.js";
@@ -318,11 +323,17 @@ export function CheckoutPage({
   useEffect(() => {
     if (sessionState.status === "conflict" && dineIn) void checkTable.current().catch(() => false);
   }, [sessionState.status, dineIn]);
-  const menu = usePublishedMenu(
+  // price-hold-dish-changes: a quote naming a changed dish reads the menu again, and the dish's
+  // allergens "now" are said only from that read (never from a menu read before the change).
+  const changesQuote = hasDishChanges(quote) ? (quote?.quoteReference ?? null) : null;
+  const { menu, freshFor: menuFreshFor } = usePublishedMenuRead(
     menuContext,
     menuClient,
-    cart?.cart.items.some((item) => item.lineEstimate.status !== "Available") ?? false,
+    changesQuote !== null ||
+      (cart?.cart.items.some((item) => item.lineEstimate.status !== "Available") ?? false),
+    changesQuote,
   );
+  const changesMenu = changesQuote !== null && menuFreshFor === changesQuote ? menu : null;
   // Each line at a price that adds up to the quote's subtotal; a line that can't be priced that
   // way shows no amount while the quote's total is beside it, never a contradicting label.
   // WP-2423 M74: the quote's own line prices when it sends them (every line, adding up to its
@@ -353,7 +364,7 @@ export function CheckoutPage({
       : seenPriceChanges(cart.cart.cartReference, quoteLines);
   // WP-2423 price-hold-dish-changes (DEC-PRICE-HOLD §3): a dish renamed or with other allergens
   // since the guest added it is named here, and ticked as read before paying or ordering.
-  const dishChanges = cart === null ? [] : quoteDishChanges(quote, cart.cart.items, menu);
+  const dishChanges = cart === null ? [] : quoteDishChanges(quote, cart.cart.items, changesMenu);
   const dishChangesSignature =
     dishChanges.length === 0
       ? null
@@ -363,6 +374,8 @@ export function CheckoutPage({
         ]);
   const dishesNeedConfirming =
     dishChangesSignature !== null && confirmedDishes !== dishChangesSignature;
+  // The Store could not say now whether a dish changed: never paid as "nothing changed".
+  const dishesUnknown = quote?.sinceAddedUnknown === true;
   const pricesNeedAcceptance =
     quote !== null &&
     (priceChangesNeedAcceptance(priceChanges) ||
@@ -470,6 +483,7 @@ export function CheckoutPage({
     quote.blockingReasons.length === 0 &&
     !(pricesNeedAcceptance && confirmedQuote !== quote.quoteReference) &&
     !dishesNeedConfirming &&
+    !dishesUnknown &&
     detailsSelection !== null;
   // WP-2423 store-service-controls (v15 M30/M34): past last orders, while this guest's service is
   // paused or when closed, no new checkout starts; the refusal says why in this service's words.
@@ -766,6 +780,18 @@ export function CheckoutPage({
                   ) : null}
                 </>
               )}
+              {dishesUnknown ? (
+                <div role="alert" className="checkout-price-change">
+                  <p>{cartText.changesNotChecked}</p>
+                  <button
+                    type="button"
+                    disabled={detailsLocked || sessionState.status !== "idle"}
+                    onClick={() => void controller.quote()}
+                  >
+                    {commonText.tryAgain}
+                  </button>
+                </div>
+              ) : null}
               {dishChanges.length > 0 ? (
                 <div role="alert" className="checkout-price-change">
                   <DishChangeList changes={dishChanges} />

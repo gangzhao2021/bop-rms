@@ -39,6 +39,11 @@ export function lineAllergenLine(
   return compactAllergenLine(allergens) ?? t("No allergens listed");
 }
 
+/** Whether the Store's answer names a dish renamed or given other allergens since it was added. */
+export function hasDishChanges(quote: Pick<CheckoutQuote, "sinceAdded"> | null): boolean {
+  return quote?.sinceAdded?.some((line) => line.changes.length > 0) === true;
+}
+
 /** The dishes the Store says changed since this cart was first priced for them. */
 export function quoteDishChanges(
   quote: Pick<CheckoutQuote, "sinceAdded"> | null,
@@ -115,14 +120,20 @@ export function DishChangeList({ changes }: { readonly changes: readonly DishCha
   );
 }
 
-/** What the guest confirms: a changed dish, or a price that went up (their signature). */
+/**
+ * What the guest confirms: a changed dish, or a price that went up (their signature). Dish changes
+ * are ticked for the Store's quote that names them: a later quote (the dish changed again) is ticked
+ * again.
+ */
 export function changesSignature(
   dishes: readonly DishChange[],
   priceRises: readonly { readonly cartItemReference: string; readonly afterMinor: bigint }[],
+  quoteReference: string | null = null,
 ): string | null {
   return dishes.length === 0 && priceRises.length === 0
     ? null
     : JSON.stringify([
+        dishes.length === 0 ? null : quoteReference,
         dishes.map((change) => [change.cartItemReference, change.name, change.allergens]),
         priceRises.map((change) => [change.cartItemReference, change.afterMinor.toString()]),
       ]);

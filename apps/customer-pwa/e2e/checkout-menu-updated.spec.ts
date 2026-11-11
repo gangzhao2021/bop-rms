@@ -200,8 +200,10 @@ async function stubTable(page: Page, timing: "PayLater" | "PayFirst", refusals: 
   );
   await page.route("**/api/v1/carts/*/quote", (route) => {
     seen.quotes += 1;
+    // The menu update lands after the first send was refused (the cart on screen and the tap are
+    // priced before it).
     const price =
-      seen.quotes > 1 && refusals.repriced
+      seen.sends.length > 0 && refusals.repriced
         ? refusals.repriced
         : { subtotalMinor: "2000", totalMinor: "2260" };
     return route.fulfill({
@@ -468,10 +470,11 @@ for (const screen of [
           page.getByRole("main").getByRole("status").filter({ hasText: "Order placed." }),
         ).toBeVisible();
         await expectNoFailureSaid(page);
-        // The price stood, so nothing to ask: priced again once, the round placed once.
+        // The price stood, so nothing to ask: priced again once, the round placed once (the cart
+        // on screen was priced first, and the tap priced it again).
         expect(pages).not.toContain("/checkout");
-        expect(seen.quotes).toBe(2);
-        expect(seen.started).toEqual([id(101), id(102)]);
+        expect(seen.quotes).toBe(3);
+        expect(seen.started).toEqual([id(102), id(103)]);
         expect(seen.accepted).toBe(1);
         expect(seen.sends).toHaveLength(refused === "send" ? 2 : 1);
         if (refused === "send") expect(seen.sends[0]).not.toBe(seen.sends[1]);
@@ -503,8 +506,8 @@ for (const screen of [
       await expect(page).toHaveURL(/\/dine-in\/session$/u);
       // price-hold-dish-changes: the second tap prices it once more (the Store holds that price,
       // or a lower one) and places it at that quote.
-      expect(seen.quotes).toBe(3);
-      expect(seen.started).toEqual([id(101), id(103)]);
+      expect(seen.quotes).toBe(4);
+      expect(seen.started).toEqual([id(102), id(104)]);
       expect(seen.accepted).toBe(1);
       expect(seen.sends).toHaveLength(2);
       expect(failures).toEqual([]);

@@ -44,6 +44,11 @@ import type { CheckoutQuote } from "./types.js";
  *
  * - The quote's price is checked against what the guest saw; a total that went up, any fee or a total
  *   never shown stops before anything is saved, and the second tap continues with the same quote.
+ * - Every tap prices the cart (DEC-PRICE-HOLD): inside the hold the Store answers the held price, or
+ *   a lower one when the restaurant cut it meanwhile. A quote that names a dish renamed or given
+ *   other allergens since it was added stops until the guest has read and ticked that very quote on
+ *   the cart page (allergen safety first); a quote that cannot say whether a dish changed stops with
+ *   "try again", never read as "nothing changed".
  * - A lost answer is never a failure the guest pays for: each step repeats with the same key and the
  *   same body, and the server returns what it already did.
  * - Nothing can be placed before the send. So before one was attempted, a plan only means something
@@ -98,6 +103,14 @@ export type SendRoundState =
       /** changed: more than the guest saw; fees: a fee was added; shown: no price was shown yet. */
       readonly reason: "changed" | "fees" | "shown";
     }
+  /**
+   * WP-2423 price-hold-dish-changes (DEC-PRICE-HOLD §3): this quote names a dish the restaurant
+   * renamed or gave other allergens since it was added, and the guest has not ticked it as read.
+   * The cart page shows it and the guest taps again; nothing was saved or placed.
+   */
+  | { readonly status: "confirm-changes"; readonly quote: CheckoutQuote }
+  /** The Store could not say now whether a dish changed since it was added: nothing was placed. */
+  | { readonly status: "changes-unknown" }
   | { readonly status: "blocked"; readonly messages: readonly string[] }
   | {
       readonly status: "refused";
@@ -150,6 +163,8 @@ interface Plan {
   confirmedTotalMinor: bigint | null;
   /** A whole new plan was already started once for this tap. */
   readonly restarted: boolean;
+  /** The quote whose dish changes the guest read and ticked on the cart page (this cart version). */
+  acknowledged: string | null;
   quoteRenewed: boolean;
 }
 
@@ -187,8 +202,9 @@ export interface SendRoundController {
   subscribe(listener: () => void): () => void;
   /**
    * The guest's tap: place the round, or carry on after a stop. Only ever called from a tap.
-   * `shown`: the Store's price for this cart as the cart showed it (price-hold-dish-changes); the
-   * round goes on that quote while it lasts, rather than pricing the cart a second time.
+   * `shown`: the Store's quote the cart showed, with any dish changes it names read and ticked
+   * (price-hold-dish-changes). It is never sent as is: the tap prices the cart again, and a quote
+   * naming changes goes on only when it is this one.
    */
   send(
     cart: CartView | null,
@@ -240,6 +256,7 @@ export function createSendRoundController(
     confirmedTotalMinor: carried?.confirmedTotalMinor ?? null,
     restarted: carried !== undefined,
     quoteRenewed: false,
+    acknowledged: carried?.acknowledged ?? null,
   });
   /** Conflict: a whole new plan with new keys, once; after that the guest decides to try again. */
   const restart = (active: Plan, options: CheckoutMutationOptions) => {
@@ -514,6 +531,18 @@ export function createSendRoundController(
           plan = null;
           return { status: "needs-page" };
         }
+        // Allergen safety before the price: a dish shown differently now is read and ticked first.
+        if (quote.sinceAddedUnknown === true) {
+          plan = null;
+          return { status: "changes-unknown" };
+        }
+        if (
+          quote.sinceAdded?.some((line) => line.changes.length > 0) === true &&
+          active.acknowledged !== quote.quoteReference
+        ) {
+          plan = null;
+          return { status: "confirm-changes", quote };
+        }
         const difference = priceCheck(quote, active.seen);
         if (
           difference !== null &&
@@ -576,15 +605,12 @@ export function createSendRoundController(
         return;
       }
       plan = newPlan(cart);
-      // The price the cart on screen was given for this very cart version, while it lasts.
-      if (
-        shown != null &&
-        shown.cartVersion === cart.cart.version &&
-        Date.parse(shown.expiresAt) > now()
-      )
-        plan.quote = shown;
     }
     if (seen !== null) plan.seen = seen;
+    // The quote the guest read on the cart page, for this very cart version. It is never put into
+    // the plan as the price: the tap prices the cart again (a cut made since is passed on).
+    if (shown != null && shown.cartVersion === plan.cart.cart.version)
+      plan.acknowledged = shown.quoteReference;
     const options: CheckoutMutationOptions = manual ? { busyTotalMs: manualRetryBusyTotalMs } : {};
     let outcome: SendRoundState;
     try {

@@ -104,10 +104,15 @@ interface Table {
   sent: number;
   /** Pricing and the checkout start answer that the dish can't be sold now. */
   soldOut: boolean;
+  /** The subtotal of the quote the checkout (the round) was started on. */
+  sessionSubtotal: bigint | null;
 }
 
 async function stubTable(page: Page, timing: "PayLater" | "PayFirst", dish: Dish) {
-  const table: Table = { dish, quotes: 0, sent: 0, soldOut: false };
+  const table: Table = { dish, quotes: 0, sent: 0, soldOut: false, sessionSubtotal: null };
+  /** As the Store inside the hold: nothing changed since the last quote answers that same quote. */
+  let held: { reference: string; key: string } | undefined;
+  const issued = new Map<string, bigint>();
   const expiresAt = new Date(Date.now() + 600_000).toISOString();
   const now = new Date().toISOString();
   const cents = () => BigInt(Math.round(Number(table.dish.priceDollars) * 100)) * 2n;
@@ -212,12 +217,15 @@ async function stubTable(page: Page, timing: "PayLater" | "PayFirst", dish: Dish
       ...(first.dish.name === table.dish.name ? [] : ["Name"]),
       ...(first.dish.mayContain.join() === table.dish.mayContain.join() ? [] : ["Allergens"]),
     ];
+    const key = JSON.stringify([String(subtotal), table.dish]);
+    if (held?.key !== key) held = { reference: id(100 + table.quotes), key };
+    issued.set(held.reference, subtotal);
     return route.fulfill({
       status: 201,
       json: {
         schemaVersion: 1,
         quote: {
-          quoteReference: id(100 + table.quotes),
+          quoteReference: held.reference,
           quoteVersion: 2,
           cartVersion: 3,
           currency: "CAD",
@@ -325,6 +333,7 @@ async function stubTable(page: Page, timing: "PayLater" | "PayFirst", dish: Dish
       });
     const body = route.request().postDataJSON() as { quoteReference: string };
     currentQuote = body.quoteReference;
+    table.sessionSubtotal = issued.get(body.quoteReference) ?? null;
     return route.fulfill({ status: 200, json: session(body.quoteReference) });
   });
   await page.route("**/api/v1/checkout-sessions/*", (route) =>
@@ -459,6 +468,67 @@ for (const screen of [
       await place.click();
       await expect(page).toHaveURL(/\/dine-in\/session$/u);
       expect(table.sent).toBe(1);
+      expect(failures).toEqual([]);
+    });
+
+    test("a dish renamed and given an allergen while the table cart is open stops Place order until the guest ticks it", async ({
+      page,
+    }) => {
+      const failures: string[] = [];
+      page.on("pageerror", () => failures.push("page error"));
+      const table = await stubTable(page, "PayLater", noodles());
+      await openAtTable(page, "/cart");
+      const main = page.getByRole("main");
+      const place = main.getByRole("button", { name: "Place order", exact: true });
+      await expect(place).toBeEnabled();
+      await expect.poll(() => table.quotes).toBe(1);
+      // Staff rename the dish and set sesame to "May contain", then list it; the guest does not
+      // reload and taps Place order at the same price.
+      table.dish = {
+        name: "Synthetic house noodles",
+        priceDollars: "10.00",
+        mayContain: ["Sesame seeds"],
+      };
+      await place.click();
+      await expect(
+        main.getByText(
+          "A dish changed since you added it. Nothing was ordered. Read the changes above, tick the box, then place your order.",
+        ),
+      ).toBeVisible();
+      await expect(main.getByText("Changed since you added it:")).toBeVisible();
+      await expect(
+        main.getByText(/renamed since you added it\..*allergens now: May contain Sesame seeds\./u),
+      ).toBeVisible();
+      await expect(place).toBeDisabled();
+      expect(table.sent).toBe(0);
+      await noSideScroll(page);
+      await expectNoInternalText(page);
+      await main.getByRole("checkbox", { name: "I have read these changes" }).check();
+      await expect(place).toBeEnabled();
+      await place.click();
+      await expect(page).toHaveURL(/\/dine-in\/session$/u);
+      expect(table.sent).toBe(1);
+      expect(failures).toEqual([]);
+    });
+
+    test("a price cut listed while the table cart is open is what the round is placed at", async ({
+      page,
+    }) => {
+      const failures: string[] = [];
+      page.on("pageerror", () => failures.push("page error"));
+      const table = await stubTable(page, "PayLater", noodles());
+      await openAtTable(page, "/cart");
+      const main = page.getByRole("main");
+      const place = main.getByRole("button", { name: "Place order", exact: true });
+      await expect(main.getByText("$20.00", { exact: true }).first()).toBeVisible();
+      await expect.poll(() => table.quotes).toBe(1);
+      // The owner lowers the dish to $9.50 and lists it; the guest taps without reloading.
+      table.dish = { ...table.dish, priceDollars: "9.50" };
+      await place.click();
+      await expect(page).toHaveURL(/\/dine-in\/session$/u);
+      expect(table.sent).toBe(1);
+      // Priced again at the tap: the round went at today's lower price, never the $20.00 shown.
+      expect(table.sessionSubtotal).toBe(1900n);
       expect(failures).toEqual([]);
     });
 

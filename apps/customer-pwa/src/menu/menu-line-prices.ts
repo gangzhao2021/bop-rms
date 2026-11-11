@@ -124,12 +124,22 @@ export function usePublishedMenu(
   return usePublishedMenuRead(context, client, needed).menu;
 }
 
-/** The same read, and whether it has finished (WP-2423 item 6: the cart waits a moment for prices). */
+/**
+ * The same read, and whether it has finished (WP-2423 item 6: the cart waits a moment for prices).
+ * `freshFor` (price-hold-dish-changes): a new value reads the menu again, and `freshFor` in the
+ * answer says which value the menu shown was read for — a dish's allergens "now" are only said from
+ * a menu read after the Store named the change.
+ */
 export function usePublishedMenuRead(
   context: MenuJourneyContext | undefined,
   client: CustomerMenuClient | undefined,
   needed: boolean,
-): { readonly menu: MenuView | null; readonly settled: boolean } {
+  freshFor: string | null = null,
+): {
+  readonly menu: MenuView | null;
+  readonly settled: boolean;
+  readonly freshFor: string | null;
+} {
   const resolved = useMemo(() => {
     if (client !== undefined) return client;
     if (context === undefined) return null;
@@ -138,7 +148,10 @@ export function usePublishedMenuRead(
       online: () => globalThis.navigator?.onLine ?? true,
     });
   }, [client, context]);
-  const [menu, setMenu] = useState<MenuView | null>(null);
+  const [read, setRead] = useState<{
+    readonly menu: MenuView | null;
+    readonly freshFor: string | null;
+  }>({ menu: null, freshFor: null });
   const [finished, setFinished] = useState(false);
   useEffect(() => {
     if (!needed || resolved === null) return;
@@ -147,10 +160,10 @@ export function usePublishedMenuRead(
     void resolved
       .load({})
       .then((result) => {
-        if (active) setMenu(result.kind === "Found" ? result.menu : null);
+        if (active) setRead({ menu: result.kind === "Found" ? result.menu : null, freshFor });
       })
       .catch(() => {
-        if (active) setMenu(null);
+        if (active) setRead({ menu: null, freshFor });
       })
       .finally(() => {
         if (active) setFinished(true);
@@ -158,6 +171,10 @@ export function usePublishedMenuRead(
     return () => {
       active = false;
     };
-  }, [needed, resolved]);
-  return { menu: needed ? menu : null, settled: !needed || resolved === null || finished };
+  }, [needed, resolved, freshFor]);
+  return {
+    menu: needed ? read.menu : null,
+    settled: !needed || resolved === null || finished,
+    freshFor: needed ? read.freshFor : null,
+  };
 }

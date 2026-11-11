@@ -44,6 +44,11 @@ export interface CheckoutQuote {
     readonly subtotal: CartMoney;
     readonly changes: readonly ("Name" | "Allergens")[];
   }[];
+  /**
+   * The Store could not work out now whether a dish changed since it was added (a passing outage).
+   * Never read as "nothing changed": the guest is asked to try again before ordering or paying.
+   */
+  readonly sinceAddedUnknown?: true;
 }
 
 export type CheckoutState =

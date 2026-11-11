@@ -1766,6 +1766,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "结账时会请你先确认这些改动再付款。",
   "I have read these changes": "我已看过这些改动",
   "Tick the box above to place your order.": "请先勾选上面的方框再下单。",
+  "A dish changed since you added it. Nothing was ordered. Read the changes above, tick the box, then place your order.":
+    "有菜在你加入购物车后改动了，这次没有下单。请看上面的改动，勾选方框后再下单。",
+  "We couldn’t check whether a dish changed since you added it, so nothing was ordered or charged. Try again, or ask staff.":
+    "暂时无法确认菜品在你加入购物车后是否有改动，所以没有下单，也没有扣款。请再试一次，或问店员。",
   "Changed since you added it:": "加入购物车后有改动：",
   "{dish} was renamed since you added it.": "{dish}在你加入购物车后改了名。",
   "{dish} allergens changed since you added it. Ask staff before you order.":

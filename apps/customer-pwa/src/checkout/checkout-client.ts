@@ -153,7 +153,11 @@ function parseQuote(value: unknown, expectedCartVersion: number): CheckoutQuote 
           }),
     ...(tips === undefined ? {} : { tips }),
     ...(withLines ? { lines: quoteLines(raw.lines, quoteCurrency) } : {}),
-    ...(withSinceAdded ? { sinceAdded: sinceAddedLines(raw.sinceAdded, quoteCurrency) } : {}),
+    ...(!withSinceAdded
+      ? {}
+      : raw.sinceAdded === null
+        ? { sinceAddedUnknown: true as const }
+        : { sinceAdded: sinceAddedLines(raw.sinceAdded, quoteCurrency) }),
   });
 }
 /**

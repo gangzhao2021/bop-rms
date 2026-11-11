@@ -413,6 +413,21 @@ describe("WP-2423 guest-payment-state: what the guest pays, and until when", () 
     expect(same).not.toContain("I have read these changes");
   });
 
+  it("price-hold-dish-changes: a quote that cannot say whether a dish changed is try again, never paid as nothing changed", () => {
+    clearSeenPrices();
+    const html = render({
+      status: "ready",
+      cart,
+      quote: { ...priced("549"), sinceAddedUnknown: true as const },
+    });
+    expect(html).toContain(
+      "We couldn’t check whether a dish changed since you added it, so nothing was ordered or charged.",
+    );
+    expect(html).toMatch(/>Try again<\/button>/u);
+    expect(html).toMatch(/<button[^>]*class="checkout-continue__button"[^>]*disabled=""/u);
+    clearSeenPrices();
+  });
+
   it("M74: a decrease is listed without asking anything", () => {
     recordFirstSeenPrices(id(1), [
       { cartItemReference: id(2), quantity: 1, amountMinor: 549n, currency: "CAD" },

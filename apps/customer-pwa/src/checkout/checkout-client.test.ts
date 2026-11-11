@@ -178,7 +178,13 @@ describe("WP-1703 Checkout transport", () => {
         },
       ],
     });
+    // Not worked out now: kept apart from "nothing changed".
+    vi.stubGlobal("fetch", answer(null));
+    const unknown = await client.quote(cart, id(9));
+    expect(unknown.sinceAddedUnknown).toBe(true);
+    expect(unknown.sinceAdded).toBeUndefined();
     for (const wrong of [
+      false,
       [{ ...line, changes: ["Price"] }],
       [{ ...line, changes: ["Name", "Name"] }],
       [{ ...line, changes: [], note: "private" }],

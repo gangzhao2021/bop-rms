@@ -557,7 +557,10 @@ for (const screen of [
       expect(table.sent[0]?.body).toEqual({ sendToKitchen: true });
       expect(table.sent[0]?.key).toMatch(roundReference);
       // Read together, then each step once, in order; never a policy read a slow phone clock fails.
+      // price-hold-dish-changes: the cart on screen is priced, and the tap prices it again (the
+      // Store answers the price it holds, or a lower one listed since).
       expect(table.calls.filter((call) => call !== "table" && call !== "details-read")).toEqual([
+        "quote",
         "quote",
         "details-save",
         "session",
@@ -672,8 +675,9 @@ test.describe("@production Pay-later table, the round just placed", () => {
     await page.getByRole("button", { name: "Place order · $24.86", exact: true }).click();
     await expect(page).toHaveURL(/\/dine-in\/session$/u);
     expect(table.sent).toHaveLength(1);
-    // price-hold-dish-changes: the second tap prices it once more (the Store holds that price).
-    expect(table.calls.filter((call) => call === "quote")).toHaveLength(2);
+    // price-hold-dish-changes: the cart on screen, the tap and the second tap are each priced
+    // (the Store holds that price, or a lower one).
+    expect(table.calls.filter((call) => call === "quote")).toHaveLength(3);
   });
 
   test("with no price shown yet, the guest sees the total once before it's placed", async ({
@@ -994,7 +998,8 @@ test.describe("@production Pay-later table, the round just placed", () => {
     await expect(page).toHaveURL(/\/dine-in\/session$/u);
     expect(table.sessionKeys).toHaveLength(2);
     expect(table.sessionKeys[1]).toBe(table.sessionKeys[0]);
-    expect(table.calls.filter((call) => call === "quote")).toHaveLength(1);
+    // The cart on screen and the tap: the retry prices nothing again.
+    expect(table.calls.filter((call) => call === "quote")).toHaveLength(2);
     expect(table.sent).toHaveLength(1);
   });
 
@@ -1123,7 +1128,8 @@ test.describe("@production Pay-later table, the round just placed", () => {
     await expect(main.getByRole("alert")).toContainText("This order comes to $22.60 with tax.");
     const withTotal = page.getByRole("button", { name: "Place order · $22.60", exact: true });
     await expect(withTotal).toBeVisible();
-    await expect.poll(() => table.calls.filter((call) => call === "quote").length).toBe(1);
+    // The cart on screen and the tap.
+    await expect.poll(() => table.calls.filter((call) => call === "quote").length).toBe(2);
     await main.getByRole("button", { name: "Increase Synthetic noodles quantity" }).click();
     await expect(main.getByRole("alert")).toHaveCount(0);
     await expect(withTotal).toHaveCount(0);
@@ -1132,8 +1138,8 @@ test.describe("@production Pay-later table, the round just placed", () => {
     // The next tap asks again about what the cart comes to now, with nothing saved before it.
     await placeOrder(page).click();
     await expect(main.getByRole("alert")).toContainText("This order comes to");
-    // price-hold-dish-changes: the changed cart on screen is priced too (the price it keeps).
-    expect(table.calls.filter((call) => call === "quote")).toHaveLength(3);
+    // price-hold-dish-changes: the changed cart on screen is priced too, and the tap again.
+    expect(table.calls.filter((call) => call === "quote")).toHaveLength(4);
     expect(table.calls).not.toContain("details-save");
   });
 

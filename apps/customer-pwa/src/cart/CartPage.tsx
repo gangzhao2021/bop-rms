@@ -69,6 +69,7 @@ import {
 import {
   changesSignature,
   DishChangeList,
+  hasDishChanges,
   quoteDishChanges,
   recordFirstPricedLines,
 } from "./dish-changes.js";
@@ -623,6 +624,18 @@ function sendRoundMessage(round: SendRoundState, cart: CartView, onRetry: () => 
         </p>
       );
     }
+    // price-hold-dish-changes (DEC-PRICE-HOLD §3): the changes are listed above with the tick.
+    case "confirm-changes":
+      return <p role="alert">{cartText.readChangesBeforeOrdering}</p>;
+    case "changes-unknown":
+      return (
+        <div role="alert">
+          <p>{cartText.changesNotChecked}</p>
+          <button type="button" onClick={onRetry}>
+            {commonText.tryAgain}
+          </button>
+        </div>
+      );
     case "blocked":
       return (
         <div role="alert">
@@ -831,6 +844,7 @@ function CartContent({
   confirmedChanges = null,
   onConfirmChanges = () => undefined,
   viewQuote = null,
+  changesMenu = null,
 }: {
   readonly state: CartState;
   readonly controller: CartStateController;
@@ -853,6 +867,8 @@ function CartContent({
   readonly onConfirmChanges?: (signature: string | null) => void;
   /** price-hold-dish-changes: the Store's answer when this table cart was shown. */
   readonly viewQuote?: CheckoutQuote | null;
+  /** The menu as read after that answer named a changed dish (null until then). */
+  readonly changesMenu?: MenuView | null;
 }) {
   if (state.status === "loading")
     return (
@@ -984,10 +1000,11 @@ function CartContent({
   // WP-2423 price-hold-dish-changes: a renamed dish, other allergens or a higher price since the
   // cart was first priced for it is said here and, at a table that orders from the cart, ticked
   // before ordering (the Store's record: after a reload and on another phone too).
-  const dishChanges = quoteDishChanges(shown, cart.cart.items, menu);
+  const dishChanges = quoteDishChanges(shown, cart.cart.items, changesMenu);
   const changes = changesSignature(
     dishChanges,
     priceChanges.filter((change) => change.direction === "up"),
+    shown?.quoteReference ?? null,
   );
   const changesUnconfirmed = changes !== null && confirmedChanges !== changes;
   const placeConfirmed = () => {
@@ -1287,6 +1304,8 @@ const menuPriceWaitMs = 2_000;
 /** What a stop says holds for the cart as it stood: any later change to the cart ends it. */
 const aboutThisCart = (round: SendRoundState) =>
   round.status === "confirm-total" ||
+  round.status === "confirm-changes" ||
+  round.status === "changes-unknown" ||
   round.status === "refused" ||
   round.status === "busy" ||
   round.status === "blocked" ||
@@ -1388,22 +1407,36 @@ function OpenCartPage({
     };
   }, [controller]);
   const cart = "cart" in state && state.cart !== null ? state.cart.cart : null;
-  const { menu, settled } = usePublishedMenuRead(
-    menuContext,
-    menuClient,
-    // Also for a line with choices: a combo's chosen dishes show their allergens.
-    cart?.items.some(
-      (item) => item.lineEstimate.status !== "Available" || item.configuration.length > 0,
-    ) ?? false,
-  );
   /** price-hold-dish-changes: the changes the guest ticked as read before ordering. */
   const [confirmedChanges, setConfirmedChanges] = useState<string | null>(null);
   const [viewQuote, setViewQuote] = useState<CheckoutQuote | null>(null);
+  // A quote naming a changed dish reads the menu again: its allergens "now" come from that read.
+  const changesQuote =
+    cart !== null && hasDishChanges(viewQuoteFor(cart, viewQuote))
+      ? (viewQuote?.quoteReference ?? null)
+      : null;
+  const {
+    menu,
+    settled,
+    freshFor: menuFreshFor,
+  } = usePublishedMenuRead(
+    menuContext,
+    menuClient,
+    // Also for a line with choices: a combo's chosen dishes show their allergens.
+    changesQuote !== null ||
+      (cart?.items.some(
+        (item) => item.lineEstimate.status !== "Available" || item.configuration.length > 0,
+      ) ??
+        false),
+    changesQuote,
+  );
+  const changesMenu = changesQuote !== null && menuFreshFor === changesQuote ? menu : null;
   const cartShowsPriceChanges =
     cart !== null &&
     cartPriceChanges(cart, cartScreenPrices(cart, menu, viewQuoteFor(cart, viewQuote))).length > 0;
   const cartShowsDishChanges =
-    cart !== null && quoteDishChanges(viewQuoteFor(cart, viewQuote), cart.items, menu).length > 0;
+    cart !== null &&
+    quoteDishChanges(viewQuoteFor(cart, viewQuote), cart.items, changesMenu).length > 0;
   const [menuWaitOver, setMenuWaitOver] = useState(false);
   useEffect(() => {
     const timer = window.setTimeout(() => setMenuWaitOver(true), menuPriceWaitMs);
@@ -1522,6 +1555,12 @@ function OpenCartPage({
       });
       return;
     }
+    // price-hold-dish-changes: the quote that names the changed dishes is shown with its tick, on
+    // whichever phone tapped; the guest reads it and taps again (nothing was placed).
+    if (roundState.status === "confirm-changes") {
+      setViewQuote(roundState.quote);
+      setConfirmedChanges(null);
+    }
     if (roundState.status === "needs-page" || roundState.status === "pay-first") {
       round.reset();
       if (mine) void navigate("/checkout");
@@ -1597,6 +1636,7 @@ function OpenCartPage({
           confirmedChanges={confirmedChanges}
           onConfirmChanges={setConfirmedChanges}
           viewQuote={viewQuote}
+          changesMenu={changesMenu}
         />
       </div>
       <div className="sr-only" role="status" aria-live="polite">
