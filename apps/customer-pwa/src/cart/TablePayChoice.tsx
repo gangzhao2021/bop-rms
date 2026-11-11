@@ -241,12 +241,17 @@ export function TablePayChooser({
           checked={scope === "Whole"}
           onChange={() => setScope("Whole")}
         />{" "}
-        {wholeAmount === null
-          ? t("The whole table ({count} dishes)", { count: String(count(wholeLines)) })
-          : t("The whole table ({count} dishes · {amount})", {
-              count: String(count(wholeLines)),
-              amount: wholeAmount,
-            })}
+        {/* v15 batch-5: one dish is "1 dish", never "1 dishes". */}
+        {count(wholeLines) === 1
+          ? wholeAmount === null
+            ? t("The whole table (1 dish)")
+            : t("The whole table (1 dish · {amount})", { amount: wholeAmount })
+          : wholeAmount === null
+            ? t("The whole table ({count} dishes)", { count: String(count(wholeLines)) })
+            : t("The whole table ({count} dishes · {amount})", {
+                count: String(count(wholeLines)),
+                amount: wholeAmount,
+              })}
       </label>
       {mine.length === 0 ? null : (
         <label>

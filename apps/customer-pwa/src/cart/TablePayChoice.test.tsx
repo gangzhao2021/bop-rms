@@ -151,6 +151,19 @@ describe("WP-2423 shared-table-checkout (a): which dishes the payer pays at a pa
     );
   });
 
+  it("one dish at the table reads as 1 dish, never 1 dishes", async () => {
+    const { client } = server();
+    const single = tableCart(idle);
+    const one: CartView = {
+      ...single,
+      cart: { ...single.cart, items: [single.cart.items[1] as CartView["cart"]["items"][number]] },
+    };
+    await render(
+      <TablePayChooser cart={one} prices={prices} onChanged={() => undefined} client={client} />,
+    );
+    expect(container.textContent).toContain("The whole table (1 dish · $5.00)");
+    expect(container.textContent).not.toContain("1 dishes");
+  });
   it("sends only what I added once, resends the same key after a lost answer, and opens the checkout", async () => {
     const { client, sent } = server(
       () => {

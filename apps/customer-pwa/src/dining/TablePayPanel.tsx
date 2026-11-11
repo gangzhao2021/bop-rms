@@ -790,15 +790,19 @@ function TablePayDishes({
             checked={scope === "Whole"}
             onChange={() => onScope("Whole")}
           />{" "}
-          {started
-            ? t("The rest of the table ({count} dishes · {amount})", {
-                count: String(allCount),
-                amount: money(wholeMinor),
-              })
-            : t("The whole table ({count} dishes · {amount})", {
-                count: String(allCount),
-                amount: money(wholeMinor),
-              })}
+          {allCount === 1
+            ? started
+              ? t("The rest of the table (1 dish · {amount})", { amount: money(wholeMinor) })
+              : t("The whole table (1 dish · {amount})", { amount: money(wholeMinor) })
+            : started
+              ? t("The rest of the table ({count} dishes · {amount})", {
+                  count: String(allCount),
+                  amount: money(wholeMinor),
+                })
+              : t("The whole table ({count} dishes · {amount})", {
+                  count: String(allCount),
+                  amount: money(wholeMinor),
+                })}
         </label>
         <label>
           <input
