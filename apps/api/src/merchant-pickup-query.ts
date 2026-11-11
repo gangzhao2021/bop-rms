@@ -259,14 +259,9 @@ export function createMerchantPickupQuery(options: {
         new Map<string, number>(),
       );
       const refundedOf = (line: (typeof result.items)[number]["items"][number]) =>
-        line.orderItemReference === undefined
-          ? 0
-          : Math.min(withdrawn.get(String(line.orderItemReference)) ?? 0, line.orderedQuantity);
+        pickupLineRefunded(line, withdrawn);
       const nothingToCollect = (item: (typeof result.items)[number]) =>
-        item.items.length > 0 &&
-        item.items.every(
-          (line) => line.handedOverQuantity === 0 && refundedOf(line) >= line.orderedQuantity,
-        );
+        pickupNothingToCollect(item, withdrawn);
       // WP-2423 item 8 ⑦ (v15 finding v): guests' pickup ordering is off; staff still hand over
       // the orders already placed here. Unreadable: not said.
       const features = await readStoreFeatures(
@@ -316,6 +311,30 @@ export function createMerchantPickupQuery(options: {
   };
 }
 
+interface PickupLine {
+  readonly orderItemReference?: unknown;
+  readonly orderedQuantity: number;
+  readonly handedOverQuantity: number;
+}
+/** WP-2423 M10: of a pickup line's units, how many staff refunded and said not to hand over. */
+export const pickupLineRefunded = (line: PickupLine, withdrawn: ReadonlyMap<string, number>) =>
+  line.orderItemReference === undefined
+    ? 0
+    : Math.min(withdrawn.get(String(line.orderItemReference)) ?? 0, line.orderedQuantity);
+/**
+ * WP-2423 M10: a pickup with every unit refunded and nothing handed over has nothing left to
+ * collect. It leaves the Pickup queue and the workspace's waiting count alike.
+ */
+export const pickupNothingToCollect = (
+  item: { readonly items: readonly PickupLine[] },
+  withdrawn: ReadonlyMap<string, number>,
+) =>
+  item.items.length > 0 &&
+  item.items.every(
+    (line) =>
+      line.handedOverQuantity === 0 && pickupLineRefunded(line, withdrawn) >= line.orderedQuantity,
+  );
+
 /**
  * WP-2423 item 8 ⑦ (v15 finding v): how many pickup orders Fulfillment's current pickup queue
  * still has to hand over (the Pickup page's own read, without handed-over orders), inside another
@@ -361,7 +380,19 @@ export async function waitingPickupOrders(
         limit: 50,
         includeCompleted: false,
       });
-      count += result.items.length;
+      // WP-2423 M10: a pickup refunded in full with nothing handed over is not waiting (the
+      // Pickup page leaves it out too). Unreadable: nothing is subtracted.
+      const withdrawn = await withOptionalRead(
+        tx,
+        () =>
+          readRefundWithdrawnUnits(
+            tx,
+            { brandReference: options.brandReference, storeReference: options.storeReference },
+            result.items.map((item) => String(item.orderReference)),
+          ),
+        new Map<string, number>(),
+      );
+      count += result.items.filter((item) => !pickupNothingToCollect(item, withdrawn)).length;
       if (result.nextAfterFulfillmentReference === null) {
         await transaction.query("RELEASE SAVEPOINT waiting_pickup_orders", []);
         return count;

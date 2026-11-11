@@ -1,5 +1,5 @@
 import { beforeEach, expect, it, vi } from "vitest";
-import { createMerchantPickupQuery } from "./merchant-pickup-query.js";
+import { createMerchantPickupQuery, waitingPickupOrders } from "./merchant-pickup-query.js";
 const doubles = vi.hoisted(() => ({
   scope: vi.fn(),
   store: vi.fn(),
@@ -10,6 +10,17 @@ const doubles = vi.hoisted(() => ({
   counter: vi.fn(),
   remakes: vi.fn(),
   lines: vi.fn(),
+  withdrawn: vi.fn(),
+}));
+vi.mock("./order-refund-withdrawal.js", () => ({ readRefundWithdrawnUnits: doubles.withdrawn }));
+vi.mock("./merchant-round-business-date.js", () => ({
+  withOptionalRead: async (_tx: unknown, work: () => Promise<unknown>, fallback: unknown) => {
+    try {
+      return await work();
+    } catch {
+      return fallback;
+    }
+  },
 }));
 vi.mock("@rms/kitchen", async (original) => ({
   ...(await original<object>()),
@@ -48,6 +59,7 @@ function setup(configured = true) {
   doubles.counter.mockResolvedValue(new Set());
   doubles.remakes.mockResolvedValue([]);
   doubles.lines.mockResolvedValue(null);
+  doubles.withdrawn.mockResolvedValue(new Map());
   doubles.list.mockResolvedValue({
     source: "CurrentFulfillment",
     observedAt: "2026-09-19T12:00:00.000Z",
@@ -347,4 +359,52 @@ it("WP-2423: keeps the queue readable when an order's item snapshots can't be re
   doubles.lines.mockRejectedValue(new Error("MERCHANT_ORDER_INDEX_UNAVAILABLE"));
   const result = (await f.operation(f.input)) as { items: { items: object[] }[] };
   expect(result.items[0]?.items[0]).not.toHaveProperty("name");
+});
+
+it("WP-2423 M10: the workspace's waiting count leaves out a pickup refunded in full, as the queue does", async () => {
+  const line = (n: number, quantity: number) => ({
+    fulfillmentItemReference: id(70 + n),
+    orderItemReference: id(80 + n),
+    orderedQuantity: quantity,
+    readyQuantity: 0,
+    handedOverQuantity: 0,
+  });
+  const item = (n: number, lines: ReturnType<typeof line>[]) => ({
+    fulfillmentReference: id(40 + n),
+    orderReference: id(50 + n),
+    aggregateVersion: 2n,
+    items: lines,
+  });
+  doubles.store.mockReturnValue({ listPickupQueue: doubles.list });
+  doubles.list.mockResolvedValue({
+    source: "CurrentFulfillment",
+    observedAt: "2026-09-19T12:00:00.000Z",
+    // Order 1: both units refunded, not to be handed over. Order 2: one of two refunded.
+    items: [item(1, [line(1, 2)]), item(2, [line(2, 2)])],
+    nextAfterFulfillmentReference: null,
+  });
+  doubles.withdrawn.mockResolvedValue(
+    new Map([
+      [id(81), 2],
+      [id(82), 1],
+    ]),
+  );
+  const tx = { query: vi.fn(async () => ({ rows: [{ brand: null, store: null }], rowCount: 1 })) };
+  const count = () =>
+    waitingPickupOrders(tx, {
+      sha256: (() => "") as never,
+      validateCurrentSource: (() => true) as never,
+      now: () => "2026-09-19T12:00:00.000Z",
+      brandReference: id(3),
+      storeReference: id(4),
+    });
+  expect(await count()).toBe(1);
+  expect(doubles.withdrawn).toHaveBeenCalledWith(
+    expect.anything(),
+    { brandReference: id(3), storeReference: id(4) },
+    [id(51), id(52)],
+  );
+  // Refunds unreadable: nothing is subtracted (never a smaller count than is true).
+  doubles.withdrawn.mockRejectedValue(new Error("ORDERING_UNAVAILABLE"));
+  expect(await count()).toBe(2);
 });
