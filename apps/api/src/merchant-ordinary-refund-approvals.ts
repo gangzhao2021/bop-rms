@@ -90,8 +90,12 @@ export function createMerchantOrdinaryRefundApprovals(options: {
             authorize,
             businessDate: configuration.businessDate,
             // WP-2423 M14: a cashier (Staff) never sends their own request, so it is listed at
-            // once; if their role can't be read it waits the usual minute (never hidden).
+            // once. Payment decides from the role recorded with the request; only a request
+            // recorded before that record existed asks for the requester's role here. That read
+            // runs in a savepoint: if it fails (denied, or a database error) it is undone and the
+            // request waits the usual minute (never hidden), and the queue read goes on.
             requesterMaySend: async (_tx, query) => {
+              await tx.query("SAVEPOINT refund_requester_may_send", []);
               try {
                 const facts = await authority(tx, {
                   ...scope,
@@ -100,8 +104,11 @@ export function createMerchantOrdinaryRefundApprovals(options: {
                   permissionCode: "payment.refund.request",
                   observedAt,
                 });
+                await tx.query("RELEASE SAVEPOINT refund_requester_may_send", []);
                 return facts.role !== "Staff";
               } catch {
+                await tx.query("ROLLBACK TO SAVEPOINT refund_requester_may_send", []);
+                await tx.query("RELEASE SAVEPOINT refund_requester_may_send", []);
                 return true;
               }
             },
