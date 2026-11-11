@@ -169,6 +169,10 @@ async function signIn(
       },
     }),
   );
+  // WP-2423 M35: the table's unsent guest lines, read before staff send (none unless a test says).
+  await page.route("**/merchant/dining/sessions/table-cart", (route) =>
+    route.fulfill({ headers, json: { cart: null } }),
+  );
   await page.route("**/merchant/dining/tables", (route) =>
     route.fulfill({
       headers,
@@ -1235,4 +1239,195 @@ test("@production M08: with counter ordering off the walk-up order address still
   await expect(page.getByRole("button", { name: "Select T4", exact: true })).toBeVisible();
   await expectNoInternalText(page);
   await expectAccessible(page);
+});
+
+/** WP-2423 M35: one of the guests' unsent lines as the table cart read returns it. */
+const guestLine = (n: number, sellable: number, change: Record<string, unknown> = {}) => ({
+  cartItemReference: id(n),
+  sellableReference: id(sellable),
+  optionSelections: [],
+  names: {},
+  quantity: 1,
+  withOptions: false,
+  phoneNumber: 1,
+  phoneLeft: false,
+  ...change,
+});
+const placedRound = {
+  status: "Placed",
+  orderReference: id(20),
+  orderBatchReference: id(21),
+  orderNumber: "7",
+  orderVersion: 5,
+  tableLabel: "T4",
+  orderMinor: "3164",
+  tipMinor: "0",
+  totalMinor: "3164",
+  payBy: null,
+  payLater: true,
+  recordedAfterOutage: false,
+};
+
+test("@production M35: staff see the guests' unsent lines before sending, take some out and send the rest in one request", async ({
+  page,
+}) => {
+  await signIn(page, { ...table, paymentTiming: "PayLater" });
+  await page.route("**/merchant/counter/menu**", (route) => route.fulfill({ headers, json: menu }));
+  const reads: unknown[] = [];
+  await page.route("**/merchant/dining/sessions/table-cart", (route) => {
+    reads.push(route.request().postDataJSON());
+    return route.fulfill({
+      headers,
+      json: {
+        cart: {
+          cartReference: id(70),
+          cartVersion: 4,
+          guestPaying: false,
+          lines: [
+            guestLine(81, 11, { quantity: 2 }),
+            guestLine(82, 13, { phoneNumber: 2, phoneLeft: true }),
+            guestLine(83, 5, { optionSelections: [{ optionReference: id(10), quantity: 1 }] }),
+          ],
+        },
+      },
+    });
+  });
+  const rounds: Record<string, unknown>[] = [];
+  await page.route("**/merchant/dining/staff-rounds", (route) => {
+    rounds.push(route.request().postDataJSON() as Record<string, unknown>);
+    return route.fulfill({ headers, json: placedRound });
+  });
+  await page.goto("/operations/order-entry?table=" + tableReference);
+  await expect(page.getByRole("heading", { level: 1, name: "Table T4 order" })).toBeVisible();
+  const guests = page.getByRole("list", { name: "From the guests' phones (not sent yet)" });
+  // On screen before anything is sent, named and priced from the menu, with whose phone.
+  await expect(guests.getByRole("listitem")).toHaveCount(3);
+  await expect(guests.getByRole("listitem").nth(0)).toContainText("2 × Gyoza · Phone 1");
+  await expect(guests.getByRole("listitem").nth(0)).toContainText("$14.00");
+  await expect(guests.getByRole("listitem").nth(1)).toContainText(
+    "1 × Matcha Pudding · Phone 2 has leftSold out or off the menu now. It is taken out.",
+  );
+  await expect(guests.getByRole("listitem").nth(2)).toContainText(
+    "1 × Shoyu Ramen · Extra noodles · Phone 1",
+  );
+  // The sold-out pudding can't be sent: it is taken out, with nothing to press.
+  await expect(guests.getByRole("listitem").nth(1).getByRole("button")).toHaveCount(0);
+  await page.getByRole("button", { name: "Add Gyoza" }).click();
+  // The guest asked staff to drop the ramen; staff can put it back before sending.
+  await page.getByRole("button", { name: "Take Shoyu Ramen out of this round" }).click();
+  await expect(guests.getByRole("listitem").nth(2)).toContainText("Taken out");
+  await page.getByRole("button", { name: "Send Shoyu Ramen with this round" }).click();
+  await page.getByRole("button", { name: "Take Shoyu Ramen out of this round" }).click();
+  const totals = page.locator(".counter-order__totals");
+  await expect(totals).toContainText("Your items$7.00");
+  await expect(totals).toContainText("From the guests' phones$14.00");
+  await expect(totals).toContainText("Estimated subtotal$21.00");
+  await expectNoInternalText(page);
+  await expectAccessible(page);
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await expect(guests).toBeVisible();
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.screenshot({
+      path: `test-results/staff-dining-round-guest-lines-${width}.png`,
+      fullPage: true,
+    });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.getByRole("button", { name: "Send order" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Table T4 round sent to the kitchen" }),
+  ).toBeVisible();
+  // One request: the decisions go with the round, against the cart version read.
+  expect(rounds).toHaveLength(1);
+  expect(rounds[0]).toMatchObject({
+    tableReference,
+    includeTableCart: {
+      expectedCartVersion: 4,
+      lines: [
+        { cartItemReference: id(81), decision: "Send" },
+        { cartItemReference: id(82), decision: "Remove", reason: "CantMake" },
+        { cartItemReference: id(83), decision: "Remove", reason: "GuestAsked" },
+      ],
+    },
+  });
+  expect(reads[0]).toEqual({ action: "Read", diningSessionReference: id(41) });
+  await expect(page.getByRole("note").filter({ hasText: "Tell the guests" })).toHaveText(
+    "Tell the guests: Matcha Pudding isn't available now, so it was taken off their order. Removed from the guests' cart: Shoyu Ramen.",
+  );
+  await expectNoInternalText(page);
+});
+
+test("@production M35: a cart guests changed just before the send is read again, nothing sent; in Chinese", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    window.localStorage.setItem("bop.merchant.language", "zh-Hans");
+  });
+  await signIn(page, { ...table, paymentTiming: "PayLater" });
+  await page.route("**/merchant/counter/menu**", (route) => route.fulfill({ headers, json: menu }));
+  let version = 4;
+  await page.route("**/merchant/dining/sessions/table-cart", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        cart: {
+          cartReference: id(70),
+          cartVersion: version,
+          guestPaying: false,
+          lines: [
+            guestLine(81, 11, { quantity: 2 }),
+            ...(version > 4 ? [guestLine(84, 5, { phoneNumber: 3 })] : []),
+          ],
+        },
+      },
+    }),
+  );
+  const rounds: Record<string, unknown>[] = [];
+  await page.route("**/merchant/dining/staff-rounds", (route) => {
+    rounds.push(route.request().postDataJSON() as Record<string, unknown>);
+    if (rounds.length === 1) {
+      // A guest added a ramen a moment before.
+      version = 5;
+      return route.fulfill({
+        status: 409,
+        headers,
+        json: { error: "table_cart_has_items", items: [], cartVersion: 5, guestsCanSend: true },
+      });
+    }
+    return route.fulfill({ headers, json: placedRound });
+  });
+  await page.goto("/operations/order-entry?table=" + tableReference);
+  await expect(page.getByRole("heading", { level: 1, name: "桌台 T4 的订单" })).toBeVisible();
+  const guests = page.getByRole("list", { name: "客人手机上还没送出的菜" });
+  await expect(guests.getByRole("listitem")).toHaveCount(1);
+  await expect(page.locator(".counter-order__totals")).toContainText("客人手机上的$14.00");
+  await page.getByRole("button", { name: "发送订单" }).click();
+  await expect(page.getByRole("alert")).toHaveText(
+    "客人刚改了购物车。请再看一下清单后发送。没有下单，也没有收款。",
+  );
+  await expect(guests.getByRole("listitem")).toHaveCount(2);
+  await expect(guests.getByRole("listitem").nth(1)).toContainText("1 × Shoyu Ramen · 手机 3");
+  await expectNoInternalText(page);
+  await expectAccessible(page);
+  await page.screenshot({
+    path: "test-results/staff-dining-round-guest-lines-changed-zh.png",
+    fullPage: true,
+  });
+  // Sent with staff's own dish? None: the guests' lines alone go as the round.
+  await page.getByRole("button", { name: "发送订单" }).click();
+  await expect(page.getByRole("heading", { name: "T4 桌这一轮已送厨房" })).toBeVisible();
+  expect(rounds).toHaveLength(2);
+  expect(rounds[1]).toMatchObject({
+    lines: [],
+    includeTableCart: {
+      expectedCartVersion: 5,
+      lines: [
+        { cartItemReference: id(81), decision: "Send" },
+        { cartItemReference: id(84), decision: "Send" },
+      ],
+    },
+  });
 });

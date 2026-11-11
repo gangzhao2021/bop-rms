@@ -1,4 +1,4 @@
-import { t, saidTable, listSeparator } from "./i18n/i18n.js";
+import { t, saidTable, listSeparator, contentName } from "./i18n/i18n.js";
 import { SlowWaitNotice } from "./slow-wait.js";
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { StatePanel } from "@bop-rms/ui";
@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useStaffSessionLive } from "./staff-session-reads.js";
 import { Link, useSearchParams } from "react-router";
 import { createDiningSessionClient } from "./dining-session-client.js";
+import { createTableCartClient, type TableCart, type TableCartLine } from "./table-cart-client.js";
 import { validSlipReference } from "./CardMachineRefundAction.js";
 import { orderMoney } from "./order-money.js";
 import { serviceOperationReference } from "./service-control-client.js";
@@ -266,6 +267,118 @@ export function tableCartMark(item: TableCartItem): string | null {
   return null;
 }
 
+/**
+ * WP-2423 M35 (shared-table-cart-staff-round): one of the guests' unsent lines as the staff round
+ * screen shows it: named and priced from the menu staff hold (the dish's own name when it is on no
+ * current menu), whether it can be sent now, and which phone added it.
+ */
+export interface GuestCartLine {
+  readonly cartItemReference: string;
+  readonly name: string;
+  readonly options: string;
+  readonly quantity: number;
+  /** About the line's price before tax from the menu; null when the menu can't say. */
+  readonly estimateMinor: bigint | null;
+  /** Sold out, off the menu, or one of its choices no longer offered: it can't be sent. */
+  readonly unsellable: boolean;
+  readonly phoneNumber: number | null;
+  readonly phoneLeft: boolean;
+}
+export type GuestLineDecision = "Send" | "Remove";
+
+export function guestCartLines(
+  cart: TableCart | null,
+  menu: CounterMenu | null,
+): readonly GuestCartLine[] {
+  if (cart === null) return [];
+  const items = new Map(
+    (menu?.sections ?? []).flatMap((section) =>
+      section.items.map((item) => [item.sellableReference, item] as const),
+    ),
+  );
+  return cart.lines.map((line: TableCartLine) => {
+    const item = items.get(line.sellableReference);
+    const offered = item?.rules.flatMap((rule) => rule.options) ?? [];
+    const options = line.optionSelections.map((selection) => ({
+      selection,
+      option: offered.find((option) => option.optionReference === selection.optionReference),
+    }));
+    const unsellable =
+      item === undefined ||
+      !item.available ||
+      options.some(({ option }) => option === undefined || option.offeredNow === false);
+    return Object.freeze({
+      cartItemReference: line.cartItemReference,
+      name: item?.name ?? contentName(line.names) ?? t("A dish no longer on the menu"),
+      options: options
+        .map(({ option, selection }) =>
+          option === undefined
+            ? ""
+            : selection.quantity > 1
+              ? `${option.name} × ${selection.quantity}`
+              : option.name,
+        )
+        .filter((name) => name !== "")
+        .join(", "),
+      quantity: line.quantity,
+      estimateMinor:
+        item === undefined || unsellable
+          ? null
+          : estimatedLineMinor({
+              key: line.cartItemReference,
+              item,
+              quantity: line.quantity,
+              options: options.map(({ option, selection }) => ({
+                optionReference: selection.optionReference,
+                name: option?.name ?? "",
+                quantity: selection.quantity,
+              })),
+            }),
+      unsellable,
+      phoneNumber: line.phoneNumber,
+      phoneLeft: line.phoneLeft,
+    });
+  });
+}
+
+/** Why a line staff take out leaves (recorded with the removal; no extra tap). */
+export function guestRemovalReason(line: GuestCartLine): "CantMake" | "GuestLeft" | "GuestAsked" {
+  return line.unsellable ? "CantMake" : line.phoneLeft ? "GuestLeft" : "GuestAsked";
+}
+
+/** What staff tell the guests about the lines they took out with the round sent. */
+export function guestRemovedNote(removed: readonly GuestCartLine[]): string | null {
+  const cantMake = removed.filter((line) => line.unsellable);
+  const asked = removed.filter((line) => !line.unsellable);
+  const notes = [
+    cantMake.length === 0
+      ? null
+      : tableCartRemovedNote(
+          cantMake.map((line) => ({
+            cartItemReference: line.cartItemReference,
+            name: line.name,
+            quantity: line.quantity,
+            standing: "Unavailable" as const,
+            available: null,
+          })),
+        ),
+    asked.length === 0
+      ? null
+      : t("Removed from the guests' cart: {names}.", {
+          names: asked.map((line) => line.name).join(listSeparator()),
+        }),
+  ].filter((note): note is string => note !== null);
+  return notes.length === 0 ? null : notes.join(" ");
+}
+
+/** Who added a guest line, as staff say it ("Phone 2", "Phone 2 has left", "Staff"). */
+export function guestLineAdder(line: GuestCartLine): string {
+  if (line.phoneNumber === null) return t("Staff");
+  return line.phoneLeft
+    ? t("Phone {number} has left", { number: String(line.phoneNumber) })
+    : t("Phone {number}", { number: String(line.phoneNumber) });
+}
+
 export function placeErrorText(
   error: CounterOrderClientError,
   lines: readonly Line[],
@@ -474,6 +587,8 @@ export function placeErrorText(
 
 /** v15 run: how often the counter menu re-reads what the store can sell while staff build an order. */
 export const MENU_REFRESH_MS = 30_000;
+/** WP-2423 M35: how often the table's unsent guest lines are read while staff build a round. */
+export const GUEST_CART_REFRESH_MS = 5_000;
 
 /**
  * WP-2423 Q7 (OPS-ORDER-ENTRY, DEC-COUNTER-PAYMENT-RECORD): staff take a pickup order at the
@@ -614,6 +729,16 @@ export function StaffOrderEntryPage({
   } | null>(null);
   // WP-2423 (staff-round-soldout): the guests' items taken off with the round sent, to tell them.
   const [removedNote, setRemovedNote] = useState<string | null>(null);
+  // WP-2423 M35: the table's dining session (from the Tables list), the guests' unsent lines read
+  // from it before staff send, and what staff decided for each (Send unless it can't be sent).
+  const [tableSession, setTableSession] = useState<string | null>(null);
+  const [guestCart, setGuestCart] = useState<TableCart | null>(null);
+  const [guestCartFailed, setGuestCartFailed] = useState(false);
+  const [guestDecisions, setGuestDecisions] = useState<Readonly<Record<string, GuestLineDecision>>>(
+    {},
+  );
+  const tableCartClient = useMemo(() => createTableCartClient(fetcher), [fetcher]);
+  const guestRead = useRef<AbortController | null>(null);
   const [paidNote, setPaidNote] = useState<string | null>(null);
   // WP-2423 (v15 751dd768): re-read the sent, unpaid counter orders after a send or a payment.
   const [awaitingKey, setAwaitingKey] = useState(0);
@@ -663,6 +788,7 @@ export function StaffOrderEntryPage({
           if (found.qrCodeValidUntil === null) throw new CounterOrderClientError("TableHasNoQr");
           setTableLabel(found.stableLabel);
           setTablePaysLater(found.paymentTiming === "PayLater");
+          setTableSession(found.currentDiningSessionReference);
           return;
         }
         if (result.next === null) break;
@@ -771,6 +897,79 @@ export function StaffOrderEntryPage({
     };
   }, [live, menuReady, phase, refreshMenu]);
 
+  // WP-2423 M35: the guests' unsent lines are on screen before staff send: read as soon as the
+  // table is known, every 5 s while the screen is in view, and once more when it comes back. A
+  // failed read keeps the last list and says so (the send is still checked by the server).
+  // A table that was free when this screen opened may have been seated since.
+  const findTableSession = useCallback(async () => {
+    if (tableReference === null) return;
+    try {
+      const tables = createDiningSessionClient(fetcher);
+      let after: string | null = null;
+      for (let page = 0; page < 10; page += 1) {
+        const result = await tables.tables(csrf, after);
+        const found = result.items.find((table) => table.tableReference === tableReference);
+        if (found !== undefined) {
+          setTableSession(found.currentDiningSessionReference);
+          return;
+        }
+        if (result.next === null) return;
+        after = result.next;
+      }
+    } catch {
+      // Read again with the next send; the server still checks the cart.
+    }
+  }, [csrf, fetcher, tableReference]);
+  const readGuestCart = useCallback(() => {
+    if (tableSession === null) return;
+    guestRead.current?.abort();
+    const controller = new AbortController();
+    guestRead.current = controller;
+    tableCartClient
+      .read(csrf, tableSession, controller.signal)
+      .then((cart) => {
+        if (controller.signal.aborted) return;
+        setGuestCart(cart);
+        setGuestCartFailed(false);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setGuestCartFailed(true);
+      });
+  }, [csrf, tableCartClient, tableSession]);
+  useEffect(() => () => guestRead.current?.abort(), []);
+  useEffect(() => {
+    if (!tableMode || tableSession === null || !live || phase !== "Building") return;
+    readGuestCart();
+    const timer = setInterval(() => {
+      if (document.visibilityState !== "hidden") readGuestCart();
+    }, GUEST_CART_REFRESH_MS);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") readGuestCart();
+    };
+    window.addEventListener("focus", readGuestCart);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener("focus", readGuestCart);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [live, phase, readGuestCart, tableMode, tableSession]);
+  const guestLines = useMemo(
+    () => guestCartLines(guestCart, menu.kind === "Ready" ? menu.menu : null),
+    [guestCart, menu],
+  );
+  // A line that can't be sent is taken out unless staff choose otherwise (they can't send it);
+  // every other line goes with the round unless staff take it out.
+  const decisionOf = (line: GuestCartLine): GuestLineDecision =>
+    line.unsellable ? "Remove" : (guestDecisions[line.cartItemReference] ?? "Send");
+  const guestSent = guestLines.filter((line) => decisionOf(line) === "Send");
+  const guestRemoved = guestLines.filter((line) => decisionOf(line) === "Remove");
+  const decide = (line: GuestCartLine, decision: GuestLineDecision) => {
+    placeOperation.current = null;
+    setProblem(null);
+    setGuestDecisions((current) => ({ ...current, [line.cartItemReference]: decision }));
+  };
+
   // Any change to what is ordered is a new order intent.
   const changeLines = (next: readonly Line[]) => {
     placeOperation.current = null;
@@ -845,10 +1044,19 @@ export function StaffOrderEntryPage({
     const options = withdrawnOptions(line);
     return options.length > 0 ? [{ dish: line.item.name, options }] : [];
   });
+  // WP-2423 M35: the guests' lines sent with the round, about their price from the menu.
+  const guestEstimate = guestSent.reduce<bigint | null>(
+    (sum, line) => (sum === null || line.estimateMinor === null ? null : sum + line.estimateMinor),
+    0n,
+  );
+  const roundEstimate =
+    estimate === null || guestEstimate === null ? null : estimate + guestEstimate;
+  const roundCount = itemCount + guestSent.reduce((sum, line) => sum + line.quantity, 0);
   const canSend =
     phase === "Building" &&
-    lines.length > 0 &&
+    (lines.length > 0 || (tableMode && guestSent.length > 0)) &&
     withdrawn.length === 0 &&
+    !(guestCart?.guestPaying === true && guestLines.length > 0) &&
     tipChoice() !== null &&
     (!paper || tablePaysLater || paperInstant !== null);
 
@@ -860,6 +1068,26 @@ export function StaffOrderEntryPage({
   ) => {
     const chosenTip = tipChoice();
     if (!canSend || chosenTip === null) return;
+    // WP-2423 M35: every guest line on screen goes with a decision, against the cart version read.
+    const decided =
+      includeTableCart === null &&
+      tableReference !== null &&
+      guestCart !== null &&
+      guestCart.lines.length > 0
+        ? {
+            expectedCartVersion: guestCart.cartVersion,
+            lines: guestLines.map((line) =>
+              decisionOf(line) === "Send"
+                ? { cartItemReference: line.cartItemReference, decision: "Send" as const }
+                : {
+                    cartItemReference: line.cartItemReference,
+                    decision: "Remove" as const,
+                    reason: guestRemovalReason(line),
+                  },
+            ),
+          }
+        : null;
+    const removedAtSend = guestRemoved;
     placeOperation.current ??= serviceOperationReference();
     setPhase("Sending");
     setProblem(null);
@@ -883,20 +1111,22 @@ export function StaffOrderEntryPage({
               lines: chosen.map((line, index) => ({ ...line, note: lines[index]?.note ?? null })),
               tip: chosenTip,
               recordedAfterOutage: paper,
-              ...(includeTableCart === null
-                ? {}
-                : {
-                    includeTableCart: {
-                      expectedCartVersion: includeTableCart.expectedCartVersion,
-                      ...(includeTableCart.removeUnavailable.length === 0
-                        ? {}
-                        : {
-                            removeUnavailable: includeTableCart.removeUnavailable.map(
-                              (item) => item.cartItemReference,
-                            ),
-                          }),
-                    },
-                  }),
+              ...(decided !== null
+                ? { includeTableCart: decided }
+                : includeTableCart === null
+                  ? {}
+                  : {
+                      includeTableCart: {
+                        expectedCartVersion: includeTableCart.expectedCartVersion,
+                        ...(includeTableCart.removeUnavailable.length === 0
+                          ? {}
+                          : {
+                              removeUnavailable: includeTableCart.removeUnavailable.map(
+                                (item) => item.cartItemReference,
+                              ),
+                            }),
+                      },
+                    }),
             })
           : await client.placeOrder({
               operationReference: placeOperation.current,
@@ -905,8 +1135,10 @@ export function StaffOrderEntryPage({
               recordedAfterOutage: paper,
             });
       setPlaced(order);
-      if (includeTableCart !== null && includeTableCart.removeUnavailable.length > 0)
+      if (decided !== null) setRemovedNote(guestRemovedNote(removedAtSend));
+      else if (includeTableCart !== null && includeTableCart.removeUnavailable.length > 0)
         setRemovedNote(tableCartRemovedNote(includeTableCart.removeUnavailable));
+      setGuestDecisions({});
       recordOrdered(
         storeReference,
         lines.map((line) => [line.item.sellableReference, line.quantity]),
@@ -935,8 +1167,22 @@ export function StaffOrderEntryPage({
         ),
       );
       setProblemNeedsTableCode(failure.code === "TableHasNoQr");
+      // WP-2423 M35: with the guests' lines on screen, a cart that changed is read again and
+      // staff decide on it as it is now; the server's own list only when it can't be read here.
+      const liveList =
+        failure.code === "TableCartHasItems" && (decided !== null || guestCart !== null);
+      if (failure.code === "TableCartHasItems") {
+        if (tableSession === null) void findTableSession();
+        else readGuestCart();
+      }
+      if (liveList)
+        setProblem(
+          t(
+            "Guests changed their cart just now. Check the list again, then send. Nothing was sent or charged.",
+          ),
+        );
       setTableCartOffer(
-        failure.code === "TableCartHasItems" && failure.tableCart !== null
+        failure.code === "TableCartHasItems" && failure.tableCart !== null && !liveList
           ? { cartVersion: failure.tableCart.cartVersion, items: failure.pendingItems }
           : null,
       );
@@ -1320,7 +1566,7 @@ export function StaffOrderEntryPage({
               </span>
             ) : null}
           </header>
-          {lines.length === 0 ? (
+          {lines.length === 0 && guestLines.length > 0 ? null : lines.length === 0 ? (
             <div className="counter-order__empty">
               <p className="counter-order__empty-title">{t("No items yet")}</p>
               <p className="bop-muted">{t("Add items from the menu.")}</p>
@@ -1438,6 +1684,81 @@ export function StaffOrderEntryPage({
               })}
             </ul>
           )}
+          {tableMode && ordering && (guestLines.length > 0 || guestCartFailed) ? (
+            <section
+              className="counter-order__guest-lines"
+              aria-labelledby="counter-guest-lines-heading"
+            >
+              <h3 id="counter-guest-lines-heading">
+                {t("From the guests' phones (not sent yet)")}
+              </h3>
+              {guestCartFailed ? (
+                <p className="order-accept-by" data-tier="warning" role="status">
+                  {t(
+                    "The guests' cart couldn't be read just now. Sending still checks it, and nothing is sent twice.",
+                  )}
+                </p>
+              ) : null}
+              {guestCart?.guestPaying === true && guestLines.length > 0 ? (
+                <p className="order-accept-by" data-tier="warning" role="status">
+                  {t(
+                    "A guest is paying for these dishes on their phone now. Send when they finish, or ask them.",
+                  )}
+                </p>
+              ) : null}
+              <ul className="counter-order__lines" aria-labelledby="counter-guest-lines-heading">
+                {guestLines.map((line) => {
+                  const decision = decisionOf(line);
+                  return (
+                    <li key={line.cartItemReference} data-decision={decision}>
+                      <span className="counter-order__line-name">
+                        <span className="counter-order__guest-dish">
+                          {t("{quantity} × {name}", { quantity: line.quantity, name: line.name })}
+                          {line.options !== "" ? (
+                            <span className="bop-muted"> · {line.options}</span>
+                          ) : null}
+                        </span>
+                        <span className="bop-muted"> · {guestLineAdder(line)}</span>
+                      </span>
+                      <span className="counter-order__line-price">
+                        {decision === "Send" && line.estimateMinor !== null
+                          ? cad(line.estimateMinor.toString())
+                          : ""}
+                      </span>
+                      <span className="counter-order__line-actions counter-order__guest-choice">
+                        {line.unsellable ? (
+                          <span className="order-accept-by" data-tier="warning">
+                            {t("Sold out or off the menu now. It is taken out.")}
+                          </span>
+                        ) : decision === "Send" ? (
+                          <button
+                            type="button"
+                            disabled={phase !== "Building"}
+                            aria-label={t("Take {name} out of this round", { name: line.name })}
+                            onClick={() => decide(line, "Remove")}
+                          >
+                            {t("Take out")}
+                          </button>
+                        ) : (
+                          <>
+                            <span className="bop-muted">{t("Taken out")}</span>
+                            <button
+                              type="button"
+                              disabled={phase !== "Building"}
+                              aria-label={t("Send {name} with this round", { name: line.name })}
+                              onClick={() => decide(line, "Send")}
+                            >
+                              {t("Send with this round")}
+                            </button>
+                          </>
+                        )}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+          ) : null}
           <div className="counter-order__ticket-foot">
             {withdrawn.length > 0 && phase === "Building" ? (
               <p className="order-accept-by" data-tier="warning" role="alert">
@@ -1472,12 +1793,42 @@ export function StaffOrderEntryPage({
                 })}
               </p>
             ) : null}
-            {estimate !== null && lines.length > 0 ? (
+            {tableMode && ordering && guestSent.length > 0 && roundEstimate !== null ? (
               <div className="counter-order__totals">
-                <p className="counter-order__subtotal">
-                  <span>{t("Subtotal")}</span>
-                  <span>{cad(estimate.toString())}</span>
+                {lines.length > 0 && estimate !== null ? (
+                  <p className="counter-order__part">
+                    <span>{t("Your items")}</span>
+                    <span>{cad(estimate.toString())}</span>
+                  </p>
+                ) : null}
+                <p className="counter-order__part">
+                  <span>{t("From the guests' phones")}</span>
+                  <span>{cad((guestEstimate ?? 0n).toString())}</span>
                 </p>
+                <p className="counter-order__subtotal">
+                  <span>{t("Estimated subtotal")}</span>
+                  <span>{cad(roundEstimate.toString())}</span>
+                </p>
+                <p className="counter-order__estimate">
+                  {tablePaysLater
+                    ? t(
+                        "About {value} before tax. It goes on the table's bill; the table pays once at the end.",
+                        { value: cad(roundEstimate.toString()) },
+                      )
+                    : t(
+                        "About {value} before tax and tip. The final total comes when you send the order.",
+                        { value: cad(roundEstimate.toString()) },
+                      )}
+                </p>
+              </div>
+            ) : (estimate !== null && lines.length > 0) || (placed !== null && !ordering) ? (
+              <div className="counter-order__totals">
+                {estimate !== null && lines.length > 0 ? (
+                  <p className="counter-order__subtotal">
+                    <span>{t("Subtotal")}</span>
+                    <span>{cad(estimate.toString())}</span>
+                  </p>
+                ) : null}
                 <p className="counter-order__estimate">
                   {placed !== null && !ordering
                     ? placed.payLater
@@ -1498,11 +1849,11 @@ export function StaffOrderEntryPage({
                     : tablePaysLater
                       ? t(
                           "About {value} before tax. It goes on the table's bill; the table pays once at the end.",
-                          { value: cad(estimate.toString()) },
+                          { value: cad((estimate ?? 0n).toString()) },
                         )
                       : t(
                           "About {value} before tax and tip. The final total comes when you send the order.",
-                          { value: cad(estimate.toString()) },
+                          { value: cad((estimate ?? 0n).toString()) },
                         )}
                 </p>
               </div>
@@ -1635,15 +1986,16 @@ export function StaffOrderEntryPage({
           </div>
         </section>
 
-        {ordering && lines.length > 0 ? (
+        {ordering && (lines.length > 0 || guestSent.length > 0) ? (
           // Phone layout only (CSS): the ticket sits below the menu, so a bottom bar keeps the
-          // order's count and estimate in view and takes staff to it to send.
+          // order's count and estimate in view and takes staff to it to send (with the guests'
+          // lines it takes in, WP-2423 M35).
           <div className="counter-order__summary-bar">
             <span className="counter-order__summary-text">
               <span>
-                {itemCount === 1 ? t("1 item") : t("{itemCount} items", { itemCount: itemCount })}
+                {roundCount === 1 ? t("1 item") : t("{itemCount} items", { itemCount: roundCount })}
               </span>
-              {estimate !== null ? <strong>{cad(estimate.toString())}</strong> : null}
+              {roundEstimate !== null ? <strong>{cad(roundEstimate.toString())}</strong> : null}
             </span>
             <button
               type="button"

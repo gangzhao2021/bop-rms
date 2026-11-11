@@ -591,6 +591,15 @@ export function createCounterOrderClient(csrf: string, fetcher: typeof fetch = f
       readonly includeTableCart?: {
         readonly expectedCartVersion: number;
         readonly removeUnavailable?: readonly string[];
+        /** WP-2423 M35: staff's decision for every guest line shown (send it, or take it out). */
+        readonly lines?: readonly (
+          | { readonly cartItemReference: string; readonly decision: "Send" }
+          | {
+              readonly cartItemReference: string;
+              readonly decision: "Remove";
+              readonly reason: "CantMake" | "GuestLeft" | "GuestAsked";
+            }
+        )[];
       };
     }): Promise<PlacedCounterOrder> {
       const response = await post("/merchant/dining/staff-rounds", command);

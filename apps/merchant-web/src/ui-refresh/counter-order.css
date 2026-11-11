@@ -667,3 +667,54 @@
   white-space: normal;
   text-align: center;
 }
+
+/* WP-2423 M35 (shared-table-cart-staff-round): the guests' unsent lines in the ticket, before
+   staff send: the same rows as the staff's own lines (hairlines, no boxes), each with a plain
+   two-way choice; the chosen one carries the accent, a line taken out reads muted. */
+.counter-order__guest-lines {
+  display: grid;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--bop-color-row-divider);
+}
+.counter-order .counter-order__guest-lines h3 {
+  margin: 0;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  font-weight: 600;
+}
+.counter-order__guest-lines > p {
+  margin: 0;
+  font-size: 14px;
+}
+.counter-order .counter-order__guest-lines .counter-order__lines {
+  overflow: visible;
+}
+.counter-order__guest-lines li[data-decision="Remove"] .counter-order__line-name {
+  color: var(--bop-color-text-muted);
+}
+.counter-order__guest-lines li[data-decision="Remove"] .counter-order__guest-dish {
+  text-decoration: line-through;
+}
+.counter-order .counter-order__guest-choice {
+  justify-content: flex-end;
+  font-size: 14px;
+}
+.counter-order .counter-order__guest-choice .order-accept-by {
+  margin: 0;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+}
+.counter-order .counter-order__guest-choice > .bop-muted {
+  margin-inline-end: auto;
+}
+.counter-order__part {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 0;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}

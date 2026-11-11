@@ -9144,4 +9144,22 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Guest left": "客人已离开",
   "Can't make it": "做不了",
   "Remove from cart": "从购物车删除",
+  "From the guests' phones (not sent yet)": "客人手机上还没送出的菜",
+  "From the guests' phones": "客人手机上的",
+  "Your items": "你点的",
+  "Estimated subtotal": "预计小计",
+  "Send with this round": "一起送",
+  "Take out": "删掉",
+  "Phone {number} has left": "手机 {number} 已离开",
+  "Removed from the guests' cart: {names}.": "已从客人的购物车删掉：{names}。",
+  "Guests changed their cart just now. Check the list again, then send. Nothing was sent or charged.":
+    "客人刚改了购物车。请再看一下清单后发送。没有下单，也没有收款。",
+  "The guests' cart couldn't be read just now. Sending still checks it, and nothing is sent twice.":
+    "暂时读不到客人的购物车。发送时仍会核对，不会重复下单。",
+  "A guest is paying for these dishes on their phone now. Send when they finish, or ask them.":
+    "有客人正在手机上为这些菜付款。等他们付完再发送，或问一下客人。",
+  "Sold out or off the menu now. It is taken out.": "现在不供应，已删掉。",
+  "Take {name} out of this round": "把 {name} 从这一轮删掉",
+  "Send {name} with this round": "把 {name} 一起送",
+  "Taken out": "已删掉",
 });

@@ -6,6 +6,10 @@ import {
   choicesComplete,
   counterOrderLines,
   estimatedLineMinor,
+  guestCartLines,
+  guestLineAdder,
+  guestRemovalReason,
+  guestRemovedNote,
   paidAtInstant,
   placeErrorText,
   repeatLimit,
@@ -905,6 +909,79 @@ describe("WP-2423 M06: the note after guest dishes were taken off a round", () =
     setLanguageForTest("zh-Hans");
     expect(tableCartRemovedNote([item(1, "酸梅汤"), item(2, "汤")])).toBe(
       "请告诉客人：酸梅汤、汤 现在不供应，已从他们的点单里删掉。",
+    );
+    setLanguageForTest("en");
+  });
+});
+
+describe("WP-2423 M35: the guests' unsent lines on the staff round screen", () => {
+  const menu = () => parseCounterMenu(counterMenuResponse());
+  const cart = (lines: Record<string, unknown>[]) => ({
+    cartReference: id(70),
+    cartVersion: 4,
+    guestPaying: false,
+    lines: lines.map((line, index) => ({
+      cartItemReference: id(80 + index),
+      sellableReference: id(5),
+      optionSelections: [],
+      names: { "en-CA": "Flat White" },
+      quantity: 1,
+      withOptions: false,
+      phoneNumber: 1,
+      phoneLeft: false,
+      ...line,
+    })) as never,
+  });
+  it("names and prices each line from the menu staff hold, and marks one that can't be sent", () => {
+    setLanguageForTest("en");
+    const lines = guestCartLines(
+      cart([
+        { quantity: 2, optionSelections: [{ optionReference: id(10), quantity: 1 }] },
+        { sellableReference: id(11), names: { "en-CA": "Croissant" }, phoneNumber: 2 },
+        { sellableReference: id(99), names: { "en-CA": "Old soup" }, phoneLeft: true },
+      ]),
+      menu(),
+    );
+    // 2 × (4.50 + 0.75 oat milk), in exact cents.
+    expect(lines[0]).toMatchObject({
+      name: "Flat White",
+      options: "Oat milk",
+      quantity: 2,
+      estimateMinor: 1050n,
+      unsellable: false,
+    });
+    // Sold out now, and a dish on no current menu: neither can be sent, neither is priced.
+    expect(lines[1]).toMatchObject({ name: "Croissant", unsellable: true, estimateMinor: null });
+    expect(lines[2]).toMatchObject({ name: "Old soup", unsellable: true });
+    // Why each leaves when taken out, with no extra tap: can't be made, the phone left, asked.
+    expect(lines.map(guestRemovalReason)).toEqual(["GuestAsked", "CantMake", "CantMake"]);
+    expect(guestRemovalReason({ ...lines[0], phoneLeft: true } as (typeof lines)[number])).toBe(
+      "GuestLeft",
+    );
+    expect(lines.map(guestLineAdder)).toEqual(["Phone 1", "Phone 2", "Phone 1 has left"]);
+    expect(guestCartLines(null, menu())).toEqual([]);
+  });
+  it("tells staff what to say for the lines they took out, one or many, in their language", () => {
+    setLanguageForTest("en");
+    const lines = guestCartLines(
+      cart([
+        { sellableReference: id(11), names: { "en-CA": "Croissant" } },
+        { sellableReference: id(99), names: { "en-CA": "Soup" } },
+        {},
+      ]),
+      menu(),
+    );
+    expect(guestRemovedNote(lines.slice(0, 1))).toBe(
+      "Tell the guests: Croissant isn't available now, so it was taken off their order.",
+    );
+    expect(guestRemovedNote(lines)).toBe(
+      "Tell the guests: Croissant, Soup aren't available now, so they were taken off their order. Removed from the guests' cart: Flat White.",
+    );
+    expect(guestRemovedNote([])).toBeNull();
+    setLanguageForTest("zh-Hans");
+    expect(guestRemovedNote(lines.slice(2, 3))).toBe("已从客人的购物车删掉：Flat White。");
+    expect(guestLineAdder({ ...(lines[2] as (typeof lines)[number]), phoneLeft: true })).toBe(
+      "手机 1 已离开",
     );
     setLanguageForTest("en");
   });
