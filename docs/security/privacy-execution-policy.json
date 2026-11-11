@@ -37,6 +37,20 @@
       "domain": null
     },
     {
+      "name": "__Host-bop-visits",
+      "purpose": "guest-earlier-visits-on-this-phone",
+      "secure": true,
+      "httpOnly": true,
+      "sameSite": "Strict",
+      "path": "/",
+      "domain": null,
+      "persistence": "24-hours",
+      "serverAuthority": "Identity guest sessions: each value is an earlier guest session credential of this phone (at most 2), valid only while that session lives; holds no contact or personal data",
+      "sourceFiles": ["apps/api/src/customer-entry.ts", "apps/api/src/customer-receipt.ts"],
+      "clearOn": "Max-Age=0 when no earlier visit is kept",
+      "webStorage": false
+    },
+    {
       "name": "__Host-bop-member",
       "purpose": "member-session",
       "secure": true,

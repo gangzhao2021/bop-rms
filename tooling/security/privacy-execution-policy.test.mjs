@@ -49,12 +49,13 @@ function allowedCookie(policy, name, file) {
 }
 
 describe("WP-2051 privacy execution policy", () => {
-  it("allows only the eight necessary host-only credential cookies", async () => {
+  it("allows only the nine necessary host-only credential cookies", async () => {
     const value = await policy();
     expect(value.necessaryCookies.map(({ name }) => name)).toEqual([
       "__Host-bop-auth",
       "__Host-bop-merchant",
       "__Host-bop-guest",
+      "__Host-bop-visits",
       "__Host-bop-member",
       "__Host-bop-platform-auth",
       "__Host-bop-platform",
@@ -66,7 +67,11 @@ describe("WP-2051 privacy execution policy", () => {
         secure: true,
         httpOnly: true,
         // WP-2423 Q18: the registered-tablet secret is Strict (never sent cross-site).
-        sameSite: cookie.name === "__Host-bop-store-device" ? "Strict" : "Lax",
+        // M104/M105: the earlier visits on this phone are Strict too (only the Store's own pages).
+        sameSite:
+          cookie.name === "__Host-bop-store-device" || cookie.name === "__Host-bop-visits"
+            ? "Strict"
+            : "Lax",
         path: "/",
         domain: null,
       });
