@@ -35,7 +35,10 @@ export function fixture(dining = false, optionAmountMinor = 125n) {
     orderType: null,
     lifecycle: "Published",
     currencyMetadata: base.currencyMetadata,
-    unitAmount: { amountMinor: optionAmountMinor, currencyCode: base.currencyMetadata.currencyCode },
+    unitAmount: {
+      amountMinor: optionAmountMinor,
+      currencyCode: base.currencyMetadata.currencyCode,
+    },
     includedQuantity: 1,
     quantityBasis: "PerItemChoice",
     effectivePeriod: entry.effectivePeriod,

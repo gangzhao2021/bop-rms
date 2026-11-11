@@ -456,7 +456,10 @@ export function createVersionedCheckoutValidationService<V extends 1 | 2>(
         if (verifyConfiguration === undefined) return fail("CHECKOUT_DEPENDENCY_UNAVAILABLE");
         // WP-2423 (DEC-PRICE-HOLD §3): a dish shown differently now asks for a new price.
         await verifyConfiguration(cart, quote, requestedAt).catch((error: unknown) => {
-          if (error instanceof CheckoutValidationError && error.code === "CHECKOUT_REQUOTE_REQUIRED")
+          if (
+            error instanceof CheckoutValidationError &&
+            error.code === "CHECKOUT_REQUOTE_REQUIRED"
+          )
             throw error;
           return fail("CHECKOUT_DEPENDENCY_UNAVAILABLE");
         });
