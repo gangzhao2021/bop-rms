@@ -5310,6 +5310,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Waiting for approval by someone holding menu approval.": "等待持有菜单审批权限的人批准。",
   "Waiting for reviews": "等待审核",
   "Waiting for staff": "等待员工",
+  "Waiting for card-machine payment": "等刷卡机收款",
+  "Waiting for the guest to pay": "等客人付款",
   "Waiting for {assigneeReference} to start counting.": "等待 {assigneeReference} 开始清点。",
   Waste: "报损",
   "Waste is unavailable": "报损暂不可用",

@@ -54,6 +54,22 @@ export const useDiningRounds = () => useContext(DiningRoundsContext);
  * kitchen…", never "Sent", until the kitchen has them.
  */
 export const KitchenSendingContext = createContext<ReadonlySet<number>>(new Set());
+/**
+ * v15 batch-5: what an unpaid round's dishes wait for, by round number — a round staff entered
+ * waits for its card-machine payment, a guest's for the guest to pay — so a dish not yet paid for
+ * never reads "Waiting for staff". Rounds not listed wait for staff (paid, to be accepted).
+ */
+export const RoundPaymentWaitContext = createContext<ReadonlyMap<number, "CardMachine" | "Guest">>(
+  new Map(),
+);
+/** The words for a dish not yet accepted, by what its round waits for. */
+export function submittedText(wait: "CardMachine" | "Guest" | undefined): string {
+  return wait === "CardMachine"
+    ? t("Waiting for card-machine payment")
+    : wait === "Guest"
+      ? t("Waiting for the guest to pay")
+      : t("Waiting for staff");
+}
 
 /** Dish states in staff words (the same words as the kitchen's and the guest's). */
 export const diningItemPhaseText: Readonly<Record<string, string>> = {
@@ -75,11 +91,12 @@ export function comboPartStateText(
   item: Pick<Item, "phase" | "remakingQuantity">,
   part: Pick<ComboPartView, "done" | "served">,
   servable: number,
+  wait?: "CardMachine" | "Guest",
 ): string {
   if (part.served || item.phase === "Fulfilled") return t("Served");
   if (item.phase === "Cancelled" || item.phase === "Rejected")
     return diningItemPhaseText[item.phase] ?? t("Checking");
-  if (item.phase === "Submitted") return t("Waiting for staff");
+  if (item.phase === "Submitted") return submittedText(wait);
   if ((item.remakingQuantity ?? 0) > 0 && servable === 0) return t("Being remade");
   if (part.done || item.phase === "Ready") return t("Ready to serve");
   return diningItemPhaseText[item.phase] ?? t("Checking");
@@ -122,6 +139,7 @@ export function roundStateText(
   items: readonly Item[],
   sequence: number,
   sending = false,
+  wait?: "CardMachine" | "Guest",
 ): string | null {
   const open = items.filter(
     (item) =>
@@ -135,7 +153,9 @@ export function roundStateText(
       const text =
         phase === "Accepted" && sending
           ? t("Sending to the kitchen…")
-          : (diningItemPhaseText[phase] ?? null);
+          : phase === "Submitted"
+            ? submittedText(wait)
+            : (diningItemPhaseText[phase] ?? null);
       return ready > 0 && text !== null
         ? t("{text} · {count} ready to serve", { text, count: ready })
         : text;
@@ -456,6 +476,7 @@ export function DiningRoundItemState({
 }) {
   const rounds = useDiningRounds();
   const sending = useContext(KitchenSendingContext);
+  const waits = useContext(RoundPaymentWaitContext);
   const item = rounds?.view?.items.find((entry) => entry.orderItemReference === orderItemReference);
   if (rounds === null || rounds.view === null || item === undefined) return null;
   // A table checking out (Closing) still gets its last dishes served before it closes.
@@ -472,7 +493,9 @@ export function DiningRoundItemState({
           ? t("Being remade")
           : item.phase === "Accepted" && sending.has(item.batchSequence)
             ? t("Sending to the kitchen…")
-            : (diningItemPhaseText[item.phase] ?? t("Checking"))}
+            : item.phase === "Submitted"
+              ? submittedText(waits.get(item.batchSequence))
+              : (diningItemPhaseText[item.phase] ?? t("Checking"))}
         {item.deliveredQuantity > 0 && item.remainingQuantity > 0
           ? t(" · {served} of {ordered} served", {
               served: item.deliveredQuantity,
@@ -519,7 +542,7 @@ export function DiningRoundItemState({
               <li key={part.optionReference}>
                 <span lang={part.nameZh ? "zh-Hans" : "en"}>{label}</span>
                 <span className="dining-round-item__state">
-                  {comboPartStateText(item, part, servable)}
+                  {comboPartStateText(item, part, servable, waits.get(item.batchSequence))}
                 </span>
                 {open && comboPartServable(item, part) ? (
                   <button
@@ -566,9 +589,15 @@ export function DiningRoundItemState({
 export function DiningRoundSummary({ sequence }: { readonly sequence: number }) {
   const rounds = useDiningRounds();
   const sending = useContext(KitchenSendingContext);
+  const waits = useContext(RoundPaymentWaitContext);
   if (rounds?.view == null) return null;
   const count = roundServedCount(rounds.view.items, sequence);
-  const state = roundStateText(rounds.view.items, sequence, sending.has(sequence));
+  const state = roundStateText(
+    rounds.view.items,
+    sequence,
+    sending.has(sequence),
+    waits.get(sequence),
+  );
   return (
     <span className="dining-round__progress">
       {count === null

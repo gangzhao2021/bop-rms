@@ -251,6 +251,53 @@ describe("Orders v3: a table's order read round by round (Owner 2026-10-26)", ()
   });
 });
 
+describe("v15 batch-5: an unpaid round's dishes say what they wait for", () => {
+  it("a staff round waits for the card machine, a guest round for the guest, a paid one for staff", () => {
+    const [first, second] = detail.order.batches;
+    const unpaid = (round: typeof second, staff: boolean) => ({
+      ...(round as NonNullable<typeof second>),
+      acceptanceStatus: "NotAccepted" as const,
+      paymentDue: { status: "Awaiting" as const, cancelsAt: "2026-10-26T23:50:00.000Z" },
+      staffRound: staff
+        ? { recordedAfterOutage: false, paidOnCardMachine: null, amountDueMinor: null }
+        : null,
+    });
+    const waiting = progress([
+      progressItem(1, 1, "TEST beef noodles", "Submitted"),
+      progressItem(2, 1, "TEST green tea", "Submitted"),
+      progressItem(3, 2, "TEST dumplings", "Submitted"),
+      progressItem(4, 2, "TEST spring rolls", "Submitted"),
+    ]);
+    const html = (batches: readonly unknown[]) =>
+      text(
+        renderToStaticMarkup(
+          <DiningRoundsContext.Provider value={context(waiting)}>
+            <CurrentOrderLines
+              lines={detail.lines}
+              rounds={{
+                batches: batches as typeof detail.order.batches,
+                timeZone: "America/Toronto",
+                today: "2026-10-26",
+              }}
+            />
+          </DiningRoundsContext.Provider>,
+        ),
+      );
+    const staffRound = html([first, unpaid(second, true)]);
+    const sections = staffRound.split("Round 2");
+    expect(sections[1]).toContain("Waiting for card-machine payment");
+    expect(sections[1]).not.toContain("Waiting for staff");
+    // Round 1 here is paid and waits for staff to accept it.
+    expect(sections[0]).toContain("Waiting for staff");
+    expect(html([first, unpaid(second, false)]).split("Round 2")[1]).toContain(
+      "Waiting for the guest to pay",
+    );
+    expect(roundStateText(waiting.items, 2, false, "CardMachine")).toBe(
+      "Waiting for card-machine payment",
+    );
+  });
+});
+
 describe("WP-2423 item 8 ⑦: chasing a dish with the kitchen", () => {
   const items = () => [
     progressItem(1, 1, "TEST beef noodles", "InProgress", 0, {

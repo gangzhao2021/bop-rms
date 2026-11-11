@@ -17,6 +17,7 @@ import {
   DiningRoundServeAll,
   DiningRoundSummary,
   KitchenSendingContext,
+  RoundPaymentWaitContext,
   DiningRoundsProvider,
 } from "./DiningRounds.js";
 import { OrderAcceptanceAction } from "./OrderAcceptanceAction.js";
@@ -471,57 +472,74 @@ export function CurrentOrderLines({
             )
           }
         >
-          {[...rounds.batches]
-            .sort((a, b) => a.sequence - b.sequence)
-            .map((batch) => {
-              const members = lines.items.filter(
-                (item) => item.orderBatchReference === batch.orderBatchReference,
-              );
-              const amount = members
-                .filter(
-                  (item) =>
-                    item.cancellation === null &&
-                    !cancelledBatches?.has(item.orderBatchReference) &&
-                    !unpaidLine(item) &&
-                    !waitingLine(item),
-                )
-                .reduce((sum, item) => sum + BigInt(item.subtotal.amountMinor), 0n);
-              return (
-                <section
-                  key={batch.orderBatchReference}
-                  className="order-round order-round--lines"
-                  aria-label={t("Round {sequence}", { sequence: batch.sequence })}
-                >
-                  <header className="order-round__head">
-                    <h3>
-                      {t("Round {sequence}", { sequence: batch.sequence })}
-                      {batch.staffRound !== null
-                        ? t(" · Entered by staff")
-                        : typeof rounds.phones?.get(batch.orderBatchReference) === "number"
-                          ? t(" · Phone {number}", {
-                              number: String(rounds.phones.get(batch.orderBatchReference)),
-                            })
-                          : ""}
-                      {batch.submittedAt === null ? null : (
-                        <time className="order-round__time" dateTime={batch.submittedAt}>
-                          {orderWhen(batch.submittedAt, rounds.timeZone, rounds.today ?? null)}
-                        </time>
-                      )}
-                    </h3>
-                    <DiningRoundSummary sequence={batch.sequence} />
-                    <span className="order-round__amount">
-                      {orderMoney({
-                        amountMinor: amount.toString(),
-                        currencyCode: lines.totals.total.currencyCode,
-                      })}
-                    </span>
-                  </header>
-                  {rounds.head?.(batch)}
-                  {members.length === 0 ? null : <ul>{members.map(lineItem)}</ul>}
-                  <DiningRoundServeAll sequence={batch.sequence} />
-                </section>
-              );
-            })}
+          <RoundPaymentWaitContext.Provider
+            value={
+              new Map(
+                rounds.batches.flatMap((batch) =>
+                  batch.paymentDue === null
+                    ? []
+                    : [
+                        [
+                          batch.sequence,
+                          batch.staffRound !== null ? ("CardMachine" as const) : ("Guest" as const),
+                        ] as const,
+                      ],
+                ),
+              )
+            }
+          >
+            {[...rounds.batches]
+              .sort((a, b) => a.sequence - b.sequence)
+              .map((batch) => {
+                const members = lines.items.filter(
+                  (item) => item.orderBatchReference === batch.orderBatchReference,
+                );
+                const amount = members
+                  .filter(
+                    (item) =>
+                      item.cancellation === null &&
+                      !cancelledBatches?.has(item.orderBatchReference) &&
+                      !unpaidLine(item) &&
+                      !waitingLine(item),
+                  )
+                  .reduce((sum, item) => sum + BigInt(item.subtotal.amountMinor), 0n);
+                return (
+                  <section
+                    key={batch.orderBatchReference}
+                    className="order-round order-round--lines"
+                    aria-label={t("Round {sequence}", { sequence: batch.sequence })}
+                  >
+                    <header className="order-round__head">
+                      <h3>
+                        {t("Round {sequence}", { sequence: batch.sequence })}
+                        {batch.staffRound !== null
+                          ? t(" · Entered by staff")
+                          : typeof rounds.phones?.get(batch.orderBatchReference) === "number"
+                            ? t(" · Phone {number}", {
+                                number: String(rounds.phones.get(batch.orderBatchReference)),
+                              })
+                            : ""}
+                        {batch.submittedAt === null ? null : (
+                          <time className="order-round__time" dateTime={batch.submittedAt}>
+                            {orderWhen(batch.submittedAt, rounds.timeZone, rounds.today ?? null)}
+                          </time>
+                        )}
+                      </h3>
+                      <DiningRoundSummary sequence={batch.sequence} />
+                      <span className="order-round__amount">
+                        {orderMoney({
+                          amountMinor: amount.toString(),
+                          currencyCode: lines.totals.total.currencyCode,
+                        })}
+                      </span>
+                    </header>
+                    {rounds.head?.(batch)}
+                    {members.length === 0 ? null : <ul>{members.map(lineItem)}</ul>}
+                    <DiningRoundServeAll sequence={batch.sequence} />
+                  </section>
+                );
+              })}
+          </RoundPaymentWaitContext.Provider>
         </KitchenSendingContext.Provider>
       )}
       <dl className="order-lines-totals">
