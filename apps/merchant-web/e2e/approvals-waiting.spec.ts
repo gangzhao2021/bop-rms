@@ -73,6 +73,20 @@ async function session(page: Page, withApprovals: boolean) {
       },
     }),
   );
+  // WP-2423 M07: the Approvals badge also counts staff roles waiting for this person; none wait.
+  // Answered here so the badge never races a failed read ("could not be counted").
+  await page.route("**/merchant/organization/staff/role-requests", (route) =>
+    route.fulfill({
+      headers,
+      json: { screenId: "APPROVAL-INBOX", sourceAsOf: new Date().toISOString(), requests: [] },
+    }),
+  );
+  await page.route("**/merchant/organization/roles/waiting", (route) =>
+    route.fulfill({
+      headers,
+      json: { screenId: "APPROVAL-INBOX", sourceAsOf: new Date().toISOString(), changes: [] },
+    }),
+  );
 }
 
 test("@production refunds waiting for approval are counted on the home page and in the navigation", async ({
