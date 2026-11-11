@@ -347,8 +347,40 @@ describe("WP-2423 item 6: placing a round from the cart", () => {
     expect(ports.createSession).not.toHaveBeenCalled();
     await controller.send(cart(), seen);
     expect(controller.getState()).toEqual({ status: "sent", held: false });
-    expect(ports.quote).toHaveBeenCalledTimes(1);
+    // Priced once more on the second tap (the Store answers the price it holds).
+    expect(ports.quote).toHaveBeenCalledTimes(2);
+    expect(ports.saveDetails.mock.calls[0]?.[0].quoteReference).toBe(id(2));
     expect(ports.send).toHaveBeenCalledTimes(1);
+  });
+
+  it("price-hold-dish-changes: a price cut made after the stop is what the round is placed at; a rise stops again", async () => {
+    const cut = setUp();
+    cut.ports.quote
+      .mockResolvedValueOnce(quote({ subtotal: cad("2200"), total: cad("2486") }))
+      .mockResolvedValueOnce(
+        quote({ quoteReference: id(7), subtotal: cad("2100"), total: cad("2373") }),
+      );
+    await cut.controller.send(cart(), seen);
+    expect(cut.controller.getState()).toMatchObject({ status: "confirm-total" });
+    await cut.controller.send(cart(), seen);
+    expect(cut.controller.getState()).toEqual({ status: "sent", held: false });
+    // The lower price is the one placed, with no extra stop.
+    expect(cut.ports.saveDetails.mock.calls[0]?.[0].quoteReference).toBe(id(7));
+    expect(cut.ports.quote.mock.calls[1]?.[1]).not.toBe(cut.ports.quote.mock.calls[0]?.[1]);
+    const rise = setUp();
+    rise.ports.quote
+      .mockResolvedValueOnce(quote({ subtotal: cad("2200"), total: cad("2486") }))
+      .mockResolvedValueOnce(
+        quote({ quoteReference: id(8), subtotal: cad("2400"), total: cad("2712") }),
+      );
+    await rise.controller.send(cart(), seen);
+    await rise.controller.send(cart(), seen);
+    expect(rise.controller.getState()).toEqual({
+      status: "confirm-total",
+      total: cad("2712"),
+      reason: "changed",
+    });
+    expect(rise.ports.saveDetails).not.toHaveBeenCalled();
   });
 
   it("a total the same or lower goes straight through", async () => {
@@ -725,7 +757,8 @@ describe("WP-2423 item 6: placing a round from the cart", () => {
     expect(ports.send).toHaveBeenCalledTimes(1);
     await controller.send(cart(), seen);
     expect(controller.getState()).toEqual({ status: "sent", held: false });
-    expect(ports.quote).toHaveBeenCalledTimes(2);
+    // price-hold-dish-changes: the second tap prices it once more (the Store holds that price).
+    expect(ports.quote).toHaveBeenCalledTimes(3);
     expect(ports.send).toHaveBeenCalledTimes(2);
     expect(ports.createSession.mock.calls.at(-1)?.[0].quoteReference).toBe(id(102));
   });

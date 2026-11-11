@@ -37,6 +37,8 @@ export interface LinePriceChange {
 }
 
 const seen = new Map<string, Map<string, SeenLinePrice>>();
+/** Lines whose price the guest accepted on this page, by cart. */
+const accepted = new Map<string, Set<string>>();
 
 function valid(line: PricedLine): boolean {
   return (
@@ -71,8 +73,28 @@ export function recordFirstSeenPrices(cartReference: string, lines: readonly Pri
 /** The guest was shown these prices and accepted them: they are now what the guest saw. */
 export function acceptSeenPrices(cartReference: string, lines: readonly PricedLine[]): void {
   const prices = cartPrices(cartReference);
+  const kept = accepted.get(cartReference) ?? new Set<string>();
+  accepted.set(cartReference, kept);
+  for (const line of lines) kept.add(line.cartItemReference);
   for (const line of lines)
     if (valid(line))
+      prices.set(line.cartItemReference, {
+        amountMinor: line.amountMinor,
+        quantity: line.quantity,
+        currency: line.currency,
+      });
+}
+
+/**
+ * WP-2423 price-hold-dish-changes: the Store's own record of what this cart was first priced at for
+ * these lines (on any phone, before any reload) is what the guest first saw. It replaces what this
+ * page recorded first, unless the guest has accepted a price for the line here since.
+ */
+export function recordStoreFirstPrices(cartReference: string, lines: readonly PricedLine[]): void {
+  const prices = cartPrices(cartReference);
+  const kept = accepted.get(cartReference);
+  for (const line of lines)
+    if (valid(line) && kept?.has(line.cartItemReference) !== true)
       prices.set(line.cartItemReference, {
         amountMinor: line.amountMinor,
         quantity: line.quantity,
@@ -112,4 +134,5 @@ export function seenPriceChanges(
 /** Test seam: forget every recorded price. */
 export function clearSeenPrices(): void {
   seen.clear();
+  accepted.clear();
 }

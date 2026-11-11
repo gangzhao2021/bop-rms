@@ -8,6 +8,7 @@ import { checkoutInProgressMessage, type CartView } from "./types.js";
 import type { SendRoundController, SendRoundState } from "../checkout/send-round.js";
 import { LanguageRoot } from "../i18n/i18n.js";
 import { cartText } from "../journey/messages.js";
+import { clearSeenPrices } from "./seen-prices.js";
 import {
   setCustomerCsrfCredential,
   setTablePaymentTiming,
@@ -623,6 +624,47 @@ describe("WP-2423 item 6: a table that pays at the end", () => {
       </MemoryRouter>,
     );
   };
+
+  it("price-hold-dish-changes (v15 batch 6): a price listed higher since the dish was added is ticked before Place order", () => {
+    clearSeenPrices();
+    const item = tableCart().cart.items[0];
+    if (item === undefined) throw new Error("synthetic item missing");
+    page({ status: "ready", cart: tableCart() }); // $10.00 for two
+    const rose = page({
+      status: "ready",
+      cart: tableCart({
+        items: [
+          {
+            ...item,
+            warnings: [],
+            lineEstimate: { status: "Available", total: { amountMinor: "1050", currency: "CAD" } },
+          },
+        ],
+      }),
+    });
+    expect(rose).toContain("Prices changed since you added these:");
+    expect(rose).toContain("Synthetic tea: $10.00 → $10.50");
+    expect(rose).toMatch(/disabled="" aria-describedby="cart-confirm-changes">Place order/u);
+    expect(rose).not.toContain("Checkout asks you to accept");
+    // A lower price is only listed: one tap still orders.
+    clearSeenPrices();
+    page({ status: "ready", cart: tableCart() });
+    const lower = page({
+      status: "ready",
+      cart: tableCart({
+        items: [
+          {
+            ...item,
+            warnings: [],
+            lineEstimate: { status: "Available", total: { amountMinor: "900", currency: "CAD" } },
+          },
+        ],
+      }),
+    });
+    expect(lower).toContain("Prices changed since you added these:");
+    expect(lower).not.toContain("cart-confirm-changes");
+    clearSeenPrices();
+  });
 
   it("at a table that pays at the end the main action is Place order, never Checkout", () => {
     const html = page({ status: "ready", cart: tableCart() });

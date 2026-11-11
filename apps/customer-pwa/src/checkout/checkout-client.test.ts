@@ -139,6 +139,56 @@ describe("WP-1703 Checkout transport", () => {
     });
   });
 
+  it("price-hold-dish-changes: accepts each line as first priced and what changed, and nothing else", async () => {
+    const line = {
+      cartItemReference: id(2),
+      quantity: 1,
+      subtotal: { amountMinor: "100", currency: "CAD" },
+    };
+    const answer = (sinceAdded: unknown) =>
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              ...publicQuote,
+              quote: { ...publicQuote.quote, lines: [line], sinceAdded },
+            }),
+            { status: 200 },
+          ),
+      );
+    setCustomerCsrfCredential("c".repeat(43));
+    const client = createCheckoutClient({} as CustomerCartClient);
+    vi.stubGlobal(
+      "fetch",
+      answer([
+        {
+          ...line,
+          subtotal: { amountMinor: "90", currency: "CAD" },
+          changes: ["Name", "Allergens"],
+        },
+      ]),
+    );
+    await expect(client.quote(cart, id(9))).resolves.toMatchObject({
+      sinceAdded: [
+        {
+          cartItemReference: id(2),
+          quantity: 1,
+          subtotal: { amountMinor: "90", currency: "CAD" },
+          changes: ["Name", "Allergens"],
+        },
+      ],
+    });
+    for (const wrong of [
+      [{ ...line, changes: ["Price"] }],
+      [{ ...line, changes: ["Name", "Name"] }],
+      [{ ...line, changes: [], note: "private" }],
+      [{ ...line, subtotal: { amountMinor: "90", currency: "USD" }, changes: [] }],
+    ]) {
+      vi.stubGlobal("fetch", answer(wrong));
+      await expect(client.quote(cart, id(9))).rejects.toMatchObject({ code: "network_unknown" });
+    }
+  });
+
   it("makes no Quote request without the page-memory CSRF credential", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);

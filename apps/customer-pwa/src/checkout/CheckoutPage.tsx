@@ -28,6 +28,7 @@ import {
   quotePricedLines,
 } from "./checkout-decisions.js";
 import { acceptSeenPrices, recordFirstSeenPrices, seenPriceChanges } from "../cart/seen-prices.js";
+import { DishChangeList, quoteDishChanges, recordFirstPricedLines } from "../cart/dish-changes.js";
 import { PriceChangeList } from "./PriceChangeList.js";
 import { createBrowserCustomerCartClient, type CustomerCartClient } from "../cart/cart-client.js";
 import { startTableCartPoll } from "../cart/table-cart-poll.js";
@@ -125,6 +126,8 @@ export function CheckoutPage({
   );
   const [detailsLocked, setDetailsLocked] = useState(false);
   const [confirmedQuote, setConfirmedQuote] = useState<string | null>(null);
+  /** price-hold-dish-changes: the changed dishes the guest ticked as read (their signature). */
+  const [confirmedDishes, setConfirmedDishes] = useState<string | null>(null);
   const navigate = useNavigate();
   const location = useLocation();
   const [sessionController] = useState(
@@ -340,12 +343,26 @@ export function CheckoutPage({
           )
         : quoteConsistentLinePrices(cart.cart.items, menu, quote?.subtotal ?? null);
   // WP-2423 M74: dishes whose price changed since the guest added them (first prices are kept).
+  // price-hold-dish-changes: the Store's first price for each line comes first (after a reload too).
+  if (cart !== null && quote !== null) recordFirstPricedLines(cart.cart.cartReference, quote);
   if (cart !== null && quote?.lines !== undefined)
     recordFirstSeenPrices(cart.cart.cartReference, quoteLines);
   const priceChanges =
     cart === null || quote?.lines === undefined
       ? []
       : seenPriceChanges(cart.cart.cartReference, quoteLines);
+  // WP-2423 price-hold-dish-changes (DEC-PRICE-HOLD §3): a dish renamed or with other allergens
+  // since the guest added it is named here, and ticked as read before paying or ordering.
+  const dishChanges = cart === null ? [] : quoteDishChanges(quote, cart.cart.items, menu);
+  const dishChangesSignature =
+    dishChanges.length === 0
+      ? null
+      : JSON.stringify([
+          quote?.quoteReference,
+          dishChanges.map((change) => [change.cartItemReference, change.name, change.allergens]),
+        ]);
+  const dishesNeedConfirming =
+    dishChangesSignature !== null && confirmedDishes !== dishChangesSignature;
   const pricesNeedAcceptance =
     quote !== null &&
     (priceChangesNeedAcceptance(priceChanges) ||
@@ -452,6 +469,7 @@ export function CheckoutPage({
     quote !== null &&
     quote.blockingReasons.length === 0 &&
     !(pricesNeedAcceptance && confirmedQuote !== quote.quoteReference) &&
+    !dishesNeedConfirming &&
     detailsSelection !== null;
   // WP-2423 store-service-controls (v15 M30/M34): past last orders, while this guest's service is
   // paused or when closed, no new checkout starts; the refusal says why in this service's words.
@@ -748,6 +766,22 @@ export function CheckoutPage({
                   ) : null}
                 </>
               )}
+              {dishChanges.length > 0 ? (
+                <div role="alert" className="checkout-price-change">
+                  <DishChangeList changes={dishChanges} />
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={!dishesNeedConfirming}
+                      disabled={sessionState.status !== "idle"}
+                      onChange={(event) =>
+                        setConfirmedDishes(event.target.checked ? dishChangesSignature : null)
+                      }
+                    />{" "}
+                    {cartText.confirmChanges}
+                  </label>
+                </div>
+              ) : null}
               {priceChanges.length > 0 && cart !== null ? (
                 <div role="alert" className="checkout-price-change">
                   <PriceChangeList changes={priceChanges} items={cart.cart.items} />
@@ -820,9 +854,9 @@ export function CheckoutPage({
           ) : null}
           {state.status === "item-unavailable" ? (
             // WP-2423 (guest-cart-503): the dish is named; the cart's own Remove clears it.
+            // price-hold-dish-changes: the page's main action below is the one Change your cart.
             <section role="alert" className="checkout-attention">
               <p>{checkoutItemRefusalMessage(state.refusal, state.line, state.cart.cart.items)}</p>
-              <Link to="/cart">{checkoutText.changeYourCart}</Link>
             </section>
           ) : null}
           {state.status === "order-processing" || state.status === "checkout-in-progress" ? (
@@ -1077,13 +1111,13 @@ export function CheckoutPage({
             </p>
           ) : null}
           {sessionState.status === "item_short" || sessionState.status === "item_unavailable" ? (
+            // The main action below is Change your cart (refusedItem): said once, not twice.
             <p role="alert">
               {checkoutItemRefusalMessage(
                 sessionState.status,
                 sessionState.line,
                 cart?.cart.items ?? [],
-              )}{" "}
-              <Link to="/cart">{checkoutText.changeYourCart}</Link>
+              )}
             </p>
           ) : sessionAlert !== null ? (
             <p role="alert">

@@ -501,8 +501,10 @@ for (const screen of [
       expect(seen.sends).toHaveLength(1);
       await page.getByRole("button", { name: "Place order · $24.86", exact: true }).click();
       await expect(page).toHaveURL(/\/dine-in\/session$/u);
-      expect(seen.quotes).toBe(2);
-      expect(seen.started).toEqual([id(101), id(102)]);
+      // price-hold-dish-changes: the second tap prices it once more (the Store holds that price,
+      // or a lower one) and places it at that quote.
+      expect(seen.quotes).toBe(3);
+      expect(seen.started).toEqual([id(101), id(103)]);
       expect(seen.accepted).toBe(1);
       expect(seen.sends).toHaveLength(2);
       expect(failures).toEqual([]);

@@ -1,3 +1,4 @@
+import { v7 as uuidv7 } from "uuid";
 import { AlreadyOrdered } from "../checkout/AlreadyOrdered.js";
 import { ClosedStoreNotice } from "../menu/ClosedStoreNotice.js";
 import {
@@ -59,11 +60,20 @@ import {
 } from "../menu/menu-line-prices.js";
 import type { CustomerMenuClient, MenuJourneyContext, MenuView } from "../menu/types.js";
 import {
+  acceptSeenPrices,
   recordFirstSeenPrices,
   seenPriceChanges,
   type LinePriceChange,
   type PricedLine,
 } from "./seen-prices.js";
+import {
+  changesSignature,
+  DishChangeList,
+  quoteDishChanges,
+  recordFirstPricedLines,
+} from "./dish-changes.js";
+import type { CheckoutQuote } from "../checkout/types.js";
+import { createCheckoutClient } from "../checkout/checkout-client.js";
 import { PriceChangeList } from "../checkout/PriceChangeList.js";
 import { comboLineAllergenText } from "../menu/combo-allergens.js";
 import { storeServiceNoticeText, useStoreService } from "../store/StoreIdentity.js";
@@ -755,6 +765,59 @@ export function cartPriceChanges(
   return seenPriceChanges(cart.cartReference, lines);
 }
 
+/** The cart's lines as priced on this page (for accepting what the guest was shown). */
+function cartPricedLines(
+  cart: CartView["cart"],
+  prices: ReadonlyMap<string, CartLinePrice | null>,
+): PricedLine[] {
+  return cart.items.flatMap((item) => {
+    const price = prices.get(item.cartItemReference);
+    return price == null
+      ? []
+      : [
+          {
+            cartItemReference: item.cartItemReference,
+            quantity: item.quantity,
+            amountMinor: price.amountMinor,
+            currency: price.currency,
+          },
+        ];
+  });
+}
+
+/**
+ * WP-2423 price-hold-dish-changes: the Store's answer for this cart when the table cart was shown —
+ * the price it keeps for the guest (DEC-PRICE-HOLD), and each line as the cart was first priced
+ * for it — when it is about this cart version.
+ */
+const viewQuoteFor = (cart: CartView["cart"], quote: CheckoutQuote | null) =>
+  quote !== null && quote.cartVersion === cart.version ? quote : null;
+
+/**
+ * Each line's price as the cart shows it: the Store's own line prices when it priced this cart on
+ * screen (the price it keeps), else the menu's where they add up to the attached quote. The
+ * Store's first price for each line is recorded first (what the guest saw before a reload).
+ */
+function cartScreenPrices(
+  cart: CartView["cart"],
+  menu: MenuView | null,
+  shown: CheckoutQuote | null,
+): ReadonlyMap<string, CartLinePrice | null> {
+  recordFirstPricedLines(cart.cartReference, shown);
+  if (shown?.lines !== undefined && shown.lines.length === cart.items.length)
+    return new Map(
+      shown.lines.map((line) => [
+        line.cartItemReference,
+        { amountMinor: BigInt(line.subtotal.amountMinor), currency: line.subtotal.currency },
+      ]),
+    );
+  return quoteConsistentLinePrices(
+    cart.items,
+    menu,
+    cart.quote !== null && cart.quote.cartVersion === cart.version ? cart.quote.subtotal : null,
+  );
+}
+
 function CartContent({
   state,
   controller,
@@ -765,6 +828,9 @@ function CartContent({
   menuSettled,
   onPlace,
   service = null,
+  confirmedChanges = null,
+  onConfirmChanges = () => undefined,
+  viewQuote = null,
 }: {
   readonly state: CartState;
   readonly controller: CartStateController;
@@ -782,6 +848,11 @@ function CartContent({
    * payment already started is paid elsewhere and is never held here).
    */
   readonly service?: ReturnType<typeof useStoreService> | null;
+  /** price-hold-dish-changes: the changes the guest ticked as read (their signature). */
+  readonly confirmedChanges?: string | null;
+  readonly onConfirmChanges?: (signature: string | null) => void;
+  /** price-hold-dish-changes: the Store's answer when this table cart was shown. */
+  readonly viewQuote?: CheckoutQuote | null;
 }) {
   if (state.status === "loading")
     return (
@@ -907,12 +978,23 @@ function CartContent({
   const othersItems = cart.cart.items
     .filter((item) => item.warnings.includes("OTHER_PARTICIPANT_ITEM"))
     .reduce((total, item) => total + item.quantity, 0);
-  const currentQuote =
-    cart.cart.quote !== null && cart.cart.quote.cartVersion === cart.cart.version
-      ? cart.cart.quote.subtotal
-      : null;
-  const prices = quoteConsistentLinePrices(cart.cart.items, menu, currentQuote);
+  const shown = viewQuoteFor(cart.cart, viewQuote);
+  const prices = cartScreenPrices(cart.cart, menu, shown);
   const priceChanges = cartPriceChanges(cart.cart, prices);
+  // WP-2423 price-hold-dish-changes: a renamed dish, other allergens or a higher price since the
+  // cart was first priced for it is said here and, at a table that orders from the cart, ticked
+  // before ordering (the Store's record: after a reload and on another phone too).
+  const dishChanges = quoteDishChanges(shown, cart.cart.items, menu);
+  const changes = changesSignature(
+    dishChanges,
+    priceChanges.filter((change) => change.direction === "up"),
+  );
+  const changesUnconfirmed = changes !== null && confirmedChanges !== changes;
+  const placeConfirmed = () => {
+    if (changes !== null)
+      acceptSeenPrices(cart.cart.cartReference, cartPricedLines(cart.cart, prices));
+    onPlace(cart, cartLinesSubtotal(prices));
+  };
   // WP-2423 M03 review: these dishes are already in an order (a cart filled before pickup carts
   // were emptied on ordering); their checkout is refused, so say so instead of offering it.
   const alreadyOrdered =
@@ -922,10 +1004,27 @@ function CartContent({
       {alreadyOrdered !== null ? (
         <AlreadyOrdered placedOrder={alreadyOrdered} dishesInCart />
       ) : null}
-      {priceChanges.length > 0 && !terminal ? (
+      {(priceChanges.length > 0 || dishChanges.length > 0) && !terminal ? (
         <section className="cart-price-changes" role="status">
+          <DishChangeList changes={dishChanges} />
           <PriceChangeList changes={priceChanges} items={cart.cart.items} />
-          <p>{cartText.acceptAtCheckout}</p>
+          {!payLater ? (
+            <p>
+              {dishChanges.length > 0
+                ? cartText.confirmChangesAtCheckout
+                : cartText.acceptAtCheckout}
+            </p>
+          ) : changes !== null ? (
+            <label>
+              <input
+                type="checkbox"
+                checked={!changesUnconfirmed}
+                disabled={held || readOnly}
+                onChange={(event) => onConfirmChanges(event.target.checked ? changes : null)}
+              />{" "}
+              {cartText.confirmChanges}
+            </label>
+          ) : null}
         </section>
       ) : null}
       {terminal ? (
@@ -1074,12 +1173,19 @@ function CartContent({
                 held ||
                 stopped ||
                 unsellableLines ||
+                changesUnconfirmed ||
                 state.status !== "ready" ||
                 !menuSettled ||
                 cart.cart.warnings.includes("PROJECTION_STALE")
               }
-              aria-describedby={unsellableLines ? "cart-remove-unavailable" : undefined}
-              onClick={() => onPlace(cart, cartLinesSubtotal(prices))}
+              aria-describedby={
+                unsellableLines
+                  ? "cart-remove-unavailable"
+                  : changesUnconfirmed
+                    ? "cart-confirm-changes"
+                    : undefined
+              }
+              onClick={placeConfirmed}
             >
               {sending
                 ? cartText.placingOrder
@@ -1091,13 +1197,13 @@ function CartContent({
               <p className="cart-next-actions__note" id="cart-remove-unavailable">
                 {cartText.line.removeUnavailableFirst}
               </p>
+            ) : changesUnconfirmed ? (
+              <p className="cart-next-actions__note" id="cart-confirm-changes">
+                {cartText.confirmChangesToOrder}
+              </p>
             ) : null}
             <SlowWaitNote active={sending}>{cartText.placedSlowly}</SlowWaitNote>
-            <SendRoundMessage
-              round={round}
-              cart={cart}
-              onRetry={() => onPlace(cart, cartLinesSubtotal(prices))}
-            />
+            <SendRoundMessage round={round} cart={cart} onRetry={placeConfirmed} />
             <p className="cart-next-actions__note">{checkoutText.sendToKitchenNote}</p>
           </div>
         ) : alreadyOrdered !== null ? null : stopped ? (
@@ -1228,6 +1334,7 @@ function OpenCartPage({
   sendRound,
   diningClient,
   storeProfile,
+  quoteClient,
 }: {
   readonly controller?: CartStateController;
   readonly store?: CustomerStoreContext | undefined;
@@ -1241,6 +1348,8 @@ function OpenCartPage({
   readonly diningClient?: DiningSessionClient | undefined;
   /** The Store's live service answer (tests inject; null reads nothing). */
   readonly storeProfile?: StoreProfileLoader | null | undefined;
+  /** price-hold-dish-changes: prices a table cart when it is shown (tests inject). */
+  readonly quoteClient?: Pick<ReturnType<typeof createCheckoutClient>, "quote"> | undefined;
 }) {
   const [controller] = useState(
     () => provided ?? createCartStateController({ client: createBrowserCustomerCartClient() }),
@@ -1287,22 +1396,53 @@ function OpenCartPage({
       (item) => item.lineEstimate.status !== "Available" || item.configuration.length > 0,
     ) ?? false,
   );
+  /** price-hold-dish-changes: the changes the guest ticked as read before ordering. */
+  const [confirmedChanges, setConfirmedChanges] = useState<string | null>(null);
+  const [viewQuote, setViewQuote] = useState<CheckoutQuote | null>(null);
   const cartShowsPriceChanges =
     cart !== null &&
-    cartPriceChanges(
-      cart,
-      quoteConsistentLinePrices(
-        cart.items,
-        menu,
-        cart.quote !== null && cart.quote.cartVersion === cart.version ? cart.quote.subtotal : null,
-      ),
-    ).length > 0;
+    cartPriceChanges(cart, cartScreenPrices(cart, menu, viewQuoteFor(cart, viewQuote))).length > 0;
+  const cartShowsDishChanges =
+    cart !== null && quoteDishChanges(viewQuoteFor(cart, viewQuote), cart.items, menu).length > 0;
   const [menuWaitOver, setMenuWaitOver] = useState(false);
   useEffect(() => {
     const timer = window.setTimeout(() => setMenuWaitOver(true), menuPriceWaitMs);
     return () => window.clearTimeout(timer);
   }, []);
   const timing = useTablePaymentTiming(cart?.orderType === "DineIn", diningClient);
+  // WP-2423 price-hold-dish-changes (DEC-PRICE-HOLD, M74): at a table that orders from the cart,
+  // the cart on screen is the guest's checkout. Once per cart version it is priced, so the Store
+  // keeps that price for the guest and says what changed since each dish was first priced (after
+  // a reload or on another phone too). A failure changes nothing: Place order prices it again.
+  const [viewQuotes] = useState(
+    () => quoteClient ?? createCheckoutClient(createBrowserCustomerCartClient()),
+  );
+  const viewedVersion = useRef<string | null>(null);
+  const viewCart = state.status === "ready" && "cart" in state ? state.cart : null;
+  useEffect(() => {
+    if (
+      timing !== "PayLater" ||
+      viewCart === null ||
+      viewCart.cart.orderType !== "DineIn" ||
+      viewCart.cart.lifecycle.status !== "Active" ||
+      viewCart.cart.items.length === 0 ||
+      roundState.status === "sending"
+    )
+      return;
+    const key = `${viewCart.cart.cartReference}:${viewCart.cart.version}`;
+    if (viewedVersion.current === key) return;
+    viewedVersion.current = key;
+    let current = true;
+    viewQuotes.quote(viewCart, uuidv7()).then(
+      (quote) => {
+        if (current) setViewQuote(quote);
+      },
+      () => undefined,
+    );
+    return () => {
+      current = false;
+    };
+  }, [timing, viewCart, roundState.status, viewQuotes]);
   // WP-2423 shared-table-checkout (a): dishes that waited for another phone's round come back to
   // the cart as soon as nobody pays for them.
   useWaitingReturn("cart" in state ? state.cart : null, () => void controller.refresh());
@@ -1353,7 +1493,7 @@ function OpenCartPage({
   const place = (placed: CartView | null, seen: SeenSubtotal | null) => {
     startedHere.current = true;
     setLastOrder(null);
-    void round.send(placed, seen);
+    void round.send(placed, seen, placed === null ? null : viewQuoteFor(placed.cart, viewQuote));
   };
   // What the send's answer means for this page, once.
   const acted = useRef<SendRoundState | null>(null);
@@ -1454,6 +1594,9 @@ function OpenCartPage({
           menuSettled={settled || menuWaitOver}
           onPlace={place}
           service={service}
+          confirmedChanges={confirmedChanges}
+          onConfirmChanges={setConfirmedChanges}
+          viewQuote={viewQuote}
         />
       </div>
       <div className="sr-only" role="status" aria-live="polite">
@@ -1461,10 +1604,13 @@ function OpenCartPage({
           ? cartText.someonePlacedIt
           : roundState.status === "cart-changed" && state.status === "empty"
             ? cartText.someonePlacedIt
-            : state.status === "ready" && cartShowsPriceChanges
-              ? // WP-2423 M74: never "up to date" while a dish's price changed since it was added.
-                cartText.pricesChangedSinceAdded
-              : (specificRefusal(state) ?? cartText.stateAnnouncement[state.status])}
+            : state.status === "ready" && cartShowsDishChanges
+              ? // price-hold-dish-changes: never "up to date" while a dish changed since added.
+                cartText.dishesChangedSinceAdded
+              : state.status === "ready" && cartShowsPriceChanges
+                ? // WP-2423 M74: never "up to date" while a dish's price changed since it was added.
+                  cartText.pricesChangedSinceAdded
+                : (specificRefusal(state) ?? cartText.stateAnnouncement[state.status])}
       </div>
     </CustomerPage>
   );

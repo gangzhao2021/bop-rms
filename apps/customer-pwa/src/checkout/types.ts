@@ -33,6 +33,17 @@ export interface CheckoutQuote {
     readonly quantity: number;
     readonly subtotal: CartMoney;
   }[];
+  /**
+   * WP-2423 price-hold-dish-changes (DEC-PRICE-HOLD §3): each line as this cart was first priced
+   * for it (on any phone, before any reload), when that was another quote, and what the
+   * restaurant changed about the dish since. Absent from an older server.
+   */
+  readonly sinceAdded?: readonly {
+    readonly cartItemReference: string;
+    readonly quantity: number;
+    readonly subtotal: CartMoney;
+    readonly changes: readonly ("Name" | "Allergens")[];
+  }[];
 }
 
 export type CheckoutState =

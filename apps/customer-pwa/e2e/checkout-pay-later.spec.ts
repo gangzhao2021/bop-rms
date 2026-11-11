@@ -672,7 +672,8 @@ test.describe("@production Pay-later table, the round just placed", () => {
     await page.getByRole("button", { name: "Place order · $24.86", exact: true }).click();
     await expect(page).toHaveURL(/\/dine-in\/session$/u);
     expect(table.sent).toHaveLength(1);
-    expect(table.calls.filter((call) => call === "quote")).toHaveLength(1);
+    // price-hold-dish-changes: the second tap prices it once more (the Store holds that price).
+    expect(table.calls.filter((call) => call === "quote")).toHaveLength(2);
   });
 
   test("with no price shown yet, the guest sees the total once before it's placed", async ({
@@ -723,7 +724,9 @@ test.describe("@production Pay-later table, the round just placed", () => {
     await expect(
       page.getByText("New dishes can’t be sent while the bill is being settled."),
     ).toBeVisible();
-    expect(table.calls).not.toContain("quote");
+    // price-hold-dish-changes: only the cart on screen was priced (once); the tap priced nothing.
+    expect(table.calls.filter((call) => call === "quote")).toHaveLength(1);
+    expect(table.calls.indexOf("quote")).toBe(0);
     expect(table.sent).toEqual([]);
   });
 
@@ -1129,7 +1132,8 @@ test.describe("@production Pay-later table, the round just placed", () => {
     // The next tap asks again about what the cart comes to now, with nothing saved before it.
     await placeOrder(page).click();
     await expect(main.getByRole("alert")).toContainText("This order comes to");
-    expect(table.calls.filter((call) => call === "quote")).toHaveLength(2);
+    // price-hold-dish-changes: the changed cart on screen is priced too (the price it keeps).
+    expect(table.calls.filter((call) => call === "quote")).toHaveLength(3);
     expect(table.calls).not.toContain("details-save");
   });
 
@@ -1601,7 +1605,7 @@ for (const screen of [
         moreDishes: 1,
         otherDishes: true,
         quote: (route, call) =>
-          call === 1
+          call <= 2
             ? route.fulfill({
                 status: 409,
                 json: {
@@ -1621,8 +1625,9 @@ for (const screen of [
       await expect(alert).toHaveText(
         "Synthetic dish 1 isn’t available right now, so this round hasn’t been sent. Remove Synthetic dish 1, then tap Place order.",
       );
-      // One quote, no busy wait and nothing sent.
-      expect(table.calls.filter((call) => call === "quote")).toHaveLength(1);
+      // price-hold-dish-changes: the cart on screen could not be priced (the dish is named on the
+      // tap), then the tap's one quote: no busy wait and nothing sent.
+      expect(table.calls.filter((call) => call === "quote")).toHaveLength(2);
       expect(sent).toEqual([]);
       await expect(page.getByRole("main")).not.toContainText("hasn’t been charged");
       const line = page.locator(`article[aria-labelledby="cart-item-${id(60)}"]`);

@@ -185,8 +185,16 @@ function priceCheck(quote: CheckoutQuote, seen: SeenSubtotal | null) {
 export interface SendRoundController {
   getState(): SendRoundState;
   subscribe(listener: () => void): () => void;
-  /** The guest's tap: place the round, or carry on after a stop. Only ever called from a tap. */
-  send(cart: CartView | null, seen: SeenSubtotal | null): Promise<void>;
+  /**
+   * The guest's tap: place the round, or carry on after a stop. Only ever called from a tap.
+   * `shown`: the Store's price for this cart as the cart showed it (price-hold-dish-changes); the
+   * round goes on that quote while it lasts, rather than pricing the cart a second time.
+   */
+  send(
+    cart: CartView | null,
+    seen: SeenSubtotal | null,
+    shown?: CheckoutQuote | null,
+  ): Promise<void>;
   /** The page acted on the state (opened the table, the checkout page), or the guest left. */
   reset(): void;
 }
@@ -528,12 +536,24 @@ export function createSendRoundController(
     const sent = await sendStep(active, session, options);
     return sent === "restart" ? restart(active, options) : sent;
   };
-  const run = async (cart: CartView | null, seen: SeenSubtotal | null) => {
+  const run = async (
+    cart: CartView | null,
+    seen: SeenSubtotal | null,
+    shown: CheckoutQuote | null,
+  ) => {
     const manual = state.status === "unconfirmed" || state.status === "busy";
     // The second tap on a total: this quote is what the guest agreed to.
     if (state.status === "confirm-total" && plan?.quote) {
       plan.confirmedQuote = plan.quote.quoteReference;
       plan.confirmedTotalMinor = asBig(plan.quote.total);
+      // WP-2423 price-hold-dish-changes (DEC-PRICE-HOLD §2): the round is priced once more before
+      // it goes on. Inside the hold the Store answers the same price, or a lower one when the
+      // restaurant cut it meanwhile (the guest never pays more than the menu says); a higher
+      // total than the one just confirmed stops again.
+      if (!plan.detailsSaved && !plan.sessionAttempted && !plan.sendAttempted) {
+        plan.quote = null;
+        plan.quoteOperation = keyFactory();
+      }
     }
     publish({ status: "sending" });
     const hadPlan = plan !== null;
@@ -556,6 +576,13 @@ export function createSendRoundController(
         return;
       }
       plan = newPlan(cart);
+      // The price the cart on screen was given for this very cart version, while it lasts.
+      if (
+        shown != null &&
+        shown.cartVersion === cart.cart.version &&
+        Date.parse(shown.expiresAt) > now()
+      )
+        plan.quote = shown;
     }
     if (seen !== null) plan.seen = seen;
     const options: CheckoutMutationOptions = manual ? { busyTotalMs: manualRetryBusyTotalMs } : {};
@@ -588,9 +615,9 @@ export function createSendRoundController(
         listeners.delete(listener);
       };
     },
-    send(cart: CartView | null, seen: SeenSubtotal | null) {
+    send(cart: CartView | null, seen: SeenSubtotal | null, shown: CheckoutQuote | null = null) {
       if (flight !== null) return flight;
-      const current = run(cart, seen).finally(() => {
+      const current = run(cart, seen, shown).finally(() => {
         flight = null;
       });
       flight = current;

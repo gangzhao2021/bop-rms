@@ -190,12 +190,12 @@ for (const screen of [
       else await proceed.click();
       const alert = page.getByRole("alert").filter({ hasText: "Synthetic mocha" });
       await expect(alert).toHaveText(
-        "We can make only 1 Synthetic mocha along with the rest of your order — some items use the same ingredients. This order hasn’t been charged. Change Synthetic mocha to 1 or change other items, then try again. Change your cart",
+        "We can make only 1 Synthetic mocha along with the rest of your order — some items use the same ingredients. This order hasn’t been charged. Change Synthetic mocha to 1 or change other items, then try again.",
       );
-      await expect(alert.getByRole("link", { name: "Change your cart" })).toHaveAttribute(
-        "href",
-        "/cart",
-      );
+      // price-hold-dish-changes (v15 batch 6): one way to the cart, the page's main action.
+      const change = page.getByRole("main").getByRole("link", { name: "Change your cart" });
+      await expect(change).toHaveCount(1);
+      await expect(change).toHaveAttribute("href", "/cart");
       // The cart is kept as it was; nothing moved on to payment.
       await expect(page).toHaveURL(/\/checkout$/u);
       await expect(page.getByText("Synthetic latte", { exact: true })).toBeVisible();
@@ -206,7 +206,7 @@ for (const screen of [
       expect(
         await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
       ).toBe(true);
-      await alert.getByRole("link", { name: "Change your cart" }).click();
+      await change.click();
       await expect(page).toHaveURL(/\/cart$/u);
       expect(failures).toEqual([]);
     });

@@ -66,6 +66,9 @@ function parseQuote(value: unknown, expectedCartVersion: number): CheckoutQuote 
   // WP-2423 M74: each line's price before tax, absent from an older server.
   const withLines =
     root.quote !== null && typeof root.quote === "object" && Object.hasOwn(root.quote, "lines");
+  // price-hold-dish-changes: each line as the cart was first priced for it, when the Store says.
+  const withSinceAdded =
+    withLines && Object.hasOwn(root.quote as Record<string, unknown>, "sinceAdded");
   const raw = exact(root.quote, [
     "quoteReference",
     "quoteVersion",
@@ -81,6 +84,7 @@ function parseQuote(value: unknown, expectedCartVersion: number): CheckoutQuote 
     "blockingReasons",
     "priceChange",
     ...(withLines ? ["lines"] : []),
+    ...(withSinceAdded ? ["sinceAdded"] : []),
   ]);
   const quoteCurrency = text(raw.currency, currency);
   if (root.schemaVersion !== 1 || raw.cartVersion !== expectedCartVersion)
@@ -149,7 +153,44 @@ function parseQuote(value: unknown, expectedCartVersion: number): CheckoutQuote 
           }),
     ...(tips === undefined ? {} : { tips }),
     ...(withLines ? { lines: quoteLines(raw.lines, quoteCurrency) } : {}),
+    ...(withSinceAdded ? { sinceAdded: sinceAddedLines(raw.sinceAdded, quoteCurrency) } : {}),
   });
+}
+/**
+ * WP-2423 price-hold-dish-changes (DEC-PRICE-HOLD §3, M74): each line as the cart was first
+ * priced for it, and what the restaurant changed about the dish since ("Name", "Allergens").
+ */
+function sinceAddedLines(
+  value: unknown,
+  quoteCurrency: string,
+): NonNullable<CheckoutQuote["sinceAdded"]> {
+  if (!Array.isArray(value) || value.length > 200) throw new Error("invalid");
+  const seen = new Set<string>();
+  return Object.freeze(
+    value.map((entry: unknown) => {
+      const line = exact(entry, ["cartItemReference", "quantity", "subtotal", "changes"]);
+      const cartItemReference = text(line.cartItemReference, uuidV7);
+      const subtotal = money(line.subtotal);
+      const changes = line.changes;
+      if (
+        seen.has(cartItemReference) ||
+        subtotal.currency !== quoteCurrency ||
+        subtotal.amountMinor.startsWith("-") ||
+        !Array.isArray(changes) ||
+        changes.length > 2 ||
+        changes.some((change) => change !== "Name" && change !== "Allergens") ||
+        new Set(changes).size !== changes.length
+      )
+        throw new Error("invalid");
+      seen.add(cartItemReference);
+      return Object.freeze({
+        cartItemReference,
+        quantity: integer(line.quantity),
+        subtotal,
+        changes: Object.freeze([...changes]) as readonly ("Name" | "Allergens")[],
+      });
+    }),
+  );
 }
 /** WP-2423 M74: one entry per cart line, each line once, in the quote's currency. */
 function quoteLines(value: unknown, quoteCurrency: string): NonNullable<CheckoutQuote["lines"]> {

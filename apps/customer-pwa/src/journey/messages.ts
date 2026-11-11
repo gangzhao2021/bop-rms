@@ -480,6 +480,22 @@ export const cartText = Object.freeze({
   get acceptAtCheckout() {
     return t("Checkout asks you to accept the new prices before you pay.");
   },
+  /**
+   * WP-2423 price-hold-dish-changes (DEC-PRICE-HOLD §3): a dish the restaurant renamed or whose
+   * allergens it changed since it was added, or a price that went up, is confirmed before ordering.
+   */
+  get dishesChangedSinceAdded() {
+    return t("Some dishes changed since you added them.");
+  },
+  get confirmChangesAtCheckout() {
+    return t("Checkout asks you to confirm these changes before you pay.");
+  },
+  get confirmChanges() {
+    return t("I have read these changes");
+  },
+  get confirmChangesToOrder() {
+    return t("Tick the box above to place your order.");
+  },
   get someonePlacedIt() {
     return t("Someone at your table just placed this order.");
   },

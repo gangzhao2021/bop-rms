@@ -172,6 +172,8 @@ describe("CUST-CHECKOUT page contract", () => {
     expect(html).toMatch(
       /<a[^>]*class="checkout-continue__button"[^>]*href="\/cart"[^>]*>Change your cart<\/a>/u,
     );
+    // price-hold-dish-changes (v15 batch 6): one way to the cart, not two identical links.
+    expect(html.match(/>Change your cart</gu)).toHaveLength(1);
     expect(html).not.toMatch(/<button[^>]*class="checkout-continue__button"/u);
   });
 
@@ -206,6 +208,7 @@ describe("CUST-CHECKOUT page contract", () => {
       expect(html).toMatch(
         /<a[^>]*class="checkout-continue__button"[^>]*href="\/cart"[^>]*>Change your cart<\/a>/u,
       );
+      expect(html.match(/>Change your cart</gu)).toHaveLength(1);
       expect(html).not.toMatch(/<button[^>]*class="checkout-continue__button"/u);
     },
   );
@@ -361,6 +364,53 @@ describe("WP-2423 guest-payment-state: what the guest pays, and until when", () 
     expect(html).toMatch(/<button[^>]*class="checkout-continue__button"[^>]*disabled=""/u);
     // The line itself shows the Store's price for it, never a blank.
     expect(html).toContain('<span class="checkout-items__amount">$5.99</span>');
+  });
+
+  it("price-hold-dish-changes (DEC-PRICE-HOLD §3): a dish the Store says was renamed or given other allergens is named and ticked before paying", () => {
+    const quote = {
+      ...priced("549"),
+      sinceAdded: [
+        {
+          cartItemReference: id(2),
+          quantity: 1,
+          subtotal: { amountMinor: "549", currency: "CAD" },
+          changes: ["Name", "Allergens"] as const,
+        },
+      ],
+    };
+    const html = render({ status: "ready", cart, quote });
+    expect(html).toContain("Changed since you added it:");
+    expect(html).toContain("Synthetic tea was renamed since you added it.");
+    // The menu is not read in this render: the guest is told to ask, never told nothing changed.
+    expect(html).toContain(
+      "Synthetic tea allergens changed since you added it. Ask staff before you order.",
+    );
+    expect(html).toContain("I have read these changes");
+    expect(html).toMatch(/<button[^>]*class="checkout-continue__button"[^>]*disabled=""/u);
+    // A first price that differs is listed as a price change (after a reload too).
+    const rose = render({
+      status: "ready",
+      cart,
+      quote: {
+        ...priced("599"),
+        sinceAdded: [
+          {
+            cartItemReference: id(2),
+            quantity: 1,
+            subtotal: { amountMinor: "549", currency: "CAD" },
+            changes: [],
+          },
+        ],
+      },
+    });
+    expect(rose).toContain("Synthetic tea: $5.49 → $5.99");
+    expect(rose).toContain("I accept the new prices");
+    expect(rose).not.toContain("I have read these changes");
+    // Nothing changed: nothing is asked.
+    clearSeenPrices();
+    const same = render({ status: "ready", cart, quote: priced("549") });
+    expect(same).not.toContain("Changed since you added it:");
+    expect(same).not.toContain("I have read these changes");
   });
 
   it("M74: a decrease is listed without asking anything", () => {

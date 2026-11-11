@@ -1761,6 +1761,16 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "价格只再为你保留 1 分钟。请现在继续，否则会重新核价。",
   "New total {total}": "新合计 {total}",
   "I accept the new prices": "我接受新价格",
+  "Some dishes changed since you added them.": "有菜在你加入购物车后改动了。",
+  "Checkout asks you to confirm these changes before you pay.":
+    "结账时会请你先确认这些改动再付款。",
+  "I have read these changes": "我已看过这些改动",
+  "Tick the box above to place your order.": "请先勾选上面的方框再下单。",
+  "Changed since you added it:": "加入购物车后有改动：",
+  "{dish} was renamed since you added it.": "{dish}在你加入购物车后改了名。",
+  "{dish} allergens changed since you added it. Ask staff before you order.":
+    "{dish}的过敏原在你加入购物车后有改动。点单前请先问店员。",
+  "{dish} allergens now: {allergens}.": "{dish}现在的过敏原：{allergens}。",
   "A tip can’t be more than the order itself ({subtotal}). Ask staff if you’d like to leave more.":
     "小费不能超过订单金额（{subtotal}）。如想多给，请告诉店员。",
   "Tip {tip} on a {subtotal} order?": "确定给 {subtotal} 的订单付 {tip} 小费吗？",
