@@ -325,6 +325,7 @@ export * from "./infrastructure/persistence/dining-table-settlement-store.js";
 export {
   createPostgresRefundRecoveryStore,
   listRefundRecoveriesByBusinessDate,
+  listRefundRecoveriesRecordedBetween,
   listRefundRecoveriesByOrders,
   refundRecoveryMethods,
   refundRecoveryReasons,

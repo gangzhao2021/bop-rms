@@ -949,6 +949,8 @@ const settlementView = {
     tipMinor: "100",
     recordedAfterOutageCount: 1,
     refunded: { count: 0, amountMinor: "0", currencyCode: "CAD" },
+    // WP-2423 M163: nothing charged back on the machine.
+    takenBack: { count: 0, amountMinor: "0", currencyCode: "CAD" },
   },
   // DEC-DINE-IN-PAY-LATER: tables paid in cash, and bills written off when guests left unpaid.
   cash: {
@@ -956,7 +958,9 @@ const settlementView = {
     tipMinor: "0",
     roundingMinor: "-1",
     refunded: { count: 1, amountMinor: "200", currencyCode: "CAD" },
-    netMinor: "845",
+    // WP-2423 M163: $5.00 given back in cash after a refund made by mistake, in the net.
+    takenBack: { count: 1, amountMinor: "500", currencyCode: "CAD" },
+    netMinor: "1345",
     recordedAfterOutageCount: 0,
   },
   unpaidWriteOffs: {
@@ -976,6 +980,10 @@ const settlementView = {
     amountMinor: "500",
     currencyCode: "CAD",
     recordedBy: [{ name: "Store Manager", count: 1, amountMinor: "500" }],
+    byMethod: {
+      cash: { count: 1, amountMinor: "500", currencyCode: "CAD" },
+      cardMachine: { count: 0, amountMinor: "0", currencyCode: "CAD" },
+    },
   },
   dayEndCheck: null,
   projectedAt: at(30),

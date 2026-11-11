@@ -105,6 +105,60 @@ describe("WP-2423 P1 settlement report", () => {
     ).not.toContain("written off");
   });
 
+  it("WP-2423 M163: money taken back is split by method and in Net cash and Card machine net, to the cent", () => {
+    const amount = (count: number, amountMinor: string) => ({
+      count,
+      amountMinor,
+      currencyCode: "CAD",
+    });
+    const html = render({
+      ...settlementViewFixture(),
+      cardMachine: {
+        taken: amount(1, "900"),
+        tipMinor: "100",
+        recordedAfterOutageCount: 0,
+        refunded: amount(0, "0"),
+        takenBack: amount(1, "125"),
+      },
+      cash: {
+        received: amount(1, "1045"),
+        tipMinor: "0",
+        roundingMinor: "0",
+        refunded: amount(1, "200"),
+        takenBack: amount(1, "500"),
+        // Received less refunded plus taken back: what the drawer holds from tables.
+        netMinor: "1345",
+        recordedAfterOutageCount: 0,
+      },
+      moneyTakenBack: {
+        ...amount(2, "625"),
+        recordedBy: [{ name: "Sam", count: 2, amountMinor: "625" }],
+        byMethod: { cash: amount(1, "500"), cardMachine: amount(1, "125") },
+      },
+    });
+    expect(html).toContain("Charged back on card machine");
+    expect(html).toContain("Cash taken back");
+    // The machine's batch: $9.00 taken, nothing refunded, $1.25 charged back.
+    expect(html).toContain("$10.25");
+    expect(html).toContain("$13.45");
+    expect(html).toContain("In cash $5.00 · charged on the card machine $1.25");
+    expect(html).toContain(
+      "the cash is in Net cash and the card-machine charge in Card machine net",
+    );
+    expect(html).not.toContain("net refunds are refunds less this");
+    // A split that does not add up to the total is refused.
+    expect(() =>
+      parseSettlementView({
+        ...settlementViewFixture(),
+        moneyTakenBack: {
+          ...amount(2, "625"),
+          recordedBy: [],
+          byMethod: { cash: amount(1, "500"), cardMachine: amount(1, "100") },
+        },
+      }),
+    ).toThrow();
+  });
+
   it("WP-2423 item 8 ① segment 2: lists the day's comps and discounts on their own line", () => {
     const html = render({
       ...settlementViewFixture(),

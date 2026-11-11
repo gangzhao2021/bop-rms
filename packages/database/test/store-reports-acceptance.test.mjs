@@ -722,6 +722,8 @@ it("reports a business day's sales, items, hours and tips, matches the settlemen
         tipMinor: "50",
         recordedAfterOutageCount: 0,
         refunded: { count: 2, amountMinor: "791", currencyCode: "CAD" },
+        // WP-2423 M163: nothing charged back on the machine after a refund made by mistake.
+        takenBack: { count: 0, amountMinor: "0", currencyCode: "CAD" },
       });
       assert.equal(
         BigInt(day.captured.amountMinor) + BigInt(day.cardMachine.taken.amountMinor),
@@ -868,7 +870,7 @@ it("reports a business day's sales, items, hours and tips, matches the settlemen
         summaryCsv,
         new RegExp(
           // Comps (none) after discounts; cash and written-off tables (none) after the channels.
-          `\\r\\n${today},open \\(so far\\),5,4,31\\.00,0\\.00,0\\.00,0,31\\.00,0\\.00,4\\.03,4\\.03,3\\.50,38\\.53,7\\.91,30\\.62,30\\.12,8\\.41,0\\.00,0\\.00,7\\.91,0\\.00,0\\.00,0,0\\.00,0,0\\.00,CAD,0\\.00,0,0\\.00,7\\.00,0\\.91,0\\.00,24\\.00,3\\.12\\r\\n$`,
+          `\\r\\n${today},open \\(so far\\),5,4,31\\.00,0\\.00,0\\.00,0,31\\.00,0\\.00,4\\.03,4\\.03,3\\.50,38\\.53,7\\.91,30\\.62,30\\.12,8\\.41,0\\.00,0\\.00,7\\.91,0\\.00,0\\.00,0,0\\.00,0,0\\.00,CAD,0\\.00,0,0\\.00,7\\.00,0\\.91,0\\.00,24\\.00,3\\.12,0\\.00,0\\.00,0\\.00\\r\\n$`,
           "u",
         ),
       );

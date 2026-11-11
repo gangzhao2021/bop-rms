@@ -45,6 +45,11 @@ export interface MerchantSettlementCardMachine {
   /** Payments entered afterwards from paper orders taken during an outage. */
   readonly recordedAfterOutageCount: number;
   readonly refunded: MerchantSettlementAmount;
+  /**
+   * WP-2423 M163: charged back on the machine after a refund made by mistake; the machine's batch
+   * total is taken less refunded plus this.
+   */
+  readonly takenBack: MerchantSettlementAmount;
 }
 /**
  * DEC-DINE-IN-PAY-LATER (cash): what the Store took in cash for tables in the day (rounding to 5
@@ -56,6 +61,9 @@ export interface MerchantSettlementCash {
   readonly tipMinor: string;
   readonly roundingMinor: string;
   readonly refunded: MerchantSettlementAmount;
+  /** WP-2423 M163: cash taken back after a refund made by mistake (in the drawer). */
+  readonly takenBack: MerchantSettlementAmount;
+  /** Received less refunded plus taken back: what the drawer should hold from tables. */
   readonly netMinor: string;
   /** Cash payments entered afterwards from paper during an outage. */
   readonly recordedAfterOutageCount: number;
@@ -93,10 +101,18 @@ export interface MerchantSettlementView {
   readonly comps: MerchantSettlementAmount | null;
   /**
    * WP-2423 M163 (DEC-OWNER-DEFAULTS-2026-11-06 item 5): money taken back in the day after refunds
-   * made by mistake, with who recorded how much. The refunds above stay as they were; net refunds
-   * are refunds less this. Null when not read.
+   * made by mistake, with who recorded how much and by how it came back. The refunds above stay
+   * as they were; each method's part is counted in the cash and card-machine nets. Null when not
+   * read.
    */
-  readonly moneyTakenBack: MerchantSettlementWriteOffs | null;
+  readonly moneyTakenBack:
+    | (MerchantSettlementWriteOffs & {
+        readonly byMethod: {
+          readonly cash: MerchantSettlementAmount;
+          readonly cardMachine: MerchantSettlementAmount;
+        };
+      })
+    | null;
   /**
    * WP-2423: charges the payment provider took in the day that match no Order, and refunds of such
    * charges in the day. The settlement statement counts both on the store's side; the Captured and
@@ -223,7 +239,7 @@ export function createMerchantSettlementRead(options: {
     tx: ConsumerTransaction,
     scope: MerchantSettlementScope,
     window: MerchantSettlementWindow,
-  ): Promise<MerchantSettlementWriteOffs | null>;
+  ): Promise<MerchantSettlementView["moneyTakenBack"]>;
   unmatchedProviderCharges?(
     tx: ConsumerTransaction,
     scope: MerchantSettlementScope,

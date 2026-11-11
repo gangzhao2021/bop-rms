@@ -44,6 +44,18 @@ export interface StoreSalesReportInput {
   }[];
   readonly orders: readonly StoreSalesOrder[];
   /**
+   * WP-2423 M163 (DEC-OWNER-DEFAULTS-2026-11-06 item 5): money taken back after a refund made by
+   * mistake, by when it was recorded and how (cash into the drawer, or charged on the card
+   * machine). Counted on its own line, by payment method, never folded into refunds or sales; the
+   * drawer and the machine's batch include it. Absent: none.
+   */
+  readonly moneyTakenBack?: readonly {
+    readonly orderReference: string;
+    readonly method: "Cash" | "CardMachine";
+    readonly amountMinor: bigint;
+    readonly recordedAt: string;
+  }[];
+  /**
    * WP-2423 item 8 ① segment 2: comps and discounts managers decided in the range (and their
    * Orders are in `orders`). A round whose every dish was comped owes nothing, so it has no
    * payment line: its dishes and comps count on the day the (last) comp was decided.
@@ -107,6 +119,9 @@ interface Totals {
   /** DEC-DINE-IN-PAY-LATER: tables written off unpaid (not collected, not in the sums above). */
   writeOffCount: number;
   writeOffMinor: bigint;
+  /** WP-2423 M163: money taken back after refunds made by mistake (not in the sums above). */
+  takenBackCount: number;
+  takenBackMinor: bigint;
   /** Orders refunded in full the day they were paid: taken and given back, not in the sums above. */
   cancelledOrders: Set<string>;
   cancelledMinor: bigint;
@@ -131,6 +146,8 @@ const totals = (): Totals => ({
   roundingMinor: 0n,
   writeOffCount: 0,
   writeOffMinor: 0n,
+  takenBackCount: 0,
+  takenBackMinor: 0n,
   unmatchedMinor: 0n,
   unmatchedCount: 0,
   refundCount: 0,
@@ -350,6 +367,20 @@ function computeSales(
     for (const t of [f.all, f.kinds.get("DineIn") ?? fail()]) {
       t.writeOffCount++;
       t.writeOffMinor += writeOff.amountMinor;
+    }
+  }
+
+  // WP-2423 M163: money taken back, on the day it was recorded, by how it came back.
+  for (const recovery of input.moneyTakenBack ?? []) {
+    const day = dayOf(recovery.recordedAt);
+    if (day === null || recovery.amountMinor <= 0n) return fail();
+    const f = facts.get(day.businessDate) ?? fail();
+    const order = orders.get(recovery.orderReference);
+    const groups = [f.all, f.channels.get(recovery.method) ?? fail()];
+    if (order !== undefined) groups.push(f.kinds.get(kindOf(order)) ?? fail());
+    for (const t of groups) {
+      t.takenBackCount++;
+      t.takenBackMinor += recovery.amountMinor;
     }
   }
 
@@ -812,6 +843,7 @@ function computeSales(
   const merge = (target: Totals, source: Totals) => {
     target.paymentCount += source.paymentCount;
     target.writeOffCount += source.writeOffCount;
+    target.takenBackCount += source.takenBackCount;
     target.compCount += source.compCount;
     target.pointsCount += source.pointsCount;
     for (const order of source.orders) target.orders.add(order);
@@ -829,6 +861,7 @@ function computeSales(
       "collectedMinor",
       "roundingMinor",
       "writeOffMinor",
+      "takenBackMinor",
       "unmatchedMinor",
       "refundedMinor",
       "refundedNetMinor",
@@ -970,6 +1003,10 @@ function computeSales(
       // v15 M45 (Owner rule 6): the tax still owed once refunds gave theirs back.
       taxAfterRefundsMinor: s(t.taxMinor - t.refundedTaxMinor),
       netCollectedMinor: s(t.collectedMinor - t.refundedMinor),
+      // WP-2423 M163: given back by the guest after a refund made by mistake. Not a sale and not
+      // less refunds: the drawer (cash) and the card machine's batch hold it on top of the net.
+      moneyTakenBackCount: t.takenBackCount,
+      moneyTakenBackMinor: s(t.takenBackMinor),
       // Taken and given back the same day: not in the sales, taken or refunds above.
       cancelledInFullCount: t.cancelledOrders.size,
       cancelledInFullMinor: s(t.cancelledMinor),
@@ -1188,6 +1225,11 @@ export function storeSalesReportCsv(
       "refunded_tips",
       "net_sales_after_refunds",
       "tax_after_refunds",
+      // WP-2423 M163: money taken back after refunds made by mistake (not in refunds or sales),
+      // appended so no earlier column moves.
+      "money_taken_back",
+      "cash_taken_back",
+      "card_machine_taken_back",
     ];
     return csv([
       header,
@@ -1234,6 +1276,9 @@ export function storeSalesReportCsv(
           money(sum.refunds.tipsMinor),
           money(sum.netSalesAfterRefundsMinor),
           money(sum.taxAfterRefundsMinor),
+          money(sum.moneyTakenBackMinor),
+          money(byChannel("Cash").moneyTakenBackMinor),
+          money(byChannel("CardMachine").moneyTakenBackMinor),
         ];
       }),
       // WP-2423 M160: a range asked from before the Store's records says where they begin, after

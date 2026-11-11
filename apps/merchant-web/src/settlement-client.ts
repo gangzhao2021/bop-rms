@@ -120,8 +120,11 @@ export interface SettlementView {
    * when unreadable, undefined from older servers.
    */
   readonly comps?: SettlementAmount | null;
-  /** WP-2423 M163: money taken back in the day after refunds made by mistake, by who. */
-  readonly moneyTakenBack?: SettlementWriteOffs | null;
+  /**
+   * WP-2423 M163: money taken back in the day after refunds made by mistake, by who, and by how
+   * it came back when the server says (each part is in the cash and card-machine nets).
+   */
+  readonly moneyTakenBack?: SettlementMoneyTakenBack | null;
   /** WP-2423: Provider charges matching no order, and their refunds, in the day; null when not
    * read, undefined when the server does not report them. */
   readonly unmatchedProviderCharges?: {
@@ -142,12 +145,19 @@ export interface SettlementDayEndCheck {
   readonly closedForMs: number;
   readonly supportAlerted: boolean;
 }
+export interface SettlementMoneyTakenBack extends SettlementWriteOffs {
+  /** Undefined from a server that does not split it. */
+  readonly byMethod?: { readonly cash: SettlementAmount; readonly cardMachine: SettlementAmount };
+}
 export interface SettlementCash {
   readonly received: SettlementAmount;
   readonly tipMinor: string;
   /** Cash rounding to 5 cents (may be negative). */
   readonly roundingMinor: string;
   readonly refunded: SettlementAmount;
+  /** WP-2423 M163: cash taken back after a refund made by mistake; undefined from older servers. */
+  readonly takenBack?: SettlementAmount;
+  /** Received less refunded (plus taken back, when the server reports it). */
   readonly netMinor: string;
   readonly recordedAfterOutageCount: number;
 }
@@ -158,6 +168,8 @@ export interface SettlementCardMachine {
   readonly tipMinor: string;
   readonly recordedAfterOutageCount: number;
   readonly refunded: SettlementAmount;
+  /** WP-2423 M163: charged back on the machine after a refund made by mistake (older: absent). */
+  readonly takenBack?: SettlementAmount;
 }
 
 const amount = (value: unknown): SettlementAmount | null => {
@@ -189,6 +201,31 @@ const writeOffs = (value: unknown): SettlementWriteOffs | null => {
       }),
     ),
   });
+};
+/** WP-2423 M163: the day's money taken back, split by how it came back when the server says. */
+const moneyTakenBack = (value: unknown): SettlementMoneyTakenBack | null => {
+  if (value === null) return null;
+  const split = typeof value === "object" && Object.hasOwn(value as object, "byMethod");
+  const { byMethod, ...rest } = value as Record<string, unknown>;
+  const base = writeOffs(split ? rest : value) ?? fail();
+  if (!split) return base;
+  const methods = exact(byMethod, ["cash", "cardMachine"]);
+  const cash = amount(methods.cash),
+    cardMachine = amount(methods.cardMachine);
+  if (
+    cash === null ||
+    cardMachine === null ||
+    BigInt(cash.amountMinor) + BigInt(cardMachine.amountMinor) !== BigInt(base.amountMinor) ||
+    cash.count + cardMachine.count !== base.count
+  )
+    return fail();
+  return Object.freeze({ ...base, byMethod: Object.freeze({ cash, cardMachine }) });
+};
+/** An optional section amount (WP-2423 M163 takenBack): absent from older servers. */
+const withTakenBack = (c: Record<string, unknown>) => {
+  if (!Object.hasOwn(c, "takenBack")) return {};
+  const parsed = amount(c.takenBack);
+  return parsed === null ? fail() : { takenBack: parsed };
 };
 const optionalText = (value: unknown, max: number) => (value === null ? null : text(value, max));
 const optionalMinor = (value: unknown) => (value === null ? null : minor(value));
@@ -442,6 +479,7 @@ export function parseSettlementView(value: unknown): SettlementView {
               "tipMinor",
               "recordedAfterOutageCount",
               "refunded",
+              ...(Object.hasOwn(raw.cardMachine as object, "takenBack") ? ["takenBack"] : []),
             ]);
             const taken = amount(c.taken),
               refunded = amount(c.refunded);
@@ -451,6 +489,7 @@ export function parseSettlementView(value: unknown): SettlementView {
               tipMinor: minor(c.tipMinor),
               recordedAfterOutageCount: count(c.recordedAfterOutageCount),
               refunded,
+              ...withTakenBack(c),
             });
           })(),
         }),
@@ -466,6 +505,7 @@ export function parseSettlementView(value: unknown): SettlementView {
               "refunded",
               "netMinor",
               "recordedAfterOutageCount",
+              ...(Object.hasOwn(raw.cash as object, "takenBack") ? ["takenBack"] : []),
             ]);
             const received = amount(c.received),
               refunded = amount(c.refunded);
@@ -477,6 +517,7 @@ export function parseSettlementView(value: unknown): SettlementView {
               refunded,
               netMinor: signedMinor(c.netMinor),
               recordedAfterOutageCount: count(c.recordedAfterOutageCount),
+              ...withTakenBack(c),
             });
           })(),
         }),
@@ -484,7 +525,9 @@ export function parseSettlementView(value: unknown): SettlementView {
       ? {}
       : { unpaidWriteOffs: writeOffs(raw.unpaidWriteOffs) }),
     ...(raw.comps === undefined ? {} : { comps: amount(raw.comps) }),
-    ...(raw.moneyTakenBack === undefined ? {} : { moneyTakenBack: writeOffs(raw.moneyTakenBack) }),
+    ...(raw.moneyTakenBack === undefined
+      ? {}
+      : { moneyTakenBack: moneyTakenBack(raw.moneyTakenBack) }),
     ...(raw.unmatchedProviderCharges === undefined
       ? {}
       : {

@@ -2650,6 +2650,7 @@ describe("WP-2423 P1 merchant settlement read route", () => {
       tipMinor: "180",
       recordedAfterOutageCount: 1,
       refunded: { count: 0, amountMinor: "0", currencyCode: "CAD" as const },
+      takenBack: { count: 0, amountMinor: "0", currencyCode: "CAD" as const },
     },
     cash: null,
     unpaidWriteOffs: null,

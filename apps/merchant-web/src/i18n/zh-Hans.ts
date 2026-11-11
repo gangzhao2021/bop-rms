@@ -483,8 +483,15 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{count} times": "{count} 次",
   "Recorded by {name}: {amount}": "{name} 记录：{amount}",
   "someone no longer on staff": "已离职员工",
-  "Refunded too much by mistake and given back by the guest. The refunds above stay as they were; net refunds are refunds less this.":
-    "多退了钱、顾客又还回来的金额。上面的退款保持不变；净退款为退款减去这一项。",
+  "Refunded too much by mistake and given back by the guest. The refunds above stay as they were.":
+    "误多退、客人退回的钱。上面的退款保持不变。",
+  "Refunded too much by mistake and given back by the guest. The refunds above stay as they were; the cash is in Net cash and the card-machine charge in Card machine net.":
+    "误多退、客人退回的钱。上面的退款保持不变；现金已计入“现金净额”，刷卡机收回已计入“刷卡机净额”。",
+  "In cash {cash} · charged on the card machine {cardMachine}":
+    "现金 {cash} · 刷卡机收回 {cardMachine}",
+  "Charged back on card machine": "刷卡机收回",
+  "Cash taken back": "收回的现金",
+  "Money taken back after a refund made by mistake": "误退后收回的钱",
   Note: "备注",
   "Open the payment": "打开这笔付款",
   "Asked by {name}, waiting for you to send": "{name} 提交，等你发送",
@@ -497,6 +504,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Request recorded for {total}. Nothing is refunded yet: a manager or the owner sends it from Approvals.":
     "已记录 {total} 的退款申请。还没有退款：由店长或店主在“审批”里发出。",
   "A manager or the owner sends it.": "由店长或店主发出。",
+  "Cash taken back after a refund made by mistake": "误退后收回的现金",
+  "Money taken back after refunds made by mistake": "误退后收回的钱",
+  "Counted in the table cash and the card-machine batch": "已计入桌台现金和刷卡机批次",
   "The kitchen's progress couldn't be read. Check with the kitchen; unticked, the guest keeps the food.":
     "读不到厨房进度。请先问厨房；不勾选时，菜照常给客人。",
   "This was already recorded with other details, shown in the list. Nothing more was recorded. Check the list before recording again.":

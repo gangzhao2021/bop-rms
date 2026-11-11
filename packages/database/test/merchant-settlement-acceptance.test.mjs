@@ -204,6 +204,8 @@ it("loads the open business day's settlement with card-machine payments, also wh
         tipMinor: "150",
         recordedAfterOutageCount: 1,
         refunded: { count: 1, amountMinor: "1280", currencyCode: "CAD" },
+        // WP-2423 M163: nothing charged back on the machine after a refund made by mistake.
+        takenBack: { count: 0, amountMinor: "0", currencyCode: "CAD" },
       };
 
       // The open day so far, with the counter's card-machine takings apart from online ones.

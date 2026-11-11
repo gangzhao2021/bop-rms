@@ -182,6 +182,43 @@ describe("WP-2423 item 8 ② tonight's closing summary", () => {
     ])
       expect(html, text).toContain(text);
   });
+  it("WP-2423 M163: money taken back is on its own line and in the drawer and the machine's batch", () => {
+    const value = tonightSummaryFixture();
+    const report = value.report as {
+      summary: Record<string, unknown>;
+      byChannel: Record<string, unknown>[];
+      byOrderType: Record<string, unknown>[];
+      days: { summary: Record<string, unknown>; byChannel: Record<string, unknown>[] }[];
+    };
+    const taken = (row: Record<string, unknown>, count: number, minor: string) => {
+      row.moneyTakenBackCount = count;
+      row.moneyTakenBackMinor = minor;
+    };
+    const by = (rows: Record<string, unknown>[], channel: string) =>
+      rows.find((row) => row.channel === channel) ?? {};
+    for (const rows of [report.byChannel, ...report.days.map((day) => day.byChannel)]) {
+      taken(by(rows, "Online"), 0, "0");
+      taken(by(rows, "CardMachine"), 1, "125");
+      taken(by(rows, "Cash"), 1, "500");
+    }
+    taken(report.summary, 2, "625");
+    for (const day of report.days) taken(day.summary, 2, "625");
+    for (const row of report.byOrderType) taken(row, 0, "0");
+    const summary = parseTonightSummary(value);
+    expect(tonightProblems(summary)).toEqual([]);
+    const html = render(value);
+    for (const text of [
+      "Money taken back after refunds made by mistake",
+      "$6.25",
+      "Cash taken back after a refund made by mistake",
+      // Table cash $86.95 + $5.00 taken back; the batch $219.50 + $1.25 charged on the machine.
+      "$91.95",
+      "The batch total should be $220.75",
+    ])
+      expect(html, text).toContain(text);
+    // Refunds and net taken stay as they were.
+    expect(html).toContain("$491.05");
+  });
   it("v15 2026-10-30: says it matches the day-end settlement only when every payment is in sales", () => {
     expect(render(tonightSummaryFixture())).toContain("Matches the day-end settlement");
     const short = tonightSummaryFixture();

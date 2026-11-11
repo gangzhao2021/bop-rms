@@ -185,8 +185,12 @@ export function TonightSummaryView({
   const online = tonightChannel(summary, "Online"),
     machine = tonightChannel(summary, "CardMachine"),
     cash = tonightChannel(summary, "Cash");
-  const machineNet = machine === null ? 0n : BigInt(machine.netCollectedMinor);
-  const drawer = cash === null ? 0n : BigInt(cash.netCollectedMinor);
+  // WP-2423 M163: money taken back after a refund made by mistake is in the drawer (cash) and on
+  // the machine's batch (charged on it), on top of what was taken less refunds.
+  const machineNet =
+    machine === null ? 0n : BigInt(machine.netCollectedMinor) + BigInt(machine.moneyTakenBackMinor);
+  const drawer =
+    cash === null ? 0n : BigInt(cash.netCollectedMinor) + BigInt(cash.moneyTakenBackMinor);
   // v15 2026-10-28 (a) and M40: a table is listed by where its money stands. "Paid, guests still
   // seated" is only a table whose money was really taken and kept; a table that never ordered, or
   // whose rounds all came off unpaid, is listed apart, and a walkout stays with the write-offs.
@@ -306,7 +310,8 @@ export function TonightSummaryView({
             )}
           </tbody>
         </table>
-        {cash !== null && (cash.paymentCount > 0 || cash.refundCount > 0) ? (
+        {cash !== null &&
+        (cash.paymentCount > 0 || cash.refundCount > 0 || cash.moneyTakenBackCount > 0) ? (
           <dl className="tonight__cash">
             <Row label={t("Cash rounding")} value={money(cash.cashRoundingMinor)} muted />
             <Row
@@ -315,6 +320,13 @@ export function TonightSummaryView({
               value={minus(cash.refundsMinor)}
               muted
             />
+            {cash.moneyTakenBackCount > 0 ? (
+              <Row
+                label={t("Cash taken back after a refund made by mistake")}
+                value={money(cash.moneyTakenBackMinor)}
+                muted
+              />
+            ) : null}
             <Row
               label={t("Table cash this system recorded (not the whole cash drawer)")}
               value={money(drawer)}
@@ -332,6 +344,14 @@ export function TonightSummaryView({
           {/* v15 M45 (Owner rule 6): the sales and tax that stay once every refund is taken off. */}
           <Row label={t("Net sales after refunds")} value={money(s.netSalesAfterRefundsMinor)} />
           <Row label={t("Tax after refunds")} value={money(s.taxAfterRefundsMinor)} />
+          {s.moneyTakenBackCount > 0 ? (
+            // WP-2423 M163: its own line, never less refunds or a sale; in the drawer and batch.
+            <Row
+              label={t("Money taken back after refunds made by mistake")}
+              detail={t("Counted in the table cash and the card-machine batch")}
+              value={money(s.moneyTakenBackMinor)}
+            />
+          ) : null}
         </dl>
         <ul className="tonight__checks">
           {machine !== null ? (

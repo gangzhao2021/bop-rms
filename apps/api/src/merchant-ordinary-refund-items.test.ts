@@ -244,7 +244,7 @@ it("WP-2423 M10: a kitchen read that failed is not known, never read as not made
   d.kitchenFails = true;
   try {
     const f = setup();
-    const read = (await f.operation(f.input)) as { items: { kitchen: unknown }[] };
+    const read = await f.operation(f.input);
     expect(read.items.map((item) => item.kitchen)).toEqual([null, null]);
   } finally {
     d.kitchenFails = false;

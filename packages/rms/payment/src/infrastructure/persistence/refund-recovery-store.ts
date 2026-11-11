@@ -126,6 +126,29 @@ export async function listRefundRecoveriesByBusinessDate(
 }
 
 /**
+ * The recoveries recorded in [startsAt, endsAt) at the Store (the Store sales reports and Today's
+ * summary count each on the business day of its recording, by how it came back). Caller authorizes.
+ */
+export async function listRefundRecoveriesRecordedBetween(
+  tx: ConsumerTransaction,
+  scope: Scope,
+  window: { readonly startsAt: string; readonly endsAt: string },
+): Promise<readonly RefundRecovery[]> {
+  const startsAt = String(parsePaymentInstant(window.startsAt)),
+    endsAt = String(parsePaymentInstant(window.endsAt));
+  if (startsAt >= endsAt) return fail("REFUND_RECOVERY_INPUT_INVALID");
+  await setScope(tx, scope);
+  const found = await tx.query<Record<string, unknown>>(
+    "SELECT " +
+      selection +
+      " FROM rms_payment.refund_recovery WHERE brand_id=$1 AND store_id=$2 AND recorded_at>=$3::timestamptz AND recorded_at<$4::timestamptz ORDER BY recorded_at,recovery_id LIMIT 5001",
+    [ref(scope.brandReference), ref(scope.storeReference), startsAt, endsAt],
+  );
+  if (found.rows.length > 5000) return fail("REFUND_RECOVERY_UNAVAILABLE");
+  return Object.freeze(found.rows.map(bind));
+}
+
+/**
  * Records one recovery, or answers the one already recorded for its operation (a retry). Under the
  * Order's refund fence: never more than the Order's confirmed refunds (online, card machine and
  * table, Payment's own position) less what was already taken back. Refunds still pending or not

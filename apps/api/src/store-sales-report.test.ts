@@ -627,10 +627,10 @@ describe("store sales report (WP-2423 Q14)", () => {
     expect(summary.startsWith("﻿")).toBe(true);
     const lines = summary.slice(1).trimEnd().split("\r\n");
     expect(lines[0]).toBe(
-      "business_date,day_status,payments,orders,gross_sales,discounts,comps_and_discounts_by_manager,comps_and_discounts_count,net_sales,service_charges,tax_synthetic_tax,tax_total,tips,total_collected,refunds,net_collected,online_collected,card_machine_collected,cash_collected,online_refunds,card_machine_refunds,cash_refunds,cash_rounding,unpaid_write_offs,unpaid_write_off_amount,cancelled_refunded_in_full_orders,cancelled_refunded_in_full_amount,currency,points_used,points_count,comps_and_discounts_with_tax,refunded_sales,refunded_tax,refunded_tips,net_sales_after_refunds,tax_after_refunds",
+      "business_date,day_status,payments,orders,gross_sales,discounts,comps_and_discounts_by_manager,comps_and_discounts_count,net_sales,service_charges,tax_synthetic_tax,tax_total,tips,total_collected,refunds,net_collected,online_collected,card_machine_collected,cash_collected,online_refunds,card_machine_refunds,cash_refunds,cash_rounding,unpaid_write_offs,unpaid_write_off_amount,cancelled_refunded_in_full_orders,cancelled_refunded_in_full_amount,currency,points_used,points_count,comps_and_discounts_with_tax,refunded_sales,refunded_tax,refunded_tips,net_sales_after_refunds,tax_after_refunds,money_taken_back,cash_taken_back,card_machine_taken_back",
     );
     expect(lines[1]).toBe(
-      "2026-10-14,open (so far),5,4,33.00,1.00,0.00,0,32.00,0.00,4.17,4.17,3.50,39.67,19.22,20.45,30.69,8.98,0.00,15.26,3.96,0.00,0.00,0,0.00,0,0.00,CAD,0.00,0,0.00,17.00,2.22,0.00,15.00,1.95",
+      "2026-10-14,open (so far),5,4,33.00,1.00,0.00,0,32.00,0.00,4.17,4.17,3.50,39.67,19.22,20.45,30.69,8.98,0.00,15.26,3.96,0.00,0.00,0,0.00,0,0.00,CAD,0.00,0,0.00,17.00,2.22,0.00,15.00,1.95,0.00,0.00,0.00",
     );
     const items = storeSalesReportCsv(view, "items").slice(1).trimEnd().split("\r\n");
     expect(items[0]).toBe(
@@ -742,6 +742,55 @@ describe("store sales report (WP-2423 Q14)", () => {
       computeStoreSalesReport({
         ...today,
         unpaidWriteOffs: [{ amountMinor: 1n, decidedAt: "2020-01-01T00:00:00.000Z" }],
+      }),
+    ).toThrow();
+  });
+  it("WP-2423 M163: money taken back is its own line by method, on the day recorded, so the drawer and machine reconcile", () => {
+    const plain = computeStoreSalesReport(today);
+    const view = computeStoreSalesReport({
+      ...today,
+      moneyTakenBack: [
+        {
+          orderReference: ref(400),
+          method: "Cash",
+          amountMinor: 500n,
+          recordedAt: "2026-10-14T21:00:00.000Z",
+        },
+        {
+          orderReference: ref(400),
+          method: "CardMachine",
+          amountMinor: 125n,
+          recordedAt: "2026-10-14T21:05:00.000Z",
+        },
+      ],
+    });
+    expect(view.summary.moneyTakenBackCount).toBe(2);
+    expect(view.summary.moneyTakenBackMinor).toBe("625");
+    const byChannel = (c: string) => view.byChannel.find((entry) => entry.channel === c);
+    expect(byChannel("Cash")?.moneyTakenBackMinor).toBe("500");
+    expect(byChannel("CardMachine")?.moneyTakenBackMinor).toBe("125");
+    expect(byChannel("Online")?.moneyTakenBackMinor).toBe("0");
+    expect(view.days[0]?.summary.moneyTakenBackMinor).toBe("625");
+    // Not a sale and not less refunds: takings, refunds, net and the settlement match unchanged.
+    expect(view.summary.collectedMinor).toBe(plain.summary.collectedMinor);
+    expect(view.summary.refundsMinor).toBe(plain.summary.refundsMinor);
+    expect(view.summary.netCollectedMinor).toBe(plain.summary.netCollectedMinor);
+    expect(view.reconciliation.matchesSettlement).toBe(plain.reconciliation.matchesSettlement);
+    const csv = storeSalesReportCsv(view, "summary").slice(1).trimEnd().split("\r\n");
+    // Appended after every earlier column, so accounting imports keep their columns.
+    expect(csv[1]?.endsWith(",6.25,5.00,1.25")).toBe(true);
+    // Outside the period's days it is refused (never silently dropped).
+    expect(() =>
+      computeStoreSalesReport({
+        ...today,
+        moneyTakenBack: [
+          {
+            orderReference: ref(400),
+            method: "Cash",
+            amountMinor: 1n,
+            recordedAt: "2020-01-01T00:00:00.000Z",
+          },
+        ],
       }),
     ).toThrow();
   });

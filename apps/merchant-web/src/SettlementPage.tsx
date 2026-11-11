@@ -277,15 +277,22 @@ export function SettlementReport({
                 })}
               </span>
             </li>
+            {view.cardMachine.takenBack !== undefined && view.cardMachine.takenBack.count > 0 ? (
+              // WP-2423 M163: charged on the machine after a refund made by mistake.
+              <li>
+                <span className="overview-count__label">{t("Charged back on card machine")}</span>
+                <strong className="overview-count__value">
+                  {money(view.cardMachine.takenBack)}
+                </strong>
+                <span className="overview-count__detail">
+                  {t("Money taken back after a refund made by mistake")}
+                </span>
+              </li>
+            ) : null}
             <li>
               <span className="overview-count__label">{t("Card machine net")}</span>
               <strong className="overview-count__value">
-                {formatSettlementMoney(
-                  netMinor(
-                    view.cardMachine.taken.amountMinor,
-                    view.cardMachine.refunded.amountMinor,
-                  ),
-                )}
+                {formatSettlementMoney(cardMachineNetMinor(view.cardMachine))}
               </strong>
               <span className="overview-count__detail">
                 {t("Compare with the machine's batch total")}
@@ -316,7 +323,9 @@ export function SettlementReport({
         <p className="bop-muted" role="status">
           {t("Cash payments could not be read.")}
         </p>
-      ) : view.cash.received.count === 0 && view.cash.refunded.count === 0 ? null : (
+      ) : view.cash.received.count === 0 &&
+        view.cash.refunded.count === 0 &&
+        (view.cash.takenBack?.count ?? 0) === 0 ? null : (
         <section className="store-card settlement__cash" aria-labelledby="settlement-cash">
           <header>
             <h3 id="settlement-cash">{t("Cash")}</h3>
@@ -343,6 +352,16 @@ export function SettlementReport({
                 })}
               </span>
             </li>
+            {view.cash.takenBack !== undefined && view.cash.takenBack.count > 0 ? (
+              // WP-2423 M163: given back in cash after a refund made by mistake (in the drawer).
+              <li>
+                <span className="overview-count__label">{t("Cash taken back")}</span>
+                <strong className="overview-count__value">{money(view.cash.takenBack)}</strong>
+                <span className="overview-count__detail">
+                  {t("Money taken back after a refund made by mistake")}
+                </span>
+              </li>
+            ) : null}
             <li>
               <span className="overview-count__label">{t("Net cash")}</span>
               <strong className="overview-count__value">
@@ -457,6 +476,17 @@ export function SettlementReport({
               </span>
             </li>
           </ul>
+          {view.moneyTakenBack.byMethod === undefined ? null : (
+            <p>
+              {t("In cash {cash} · charged on the card machine {cardMachine}", {
+                cash: formatSettlementMoney(view.moneyTakenBack.byMethod.cash.amountMinor, "CAD"),
+                cardMachine: formatSettlementMoney(
+                  view.moneyTakenBack.byMethod.cardMachine.amountMinor,
+                  "CAD",
+                ),
+              })}
+            </p>
+          )}
           {view.moneyTakenBack.recordedBy.map((person, index) => (
             <p key={index}>
               {t("Recorded by {name}: {amount}", {
@@ -466,9 +496,13 @@ export function SettlementReport({
             </p>
           ))}
           <p className="bop-muted">
-            {t(
-              "Refunded too much by mistake and given back by the guest. The refunds above stay as they were; net refunds are refunds less this.",
-            )}
+            {view.moneyTakenBack.byMethod === undefined
+              ? t(
+                  "Refunded too much by mistake and given back by the guest. The refunds above stay as they were.",
+                )
+              : t(
+                  "Refunded too much by mistake and given back by the guest. The refunds above stay as they were; the cash is in Net cash and the card-machine charge in Card machine net.",
+                )}
           </p>
         </section>
       )}
@@ -883,6 +917,16 @@ type State =
   | { readonly kind: "Ready"; readonly view: SettlementView };
 
 /** WP-2423 P1 (PAY-RECONCILIATION): the Store's day-end page. */
+/**
+ * WP-2423 M163: what the machine's batch should total: taken less refunded, plus any charge
+ * taken back on it after a refund made by mistake.
+ */
+export function cardMachineNetMinor(card: NonNullable<SettlementView["cardMachine"]>): string {
+  return (
+    BigInt(netMinor(card.taken.amountMinor, card.refunded.amountMinor)) +
+    BigInt(card.takenBack?.amountMinor ?? "0")
+  ).toString();
+}
 export function SettlementPage({
   storeLabel,
   timeZone,

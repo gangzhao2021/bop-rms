@@ -207,6 +207,35 @@ export function createPersistentMerchantSettlement(options: {
      * Read once per transaction and window.
      */
     const tableWindows = new Map<string, Promise<TableWindow>>();
+    /**
+     * WP-2423 M163: money taken back on the business day, by how it came back (cash into the
+     * drawer, or charged on the card machine), so each section's net holds it.
+     */
+    const takenBack = async (
+      tx: ConsumerTransaction,
+      scope: MerchantSettlementScope,
+      window: MerchantSettlementWindow,
+    ) => {
+      if (!(await guard(scope)(tx))) return unavailable();
+      const recoveries = await listRefundRecoveriesByBusinessDate(
+        tx,
+        {
+          tenantReference: scope.tenantReference,
+          brandReference: scope.brandReference,
+          storeReference: scope.storeReference,
+        },
+        window.businessDate,
+      );
+      if (!(await guard(scope)(tx))) return unavailable();
+      const of = (method: "Cash" | "CardMachine") => {
+        const listed = recoveries.filter((recovery) => recovery.method === method);
+        return {
+          count: listed.length,
+          amountMinor: listed.reduce((sum, recovery) => sum + recovery.amountMinor, 0n),
+        };
+      };
+      return { recoveries, cash: of("Cash"), cardMachine: of("CardMachine") };
+    };
     interface TableWindow {
       readonly card: {
         count: number;
@@ -451,6 +480,8 @@ export function createPersistentMerchantSettlement(options: {
           // DEC-DINE-IN-PAY-LATER: tables paid at the end on the same machine count with it, so
           // the takings match the machine's own day total.
           const table = (await tableWindow(tx, scope, window)).card;
+          // WP-2423 M163: charged back on the machine after a refund made by mistake.
+          const back = (await takenBack(tx, scope, window)).cardMachine;
           return {
             taken: {
               count: summary.paymentCount + table.count,
@@ -462,6 +493,11 @@ export function createPersistentMerchantSettlement(options: {
             refunded: {
               count: summary.refundCount + table.refundCount,
               amountMinor: (summary.refundedMinor + table.refundedMinor).toString(),
+              currencyCode: "CAD" as const,
+            },
+            takenBack: {
+              count: back.count,
+              amountMinor: back.amountMinor.toString(),
               currencyCode: "CAD" as const,
             },
           };
@@ -495,16 +531,8 @@ export function createPersistentMerchantSettlement(options: {
       // WP-2423 M163: money taken back on the day after refunds made by mistake, by who.
       moneyTakenBack: (tx, scope, window) =>
         optional(async () => {
-          if (!(await guard(scope)(tx))) return null;
-          const recoveries = await listRefundRecoveriesByBusinessDate(
-            tx,
-            {
-              tenantReference: scope.tenantReference,
-              brandReference: scope.brandReference,
-              storeReference: scope.storeReference,
-            },
-            window.businessDate,
-          );
+          const day = await takenBack(tx, scope, window);
+          const recoveries = day.recoveries;
           const byActor = new Map<string, { count: number; amountMinor: bigint }>();
           for (const recovery of recoveries) {
             const total = byActor.get(recovery.actorReference) ?? { count: 0, amountMinor: 0n };
@@ -534,6 +562,19 @@ export function createPersistentMerchantSettlement(options: {
               .toString(),
             currencyCode: "CAD" as const,
             recordedBy,
+            // By how it came back: each is counted in its section's net (cash, card machine).
+            byMethod: {
+              cash: {
+                count: day.cash.count,
+                amountMinor: day.cash.amountMinor.toString(),
+                currencyCode: "CAD" as const,
+              },
+              cardMachine: {
+                count: day.cardMachine.count,
+                amountMinor: day.cardMachine.amountMinor.toString(),
+                currencyCode: "CAD" as const,
+              },
+            },
           };
         }),
       // WP-2423 item 8 ① segment 2: comps and discounts managers decided in the day (by dish).
@@ -559,6 +600,8 @@ export function createPersistentMerchantSettlement(options: {
       cash: (tx, scope, window) =>
         optional(async () => {
           const { cash } = await tableWindow(tx, scope, window);
+          // WP-2423 M163: cash taken back after a refund made by mistake is in the drawer.
+          const back = (await takenBack(tx, scope, window)).cash;
           return {
             received: {
               count: cash.count,
@@ -572,7 +615,12 @@ export function createPersistentMerchantSettlement(options: {
               amountMinor: cash.refundedMinor.toString(),
               currencyCode: "CAD" as const,
             },
-            netMinor: (cash.amountMinor - cash.refundedMinor).toString(),
+            takenBack: {
+              count: back.count,
+              amountMinor: back.amountMinor.toString(),
+              currencyCode: "CAD" as const,
+            },
+            netMinor: (cash.amountMinor - cash.refundedMinor + back.amountMinor).toString(),
             recordedAfterOutageCount: cash.backEntered,
           };
         }),

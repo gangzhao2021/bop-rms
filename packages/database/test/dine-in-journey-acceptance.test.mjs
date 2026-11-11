@@ -95,7 +95,10 @@ import { createMerchantOrdinaryRefundItems } from "../../../apps/api/src/merchan
 import { createMerchantOrdinaryRefundCommand } from "../../../apps/api/src/merchant-ordinary-refund-command.ts";
 import { createOrdinaryRefundFollowThrough } from "../../../tooling/environment/pilot-ordinary-refund-follow-through.mjs";
 import { createMerchantRefundRecovery } from "../../../apps/api/src/merchant-refund-recovery.ts";
-import { listRefundRecoveriesByBusinessDate } from "../../rms/payment/src/index.ts";
+import {
+  listRefundRecoveriesByBusinessDate,
+  listRefundRecoveriesRecordedBetween,
+} from "../../rms/payment/src/index.ts";
 import { createMerchantOrdinaryRefundSendCommand } from "../../../apps/api/src/merchant-ordinary-refund-send-command.ts";
 import { createOriginalReceiptIssuance } from "../../../apps/api/src/original-receipt-issuance.ts";
 import { createRefundReceiptIssuance } from "../../../apps/api/src/refund-receipt-issuance.ts";
@@ -3391,6 +3394,18 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
       assert.deepEqual(
         day.map((recovery) => recovery.amountMinor),
         [500n],
+      );
+      // The Store sales reports and Today's summary read it by when it was recorded.
+      const recordedAt = Date.parse(taken.recovery.recordedAt);
+      const inWindow = await transactions(api).run((tx) =>
+        listRefundRecoveriesRecordedBetween(tx, ownerScope, {
+          startsAt: new Date(recordedAt - 60_000).toISOString(),
+          endsAt: new Date(recordedAt + 60_000).toISOString(),
+        }),
+      );
+      assert.deepEqual(
+        inWindow.map((recovery) => [recovery.method, recovery.amountMinor]),
+        [["Cash", 500n]],
       );
     } finally {
       vi.unstubAllEnvs();

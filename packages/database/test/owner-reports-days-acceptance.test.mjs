@@ -235,6 +235,8 @@ it("reads the Store's first business day in reports and settlement, says where r
         tipMinor: "150",
         recordedAfterOutageCount: 0,
         refunded: { count: 0, amountMinor: "0", currencyCode: "CAD" },
+        // WP-2423 M163: nothing charged back on the machine after a refund made by mistake.
+        takenBack: { count: 0, amountMinor: "0", currencyCode: "CAD" },
       };
       for (const businessDate of [first, null]) {
         const day = await settlement({ sessionCookie: cookie, businessDate });

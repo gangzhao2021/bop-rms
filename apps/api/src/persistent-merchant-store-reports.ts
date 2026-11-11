@@ -3,7 +3,10 @@ import {
   createPostgresStoreSalesOrderSource,
   listStorePriceReductionsDecided,
 } from "@rms/ordering";
-import { createPostgresStoreSalesPaymentLedger } from "@rms/payment";
+import {
+  createPostgresStoreSalesPaymentLedger,
+  listRefundRecoveriesRecordedBetween,
+} from "@rms/payment";
 import {
   createMerchantBusinessDayWindows,
   MerchantBusinessDayBeforeRecordsError,
@@ -226,14 +229,15 @@ export function createPersistentMerchantStoreReports(options: {
           const locale = /^[a-z]{2}-[A-Z]{2}$/u.test(String(value.store.locale))
             ? String(value.store.locale)
             : "en-CA";
-          const { ledger, orders, priceReductions } = await loadStoreSalesReportSources(tx, {
-            scope,
-            configuration,
-            window: { startsAt: first.startsAt, endsAt: last.endsAt },
-            observedAt: persistence.now(),
-            locale,
-            authorize: sameTransaction,
-          });
+          const { ledger, orders, priceReductions, moneyTakenBack } =
+            await loadStoreSalesReportSources(tx, {
+              scope,
+              configuration,
+              window: { startsAt: first.startsAt, endsAt: last.endsAt },
+              observedAt: persistence.now(),
+              locale,
+              authorize: sameTransaction,
+            });
           const mayExport =
             input.permission === storeReportsExportPermission ||
             (await value.authorizeAction(storeReportsExportPermission))?.effect === "Allow";
@@ -249,6 +253,7 @@ export function createPersistentMerchantStoreReports(options: {
             unpaidWriteOffs: ledger.unpaidWriteOffs,
             orders,
             priceReductions,
+            moneyTakenBack,
             mayExport,
             generatedAt: persistence.now(),
             requestedFrom: from,
@@ -382,6 +387,19 @@ export async function loadStoreSalesReportSources(
       decidedAt: record.decidedAt,
     }),
   );
+  // WP-2423 M163: money taken back in the window, on the day it was recorded, by how.
+  if ((await input.authorize(tx)) !== true) return denied();
+  const moneyTakenBack = (
+    await listRefundRecoveriesRecordedBetween(tx, input.scope, input.window)
+  ).map((recovery) =>
+    Object.freeze({
+      orderReference: recovery.orderReference,
+      method: recovery.method,
+      amountMinor: recovery.amountMinor,
+      recordedAt: recovery.recordedAt,
+    }),
+  );
+  if ((await input.authorize(tx)) !== true) return denied();
   const orders = await createPostgresStoreSalesOrderSource({
     brandReference: input.scope.brandReference,
     storeReference: input.scope.storeReference,
@@ -391,6 +409,12 @@ export async function loadStoreSalesReportSources(
     ...ledger.payments.map((payment) => payment.orderReference),
     ...ledger.refunds.map((refund) => refund.orderReference),
     ...priceReductions.map((reduction) => reduction.orderReference),
+    ...moneyTakenBack.map((recovery) => recovery.orderReference),
   ]);
-  return Object.freeze({ ledger, orders, priceReductions: Object.freeze(priceReductions) });
+  return Object.freeze({
+    ledger,
+    orders,
+    priceReductions: Object.freeze(priceReductions),
+    moneyTakenBack: Object.freeze(moneyTakenBack),
+  });
 }

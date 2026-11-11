@@ -75,6 +75,12 @@ export interface StoreReportSummary {
   /** v15 2026-11-01: orders refunded in full the day they were paid (not in the sums above). */
   readonly cancelledInFullCount: number;
   readonly cancelledInFullMinor: string;
+  /**
+   * WP-2423 M163: money taken back after refunds made by mistake (not a sale, not less refunds):
+   * the drawer (cash) and the card machine's batch hold it on top of the net. 0 from older servers.
+   */
+  readonly moneyTakenBackCount: number;
+  readonly moneyTakenBackMinor: string;
 }
 export interface StoreReportItemRow {
   readonly name: string;
@@ -178,6 +184,11 @@ const summaryKeys = [
   "cancelledInFullCount",
   "cancelledInFullMinor",
 ] as const;
+/** The summary keys, with WP-2423 M163's money taken back when the server reports it. */
+const summaryKeysOf = (value: unknown) =>
+  value !== null && typeof value === "object" && Object.hasOwn(value, "moneyTakenBackMinor")
+    ? [...summaryKeys, "moneyTakenBackCount", "moneyTakenBackMinor"]
+    : summaryKeys;
 function summary(value: Record<string, unknown>): StoreReportSummary {
   const refunds = exact(value.refunds, [
     "salesMinor",
@@ -226,6 +237,10 @@ function summary(value: Record<string, unknown>): StoreReportSummary {
     netCollectedMinor: signed(value.netCollectedMinor),
     cancelledInFullCount: count(value.cancelledInFullCount),
     cancelledInFullMinor: minor(value.cancelledInFullMinor),
+    moneyTakenBackCount:
+      value.moneyTakenBackCount === undefined ? 0 : count(value.moneyTakenBackCount),
+    moneyTakenBackMinor:
+      value.moneyTakenBackMinor === undefined ? "0" : minor(value.moneyTakenBackMinor),
   });
 }
 const channels: readonly StoreReportChannel[] = ["Online", "CardMachine", "Cash"];
@@ -347,13 +362,13 @@ export function parseStoreReportsView(value: unknown): StoreReportsView {
     startsAt: instant(raw.startsAt),
     endsAt: instant(raw.endsAt),
     includesOpenDay: bool(raw.includesOpenDay),
-    summary: summary(exact(raw.summary, summaryKeys)),
+    summary: summary(exact(raw.summary, summaryKeysOf(raw.summary))),
     byChannel: list(raw.byChannel, channels.length, (item) => {
-      const entry = exact(item, ["channel", ...summaryKeys]);
+      const entry = exact(item, ["channel", ...summaryKeysOf(item)]);
       return Object.freeze({ channel: oneOf(entry.channel, channels), ...summary(entry) });
     }),
     byOrderType: list(raw.byOrderType, 3, (item) => {
-      const entry = exact(item, ["orderType", ...summaryKeys]);
+      const entry = exact(item, ["orderType", ...summaryKeysOf(item)]);
       return Object.freeze({ orderType: oneOf(entry.orderType, orderTypes), ...summary(entry) });
     }),
     items: list(raw.items, 5000, itemRow),
@@ -390,7 +405,7 @@ export function parseStoreReportsView(value: unknown): StoreReportsView {
         businessDate: date(day.businessDate),
         status: oneOf(day.status, ["Open", "Closed"] as const),
         opensAt: opens && day.opensAt !== null ? instant(day.opensAt) : null,
-        summary: summary(exact(day.summary, summaryKeys)),
+        summary: summary(exact(day.summary, summaryKeysOf(day.summary))),
       });
     }),
     reconciliation: Object.freeze({
