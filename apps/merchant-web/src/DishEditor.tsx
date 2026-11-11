@@ -235,7 +235,7 @@ export function DishEditor({
   const [operation, setOperation] = useState<string | null>(null);
   // WP-2423 M70: a price sent by a save that got no answer may already be the dish's: until a save
   // answers, the price is sent again, compared with that one (a price put back is not lost).
-  const [unanswered, setUnanswered] = useState<string | null>(null);
+  const [unansweredPrice, setUnansweredPrice] = useState<string | null>(null);
   const sent = useRef<string | null>(null);
   useEffect(() => {
     let active = true;
@@ -311,7 +311,7 @@ export function DishEditor({
   // WP-2423 M70: a price is sent only when it differs from what the dish has now, with where it
   // changes. A new dish's first price is for every Store; at one Store there is one price.
   const priceEdited =
-    dish === null || unanswered !== null || priceMinor !== shownPrice(basis, several);
+    dish === null || unansweredPrice !== null || priceMinor !== shownPrice(basis, several);
   const scopes = priceScopeChoices(priceScopes, basis, dish === null && adopted === null);
   const chosenScope: "AllStores" | "ThisStore" | null = !priceEdited
     ? null
@@ -369,7 +369,7 @@ export function DishEditor({
     priceScope: priceEdited ? (chosenScope ?? "AllStores") : null,
     expectedPriceMinor:
       priceEdited && dish !== null
-        ? (unanswered ?? expectedFor(basis, chosenScope ?? "AllStores"))
+        ? (unansweredPrice ?? expectedFor(basis, chosenScope ?? "AllStores"))
         : null,
     choiceGroups: choicePrices.map((g) => ({
       optionSetReference: g.optionSetReference,
@@ -463,7 +463,7 @@ export function DishEditor({
     sent.current = fingerprint;
     const reference = operation ?? newOperationReference();
     setOperation(reference);
-    if (content.priceMinor !== null && dish !== null) setUnanswered(content.priceMinor);
+    if (content.priceMinor !== null && dish !== null) setUnansweredPrice(content.priceMinor);
     const result = (await client.oneStore({ ...content, operationReference: reference })) as {
       productReference?: unknown;
       choicesWaiting?: unknown;
@@ -474,7 +474,7 @@ export function DishEditor({
     // with these, not with what the page read when it opened.
     const after = parseSavedPrice(result?.price);
     if (after !== null) setBasis(after);
-    setUnanswered(null);
+    setUnansweredPrice(null);
     // Saved: what is on the form is now what the dish is.
     if (loaded.current !== null) loaded.current = JSON.stringify(content);
     return {
