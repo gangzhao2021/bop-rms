@@ -27,7 +27,10 @@ import { createMerchantDiningPartySize } from "../../../apps/api/src/merchant-di
 import { createMerchantDiningTableMove } from "../../../apps/api/src/merchant-dining-table-move.ts";
 import { createMerchantDiningTableMerge } from "../../../apps/api/src/merchant-dining-table-merge.ts";
 import { createPersistentMerchantOrderQueue } from "../../../apps/api/src/persistent-merchant-order-queue.ts";
-import { recordDiningTableBillOrder } from "../../rms/payment/src/index.ts";
+import {
+  createPostgresDiningTableSettlementStore,
+  recordDiningTableBillOrder,
+} from "../../rms/payment/src/index.ts";
 import { createMerchantDiningTableCommand } from "../../../apps/api/src/merchant-dining-table-command.ts";
 import { parseDiningJoinCapability } from "../../bop/public-capability/src/index.ts";
 import {
@@ -68,7 +71,10 @@ import {
 } from "../../rms/customer-loyalty/src/index.ts";
 import { createMerchantDiningOrderCloseCommand } from "../../../apps/api/src/merchant-dining-order-close-command.ts";
 import { loadStoreSalesReportSources } from "../../../apps/api/src/persistent-merchant-store-reports.ts";
-import { readCustomerTableBillFacts } from "../../../apps/api/src/customer-dining-session-read.ts";
+import {
+  readCustomerTableBillFacts,
+  readCustomerTablePayments,
+} from "../../../apps/api/src/customer-dining-session-read.ts";
 import { readTonightFacts } from "../../../apps/api/src/merchant-tonight-summary.ts";
 import {
   computeStoreSalesReport,
@@ -5578,6 +5584,20 @@ async function journey(journeyEnding) {
             paidParts: 1,
             partCount: null,
           });
+          // And every guest's table page: paying by dish, one paid, no number of parts (a bill
+          // of one part so far is never "1 parts", and never refused as a broken split).
+          const pagePayments = await transactions({ guc: true }).run((tx) =>
+            readCustomerTablePayments(
+              tx,
+              createPostgresDiningTableSettlementStore({
+                scope: ownerScope,
+                authorize: async () => true,
+              }),
+              orderReference,
+            ),
+          );
+          assert.deepEqual(pagePayments.splitParts, { count: null, paid: 1 });
+          assert.equal(pagePayments.splitPaid, false);
           // Phone A still showed "Pay the whole table" (no split when it opened): the table
           // changed, it is told so (never "invalid"), and nothing is started or recorded.
           const intentsBefore = created();

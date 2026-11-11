@@ -404,6 +404,35 @@ export function customerSplitParts(
   };
 }
 
+/**
+ * A table paying at the end: its payments so far and, for a split bill, what the guest's page
+ * says of it. WP-2423 item 8 ④: a split bill's rounds are paid once every part is (each part is
+ * a payment with its own tip and cash rounding); 同桌结账: guests paying by dish have paid once
+ * their parts cover the bill, and carry no part count (one part per payment so far).
+ */
+export async function readCustomerTablePayments(
+  transaction: Parameters<
+    ReturnType<typeof createPostgresDiningTableSettlementStore>["listByOrders"]
+  >[0],
+  store: Pick<
+    ReturnType<typeof createPostgresDiningTableSettlementStore>,
+    "listByOrders" | "listSplitPlans"
+  >,
+  orderReference: Parameters<
+    ReturnType<typeof createPostgresDiningTableSettlementStore>["listByOrders"]
+  >[1][number],
+) {
+  const tableSettlements = await store.listByOrders(transaction, [orderReference]);
+  const [splitPlan] = await store.listSplitPlans(transaction, [orderReference]);
+  const splitPaid =
+    splitPlan !== undefined && diningTableSplitPaidInFull(splitPlan, tableSettlements);
+  return {
+    tableSettlements,
+    splitPaid,
+    splitParts: customerSplitParts(splitPlan, tableSettlements, splitPaid),
+  };
+}
+
 export function composeCustomerDiningSession(
   facts: CustomerDiningSessionFacts,
 ): CustomerDiningSessionView {
@@ -1247,12 +1276,10 @@ function postgresDependencies(
                 authorize: async (_tx, value) =>
                   value.orderReference === orderReference && (await stillAuthorized()),
               });
-        const tableSettlements =
-          tableStore === null ? [] : await tableStore.listByOrders(transaction, [orderReference]);
-        // WP-2423 item 8 ④: a split bill's rounds are paid once every part is (each part is a
-        // payment with its own tip and cash rounding, added up below).
-        const [splitPlan] =
-          tableStore !== null ? await tableStore.listSplitPlans(transaction, [orderReference]) : [];
+        const { tableSettlements, splitPaid, splitParts } =
+          tableStore === null
+            ? { tableSettlements: [], splitPaid: false, splitParts: null }
+            : await readCustomerTablePayments(transaction, tableStore, orderReference);
         // WP-2423 item 8b: which lines are a charge. A convenience: it has its own savepoint, so a
         // failure here never takes the table page down at any table. Whatever was read before the
         // failure still counts (the cart still refuses the per-head item from a guest).
@@ -1296,9 +1323,6 @@ function postgresDependencies(
             .filter(([, sellable]) => sellable === teaSellable || declaredCharges.has(sellable))
             .map(([orderItem]) => orderItem),
         ]);
-        // WP-2423 同桌结账: guests paying by dish have paid once their parts cover the bill.
-        const splitPaid =
-          splitPlan !== undefined && diningTableSplitPaidInFull(splitPlan, tableSettlements);
         const settledRounds = new Set(
           tableSettlements
             .filter((settlement) => settlement.part === null || splitPaid)
@@ -1333,7 +1357,7 @@ function postgresDependencies(
           ...(teaItems.size === 0 ? {} : { teaItems }),
           ...(teaLines.size === 0 ? {} : { teaLines }),
           ...(chargeLines.size === 0 ? {} : { chargeLines }),
-          splitParts: customerSplitParts(splitPlan, tableSettlements, splitPaid),
+          splitParts,
           tableSettlement:
             tableSettlements.length === 0
               ? null
