@@ -738,6 +738,11 @@ export async function declareChoiceAllergens(
     readonly allergenReference: string;
     readonly classification: "Contains" | "CrossContactPossible";
   }[];
+  /**
+   * b7: this answer differs from the choice's answer before it (or is its first), so guests read
+   * it now (an answer of "adds none" too: they are no longer asked to check about that choice).
+   */
+  readonly answerChanged: boolean;
 }> {
   const { may } = input;
   for (const action of [
@@ -884,7 +889,12 @@ export async function declareChoiceAllergens(
       at: input.at,
       auditReference: step("choice-declaration-audit"),
     });
-  return { itemReference: item.itemReference, adds: Object.freeze(adds) };
+  return {
+    itemReference: item.itemReference,
+    adds: Object.freeze(adds),
+    answerChanged:
+      previous === undefined || allergenKey(previous.allergens) !== allergenKey(input.declared),
+  };
 }
 
 /**
@@ -1051,8 +1061,10 @@ export function createMerchantDishAllergens(options: {
       readonly allergenReference: string;
       readonly classification: "Contains" | "CrossContactPossible";
     }[];
+    /** b7: a choice was answered "adds none" in this save (guests stop being asked about it). */
+    answeredNone?: boolean;
   }) => {
-    if (input.adds.length === 0) return;
+    if (input.adds.length === 0 && input.answeredNone !== true) return;
     const current = await session(input);
     await retryTransactionConflict(() =>
       options.persistence.transactions.run((tx: Tx) =>

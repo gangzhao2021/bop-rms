@@ -409,6 +409,28 @@ describe("WP-1701 Customer Menu screens", () => {
       render({ context, detail: item, mode: "detail", state: { kind: "Found", menu } });
     expect(detail(answered)).toContain("Allergen information (all choices)");
     expect(detail(sellable)).not.toContain("(all choices)");
+    // Staff answered "Adds none" for every choice: guests are no longer asked to check, and no
+    // choice claims to be free of anything.
+    const none: MenuSellable = {
+      ...sellable,
+      allergensByOption: Object.fromEntries(
+        sellable.optionRules.flatMap((rule) =>
+          rule.options.map((option) => [option.optionReference, []] as const),
+        ),
+      ),
+    };
+    const noneHtml = configure(none);
+    expect(noneHtml).not.toContain(caution);
+    expect(noneHtml).not.toContain("Adds:");
+    expect(detail(none)).not.toContain("(all choices)");
+    // One choice still unanswered: the careful line stays.
+    const [first, ...rest] = sellable.optionRules.flatMap((rule) => rule.options);
+    if (first === undefined) throw new Error("fixture");
+    const partly: MenuSellable = {
+      ...sellable,
+      allergensByOption: Object.fromEntries(rest.map((option) => [option.optionReference, []])),
+    };
+    expect(configure(partly)).toContain(caution);
   });
 
   it("renders required-selection, price and sensitive-note boundaries without references", () => {

@@ -662,8 +662,9 @@ export function createMerchantOptionRecipes(options: {
                 scope,
                 restatedRows.map((row) => row.target),
               );
+              const known = await recipeIngredientItems(tx, s, at, { staffDeclared: true });
               const standIns = new Set(
-                (await recipeIngredientItems(tx, s, at, { staffDeclared: true })).items
+                known.items
                   .filter((item) => item.internalCode.startsWith("DECL-OPT-") && !item.stockTracked)
                   .map((item) => item.itemReference),
               );
@@ -678,9 +679,12 @@ export function createMerchantOptionRecipes(options: {
                     content.toItemReference !== null &&
                     standIns.has(content.toItemReference));
                 if (!staffs) return false;
-                return want === null
-                  ? content.kind !== "NoChange"
-                  : !(content.kind === "Add" && content.toItemReference === want);
+                if (want === null) return content.kind !== "NoChange";
+                if (!(content.kind === "Add" && content.toItemReference === want)) return true;
+                // b7: the same stand-in with a new answer (Eggs, then "adds none"): the published
+                // recipe still names the earlier answer until it is saved with the current one.
+                const answer = known.facts.get(want)?.allergenDeclaration?.evidenceReference;
+                return answer !== undefined && !JSON.stringify(change.expansion).includes(answer);
               });
             }
             const stale = new Set(staleAnswers);

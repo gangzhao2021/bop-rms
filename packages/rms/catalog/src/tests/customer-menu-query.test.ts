@@ -599,40 +599,54 @@ it("WP-2423 item 12: sends what each dish declares only for a combo's parts", as
   expect((await disclosureOf(new Set([id(99)])))?.byOption).toEqual(byOption);
 });
 
-it("WP-2423 (M166): a choice that adds no allergens of its own is not sent", async () => {
+it("WP-2423 (M166, b7): a choice answered as adding none is sent as answered only when no reviewed set of choices covers the dish", async () => {
   const base = projection();
   const [section] = base.snapshot.sections;
   const [latte] = section?.sellables ?? [];
   if (section === undefined || latte === undefined) throw new Error("fixture");
-  const menu: PublishedMenuProjection = {
-    ...base,
-    snapshot: {
-      ...base.snapshot,
-      sections: [
-        {
-          ...section,
-          sellables: [
-            {
-              ...latte,
-              allergenDisclosure: { ...latte.allergenDisclosure, byOption: { [id(14)]: [] } },
-            },
-          ],
-        },
-      ],
-    },
+  const disclosureWith = async (byChoice: unknown) => {
+    const plain: Record<string, unknown> = { ...latte.allergenDisclosure };
+    delete plain.byChoice;
+    const menu: PublishedMenuProjection = {
+      ...base,
+      snapshot: {
+        ...base.snapshot,
+        sections: [
+          {
+            ...section,
+            sellables: [
+              {
+                ...latte,
+                allergenDisclosure: {
+                  ...plain,
+                  ...(byChoice === undefined ? {} : { byChoice }),
+                  byOption: { [id(14)]: [] },
+                } as never,
+              },
+            ],
+          },
+        ],
+      },
+    };
+    const result = await createCustomerMenuQueryService({
+      stores: {
+        resolvePublic: async () => ({
+          brandReference: id(3) as never,
+          storeReference: id(7) as never,
+          status: "Active",
+        }),
+      },
+      projections: { loadCandidates: async () => [menu] },
+    }).getPublishedMenu(input());
+    if (result.status !== "Found") throw new Error("menu");
+    return result.menu.sections[0]?.sellables[0]?.allergenDisclosure;
   };
-  const result = await createCustomerMenuQueryService({
-    stores: {
-      resolvePublic: async () => ({
-        brandReference: id(3) as never,
-        storeReference: id(7) as never,
-        status: "Active",
-      }),
-    },
-    projections: { loadCandidates: async () => [menu] },
-  }).getPublishedMenu(input());
-  if (result.status !== "Found") throw new Error("menu");
-  expect(result.menu.sections[0]?.sellables[0]?.allergenDisclosure).not.toHaveProperty("byOption");
+  // Answered "Adds none": guests are not asked to check with staff about that choice.
+  expect((await disclosureWith(undefined))?.byOption).toEqual({ [id(14)]: [] });
+  // A reviewed set of choices already says it, so nothing more is sent.
+  expect(
+    await disclosureWith({ options: [id(14)], outcomes: [[]], sets: [[0], [0, 0]] }),
+  ).not.toHaveProperty("byOption");
 });
 
 it("WP-2423 Q12: gives the Store's facts each shown item as normally ordered", async () => {

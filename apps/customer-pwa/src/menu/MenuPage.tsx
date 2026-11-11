@@ -1949,8 +1949,9 @@ export function SellableConfigurator({
 
 /**
  * b7 (M166): the dish offers a choice (not a combo dish) whose own allergens the menu does not
- * state — no reviewed set of choices covers it, and it names nothing it adds. "Adds none" is not
- * told apart from "never answered" here, so both are said the careful way.
+ * state — no reviewed set of choices covers it, and the restaurant never answered what it adds.
+ * A choice answered "Adds none" is sent with an empty list, so it is answered; one never answered
+ * is absent and said the careful way.
  */
 export function choicesUnconfirmed(sellable: MenuSellable): boolean {
   if (sellable.allergensByChoice !== undefined) return false;
@@ -1960,7 +1961,7 @@ export function choicesUnconfirmed(sellable: MenuSellable): boolean {
       rule.options.some(
         (option) =>
           option.offeredNow !== false &&
-          (sellable.allergensByOption?.[option.optionReference]?.length ?? 0) === 0,
+          sellable.allergensByOption?.[option.optionReference] === undefined,
       ),
   );
 }

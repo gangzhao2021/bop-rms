@@ -1,7 +1,8 @@
-import type {
-  SellableAllergenChange,
-  SellableAllergenChoiceChange,
-  SellableAllergenNow,
+import {
+  SELLABLE_ALLERGEN_CHOICE_LIMIT,
+  type SellableAllergenChange,
+  type SellableAllergenChoiceChange,
+  type SellableAllergenNow,
 } from "../../domain/sellable-allergen-change.js";
 
 /**
@@ -89,7 +90,11 @@ function allergensOf(value: unknown): readonly SellableAllergenNow[] | null {
 
 /** A choice's key: the last 12 characters of its option reference (as its stand-in is named). */
 const optionKey = /^[0-9a-f]{12}$/u;
-function choicesOf(value: unknown): SellableAllergenChoiceChange | undefined {
+function choicesOf(
+  value: unknown,
+  /** Read: a stored change about too many choices is read as the dish's list only. */
+  reading = false,
+): SellableAllergenChoiceChange | undefined {
   if (value === null || value === undefined) return undefined;
   const raw = value as Record<string, unknown>;
   if (
@@ -101,7 +106,8 @@ function choicesOf(value: unknown): SellableAllergenChoiceChange | undefined {
   )
     return invalid();
   const entries = Object.entries(raw.options as Record<string, unknown>);
-  if (entries.length > 100 || entries.some(([key]) => !optionKey.test(key))) return invalid();
+  if (entries.length > SELLABLE_ALLERGEN_CHOICE_LIMIT) return reading ? undefined : invalid();
+  if (entries.some(([key]) => !optionKey.test(key))) return invalid();
   return Object.freeze({
     dish: allergensOf(raw.dish) ?? invalid(),
     options: Object.freeze(
@@ -226,7 +232,9 @@ export async function listSellableAllergenChangesSince(
               ? row.cause
               : "RecipeBound",
           allergens: allergensOf(row.allergens),
-          ...((choices) => (choices === undefined ? {} : { choices }))(choicesOf(row.choices)),
+          ...((choices) => (choices === undefined ? {} : { choices }))(
+            choicesOf(row.choices, true),
+          ),
           recordedAt: String(row.recorded_at),
         }),
       );

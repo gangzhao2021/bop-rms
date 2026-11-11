@@ -99,8 +99,10 @@ it("WP-2423 (M166): a choice's own allergens reach the listed menu for that choi
       const codes = (items) => (items ?? []).map((item) => item.code).sort();
       // Egg fried rice adds milk (standing in for egg); plain rice adds nothing; the dish keeps wheat.
       assert.deepEqual(codes(disclosure.byOption?.[fried]), ["MILK"]);
-      // Plain rice adds nothing, so guests are not sent a list for it.
-      assert.equal(disclosure.byOption?.[plain], undefined);
+      // b7: plain rice was answered "adds nothing": sent as answered (an empty list, never a
+      // free-from claim) unless a reviewed set of choices already covers the dish.
+      const answeredNone = (seen) => (seen.byChoice === undefined ? [] : undefined);
+      assert.deepEqual(disclosure.byOption?.[plain], answeredNone(disclosure));
       assert.ok(codes(disclosure.items).includes("WHEAT"));
       // The dish's list names every allergen a choice can add (guests' menus name each one).
       assert.ok(codes(disclosure.items).includes("MILK"));
@@ -118,7 +120,7 @@ it("WP-2423 (M166): a choice's own allergens reach the listed menu for that choi
       });
       assert.equal((await f.listAll()).status, "Listed");
       const after = await guestSees();
-      assert.equal(after.byOption?.[fried], undefined);
+      assert.deepEqual(after.byOption?.[fried], answeredNone(after));
       assert.ok(!codes(after.items).includes("MILK"));
 
       // On the listed menu, staff now answer that egg fried rice adds milk (standing in for egg)
@@ -150,12 +152,17 @@ it("WP-2423 (M166): a choice's own allergens reach the listed menu for that choi
       assert.deepEqual(codes(changes[0]?.allergens), ["MILK", "WHEAT"]);
       // b7: the change says which are the dish's own and what the choice adds.
       assert.deepEqual(codes(changes[0]?.choices?.dish), ["WHEAT"]);
-      assert.deepEqual(Object.keys(changes[0]?.choices?.options ?? {}), [fried.slice(-12)]);
+      // b7: plain rice answered "adds nothing" is kept as answered (an empty list), not left out.
+      assert.deepEqual(
+        Object.keys(changes[0]?.choices?.options ?? {}).sort(),
+        [plain.slice(-12), fried.slice(-12)].sort(),
+      );
+      assert.deepEqual(changes[0]?.choices?.options?.[plain.slice(-12)], []);
       const now = await guestSees();
       assert.ok(codes(now.items).includes("MILK"));
       // b7: guests read it under Egg fried rice at once, and with plain rice the dish is wheat only.
       assert.deepEqual(codes(now.byOption?.[fried]), ["MILK"]);
-      assert.equal(now.byOption?.[plain], undefined);
+      assert.deepEqual(now.byOption?.[plain], answeredNone(now));
       assert.equal(now.justUpdated, true);
       if (now.byChoice !== undefined) {
         const outcomeFor = (option) => {
@@ -166,6 +173,29 @@ it("WP-2423 (M166): a choice's own allergens reach the listed menu for that choi
         assert.deepEqual(outcomeFor(plain), ["WHEAT"]);
         assert.deepEqual(outcomeFor(fried), ["MILK", "WHEAT"]);
       }
+      // b7: still unlisted again, staff answer that egg fried rice adds nothing after all. The
+      // answer reaches guests at once: no milk, and the choice reads as answered (not "ask staff").
+      await f.saveDish({
+        productReference: dish.productReference,
+        name: "Curry chicken (TEST)",
+        nameZh: "咖喱鸡",
+        priceMinor: null,
+        sectionCode: null,
+        allergens: null,
+        choiceGroups,
+        choiceAllergens: [{ optionReference: fried, name: "Egg fried rice", declared: [] }],
+      });
+      const none = (
+        await admin.query(
+          "SELECT cause,choices_json choices FROM rms_catalog.sellable_allergen_change WHERE sku_id=$1 ORDER BY recorded_at DESC,change_id DESC",
+          [dish.skuReference],
+        )
+      ).rows;
+      assert.equal(none.length, changes.length + 1);
+      assert.deepEqual(none[0]?.choices?.options?.[fried.slice(-12)], []);
+      const answered = await guestSees();
+      assert.ok(!codes(answered.items).includes("MILK"));
+      assert.deepEqual(answered.byOption?.[fried], answeredNone(answered));
       // The record stays append-only for the api role.
       await assert.rejects(
         f.asApi((tx) =>

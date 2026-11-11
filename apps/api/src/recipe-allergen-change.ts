@@ -1,6 +1,7 @@
 import {
   currentAllergenRegistry,
   recordSellableAllergenChange,
+  SELLABLE_ALLERGEN_CHOICE_LIMIT,
   type SellableAllergenChange,
   type SellableAllergenChoiceChange,
   type SellableAllergenNow,
@@ -122,11 +123,19 @@ export async function recordRecipeAllergenChange(
         if (before !== "Contains" && before !== "Unverified")
           strongest.set(added.allergenReference, added.classification);
       }
-      if (mine.size > 0) options[option] = entries(mine);
+      // An answered choice that adds none is kept as an empty list, so guests stop being asked
+      // to check with staff about it (a choice never answered stays absent).
+      options[option] = entries(mine);
     }
     if (![...strongest.values()].includes("Unverified")) {
       allergens = entries(strongest);
-      if (input.choiceAllergens !== undefined) choices = { dish: entries(own), options };
+      // More choices than one change can say something about: the dish's list alone (every
+      // allergen still named; guests keep the check-with-staff line).
+      if (
+        input.choiceAllergens !== undefined &&
+        Object.keys(options).length <= SELLABLE_ALLERGEN_CHOICE_LIMIT
+      )
+        choices = { dish: entries(own), options };
     }
     await t.query("RELEASE SAVEPOINT recipe_allergen_change", []);
   } catch {

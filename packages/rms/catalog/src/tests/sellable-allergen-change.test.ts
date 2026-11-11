@@ -1,10 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { changedAllergenDisclosure } from "../application/customer-menu-query-service.js";
 import {
+  SELLABLE_ALLERGEN_CHOICE_LIMIT,
   sellableAllergenChangeForChoices,
   withSellableAllergenChange,
   type SellableAllergenNow,
 } from "../domain/sellable-allergen-change.js";
+import {
+  listSellableAllergenChangesSince,
+  recordSellableAllergenChange,
+} from "../infrastructure/persistence/sellable-allergen-change-store.js";
 
 /** WP-2423 (M77, M167): synthetic, TEST-only allergens. */
 const ref = (n: number) => "01909b00-0000-7000-8000-" + n.toString(16).padStart(12, "0");
@@ -150,5 +155,105 @@ describe("WP-2423 (M77, M167): a recipe change read with the listed allergens", 
     expect(sellableAllergenChangeForChoices(answered, null)).toBe(answered);
     // A change that does not say what each choice adds keeps the whole change.
     expect(sellableAllergenChangeForChoices(change([egg]), [plain])?.allergens).toEqual([egg]);
+  });
+
+  // b7 (review): staff answer "Adds none" for Plain rice on a listed dish with no reviewed sets.
+  it("a choice answered as adding none is read as answered, not as never answered, and adds nothing", () => {
+    const rice = ref(30),
+      plain = ref(31),
+      never = ref(32);
+    const answered = {
+      ...change([milk]),
+      cause: "StaffDeclared" as const,
+      choices: { dish: [milk], options: { [plain.slice(-12)]: [] } },
+    };
+    const disclosure = {
+      registryVersionReference: ref(50),
+      items: [
+        {
+          allergenReference: ref(2),
+          code: "MILK",
+          name: "Milk",
+          classification: "Contains" as const,
+        },
+      ],
+      allergenFreeClaim: false as const,
+      assistanceCode: "ALLERGEN_ASSISTANCE_REQUIRED" as const,
+      byOption: { [rice]: [listed("EGG", "Contains")] },
+    } as never;
+    const seen = changedAllergenDisclosure(disclosure, answered, () => "", [rice, plain, never]);
+    // Plain rice is answered (adds none); the choice nobody answered stays absent; the listed
+    // egg under fried rice stays; nothing new to read, so not said just updated.
+    expect(seen.byOption).toEqual({ [rice]: [listed("EGG", "Contains")], [plain]: [] });
+    expect(seen).not.toHaveProperty("justUpdated");
+    expect(seen.items.map((item) => item.code)).toEqual(["MILK"]);
+    // An answer of none never removes what the listed menu names under a choice.
+    const listedNone = changedAllergenDisclosure(
+      disclosure,
+      { ...answered, choices: { dish: [milk], options: { [rice.slice(-12)]: [] } } },
+      () => "",
+      [rice],
+    );
+    expect(listedNone).toBe(disclosure);
+    // The kitchen: a dish ordered with Plain rice is told the dish's own only.
+    expect(sellableAllergenChangeForChoices(answered, [plain])?.allergens).toEqual([milk]);
+  });
+
+  // b7 (review): a dish with more answered choices than one change can hold.
+  it("a change about too many choices is refused when written and read as the dish's list, never failing the menu", async () => {
+    const many = Object.fromEntries(
+      Array.from({ length: SELLABLE_ALLERGEN_CHOICE_LIMIT + 1 }, (_, n) => [
+        n.toString(16).padStart(12, "0"),
+        [] as Allergen[],
+      ]),
+    );
+    const seen: string[] = [];
+    const tx = {
+      query: async <Row>(sql: string): Promise<{ rows: readonly Row[]; rowCount: number }> => {
+        seen.push(sql);
+        if (sql.includes("DISTINCT ON"))
+          return {
+            rows: [
+              {
+                version: ref(40),
+                sku: ref(9),
+                store: null,
+                cause: "StaffDeclared",
+                allergens: [milk],
+                choices: { dish: [milk], options: many },
+                recorded_at: "2026-11-06T16:00:00.000Z",
+              },
+            ] as never[],
+            rowCount: 1,
+          };
+        return { rows: [{ brand: "", store: "" }] as never[], rowCount: 1 };
+      },
+    };
+    await expect(
+      recordSellableAllergenChange(
+        tx,
+        { tenantReference: ref(1), brandReference: ref(3) },
+        {
+          changeReference: ref(10),
+          operationReference: ref(11),
+          skuReference: ref(9),
+          storeReference: null,
+          cause: "StaffDeclared",
+          allergens: [milk],
+          choices: { dish: [milk], options: many },
+          actorReference: ref(12),
+          recordedAt: "2026-11-06T16:00:00.000Z",
+        },
+      ),
+    ).rejects.toMatchObject({ code: "SELLABLE_ALLERGEN_CHANGE_INVALID" });
+    expect(seen.some((sql) => sql.includes("INSERT"))).toBe(false);
+    const read = await listSellableAllergenChangesSince(
+      tx,
+      { brandReference: ref(3), storeReference: ref(7) },
+      [{ menuVersionReference: ref(40), skuReference: ref(9) }],
+    );
+    const found = read.get(ref(40) + ":" + ref(9));
+    expect(found?.allergens).toEqual([milk]);
+    expect(found).not.toHaveProperty("choices");
   });
 });

@@ -32,8 +32,18 @@ export const sellableAllergenChoiceKey = (optionReference: string) =>
   optionReference.slice(-12).toLowerCase();
 export interface SellableAllergenChoiceChange {
   readonly dish: readonly SellableAllergenNow[];
+  /**
+   * What each answered choice adds; an empty list is a choice staff answered "Adds none" (told
+   * apart from one never answered, which is absent).
+   */
   readonly options: Readonly<Record<string, readonly SellableAllergenNow[]>>;
 }
+/**
+ * The most choices one change says something about: every choice the dish editor can put on a
+ * dish (12 sets of 50). A change about more is recorded without `choices` (the dish's list still
+ * names every allergen), and a stored one about more is read the same way, never refused.
+ */
+export const SELLABLE_ALLERGEN_CHOICE_LIMIT = 600;
 
 /**
  * WP-2423 (b7): the change as it reaches one dish ordered with these choices — the dish's own

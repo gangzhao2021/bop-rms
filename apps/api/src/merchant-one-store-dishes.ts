@@ -1121,7 +1121,7 @@ export function createMerchantOneStoreDishes(options: {
     // transaction (WP-2423 item 3: one authorization each, not one command per step per choice).
     let choicesWaiting = false;
     // WP-2423 (M166): each choice answered in this save: what it adds becomes its own stand-in,
-    // which its option recipe adds ("adds none": no change). Its answer replaces a published "no
+    // which its option recipe adds ("adds none" too, holding the empty answer). Its answer replaces a published "no
     // change" or an earlier answer; a real recipe change set under Option recipes is kept.
     const restated = new Set<string>();
     const answeredItems = new Map<string, string>();
@@ -1133,6 +1133,7 @@ export function createMerchantOneStoreDishes(options: {
         readonly classification: "Contains" | "CrossContactPossible";
       }
     >();
+    let answeredNone = false;
     for (const choice of body.choiceAllergens ?? []) {
       restated.add(choice.optionReference);
       const declared = await options.dishAllergens.declareChoice({
@@ -1143,8 +1144,10 @@ export function createMerchantOneStoreDishes(options: {
         choiceName: choice.name,
         declared: choice.declared,
       });
-      if (choice.declared.length > 0)
-        answeredItems.set(choice.optionReference, declared.itemReference);
+      // b7: "adds none" too adds its stand-in (holding the empty answer), so the listed menu
+      // tells an answered choice from one nobody answered (a "no change" recipe says nothing).
+      answeredItems.set(choice.optionReference, declared.itemReference);
+      if (choice.declared.length === 0 && declared.answerChanged) answeredNone = true;
       for (const added of declared.adds)
         if (choiceAdds.get(added.allergenReference)?.classification !== "Contains")
           choiceAdds.set(added.allergenReference, added);
@@ -1183,12 +1186,14 @@ export function createMerchantOneStoreDishes(options: {
     }
     // Choices now in use that add an allergen reach guests and the kitchen on the listed menu.
     const allergensShownNow = !choicesWaiting && choiceAdds.size > 0;
-    if (allergensShownNow)
+    // b7: and a choice now answered "adds none": guests stop being asked to check about it.
+    if (allergensShownNow || (!choicesWaiting && answeredNone))
       await options.dishAllergens.recordChoiceAllergenChange({
         ...session,
         operationReference: body.operationReference,
         skuReference: sku,
         adds: [...choiceAdds.values()],
+        answeredNone,
       });
     return {
       status: "Saved" as const,

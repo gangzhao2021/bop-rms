@@ -232,6 +232,7 @@ export function changedAllergenDisclosure(
   // WP-2423 (M166 with M77, b7): what a staff answer says a choice adds, under that choice.
   let byOption = disclosure.byOption;
   let optionChanged = false;
+  let answeredNone = false;
   const choices = change.allergens === null ? undefined : change.choices;
   if (choices !== undefined) {
     const next: Record<
@@ -240,15 +241,28 @@ export function changedAllergenDisclosure(
     > = { ...(byOption ?? {}) };
     for (const option of offeredOptions) {
       const adds = choices.options[sellableAllergenChoiceKey(option)];
-      if (adds === undefined || adds.length === 0) continue;
+      if (adds === undefined) continue;
+      if (adds.length === 0) {
+        // Answered "Adds none" (guests are no longer asked to check with staff about it, when no
+        // reviewed set of choices says it already). Never removes what the listed menu names.
+        if (next[option] === undefined && disclosure.byChoice === undefined) {
+          next[option] = Object.freeze([]);
+          answeredNone = true;
+        }
+        continue;
+      }
       const found = withSellableAllergenChange(next[option] ?? [], { allergens: adds }, coded);
       if (!found.changed) continue;
       next[option] = found.items;
       optionChanged = true;
     }
-    if (optionChanged) byOption = Object.freeze(next);
+    if (optionChanged || answeredNone) byOption = Object.freeze(next);
   }
-  if (!merged.changed && !optionChanged) return disclosure;
+  if (!merged.changed && !optionChanged)
+    // Only answered "Adds none": nothing more to read, so not said "just updated".
+    return answeredNone && byOption !== undefined
+      ? Object.freeze({ ...disclosure, byOption })
+      : disclosure;
   const byChoice = disclosure.byChoice;
   // Each reviewed set of choices takes the dish's own with what its chosen ones add (the whole
   // change when it does not say what each adds).
@@ -313,9 +327,13 @@ function publicSellable(
   const offeredOptions = new Set(
     offeredRules.flatMap((rule) => rule.options.map((option) => String(option.optionReference))),
   );
+  // b7: and a choice answered as adding none (an empty list) when no reviewed set of choices
+  // covers the dish, so guests are asked to check with staff only about choices nobody answered.
+  const answeredNoneSent = item.allergenDisclosure.byChoice === undefined;
   const byOption = Object.entries(item.allergenDisclosure.byOption ?? {}).filter(
     ([option, items]) =>
-      comboDishes.has(option) || (offeredOptions.has(option) && items.length > 0),
+      comboDishes.has(option) ||
+      (offeredOptions.has(option) && (items.length > 0 || answeredNoneSent)),
   );
   return Object.freeze({
     sellableReference: item.sellableReference,
