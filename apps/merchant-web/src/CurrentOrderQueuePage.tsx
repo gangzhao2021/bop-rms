@@ -2231,6 +2231,8 @@ export function orderRecordRows(
   orderType: QueuedOrder["orderType"],
   timeZone: string | undefined,
   today: string | null,
+  /** v15 batch 7: a table that pays at the end; its rounds go to the kitchen unpaid when sent. */
+  payLater = false,
 ): readonly { readonly key: string; readonly label: string; readonly text: string }[] {
   const when = (at: string) => orderWhen(at, timeZone, today);
   const rows: { key: string; label: string; text: string }[] = [];
@@ -2241,7 +2243,11 @@ export function orderRecordRows(
       label: table ? t("Round {round} accepted", { round: accepted.round }) : t("Accepted"),
       text:
         accepted.by === null
-          ? t("Automatically, when paid · {at}", { at: when(accepted.at) })
+          ? payLater && table
+            ? t("Automatically, when sent (the table pays at the end) · {at}", {
+                at: when(accepted.at),
+              })
+            : t("Automatically, when paid · {at}", { at: when(accepted.at) })
           : t("{name} · {at}", { name: personLabel(accepted.by), at: when(accepted.at) }),
     });
   for (const [index, handoff] of record.handedOver.entries())
@@ -2700,7 +2706,13 @@ function OrderDetailBody({
           </div>
           {record === null
             ? null
-            : orderRecordRows(record, order.orderType, timeZone, today).map((row) => (
+            : orderRecordRows(
+                record,
+                order.orderType,
+                timeZone,
+                today,
+                order.tableBill !== null,
+              ).map((row) => (
                 <div key={row.key}>
                   <dt>{row.label}</dt>
                   <dd>{row.text}</dd>

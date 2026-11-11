@@ -87,6 +87,26 @@ describe("M61: the order record says who did what", () => {
     ]);
   });
 
+  it("v15 batch 7: a table that pays at the end says its round was accepted when sent, not when paid", () => {
+    const parsed = parseOrderRecordPeople({
+      ...record,
+      accepted: [{ round: 1, by: null, at: "2026-11-06T00:42:00.000Z" }],
+      handedOver: [],
+      payments: [],
+      refunds: [],
+    });
+    const rows = orderRecordRows(parsed, "DineIn", tz, "2026-11-05", true);
+    expect(rows.map((row) => [row.label, row.text])).toEqual([
+      ["Round 1 accepted", "Automatically, when sent (the table pays at the end) · 19:42"],
+    ]);
+    expect(rows.some((row) => row.text.includes("when paid"))).toBe(false);
+    setLanguageForTest("zh-Hans");
+    expect(orderRecordRows(parsed, "DineIn", tz, "2026-11-05", true)[0]?.text).toBe(
+      "送出后自动接单（这桌最后结账）· 19:42",
+    );
+    setLanguageForTest("en");
+  });
+
   it("reads the same in Chinese, with fixed role names translated and never an id", () => {
     setLanguageForTest("zh-Hans");
     expect(personLabel("Store owner")).toBe("店主");

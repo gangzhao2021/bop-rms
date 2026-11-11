@@ -9073,6 +9073,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Items cancelled": "已取消菜品",
   "Round {round} accepted": "第 {round} 轮接单",
   "Automatically, when paid · {at}": "付款后自动接单 · {at}",
+  "Automatically, when sent (the table pays at the end) · {at}":
+    "送出后自动接单（这桌最后结账）· {at}",
   "{name} · {at}": "{name} · {at}",
   "Paid online by the guest": "客人已在线付款",
   "Part {part} paid": "第 {part} 份已付",
