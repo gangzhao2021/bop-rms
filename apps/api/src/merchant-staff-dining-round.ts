@@ -490,6 +490,31 @@ interface StaffScope {
  * exact amount to charge on the Store's card machine. The staff member is recorded by Ordering; a
  * retry with the same operation returns the same round.
  */
+/**
+ * WP-2423 M35 (design 2.2, "idempotent per operation"): the reference of a guest line's staff
+ * removal (or of its Audit record) made by one staff round command. It comes from the command and
+ * the line, never from a fresh draw, so the removal belongs to that command: a repeat of the same
+ * command names the same removal (Ordering replays it), and two commands or two lines never share
+ * one. A UUIDv7 dated as the command (its first 48 bits), the rest from SHA-256.
+ */
+export function staffRemovalReference(
+  roundOperationReference: string,
+  cartItemReference: string,
+  purpose: "Operation" | "Audit",
+): string {
+  const round = String(parseOrderingReference(roundOperationReference));
+  const line = String(parseOrderingReference(cartItemReference));
+  const digest = createHash("sha256")
+    .update(`WP-2423 staff round removal\n${purpose}\n${round}\n${line}`)
+    .digest("hex");
+  const variant = ((parseInt(digest.slice(3, 4), 16) & 0x3) | 0x8).toString(16);
+  return String(
+    parseOrderingReference(
+      `${round.slice(0, 8)}-${round.slice(9, 13)}-7${digest.slice(0, 3)}-${variant}${digest.slice(4, 7)}-${digest.slice(7, 19)}`,
+    ),
+  );
+}
+
 export function createMerchantStaffDiningRound(options: {
   persistence: PersistentMerchantBffOptions;
   authentication: Pick<MerchantBffService, "authorize">;
@@ -725,13 +750,22 @@ export function createMerchantStaffDiningRound(options: {
           expectedCartVersion: input.expectedCartVersion,
           keep: input.keep,
           lines: input.removals.map((line) => {
-            const operationReference = options.nextReference();
+            // This command's own removal of this line (a repeat names the same one).
+            const operationReference = staffRemovalReference(
+              command.operationReference,
+              line.cartItemReference,
+              "Operation",
+            );
             return {
               cartItemReference: line.cartItemReference,
               reason: line.reason,
               operationReference,
               audit: {
-                auditId: options.nextReference(),
+                auditId: staffRemovalReference(
+                  command.operationReference,
+                  line.cartItemReference,
+                  "Audit",
+                ),
                 brandId: scope.selected.brandReference,
                 storeId: scope.selected.storeReference,
                 actor: { type: "User" as const, reference: scope.actorReference },

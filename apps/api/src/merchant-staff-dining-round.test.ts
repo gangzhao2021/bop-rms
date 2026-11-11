@@ -135,8 +135,12 @@ vi.mock("@rms/ordering", async (importOriginal) => {
   };
 });
 
-const { createMerchantStaffDiningRound, parseStaffDiningRoundCommand, StaffDiningRoundError } =
-  await import("./merchant-staff-dining-round.js");
+const {
+  createMerchantStaffDiningRound,
+  parseStaffDiningRoundCommand,
+  StaffDiningRoundError,
+  staffRemovalReference,
+} = await import("./merchant-staff-dining-round.js");
 const { CartError } = await import("@rms/ordering");
 
 const id = (n: number) => `0198a7c0-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
@@ -1395,6 +1399,47 @@ describe("staff round with a guest item that can't be sold — WP-2423", () => {
     });
     expect(f.pipeline.addItem).not.toHaveBeenCalled();
     expect(table.cart.lines).toHaveLength(2);
+  });
+
+  it("M35: a removal is the round command's own: its references come from the command and the line, and a retry after a lost answer never asks staff to decide again", async () => {
+    const f = setup();
+    const table = sharedCart(f, guestsAtTable());
+    const operationReference = "019a6f00-1234-7abc-8def-000000000123";
+    const remove = {
+      operationReference,
+      ...deciding([
+        { cartItemReference: plum, decision: "Remove" },
+        { cartItemReference: noodles, decision: "Send" },
+      ]),
+    };
+    // The removal commits; the next step's answer is lost.
+    f.pipeline.quote.mockRejectedValueOnce(new Error("connection reset"));
+    await expect(f.send(remove)).rejects.toMatchObject({ code: "STAFF_ROUND_UNAVAILABLE" });
+    const call = table.staffRemoval.mock.calls[0]?.[0] as unknown as {
+      lines: {
+        cartItemReference: string;
+        operationReference: string;
+        audit: { auditId: string };
+      }[];
+    };
+    const line = call.lines[0];
+    expect(line?.operationReference).toBe(
+      staffRemovalReference(operationReference, plum, "Operation"),
+    );
+    expect(line?.audit.auditId).toBe(staffRemovalReference(operationReference, plum, "Audit"));
+    // UUIDv7 dated as the command, the same for the same command and line, never another's.
+    expect(line?.operationReference).toMatch(
+      /^019a6f00-1234-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
+    );
+    expect(staffRemovalReference(operationReference, noodles, "Operation")).not.toBe(
+      line?.operationReference,
+    );
+    expect(staffRemovalReference(id(0x901), plum, "Operation")).not.toBe(line?.operationReference);
+    expect(line?.audit.auditId).not.toBe(line?.operationReference);
+    // The same command again: the round it started, never "decide on the guests' lines again".
+    await expect(f.send(remove)).rejects.toMatchObject({ code: "STAFF_ROUND_IN_PROGRESS" });
+    expect(table.staffRemoval).toHaveBeenCalledTimes(1);
+    expect(table.cart.lines.map((entry) => entry.name)).toEqual(["Noodles"]);
   });
 
   it("M35: the decisions are part of the command; a malformed decision is not a command", async () => {
