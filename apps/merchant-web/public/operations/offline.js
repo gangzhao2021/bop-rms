@@ -1,4 +1,4 @@
-/* global document, window, location, localStorage, fetch, setInterval */
+/* global document, window, location, localStorage, fetch, setInterval, navigator */
 // Owner 2026-11-03 (operating continuity): see sw.js. Reads what the Tables page last saved on this
 // device (src/table-last-bills.ts) and reads nothing else; it returns by itself when the connection
 // does. The steps are the same as src/TablesOfflineGuide.tsx.
@@ -7,6 +7,8 @@
     "zh-Hans": {
       title: "现在连不上系统",
       back: "连上后这一页会自动回到系统。",
+      offlineTitle: "这台设备没有联网",
+      offlineBack: "请检查无线网络。网络恢复后这一页会自己重新打开。",
       retry: "再试一次",
       guide: "断网期间怎么做",
       steps: [
@@ -28,6 +30,8 @@
     en: {
       title: "Can't reach the system right now",
       back: "This page returns to the system by itself once connected.",
+      offlineTitle: "This device is offline",
+      offlineBack: "Check the wifi. The page opens again by itself when the network is back.",
       retry: "Try again",
       guide: "While the connection is down",
       steps: [
@@ -47,12 +51,21 @@
       note: "Rounds taken since then aren't here: add the paper slips.",
     },
   };
-  var language = "zh-Hans";
+  // The same choice as the app (src/i18n/i18n.ts): this device's own choice, else Chinese when the
+  // device prefers Chinese, else English.
+  var stored = null;
   try {
-    if (localStorage.getItem("bop.merchant.language") === "en") language = "en";
+    stored = localStorage.getItem("bop.merchant.language");
   } catch {
-    /* Blocked storage: the default language. */
+    /* Blocked storage: the device's language. */
   }
+  var preferred = String((navigator.languages && navigator.languages[0]) || "").toLowerCase();
+  var language =
+    stored === "en" || stored === "zh-Hans"
+      ? stored
+      : preferred.indexOf("zh") === 0
+        ? "zh-Hans"
+        : "en";
   var w = words[language];
   document.documentElement.lang = language;
   var main = document.getElementById("offline");
@@ -69,8 +82,19 @@
     var cents = String(abs % 100n).padStart(2, "0");
     return (value < 0n ? "−" : "") + "$" + String(abs / 100n) + "." + cents;
   };
-  el("h1", w.title);
-  el("p", w.back, null, "quiet");
+  // Live v15 2026-11-10: a device with no network says so, as the app does; otherwise the system
+  // is down (the network is fine but the front page answers 503).
+  var heading = el("h1", null);
+  var back = el("p", null, null, "quiet");
+  // Whether the last try reached the store system's address at all (a 503 does; no network doesn't).
+  var unreachable = false;
+  var state = function () {
+    var offline = navigator.onLine === false || unreachable;
+    heading.textContent = offline ? w.offlineTitle : w.title;
+    back.textContent = offline ? w.offlineBack : w.back;
+  };
+  state();
+  window.addEventListener("offline", state);
   el("button", w.retry).addEventListener("click", function () {
     location.reload();
   });
@@ -130,14 +154,26 @@
     location.reload();
   });
   // The browser can say "online" (store Wi-Fi up, internet down) and miss the way back: ask too.
-  setInterval(function () {
+  // The first ask only finds out which message to show (never reloads at once, so a page that keeps
+  // failing is not reloaded in a loop); later asks every 5 s go back once the system answers.
+  var ask = function (first) {
     fetch("/operations/sw.js", { cache: "no-store" }).then(
       function (response) {
-        if (response.ok) location.reload();
+        if (response.ok && first !== true) location.reload();
+        else if (unreachable) {
+          unreachable = false;
+          state();
+        }
       },
       function () {
-        /* Still down. */
+        // Nothing answered: this device has no way to the system (wifi off, or no internet).
+        if (!unreachable) {
+          unreachable = true;
+          state();
+        }
       },
     );
-  }, 5000);
+  };
+  ask(true);
+  setInterval(ask, 5000);
 })();
