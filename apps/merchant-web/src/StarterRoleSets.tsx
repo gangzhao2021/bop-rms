@@ -82,6 +82,36 @@ export function waitingStarterRoles(
   };
 }
 /**
+ * Where the Store's starter roles stand for Store setup's "Who does what": the step is done only
+ * when no starter role is still off (v15 2026-11-11: it said "set up" while every starter role
+ * waited for approval or had been withdrawn). Removed ones were the owner's choice.
+ */
+export function starterRolesProgress(
+  sets: StarterRoleSetsView,
+  roles: RoleAdministrationPageView,
+): {
+  readonly done: boolean;
+  /** Sent and waiting for approval, or approved and not turned on. */
+  readonly waiting: readonly RoleAdministrationItemView[];
+  /** Not approved, withdrawn, or never sent: nobody can be given them until they are sent again. */
+  readonly notSent: readonly RoleAdministrationItemView[];
+} {
+  const starter = new Set(
+    sets.sets.flatMap((set) => set.roles.flatMap((role) => role.roleReference ?? [])),
+  );
+  const ours = roles.roles.filter((role) => starter.has(role.roleReference));
+  const off = ours.filter((role) => role.state === "NotOn");
+  const waiting = off.filter(
+    (role) => role.change?.status === "InReview" || role.change?.status === "Approved",
+  );
+  const notSent = off.filter((role) => !waiting.includes(role));
+  return {
+    done: off.length === 0,
+    waiting,
+    notSent,
+  };
+}
+/**
  * After a failed approve or turn-on run: only a lost answer keeps the rest to send again as they
  * were (Try again). Any other failure means the versions this offer holds may be out of date, so
  * the roles are read again and the next press builds its steps from the fresh versions.
@@ -326,7 +356,11 @@ export function StarterRoleSetOffer({
         done += 1;
       }
       setPending(null);
-      setNotice(t("Your new roles are on. Give them to staff on Staff."));
+      setNotice(
+        requests.filter((request) => request.operation === "Activate").length > 1
+          ? t("Your new roles are on. Give them to staff on Staff.")
+          : t("Your new role is on. Give it to staff on Staff."),
+      );
       reload();
     } catch (error) {
       const code = error instanceof RoleAdministrationPageError ? error.code : "Unavailable";
@@ -357,6 +391,13 @@ export function StarterRoleSetOffer({
         ) : null}
       </p>
     );
+  const several = (waiting?.mine.length ?? 0) > 1;
+  const progress = read.kind === "Found" ? starterRolesProgress(read.sets, read.roles) : null;
+  const offCount = progress === null ? 0 : progress.waiting.length + progress.notSent.length;
+  // Roles the approval block above already names, so they are not listed twice.
+  const shownAbove = new Set(
+    [...(waiting?.mine ?? []), ...(waiting?.turnOn ?? [])].map((role) => role.roleReference),
+  );
   const approval =
     waiting === null || (waiting.mine.length === 0 && waiting.turnOn.length === 0) ? null : (
       <div className="starter-roles__approval">
@@ -364,18 +405,31 @@ export function StarterRoleSetOffer({
           <>
             <p>
               {t("Waiting for approval: {list}.", { list: names(waiting.mine) })}{" "}
-              {t("Staff can be given them once they are approved and turned on.")}
+              {several
+                ? t("Staff can be given them once they are approved and turned on.")
+                : t("Staff can be given it once it is approved and turned on.")}
             </p>
             {waiting.approveAlone ? (
               <SoleOperatorSelfApproval
                 gate={waiting.mine[0]?.change?.approval?.soleOperator ?? null}
                 csrf={csrf}
-                summary={<p>{t("New roles: {list}.", { list: names(waiting.mine) })}</p>}
-                what={t("these new roles")}
+                summary={
+                  <p>
+                    {several
+                      ? t("New roles: {list}.", { list: names(waiting.mine) })
+                      : t("New role: {name}.", { name: names(waiting.mine) })}
+                  </p>
+                }
+                what={several ? t("these new roles") : t("this new role")}
                 permissionName={t("role approval")}
-                actionLabel={t("Approve them on my own and turn them on")}
+                actionLabel={
+                  several
+                    ? t("Approve them on my own and turn them on")
+                    : t("Approve it on my own and turn it on")
+                }
                 busy={busy}
-                yourPart={t("You sent these roles")}
+                yourPart={several ? t("You sent these roles") : t("You sent this role")}
+                several={several}
                 onApprove={() =>
                   void runAll(
                     waiting.mine.flatMap((role) => [
@@ -386,7 +440,11 @@ export function StarterRoleSetOffer({
                 }
               />
             ) : (
-              <p>{t("Someone else who approves roles must approve them.")}</p>
+              <p>
+                {several
+                  ? t("Someone else who approves roles must approve them.")
+                  : t("Someone else who approves roles must approve it.")}
+              </p>
             )}
           </>
         ) : null}
@@ -399,7 +457,7 @@ export function StarterRoleSetOffer({
                 void runAll(waiting.turnOn.map((role) => command(role, "Activate", role.version)))
               }
             >
-              {t("Turn them on")}
+              {waiting.turnOn.length > 1 ? t("Turn them on") : t("Turn it on")}
             </button>
           </p>
         ) : null}
@@ -468,10 +526,50 @@ export function StarterRoleSetOffer({
       {!sets.started ? (
         offer
       ) : place === "StoreSetup" ? (
-        <p>
-          {t("Your roles are set up for your kind of shop.")}{" "}
-          <Link to="/app/organization/roles">{t("Change them on Roles")}</Link>
-        </p>
+        progress === null || progress.done ? (
+          <p>
+            {t("Your roles are set up for your kind of shop.")}{" "}
+            <Link to="/app/organization/roles">{t("Change them on Roles")}</Link>
+          </p>
+        ) : (
+          <>
+            <p role="status">
+              {offCount > 1
+                ? t("Not done yet: nobody can be given these roles until they are on.")
+                : t("Not done yet: nobody can be given this role until it is on.")}
+            </p>
+            {progress.waiting.some((role) => !shownAbove.has(role.roleReference)) ? (
+              <p>
+                {t("Waiting for another person who approves roles: {list}.", {
+                  list: names(
+                    progress.waiting.filter((role) => !shownAbove.has(role.roleReference)),
+                  ),
+                })}
+              </p>
+            ) : null}
+            {progress.notSent.length > 0 ? (
+              <>
+                <p>
+                  {progress.notSent.length > 1
+                    ? t(
+                        "{list} weren't approved, or were withdrawn. Choose your kind of shop again to send them for approval again.",
+                        { list: names(progress.notSent) },
+                      )
+                    : t(
+                        "{list} wasn't approved, or was withdrawn. Choose your kind of shop again to send it for approval again.",
+                        { list: names(progress.notSent) },
+                      )}
+                </p>
+                {offer}
+              </>
+            ) : null}
+            <p>
+              <Link to="/app/organization/roles">
+                {offCount > 1 ? t("See them on Roles") : t("See it on Roles")}
+              </Link>
+            </p>
+          </>
+        )
       ) : (
         <details className="starter-roles__again">
           <summary>{t("Start from the roles of another kind of shop")}</summary>

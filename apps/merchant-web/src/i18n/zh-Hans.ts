@@ -9288,6 +9288,28 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Done. The roles this kind of shop doesn't use were removed.": "好了，这类店用不到的角色已移除。",
   "Added {count} roles. Each is on once it is approved.": "已添加 {count} 个角色，批准后启用。",
   "Your new roles are on. Give them to staff on Staff.": "新角色已启用，可以在“员工”里分给员工。",
+  "Your new role is on. Give it to staff on Staff.": "新角色已启用，可以在“员工”里分给员工。",
+  "Staff can be given it once it is approved and turned on.": "批准并启用后才能分给员工。",
+  "New role: {name}.": "新角色：{name}。",
+  "this new role": "这个新角色",
+  "Approve it on my own and turn it on": "我自己批准并启用",
+  "You sent this role": "这个角色是你送审的",
+  "Someone else who approves roles must approve it.": "需要另一位能批准角色的人来批准。",
+  "Turn it on": "启用",
+  "{yourPart} and you are the only person who holds {permissionName} (sole operator), so you may approve them yourself. Check them first:":
+    "{yourPart}，而你是唯一持有{permissionName}的人（独立经营者），因此可以自行批准。请先核对：",
+  "Not done yet: nobody can be given these roles until they are on.":
+    "还没完成：这些角色启用之前，不能分给任何员工。",
+  "Waiting for another person who approves roles: {list}.":
+    "等待另一位能批准角色的人批准：{list}。",
+  "{list} weren't approved, or were withdrawn. Choose your kind of shop again to send them for approval again.":
+    "{list}没有获批，或已撤回。重新选择店型，即可再次送审。",
+  "{list} wasn't approved, or was withdrawn. Choose your kind of shop again to send it for approval again.":
+    "{list}没有获批，或已撤回。重新选择店型，即可再次送审。",
+  "See them on Roles": "到“角色”里查看",
+  "See it on Roles": "到“角色”里查看",
+  "Not done yet: nobody can be given this role until it is on.":
+    "还没完成：这个角色启用之前，不能分给任何员工。",
   "Waiting for approval: {list}.": "等待批准：{list}。",
   "Staff can be given them once they are approved and turned on.": "批准并启用后才能分给员工。",
   "New roles: {list}.": "新角色：{list}。",

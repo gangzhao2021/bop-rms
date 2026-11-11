@@ -138,7 +138,14 @@ function teaShop(options: { readonly setsDown?: boolean } = {}) {
       name,
       description,
       permissions: ["merchant.access", "ordering.order.read"],
-      state: have === undefined ? "ToAdd" : have.state === "Removed" ? "Removed" : "Added",
+      state:
+        have === undefined
+          ? "ToAdd"
+          : have.state === "Removed"
+            ? "Removed"
+            : have.state === "NotOn" && have.change === null
+              ? "NotApproved"
+              : "Added",
       roleReference: have === undefined ? null : reference,
     };
   };
@@ -198,6 +205,15 @@ function teaShop(options: { readonly setsDown?: boolean } = {}) {
   return {
     applies,
     commands,
+    /** The owner withdrew a sent starter role (elsewhere): not on, nothing waiting. */
+    withdraw(reference: string) {
+      Object.assign(find(reference) as Role, {
+        change: null,
+        lastOutcome: "Withdrawn",
+        operations: [],
+        version: (find(reference) as Role).version + 1,
+      });
+    },
     /** Someone else changes a role meanwhile: its version moves on without this page knowing. */
     changeMeanwhile(reference: string) {
       (find(reference) as Role).version += 1;
@@ -329,6 +345,10 @@ test("@production a tea shop owner starts from the tea shop roles on Roles, appr
   await dialog.getByRole("button", { name: "Verify" }).click();
   await expect(dialog).toBeHidden();
   await offer.getByLabel("I checked these new roles and approve on my own").check();
+  // Two roles are "them" (v15 2026-11-11).
+  await expect(
+    offer.getByText(/so you may approve them yourself\. Check them first:/u),
+  ).toBeVisible();
   await checkScreen(page, "roles-tea-approve");
   await approve.click();
   await expect(
@@ -412,12 +432,59 @@ test("@production Store setup offers who does what, in Chinese, and links to Rol
   await checkScreen(page, "setup-tea-preview-zh");
   await offer.getByRole("button", { name: "用这些角色" }).click();
   await expect(offer.getByText("等待批准：柜台、饮品师。")).toBeVisible();
+  // v15 2026-11-11: the step is not done while the roles wait for approval.
+  await expect(offer.getByText("还没完成：这些角色启用之前，不能分给任何员工。")).toBeVisible();
+  await expect(offer.getByText("角色已按你的店型设置好。")).toHaveCount(0);
+  await checkScreen(page, "setup-tea-started-zh");
+  // The sole owner approves them alone right here; then the step is done.
+  await offer.getByRole("button", { name: "验证后自行批准" }).click();
+  const dialog = page.getByRole("dialog", { name: "确认身份" });
+  await dialog.getByLabel("六位验证码").fill("123456");
+  await dialog.getByRole("button", { name: "验证", exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await offer.getByLabel("我已核对这些新角色，并自行批准").check();
+  await offer.getByRole("button", { name: "我自己批准并启用" }).click();
   await expect(offer.getByText("角色已按你的店型设置好。")).toBeVisible();
+  await expect(offer.getByText(/还没完成/u)).toHaveCount(0);
   await expect(offer.getByRole("link", { name: "到“角色”里修改" })).toHaveAttribute(
     "href",
     "/app/organization/roles",
   );
-  await checkScreen(page, "setup-tea-started-zh");
+  await checkScreen(page, "setup-tea-done-zh");
+});
+
+test("@production Store setup says withdrawn starter roles are not on and sends them for approval again", async ({
+  page,
+}) => {
+  await session(page);
+  await serveStoreSetupPanels(page);
+  await page.route("**/merchant/store-setup**", (route) =>
+    route.fulfill({ status: 503, headers, json: { error: "unavailable" } }),
+  );
+  await page.route("**/merchant/store/receipt-profile", (route) =>
+    route.fulfill({ status: 503, headers, json: { error: "unavailable" } }),
+  );
+  const state = teaShop();
+  await state.install(page);
+  await page.goto(`/app/organization/stores/${storeReference}/setup`);
+  const offer = page.locator("section.starter-roles");
+  await offer.getByLabel("Bubble tea or tea shop").check();
+  await offer.getByRole("button", { name: "Use these roles" }).click();
+  await expect(offer.getByText("Waiting for approval: Counter, Drink maker.")).toBeVisible();
+  state.withdraw(counter);
+  state.withdraw(maker);
+  await page.reload();
+  await expect(
+    offer.getByText("Not done yet: nobody can be given these roles until they are on."),
+  ).toBeVisible();
+  await expect(
+    offer.getByText(
+      "Counter, Drink maker weren't approved, or were withdrawn. Choose your kind of shop again to send them for approval again.",
+    ),
+  ).toBeVisible();
+  await expect(offer.getByText("Your roles are set up for your kind of shop.")).toHaveCount(0);
+  await expect(offer.getByRole("group", { name: "What kind of shop is this?" })).toBeVisible();
+  await checkScreen(page, "setup-tea-withdrawn");
 });
 
 test("@production an outage of the starter roles reads as an outage with Try again, never as no access", async ({

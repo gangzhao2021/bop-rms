@@ -117,11 +117,19 @@ it("says a starter role that was not approved isn't in use, and sends it for app
   noInternals(html);
 });
 
-it("offers a sole owner to approve the sent roles alone, and Store setup then links to Roles", () => {
+it("offers a sole owner to approve the sent roles alone, and Store setup says the step is not done", () => {
   const html = render({ sets: starterStartedSetsFixture, roles: starterStartedRolesFixture });
   expect(html).toContain("Waiting for approval: Counter, Drink maker.");
   expect(html).toContain("Approve them on my own and turn them on");
-  expect(html).toContain("Your roles are set up for your kind of shop.");
+  // v15 2026-11-11: several roles are "them", never "it".
+  expect(html).toContain("so you may approve them yourself. Check them first:");
+  expect(html).not.toContain("approve it yourself");
+  expect(html).toContain("Staff can be given them once they are approved and turned on.");
+  // v15 2026-11-11: never "set up" while the roles still wait for approval.
+  expect(html).not.toContain("Your roles are set up for your kind of shop.");
+  expect(html).toContain("Not done yet: nobody can be given these roles until they are on.");
+  // The waiting roles are named once, in the approval above.
+  expect(html).not.toContain("Waiting for another person who approves roles");
   expect(html).toContain('href="/app/organization/roles"');
   expect(html).not.toContain("What kind of shop is this?");
   // On Roles the offer stays, folded, for another kind of shop.
@@ -132,6 +140,56 @@ it("offers a sole owner to approve the sent roles alone, and Store setup then li
   });
   expect(roles).toContain("Start from the roles of another kind of shop");
   noInternals(roles);
+});
+
+it("speaks of one waiting starter role in the singular", () => {
+  const roles = {
+    ...starterStartedRolesFixture,
+    roles: starterStartedRolesFixture.roles.filter(
+      (role) => role.roleReference !== starterMakerReference,
+    ),
+  };
+  const html = render({ sets: starterStartedSetsFixture, roles });
+  expect(html).toContain("Waiting for approval: Counter.");
+  expect(html).toContain("so you may approve it yourself. Check it first:");
+  expect(html).toContain("New role: Counter.");
+  expect(html).toContain("Approve it on my own and turn it on");
+  expect(html).toContain("Staff can be given it once it is approved and turned on.");
+  expect(html).not.toContain("them");
+});
+
+it("Store setup says withdrawn starter roles are not on and offers to send them again", () => {
+  const withdrawn = (role: (typeof starterStartedRolesFixture.roles)[number]) =>
+    role.roleReference === starterTeaReference || role.roleReference === starterMakerReference
+      ? { ...role, change: null, lastOutcome: "Withdrawn", operations: [] }
+      : role;
+  const roles = {
+    ...starterStartedRolesFixture,
+    roles: starterStartedRolesFixture.roles.map(withdrawn),
+  };
+  const html = render({ sets: starterStartedSetsFixture, roles });
+  expect(html).not.toContain("Your roles are set up for your kind of shop.");
+  expect(html).toContain("Not done yet: nobody can be given these roles until they are on.");
+  expect(html).toContain(
+    "Counter, Drink maker weren&#x27;t approved, or were withdrawn. Choose your kind of shop again to send them for approval again.",
+  );
+  expect(html).toContain("What kind of shop is this?");
+  noInternals(html);
+  setLanguageForTest("zh-Hans");
+  const zh = render({ sets: starterStartedSetsFixture, roles });
+  expect(zh).toContain("还没完成：这些角色启用之前，不能分给任何员工。");
+  expect(zh).toContain("没有获批，或已撤回。重新选择店型，即可再次送审。");
+});
+
+it("Store setup says the roles are set up once the starter roles are on", () => {
+  const on = (role: (typeof starterStartedRolesFixture.roles)[number]) =>
+    role.roleReference === starterTeaReference || role.roleReference === starterMakerReference
+      ? { ...role, state: "InUse", change: null, operations: [] }
+      : role;
+  const roles = { ...starterStartedRolesFixture, roles: starterStartedRolesFixture.roles.map(on) };
+  const html = render({ sets: starterStartedSetsFixture, roles });
+  expect(html).toContain("Your roles are set up for your kind of shop.");
+  expect(html).not.toContain("Not done yet");
 });
 
 it("finds the starter roles waiting on the signed-in person", () => {

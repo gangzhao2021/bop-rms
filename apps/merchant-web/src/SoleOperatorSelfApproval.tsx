@@ -61,6 +61,7 @@ export function SoleOperatorSelfApproval({
   onApprove,
   fetcher,
   yourPart = t("You made this change"),
+  several = false,
 }: {
   readonly gate: SoleOperatorGateView | null;
   readonly csrf: string | undefined;
@@ -79,6 +80,8 @@ export function SoleOperatorSelfApproval({
    * (default) or, for a second review, "You already gave the cost review".
    */
   readonly yourPart?: string;
+  /** Several things are approved together (several new roles): the text says "them". */
+  readonly several?: boolean;
 }) {
   const [verifiedUntil, setVerifiedUntil] = useState<string | null>(gate?.verifiedUntil ?? null);
   const [confirmed, setConfirmed] = useState(false);
@@ -112,10 +115,15 @@ export function SoleOperatorSelfApproval({
   return (
     <div className="sole-operator-confirm">
       <p>
-        {t(
-          "{yourPart} and you are the only person who holds {permissionName} (sole operator), so you may approve it yourself. Check it first:",
-          { yourPart: yourPart, permissionName: permissionName },
-        )}
+        {several
+          ? t(
+              "{yourPart} and you are the only person who holds {permissionName} (sole operator), so you may approve them yourself. Check them first:",
+              { yourPart: yourPart, permissionName: permissionName },
+            )
+          : t(
+              "{yourPart} and you are the only person who holds {permissionName} (sole operator), so you may approve it yourself. Check it first:",
+              { yourPart: yourPart, permissionName: permissionName },
+            )}
       </p>
       {summary}
       <p>{t("It will be recorded as approved by you alone.")}</p>
