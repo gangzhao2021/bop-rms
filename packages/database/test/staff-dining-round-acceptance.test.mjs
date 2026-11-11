@@ -1201,7 +1201,8 @@ it("enters a dine-in round by staff, takes its card-machine payment and marks it
         authentication: staffSession.authentication,
         references: { next: fresh },
       });
-      const markAllergies = (operationReference, allergenCodes) =>
+      // The set the screen was based on travels with each save (the table's expected state).
+      const markAllergies = (operationReference, allergenCodes, basedOnAllergenCodes = []) =>
         tableAllergies({
           sessionCookie: staffSession.sessionCookie,
           csrf: staffSession.csrf,
@@ -1209,6 +1210,7 @@ it("enters a dine-in round by staff, takes its card-machine payment and marks it
             operationReference,
             diningSessionReference: dining.session.diningSessionReference,
             allergenCodes,
+            basedOnAllergenCodes,
           },
         });
       assert.deepEqual(await markAllergies(id(0x2794), ["SESAME", "PEANUT"]), {
@@ -1264,7 +1266,25 @@ it("enters a dine-in round by staff, takes its card-machine payment and marks it
         admin.query("DELETE FROM rms_dining.dining_table_allergy_mark"),
         /append-only table allergy history/u,
       );
-      assert.equal((await markAllergies(id(0x2796), [])).status, "Applied");
+      // Two servers: one whose Tables page still shows no marks saves Sesame alone. Peanut is
+      // not dropped; the save is refused with what the table holds now.
+      assert.deepEqual(await markAllergies(id(0x2797), ["SESAME"], []), {
+        status: "Changed",
+        allergenCodes: ["PEANUT", "SESAME"],
+      });
+      assert.deepEqual((await ticketsNow()).get(id(0x2501)).orderLabel.tableAllergies, [
+        { code: "PEANUT", name: "Peanuts" },
+        { code: "SESAME", name: "Sesame" },
+      ]);
+      // Two saves from the same screen state at the same moment: exactly one is recorded.
+      const racing = await Promise.all([
+        markAllergies(id(0x2798), ["PEANUT"], ["PEANUT", "SESAME"]),
+        markAllergies(id(0x2799), ["SESAME"], ["SESAME", "PEANUT"]),
+      ]);
+      assert.deepEqual(racing.map((r) => r.status).sort(), ["Applied", "Changed"]);
+      const won = racing.find((r) => r.status === "Applied").allergenCodes;
+      assert.deepEqual(racing.find((r) => r.status === "Changed").allergenCodes, won);
+      assert.equal((await markAllergies(id(0x2796), [], won)).status, "Applied");
       assert.equal((await ticketsNow()).get(id(0x2501)).orderLabel.tableAllergies, undefined);
 
       // WP-2423 D4: the staff round is its own business day's work. The Order opened with round 1;

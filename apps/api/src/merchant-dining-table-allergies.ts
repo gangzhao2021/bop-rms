@@ -18,6 +18,7 @@ import type { MerchantBffService } from "./merchant-bff.js";
  * kitchen ticket of that table shows them in red. The Tables page's own permission,
  * `dining.operate`; the record names who set it and when. Codes are never logged or echoed in
  * an error.
+ * A save from a screen that no longer matches the table answers `Changed` with the current set.
  */
 const denied = (): never => {
   throw new Error("DINING_TABLE_ALLERGY_DENIED");
@@ -70,12 +71,15 @@ export function createMerchantDiningTableAllergies(options: {
       "operationReference",
       "diningSessionReference",
       "allergenCodes",
+      "basedOnAllergenCodes",
     ]);
     const operationReference = String(parseDiningReference(raw.operationReference));
     const diningSessionReference = String(parseDiningReference(raw.diningSessionReference));
     let codes: readonly string[];
+    let basedOnAllergenCodes: readonly string[];
     try {
       codes = parseDiningTableAllergyCodes(raw.allergenCodes);
+      basedOnAllergenCodes = parseDiningTableAllergyCodes(raw.basedOnAllergenCodes);
     } catch {
       return Object.freeze({ status: "Invalid" as const });
     }
@@ -112,6 +116,7 @@ export function createMerchantDiningTableAllergies(options: {
               markReference: options.references.next(),
               diningSessionReference,
               allergenCodes: codes,
+              basedOnAllergenCodes,
               actorReference: String(current.actorReference),
               operationReference,
               recordedAt: new Date(Date.parse(options.persistence.now())).toISOString(),

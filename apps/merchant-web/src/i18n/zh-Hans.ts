@@ -8954,6 +8954,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Save allergies": "保存过敏",
   "This table is no longer open.": "这桌已经不在用餐中了。",
   "Allergies couldn't be saved. Try again.": "过敏没有保存上，请再试一次。",
+  "Someone else changed this table's allergies, so yours weren't saved. Check the ticks and save again.":
+    "别的同事刚改过这桌的过敏，您的修改没有保存。请核对勾选后再保存一次。",
   "Ticks only: ask the guest, and never write their name or health details.":
     "只打勾：问清客人，不要写名字或健康情况。",
   "Table {table}: no allergies marked.": "{table} 号桌：没有标过敏。",

@@ -749,13 +749,16 @@ export function createDiningSessionClient(fetcher: typeof fetch = fetch) {
     },
     /**
      * WP-2423 (M171): the allergens this open table must avoid now (empty clears them); repeat
-     * the same operation only to recover.
+     * the same operation only to recover. `basedOnAllergenCodes` is the set this screen showed;
+     * when another server changed the table since, nothing is saved and the answer is `Changed`
+     * with the table's set now.
      */
     async setTableAllergies(
       csrf: string,
       operationReference: string,
       diningSessionReference: string,
       allergenCodes: readonly string[],
+      basedOnAllergenCodes: readonly string[],
     ) {
       const data = await send(
         "/merchant/dining/table-allergies",
@@ -763,6 +766,7 @@ export function createDiningSessionClient(fetcher: typeof fetch = fetch) {
           operationReference: ref(operationReference),
           diningSessionReference: ref(diningSessionReference),
           allergenCodes: [...allergenCodes],
+          basedOnAllergenCodes: [...basedOnAllergenCodes],
         }),
         csrf,
         undefined,
@@ -772,12 +776,15 @@ export function createDiningSessionClient(fetcher: typeof fetch = fetch) {
         return { status: "TableNotOpen" as const };
       if (
         Object.keys(data).length !== 2 ||
-        (data.status !== "Applied" && data.status !== "AlreadyApplied") ||
-        !Array.isArray(data.allergenCodes)
+        (data.status !== "Applied" &&
+          data.status !== "AlreadyApplied" &&
+          data.status !== "Changed") ||
+        !Array.isArray(data.allergenCodes) ||
+        (data.allergenCodes as unknown[]).some((code) => typeof code !== "string")
       )
         throw new DiningSessionClientError("Unknown");
       return {
-        status: data.status as "Applied" | "AlreadyApplied",
+        status: data.status as "Applied" | "AlreadyApplied" | "Changed",
         allergenCodes: Object.freeze((data.allergenCodes as unknown[]).map(String)),
       };
     },

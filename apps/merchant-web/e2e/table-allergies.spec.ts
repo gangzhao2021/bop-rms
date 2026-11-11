@@ -90,13 +90,26 @@ test("@production staff see an allergy question first and mark a table's allergi
   await page.route("**/merchant/dining/staff-calls/count", (route) =>
     route.fulfill({ headers, json: { open: 2 } }),
   );
-  const saved: { allergenCodes: string[]; diningSessionReference: string }[] = [];
+  const saved: {
+    allergenCodes: string[];
+    basedOnAllergenCodes: string[];
+    diningSessionReference: string;
+  }[] = [];
+  // Another server's save lands on the table before this screen's next save.
+  let elsewhere: string[] | null = null;
   await page.route("**/merchant/dining/table-allergies", (route) => {
     const body = route.request().postDataJSON() as {
       allergenCodes: string[];
+      basedOnAllergenCodes: string[];
       diningSessionReference: string;
     };
     saved.push(body);
+    if (elsewhere !== null) {
+      marked = elsewhere;
+      elsewhere = null;
+    }
+    if (JSON.stringify([...body.basedOnAllergenCodes].sort()) !== JSON.stringify(marked))
+      return route.fulfill({ headers, json: { status: "Changed", allergenCodes: marked } });
     marked = [...body.allergenCodes].sort();
     return route.fulfill({
       headers,
@@ -119,11 +132,33 @@ test("@production staff see an allergy question first and mark a table's allergi
   await expect(
     page.getByText("Table T1: kitchen tickets will show Peanuts, Sesame."),
   ).toBeVisible();
-  expect(saved).toEqual([{ ...saved[0], allergenCodes: ["PEANUT", "SESAME"] }]);
+  expect(saved).toEqual([
+    { ...saved[0], allergenCodes: ["PEANUT", "SESAME"], basedOnAllergenCodes: [] },
+  ]);
   expect(saved[0]?.diningSessionReference).toBe(id(11));
   await expect(allergies).toContainText(
     "Kitchen tickets for this table will show: Peanuts, Sesame.",
   );
+  // A colleague adds Milk; this screen, still showing Peanuts and Sesame, unticks Sesame. The
+  // save is refused, Milk is not lost, and both servers' ticks stay for the next save.
+  elsewhere = ["MILK", "PEANUT", "SESAME"];
+  await allergies.getByLabel("Sesame").uncheck();
+  await allergies.getByRole("button", { name: "Save allergies" }).click();
+  await expect(allergies.getByRole("alert")).toContainText(
+    "Someone else changed this table's allergies",
+  );
+  await expect(allergies).toContainText(
+    "Kitchen tickets for this table will show: Milk, Peanuts, Sesame.",
+  );
+  await expect(allergies.getByLabel("Milk")).toBeChecked();
+  await expect(allergies.getByLabel("Sesame")).toBeChecked();
+  await allergies.getByLabel("Sesame").uncheck();
+  await allergies.getByRole("button", { name: "Save allergies" }).click();
+  await expect(page.getByText("Table T1: kitchen tickets will show Milk, Peanuts.")).toBeVisible();
+  expect(saved.at(-1)).toMatchObject({
+    allergenCodes: ["PEANUT", "MILK"],
+    basedOnAllergenCodes: ["MILK", "PEANUT", "SESAME"],
+  });
   for (const width of [1440, 1024, 390]) {
     await page.setViewportSize({ width, height: 900 });
     await allergies.scrollIntoViewIfNeeded();

@@ -19,7 +19,8 @@ export function tableAllergenText(choice: StaffTableAllergenChoice): string {
  * Ticks from the Brand's allergen list only (no free text, so nobody writes a name or a health
  * detail); every kitchen ticket of the table then shows them in red. Cleared when the table
  * closes. A save that fails keeps the ticks and says so; pressing again repeats the same
- * operation, so nothing is recorded twice.
+ * operation, so nothing is recorded twice. A save made after another server changed the table
+ * is refused; the panel then shows the table's set and keeps both servers' ticks to save again.
  */
 export function TableAllergies({
   table,
@@ -35,9 +36,10 @@ export function TableAllergies({
   readonly onSaved: (codes: readonly string[]) => void;
 }) {
   const session = table.currentDiningSessionReference;
-  const saved = table.tableAllergies ?? [];
+  // What the table holds as far as this screen knows; a save is based on it.
+  const [saved, setSaved] = useState<readonly string[]>(() => table.tableAllergies ?? []);
   const [picked, setPicked] = useState<ReadonlySet<string>>(() => new Set(saved));
-  const [state, setState] = useState<"Idle" | "Saving" | "Failed" | "NotOpen">("Idle");
+  const [state, setState] = useState<"Idle" | "Saving" | "Failed" | "NotOpen" | "Changed">("Idle");
   const operation = useRef<{ key: string; reference: string } | null>(null);
   if (session === null || choices.length === 0) return null;
   const changed = picked.size !== saved.length || saved.some((code) => !picked.has(code));
@@ -59,10 +61,19 @@ export function TableAllergies({
         operation.current.reference,
         session,
         codes,
+        saved,
       );
       operation.current = null;
       if (result.status === "TableNotOpen") {
         setState("NotOpen");
+        return;
+      }
+      if (result.status === "Changed") {
+        // Another server changed this table first. Nothing was saved; keep every allergen either
+        // of them ticked, show what the kitchen sees now, and let this server save again.
+        setSaved(result.allergenCodes);
+        setPicked(new Set([...picked, ...result.allergenCodes]));
+        setState("Changed");
         return;
       }
       setState("Idle");
@@ -108,6 +119,12 @@ export function TableAllergies({
         <p className="table-allergies__problem" role="alert">
           {t("Allergies couldn't be saved. Try again.")}
         </p>
+      ) : state === "Changed" ? (
+        <p className="table-allergies__problem" role="alert">
+          {t(
+            "Someone else changed this table's allergies, so yours weren't saved. Check the ticks and save again.",
+          )}
+        </p>
       ) : state === "NotOpen" ? (
         <p className="table-allergies__problem" role="alert">
           {t("This table is no longer open.")}
@@ -116,7 +133,9 @@ export function TableAllergies({
       <button
         type="button"
         className="table-panel__text-step"
-        disabled={locked || state === "Saving" || (!changed && state !== "Failed")}
+        disabled={
+          locked || state === "Saving" || (!changed && state !== "Failed" && state !== "Changed")
+        }
         onClick={() => void save()}
       >
         {state === "Saving" ? t("Saving…") : t("Save allergies")}
