@@ -763,6 +763,8 @@ const kitchenItem = (n: number, status: "Queued" | "Completed"): KitchenList["it
   comboPartSections: { [id(0x650 + n)]: null },
   chase: { count: 1, lastChasedAt: at(20) },
   takenOnPaper: true,
+  // WP-2423 M10: one unit refunded and not to be made.
+  refundedQuantity: 1,
   workItemCreatedAt: at(16),
   // merchant-outage-recovery M120: when the round was sent (the wait counts from it).
   placedAt: at(15),
@@ -968,6 +970,13 @@ const settlementView = {
     captured: { count: 0, amountMinor: "0", currencyCode: "CAD" },
     refunded: { count: 0, amountMinor: "0", currencyCode: "CAD" },
   },
+  // WP-2423 M163: money taken back in the day, by who.
+  moneyTakenBack: {
+    count: 1,
+    amountMinor: "500",
+    currencyCode: "CAD",
+    recordedBy: [{ name: "Store Manager", count: 1, amountMinor: "500" }],
+  },
   dayEndCheck: null,
   projectedAt: at(30),
 } satisfies Output<"settlement">;
@@ -999,6 +1008,8 @@ const pickupView = {
           orderedQuantity: 1,
           readyQuantity: 1,
           handedOverQuantity: 0,
+          // WP-2423 M10: refunded, not in the bag.
+          refundedQuantity: 1,
         },
       ],
     },
