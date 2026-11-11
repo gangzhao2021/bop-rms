@@ -51,10 +51,12 @@ export function createPersistentMerchantOrderExceptions(options: {
   /**
    * WP-2423 D3: an unexpected failure reading what a payment reconciliation difference is about
    * (the card then says its details could not be loaded), or (v15 M44, `read` "OrderCause") why a
-   * case's Order ended (the case then keeps its kind as the title). Callers log code and frames
-   * only, under a code for which read failed.
+   * case's Order ended (the case then keeps its kind as the title), or (WP-2423, `read`
+   * "RefundCheckDue") a business day a confirmed refund's check is due at the end of (the case
+   * then keeps its 15-minute due time). Callers log code and frames only, under a code for which
+   * read failed.
    */
-  onUnexpected?(error: unknown, read?: "OrderCause"): void;
+  onUnexpected?(error: unknown, read?: "OrderCause" | "RefundCheckDue"): void;
 }) {
   const persistence = options.persistence,
     resolve = createMerchantStoreScope(persistence);
@@ -336,26 +338,38 @@ export function createPersistentMerchantOrderExceptions(options: {
           }
         return result;
       },
-      refundCheckDueAt: async (tx, scope, sources) => {
-        if (!matches(await authorize(tx), scope)) return unavailable();
-        const days = createMerchantBusinessDayWindows({
-          persistence,
-          scope,
-          timeZone: (await current(tx)).store.timeZone,
-          authorize: async (t) => t === tx && matches(await authorize(t), scope),
-        });
+      refundCheckDueAt: async (dayTransactions, scope, sources) => {
+        // WP-2423 (outage-reads-and-retry): after the cases, each business day in a short
+        // read-only transaction of its own (see causeTransactions), for the scope the cases'
+        // transaction just rechecked in full. A day read that fails (a statement timeout, a
+        // cancel) aborts its PostgreSQL transaction (25P02); in the cases' one it took the whole
+        // page with it whenever a confirmed refund was waiting for its check.
+        const timeZone = verifiedTimeZone;
+        if (verified === null || !matches(verified, scope) || timeZone === null)
+          return unavailable();
+        const own = async (t: ConsumerTransaction) =>
+          causeRuns.has(t) && verified !== null && matches(verified, scope);
+        const dayOf = (at: string) =>
+          dayTransactions.run((tx) =>
+            createMerchantBusinessDayWindows({
+              persistence,
+              scope,
+              timeZone,
+              authorize: async (t) => t === tx && (await own(t)),
+            }).dayOf(tx, at),
+          );
         const ownRefusal = (error: unknown) =>
           error instanceof Error &&
           (error.message === "MERCHANT_ORDER_EXCEPTION_UNAVAILABLE" ||
             error.message === "MERCHANT_ORDER_EXCEPTION_DENIED");
         const due = new Map<string, string>();
-        let today: Awaited<ReturnType<typeof days.dayOf>>;
+        let today: Awaited<ReturnType<typeof dayOf>>;
         try {
-          today = await days.dayOf(tx, persistence.now());
+          today = await dayOf(persistence.now());
         } catch (error) {
           // The business day cannot be read: these cases keep the 15-minute due time.
           if (ownRefusal(error)) throw error;
-          options.onUnexpected?.(error);
+          options.onUnexpected?.(error, "RefundCheckDue");
           return due;
         }
         for (const source of sources) {
@@ -367,10 +381,10 @@ export function createPersistentMerchantOrderExceptions(options: {
           // read, today's start is the latest it could have ended (it is overdue either way).
           let endsAt = today.startsAt;
           try {
-            endsAt = (await days.dayOf(tx, source.createdAt)).endsAt;
+            endsAt = (await dayOf(source.createdAt)).endsAt;
           } catch (error) {
             if (ownRefusal(error)) throw error;
-            options.onUnexpected?.(error);
+            options.onUnexpected?.(error, "RefundCheckDue");
           }
           if (Date.parse(endsAt) > Date.parse(source.createdAt))
             due.set(source.sourceReference, endsAt);

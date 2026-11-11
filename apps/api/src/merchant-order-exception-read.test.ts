@@ -137,6 +137,73 @@ it("DEC-EXCEPTION-CONFIRMED-REFUND-DUE: a confirmed refund is due at its busines
     "2026-09-12T15:13:00.000Z",
   );
 });
+it("WP-2423 outage-reads-and-retry: a confirmed refund's due time is read after the cases, in transactions of its own, and an unreadable one keeps the 15 minutes", async () => {
+  const confirmed = { ...sourceOf(40), providerState: "Confirmed" as const };
+  const casesTx = { query: vi.fn() } as ConsumerTransaction;
+  const laterTx = { query: vi.fn() } as ConsumerTransaction;
+  const order: string[] = [];
+  const authorize = vi.fn(async (tx: ConsumerTransaction) => {
+    order.push(tx === casesTx ? "cases:authorize" : "later:authorize");
+    return scope;
+  });
+  const refundCheckDueAt = vi.fn(
+    async (transactions: {
+      run<T>(work: (tx: ConsumerTransaction) => Promise<T>): Promise<T>;
+    }): Promise<ReadonlyMap<string, string>> =>
+      transactions.run(async (tx) => {
+        order.push(tx === laterTx ? "later:due" : "cases:due");
+        throw Object.assign(new Error("canceling statement due to statement timeout"), {
+          code: "57014",
+        });
+      }),
+  );
+  const read = createMerchantOrderExceptionRead({
+    transactions: { run: async (work) => work(casesTx) },
+    causeTransactions: { run: async (work) => work(laterTx) },
+    authorize,
+    sources: () => ({
+      listOpen: async () => ({ items: [confirmed], next: null }),
+      listResolved: async () => ({ items: [], next: null }),
+    }),
+    refundCheckDueAt,
+    metadata: async () => ({
+      storeLabel: "Synthetic Store",
+      businessDate: "2026-09-12",
+      checkpointReference: id(5),
+      projectedAt: at,
+      freshnessStatus: "Fresh",
+      currentSourceCheck: "Complete" as const,
+    }),
+  });
+  const result = await read("synthetic-cookie");
+  // Both authorizations finish in the cases' transaction before the due time is read.
+  expect(order).toEqual(["cases:authorize", "cases:authorize", "later:due"]);
+  expect(result.items.map((item) => [item.exceptionReference, item.dueAt])).toEqual([
+    [id(40), "2026-09-12T15:13:00.000Z"],
+  ]);
+});
+it("WP-2423: a due time the projection refuses still answers unavailable, not a page", async () => {
+  const confirmed = { ...sourceOf(40), providerState: "Confirmed" as const };
+  const read = createMerchantOrderExceptionRead({
+    transactions: { run: async (work) => work({ query: vi.fn() }) },
+    authorize: async () => scope,
+    sources: () => ({
+      listOpen: async () => ({ items: [confirmed], next: null }),
+      listResolved: async () => ({ items: [], next: null }),
+    }),
+    // Before the case opened: never a due time.
+    refundCheckDueAt: async () => new Map([[id(40), "2026-09-12T14:00:00.000Z"]]),
+    metadata: async () => ({
+      storeLabel: "Synthetic Store",
+      businessDate: "2026-09-12",
+      checkpointReference: id(5),
+      projectedAt: at,
+      freshnessStatus: "Fresh",
+      currentSourceCheck: "Complete" as const,
+    }),
+  });
+  await expect(read("synthetic-cookie")).rejects.toThrow("MERCHANT_ORDER_EXCEPTION_UNAVAILABLE");
+});
 
 it("uses only trusted metadata source checks for a current older exception read", async () => {
   const source = {

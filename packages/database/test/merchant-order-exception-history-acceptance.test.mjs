@@ -85,6 +85,19 @@ it("lists every open exception past 500 lifetime cases and pages resolved histor
       /** Test-only: the one reconciliation difference whose detail read PostgreSQL refuses. */
       let breakReconciliation = null;
       /**
+       * Test-only: the business-day configuration read PostgreSQL cancels at the statement
+       * timeout: the one for this instant, or "now" for today's.
+       */
+      let breakDayAt = null;
+      const breaksDay = (sql, values) =>
+        breakDayAt !== null &&
+        sql.startsWith("WITH RECURSIVE published AS") &&
+        sql.includes("rms_store.store_configuration_version") &&
+        typeof values?.[2] === "string" &&
+        (breakDayAt === "now"
+          ? Math.abs(Date.parse(values[2]) - Date.now()) < 60_000
+          : Date.parse(values[2]) === Date.parse(breakDayAt));
+      /**
        * The pilot exception snapshot (tooling/environment/pilot-exception-snapshot.mjs): one
        * REPEATABLE READ transaction under the api role with the runner's limits, accepting only
        * read statements.
@@ -125,6 +138,8 @@ it("lists every open exception past 500 lifetime cases and pages resolved histor
                           "FROM rms_payment.no_such_table e",
                         )
                       : sql;
+                // Longer than the snapshot's 5 s statement timeout: PostgreSQL cancels it (57014).
+                if (breaksDay(sql, values)) return client.query("SELECT pg_sleep(10)", []);
                 return client.query(statement, values === undefined ? [] : [...values]);
               },
             });
@@ -390,6 +405,72 @@ it("lists every open exception past 500 lifetime cases and pages resolved histor
         [
           ["ReconciliationDetail", "42P01"],
           ["ReconciliationDetail", "42P01"],
+        ],
+      );
+      unexpected.length = 0;
+
+      // WP-2423 (outage-reads-and-retry): the business day a confirmed refund's check is due at
+      // the end of is read after the cases, each day in a transaction of its own. When PostgreSQL
+      // cancels an earlier day's read at the statement timeout, the page still lists every case:
+      // that case is due at today's start (the latest its day could have ended), the others keep
+      // theirs. Before, the read ran on in the cases' aborted transaction (25P02) and the whole
+      // page answered "unavailable" whenever a refund was waiting for its check.
+      const dueOf = (page) =>
+        new Map(page.items.map((item) => [item.exceptionReference, item.dueAt]));
+      const todayStart = businessDayEnd(
+        new Date(Date.parse(businessDayEnd(now())) - 25 * 3_600_000).toISOString(),
+      );
+      breakDayAt = earlierOpened;
+      let withoutEarlierDay;
+      try {
+        withoutEarlierDay = await read(session.sessionCookie);
+      } finally {
+        breakDayAt = null;
+      }
+      assert.deepEqual(
+        withoutEarlierDay.items.map((item) => item.exceptionReference),
+        whole.items.map((item) => item.exceptionReference),
+      );
+      const partDue = dueOf(withoutEarlierDay);
+      assert.equal(partDue.get(id(2000)), businessDayEnd(todayOpened));
+      assert.equal(partDue.get(id(2001)), todayStart);
+      assert.equal(
+        partDue.get(id(2002)),
+        new Date(Date.parse(unconfirmedOpened) + minutes(15)).toISOString(),
+      );
+      for (const reference of differences)
+        assert.deepEqual(detailOf(withoutEarlierDay, reference), { type: "UnmatchedCharge" });
+      // When today's business day can't be read either, every case keeps its 15-minute due time.
+      breakDayAt = "now";
+      let withoutToday;
+      try {
+        withoutToday = await read(session.sessionCookie);
+      } finally {
+        breakDayAt = null;
+      }
+      assert.deepEqual(
+        withoutToday.items.map((item) => item.exceptionReference),
+        whole.items.map((item) => item.exceptionReference),
+      );
+      const noDayDue = dueOf(withoutToday);
+      for (const [n, opened] of [
+        [2000, todayOpened],
+        [2001, earlierOpened],
+        [2002, unconfirmedOpened],
+      ])
+        assert.equal(noDayDue.get(id(n)), new Date(Date.parse(opened) + minutes(15)).toISOString());
+      // Each cancelled day read is logged as a refund-check day (Store answers its own code for a
+      // business day it could not read; PostgreSQL's 57014 is not passed through).
+      const postgresCode = (error) => {
+        for (let at = error, depth = 0; at && depth < 6; at = at.cause, depth++)
+          if (typeof at.code === "string" && /^[0-9A-Z]{5}$/u.test(at.code)) return at.code;
+        return error instanceof Error ? error.message : null;
+      };
+      assert.deepEqual(
+        unexpected.map(([what, error]) => [what, postgresCode(error)]),
+        [
+          ["RefundCheckDue", "STORE_BUSINESS_DATE_UNAVAILABLE"],
+          ["RefundCheckDue", "STORE_BUSINESS_DATE_UNAVAILABLE"],
         ],
       );
     } finally {

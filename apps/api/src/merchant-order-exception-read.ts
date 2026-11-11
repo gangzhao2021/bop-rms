@@ -96,9 +96,12 @@ export function createMerchantOrderExceptionRead(options: {
    * DEC-EXCEPTION-CONFIRMED-REFUND-DUE (WP-2423): the end of the Store business day each open
    * case with an already Provider-confirmed refund opened in (its reconciliation check is due
    * then). A missing entry keeps that case's 15-minute due time.
+   * WP-2423 (outage-reads-and-retry): read after the cases, in transactions of its own (as
+   * `reconciliationDetails`), so a business day that can't be read leaves the cases on the page
+   * with their 15-minute due time instead of aborting the cases' transaction (25P02).
    */
   refundCheckDueAt?(
-    tx: ConsumerTransaction,
+    transactions: { run<T>(work: (tx: ConsumerTransaction) => Promise<T>): Promise<T> },
     scope: MerchantExceptionScope,
     sources: readonly OrderExceptionSource[],
   ): Promise<ReadonlyMap<string, string>>;
@@ -195,17 +198,19 @@ export function createMerchantOrderExceptionRead(options: {
         )
           return unavailable();
         const awaitingCheck = items.filter(isConfirmedRefundAwaitingCheck);
-        const refundCheckDueAt =
-          options.refundCheckDueAt && awaitingCheck.length > 0
-            ? await options.refundCheckDueAt(tx, scope, Object.freeze(awaitingCheck))
-            : new Map<string, string>();
-        const projection = readOrderExceptionProjection({
+        const projectionInput = {
           ...scope,
           ...metadata,
           sources: items,
-          deriveProjectionReference: (source) => source,
-          refundCheckDueAt,
-        });
+          deriveProjectionReference: (source: string) => source,
+        };
+        // Every case is checked here with the 15-minute due times; a confirmed refund's due time
+        // (its business day's end) is read after this transaction and applied in `withDueTimes`.
+        const projection = readOrderExceptionProjection(projectionInput);
+        const withDueTimes = (refundCheckDueAt: ReadonlyMap<string, string>) =>
+          refundCheckDueAt.size === 0
+            ? projection
+            : readOrderExceptionProjection({ ...projectionInput, refundCheckDueAt });
         const assignments = new Map<string, boolean>();
         for (const source of items) {
           if (
@@ -243,6 +248,7 @@ export function createMerchantOrderExceptionRead(options: {
         )
           return unavailable();
         const build = (
+          projection: ReturnType<typeof readOrderExceptionProjection>,
           causes: ReadonlyMap<string, MerchantExceptionOrderCause>,
           details: ReadonlyMap<string, MerchantExceptionReconciliationDetail>,
         ) =>
@@ -287,27 +293,45 @@ export function createMerchantOrderExceptionRead(options: {
               ),
             ),
           });
-        return { scope, linked, build, reconciliationSources };
+        return { scope, linked, build, withDueTimes, awaitingCheck, reconciliationSources };
       })
       .catch(
         keepingCause(() => {
           throw Error("MERCHANT_ORDER_EXCEPTION_UNAVAILABLE");
         }),
       )
-      .then(async ({ scope, linked, build: withDetails, reconciliationSources }) => {
+      .then(async (cases) => {
+        const { scope, linked, reconciliationSources, awaitingCheck } = cases;
+        const later = options.causeTransactions ?? options.transactions;
+        const refundCheckDueAt =
+          options.refundCheckDueAt && awaitingCheck.length > 0
+            ? await options
+                .refundCheckDueAt(later, scope, Object.freeze(awaitingCheck))
+                // The adapter reports what failed; these cases keep their 15-minute due time.
+                .catch(() => new Map<string, string>())
+            : new Map<string, string>();
+        let projection: ReturnType<typeof readOrderExceptionProjection>;
+        try {
+          projection = cases.withDueTimes(refundCheckDueAt);
+        } catch (error) {
+          return keepingCause(() => {
+            throw Error("MERCHANT_ORDER_EXCEPTION_UNAVAILABLE");
+          })(error);
+        }
+        const withDetails = (
+          causes: ReadonlyMap<string, MerchantExceptionOrderCause>,
+          details: ReadonlyMap<string, MerchantExceptionReconciliationDetail>,
+        ) => cases.build(projection, causes, details);
         const reconciliationDetails = options.reconciliationDetails;
         const details =
           reconciliationDetails && reconciliationSources.length > 0
-            ? await reconciliationDetails(
-                options.causeTransactions ?? options.transactions,
-                scope,
-                Object.freeze(reconciliationSources),
-              ).catch((error: unknown) =>
-                unreadableDetails(
-                  reconciliationSources,
-                  error,
-                  options.reconciliationDetailsFailed,
-                ),
+            ? await reconciliationDetails(later, scope, Object.freeze(reconciliationSources)).catch(
+                (error: unknown) =>
+                  unreadableDetails(
+                    reconciliationSources,
+                    error,
+                    options.reconciliationDetailsFailed,
+                  ),
               )
             : new Map<string, MerchantExceptionReconciliationDetail>();
         const build = (causes: ReadonlyMap<string, MerchantExceptionOrderCause>) =>
@@ -319,7 +343,7 @@ export function createMerchantOrderExceptionRead(options: {
         // titled by its kind. In the same transaction it could not: a failed statement aborts a
         // PostgreSQL transaction, and the pilot's read-only exception snapshot refuses SAVEPOINT
         // and fails the whole read once any statement failed.
-        const causes = await (options.causeTransactions ?? options.transactions)
+        const causes = await later
           .run((tx) => orderCauses(tx, scope, linked))
           .catch(() => new Map<string, MerchantExceptionOrderCause>());
         return build(causes);
