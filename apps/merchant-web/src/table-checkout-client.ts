@@ -60,6 +60,8 @@ export interface TableBill {
         readonly kind: "Comp" | "Percent" | "Amount";
         readonly percent: number | null;
         readonly amountMinor: string;
+        /** The same reduction before tax (null from an older server), for the printed bill. */
+        readonly netMinor: string | null;
         /** Taken off with a guest's points, not by staff. */
         readonly points?: boolean;
       };
@@ -558,6 +560,7 @@ function reductionOf(value: unknown) {
     kind: entry.kind,
     percent: entry.percent as number | null,
     amountMinor: amount(entry.amountMinor),
+    netMinor: entry.netMinor === undefined ? null : amount(entry.netMinor),
     ...(entry.points === true ? { points: true } : {}),
   });
 }

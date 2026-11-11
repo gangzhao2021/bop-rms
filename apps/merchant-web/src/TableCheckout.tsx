@@ -1271,11 +1271,13 @@ function TableReceipt({
             </span>
             <span>{cad(item.subtotalMinor)}</span>
             {item.reduction ? (
+              // v15 batch 7 review: on paper each dish and its comp are before tax, like the
+              // Subtotal under them, so the dishes less the comps add up to the Subtotal.
               <span className="table-receipt__reduction">
                 {item.reduction.points === true
                   ? t("Points used")
-                  : compedText(item.reduction.kind, item.reduction.percent)}{" "}
-                −{cad(item.reduction.amountMinor)}
+                  : compedText(item.reduction.kind, item.reduction.percent)}
+                {item.reduction.netMinor === null ? null : <> −{cad(item.reduction.netMinor)}</>}
               </span>
             ) : null}
           </li>

@@ -372,6 +372,123 @@ test("@production DEC-DINE-IN-PAY-LATER: staff start checkout, take cash rounded
   ).toEqual([]);
 });
 
+test("@production the printed paid bill adds up: each dish less its comp or discount comes to the Subtotal", async ({
+  page,
+}) => {
+  const state: { phase: "Active" | "Closing"; version: number } = {
+    phase: "Closing",
+    version: 7,
+  };
+  await floor(page, state);
+  await page.route("**/merchant/dining/table-close-plan", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        orderReference: id(3),
+        diningSessionReference: id(2),
+        orderVersion: 4,
+        observedAt: "2026-10-15T19:00:00.000Z",
+        rounds: [],
+        closeBlockers: [],
+        totals: { onlineMinor: "0", cardMachineMinor: "0" },
+      },
+    }),
+  );
+  // Two $12.50 dishes at a 13 % TEST tax: one comped in full ($14.13 with tax), one 10 % off
+  // ($1.25 before tax, $1.41 with it). The round is $11.25 after comps, $1.47 tax.
+  const bill = unpaidBill("Closing", 7);
+  await page.route("**/merchant/dining/table-bill", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        ...bill,
+        rounds: [
+          {
+            ...bill.rounds[0],
+            items: [
+              {
+                orderItemReference: id(901),
+                quantity: 1,
+                displayName: "Synthetic noodles",
+                subtotalMinor: "1250",
+                totalMinor: "0",
+                reduction: { kind: "Comp", percent: null, amountMinor: "1413", netMinor: "1250" },
+              },
+              {
+                orderItemReference: id(903),
+                quantity: 1,
+                displayName: "Synthetic dumplings",
+                subtotalMinor: "1250",
+                totalMinor: "1272",
+                reduction: { kind: "Percent", percent: 10, amountMinor: "141", netMinor: "125" },
+              },
+            ],
+            subtotalMinor: "1125",
+            taxMinor: "147",
+            totalMinor: "1272",
+            taxRoundingMinor: "0",
+            paid: true,
+          },
+        ],
+        taxRoundingMinor: "0",
+        owed: { subtotalMinor: "0", taxMinor: "0", totalMinor: "0" },
+        tips: { enabled: false, tierPercents: [12, 18, 20] },
+        settlement: {
+          method: "CardMachine",
+          roundsMinor: "1272",
+          tipMinor: "0",
+          roundingMinor: "0",
+          totalMinor: "1272",
+          tenderedMinor: null,
+          changeMinor: null,
+          recordedAt: "2026-10-15T19:05:00.000Z",
+          recordedAfterOutage: false,
+        },
+      },
+    }),
+  );
+  await page.goto("/operations/dining");
+  await page.getByRole("button", { name: "Select T2", exact: true }).click();
+  const checkout = page.getByRole("region", { name: "Checkout" });
+  await expect(checkout.getByRole("button", { name: "Print paid bill" })).toBeVisible();
+  await page.evaluate(() => {
+    window.print = () => undefined;
+  });
+  await checkout.getByRole("button", { name: "Print paid bill" }).click();
+  await page.emulateMedia({ media: "print" });
+  const paper = await page.evaluate(() => {
+    const cents = (text: string) => {
+      const found = /(−?)\$(\d+)\.(\d\d)/u.exec(text);
+      if (found === null) return null;
+      const value = Number(found[2]) * 100 + Number(found[3]);
+      return found[1] === "−" ? -value : value;
+    };
+    const lines = [...document.querySelectorAll(".table-receipt__dishes > li")].map((li) => ({
+      dish: cents((li.children[1] as HTMLElement).innerText),
+      off: li.children[2] === undefined ? 0 : cents((li.children[2] as HTMLElement).innerText),
+    }));
+    const subtotal = [...document.querySelectorAll(".table-receipt dt")].find(
+      (dt) => (dt as HTMLElement).innerText === "Subtotal",
+    )?.nextElementSibling as HTMLElement | undefined;
+    return {
+      lines,
+      subtotal: subtotal === undefined ? null : cents(subtotal.innerText),
+      text: (document.querySelector("[data-print-root]") as HTMLElement | null)?.innerText ?? "",
+    };
+  });
+  expect(paper.lines).toEqual([
+    { dish: 1250, off: -1250 },
+    { dish: 1250, off: -125 },
+  ]);
+  expect(paper.subtotal).toBe(1125);
+  expect(paper.lines.reduce((sum, line) => sum + (line.dish ?? 0) + (line.off ?? 0), 0)).toBe(
+    paper.subtotal,
+  );
+  expect(paper.text).toContain("Total paid");
+  expect(paper.text).toContain("$12.72");
+  await page.emulateMedia({ media: "screen" });
+});
+
 test("@production DEC-DINE-IN-PAY-LATER: a table the guests left without paying shows it was written off and offers no payment", async ({
   page,
 }) => {

@@ -175,6 +175,11 @@ export interface DiningTableBill {
         readonly kind: "Comp" | "Percent" | "Amount";
         readonly percent: number | null;
         readonly amountMinor: string;
+        /**
+         * v15 batch 7 review: the same reduction before tax, so the printed bill's dish less its
+         * comp adds up to the Subtotal (which is after comps and before tax).
+         */
+        readonly netMinor: string;
         /** WP-2423 取舍 18: a guest's points, not a manager's decision. */
         readonly points?: true;
       };
@@ -703,6 +708,9 @@ export async function readDiningTableBill(
                     amountMinor: (
                       off(item) as NonNullable<ReturnType<typeof off>>
                     ).totalMinor.toString(),
+                    netMinor: (
+                      off(item) as NonNullable<ReturnType<typeof off>>
+                    ).netMinor.toString(),
                   }),
           }),
         ),
