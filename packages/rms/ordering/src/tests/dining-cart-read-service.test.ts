@@ -318,15 +318,19 @@ describe("current-authorized shared Dining Cart read", () => {
     "tableAssignmentVersion",
     "diningSessionVersion",
     "participantVersion",
-  ] as const)("denies changed %s after the Cart read", async (field) => {
-    const f = fixture();
-    f.participate
-      .mockResolvedValueOnce(membership())
-      .mockResolvedValue({ ...membership(), [field]: field === "tableReference" ? id(99) : 2 });
-    await expect(f.service.read({ sessionCredential: credential })).rejects.toMatchObject({
-      code: "CART_PERMISSION_DENIED",
-    });
-  });
+  ] as const)(
+    "WP-2423 (outage-reads-and-retry): reads again on the party's table as it is now when %s changed after the Cart read",
+    async (field) => {
+      const f = fixture();
+      const changed = field === "tableReference" ? id(99) : 2;
+      f.participate
+        .mockResolvedValueOnce(membership())
+        .mockResolvedValue({ ...membership(), [field]: changed });
+      const read = await f.service.read({ sessionCredential: credential });
+      expect(read?.viewer).toMatchObject({ [field]: changed });
+      expect(f.current).toHaveBeenCalledTimes(2);
+    },
+  );
   it.each([
     null,
     { ...membership(), schemaVersion: 2 },
@@ -403,7 +407,60 @@ describe("current-authorized shared Dining Cart read", () => {
       if (++count === 2) source.tableAssignmentVersion = 2;
       return guest();
     });
+    // The first snapshot was kept as it was read: the change is seen (and the read done again on
+    // the table as it is now, WP-2423 outage-reads-and-retry) instead of passing unnoticed.
+    const read = await f.service.read({ sessionCredential: credential });
+    expect(read?.viewer.tableAssignmentVersion).toBe(2);
+    expect(f.participate).toHaveBeenCalledTimes(4);
+  });
+  it("WP-2423 (outage-reads-and-retry): a read while staff move the party's table follows the party", async () => {
+    const f = fixture();
+    let reads = 0;
+    // Staff move the party from table 61 to table 62 between the read's two checks.
+    f.participate.mockImplementation(async () => ({
+      ...membership(),
+      ...(++reads >= 2 ? { tableReference: id(62), tableAssignmentVersion: 2 } : {}),
+      diningSessionVersion: reads >= 2 ? 2 : 1,
+      observedAt: f.now(),
+    }));
+    const read = await f.service.read({ sessionCredential: credential });
+    // Before: "your session ended" (401), and the phone dropped its cart.
+    expect(read?.viewer).toMatchObject({ tableReference: id(62), tableAssignmentVersion: 2 });
+    expect(f.current).toHaveBeenCalledTimes(2);
+  });
+  it("WP-2423 (outage-reads-and-retry): a table that keeps changing is said as such, never an ended session", async () => {
+    const f = fixture();
+    let reads = 0;
+    f.participate.mockImplementation(async () => ({
+      ...membership(),
+      tableReference: id(61 + (++reads % 2)),
+      tableAssignmentVersion: reads,
+      observedAt: f.now(),
+    }));
     await expect(f.service.read({ sessionCredential: credential })).rejects.toMatchObject({
+      code: "CART_PARTICIPATION_ENDED",
+      reason: "Changed",
+    });
+    // Another guest joining over and over (the party's version only): busy, try again.
+    const g = fixture();
+    let versions = 0;
+    g.participate.mockImplementation(async () => ({
+      ...membership(),
+      diningSessionVersion: ++versions,
+      observedAt: g.now(),
+    }));
+    await expect(g.service.read({ sessionCredential: credential })).rejects.toMatchObject({
+      code: "CART_DEPENDENCY_UNAVAILABLE",
+    });
+    // Another participant or party is still a plain refusal.
+    const h = fixture();
+    let other = 0;
+    h.participate.mockImplementation(async () => ({
+      ...membership(),
+      ...(++other >= 2 ? { participantReference: ids.otherParticipant } : {}),
+      observedAt: h.now(),
+    }));
+    await expect(h.service.read({ sessionCredential: credential })).rejects.toMatchObject({
       code: "CART_PERMISSION_DENIED",
     });
   });

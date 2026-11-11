@@ -197,20 +197,24 @@ describe("current-authorized shared Dining Cart selection", () => {
     "tableAssignmentVersion",
     "diningSessionVersion",
     "participantVersion",
-  ])("denies post-effect %s drift", async (key) => {
-    const f = fixture();
-    f.select.mockImplementation(async () => {
-      f.participate.mockResolvedValue({
-        ...membership(),
-        [key]: key === "tableReference" ? id(99) : 2,
+  ])(
+    "WP-2423 (outage-reads-and-retry): post-effect %s drift (staff moved the party) selects again, same operation",
+    async (key) => {
+      const f = fixture();
+      f.select.mockImplementation(async () => {
+        f.participate.mockResolvedValue({
+          ...membership(),
+          [key]: key === "tableReference" ? id(99) : 2,
+        });
+        return receipt();
       });
-      return receipt();
-    });
-    await expect(f.service.select(input())).rejects.toMatchObject({
-      code: "CART_PERMISSION_DENIED",
-    });
-    expect(f.select).toHaveBeenCalledTimes(1);
-  });
+      expect(await f.service.select(input())).toEqual(receipt());
+      expect(f.select).toHaveBeenCalledTimes(2);
+      expect(f.select.mock.calls[0]?.[0].operationReference).toBe(
+        f.select.mock.calls[1]?.[0].operationReference,
+      );
+    },
+  );
   it("denies a post-effect Guest rotation", async () => {
     const f = fixture();
     f.select.mockImplementation(async () => {

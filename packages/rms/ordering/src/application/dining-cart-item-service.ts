@@ -3,6 +3,7 @@ import { parseGuestRawCredential, readClosedRecord } from "@bop/identity";
 import {
   assertDiningCartNotHeld,
   CartCheckoutInProgressError,
+  CartParticipationEndedError,
   CartSelectionRejectedError,
   CartError,
   type DiningCartCheckoutHoldPort,
@@ -16,7 +17,9 @@ import {
 import { assertCartLifecycleActive } from "../domain/cart-lifecycle.js";
 import { createCartItemCommandService } from "./cart-item-command-service.js";
 import {
+  CartPartyMovedError,
   createDiningCartAuthority,
+  partyMoved,
   type DiningCartAuthorityPorts,
   type DiningCartAuthoritySnapshot,
 } from "./dining-cart-authority.js";
@@ -141,6 +144,10 @@ function sameAuthority(first: DiningCartAuthoritySnapshot, next: DiningCartAutho
     "locale",
   ] as const)
     if (first.session[key] !== next.session[key]) return denied();
+  // WP-2423 (outage-reads-and-retry): staff moved or merged this party's table meanwhile: the
+  // whole change is done again on the table as it is now (never "your session ended").
+  const moved = partyMoved(first, next);
+  if (moved !== null) throw moved;
   for (const key of [
     "brandReference",
     "storeReference",
@@ -196,6 +203,9 @@ export function createDiningCartItemService(options: DiningCartItemOptions) {
   ): Promise<PickupCartItemResult> {
     const raw = input(value, action);
     let guardFailure: CartError | null = null;
+    // The party's table changed under one of this change's checks (the command service writes
+    // dependency failures over, so it is kept here and said to the authority after).
+    let movedDuring: CartPartyMovedError | null = null;
     const receiptState: { expiresAt: string | null } = { expiresAt: null };
     const authority = createDiningCartAuthority({
       scope: { brandReference, storeReference },
@@ -210,190 +220,15 @@ export function createDiningCartItemService(options: DiningCartItemOptions) {
     });
     try {
       const result = await authority.run(raw.sessionCredential, async (first) => {
-        const bound = Object.freeze({
-          brandReference,
-          storeReference,
-          diningSessionReference: first.participation.diningSessionReference,
-          guestSessionReference: String(first.session.sessionReference),
-          cartReference: raw.cartReference,
-        });
-        await assertDiningCartNotHeld(options.checkoutHold, {
-          diningSessionReference: String(first.participation.diningSessionReference),
-          participantReference: String(first.participation.participantReference),
-          cartReference: raw.cartReference,
-          cartVersion: raw.expectedAggregateVersion,
-          observedAt: first.observedAt,
-        });
-        const repository = options.repository(bound);
-        function owned(value: unknown) {
-          let cart;
-          try {
-            cart = parseCartAggregate(value);
-          } catch {
-            return unavailable();
-          }
-          if (
-            cart.brandReference !== brandReference ||
-            cart.storeReference !== storeReference ||
-            cart.cartReference !== raw.cartReference ||
-            cart.orderType !== "DineIn" ||
-            cart.diningSessionReference !== bound.diningSessionReference ||
-            !["Qr", "Web"].includes(cart.sourceChannel) ||
-            cart.updatedAt > first.observedAt
-          )
-            return unavailable();
-          return cart;
+        guardFailure = null;
+        movedDuring = null;
+        receiptState.expiresAt = null;
+        try {
+          return await attempt(first);
+        } catch (error) {
+          if (movedDuring !== null) throw movedDuring;
+          throw error;
         }
-        function record(value: unknown): CartItemOperationRecord {
-          try {
-            return parseRecord(value);
-          } catch (error) {
-            if (error instanceof CartError && error.code === "CART_IDEMPOTENCY_CONFLICT")
-              throw new CartError(error.code);
-            return unavailable();
-          }
-        }
-        function parseRecord(value: unknown): CartItemOperationRecord {
-          const saved = readClosedRecord(value, [
-            "action",
-            "operationReference",
-            "operationIntentHash",
-            "guestSessionReference",
-            "cartReference",
-            "cartItemReference",
-            "result",
-            "occurredAt",
-            "expiresAt",
-          ]);
-          if (
-            saved.action !== action ||
-            saved.operationReference !== raw.operationReference ||
-            saved.cartReference !== raw.cartReference ||
-            saved.guestSessionReference !== bound.guestSessionReference
-          )
-            throw new CartError("CART_IDEMPOTENCY_CONFLICT");
-          const occurredAt = parseOrderingInstant(saved.occurredAt);
-          const expiresAt = parseOrderingInstant(saved.expiresAt);
-          if (
-            occurredAt > first.observedAt ||
-            occurredAt < String(first.session.createdAt) ||
-            Date.parse(expiresAt) - Date.parse(occurredAt) !== 86_400_000
-          )
-            return unavailable();
-          const aggregate = owned(saved.result);
-          const itemReference = parseOrderingReference(saved.cartItemReference);
-          const item = aggregate.items.find(
-            (candidate) => candidate.cartItemReference === itemReference,
-          );
-          if (
-            aggregate.updatedAt !== occurredAt ||
-            (action === "Remove"
-              ? item !== undefined
-              : item?.addedByParticipantReference !== first.participation.participantReference)
-          )
-            return unavailable();
-          receiptState.expiresAt = expiresAt;
-          return Object.freeze({
-            action,
-            operationReference: raw.operationReference,
-            operationIntentHash: parseOrderingHash(saved.operationIntentHash),
-            guestSessionReference: parseOrderingReference(bound.guestSessionReference),
-            cartReference: raw.cartReference,
-            cartItemReference: itemReference,
-            result: aggregate,
-            occurredAt,
-            expiresAt,
-          });
-        }
-        async function guarded<T>(effect: (current: DiningCartAuthoritySnapshot) => Promise<T>) {
-          try {
-            const checked = await authority.run(raw.sessionCredential, async (current) => {
-              sameAuthority(first, current);
-              return effect(current);
-            });
-            sameAuthority(first, checked.authority);
-            return checked.value;
-          } catch (error) {
-            if (error instanceof CartError) guardFailure = new CartError(error.code);
-            throw error;
-          }
-        }
-        const audit = captureAudit(
-          options.audit(
-            Object.freeze({
-              action,
-              brandReference,
-              storeReference,
-              sessionReference: parseOrderingReference(bound.guestSessionReference),
-              cartReference: raw.cartReference,
-              operationReference: raw.operationReference,
-              observedAt: first.observedAt,
-            }),
-          ),
-          first.observedAt,
-        );
-        let loaded: ReturnType<typeof owned> | null = null;
-        const service = createCartItemCommandService({
-          ...(options.adders === undefined ? {} : { adders: options.adders }),
-          catalog: {
-            validateSelection: (selection, context) =>
-              guarded(() => options.catalog.validateSelection(selection, context)),
-            ...(options.catalog.explainMany === undefined
-              ? {}
-              : {
-                  explainMany: (
-                    inputs: Parameters<
-                      NonNullable<CartItemCommandPorts["catalog"]["explainMany"]>
-                    >[0],
-                  ) => options.catalog.explainMany?.(inputs) ?? Promise.resolve([]),
-                }),
-          },
-          references: options.references,
-          authorization: { authorize: async () => ({ guestSession: first.session, audit }) },
-          repository: {
-            load: async (reference) => {
-              const source = await repository.load(reference);
-              loaded = source === null ? null : owned(source);
-              return loaded;
-            },
-            resolveOperation: (reference) =>
-              guarded(async () => {
-                const prior = await repository.resolveOperation(reference);
-                return prior === null ? null : record(prior);
-              }),
-            commit: (command) =>
-              guarded(async (current) => {
-                if (loaded === null) return unavailable();
-                assertCartLifecycleActive(loaded.lifecycle, current.observedAt);
-                return record(await repository.commit(command));
-              }),
-          },
-        });
-        const common = {
-          cartReference: raw.cartReference,
-          operationReference: raw.operationReference,
-          expectedAggregateVersion: raw.expectedAggregateVersion,
-          requestedAt: first.observedAt,
-        };
-        const configured = {
-          ...common,
-          quantity: raw.quantity,
-          optionSelections: raw.optionSelections,
-          customerNote: raw.customerNote,
-        };
-        const applied =
-          action === "Add"
-            ? await service.add({ ...configured, sellableReference: raw.targetReference })
-            : action === "Update"
-              ? await service.update({ ...configured, cartItemReference: raw.targetReference })
-              : await service.remove({ ...common, cartItemReference: raw.targetReference });
-        const aggregate = owned(applied.aggregate);
-        return Object.freeze({
-          status: applied.status,
-          cartReference: aggregate.cartReference,
-          cartItemReference: parseOrderingReference(applied.cartItemReference),
-          aggregateVersion: aggregate.aggregateVersion,
-        });
       });
       if (receiptState.expiresAt !== null && receiptState.expiresAt <= result.authority.observedAt)
         throw new CartError("CART_IDEMPOTENCY_CONFLICT");
@@ -405,8 +240,202 @@ export function createDiningCartItemService(options: DiningCartItemOptions) {
       // the guest at a table reads it, as on Pickup; the code alone read "can't be ordered".
       if (error instanceof CartSelectionRejectedError)
         throw new CartSelectionRejectedError(error.reason);
+      // WP-2423 (outage-reads-and-retry): the party's table changed: said as such.
+      if (error instanceof CartParticipationEndedError)
+        throw new CartParticipationEndedError(error.reason);
       if (error instanceof CartError) throw new CartError(error.code);
       return unavailable();
+    }
+    async function attempt(first: DiningCartAuthoritySnapshot): Promise<PickupCartItemResult> {
+      const bound = Object.freeze({
+        brandReference,
+        storeReference,
+        diningSessionReference: first.participation.diningSessionReference,
+        guestSessionReference: String(first.session.sessionReference),
+        cartReference: raw.cartReference,
+      });
+      await assertDiningCartNotHeld(options.checkoutHold, {
+        diningSessionReference: String(first.participation.diningSessionReference),
+        participantReference: String(first.participation.participantReference),
+        cartReference: raw.cartReference,
+        cartVersion: raw.expectedAggregateVersion,
+        observedAt: first.observedAt,
+      });
+      const repository = options.repository(bound);
+      function owned(value: unknown) {
+        let cart;
+        try {
+          cart = parseCartAggregate(value);
+        } catch {
+          return unavailable();
+        }
+        if (
+          cart.brandReference !== brandReference ||
+          cart.storeReference !== storeReference ||
+          cart.cartReference !== raw.cartReference ||
+          cart.orderType !== "DineIn" ||
+          cart.diningSessionReference !== bound.diningSessionReference ||
+          !["Qr", "Web"].includes(cart.sourceChannel) ||
+          cart.updatedAt > first.observedAt
+        )
+          return unavailable();
+        return cart;
+      }
+      function record(value: unknown): CartItemOperationRecord {
+        try {
+          return parseRecord(value);
+        } catch (error) {
+          if (error instanceof CartError && error.code === "CART_IDEMPOTENCY_CONFLICT")
+            throw new CartError(error.code);
+          return unavailable();
+        }
+      }
+      function parseRecord(value: unknown): CartItemOperationRecord {
+        const saved = readClosedRecord(value, [
+          "action",
+          "operationReference",
+          "operationIntentHash",
+          "guestSessionReference",
+          "cartReference",
+          "cartItemReference",
+          "result",
+          "occurredAt",
+          "expiresAt",
+        ]);
+        if (
+          saved.action !== action ||
+          saved.operationReference !== raw.operationReference ||
+          saved.cartReference !== raw.cartReference ||
+          saved.guestSessionReference !== bound.guestSessionReference
+        )
+          throw new CartError("CART_IDEMPOTENCY_CONFLICT");
+        const occurredAt = parseOrderingInstant(saved.occurredAt);
+        const expiresAt = parseOrderingInstant(saved.expiresAt);
+        if (
+          occurredAt > first.observedAt ||
+          occurredAt < String(first.session.createdAt) ||
+          Date.parse(expiresAt) - Date.parse(occurredAt) !== 86_400_000
+        )
+          return unavailable();
+        const aggregate = owned(saved.result);
+        const itemReference = parseOrderingReference(saved.cartItemReference);
+        const item = aggregate.items.find(
+          (candidate) => candidate.cartItemReference === itemReference,
+        );
+        if (
+          aggregate.updatedAt !== occurredAt ||
+          (action === "Remove"
+            ? item !== undefined
+            : item?.addedByParticipantReference !== first.participation.participantReference)
+        )
+          return unavailable();
+        receiptState.expiresAt = expiresAt;
+        return Object.freeze({
+          action,
+          operationReference: raw.operationReference,
+          operationIntentHash: parseOrderingHash(saved.operationIntentHash),
+          guestSessionReference: parseOrderingReference(bound.guestSessionReference),
+          cartReference: raw.cartReference,
+          cartItemReference: itemReference,
+          result: aggregate,
+          occurredAt,
+          expiresAt,
+        });
+      }
+      async function guarded<T>(effect: (current: DiningCartAuthoritySnapshot) => Promise<T>) {
+        try {
+          const checked = await authority.run(
+            raw.sessionCredential,
+            async (current) => {
+              sameAuthority(first, current);
+              return effect(current);
+            },
+            0,
+          );
+          sameAuthority(first, checked.authority);
+          return checked.value;
+        } catch (error) {
+          if (error instanceof CartPartyMovedError) movedDuring = error;
+          else if (error instanceof CartError) guardFailure = new CartError(error.code);
+          throw error;
+        }
+      }
+      const audit = captureAudit(
+        options.audit(
+          Object.freeze({
+            action,
+            brandReference,
+            storeReference,
+            sessionReference: parseOrderingReference(bound.guestSessionReference),
+            cartReference: raw.cartReference,
+            operationReference: raw.operationReference,
+            observedAt: first.observedAt,
+          }),
+        ),
+        first.observedAt,
+      );
+      let loaded: ReturnType<typeof owned> | null = null;
+      const service = createCartItemCommandService({
+        ...(options.adders === undefined ? {} : { adders: options.adders }),
+        catalog: {
+          validateSelection: (selection, context) =>
+            guarded(() => options.catalog.validateSelection(selection, context)),
+          ...(options.catalog.explainMany === undefined
+            ? {}
+            : {
+                explainMany: (
+                  inputs: Parameters<
+                    NonNullable<CartItemCommandPorts["catalog"]["explainMany"]>
+                  >[0],
+                ) => options.catalog.explainMany?.(inputs) ?? Promise.resolve([]),
+              }),
+        },
+        references: options.references,
+        authorization: { authorize: async () => ({ guestSession: first.session, audit }) },
+        repository: {
+          load: async (reference) => {
+            const source = await repository.load(reference);
+            loaded = source === null ? null : owned(source);
+            return loaded;
+          },
+          resolveOperation: (reference) =>
+            guarded(async () => {
+              const prior = await repository.resolveOperation(reference);
+              return prior === null ? null : record(prior);
+            }),
+          commit: (command) =>
+            guarded(async (current) => {
+              if (loaded === null) return unavailable();
+              assertCartLifecycleActive(loaded.lifecycle, current.observedAt);
+              return record(await repository.commit(command));
+            }),
+        },
+      });
+      const common = {
+        cartReference: raw.cartReference,
+        operationReference: raw.operationReference,
+        expectedAggregateVersion: raw.expectedAggregateVersion,
+        requestedAt: first.observedAt,
+      };
+      const configured = {
+        ...common,
+        quantity: raw.quantity,
+        optionSelections: raw.optionSelections,
+        customerNote: raw.customerNote,
+      };
+      const applied =
+        action === "Add"
+          ? await service.add({ ...configured, sellableReference: raw.targetReference })
+          : action === "Update"
+            ? await service.update({ ...configured, cartItemReference: raw.targetReference })
+            : await service.remove({ ...common, cartItemReference: raw.targetReference });
+      const aggregate = owned(applied.aggregate);
+      return Object.freeze({
+        status: applied.status,
+        cartReference: aggregate.cartReference,
+        cartItemReference: parseOrderingReference(applied.cartItemReference),
+        aggregateVersion: aggregate.aggregateVersion,
+      });
     }
   }
   return Object.freeze({

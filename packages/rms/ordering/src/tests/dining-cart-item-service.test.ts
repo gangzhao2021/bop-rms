@@ -336,18 +336,44 @@ describe("current-authorized Dining item commands", () => {
     expect(f.historyRead).not.toHaveBeenCalled();
     expect(f.commit).not.toHaveBeenCalled();
   });
-  it("denies a membership version change during Catalog before commit", async () => {
+  it("WP-2423 (outage-reads-and-retry): a membership version change during Catalog does the add again on what is current", async () => {
     const f = setup();
     const catalog = required(f.catalog.getMockImplementation());
+    let changed = false;
     f.catalog.mockImplementation(async (request) => {
       const result = await catalog(request);
-      const receipt = (await f.participation()) as Record<string, unknown>;
-      f.participation.mockResolvedValue({ ...receipt, participantVersion: 2 });
+      if (!changed) {
+        changed = true;
+        const receipt = (await f.participation()) as Record<string, unknown>;
+        f.participation.mockResolvedValue({ ...receipt, participantVersion: 2 });
+      }
       return result;
     });
-    await expect(f.service.add(input)).rejects.toMatchObject({ code: "CART_PERMISSION_DENIED" });
-    expect(f.commit).not.toHaveBeenCalled();
-    expect(f.history.size).toBe(0);
+    // Before: "your session ended" (401). Nothing was committed on the stale observation.
+    expect(await f.service.add(input)).toMatchObject({ status: "Applied", aggregateVersion: 2 });
+    expect(f.commit).toHaveBeenCalledTimes(1);
+    expect(f.history.size).toBe(1);
+    expect(f.catalog).toHaveBeenCalledTimes(2);
+  });
+  it("WP-2423 (outage-reads-and-retry): staff move the party's table right after the add committed: the same add, once", async () => {
+    const f = setup();
+    const member = (await f.participation()) as Record<string, unknown>;
+    const commit = required(f.commit.getMockImplementation());
+    f.commit.mockImplementation(async (command) => {
+      const saved = await commit(command);
+      f.participation.mockResolvedValue({
+        ...member,
+        tableReference: ids.otherParticipant,
+        tableAssignmentVersion: 2,
+      });
+      return saved;
+    });
+    expect(await f.service.add(input)).toMatchObject({
+      status: "AlreadyApplied",
+      aggregateVersion: 2,
+    });
+    expect(f.commit).toHaveBeenCalledTimes(1);
+    expect(f.history.size).toBe(1);
   });
   it("withholds a committed result after revocation and recovers the original without duplicate effects", async () => {
     const f = setup();

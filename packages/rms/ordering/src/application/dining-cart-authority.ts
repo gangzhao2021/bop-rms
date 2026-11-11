@@ -6,6 +6,7 @@ import {
 } from "@bop/identity";
 import {
   CartError,
+  CartParticipationEndedError,
   parseOrderingInstant,
   parseOrderingReference,
   readCartParticipationEnded,
@@ -98,6 +99,51 @@ export interface DiningCartAuthoritySnapshot {
   readonly observedAt: OrderingInstant;
 }
 
+/**
+ * WP-2423 (outage-reads-and-retry, v15 2026-11-11): while a guest added a dish, staff moved the
+ * guest's own table (or merged another into it) and the add answered "couldn't add this right
+ * now"; a read in that moment answered "your session ended". The same phone, the same party and
+ * the same participant, only where the party sits (or the party's version) changed: the action is
+ * done again on what is current now, as staff would expect at a real table. Raised by the checks
+ * that see it; `run` does the action again, and only if the table keeps changing says so.
+ */
+export class CartPartyMovedError extends CartError {
+  readonly tableChanged: boolean;
+  constructor(tableChanged: boolean) {
+    super("CART_DEPENDENCY_UNAVAILABLE");
+    this.name = "CartPartyMovedError";
+    this.tableChanged = tableChanged;
+  }
+}
+const placementKeys = [
+  "tableReference",
+  "tableAssignmentVersion",
+  "diningSessionVersion",
+  "participantVersion",
+] as const;
+/**
+ * The same participant of the same party, seen at another place or version of its table: a
+ * CartPartyMovedError to throw, or null when nothing but that changed is not the case.
+ */
+export function partyMoved(
+  first: DiningCartAuthoritySnapshot,
+  next: DiningCartAuthoritySnapshot,
+): CartPartyMovedError | null {
+  if (
+    first.participation.brandReference !== next.participation.brandReference ||
+    first.participation.storeReference !== next.participation.storeReference ||
+    first.participation.diningSessionReference !== next.participation.diningSessionReference ||
+    first.participation.participantReference !== next.participation.participantReference ||
+    placementKeys.every((key) => first.participation[key] === next.participation[key])
+  )
+    return null;
+  return new CartPartyMovedError(
+    first.participation.tableReference !== next.participation.tableReference,
+  );
+}
+/** How many times an action is done again while the party's table changes under it. */
+export const diningCartMovedRetries = 2;
+
 /** Internal invocation guard. Its current observations grant no persistent write lease. */
 export function createDiningCartAuthority(ports: DiningCartAuthorityPorts) {
   let brand: string;
@@ -141,9 +187,14 @@ export function createDiningCartAuthority(ports: DiningCartAuthorityPorts) {
     }
   }
   return Object.freeze({
+    /**
+     * `retries`: how many times the action is done again when the party's table changes during
+     * it (0: the CartPartyMovedError is left to the caller, which does its own action again).
+     */
     async run<T>(
       credential: string,
       action: (snapshot: DiningCartAuthoritySnapshot) => Promise<T>,
+      retries = diningCartMovedRetries,
     ): Promise<{ readonly value: T; readonly authority: DiningCartAuthoritySnapshot }> {
       let previous: OrderingInstant | null = null;
       const tick = () => {
@@ -201,24 +252,42 @@ export function createDiningCartAuthority(ports: DiningCartAuthorityPorts) {
         if (!sameSession(initial, current)) return denied();
         return Object.freeze({ session: current, participation: receipt, observedAt });
       }
-      const first = await authorize();
-      // Callers parse/freeze dependency results before returning from the action.
-      const value = await action(first);
-      const last = await authorize();
-      if (!sameSession(first.session, last.session)) return denied();
-      for (const key of [
-        "brandReference",
-        "storeReference",
-        "diningSessionReference",
-        "participantReference",
-        "tableReference",
-        "tableAssignmentVersion",
-        "diningSessionVersion",
-        "participantVersion",
-      ] as const) {
-        if (first.participation[key] !== last.participation[key]) return denied();
+      // The party's table kept changing through every attempt: a table that moved is said as
+      // such ("your party's table changed"), anything else as "busy, try again".
+      const settle = (moved: CartPartyMovedError): never => {
+        if (retries === 0) throw moved;
+        if (moved.tableChanged) throw new CartParticipationEndedError("Changed");
+        throw new CartError("CART_DEPENDENCY_UNAVAILABLE");
+      };
+      for (let attempt = 0; ; attempt += 1) {
+        const first = await authorize();
+        // Callers parse/freeze dependency results before returning from the action.
+        let value: T;
+        try {
+          value = await action(first);
+        } catch (error) {
+          if (!(error instanceof CartPartyMovedError)) throw error;
+          if (attempt < retries) continue;
+          return settle(error);
+        }
+        const last = await authorize();
+        if (!sameSession(first.session, last.session)) return denied();
+        const moved = partyMoved(first, last);
+        if (moved !== null) {
+          if (attempt < retries) continue;
+          return settle(moved);
+        }
+        for (const key of [
+          "brandReference",
+          "storeReference",
+          "diningSessionReference",
+          "participantReference",
+          ...placementKeys,
+        ] as const) {
+          if (first.participation[key] !== last.participation[key]) return denied();
+        }
+        return Object.freeze({ value, authority: last });
       }
-      return Object.freeze({ value, authority: last });
     },
   });
 }
