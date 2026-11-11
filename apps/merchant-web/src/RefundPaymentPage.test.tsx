@@ -24,7 +24,6 @@ import {
 } from "./RefundPaymentPage.js";
 import { StoreTimeZoneContext } from "./StoreTime.js";
 import { setLanguageForTest } from "./i18n/i18n.js";
-import { OrdinaryRefundClientError } from "./ordinary-refund-client.js";
 
 afterEach(() => setLanguageForTest("en"));
 
