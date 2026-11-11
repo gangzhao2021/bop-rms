@@ -394,6 +394,16 @@ export async function exerciseCounterCardMachinePayment({
     tipMinor: amounts.tip.amountMinor,
     refundCount: 0,
     refundedMinor: 0n,
+    // WP-2423 M52: the counter's cash, apart from the machine.
+    cash: {
+      paymentCount: 0,
+      backEnteredCount: 0,
+      takenMinor: 0n,
+      tipMinor: 0n,
+      roundingMinor: 0n,
+      refundCount: 0,
+      refundedMinor: 0n,
+    },
   });
 
   const paymentScope = { ...ownerScope, providerAccountReference: id(90), environment: "Test" };

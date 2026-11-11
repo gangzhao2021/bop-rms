@@ -14,6 +14,11 @@ import {
   type PaymentIntentCreationRecord,
 } from "./payment-intent-creation.js";
 import { parsePaymentSucceededEnvelope } from "./payment-terminal-event.js";
+import {
+  DiningTableSettlementError,
+  planDiningTableSettlement,
+  roundCashTotal,
+} from "../domain/dining-table-settlement.js";
 
 /**
  * WP-2423 Q7 (DEC-COUNTER-PAYMENT-RECORD): a payment staff took on the Store's own card machine.
@@ -36,6 +41,8 @@ export const cardMachinePaymentErrorCodes = [
   "CARD_MACHINE_ALREADY_PAID",
   "CARD_MACHINE_IDEMPOTENCY_CONFLICT",
   "CARD_MACHINE_REFUND_EXCEEDS_PAYMENT",
+  /** WP-2423 M52: the cash handed over is less than the cash total (rounded to 5 cents). */
+  "CARD_MACHINE_CASH_TENDER_SHORT",
   "CARD_MACHINE_UNAVAILABLE",
 ] as const;
 export type CardMachinePaymentErrorCode = (typeof cardMachinePaymentErrorCodes)[number];
@@ -68,6 +75,17 @@ export function parseCardMachineSlipReference(value: unknown): string | null {
   return value;
 }
 
+/**
+ * WP-2423 M52 (DEC-COUNTER-CASH): a counter order paid in cash, by the table's cash rules: the
+ * total is rounded to 5 cents (Canada), the guest hands over at least that and gets the change.
+ * The order's amount (the preparation total) is unchanged; the rounding is its own amount.
+ */
+export interface CardMachineCashTender {
+  readonly roundingMinor: bigint;
+  readonly tenderedMinor: bigint;
+  readonly changeMinor: bigint;
+}
+
 export interface CardMachinePaymentRecord {
   readonly tenantReference: string;
   readonly brandReference: string;
@@ -93,6 +111,93 @@ export interface CardMachinePaymentRecord {
   readonly actorReference: string;
   readonly eventReference: string;
   readonly auditReference: string;
+  /** WP-2423 M52: present when the counter took cash (absent: the Store's card machine). */
+  readonly cash?: CardMachineCashTender;
+}
+
+/**
+ * WP-2423 M52: the cash a counter order takes for its payment total, with the table's cash code
+ * (one line: the order and its tip). Throws CARD_MACHINE_CASH_TENDER_SHORT when the guest handed
+ * over less than the cash total.
+ */
+export function planCounterCashTender(
+  preparation: OrderPaymentPreparationEvidence,
+  tenderedMinor: bigint,
+): CardMachineCashTender {
+  try {
+    const plan = planDiningTableSettlement({
+      method: "Cash",
+      rounds: [
+        {
+          orderBatchReference: String(preparation.orderBatchReference),
+          submissionReference: String(preparation.submissionReference),
+          sequence: 1,
+          roundMinor: preparation.orderAllocation.amountMinor,
+        },
+      ],
+      tipMinor: preparation.tip.amountMinor,
+      tenderedMinor,
+    });
+    if (
+      plan.totalMinor <= 0n ||
+      plan.roundsMinor + plan.tipMinor !== preparation.total.amountMinor ||
+      plan.tenderedMinor === null ||
+      plan.changeMinor === null
+    )
+      return invalid();
+    return Object.freeze({
+      roundingMinor: plan.roundingMinor,
+      tenderedMinor: plan.tenderedMinor,
+      changeMinor: plan.changeMinor,
+    });
+  } catch (error) {
+    if (
+      error instanceof DiningTableSettlementError &&
+      error.code === "DINING_TABLE_SETTLEMENT_TENDER_SHORT"
+    )
+      throw new CardMachinePaymentError("CARD_MACHINE_CASH_TENDER_SHORT");
+    if (error instanceof CardMachinePaymentError) throw error;
+    return invalid();
+  }
+}
+
+/** What the payment took: the card-machine charge, or the cash total (rounding included). */
+export function cardMachinePaymentTakenMinor(record: CardMachinePaymentRecord): bigint {
+  return record.preparation.total.amountMinor + (record.cash?.roundingMinor ?? 0n);
+}
+
+/**
+ * WP-2423 M52/M131: what goes back for a refund of `wantedMinor` from this payment when
+ * `refundedMinor` already went back. A card-machine refund is the amount itself; cash goes back in
+ * whole nickels (the table's cash rounding: 1–2 cents down, 3–4 up), never more than the drawer
+ * still holds of it. Zero when nothing can go back.
+ */
+export function cardMachineRefundGivenBackMinor(
+  record: CardMachinePaymentRecord,
+  wantedMinor: bigint,
+  refundedMinor: bigint,
+): bigint {
+  const left = cardMachinePaymentTakenMinor(record) - refundedMinor;
+  if (wantedMinor <= 0n || left <= 0n) return 0n;
+  const amount = record.cash === undefined ? wantedMinor : roundCashTotal(wantedMinor).roundedMinor;
+  return amount < left ? amount : left;
+}
+
+function parseCashTender(value: unknown, totalMinor: bigint): CardMachineCashTender {
+  const raw = exact(value, ["roundingMinor", "tenderedMinor", "changeMinor"]);
+  const { roundingMinor, tenderedMinor, changeMinor } = raw;
+  if (
+    typeof roundingMinor !== "bigint" ||
+    typeof tenderedMinor !== "bigint" ||
+    typeof changeMinor !== "bigint" ||
+    roundCashTotal(totalMinor).roundingMinor !== roundingMinor ||
+    totalMinor + roundingMinor <= 0n ||
+    tenderedMinor < totalMinor + roundingMinor ||
+    tenderedMinor > 9223372036854775807n ||
+    changeMinor !== tenderedMinor - (totalMinor + roundingMinor)
+  )
+    return invalid();
+  return Object.freeze({ roundingMinor, tenderedMinor, changeMinor });
 }
 
 function exact(value: unknown, fields: readonly string[]): Readonly<Record<string, unknown>> {
@@ -117,7 +222,12 @@ function exact(value: unknown, fields: readonly string[]): Readonly<Record<strin
 
 export function parseCardMachinePaymentRecord(value: unknown): CardMachinePaymentRecord {
   try {
+    const paidInCash =
+      value !== null &&
+      typeof value === "object" &&
+      Object.prototype.hasOwnProperty.call(value, "cash");
     const raw = exact(value, [
+      ...(paidInCash ? ["cash"] : []),
       "tenantReference",
       "brandReference",
       "storeReference",
@@ -166,8 +276,10 @@ export function parseCardMachinePaymentRecord(value: unknown): CardMachinePaymen
       actorReference: String(parsePaymentReference(raw.actorReference)),
       eventReference: String(parsePaymentReference(raw.eventReference)),
       auditReference: String(parsePaymentReference(raw.auditReference)),
+      ...(paidInCash ? { cash: parseCashTender(raw.cash, preparation.total.amountMinor) } : {}),
     });
     if (
+      (record.cash !== undefined && record.slipReference !== null) ||
       (record.environment !== "Test" && record.environment !== "Live") ||
       !cardMachineRecordingReasons.includes(reason) ||
       takenAt > recordedAt ||

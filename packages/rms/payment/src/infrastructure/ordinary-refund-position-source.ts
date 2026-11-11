@@ -36,7 +36,7 @@ export function createPostgresOrdinaryRefundPositionSource(
       };
       // WP-2423 item 4: a refund of a card-machine payment is made on the Store's machine and
       // recorded once; until then the request's amount stays pending (set aside).
-      const machine = await createPostgresCardMachinePaymentStore({
+      const cards = createPostgresCardMachinePaymentStore({
         scope: {
           brandReference: options.scope.brandReference,
           storeReference: options.scope.storeReference,
@@ -44,18 +44,31 @@ export function createPostgresOrdinaryRefundPositionSource(
         authorize: async (transaction, query) =>
           query.orderReference === request.orderReference &&
           (await authorize(transaction as typeof tx)),
-      }).loadRefundBySource(tx, "OrdinaryRefund", request.requestReference);
+      });
+      const machine = await cards.loadRefundBySource(
+        tx,
+        "OrdinaryRefund",
+        request.requestReference,
+      );
       // Recorded after the instant being read: still pending at that instant.
       if (machine !== null && machine.recordedAt <= observedAt) {
+        // WP-2423 M52/M131: cash from a counter cash payment goes back in whole nickels, so what
+        // was handed back may differ from the request by the cash rounding; the request's amount
+        // is what the Order got back (the rounding is the drawer's, as for a table's cash).
+        const amount = ordinaryRefundPaymentAmount(payment);
+        const inCash =
+          machine.amountMinor !== amount &&
+          (await cards.loadByIntent(tx, payment.paymentIntentReference))?.cash !== undefined &&
+          machine.amountMinor % 5n === 0n;
         if (
           machine.cardMachinePaymentReference !== payment.paymentTransactionReference ||
           machine.orderReference !== request.orderReference ||
-          machine.amountMinor !== ordinaryRefundPaymentAmount(payment) ||
+          (machine.amountMinor !== amount && !inCash) ||
           request.payments.length !== 1
         )
           throw new Error("ORDINARY_REFUND_HISTORY_UNAVAILABLE");
         return {
-          confirmedMinor: machine.amountMinor,
+          confirmedMinor: amount,
           pendingMinor: 0n,
           observationCount: 1,
           historyDigest:

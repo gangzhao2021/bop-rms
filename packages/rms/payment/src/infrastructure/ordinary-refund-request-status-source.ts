@@ -9,6 +9,7 @@ import {
 } from "./persistence/ordinary-refund-operation-store.js";
 import { createPostgresOrdinaryRefundRecoverySource } from "./ordinary-refund-recovery-source.js";
 import { createPostgresCardMachinePaymentStore } from "./persistence/card-machine-payment-store.js";
+import { cardMachineRefundGivenBackMinor } from "../application/card-machine-payment.js";
 
 type ContextOptions = Parameters<typeof createPostgresOrdinaryRefundRequestContextSource>[0];
 const fail = (): never => {
@@ -87,10 +88,24 @@ export function createPostgresOrdinaryRefundRequestStatusSource(options: {
           request.requestReference,
         );
         const done = recorded !== null && recorded.recordedAt <= query.observedAt;
+        // WP-2423 M52/M131: a counter cash payment gives back whole nickels — what was handed back,
+        // or what to hand back now (never more than the drawer still holds of the payment).
+        let cashMinor: bigint | null = null;
+        if (card.cash !== undefined)
+          cashMinor = done
+            ? recorded.amountMinor
+            : cardMachineRefundGivenBackMinor(
+                card,
+                amountMinor,
+                (await cards.refunds(tx, card.cardMachinePaymentReference))
+                  .filter((refund) => refund.recordedAt <= query.observedAt)
+                  .reduce((sum, refund) => sum + refund.amountMinor, 0n),
+              );
         if (
           done &&
           (recorded.cardMachinePaymentReference !== card.cardMachinePaymentReference ||
-            recorded.amountMinor !== amountMinor)
+            (recorded.amountMinor !== amountMinor &&
+              (card.cash === undefined || recorded.amountMinor % 5n !== 0n)))
         )
           return fail();
         payments.push(
@@ -108,6 +123,7 @@ export function createPostgresOrdinaryRefundRequestStatusSource(options: {
             // WP-2423 item 4: the reference printed on the machine's refund slip (never a card
             // number; validated when recorded), so staff can match the slip to the request.
             cardMachineSlipReference: done ? recorded.slipReference : null,
+            ...(cashMinor === null ? {} : { cashGivenBackMinor: cashMinor.toString() }),
           }),
         );
         continue;

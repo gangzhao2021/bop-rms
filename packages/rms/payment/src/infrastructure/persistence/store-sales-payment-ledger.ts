@@ -322,6 +322,11 @@ export function createPostgresStoreSalesPaymentLedger(options: {
         requests.set(request.requestReference, request);
       }
     }
+    // WP-2423 M52: cash given back at the counter in the window, by the settlement's own source.
+    const cashRefunded = {
+      count: cardSummary.cash.refundCount,
+      amountMinor: cardSummary.cash.refundedMinor,
+    };
     for (const refund of cardMachine.refunds) {
       const payment = cardPayments.get(refund.cardMachinePaymentReference) ?? fail();
       let items: StoreSalesRefund["items"] = null;
@@ -346,10 +351,12 @@ export function createPostgresStoreSalesPaymentLedger(options: {
           ),
         );
       }
+      // WP-2423 M52: cash given back from a counter cash payment is the drawer's, not the machine's.
+      const inCash = payment.cash !== undefined;
       refunds.push(
         Object.freeze({
-          channel: "CardMachine" as const,
-          kind: "CardMachine" as const,
+          channel: inCash ? ("Cash" as const) : ("CardMachine" as const),
+          kind: inCash ? ("Cash" as const) : ("CardMachine" as const),
           refundReference: refund.cardMachineRefundReference,
           orderReference: refund.orderReference,
           paymentIntentReference: payment.paymentIntentReference,
@@ -363,7 +370,6 @@ export function createPostgresStoreSalesPaymentLedger(options: {
     const tableSettlements = new Map(
       table.settlements.map((settlement) => [settlement.settlementReference, settlement]),
     );
-    const cashRefunded = { count: 0, amountMinor: 0n };
     for (const refund of table.cashRefunds) {
       const settlement =
         tableSettlements.get(refund.settlementReference) ?? fail("TableRefundWithoutSettlement");
@@ -530,16 +536,18 @@ export function createPostgresStoreSalesPaymentLedger(options: {
       onlineTotal !== captured.capturedAmountMinor
     )
       return fail("OnlineCapturesDisagree");
+    const cashTaken = { count: 0, amountMinor: 0n, tipMinor: 0n, roundingMinor: 0n };
     for (const payment of cardMachine.payments) {
+      // WP-2423 M52: a counter order paid in cash is cash taken, its rounding to 5 cents apart.
       const record = Object.freeze({
-        channel: "CardMachine" as const,
+        channel: payment.cash === undefined ? ("CardMachine" as const) : ("Cash" as const),
         paymentIntentReference: payment.paymentIntentReference,
         orderReference: payment.orderReference,
         orderBatchReference: payment.orderBatchReference,
         orderAllocationMinor: payment.preparation.orderAllocation.amountMinor,
         tipMinor: payment.preparation.tip.amountMinor,
         totalMinor: payment.preparation.total.amountMinor,
-        roundingMinor: 0n,
+        roundingMinor: payment.cash?.roundingMinor ?? 0n,
         paymentCount: 1 as const,
         takenAt: payment.takenAt,
       });
@@ -547,8 +555,12 @@ export function createPostgresStoreSalesPaymentLedger(options: {
       if (payment.takenAt >= startsAt && payment.takenAt < endsAt) payments.push(record);
       else refundedPayments.push(record);
     }
+    // The counter's cash, by the settlement's own source (summarize), as the day-end page counts it.
+    cashTaken.count += cardSummary.cash.paymentCount;
+    cashTaken.amountMinor += cardSummary.cash.takenMinor;
+    cashTaken.tipMinor += cardSummary.cash.tipMinor;
+    cashTaken.roundingMinor += cardSummary.cash.roundingMinor;
     const tableCard = { count: 0, amountMinor: 0n, tipMinor: 0n };
-    const cashTaken = { count: 0, amountMinor: 0n, tipMinor: 0n, roundingMinor: 0n };
     for (const settlement of table.settlements) {
       const inWindow = settlement.takenAt >= startsAt && settlement.takenAt < endsAt;
       if (inWindow) {

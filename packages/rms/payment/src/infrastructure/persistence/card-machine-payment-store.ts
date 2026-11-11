@@ -3,6 +3,7 @@ import { appendEventInTransaction } from "@bop/eventing";
 
 import {
   CardMachinePaymentError,
+  cardMachinePaymentTakenMinor,
   createCardMachinePaymentEnvelope,
   parseCardMachinePaymentRecord,
   parseCardMachineRefundRecord,
@@ -30,7 +31,8 @@ const paymentColumns = `jsonb_build_object(
  'preparation',p.preparation_json,'environment',p.payment_environment,'slipReference',p.slip_reference,
  'recordingReason',p.recording_reason,'takenAt',${instant("p.taken_at")},
  'recordedAt',${instant("p.recorded_at")},'actorReference',p.actor_id,'eventReference',p.event_id,
- 'auditReference',p.audit_id) AS record`;
+ 'auditReference',p.audit_id,'tender',p.tender,'roundingMinor',p.rounding_minor::text,
+ 'tenderedMinor',p.tendered_minor::text,'changeMinor',p.change_minor::text) AS record`;
 const selectPayment = `SELECT ${paymentColumns} FROM rms_payment.card_machine_payment p
  WHERE p.brand_id=$1 AND p.store_id=$2`;
 const refundColumns = `jsonb_build_object(
@@ -53,12 +55,29 @@ function count(result: unknown): number {
   if (typeof value !== "number") return fail();
   return value;
 }
+const minor = (value: unknown) => {
+  if (typeof value !== "string" || !/^-?(0|[1-9][0-9]{0,18})$/u.test(value)) return fail();
+  return BigInt(value);
+};
 function paymentFrom(row: Record<string, unknown>): CardMachinePaymentRecord {
   const raw = row.record as Record<string, unknown>;
   if (raw === null || typeof raw !== "object") return fail();
+  const { tender, roundingMinor, tenderedMinor, changeMinor, ...rest } = raw;
+  // WP-2423 M52: a counter payment taken in cash carries its rounding, tender and change.
+  if (tender !== "CardMachine" && tender !== "Cash") return fail();
+  if (tender === "CardMachine" && (roundingMinor !== "0" || tenderedMinor !== null)) return fail();
   return parseCardMachinePaymentRecord({
-    ...raw,
+    ...rest,
     preparation: reviveCardMachinePreparation(raw.preparation),
+    ...(tender === "Cash"
+      ? {
+          cash: {
+            roundingMinor: minor(roundingMinor),
+            tenderedMinor: minor(tenderedMinor),
+            changeMinor: minor(changeMinor),
+          },
+        }
+      : {}),
   });
 }
 function refundFrom(row: Record<string, unknown>): CardMachineRefundRecord {
@@ -72,7 +91,9 @@ function samePayment(left: CardMachinePaymentRecord, right: CardMachinePaymentRe
     left.intentDigest === right.intentDigest &&
     left.orderReference === right.orderReference &&
     left.orderBatchReference === right.orderBatchReference &&
-    left.actorReference === right.actorReference
+    left.actorReference === right.actorReference &&
+    left.cash?.tenderedMinor === right.cash?.tenderedMinor &&
+    left.cash?.roundingMinor === right.cash?.roundingMinor
   );
 }
 
@@ -354,8 +375,10 @@ export function createPostgresCardMachinePaymentStore(options: {
           `INSERT INTO rms_payment.card_machine_payment (tenant_id,brand_id,store_id,card_machine_payment_id,
  payment_intent_id,payment_attempt_id,payment_operation_id,operation_id,intent_digest,order_id,order_batch_id,
  submission_id,preparation_json,order_allocation_minor,tip_minor,total_minor,currency_code,payment_environment,
- slip_reference,recording_reason,taken_at,recorded_at,actor_id,event_id,audit_id)
- VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14,$15,$16,'CAD',$17,$18,$19,$20,$21,$22,$23,$24)`,
+ slip_reference,recording_reason,taken_at,recorded_at,actor_id,event_id,audit_id,
+ tender,rounding_minor,tendered_minor,change_minor)
+ VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14,$15,$16,'CAD',$17,$18,$19,$20,$21,$22,$23,$24,
+ $25,$26,$27,$28)`,
           [
             tenant,
             brand,
@@ -381,25 +404,41 @@ export function createPostgresCardMachinePaymentStore(options: {
             record.actorReference,
             record.eventReference,
             record.auditReference,
+            record.cash === undefined ? "CardMachine" : "Cash",
+            (record.cash?.roundingMinor ?? 0n).toString(),
+            record.cash?.tenderedMinor.toString() ?? null,
+            record.cash?.changeMinor.toString() ?? null,
           ],
         ),
       );
+      // WP-2423 M52: every cash sale at the counter is recorded and attributed like a card one.
       await appendAuditRecordInTransaction(tx, {
         auditId: record.auditReference,
         brandId: brand,
         storeId: store,
         actor: { type: "User", reference: record.actorReference },
-        actionCode: "PAYMENT_CARD_MACHINE_RECORDED",
+        actionCode:
+          record.cash === undefined
+            ? "PAYMENT_CARD_MACHINE_RECORDED"
+            : "PAYMENT_COUNTER_CASH_RECORDED",
         targetType: "PaymentIntent",
         targetId: record.paymentIntentReference,
         afterSummary: {
           amountMinor: record.preparation.total.amountMinor.toString(),
           recordingReason: record.recordingReason,
+          ...(record.cash === undefined
+            ? {}
+            : {
+                roundingMinor: record.cash.roundingMinor.toString(),
+                cashTakenMinor: cardMachinePaymentTakenMinor(record).toString(),
+              }),
         },
         reasonCode:
-          record.recordingReason === "AtCounter"
-            ? "CARD_MACHINE_APPROVED"
-            : "RECORDED_AFTER_OUTAGE",
+          record.recordingReason !== "AtCounter"
+            ? "RECORDED_AFTER_OUTAGE"
+            : record.cash === undefined
+              ? "CARD_MACHINE_APPROVED"
+              : "CASH_RECEIVED",
         correlationId: record.paymentOperationReference,
         occurredAt: record.recordedAt,
         sourceChannel: "MERCHANT_WEB",
@@ -454,11 +493,17 @@ export function createPostgresCardMachinePaymentStore(options: {
       if (payment === null || payment.orderReference !== refund.orderReference)
         return fail("CARD_MACHINE_NOT_FOUND");
       if (refund.refundedAt < payment.takenAt) return fail("CARD_MACHINE_INPUT_INVALID");
+      // WP-2423 M52/M131: cash goes back in whole nickels, with no card-machine slip.
+      if (
+        payment.cash !== undefined &&
+        (refund.amountMinor % 5n !== 0n || refund.slipReference !== null)
+      )
+        return fail("CARD_MACHINE_INPUT_INVALID");
       const refunded = (await refundsOf(tx, payment.cardMachinePaymentReference)).reduce(
         (sum, item) => sum + item.amountMinor,
         0n,
       );
-      if (refunded + refund.amountMinor > payment.preparation.total.amountMinor)
+      if (refunded + refund.amountMinor > cardMachinePaymentTakenMinor(payment))
         return fail("CARD_MACHINE_REFUND_EXCEEDS_PAYMENT");
       count(
         await tx.query(
@@ -494,8 +539,12 @@ export function createPostgresCardMachinePaymentStore(options: {
         actionCode: "PAYMENT_CARD_MACHINE_REFUND_RECORDED",
         targetType: "PaymentIntent",
         targetId: payment.paymentIntentReference,
-        afterSummary: { amountMinor: refund.amountMinor.toString(), sourceKind: refund.sourceKind },
-        reasonCode: "REFUNDED_ON_CARD_MACHINE",
+        afterSummary: {
+          amountMinor: refund.amountMinor.toString(),
+          sourceKind: refund.sourceKind,
+          ...(payment.cash === undefined ? {} : { tender: "Cash" }),
+        },
+        reasonCode: payment.cash === undefined ? "REFUNDED_ON_CARD_MACHINE" : "CASH_GIVEN_BACK",
         correlationId: refund.operationReference,
         occurredAt: refund.recordedAt,
         sourceChannel: "MERCHANT_WEB",
@@ -520,36 +569,63 @@ export function createPostgresCardMachinePaymentStore(options: {
       if (to <= from) return fail("CARD_MACHINE_INPUT_INVALID");
       const tenant = requireTenant();
       await context(tx);
+      // WP-2423 M52: by how the counter took it — the card machine (matched against the machine's
+      // own batch total) and cash (in the drawer, rounding included).
       const payments = rows(
         await tx.query(
-          `SELECT count(*)::text AS count,COALESCE(sum(total_minor),0)::text AS total,
- COALESCE(sum(tip_minor),0)::text AS tip,
+          `SELECT tender,count(*)::text AS count,COALESCE(sum(total_minor+rounding_minor),0)::text AS total,
+ COALESCE(sum(tip_minor),0)::text AS tip,COALESCE(sum(rounding_minor),0)::text AS rounding,
  count(*) FILTER (WHERE recording_reason='RecordedAfterOutage')::text AS back_entered
  FROM rms_payment.card_machine_payment WHERE brand_id=$1 AND store_id=$2 AND tenant_id=$3
- AND taken_at>=$4::timestamptz AND taken_at<$5::timestamptz`,
+ AND taken_at>=$4::timestamptz AND taken_at<$5::timestamptz GROUP BY tender`,
           [brand, store, tenant, from, to],
         ),
-      )[0];
+      );
       const refunds = rows(
         await tx.query(
-          `SELECT count(*)::text AS count,COALESCE(sum(amount_minor),0)::text AS total
- FROM rms_payment.card_machine_refund WHERE brand_id=$1 AND store_id=$2 AND tenant_id=$3
- AND refunded_at>=$4::timestamptz AND refunded_at<$5::timestamptz`,
+          `SELECT p.tender,count(*)::text AS count,COALESCE(sum(r.amount_minor),0)::text AS total
+ FROM rms_payment.card_machine_refund r JOIN rms_payment.card_machine_payment p
+ ON p.brand_id=r.brand_id AND p.store_id=r.store_id AND p.card_machine_payment_id=r.card_machine_payment_id
+ WHERE r.brand_id=$1 AND r.store_id=$2 AND r.tenant_id=$3
+ AND r.refunded_at>=$4::timestamptz AND r.refunded_at<$5::timestamptz GROUP BY p.tender`,
           [brand, store, tenant, from, to],
         ),
-      )[0];
-      if (!payments || !refunds) return fail();
+      );
       const integer = (value: unknown) => {
-        if (typeof value !== "string" || !/^(0|[1-9][0-9]{0,18})$/u.test(value)) return fail();
+        if (typeof value !== "string" || !/^-?(0|[1-9][0-9]{0,18})$/u.test(value)) return fail();
         return BigInt(value);
       };
+      const of = (tender: "CardMachine" | "Cash") => {
+        const taken = payments.filter((row) => row.tender === tender);
+        const back = refunds.filter((row) => row.tender === tender);
+        if (taken.length > 1 || back.length > 1) return fail();
+        const [paid] = taken,
+          [given] = back;
+        return Object.freeze({
+          paymentCount: paid === undefined ? 0 : Number(integer(paid.count)),
+          backEnteredCount: paid === undefined ? 0 : Number(integer(paid.back_entered)),
+          takenMinor: paid === undefined ? 0n : integer(paid.total),
+          tipMinor: paid === undefined ? 0n : integer(paid.tip),
+          roundingMinor: paid === undefined ? 0n : integer(paid.rounding),
+          refundCount: given === undefined ? 0 : Number(integer(given.count)),
+          refundedMinor: given === undefined ? 0n : integer(given.total),
+        });
+      };
+      if (
+        payments.some((row) => row.tender !== "CardMachine" && row.tender !== "Cash") ||
+        refunds.some((row) => row.tender !== "CardMachine" && row.tender !== "Cash")
+      )
+        return fail();
+      const card = of("CardMachine");
       return Object.freeze({
-        paymentCount: Number(integer(payments.count)),
-        backEnteredCount: Number(integer(payments.back_entered)),
-        takenMinor: integer(payments.total),
-        tipMinor: integer(payments.tip),
-        refundCount: Number(integer(refunds.count)),
-        refundedMinor: integer(refunds.total),
+        paymentCount: card.paymentCount,
+        backEnteredCount: card.backEnteredCount,
+        takenMinor: card.takenMinor,
+        tipMinor: card.tipMinor,
+        refundCount: card.refundCount,
+        refundedMinor: card.refundedMinor,
+        /** WP-2423 M52: counter orders paid in cash (taken includes the cash rounding). */
+        cash: of("Cash"),
       });
     },
     /**

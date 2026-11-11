@@ -229,6 +229,15 @@ export function createPostgresOrderFinancialPosition(options: {
           if (refund.sourceKind === "ItemCancellation") itemMinor += refund.amountMinor;
           else wholeMinor += refund.amountMinor;
         }
+        // WP-2423 M52/M131: cash from a counter cash payment goes back in whole nickels, its last
+        // refund taking what the drawer still held (the cash rounding included). The Order's
+        // amounts never count the rounding (as for a table's cash): what came back beyond the
+        // payment's amount is rounding handed back, not a refund of the Order.
+        if (payment.cash !== undefined) {
+          const beyond =
+            ordinary.confirmedMinor + itemMinor + wholeMinor + ordinary.pendingMinor - captureMinor;
+          if (beyond > 0n) wholeMinor -= beyond < wholeMinor ? beyond : wholeMinor;
+        }
         const confirmedMinor = ordinary.confirmedMinor + itemMinor + wholeMinor,
           pendingMinor = ordinary.pendingMinor;
         if (confirmedMinor + pendingMinor > captureMinor) return fail();

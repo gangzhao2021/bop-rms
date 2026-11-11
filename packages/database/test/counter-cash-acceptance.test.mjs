@@ -1,0 +1,379 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { setTimeout } from "node:timers";
+import { URL } from "node:url";
+import pg from "pg";
+import { it } from "vitest";
+import { parseOrderPaymentPreparationEvidence } from "../../rms/ordering/src/index.ts";
+import {
+  cardMachinePaymentTakenMinor,
+  cardMachineRefundGivenBackMinor,
+  createPostgresCardMachinePaymentStore,
+  parseCardMachinePaymentRecord,
+  parseCardMachineRefundRecord,
+  planCounterCashTender,
+} from "../../rms/payment/src/index.ts";
+import { preparation } from "../../rms/payment/src/tests/payment-intent-creation.fixture.ts";
+import { renderPilotAclSql } from "../../../tooling/environment/pilot-acl-render.mjs";
+import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
+
+const { Client } = pg;
+const id = (n) => "01a7e560-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+const digest = (n) => "sha256:" + n.toString(16).padStart(64, "0");
+const brand = id(1),
+  store = id(2),
+  tenant = id(3),
+  otherStore = id(4),
+  actor = id(5);
+
+/**
+ * WP-2423 M52 (DEC-COUNTER-CASH): a counter order paid in cash is the counter's one payment record
+ * with its cash rounding to 5 cents, the cash handed over and the change; cash given back from it
+ * goes back in whole nickels and never more than the drawer took (M131). Everything below runs as a
+ * restricted NOBYPASSRLS role holding exactly the rendered pilot API grants; only the order facts
+ * (a synthetic payment preparation, as Ordering hands it to Payment) are test-controlled.
+ */
+it("WP-2423 M52: the counter takes cash by the table's rules; replay, concurrency and nickel refunds hold", async () => {
+  await withIsolatedDatabase({ caseId: "wp2423_counter_cash" }, async (context) => {
+    const admin = new Client(context.clientConfig);
+    await admin.connect();
+    const api = "wp2423_cc_" + context.runId,
+      worker = "wp2423_cc_w_" + context.runId;
+    const clients = [];
+    try {
+      for (const name of [api, worker])
+        await admin.query(
+          "CREATE ROLE " + name + " NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE",
+        );
+      const root = new URL("../../../docs/spec/", import.meta.url);
+      const matrices = await Promise.all(
+        ["pilot-acl-matrix.json", "pilot-acl-additions.json"].map(async (file) =>
+          JSON.parse(await readFile(new URL(file, root), "utf8")),
+        ),
+      );
+      await admin.query(renderPilotAclSql(matrices, { api, worker }));
+
+      const connect = async () => {
+        const client = new Client(context.clientConfig);
+        await client.connect();
+        clients.push(client);
+        return client;
+      };
+      /** One unit of work as the pilot API role. */
+      const asApi = async (work, client = null) => {
+        const own = client ?? (await connect());
+        await own.query("BEGIN");
+        try {
+          await own.query("SET LOCAL ROLE " + api);
+          await own.query("SET LOCAL statement_timeout = '20s'");
+          const result = await work(own);
+          await own.query("COMMIT");
+          return result;
+        } catch (error) {
+          await own.query("ROLLBACK");
+          throw error;
+        }
+      };
+      const cards = (storeReference = store) =>
+        createPostgresCardMachinePaymentStore({
+          scope: { tenantReference: tenant, brandReference: brand, storeReference },
+          authorize: async () => true,
+        });
+
+      // An order of $20.43 with tax and a $2.00 tip: $22.43, $22.45 in cash.
+      let n = 100;
+      const order = (allocationMinor, tipMinor) => {
+        const orderReference = id(++n),
+          batch = id(++n),
+          submission = id(++n);
+        return {
+          orderReference,
+          batch,
+          submission,
+          preparation: parseOrderPaymentPreparationEvidence(
+            preparation({
+              preparationReference: id(++n),
+              orderReference,
+              orderBatchReference: batch,
+              submissionReference: submission,
+              brandReference: brand,
+              storeReference: store,
+              orderAllocation: { amountMinor: allocationMinor, currencyCode: "CAD" },
+              tip: { amountMinor: tipMinor, currencyCode: "CAD" },
+              total: { amountMinor: allocationMinor + tipMinor, currencyCode: "CAD" },
+            }),
+          ),
+        };
+      };
+      const now = new Date(Date.now() - 60_000).toISOString().replace(/\.\d{3}Z$/u, ".000Z");
+      const paymentOf = (paid, operationReference, extra) =>
+        parseCardMachinePaymentRecord({
+          tenantReference: tenant,
+          brandReference: brand,
+          storeReference: store,
+          cardMachinePaymentReference: id(++n),
+          paymentIntentReference: id(++n),
+          paymentAttemptReference: id(++n),
+          paymentOperationReference: id(++n),
+          operationReference,
+          intentDigest: digest(operationReference.length + n),
+          orderReference: paid.orderReference,
+          orderBatchReference: paid.batch,
+          submissionReference: paid.submission,
+          preparation: paid.preparation,
+          environment: "Test",
+          slipReference: null,
+          recordingReason: "AtCounter",
+          takenAt: now,
+          recordedAt: now,
+          actorReference: actor,
+          eventReference: id(++n),
+          auditReference: id(++n),
+          ...extra,
+        });
+
+      // 1. Cash at the counter: the table's rounding, what was handed over, the change.
+      const first = order(2043n, 200n);
+      const cash = planCounterCashTender(first.preparation, 5000n);
+      assert.deepEqual(cash, { roundingMinor: 2n, tenderedMinor: 5000n, changeMinor: 2755n });
+      const operation = id(++n);
+      const record = paymentOf(first, operation, { cash });
+      const saved = await asApi((tx) => cards().record(tx, record));
+      assert.equal(saved.status, "Created");
+      assert.deepEqual(saved.record.cash, cash);
+      assert.equal(cardMachinePaymentTakenMinor(saved.record), 2245n);
+      const row = (
+        await admin.query(
+          "SELECT tender,total_minor::text,rounding_minor::text,tendered_minor::text,change_minor::text,slip_reference,actor_id::text FROM rms_payment.card_machine_payment WHERE operation_id=$1",
+          [operation],
+        )
+      ).rows[0];
+      assert.deepEqual(row, {
+        tender: "Cash",
+        total_minor: "2243",
+        rounding_minor: "2",
+        tendered_minor: "5000",
+        change_minor: "2755",
+        slip_reference: null,
+        actor_id: actor,
+      });
+      // Recorded and attributed: the same paid signal as the card machine, and its own audit.
+      const audit = (
+        await admin.query(
+          "SELECT action_code,reason_code,actor_reference::text AS actor_id,after_summary_json FROM platform_audit.audit_record WHERE audit_id=$1",
+          [record.auditReference],
+        )
+      ).rows[0];
+      assert.equal(audit.action_code, "PAYMENT_COUNTER_CASH_RECORDED");
+      assert.equal(audit.reason_code, "CASH_RECEIVED");
+      assert.equal(audit.actor_id, actor);
+      assert.equal(audit.after_summary_json.cashTakenMinor, "2245");
+      const event = (
+        await admin.query(
+          "SELECT event_type,payload_json->>'amountMinor' AS amount FROM platform_eventing.outbox_event WHERE event_id=$1",
+          [record.eventReference],
+        )
+      ).rows[0];
+      assert.deepEqual(event, { event_type: "PaymentSucceeded", amount: "2243" });
+
+      // 2. Replay: the same operation returns the same record; a different tender is a conflict.
+      const replay = await asApi((tx) => cards().record(tx, record));
+      assert.equal(replay.status, "AlreadyRecorded");
+      await assert.rejects(
+        asApi((tx) =>
+          cards().record(tx, {
+            ...record,
+            cash: planCounterCashTender(first.preparation, 10000n),
+          }),
+        ),
+        { code: "CARD_MACHINE_IDEMPOTENCY_CONFLICT" },
+      );
+      // A second payment of the same order, by anyone, is refused.
+      await assert.rejects(
+        asApi((tx) => cards().record(tx, paymentOf(first, id(++n), { cash }))),
+        { code: "CARD_MACHINE_ALREADY_PAID" },
+      );
+      // The database holds the rounding, change and slip rules for every row.
+      for (const [rounding, tendered, change, slip] of [
+        [0, 5000, 2757, null],
+        [2, 5000, 2750, null],
+        [2, 2000, -245, null],
+        [2, 5000, 2755, "AUTH 1"],
+      ])
+        await assert.rejects(
+          admin.query(
+            "INSERT INTO rms_payment.card_machine_payment SELECT tenant_id,brand_id,store_id,$1,$2,$3,$4,$5,intent_digest,order_id,$6::text::platform_helpers.uuid_v7,submission_id,jsonb_set(preparation_json,'{orderBatchReference}',to_jsonb($6::text)),order_allocation_minor,tip_minor,total_minor,currency_code,payment_environment,$10,recording_reason,taken_at,recorded_at,actor_id,$11,$12,'Cash',$7,$8,$9 FROM rms_payment.card_machine_payment WHERE operation_id=$13",
+            [
+              id(++n),
+              id(++n),
+              id(++n),
+              id(++n),
+              id(++n),
+              id(++n),
+              rounding,
+              tendered,
+              change,
+              slip,
+              id(++n),
+              id(++n),
+              operation,
+            ],
+          ),
+          /card_machine_payment_cash_tender/u,
+        );
+      await assert.rejects(
+        admin.query("UPDATE rms_payment.card_machine_payment SET change_minor=0"),
+        /append-only/u,
+      );
+      // Another Store's role scope sees nothing of it.
+      assert.equal(await asApi((tx) => cards(otherStore).loadByOperation(tx, operation)), null);
+
+      // 3. Two tills record the same order at once: one payment, the other is told it is paid.
+      const raced = order(1000n, 0n);
+      const [a, b] = [await connect(), await connect()];
+      await a.query("BEGIN");
+      await a.query("SET LOCAL ROLE " + api);
+      const left = await cards().record(
+        a,
+        paymentOf(raced, id(++n), { cash: planCounterCashTender(raced.preparation, 1000n) }),
+      );
+      assert.equal(left.status, "Created");
+      const right = asApi(
+        (tx) =>
+          cards().record(
+            tx,
+            paymentOf(raced, id(++n), { cash: planCounterCashTender(raced.preparation, 2000n) }),
+          ),
+        b,
+      );
+      let waited = false;
+      for (let attempt = 0; attempt < 400 && !waited; attempt++) {
+        const waiting = await admin.query(
+          "SELECT count(*)::int n FROM pg_locks WHERE locktype='advisory' AND NOT granted",
+        );
+        waited = waiting.rows[0].n > 0;
+        if (!waited) await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      assert.ok(waited, "the second till waits for the first");
+      await a.query("COMMIT");
+      await assert.rejects(right, { code: "CARD_MACHINE_ALREADY_PAID" });
+      assert.equal(
+        (
+          await admin.query(
+            "SELECT count(*)::int n FROM rms_payment.card_machine_payment WHERE order_batch_id=$1",
+            [raced.batch],
+          )
+        ).rows[0].n,
+        1,
+      );
+
+      // 4. Refunds of the cash payment go back in whole nickels (M131).
+      const refundOf = (amountMinor, extra = {}) =>
+        parseCardMachineRefundRecord({
+          tenantReference: tenant,
+          brandReference: brand,
+          storeReference: store,
+          cardMachineRefundReference: id(++n),
+          cardMachinePaymentReference: saved.record.cardMachinePaymentReference,
+          orderReference: first.orderReference,
+          operationReference: id(++n),
+          intentDigest: digest(++n),
+          sourceKind: "StaffCancellation",
+          sourceReference: id(++n),
+          amountMinor,
+          slipReference: null,
+          refundedAt: now,
+          recordedAt: now,
+          actorReference: actor,
+          auditReference: id(++n),
+          ...extra,
+        });
+      // An odd cent is refused by the store and by the database.
+      await assert.rejects(
+        asApi((tx) => cards().recordRefund(tx, refundOf(437n))),
+        { code: "CARD_MACHINE_INPUT_INVALID" },
+      );
+      await assert.rejects(
+        asApi((tx) =>
+          tx
+            .query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+              brand,
+              store,
+            ])
+            .then(() =>
+              tx.query(
+                "INSERT INTO rms_payment.card_machine_refund (tenant_id,brand_id,store_id,card_machine_refund_id,card_machine_payment_id,order_id,operation_id,intent_digest,source_kind,source_id,amount_minor,currency_code,slip_reference,refunded_at,recorded_at,actor_id,audit_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'StaffCancellation',$9,437,'CAD',NULL,$10,$10,$11,$12)",
+                [
+                  tenant,
+                  brand,
+                  store,
+                  id(++n),
+                  saved.record.cardMachinePaymentReference,
+                  first.orderReference,
+                  id(++n),
+                  digest(++n),
+                  id(++n),
+                  now,
+                  actor,
+                  id(++n),
+                ],
+              ),
+            ),
+        ),
+        /whole nickels/u,
+      );
+      // $4.37 of dishes goes back as $4.35; the rest is what the drawer still holds — $18.10,
+      // the rounding up included ($22.45 in all, more than the order's $22.43).
+      assert.equal(cardMachineRefundGivenBackMinor(saved.record, 437n, 0n), 435n);
+      const part = await asApi((tx) => cards().recordRefund(tx, refundOf(435n)));
+      assert.equal(part.status, "Created");
+      const rest = cardMachineRefundGivenBackMinor(saved.record, 2245n - 435n, 435n);
+      assert.equal(rest, 1810n);
+      const whole = await asApi((tx) => cards().recordRefund(tx, refundOf(rest)));
+      assert.equal(whole.status, "Created");
+      await assert.rejects(
+        asApi((tx) => cards().recordRefund(tx, refundOf(5n))),
+        { code: "CARD_MACHINE_REFUND_EXCEEDS_PAYMENT" },
+      );
+      assert.equal(cardMachineRefundGivenBackMinor(saved.record, 100n, 2245n), 0n);
+      const refundAudit = (
+        await admin.query(
+          "SELECT reason_code FROM platform_audit.audit_record WHERE action_code='PAYMENT_CARD_MACHINE_REFUND_RECORDED' ORDER BY occurred_at LIMIT 1",
+        )
+      ).rows[0];
+      assert.equal(refundAudit.reason_code, "CASH_GIVEN_BACK");
+
+      // 5. The day: the card machine's takings apart from the counter's cash (rounding included).
+      const carded = order(1999n, 0n);
+      await asApi((tx) =>
+        cards().record(tx, paymentOf(carded, id(++n), { slipReference: "AUTH 9" })),
+      );
+      const day = await asApi((tx) =>
+        cards().summarize(tx, {
+          from: new Date(Date.parse(now) - 3_600_000).toISOString(),
+          to: new Date(Date.now() + 60_000).toISOString(),
+        }),
+      );
+      assert.deepEqual(day, {
+        paymentCount: 1,
+        backEnteredCount: 0,
+        takenMinor: 1999n,
+        tipMinor: 0n,
+        refundCount: 0,
+        refundedMinor: 0n,
+        cash: {
+          paymentCount: 2,
+          backEnteredCount: 0,
+          takenMinor: 2245n + 1000n,
+          tipMinor: 200n,
+          roundingMinor: 2n,
+          refundCount: 2,
+          refundedMinor: 2245n,
+        },
+      });
+    } finally {
+      for (const client of clients) await client.end().catch(() => undefined);
+      await admin.end();
+    }
+  });
+});
