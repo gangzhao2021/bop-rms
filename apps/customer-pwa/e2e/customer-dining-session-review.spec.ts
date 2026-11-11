@@ -1935,3 +1935,133 @@ test.describe("@production 同桌结账 guests pay by dish at a table that pays 
     await expectNoInternalText(page);
   });
 });
+
+// v15 batch 8 (dining-service-api): staff stopped the phone payment a guest gave up on. The same
+// open page offers Pay again, and a tap starts a new payment at once: never a tap that only reads
+// the bill (the stopped payment's operation, asked again, answered "nothing to pay on it").
+test.describe("@production a phone payment staff stopped", () => {
+  test.use({ serviceWorkers: "block" });
+  async function stubStoppable(page: Page, options: { loseFirstAnswer: boolean }) {
+    await page.route("**/bff/customer/payment-configuration", (route) =>
+      route.fulfill({
+        headers: { "cache-control": "no-store" },
+        json: {
+          schemaVersion: 1,
+          mode: "stripe",
+          publishableKey: "pk_test_SyntheticBrowserOnly",
+          returnUrl: "https://synthetic-return.invalid/return",
+          wallets: false,
+          internalTestEntry: false,
+        },
+      }),
+    );
+    await page.route("https://js.stripe.com/**", (route) =>
+      route.fulfill({ contentType: "application/javascript", body: syntheticStripe }),
+    );
+    await page.route("**/api/v1/dine-in/table-payment/handoff", (route) =>
+      route.fulfill({
+        headers: { "cache-control": "no-store" },
+        json: { schemaVersion: 1, clientSecret: "pi_SYNTHETIC_secret_SYNTHETIC" },
+      }),
+    );
+    const server = {
+      open: null as string | null,
+      stopped: new Set<string>(),
+      starts: [] as string[],
+      stop() {
+        if (server.open !== null) server.stopped.add(server.open);
+        server.open = null;
+      },
+    };
+    const answer = () => ({
+      schemaVersion: 1,
+      payment: {
+        tableLabel: "12",
+        checkingOut: true,
+        rounds: [
+          {
+            roundNumber: 1,
+            items: [{ displayName: "Synthetic tonkotsu ramen", subtotalMinor: "2500" }],
+            totalMinor: "2825",
+          },
+        ],
+        owed: { subtotalMinor: "2500", taxMinor: "325", totalMinor: "2825" },
+        consistent: true,
+        state: server.open === null ? "NotPaid" : "Paying",
+        attempt: server.open === null ? null : { totalMinor: "2825", tipMinor: "0" },
+        receipt: null,
+      },
+    });
+    await page.route("**/api/v1/dine-in/table-payment", (route) => {
+      const body = route.request().postDataJSON() as {
+        action: string;
+        operationReference?: string;
+      };
+      if (body.action === "Start" && body.operationReference !== undefined) {
+        const reference = body.operationReference;
+        server.starts.push(reference);
+        // The same operation again: the payment it started, as it is now (stopped: nothing open).
+        if (!server.stopped.has(reference) && server.open !== reference) {
+          server.open = reference;
+          if (options.loseFirstAnswer && server.starts.length === 1) {
+            // Staff stop it before this phone hears back.
+            server.stop();
+            return route.abort("connectionreset");
+          }
+        }
+      }
+      return route.fulfill({ headers: { "cache-control": "no-store" }, json: answer() });
+    });
+    const payLater = {
+      schemaVersion: 1,
+      session: {
+        ...session.session,
+        paymentTiming: "PayLater",
+        rounds: [{ ...session.session.rounds[0], payment: "OnTableBill" }],
+      },
+    };
+    await enterTable(page, () => ({ status: 200, json: payLater }));
+    return server;
+  }
+
+  for (const width of [390, 1024, 1440])
+    test(`after staff stop it, Pay on the same page starts a new payment at ${width}`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+      const server = await stubStoppable(page, { loseFirstAnswer: false });
+      const pay = page.getByRole("region", { name: "Pay the bill" });
+      await pay.getByRole("radio", { name: "No tip" }).check();
+      await pay.getByRole("button", { name: "Pay $28.25" }).click();
+      await expect(pay).toContainText("Paying $28.25 for the whole table.");
+      // Staff tap "Stop the phone payment"; the page reads the bill again.
+      server.stop();
+      await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+      const again = pay.getByRole("button", { name: "Pay $28.25" });
+      await expect(again).toBeVisible();
+      await again.click();
+      await expect(pay).toContainText("Paying $28.25 for the whole table.");
+      expect(server.starts).toHaveLength(2);
+      expect(new Set(server.starts).size).toBe(2);
+      await expectNoHorizontalOverflow(page);
+      await pay.screenshot({ path: `test-results/guest-pay-after-stop-${width}.png` });
+      await expectNoInternalText(page);
+    });
+
+  test("a lost answer whose payment staff stopped meanwhile: the next tap starts a new one", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    const server = await stubStoppable(page, { loseFirstAnswer: true });
+    const pay = page.getByRole("region", { name: "Pay the bill" });
+    await pay.getByRole("radio", { name: "No tip" }).check();
+    await pay.getByRole("button", { name: "Pay $28.25" }).click();
+    await expect(pay.getByRole("button", { name: "Pay $28.25" })).toBeEnabled();
+    await pay.getByRole("button", { name: "Pay $28.25" }).click();
+    await expect(pay).toContainText("Paying $28.25 for the whole table.");
+    // The lost one asked again once (the same operation, never charged twice), then a new one.
+    expect(server.starts).toHaveLength(3);
+    expect(server.starts[1]).toBe(server.starts[0]);
+    expect(server.starts[2]).not.toBe(server.starts[0]);
+  });
+});

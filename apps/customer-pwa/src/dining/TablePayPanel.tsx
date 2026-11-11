@@ -165,12 +165,15 @@ export function TablePayPanel({
   const [handoffFailed, setHandoffFailed] = useState(false);
   const [handoffAttempt, setHandoffAttempt] = useState(0);
   const [submitted, setSubmitted] = useState(false);
-  const operation = useRef<{ key: string; reference: string } | null>(null);
+  // One reference is one phone payment: a lost answer is asked again with it, and once that
+  // payment is over (paid, declined, or stopped by staff) a new tap is a new payment.
+  const operation = useRef<{ key: string; reference: string; opened: boolean } | null>(null);
   const configuration = paymentConfiguration();
 
   const read = useCallback(async (): Promise<TablePaymentView | null> => {
     try {
       const next = await client.read();
+      if (next.state === "Paying" && operation.current !== null) operation.current.opened = true;
       setView(next);
       setProblem(null);
       return next;
@@ -293,21 +296,43 @@ export function TablePayPanel({
       selection?.choice ?? null,
     )}`;
     // A failed payment is followed by a new one; a lost answer is retried with the same one.
-    if (operation.current?.key !== key || view.state === "Failed")
-      operation.current = { key, reference: uuidv7() };
+    // v15 batch 8: so is a payment staff stopped (this page saw it open, and it is no longer).
+    const reused = !(
+      operation.current?.key !== key ||
+      view.state === "Failed" ||
+      (operation.current.opened && view.state !== "Paying")
+    );
+    if (!reused || operation.current === null)
+      operation.current = { key, reference: uuidv7(), opened: false };
+    const current = operation.current;
     setBusy(true);
     setProblem(null);
     setSubmitted(false);
     setClientSecret(null);
-    try {
-      setView(
-        await client.start(
-          operation.current.reference,
-          tipOf(chosenTip, typedMinor),
-          chosen?.partNumber ?? null,
-          selection?.choice ?? null,
-        ),
+    const startWith = (reference: string) =>
+      client.start(
+        reference,
+        tipOf(chosenTip, typedMinor),
+        chosen?.partNumber ?? null,
+        selection?.choice ?? null,
       );
+    try {
+      let started = await startWith(current.reference);
+      // v15 batch 8: the reference asked again belonged to a payment already over (staff stopped
+      // it before this page heard back). Nothing was charged on it, and the guest pressed Pay
+      // to pay now: a new payment, once.
+      if (
+        reused &&
+        started.state !== "Paying" &&
+        started.state !== "Paid" &&
+        started.state !== "AnotherGuestPaying" &&
+        started.checkingOut
+      ) {
+        operation.current = { key, reference: uuidv7(), opened: false };
+        started = await startWith(operation.current.reference);
+      }
+      if (started.state === "Paying" && operation.current !== null) operation.current.opened = true;
+      setView(started);
     } catch (error) {
       // The bill is read again first (its answer clears old messages), then this one is said.
       const again =
