@@ -607,6 +607,45 @@ test("@production the Tables page warns before a staff round's payment time ends
   await expectNoInternalText(page);
 });
 
+// v15 batch 8: in Chinese the selected table's notice is Chinese throughout (no "awaits").
+test("@production the Tables page's staff round notice reads as whole Chinese sentences, at 1440, 1024 and 390", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    window.localStorage.setItem("bop.merchant.language", "zh-Hans");
+  });
+  await page.clock.setFixedTime(new Date("2026-10-15T16:00:00.000Z"));
+  await signIn(page);
+  await page.route("**/merchant/dining/tables", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        canOperateTables: false,
+        items: [{ ...table, staffRoundsAwaitingPayment: [{ payBy: "2026-10-15T16:30:00.000Z" }] }],
+        nextAfterTableReference: null,
+      },
+    }),
+  );
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await page.goto("/operations/dining");
+    await page
+      .locator(".table-row")
+      .first()
+      .getByRole("button", { name: /^选择 /u })
+      .click();
+    const panel = page.getByRole("complementary");
+    await expect(panel).toContainText(
+      "员工录入的一轮正在等待刷卡机付款。请在 12:30 前记录；记录后后厨才开始制作。",
+    );
+    await expect(panel).not.toContainText(/awaits|await\b| at \d/u);
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+  }
+  await expectNoInternalText(page);
+});
+
 test("@production a table without a QR code can't take a staff order; staff are told why and where to fix it", async ({
   page,
 }) => {
