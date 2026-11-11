@@ -520,6 +520,8 @@ export function createApp({
   app.post(
     customerDiningRoundWithdrawRoute,
     customerDiningRoundWithdraw?.handler() ?? unavailableCustomerDiningRoundWithdrawHandler,
+  );
+  app.post(
     customerDiningCheckoutScopeRoute,
     customerDiningCheckoutScope?.handler() ?? unavailableCustomerDiningCheckoutScopeHandler,
   );
