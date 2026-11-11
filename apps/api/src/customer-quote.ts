@@ -45,13 +45,15 @@ export type QuoteCartResult =
       readonly status: "Created";
       readonly quote: PriceQuoteSnapshot | ConfiguredPriceQuoteSnapshot;
       readonly tips?: QuoteTipChoices;
-      readonly sinceAdded?: readonly QuoteLineSinceAdded[];
+      /** null: the comparison could not be worked out now (the page asks the guest to try again). */
+      readonly sinceAdded?: readonly QuoteLineSinceAdded[] | null;
     }
   | {
       readonly status: "Current";
       readonly quote: PriceQuoteSnapshot | ConfiguredPriceQuoteSnapshot;
       readonly tips?: QuoteTipChoices;
-      readonly sinceAdded?: readonly QuoteLineSinceAdded[];
+      /** null: the comparison could not be worked out now (the page asks the guest to try again). */
+      readonly sinceAdded?: readonly QuoteLineSinceAdded[] | null;
     }
   | {
       readonly status: "Requoted";
@@ -206,7 +208,7 @@ function publicQuote(
   quote: PriceQuoteSnapshot | ConfiguredPriceQuoteSnapshot,
   requote?: PriceQuoteRequoteResult,
   tips?: QuoteTipChoices,
-  sinceAdded?: readonly QuoteLineSinceAdded[],
+  sinceAdded?: readonly QuoteLineSinceAdded[] | null,
 ) {
   return {
     schemaVersion: 1,
@@ -233,16 +235,19 @@ function publicQuote(
         quantity: line.quantity,
         subtotal: money(line.subtotal),
       })),
+      // null: whether a dish changed since it was added is not known now (never read as "nothing").
       ...(sinceAdded === undefined
         ? {}
-        : {
-            sinceAdded: sinceAdded.map((line) => ({
-              cartItemReference: line.cartItemReference,
-              quantity: line.quantity,
-              subtotal: money(line.subtotal),
-              changes: [...line.changes],
-            })),
-          }),
+        : sinceAdded === null
+          ? { sinceAdded: null }
+          : {
+              sinceAdded: sinceAdded.map((line) => ({
+                cartItemReference: line.cartItemReference,
+                quantity: line.quantity,
+                subtotal: money(line.subtotal),
+                changes: [...line.changes],
+              })),
+            }),
       priceChange:
         requote === undefined
           ? null

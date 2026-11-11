@@ -282,7 +282,7 @@ export interface CounterGuestPipeline {
         readonly subtotalMinor: bigint;
         readonly totalMinor: bigint;
         /** price-hold-dish-changes: each line as the cart was first priced for it, when told. */
-        readonly sinceAdded?: readonly QuoteLineSinceAdded[];
+        readonly sinceAdded?: readonly QuoteLineSinceAdded[] | null;
       }
     | { readonly status: "NotPriced" }
     /**

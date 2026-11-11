@@ -119,7 +119,7 @@ describe("authorized Quote HTTP bridge", () => {
       expect(result.quote).not.toBe(f.quote);
     },
   );
-  it("price-hold-dish-changes: adds each line as first priced once the answer is settled; a failure leaves the price answered", async () => {
+  it("price-hold-dish-changes: adds each line as first priced once the answer is settled; a failure keeps the price and says the comparison is unknown", async () => {
     const f = fixture();
     const line = {
       cartItemReference: id(6),
@@ -142,7 +142,12 @@ describe("authorized Quote HTTP bridge", () => {
     });
     expect(sinceAdded).toHaveBeenCalledWith(f.quote);
     sinceAdded.mockRejectedValueOnce(new Error("no database"));
-    expect(await port.quoteCart(f.input)).toEqual({ status: "Created", quote: f.quote });
+    // Not worked out: said as unknown (null), never as "nothing changed" (allergen safety).
+    expect(await port.quoteCart(f.input)).toEqual({
+      status: "Created",
+      quote: f.quote,
+      sinceAdded: null,
+    });
     // Not asked for an answer that is not a price.
     f.attach.mockRejectedValueOnce(new Error("down"));
     sinceAdded.mockClear();

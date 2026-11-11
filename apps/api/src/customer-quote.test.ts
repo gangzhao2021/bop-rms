@@ -216,6 +216,13 @@ describe("WP-1103/1104 Customer Quote API", () => {
     service.result = { status: "Current", quote: quote() };
     const plain = (await (await post(await listen(service))).json()) as { quote: object };
     expect(Object.hasOwn(plain.quote, "sinceAdded")).toBe(false);
+    // Not known now: said as null, so the page never reads it as "nothing changed".
+    service.result = { status: "Current", quote: quote(), sinceAdded: null };
+    const unknown = (await (await post(await listen(service))).json()) as {
+      quote: { sinceAdded?: unknown };
+    };
+    expect(Object.hasOwn(unknown.quote, "sinceAdded")).toBe(true);
+    expect(unknown.quote.sinceAdded).toBeNull();
   });
 
   it("returns a replacement Quote with an explicit price-increase decision", async () => {

@@ -214,7 +214,8 @@ export function createCustomerQuotePort(options: {
   readonly now: () => string;
   /**
    * WP-2423 price-hold-dish-changes: each line as this cart was first priced for it. Read after the
-   * answer is settled; a failure leaves it out (the price answered stands), never refuses it.
+   * answer is settled. A failure keeps the price answered but says the comparison is not known
+   * (null), so the guest's page asks to try again instead of reading it as "nothing changed".
    */
   readonly sinceAdded?: (
     quote: PriceQuoteSnapshot | ConfiguredPriceQuoteSnapshot,
@@ -231,7 +232,7 @@ export function createCustomerQuotePort(options: {
       const lines = await options.sinceAdded(result.quote);
       return Object.freeze({ ...result, sinceAdded: Object.freeze([...lines]) });
     } catch {
-      return result;
+      return Object.freeze({ ...result, sinceAdded: null });
     }
   };
   return Object.freeze({
