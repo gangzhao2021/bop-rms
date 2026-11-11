@@ -53,6 +53,10 @@ const failureText = (code: RoleAdministrationPageErrorCode) =>
             ? t("Your access doesn't allow changing roles. Ask the owner.")
             : serverProblemText;
 
+/** A starter role this set adds, or sends for approval again. */
+const sendsForApproval = (role: { readonly state: string }) =>
+  role.state === "ToAdd" || role.state === "NotApproved";
+
 /** Starter roles waiting on the signed-in person: their own to approve alone, or to turn on. */
 export function waitingStarterRoles(
   sets: StarterRoleSetsView,
@@ -104,7 +108,7 @@ function SetPreview({
   readonly putAway: boolean;
   onPutAway(value: boolean): void;
 }) {
-  const adding = set.roles.filter((role) => role.state === "ToAdd");
+  const adding = set.roles.filter(sendsForApproval);
   const removable = set.putAway.filter((role) => !role.held);
   return (
     <div className="starter-roles__preview">
@@ -127,15 +131,20 @@ function SetPreview({
         .filter((role) => role.state !== "ToAdd")
         .map((role) => (
           <p key={role.key}>
-            {role.state === "Added"
-              ? t("{name} is already here.", { name: systemText(role.name) })
-              : role.state === "Removed"
-                ? t("{name} was removed here, so it isn't added again. Bring it back on Roles.", {
-                    name: systemText(role.name),
-                  })
-                : t("You already have a role called {name}, so it isn't added.", {
-                    name: systemText(role.name),
-                  })}
+            {role.state === "NotApproved"
+              ? t(
+                  "{name} wasn't approved, or was withdrawn, so nobody can be given it yet. These roles send it for approval again.",
+                  { name: systemText(role.name) },
+                )
+              : role.state === "Added"
+                ? t("{name} is already here.", { name: systemText(role.name) })
+                : role.state === "Removed"
+                  ? t("{name} was removed here, so it isn't added again. Bring it back on Roles.", {
+                      name: systemText(role.name),
+                    })
+                  : t("You already have a role called {name}, so it isn't added.", {
+                      name: systemText(role.name),
+                    })}
           </p>
         ))}
       {set.keep.length > 0 ? <p>{t("Keeps: {list}.", { list: names(set.keep) })}</p> : null}
@@ -257,7 +266,7 @@ export function StarterRoleSetOffer({
   const { sets } = read;
   if (!sets.mayApply) return null;
   const chosen = sets.sets.find((set) => set.storeType === storeType) ?? null;
-  const willAdd = chosen?.roles.filter((role) => role.state === "ToAdd").length ?? 0;
+  const willAdd = chosen?.roles.filter(sendsForApproval).length ?? 0;
   const willRemove =
     chosen !== null && sets.mayPutAway && putAway
       ? chosen.putAway.filter((role) => !role.held).length

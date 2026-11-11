@@ -9270,4 +9270,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Starts table checkout, takes card and cash, closes paid tables, takes takeout orders and hands them over, and records refund requests":
     "开始结账、收刷卡和现金、关闭已付清的桌、接外带单并交付、登记退款申请",
   "Added 1 role. It is on once it is approved.": "已添加 1 个角色，批准后启用。",
+  "{name} wasn't approved, or was withdrawn, so nobody can be given it yet. These roles send it for approval again.":
+    "{name} 没有被批准或已撤回，现在还不能分给员工；用这些角色会把它重新送审。",
 });

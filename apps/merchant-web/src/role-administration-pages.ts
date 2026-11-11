@@ -468,8 +468,9 @@ export interface StarterRoleView {
   readonly description: string;
   readonly permissions: readonly string[];
   /** ToAdd: added by this set. Added: already here. Removed: the owner removed it. NameTaken:
-   * another role here already has its name, so it is not added. */
-  readonly state: "ToAdd" | "Added" | "Removed" | "NameTaken";
+   * another role here already has its name, so it is not added. NotApproved: it was not approved,
+   * or was withdrawn, before it was ever on; this set sends it for approval again. */
+  readonly state: "ToAdd" | "Added" | "Removed" | "NameTaken" | "NotApproved";
   readonly roleReference: string | null;
 }
 export interface StarterRoleSetView {
@@ -535,7 +536,10 @@ export function parseStarterRoleSetsView(value: unknown): StarterRoleSetsView {
             "state",
             "roleReference",
           ]);
-          if (!["ToAdd", "Added", "Removed", "NameTaken"].includes(String(role.state))) invalid();
+          if (
+            !["ToAdd", "Added", "Removed", "NameTaken", "NotApproved"].includes(String(role.state))
+          )
+            invalid();
           return Object.freeze({
             key: text(role.key),
             name: text(role.name),

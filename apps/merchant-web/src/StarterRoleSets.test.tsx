@@ -86,6 +86,32 @@ it("never adds a second role under a name the owner already uses", () => {
   expect(html).toContain("You already have a role called Runner, so it isn&#x27;t added.");
 });
 
+it("says a starter role that was not approved isn't in use, and sends it for approval again", () => {
+  const sets = {
+    ...starterSetsFixture,
+    sets: starterSetsFixture.sets.map((set) =>
+      set.storeType !== "CounterOnly"
+        ? set
+        : {
+            ...set,
+            roles: set.roles.map((role) => ({
+              ...role,
+              state: "NotApproved",
+              roleReference: starterTeaReference,
+            })),
+          },
+    ),
+  };
+  const html = render({ sets, storeType: "CounterOnly" });
+  expect(html).not.toContain("is already here");
+  expect(html).toContain(
+    "Counter wasn&#x27;t approved, or was withdrawn, so nobody can be given it yet. These roles send it for approval again.",
+  );
+  expect(html).toContain("Adds these roles:");
+  expect(html).toMatch(/<button[^>]*data-variant="primary"(?![^>]*disabled)[^>]*>Use these roles/u);
+  noInternals(html);
+});
+
 it("offers a sole owner to approve the sent roles alone, and Store setup then links to Roles", () => {
   const html = render({ sets: starterStartedSetsFixture, roles: starterStartedRolesFixture });
   expect(html).toContain("Waiting for approval: Counter, Drink maker.");
