@@ -166,7 +166,10 @@ function createVersionedOrderSubmissionSource<V extends 1 | 2>(
             catalog.brandReference !== brand ||
             catalog.storeReference !== store ||
             catalog.sellableReference !== item.sellableReference ||
-            catalog.menuVersionReference !== validated?.menuVersionReference ||
+            // Owner #26 (DEC-PRICE-HOLD): the Owner may list again between checkout start and
+            // send; inside the hold (validUntil, checked by fresh()) the same dish is sent as the
+            // menu sells it now at the confirmed price. The dish itself must not have changed.
+            validated === undefined ||
             catalog.productVersionReference !== validated.productVersionReference ||
             catalog.capturedAt !== evidence.validatedAt ||
             catalog.options.length !== item.optionSelections.length ||

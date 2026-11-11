@@ -90,6 +90,22 @@ it("Owner #26 (DEC-PRICE-HOLD): a cart priced on the menu before the latest list
   });
   await expect(f.source.load({ evidence: f.evidence } as never)).rejects.toThrow();
 });
+it("Owner #26 (DEC-PRICE-HOLD): a listing between checkout start and send still sends the same dish inside the hold", async () => {
+  const f = fixture();
+  const listedSince = "01a7ee00-0000-7000-8000-00000000cafe";
+  // The menu sold now is newer than the one the checkout was validated on.
+  f.capture.mockResolvedValue({ ...f.input.lines[0]?.catalog, menuVersionReference: listedSince });
+  const result = await f.source.load({ evidence: f.evidence } as never);
+  expect(result.lines[0]?.catalog).toMatchObject({ menuVersionReference: listedSince });
+  expect(result.lines[0]?.pricing).toEqual(f.input.lines[0]?.pricing);
+  // The dish itself changed (another product version): never held.
+  f.capture.mockResolvedValue({
+    ...f.input.lines[0]?.catalog,
+    menuVersionReference: listedSince,
+    productVersionReference: listedSince,
+  });
+  await expect(f.source.load({ evidence: f.evidence } as never)).rejects.toThrow();
+});
 it("denies foreign scope without reading Cart", async () => {
   const f = fixture();
   await expect(

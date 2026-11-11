@@ -188,26 +188,30 @@ it("a guest's open cart still sends after the owner lists a change to another di
         "NoIngredients",
       );
       await owner.listAll();
-      // A listing between checkout start and send: the page is told to price again, which
-      // answers the same confirmed price (still held), starts again and sends it, once.
-      const send = (checkoutSessionReference) =>
+      // A listing between checkout start and send (the guest pressed 下单): inside the hold the
+      // round is sent at once at the confirmed price, never asked to price again; sent once.
+      const selectionReference = fresh();
+      const send = () =>
         guests.submitPayLater(phone, {
-          checkoutSessionReference,
-          selectionReference: fresh(),
+          checkoutSessionReference: started.checkoutSessionReference,
+          selectionReference,
           recordedAfterOutage: false,
         });
-      await assert.rejects(
-        () => send(started.checkoutSessionReference),
-        (error) => error.code === "CHECKOUT_REQUOTE_REQUIRED",
-        "price again",
-      );
-      const still = await priced();
-      assert.equal(still.quoteReference, held.quoteReference, "the same confirmed price");
-      assert.equal(still.totalMinor, held.totalMinor, "to the cent");
-      const restarted = await startFor(still);
-      assert.equal(restarted.status, "Started", "a stale checkout does not block the new one");
-      const secondSent = await send(restarted.checkoutSessionReference);
+      const secondSent = await send();
       assert.ok(secondSent.submissionReference, "the second round reached the kitchen");
+      const replayed = await send();
+      assert.equal(replayed.submissionReference, secondSent.submissionReference, "sent once");
+      const charged = await admin.query(
+        `SELECT coalesce(sum((transaction_snapshot_json->'pricing'->'total'->>'amountMinor')::bigint),0)::text AS total
+           FROM rms_ordering.order_item
+          WHERE store_id=$1 AND transaction_snapshot_json->'pricing'->>'quoteReference'=$2`,
+        [store.scope.storeReference, held.quoteReference],
+      );
+      assert.equal(
+        charged.rows[0].total,
+        String(held.totalMinor),
+        "the confirmed total, to the cent",
+      );
       const { rows } = await admin.query(
         "SELECT count(*)::int AS rounds FROM rms_ordering.order_submission_record WHERE store_id=$1",
         [store.scope.storeReference],
