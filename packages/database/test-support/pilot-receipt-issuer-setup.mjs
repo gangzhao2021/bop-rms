@@ -106,9 +106,8 @@ export async function exercisePilotReceiptIssuerSetup(context) {
         [permission, action, from],
       );
     }
-    // The Store setup publication already granted them when it published the Store's phone.
     await admin.query(
-      "INSERT INTO bop_permission.permission_grant VALUES($1,$2,$3,$4,$5,'Active',$6,$7,1,$6,$6) ON CONFLICT DO NOTHING",
+      "INSERT INTO bop_permission.permission_grant VALUES($1,$2,$3,$4,$5,'Active',$6,$7,1,$6,$6)",
       [id(0x9f020 + n), ownerRole, permission, brand, store, from, until],
     );
   }

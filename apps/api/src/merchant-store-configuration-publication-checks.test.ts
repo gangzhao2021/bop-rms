@@ -98,10 +98,18 @@ const facts: StoreConfigurationPublicationFacts = {
 };
 const outcome = (value: ReturnType<typeof evaluateStoreConfigurationPublication>) =>
   Object.fromEntries(value.checks.map((c) => [c.code, c.outcome]));
-const evaluate = (change: Record<string, unknown> = {}, f = facts, timeZone = "America/Toronto") =>
+const evaluate = (
+  change: Record<string, unknown> = {},
+  f = facts,
+  timeZone = "America/Toronto",
+  live: Record<string, unknown> = {},
+) =>
   evaluateStoreConfigurationPublication({
     configuration: configuration(change),
-    current: createStoreConfigurationVersion(JSON.parse(JSON.stringify(current))),
+    current: createStoreConfigurationVersion({
+      ...JSON.parse(JSON.stringify(current)),
+      ...live,
+    }),
     storeTimeZone: timeZone,
     observedAt: at,
     facts: f,
@@ -162,9 +170,17 @@ describe("WP-2423 DEC-STORE-SETUP-PUBLICATION publication checks", () => {
       false,
     );
   });
-  it("M109: a configuration offering pickup needs the Store's published phone; one without pickup does not", () => {
+  it("M109: a configuration that starts offering pickup needs the Store's published phone; one without pickup does not", () => {
     const noPhone = { ...facts, storePhone: false };
-    const checks = evaluate({}, noPhone);
+    // The Store in force is dine-in only; this configuration adds pickup.
+    const dineInLive = {
+      enabledServiceModes: ["DineIn"],
+      weeklySchedule: base.weeklySchedule.map((d, i) => ({
+        ...d,
+        intervals: i === 0 ? [interval(["DineIn"])] : [],
+      })),
+    };
+    const checks = evaluate({}, noPhone, "America/Toronto", dineInLive);
     expect(checks.profile).toBe("StoreConfigurationPublicationChecksV2");
     expect(checks.checks.at(-1)).toEqual({ code: "StorePhone", outcome: "Fail" });
     expect(storeConfigurationPublicationReady(checks)).toBe(false);
@@ -181,10 +197,29 @@ describe("WP-2423 DEC-STORE-SETUP-PUBLICATION publication checks", () => {
         })),
       },
       noPhone,
+      "America/Toronto",
+      dineInLive,
     );
     expect(outcome(dineInOnly).StorePhone).toBe("Pass");
     expect(storeConfigurationPublicationReady(dineInOnly)).toBe(true);
-    expect(outcome(evaluate()).StorePhone).toBe("Pass");
+    expect(outcome(evaluate({}, facts, "America/Toronto", dineInLive)).StorePhone).toBe("Pass");
+    // A first configuration (no Store in force yet) offering pickup needs it too.
+    expect(
+      outcome(
+        evaluateStoreConfigurationPublication({
+          configuration: configuration(),
+          current: null,
+          storeTimeZone: "America/Toronto",
+          observedAt: at,
+          facts: noPhone,
+        }),
+      ).StorePhone,
+    ).toBe("Fail");
+  });
+  it("M109: a Store already offering pickup without a phone is not held up (hours and other changes)", () => {
+    const checks = evaluate({}, { ...facts, storePhone: false });
+    expect(outcome(checks).StorePhone).toBe("Pass");
+    expect(storeConfigurationPublicationReady(checks)).toBe(true);
   });
   it("M109: still reads a V1 list (no StorePhone) saved before, and no other mix", () => {
     const v2 = evaluate();

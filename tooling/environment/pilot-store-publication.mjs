@@ -3,6 +3,7 @@ import { createMerchantStoreConfigurationReferenceSources } from "../../apps/api
 import {
   evaluateStoreConfigurationPublication,
   storeConfigurationPublicationReady,
+  storeConfigurationStartsPickup,
 } from "../../apps/api/dist/merchant-store-configuration-publication-checks.js";
 import { readPublishedStoreBusinessPhone } from "../../apps/api/dist/merchant-store-public-profile.js";
 import {
@@ -113,9 +114,9 @@ export async function storeConfigurationPublicationChecks(operating, tx, input) 
     { brandReference: operating.brandReference, storeReference: operating.storeReference },
     at,
   );
-  // M109: only a configuration offering pickup needs the Store's published phone.
+  // M109: only a configuration that starts offering pickup needs the Store's published phone.
   const storePhone =
-    configuration.enabledServiceModes.includes("Pickup") &&
+    storeConfigurationStartsPickup(configuration, published.configuration) &&
     (await readPublishedStoreBusinessPhone(
       tx,
       {

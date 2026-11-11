@@ -58,9 +58,18 @@ export interface StoreConfigurationPublicationFacts {
   } | null;
   /** The Store's go-live check (Live Gate) is approved for the codes this deployment requires. */
   readonly goLive: boolean;
-  /** M109: the Store's current published profile has a phone pickup guests can call. */
+  /** M109: the Store's current published profile has a phone pickup guests can call (read only
+   * when the configuration starts offering pickup; otherwise not consulted). */
   readonly storePhone: boolean;
 }
+
+/** M109: the configuration offers pickup and the one in force does not (or there is none). */
+export const storeConfigurationStartsPickup = (
+  configuration: Pick<StoreConfigurationVersion, "enabledServiceModes">,
+  current: Pick<StoreConfigurationVersion, "enabledServiceModes"> | null,
+) =>
+  configuration.enabledServiceModes.includes("Pickup") &&
+  !(current?.enabledServiceModes.includes("Pickup") ?? false);
 
 const fixedOrder = (results: Readonly<Record<StoreConfigurationPublicationCheckCode, boolean>>) =>
   Object.freeze(
@@ -129,8 +138,10 @@ export function evaluateStoreConfigurationPublication(input: {
         ),
       GoLive: facts.goLive,
       // M109: pickup guests order away from the counter and call the Store about allergies or
-      // their order, so a configuration offering pickup needs the Store's published phone.
-      StorePhone: !configuration.enabledServiceModes.includes("Pickup") || facts.storePhone,
+      // their order, so a configuration that starts offering pickup needs the Store's published
+      // phone. A Store already offering it keeps it (its Home asks for the phone), so its hours
+      // and other changes are not held up.
+      StorePhone: !storeConfigurationStartsPickup(configuration, current) || facts.storePhone,
     }),
   });
 }

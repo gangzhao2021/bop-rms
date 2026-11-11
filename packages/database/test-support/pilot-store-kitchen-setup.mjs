@@ -32,9 +32,8 @@ export async function exercisePilotStoreKitchenSetup(context) {
       );
     }
     const until = new Date(Date.parse(now()) + 3_600_000).toISOString();
-    // Store setup publication may have granted it already (it publishes the Store's phone).
     await admin.query(
-      "INSERT INTO bop_permission.permission_grant VALUES($1,$2,$3,$4,$5,'Active',$6,$7,1,$6,$6) ON CONFLICT DO NOTHING",
+      "INSERT INTO bop_permission.permission_grant VALUES($1,$2,$3,$4,$5,'Active',$6,$7,1,$6,$6)",
       [id(0x9d100 + n), ownerRole, permission, brand, store, from, until],
     );
   };
