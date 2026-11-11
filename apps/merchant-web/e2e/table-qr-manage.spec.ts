@@ -96,3 +96,52 @@ for (const [width, height] of [
       results.violations.filter((v) => ["critical", "serious"].includes(v.impact ?? "")),
     ).toEqual([]);
   });
+
+// v15 batch 7: a table just added (its name ending in ")") gets its code, and its row says so at
+// once — no reload of the list.
+test("@production a table just added gets its code and its row shows it without a reload", async ({
+  page,
+}) => {
+  await workspace(page);
+  let reads = 0;
+  page.on("request", (request) => {
+    if (request.method() === "GET" && /\/merchant\/dining\/table-qr$/u.test(request.url()))
+      reads += 1;
+  });
+  await page.route("**/merchant/dining/table-qr/command", (route) => {
+    const body = route.request().postDataJSON() as Record<string, unknown>;
+    return route.fulfill({
+      headers,
+      json: {
+        status: "Applied",
+        item: {
+          tableReference: body.tableReference,
+          stableLabel: "DBT 9 (TEST)",
+          areaCode: "MAIN",
+          aggregateVersion: 3,
+          seated: false,
+          codeState: "Active",
+          issuedAt: "2026-11-01T15:00:00.000Z",
+          validUntil: "2027-05-01T15:00:00.000Z",
+        },
+      },
+    });
+  });
+  await page.goto("/app/operations/tables");
+  await page.getByRole("button", { name: "Add a table" }).first().click();
+  await page.getByLabel("Name staff and guests see", { exact: false }).fill("DBT 9 (TEST)");
+  await page.getByLabel("Seats").fill("4");
+  await page.getByRole("button", { name: "Add table" }).click();
+  const row = page.getByRole("row", { name: /DBT 9 \(TEST\)/u });
+  await expect(row).toContainText("No code yet");
+  const before = reads;
+  await row.getByRole("button", { name: "Create code" }).click();
+  await page
+    .getByRole("form", { name: "Create a code for DBT 9 (TEST)?" })
+    .getByRole("button", { name: "Create code" })
+    .click();
+  await expect(page.getByText("DBT 9 (TEST) has a code. Print it now.")).toBeVisible();
+  await expect(row).toContainText("Ready to print");
+  await expect(row).not.toContainText("No code yet");
+  expect(reads).toBe(before);
+});
