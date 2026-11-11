@@ -15,8 +15,11 @@ const { Client } = pg;
  *    → to — and a new extra shows as new; once listed, nothing is waiting;
  * 2. saving a listed dish unchanged opens no menu draft (nothing "not listed yet" with nothing to
  *    list), while a changed name does;
- * 3. one Store: nothing is said about other Stores.
- * Fails at 0cf1e7a5: the menu read has no extra prices, and an unchanged save opens a draft.
+ * 3. one Store: nothing is said about other Stores;
+ * 4. the menu read names the dishes a listing adds (against the version guests saw before), the
+ *    same before and after it is listed, and none for a version that only renames.
+ * Fails at 0cf1e7a5: the menu read has no extra prices, and an unchanged save opens a draft; at
+ * e95c1788: the menu read has no added dishes.
  */
 it("the review names each extra price waiting, and an unchanged save leaves the menu listed", async () => {
   await withIsolatedDatabase({ caseId: "wp2423_review_extras" }, async (context) => {
@@ -44,6 +47,8 @@ it("the review names each extra price waiting, and an unchanged save leaves the 
       assert.equal(await listed(), true);
       assert.deepEqual((await view()).choicePriceChanges, []);
       assert.equal((await view()).otherStores, null);
+      // The menu's first listing added every dish on it, and still says so once listed.
+      assert.deepEqual((await view()).addedToMenu, [noodles.skuReference]);
 
       // 2. The same dish saved again, nothing changed: the menu stays listed.
       const edit = (overrides) =>
@@ -81,9 +86,15 @@ it("the review names each extra price waiting, and an unchanged save leaves the 
           toMinor: "80",
         },
       ]);
+      // A dish already listed is not added again by a later version.
+      assert.deepEqual((await view()).addedToMenu, []);
+      const dumplings = await f.saveDish({ name: "Pork dumplings (TEST)", priceMinor: "900" });
+      assert.deepEqual((await view()).addedToMenu, [dumplings.skuReference]);
       await f.listAll();
       assert.equal(await listed(), true);
       assert.deepEqual((await view()).choicePriceChanges, []);
+      // Once listed, the same dish is still what this listing added (a retried "List it").
+      assert.deepEqual((await view()).addedToMenu, [dumplings.skuReference]);
 
       // A new name waits for "List it" again.
       const renamed = await edit({
@@ -92,6 +103,7 @@ it("the review names each extra price waiting, and an unchanged save leaves the 
       });
       assert.equal(renamed.listingNeeded, true);
       assert.equal(await listed(), false);
+      assert.deepEqual((await view()).addedToMenu, []);
     } finally {
       await f.close();
       await admin.end();

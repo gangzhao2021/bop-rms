@@ -32,7 +32,12 @@ const id = (n) => "01909a7f-0000-7000-8000-" + n.toString(16).padStart(12, "0");
  * 3. "Only at this Store" is live at once and opens no menu draft; the same save sent again after
  *    its answer was lost (same operation, the price it was sent against) is the same change, never
  *    a second one; a store price saved with a new name leaves the name to be listed.
- * Fails at 0cf1e7a5: step 1 (Store 2 does not offer the dish) and step 3 (the menu draft opens).
+ * 4. a Store that joins the menu later keeps dishes guests already had on the menu as it has them
+ *    (never decided there: not on sale); only what a listing adds goes on sale there;
+ * 5. a listing that is refused offers the new dish at no other Store; listed again, it does.
+ * Fails at 0cf1e7a5: step 1 (Store 2 does not offer the dish) and step 3 (the menu draft opens);
+ * at e95c1788: step 3's resent rename answers nothing to list, step 4 puts the soup and tea on sale
+ * at Store 3, and step 5 offers the buns at Store 2 and 3 before the refused listing.
  */
 it("two Stores: a listed dish is on sale at both, a Store's hide stays, a Store price opens no draft", async () => {
   await withIsolatedDatabase({ caseId: "wp2423_other_stores" }, async (context) => {
@@ -211,13 +216,36 @@ it("two Stores: a listed dish is on sale at both, a Store's hide stays, a Store 
       };
       let listed = false;
       const revisions = [];
+      // As the menu read answers it: the sizes this version adds to the one guests saw before
+      // (the latest listing of an earlier version), the same before and after this one is listed.
+      let version = 1;
+      const releases = [];
+      const onMenu = () => menu.sections.flatMap((s) => s.items.map((item) => item.skuReference));
+      let refuseList = 0;
       const menus = {
-        query: async () => ({ menu, publication: listed ? { state: "Published" } : null }),
+        query: async () => {
+          const before = releases.filter((r) => r.version !== version).at(-1)?.skus ?? [];
+          return {
+            menu,
+            publication: listed ? { state: "Published" } : null,
+            addedToMenu: onMenu().filter((sku) => !before.includes(sku)),
+          };
+        },
         command: async ({ body }) => {
           revisions.push(body.action);
+          if (body.action === "List" && refuseList > 0) {
+            refuseList -= 1;
+            throw Object.assign(new Error("TEST: listing refused"), { name: "MerchantMenuError" });
+          }
           if (body.action === "SaveDraft") menu.sections = body.sections;
-          if (body.action === "Revise") listed = false;
-          if (body.action === "List") listed = true;
+          if (body.action === "Revise") {
+            listed = false;
+            version += 1;
+          }
+          if (body.action === "List" && !listed) {
+            listed = true;
+            releases.push({ version, skus: onMenu() });
+          }
           menu.aggregateVersion += 1;
           return { status: "Listed" };
         },
@@ -416,19 +444,64 @@ it("two Stores: a listed dish is on sale at both, a Store's hide stays, a Store 
       assert.deepEqual(changes, [{ p: "650", a: "700" }]);
       assert.equal(listed, true);
       // A Store price with a new name: the price is live now, the name waits for "List it".
-      const renamed = await two.dishes.command({
-        ...session,
-        body: dish(
-          soup.productReference,
-          "Hot and sour soup, large (TEST)",
-          "750",
-          "ThisStore",
-          "700",
-        ),
-      });
+      const renameBody = dish(
+        soup.productReference,
+        "Hot and sour soup, large (TEST)",
+        "750",
+        "ThisStore",
+        "700",
+      );
+      const renamed = await two.dishes.command({ ...session, body: renameBody });
       assert.equal(renamed.listingNeeded, true);
       assert.equal(listed, false);
       assert.equal(await price(store2, soup.skuReference), "7.50");
+      // Its answer was lost and it is sent again unchanged: the new name still waits for "List it".
+      const renamedAgain = await two.dishes.command({ ...session, body: renameBody });
+      assert.equal(renamedAgain.listingNeeded, true);
+      assert.equal(listed, false);
+      two.as(manager);
+      await listAll();
+
+      // 4. A Store that joins the menu later: dishes guests already had on the menu are left as
+      // that Store has them (never decided: not on sale there); only what a listing adds goes on
+      // sale there.
+      const storeThree = id(9);
+      await admin.query(
+        "INSERT INTO bop_tenant.store (store_id,brand_id,code,display_name,time_zone,locale,currency_code,lifecycle,version,created_at,updated_at) VALUES ($1,$2,'STORE_THREE','Synthetic STORE_THREE','America/Toronto','en-CA','CAD','Active',1,$3,$3)",
+        [storeThree, brandReference, from],
+      );
+      const three = at(storeThree);
+      three.as(owner);
+      menu.storeReferences = [store1, store2, storeThree];
+      await one.dishes.command({
+        ...session,
+        body: dish(soup.productReference, "Hot and sour soup (TEST)", null, null, null),
+      });
+      await listAll();
+      assert.notEqual(await status(three, soup.skuReference), "Available");
+      assert.notEqual(await status(three, tea.skuReference), "Available");
+
+      // 5. A new dish whose listing is refused: offered nowhere else; listed on retry, on sale at
+      // every Store that has not decided it.
+      const buns = await one.dishes.command({
+        ...session,
+        body: dish(null, "Pork buns (TEST)", "800", "AllStores", null),
+      });
+      const confirmed = await menuDraft();
+      refuseList = 1;
+      await assert.rejects(listAll(confirmed));
+      for (const store of [store2, storeThree])
+        assert.deepEqual(
+          await owned(
+            "SELECT store_id::text store FROM rms_catalog.availability_rule WHERE brand_id=$1 AND sku_id=$2 AND store_id=$3",
+            [brandReference, buns.skuReference, store],
+          ),
+          [],
+        );
+      await listAll(confirmed);
+      assert.equal(await status(two, buns.skuReference), "Available");
+      assert.equal(await status(three, buns.skuReference), "Available");
+      assert.notEqual(await status(three, soup.skuReference), "Available");
     } finally {
       await admin.end();
     }

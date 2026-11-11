@@ -520,6 +520,11 @@ interface MenuBuilder {
   readonly publication: { readonly state: string } | null;
   /** The Brand's allergen list (absent or empty: the Brand has none yet). */
   readonly allergenChoices?: readonly unknown[];
+  /**
+   * The sizes on this version that the version guests saw before did not have (absent in older
+   * reads: none, so the listing offers nothing at other Stores).
+   */
+  readonly addedToMenu?: readonly string[];
 }
 /** The menu read's sizes with where their allergens come from (as the menu page reads them). */
 interface MenuAllergenView {
@@ -1523,18 +1528,24 @@ export function createMerchantOneStoreDishes(options: {
       listed.menu.sections.flatMap((s) => s.items.map((item) => item.skuReference)),
     );
     await offerUndecided(session, onMenu, step);
-    // WP-2423 (v15 batch 5): at a Brand with several Stores, the Brand's listing puts them live
-    // at the menu's other Stores too, where nobody decided them (a Store's own hide stays).
-    await options.availability.offerAtOtherStores?.({
-      ...session,
-      operationReference: step("offer-other-stores"),
-      skuReferences: [...onMenu],
-      storeReferences: listed.menu.storeReferences ?? [],
-    });
-    return options.menus.command({
+    const result = await options.menus.command({
       ...session,
       body: { action: "List", operationReference: step("menu"), menuReference: body.menuReference },
     });
+    // WP-2423 (v15 batch 5): at a Brand with several Stores, the dishes this listing adds to the
+    // menu go on sale at its other Stores too, where nobody decided them — only once the menu is
+    // listed (a refused listing offers nothing there), and never a dish guests could already see
+    // on the menu (a Store that kept one hidden keeps it hidden). The review named each one with
+    // its Store. A retry after the listing went through offers the same dishes (same keys).
+    const added = new Set(listed.addedToMenu ?? []);
+    if (added.size > 0)
+      await options.availability.offerAtOtherStores?.({
+        ...session,
+        operationReference: step("offer-other-stores"),
+        skuReferences: [...onMenu].filter((sku) => added.has(sku)),
+        storeReferences: listed.menu.storeReferences ?? [],
+      });
+    return result;
   };
 
   const command = async (input: { sessionCookie: unknown; csrf: unknown; body: unknown }) => {

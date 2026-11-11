@@ -1235,20 +1235,61 @@ export function createMerchantMenus(options: {
     return missing;
   };
   /**
+   * WP-2423 (v15 batch 5): the dishes on this version of the menu that the version guests saw
+   * before it did not have — the dishes this listing adds. Read against the latest release of an
+   * earlier version, so the answer is the same before and after this version is listed (a "List
+   * it" retried after its listing went through still offers the same dishes). Never listed: all.
+   */
+  const addedToMenu = async (
+    tx: unknown,
+    s: Scope,
+    menuReference: string,
+    currentVersionReference: string,
+    skuReferences: readonly string[],
+  ) => {
+    await brandScope(tx, s.owner.brandReference);
+    const before = new Set(
+      (
+        await ptx(tx).query(
+          `SELECT DISTINCT p.sku_id::text sku FROM rms_catalog.sellable_placement p
+            JOIN rms_catalog.menu_section s ON s.menu_section_id=p.menu_section_id
+             AND s.menu_id=p.menu_id AND s.brand_id=p.brand_id
+           WHERE p.brand_id=$1 AND p.menu_id=$2 AND s.menu_version_id=(
+             SELECT l.menu_version_id FROM rms_catalog.menu_publication_release l
+              WHERE l.brand_id=$1 AND l.menu_id=$2 AND l.menu_version_id<>$3
+              ORDER BY l.release_sequence DESC LIMIT 1)`,
+          [s.owner.brandReference, menuReference, currentVersionReference],
+        )
+      ).rows.map((row) => String((row as { sku: unknown }).sku)),
+    );
+    return [...new Set(skuReferences)].filter((sku) => !before.has(sku));
+  };
+  /**
    * WP-2423 (v15 batch 5): the rest of what "List it" puts live, for its review — each choice
-   * price waiting (which dish, which choice, from → to) and, at a Brand with several Stores, the
-   * dishes on the menu nobody has decided at one of its other Stores yet, and whether this person's
-   * listing puts them live there (the Brand's own availability authority) or each Store must.
+   * price waiting (which dish, which choice, from → to) and, at a Brand with several Stores, each
+   * other Store the menu serves with the dishes this listing adds that nobody has decided there
+   * yet, and whether this person's listing puts them live there (the Brand's own availability
+   * authority) or each Store must. A dish guests could already see on the menu is left as each
+   * Store has it (one a Store kept hidden stays hidden).
    */
   const listingReview = async (
     tx: unknown,
     s: Scope,
     view: {
+      readonly menuReference: string;
+      readonly currentVersionReference: string;
       readonly storeReferences: readonly string[];
       readonly skuReferences: readonly string[];
     },
     severalStores: boolean,
   ) => {
+    const added = await addedToMenu(
+      tx,
+      s,
+      view.menuReference,
+      view.currentVersionReference,
+      view.skuReferences,
+    );
     const onDishes = new Map(
       (await listCurrentProductOptionBindings(ptx(tx) as never, s.owner)).map((row) => [
         row.bindingReference + ":" + row.optionReference,
@@ -1284,31 +1325,47 @@ export function createMerchantMenus(options: {
       fromMinor: rule.publishedAmountMinor,
       toMinor: rule.amountMinor,
     }));
-    if (!severalStores) return { choicePriceChanges, otherStores: null };
+    if (!severalStores) return { choicePriceChanges, addedToMenu: added, otherStores: null };
     const served = new Set(view.storeReferences);
     const others = (await listBrandStoreReferences(ptx(tx) as never, s.owner)).filter(
       (store) => store !== s.owner.storeReference && served.has(store),
     );
     const undecided = new Set<string>();
+    const stores: { storeName: string | null; notDecided: string[] }[] = [];
     for (const storeReference of others) {
       const rules = await listStoreAvailabilityRules(ptx(tx), { ...s.owner, storeReference });
-      for (const sku of view.skuReferences)
-        if (
+      const here = added.filter(
+        (sku) =>
           !rules.some(
             (rule) =>
               rule.sellableReference === sku &&
               rule.storeReference === storeReference &&
               rule.reasonCode === storeOfferedReasonCode,
-          )
-        )
-          undecided.add(sku);
+          ),
+      );
+      if (here.length === 0) continue;
+      for (const sku of here) undecided.add(sku);
+      // The Store's name, read in that Store's scope; one that cannot be read is left unnamed.
+      const storeName = await createPostgresMerchantOrganizationSource(ptx(tx) as never, {
+        brandReference: s.owner.brandReference,
+        storeReference,
+        observedAt: options.persistence.now(),
+      })
+        .getStore(storeReference as never)
+        .then(
+          (store) => store?.displayName ?? null,
+          () => null,
+        );
+      stores.push({ storeName, notDecided: here });
     }
     await brandScope(tx, s.owner.brandReference);
     return {
       choicePriceChanges,
+      addedToMenu: added,
       otherStores: {
         storeCount: others.length,
         notDecided: [...undecided],
+        stores,
         listingOffers: (await s.decision(availabilityPermission))?.effect === "Allow",
       },
     };
@@ -1487,6 +1544,8 @@ export function createMerchantMenus(options: {
               tx,
               s,
               {
+                menuReference: summary.menuReference,
+                currentVersionReference: summary.currentVersionReference,
                 storeReferences: loaded.aggregate.draft.storeReferences.map(String),
                 skuReferences: loaded.aggregate.draft.sections.flatMap((section) =>
                   section.placements.map((placement) => String(placement.sellableReference)),
