@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, expect, it, vi } from "vitest";
 import { cardMachineRefundRecordedText } from "./CardMachineRequestRefund.js";
 import {
+  cardMachineRefundBySenderText,
   CardMachineRefundDone,
   cardMachineRefundToRecord,
   MoneyTakenBack,
@@ -585,4 +586,22 @@ it("v15 batch 8: a counter cash payment is described as cash from the drawer, ne
   expect(cardMachineReviewText(true, false, cash)).toContain("由店长或店主从钱箱退还现金 $3.65");
   expect(recorded(true, false, false)).toContain("店主批准后，由店长或店主从钱箱退还现金 $3.65");
   expect(recorded(false, false, true)).toContain("请从钱箱退还现金 $3.65（按 5 分取整）");
+});
+
+// b9 refund-cashier-authorization (WP-2423 M14): a cashier is told who makes and records the
+// card-machine or cash refund, never asked to record it themselves.
+it("tells a cashier that a manager or the owner makes and records the machine or cash refund", () => {
+  expect(cardMachineRefundBySenderText("$2.83", null)).toBe(
+    "Not refunded yet. A manager or the owner refunds $2.83 on the card machine and records it.",
+  );
+  expect(cardMachineRefundBySenderText("$2.83", "$2.85")).toBe(
+    "Not given back yet. A manager or the owner gives back $2.85 in cash and records it.",
+  );
+  setLanguageForTest("zh-Hans");
+  expect(cardMachineRefundBySenderText("$2.83", null)).toBe(
+    "还没退款。由店长或店主在刷卡机上退款 $2.83，再在这里记录。",
+  );
+  expect(cardMachineRefundBySenderText("$2.83", "$2.85")).toBe(
+    "还没退还。由店长或店主从钱箱退还现金 $2.85，再在这里记录。",
+  );
 });

@@ -263,6 +263,22 @@ export function onlineSendControl(
   if (approval?.state === "NotSent") return canSend ? "AskedSendHere" : "AskedManagerSends";
   return canSend ? "Send" : "ManagerSends";
 }
+/**
+ * b9 refund-cashier-authorization (WP-2423 M14): a card-machine or cash refund still to make, as
+ * a reader who may not send refunds (a cashier) reads it. Recording it as made sends it, which
+ * only a manager or the owner does, so the cashier is told who does it and offered nothing.
+ * `cash`: what goes back from the drawer (whole nickels), or null for the card machine.
+ */
+export function cardMachineRefundBySenderText(amount: string, cash: string | null): string {
+  return cash !== null
+    ? t("Not given back yet. A manager or the owner gives back {amount} in cash and records it.", {
+        amount: cash,
+      })
+    : t(
+        "Not refunded yet. A manager or the owner refunds {amount} on the card machine and records it.",
+        { amount },
+      );
+}
 const onlineSendOffered = (control: ReturnType<typeof onlineSendControl>) =>
   control === "Send" || control === "AskedSendHere";
 function RecordedRequestStatus({
@@ -461,7 +477,16 @@ function RecordedRequestStatus({
                           })}{" "}
                       <Link to="/app/approvals">{t("Open Approvals")}</Link>
                     </p>
-                  ) : recordedHere ? null : (
+                  ) : recordedHere ? null : !canSend ? (
+                    <p>
+                      {cardMachineRefundBySenderText(
+                        amount(payment.amountMinor),
+                        payment.cashGivenBackMinor == null
+                          ? null
+                          : amount(payment.cashGivenBackMinor),
+                      )}
+                    </p>
+                  ) : (
                     <CardMachineRequestRefund
                       orderReference={orderReference}
                       requestReference={entry.requestReference}
@@ -1940,8 +1965,9 @@ export function cardMachineRefundToRecord(
 /**
  * WP-2423 item 4 (v15 2026-10-17): on the payment page itself, each recorded refund of this
  * card-machine payment that is still to be made on the machine, with its record action. Staff who
- * just refunded on the machine record it here without opening the refund wizard. The server
- * decides who may record (refund handlers); someone who may not read refunds sees nothing here.
+ * just refunded on the machine record it here without opening the refund wizard. Only a reader
+ * who may send refunds (a manager or the owner) records one; a cashier is told who does it (b9),
+ * and the server refuses them too. Someone who may not read refunds sees nothing here.
  */
 export function PendingCardMachineRefunds({
   context,
@@ -2059,6 +2085,13 @@ export function PendingCardMachineRefunds({
                 {approval?.state === "AwaitingApproval" ? (
                   <p>
                     <Link to="/app/approvals">{t("Open Approvals")}</Link>
+                  </p>
+                ) : !context.canSend ? (
+                  <p>
+                    {cardMachineRefundBySenderText(
+                      amount(amountMinor),
+                      cashMinor === null ? null : amount(cashMinor),
+                    )}
                   </p>
                 ) : open === entry.requestReference ? (
                   <CardMachineRequestRefund

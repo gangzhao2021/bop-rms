@@ -546,6 +546,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Not sent yet. A manager or the owner sends it from Approvals.":
     "还没发出。由店长或店主在“审批”里发出。",
   "Not sent yet. A manager or the owner sends it.": "还没发出。由店长或店主发出。",
+  "Not refunded yet. A manager or the owner refunds {amount} on the card machine and records it.":
+    "还没退款。由店长或店主在刷卡机上退款 {amount}，再在这里记录。",
+  "Not given back yet. A manager or the owner gives back {amount} in cash and records it.":
+    "还没退还。由店长或店主从钱箱退还现金 {amount}，再在这里记录。",
   "The kitchen and the counter leave it out.": "后厨不做，柜台也不交付。",
   "Already being made: the guest keeps the food.": "已经在做了：顾客保留餐品。",
   "The guest keeps the food.": "顾客保留餐品。",
