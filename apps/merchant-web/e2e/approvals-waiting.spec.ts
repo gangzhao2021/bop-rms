@@ -97,7 +97,13 @@ test("@production refunds waiting for approval are counted on the home page and 
   await page.route("**/merchant/payments/refunds/approvals", (route) =>
     route.fulfill({
       headers,
-      json: { observedAt: new Date().toISOString(), canApprove: true, soleOperator: null, entries },
+      json: {
+        observedAt: new Date().toISOString(),
+        canApprove: true,
+        canSend: true,
+        soleOperator: null,
+        entries,
+      },
     }),
   );
   await page.goto("/app");
@@ -141,4 +147,34 @@ test("@production staff without the approvals page are never asked for approvals
   await expect(page.getByRole("heading", { name: "Right now" })).toBeVisible();
   await expect(page.getByText("Refunds waiting for approval")).toHaveCount(0);
   expect(asked).toEqual([]);
+});
+
+test("@production a cashier's home and badge never count refunds they can neither approve nor send", async ({
+  page,
+}) => {
+  // v15 batch 5: a cashier's approvals read lists the store's requests; Home said "1 to approve ·
+  // 1 approved, not sent yet" and the badge counted them, though a cashier can do neither.
+  await session(page, true);
+  const entries = [entry(1, "AwaitingApproval"), entry(2, "Approved")].map((e) => ({
+    ...e,
+    canApprove: false,
+  }));
+  await page.route("**/merchant/payments/refunds/approvals", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        observedAt: new Date().toISOString(),
+        canApprove: false,
+        canSend: false,
+        soleOperator: null,
+        entries,
+      },
+    }),
+  );
+  await page.goto("/app");
+  const navigation = page.getByRole("navigation", { name: "Workspace" });
+  await expect(navigation.getByRole("link", { name: "Approvals", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Right now" })).toBeVisible();
+  await expect(page.getByText("Refunds waiting for approval")).toHaveCount(0);
+  await expect(page.getByText("To approve", { exact: true })).toHaveCount(0);
 });

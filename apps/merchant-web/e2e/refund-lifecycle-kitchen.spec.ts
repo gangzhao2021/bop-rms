@@ -101,7 +101,7 @@ async function noHorizontalScroll(page: Page, name: string) {
 }
 
 /** The items route of order 21 (Fries not started, Noodles being made) and its previews. */
-async function twoDishes(page: Page) {
+async function twoDishes(page: Page, paymentMethod: "Online" | "CardMachine" = "Online") {
   await page.route("**/merchant/payments/refunds/items", (route) =>
     route.fulfill({
       headers,
@@ -122,7 +122,7 @@ async function twoDishes(page: Page) {
             paymentCaptured: true,
             refundedByCancellation: false,
             paymentIntentReference: id(31),
-            paymentMethod: "Online",
+            paymentMethod,
             kitchen: "NotStarted",
             withdrawnQuantity: 0,
           },
@@ -135,7 +135,7 @@ async function twoDishes(page: Page) {
             paymentCaptured: true,
             refundedByCancellation: false,
             paymentIntentReference: id(31),
-            paymentMethod: "Online",
+            paymentMethod,
             kitchen: "Started",
             withdrawnQuantity: 0,
           },
@@ -230,6 +230,34 @@ test("@production M10/M14: a cashier, whose request a manager sends, is not offe
   await expect(review.getByRole("button", { name: /^Send / })).toHaveCount(0);
   await expectNoInternalText(page);
   await noHorizontalScroll(page, "refund-stop-making-cashier");
+});
+
+test("@production M14: a cashier refunding a card-machine payment is told a manager or the owner sends it", async ({
+  page,
+}) => {
+  // v15 batch 5: the review told a cashier to refund on the card machine and record it there,
+  // which only a manager or the owner can do; the message after recording already said so.
+  await signIn(page);
+  await noApprovals(page);
+  await page.route("**/merchant/payments/refunds/context", (route) =>
+    route.fulfill({
+      headers,
+      json: context({ canSend: false, paymentMethod: "CardMachine" }),
+    }),
+  );
+  await twoDishes(page, "CardMachine");
+  await page.goto("/app/operations/payments/" + id(31) + "/refund");
+  await page.getByRole("spinbutton", { name: /Noodles/ }).fill("1");
+  await page.getByRole("combobox", { name: "Reason" }).selectOption("WRONG_ITEM");
+  await page.getByRole("button", { name: "Review refund" }).click();
+  const review = page.getByRole("region", { name: "Review this refund" });
+  await expect(review).toContainText(
+    "Paid on the store's card machine. Recording this request does not refund anything yet: a manager or the owner sends it from Approvals.",
+  );
+  await expect(review).not.toContainText("refund this amount on that machine");
+  await expect(review.getByRole("button", { name: "Record refund request" })).toBeVisible();
+  await expectNoInternalText(page);
+  await noHorizontalScroll(page, "refund-card-machine-cashier");
 });
 
 test("@production M10: a cashier refunding all of an order nobody accepted is pointed to Can't make it", async ({
