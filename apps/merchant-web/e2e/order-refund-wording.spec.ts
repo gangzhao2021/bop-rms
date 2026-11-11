@@ -235,9 +235,12 @@ test("@production a refund waiting for approval says so on the order, not 'open 
   await page.route("**/merchant/payments/refunds/approvals", (route) =>
     route.fulfill({
       headers,
+      // The manager asked for this refund, so they can't approve it, but they may send a refund
+      // nobody sent (payment.refund.execute; the BFF says so since batch 5, WP-2423 M14).
       json: {
         observedAt: new Date().toISOString(),
         canApprove: false,
+        canSend: true,
         soleOperator: null,
         entries,
       },
