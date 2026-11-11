@@ -161,6 +161,48 @@ function bound(guest: GuestSession, scope: CustomerDiningCheckoutScopeOptions["s
   }) satisfies DiningCheckoutScopeActor;
 }
 
+/**
+ * Dining's public checkout-hold read, two ways: `heldByOther` is another participant's hold (the
+ * caller's own checkout does not keep it from choosing), `heldByAnyone` counts every guest's hold,
+ * the caller's own too (read with a reference that is no participant, as staff read it), so that
+ * "Back to cart" or a give-back never moves a cart whose payment is in flight.
+ */
+export function diningCheckoutHoldReaders(
+  holds: {
+    read(input: {
+      readonly diningSessionReference: string;
+      readonly cartReference: string;
+      readonly cartVersion: number;
+      readonly participantReference: string;
+      readonly observedAt: string;
+    }): Promise<{ readonly heldUntil: string } | null>;
+  },
+  input: {
+    readonly diningSessionReference: string;
+    readonly participantReference: string;
+    /** A fresh reference of this request (never a participant's). */
+    readonly readerReference: string;
+    readonly observedAt: string;
+  },
+) {
+  const read = async (participantReference: string, cartReference: string, cartVersion: number) =>
+    (
+      await holds.read({
+        diningSessionReference: input.diningSessionReference,
+        cartReference,
+        cartVersion,
+        participantReference,
+        observedAt: input.observedAt,
+      })
+    )?.heldUntil ?? null;
+  return Object.freeze({
+    heldByOther: (cartReference: string, cartVersion: number) =>
+      read(input.participantReference, cartReference, cartVersion),
+    heldByAnyone: (cartReference: string, cartVersion: number) =>
+      read(input.readerReference, cartReference, cartVersion),
+  });
+}
+
 const hashIntent = (value: string) => "sha256:" + createHash("sha256").update(value).digest("hex");
 
 export function createCustomerDiningCheckoutScope(options: CustomerDiningCheckoutScopeOptions) {
@@ -218,16 +260,12 @@ export function createCustomerDiningCheckoutScope(options: CustomerDiningCheckou
             { run: (work) => work(transaction as never) },
             scope,
           );
-          const heldByOther = async (cartReference: string, cartVersion: number) =>
-            (
-              await holds.read({
-                diningSessionReference: actor.diningSessionReference,
-                cartReference,
-                cartVersion,
-                participantReference: actor.participantReference,
-                observedAt,
-              })
-            )?.heldUntil ?? null;
+          const { heldByOther, heldByAnyone } = diningCheckoutHoldReaders(holds, {
+            diningSessionReference: actor.diningSessionReference,
+            participantReference: actor.participantReference,
+            readerReference: operationReference,
+            observedAt,
+          });
           const audit = (actionCode: string, cartReference: string) => ({
             auditId: options.newReference(),
             brandId: scope.brandReference,
@@ -268,7 +306,9 @@ export function createCustomerDiningCheckoutScope(options: CustomerDiningCheckou
             observedAt,
             newReference: options.newReference,
             audit: (cartReference) => audit("ORDERING_CART_WAITING_RETURN", cartReference),
-            heldByOther,
+            // The dishes never move while anyone's checkout holds the cart, the caller's own
+            // included: a payment of the round in flight must meet the cart it was taken for.
+            heldByOther: heldByAnyone,
           });
         });
       } catch (error) {

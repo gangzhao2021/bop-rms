@@ -4,6 +4,7 @@ import {
   CustomerDiningCheckoutScopeError,
   CustomerDiningCheckoutScopeHandler,
   customerDiningCheckoutScopeRoute,
+  diningCheckoutHoldReaders,
   parseCustomerDiningCheckoutScopeCommand,
   type createCustomerDiningCheckoutScope,
 } from "./customer-dining-checkout-scope.js";
@@ -186,5 +187,28 @@ describe("WP-2423 shared-table-checkout (a): the payer at a pay-first table choo
     } finally {
       await server.close();
     }
+  });
+
+  it("Back to cart and a give-back count the payer's own checkout hold: a payment in flight keeps the cart", async () => {
+    const payer = id(7);
+    // Dining's read leaves out the asker's own hold: here only the payer holds the cart.
+    const asked: string[] = [];
+    const holds = {
+      read: async (input: { readonly participantReference: string }) => {
+        asked.push(input.participantReference);
+        return input.participantReference === payer
+          ? null
+          : { heldUntil: "2026-08-02T16:10:00.000Z" };
+      },
+    };
+    const readers = diningCheckoutHoldReaders(holds, {
+      diningSessionReference: id(8),
+      participantReference: payer,
+      readerReference: id(99),
+      observedAt: now,
+    });
+    expect(await readers.heldByOther(id(1), 5)).toBeNull();
+    expect(await readers.heldByAnyone(id(1), 5)).toBe("2026-08-02T16:10:00.000Z");
+    expect(asked).toEqual([payer, id(99)]);
   });
 });
