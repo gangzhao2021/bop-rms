@@ -25,6 +25,7 @@ import {
 } from "../domain/cart.js";
 // Version-specific on purpose: this service attaches configured (v2) Quotes only.
 import {
+  parseAnyCartQuoteAttachment,
   parseConfiguredCartQuoteAttachment,
   type CartQuoteAttachment,
 } from "../domain/cart-quote-attachment.js";
@@ -85,6 +86,16 @@ export interface ConfiguredCartQuotePorts {
   readonly repository: {
     loadCart(reference: string): Promise<unknown>;
     resolveOperation(reference: string): Promise<unknown>;
+    /**
+     * Owner #26 (DEC-PRICE-HOLD): the Quote last attached to this Cart version, any Quote version.
+     * While its hold lasts, pricing the same Cart again (a reload, a reconnect, another phone at the
+     * table) answers that Quote: the price the guest confirmed, with its own end, never a new one.
+     */
+    loadLatest?(input: {
+      readonly cartReference: string;
+      readonly cartVersion: number;
+      readonly observedAt: string;
+    }): Promise<unknown>;
     attach(input: {
       readonly attachment: CartQuoteAttachment<2>;
       readonly expectedCartVersion: number;
@@ -289,6 +300,69 @@ export function createConfiguredCartQuoteService(ports: ConfiguredCartQuotePorts
           cart.items.some((item) => item.catalogSelectionEvidence === null)
         )
           throw new CartError("CART_QUOTE_INVALID");
+        // Owner #26 (DEC-PRICE-HOLD): the price the guest confirmed for this Cart version is kept
+        // until its Quote's hold ends. Each dish must still be sold now, and be the dish that was
+        // priced (same product version); a dish the restaurant changed is priced again below.
+        if (ports.repository.loadLatest !== undefined) {
+          const latestValue = await ports.repository.loadLatest({
+            cartReference,
+            cartVersion: expectedCartVersion,
+            observedAt: now(),
+          });
+          const latest = latestValue === null ? null : parseAnyCartQuoteAttachment(latestValue);
+          const evidenceOf = new Map(
+            cart.items.map((item) => [item.cartItemReference, item.catalogSelectionEvidence]),
+          );
+          if (
+            latest !== null &&
+            latest.quoteVersion === 2 &&
+            latest.cartReference === cartReference &&
+            latest.brandReference === cart.brandReference &&
+            latest.storeReference === cart.storeReference &&
+            latest.cartVersion === expectedCartVersion &&
+            latest.attachedAt >= cart.updatedAt &&
+            now() < latest.quoteExpiresAt &&
+            latest.lines.length === cart.items.length &&
+            cart.items.every((item) =>
+              latest.lines.some(
+                (line) =>
+                  line.lineReference === item.cartItemReference &&
+                  line.sellableReference === item.sellableReference &&
+                  line.quantity === item.quantity &&
+                  line.menuVersionReference ===
+                    evidenceOf.get(item.cartItemReference)?.menuVersionReference &&
+                  line.productVersionReference ===
+                    evidenceOf.get(item.cartItemReference)?.productVersionReference,
+              ),
+            )
+          ) {
+            let sameDishes = true;
+            for (const item of cart.items) {
+              const captured = await ports.catalog.capture(selectionOf(item, now()));
+              // Not sold now (sold out, off the menu): named as for any price.
+              if (captured === null) return await refuse(item);
+              const snapshot = parseOrderCatalogLineSnapshot(captured);
+              if (
+                snapshot.productVersionReference !==
+                item.catalogSelectionEvidence?.productVersionReference
+              )
+                sameDishes = false;
+              await authorize();
+            }
+            if (sameDishes) {
+              const current = owned(await ports.repository.loadCart(cartReference), cart);
+              if (current.aggregateVersion !== expectedCartVersion)
+                throw new CartError("CART_VERSION_CONFLICT");
+              await authorize();
+            }
+            // A hold that ended while it was being checked prices the Cart anew below.
+            if (sameDishes && now() < latest.quoteExpiresAt)
+              return Object.freeze({
+                status: "Held" as const,
+                attachment: parseConfiguredCartQuoteAttachment(latestValue),
+              });
+          }
+        }
         if (ports.evidence !== undefined) {
           const evidence = ports.evidence;
           const observedAt = now();

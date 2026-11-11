@@ -85,12 +85,14 @@ function receipt(
   version: 1 | 2 = 1,
 ) {
   const raw = closed(value, ["status", "attachment"]);
-  if (raw.status !== "Attached" && raw.status !== "AlreadyAttached") throw new Error();
+  if (raw.status !== "Attached" && raw.status !== "AlreadyAttached" && raw.status !== "Held")
+    throw new Error();
   const result = parseCartQuoteAttachmentOfVersion(raw.attachment, version);
   if (
     result.cartReference !== command.cartReference ||
     result.cartVersion !== command.expectedCartVersion ||
-    result.operationReference !== command.operationReference ||
+    // Owner #26 (DEC-PRICE-HOLD): a held Quote was attached by the request that first priced it.
+    (raw.status !== "Held" && result.operationReference !== command.operationReference) ||
     result.brandReference !== scope.brandReference ||
     result.storeReference !== scope.storeReference
   )
@@ -259,6 +261,7 @@ export function createCustomerQuotePort(options: {
       // Any failure after an attempted successful command preserves outcome uncertainty.
       try {
         const first = receipt(saved, command, scope, options.quoteVersion);
+        const held = closed(saved, ["status", "attachment"]).status === "Held";
         const observedAt = parseCanonicalInstant(options.now());
         if (
           String(observedAt) < first.attachedAt ||
@@ -317,7 +320,7 @@ export function createCustomerQuotePort(options: {
         )
           return unavailable;
         return Object.freeze({
-          status: record.quoteOutcome === "Created" ? "Created" : "Current",
+          status: record.quoteOutcome === "Created" && !held ? "Created" : "Current",
           quote,
         });
       } catch {

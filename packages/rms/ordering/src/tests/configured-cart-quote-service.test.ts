@@ -12,6 +12,7 @@ function setup(
   dining = false,
   evidence?: ConfiguredCartQuotePorts["evidence"],
   explainMany?: NonNullable<ConfiguredCartQuotePorts["catalog"]["explainMany"]>,
+  loadLatest?: NonNullable<ConfiguredCartQuotePorts["repository"]["loadLatest"]>,
 ) {
   const f = fixture(dining);
   const snapshot = f.catalogLines[0]?.snapshot;
@@ -88,7 +89,10 @@ function setup(
       hashIntent: (value) => "sha256:" + createHash("sha256").update(value).digest("hex"),
       equals: (left, right) => left === right,
     },
-    repository: { loadCart, resolveOperation, attach },
+    repository:
+      loadLatest === undefined
+        ? { loadCart, resolveOperation, attach }
+        : { loadCart, resolveOperation, attach, loadLatest },
     pricingChannelCode: f.pricingChannelCode,
     now: () => at,
     ...(evidence === undefined ? {} : { evidence }),
@@ -314,6 +318,51 @@ describe("configured current-authorized Cart quote", () => {
       code: "CART_PERMISSION_DENIED",
     });
     expect(s.attach).toHaveBeenCalledOnce();
+  });
+});
+
+describe("Owner #26 (DEC-PRICE-HOLD): the confirmed price is kept until its hold ends", () => {
+  const held = async () => {
+    let latest: unknown = null;
+    const s = setup(false, undefined, undefined, async () => latest);
+    const first = await s.service.attach(s.command);
+    expect(first.status).toBe("Attached");
+    latest = first.attachment;
+    const attached = first.attachment;
+    s.resolveOperation.mockImplementation(async (reference?: unknown) =>
+      reference === attached.operationReference ? attached : null,
+    );
+    return s;
+  };
+  it("answers the confirmed Quote when the same Cart is priced again inside the hold", async () => {
+    const s = await held();
+    const again = await s.service.attach({ ...s.command, operationReference: id(91) });
+    expect(again.status).toBe("Held");
+    expect(again.attachment.quoteReference).toBe(s.f.quote.quoteReference);
+    expect(again.attachment.quoteExpiresAt).toBe(s.f.quote.expiresAt);
+    expect(s.quoteCart).toHaveBeenCalledTimes(1);
+    expect(s.attach).toHaveBeenCalledTimes(1);
+  });
+  it("prices again once the hold has ended", async () => {
+    const s = await held();
+    s.advance(s.f.quote.expiresAt);
+    await s.service.attach({ ...s.command, operationReference: id(92) }).catch(() => undefined);
+    expect(s.quoteCart).toHaveBeenCalledTimes(2);
+  });
+  it("prices again a dish the restaurant changed (another product version)", async () => {
+    const s = await held();
+    s.capture.mockResolvedValue({ ...s.snapshot, productVersionReference: id(93) } as never);
+    await s.service.attach({ ...s.command, operationReference: id(94) }).catch(() => undefined);
+    expect(s.quoteCart).toHaveBeenCalledTimes(2);
+  });
+  it("is an outage, never a new price or a refusal, when the held Quote cannot be read", async () => {
+    const s = setup(false, undefined, undefined, async () => {
+      throw new Error("no database");
+    });
+    await expect(s.service.attach(s.command)).rejects.toMatchObject({
+      code: "CART_DEPENDENCY_UNAVAILABLE",
+    });
+    expect(s.quoteCart).not.toHaveBeenCalled();
   });
 });
 

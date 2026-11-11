@@ -119,6 +119,19 @@ describe("authorized Quote HTTP bridge", () => {
       expect(result.quote).not.toBe(f.quote);
     },
   );
+  it("Owner #26 (DEC-PRICE-HOLD): a new request inside the hold answers the confirmed Quote, read by its own operation", async () => {
+    const f = fixture();
+    f.attach.mockResolvedValue({ status: "Held", attachment: f.attachment } as never);
+    const later = { ...f.input, idempotencyKey: id(93) };
+    const result = await f.port.quoteCart(later);
+    expect(result).toEqual({ status: "Current", quote: f.quote });
+    expect(f.resolve).toHaveBeenCalledWith(
+      expect.objectContaining({ operationReference: id(91), guestSessionReference: id(92) }),
+    );
+    // Without the hold, an attachment for another request is never answered.
+    f.attach.mockResolvedValue({ status: "Attached", attachment: f.attachment });
+    expect(await f.port.quoteCart(later)).toEqual({ status: "Unavailable" });
+  });
   it.each([
     ["CART_PERMISSION_DENIED", "NotFound"],
     ["CART_UNAVAILABLE", "NotFound"],

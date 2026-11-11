@@ -8,6 +8,7 @@ import {
   createConfiguredCustomerQuoteService,
   createPostgresCartQueryStore,
   createPostgresCartLineEvidenceStore,
+  createPostgresAnyCartQuoteReader,
   createPostgresConfiguredCartQuoteStore,
   createPostgresPickupCartBindingReader,
   type ConfiguredCustomerQuoteOptions,
@@ -96,6 +97,7 @@ export function createCustomerConfiguredQuoteComposition(
     { ...options.catalogSafety, clock: { now: options.now } },
   );
   const lineEvidence = createPostgresCartLineEvidenceStore(options.attachmentTransactions, scope);
+  const latestQuotes = createPostgresAnyCartQuoteReader(options.attachmentTransactions, scope);
   return createConfiguredCustomerQuoteService({
     scope,
     sessions: options.sessions,
@@ -137,6 +139,8 @@ export function createCustomerConfiguredQuoteComposition(
       loadCart: carts.load,
       resolveOperation: attachments.resolveOperation,
       attach: attachments.attach,
+      // Owner #26 (DEC-PRICE-HOLD): the confirmed price is answered again until its hold ends.
+      loadLatest: latestQuotes.loadLatest,
     },
     pricing: {
       async quoteCart(input, identity) {
