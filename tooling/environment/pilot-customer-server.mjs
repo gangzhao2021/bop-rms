@@ -1,4 +1,8 @@
-import { createPilotEntryListener, withClientAddress } from "./pilot-client-address.mjs";
+import {
+  configurePilotEntryConnections,
+  createPilotEntryListener,
+  withClientAddress,
+} from "./pilot-client-address.mjs";
 import { pilotMerchantAppPaths } from "./pilot-merchant-app-paths.mjs";
 import { registerInternalDiningEntry } from "./pilot-dining-launcher.mjs";
 import { installInternalStaffLogin } from "./pilot-staff-login.mjs";
@@ -597,7 +601,7 @@ export async function startInternalCustomerServer({
     if (stateClientAddress) {
       entryListener = createPilotEntryListener({ ...secure, app });
       server = entryListener.server;
-    } else server = createServer(secure, app);
+    } else server = configurePilotEntryConnections(createServer(secure, app));
     server.listen(listenPort, "127.0.0.1", () =>
       process.stdout.write(
         "Pilot customer HTTPS listening on 127.0.0.1:" + server.address().port + "\n",

@@ -71,9 +71,25 @@ function afterLine(socket, first) {
  * peer, remembers the address for the connection, and serves the rest as HTTPS. Used only then: an
  * installation without it listens as plain HTTPS, exactly as before.
  */
+/**
+ * v15 2026-11-11 (staff reloads failing with net::ERR_TOO_MANY_RETRIES): with Node's 5 s idle
+ * keep-alive, every connection a page load opened was closed at about the same moment 5 s later.
+ * A reload in that moment sent its requests down connections being closed; the browser retries
+ * each on the next idle one, which was closing too, and gives up after a few. The entry keeps an
+ * idle connection for 75 s (as common web servers do), so the pages' own refreshes (every few
+ * seconds) keep their connections and a reload rarely meets one being closed.
+ */
+export const pilotEntryKeepAliveMs = 75_000;
+export function configurePilotEntryConnections(server) {
+  server.keepAliveTimeout = pilotEntryKeepAliveMs;
+  // A request's headers still have to arrive promptly; only idle time between requests grows.
+  server.headersTimeout = 20_000;
+  return server;
+}
+
 export function createPilotEntryListener({ key, cert, app }) {
   const context = createSecureContext({ key, cert, minVersion: "TLSv1.2" });
-  const http = createHttpServer(app);
+  const http = configurePilotEntryConnections(createHttpServer(app));
   const addresses = new WeakMap();
   const serve = (socket, first, address) => {
     const secure = new TLSSocket(afterLine(socket, first), {

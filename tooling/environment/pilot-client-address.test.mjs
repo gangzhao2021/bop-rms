@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import net from "node:net";
 import tls from "node:tls";
+import { setTimeout } from "node:timers";
 import { afterEach, expect, it } from "vitest";
 import {
   createPilotEntryListener,
@@ -73,3 +74,31 @@ it("a guest's own header never reaches the API", () => {
   expect(withClientAddress(sent, null)).toEqual({ cookie: "c" });
   expect(withClientAddress(sent, "203.0.113.9")[pilotClientAddressHeader]).toBe("203.0.113.9");
 });
+
+/**
+ * v15 2026-11-11: staff page reloads sometimes failed with net::ERR_TOO_MANY_RETRIES. Node's 5 s
+ * idle keep-alive closed every connection of a page load at about the same moment, so a reload in
+ * that moment met only closing connections. The entry keeps an idle connection for 75 s.
+ */
+it("keeps an idle connection open past Node's 5 s, and still serves the next request on it", async () => {
+  const server = await entry();
+  const response = await new Promise((resolve, reject) => {
+    const secure = tls.connect(
+      { host: "127.0.0.1", port: server.port, ca: server.ca, servername: "localhost" },
+      () => secure.write("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n"),
+    );
+    let text = "",
+      closedAt = null;
+    const started = Date.now();
+    secure.on("data", (chunk) => (text += chunk));
+    secure.on("close", () => (closedAt = Date.now() - started));
+    secure.on("error", reject);
+    setTimeout(() => {
+      if (closedAt !== null) resolve({ closedAt, text });
+      else secure.write("GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n");
+    }, 6_500);
+    secure.on("end", () => setTimeout(() => resolve({ closedAt, text }), 50));
+  });
+  expect(response.text).toMatch(/Keep-Alive: timeout=75/u);
+  expect(response.text.match(/HTTP\/1\.1 200 OK/gu)).toHaveLength(2);
+}, 15_000);
