@@ -6,6 +6,8 @@
 //     records say is the answer again;
 //  2. the transactions of one request share one connection-waiting budget, so a request of
 //     several reads answers "busy" within the budget instead of waiting it once per read;
+//  4. a request's transaction that wrote marks the request, so its later transactions are never
+//     cut short by the shared budget after some of its changes committed;
 //  3. the same for a table guest's check of the table's QR records (the dining context), while a
 //     registration that doesn't fit the phone's QR stays the answer "Unavailable" (scan again),
 //     never "busy" for ever.
@@ -18,7 +20,10 @@ import { createGuestSession } from "../../bop/identity/src/index.ts";
 import { createConfiguredPickupSessionBinding } from "../../../apps/api/src/configured-pickup-session-binding.ts";
 import { createConfiguredDiningGuestContext } from "../../../apps/api/src/configured-dining-guest-context.ts";
 import { renderPilotAclSql } from "../../../tooling/environment/pilot-acl-render.mjs";
-import { runWithRequestAcquireBudget } from "../src/connection-acquire.ts";
+import {
+  remainingRequestAcquireBudgetMs,
+  runWithRequestAcquireBudget,
+} from "../src/connection-acquire.ts";
 import { createTenantTransactionRunner } from "../src/transaction-runner.ts";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 
@@ -205,6 +210,21 @@ it("an outage of the Store's records never reads as an ended guest session, and 
         await tableContext({ validFrom: later, validUntil: later }).validate(tableSession, at),
         "Unavailable",
       );
+
+      // 4. A request's transaction that wrote says so before it commits (PostgreSQL assigned it a
+      // transaction id), under the api role: from then on the request's later transactions wait
+      // their own budget, so a command is never cut short after some of its changes committed.
+      // A read does not. Test-only write: a temporary table dropped at commit.
+      await runWithRequestAcquireBudget(3000, async () => {
+        await runner.run((tx) => tx.query("SELECT 1", []));
+        // Still bounded (a new connection's handshake counts as waiting, a few ms).
+        assert.ok(remainingRequestAcquireBudgetMs() > 2000);
+        await runner.run(async (tx) => {
+          await tx.query("CREATE TEMP TABLE wp2423_budget_probe (n int) ON COMMIT DROP", []);
+          await tx.query("INSERT INTO wp2423_budget_probe (n) VALUES (1)", []);
+        });
+        assert.equal(remainingRequestAcquireBudgetMs(), undefined);
+      });
     } finally {
       held?.release();
       await pool.end().catch(() => undefined);

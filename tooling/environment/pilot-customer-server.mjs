@@ -253,7 +253,7 @@ export async function startInternalCustomerServer({
   app.disable("x-powered-by");
   // WP-2423 (outage-reads-and-retry): staff and guest requests answered here share one
   // connection waiting budget per request, so a rush answers "busy, try again" within 15 s.
-  app.use((req, res, next) => withRequestAcquireBudget(next));
+  app.use((req, res, next) => withRequestAcquireBudget(next, { response: res }));
   app.use((req, res, next) => {
     if (req.headers.host !== host) return res.sendStatus(421);
     res.setHeader("Referrer-Policy", "no-referrer");

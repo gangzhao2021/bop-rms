@@ -1,5 +1,5 @@
-import { AsyncLocalStorage } from "node:async_hooks";
 import type { Pool, PoolClient } from "pg";
+import { boundingRequestAcquireBudget } from "./request-acquire-budget.js";
 import { TenantContextDatabaseError, tenantContextDatabaseDiagnostic } from "./tenant-context.js";
 
 /**
@@ -70,38 +70,13 @@ function acquireFailed(error: unknown): TenantContextDatabaseError {
 
 const outOfTime = Symbol("out of time");
 
-/**
- * WP-2423 (outage-reads-and-retry, v15 2026-11-11): the acquire budget is the request's, not each
- * acquire's. A guest's cart read takes several transactions one after another (the session, the
- * table's records, the cart, the menu facts); each could wait the whole 10 s, so in a rush the
- * slowest answers took 15-19 s, past the 15 s phones and staff screens wait, and the guest saw
- * "couldn't load" instead of "busy, try again". An HTTP entry runs each request inside
- * `runWithRequestAcquireBudget`: the time all its acquires spend waiting together is bounded, and
- * once it is spent the next acquire answers "busy" at once. Only waiting counts: a long command
- * whose connections come at once (listing a whole menu) is never cut short. The store is
- * process-wide (one per process, whichever copy of this module the entry and the API load).
- */
-interface RequestAcquireBudget {
-  remainingMs: number;
-}
-const requestBudgetKey = Symbol.for("bop.database.request-acquire-budget");
-function requestBudgets(): AsyncLocalStorage<RequestAcquireBudget> {
-  const holder = globalThis as { [requestBudgetKey]?: AsyncLocalStorage<RequestAcquireBudget> };
-  holder[requestBudgetKey] ??= new AsyncLocalStorage<RequestAcquireBudget>();
-  return holder[requestBudgetKey];
-}
-/** Runs `work` with every connection acquire in it sharing one waiting budget of `budgetMs`. */
-export function runWithRequestAcquireBudget<T>(budgetMs: number, work: () => T): T {
-  if (!Number.isFinite(budgetMs) || budgetMs < 0) return work();
-  const outer = requestBudgets().getStore();
-  // A nested request (none today) never gets more than what is left of the outer one.
-  if (outer !== undefined && outer.remainingMs <= budgetMs) return work();
-  return requestBudgets().run({ remainingMs: budgetMs }, work);
-}
-/** What is left of the current request's acquire budget, or undefined outside a request. */
-export function remainingRequestAcquireBudgetMs(): number | undefined {
-  return requestBudgets().getStore()?.remainingMs;
-}
+export {
+  endRequestAcquireBudget,
+  noteRequestCommittedWrite,
+  remainingRequestAcquireBudgetMs,
+  requestAcquireBudgetWatchesWrites,
+  runWithRequestAcquireBudget,
+} from "./request-acquire-budget.js";
 
 export async function acquireTenantConnection(
   pool: Pick<Pool, "connect">,
@@ -122,7 +97,7 @@ export async function acquireTenantConnection(
   const sleep =
     policy.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const random = policy.random ?? Math.random;
-  const request = requestBudgets().getStore();
+  const request = boundingRequestAcquireBudget();
   // The request has already waited all it may: busy, try again (nothing has been sent).
   if (request !== undefined && request.remainingMs <= 0)
     throw new TenantContextDatabaseError(

@@ -210,9 +210,12 @@ export function createRequestCorrelationMiddleware({
     response.once("finish", complete);
     response.once("close", complete);
     // WP-2423 (outage-reads-and-retry): one connection waiting budget for the whole request.
-    withRequestAcquireBudget(() => {
-      if (telemetryOperation === undefined) next();
-      else telemetryOperation.run(next);
-    });
+    withRequestAcquireBudget(
+      () => {
+        if (telemetryOperation === undefined) next();
+        else telemetryOperation.run(next);
+      },
+      { response },
+    );
   };
 }

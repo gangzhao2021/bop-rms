@@ -1,6 +1,10 @@
 import type { Pool, PoolClient, QueryResult } from "pg";
 import { describe, expect, it } from "vitest";
 import {
+  remainingRequestAcquireBudgetMs,
+  runWithRequestAcquireBudget,
+} from "./connection-acquire.js";
+import {
   TenantContextDatabaseError,
   tenantContextDatabaseDiagnostic,
   withTenantContextTransaction,
@@ -306,5 +310,56 @@ describe("the safe diagnostic of a failed statement (WP-2423 item 10)", () => {
     expect(
       tenantContextDatabaseDiagnostic(failure({ code: "23514", table: "product" }, "x")).table,
     ).toBe("product");
+  });
+});
+
+describe("WP-2423 outage-reads-and-retry review: a request's transaction says whether it wrote", () => {
+  const probe = "SELECT pg_current_xact_id_if_assigned() IS NOT NULL AS wrote";
+  class Answering extends FakeClient {
+    constructor(private readonly wrote: boolean) {
+      super();
+    }
+    override async query(text: string, values?: readonly unknown[]): Promise<QueryResult> {
+      const result = await super.query(text, values);
+      return text === probe ? ({ rows: [{ wrote: this.wrote }], rowCount: 1 } as never) : result;
+    }
+  }
+  it("a write marks the request (its later connections wait their own budget); a read does not", async () => {
+    await runWithRequestAcquireBudget(10_000, async () => {
+      const read = new Answering(false);
+      await withTenantContextTransaction(pool(read), { brandId: BRAND }, async () => undefined);
+      expect(read.trace.map((step) => step.text).slice(-2)).toEqual([probe, "COMMIT"]);
+      expect(remainingRequestAcquireBudgetMs()).toBe(10_000);
+      // A snapshot is read-only: no probe.
+      const snapshot = new Answering(false);
+      await withTenantContextTransaction(
+        pool(snapshot),
+        { brandId: BRAND },
+        async () => undefined,
+        "Snapshot",
+      );
+      expect(snapshot.trace.map((step) => step.text)).not.toContain(probe);
+      const write = new Answering(true);
+      await withTenantContextTransaction(pool(write), { brandId: BRAND }, async () => undefined);
+      // The request no longer bounds its acquires, and its next transactions need no probe.
+      expect(remainingRequestAcquireBudgetMs()).toBeUndefined();
+      const after = new Answering(true);
+      await withTenantContextTransaction(pool(after), { brandId: BRAND }, async () => undefined);
+      expect(after.trace.map((step) => step.text)).not.toContain(probe);
+    });
+  });
+  it("outside a request nothing is probed, and a probe that fails fails the transaction", async () => {
+    const plain = new FakeClient();
+    await withTenantContextTransaction(pool(plain), { brandId: BRAND }, async () => undefined);
+    expect(plain.trace.map((step) => step.text)).not.toContain(probe);
+    await runWithRequestAcquireBudget(10_000, async () => {
+      const failing = new FakeClient();
+      failing.failOn = probe;
+      await expect(
+        withTenantContextTransaction(pool(failing), { brandId: BRAND }, async () => undefined),
+      ).rejects.toBeInstanceOf(TenantContextDatabaseError);
+      expect(failing.trace.map((step) => step.text)).toContain("ROLLBACK");
+      expect(failing.trace.map((step) => step.text)).not.toContain("COMMIT");
+    });
   });
 });

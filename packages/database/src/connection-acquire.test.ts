@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import {
   acquireTenantConnection,
   isTransientConnectionAcquireFailure,
+  endRequestAcquireBudget,
+  noteRequestCommittedWrite,
   remainingRequestAcquireBudgetMs,
   runWithRequestAcquireBudget,
 } from "./connection-acquire.js";
@@ -248,5 +250,43 @@ describe("WP-2423 (outage-reads-and-retry) one waiting budget per request", () =
     });
     // Outside a request each acquire keeps its own budget.
     expect(remainingRequestAcquireBudgetMs()).toBeUndefined();
+  });
+});
+
+describe("WP-2423 outage-reads-and-retry review: the budget never stops a command half way", () => {
+  /** Every connection busy; the time each acquire waited before it answered "busy". */
+  const waits = async (steps: (() => void)[]) => {
+    vi.useFakeTimers();
+    try {
+      const connect = vi.fn(() => new Promise<PoolClient>(() => undefined));
+      const outcome = runWithRequestAcquireBudget(10_000, async () => {
+        const waited: number[] = [];
+        for (const step of steps) {
+          step();
+          const started = Date.now();
+          await acquireTenantConnection({ connect }, { budgetMs: 10_000 }).catch(() =>
+            waited.push(Date.now() - started),
+          );
+        }
+        return waited;
+      });
+      await vi.advanceTimersByTimeAsync(60_000);
+      return await outcome;
+    } finally {
+      vi.useRealTimers();
+    }
+  };
+  it("after a transaction of the request committed a write, later ones wait their full budget", async () => {
+    // Without a write the second answers "busy" at once; after one it waits its own 10 s, so a
+    // command that began changing things finishes slowly instead of stopping half done.
+    expect(await waits([() => undefined, () => undefined])).toEqual([10_000, 0]);
+    expect(await waits([() => undefined, noteRequestCommittedWrite])).toEqual([10_000, 10_000]);
+  });
+  it("work still running after the answer was sent, or past the 15 s clients wait, is not bounded", async () => {
+    expect(await waits([() => undefined, endRequestAcquireBudget])).toEqual([10_000, 10_000]);
+    // A stream's revalidation timer 15 s after its request began: its own budget, never "busy".
+    expect(await waits([() => undefined, () => vi.advanceTimersByTime(5_000)])).toEqual([
+      10_000, 10_000,
+    ]);
   });
 });

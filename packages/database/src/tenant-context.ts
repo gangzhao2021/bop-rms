@@ -1,4 +1,8 @@
 import type { Pool, PoolClient } from "pg";
+import {
+  noteRequestCommittedWrite,
+  requestAcquireBudgetWatchesWrites,
+} from "./request-acquire-budget.js";
 import { snapshotReadBegin } from "./snapshot-read.js";
 
 export const tenantContextDatabaseErrorCodes = [
@@ -215,8 +219,21 @@ export async function withTenantContextTransaction<T>(
     callbackActive = true;
     result = await callback(client);
     callbackActive = false;
+    // WP-2423 (outage-reads-and-retry review): inside a request whose connection waits share one
+    // budget, a transaction that wrote says so before it commits (an assigned transaction id), so
+    // the request's later transactions are never cut short after some of its changes committed.
+    // A probe that fails fails the transaction, as any statement does: never a silent ROLLBACK.
+    const wrote =
+      mode !== "Snapshot" && requestAcquireBudgetWatchesWrites()
+        ? (
+            await client.query<{ wrote: boolean }>(
+              "SELECT pg_current_xact_id_if_assigned() IS NOT NULL AS wrote",
+            )
+          ).rows[0]?.wrote !== false
+        : false;
     await client.query("COMMIT");
     began = false;
+    if (wrote) noteRequestCommittedWrite();
   } catch (error) {
     failed = true;
     // WP-2423 (v15 2026-10-17): a setup or COMMIT failure keeps its safe diagnostic, so a lost or
