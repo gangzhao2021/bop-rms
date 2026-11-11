@@ -2,6 +2,7 @@ import {
   TenantContextDatabaseError,
   tenantContextDatabaseDiagnostic,
 } from "../../packages/database/dist/tenant-context.js";
+import { stableReadStatement } from "../../packages/database/dist/transaction-statement-memo.js";
 import { isPilotRuntime } from "./pilot-environment.mjs";
 
 /** Read by merchantFailureKind and the request reporter, as the transaction runner sets it. */
@@ -83,17 +84,20 @@ export function createInternalExceptionSnapshotTransactions(resources) {
         open = true;
         const tx = Object.freeze({
           query: async (sql, values) => {
+            // WP-2423 M35: an owner's stable read starts with its marker comment; the statement
+            // after it is what is checked.
+            const statement = stableReadStatement(sql).sql;
             if (
               !open ||
               !active() ||
               typeof sql !== "string" ||
               !/^\s*(SELECT\b|WITH RECURSIVE\b|SET LOCAL\b|LOCK TABLE [a-z_][a-z0-9_.]*(?:,[a-z_][a-z0-9_.]*)* IN (?:ROW )?SHARE MODE$)/iu.test(
-                sql,
+                statement,
               ) ||
-              sql.includes(";") ||
-              (/^\s*WITH\b/iu.test(sql) &&
+              statement.includes(";") ||
+              (/^\s*WITH\b/iu.test(statement) &&
                 /\b(INSERT|UPDATE|DELETE|MERGE|CALL|COPY|ALTER|DROP|CREATE|TRUNCATE)\b/iu.test(
-                  sql,
+                  statement,
                 )) ||
               !Array.isArray(values)
             ) {

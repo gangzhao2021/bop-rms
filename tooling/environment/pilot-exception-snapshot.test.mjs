@@ -48,6 +48,17 @@ it.each([
   expect(f.client.query.mock.calls.some(([query]) => query === sql)).toBe(false);
   expect(f.client.release).toHaveBeenCalledOnce();
 });
+it("WP-2423 M35: accepts an owner's stable read marked as such, never a marked mutation", async () => {
+  const f = fixture();
+  const read = "-- bop:stable-read\nSELECT * FROM bop_tenant.brand WHERE brand_id=$1";
+  await f.runner.run((tx) => tx.query(read, ["brand"]));
+  expect(f.client.query.mock.calls.some(([query]) => query === read)).toBe(true);
+  expect(f.client.query.mock.calls.at(-1)[0]).toBe("COMMIT");
+  const g = fixture();
+  const marked = "-- bop:stable-read\nUPDATE private_table SET a=1";
+  await expect(g.runner.run((tx) => tx.query(marked, []))).rejects.toThrow();
+  expect(g.client.query.mock.calls.some(([query]) => query === marked)).toBe(false);
+});
 const failureOf = (error) => error[Symbol.for("bop.database.failure")];
 const refusedGrant = () =>
   Object.assign(new Error("permission denied for table reconciliation_case"), { code: "42501" });

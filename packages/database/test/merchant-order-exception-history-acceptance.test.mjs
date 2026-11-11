@@ -113,12 +113,16 @@ it("lists every open exception past 500 lifetime cases and pages resolved histor
             await client.query("SET LOCAL lock_timeout = '2s'");
             const result = await work({
               query: async (sql, values) => {
+                // WP-2423 M35: as the snapshot does, an owner's stable read is checked after its
+                // marker comment.
+                const checked =
+                  typeof sql === "string" ? sql.replace(/^-- bop:stable-read\n/u, "") : sql;
                 assert.ok(
-                  typeof sql === "string" &&
+                  typeof checked === "string" &&
                     /^\s*(SELECT\b|WITH RECURSIVE\b|SET LOCAL\b|LOCK TABLE [a-z_][a-z0-9_.]*(?:,[a-z_][a-z0-9_.]*)* IN (?:ROW )?SHARE MODE$)/iu.test(
-                      sql,
+                      checked,
                     ) &&
-                    !sql.includes(";"),
+                    !checked.includes(";"),
                   "the exception snapshot refuses: " + String(sql).slice(0, 60),
                 );
                 queryLog.push(sql);
