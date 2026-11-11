@@ -291,6 +291,10 @@ test("@production a round waiting for staff needs action; staff send it or cance
       json: { status: body.action === "Confirm" ? "Sent" : "Cancelled" },
     });
   });
+  // v15 batch 7: the Store's default for paying at a shared table, read with the settings.
+  await page.route("**/merchant/dining/checkout-scope-setting", (route) =>
+    route.fulfill({ headers, json: { version: 0, defaultScope: "WholeTable", canChange: true } }),
+  );
   await page.goto("/operations/dining");
   // The list: the table needs action for the waiting round (first: it never times out).
   await expect(page.getByText("Round waiting for your OK")).toBeVisible();
@@ -305,6 +309,26 @@ test("@production a round waiting for staff needs action; staff send it or cance
   await settingBox.click();
   await expect(settingBox).toBeChecked();
   expect(changes).toMatchObject([{ expectedVersion: 0, firstRoundNeedsStaff: true }]);
+  // v15 batch 7: each default-choice radio sits on its own line beside its own words, never run
+  // together with the option before it.
+  const scopeGroup = page.getByRole("group", {
+    name: "When guests at one table pay on their phones, start with",
+  });
+  const whole = scopeGroup.getByRole("radio", { name: "The whole table" });
+  const own = scopeGroup.getByRole("radio", { name: "What each guest added" });
+  await expect(whole).toBeChecked();
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    const first = await scopeGroup.locator("label").nth(0).boundingBox();
+    const second = await scopeGroup.locator("label").nth(1).boundingBox();
+    const ownBox = await own.boundingBox();
+    expect(first && second && ownBox).toBeTruthy();
+    if (!first || !second || !ownBox) continue;
+    expect(second.y).toBeGreaterThanOrEqual(first.y + first.height - 1);
+    expect(Math.abs(ownBox.x - first.x)).toBeLessThanOrEqual(2);
+    await scopeGroup.screenshot({ path: `test-results/table-settings-scope-${width}.png` });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
 
   await page.getByRole("button", { name: "Select T6", exact: true }).click();
   const waiting = page.getByRole("region", { name: "Rounds waiting for your OK" });

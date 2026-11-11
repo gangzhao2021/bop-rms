@@ -1359,6 +1359,21 @@
   height: 20px;
   accent-color: var(--bop-color-accent);
 }
+/* v15 batch 7: the default-choice radios are a group: each option on its own line, its circle
+   beside its own words, never run together with the option before. */
+.tables-v3 fieldset.round-hold-setting {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0;
+  border: 0;
+  padding: 0;
+  min-width: 0;
+}
+.tables-v3 fieldset.round-hold-setting legend {
+  padding: 0;
+  margin-bottom: 4px;
+}
 .tables-v3 .round-hold-setting__note {
   margin: 0;
   color: var(--bop-color-text-muted);
