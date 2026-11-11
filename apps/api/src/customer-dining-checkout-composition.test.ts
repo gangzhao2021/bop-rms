@@ -1,7 +1,10 @@
 import { parseDiningCheckoutCommitment } from "@rms/dining";
 import { createHash } from "node:crypto";
 import { expect, it } from "vitest";
-import { diningOrderCapacityLinkFromHistory } from "./customer-dining-checkout-composition.js";
+import {
+  createCustomerDiningCheckoutComposition,
+  diningOrderCapacityLinkFromHistory,
+} from "./customer-dining-checkout-composition.js";
 import {
   fixture,
   submissionFixture,
@@ -17,6 +20,45 @@ it("uses Identity credentials and CSRF to derive the bound Guest and Participant
   expect(result.record.participantReference).toBe(id(8));
   expect(result.record.tableReference).toBe(id(6));
   expect(f.writes()).toBe(1);
+});
+it("WP-2423 M35: each guest check runs once per check on the ports bound to one transaction", async () => {
+  const f = fixture();
+  let checks = 0;
+  let unboundReads = 0;
+  const unbound = f.options.contexts.resolve;
+  f.options.contexts.resolve = async (input) => {
+    unboundReads += 1;
+    return unbound(input);
+  };
+  const result = await createCustomerDiningCheckoutComposition({
+    ...f.options,
+    checkOnce: async (work) => {
+      checks += 1;
+      // The check sees the bound ports only: here the same owner facts, counted apart.
+      return work({
+        session: f.options.session,
+        contexts: { resolve: unbound },
+        dining: f.options.dining,
+      });
+    },
+  }).prepare(f.input);
+  expect(result.record.guestSessionReference).toBe(id(9));
+  expect(checks).toBeGreaterThan(1);
+  // Every table context of the checks was read on the bound ports, none on the unbound ones.
+  expect(unboundReads).toBe(0);
+  // A revoked session is still refused inside the one-transaction check.
+  f.revoke();
+  await expect(
+    createCustomerDiningCheckoutComposition({
+      ...f.options,
+      checkOnce: (work) =>
+        work({
+          session: f.options.session,
+          contexts: { resolve: unbound },
+          dining: f.options.dining,
+        }),
+    }).prepare(f.input),
+  ).rejects.toMatchObject({ code: "GUEST_SESSION_UNAVAILABLE" });
 });
 it("rejects invalid CSRF before preparing a commitment", async () => {
   const f = fixture();

@@ -42,10 +42,44 @@ export interface CustomerDiningCheckoutCompositionOptions {
    * version (the same answer as another guest's checkout holding it).
    */
   readonly scopeFence?: DiningCartCheckoutHoldPort;
+  /**
+   * WP-2423 M35 (staff round speed): run one guest check (the Guest Session, its table binding and
+   * its table context) in one transaction, with these same ports bound to it. The same owner reads
+   * and checks run in the same order and see one consistent set of facts, instead of about seven
+   * transactions per check (DEC-STAFF-ROUND-SPEED). Absent: each port runs its own, as before.
+   */
+  readonly checkOnce?: <T>(work: (bound: CustomerDiningCheckBinding) => Promise<T>) => Promise<T>;
 }
+/** WP-2423 M35: the ports one guest check reads, bound to one transaction. */
+export type CustomerDiningCheckBinding = Pick<
+  CustomerDiningCheckoutCompositionOptions,
+  "session" | "contexts" | "dining"
+>;
 const unavailable = (): never => {
   throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
 };
+/**
+ * WP-2423 M35: one guest check, in one transaction when the composition can bind its ports to one
+ * (`checkOnce`), otherwise with each port's own transactions.
+ */
+function guestCheck(
+  options: CustomerDiningCheckoutCompositionOptions,
+  scope: CustomerDiningCheckoutCompositionOptions["scope"],
+  now: () => ReturnType<typeof parseCanonicalInstant>,
+) {
+  const unbound = guestSessionService(options, scope, now);
+  return <T>(
+    work: (
+      identity: GuestSessionService,
+      contexts: CustomerDiningCheckoutCompositionOptions["contexts"],
+    ) => Promise<T>,
+  ): Promise<T> =>
+    options.checkOnce === undefined
+      ? work(unbound, options.contexts)
+      : options.checkOnce((bound) =>
+          work(guestSessionService({ ...options, ...bound }, scope, now), bound.contexts),
+        );
+}
 /** Internal server submission composition; no public route or caller-supplied identity scope. */
 export function createCustomerDiningCheckoutComposition(
   options: CustomerDiningCheckoutCompositionOptions,
@@ -56,8 +90,11 @@ export function createCustomerDiningCheckoutComposition(
     storeReference: String(parseDiningReference(scopeRaw.storeReference)),
   });
   const now = () => parseCanonicalInstant(options.now());
-  const identity = createCustomerDiningCheckoutIdentity(options, scope, now);
-  async function tableContext(session: GuestSession) {
+  const check = guestCheck(options, scope, now);
+  async function tableContext(
+    session: GuestSession,
+    contexts: CustomerDiningCheckoutCompositionOptions["contexts"] = options.contexts,
+  ) {
     const at = now();
     const input = {
       brandReference: session.brandReference,
@@ -70,7 +107,7 @@ export function createCustomerDiningCheckoutComposition(
     };
     const context = assertCurrentDiningGuestTableContext(
       input,
-      await options.contexts.resolve({ session, observedAt: at, purpose: "DiningAdmission" }),
+      await contexts.resolve({ session, observedAt: at, purpose: "DiningAdmission" }),
     );
     assertCurrentDiningGuestTableContext({ ...input, observedAt: now() }, context);
     return context;
@@ -93,7 +130,7 @@ export function createCustomerDiningCheckoutComposition(
           "sourceValidUntil",
         ]),
       );
-      const authenticate = async () => {
+      const authenticate = async (identity: GuestSessionService) => {
         const session = createGuestSession(
           await identity.authorize({
             sessionCredential,
@@ -112,24 +149,30 @@ export function createCustomerDiningCheckoutComposition(
           return unavailable();
         return session;
       };
-      const first = await authenticate();
+      const first = await check((identity) => authenticate(identity));
       const ownerOptions: DiningCheckoutServiceOptions = {
         scope,
         now,
         ...options.dining,
         authorization: {
           authorize: async (request) => {
-            const current = await authenticate();
-            if (
-              JSON.stringify(current) !== JSON.stringify(first) ||
-              String(request.command.guestSessionReference) !== String(current.sessionReference) ||
-              String(request.command.diningSessionReference) !==
-                String(current.diningSessionReference) ||
-              String(request.command.participantReference) !==
-                String(current.diningParticipantReference)
-            )
-              return null;
-            const context = await tableContext(current);
+            // M35: the session and its table context are checked together, in one transaction.
+            const checked = await check(async (identity, contexts) => {
+              const current = await authenticate(identity);
+              if (
+                JSON.stringify(current) !== JSON.stringify(first) ||
+                String(request.command.guestSessionReference) !==
+                  String(current.sessionReference) ||
+                String(request.command.diningSessionReference) !==
+                  String(current.diningSessionReference) ||
+                String(request.command.participantReference) !==
+                  String(current.diningParticipantReference)
+              )
+                return null;
+              return { current, context: await tableContext(current, contexts) };
+            });
+            if (checked === null) return null;
+            const { current, context } = checked;
             const deadline = Math.min(
               Date.parse(current.idleExpiresAt),
               Date.parse(current.absoluteExpiresAt),
@@ -195,7 +238,23 @@ export function createCustomerDiningCheckoutComposition(
   });
 }
 
+/**
+ * The guest's identity for a dining checkout step: the Guest Session with its table binding and
+ * context. WP-2423 M35: each check runs in one transaction when the composition can bind its ports
+ * to one (`checkOnce`).
+ */
 export function createCustomerDiningCheckoutIdentity(
+  options: CustomerDiningCheckoutCompositionOptions,
+  scope: CustomerDiningCheckoutCompositionOptions["scope"],
+  now: () => ReturnType<typeof parseCanonicalInstant>,
+): Pick<GuestSessionService, "authorize"> {
+  const check = guestCheck(options, scope, now);
+  return Object.freeze({
+    authorize: (input: Parameters<GuestSessionService["authorize"]>[0]) =>
+      check((identity) => identity.authorize(input)),
+  });
+}
+function guestSessionService(
   options: CustomerDiningCheckoutCompositionOptions,
   scope: CustomerDiningCheckoutCompositionOptions["scope"],
   now: () => ReturnType<typeof parseCanonicalInstant>,
@@ -234,7 +293,7 @@ export function createCustomerDiningSubmissionPreparation(
     storeReference: String(parseDiningReference(scopeRaw.storeReference)),
   });
   const now = () => parseCanonicalInstant(options.now());
-  const identity = createCustomerDiningCheckoutIdentity(options, scope, now);
+  const check = guestCheck(options, scope, now);
   async function prepare(value: unknown) {
     try {
       const raw = readClosedRecord(value, ["sessionCredential", "csrfCredential", "intent"]);
@@ -259,7 +318,9 @@ export function createCustomerDiningSubmissionPreparation(
         sourceValidUntil: parseCanonicalInstant(intentRaw.sourceValidUntil),
       });
       const authenticate = async () => {
-        const guest = await identity.authorize({ ...credentials, observedAt: now() });
+        const guest = await check((identity) =>
+          identity.authorize({ ...credentials, observedAt: now() }),
+        );
         if (
           guest.brandReference !== scope.brandReference ||
           guest.storeReference !== scope.storeReference ||

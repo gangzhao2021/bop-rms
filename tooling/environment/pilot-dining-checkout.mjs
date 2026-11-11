@@ -33,10 +33,29 @@ export function createInternalDiningCheckout(resources, entry, pickup, { openGat
     binding: entry.binding(resources.transactions),
     store: createPostgresGuestSessionEntryStore(resources.transactions, resources.scope),
   };
+  // WP-2423 M35 (DEC-STAFF-ROUND-SPEED): the ports of one guest check bound to one transaction.
+  const boundCheck = (tx) => {
+    const bound = { run: (work) => work(tx) };
+    return {
+      session: {
+        ...session,
+        binding: entry.binding(bound),
+        store: createPostgresGuestSessionEntryStore(bound, resources.scope),
+      },
+      contexts: entry.dining.binding(bound),
+      // Only the binding read is part of the check; the checkout's own writes keep theirs.
+      dining: {
+        ...preparation.dining,
+        current: createPostgresDiningGuestBindingStore(bound, scope),
+      },
+    };
+  };
   const preparation = {
     scope: resources.scope,
     session,
     contexts: entry.dining.binding(resources.transactions),
+    // WP-2423 M35: one transaction per guest check instead of one per read (same reads, order).
+    checkOnce: (work) => resources.transactions.run((tx) => work(boundCheck(tx))),
     now,
     submissions: repository,
     references: { generate: resources.credentials.reference },
@@ -124,6 +143,8 @@ export function createInternalDiningCheckout(resources, entry, pickup, { openGat
       const bound = { run: (work) => work(tx) };
       return {
         ...preparation,
+        // Already on the caller's transaction: its guest checks stay on it (never a new one).
+        checkOnce: undefined,
         session: {
           ...preparation.session,
           binding: entry.binding(bound),
