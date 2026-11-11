@@ -64,8 +64,13 @@ test("@production exception read recovers from an outage, and a refusal of acces
   let response: "unavailable" | "denied" | "stale" | "empty" = "denied";
   const mutations: string[] = [];
   page.on("request", (request) => {
-    // WP-2423 Q18: the staff Session activity report is not a business mutation.
-    if (request.method() !== "GET" && !request.url().endsWith("/merchant/session/activity"))
+    // WP-2423 Q18: the staff Session activity report is not a business mutation; nor is the
+    // frame's read of who is signed in (M61, batch 5), which travels as POST.
+    if (
+      request.method() !== "GET" &&
+      !request.url().endsWith("/merchant/session/activity") &&
+      !request.url().endsWith("/merchant/organization/staff/me")
+    )
       mutations.push(request.method());
   });
   await page.route("**/merchant/session", (route) =>
@@ -779,6 +784,7 @@ test("@production WP-2423 a business day's totals difference resolved on re-chec
     if (
       request.method() !== "GET" &&
       !request.url().endsWith("/merchant/session/activity") &&
+      !request.url().endsWith("/merchant/organization/staff/me") &&
       !request.url().endsWith("/follow-up-query")
     )
       writes.push(request.url());
@@ -915,6 +921,7 @@ test("@production WP-2423 a single payment's difference resolved by its re-check
     if (
       request.method() !== "GET" &&
       !request.url().endsWith("/merchant/session/activity") &&
+      !request.url().endsWith("/merchant/organization/staff/me") &&
       !request.url().endsWith("/follow-up-query")
     )
       writes.push(request.url());
@@ -1002,6 +1009,7 @@ test("@production WP-2423 every open case first, resolved history a page at a ti
     if (
       request.method() !== "GET" &&
       !request.url().endsWith("/merchant/session/activity") &&
+      !request.url().endsWith("/merchant/organization/staff/me") &&
       !request.url().endsWith("/compensations/query")
     )
       writes.push(request.url());
