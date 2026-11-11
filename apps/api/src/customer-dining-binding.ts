@@ -8,6 +8,8 @@ import {
   readClosedRecord,
 } from "@bop/identity";
 import type { Request, RequestHandler, Response } from "express";
+import { customerFailureCode } from "./customer-failure-diagnostic.js";
+import { markRequestFailure } from "./request-correlation.js";
 export const customerDiningBindingRoutes = Object.freeze({
   prepare: "/bff/customer/dining-binding/prepare",
   activate: "/bff/customer/dining-binding/activate",
@@ -259,7 +261,12 @@ export class CustomerDiningBindingHandler {
         response
           .status(200)
           .json({ status: "Activated", operationReference, csrfToken: expectedCsrf });
-      } catch {
+      } catch (failure) {
+        // WP-2423 (checkout-session-outage): a 503 logs which owner refused, as a code (no PII).
+        markRequestFailure(
+          request,
+          customerFailureCode(failure) ?? "DINING_BINDING_" + action.toUpperCase() + "_FAILED",
+        );
         error(response);
       }
     };

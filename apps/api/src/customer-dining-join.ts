@@ -7,6 +7,8 @@ import {
 } from "@bop/identity";
 import type { Request, RequestHandler, Response } from "express";
 import type { CustomerDiningJoinRequestContext } from "./customer-dining-join-composition.js";
+import { customerFailureCode } from "./customer-failure-diagnostic.js";
+import { markRequestFailure } from "./request-correlation.js";
 export const customerDiningJoinRoute = "/bff/customer/dining/join";
 /** WP-2423 item 8 ⑤ DEC-DINING-QR-JOIN: join the scanned, open table without a code. */
 export const customerDiningQrJoinRoute = "/bff/customer/dining/qr-join";
@@ -238,7 +240,9 @@ export class CustomerDiningJoinHandler {
         if (result.status !== "Joined" || result.operationReference !== operationReference)
           throw new Error("invalid join result");
         response.status(200).json({ status: "Joined", operationReference, admissionReference });
-      } catch {
+      } catch (failure) {
+        // WP-2423 (checkout-session-outage): a 503 logs which owner refused, as a code (no PII).
+        markRequestFailure(request, customerFailureCode(failure) ?? "DINING_JOIN_FAILED");
         error(response);
       }
     };

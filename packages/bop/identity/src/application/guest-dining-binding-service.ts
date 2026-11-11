@@ -25,14 +25,23 @@ import {
 } from "../contracts/identity-actor.js";
 import type { GuestDiningBindingServiceOptions } from "./ports/guest-dining-binding-ports.js";
 
-function unavailable(): never {
-  throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
+/** `reason` (WP-2423 checkout-session-outage) is a safe code kept for the API's log only. */
+function unavailable(reason?: string): never {
+  const error = new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
+  if (reason !== undefined)
+    Object.defineProperty(error, "cause", { value: { code: reason }, enumerable: false });
+  throw error;
 }
 async function boundary<T>(action: () => Promise<T>): Promise<T> {
   try {
     return await action();
-  } catch {
-    return unavailable();
+  } catch (cause) {
+    // WP-2423 (checkout-session-outage): the owner's failure stays behind the plain answer (never
+    // shown, never enumerated), so the API can log its code.
+    const error = new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
+    if (cause !== null && typeof cause === "object" && cause !== error)
+      Object.defineProperty(error, "cause", { value: cause, enumerable: false });
+    throw error;
   }
 }
 const uuid = (value: unknown) => parseOpaqueUuidV7(value, "IDENTITY_INPUT_INVALID");
@@ -68,7 +77,8 @@ export function createGuestDiningBindingService(options: GuestDiningBindingServi
       ),
       at,
     );
-    if (session.channel !== "DineIn" || session.diningState !== state) return unavailable();
+    if (session.channel !== "DineIn" || session.diningState !== state)
+      return unavailable("GUEST_BINDING_SESSION_STATE");
     return session;
   }
   async function finish(
@@ -142,7 +152,7 @@ export function createGuestDiningBindingService(options: GuestDiningBindingServi
           options.credentials.equals(predecessor.csrfSelectorHash, csrfHash(csrfCredential)) !==
             true
         )
-          return unavailable();
+          return unavailable("GUEST_BINDING_SESSION_CHANGED");
         const reservationAt = now();
         const target = readClosedRecord(
           await options.owner.reserveAdmission({
@@ -175,7 +185,7 @@ export function createGuestDiningBindingService(options: GuestDiningBindingServi
           target.expectedGuestVersion !== session.version ||
           parseCanonicalInstant(target.evaluatedAt) > reservationAt
         )
-          return unavailable();
+          return unavailable("GUEST_BINDING_RESERVATION_MISMATCH");
         const diningSessionReference = uuid(target.diningSessionReference);
         const diningParticipantReference = uuid(target.diningParticipantReference);
         const preparedAt = now();
@@ -191,7 +201,7 @@ export function createGuestDiningBindingService(options: GuestDiningBindingServi
             ),
           ).toISOString(),
         );
-        if (expiresAt <= preparedAt) return unavailable();
+        if (expiresAt <= preparedAt) return unavailable("GUEST_BINDING_PREPARATION_EXPIRED");
         const nextSessionCredential = parseGuestRawCredential(
           options.credentials.generateCredential("Session"),
         );
@@ -247,7 +257,8 @@ export function createGuestDiningBindingService(options: GuestDiningBindingServi
         const saved = parseGuestDiningBindingPreparation(
           await options.bindings.prepare(preparation, now()),
         );
-        if (JSON.stringify(saved) !== JSON.stringify(preparation)) return unavailable();
+        if (JSON.stringify(saved) !== JSON.stringify(preparation))
+          return unavailable("GUEST_BINDING_PREPARATION_CHANGED");
         return Object.freeze({
           status: "Prepared" as const,
           operationReference,

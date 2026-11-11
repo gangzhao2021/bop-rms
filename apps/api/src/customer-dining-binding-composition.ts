@@ -24,6 +24,7 @@ import {
   type DiningAdmissionConsumptionPorts,
 } from "@rms/dining";
 import { guestBindingReadFailure, isGuestDependencyFailure } from "./guest-binding-dependency.js";
+import { withFailureCause } from "./customer-failure-diagnostic.js";
 
 export interface CustomerDiningBindingCompositionOptions {
   readonly scope: Readonly<{ brandReference: string; storeReference: string }>;
@@ -45,8 +46,10 @@ export interface CustomerDiningBindingCompositionOptions {
   readonly now: () => unknown;
 }
 
-function unavailable(): never {
-  throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
+/** `reason` (WP-2423 checkout-session-outage) is a safe code kept for the API's log only. */
+function unavailable(reason?: string): never {
+  const error = new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
+  throw reason === undefined ? error : withFailureCause(error, { code: reason });
 }
 
 const contextInput = (session: GuestSession, observedAt: CanonicalInstant) => ({
@@ -143,13 +146,19 @@ export function createCustomerDiningBindingComposition(
       session.brandReference !== scope.brandReference ||
       session.storeReference !== scope.storeReference
     )
-      return unavailable();
-    return assertCurrentDiningGuestTableContext(
-      contextInput(session, observedAt),
-      await options.contexts.resolve(
-        Object.freeze({ session, observedAt, purpose: "DiningAdmission" }),
-      ),
+      return unavailable("DINING_BINDING_SCOPE_MISMATCH");
+    const evidence = await options.contexts.resolve(
+      Object.freeze({ session, observedAt, purpose: "DiningAdmission" }),
     );
+    try {
+      return assertCurrentDiningGuestTableContext(contextInput(session, observedAt), evidence);
+    } catch {
+      return unavailable(
+        evidence === null
+          ? "DINING_BINDING_TABLE_CONTEXT_MISSING"
+          : "DINING_BINDING_TABLE_CONTEXT_STALE",
+      );
+    }
   }
   const authorization = new GuestSessionService({
     ...options.session,
@@ -173,7 +182,7 @@ export function createCustomerDiningBindingComposition(
     async function current(guestSessionReference: string, observedAt: CanonicalInstant) {
       const captured = authenticated;
       if (captured === null || captured.session.sessionReference !== guestSessionReference)
-        return unavailable();
+        return unavailable("DINING_BINDING_GUEST_MISMATCH");
       const session = createGuestSession(
         await authorization.authorize({
           sessionCredential: captured.sessionCredential,
@@ -187,7 +196,7 @@ export function createCustomerDiningBindingComposition(
         session.brandReference !== scope.brandReference ||
         session.storeReference !== scope.storeReference
       )
-        return unavailable();
+        return unavailable("DINING_BINDING_GUEST_SESSION_CHANGED");
       const context = await contextFor(session, observedAt);
       return Object.freeze({ session, context });
     }
@@ -214,7 +223,7 @@ export function createCustomerDiningBindingComposition(
           },
         },
       });
-      return { service, observed: () => observation ?? unavailable() };
+      return { service, observed: () => observation ?? unavailable("DINING_BINDING_NOT_OBSERVED") };
     }
     return createGuestDiningBindingService({
       authorization: {
@@ -251,7 +260,7 @@ export function createCustomerDiningBindingComposition(
             JSON.stringify(session) !== JSON.stringify(input.session) ||
             result.tableReference !== String(context.tableReference)
           )
-            return unavailable();
+            return unavailable("DINING_BINDING_RESERVATION_CHANGED");
           return Object.freeze({
             operationReference: result.operationReference,
             admissionReference: result.admissionReference,
@@ -272,7 +281,8 @@ export function createCustomerDiningBindingComposition(
           const observedAt = now();
           const { context } = await current(input.guestSessionReference, observedAt);
           const admission = result.record.admission;
-          if (admission.tableReference !== String(context.tableReference)) return unavailable();
+          if (admission.tableReference !== String(context.tableReference))
+            return unavailable("DINING_BINDING_TABLE_CHANGED");
           return parseGuestDiningAdmissionEvidence({
             decision: "Allowed",
             guestSessionReference: result.record.guestSessionReference,

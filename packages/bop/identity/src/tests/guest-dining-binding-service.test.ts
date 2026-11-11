@@ -278,6 +278,29 @@ describe("WP-2296 credential handoff service", () => {
     expect(f.options.owner.reserveAdmission).not.toHaveBeenCalled();
   });
 
+  it("WP-2423 (checkout-session-outage): keeps why it refused behind the plain answer, for the log", async () => {
+    const f = fixture();
+    vi.mocked(f.options.sessions.resolve).mockResolvedValue(
+      createGuestSessionRecord({
+        ...f.predecessor,
+        session: { ...f.predecessor.session, storeReference: id(99) },
+      }),
+    );
+    const refused = await f.service.prepare(f.input).catch((error: unknown) => error);
+    expect(refused).toMatchObject({ code: "GUEST_SESSION_UNAVAILABLE" });
+    // The boundary keeps the inner refusal; its reason is a code, never enumerable or shown.
+    const inner = (refused as { cause?: { cause?: unknown } }).cause;
+    expect(inner?.cause).toEqual({ code: "GUEST_BINDING_SESSION_CHANGED" });
+    expect(Object.keys(refused as object)).not.toContain("cause");
+    const owner = Object.assign(new Error("not shown"), {
+      code: "DINING_SESSION_VERSION_CONFLICT",
+    });
+    const g = fixture();
+    vi.mocked(g.options.owner.reserveAdmission).mockRejectedValue(owner);
+    const failed = await g.service.prepare(g.input).catch((error: unknown) => error);
+    expect((failed as { cause?: unknown }).cause).toBe(owner);
+  });
+
   it("continues after lost Identity activation acknowledgement without reusing the revoked predecessor", async () => {
     const f = fixture();
     const prepared = await f.service.prepare(f.input);

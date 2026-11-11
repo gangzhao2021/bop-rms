@@ -356,3 +356,40 @@ describe("same-origin binding credential transport", () => {
     expect(() => new CustomerDiningBindingHandler({ allowedOrigin, port: port(), now })).toThrow();
   });
 });
+
+/**
+ * WP-2423 (checkout-session-outage, v15 2026-11-11): a phone that waited on "isn't open yet" got
+ * four fast 503 dining_binding_unavailable answers, and nothing in the log said why. A 503 now
+ * logs the owner's refusal as a code (never a credential or reference).
+ */
+it("logs why a binding step answered 503, as a safe code only", async () => {
+  const entries: { statusCode?: number; error?: unknown }[] = [];
+  const service = port();
+  const refused = Object.assign(new Error("guest " + oldSession), {
+    code: "GUEST_SESSION_UNAVAILABLE",
+  });
+  Object.defineProperty(refused, "cause", {
+    value: { code: "DINING_BINDING_TABLE_CONTEXT_STALE" },
+  });
+  service.prepare.mockRejectedValueOnce(refused);
+  const server = createServer(
+    createApp({
+      requestLogger: { info: (entry: unknown) => entries.push(entry as never) },
+      customerDiningBinding: new CustomerDiningBindingHandler({
+        allowedOrigin: origin,
+        port: service,
+        now,
+      }),
+    }),
+  );
+  servers.push(server);
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const response = await post((server.address() as AddressInfo).port, "prepare");
+  expect(response.status).toBe(503);
+  await vi.waitFor(() => expect(entries.length).toBe(1));
+  expect(entries[0]?.error).toEqual({
+    code: "DINING_BINDING_TABLE_CONTEXT_STALE",
+    value: undefined,
+  });
+  expect(JSON.stringify(entries)).not.toContain(oldSession);
+});
