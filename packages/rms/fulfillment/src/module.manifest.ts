@@ -45,6 +45,7 @@ const moduleManifestInput =
       schema: "rms_fulfillment",
       tables: [
         "capacity_asap_commitment",
+        "capacity_asap_refusal",
         "capacity_hold_terminal",
         "capacity_allocation",
         "capacity_allocation_terminal",

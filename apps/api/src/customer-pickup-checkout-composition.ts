@@ -25,7 +25,8 @@ import {
 export interface CustomerPickupCheckoutOptions {
   readonly scope: { readonly brandReference: string; readonly storeReference: string };
   readonly session: Pick<GuestSessionServiceOptions, "binding" | "credentials" | "store">;
-  readonly capacity: Pick<AsapCapacityServiceOptions, "repository" | "audit">;
+  /** `refusals` (DEC-CHECKOUT-SESSION-OUTAGE): an online order the hour could not take, for staff. */
+  readonly capacity: Pick<AsapCapacityServiceOptions, "repository" | "audit" | "refusals">;
   readonly sources: {
     /**
      * Required owner composition: exact current Cart/Quote/Guest and capacity units/slot evidence.

@@ -209,7 +209,7 @@ const CheckoutSessionErrorBody = z
           "checkout_session_item_short",
           "checkout_session_item_unavailable",
           // WP-2423 (checkout-session-outage): 409, this hour's online pickup orders are full;
-          // nothing was created or charged (Retry-After: a place may free up).
+          // nothing was created or charged (no Retry-After: a place may only open next hour).
           "checkout_session_pickup_full",
         ]),
         messageKey: z.string().regex(/^customer\.checkoutSession\.[a-z_]+$/u),

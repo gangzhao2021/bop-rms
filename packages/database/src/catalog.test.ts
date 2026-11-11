@@ -849,6 +849,7 @@ describe("migration catalog", () => {
       "2000_560_alter_card_machine_payment_counter_cash",
       "2000_680_alter_sellable_allergen_change_choices",
       "2000_740_create_counter_paper_reentry",
+      "2000_780_create_capacity_asap_refusal",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),

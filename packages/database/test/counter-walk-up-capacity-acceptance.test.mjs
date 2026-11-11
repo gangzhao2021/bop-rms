@@ -8,6 +8,7 @@ import {
   createPostgresAsapCapacityStore,
   createPostgresCurrentPickupCapacityStore,
   parseAsapCapacityCommitment,
+  readCurrentPickupHour,
   sealAsapCapacityCommitment,
 } from "../../rms/fulfillment/src/index.ts";
 import { renderPilotAclSql } from "../../../tooling/environment/pilot-acl-render.mjs";
@@ -163,6 +164,8 @@ it("never refuses a counter walk-up order for pickup capacity, and paces online 
             }),
           },
           repository,
+          // DEC-CHECKOUT-SESSION-OUTAGE: an online order the hour could not take, for staff.
+          refusals: reader,
           audit: { prepare: async (value) => auditFor(value, ++audits) },
         });
       const order = async (n, walkUp) => {
@@ -223,6 +226,47 @@ it("never refuses a counter walk-up order for pickup capacity, and paces online 
       await assert.rejects(service(online, false).prepare(online), {
         code: "ASAP_CAPACITY_INSUFFICIENT",
       });
+      // DEC-CHECKOUT-SESSION-OUTAGE (review, the v15 Test Merchant 2 hour): the refused online
+      // guest is recorded once however often they try, and staff on Orders read, as the pilot API
+      // role, that online pickup is full with one guest turned away. Counter orders never are.
+      await assert.rejects(service(online, false).prepare(online), {
+        code: "ASAP_CAPACITY_INSUFFICIENT",
+      });
+      const refusals = async () =>
+        (
+          await admin.query(
+            "SELECT count(*)::int AS n FROM rms_fulfillment.capacity_asap_refusal WHERE slot_id=$1",
+            [slotReference],
+          )
+        ).rows[0].n;
+      assert.equal(await refusals(), 1);
+      const hour = await runner.run(async (tx) => {
+        await tx.query(
+          "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+          [brand, store],
+        );
+        return readCurrentPickupHour(tx, scope, now());
+      });
+      assert.deepEqual(
+        [hour.full, hour.turnedAway, hour.capacityLimit, hour.occupiedUnits, hour.endsAt],
+        [true, 1, 20, 21, endsAt],
+      );
+      // Append-only, and another Store's context reads none of it.
+      await assert.rejects(
+        admin.query("DELETE FROM rms_fulfillment.capacity_asap_refusal WHERE slot_id=$1", [
+          slotReference,
+        ]),
+      );
+      const otherStore = await runner.run(async (tx) => {
+        await tx.query(
+          "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+          [brand, id(99)],
+        );
+        return (
+          await tx.query("SELECT count(*)::int AS n FROM rms_fulfillment.capacity_asap_refusal", [])
+        ).rows[0].n;
+      });
+      assert.equal(otherStore, 0);
       await assert.rejects(repository.append({ record: online, audit: auditFor(online, 30) }), {
         code: "ASAP_CAPACITY_UNAVAILABLE",
       });

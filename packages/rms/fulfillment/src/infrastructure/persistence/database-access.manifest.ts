@@ -102,6 +102,15 @@ const databaseAccessManifestInput = {
       piiClassification: ["indirect_identifier"],
     },
     {
+      // DEC-CHECKOUT-SESSION-OUTAGE: an online pickup order the hour could not take (one per Cart).
+      table: "capacity_asap_refusal",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/fulfillment" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "transactional",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       table: "capacity_hold_terminal",
       classification: "append-only-record",
       writeOwner: { kind: "module", id: "@rms/fulfillment" },
@@ -294,6 +303,26 @@ const databaseAccessManifestInput = {
         "packages/rms/fulfillment/src/infrastructure/persistence/current-pickup-capacity-store.ts",
     },
 
+    {
+      id: "current-pickup-capacity.read.capacity_asap_refusal",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_fulfillment", table: "capacity_asap_refusal" },
+      principal: { kind: "module", id: "@rms/fulfillment" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/fulfillment/src/infrastructure/persistence/current-pickup-capacity-store.ts",
+    },
+    {
+      id: "current-pickup-capacity.write.capacity_asap_refusal",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_fulfillment", table: "capacity_asap_refusal" },
+      principal: { kind: "module", id: "@rms/fulfillment" },
+      readPattern: null,
+      source:
+        "packages/rms/fulfillment/src/infrastructure/persistence/current-pickup-capacity-store.ts",
+    },
     {
       id: "asap-capacity.read.capacity_asap_commitment",
       operation: "read",

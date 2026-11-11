@@ -1,6 +1,9 @@
 import { createHash } from "node:crypto";
 import { createPostgresGuestSessionEntryStore } from "../../packages/bop/identity/src/index.ts";
-import { createPostgresAsapCapacityStore } from "../../packages/rms/fulfillment/src/index.ts";
+import {
+  createPostgresAsapCapacityStore,
+  createPostgresCurrentPickupCapacityStore,
+} from "../../packages/rms/fulfillment/src/index.ts";
 import {
   createPostgresCartQueryStore,
   createPostgresConfiguredCartQuoteReader,
@@ -62,6 +65,8 @@ export function createInternalCheckout(resources, configuredEntry, catalogOption
     }),
     capacity: {
       repository: createPostgresAsapCapacityStore(transactions, scope, { now }),
+      // DEC-CHECKOUT-SESSION-OUTAGE: an online order the hour could not take, so staff are told.
+      refusals: createPostgresCurrentPickupCapacityStore(transactions, scope),
       audit: {
         prepare: async (record) =>
           audit(

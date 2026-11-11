@@ -85,6 +85,80 @@ LEFT JOIN LATERAL (
 WHERE s.brand_id=$1 AND s.store_id=$2 AND s.fulfillment_type='Pickup'
  AND s.starts_at<=$3::timestamptz AND s.ends_at>$3::timestamptz
 ORDER BY s.slot_id LIMIT 2`;
+
+/** DEC-CHECKOUT-SESSION-OUTAGE: the pickup hour as staff are told it on Orders. */
+export interface CurrentPickupHour {
+  /** When this pickup time ends (the next one may have room). */
+  readonly endsAt: string;
+  readonly capacityLimit: number;
+  readonly occupiedUnits: number;
+  /** No online pickup order fits this hour any more (counter orders still go through). */
+  readonly full: boolean;
+  /** Online guests (one per Cart) this hour could not take. */
+  readonly turnedAway: number;
+}
+
+interface Queryable {
+  query(sql: string, values: readonly unknown[]): Promise<unknown>;
+}
+
+/**
+ * DEC-CHECKOUT-SESSION-OUTAGE (review): the current pickup hour and how many online guests it has
+ * turned away, read in the caller's transaction (under this Store's context). Null when
+ * no pickup time covers this instant or it has no published limit. A read failure is an error.
+ */
+export async function readCurrentPickupHour(
+  tx: Queryable,
+  scopeInput: unknown,
+  observedAtValue: unknown,
+): Promise<CurrentPickupHour | null> {
+  const scope = closed(scopeInput, ["brandReference", "storeReference"]);
+  const brand = parseFulfillmentReference(scope.brandReference),
+    store = parseFulfillmentReference(scope.storeReference);
+  const observedAt = parseFulfillmentInstant(observedAtValue);
+  await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+    brand,
+    store,
+  ]);
+  const found = row(await tx.query(select, [brand, store, observedAt]));
+  if (found === null) return null;
+  const raw = closed(closed(found, ["observation"]).observation, [
+    "slot",
+    "capacityLimit",
+    "occupiedUnits",
+    "observedAt",
+  ]);
+  if (raw.capacityLimit === null) return null;
+  const slot = parseScheduledCapacitySlot(raw.slot);
+  if (
+    slot.brandReference !== brand ||
+    slot.storeReference !== store ||
+    !Number.isSafeInteger(raw.capacityLimit) ||
+    (raw.capacityLimit as number) < 0 ||
+    !Number.isSafeInteger(raw.occupiedUnits) ||
+    (raw.occupiedUnits as number) < 0
+  )
+    return fail();
+  const counted = row(
+    await tx.query(
+      "SELECT count(*)::int AS turned_away FROM rms_fulfillment.capacity_asap_refusal r " +
+        "WHERE r.brand_id=$1 AND r.store_id=$2 AND r.slot_id=$3",
+      [brand, store, slot.slotReference],
+    ),
+  );
+  const turnedAway = (counted as { turned_away?: unknown } | null)?.turned_away;
+  if (!Number.isSafeInteger(turnedAway) || (turnedAway as number) < 0) return fail();
+  const capacityLimit = raw.capacityLimit as number,
+    occupiedUnits = raw.occupiedUnits as number;
+  return Object.freeze({
+    endsAt: slot.endsAt,
+    capacityLimit,
+    occupiedUnits,
+    full: occupiedUnits >= capacityLimit,
+    turnedAway: turnedAway as number,
+  });
+}
+
 /** Current owner observation only; acquisition is enforced independently under the slot write lock. */
 export function createPostgresCurrentPickupCapacityStore(
   runner: AsapCapacityTransactionRunner,
@@ -94,6 +168,28 @@ export function createPostgresCurrentPickupCapacityStore(
   const brand = parseFulfillmentReference(scope.brandReference),
     store = parseFulfillmentReference(scope.storeReference);
   return Object.freeze({
+    /**
+     * DEC-CHECKOUT-SESSION-OUTAGE (review): an online pickup order this hour could not take, so
+     * staff are told. One per Cart and pickup time (a guest trying again is one guest). Its own
+     * transaction: the refused checkout wrote nothing else.
+     */
+    async recordRefusal(input: unknown): Promise<void> {
+      const raw = closed(input, ["slotReference", "cartReference", "refusedAt"]);
+      const slot = parseFulfillmentReference(raw.slotReference),
+        cart = parseFulfillmentReference(raw.cartReference),
+        refusedAt = parseFulfillmentInstant(raw.refusedAt);
+      await runner.run(async (tx) => {
+        await tx.query(
+          "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+          [brand, store],
+        );
+        await tx.query(
+          "INSERT INTO rms_fulfillment.capacity_asap_refusal (brand_id,store_id,slot_id,cart_id,refused_at) " +
+            "VALUES ($1,$2,$3,$4,$5::timestamptz) ON CONFLICT DO NOTHING",
+          [brand, store, slot, cart, refusedAt],
+        );
+      });
+    },
     /**
      * WP-2423: whether any pickup time covers this instant (the schedule has not run out), so a
      * refused order can be explained to staff. A read failure is an error, never "no".

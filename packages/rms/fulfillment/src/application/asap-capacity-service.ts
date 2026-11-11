@@ -48,6 +48,15 @@ export interface AsapCapacityServiceOptions {
     ): Promise<unknown>;
   };
   readonly audit: { prepare(record: AsapCapacityCommitment): Promise<unknown> };
+  /**
+   * DEC-CHECKOUT-SESSION-OUTAGE (review): an online order this hour could not take is recorded so
+   * staff are told. Its failure never changes the guest's answer.
+   */
+  readonly refusals?: {
+    recordRefusal(
+      input: Readonly<{ slotReference: string; cartReference: string; refusedAt: string }>,
+    ): Promise<unknown>;
+  };
 }
 function fail(code: AsapCapacityError["code"] = "ASAP_CAPACITY_UNAVAILABLE"): never {
   throw new AsapCapacityError(code);
@@ -226,7 +235,23 @@ export function createAsapCapacityService(options: AsapCapacityServiceOptions) {
       const preparation = Object.fromEntries(
         Object.entries(raw).filter(([key]) => !lifecycleFields.has(key)),
       );
-      prepareAsapCapacityCommitment(preparation, observation);
+      try {
+        prepareAsapCapacityCommitment(preparation, observation);
+      } catch (error) {
+        if (
+          error instanceof AsapCapacityError &&
+          error.code === "ASAP_CAPACITY_INSUFFICIENT" &&
+          options.refusals !== undefined
+        )
+          await options.refusals
+            .recordRefusal({
+              slotReference: requested.slot.slotReference,
+              cartReference: requested.cartReference,
+              refusedAt: at,
+            })
+            .catch(() => undefined);
+        throw error;
+      }
       await authorize("PrepareAsapCapacity");
       const audit = await options.audit.prepare(requested);
       await authorize("PrepareAsapCapacity");

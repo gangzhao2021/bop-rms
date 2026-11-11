@@ -149,6 +149,52 @@ describe("ASAP application current authority", () => {
     });
     expect(g.counts().writes).toBe(0);
   });
+  // DEC-CHECKOUT-SESSION-OUTAGE (review): an online order the hour can't take is recorded for
+  // staff (its slot, Cart and time only); recording failing never changes the guest's answer, and
+  // nothing else is recorded as a refusal.
+  it("records an online order the full hour refused, and only that", async () => {
+    const full = setup();
+    const recorded: unknown[] = [];
+    (full.options as { refusals?: AsapCapacityServiceOptions["refusals"] }).refusals = {
+      recordRefusal: async (input: unknown) => {
+        recorded.push(input);
+        throw new Error("synthetic refusal write failure");
+      },
+    };
+    full.options.current.resolve = async (_record, time) => ({
+      ...current(),
+      capacityLimit: 3,
+      observedAt: time,
+    });
+    await expect(full.service.prepare(full.record)).rejects.toMatchObject({
+      code: "ASAP_CAPACITY_INSUFFICIENT",
+    });
+    expect(recorded).toEqual([
+      {
+        slotReference: full.record.slot.slotReference,
+        cartReference: full.record.cartReference,
+        refusedAt: at,
+      },
+    ]);
+    const walkUp = setup();
+    const none: unknown[] = [];
+    (walkUp.options as { refusals?: AsapCapacityServiceOptions["refusals"] }).refusals = {
+      recordRefusal: async (input: unknown) => none.push(input),
+    };
+    walkUp.options.current.resolve = async (_record, time) => ({
+      ...current(),
+      capacityLimit: 3,
+      observedAt: time,
+      admission: "WalkUp",
+    });
+    expect((await walkUp.service.prepare(walkUp.record)).status).toBe("Created");
+    const room = setup();
+    (room.options as { refusals?: AsapCapacityServiceOptions["refusals"] }).refusals = {
+      recordRefusal: async (input: unknown) => none.push(input),
+    };
+    expect((await room.service.prepare(room.record)).status).toBe("Created");
+    expect(none).toEqual([]);
+  });
   it("allows a current observation after the original preparation instant", async () => {
     const f = setup();
     f.setTime("2026-09-10T12:00:01.000Z");

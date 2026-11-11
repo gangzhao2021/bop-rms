@@ -6533,6 +6533,24 @@
       "privilege": "SELECT",
       "principal": "api",
       "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); DEC-PAPER-ORDER-NEVER-RELEASED: a paper order closed as entered again names the new order carrying its sale, at no lower amount (2000_740)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_fulfillment",
+      "object": "capacity_asap_refusal",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); DEC-CHECKOUT-SESSION-OUTAGE: an online pickup order the hour could not take is recorded, so staff on Orders are told online guests are being turned away (2000_780)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_fulfillment",
+      "object": "capacity_asap_refusal",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); DEC-CHECKOUT-SESSION-OUTAGE: an online pickup order the hour could not take is recorded, so staff on Orders are told online guests are being turned away (2000_780)"
     }
   ]
 }
