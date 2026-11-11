@@ -82,7 +82,7 @@ function servicesPhrase(modes: readonly ServiceMode[]): string {
 export function pausedServices(
   modes: readonly string[] | null,
   enabled: readonly string[],
-): { readonly paused: string; readonly open: string | null } | null {
+): { readonly paused: string; readonly open: string } | null {
   if (modes === null) return null;
   const offered = modeOrder.filter((mode) => enabled.includes(mode));
   const paused = modeOrder.filter((mode) => modes.includes(mode));
