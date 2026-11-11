@@ -732,6 +732,11 @@ what staff do when something fails is different:
   access", nothing half-done). Do not edit, approve or turn on a role during an outage: staff keep
   the role they have, and the owner makes the change on `Roles` once screens load again (a change
   left waiting is still there; send or withdraw it then).
+- **Roles for your kind of shop (WP-2423 DEC-STORE-TYPE-STARTER-ROLES)**: on Store setup ("Who
+  does what") or Roles the owner picks the kind of shop and presses "Use these roles". The new
+  roles wait for approval like any new role; a sole owner approves them there. During an outage
+  the panel says it did not load: staff keep their roles, and the owner presses Try again once
+  screens load (the same request; nothing is done twice).
 
 ### Who to call (Owner input, not yet provided)
 
