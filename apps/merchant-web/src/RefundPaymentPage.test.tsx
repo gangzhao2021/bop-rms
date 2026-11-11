@@ -9,6 +9,7 @@ import {
   MoneyTakenBack,
   cardMachineRequestsToCheck,
   nextFinancialSummary,
+  onlineSendControl,
   PaymentFinancialSummary,
   paymentLoadFailure,
   paymentRefundStateLabel,
@@ -408,4 +409,22 @@ it("WP-2423 M163: a manager takes money back on a refunded order; what was taken
   });
   expect(listed).toContain("Money taken back +$5.00 · Cash · Sam");
   expect(listed).not.toContain("Take money back");
+});
+
+it("WP-2423 M14: a cashier's unsent request is never read as approved, and Send is only for who may send", () => {
+  const notSent = { method: "Online", state: "NotDispatched", executionOperationReference: null };
+  const prepared = { ...notSent, state: "Prepared", executionOperationReference: id(9) };
+  // A cashier's own request (NotSent on Approvals): told who sends it, never offered Send.
+  expect(onlineSendControl(notSent, { state: "NotSent" }, false)).toBe("AskedManagerSends");
+  // Not on Approvals yet: still no Send for someone who can't send.
+  expect(onlineSendControl(notSent, null, false)).toBe("ManagerSends");
+  expect(onlineSendControl(prepared, null, false)).toBe("ManagerSends");
+  // A manager or the owner reading a cashier's request sends it here, not "approved".
+  expect(onlineSendControl(notSent, { state: "NotSent" }, true)).toBe("AskedSendHere");
+  expect(onlineSendControl(notSent, null, true)).toBe("Send");
+  expect(onlineSendControl(prepared, null, true)).toBe("Send");
+  // Approval states are said as they are.
+  expect(onlineSendControl(notSent, { state: "AwaitingApproval" }, true)).toBe("AwaitingApproval");
+  expect(onlineSendControl(notSent, { state: "Approved" }, true)).toBe("ApprovedNotSent");
+  expect(onlineSendControl({ ...notSent, method: "CardMachine" }, null, true)).toBeNull();
 });

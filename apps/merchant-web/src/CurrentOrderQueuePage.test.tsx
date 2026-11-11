@@ -648,7 +648,11 @@ it("WP-2423 M16: a refund recorded but never sent is not called on its way", () 
   const withApprovals = (
     p: ReturnType<typeof position>,
     approvals: { amountMinor: string; state: "AwaitingApproval" | "Approved" | "NotSent" }[] | null,
-  ) => renderToStaticMarkup(<OnlineRefundNote order={order} position={p} approvals={approvals} />);
+    canSend: boolean | null = approvals === null ? null : true,
+  ) =>
+    renderToStaticMarkup(
+      <OnlineRefundNote order={order} position={p} approvals={approvals} canSend={canSend} />,
+    );
   const waiting = withApprovals(position("1569", "1569"), [
     { amountMinor: "1569", state: "AwaitingApproval" },
   ]);
@@ -677,9 +681,18 @@ it("WP-2423 M16: a refund recorded but never sent is not called on its way", () 
   expect(withApprovals(position("1569", "1569"), [])).toContain(
     "Open the payment under Payments and refunds to send it.",
   );
+  // Unread (the approval list failed): where it stands, never that this reader can send it.
   expect(note(position("1569", "1569"))).toContain(
-    "Open the payment under Payments and refunds to see whether it waits for approval, or to send it.",
+    "A refund of $15.69 is recorded but not sent yet. Open the payment under Payments and refunds to see where it stands.",
   );
+  expect(note(position("1569", "1569"))).not.toContain("to send it");
+  // WP-2423 M14: a cashier holds payment.refund.request, so they open payments, but they can't
+  // send (payment.refund.execute): their unsent request is sent by a manager or the owner.
+  const cashierCanOpen = withApprovals(position("1569", "1569"), [], false);
+  expect(cashierCanOpen).toContain(
+    "A refund of $15.69 is recorded but not sent yet. A manager or the owner sends it.",
+  );
+  expect(cashierCanOpen).not.toContain("to send it");
   // A cashier (no payment access) can't open the payment page: they are told who sends it.
   const cashierNote = renderToStaticMarkup(
     <OnlineRefundNote

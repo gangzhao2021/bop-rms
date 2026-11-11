@@ -959,6 +959,7 @@ export function OnlineRefundNote({
   order,
   position,
   approvals = null,
+  canSend = null,
 }: {
   readonly order: CurrentOrderQueue["items"][number];
   readonly position: CurrentOrderDetail["paymentPosition"];
@@ -967,6 +968,12 @@ export function OnlineRefundNote({
    * (Payment's approval queue); null when it was not read, so the note does not guess.
    */
   readonly approvals?: readonly Pick<RefundApprovalEntry, "amountMinor" | "state">[] | null;
+  /**
+   * WP-2423 M14: whether this reader may send a refund (payment.refund.execute), read with the
+   * approval queue; null when not read. A cashier opens payments (payment.refund.request) but
+   * never sends, so this, not canViewPayments, decides who is told to send it.
+   */
+  readonly canSend?: boolean | null;
 }) {
   if (order.paidOnline === null || position === null) return null;
   const refunded = BigInt(position.refundedMinor),
@@ -1025,17 +1032,18 @@ export function OnlineRefundNote({
         : ""}
       {toSend > 0n
         ? " " +
-          // A reader who can't open payments (a cashier) is told who sends it, not where.
-          (order.canViewPayments !== true
+          // A reader who can't send (a cashier) is told who sends it, not where; unread, where it
+          // stands, never that this reader can send it.
+          (order.canViewPayments !== true || canSend === false
             ? t(
                 "A refund of {amount} is recorded but not sent yet. A manager or the owner sends it.",
                 {
                   amount: amount(toSend),
                 },
               )
-            : approvals === null
+            : approvals === null || canSend !== true
               ? t(
-                  "A refund of {amount} is recorded but not sent yet. Open the payment under Payments and refunds to see whether it waits for approval, or to send it.",
+                  "A refund of {amount} is recorded but not sent yet. Open the payment under Payments and refunds to see where it stands.",
                   { amount: amount(toSend) },
                 )
               : t(
@@ -1075,13 +1083,16 @@ function LiveOnlineRefundNote({
   const needed =
     order.paidOnline !== null && position !== null && BigInt(position.refundNotSentMinor) > 0n;
   const [approvals, setApprovals] = useState<readonly RefundApprovalEntry[] | null>(null);
+  const [canSend, setCanSend] = useState<boolean | null>(null);
   useEffect(() => {
     setApprovals(null);
+    setCanSend(null);
     if (!needed) return;
     const controller = new AbortController();
     createRefundApprovalClient(fetcher)
       .approvals(controller.signal)
       .then((view) => {
+        if (!controller.signal.aborted) setCanSend(view.canSend);
         if (!controller.signal.aborted)
           setApprovals(
             view.entries.filter(
@@ -1093,7 +1104,9 @@ function LiveOnlineRefundNote({
       .catch(() => undefined);
     return () => controller.abort();
   }, [needed, order.orderReference, fetcher, position?.refundNotSentMinor]);
-  return <OnlineRefundNote order={order} position={position} approvals={approvals} />;
+  return (
+    <OnlineRefundNote order={order} position={position} approvals={approvals} canSend={canSend} />
+  );
 }
 /**
  * WP-2423: an order's current status in staff words. Dine-in is Fulfilled once every item not

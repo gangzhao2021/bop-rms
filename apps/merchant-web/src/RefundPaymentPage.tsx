@@ -217,6 +217,35 @@ function RequestRow({
     </>
   );
 }
+/**
+ * WP-2423 M14/Q5: what a recorded online refund payment that is not sent yet offers this reader.
+ * Waiting for or holding an approval is said as it is; a request needing no approval that nobody
+ * sent (NotSent on Approvals, a cashier's) is never read as approved. Send is offered only to a
+ * reader who may send (payment.refund.execute); a cashier is told who sends it.
+ */
+export function onlineSendControl(
+  payment: { method: string; state: string; executionOperationReference: string | null },
+  approval: Pick<RefundApprovalEntry, "state"> | null,
+  canSend: boolean,
+):
+  | "AwaitingApproval"
+  | "ApprovedNotSent"
+  | "AskedSendHere"
+  | "AskedManagerSends"
+  | "ManagerSends"
+  | "Send"
+  | null {
+  if (payment.method !== "Online") return null;
+  if (payment.state === "Prepared" && payment.executionOperationReference)
+    return canSend ? "Send" : "ManagerSends";
+  if (payment.state !== "NotDispatched") return null;
+  if (approval?.state === "AwaitingApproval") return "AwaitingApproval";
+  if (approval?.state === "Approved") return "ApprovedNotSent";
+  if (approval?.state === "NotSent") return canSend ? "AskedSendHere" : "AskedManagerSends";
+  return canSend ? "Send" : "ManagerSends";
+}
+const onlineSendOffered = (control: ReturnType<typeof onlineSendControl>) =>
+  control === "Send" || control === "AskedSendHere";
 function RecordedRequestStatus({
   orderReference,
   entry,
@@ -227,9 +256,15 @@ function RecordedRequestStatus({
   onPending,
   held = false,
   refreshSignal,
+  canSend = true,
 }: {
   orderReference: string;
   entry: Items["recentRequests"][number];
+  /**
+   * WP-2423 M14: this reader may send a refund (payment.refund.execute). A cashier asks; a
+   * manager or the owner sends it, so a cashier is never offered Send.
+   */
+  canSend?: boolean;
   /** WP-2423 item 6: the refund form below is still sending this request (resume it there). */
   held?: boolean;
   /** WP-2423 Q5: this request's place in the Store's approval list (null: none needed/known). */
@@ -433,23 +468,39 @@ function RecordedRequestStatus({
                     }}
                   />
                 ) : null}
-                {payment.method === "Online" &&
-                payment.state === "NotDispatched" &&
-                approval !== null ? (
-                  <p>
-                    {approval.state === "AwaitingApproval"
+                {(() => {
+                  const control = onlineSendControl(payment, approval, canSend);
+                  const text =
+                    control === "AwaitingApproval"
                       ? t(
                           "Waiting for an owner or finance member to approve this refund in person. It is sent once approved.",
                         )
-                      : t(
-                          "Approved, not sent yet. The approver sends it from Approvals; it is never sent twice.",
-                        )}{" "}
-                    <Link to="/app/approvals">{t("Open Approvals")}</Link>
-                  </p>
-                ) : null}
-                {payment.method === "Online" &&
-                ((payment.state === "NotDispatched" && approval === null) ||
-                  (payment.state === "Prepared" && payment.executionOperationReference)) ? (
+                      : control === "ApprovedNotSent"
+                        ? t(
+                            "Approved, not sent yet. The approver sends it from Approvals; it is never sent twice.",
+                          )
+                        : control === "AskedSendHere"
+                          ? t("Asked by staff, not sent yet. Send it here or from Approvals.")
+                          : control === "AskedManagerSends"
+                            ? t("Not sent yet. A manager or the owner sends it from Approvals.")
+                            : control === "ManagerSends"
+                              ? t("Not sent yet. A manager or the owner sends it.")
+                              : null;
+                  return text === null ? null : (
+                    <p>
+                      {text}
+                      {control === "AwaitingApproval" ||
+                      control === "ApprovedNotSent" ||
+                      control === "AskedManagerSends" ? (
+                        <>
+                          {" "}
+                          <Link to="/app/approvals">{t("Open Approvals")}</Link>
+                        </>
+                      ) : null}
+                    </p>
+                  );
+                })()}
+                {onlineSendOffered(onlineSendControl(payment, approval, canSend)) ? (
                   held ? (
                     <p>
                       {t("Continue sending this refund with the button further down the page.")}
@@ -1101,6 +1152,7 @@ function RefundWizard({
                   <RecordedRequestStatus
                     held={heldRequest === entry.requestReference}
                     approval={approvals.get(entry.requestReference) ?? null}
+                    canSend={canSend}
                     onFinancialChange={onFinancialChange}
                     onRequestsChange={() => void reloadRequests()}
                     orderReference={orderReference}

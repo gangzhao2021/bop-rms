@@ -448,8 +448,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "一笔 {amount} 的退款已批准，正在发出。如果一分钟后还没发出，请在“审批”里发送。",
   "A refund of {amount} was asked for and is not sent yet. A manager or the owner sends it from Approvals.":
     "一笔 {amount} 的退款已提交，还没发出。由店长或店主在“审批”里发出。",
-  "A refund of {amount} is recorded but not sent yet. Open the payment under Payments and refunds to see whether it waits for approval, or to send it.":
-    "一笔 {amount} 的退款已记录，还没发出。请在“付款与退款”里打开这笔付款，看它是否在等批准，或去发送。",
+  "A refund of {amount} is recorded but not sent yet. Open the payment under Payments and refunds to see where it stands.":
+    "一笔 {amount} 的退款已记录，还没发出。请在“付款与退款”里打开这笔付款，查看进展。",
   "Refunded · stop, don't make it": "已退款 · 停止制作",
   "Stop making it too": "不再制作这道菜",
   "Record money taken back after a refund made by mistake": "记录多退后收回的钱",
@@ -497,6 +497,11 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Request recorded for {total}. Nothing is refunded yet: a manager or the owner sends it from Approvals.":
     "已记录 {total} 的退款申请。还没有退款：由店长或店主在“审批”里发出。",
   "A manager or the owner sends it.": "由店长或店主发出。",
+  "Asked by staff, not sent yet. Send it here or from Approvals.":
+    "员工已申请，还没发出。可在这里发出，或在“审批”里发出。",
+  "Not sent yet. A manager or the owner sends it from Approvals.":
+    "还没发出。由店长或店主在“审批”里发出。",
+  "Not sent yet. A manager or the owner sends it.": "还没发出。由店长或店主发出。",
   "The kitchen and the counter leave it out.": "后厨不做，柜台也不交付。",
   "Already being made: the guest keeps the food.": "已经在做了：顾客保留餐品。",
   "The guest keeps the food.": "顾客保留餐品。",
