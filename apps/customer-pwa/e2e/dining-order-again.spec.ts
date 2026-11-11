@@ -14,6 +14,8 @@ test.beforeEach(({ context }) => routeStorefrontReads(context));
 const id = (n: number) => `018f8a40-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 const cad = (amountMinor: string) => ({ amountMinor, currencyCode: "CAD" });
 const csrf = "o".repeat(43);
+/** The phone's session credential once it joined the table. */
+const seatedCsrf = "q".repeat(43);
 const dumpling = id(20);
 const spicy = id(21);
 const session = {
@@ -110,10 +112,50 @@ async function enterTable(page: Page) {
   await page.route("**/bff/customer/cart**", (route) =>
     route.fulfill({ status: 200, headers: { "cache-control": "no-store" }, json: cart(1, []) }),
   );
+  // WP-2423 M115: the guest joins the scanned table first, as a real guest does; a phone that
+  // has not joined would join with its first Add instead.
+  await page.route("**/bff/customer/dining/qr-join", (route) =>
+    route.fulfill({
+      status: 200,
+      headers: { "cache-control": "no-store" },
+      json: {
+        status: "Joined",
+        operationReference: route.request().headers()["idempotency-key"],
+        admissionReference: id(30),
+      },
+    }),
+  );
+  const expiresAt = new Date(Date.now() + 600_000).toISOString();
+  await page.route("**/bff/customer/dining-binding/prepare", (route) =>
+    route.fulfill({
+      status: 200,
+      headers: { "cache-control": "no-store" },
+      json: {
+        status: "Prepared",
+        operationReference: route.request().headers()["idempotency-key"],
+        candidateCsrfToken: seatedCsrf,
+        recoveryProof: "r".repeat(43),
+        expiresAt,
+      },
+    }),
+  );
+  await page.route("**/bff/customer/dining-binding/activate", (route) =>
+    route.fulfill({
+      status: 200,
+      headers: { "cache-control": "no-store" },
+      json: {
+        status: "Activated",
+        operationReference: route.request().headers()["idempotency-key"],
+        csrfToken: seatedCsrf,
+      },
+    }),
+  );
   await page.goto("/#qr=aaa.bbb.ccc");
   await expect(
     page.getByRole("heading", { name: "Synthetic Dumpling House", exact: true }),
   ).toBeVisible();
+  await page.getByRole("button", { name: "Join this table", exact: true }).click();
+  await expect(page).toHaveURL(/\/menu$/u);
   await page.evaluate(() => {
     history.pushState(null, "", "/dine-in/session");
     window.dispatchEvent(new PopStateEvent("popstate"));
@@ -129,7 +171,7 @@ test.describe("@production order a dish again from the table", () => {
     await enterTable(page);
     await page.route("**/api/v1/carts/*/items", async (route) => {
       expect(route.request().method()).toBe("POST");
-      expect(route.request().headers()["x-csrf-token"]).toBe(csrf);
+      expect(route.request().headers()["x-csrf-token"]).toBe(seatedCsrf);
       posted.push(route.request().postDataJSON());
       await route.fulfill({
         status: 200,
