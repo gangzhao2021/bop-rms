@@ -543,15 +543,28 @@
   }
 }
 
-/* WP-2423 M10: "Stop making it too" under a refunded dish; words, no box. */
+/* WP-2423 M10: "Stop making it too" on its own row under a refunded dish; words, no box. */
+.refund-page .refund-line__stop,
 .refund-line__stop {
+  grid-column: 1 / -1;
+  grid-row: 2;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 4px 8px;
-  flex-basis: 100%;
   min-height: 44px;
+  margin: 0;
+  font-weight: 400;
+}
+.refund-line__stop input {
+  width: 20px;
+  height: 20px;
+  margin: 0;
 }
 .refund-line__stop .refund-line__meta {
   flex-basis: 100%;
+  padding-left: 28px;
+}
+.refund-line > .refund-line__meta {
+  grid-column: 1 / -1;
 }
