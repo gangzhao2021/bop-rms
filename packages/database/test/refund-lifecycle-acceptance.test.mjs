@@ -337,14 +337,17 @@ it("a dish refunded with stop making it too is recorded with the refund and coun
         )
       )[0];
       assert.equal(line.quantity, 2);
-      const command = (staff, withdraw) =>
+      const command = (staff, withdraw, role = "Manager") =>
         createMerchantOrdinaryRefundRequest({
           persistence: { ...staff.persistence, now: world.now },
           authentication: staff.authentication,
           resolveConfiguration: async () => ({
             providerAccountReference: world.provider,
             environment: "Test",
-            roleMapping: { Manager: [staff.roleCode], Owner: [], Finance: [] },
+            roleMapping:
+              role === "Staff"
+                ? { Manager: [], Owner: [], Finance: [], Staff: [staff.roleCode] }
+                : { Manager: [staff.roleCode], Owner: [], Finance: [] },
           }),
           newAuditReference: fresh,
           retentionPolicyCode: "FINANCIAL_COMPLIANCE",
@@ -385,6 +388,23 @@ it("a dish refunded with stop making it too is recorded with the refund and coun
       await assert.rejects(
         command(noCancel, { requestReference: fresh(), operationReference: fresh(), quantity: 1 }),
         { message: "ORDINARY_REFUND_WITHDRAW_DENIED" },
+      );
+      assert.equal(await requests(), 0);
+      assert.deepEqual(await rows(), []);
+      // M14: a cashier (Staff) who may take dishes off an order: their request waits for a manager
+      // or the owner, who may still decline it, so it can't stop dishes. Nothing is recorded.
+      const cashier = await world.session(
+        ["payment.refund.request", "ordering.order.cancel"],
+        "01a6ab14",
+      );
+      cashier.roleCode = "synthetic_acceptance_01a6ab14";
+      await assert.rejects(
+        command(
+          cashier,
+          { requestReference: fresh(), operationReference: fresh(), quantity: 1 },
+          "Staff",
+        ),
+        { message: "ORDINARY_REFUND_WITHDRAW_NEEDS_SENDER" },
       );
       assert.equal(await requests(), 0);
       assert.deepEqual(await rows(), []);
