@@ -115,6 +115,8 @@ export function createPersistentMerchantOrderExceptions(options: {
     };
     /** This request's scope once its cases' transaction rechecked it in full before the reply. */
     let verified: MerchantExceptionScope | null = null;
+    /** The verified Store's time zone (its business days name a totals difference's day). */
+    let verifiedTimeZone: string | null = null;
     /** v15 batch 7 review: the short read-only transactions of this request's order-cause read. */
     const causeRuns = new WeakSet<ConsumerTransaction>();
     const causeTransactions = {
@@ -143,6 +145,7 @@ export function createPersistentMerchantOrderExceptions(options: {
                 const ok =
                   matches(scopeOf(again), scopeOf(value)) && (await again.allowed()) === true;
                 verified = ok ? scopeOf(value) : null;
+                verifiedTimeZone = ok ? again.store.timeZone : null;
                 return ok;
               },
               denied,
@@ -221,21 +224,30 @@ export function createPersistentMerchantOrderExceptions(options: {
         })(tx, source.sourceReference);
         return result.assigned;
       },
-      reconciliationDetails: async (tx, scope, sources) => {
-        if (!matches(await authorize(tx), scope)) return unavailable();
+      reconciliationDetails: async (detailTransactions, scope, sources) => {
+        // WP-2423 (outage-reads-and-retry): in its own short read-only transactions after the
+        // cases (see causeTransactions), for the scope the cases' transaction just rechecked in
+        // full. A failed statement aborts its PostgreSQL transaction (25P02), so each retry below
+        // gets a transaction of its own; in the cases' one it could never succeed.
+        const timeZone = verifiedTimeZone;
+        if (verified === null || !matches(verified, scope) || timeZone === null)
+          return unavailable();
+        const own = async (t: ConsumerTransaction) =>
+          causeRuns.has(t) && verified !== null && matches(verified, scope);
         const result = new Map<string, MerchantExceptionReconciliationDetail>();
         const reader = createPostgresPaymentReconciliationExceptionDetailReader({
           scope,
-          authorize: async (t) => t === tx && matches(await authorize(t), scope),
+          authorize: own,
         });
         const references = sources.map((source) => source.sourceReference);
         const ownRefusal = (error: unknown) =>
           error instanceof Error &&
           (error.message === "MERCHANT_ORDER_EXCEPTION_UNAVAILABLE" ||
             error.message === "MERCHANT_ORDER_EXCEPTION_DENIED");
+        const read = (some: readonly string[]) => detailTransactions.run((tx) => reader(tx, some));
         let details: ReadonlyMap<string, PaymentReconciliationExceptionDetail>;
         try {
-          details = await reader(tx, references);
+          details = await read(references);
         } catch (error) {
           if (ownRefusal(error)) throw error;
           options.onUnexpected?.(error);
@@ -244,7 +256,7 @@ export function createPersistentMerchantOrderExceptions(options: {
           const each = new Map<string, PaymentReconciliationExceptionDetail>();
           for (const reference of references) {
             try {
-              for (const [key, value] of await reader(tx, [reference])) each.set(key, value);
+              for (const [key, value] of await read([reference])) each.set(key, value);
             } catch (itemError) {
               if (ownRefusal(itemError)) throw itemError;
               options.onUnexpected?.(itemError);
@@ -253,32 +265,30 @@ export function createPersistentMerchantOrderExceptions(options: {
           }
           details = each;
         }
-        const days = createMerchantBusinessDayWindows({
-          persistence,
-          scope,
-          timeZone: (await current(tx)).store.timeZone,
-          authorize: async (t) => t === tx && matches(await authorize(t), scope),
-        });
         const businessDateOf = async (runReference: string): Promise<string | null> => {
           const settlementDays = options.settlementDays;
           const endsAt = settlementDays?.dayEndOf(runReference) ?? null;
           if (!settlementDays || endsAt === null) return null;
           try {
-            const lastInstant = new Date(Date.parse(endsAt) - 1).toISOString();
-            const { businessDate } = await days.today(tx, lastInstant);
-            const window = await days.window(tx, businessDate);
-            if (window.status !== "Closed" || window.endsAt !== endsAt) return null;
-            const runs = await settlementDays.runReferences(scope, window);
-            return runs.original === runReference || runs.rechecks.includes(runReference)
-              ? businessDate
-              : null;
+            // Its own transaction too: a day that can't be read leaves the others readable.
+            return await detailTransactions.run(async (tx) => {
+              const days = createMerchantBusinessDayWindows({
+                persistence,
+                scope,
+                timeZone,
+                authorize: async (t) => t === tx && (await own(t)),
+              });
+              const lastInstant = new Date(Date.parse(endsAt) - 1).toISOString();
+              const { businessDate } = await days.today(tx, lastInstant);
+              const window = await days.window(tx, businessDate);
+              if (window.status !== "Closed" || window.endsAt !== endsAt) return null;
+              const runs = await settlementDays.runReferences(scope, window);
+              return runs.original === runReference || runs.rechecks.includes(runReference)
+                ? businessDate
+                : null;
+            });
           } catch (error) {
-            if (
-              error instanceof Error &&
-              (error.message === "MERCHANT_ORDER_EXCEPTION_UNAVAILABLE" ||
-                error.message === "MERCHANT_ORDER_EXCEPTION_DENIED")
-            )
-              throw error;
+            if (ownRefusal(error)) throw error;
             return null;
           }
         };

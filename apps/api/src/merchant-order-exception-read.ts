@@ -108,9 +108,12 @@ export function createMerchantOrderExceptionRead(options: {
   /**
    * WP-2423: what each Payment reconciliation difference is about; a missing entry shows the
    * card without it. Never fails the page: an unreadable detail is answered as `Unavailable`.
+   * WP-2423 (outage-reads-and-retry): read after the cases, in transactions of its own (as
+   * `orderCauses`), so a detail read that fails can be read again on its own (a failed statement
+   * aborts its PostgreSQL transaction) and never takes the cases with it.
    */
   reconciliationDetails?(
-    tx: ConsumerTransaction,
+    transactions: { run<T>(work: (tx: ConsumerTransaction) => Promise<T>): Promise<T> },
     scope: MerchantExceptionScope,
     sources: readonly OrderExceptionSource[],
   ): Promise<ReadonlyMap<string, MerchantExceptionReconciliationDetail>>;
@@ -210,10 +213,6 @@ export function createMerchantOrderExceptionRead(options: {
           (source) =>
             source.kind === "PaymentReconciliationDifference" && source.sourceOwner === "Payment",
         );
-        const details =
-          options.reconciliationDetails && reconciliationSources.length > 0
-            ? await options.reconciliationDetails(tx, scope, Object.freeze(reconciliationSources))
-            : new Map<string, MerchantExceptionReconciliationDetail>();
         const current = await options.authorize(tx, input);
         if (
           !current ||
@@ -223,7 +222,10 @@ export function createMerchantOrderExceptionRead(options: {
           current.sessionReference !== scope.sessionReference
         )
           return unavailable();
-        const build = (causes: ReadonlyMap<string, MerchantExceptionOrderCause>) =>
+        const build = (
+          causes: ReadonlyMap<string, MerchantExceptionOrderCause>,
+          details: ReadonlyMap<string, MerchantExceptionReconciliationDetail>,
+        ) =>
           Object.freeze({
             screenId: "OPS-ORDER-EXCEPTION" as const,
             projectionName: projection.projectionName,
@@ -265,14 +267,34 @@ export function createMerchantOrderExceptionRead(options: {
               ),
             ),
           });
-        return { scope, linked, build };
+        return { scope, linked, build, reconciliationSources };
       })
       .catch(
         keepingCause(() => {
           throw Error("MERCHANT_ORDER_EXCEPTION_UNAVAILABLE");
         }),
       )
-      .then(async ({ scope, linked, build }) => {
+      .then(async ({ scope, linked, build: withDetails, reconciliationSources }) => {
+        const reconciliationDetails = options.reconciliationDetails;
+        const details =
+          reconciliationDetails && reconciliationSources.length > 0
+            ? await reconciliationDetails(
+                options.causeTransactions ?? options.transactions,
+                scope,
+                Object.freeze(reconciliationSources),
+              ).catch(
+                // Not even one could be read: each card says its details could not be loaded.
+                () =>
+                  new Map(
+                    reconciliationSources.map((source) => [
+                      source.sourceReference,
+                      Object.freeze({ type: "Unavailable" as const }),
+                    ]),
+                  ),
+              )
+            : new Map<string, MerchantExceptionReconciliationDetail>();
+        const build = (causes: ReadonlyMap<string, MerchantExceptionOrderCause>) =>
+          withDetails(causes, details);
         const orderCauses = options.orderCauses;
         if (!orderCauses || linked.length === 0) return build(new Map());
         // v15 batch 7 review: why each Order ended is read in its own short transaction after the

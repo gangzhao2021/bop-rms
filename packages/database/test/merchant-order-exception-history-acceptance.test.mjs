@@ -82,6 +82,8 @@ it("lists every open exception past 500 lifetime cases and pages resolved histor
       const ownerScope = { tenantReference: id(3), ...scope };
       const queryLog = [];
       let breakCauses = false;
+      /** Test-only: the one reconciliation difference whose detail read PostgreSQL refuses. */
+      let breakReconciliation = null;
       /**
        * The pilot exception snapshot (tooling/environment/pilot-exception-snapshot.mjs): one
        * REPEATABLE READ transaction under the api role with the runner's limits, accepting only
@@ -114,7 +116,15 @@ it("lists every open exception past 500 lifetime cases and pages resolved histor
                         "rms_ordering.order_termination_record",
                         "rms_ordering.no_such_table",
                       )
-                    : sql;
+                    : breakReconciliation !== null &&
+                        sql.includes("FROM rms_payment.payment_reconciliation_exception e") &&
+                        Array.isArray(values?.[2]) &&
+                        values[2].includes(breakReconciliation)
+                      ? sql.replace(
+                          "FROM rms_payment.payment_reconciliation_exception e",
+                          "FROM rms_payment.no_such_table e",
+                        )
+                      : sql;
                 return client.query(statement, values === undefined ? [] : [...values]);
               },
             });
@@ -323,6 +333,65 @@ it("lists every open exception past 500 lifetime cases and pages resolved histor
       // Measured 2026-10-17: 102 statements (scope, 3 open, 25 resolved, two business days),
       // whatever the 520 resolved cases behind them.
       assert.ok(firstQueries <= 130, "the exception read took " + firstQueries + " statements");
+
+      // WP-2423 (outage-reads-and-retry): two Payment reconciliation differences (charges that
+      // match no order). When PostgreSQL refuses the detail read of one of them, the page still
+      // lists every case and the other card keeps its detail; only the refused one says its
+      // details could not be loaded. Before, the read of each one on its own ran in the cases'
+      // transaction, already aborted (25P02), and the whole page answered "unavailable".
+      const differences = [id(2100), id(2101)];
+      await admin.query(
+        "SELECT set_config('bop.brand_id',$1,false),set_config('bop.store_id',$2,false)",
+        [scope.brandReference, scope.storeReference],
+      );
+      for (const [index, reference] of differences.entries()) {
+        await admin.query(
+          "INSERT INTO rms_payment.payment_reconciliation_exception (reconciliation_exception_id,brand_id,store_id,candidate_id,reason,severity,status,opened_at) VALUES ($1,$2,$3,$4,'AmountMismatch','Error','Open',now())",
+          [reference, scope.brandReference, scope.storeReference, id(2200 + index)],
+        );
+        const opened = new Date(Date.now() - minutes(20 + index)).toISOString();
+        await insert(
+          record(2100 + index, 1, "Open", {
+            sourceReference: reference,
+            kind: "PaymentReconciliationDifference",
+            severity: "High",
+            orderReference: null,
+            paymentReference: null,
+            providerState: "Unknown",
+            compensationStatus: "NotRequested",
+            createdAt: opened,
+            updatedAt: opened,
+          }),
+        );
+      }
+      const detailOf = (page, reference) =>
+        page.items.find((item) => item.exceptionReference === reference)?.reconciliation;
+      const whole = await read(session.sessionCookie);
+      for (const reference of differences)
+        assert.deepEqual(detailOf(whole, reference), { type: "UnmatchedCharge" });
+      assert.deepEqual(unexpected, []);
+      breakReconciliation = differences[0];
+      let partly;
+      try {
+        partly = await read(session.sessionCookie);
+      } finally {
+        breakReconciliation = null;
+      }
+      assert.deepEqual(
+        partly.items.map((item) => item.exceptionReference),
+        whole.items.map((item) => item.exceptionReference),
+      );
+      assert.deepEqual(detailOf(partly, differences[0]), { type: "Unavailable" });
+      assert.deepEqual(detailOf(partly, differences[1]), { type: "UnmatchedCharge" });
+      // The failed reads are logged as detail reads, with PostgreSQL's code (the batch, then the
+      // refused one on its own).
+      assert.deepEqual(
+        unexpected.map(([what, error]) => [what, error?.code ?? error?.cause?.code ?? null]),
+        [
+          ["ReconciliationDetail", "42P01"],
+          ["ReconciliationDetail", "42P01"],
+        ],
+      );
     } finally {
       await admin.query("RESET ROLE").catch(() => undefined);
       for (const name of [api, worker])
