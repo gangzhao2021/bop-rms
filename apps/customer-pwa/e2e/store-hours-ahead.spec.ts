@@ -45,7 +45,9 @@ test.describe("@production the Store's hours ahead", () => {
   }) => {
     await enterOpen(page);
     await page.goto("/#qr=aaa.bbb.ccc");
-    await expect(page.getByRole("heading", { name: "Synthetic Store", exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { level: 1, name: "Synthetic Store", exact: true }),
+    ).toBeVisible();
     await page.evaluate(() => {
       history.pushState(null, "", "/menu");
       window.dispatchEvent(new PopStateEvent("popstate"));
@@ -104,7 +106,9 @@ test.describe("@production the Store's hours ahead", () => {
     );
     await enterOpen(page);
     await page.goto("/#qr=aaa.bbb.ccc");
-    await expect(page.getByRole("heading", { name: "Synthetic Store", exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { level: 1, name: "Synthetic Store", exact: true }),
+    ).toBeVisible();
     await page.evaluate(() => {
       history.pushState(null, "", "/menu");
       window.dispatchEvent(new PopStateEvent("popstate"));
