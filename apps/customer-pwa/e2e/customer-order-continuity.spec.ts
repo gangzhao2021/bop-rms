@@ -94,8 +94,10 @@ async function noHorizontalOverflow(page: Page) {
   ).toBe(true);
 }
 
+// M109 (DEC-STORE-PHONE-BEFORE-PICKUP): the pickup order page's store phone at the tablet width too.
 for (const viewport of [
   { width: 390, height: 844 },
+  { width: 1024, height: 768 },
   { width: 1440, height: 900 },
 ]) {
   test.describe(`@production WP-2423 Q10 order continuity at ${viewport.width}px`, () => {
