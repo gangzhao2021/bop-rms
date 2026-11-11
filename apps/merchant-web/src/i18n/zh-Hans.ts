@@ -9445,6 +9445,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "That paid-at time is later than now, or more than 3 days ago, by the system's clock. Nothing was sent. Check the time on the paper slip and this device's clock, then send again.":
     "按系统时间，这个付款时间晚于现在，或早于 3 天前。订单没有发送。请核对纸质单上的时间和这台设备的时钟后再发送。",
   "Orders with a dish sold out since it was ordered": "有菜在下单后售罄的订单",
+  "Orders with a dish sold out or taken off the menu since it was ordered":
+    "有菜在下单后售罄或下架的订单",
   "{orders} waiting to be accepted. Open each on Orders: offer the guest a swap, or cancel that dish with a refund.":
     "{orders}等待接单。在订单页逐一打开：请客人换一道，或取消这道菜并退款。",
   "{item} saved. Guests and the kitchen already see what its choices add; the rest shows when the menu is listed.":

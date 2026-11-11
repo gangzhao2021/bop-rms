@@ -416,7 +416,7 @@ describe("WP-2423 P2 store overview", () => {
       [
         [
           "sold-out-now",
-          "Orders with a dish sold out since it was ordered",
+          "Orders with a dish sold out or taken off the menu since it was ordered",
           "1 order waiting to be accepted. Open each on Orders: offer the guest a swap, or cancel that dish with a refund.",
           "danger",
         ],

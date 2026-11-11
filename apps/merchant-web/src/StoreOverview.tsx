@@ -557,7 +557,7 @@ export function attentionItems(
     if ((o.soldOutNow ?? 0) > 0)
       items.push({
         key: "sold-out-now",
-        title: t("Orders with a dish sold out since it was ordered"),
+        title: t("Orders with a dish sold out or taken off the menu since it was ordered"),
         detail: t(
           "{orders} waiting to be accepted. Open each on Orders: offer the guest a swap, or cancel that dish with a refund.",
           { orders: countOf(o.soldOutNow ?? 0, "order") },
