@@ -530,7 +530,15 @@ it("WP-2423 (v15 batch 5): What goes live names each extra price and the dishes 
         toMinor: "120",
       },
     ],
-    otherStores: { storeCount: 2, notDecided: [id(30)], listingOffers: true },
+    otherStores: {
+      storeCount: 2,
+      notDecided: [id(30), id(32)],
+      stores: [
+        { storeName: "Midtown (TEST)", notDecided: [id(30), id(32)] },
+        { storeName: null, notDecided: [id(30)] },
+      ],
+      listingOffers: true,
+    },
   });
   const { container } = await page(async () => menu());
   await click(buttonNamed(container, "List it"));
@@ -542,19 +550,33 @@ it("WP-2423 (v15 batch 5): What goes live names each extra price and the dishes 
   );
   expect(review?.textContent).toContain("Dan dan noodles (TEST), Egg (TEST): +$1.20 (new)");
   expect(review?.textContent).toContain(
-    "Guests at the other Stores can order these once listed: Har gow (TEST).",
+    "New dishes go on sale at the other Stores once listed. A Store that should not sell one hides it there.",
   );
+  // Every new dish at each Store, with its count: nothing goes live there unseen.
+  const lines = [...(review?.querySelectorAll('[role="note"] li') ?? [])].map(
+    (li) => li.textContent,
+  );
+  expect(lines).toEqual([
+    "Midtown (TEST), 2 dishes: Har gow (TEST), Dan dan noodles (TEST)",
+    "another Store, 1 dish: Har gow (TEST)",
+  ]);
 });
 
 it("WP-2423 (v15 batch 5): without the Brand's say over other Stores, the review says the new dish stays hidden there", async () => {
   const { container } = await page(async () => ({
     ...severalStores(),
     listingStep: "Submit",
-    otherStores: { storeCount: 1, notDecided: [id(30)], listingOffers: false },
+    otherStores: {
+      storeCount: 1,
+      notDecided: [id(30)],
+      stores: [{ storeName: "Midtown (TEST)", notDecided: [id(30)] }],
+      listingOffers: false,
+    },
   }));
   await click(buttonNamed(container, "List it"));
   await settle(5);
   expect(container.textContent).toContain(
-    "These stay hidden at the other Stores until each Store shows them to guests: Har gow (TEST).",
+    "New dishes stay hidden at the other Stores until each Store shows them to guests.",
   );
+  expect(container.textContent).toContain("Midtown (TEST), 1 dish: Har gow (TEST)");
 });

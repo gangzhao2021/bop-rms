@@ -8,8 +8,8 @@ const money = (minor: string | null) => (minor === null ? null : "$" + minorToDo
 /**
  * WP-2423 M69/M71: what "List it" will put live, read before anything is written. The prices
  * waiting in the menu's own price draft (from → to, at every Store), whether someone else changed
- * them, the waiting extra (choice) prices, the dishes the other Stores of a Brand with several
- * do not sell yet, the price changes started on the Prices page (never listed from here), and dishes whose
+ * them, the waiting extra (choice) prices, each new dish that goes on sale (or stays hidden) at
+ * each other Store of a Brand with several, with its Store and a count, the price changes started on the Prices page (never listed from here), and dishes whose
  * allergens nobody answered (listing waits for them). "List it" here confirms exactly the prices
  * shown: anything saved after the review was read is refused, nothing goes live unseen.
  */
@@ -51,7 +51,11 @@ export function MenuListingReview({
     view.sellables.find((x) => x.productReference === productReference)?.productName ?? t("a dish");
   const choices = view.choicePriceChanges ?? [];
   const others = view.otherStores ?? null;
-  const notDecided = (others?.notDecided ?? []).map(nameOf);
+  // Every new dish at each other Store that has not decided it, with its Store and a count:
+  // nothing goes live there unseen.
+  const otherStores = (
+    others?.stores ?? [{ storeName: null, notDecided: others?.notDecided ?? [] }]
+  ).filter((store) => store.notDecided.length > 0);
   const elsewhere = view.priceChangesOnPricesPage ?? 0;
   const moved = draft?.movedSinceStart === true;
   // Allergens are named here, and the server's own check refuses the listing until they are
@@ -106,22 +110,34 @@ export function MenuListingReview({
           </ul>
         </>
       ) : null}
-      {others !== null && notDecided.length > 0 ? (
-        <p className="one-menu__note" role="note">
-          {others.listingOffers
-            ? t(
-                "Guests at the other Stores can order these once listed: {dishes}. A Store that should not sell one hides it there.",
-                {
-                  dishes: notDecided.slice(0, 8).join(t(", ")) + (notDecided.length > 8 ? "…" : ""),
-                },
-              )
-            : t(
-                "These stay hidden at the other Stores until each Store shows them to guests: {dishes}.",
-                {
-                  dishes: notDecided.slice(0, 8).join(t(", ")) + (notDecided.length > 8 ? "…" : ""),
-                },
-              )}
-        </p>
+      {others !== null && otherStores.length > 0 ? (
+        <div className="one-menu__note" role="note">
+          <p>
+            {others.listingOffers
+              ? t(
+                  "New dishes go on sale at the other Stores once listed. A Store that should not sell one hides it there.",
+                )
+              : t(
+                  "New dishes stay hidden at the other Stores until each Store shows them to guests.",
+                )}
+          </p>
+          <ul>
+            {otherStores.map((store, index) => (
+              <li key={(store.storeName ?? "") + index}>
+                {store.notDecided.length === 1
+                  ? t("{store}, 1 dish: {dishes}", {
+                      store: store.storeName ?? t("another Store"),
+                      dishes: store.notDecided.map(nameOf).join(t(", ")),
+                    })
+                  : t("{store}, {count} dishes: {dishes}", {
+                      store: store.storeName ?? t("another Store"),
+                      count: String(store.notDecided.length),
+                      dishes: store.notDecided.map(nameOf).join(t(", ")),
+                    })}
+              </li>
+            ))}
+          </ul>
+        </div>
       ) : null}
       {draft !== null && draft.prices.length > 0 && !draft.startedByViewer ? (
         <p className="one-menu__note">

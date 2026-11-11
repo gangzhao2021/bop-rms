@@ -6974,10 +6974,13 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{dish}, {choice}: +{to} (new)": "{dish}，{choice}：+{to}（新）",
   "{dish}, {choice}: +{from} → +{to}": "{dish}，{choice}：+{from} → +{to}",
   "a choice": "一个选项",
-  "Guests at the other Stores can order these once listed: {dishes}. A Store that should not sell one hides it there.":
-    "上架后其他门店的客人也能点：{dishes}。哪家门店不卖，就在那家门店隐藏。",
-  "These stay hidden at the other Stores until each Store shows them to guests: {dishes}.":
-    "这些菜在其他门店仍对客人隐藏，要各门店自己“显示给客人”：{dishes}。",
+  "New dishes go on sale at the other Stores once listed. A Store that should not sell one hides it there.":
+    "上架后，新菜在其他门店也开始卖。哪家门店不卖，就在那家门店隐藏。",
+  "New dishes stay hidden at the other Stores until each Store shows them to guests.":
+    "新菜在其他门店仍对客人隐藏，要各门店自己“显示给客人”。",
+  "{store}, 1 dish: {dishes}": "{store}，1 道菜：{dishes}",
+  "{store}, {count} dishes: {dishes}": "{store}，{count} 道菜：{dishes}",
+  "another Store": "另一家门店",
   "The dish could not be read. Check the connection and try again.":
     "读不到这道菜。请检查网络后重试。",
   "Reading the dish…": "正在读取菜品…",

@@ -693,13 +693,20 @@ export interface MenuBuilderView extends MenuViewBase {
     readonly toMinor: string;
   }[];
   /**
-   * WP-2423 (v15 batch 5): at a Brand with several Stores, the dishes on the menu nobody has
-   * decided at one of its other Stores yet, and whether this person's listing puts them live there.
+   * WP-2423 (v15 batch 5): at a Brand with several Stores, the dishes this listing adds to the menu
+   * that nobody has decided at one of its other Stores yet, and whether this person's listing puts
+   * them live there.
    * null or absent: one Store.
    */
   readonly otherStores?: {
     readonly storeCount: number;
     readonly notDecided: readonly string[];
+    /** Each other Store with the new dishes it has not decided (absent in older views). */
+    readonly stores?: readonly {
+      /** null: the Store's name could not be read. */
+      readonly storeName: string | null;
+      readonly notDecided: readonly string[];
+    }[];
     readonly listingOffers: boolean;
   } | null;
   /** WP-2423 M70: where this person may change a dish's price (absent: one Store). */
