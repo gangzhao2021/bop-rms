@@ -36,6 +36,16 @@ export interface PickupHandoffResult {
   readonly nextAggregateVersion: string;
   readonly nextPhase: "InProgress" | "Completed";
 }
+/**
+ * WP-2423 M10: of a ready pickup line, the units still to hand over: ready, less those already
+ * handed over and those refunded and not to be handed over. The card, the dialog and the handover
+ * command all count this one number.
+ */
+export const pickupLineToHandOver = (line: {
+  readonly readyQuantity: number;
+  readonly handedOverQuantity: number;
+  readonly refundedQuantity?: number;
+}) => Math.max(0, line.readyQuantity - line.handedOverQuantity - (line.refundedQuantity ?? 0));
 /** One immutable handoff intent; uncertain responses require explicit same-key retry. */
 export function createPickupHandoffClient(fetcher: typeof fetch = fetch) {
   return {
@@ -91,12 +101,15 @@ export function createPickupHandoffClient(fetcher: typeof fetch = fetch) {
             : !/^[\p{L}\p{N}* ._'()-]{1,64}$/u.test(input.recipientDisplayMask))
         )
           return fail("Invalid");
+        // WP-2423 M10: what is still owed: units staff refunded and said not to hand over are
+        // never in the bag, so they are never handed over (the server counts the same, and an
+        // ordered quantity that includes them is refused).
         const quantities = execution.items
-          .filter((line) => line.readyQuantity > line.handedOverQuantity)
           .map((line) => ({
             fulfillmentItemReference: line.fulfillmentItemReference,
-            quantity: line.readyQuantity - line.handedOverQuantity,
-          }));
+            quantity: pickupLineToHandOver(line),
+          }))
+          .filter((line) => line.quantity > 0);
         if (!quantities.length) return fail("Invalid");
         expectedVersion = execution.aggregateVersion;
         command = {

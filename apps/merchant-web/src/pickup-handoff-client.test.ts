@@ -252,3 +252,69 @@ it("WP-2423 M21: no initial only for the customer, and a called number only for 
     }),
   ).toThrow();
 });
+
+it("WP-2423 M10: a pickup with refunded units hands over only what is still owed", async () => {
+  // v15 batch 5, order 24: 3 ordered, 1 refunded with "Stop making it too", 2 in the bag. The
+  // handover sent 3 and was refused, leaving the order at Ready.
+  const fetcher = vi.fn<typeof fetch>().mockImplementation(async () => response());
+  const execution = item.execution!;
+  const owed = (lines: NonNullable<PickupQueueItem["execution"]>["items"]) =>
+    createPickupHandoffClient(fetcher)
+      .prepare({ ...input(), item: { ...item, execution: { ...execution, items: lines } } })
+      .execute(csrf)
+      .then(() => JSON.parse(String(fetcher.mock.lastCall?.[1]?.body)).quantities);
+  await expect(
+    owed([
+      {
+        fulfillmentItemReference: ref(3),
+        orderedQuantity: 3,
+        readyQuantity: 3,
+        handedOverQuantity: 0,
+        refundedQuantity: 1,
+      },
+      // A line refunded in full is not handed over at all.
+      {
+        fulfillmentItemReference: ref(11),
+        orderedQuantity: 1,
+        readyQuantity: 1,
+        handedOverQuantity: 0,
+        refundedQuantity: 1,
+      },
+    ]),
+  ).resolves.toEqual([{ fulfillmentItemReference: ref(3), quantity: 2 }]);
+  // After one unit was handed over, the rest less the refunded one.
+  await expect(
+    owed([
+      {
+        fulfillmentItemReference: ref(3),
+        orderedQuantity: 4,
+        readyQuantity: 4,
+        handedOverQuantity: 1,
+        refundedQuantity: 1,
+      },
+    ]),
+  ).resolves.toEqual([{ fulfillmentItemReference: ref(3), quantity: 2 }]);
+  // Everything left is refunded: nothing to hand over, nothing sent.
+  const calls = fetcher.mock.calls.length;
+  expect(() =>
+    createPickupHandoffClient(fetcher).prepare({
+      ...input(),
+      item: {
+        ...item,
+        execution: {
+          ...execution,
+          items: [
+            {
+              fulfillmentItemReference: ref(3),
+              orderedQuantity: 2,
+              readyQuantity: 2,
+              handedOverQuantity: 1,
+              refundedQuantity: 1,
+            },
+          ],
+        },
+      },
+    }),
+  ).toThrow();
+  expect(fetcher).toHaveBeenCalledTimes(calls);
+});

@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   createPickupHandoffClient,
   PickupHandoffClientError,
+  pickupLineToHandOver,
   type PickupCodeNotShownCause,
 } from "./pickup-handoff-client.js";
 import type { PickupVerification } from "./pickup-proof-client.js";
@@ -253,8 +254,7 @@ export function PickupHandoffForm({
     }
   };
   // WP-2423 M10: units refunded and not to be handed over are left out of what staff hand over.
-  const toHandOver = (line: NonNullable<typeof item.execution>["items"][number]) =>
-    Math.max(0, line.readyQuantity - line.handedOverQuantity - (line.refundedQuantity ?? 0));
+  const toHandOver = pickupLineToHandOver;
   const lines = item.execution?.items.filter((line) => toHandOver(line) > 0) ?? [];
   const orderNumber =
     item.publicOrderNumber ?? item.execution?.publicOrderReference ?? t("reference unavailable");
