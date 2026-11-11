@@ -8984,4 +8984,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Save kitchen allergens": "保存后厨过敏原",
   "Guests read: {statement}": "顾客会看到：{statement}",
   "The kitchen's allergen statement could not be read.": "读不到后厨过敏原说明。",
+  "Allergens {choice} adds": "{choice} 加的过敏原",
+  "Adds allergens? Not answered": "加过敏原吗？未回答",
+  "Adds no allergens": "不加过敏原",
+  "Adds: {allergens}": "加：{allergens}",
+  "Adds none": "都不加",
 });

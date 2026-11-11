@@ -593,9 +593,46 @@ it("WP-2423 item 12: sends what each dish declares only for a combo's parts", as
     return result.menu.sections[0]?.sellables[0]?.allergenDisclosure;
   };
   expect((await disclosureOf(new Set([id(14)])))?.byOption).toEqual(byOption);
-  // A drink's choices aren't sent to guests, so milk tea menus don't grow.
-  expect(await disclosureOf(undefined)).not.toHaveProperty("byOption");
-  expect(await disclosureOf(new Set([id(99)]))).not.toHaveProperty("byOption");
+  // WP-2423 (M166): a choice that adds allergens of its own is sent too (egg fried rice), so
+  // guests and the kitchen read it; a choice that adds none is not, so milk tea menus don't grow.
+  expect((await disclosureOf(undefined))?.byOption).toEqual(byOption);
+  expect((await disclosureOf(new Set([id(99)])))?.byOption).toEqual(byOption);
+});
+
+it("WP-2423 (M166): a choice that adds no allergens of its own is not sent", async () => {
+  const base = projection();
+  const [section] = base.snapshot.sections;
+  const [latte] = section?.sellables ?? [];
+  if (section === undefined || latte === undefined) throw new Error("fixture");
+  const menu: PublishedMenuProjection = {
+    ...base,
+    snapshot: {
+      ...base.snapshot,
+      sections: [
+        {
+          ...section,
+          sellables: [
+            {
+              ...latte,
+              allergenDisclosure: { ...latte.allergenDisclosure, byOption: { [id(14)]: [] } },
+            },
+          ],
+        },
+      ],
+    },
+  };
+  const result = await createCustomerMenuQueryService({
+    stores: {
+      resolvePublic: async () => ({
+        brandReference: id(3) as never,
+        storeReference: id(7) as never,
+        status: "Active",
+      }),
+    },
+    projections: { loadCandidates: async () => [menu] },
+  }).getPublishedMenu(input());
+  if (result.status !== "Found") throw new Error("menu");
+  expect(result.menu.sections[0]?.sellables[0]?.allergenDisclosure).not.toHaveProperty("byOption");
 });
 
 it("WP-2423 Q12: gives the Store's facts each shown item as normally ordered", async () => {

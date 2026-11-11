@@ -156,6 +156,19 @@ export interface SaveDishBody {
     | "NoIngredients"
     | "ComboParts"
     | null;
+  /**
+   * WP-2423 (M166): what each choice answered in this save adds to the dish, declared by staff
+   * ("adds none": an empty list). Choices not listed keep what they add. Only the dish's own
+   * choices; absent from an older client.
+   */
+  readonly choiceAllergens?: readonly {
+    readonly optionReference: string;
+    readonly name: string;
+    readonly declared: readonly {
+      readonly allergenReference: string;
+      readonly classification: "Contains" | "CrossContactPossible";
+    }[];
+  }[];
 }
 export interface ListAllBody {
   readonly action: "ListAll";
@@ -312,10 +325,13 @@ export function parseOneStoreDishBody(value: unknown): SaveDishBody | ListAllBod
             },
     };
   }
+  const withChoiceAllergens = Object.hasOwn(r, "choiceAllergens");
   if (
     r.action !== "SaveDish" ||
     keys !==
-      "action,allergens,choiceGroups,description,descriptionZh,expectedPriceMinor,menuReference,name,nameZh,operationReference,priceMinor,priceScope,productReference,sectionCode,taxClassificationReference" ||
+      (withChoiceAllergens
+        ? "action,allergens,choiceAllergens,choiceGroups,description,descriptionZh,expectedPriceMinor,menuReference,name,nameZh,operationReference,priceMinor,priceScope,productReference,sectionCode,taxClassificationReference"
+        : "action,allergens,choiceGroups,description,descriptionZh,expectedPriceMinor,menuReference,name,nameZh,operationReference,priceMinor,priceScope,productReference,sectionCode,taxClassificationReference") ||
     !Array.isArray(r.choiceGroups) ||
     r.choiceGroups.length > 12 ||
     (r.allergens !== null &&
@@ -373,6 +389,47 @@ export function parseOneStoreDishBody(value: unknown): SaveDishBody | ListAllBod
             classification: a.classification as "Contains" | "CrossContactPossible" | "None",
           };
         });
+  // WP-2423 (M166): each answered choice once, one of this dish's own, at most 100.
+  const ownOptions = new Set(choiceGroups.flatMap((g) => g.options.map((o) => o.optionReference)));
+  const choiceAllergens = !withChoiceAllergens
+    ? undefined
+    : Array.isArray(r.choiceAllergens) && r.choiceAllergens.length <= 100
+      ? r.choiceAllergens.map((candidate: unknown) => {
+          const c = candidate as Record<string, unknown> | null;
+          if (
+            c === null ||
+            typeof c !== "object" ||
+            Object.keys(c).sort().join(",") !== "declared,name,optionReference" ||
+            !Array.isArray(c.declared) ||
+            c.declared.length > 64
+          )
+            return fail("Invalid");
+          const optionReference = ref(c.optionReference);
+          if (!ownOptions.has(optionReference)) return fail("Invalid");
+          const declared = c.declared.map((entry: unknown) => {
+            const a = entry as Record<string, unknown> | null;
+            if (
+              a === null ||
+              typeof a !== "object" ||
+              Object.keys(a).sort().join(",") !== "allergenReference,classification" ||
+              (a.classification !== "Contains" && a.classification !== "CrossContactPossible")
+            )
+              return fail("Invalid");
+            return {
+              allergenReference: ref(a.allergenReference),
+              classification: a.classification as "Contains" | "CrossContactPossible",
+            };
+          });
+          if (new Set(declared.map((a) => a.allergenReference)).size !== declared.length)
+            return fail("Invalid");
+          return { optionReference, name: text(c.name, 80, true), declared };
+        })
+      : fail("Invalid");
+  if (
+    choiceAllergens !== undefined &&
+    new Set(choiceAllergens.map((c) => c.optionReference)).size !== choiceAllergens.length
+  )
+    return fail("Invalid");
   // Only an existing dish can keep its place and price: a new one has neither yet.
   if (r.productReference === null && (r.sectionCode === null || r.priceMinor === null))
     return fail("Invalid");
@@ -406,6 +463,7 @@ export function parseOneStoreDishBody(value: unknown): SaveDishBody | ListAllBod
     expectedPriceMinor: r.expectedPriceMinor === null ? null : amount(r.expectedPriceMinor),
     choiceGroups,
     allergens,
+    ...(choiceAllergens === undefined ? {} : { choiceAllergens }),
   };
 }
 
@@ -988,9 +1046,30 @@ export function createMerchantOneStoreDishes(options: {
     // 6. A "no change" option recipe for each of its choices that has none yet, a few choices per
     // transaction (WP-2423 item 3: one authorization each, not one command per step per choice).
     let choicesWaiting = false;
+    // WP-2423 (M166): each choice answered in this save: what it adds becomes its own stand-in,
+    // which its option recipe adds ("adds none": no change). Its answer replaces a published "no
+    // change" or an earlier answer; a real recipe change set under Option recipes is kept.
+    const restated = new Set<string>();
+    const answeredItems = new Map<string, string>();
+    for (const choice of body.choiceAllergens ?? []) {
+      restated.add(choice.optionReference);
+      const declared = await options.dishAllergens.declareChoice({
+        ...session,
+        operationReference: step("choice-allergens-" + choice.optionReference.slice(-12)),
+        skuReference: sku,
+        optionReference: choice.optionReference,
+        choiceName: choice.name,
+        declared: choice.declared,
+      });
+      if (choice.declared.length > 0)
+        answeredItems.set(choice.optionReference, declared.itemReference);
+    }
     if (wanted.size > 0) {
       const choices = new Map(
-        [...wanted.keys()].map((option) => [option, choiceItems.get(option) ?? null]),
+        [...wanted.keys()].map((option) => [
+          option,
+          choiceItems.get(option) ?? answeredItems.get(option) ?? null,
+        ]),
       );
       let left = Number.POSITIVE_INFINITY;
       for (;;) {
@@ -1000,6 +1079,7 @@ export function createMerchantOneStoreDishes(options: {
           productReference,
           skuReference: sku,
           choices,
+          restated,
         });
         if (round.waitingForAllergens) {
           // A dish whose allergens simply are not declared yet saves: declaring them later covers

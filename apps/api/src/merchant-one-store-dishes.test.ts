@@ -870,3 +870,48 @@ describe("one-page menu combos (WP-2423 item 8 ⑥ part 4)", () => {
     ).rejects.toMatchObject({ code: "NotFound" });
   });
 });
+
+describe("WP-2423 (M166): what a choice adds, answered in the dish save", () => {
+  it("reads each answered choice of the dish once; refuses another dish's choice or a No", () => {
+    const body = parseOneStoreDishBody(
+      save({
+        choiceAllergens: [
+          {
+            optionReference: HOT,
+            name: "Hot",
+            declared: [{ allergenReference: PEANUT, classification: "Contains" }],
+          },
+          { optionReference: MILD, name: "Mild", declared: [] },
+        ],
+      }),
+    );
+    expect(body.action === "SaveDish" ? body.choiceAllergens : null).toEqual([
+      {
+        optionReference: HOT,
+        name: "Hot",
+        declared: [{ allergenReference: PEANUT, classification: "Contains" }],
+      },
+      { optionReference: MILD, name: "Mild", declared: [] },
+    ]);
+    for (const choiceAllergens of [
+      [{ optionReference: id(999), name: "Other", declared: [] }],
+      [
+        { optionReference: HOT, name: "Hot", declared: [] },
+        { optionReference: HOT, name: "Hot", declared: [] },
+      ],
+      [
+        {
+          optionReference: HOT,
+          name: "Hot",
+          declared: [{ allergenReference: PEANUT, classification: "None" }],
+        },
+      ],
+    ])
+      expect(() => parseOneStoreDishBody(save({ choiceAllergens }))).toThrow(
+        MerchantOneStoreDishError,
+      );
+    // An older client sends none: every choice keeps what it adds.
+    const older = parseOneStoreDishBody(save());
+    expect(older.action === "SaveDish" && "choiceAllergens" in older).toBe(false);
+  });
+});

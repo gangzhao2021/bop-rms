@@ -1756,8 +1756,15 @@ export function SellableConfigurator({
             const price = optionPriceText(option.price);
             // Indexes, never the option's reference: references stay out of the markup.
             const priceId = price === null ? null : `configure-price-${groupIndex}-${optionIndex}`;
+            // WP-2423 (M166): a choice that adds allergens of its own says so ("Adds: Egg").
+            const adds =
+              rule.comboPart === true
+                ? null
+                : (sellable.allergensByOption?.[option.optionReference] ?? null);
             const allergensId =
-              rule.comboPart === true ? `configure-allergens-${groupIndex}-${optionIndex}` : null;
+              rule.comboPart === true || (adds !== null && adds.length > 0)
+                ? `configure-allergens-${groupIndex}-${optionIndex}`
+                : null;
             // A screen reader gets what a sighted guest reads beside the choice: its price, and for
             // a combo dish what it contains.
             const described = [priceId, allergensId].filter((id) => id !== null).join(" ");
@@ -1799,7 +1806,11 @@ export function SellableConfigurator({
                 {/* WP-2423 item 8 ⑥ part 4: each dish of a combo part with its allergens. */}
                 {allergensId === null ? null : (
                   <span id={allergensId} className="configure-option__allergens">
-                    {dishAllergenText(comboDishAllergens(sellable, option.optionReference))}
+                    {adds !== null && adds.length > 0
+                      ? t("Adds: {allergens}", {
+                          allergens: adds.map((allergen) => allergen.name).join(listSeparator()),
+                        })
+                      : dishAllergenText(comboDishAllergens(sellable, option.optionReference))}
                   </span>
                 )}
                 {current.has(option.optionReference) && option.maximumQuantity > 1 ? (

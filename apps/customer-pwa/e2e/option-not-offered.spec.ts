@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { expectNoInternalText } from "./internal-text-guard";
-import { routeStorefrontReads } from "./storefront-reads";
+import { routeStorefrontReads, syntheticStoreProfile } from "./storefront-reads";
 
 // WP-2423: every page with a Store context reads the Store's identity (and the menu for
 // cart lines not yet priced); spec routes registered later still answer first.
@@ -33,6 +33,8 @@ for (const screen of [
       // WP-2423 (M22, M24, M154): Hot sold out at the Store today; the dish sold out meanwhile.
       "hot sold out",
       "dish sold out meanwhile",
+      // WP-2423 (M166, M178): Iced adds milk of its own; the kitchen's statement above the menu.
+      "iced adds milk",
     ] as const)
       test(scenario, async ({ page }) => {
         const failures: string[] = [];
@@ -40,7 +42,31 @@ for (const screen of [
         const at = new Date().toISOString(),
           expiresAt = new Date(Date.now() + 600_000).toISOString();
         // "refused meanwhile": the page was read while Hot was offered; it goes off before Add.
-        let hotOff = scenario !== "refused meanwhile" && scenario !== "dish sold out meanwhile";
+        let hotOff =
+          scenario !== "refused meanwhile" &&
+          scenario !== "dish sold out meanwhile" &&
+          scenario !== "iced adds milk";
+        if (scenario === "iced adds milk")
+          await page.route("**/api/v1/customer/store", (route) =>
+            route.fulfill({
+              status: 200,
+              headers: { "cache-control": "private, max-age=30" },
+              contentType: "application/json",
+              body: JSON.stringify({
+                ...syntheticStoreProfile,
+                store: {
+                  kitchenStatement: {
+                    handled: [
+                      { code: "PEANUT", name: "peanuts" },
+                      { code: "SESAME", name: "sesame" },
+                    ],
+                    sharedEquipment: ["Woks", "FryerOil"],
+                  },
+                  ...syntheticStoreProfile.store,
+                },
+              }),
+            }),
+          );
         let menuReads = 0;
         await page.route("**/bff/customer/entry", (route) =>
           route.fulfill({
@@ -136,12 +162,30 @@ for (const screen of [
                             ],
                           },
                         ],
-                        allergenDisclosure: {
-                          registryVersionReference: id(11),
-                          items: [],
-                          allergenFreeClaim: false,
-                          assistanceCode: "ALLERGEN_ASSISTANCE_REQUIRED",
-                        },
+                        allergenDisclosure:
+                          scenario === "iced adds milk"
+                            ? {
+                                registryVersionReference: id(11),
+                                items: [
+                                  {
+                                    allergenReference: id(12),
+                                    code: "MILK",
+                                    name: "Milk",
+                                    classification: "Contains",
+                                  },
+                                ],
+                                allergenFreeClaim: false,
+                                assistanceCode: "ALLERGEN_ASSISTANCE_REQUIRED",
+                                byOption: {
+                                  [iced]: [{ code: "MILK", classification: "Contains" }],
+                                },
+                              }
+                            : {
+                                registryVersionReference: id(11),
+                                items: [],
+                                allergenFreeClaim: false,
+                                assistanceCode: "ALLERGEN_ASSISTANCE_REQUIRED",
+                              },
                         displayPrice: {
                           status: "Available",
                           amount: "3.50",
@@ -240,11 +284,26 @@ for (const screen of [
           page.getByRole("heading", { name: "Synthetic Soy Store", exact: true }),
         ).toBeVisible();
         await press(page.getByRole("button", { name: "Continue to menu", exact: true }));
+        if (scenario === "iced adds milk")
+          await expect(
+            page.getByText(
+              "Our kitchen uses peanuts, sesame, and shares woks, fryer oil. Any dish may contain traces.",
+              { exact: true },
+            ),
+          ).toBeVisible();
         await press(page.getByRole("link", { name: "View Synthetic soy milk", exact: true }));
         const hotChoice = page.getByRole("radio", { name: "Hot", exact: true });
         const icedChoice = page.getByRole("radio", { name: "Iced", exact: true });
         const add = page.getByRole("button", { name: "Add to cart", exact: true });
-        if (scenario === "all off") {
+        if (scenario === "iced adds milk") {
+          // Iced says what it adds; Hot adds nothing and says nothing.
+          await expect(page.getByText("Adds: Milk", { exact: true })).toBeVisible();
+          await expect(page.getByText(/^Adds:/u)).toHaveCount(1);
+          await page.screenshot({
+            path: `test-results/choice-adds-${screen.width}.png`,
+            fullPage: true,
+          });
+        } else if (scenario === "all off") {
           await expect(
             page.getByText("Synthetic soy milk isn't available right now.", { exact: true }),
           ).toBeVisible();

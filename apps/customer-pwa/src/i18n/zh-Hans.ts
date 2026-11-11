@@ -1719,4 +1719,5 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Our kitchen uses {uses}.": "本店后厨使用{uses}。",
   "Our kitchen shares {shares}.": "本店后厨{shares}共用。",
   "Any dish may contain traces.": "任何菜都可能含有微量。",
+  "Adds: {allergens}": "加：{allergens}",
 });

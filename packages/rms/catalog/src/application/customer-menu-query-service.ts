@@ -262,8 +262,13 @@ function publicSellable(
       .filter((rule) => comboPartRule(rule, fact))
       .flatMap((rule) => rule.options.map((option) => String(option.optionReference))),
   );
-  const byOption = Object.entries(item.allergenDisclosure.byOption ?? {}).filter(([option]) =>
-    comboDishes.has(option),
+  // WP-2423 (M166): and any choice that adds allergens of its own (egg in egg fried rice).
+  const offeredOptions = new Set(
+    offeredRules.flatMap((rule) => rule.options.map((option) => String(option.optionReference))),
+  );
+  const byOption = Object.entries(item.allergenDisclosure.byOption ?? {}).filter(
+    ([option, items]) =>
+      comboDishes.has(option) || (offeredOptions.has(option) && items.length > 0),
   );
   return Object.freeze({
     sellableReference: item.sellableReference,

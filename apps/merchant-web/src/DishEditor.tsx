@@ -1,4 +1,4 @@
-import { t } from "./i18n/i18n.js";
+import { allergenName, listSeparator, t } from "./i18n/i18n.js";
 import { MenuSectionSelect } from "./MenuSectionSelect.js";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { Link } from "react-router";
@@ -144,6 +144,18 @@ export function DishEditor({
     section: sectionCode,
   });
   const [chosen, setChosen] = useState<ReadonlyMap<string, ReadonlyMap<string, string>>>(new Map());
+  // WP-2423 (M166): what each choice adds of its own (Contains), as staff answered it here. Only
+  // choices answered in this editor are sent; the others keep what they add.
+  const [choiceAdds, setChoiceAdds] = useState<ReadonlyMap<string, ReadonlySet<string>>>(
+    () =>
+      new Map(
+        (dish?.allergens.choiceAllergens ?? []).map((answer) => [
+          answer.optionKey,
+          new Set(answer.declared.map((a) => a.allergenReference)),
+        ]),
+      ),
+  );
+  const [choiceAnswered, setChoiceAnswered] = useState<ReadonlySet<string>>(new Set());
   // WP-2423 (M76): a new dish starts with every allergen unanswered; a declared one, as declared.
   const [allergens, setAllergens] = useState<ReadonlyMap<string, AllergenAnswer>>(() =>
     startingAllergenAnswers(dish?.allergens, allergenChoices),
@@ -366,6 +378,27 @@ export function DishEditor({
         amountMinor: o.amountMinor ?? "0",
       })),
     })),
+    // WP-2423 (M166): the choices answered here, among those the dish keeps.
+    ...((answers) => (answers.length === 0 ? {} : { choiceAllergens: answers }))(
+      choicePrices.flatMap((g) =>
+        g.options
+          .filter((o) => choiceAnswered.has(o.optionReference))
+          .map((o) => ({
+            optionReference: o.optionReference,
+            name:
+              (source?.groups ?? [])
+                .flatMap((group) => group.options)
+                .find((option) => option.optionReference === o.optionReference)?.name ??
+              o.optionReference,
+            declared: [...(choiceAdds.get(o.optionReference.slice(-12)) ?? [])].map(
+              (allergenReference) => ({
+                allergenReference,
+                classification: "Contains" as const,
+              }),
+            ),
+          })),
+      ),
+    ),
     allergens: recipeAllergens
       ? null
       : charge
@@ -948,6 +981,24 @@ export function DishEditor({
                               />
                             </label>
                           ) : null}
+                          {options.has(option.optionReference) &&
+                          !recipeAllergens &&
+                          !charge &&
+                          allergenChoices.length > 0 ? (
+                            <ChoiceAdds
+                              choice={option.name}
+                              allergenChoices={allergenChoices}
+                              picked={choiceAdds.get(option.optionReference.slice(-12))}
+                              onChange={(picked) => {
+                                setChoiceAdds((current) =>
+                                  new Map(current).set(option.optionReference.slice(-12), picked),
+                                );
+                                setChoiceAnswered((current) =>
+                                  new Set(current).add(option.optionReference),
+                                );
+                              }}
+                            />
+                          ) : null}
                         </li>
                       ))}
                   </ul>
@@ -1190,5 +1241,60 @@ export function DishEditor({
         ) : null}
       </fieldset>
     </form>
+  );
+}
+
+/**
+ * WP-2423 (M166): what one choice adds to the dish's allergens (egg in egg fried rice), ticked
+ * from the Brand's list. Folded to one line ("Adds: none" / "Adds: Egg") until opened.
+ */
+export function ChoiceAdds({
+  choice,
+  allergenChoices,
+  picked,
+  onChange,
+}: {
+  readonly choice: string;
+  readonly allergenChoices: readonly AllergenChoice[];
+  readonly picked: ReadonlySet<string> | undefined;
+  readonly onChange: (picked: ReadonlySet<string>) => void;
+}) {
+  const named = allergenChoices
+    .filter((entry) => picked?.has(entry.allergenReference) === true)
+    .map((entry) => allergenName(entry.code ?? "", entry.name));
+  return (
+    <details className="dish-editor__choice-adds">
+      <summary aria-label={t("Allergens {choice} adds", { choice })}>
+        {picked === undefined
+          ? t("Adds allergens? Not answered")
+          : named.length === 0
+            ? t("Adds no allergens")
+            : t("Adds: {allergens}", { allergens: named.join(listSeparator()) })}
+      </summary>
+      <div
+        className="table-allergies__choices"
+        role="group"
+        aria-label={t("Allergens {choice} adds", { choice })}
+      >
+        {allergenChoices.map((entry) => (
+          <label key={entry.allergenReference} className="table-allergies__choice">
+            <input
+              type="checkbox"
+              checked={picked?.has(entry.allergenReference) === true}
+              onChange={(event) => {
+                const next = new Set(picked ?? []);
+                if (event.currentTarget.checked) next.add(entry.allergenReference);
+                else next.delete(entry.allergenReference);
+                onChange(next);
+              }}
+            />
+            <span>{allergenName(entry.code ?? "", entry.name)}</span>
+          </label>
+        ))}
+        <button type="button" onClick={() => onChange(new Set())}>
+          {t("Adds none")}
+        </button>
+      </div>
+    </details>
   );
 }

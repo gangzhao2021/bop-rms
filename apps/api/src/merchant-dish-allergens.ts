@@ -693,6 +693,176 @@ export async function declareDishAllergens(
   }
 }
 
+/** WP-2423 (M166): the stand-in item code for one dish size's choice (unique per size and choice). */
+export const choiceStandInCode = (skuReference: string, optionReference: string) =>
+  ("DECL-OPT-" + skuReference.slice(-12) + "-" + optionReference.slice(-12)).toUpperCase();
+
+/**
+ * WP-2423 sold-out-and-allergen-safety (M166): what one choice of a dish adds, declared by staff.
+ * The choice gets its own stand-in item (DECL-OPT-, never stock-tracked) holding the declaration,
+ * which the dish's option recipe then adds instead of "no change", so the reviewed menu, guests
+ * and the kitchen read the choice's own allergens. An empty declaration ("adds none") is recorded
+ * too (the answer, with who and when). In the caller's transaction.
+ */
+export async function declareChoiceAllergens(
+  tx: unknown,
+  input: {
+    readonly scope: {
+      readonly tenantReference: string;
+      readonly brandReference: string;
+      readonly storeReference: string;
+    };
+    readonly actorReference: string;
+    readonly may: (action: string) => Promise<boolean>;
+    readonly at: string;
+    readonly locale: string;
+    readonly nextReference: () => string;
+    readonly operationReference: string;
+    readonly skuReference: string;
+    readonly optionReference: string;
+    readonly choiceName: string;
+    readonly declared: readonly {
+      readonly allergenReference: string;
+      readonly classification: "Contains" | "CrossContactPossible";
+    }[];
+  },
+): Promise<{ readonly itemReference: string }> {
+  const { may } = input;
+  for (const action of [
+    "catalog.allergen.declare",
+    "inventory.item.create",
+    "inventory.item.activate",
+  ])
+    if (!(await may(action))) fail("PermissionDenied");
+  const s = input.scope;
+  const step = (purpose: string) => derivedReference(input.operationReference, purpose);
+  const registry = await currentAllergenRegistry(tx as never, s);
+  if (registry === null) return fail("RegistryMissing");
+  const known = new Set(registry.entries.map((entry) => entry.allergenReference));
+  if (input.declared.some((a) => !known.has(a.allergenReference))) fail("Invalid");
+  const internalCode = choiceStandInCode(input.skuReference, input.optionReference);
+  const store = createPostgresInventoryItemStore(
+    { run: (work) => work(tx as unknown as InventoryItemTransaction) },
+    { tenantReference: s.tenantReference, brandReference: s.brandReference },
+  );
+  const itemCommand = (
+    purpose: string,
+    action: "Create" | "Activate",
+    payload: Record<string, unknown>,
+  ) =>
+    executeInventoryItemCommand(
+      {
+        tenantReference: s.tenantReference,
+        brandReference: s.brandReference,
+        actorReference: input.actorReference,
+        purpose: "InventoryItemManagement",
+        operationReference: step(purpose),
+        occurredAt: input.at,
+        action,
+        payload,
+      },
+      {
+        authorization: {
+          authorize: async (request) =>
+            (await may(request.permission)) ? { authorized: true } : null,
+        },
+        audit: {
+          create: async ({ command: c, after }) => ({
+            auditId: step(purpose + "-audit"),
+            brandId: c.brandReference,
+            actor: { type: "User", reference: c.actorReference },
+            actionCode: "INVENTORY_ITEM_" + c.action.toUpperCase(),
+            targetType: "InventoryItem",
+            targetId: after.itemReference,
+            reasonCode: "STAFF_DECLARED_ALLERGENS",
+            correlationId: c.operationReference,
+            occurredAt: c.occurredAt,
+            sourceChannel: "MERCHANT_WEB",
+            dataClassification: "Internal",
+            retentionPolicyCode: "AUDIT_STANDARD",
+            retentionPolicyVersion: 1,
+          }),
+        },
+        references: {
+          generate: () => input.nextReference(),
+          hashIntent: digest,
+          equals: (left, right) => left === right,
+        },
+        repository: store,
+      },
+    );
+  let item = (await listInventoryRecipeIngredientFacts(tx as never, s)).find(
+    (candidate) => candidate.internalCode === internalCode,
+  );
+  const itemReference =
+    item?.itemReference ??
+    String(
+      parseInventoryReference(
+        (
+          await itemCommand("choice-item", "Create", {
+            internalCode,
+            itemType: "FinishedGood",
+            localizedNames: {
+              [input.locale]: (input.choiceName + " (allergens declared by staff)").slice(0, 120),
+            },
+            baseUnit: {
+              unitCode: "EA",
+              dimension: "Count",
+              displayPrecision: 0,
+              ledgerPrecision: 0,
+              roundingMode: "HalfEven",
+            },
+            trackingPolicy: {
+              stockTrackingEnabled: false,
+              lotTrackingMode: "NoLot",
+              defaultShelfLifeDays: null,
+              expiryWarningDays: null,
+              issuePolicy: "FIFO",
+              negativeStockPolicy: "AllowWithWarning",
+            },
+          })
+        ).item.itemReference,
+      ),
+    );
+  const stored = await store.load(parseInventoryReference(itemReference));
+  if (stored === null) return fail("Conflict");
+  if (stored.lifecycle !== "Active")
+    await itemCommand("choice-item-activate", "Activate", {
+      itemReference,
+      expectedVersion: stored.aggregateVersion,
+      reasonCode: "STAFF_DECLARED_ALLERGENS",
+    });
+  item = (await listInventoryRecipeIngredientFacts(tx as never, s)).find(
+    (candidate) => candidate.itemReference === itemReference,
+  );
+  if (item === undefined || item.stockTracked) return fail("Conflict");
+  const history = await listIngredientDeclarationHistory(tx as never, s, item.itemReference);
+  const latest = history.find(
+    (d) =>
+      d.registryVersionReference === registry.registryVersionReference &&
+      d.itemVersionReference === item?.configurationOperationReference &&
+      Date.parse(d.validUntil) > Date.parse(input.at),
+  );
+  if (latest === undefined || allergenKey(latest.allergens) !== allergenKey(input.declared))
+    await recordIngredientAllergenDeclaration(tx as never, s, {
+      evidenceReference: step("choice-declaration"),
+      itemReference: item.itemReference,
+      itemVersionReference: item.configurationOperationReference,
+      registryVersionReference: registry.registryVersionReference,
+      allergens: input.declared,
+      sourceKind: staffAllergenDeclarationSource,
+      documentReference: "Declared by staff in the menu",
+      note: null,
+      validUntil: new Date(
+        Date.parse(input.at) + staffDeclarationValidityDays * 86_400_000,
+      ).toISOString(),
+      actorReference: input.actorReference,
+      at: input.at,
+      auditReference: step("choice-declaration-audit"),
+    });
+  return { itemReference: item.itemReference };
+}
+
 export function createMerchantDishAllergens(options: {
   persistence: PersistentMerchantBffOptions;
   authentication: Pick<MerchantBffService, "authorize">;
@@ -742,5 +912,55 @@ export function createMerchantDishAllergens(options: {
       ),
     );
   };
-  return { command };
+  /**
+   * WP-2423 (M166): one choice's own allergens, declared by staff (the dish save calls it; not a
+   * route). Answers the stand-in item the choice's option recipe adds.
+   */
+  const declareChoice = async (input: {
+    sessionCookie: unknown;
+    csrf: unknown;
+    operationReference: string;
+    skuReference: string;
+    optionReference: string;
+    choiceName: string;
+    declared: readonly {
+      readonly allergenReference: string;
+      readonly classification: "Contains" | "CrossContactPossible";
+    }[];
+  }) => {
+    const current = await session(input);
+    return retryTransactionConflict(() =>
+      options.persistence.transactions.run((tx: Tx) =>
+        withRememberedBrandAuthorization(tx, async () => {
+          const scope = await resolveBrand(tx, input.sessionCookie, current.sessionReference).catch(
+            onlyRefusal(() => fail("PermissionDenied")),
+          );
+          try {
+            return await declareChoiceAllergens(tx, {
+              scope: {
+                tenantReference: String(scope.tenantReference),
+                brandReference: String(scope.context.brand.brandReference),
+                storeReference: String(scope.selectedStoreReference),
+              },
+              actorReference: String(scope.actorReference),
+              may: async (action) => (await scope.authorizeAction(action))?.effect === "Allow",
+              at: options.persistence.now(),
+              locale: options.locale,
+              nextReference: () => options.references.next(),
+              operationReference: input.operationReference,
+              skuReference: input.skuReference,
+              optionReference: input.optionReference,
+              choiceName: input.choiceName,
+              declared: input.declared,
+            });
+          } catch (error) {
+            if (error instanceof AllergenDeclarationError)
+              return fail(error.code === "ALLERGEN_IDEMPOTENCY_CONFLICT" ? "Conflict" : "Invalid");
+            throw error;
+          }
+        }),
+      ),
+    );
+  };
+  return { command, declareChoice };
 }

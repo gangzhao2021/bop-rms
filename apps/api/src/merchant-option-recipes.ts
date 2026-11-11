@@ -613,6 +613,12 @@ export function createMerchantOptionRecipes(options: {
     readonly skuReference: string;
     /** The dish's choices; each with the item it adds to the recipe (a combo's), or null. */
     readonly choices: ReadonlyMap<string, string | null>;
+    /**
+     * WP-2423 (M166): choices whose own allergens staff answered in this save. A covered choice
+     * whose published recipe is "no change" or adds an earlier staff answer is changed to what
+     * `choices` says now; a real recipe change set under Option recipes is kept.
+     */
+    readonly restated?: ReadonlySet<string>;
   }): Promise<{
     readonly remaining: number;
     readonly waitingForAllergens: boolean;
@@ -641,7 +647,44 @@ export function createMerchantOptionRecipes(options: {
               rows.map((row) => row.target),
               at,
             );
-            const uncovered = rows.filter((row) => coverage.get(row.target)?.covered !== true);
+            const missing = rows.filter((row) => coverage.get(row.target)?.covered !== true);
+            // WP-2423 (M166): covered choices whose staff answer changed in this save.
+            const restated = input.restated ?? new Set<string>();
+            const restatedRows = rows.filter(
+              (row) =>
+                coverage.get(row.target)?.covered === true &&
+                restated.has(row.target.optionReference),
+            );
+            let staleAnswers: typeof rows = [];
+            if (restatedRows.length > 0) {
+              const published = await listOptionRecipeChanges(
+                rtx(tx),
+                scope,
+                restatedRows.map((row) => row.target),
+              );
+              const standIns = new Set(
+                (await recipeIngredientItems(tx, s, at, { staffDeclared: true })).items
+                  .filter((item) => item.internalCode.startsWith("DECL-OPT-") && !item.stockTracked)
+                  .map((item) => item.itemReference),
+              );
+              staleAnswers = restatedRows.filter((row) => {
+                const change = changeOf(published, row.target);
+                if (change === null || change.publishedAt === null) return false;
+                const want = input.choices.get(row.target.optionReference) ?? null;
+                const content = change.content;
+                const staffs =
+                  content.kind === "NoChange" ||
+                  (content.kind === "Add" &&
+                    content.toItemReference !== null &&
+                    standIns.has(content.toItemReference));
+                if (!staffs) return false;
+                return want === null
+                  ? content.kind !== "NoChange"
+                  : !(content.kind === "Add" && content.toItemReference === want);
+              });
+            }
+            const stale = new Set(staleAnswers);
+            const uncovered = [...missing, ...staleAnswers];
             if (uncovered.length === 0)
               return { remaining: 0, waitingForAllergens: false, needsPerson: 0 };
             // No recipe for the size yet: its allergens are not declared, so there is nothing a
@@ -660,6 +703,7 @@ export function createMerchantOptionRecipes(options: {
             const ours = uncovered.filter((row) => {
               const change = changeOf(latest, row.target);
               return (
+                stale.has(row) ||
                 change === null ||
                 change.publishedAt === null ||
                 change.content.kind === "NoChange" ||

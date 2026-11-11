@@ -34,6 +34,11 @@ export async function recipeIngredientItems(
     );
   }
   const items = await listInventoryRecipeIngredientFacts(tx as never, scope);
+  // WP-2423 (M166): a choice's stand-in for the allergens staff declared for it (never stock).
+  if (options.staffDeclared === true)
+    for (const item of items)
+      if (item.internalCode.startsWith("DECL-OPT-") && !item.stockTracked)
+        staffItems.add(item.itemReference);
   const registry = await currentAllergenRegistry(tx as never, scope);
   const declarations = new Map(
     (await listCurrentIngredientDeclarations(tx as never, scope, at))

@@ -950,8 +950,27 @@ export function createMerchantMenus(options: {
          * listing the menu again makes it the reviewed list. Absent otherwise.
          */
         readonly changedByRecipe?: true;
+        /**
+         * WP-2423 (M166): what each choice answered on this page adds (by the choice reference's
+         * last 12 characters, as its stand-in is named); an empty list: adds none.
+         */
+        readonly choiceAllergens?: readonly {
+          readonly optionKey: string;
+          readonly declared: readonly { allergenReference: string; classification: string }[];
+        }[];
       }
     >();
+    // WP-2423 (M166): each choice's stand-in, by the size it belongs to.
+    const choiceStandIns = new Map<string, { optionKey: string; itemReference: string }[]>();
+    for (const item of items) {
+      const match = /^DECL-OPT-([0-9A-F]{12})-([0-9A-F]{12})$/u.exec(item.internalCode);
+      if (match === null || item.stockTracked) continue;
+      const key = (match[1] ?? "").toLowerCase();
+      choiceStandIns.set(key, [
+        ...(choiceStandIns.get(key) ?? []),
+        { optionKey: (match[2] ?? "").toLowerCase(), itemReference: item.itemReference },
+      ]);
+    }
     const skus = new Set([
       ...recipes.flatMap((recipe) => recipe.bindings.map((binding) => binding.skuReference)),
       ...sources.flatMap((source) => (source.skuReference === null ? [] : [source.skuReference])),
@@ -994,6 +1013,26 @@ export function createMerchantMenus(options: {
               ? unansweredFor(item?.itemReference)
               : [],
           ...(changed.has(sku) ? { changedByRecipe: true as const } : {}),
+          ...(choiceStandIns.has(sku.slice(-12))
+            ? {
+                choiceAllergens: (choiceStandIns.get(sku.slice(-12)) ?? []).flatMap((standIn) => {
+                  const declaration = declarations.get(standIn.itemReference);
+                  return declaration === undefined
+                    ? []
+                    : [
+                        {
+                          optionKey: standIn.optionKey,
+                          declared: declaration.allergens
+                            .filter((a) => current.has(a.allergenReference))
+                            .map((a) => ({
+                              allergenReference: a.allergenReference,
+                              classification: a.classification,
+                            })),
+                        },
+                      ];
+                }),
+              }
+            : {}),
         });
     }
     await brandScope(tx, s.owner.brandReference);

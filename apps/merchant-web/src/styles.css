@@ -10295,3 +10295,11 @@ tr[data-drop-target="true"] {
   margin: 0 0 12px;
   color: var(--bop-color-danger);
 }
+
+/* WP-2423 (M166): what a choice adds of its own, folded to one line. */
+.dish-editor__choice-adds summary {
+  color: var(--bop-color-text-muted);
+  font-size: 13px;
+  cursor: pointer;
+  min-height: 32px;
+}

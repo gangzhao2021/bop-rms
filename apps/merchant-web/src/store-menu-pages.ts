@@ -452,6 +452,17 @@ export interface DishAllergens {
    * contains; guests and the kitchen already see it, and listing again makes it the reviewed list.
    */
   readonly changedByRecipe?: true;
+  /**
+   * WP-2423 (M166): what each choice answered on this page adds, by the choice reference's last 12
+   * characters (an empty list: adds none). Absent: no choice answered yet.
+   */
+  readonly choiceAllergens?: readonly {
+    readonly optionKey: string;
+    readonly declared: readonly {
+      readonly allergenReference: string;
+      readonly classification: AllergenClassification;
+    }[];
+  }[];
 }
 export interface AllergenChoice {
   readonly allergenReference: string;
@@ -488,6 +499,18 @@ export interface SaveDishCommand {
    * ingredients, such as the per-head tea.
    */
   readonly allergens: DishAllergenAnswers | "NoIngredients" | null;
+  /**
+   * WP-2423 (M166): what each choice answered in this save adds ("adds none": an empty list);
+   * choices not listed keep their answer. Absent when none was answered.
+   */
+  readonly choiceAllergens?: readonly {
+    readonly optionReference: string;
+    readonly name: string;
+    readonly declared: readonly {
+      readonly allergenReference: string;
+      readonly classification: AllergenClassification;
+    }[];
+  }[];
 }
 /**
  * WP-2423 (M76, Owner default 2026-11-06): a declaration answers every allergen on the Brand's
