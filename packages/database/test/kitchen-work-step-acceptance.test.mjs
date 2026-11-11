@@ -535,10 +535,12 @@ it("a Store with 150 finished and 10 open tickets and 400 dishes in 24 hours rea
       const items = [];
       let cursor = null;
       for (let page = 0; page < 6; page += 1) {
+        // The board read asks with the instant the trusted context answers (one clock).
+        f.query.observedAt = new Date().toISOString();
         const result = await board.list({
           ...f.scope,
           actorReference: f.id(0x600),
-          observedAt: new Date().toISOString(),
+          observedAt: f.query.observedAt,
           filters: {
             orderReference: null,
             ticketReference: null,

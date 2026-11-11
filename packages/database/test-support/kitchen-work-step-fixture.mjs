@@ -371,6 +371,11 @@ export async function createKitchenStepFixture(context, prefix) {
     transaction.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
       brand + ":" + store + ":kitchen_work_queue_v1",
     ]);
+  /**
+   * The instant the trusted context answers for a board read. A read sends the same instant it
+   * was asked at, so a test sets it once instead of two clocks racing to the same millisecond.
+   */
+  const query = { observedAt: null };
   /** The queue read model with the pilot composition's bounds. */
   const board = (source = {}) =>
     createPostgresKitchenQueueReadModel({
@@ -396,7 +401,7 @@ export async function createKitchenStepFixture(context, prefix) {
           resolveQueryAuthority: async () => ({
             ...scope,
             actorReference: id(0x600),
-            observedAt: new Date().toISOString(),
+            observedAt: query.observedAt ?? new Date().toISOString(),
           }),
         },
         transactions: {
@@ -443,6 +448,7 @@ export async function createKitchenStepFixture(context, prefix) {
     api,
     as,
     board,
+    query,
     brand,
     close,
     connect,
