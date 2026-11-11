@@ -178,10 +178,13 @@ const commandBudgets = {
  * Every statement this process sends to PostgreSQL while one real staff round is sent is counted
  * (the per-connection SET ROLE this test's pool adds is not: the pilot logs in as its role). At
  * about 0.33 ms a statement on the pilot's container, the count is the time. Before (564b8217):
- * about 9,550 statements, 3.1–3.5 s; now about 5,600 (one-trip transaction setup, scope settings
- * sent only when they change, repeated stable reads answered inside a transaction, each guest
- * check of the table cart in one transaction).
+ * 8,088 statements (opening a table), 3.1–3.5 s on the container; now about 4,160 (one-trip
+ * transaction setup, scope settings sent only when they change, repeated stable reads answered
+ * inside a transaction, each guest check of the table cart in one transaction). The budget, 4,400,
+ * is about 6% above that: 4,400 × 0.33 ms ≈ 1.45 s of database time, so a regression that would
+ * take the round towards 2 s fails here. The 2 s target itself is only shown by the v15 measurement.
  */
+const roundBudget = 4400;
 const roundStatements = { on: false, count: 0 };
 const clientQuery = pg.Client.prototype.query;
 pg.Client.prototype.query = function (config, ...rest) {
@@ -1596,7 +1599,7 @@ it("the real staff round command takes a round from table entry to the card mach
       const firstOperation = reference();
       const firstLines = [line(2, soup.skuReference, "no onions")];
       // M35: the round that opens the table, from Send to the card machine's amount.
-      const first = await withinRoundBudget("staff round (opens the table)", 5200, () =>
+      const first = await withinRoundBudget("staff round (opens the table)", roundBudget, () =>
         send(server, {
           operationReference: firstOperation,
           lines: firstLines,
@@ -1676,7 +1679,7 @@ it("the real staff round command takes a round from table entry to the card mach
 
       // A later round of the table's Order, a paper round taken during an outage.
       // M35: a later round of an open table.
-      const second = await withinRoundBudget("staff round (later round)", 5200, () =>
+      const second = await withinRoundBudget("staff round (later round)", roundBudget, () =>
         send(server, { lines: [line(1)], recordedAfterOutage: true }),
       );
       assert.deepEqual(

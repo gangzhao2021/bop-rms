@@ -335,6 +335,17 @@ const together: AsyncLocalStorage<TogetherSlot> = ((globalThis as Record<symbol,
  * also see one consistent set of facts. Not for work that must commit part of itself on its own:
  * nothing is committed until `work` ends, and any failure rolls all of it back. Snapshot reads,
  * other pools and calls already inside one run as before.
+ *
+ * Restrictions, which the caller must keep:
+ * - `work` must run its reads one after another, never concurrently (no `Promise.all` over runs).
+ *   Every ordinary run on the pool shares the one transaction and its one connection, so a second
+ *   run started while another is still in flight fails with
+ *   TENANT_DATABASE_TRANSACTION_CONCURRENT_QUERY (which the guest sees as "unavailable") where it
+ *   used to get its own connection.
+ * - Every ordinary run on the same pool joins, whichever runner started it: a runner with another
+ *   scope runs under its own Brand and Store scope, but its own transaction limits and connection
+ *   budget do not apply; the first run's transaction (and its time limit) is used for all of them.
+ * After a deploy, the api log is checked for TENANT_DATABASE_TRANSACTION_CONCURRENT_QUERY.
  */
 export async function runTogether<T>(work: () => Promise<T>): Promise<T> {
   if (together.getStore() !== undefined) return work();
