@@ -124,9 +124,58 @@ it("DEC-DINE-IN-PAY-LATER S4: answers the guest's table payment in public fields
       tip: { kind: "Percent", percent: 15 },
       // WP-2423 item 8 ④: no part — the whole table.
       partNumber: null,
+      // WP-2423 同桌结账: no dishes chosen — the whole table.
+      choice: null,
     },
     null,
   );
+});
+
+it("WP-2423 同桌结账: a guest pays only what they added or dishes they choose; nothing else", async () => {
+  const f = await setup();
+  const start = (choice: unknown) =>
+    f.send({
+      action: "Start",
+      operationReference: "01909968-0000-7000-8000-000000000001",
+      tip: { kind: "None" },
+      choice,
+    });
+  expect((await start({ kind: "Mine" })).status).toBe(200);
+  expect(f.port.start).toHaveBeenLastCalledWith(
+    expect.anything(),
+    expect.objectContaining({ choice: { kind: "Mine" }, partNumber: null }),
+    null,
+  );
+  const dish = "01909968-0000-7000-8000-0000000000d1";
+  expect(
+    (await start({ kind: "Chosen", dishes: [{ orderItemReference: dish, quantity: 2 }] })).status,
+  ).toBe(200);
+  expect(f.port.start).toHaveBeenLastCalledWith(
+    expect.anything(),
+    expect.objectContaining({
+      choice: { kind: "Chosen", dishes: [{ orderItemReference: dish, quantity: 2 }] },
+    }),
+    null,
+  );
+  expect((await start({ kind: "Rest" })).status).toBe(200);
+  const calls = f.port.start.mock.calls.length;
+  for (const choice of [
+    { kind: "Everything" },
+    { kind: "Mine", amountMinor: "1" },
+    { kind: "Chosen", dishes: [] },
+    { kind: "Chosen", dishes: [{ orderItemReference: dish, quantity: 0 }] },
+    { kind: "Chosen", dishes: [{ orderItemReference: "dumplings", quantity: 1 }] },
+    {
+      kind: "Chosen",
+      dishes: [
+        { orderItemReference: dish, quantity: 1 },
+        { orderItemReference: dish, quantity: 1 },
+      ],
+    },
+    { kind: "Chosen", dishes: [{ orderItemReference: dish, quantity: 1, priceMinor: "1" }] },
+  ])
+    expect((await start(choice)).status, JSON.stringify(choice)).toBe(400);
+  expect(f.port.start.mock.calls.length).toBe(calls);
 });
 
 it("refuses a chosen amount or table, a cross-site request and an unknown tip", async () => {

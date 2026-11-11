@@ -229,6 +229,10 @@ it("a table splits the bill evenly and pays it part by part", () => journey("Pai
 // WP-2423 按菜分单: each dish goes to one part at its own price and tax, or everyone shares it; the
 // parts are paid as usual, and a dish left out, a part with nothing or a changed bill is refused.
 it("a table splits the bill by dish and pays it part by part", () => journey("PaidByDish"));
+// WP-2423 同桌结账 (DEC-OWNER-DEFAULTS-2026-11-06): guests at one table pay by dish on their phones
+// as they go; two phones choosing the same dish at once, a failed card, staff take the rest.
+it("guests pay by dish as they go; each dish is paid once and the table closes", () =>
+  journey("PaidByGuests"));
 // WP-2423 取舍 18 DEC-MEMBER-POINTS: points on a real bill: a comp and a redemption come off what
 // earns, tax and tip never earn, the reports and settlement still agree, refunds take back.
 it("a member earns and spends points on a table's bill, and the books still agree", () =>
@@ -5351,6 +5355,337 @@ async function journey(journeyEnding) {
           };
           return { intents, stripe, created: () => created };
         }
+        /**
+         * WP-2423 同桌结账 (DEC-OWNER-DEFAULTS-2026-11-06, pay at the end): guests pay by dish as
+         * they go. Two phones choosing the same dish at once: one part wins, the other is told
+         * someone just started paying for it (its Provider transaction cancelled); the database
+         * refuses a forced second part for a dish already in one. A failed card gives the dish back
+         * (the part is withdrawn, never deleted). The other phone pays one dish; staff take the
+         * rest in cash. Each dish is paid once, the parts add up to the bill to the cent (the last
+         * part takes the round's tax rounding), the table counts as paid and closes; a refund of
+         * one part is bounded by that part.
+         */
+        async function paidByGuestsEnding() {
+          const { intents, stripe, created } = providerStandIn();
+          const payments = createDiningTableOnlinePayments({
+            scope: ownerScope,
+            providerAccountReference: provider,
+            environment: "Test",
+            provider: stripe,
+            transactions: transactions(),
+            now,
+            nextReference: fresh,
+          });
+          const adder = String(items1[0].addedByParticipantReference);
+          const guestAt = (guestSessionReference, participantReference) => ({
+            diningSessionReference: sessionReference,
+            guestSessionReference,
+            participantReference,
+            allowed: async () => true,
+          });
+          // Phone A added the dishes; phone B (another guest at the table) added none.
+          const a = guestAt(guestSession, adder),
+            b = guestAt(tableGuest, id(0x6b2));
+          const none = { kind: "None" };
+          const current = await bill();
+          const owing = current.rounds.filter((round) => round.totalMinor !== "0");
+          assert.equal(owing.length, 1);
+          const [first] = owing;
+          const dish = first.items[0];
+          assert.equal(dish.quantity, 2);
+          const totalMinor = BigInt(first.totalMinor);
+          // Nothing split yet: every dish can be chosen, two units of the one dish.
+          assert.equal(current.split, null);
+          assert.deepEqual(
+            current.guestChoices.dishes.map((entry) => [
+              entry.orderItemReference,
+              entry.unitMinor.length,
+            ]),
+            [[dish.orderItemReference, 2]],
+          );
+          const viewA = await payments.read(a);
+          assert.equal(viewA.choices.mine.count, 2);
+          assert.equal(viewA.choices.mine.amountMinor, totalMinor.toString());
+          assert.equal(viewA.choices.dishes[0].mine, true);
+          const viewB = await payments.read(b);
+          assert.equal(viewB.choices.mine, null);
+          assert.equal(viewB.choices.dishes[0].mine, false);
+          // "Only what I added" on a phone that added nothing: nothing to pay.
+          await assert.rejects(
+            payments.start(b, { operationReference: fresh(), tip: none, choice: { kind: "Mine" } }),
+            { code: "TABLE_ONLINE_PAYMENT_NOTHING_OWED" },
+          );
+          const chosen = (quantity) => ({
+            kind: "Chosen",
+            dishes: [{ orderItemReference: dish.orderItemReference, quantity }],
+          });
+          // ── Both phones choose the dish at once (A both, B one): exactly one part is recorded.
+          const raced = await Promise.allSettled([
+            payments.start(a, { operationReference: fresh(), tip: none, choice: chosen(2) }),
+            payments.start(b, { operationReference: fresh(), tip: none, choice: chosen(1) }),
+          ]);
+          const won = raced.filter((entry) => entry.status === "fulfilled");
+          const lost = raced.filter((entry) => entry.status === "rejected");
+          assert.equal(won.length, 1, JSON.stringify(lost.map((entry) => String(entry.reason))));
+          assert.equal(lost[0].reason.code, "TABLE_ONLINE_PAYMENT_DISHES_TAKEN");
+          assert.equal(created(), 2);
+          // The loser's Provider transaction was cancelled: nothing can be charged on it.
+          assert.equal(
+            [...new Set(intents.values())].filter((intent) => intent.status === "Cancelled").length,
+            1,
+          );
+          const winner = raced[0].status === "fulfilled" ? a : b;
+          const parts = () =>
+            rows(
+              `SELECT p.part_number,p.amount_minor::text AS amount,a.choice,a.actor_type,a.completes_bill,
+ (SELECT count(*)::int FROM rms_payment.dining_table_split_part_unit u WHERE u.split_plan_id=p.split_plan_id AND u.part_number=p.part_number) AS units,
+ (SELECT w.reason FROM rms_payment.dining_table_split_part_withdrawal w WHERE w.split_plan_id=p.split_plan_id AND w.part_number=p.part_number) AS withdrawn
+ FROM rms_payment.dining_table_split_part p JOIN rms_payment.dining_table_split_part_append a USING (split_plan_id,part_number)
+ JOIN rms_payment.dining_table_split_plan q USING (split_plan_id) WHERE q.order_id=$1 ORDER BY p.part_number`,
+              [orderReference],
+            );
+          const [plan] = await rows(
+            "SELECT split_plan_id::text AS plan,mode,part_count,plan_version FROM rms_payment.dining_table_split_plan WHERE order_id=$1",
+            [orderReference],
+          );
+          assert.deepEqual([plan.mode, plan.part_count], ["ByGuests", 0]);
+          assert.equal((await parts()).length, 1);
+          // A forced second part for a unit already in one is refused when it commits.
+          const [taken] = await rows(
+            "SELECT order_item_id::text AS item,unit_number FROM rms_payment.dining_table_split_part_unit WHERE split_plan_id=$1 ORDER BY unit_number LIMIT 1",
+            [plan.plan],
+          );
+          await assert.rejects(
+            (async () => {
+              await admin.query("BEGIN");
+              try {
+                await admin.query(
+                  "INSERT INTO rms_payment.dining_table_split_part (split_plan_id,brand_id,store_id,order_id,part_number,amount_minor,subtotal_minor,tax_minor) VALUES ($1,$2,$3,$4,2,1,1,0)",
+                  [plan.plan, scope.brandReference, scope.storeReference, orderReference],
+                );
+                await admin.query(
+                  "INSERT INTO rms_payment.dining_table_split_part_round (split_plan_id,part_number,brand_id,store_id,order_id,order_batch_id,round_minor,subtotal_minor,tax_minor) VALUES ($1,2,$2,$3,$4,$5,1,1,0)",
+                  [
+                    plan.plan,
+                    scope.brandReference,
+                    scope.storeReference,
+                    orderReference,
+                    first.orderBatchReference,
+                  ],
+                );
+                await admin.query(
+                  "INSERT INTO rms_payment.dining_table_split_part_unit (split_plan_id,part_number,brand_id,store_id,order_item_id,unit_number) VALUES ($1,2,$2,$3,$4,$5)",
+                  [
+                    plan.plan,
+                    scope.brandReference,
+                    scope.storeReference,
+                    taken.item,
+                    taken.unit_number,
+                  ],
+                );
+                await admin.query(
+                  "INSERT INTO rms_payment.dining_table_split_part_append (split_plan_id,part_number,tenant_id,brand_id,store_id,order_id,operation_id,intent_digest,choice,actor_type,actor_id,guest_session_id,completes_bill,recorded_at,audit_id) VALUES ($1,2,$2,$3,$4,$5,$6,$7,'Chosen','Guest',NULL,$8,false,date_trunc('milliseconds',now()),$9)",
+                  [
+                    plan.plan,
+                    tenant,
+                    scope.brandReference,
+                    scope.storeReference,
+                    orderReference,
+                    fresh(),
+                    "sha256:" + "d".repeat(64),
+                    tableGuest,
+                    fresh(),
+                  ],
+                );
+                await admin.query("COMMIT");
+              } catch (error) {
+                await admin.query("ROLLBACK");
+                throw error;
+              }
+            })(),
+            /split plan parts do not match the plan/u,
+          );
+          // The plan and its parts are a record: never changed afterwards.
+          for (const table of ["dining_table_split_part_append", "dining_table_split_part_unit"])
+            await assert.rejects(admin.query(`DELETE FROM rms_payment.${table}`));
+
+          // ── The winner's card is declined: the part is withdrawn, its dishes unpaid again.
+          for (const intent of new Set(intents.values()))
+            if (intent.status === "RequiresCustomerAction") intent.status = "Failed";
+          const failed = await payments.refresh(winner);
+          assert.equal(failed.attempt, null);
+          assert.deepEqual(
+            (await parts()).map((part) => [part.part_number, part.withdrawn]),
+            [[1, "PaymentFailed"]],
+          );
+          assert.equal(failed.choices.dishes[0].unitMinor.length, 2);
+          await assert.rejects(
+            admin.query("DELETE FROM rms_payment.dining_table_split_part_withdrawal"),
+          );
+
+          // ── Phone B pays one dish for the table (choose dishes): its part is paid online.
+          const paying = await payments.start(b, {
+            operationReference: fresh(),
+            tip: none,
+            choice: chosen(1),
+          });
+          assert.equal(paying.attempt.partNumber, 2);
+          const unitMinor = BigInt(paying.attempt.totalMinor);
+          // Phone A can't take the dish B is paying for, only the other one.
+          await assert.rejects(
+            payments.start(a, { operationReference: fresh(), tip: none, choice: chosen(2) }),
+            { code: "TABLE_ONLINE_PAYMENT_DISHES_TAKEN" },
+          );
+          // A staff split is locked once a guest started paying by dish.
+          await assert.rejects(
+            createMerchantDiningTableSplit({
+              persistence: persistenceOf(server),
+              authentication: server.authentication,
+              nextReference: fresh,
+            })({
+              ...as(server),
+              command: {
+                operationReference: fresh(),
+                diningSessionReference: sessionReference,
+                mode: "Even",
+                people: 2,
+                rounds: null,
+              },
+            }),
+            { code: "TABLE_CHECKOUT_SPLIT_LOCKED" },
+          );
+          for (const intent of new Set(intents.values()))
+            if (intent.status === "RequiresCustomerAction") intent.status = "Captured";
+          const paidB = await payments.refresh(b);
+          const half = await bill();
+          assert.equal(half.split.mode, "ByGuests");
+          assert.equal(half.split.paidInFull, false);
+          assert.deepEqual(
+            half.split.parts.map((part) => [part.partNumber, part.choice, part.payment?.method]),
+            [[2, "Chosen", "Online"]],
+          );
+          assert.equal(half.owed.totalMinor, (totalMinor - unitMinor).toString());
+          assert.equal(half.rounds[0].paid, false);
+          assert.equal(paidB.bill.split.paidInFull, false);
+          // The whole table is no longer one payment: staff take the rest (or a guest pays it).
+          assert.equal(half.split.restMinor, (totalMinor - unitMinor).toString());
+          await assert.rejects(
+            settleWith(server, { partNumber: 3, tip: none, tenderedMinor: "100000" }),
+            { code: "TABLE_CHECKOUT_INPUT_INVALID" },
+          );
+          // ── Staff take the rest at the counter in cash: the last part takes the round's rest.
+          const rest = await settleWith(server, {
+            tip: none,
+            tenderedMinor: "100000",
+            owedMinor: half.split.restMinor,
+          });
+          assert.equal(rest.status, "Recorded");
+          assert.equal(rest.bill.split.paidInFull, true);
+          assert.equal(rest.bill.owed.totalMinor, "0");
+          assert.ok(rest.bill.rounds.every((round) => round.paid || round.totalMinor === "0"));
+          assert.ok(rest.bill.consistent);
+          assert.equal(rest.bill.guestChoices.dishes.length, 0);
+          assert.deepEqual(
+            (await parts()).map((part) => [
+              part.part_number,
+              part.choice,
+              part.actor_type,
+              part.units,
+              part.completes_bill,
+              part.withdrawn,
+            ]),
+            [
+              // The winner's part took the whole dish when it was A's (the last of the bill then).
+              [1, "Chosen", "Guest", winner === a ? 2 : 1, winner === a, "PaymentFailed"],
+              [2, "Chosen", "Guest", 1, false, null],
+              [3, "Rest", "Staff", 1, true, null],
+            ],
+          );
+          // Each dish once, to the cent: the paid parts' lines add up to the round exactly.
+          const [lines] = await rows(
+            "SELECT sum(r.round_minor)::text AS paid,count(DISTINCT s.settlement_id)::int AS n FROM rms_payment.dining_table_settlement_round r JOIN rms_payment.dining_table_settlement s USING (settlement_id) WHERE s.order_id=$1",
+            [orderReference],
+          );
+          assert.deepEqual([lines.paid, lines.n], [totalMinor.toString(), 2]);
+          assert.deepEqual(
+            await rows("SELECT rms_payment.dining_table_by_guests_paid($1) AS paid", [plan.plan]),
+            [{ paid: true }],
+          );
+          // Paid in full: no part can be added, a phone can't pay again, nothing is written off.
+          await assert.rejects(
+            payments.start(a, { operationReference: fresh(), tip: none, choice: { kind: "Rest" } }),
+            { code: "TABLE_ONLINE_PAYMENT_ALREADY_PAID" },
+          );
+          await assert.rejects(settleWith(server, { tip: none, tenderedMinor: "100000" }), {
+            code: "TABLE_CHECKOUT_NOTHING_OWED",
+          });
+          // ── A refund of the cash part is bounded by that part; B's part is untouched.
+          const cashRefund = (amountMinor) =>
+            createMerchantDiningTableCashRefund({
+              persistence: persistenceOf(manager),
+              authentication: manager.authentication,
+              nextReference: fresh,
+            })({
+              ...as(manager),
+              command: {
+                orderReference,
+                operationReference: fresh(),
+                amountMinor,
+                reasonCode: "FOOD_ISSUE",
+                partNumber: 3,
+              },
+            });
+          const restTotal = BigInt(
+            rest.bill.split.parts.find((part) => part.partNumber === 3).payment.totalMinor,
+          );
+          await assert.rejects(cashRefund((restTotal + 1n).toString()), {
+            code: "TABLE_PAYMENT_TOO_MUCH",
+          });
+          assert.equal((await cashRefund("100")).status, "Recorded");
+          const refunded = await bill();
+          assert.equal(refunded.refundedMinor, "100");
+          assert.equal(refunded.split.paidInFull, true);
+          assert.equal(
+            refunded.split.parts.find((part) => part.partNumber === 2).payment.totalMinor,
+            unitMinor.toString(),
+          );
+          await assertSalesCountEveryRoundOnce();
+          // The table counts as paid and closes.
+          await cookAndServeRound1();
+          const progress = await createMerchantDiningOrderProgress({
+            persistence: persistenceOf(server),
+            locale: "en-CA",
+            authentication: server.authentication,
+          })({ ...as(server), query: { orderReference } });
+          const closedOrder = await createMerchantDiningOrderCloseCommand({
+            persistence: persistenceOf(server),
+            authentication: server.authentication,
+            resolveConfiguration: createDiningOrderCloseConfiguration({
+              ...ownerScope,
+              providerAccountReference: provider,
+              environment: "Test",
+            }),
+            newReference: fresh,
+            audit: { retentionPolicyCode: "ORDER_AUDIT", retentionPolicyVersion: 1 },
+          })({
+            ...as(server),
+            command: {
+              orderReference,
+              operationReference: fresh(),
+              expectedOrderVersion: progress.currentOrderVersion,
+              expectedClosureVersion: progress.closureVersion,
+              reasonCode: "ORDER_COMPLETED",
+            },
+          });
+          assert.equal(closedOrder.status, "Committed");
+          assert.equal((await closing(server, "Finalize")).phase, "Closed");
+          // Another Store sees none of it.
+          const other = await rows(
+            "SELECT count(*)::int AS n FROM rms_payment.dining_table_split_part_append WHERE store_id<>$1",
+            [scope.storeReference],
+          );
+          assert.equal(other[0].n, 0);
+        }
         async function paidOnlineEnding() {
           const { intents, stripe, created } = providerStandIn();
           const payments = createDiningTableOnlinePayments({
@@ -6470,6 +6805,10 @@ async function journey(journeyEnding) {
           ]),
           [[true, null]],
         );
+        if (ending === "PaidByGuests") {
+          await paidByGuestsEnding();
+          return;
+        }
         if (ending === "PaidByDish") {
           // What this table still owes: one round, one line of two dishes.
           const current = await bill();

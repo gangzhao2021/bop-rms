@@ -15,6 +15,7 @@ import {
 import {
   createPostgresCardMachinePaymentStore,
   createPostgresDiningTableSettlementStore,
+  diningTableSplitPaidInFull,
   listStoreOrderBatchPaymentOutcomes,
   listStoreOrderBatchesWithOnlinePayment,
   readPaymentRemainingRefundable,
@@ -269,15 +270,8 @@ export function createMerchantDiningTableClosePlan(options: {
             : [];
           const tablePaid =
             tableSettlements.some((settlement) => settlement.part === null) ||
-            (splitPlan !== undefined &&
-              splitPlan.mode !== "Whole" &&
-              splitPlan.parts.every((part) =>
-                tableSettlements.some(
-                  (settlement) =>
-                    settlement.part?.splitPlanReference === splitPlan.splitPlanReference &&
-                    settlement.part.partNumber === part.partNumber,
-                ),
-              ));
+            // WP-2423 同桌结账: guests paying by dish, once their parts cover the bill.
+            (splitPlan !== undefined && diningTableSplitPaidInFull(splitPlan, tableSettlements));
           // WP-2423 item 8 ⑤: rounds waiting for staff OK (the same read as Tables and checkout).
           const waitingForStaff = new Set(
             (await listRoundsWaitingForStaff(tx, owner, [orderReference], stillAllowed)).map(

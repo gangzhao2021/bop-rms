@@ -44,6 +44,7 @@ import {
 } from "@rms/ordering";
 import {
   createPostgresDiningTableSettlementStore,
+  diningTableSplitPaidInFull,
   createPostgresCardMachinePaymentStore,
   createPostgresOrdinaryRefundPositionSource,
   createPostgresPaymentCompensationRefundPositionSource,
@@ -723,6 +724,7 @@ export function assertDiningParticipant(
   return Object.freeze({
     guestSessionReference: String(guest.sessionReference),
     diningSessionReference: String(guest.diningSessionReference),
+    participantReference: String(guest.diningParticipantReference),
   });
 }
 
@@ -1275,12 +1277,9 @@ function postgresDependencies(
             .filter(([, sellable]) => sellable === teaSellable || declaredCharges.has(sellable))
             .map(([orderItem]) => orderItem),
         ]);
+        // WP-2423 同桌结账: guests paying by dish have paid once their parts cover the bill.
         const splitPaid =
-          splitPlan !== undefined &&
-          splitPlan.mode !== "Whole" &&
-          splitPlan.parts.every((part) =>
-            tableSettlements.some((settlement) => settlement.part?.partNumber === part.partNumber),
-          );
+          splitPlan !== undefined && diningTableSplitPaidInFull(splitPlan, tableSettlements);
         const settledRounds = new Set(
           tableSettlements
             .filter((settlement) => settlement.part === null || splitPaid)

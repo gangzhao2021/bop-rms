@@ -52,6 +52,7 @@ import {
 import {
   createPostgresCardMachinePaymentStore,
   createPostgresDiningTableSettlementStore,
+  diningTableSplitPaidInFull,
   type CardMachinePaymentRecord,
   listStoreOrderBatchPaymentOutcomes,
   listStoreOrderBatchesWithOnlinePayment,
@@ -1230,11 +1231,8 @@ export function createPersistentMerchantOrderQueue(options: {
                 if (
                   settlement === undefined &&
                   plan !== undefined &&
-                  plan.mode !== "Whole" &&
                   plan.parts.length > 0 &&
-                  plan.parts.every((part) =>
-                    parts.some((entry) => entry.part?.partNumber === part.partNumber),
-                  )
+                  diningTableSplitPaidInFull(plan, parts)
                 ) {
                   const refunded = await tableRefundedMinor(
                     businessTransaction as never,

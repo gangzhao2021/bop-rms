@@ -7,11 +7,12 @@ import {
   createPostgresDiningTableSettlementStore,
   createRetrieveIntentRequest,
   type DiningTableOnlinePaymentRecord,
-  type DiningTableSplitPlanRecord,
   type PaymentProviderAdapter,
   type PaymentProviderOutcome,
 } from "@rms/payment";
 import {
+  diningTableFreeUnits,
+  diningTableGuestPart,
   readDiningTableBill,
   roundOrdersOf,
   tableTipMinor,
@@ -46,6 +47,10 @@ export type DiningTableOnlinePaymentErrorCode =
   | "TABLE_ONLINE_PAYMENT_TIP_CHOICES_CHANGED"
   /** WP-2423 item 8 ⑤ D4: some of the table's dishes wait for staff to confirm them first. */
   | "TABLE_ONLINE_PAYMENT_ROUNDS_WAITING"
+  /** WP-2423 同桌结账: someone at the table just started paying for some of these dishes. */
+  | "TABLE_ONLINE_PAYMENT_DISHES_TAKEN"
+  /** WP-2423 同桌结账: staff split this bill; a guest pays one of its parts. */
+  | "TABLE_ONLINE_PAYMENT_SPLIT_BY_STAFF"
   | "TABLE_ONLINE_PAYMENT_UNAVAILABLE";
 export class DiningTableOnlinePaymentError extends Error {
   constructor(readonly code: DiningTableOnlinePaymentErrorCode) {
@@ -65,7 +70,25 @@ export interface TableOnlinePaymentAuthority {
   allowed(tx: ConsumerTransaction): Promise<boolean>;
   /** The guest's chosen language for dish names on what they read (absent: as stored). */
   readonly displayLocale?: string | null | undefined;
+  /** WP-2423 同桌结账: the guest's place at the table ("only what I added"); absent for staff. */
+  readonly participantReference?: string | null | undefined;
 }
+
+/**
+ * WP-2423 同桌结账 (DEC-OWNER-DEFAULTS-2026-11-06): which dishes a guest pays on their phone at a
+ * table that pays at the end — "only what I added", dishes they choose (also for others), or the
+ * rest of the table once others paid some. Absent: the whole table (or a part staff split).
+ */
+export type DiningTableGuestPayChoice =
+  | { readonly kind: "Mine" }
+  | { readonly kind: "Rest" }
+  | {
+      readonly kind: "Chosen";
+      readonly dishes: readonly {
+        readonly orderItemReference: string;
+        readonly quantity: number;
+      }[];
+    };
 interface Scope {
   readonly tenantReference: string;
   readonly brandReference: string;
@@ -104,6 +127,30 @@ export interface DiningTableOnlinePaymentView {
    * which part it was for (null: the whole table) — so a declined part is said, not silent.
    */
   readonly lastOwnDeclined?: null | { readonly partNumber: number | null };
+  /**
+   * WP-2423 同桌结账: what this guest may pay by dish now (null: the table is paid, split by staff,
+   * or not at checkout) — the dishes still to pay (those this phone added marked), and what "only
+   * what I added" comes to (null when nothing of theirs is left to pay).
+   */
+  readonly choices: null | {
+    /** The Store's setting: the whole table, or only what this phone added, chosen to start. */
+    readonly defaultScope: "WholeTable" | "OwnDishes";
+    readonly mine: null | { readonly count: number; readonly amountMinor: string };
+    readonly dishes: readonly {
+      readonly orderItemReference: string;
+      readonly displayName: string;
+      readonly roundNumber: number;
+      readonly mine: boolean;
+      readonly unitMinor: readonly string[];
+      readonly unitSubtotalMinor: readonly string[];
+    }[];
+    /** What is left of each round (a choice taking its last dishes pays exactly this). */
+    readonly rounds: readonly {
+      readonly roundNumber: number;
+      readonly restMinor: string;
+      readonly restSubtotalMinor: string;
+    }[];
+  };
 }
 
 /**
@@ -195,8 +242,51 @@ export function createDiningTableOnlinePayments(options: DiningTableOnlinePaymen
     authority: TableOnlinePaymentAuthority,
     orderReference: string,
   ) => store(authority).listOnlinePaymentsByOrders(tx, [orderReference]);
+  const choicesOf = (
+    current: Awaited<ReturnType<typeof readDiningTableBill>>,
+    authority: TableOnlinePaymentAuthority,
+  ): DiningTableOnlinePaymentView["choices"] => {
+    if (
+      current.guestChoices === null ||
+      current.guestChoices.dishes.length === 0 ||
+      current.sessionPhase !== "Closing" ||
+      current.waitingRounds.length > 0
+    )
+      return null;
+    const participant = authority.participantReference ?? null;
+    const mineUnits = participant === null ? [] : diningTableFreeUnits(current, participant);
+    let mine: { count: number; amountMinor: string } | null = null;
+    if (mineUnits.length > 0)
+      try {
+        mine = {
+          count: mineUnits.length,
+          amountMinor: diningTableGuestPart(current, mineUnits).part.amountMinor.toString(),
+        };
+      } catch {
+        mine = null;
+      }
+    return Object.freeze({
+      defaultScope: current.guestChoices.defaultScope,
+      mine: mine === null ? null : Object.freeze(mine),
+      dishes: Object.freeze(
+        current.guestChoices.dishes.map((dish) =>
+          Object.freeze({
+            orderItemReference: dish.orderItemReference,
+            displayName: dish.displayName,
+            roundNumber: dish.roundNumber,
+            mine:
+              participant !== null &&
+              current.dishAdders.get(dish.orderItemReference) === participant,
+            unitMinor: dish.unitMinor,
+            unitSubtotalMinor: dish.unitSubtotalMinor,
+          }),
+        ),
+      ),
+      rounds: current.guestChoices.rounds,
+    });
+  };
   const viewOf = (
-    current: DiningTableBill,
+    current: Awaited<ReturnType<typeof readDiningTableBill>>,
     attempts: readonly DiningTableOnlinePaymentRecord[],
     authority: TableOnlinePaymentAuthority,
   ): DiningTableOnlinePaymentView => {
@@ -207,19 +297,18 @@ export function createDiningTableOnlinePayments(options: DiningTableOnlinePaymen
           attempt.outcome === null &&
           attempt.guestSessionReference === authority.guestSessionReference,
       ) ?? attempts.find((attempt) => attempt.outcome === null && attempt.part === null);
-    const { settlementRecord, splitPlanRecord, ...publicBill } = current as DiningTableBill & {
-      settlementRecord?: unknown;
-      splitPlanRecord?: unknown;
-    };
+    const { settlementRecord, splitPlanRecord, dishAdders, splitRounds, ...publicBill } = current;
     void settlementRecord;
+    void dishAdders;
+    void splitRounds;
     return Object.freeze({
       lastOwnDeclined: lastOwnDeclinedOf(
         attempts,
         authority.guestSessionReference,
-        (splitPlanRecord as DiningTableSplitPlanRecord | null | undefined)?.splitPlanReference ??
-          null,
+        splitPlanRecord?.splitPlanReference ?? null,
       ),
       bill: publicBill,
+      choices: choicesOf(current, authority),
       attempt:
         open === undefined
           ? null
@@ -241,9 +330,11 @@ export function createDiningTableOnlinePayments(options: DiningTableOnlinePaymen
    * and its tip on its own share before tax; a bill paid whole, the whole table.
    */
   const owedPlan = (
-    current: DiningTableBill & { splitPlanRecord?: DiningTableSplitPlanRecord | null },
+    current: Awaited<ReturnType<typeof readDiningTableBill>>,
     tip: DiningTableTip,
     partNumber: number | null,
+    choice: DiningTableGuestPayChoice | null = null,
+    participantReference: string | null = null,
   ) => {
     if (current.paymentTiming !== "PayLater" || current.sessionPhase !== "Closing")
       return fail("TABLE_ONLINE_PAYMENT_NOT_CHECKING_OUT");
@@ -252,6 +343,7 @@ export function createDiningTableOnlinePayments(options: DiningTableOnlinePaymen
     // A guest round still waiting for staff is not on the bill yet: staff decide it first.
     if (current.waitingRounds.length > 0) return fail("TABLE_ONLINE_PAYMENT_ROUNDS_WAITING");
     if (!current.consistent) return fail("TABLE_ONLINE_PAYMENT_BILL_CHANGED");
+    if (choice !== null) return guestPlan(current, tip, choice, participantReference);
     if ((current.split === null) !== (partNumber === null))
       return fail("TABLE_ONLINE_PAYMENT_INPUT_INVALID");
     const part =
@@ -286,6 +378,71 @@ export function createDiningTableOnlinePayments(options: DiningTableOnlinePaymen
         part === null || plan === null
           ? null
           : { splitPlanReference: plan.splitPlanReference, partNumber: part.partNumber },
+      guestPart: null,
+    };
+  };
+
+  /**
+   * WP-2423 同桌结账: the next part guests paying by dish append — this guest's own dishes, the
+   * dishes they chose, or the rest — priced on the bill as it stands (DEC-TAX-WHOLE-RECEIPT: the
+   * part taking the last of a round takes its rounding), the tip on the part's own share before
+   * tax. A bill staff split another way is paid by its parts only.
+   */
+  const guestPlan = (
+    current: Awaited<ReturnType<typeof readDiningTableBill>>,
+    tip: DiningTableTip,
+    choice: DiningTableGuestPayChoice,
+    participantReference: string | null,
+  ) => {
+    if (current.split !== null && current.split.mode !== "ByGuests")
+      return fail("TABLE_ONLINE_PAYMENT_SPLIT_BY_STAFF");
+    if (current.split?.paidInFull === true) return fail("TABLE_ONLINE_PAYMENT_ALREADY_PAID");
+    const owed = current.rounds.filter((round) => !round.paid && round.totalMinor !== "0");
+    if (current.orderReference === null || owed.length === 0 || current.guestChoices === null)
+      return fail("TABLE_ONLINE_PAYMENT_NOTHING_OWED");
+    let units: { orderItemReference: string; unit: number }[];
+    if (choice.kind === "Mine") {
+      if (participantReference === null) return fail("TABLE_ONLINE_PAYMENT_INPUT_INVALID");
+      units = diningTableFreeUnits(current, participantReference);
+    } else if (choice.kind === "Rest") units = diningTableFreeUnits(current, null);
+    else {
+      const free = diningTableFreeUnits(current, null);
+      units = [];
+      for (const dish of choice.dishes) {
+        const left = free.filter((unit) => unit.orderItemReference === dish.orderItemReference);
+        // Someone at the table took some of these dishes meanwhile (or they are not on the bill).
+        if (left.length < dish.quantity) return fail("TABLE_ONLINE_PAYMENT_DISHES_TAKEN");
+        units.push(...left.slice(0, dish.quantity));
+      }
+    }
+    if (units.length === 0) return fail("TABLE_ONLINE_PAYMENT_NOTHING_OWED");
+    let chosen: ReturnType<typeof diningTableGuestPart>;
+    try {
+      chosen = diningTableGuestPart(current, units);
+    } catch {
+      return fail("TABLE_ONLINE_PAYMENT_BILL_CHANGED");
+    }
+    const refused = tipRefusal(current.tips, tip);
+    if (refused === "TipsOff") return fail("TABLE_ONLINE_PAYMENT_TIPS_OFF");
+    if (refused === "TipChoicesChanged") return fail("TABLE_ONLINE_PAYMENT_TIP_CHOICES_CHANGED");
+    let tipMinor: bigint;
+    try {
+      tipMinor = tableTipMinor(tip, chosen.part.subtotalMinor);
+    } catch {
+      return fail("TABLE_ONLINE_PAYMENT_INPUT_INVALID");
+    }
+    return {
+      orderReference: current.orderReference,
+      owed,
+      roundsMinor: chosen.part.amountMinor,
+      tipMinor,
+      part: null,
+      guestPart: {
+        choice: choice.kind,
+        chosen,
+        plan: current.splitPlanRecord,
+        billMinor: BigInt(current.owed.totalMinor),
+      },
     };
   };
 
@@ -483,9 +640,14 @@ export function createDiningTableOnlinePayments(options: DiningTableOnlinePaymen
         readonly tip: DiningTableTip;
         /** WP-2423 item 8 ④: the part of a split bill this guest pays (null: the whole table). */
         readonly partNumber?: number | null;
+        /** WP-2423 同桌结账: the dishes this guest pays (absent: the whole table or a part). */
+        readonly choice?: DiningTableGuestPayChoice | null;
       },
     ): Promise<DiningTableOnlinePaymentView> {
       const partNumber = command.partNumber ?? null;
+      const choice = command.choice ?? null;
+      if (choice !== null && partNumber !== null) return fail("TABLE_ONLINE_PAYMENT_INPUT_INVALID");
+      const participant = authority.participantReference ?? null;
       if (authority.guestSessionReference === null)
         return fail("TABLE_ONLINE_PAYMENT_INPUT_INVALID");
       // An earlier attempt may have finished with the Provider meanwhile.
@@ -495,6 +657,7 @@ export function createDiningTableOnlinePayments(options: DiningTableOnlinePaymen
         diningSessionReference: authority.diningSessionReference,
         tip: command.tip,
         ...(partNumber === null ? {} : { partNumber }),
+        ...(choice === null ? {} : { choice }),
       });
       const plan = await options.transactions.run(async (tx) => {
         const current = await bill(tx, authority, true);
@@ -516,16 +679,16 @@ export function createDiningTableOnlinePayments(options: DiningTableOnlinePaymen
           open.some((attempt) => attempt.guestSessionReference === authority.guestSessionReference)
         )
           return { view: viewOf(current, attempts, authority) };
+        // Guests paying by dish: another guest's part takes only its own dishes.
         if (
           open.some(
             (attempt) =>
               attempt.part === null ||
-              partNumber === null ||
-              attempt.part.partNumber === partNumber,
+              (choice === null && (partNumber === null || attempt.part.partNumber === partNumber)),
           )
         )
           return fail("TABLE_ONLINE_PAYMENT_ANOTHER_GUEST_PAYING");
-        return { plan: owedPlan(current, command.tip, partNumber) };
+        return { plan: owedPlan(current, command.tip, partNumber, choice, participant) };
       });
       if ("view" in plan) return plan.view;
       const onlinePaymentReference = attemptReference(command.operationReference);
@@ -548,9 +711,41 @@ export function createDiningTableOnlinePayments(options: DiningTableOnlinePaymen
           // The bill may have changed while the Provider answered: what is owed must still be it
           // (read under the bill's fence, so a staff "Send to kitchen" can't change it meanwhile).
           const current = await bill(tx, authority, false, true);
-          const again = owedPlan(current, command.tip, partNumber);
+          const again = owedPlan(current, command.tip, partNumber, choice, participant);
+          // WP-2423 同桌结账: the dishes are still the ones the guest saw (no one took them meanwhile).
+          if (
+            again.guestPart !== null &&
+            JSON.stringify(plan.plan.guestPart?.chosen.units ?? null) !==
+              JSON.stringify(again.guestPart.chosen.units)
+          )
+            return fail("TABLE_ONLINE_PAYMENT_DISHES_TAKEN");
           if (again.roundsMinor !== plan.plan.roundsMinor || again.tipMinor !== plan.plan.tipMinor)
             return fail("TABLE_ONLINE_PAYMENT_BILL_CHANGED");
+          let part = again.part;
+          if (again.guestPart !== null) {
+            const existing = again.guestPart.plan;
+            const appended = await store(authority).appendGuestSplitPart(tx, {
+              createPlan: existing === null ? { billMinor: again.guestPart.billMinor } : null,
+              splitPlanReference: existing?.splitPlanReference ?? options.nextReference(),
+              operationReference: command.operationReference,
+              intentDigest,
+              diningSessionReference: authority.diningSessionReference,
+              orderReference: again.orderReference,
+              part: again.guestPart.chosen.part,
+              units: again.guestPart.chosen.units,
+              completesBill: again.guestPart.chosen.completesBill,
+              choice: again.guestPart.choice,
+              actor: {
+                type: "Guest",
+                guestSessionReference: authority.guestSessionReference as string,
+              },
+              roundOrders: roundOrdersOf(current.rounds),
+              recordedAt: milliseconds(options.now()),
+              auditReference: options.nextReference(),
+              correlationReference: command.operationReference,
+            });
+            part = appended.part;
+          }
           await store(authority).recordOnlinePayment(tx, {
             onlinePaymentReference,
             operationReference: command.operationReference,
@@ -565,7 +760,7 @@ export function createDiningTableOnlinePayments(options: DiningTableOnlinePaymen
             providerIntentReference: String(created.providerIntentReference),
             createdAt: milliseconds(options.now()),
             auditReference: options.nextReference(),
-            ...(again.part === null ? {} : { part: again.part }),
+            ...(part === null ? {} : { part }),
           });
         });
       } catch (error) {
@@ -589,7 +784,13 @@ export function createDiningTableOnlinePayments(options: DiningTableOnlinePaymen
             ? "TABLE_ONLINE_PAYMENT_ALREADY_PAID"
             : /already paying/u.test(message)
               ? "TABLE_ONLINE_PAYMENT_ANOTHER_GUEST_PAYING"
-              : "TABLE_ONLINE_PAYMENT_UNAVAILABLE",
+              : // Two phones chose the same dishes at once: the database kept the first.
+                choice !== null &&
+                  /split plan parts do not match|not the plan's next part|current split/u.test(
+                    message,
+                  )
+                ? "TABLE_ONLINE_PAYMENT_DISHES_TAKEN"
+                : "TABLE_ONLINE_PAYMENT_UNAVAILABLE",
         );
       }
       return read(authority);

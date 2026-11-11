@@ -15,6 +15,7 @@ import type { createCustomerOrderStatusRead } from "./customer-order-status-read
 import { assertDiningParticipant } from "./customer-dining-session-read.js";
 import {
   DiningTableOnlinePaymentError,
+  type DiningTableGuestPayChoice,
   type DiningTableOnlinePaymentView,
   type TableOnlinePaymentAuthority,
   type createDiningTableOnlinePayments,
@@ -66,6 +67,7 @@ export function createCustomerDiningTablePayment(options: CustomerDiningTablePay
     return Object.freeze({
       diningSessionReference: first.diningSessionReference,
       guestSessionReference: first.guestSessionReference,
+      participantReference: first.participantReference,
       allowed: async (tx: ConsumerTransaction) => {
         try {
           const again = await guestIn(tx, credentials);
@@ -139,11 +141,7 @@ export function createCustomerDiningTablePayment(options: CustomerDiningTablePay
         }),
       );
       const bill = view.bill;
-      const paidInFull =
-        bill.settlement !== null ||
-        (bill.split !== null &&
-          bill.split.parts.length > 0 &&
-          bill.split.parts.every((part) => part.payment !== null));
+      const paidInFull = bill.settlement !== null || (bill.split !== null && bill.split.paidInFull);
       // Written off, or closed with nothing paid: there is no receipt to show.
       if (bill.sessionPhase !== "Closed" || !paidInFull)
         throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
@@ -151,7 +149,12 @@ export function createCustomerDiningTablePayment(options: CustomerDiningTablePay
     },
     async start(
       credentials: Credentials,
-      command: { operationReference: string; tip: DiningTableTip; partNumber?: number | null },
+      command: {
+        operationReference: string;
+        tip: DiningTableTip;
+        partNumber?: number | null;
+        choice?: DiningTableGuestPayChoice | null;
+      },
       displayLocale?: string | null,
     ) {
       return options.payments.start({ ...(await authority(credentials)), displayLocale }, command);
@@ -233,7 +236,7 @@ export function customerTablePaymentBody(view: DiningTableOnlinePaymentView) {
       // WP-2423 item 8 ⑦: the tips this Store offers (none chosen for the guest), or tips off.
       tips: { enabled: bill.tips.enabled, tierPercents: bill.tips.tierPercents },
       state:
-        paid !== null || (bill.split !== null && bill.split.paidParts === bill.split.parts.length)
+        paid !== null || (bill.split !== null && bill.split.paidInFull)
           ? "Paid"
           : bill.writeOff !== null
             ? "Closed"
@@ -261,6 +264,7 @@ export function customerTablePaymentBody(view: DiningTableOnlinePaymentView) {
           ? null
           : {
               mode: bill.split.mode,
+              paidInFull: bill.split.paidInFull,
               paidParts: bill.split.paidParts,
               remainingMinor: bill.split.remainingMinor,
               parts: bill.split.parts.map((part) => ({
@@ -268,6 +272,7 @@ export function customerTablePaymentBody(view: DiningTableOnlinePaymentView) {
                 amountMinor: part.amountMinor,
                 subtotalMinor: part.subtotalMinor,
                 dishes: part.dishes,
+                ...(part.choice === undefined ? {} : { choice: part.choice }),
                 status:
                   part.payment !== null
                     ? "Paid"
@@ -278,6 +283,9 @@ export function customerTablePaymentBody(view: DiningTableOnlinePaymentView) {
                         : "ToPay",
               })),
             },
+      // WP-2423 同桌结账: what this phone may pay by dish (its own dishes marked; no names of
+      // other guests, no phone numbers).
+      choices: view.choices,
       // The whole-table receipt once paid (decision 5): one payment, never split by round.
       receipt:
         paid === null
@@ -385,6 +393,39 @@ export function customerSettledTableReceiptBody(view: DiningTableOnlinePaymentVi
   };
 }
 
+const uuidV7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+/**
+ * WP-2423 同桌结账: {kind: "Mine"} / {kind: "Rest"} / {kind: "Chosen", dishes: [{orderItemReference,
+ * quantity}]}; absent or null: the whole table (or the part named). Anything else is refused.
+ */
+export function parseGuestPayChoice(value: unknown): DiningTableGuestPayChoice | null {
+  if (value === undefined || value === null) return null;
+  const raw = readClosedRecord(value, Object.keys(value as object));
+  if ((raw.kind === "Mine" || raw.kind === "Rest") && Object.keys(raw).length === 1)
+    return { kind: raw.kind };
+  if (raw.kind !== "Chosen" || Object.keys(raw).length !== 2 || !Array.isArray(raw.dishes))
+    throw new Error("choice");
+  const dishes = raw.dishes.map((entry: unknown) => {
+    const dish = readClosedRecord(entry, ["orderItemReference", "quantity"]);
+    if (
+      typeof dish.orderItemReference !== "string" ||
+      !uuidV7.test(dish.orderItemReference) ||
+      !Number.isSafeInteger(dish.quantity) ||
+      (dish.quantity as number) < 1 ||
+      (dish.quantity as number) > 1000
+    )
+      throw new Error("choice");
+    return { orderItemReference: dish.orderItemReference, quantity: dish.quantity as number };
+  });
+  if (
+    dishes.length < 1 ||
+    dishes.length > 200 ||
+    new Set(dishes.map((dish) => dish.orderItemReference)).size !== dishes.length
+  )
+    throw new Error("choice");
+  return { kind: "Chosen", dishes };
+}
+
 const credential = /^[A-Za-z0-9_-]{43}$/u;
 function protect(response: Response) {
   response.setHeader("Cache-Control", "no-store");
@@ -401,6 +442,8 @@ const errorBodies: Readonly<Record<string, [number, string]>> = {
   TABLE_ONLINE_PAYMENT_TIPS_OFF: [409, "table_tips_turned_off"],
   TABLE_ONLINE_PAYMENT_TIP_CHOICES_CHANGED: [409, "table_tip_choices_changed"],
   TABLE_ONLINE_PAYMENT_ROUNDS_WAITING: [409, "table_rounds_waiting"],
+  TABLE_ONLINE_PAYMENT_DISHES_TAKEN: [409, "table_dishes_taken"],
+  TABLE_ONLINE_PAYMENT_SPLIT_BY_STAFF: [409, "table_split_by_staff"],
 };
 
 /** HTTP: POST {action: "Read" | "Start", ...}; POST /handoff for the secure card form. */
@@ -462,7 +505,8 @@ export class CustomerDiningTablePaymentHandler {
   }
   handler(): RequestHandler[] {
     return [
-      express.json({ limit: "2kb", strict: true }),
+      // WP-2423 同桌结账: a guest choosing dishes names each one (up to the bill's dishes).
+      express.json({ limit: "16kb", strict: true }),
       async (request, response) => {
         protect(response);
         const credentials = this.credentials(request);
@@ -474,6 +518,7 @@ export class CustomerDiningTablePaymentHandler {
               operationReference: string;
               tip: DiningTableTip;
               partNumber: number | null;
+              choice: DiningTableGuestPayChoice | null;
               displayLocale: string | null;
             }
           | null = null;
@@ -509,8 +554,10 @@ export class CustomerDiningTablePaymentHandler {
               "operationReference",
               "tip",
               ...(Object.hasOwn(body, "partNumber") ? ["partNumber"] : []),
+              ...(Object.hasOwn(body, "choice") ? ["choice"] : []),
               ...(Object.hasOwn(body, "locale") ? ["locale"] : []),
             ]);
+            const choice = parseGuestPayChoice(raw.choice);
             const partNumber =
               raw.partNumber === undefined || raw.partNumber === null
                 ? null
@@ -550,6 +597,7 @@ export class CustomerDiningTablePaymentHandler {
               operationReference: raw.operationReference,
               tip: parsed,
               partNumber,
+              choice,
               displayLocale: customerDisplayLocale(
                 raw.locale === undefined ? {} : { locale: raw.locale },
               ),
@@ -582,6 +630,7 @@ export class CustomerDiningTablePaymentHandler {
                     operationReference: command.operationReference,
                     tip: command.tip,
                     partNumber: command.partNumber,
+                    choice: command.choice,
                   },
                   command.displayLocale,
                 );
