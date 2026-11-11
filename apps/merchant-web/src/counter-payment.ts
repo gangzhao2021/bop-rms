@@ -54,6 +54,54 @@ export function payErrorText(
 }
 
 /**
+ * One card-machine (or cash) payment as staff entered it: the same key is the same payment command
+ * (a retry reuses its operation), a corrected slip, time or cash is a new one.
+ */
+export function payIntentKey(
+  orderBatchReference: string,
+  expectedTotalMinor: string,
+  inCash: boolean,
+  slip: string,
+  takenAt: string | null,
+  tenderedMinor: string | null,
+): string {
+  return JSON.stringify([
+    orderBatchReference,
+    expectedTotalMinor,
+    inCash ? "" : slip.trim(),
+    takenAt,
+    tenderedMinor,
+  ]);
+}
+
+/**
+ * DEC-PAPER-ORDER-PAID-AT-SEND: why a paper order's payment (taken during the outage) was not
+ * recorded with it, in words that never ask staff to charge the guest again.
+ */
+export function paperPaymentProblem(error: CounterOrderClientError, inCash = false): string {
+  switch (error.code) {
+    case "AmountChanged":
+      return error.totalMinor === null
+        ? t("The total changed. Check it against the paper slip, then record the payment.")
+        : t("The total is now {totalMinor}. Check it against the paper slip, then record it.", {
+            totalMinor: cad(error.totalMinor),
+          });
+    case "PaymentWindowClosed":
+    case "NotPayable":
+      return t(
+        "This paper order was taken off because its payment wasn't recorded in time. Enter the paper order again from the slip; don't charge the guest again.",
+      );
+    case "Unavailable":
+    case "OutcomeUnknown":
+      return t(
+        "The order is in, but its payment from the paper slip isn't recorded yet. Record it again below: the same payment is never counted twice.",
+      );
+    default:
+      return payErrorText(error, inCash);
+  }
+}
+
+/**
  * A date-time input value ("2026-10-13T14:05") read as Store time (WP-2423 Q21: the slip's time
  * where the Store is, not the device's zone) as an instant, or null.
  */
@@ -111,9 +159,41 @@ export function paymentWindowNotice(input: {
   readonly now: number;
   readonly tableMode: boolean;
   readonly timeZone?: string | undefined;
+  /**
+   * DEC-PAPER-ORDER-PAID-AT-SEND: a paper order whose payment (taken during the outage) did not
+   * record with it. Staff are told it is not in the day's takings until recorded and what the
+   * system does at the time, never to charge or take payment.
+   */
+  readonly paper?: boolean;
 }): { readonly tier: "warning" | "urgent"; readonly ended: boolean; readonly text: string } {
   const at = storeTime(input.payBy, input.timeZone);
   const remainingMs = Date.parse(input.payBy) - input.now;
+  if (input.paper === true) {
+    if (remainingMs <= 0)
+      return {
+        tier: "urgent",
+        ended: true,
+        text: t(
+          "Its payment wasn't recorded by {at}, so the system took this paper order off. Enter it again from the paper slip; don't charge the guest again.",
+          { at },
+        ),
+      };
+    const minutes = Math.max(1, Math.ceil(remainingMs / 60_000));
+    return {
+      tier: minutes <= paymentUrgentMinutes ? "urgent" : "warning",
+      ended: false,
+      text:
+        minutes <= paymentUrgentMinutes
+          ? t(
+              "{minutes} min left: record this paper order's payment by {at}. Until it is recorded the sale isn't in the day's takings; after {at} the system takes the order off and you enter it again.",
+              { minutes, at },
+            )
+          : t(
+              "Record this paper order's payment now. Until it is recorded the sale isn't in the day's takings; if it still isn't by {at}, the system takes the order off and you enter it again.",
+              { at },
+            ),
+    };
+  }
   if (remainingMs <= 0)
     return {
       tier: "urgent",
@@ -181,9 +261,19 @@ export function counterPayByTier(payBy: string, now: number | undefined) {
   return paymentWindowNotice({ payBy, now: now ?? Date.now(), tableMode: false }).tier;
 }
 /** The short row text of a counter order's pay-by time (the form says what to do). */
-export function counterPayByText(payBy: string, timeZone: string | undefined, now?: number) {
+export function counterPayByText(
+  payBy: string,
+  timeZone: string | undefined,
+  now?: number,
+  /** DEC-PAPER-ORDER-PAID-AT-SEND: a paper order, already paid during the outage. */
+  paper = false,
+) {
   const left = Date.parse(payBy) - (now ?? Date.now());
   const at = storeTime(payBy, timeZone);
+  if (paper)
+    return left <= 0
+      ? t("Not recorded by {at} · enter the paper order again", { at })
+      : t("Paid during the outage · record it by {at}, or it is taken off", { at });
   if (left <= 0) return t("Payment time ended at {at} · being released", { at: at });
   const minutes = Math.max(1, Math.ceil(left / 60_000));
   return minutes <= paymentUrgentMinutes

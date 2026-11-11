@@ -209,13 +209,18 @@ export function CounterAwaitingPayment({
           <p className="bop-muted">
             {/* WP-2423 M127: only those who may cancel are told to cancel; front of house asks a
                 manager, as the counter's charge step says. */}
-            {shown.some((order) => order.counter?.canCancelUnpaid === true)
-              ? t(
-                  "Take payment for each, on the card machine or in cash, and record it here before its time ends. A guest who isn't paying: cancel the order so its items go back to stock.",
+            {shown.every((order) => order.counter?.recordedAfterOutage === true)
+              ? // DEC-PAPER-ORDER-PAID-AT-SEND: paper orders were paid during the outage.
+                t(
+                  "These paper orders were paid during the outage, but their payment isn't recorded yet. Record each from its paper slip before its time ends; don't charge again.",
                 )
-              : t(
-                  "Take payment for each, on the card machine or in cash, and record it here before its time ends. A guest who isn't paying: ask a manager to cancel it; otherwise it is released at its time and its items go back to stock.",
-                )}
+              : shown.some((order) => order.counter?.canCancelUnpaid === true)
+                ? t(
+                    "Take payment for each, on the card machine or in cash, and record it here before its time ends. A guest who isn't paying: cancel the order so its items go back to stock.",
+                  )
+                : t(
+                    "Take payment for each, on the card machine or in cash, and record it here before its time ends. A guest who isn't paying: ask a manager to cancel it; otherwise it is released at its time and its items go back to stock.",
+                  )}
           </p>
         )}
         <ul className="counter-order__awaiting-list">
@@ -234,7 +239,12 @@ export function CounterAwaitingPayment({
                   </span>
                 </p>
                 <p className="order-accept-by" data-tier={counterPayByTier(payBy, now)}>
-                  {counterPayByText(payBy, timeZone, now)}
+                  {counterPayByText(
+                    payBy,
+                    timeZone,
+                    now,
+                    order.counter?.recordedAfterOutage === true,
+                  )}
                 </p>
                 {batch === undefined || !order.canRecordCardMachinePayment ? (
                   <p className="bop-muted">{t("Ask a manager to record its payment.")}</p>

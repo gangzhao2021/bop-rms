@@ -9372,4 +9372,44 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "收现金 {amount}（按 5 分取整），点清后在这里记录。记录后厨房才开始做这单。",
   "Awaiting payment at the counter": "等待柜台收款",
   "Paid in cash": "现金付款",
+  "These paper orders were paid during the outage, but their payment isn't recorded yet. Record each from its paper slip before its time ends; don't charge again.":
+    "这些纸质订单在停电/断网时已经付款，但付款还没录入。请在时间结束前按纸质单逐一录入，不要再收一次。",
+  "Paid during the outage, but its payment isn't recorded yet: record it below from the paper slip. Don't charge again. If it isn't recorded by {at}, the system takes it off and the paper order is entered again.":
+    "停电/断网时已付款，但付款还没录入：请在下方按纸质单录入，不要再收一次。如果 {at} 前没有录入，系统会撤下这单，需要重新录入纸质订单。",
+  "Not paid yet: take payment on the card machine or in cash, then record it below (or from Counter order). A guest who isn't paying: cancel it below so its items go back to stock.":
+    "尚未付款：请用刷卡机或现金收款，然后在下方（或在柜台点单）录入。客人不付款：在下方取消这单，菜品退回库存。",
+  "Not paid yet: take payment on the card machine or in cash, then record it below (or from Counter order). A guest who isn't paying: ask a manager to cancel it; otherwise it is released at {at} and its items go back to stock.":
+    "尚未付款：请用刷卡机或现金收款，然后在下方（或在柜台点单）录入。客人不付款：请经理取消；否则 {at} 自动释放，菜品退回库存。",
+  "Paid on the card machine during the outage.": "停电/断网时已用刷卡机付款。",
+  "How it was paid during the outage": "停电/断网时的付款方式",
+  "Sending records the order and the payment on the slip together. Don't charge the guest again. The slip's approval code, never the card number.":
+    "发送时会同时录入订单和签购单上的付款，不要再向客人收款。填签购单上的授权码，切勿填写卡号。",
+  "Sending records the order and the cash taken during the outage together. Don't take the cash again.":
+    "发送时会同时录入订单和停电/断网时收的现金，不要再收一次现金。",
+  "Send and record paper order": "发送并录入纸质订单",
+  "Paper order {orderNumber}: its payment isn't recorded yet":
+    "纸质订单 {orderNumber}：付款还没录入",
+  "Paid in cash during the outage": "停电/断网时现金付款",
+  "Paid on the card machine during the outage": "停电/断网时刷卡付款",
+  "Record paper payment · {amount}": "录入纸单付款 · {amount}",
+  "Don't charge the guest again. If the total isn't what the paper slip says, record it anyway and tell a manager, who corrects it on Orders with a recorded refund.":
+    "不要再向客人收款。如果总额和纸质单不一致，仍请录入并告诉经理，由经理在订单页用有记录的退款更正。",
+  "Card declined? Try another card.": "刷卡被拒？请换一张卡。",
+  "The total changed. Check it against the paper slip, then record the payment.":
+    "总额有变化。请和纸质单核对后再录入付款。",
+  "The total is now {totalMinor}. Check it against the paper slip, then record it.":
+    "总额现在是 {totalMinor}。请和纸质单核对后再录入。",
+  "This paper order was taken off because its payment wasn't recorded in time. Enter the paper order again from the slip; don't charge the guest again.":
+    "这张纸质订单的付款没有按时录入，已被撤下。请按纸质单重新录入，不要再向客人收款。",
+  "The order is in, but its payment from the paper slip isn't recorded yet. Record it again below: the same payment is never counted twice.":
+    "订单已录入，但纸质单上的付款还没录入。请在下方再录一次：同一笔付款不会重复计算。",
+  "Its payment wasn't recorded by {at}, so the system took this paper order off. Enter it again from the paper slip; don't charge the guest again.":
+    "{at} 前没有录入付款，系统已撤下这张纸质订单。请按纸质单重新录入，不要再向客人收款。",
+  "{minutes} min left: record this paper order's payment by {at}. Until it is recorded the sale isn't in the day's takings; after {at} the system takes the order off and you enter it again.":
+    "还剩 {minutes} 分钟：请在 {at} 前录入这张纸质订单的付款。录入前这笔销售不计入当天营业额；{at} 后系统会撤下这单，需要重新录入。",
+  "Record this paper order's payment now. Until it is recorded the sale isn't in the day's takings; if it still isn't by {at}, the system takes the order off and you enter it again.":
+    "请现在录入这张纸质订单的付款。录入前这笔销售不计入当天营业额；如果 {at} 前仍未录入，系统会撤下这单，需要重新录入。",
+  "Not recorded by {at} · enter the paper order again": "{at} 前未录入 · 请重新录入纸质订单",
+  "Paid during the outage · record it by {at}, or it is taken off":
+    "停电/断网时已付款 · 请在 {at} 前录入，否则会被撤下",
 });

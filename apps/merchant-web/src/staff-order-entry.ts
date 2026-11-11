@@ -454,7 +454,144 @@ export interface PlacedCounterOrder {
   readonly recordedAfterOutage: boolean;
   /** WP-2423 Q7 slice 2: the table a staff-entered round joined (null at the counter). */
   readonly tableLabel: string | null;
+  /**
+   * DEC-PAPER-ORDER-PAID-AT-SEND: a paper order's payment, recorded with it (or why it wasn't, so
+   * staff record it again). Null when no payment was sent with the order.
+   */
+  readonly paperPayment?: PaperPaymentOutcome | null;
 }
+/** How a paper order was paid during the outage, sent with the order. */
+export interface PaperPayment {
+  readonly operationReference: string;
+  readonly tender: "CardMachine" | "Cash";
+  readonly slipReference: string | null;
+  readonly takenAt: string;
+}
+export type PaperPaymentOutcome =
+  | { readonly kind: "Recorded"; readonly payment: RecordedCardPayment }
+  | { readonly kind: "NotRecorded"; readonly error: CounterOrderClientError };
+
+/** The placed order and, for a paper order, the outcome of its payment recorded with it. */
+function parsePlacedWithPayment(
+  value: unknown,
+  table: boolean,
+  paper: PaperPayment | undefined,
+): PlacedCounterOrder {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return invalid();
+  const { payment, paymentError, paymentTotalMinor, ...order } = value as Record<string, unknown>;
+  const placed = parsePlacedCounterOrder(order, table);
+  if (paper === undefined || (payment === undefined && paymentError === undefined)) {
+    if (payment !== undefined || paymentError !== undefined) return invalid();
+    return placed;
+  }
+  if (payment !== undefined)
+    return Object.freeze({
+      ...placed,
+      paperPayment: Object.freeze({
+        kind: "Recorded" as const,
+        payment: parseRecordedPayment(
+          { ...(payment as object), orderReference: placed.orderReference },
+          placed.orderReference,
+          paper.tender === "Cash",
+        ),
+      }),
+    });
+  return Object.freeze({
+    ...placed,
+    paperPayment: Object.freeze({
+      kind: "NotRecorded" as const,
+      error: paymentErrorOf(null, {
+        error: paymentError,
+        ...(paymentTotalMinor === undefined ? {} : { totalMinor: paymentTotalMinor }),
+      }),
+    }),
+  });
+}
+
+/** A recorded card-machine (or cash) payment as the server answers it. */
+function parseRecordedPayment(
+  body: unknown,
+  orderReference: string,
+  sentCash: boolean,
+): RecordedCardPayment {
+  const paidInCash = body !== null && typeof body === "object" && Object.hasOwn(body, "cash");
+  const raw = record(
+    body,
+    [
+      "status",
+      "orderReference",
+      "amountMinor",
+      "recordingReason",
+      "takenAt",
+      "recordedAt",
+      "acceptance",
+      ...(paidInCash ? ["cash"] : []),
+    ],
+    ["orderBatchReference"],
+  );
+  let cash: RecordedCardPayment["cash"] = null;
+  if (paidInCash) {
+    const c = record(raw.cash, ["cashTotalMinor", "roundingMinor", "tenderedMinor", "changeMinor"]);
+    if (
+      [c.cashTotalMinor, c.tenderedMinor, c.changeMinor].some(
+        (value) => typeof value !== "string" || !minorPattern.test(value),
+      ) ||
+      !sentCash
+    )
+      return invalid();
+    cash = Object.freeze({
+      cashTotalMinor: c.cashTotalMinor as string,
+      tenderedMinor: c.tenderedMinor as string,
+      changeMinor: c.changeMinor as string,
+    });
+  }
+  if (
+    (raw.status !== "Recorded" && raw.status !== "AlreadyRecorded") ||
+    (raw.acceptance !== "Accepted" && raw.acceptance !== "NotAccepted") ||
+    raw.orderReference !== orderReference ||
+    (raw.recordingReason !== "AtCounter" && raw.recordingReason !== "RecordedAfterOutage") ||
+    typeof raw.amountMinor !== "string" ||
+    !minorPattern.test(raw.amountMinor) ||
+    typeof raw.takenAt !== "string"
+  )
+    return invalid();
+  return Object.freeze({
+    status: raw.status,
+    amountMinor: raw.amountMinor,
+    recordingReason: raw.recordingReason,
+    takenAt: raw.takenAt,
+    acceptance: raw.acceptance,
+    cash,
+  });
+}
+
+/** Why a card-machine (or cash) payment was not recorded, from the server's error code. */
+function paymentErrorOf(status: number | null, body: Record<string, unknown>) {
+  const code = body.error;
+  if (status === 403 || code === "card_machine_permission_denied")
+    return new CounterOrderClientError("PermissionDenied");
+  if (code === "amount_changed")
+    return new CounterOrderClientError(
+      "AmountChanged",
+      null,
+      typeof body.totalMinor === "string" && minorPattern.test(body.totalMinor)
+        ? body.totalMinor
+        : null,
+    );
+  if (code === "payment_window_closed") return new CounterOrderClientError("PaymentWindowClosed");
+  if (code === "already_paid") return new CounterOrderClientError("AlreadyPaid");
+  if (code === "order_not_payable" || code === "counter_order_not_found")
+    return new CounterOrderClientError("NotPayable");
+  if (code === "card_machine_conflict") return new CounterOrderClientError("Conflict");
+  if (code === "taken_before_records") return new CounterOrderClientError("TakenBeforeRecords");
+  if (code === "cash_tender_short") return new CounterOrderClientError("CashShort");
+  if (status === 400 || code === "card_machine_input_invalid")
+    return new CounterOrderClientError("Invalid");
+  // The server's own answer that it could not record it (nothing was recorded): record again.
+  if (status === null) return new CounterOrderClientError("Unavailable");
+  return new CounterOrderClientError(status >= 500 ? "OutcomeUnknown" : "Unavailable");
+}
+
 export function parsePlacedCounterOrder(value: unknown, table = false): PlacedCounterOrder {
   const raw = record(
     value,
@@ -595,6 +732,8 @@ export function createCounterOrderClient(csrf: string, fetcher: typeof fetch = f
       readonly lines: readonly TableRoundLine[];
       readonly tip: CounterTip;
       readonly recordedAfterOutage: boolean;
+      /** DEC-PAPER-ORDER-PAID-AT-SEND: a paper round the table pays now: how it was paid. */
+      readonly paperPayment?: PaperPayment;
       /**
        * WP-2423 item 8 ⑦: add the guests' unsent items, as shown (that cart version); WP-2423
        * (staff-round-soldout): first removing those staff were shown as not sellable now.
@@ -614,7 +753,8 @@ export function createCounterOrderClient(csrf: string, fetcher: typeof fetch = f
       };
     }): Promise<PlacedCounterOrder> {
       const response = await post("/merchant/dining/staff-rounds", command);
-      if (response.ok) return parsePlacedCounterOrder(await response.json(), true);
+      if (response.ok)
+        return parsePlacedWithPayment(await response.json(), true, command.paperPayment);
       const body = await errorOf(response);
       const code = body.error;
       if (response.status === 403) throw new CounterOrderClientError("PermissionDenied");
@@ -663,9 +803,12 @@ export function createCounterOrderClient(csrf: string, fetcher: typeof fetch = f
       readonly lines: readonly CounterOrderLine[];
       readonly tip: CounterTip;
       readonly recordedAfterOutage: boolean;
+      /** DEC-PAPER-ORDER-PAID-AT-SEND: a paper order says how it was paid during the outage. */
+      readonly paperPayment?: PaperPayment;
     }): Promise<PlacedCounterOrder> {
       const response = await post("/merchant/counter/orders", command);
-      if (response.ok) return parsePlacedCounterOrder(await response.json());
+      if (response.ok)
+        return parsePlacedWithPayment(await response.json(), false, command.paperPayment);
       const body = await errorOf(response);
       const code = body.error;
       if (response.status === 403) throw new CounterOrderClientError("PermissionDenied");
@@ -711,81 +854,13 @@ export function createCounterOrderClient(csrf: string, fetcher: typeof fetch = f
       readonly tenderedMinor?: string;
     }): Promise<RecordedCardPayment> {
       const response = await post("/merchant/orders/card-machine-payment", command);
-      if (response.ok) {
-        const body: unknown = await response.json();
-        const paidInCash = body !== null && typeof body === "object" && Object.hasOwn(body, "cash");
-        const raw = record(body, [
-          "status",
-          "orderReference",
-          "orderBatchReference",
-          "amountMinor",
-          "recordingReason",
-          "takenAt",
-          "recordedAt",
-          "acceptance",
-          ...(paidInCash ? ["cash"] : []),
-        ]);
-        let cash: RecordedCardPayment["cash"] = null;
-        if (paidInCash) {
-          const c = record(raw.cash, [
-            "cashTotalMinor",
-            "roundingMinor",
-            "tenderedMinor",
-            "changeMinor",
-          ]);
-          if (
-            [c.cashTotalMinor, c.tenderedMinor, c.changeMinor].some(
-              (value) => typeof value !== "string" || !minorPattern.test(value),
-            ) ||
-            command.tenderedMinor === undefined
-          )
-            return invalid();
-          cash = Object.freeze({
-            cashTotalMinor: c.cashTotalMinor as string,
-            tenderedMinor: c.tenderedMinor as string,
-            changeMinor: c.changeMinor as string,
-          });
-        }
-        if (
-          (raw.status !== "Recorded" && raw.status !== "AlreadyRecorded") ||
-          (raw.acceptance !== "Accepted" && raw.acceptance !== "NotAccepted") ||
-          raw.orderReference !== command.orderReference ||
-          (raw.recordingReason !== "AtCounter" && raw.recordingReason !== "RecordedAfterOutage") ||
-          typeof raw.amountMinor !== "string" ||
-          !minorPattern.test(raw.amountMinor) ||
-          typeof raw.takenAt !== "string"
-        )
-          return invalid();
-        return Object.freeze({
-          status: raw.status,
-          amountMinor: raw.amountMinor,
-          recordingReason: raw.recordingReason,
-          takenAt: raw.takenAt,
-          acceptance: raw.acceptance,
-          cash,
-        });
-      }
-      const body = await errorOf(response);
-      const code = body.error;
-      if (response.status === 403) throw new CounterOrderClientError("PermissionDenied");
-      if (code === "amount_changed")
-        throw new CounterOrderClientError(
-          "AmountChanged",
-          null,
-          typeof body.totalMinor === "string" && minorPattern.test(body.totalMinor)
-            ? body.totalMinor
-            : null,
+      if (response.ok)
+        return parseRecordedPayment(
+          await response.json(),
+          command.orderReference,
+          command.tenderedMinor !== undefined,
         );
-      if (code === "payment_window_closed")
-        throw new CounterOrderClientError("PaymentWindowClosed");
-      if (code === "already_paid") throw new CounterOrderClientError("AlreadyPaid");
-      if (code === "order_not_payable" || code === "counter_order_not_found")
-        throw new CounterOrderClientError("NotPayable");
-      if (code === "card_machine_conflict") throw new CounterOrderClientError("Conflict");
-      if (code === "taken_before_records") throw new CounterOrderClientError("TakenBeforeRecords");
-      if (code === "cash_tender_short") throw new CounterOrderClientError("CashShort");
-      if (response.status === 400) throw new CounterOrderClientError("Invalid");
-      throw new CounterOrderClientError(response.status >= 500 ? "OutcomeUnknown" : "Unavailable");
+      throw paymentErrorOf(response.status, await errorOf(response));
     },
   });
 }

@@ -22,9 +22,12 @@ import {
   paidAtRefusal,
   payErrorText,
   paidNoteText,
+  paperPaymentProblem,
+  payIntentKey,
   paymentUrgentMinutes,
   paymentWindowNotice,
 } from "./counter-payment.js";
+import { cashTotalMinor } from "./table-checkout-client.js";
 import {
   CounterOrderClientError,
   counterMenuFamilies,
@@ -751,9 +754,13 @@ export function StaffOrderEntryPage({
   const [paidNote, setPaidNote] = useState<string | null>(null);
   // WP-2423 (v15 751dd768): re-read the sent, unpaid counter orders after a send or a payment.
   const [awaitingKey, setAwaitingKey] = useState(0);
-  // WP-2423 M127: the order being charged may be cancelled by this staff member (from Orders' read).
-  const [placedCancellable, setPlacedCancellable] = useState(false);
+  // WP-2423 M127: the order being charged may be cancelled by this staff member (from Orders' read);
+  // null until that read answers, so nobody is told to ask a manager before it is known.
+  const [placedCancellable, setPlacedCancellable] = useState<boolean | null>(null);
   const placeOperation = useRef<string | null>(null);
+  // DEC-PAPER-ORDER-PAID-AT-SEND: the payment operation sent with a paper order (one per order
+  // operation and payment as entered), so a retry of either never records it twice.
+  const paperOperation = useRef<{ key: string; reference: string } | null>(null);
   // One operation per payment as staff entered it (as at table checkout): a retry after no answer
   // with the same details is the same command (never counted twice); a corrected paid-at or slip is
   // a new one, not a conflict with the first.
@@ -1043,6 +1050,8 @@ export function StaffOrderEntryPage({
     };
   };
   const paperInstant = paper ? paidAtInstant(paidAt, Date.now(), timeZone) : null;
+  /** DEC-PAPER-ORDER-PAID-AT-SEND: how the paper order was paid (a table's cash is at checkout). */
+  const paperTender: "CardMachine" | "Cash" = tableMode ? "CardMachine" : tender;
   const estimate = lines.reduce<bigint | null>((sum, line) => {
     const value = estimatedLineMinor(line);
     return sum === null || value === null ? null : sum + value;
@@ -1067,7 +1076,9 @@ export function StaffOrderEntryPage({
     withdrawn.length === 0 &&
     !(guestCart?.guestPaying === true && guestLines.length > 0) &&
     tipChoice() !== null &&
-    (!paper || tablePaysLater || paperInstant !== null);
+    (!paper ||
+      tablePaysLater ||
+      (paperInstant !== null && (paperTender === "Cash" || validSlipReference(slip.trim()))));
 
   const send = async (
     includeTableCart: {
@@ -1098,6 +1109,28 @@ export function StaffOrderEntryPage({
         : null;
     const removedAtSend = guestRemoved;
     placeOperation.current ??= serviceOperationReference();
+    // DEC-PAPER-ORDER-PAID-AT-SEND: a paper order was paid during the outage; its payment goes with
+    // it and is recorded with it (a table that pays at the end has nothing to pay now).
+    const paperPayment =
+      paper && !tablePaysLater && paperInstant !== null
+        ? (() => {
+            const slipReference = paperTender === "Cash" || slip.trim() === "" ? null : slip.trim();
+            const key = JSON.stringify([
+              placeOperation.current,
+              paperTender,
+              slipReference,
+              paperInstant,
+            ]);
+            if (paperOperation.current?.key !== key)
+              paperOperation.current = { key, reference: serviceOperationReference() };
+            return {
+              operationReference: paperOperation.current.reference,
+              tender: paperTender,
+              slipReference,
+              takenAt: paperInstant,
+            };
+          })()
+        : undefined;
     setPhase("Sending");
     setProblem(null);
     setProblemNeedsTableCode(false);
@@ -1120,6 +1153,7 @@ export function StaffOrderEntryPage({
               lines: chosen.map((line, index) => ({ ...line, note: lines[index]?.note ?? null })),
               tip: chosenTip,
               recordedAfterOutage: paper,
+              ...(paperPayment === undefined ? {} : { paperPayment }),
               ...(decided !== null
                 ? { includeTableCart: decided }
                 : includeTableCart === null
@@ -1142,8 +1176,10 @@ export function StaffOrderEntryPage({
               lines: counterOrderLines(lines),
               tip: chosenTip,
               recordedAfterOutage: paper,
+              ...(paperPayment === undefined ? {} : { paperPayment }),
             });
       setPlaced(order);
+      setPlacedCancellable(null);
       if (decided !== null) setRemovedNote(guestRemovedNote(removedAtSend));
       else if (includeTableCart !== null && includeTableCart.removeUnavailable.length > 0)
         setRemovedNote(tableCartRemovedNote(includeTableCart.removeUnavailable));
@@ -1153,7 +1189,47 @@ export function StaffOrderEntryPage({
         lines.map((line) => [line.item.sellableReference, line.quantity]),
       );
       payOperation.current = null;
-      setPhase(order.payLater ? "Sent" : "Charge");
+      const paperOutcome = order.paperPayment ?? null;
+      if (paperOutcome?.kind === "Recorded") {
+        // The paper order and its payment are recorded together: nothing is left to charge.
+        const recorded = paperOutcome.payment;
+        setPhase(recorded.acceptance === "Accepted" ? "Accepted" : "Paid");
+        setChangeDue(recorded.cash?.changeMinor ?? null);
+        setPaidNote(
+          paidNoteText({
+            tableMode,
+            recordedAfterOutage: true,
+            acceptance: recorded.acceptance,
+            cash: recorded.cash,
+          }),
+        );
+      } else {
+        if (paperOutcome !== null && paperPayment !== undefined) {
+          // Placed, but its payment was not recorded: the same payment, recorded again below.
+          const failure = paperOutcome.error;
+          payOperation.current = {
+            key: payIntentKey(
+              order.orderBatchReference,
+              order.totalMinor,
+              paperPayment.tender === "Cash",
+              paperPayment.slipReference ?? "",
+              paperPayment.takenAt,
+              paperPayment.tender === "Cash"
+                ? cashTotalMinor(BigInt(order.totalMinor)).toString()
+                : null,
+            ),
+            reference: paperPayment.operationReference,
+          };
+          if (failure.code === "AmountChanged" && failure.totalMinor !== null)
+            setPlaced({ ...order, totalMinor: failure.totalMinor });
+          setProblem(paperPaymentProblem(failure, paperPayment.tender === "Cash"));
+          if (paidAtRefusal(failure)) {
+            setPaidAtRefused(true);
+            setFocusPaidAt((value) => value + 1);
+          }
+        }
+        setPhase(order.payLater ? "Sent" : "Charge");
+      }
       setAwaitingKey((value) => value + 1);
       refreshMenu();
     } catch (error) {
@@ -1209,20 +1285,27 @@ export function StaffOrderEntryPage({
   const recordPayment = async (expectedTotalMinor: string) => {
     if (placed === null || phase !== "Charge") return;
     const inCash = tender === "Cash" && !tableMode;
-    const cash = inCash
-      ? cashTender(BigInt(expectedTotalMinor), received, largeChangeConfirmed)
-      : null;
-    if (cash !== null ? !cash.ready : !validSlipReference(slip.trim())) return;
+    // DEC-PAPER-ORDER-PAID-AT-SEND: a paper order's cash was taken (and change given) during the
+    // outage; its cash total is what is recorded.
+    const paperCash = inCash && placed.recordedAfterOutage;
+    const cash =
+      inCash && !paperCash
+        ? cashTender(BigInt(expectedTotalMinor), received, largeChangeConfirmed)
+        : null;
+    if (cash !== null ? !cash.ready : !inCash && !validSlipReference(slip.trim())) return;
     if (placed.recordedAfterOutage && paperInstant === null) return;
     const takenAt = placed.recordedAfterOutage ? paperInstant : null;
-    const tenderedMinor = cash?.receivedMinor?.toString() ?? null;
-    const intent = JSON.stringify([
+    const tenderedMinor = paperCash
+      ? cashTotalMinor(BigInt(expectedTotalMinor)).toString()
+      : (cash?.receivedMinor?.toString() ?? null);
+    const intent = payIntentKey(
       placed.orderBatchReference,
       expectedTotalMinor,
-      inCash ? "" : slip.trim(),
+      inCash,
+      slip.trim(),
       takenAt,
       tenderedMinor,
-    ]);
+    );
     if (payOperation.current?.key !== intent)
       payOperation.current = { key: intent, reference: serviceOperationReference() };
     setPhase("Recording");
@@ -1246,12 +1329,16 @@ export function StaffOrderEntryPage({
           ? error
           : new CounterOrderClientError("Unavailable");
       if (failure.code !== "OutcomeUnknown") payOperation.current = null;
-      setCashUnanswered(inCash && failure.code === "OutcomeUnknown");
+      setCashUnanswered(inCash && !paperCash && failure.code === "OutcomeUnknown");
       if (failure.code === "AmountChanged" && failure.totalMinor !== null)
         setPlaced({ ...placed, totalMinor: failure.totalMinor });
       // A cash Record with no answer says so beside the cash received it keeps.
       setProblem(
-        inCash && failure.code === "OutcomeUnknown" ? null : payErrorText(failure, inCash),
+        placed.recordedAfterOutage
+          ? paperPaymentProblem(failure, inCash)
+          : inCash && failure.code === "OutcomeUnknown"
+            ? null
+            : payErrorText(failure, inCash),
       );
       setPhase("Charge");
       if (placed.recordedAfterOutage && paidAtRefusal(failure)) {
@@ -1293,7 +1380,8 @@ export function StaffOrderEntryPage({
     setPaidAtRefused(false);
     placeOperation.current = null;
     payOperation.current = null;
-    setPlacedCancellable(false);
+    paperOperation.current = null;
+    setPlacedCancellable(null);
     setAwaitingKey((value) => value + 1);
     setPhase("Building");
   };
@@ -1317,6 +1405,8 @@ export function StaffOrderEntryPage({
     setPaidAtRefused(false);
     placeOperation.current = null;
     payOperation.current = null;
+    paperOperation.current = null;
+    setPlacedCancellable(null);
     setPhase("Building");
   };
 
@@ -2000,6 +2090,65 @@ export function StaffOrderEntryPage({
                   {paidAtDayNote(paperInstant, Date.now(), timeZone)}
                 </p>
               ) : null}
+              {/* DEC-PAPER-ORDER-PAID-AT-SEND: how it was paid during the outage, recorded with
+                  the order, so this sale is never left "to charge". */}
+              {paper && !tablePaysLater && ordering ? (
+                <div className="counter-order__paper-paid">
+                  {tableMode ? (
+                    <p className="field-hint">{t("Paid on the card machine during the outage.")}</p>
+                  ) : (
+                    <fieldset className="counter-order__tender">
+                      <legend>{t("How it was paid during the outage")}</legend>
+                      <label>
+                        <input
+                          type="radio"
+                          name="counter-paper-tender"
+                          checked={tender === "CardMachine"}
+                          onChange={() => {
+                            setTender("CardMachine");
+                            setProblem(null);
+                          }}
+                        />
+                        {t("Card machine")}
+                      </label>
+                      <label>
+                        <input
+                          type="radio"
+                          name="counter-paper-tender"
+                          checked={tender === "Cash"}
+                          onChange={() => {
+                            setTender("Cash");
+                            setProblem(null);
+                          }}
+                        />
+                        {t("Cash")}
+                      </label>
+                    </fieldset>
+                  )}
+                  {paperTender === "CardMachine" ? (
+                    <label>
+                      {t("Slip reference (optional)")}
+                      <input
+                        value={slip}
+                        maxLength={40}
+                        autoComplete="off"
+                        aria-invalid={!validSlipReference(slip.trim())}
+                        aria-describedby="counter-paper-slip-hint"
+                        onChange={(event) => setSlip(event.currentTarget.value)}
+                      />
+                    </label>
+                  ) : null}
+                  <p id="counter-paper-slip-hint" className="field-hint">
+                    {paperTender === "CardMachine"
+                      ? t(
+                          "Sending records the order and the payment on the slip together. Don't charge the guest again. The slip's approval code, never the card number.",
+                        )
+                      : t(
+                          "Sending records the order and the cash taken during the outage together. Don't take the cash again.",
+                        )}
+                  </p>
+                </div>
+              ) : null}
             </fieldset>
             {tableMode && ordering ? (
               <p className="field-hint">
@@ -2031,7 +2180,11 @@ export function StaffOrderEntryPage({
                   disabled={!canSend}
                   onClick={() => void send()}
                 >
-                  {phase === "Sending" ? t("Sending…") : t("Send order")}
+                  {phase === "Sending"
+                    ? t("Sending…")
+                    : paper && !tablePaysLater
+                      ? t("Send and record paper order")
+                      : t("Send order")}
                 </button>
                 <SlowWaitNotice busy={phase === "Sending"} />
               </div>
@@ -2127,7 +2280,7 @@ export function StaffOrderEntryPage({
                     })
                   : t("Order {orderNumber} paid", { orderNumber: placed.orderNumber })
                 : placed.recordedAfterOutage
-                  ? t("Paper order {orderNumber}: record the payment taken during the outage", {
+                  ? t("Paper order {orderNumber}: its payment isn't recorded yet", {
                       orderNumber: placed.orderNumber,
                     })
                   : counterCash
@@ -2161,7 +2314,11 @@ export function StaffOrderEntryPage({
               {counterCash ? (
                 // WP-2423 M52: cash is rounded to 5 cents; the order's amount stays as above.
                 <div>
-                  <dt>{t("Cash total (rounded to 5 cents)")}</dt>
+                  <dt>
+                    {placed.recordedAfterOutage
+                      ? t("Paid in cash during the outage")
+                      : t("Cash total (rounded to 5 cents)")}
+                  </dt>
                   <dd>
                     <strong>
                       {cad(cashTender(BigInt(placed.totalMinor), "").cashDueMinor.toString())}
@@ -2170,7 +2327,11 @@ export function StaffOrderEntryPage({
                 </div>
               ) : (
                 <div>
-                  <dt>{t("To charge")}</dt>
+                  <dt>
+                    {placed.recordedAfterOutage
+                      ? t("Paid on the card machine during the outage")
+                      : t("To charge")}
+                  </dt>
                   <dd>
                     <strong>{cad(placed.totalMinor)}</strong>
                   </dd>
@@ -2193,6 +2354,7 @@ export function StaffOrderEntryPage({
                     now,
                     tableMode,
                     timeZone,
+                    paper: placed.recordedAfterOutage,
                   });
                   return (
                     <p
@@ -2217,7 +2379,11 @@ export function StaffOrderEntryPage({
                       className="counter-order__tender"
                       disabled={phase === "Recording" || cashUnanswered}
                     >
-                      <legend>{t("How the guest pays")}</legend>
+                      <legend>
+                        {placed.recordedAfterOutage
+                          ? t("How it was paid during the outage")
+                          : t("How the guest pays")}
+                      </legend>
                       <label>
                         <input
                           type="radio"
@@ -2244,7 +2410,7 @@ export function StaffOrderEntryPage({
                       </label>
                     </fieldset>
                   )}
-                  {counterCash ? (
+                  {counterCash && placed.recordedAfterOutage ? null : counterCash ? (
                     <CashTenderFields
                       idPrefix="counter-cash"
                       showDue={false}
@@ -2328,7 +2494,8 @@ export function StaffOrderEntryPage({
                       disabled={
                         phase === "Recording" ||
                         (counterCash
-                          ? !cashTender(BigInt(placed.totalMinor), received, largeChangeConfirmed)
+                          ? !placed.recordedAfterOutage &&
+                            !cashTender(BigInt(placed.totalMinor), received, largeChangeConfirmed)
                               .ready
                           : !validSlipReference(slip.trim())) ||
                         (placed.recordedAfterOutage && paperInstant === null)
@@ -2336,38 +2503,59 @@ export function StaffOrderEntryPage({
                     >
                       {phase === "Recording"
                         ? t("Recording…")
-                        : counterCash
-                          ? t("Cash received · {amount}", {
+                        : placed.recordedAfterOutage
+                          ? t("Record paper payment · {amount}", {
                               amount: cad(
-                                cashTender(BigInt(placed.totalMinor), "").cashDueMinor.toString(),
+                                counterCash
+                                  ? cashTender(
+                                      BigInt(placed.totalMinor),
+                                      "",
+                                    ).cashDueMinor.toString()
+                                  : placed.totalMinor,
                               ),
                             })
-                          : t("Paid on card machine · {totalMinor}", {
-                              totalMinor: cad(placed.totalMinor),
-                            })}
+                          : counterCash
+                            ? t("Cash received · {amount}", {
+                                amount: cad(
+                                  cashTender(BigInt(placed.totalMinor), "").cashDueMinor.toString(),
+                                ),
+                              })
+                            : t("Paid on card machine · {totalMinor}", {
+                                totalMinor: cad(placed.totalMinor),
+                              })}
                     </button>
                   </div>
                 </form>
                 <p className="bop-muted">
-                  {tableMode
-                    ? t(
-                        "Card declined? Try another card. Nothing goes to the kitchen until this is recorded; after {payBy} it can no longer be paid here and must be sent again.",
-                        { payBy: storeTime(placed.payBy ?? "", timeZone) },
+                  {placed.recordedAfterOutage
+                    ? // DEC-PAPER-ORDER-PAID-AT-SEND: a sale that already happened is recorded, never
+                      // cancelled or charged again; a wrong amount is corrected with a recorded refund.
+                      t(
+                        "Don't charge the guest again. If the total isn't what the paper slip says, record it anyway and tell a manager, who corrects it on Orders with a recorded refund.",
                       )
-                    : counterCash
+                    : tableMode
                       ? t(
-                          "Count the cash before you record it. Once recorded, it goes back only by cancelling the order or by a refund a manager records.",
+                          "Card declined? Try another card. Nothing goes to the kitchen until this is recorded; after {payBy} it can no longer be paid here and must be sent again.",
+                          { payBy: storeTime(placed.payBy ?? "", timeZone) },
                         )
-                      : placedCancellable
+                      : counterCash
                         ? t(
-                            "Card declined? Try another card. Guest not paying? Cancel the order so its items go back to stock.",
+                            "Count the cash before you record it. Once recorded, it goes back only by cancelling the order or by a refund a manager records.",
                           )
-                        : t(
-                            "Card declined? Try another card. Guest not paying? Ask a manager to cancel it; otherwise it is released at {payBy}.",
-                            { payBy: storeTime(placed.payBy ?? "", timeZone) },
-                          )}
+                        : placedCancellable === true
+                          ? t(
+                              "Card declined? Try another card. Guest not paying? Cancel the order so its items go back to stock.",
+                            )
+                          : placedCancellable === false
+                            ? t(
+                                "Card declined? Try another card. Guest not paying? Ask a manager to cancel it; otherwise it is released at {payBy}.",
+                                { payBy: storeTime(placed.payBy ?? "", timeZone) },
+                              )
+                            : // WP-2423 M127: who may cancel is still being read; no one is sent to a
+                              // manager (or offered Cancel) before it is known.
+                              t("Card declined? Try another card.")}
                 </p>
-                {!tableMode && placedCancellable && !placed.recordedAfterOutage ? (
+                {!tableMode && placedCancellable === true && !placed.recordedAfterOutage ? (
                   <div className="card-actions">
                     <CounterCancelAction
                       orderReference={placed.orderReference}

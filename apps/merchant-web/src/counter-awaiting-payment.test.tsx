@@ -143,6 +143,57 @@ it("Orders offers the card-machine charge on the row and says when it is release
   expect(html).not.toContain("from Counter order.");
 });
 
+it("WP-2423 M127: Orders tells front of house to ask a manager about an unpaid counter order", () => {
+  const rows = (counter: Record<string, unknown>) =>
+    renderToStaticMarkup(
+      <CurrentOrderQueueRows
+        view={parseCurrentOrderQueue({
+          items: [counterItem({}, { cancelledBeforePayment: null, ...counter })],
+          nextAfterOrderReference: null,
+        })}
+        timeZone="America/Toronto"
+        now={now}
+      />,
+    );
+  const frontOfHouse = rows({ canCancelUnpaid: false });
+  expect(frontOfHouse).toContain(
+    "A guest who isn&#x27;t paying: ask a manager to cancel it; otherwise it is released at 13:20 and its items go back to stock.",
+  );
+  const manager = rows({ canCancelUnpaid: true });
+  expect(manager).toContain(
+    "A guest who isn&#x27;t paying: cancel it below so its items go back to stock.",
+  );
+  expect(manager).not.toContain("ask a manager to cancel it");
+});
+
+it("DEC-PAPER-ORDER-PAID-AT-SEND: a paper order whose payment didn't record is never to charge", () => {
+  const html = renderToStaticMarkup(
+    <CurrentOrderQueueRows
+      view={parseCurrentOrderQueue({
+        items: [
+          counterItem(
+            {},
+            { recordedAfterOutage: true, canCancelUnpaid: false, cancelledBeforePayment: null },
+          ),
+        ],
+        nextAfterOrderReference: null,
+      })}
+      timeZone="America/Toronto"
+      now={now}
+    />,
+  );
+  expect(html).toContain("Paid during the outage, but its payment isn&#x27;t recorded yet");
+  expect(html).toContain("Don&#x27;t charge again.");
+  expect(html).not.toContain("take payment on the card machine");
+  expect(html).not.toContain("ask a manager to cancel");
+  expect(counterPayByText(payBy, "America/Toronto", now, true)).toBe(
+    "Paid during the outage · record it by 13:20, or it is taken off",
+  );
+  expect(counterPayByText(payBy, "America/Toronto", Date.parse(payBy), true)).toBe(
+    "Not recorded by 13:20 · enter the paper order again",
+  );
+});
+
 it("the counter charge form names the order and warns before release", () => {
   const html = renderToStaticMarkup(
     <StaffRoundPaymentAction

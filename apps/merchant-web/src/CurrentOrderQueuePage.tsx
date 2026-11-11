@@ -2612,9 +2612,21 @@ function OrderDetailBody({
       {order.counter !== null && order.counter.paidOnCardMachine === null ? (
         <p className="order-counter-note" role="note">
           {counterAwaitingCardMachine(order, now ?? Date.now())
-            ? t(
-                "Not paid yet: take payment on the card machine or in cash, then record it below (or from Counter order).",
-              )
+            ? order.counter.recordedAfterOutage
+              ? // DEC-PAPER-ORDER-PAID-AT-SEND: paid during the outage; only its record is missing.
+                t(
+                  "Paid during the outage, but its payment isn't recorded yet: record it below from the paper slip. Don't charge again. If it isn't recorded by {at}, the system takes it off and the paper order is entered again.",
+                  { at: storeTime(order.counter.payBy ?? "", timeZone) },
+                )
+              : order.counter.canCancelUnpaid
+                ? t(
+                    "Not paid yet: take payment on the card machine or in cash, then record it below (or from Counter order). A guest who isn't paying: cancel it below so its items go back to stock.",
+                  )
+                : // WP-2423 M127: front of house asks a manager, as the counter screen says.
+                  t(
+                    "Not paid yet: take payment on the card machine or in cash, then record it below (or from Counter order). A guest who isn't paying: ask a manager to cancel it; otherwise it is released at {at} and its items go back to stock.",
+                    { at: storeTime(order.counter.payBy ?? "", timeZone) },
+                  )
             : t("Not paid.")}
         </p>
       ) : null}
@@ -4507,7 +4519,11 @@ export function CurrentOrderQueuePage({
                       <StaffRoundPaymentAction
                         key={"counter-pay-" + batch.orderBatchReference}
                         subject="order"
-                        label={t("Take payment")}
+                        label={
+                          order.counter?.recordedAfterOutage
+                            ? t("Record the paper order's payment")
+                            : t("Take payment")
+                        }
                         csrf={csrf}
                         fetcher={fetcher}
                         orderReference={order.orderReference}

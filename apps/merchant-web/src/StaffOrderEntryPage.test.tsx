@@ -805,6 +805,108 @@ describe("counter order (OPS-ORDER-ENTRY) — WP-2423 Q7", () => {
   });
 });
 
+describe("DEC-PAPER-ORDER-PAID-AT-SEND: a paper order is recorded with its payment", () => {
+  const placed = {
+    status: "Placed",
+    orderReference: id(20),
+    orderBatchReference: id(21),
+    orderNumber: "5",
+    orderVersion: 1,
+    orderMinor: "367",
+    tipMinor: "0",
+    totalMinor: "367",
+    payBy: "2026-10-13T18:30:00.000Z",
+    recordedAfterOutage: true,
+  };
+  const paperPayment = {
+    operationReference: id(31),
+    tender: "CardMachine" as const,
+    slipReference: "AUTH 1",
+    takenAt: "2026-10-13T16:00:00.000Z",
+  };
+  const command = {
+    operationReference: id(30),
+    lines: [],
+    tip: { kind: "None" as const },
+    recordedAfterOutage: true,
+    paperPayment,
+  };
+  it("sends how it was paid and reads the payment recorded with it, or why it wasn't", async () => {
+    const answers: unknown[] = [
+      {
+        ...placed,
+        payment: {
+          status: "Recorded",
+          amountMinor: "367",
+          recordingReason: "RecordedAfterOutage",
+          takenAt: paperPayment.takenAt,
+          recordedAt: "2026-10-13T18:01:00.000Z",
+          acceptance: "Accepted",
+        },
+      },
+      { ...placed, paymentError: "taken_before_records" },
+      { ...placed, paymentError: "amount_changed", paymentTotalMinor: "390" },
+      { ...placed, paymentError: "card_machine_payment_unavailable" },
+      // A payment answer for an order sent without one is not believed.
+      { ...placed, paymentError: "taken_before_records" },
+    ];
+    const bodies: unknown[] = [];
+    const fetcher = vi.fn(async (_path: string, init: RequestInit) => {
+      bodies.push(JSON.parse(String(init.body)));
+      return new Response(JSON.stringify(answers.shift()), { status: 200 });
+    });
+    const client = createCounterOrderClient("a".repeat(43), fetcher as unknown as typeof fetch);
+    const recorded = await client.placeOrder(command);
+    expect(bodies[0]).toEqual(command);
+    expect(recorded.paperPayment).toEqual({
+      kind: "Recorded",
+      payment: {
+        status: "Recorded",
+        amountMinor: "367",
+        recordingReason: "RecordedAfterOutage",
+        takenAt: paperPayment.takenAt,
+        acceptance: "Accepted",
+        cash: null,
+      },
+    });
+    const refused = await client.placeOrder(command);
+    expect(refused.paperPayment?.kind).toBe("NotRecorded");
+    expect(
+      refused.paperPayment?.kind === "NotRecorded" ? refused.paperPayment.error.code : null,
+    ).toBe("TakenBeforeRecords");
+    const changed = await client.placeOrder(command);
+    expect(
+      changed.paperPayment?.kind === "NotRecorded" && changed.paperPayment.error,
+    ).toMatchObject({ code: "AmountChanged", totalMinor: "390" });
+    const failed = await client.placeOrder(command);
+    expect(failed.paperPayment?.kind === "NotRecorded" && failed.paperPayment.error.code).toBe(
+      "Unavailable",
+    );
+    const { paperPayment: _, ...unpaid } = command;
+    await expect(client.placeOrder({ ...unpaid, recordedAfterOutage: false })).rejects.toThrow();
+  });
+  it("never tells staff to charge a paper order, and warns before the system takes it off", () => {
+    const payBy = "2026-10-15T16:30:00.000Z";
+    const notice = (now: string) =>
+      paymentWindowNotice({
+        payBy,
+        now: Date.parse(now),
+        tableMode: false,
+        timeZone: "UTC",
+        paper: true,
+      });
+    expect(notice("2026-10-15T16:05:00.000Z")).toEqual({
+      tier: "warning",
+      ended: false,
+      text: "Record this paper order's payment now. Until it is recorded the sale isn't in the day's takings; if it still isn't by 16:30, the system takes the order off and you enter it again.",
+    });
+    expect(notice("2026-10-15T16:25:00.000Z")).toMatchObject({ tier: "urgent", ended: false });
+    expect(notice(payBy)).toMatchObject({ tier: "urgent", ended: true });
+    for (const at of ["2026-10-15T16:05:00.000Z", "2026-10-15T16:25:00.000Z", payBy])
+      expect(notice(at).text).not.toMatch(/released|refund it|charge it on/iu);
+  });
+});
+
 describe("WP-2423 item 5: warns before the time to record the payment ends", () => {
   const payBy = "2026-10-15T16:30:00.000Z";
   const at = (iso: string) => Date.parse(iso);
