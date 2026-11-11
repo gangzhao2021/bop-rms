@@ -91,6 +91,19 @@ interface FreshGuestSessionRecord {
   readonly csrfCredential: GuestRawCredential;
 }
 
+/**
+ * WP-2423 (checkout-session-outage review): a plain refusal that keeps which check refused, as a
+ * safe code (never shown, never enumerated), so an API 503 can log it.
+ */
+function refusedFor(reason: string): GuestSessionError {
+  const error = new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
+  Object.defineProperty(error, "cause", {
+    value: Object.freeze({ code: reason }),
+    enumerable: false,
+  });
+  return error;
+}
+
 export class GuestSessionService {
   readonly #admission: GuestEntryAdmissionPort;
   readonly #diningAdmission: GuestDiningAdmissionPort | null;
@@ -427,31 +440,46 @@ export class GuestSessionService {
       const record = await this.#storeCall(() =>
         this.#store.resolve(this.#credentials.hashCredential("Session", sessionCredential)),
       );
+      if (record === null) throw refusedFor("GUEST_SESSION_NOT_FOUND");
       if (
-        record === null ||
-        (!this.#credentials.equals(
+        !this.#credentials.equals(
           this.#credentials.hashCredential("Csrf", csrfCredential),
           record.csrfSelectorHash,
         ) &&
-          !(
-            this.#credentials.deriveForegroundCsrf &&
-            this.#credentials.equals(
-              this.#credentials.hashCredential("Csrf", csrfCredential),
-              this.#credentials.hashCredential(
-                "Csrf",
-                parseGuestRawCredential(this.#credentials.deriveForegroundCsrf(sessionCredential)),
-              ),
-            )
-          ))
+        !(
+          this.#credentials.deriveForegroundCsrf &&
+          this.#credentials.equals(
+            this.#credentials.hashCredential("Csrf", csrfCredential),
+            this.#credentials.hashCredential(
+              "Csrf",
+              parseGuestRawCredential(this.#credentials.deriveForegroundCsrf(sessionCredential)),
+            ),
+          )
+        )
       ) {
-        throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
+        throw refusedFor("GUEST_SESSION_CSRF_REFUSED");
       }
-      const session = assertGuestSessionUsable(this.#record(record).session, observedAt);
-      await this.#assertCurrent(session, observedAt);
+      const stored = this.#record(record).session;
+      let session: GuestSession;
+      try {
+        session = assertGuestSessionUsable(stored, observedAt);
+      } catch {
+        throw refusedFor("GUEST_SESSION_ENDED");
+      }
+      try {
+        await this.#assertCurrent(session, observedAt);
+      } catch (error) {
+        if ((error as { dependencyFailure?: unknown }).dependencyFailure === true) throw error;
+        throw refusedFor("GUEST_SESSION_BINDING_NOT_CURRENT");
+      }
       return session;
     } catch (error) {
       if ((error as { dependencyFailure?: unknown }).dependencyFailure === true) throw error;
-      throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
+      // WP-2423 (checkout-session-outage review): the refusal's code stays behind the plain answer.
+      const plain = new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
+      if (error !== null && typeof error === "object")
+        Object.defineProperty(plain, "cause", { value: error, enumerable: false });
+      throw plain;
     }
   }
 

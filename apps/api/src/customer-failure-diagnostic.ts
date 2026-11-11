@@ -38,7 +38,7 @@ export function customerFailureCode(error: unknown): string | undefined {
   let code: string | undefined;
   let sqlState: string | null = null;
   let current: unknown = error;
-  for (let depth = 0; depth < 6 && current !== null && typeof current === "object"; depth++) {
+  for (let depth = 0; depth < 10 && current !== null && typeof current === "object"; depth++) {
     const candidate = own(current, "code");
     if (typeof candidate === "string" && safeCode.test(candidate)) code = candidate;
     sqlState = sqlStateOf(current) ?? sqlState;

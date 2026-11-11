@@ -295,6 +295,29 @@ describe("current-authorized Dining admission consumption", () => {
     await expect(x.service.consume(x.input)).rejects.toMatchObject(unavailable);
     expect(x.original).not.toHaveBeenCalled();
   });
+  // WP-2423 (checkout-session-outage review): each refusal keeps which rule refused, as a code
+  // behind the plain answer (never enumerated), so an API 503 can log it.
+  it("keeps which admission rule refused behind the plain answer", async () => {
+    const reason = (error: unknown) =>
+      (Object.getOwnPropertyDescriptor(error, "cause")?.value as { code?: string } | undefined)
+        ?.code;
+    const other = fixture();
+    const otherPhone = await other.service
+      .consume({ ...other.input, guestSessionReference: id(99) })
+      .catch((e: unknown) => e);
+    expect(otherPhone).toMatchObject(unavailable);
+    expect(reason(otherPhone)).toBe("DINING_ADMISSION_OTHER_PHONE");
+    const moved = fixture();
+    moved.state.session = {
+      ...moved.state.session,
+      tableReference: parseDiningReference(id(99)),
+      version: 3,
+    };
+    const table = await moved.service.consume(moved.input).catch((e: unknown) => e);
+    expect(table).toMatchObject(unavailable);
+    expect(reason(table)).toBe("DINING_ADMISSION_OTHER_TABLE");
+    expect(JSON.stringify(table)).not.toContain("DINING_ADMISSION");
+  });
   it.each([
     ["admission.admissionReference", id(99)],
     ["admission.operationIntentHash", "b".repeat(64)],

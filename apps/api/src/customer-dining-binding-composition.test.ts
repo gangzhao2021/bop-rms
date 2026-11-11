@@ -18,6 +18,7 @@ import {
   createCustomerDiningSessionBinding,
   type CustomerDiningBindingCompositionOptions,
 } from "./customer-dining-binding-composition.js";
+import { customerFailureCode } from "./customer-failure-diagnostic.js";
 const id = (n: number) => `01902298-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 const at = (n: number) =>
   parseCanonicalInstant(new Date(Date.parse("2026-09-09T12:00:00.000Z") + n * 1000).toISOString());
@@ -373,6 +374,28 @@ describe("WP-2298 explicit Dining binding composition", () => {
       expect(f.options.dining.store.consume).not.toHaveBeenCalled();
     },
   );
+  // WP-2423 (checkout-session-outage review): a phone refused at prepare logs which table-context
+  // rule refused it, as a code, so the next v15 occurrence names the rule.
+  it.each([
+    ["brandReference", id(99), "QR_CONTEXT_SCOPE"],
+    ["publicTableReference", id(99), "QR_CONTEXT_TABLE_LINK"],
+    ["storeLifecycle", "Suspended", "QR_CONTEXT_STORE_NOT_ACTIVE"],
+    ["tableLifecycle", "Suspended", "QR_CONTEXT_TABLE_NOT_ACTIVE"],
+    ["assignmentState", "Inactive", "QR_CONTEXT_TABLE_NOT_ASSIGNED"],
+    ["qrState", "Revoked", "QR_CONTEXT_CODE_DISABLED"],
+    ["revocationVersion", 2, "QR_CONTEXT_CODE_REISSUED"],
+    ["validUntil", at(0), "QR_CONTEXT_EXPIRED"],
+  ])("keeps the table-context rule behind a prepare refusal (%s)", async (field, value, code) => {
+    const f = fixture();
+    vi.mocked(f.options.contexts.resolve).mockResolvedValue({
+      ...f.context,
+      [field]: value,
+    } as never);
+    const error = await f.service.prepare(f.input).catch((e: unknown) => e);
+    expect(error).toMatchObject(unavailable);
+    expect(customerFailureCode(error)).toBe(code);
+    expect(JSON.stringify(error)).not.toContain(code);
+  });
   it("bounds null/private context errors and rejects accessor evidence", async () => {
     const f = fixture();
     const getter = vi.fn(() => id(40));
@@ -395,11 +418,16 @@ describe("WP-2298 explicit Dining binding composition", () => {
   });
   it("denies Session/CSRF and current binding failure before context or owner reads", async () => {
     const f = fixture();
-    await expect(
-      f.service.prepare({ ...f.input, csrfCredential: f.input.sessionCredential }),
-    ).rejects.toMatchObject(unavailable);
+    const csrf = await f.service
+      .prepare({ ...f.input, csrfCredential: f.input.sessionCredential })
+      .catch((e: unknown) => e);
+    expect(csrf).toMatchObject(unavailable);
+    // Review of checkout-session-outage: which check refused is kept for the log, as a code.
+    expect(customerFailureCode(csrf)).toBe("GUEST_SESSION_CSRF_REFUSED");
     vi.mocked(f.options.session.binding.validate).mockResolvedValue("Unavailable");
-    await expect(f.service.prepare(f.input)).rejects.toMatchObject(unavailable);
+    const binding = await f.service.prepare(f.input).catch((e: unknown) => e);
+    expect(binding).toMatchObject(unavailable);
+    expect(customerFailureCode(binding)).toBe("GUEST_SESSION_BINDING_NOT_CURRENT");
     expect(f.options.contexts.resolve).not.toHaveBeenCalled();
     expect(f.options.dining.store.readCurrent).not.toHaveBeenCalled();
   });

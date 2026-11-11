@@ -46,10 +46,14 @@ export interface CustomerDiningBindingCompositionOptions {
   readonly now: () => unknown;
 }
 
-/** `reason` (WP-2423 checkout-session-outage) is a safe code kept for the API's log only. */
-function unavailable(reason?: string): never {
+/**
+ * `reason` (WP-2423 checkout-session-outage) is a safe code kept for the API's log only; `cause`,
+ * when an owner refused, stays behind it so the log names the owner's own rule (innermost code).
+ */
+function unavailable(reason?: string, cause?: unknown): never {
   const error = new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
-  throw reason === undefined ? error : withFailureCause(error, { code: reason });
+  if (reason === undefined) throw error;
+  throw withFailureCause(error, withFailureCause({ code: reason }, cause));
 }
 
 const contextInput = (session: GuestSession, observedAt: CanonicalInstant) => ({
@@ -152,11 +156,12 @@ export function createCustomerDiningBindingComposition(
     );
     try {
       return assertCurrentDiningGuestTableContext(contextInput(session, observedAt), evidence);
-    } catch {
+    } catch (error) {
       return unavailable(
         evidence === null
           ? "DINING_BINDING_TABLE_CONTEXT_MISSING"
           : "DINING_BINDING_TABLE_CONTEXT_STALE",
+        error,
       );
     }
   }

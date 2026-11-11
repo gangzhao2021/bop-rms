@@ -20,8 +20,20 @@ import type {
   DiningAdmissionReservation,
 } from "./ports/dining-admission-ports.js";
 
-function unavailable(): never {
-  throw new DiningSessionError("DINING_SESSION_UNAVAILABLE");
+/**
+ * WP-2423 (checkout-session-outage review): `reason` names the refusal as a safe code, and `cause`
+ * keeps an owner's own refusal, behind the plain error (never shown, never enumerated), so an API
+ * 503 can log which rule refused the phone.
+ */
+function unavailable(reason?: string, cause?: unknown): never {
+  const error = new DiningSessionError("DINING_SESSION_UNAVAILABLE");
+  if (reason !== undefined) {
+    const detail: Record<string, unknown> = { code: reason };
+    if (cause !== null && typeof cause === "object")
+      Object.defineProperty(detail, "cause", { value: cause, enumerable: false });
+    Object.defineProperty(error, "cause", { value: Object.freeze(detail), enumerable: false });
+  }
+  throw error;
 }
 function conflict(): never {
   throw new DiningSessionError("DINING_SESSION_IDEMPOTENCY_CONFLICT");
@@ -84,8 +96,8 @@ export function createDiningAdmissionConsumptionService(ports: DiningAdmissionCo
           await ports.guests.resolve({ guestSessionReference, observedAt: requestedAt }),
         ),
       );
-    } catch {
-      return unavailable();
+    } catch (error) {
+      return unavailable("DINING_ADMISSION_GUEST_REFUSED", error);
     }
     if (
       guest.guestSessionReference !== guestSessionReference ||
@@ -95,11 +107,11 @@ export function createDiningAdmissionConsumptionService(ports: DiningAdmissionCo
       guest.tableReference === null ||
       guest.observedAt !== requestedAt
     )
-      return unavailable();
+      return unavailable("DINING_ADMISSION_GUEST_NOT_AT_TABLE");
     const source = await dependency(() =>
       ports.store.readCurrent({ admissionReference, observedAt: requestedAt }),
     );
-    if (source === null) return unavailable();
+    if (source === null) return unavailable("DINING_ADMISSION_NOT_FOUND");
     const snapshot = parseDiningAdmissionSnapshot(source);
     if (
       snapshot.session.brandReference !== brandReference ||
@@ -107,11 +119,10 @@ export function createDiningAdmissionConsumptionService(ports: DiningAdmissionCo
       snapshot.admission.admissionReference !== admissionReference
     )
       return sessionDependency();
-    if (
-      snapshot.joinedGuestSessionReference !== guestSessionReference ||
-      snapshot.session.tableReference !== guest.tableReference
-    )
-      return unavailable();
+    if (snapshot.joinedGuestSessionReference !== guestSessionReference)
+      return unavailable("DINING_ADMISSION_OTHER_PHONE");
+    if (snapshot.session.tableReference !== guest.tableReference)
+      return unavailable("DINING_ADMISSION_OTHER_TABLE");
     const joinHash = checked(() =>
       parseDiningHash(
         ports.credentials.hashOperationIntent(
@@ -153,7 +164,7 @@ export function createDiningAdmissionConsumptionService(ports: DiningAdmissionCo
         snapshot,
       } = await current(input);
       if (snapshot.admission.status !== "Active" || snapshot.admission.version !== 1)
-        return unavailable();
+        return unavailable("DINING_ADMISSION_NOT_ACTIVE");
       return Object.freeze({
         operationReference,
         admissionReference,
@@ -214,7 +225,7 @@ export function createDiningAdmissionConsumptionService(ports: DiningAdmissionCo
       const prior = await dependency(() => ports.store.resolveOperation(operationReference));
       if (prior !== null)
         return Object.freeze({ status: "AlreadyApplied", record: validate(prior) });
-      if (snapshot.admission.status !== "Active") return unavailable();
+      if (snapshot.admission.status !== "Active") return unavailable("DINING_ADMISSION_NOT_ACTIVE");
       const receipt = closedAdmissionData(
         await dependency(
           () => ports.store.consume(Object.freeze({ snapshot, record: proposed })),
