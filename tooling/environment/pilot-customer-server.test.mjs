@@ -405,12 +405,19 @@ test("WP-2423 取舍 18: a guest's member request reaches their own Store's hand
         origin: options.origin,
         resources: {
           ...options.resources,
-          publicProfile: { binding: { tenantReference: "tenant" } },
+          // The member port checks its references are real identifiers when it is built.
+          publicProfile: { binding: { tenantReference: "01900000-0000-7000-8000-000000000001" } },
           credentials: { reference: () => "reference" },
         },
         providerAccountReference: "provider",
         access: {
-          scope: { brandReference: "brand", storeReference: store },
+          scope: {
+            brandReference: "01900000-0000-7000-8000-000000000002",
+            storeReference:
+              store === "store-1"
+                ? "01900000-0000-7000-8000-000000000003"
+                : "01900000-0000-7000-8000-000000000004",
+          },
           transactions: {
             run: async () => {
               reached.push(store);
