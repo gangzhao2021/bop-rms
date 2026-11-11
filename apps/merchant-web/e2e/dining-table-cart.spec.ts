@@ -251,7 +251,7 @@ test("@production staff see that a phone is choosing what it pays and may still 
       cartReference: id(3),
       cartVersion: 8,
       guestPaying: false,
-      guestChoosing: { phoneNumber: 1, until: until.toISOString() },
+      guestChoosing: { phoneNumber: 1, until: until.toISOString(), held: true },
       lines: [line(21, { "en-CA": "Lemon tea" }), line(22, { "en-CA": "Mapo tofu" })],
     };
   const removes: Record<string, unknown>[] = [];

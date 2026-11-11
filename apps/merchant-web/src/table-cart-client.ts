@@ -40,7 +40,12 @@ export interface TableCart {
    * v15 batch 7: a phone chose which of these dishes it pays and has not started paying (until
    * when the others' dishes wait). Taking a dish out ends that choice; the phone chooses again.
    */
-  readonly guestChoosing: null | { readonly phoneNumber: number | null; readonly until: string };
+  readonly guestChoosing: null | {
+    readonly phoneNumber: number | null;
+    readonly until: string;
+    /** False once the hold ran out: the phone still shows its choice until it pays or goes back. */
+    readonly held: boolean;
+  };
   readonly lines: readonly TableCartLine[];
 }
 
@@ -75,8 +80,9 @@ export function parseTableCart(value: unknown): TableCart | null {
   ]);
   let guestChoosing: TableCart["guestChoosing"] = null;
   if (withChoosing && cart.guestChoosing !== null) {
-    const choosing = exact(cart.guestChoosing, ["phoneNumber", "until"]);
+    const choosing = exact(cart.guestChoosing, ["phoneNumber", "until", "held"]);
     if (
+      typeof choosing.held !== "boolean" ||
       typeof choosing.until !== "string" ||
       !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/u.test(choosing.until)
     )
@@ -84,6 +90,7 @@ export function parseTableCart(value: unknown): TableCart | null {
     guestChoosing = Object.freeze({
       phoneNumber: choosing.phoneNumber === null ? null : count(choosing.phoneNumber, 200),
       until: choosing.until,
+      held: choosing.held,
     });
   }
   if (

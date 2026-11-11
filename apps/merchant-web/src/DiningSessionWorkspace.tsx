@@ -1852,6 +1852,7 @@ function TablePanel({
             csrf={csrf}
             locked={locked}
             refreshKey={refreshKey + ":" + String(checkoutRevision)}
+            timeZone={timeZone}
           />
         ) : null}
         <section className="table-panel__more" aria-label={t("More for this table")}>

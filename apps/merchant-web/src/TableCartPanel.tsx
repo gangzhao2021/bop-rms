@@ -24,17 +24,46 @@ const reasonOrder: readonly TableCartRemovalReason[] = ["GuestAsked", "GuestLeft
  * left. Staff take a dish out with a reason (guest asked, guest left, can't make it); the guests'
  * phones are told. Not while a guest is paying for these dishes. Hidden when the cart is empty.
  */
+function guestChoosingText(
+  choosing: NonNullable<TableCart["guestChoosing"]>,
+  timeZone: string | undefined,
+): string {
+  const time = storeClockTime(choosing.until, timeZone);
+  if (!choosing.held)
+    return choosing.phoneNumber === null
+      ? t(
+          "A guest chose which of these dishes to pay and hasn't paid. Their hold ran out at {time}. Taking a dish out ends their choice: their phone asks them to choose again.",
+          { time },
+        )
+      : t(
+          "Phone {number} chose which of these dishes to pay and hasn't paid. Their hold ran out at {time}. Taking a dish out ends their choice: their phone asks them to choose again.",
+          { number: String(choosing.phoneNumber), time },
+        );
+  return choosing.phoneNumber === null
+    ? t(
+        "A guest is choosing which of these dishes to pay, until {time}. Taking a dish out ends their choice: their phone asks them to choose again.",
+        { time },
+      )
+    : t(
+        "Phone {number} is choosing which of these dishes to pay, until {time}. Taking a dish out ends their choice: their phone asks them to choose again.",
+        { number: String(choosing.phoneNumber), time },
+      );
+}
+
 export function TableCartPanel({
   diningSessionReference,
   csrf,
   locked,
   refreshKey,
+  timeZone,
   fetcher,
 }: {
   readonly diningSessionReference: string;
   readonly csrf: string;
   readonly locked: boolean;
   readonly refreshKey: string;
+  /** The store's IANA zone: "until 8:05" is the store's clock, never the device's. */
+  readonly timeZone: string | undefined;
   readonly fetcher?: typeof fetch | undefined;
 }) {
   const client = useMemo(() => createTableCartClient(fetcher), [fetcher]);
@@ -117,18 +146,7 @@ export function TableCartPanel({
         // v15 batch 7: a phone chose what it pays and hasn't paid yet. Staff may still take a
         // dish out; the phone is then asked to choose again, never charged for more.
         <p className="table-phones__mode" role="note">
-          {cart.guestChoosing.phoneNumber === null
-            ? t(
-                "A guest is choosing which of these dishes to pay, until {time}. Taking a dish out ends their choice: their phone asks them to choose again.",
-                { time: storeClockTime(cart.guestChoosing.until, undefined) },
-              )
-            : t(
-                "Phone {number} is choosing which of these dishes to pay, until {time}. Taking a dish out ends their choice: their phone asks them to choose again.",
-                {
-                  number: String(cart.guestChoosing.phoneNumber),
-                  time: storeClockTime(cart.guestChoosing.until, undefined),
-                },
-              )}
+          {guestChoosingText(cart.guestChoosing, timeZone)}
         </p>
       ) : null}
       <ul className="table-phones__list">

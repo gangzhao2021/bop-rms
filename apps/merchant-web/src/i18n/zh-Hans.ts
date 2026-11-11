@@ -6179,6 +6179,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{amount} to go · paying by dish, {paid} paid": "还差 {amount} · 按菜付，已付 {paid} 笔",
   "A guest is choosing which of these dishes to pay, until {time}. Taking a dish out ends their choice: their phone asks them to choose again.":
     "有位客人正在选这些菜里要付哪几道，保留到 {time}。删掉一道菜会结束他的选择，他的手机会请他重新选。",
+  "A guest chose which of these dishes to pay and hasn't paid. Their hold ran out at {time}. Taking a dish out ends their choice: their phone asks them to choose again.":
+    "有位客人选了这些菜里要付哪几道，还没付。保留已在 {time} 到期。删掉一道菜会结束他的选择，他的手机会请他重新选。",
+  "Phone {number} chose which of these dishes to pay and hasn't paid. Their hold ran out at {time}. Taking a dish out ends their choice: their phone asks them to choose again.":
+    "手机 {number} 选了这些菜里要付哪几道，还没付。保留已在 {time} 到期。删掉一道菜会结束他的选择，他的手机会请他重新选。",
   "Phone {number} is choosing which of these dishes to pay, until {time}. Taking a dish out ends their choice: their phone asks them to choose again.":
     "手机 {number} 正在选这些菜里要付哪几道，保留到 {time}。删掉一道菜会结束他的选择，他的手机会请他重新选。",
   "Table {table}: {amount} cash received. Change {change}.":
