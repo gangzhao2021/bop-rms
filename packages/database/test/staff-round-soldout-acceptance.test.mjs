@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { performance } from "node:perf_hooks";
+import { stdout } from "node:process";
 import pg from "pg";
 import { it, vi } from "vitest";
 import { createMerchantAvailability } from "../../../apps/api/src/merchant-availability.ts";
@@ -264,7 +266,7 @@ it("a guest's sold-out dish is marked; staff remove it and send the rest, a dish
       // Recorded, not a gate here: on this container database most of it is the existing
       // checkout and payment preparation (about 2.2 s of 3.6 s on 2026-11-10); the decision adds
       // one read-only check and one removal transaction. The < 2 s budget is checked live on v15.
-      console.info(`[M35] staff round with a guest line removed and one sent: ${elapsed} ms`);
+      stdout.write(`[M35] staff round with a guest line removed and one sent: ${elapsed} ms\n`);
       assert.deepEqual(await orderedItems(admin, placed.orderBatchReference), [
         { sku: tea.skuReference, quantity: 1 },
         { sku: tea.skuReference, quantity: 2 },

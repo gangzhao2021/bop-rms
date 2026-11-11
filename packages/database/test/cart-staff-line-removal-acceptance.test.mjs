@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { setTimeout as sleep } from "node:timers/promises";
 import pg from "pg";
 import { it } from "vitest";
 import {
@@ -173,7 +174,7 @@ it("WP-2423 (shared-table-checkout): staff remove a dish from a table cart, reco
             );
             if (waiting.rows[0].n > 0) break;
             assert.ok(attempt < 200, "staff removal never waited for the cart lock");
-            await new Promise((resolve) => setTimeout(resolve, 50));
+            await sleep(50);
           }
           holdRecorded = true;
           await guest.query("COMMIT");
