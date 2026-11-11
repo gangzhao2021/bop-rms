@@ -132,6 +132,29 @@ describe("authorized Quote HTTP bridge", () => {
     f.attach.mockResolvedValue({ status: "Attached", attachment: f.attachment });
     expect(await f.port.quoteCart(later)).toEqual({ status: "Unavailable" });
   });
+  it("Owner #26 (DEC-PRICE-HOLD): a hold that ends while it is read back answers the new price, never an outage", async () => {
+    const f = fixture();
+    // The held Quote was attached by the request that first priced it (id 90).
+    const held = { ...f.attachment, operationReference: id(90) };
+    f.attach
+      .mockResolvedValueOnce({ status: "Held", attachment: held } as never)
+      // The hold ended before the confirmation: this request (id 91) prices the Cart anew.
+      .mockResolvedValueOnce({ status: "Attached", attachment: f.attachment })
+      .mockResolvedValueOnce({ status: "AlreadyAttached", attachment: f.attachment });
+    f.resolve.mockImplementation(async (request) => ({
+      record: { ...f.record, operationReference: request.operationReference } as never,
+      quote: f.quote,
+    }));
+    const result = await f.port.quoteCart(f.input);
+    expect(result).toEqual({ status: "Created", quote: f.quote });
+    expect(f.attach).toHaveBeenCalledTimes(3);
+    // A new price that cannot be read back twice stays an outage.
+    f.attach
+      .mockResolvedValueOnce({ status: "Held", attachment: held } as never)
+      .mockResolvedValueOnce({ status: "Attached", attachment: f.attachment })
+      .mockResolvedValueOnce({ status: "Held", attachment: held } as never);
+    expect(await f.port.quoteCart(f.input)).toEqual({ status: "Unavailable" });
+  });
   it.each([
     ["CART_PERMISSION_DENIED", "NotFound"],
     ["CART_UNAVAILABLE", "NotFound"],

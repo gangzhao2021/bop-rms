@@ -259,75 +259,83 @@ export function createCustomerQuotePort(options: {
         return initialFailure(error);
       }
       // Any failure after an attempted successful command preserves outcome uncertainty.
-      try {
-        const first = receipt(saved, command, scope, options.quoteVersion);
-        const held = closed(saved, ["status", "attachment"]).status === "Held";
-        const observedAt = parseCanonicalInstant(options.now());
-        if (
-          String(observedAt) < first.attachedAt ||
-          String(observedAt) >= first.idempotencyExpiresAt
-        )
-          return unavailable;
-        const result = await options.requests.resolve({
-          operationReference: first.operationReference,
-          guestSessionReference: first.guestSessionReference,
-          cartReference: first.cartReference,
-          cartVersion: first.cartVersion,
-          observedAt,
-        });
-        const raw = closed(result, ["record", "quote"]);
-        const record = parsePriceQuoteRequestRecord(raw.record);
-        const quote =
-          options.quoteVersion === 2
-            ? decodeConfiguredPriceQuoteSnapshot(
-                encodeConfiguredPriceQuoteSnapshot(raw.quote as ConfiguredPriceQuoteSnapshot),
-              )
-            : decodePriceQuoteSnapshot(encodePriceQuoteSnapshot(raw.quote as PriceQuoteSnapshot));
-        if (
-          String(record.operationReference) !== first.operationReference ||
-          String(record.guestSessionReference) !== first.guestSessionReference ||
-          String(record.brandReference) !== first.brandReference ||
-          String(record.storeReference) !== first.storeReference ||
-          String(record.cartReference) !== first.cartReference ||
-          record.cartVersion !== first.cartVersion ||
-          record.quoteReference !== quote.quoteReference ||
-          record.createdAt > first.attachedAt ||
-          observedAt < record.createdAt ||
-          observedAt >= record.idempotencyExpiresAt ||
-          !matchesQuote(quote, first)
-        )
-          return unavailable;
-        const confirmed = receipt(
-          await options.attachment.attach(command),
-          command,
-          scope,
-          options.quoteVersion,
-        );
-        const finalAt = parseCanonicalInstant(options.now());
-        if (
-          finalAt < observedAt ||
-          finalAt >= record.idempotencyExpiresAt ||
-          String(finalAt) >= first.idempotencyExpiresAt
-        )
-          return unavailable;
-        if (
-          JSON.stringify(confirmed, (_key, value: unknown) =>
-            typeof value === "bigint" ? value.toString() : value,
-          ) !==
-          JSON.stringify(first, (_key, value: unknown) =>
-            typeof value === "bigint" ? value.toString() : value,
-          )
-        )
-          return unavailable;
-        return Object.freeze({
-          status: record.quoteOutcome === "Created" && !held ? "Created" : "Current",
-          quote,
-        });
-      } catch {
-        return unavailable;
-      }
+      return await answer(command, saved, true);
     },
   });
+  /**
+   * Reads back and confirms one attach answer. Owner #26 (DEC-PRICE-HOLD): when a held Quote's
+   * hold ends between the attach and its confirmation, the confirmation prices the Cart anew for
+   * this request; that new price is answered as any new price ("priced again"), never as an
+   * outage the guest would retry.
+   */
+  async function answer(
+    command: ReturnType<typeof copyCommand>,
+    saved: unknown,
+    heldMayEnd: boolean,
+  ): Promise<QuoteCartResult> {
+    try {
+      const first = receipt(saved, command, scope, options.quoteVersion);
+      const held = closed(saved, ["status", "attachment"]).status === "Held";
+      const observedAt = parseCanonicalInstant(options.now());
+      if (String(observedAt) < first.attachedAt || String(observedAt) >= first.idempotencyExpiresAt)
+        return unavailable;
+      const result = await options.requests.resolve({
+        operationReference: first.operationReference,
+        guestSessionReference: first.guestSessionReference,
+        cartReference: first.cartReference,
+        cartVersion: first.cartVersion,
+        observedAt,
+      });
+      const raw = closed(result, ["record", "quote"]);
+      const record = parsePriceQuoteRequestRecord(raw.record);
+      const quote =
+        options.quoteVersion === 2
+          ? decodeConfiguredPriceQuoteSnapshot(
+              encodeConfiguredPriceQuoteSnapshot(raw.quote as ConfiguredPriceQuoteSnapshot),
+            )
+          : decodePriceQuoteSnapshot(encodePriceQuoteSnapshot(raw.quote as PriceQuoteSnapshot));
+      if (
+        String(record.operationReference) !== first.operationReference ||
+        String(record.guestSessionReference) !== first.guestSessionReference ||
+        String(record.brandReference) !== first.brandReference ||
+        String(record.storeReference) !== first.storeReference ||
+        String(record.cartReference) !== first.cartReference ||
+        record.cartVersion !== first.cartVersion ||
+        record.quoteReference !== quote.quoteReference ||
+        record.createdAt > first.attachedAt ||
+        observedAt < record.createdAt ||
+        observedAt >= record.idempotencyExpiresAt ||
+        !matchesQuote(quote, first)
+      )
+        return unavailable;
+      const confirmedRaw = await options.attachment.attach(command);
+      if (held && heldMayEnd && closed(confirmedRaw, ["status", "attachment"]).status !== "Held")
+        return await answer(command, confirmedRaw, false);
+      const confirmed = receipt(confirmedRaw, command, scope, options.quoteVersion);
+      const finalAt = parseCanonicalInstant(options.now());
+      if (
+        finalAt < observedAt ||
+        finalAt >= record.idempotencyExpiresAt ||
+        String(finalAt) >= first.idempotencyExpiresAt
+      )
+        return unavailable;
+      if (
+        JSON.stringify(confirmed, (_key, value: unknown) =>
+          typeof value === "bigint" ? value.toString() : value,
+        ) !==
+        JSON.stringify(first, (_key, value: unknown) =>
+          typeof value === "bigint" ? value.toString() : value,
+        )
+      )
+        return unavailable;
+      return Object.freeze({
+        status: record.quoteOutcome === "Created" && !held ? "Created" : "Current",
+        quote,
+      });
+    } catch {
+      return unavailable;
+    }
+  }
 }
 
 export interface CustomerQuoteCompositionOptions {
