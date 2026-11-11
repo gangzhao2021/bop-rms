@@ -261,6 +261,10 @@ export function createPostgresDiningCheckoutCommitmentStore(
   }
   async function current(tx: DiningTableTransaction, record: DiningCheckoutCommitment, at: string) {
     // Match Move's table-before-session order; only Dining's own current rows are locked.
+    // WP-2423 M68 lock order: the table key before the table row, as every table command.
+    await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+      `DiningTable:${tenant}:${brand}:${store}:${record.tableReference}`,
+    ]);
     const tables = rows(
       await tx.query(
         "SELECT table_snapshot AS table FROM rms_dining.dining_table WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND table_id=$4 FOR UPDATE",
@@ -371,6 +375,10 @@ export function createPostgresDiningCheckoutCommitmentStore(
     )
       return fail("DINING_CHECKOUT_STORE_CONFLICT");
     const tableReference = before.tableReference;
+    // WP-2423 M68 lock order: the table key before the table row, as every table command.
+    await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+      `DiningTable:${tenant}:${brand}:${store}:${tableReference}`,
+    ]);
     const tables = rows(
       await tx.query(
         "SELECT table_snapshot AS table FROM rms_dining.dining_table WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND table_id=$4 FOR UPDATE",

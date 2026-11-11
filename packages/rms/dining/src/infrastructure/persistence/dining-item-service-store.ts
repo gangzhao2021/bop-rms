@@ -78,6 +78,10 @@ export function createPostgresDiningItemServiceStore(options: {
           return Object.freeze({ status: "AlreadyCommitted" as const, record: original });
         }
         // Match Dining Move: table before session, retained through caller commit.
+        // WP-2423 M68 lock order: the table key before the table row, as every table command.
+        await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+          `DiningTable:${scope.tenantReference}:${scope.brandReference}:${scope.storeReference}:${record.tableReference}`,
+        ]);
         const tables = await rows(
           tx,
           "SELECT table_snapshot FROM rms_dining.dining_table WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND table_id=$4 FOR UPDATE",

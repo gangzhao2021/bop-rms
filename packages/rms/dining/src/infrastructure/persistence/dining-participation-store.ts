@@ -156,6 +156,10 @@ function createParticipationStore(
             );
             if (located.length === 0) return null;
             lockedTable = parseDiningReference(closed(located[0], ["table_id"]).table_id);
+            // WP-2423 M68 lock order: the table key before the table row, as every table command.
+            await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+              `DiningTable:${tenant}:${brand}:${store}:${lockedTable}`,
+            ]);
             const tables = rows(
               await tx.query(
                 "SELECT table_id FROM rms_dining.dining_table WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND table_id=$4 FOR UPDATE",
