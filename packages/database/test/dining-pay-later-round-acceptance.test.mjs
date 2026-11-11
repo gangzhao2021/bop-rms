@@ -83,6 +83,7 @@ import {
 import { createMerchantDiningServeCommand } from "../../../apps/api/src/merchant-dining-serve-command.ts";
 import { createDiningTableOnlineRefundSender } from "../../../apps/api/src/dining-table-online-refund.ts";
 import { createDiningTableOnlinePayments } from "../../../apps/api/src/dining-table-online-payment.ts";
+import { createMerchantDiningTableOnlinePaymentStop } from "../../../apps/api/src/merchant-dining-table-online-payment.ts";
 import {
   createCustomerDiningTablePayment,
   customerSettledTableReceiptBody,
@@ -5834,7 +5835,13 @@ async function journey(journeyEnding) {
 
           // ── The guest gives up; staff stop the phone payment (cancelled with the Provider,
           // recorded with who stopped it), so the table could be paid another way.
-          const stopped = await payments.stop(me, id(0x700));
+          // M89: through the staff route's own command, as the restricted API role.
+          const stopped = await createMerchantDiningTableOnlinePaymentStop({
+            persistence: persistenceOf(server),
+            authentication: server.authentication,
+            payments: () => payments,
+          })({ ...as(server), command: { diningSessionReference: sessionReference } });
+          assert.equal(stopped.status, "Stopped");
           assert.equal(stopped.bill.onlinePayment?.status, "Cancelled");
           assert.equal(intents.get("pi_TEST000002").status, "Cancelled");
           assert.deepEqual(
@@ -5845,16 +5852,46 @@ async function journey(journeyEnding) {
             [{ actor: id(0x700) }],
           );
 
+          // ── M89 (v15 batch 5): the guest starts again and gives up again. Staff stop it; the
+          // Provider cancels it, the guest's phone records the cancel first, and the Provider's
+          // reply to staff is lost. The stop is recorded, so staff are told it stopped, not "we
+          // couldn't confirm".
+          await payments.start(me, { operationReference: fresh(), tip: fifteen });
+          const lostReply = createDiningTableOnlinePayments({
+            scope: ownerScope,
+            providerAccountReference: provider,
+            environment: "Test",
+            provider: {
+              ...stripe,
+              async cancelIntent(request) {
+                await stripe.cancelIntent(request);
+                await payments.refresh(me);
+                throw new Error("PROVIDER_REPLY_LOST");
+              },
+            },
+            transactions: transactions(),
+            now,
+            nextReference: fresh,
+          });
+          const stoppedAgain = await createMerchantDiningTableOnlinePaymentStop({
+            persistence: persistenceOf(server),
+            authentication: server.authentication,
+            payments: () => lostReply,
+          })({ ...as(server), command: { diningSessionReference: sessionReference } });
+          assert.equal(stoppedAgain.status, "Stopped");
+          assert.equal(stoppedAgain.bill.onlinePayment?.status, "Cancelled");
+          assert.equal(intents.get("pi_TEST000003").status, "Cancelled");
+
           // ── The guest comes back and pays: captured → the table's one payment, by round.
           await payments.start(me, { operationReference: fresh(), tip: fifteen });
-          intents.get("pi_TEST000003").status = "Captured";
+          intents.get("pi_TEST000004").status = "Captured";
           const paidView = await payments.refresh(me);
           assert.equal(paidView.bill.settlement?.method, "Online");
           assert.equal(paidView.bill.settlement?.totalMinor, due.toString());
           assert.equal(paidView.bill.settlement?.tipMinor, tipMinor.toString());
           assert.deepEqual(
             (await attempts()).map((attempt) => attempt.status),
-            ["Failed", "Cancelled", "Captured"],
+            ["Failed", "Cancelled", "Cancelled", "Captured"],
           );
           assert.deepEqual(
             await rows(

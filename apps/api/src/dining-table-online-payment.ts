@@ -827,7 +827,43 @@ export function createDiningTableOnlinePayments(options: DiningTableOnlinePaymen
      * a stop that was recorded from one that was not before it reads the bill again.
      */
     async stopAndRecord(authority: TableOnlinePaymentAuthority, actorReference: string) {
-      await refreshOpen(authority, { actor: { type: "User", reference: actorReference } });
+      const stop = { actor: { type: "User" as const, reference: actorReference } };
+      const openOf = () =>
+        options.transactions.run(async (tx) => {
+          const current = await bill(tx, authority);
+          if (current.orderReference === null) return [];
+          return (await attemptsOf(tx, authority, current.orderReference))
+            .filter((attempt) => attempt.outcome === null)
+            .map((attempt) => attempt.onlinePaymentReference);
+        });
+      const open = await options.transactions.run(async (tx) => {
+        const current = await bill(tx, authority);
+        if (current.orderReference === null) return [];
+        return (await attemptsOf(tx, authority, current.orderReference)).filter(
+          (attempt) => attempt.outcome === null,
+        );
+      });
+      // M89 (v15 batch 5): each open phone payment is stopped on its own; one whose answer was lost
+      // does not keep the others open.
+      let failure: unknown = null;
+      for (const found of open)
+        await refreshOne(authority, found, stop).catch((error: unknown) => {
+          failure ??= error;
+        });
+      if (failure === null) return;
+      // Still being processed: the guest may be paying right now (staff try again shortly).
+      if (
+        failure instanceof DiningTableOnlinePaymentError &&
+        failure.code === "TABLE_ONLINE_PAYMENT_STILL_PROCESSING"
+      )
+        throw failure;
+      // The Provider's reply was lost or a step after it failed. What counts is the record: when
+      // every payment that was open now has its outcome (stopped by staff, by the guest's phone or
+      // by the Provider, or paid meanwhile), the stop is done. Otherwise it is "try again".
+      const after = await openOf().catch(() => null);
+      if (after === null) throw failure;
+      const stillOpen = new Set(after);
+      if (open.some((found) => stillOpen.has(found.onlinePaymentReference))) throw failure;
     },
     /** The record, then the bill. */
     async stop(authority: TableOnlinePaymentAuthority, actorReference: string) {
