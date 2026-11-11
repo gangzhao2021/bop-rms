@@ -70,3 +70,23 @@ activation remain separate gates. Until then this is not a complete pilot refund
 Owner response: **Accepted RF-D01–06**.
 Acceptance date/evidence: **2026-09-13**, explicit current-task user response “确认普通退款提案”.
 Accepted policy version: **PILOT_ORDINARY_REFUND_V1**.
+
+## Amendments (DEC-OWNER-DEFAULTS-2026-11-06, Owner accepted all defaults)
+
+- Item 3 (M16), 2026-11-10: a refund needing no approval is prepared by the server with its
+  request, on the requester's session; the business worker's follow-through then sends what a
+  person prepared (an approved refund too) with no session, re-checking the recorded requester,
+  approval and executor through Membership, Permission and MFA at dispatch. This amends "execution
+  is never resolved for anyone but the signed-in actor": the system finishes what the executor
+  authorized, it never prepares. A dispatch is journaled once per operation, so it is never sent
+  twice. When the Provider or network is down the refund stays recorded and listed as not sent on
+  Approvals and Home, and the worker keeps trying; the guest is told it is recorded and will
+  reach their card. Staff never also refund it another way while it is listed (that would refund
+  twice): an Owner declines it first if it must be refunded otherwise.
+- Item 2 (M14), 2026-11-10: a cashier (role group Staff, Front of House, catalog v27
+  `payment.refund.request` only) records a request with a reason. It is never prepared by them; a
+  Store Manager or the Owner sends it from Approvals ("Asked by …, waiting for you to send"); an
+  escalated one still also needs the Owner's (or Finance's) approval as a manager's would.
+- Item 5 (M163), 2026-11-10: money taken back after a refund made by mistake is a new
+  append-only Payment record on the same order and business day, recorded by a Store Manager or
+  the Owner (`payment.refund.recover`); the refund itself never changes.

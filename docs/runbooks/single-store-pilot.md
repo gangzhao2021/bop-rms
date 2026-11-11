@@ -686,6 +686,17 @@ what staff do when something fails is different:
   Anyone who can accept can do it; it is recorded in their name and listed on the manager's Home and
   in tonight's summary. After the kitchen started, it is an ordinary refund or item cancellation by
   a manager.
+- **Refunding a dish (WP-2423 M10/M14/M16/M163):** on the payment's refund page, each refunded dish
+  asks "Stop making it too", ticked while the kitchen has not started it: the kitchen board then
+  shows "N refunded · don't make it" and the pickup card leaves those units out of the bag (a pickup
+  with everything refunded leaves the queue). Untick it when the guest keeps the food. A cashier can
+  record a refund request with a reason; it waits on Approvals and Home ("Asked by …, waiting for
+  you to send") for a manager or the owner to send. A refund that needs no approval, or was
+  approved, is sent by the system within a minute even if the page was closed; if the card company
+  or network is down it stays on Approvals and Home as not sent and keeps being tried. Never refund
+  it another way while it is listed. If too much was refunded and the guest gives money back, a
+  manager or the owner records "Take money back" on the payment (cash, or charged on the card
+  machine with the slip): the refund stays as it was and the day's settlement shows the line.
 - **A pickup nobody touched:** 30 minutes after it was sent it closes and refunds by itself, with
   warnings at 5 minutes, 2 minutes and 30 seconds on every screen. Any kitchen step on it stops it,
   and so does "Making it by hand" on Orders. While the kitchen is still recording steps on other
