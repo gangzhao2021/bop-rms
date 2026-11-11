@@ -85,7 +85,9 @@ test.describe("@production the Store's hours ahead", () => {
     await page.screenshot({ path: "test-results/store-info-zh-390.png", fullPage: true });
   });
 
-  test("after last orders the menu says the kitchen stopped and to ask staff", async ({ page }) => {
+  test("after last orders the menu says the kitchen stopped and a pickup order can’t be placed from the phone", async ({
+    page,
+  }) => {
     // Follow-up (v15 2026-10-28): the checkout and payment gates refuse guests after this time.
     await page.route("**/api/v1/customer/store", (route) =>
       route.fulfill({
@@ -107,9 +109,11 @@ test.describe("@production the Store's hours ahead", () => {
       history.pushState(null, "", "/menu");
       window.dispatchEvent(new PopStateEvent("popstate"));
     });
-    const notice = page.getByRole("status", { name: "Last orders" });
+    // WP-2423 store-service-controls (v15 M30/M34): once orders stopped the notice is an alert,
+    // and a pickup guest (no staff member beside them) is told they can't order from the phone.
+    const notice = page.getByRole("alert", { name: "Last orders" });
     await expect(notice).toContainText("The kitchen stopped taking orders at 9:30 p.m.");
-    await expect(notice).toContainText("To add something, ask a staff member.");
+    await expect(notice).toContainText("You can’t place a pickup order from your phone now.");
     await expect(page.getByRole("region", { name: "Store hours and address" })).toContainText(
       "Kitchen stopped taking orders at 9:30 p.m.",
     );
