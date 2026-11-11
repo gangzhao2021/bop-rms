@@ -1,4 +1,4 @@
-import { expect, test, type Page, type Route } from "@playwright/test";
+import { expect, test, type Locator, type Page, type Route } from "@playwright/test";
 import { expectNoInternalText } from "./internal-text-guard";
 
 /**
@@ -175,6 +175,12 @@ test("@production a sign-out is still a sign-out, not a reconnect", async ({ pag
   expect(reads).toBe(1);
 });
 
+async function box(locator: Locator) {
+  const found = await locator.boundingBox();
+  if (found === null) throw new Error("not laid out");
+  return found;
+}
+
 for (const width of [390, 1024, 1440])
   test(`@production the reconnecting page reads as a page at ${width}: clear of the language switch, with margins and a real Try now button`, async ({
     page,
@@ -195,17 +201,17 @@ for (const width of [390, 1024, 1440])
     await expect(heading).toBeVisible();
     const language = page.getByRole("button", { name: "切换到中文" });
     await expect(language).toHaveCount(1);
-    const h = (await heading.boundingBox())!;
-    const l = (await language.boundingBox())!;
+    const h = await box(heading);
+    const l = await box(language);
     const overlaps =
       h.x < l.x + l.width && l.x < h.x + h.width && h.y < l.y + l.height && l.y < h.y + h.height;
     expect(overlaps).toBe(false);
     // Margins: off the top edge, and off the sidebar (or the phone's edge) by the page gutter.
     expect(h.y).toBeGreaterThanOrEqual(16);
-    const text = (await page.getByText("Retrying on its own.", { exact: false }).boundingBox())!;
+    const text = await box(page.getByText("Retrying on its own.", { exact: false }));
     if (width === 390) expect(text.x).toBeGreaterThanOrEqual(16);
     else {
-      const nav = (await page.locator(".workspace-sidebar").boundingBox())!;
+      const nav = await box(page.locator(".workspace-sidebar"));
       expect(text.x).toBeGreaterThanOrEqual(nav.x + nav.width + 16);
     }
     // Try now is drawn as a button (a border or a fill), at least 44 px tall.

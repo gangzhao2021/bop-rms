@@ -52,10 +52,13 @@ export async function createMerchantBrandApplication(options: {
     const root = await lstat(directory);
     if (!root.isDirectory() || root.isSymbolicLink()) return unavailable();
     const entries = await readdir(directory);
-    // operations/ holds the store outage page's files (public/operations); this application never
-    // serves it: requests are answered only from index.html and assets captured below.
+    // operations/ holds the store outage page's files (public/operations) and merchant-app-sw.js
+    // the same offline worker for /app pages; this application never serves them: requests are
+    // answered only from index.html and assets captured below.
     if (
-      entries.some((entry) => !["index.html", "assets", "operations"].includes(entry)) ||
+      entries.some(
+        (entry) => !["index.html", "assets", "operations", "merchant-app-sw.js"].includes(entry),
+      ) ||
       !entries.includes("index.html") ||
       !entries.includes("assets")
     )

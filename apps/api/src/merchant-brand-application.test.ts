@@ -213,3 +213,14 @@ it("refuses noncanonical build roots, unsafe configured Host and finite preload 
     "Merchant application build is unavailable",
   );
 });
+it("accepts the merchant build with its outage page files, and never serves them", async () => {
+  const directory = await build();
+  // Live v15 2026-11-10: the merchant build's own offline worker files sit beside the app.
+  await mkdir(join(directory, "operations"));
+  await writeFile(join(directory, "operations", "sw.js"), "/* synthetic worker */");
+  await writeFile(join(directory, "merchant-app-sw.js"), "/* synthetic worker */");
+  const read = await serve(directory);
+  expect((await read("/app/organization/brands")).status).toBe(200);
+  for (const path of ["/merchant-app-sw.js", "/operations/sw.js"])
+    expect((await read(path)).status).toBe(404);
+});
