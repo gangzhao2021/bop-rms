@@ -169,6 +169,12 @@ it.each([false, true])(
             "GRANT SELECT,INSERT ON rms_ordering.cart_quote_attachment,rms_ordering.cart_quote_attachment_line TO " +
               roles[0],
           );
+          // WP-2423 shared-table-checkout (2000_520/2000_526): the checkout-scope fence on this insert reads
+          // the live scope, its payer sessions and the table's cart operations (pilot ACL: SELECT for api).
+          await admin.query(
+            "GRANT SELECT ON rms_ordering.dining_checkout_scope,rms_ordering.dining_checkout_scope_payer_session,rms_ordering.dining_cart_operation TO " +
+              roles[0],
+          );
           await admin.query("GRANT USAGE ON SCHEMA rms_pricing TO " + roles[1]);
           await admin.query(
             "GRANT SELECT,INSERT ON rms_pricing.price_quote,rms_pricing.price_quote_line,rms_pricing.price_quote_tax_line,rms_pricing.price_quote_request TO " +

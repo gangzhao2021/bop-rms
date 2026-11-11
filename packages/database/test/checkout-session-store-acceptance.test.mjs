@@ -24,6 +24,12 @@ it("enforces checkout session identities, append-only history and Store RLS in P
         "GRANT SELECT,INSERT,UPDATE,DELETE ON rms_ordering.checkout_session_record,rms_ordering.checkout_session_allocation TO " +
           role,
       );
+      // WP-2423 shared-table-checkout (2000_520/2000_526): the checkout-scope fence on this insert reads
+      // the live scope, its payer sessions and the table's cart operations (pilot ACL: SELECT for api).
+      await admin.query(
+        "GRANT SELECT ON rms_ordering.cart,rms_ordering.dining_checkout_scope,rms_ordering.dining_checkout_scope_payer_session,rms_ordering.dining_cart_operation TO " +
+          role,
+      );
       const now = new Date(Date.now() - 1000).toISOString();
       await admin.query(
         `INSERT INTO rms_ordering.cart

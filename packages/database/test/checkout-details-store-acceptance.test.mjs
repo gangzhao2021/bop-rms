@@ -29,6 +29,12 @@ it("persists original checkout details with revision contention, lost response, 
         "GRANT SELECT,INSERT ON rms_ordering.checkout_details_record,platform_audit.audit_record TO " +
           role,
       );
+      // WP-2423 shared-table-checkout (2000_520/2000_526): the checkout-scope fence on this insert reads
+      // the live scope, its payer sessions and the table's cart operations (pilot ACL: SELECT for api).
+      await admin.query(
+        "GRANT SELECT ON rms_ordering.dining_checkout_scope,rms_ordering.dining_checkout_scope_payer_session,rms_ordering.dining_cart_operation TO " +
+          role,
+      );
       await admin.query("GRANT SELECT,INSERT,UPDATE ON platform_audit.audit_chain_head TO " + role);
       const now = new Date(Date.now() - 1000).toISOString();
       await admin.query(
