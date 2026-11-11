@@ -364,6 +364,12 @@ export const cartText = Object.freeze({
   get pageHeading() {
     return t("Your cart");
   },
+  /** M116: the cart while only looking at a closed (or paused) Store's menu. */
+  storeNotTakingOrders: (storeDisplayName: string) =>
+    t("{storeDisplayName} isn’t taking orders right now", { storeDisplayName }),
+  get backToMenu() {
+    return t("Back to menu");
+  },
   get loadingHeading() {
     return t("Loading cart");
   },

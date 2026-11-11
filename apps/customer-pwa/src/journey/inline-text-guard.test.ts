@@ -258,10 +258,10 @@ const pageMachineCodes: Readonly<Record<string, ReadonlySet<string>>> = {
     "InUse",
   ]),
   "member/MemberPage.tsx": new Set(["Loading", "Ready", "Failed", "Left"]),
+  // M116: how the next opening is worded inside a line (never shown).
+  "menu/ClosedStoreNotice.tsx": new Set(["Line"]),
   "menu/MenuPage.tsx": new Set([
     "Loading",
-    // M116: how the next opening is worded inside a line (never shown).
-    "Line",
     // The guest's service channel the store-service notice is asked about (never shown).
     "Pickup",
     "DineIn",

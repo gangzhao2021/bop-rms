@@ -4,7 +4,6 @@ import {
   CHINESE_LOCALE,
   currentLanguage,
   listSeparator,
-  t,
   useReloadOnLanguageChange,
 } from "../i18n/i18n.js";
 import {
@@ -1172,18 +1171,14 @@ export function CartPage(props: CartPageProps) {
   if (closed !== undefined && props.menuContext !== undefined)
     return (
       <CustomerPage step="cart" store={props.store} className="cart-page" browseOnly>
-        <PageHeading title={t("Your cart")} />
+        <PageHeading title={cartText.pageHeading} />
         <section className="menu-readonly-boundary menu-closed-notice" role="status">
-          <h2>
-            {t("{storeDisplayName} isn’t taking orders right now", {
-              storeDisplayName: props.menuContext.storeDisplayName,
-            })}
-          </h2>
+          <h2>{cartText.storeNotTakingOrders(props.menuContext.storeDisplayName)}</h2>
           <ClosedStoreNotice
             closed={closed}
             primary={
               <Link className="cart-primary-link" to="/menu">
-                {t("Back to menu")}
+                {cartText.backToMenu}
               </Link>
             }
           />
