@@ -1859,4 +1859,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "你选的菜已不再保留，同桌其他人可以拿回他们的菜。",
   "Back to cart": "返回购物车",
   "Someone at your table is paying": "同桌有人正在付款",
+  "A choice can add allergens not listed here. If you have an allergy, ask staff before ordering.":
+    "选项可能会加入这里没列出的过敏原。如果你有过敏，请下单前先问店员。",
 });

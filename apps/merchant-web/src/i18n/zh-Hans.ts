@@ -9447,4 +9447,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Orders with a dish sold out since it was ordered": "有菜在下单后售罄的订单",
   "{orders} waiting to be accepted. Open each on Orders: offer the guest a swap, or cancel that dish with a refund.":
     "{orders}等待接单。在订单页逐一打开：请客人换一道，或取消这道菜并退款。",
+  "{item} saved. Guests and the kitchen already see what its choices add; the rest shows when the menu is listed.":
+    "{item} 已保存。顾客和后厨已经能看到各选项新增的过敏原；其他改动在菜单上架后显示。",
+  "Not answered yet whether these choices add allergens: {choices}. Guests are asked to check with staff until you answer “Adds allergens?” under each.":
+    "这些选项还没回答是否会加过敏原：{choices}。在你逐一回答“加过敏原吗？”之前，顾客会被提醒先问店员。",
 });

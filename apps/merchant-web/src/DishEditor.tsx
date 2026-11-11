@@ -321,6 +321,23 @@ export function DishEditor({
   const label =
     dish === null ? t("New dish") : dish.nameZh ? `${dish.name} ${dish.nameZh}` : dish.name;
   const recipeAllergens = dish?.allergens.source === "Recipe";
+  // b7 (M166): the choices on this dish whose own allergens nobody answered yet (by name).
+  const choicesUnanswered =
+    recipeAllergens || charge || allergenChoices.length === 0 || source === null
+      ? []
+      : source.groups.flatMap((group) => {
+          const on = chosen.get(group.optionSetReference);
+          return on === undefined
+            ? []
+            : group.options
+                .filter(
+                  (option) =>
+                    option.offered &&
+                    on.has(option.optionReference) &&
+                    !choiceAdds.has(option.optionReference.slice(-12)),
+                )
+                .map((option) => option.name);
+        });
   const priceMinor = dollarsToMinor(form.price);
   // WP-2423 M70: a price is sent only when it differs from what the dish has now, with where it
   // changes. A new dish's first price is for every Store; at one Store there is one price.
@@ -462,6 +479,8 @@ export function DishEditor({
     | {
         readonly productReference: string | null;
         readonly choicesWaiting: boolean;
+        /** b7: what the answered choices add already reaches guests and the kitchen. */
+        readonly allergensShownNow?: boolean;
         readonly name: string;
         /** Saved with no allergens declared (it cannot be listed until they are). */
         readonly undeclared: boolean;
@@ -489,6 +508,7 @@ export function DishEditor({
     const result = (await client.oneStore({ ...request, operationReference: reference })) as {
       productReference?: unknown;
       choicesWaiting?: unknown;
+      allergensShownNow?: unknown;
       price?: unknown;
       listingNeeded?: unknown;
     } | null;
@@ -504,6 +524,7 @@ export function DishEditor({
       productReference:
         typeof result?.productReference === "string" ? result.productReference : productReference,
       choicesWaiting: result?.choicesWaiting === true,
+      allergensShownNow: result?.allergensShownNow === true,
       name: content.name,
       undeclared:
         content.allergens === null &&
@@ -539,6 +560,7 @@ export function DishEditor({
       undeclared: boolean;
       storePriceMinor: string | null;
       listingNeeded: boolean;
+      allergensShownNow?: boolean;
     },
     notSet: readonly string[],
   ) =>
@@ -552,7 +574,12 @@ export function DishEditor({
       result.choicesWaiting || result.undeclared
         ? t("{item} saved. Declare its allergens, then list it.", { item: result.name })
         : result.storePriceMinor === null
-          ? t("{item} saved. Guests see it when the menu is listed.", { item: result.name })
+          ? result.allergensShownNow === true
+            ? t(
+                "{item} saved. Guests and the kitchen already see what its choices add; the rest shows when the menu is listed.",
+                { item: result.name },
+              )
+            : t("{item} saved. Guests see it when the menu is listed.", { item: result.name })
           : result.listingNeeded
             ? t("Its other changes go live when the menu is listed.")
             : t("Nothing else changed, so there is nothing to list."),
@@ -1254,6 +1281,15 @@ export function DishEditor({
               </p>
             ) : null}
           </div>
+        ) : null}
+        {choicesUnanswered.length > 0 ? (
+          // b7 (M166): a choice nobody answered is never taken as adding nothing.
+          <p className="dish-editor__note" role="note">
+            {t(
+              "Not answered yet whether these choices add allergens: {choices}. Guests are asked to check with staff until you answer “Adds allergens?” under each.",
+              { choices: choicesUnanswered.join(listSeparator()) },
+            )}
+          </p>
         ) : null}
         {problem ? (
           <p className="dish-editor__problem" role="alert">

@@ -378,6 +378,39 @@ describe("WP-1701 Customer Menu screens", () => {
     expect(plain).not.toContain("just updated");
   });
 
+  it("b7 (M166): a choice that adds an allergen says so; a dish whose choices say nothing asks guests to check", () => {
+    const rice = sellable.optionRules[0]?.options[0]?.optionReference ?? "";
+    const controller: ConfigureController = {
+      getState: () => ({ status: "idle" }),
+      retry: vi.fn(),
+      setOnline: vi.fn(),
+      submit: vi.fn(),
+      subscribe: () => () => undefined,
+    };
+    const configure = (item: MenuSellable) =>
+      renderToStaticMarkup(
+        <MemoryRouter>
+          <SellableConfigurator sellable={item} controller={controller} />
+        </MemoryRouter>,
+      );
+    const caution =
+      "A choice can add allergens not listed here. If you have an allergy, ask staff before ordering.";
+    // Nothing is said about the choice: never read as safe.
+    expect(configure(sellable)).toContain(caution);
+    const answered: MenuSellable = {
+      ...sellable,
+      allergensByOption: { [rice]: [{ name: "Eggs", classification: "Contains" as const }] },
+    };
+    const html = configure(answered);
+    expect(html).toContain("Adds: Eggs");
+    expect(html).not.toContain(caution);
+    // The dish's list holds what that choice adds, so it says it covers all choices.
+    const detail = (item: MenuSellable) =>
+      render({ context, detail: item, mode: "detail", state: { kind: "Found", menu } });
+    expect(detail(answered)).toContain("Allergen information (all choices)");
+    expect(detail(sellable)).not.toContain("(all choices)");
+  });
+
   it("renders required-selection, price and sensitive-note boundaries without references", () => {
     const configurable = {
       ...sellable,

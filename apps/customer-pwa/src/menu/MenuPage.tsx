@@ -1935,7 +1935,33 @@ export function SellableConfigurator({
           )}
         />
       ) : null}
+      {choicesUnconfirmed(sellable) ? (
+        // b7 (M166): a choice the restaurant has not said anything about is never read as safe.
+        <p className="configure-allergens" role="note">
+          {t(
+            "A choice can add allergens not listed here. If you have an allergy, ask staff before ordering.",
+          )}
+        </p>
+      ) : null}
     </form>
+  );
+}
+
+/**
+ * b7 (M166): the dish offers a choice (not a combo dish) whose own allergens the menu does not
+ * state — no reviewed set of choices covers it, and it names nothing it adds. "Adds none" is not
+ * told apart from "never answered" here, so both are said the careful way.
+ */
+export function choicesUnconfirmed(sellable: MenuSellable): boolean {
+  if (sellable.allergensByChoice !== undefined) return false;
+  return sellable.optionRules.some(
+    (rule) =>
+      rule.comboPart !== true &&
+      rule.options.some(
+        (option) =>
+          option.offeredNow !== false &&
+          (sellable.allergensByOption?.[option.optionReference]?.length ?? 0) === 0,
+      ),
   );
 }
 
@@ -2001,7 +2027,9 @@ function AllergenSummary({ sellable }: { readonly sellable: MenuSellable }) {
   return (
     <div className="menu-allergens">
       <p className="menu-allergen-heading">
-        {sellable.allergensByChoice === undefined
+        {/* b7: a list that holds what a choice adds says so (that choice names it too). */}
+        {sellable.allergensByChoice === undefined &&
+        !Object.values(sellable.allergensByOption ?? {}).some((adds) => adds.length > 0)
           ? t("Allergen information")
           : t("Allergen information (all choices)")}
       </p>
