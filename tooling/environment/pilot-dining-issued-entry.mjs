@@ -71,12 +71,28 @@ export async function createIssuedDiningEntries(resources, { loadProfile, loadKe
    * before it writes (dining-table-lock-order acceptance: a guest's call that checked a table
    * staff then blocked, or whose QR code staff then replaced, is refused).
    */
+  /**
+   * WP-2423 M35 (DEC-STAFF-ROUND-SPEED): an issued table code is append-only (never changed or
+   * removed; replacing or turning off a code is a new fact on the table, which each check still
+   * reads), so the issue row a guest's session names is read once per process instead of once per
+   * check. Only codes this Store issued are kept (the read is scoped to it), at most 4,096.
+   */
+  const issuedCodes = new Map();
+  const issuedCode = async (runner, qrReference) => {
+    const known = issuedCodes.get(qrReference);
+    if (known !== undefined) return known;
+    const issue = await runner.run((tx) => codes(tx).loadByQrReference(qrReference));
+    if (issue === null) return null;
+    if (issuedCodes.size >= 4096) issuedCodes.delete(issuedCodes.keys().next().value);
+    issuedCodes.set(qrReference, issue);
+    return issue;
+  };
   const binding = (runner, { oneTransaction = false } = {}) => {
     const resolved = oneTransaction ? new Map() : null;
     const guest = async (session) => {
       if (session?.channel !== "DineIn" || !uuidPattern.test(String(session.qrReference)))
         return null;
-      const issue = await runner.run((tx) => codes(tx).loadByQrReference(session.qrReference));
+      const issue = await issuedCode(runner, String(session.qrReference));
       return issue === null
         ? null
         : createConfiguredDiningGuestContext({

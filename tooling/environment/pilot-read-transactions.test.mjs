@@ -18,9 +18,9 @@ it("uses a read-only scoped transaction and releases after successful work", asy
     }),
   ).resolves.toBe("read-result");
   expect(f.connection.query.mock.calls[0][0]).toBe(
-    "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY",
+    "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY; SET LOCAL lock_timeout = '2s'",
   );
-  expect(f.connection.query.mock.calls[2][1]).toEqual([
+  expect(f.connection.query.mock.calls[1][1]).toEqual([
     f.scope.brandReference,
     f.scope.storeReference,
   ]);
@@ -46,3 +46,35 @@ it.each([false, true])(
     expect(f.connection.release).toHaveBeenCalledExactlyOnceWith(true);
   },
 );
+
+it("WP-2423 M35: sends a scope setting only when it changes one, and answers a repeated stable read", async () => {
+  const f = fixture();
+  const read = "SELECT snapshot_json FROM rms_catalog.sku WHERE sku_id=$1";
+  f.connection.query.mockImplementation(async (sql) =>
+    sql === read ? { rows: [{ snapshot_json: { v: 1 } }], rowCount: 1 } : { rows: [], rowCount: 0 },
+  );
+  await f.run(async (tx) => {
+    await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+      f.scope.brandReference,
+      f.scope.storeReference,
+    ]);
+    expect(await tx.query("-- bop:stable-read\n" + read, ["s"])).toMatchObject({
+      rows: [{ snapshot_json: { v: 1 } }],
+    });
+    expect(await tx.query("-- bop:stable-read\n" + read, ["s"])).toMatchObject({
+      rows: [{ snapshot_json: { v: 1 } }],
+    });
+    await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id','',true)", [
+      f.scope.brandReference,
+    ]);
+    await tx.query("SELECT 1", []);
+  });
+  expect(f.connection.query.mock.calls.map(([sql]) => sql)).toEqual([
+    "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY; SET LOCAL lock_timeout = '2s'",
+    "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+    read,
+    "SELECT set_config('bop.store_id',$1,true)",
+    "SELECT 1",
+    "COMMIT",
+  ]);
+});

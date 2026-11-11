@@ -9,8 +9,10 @@ export function createInternalReadTransactions(resources) {
       const connection = await resources.database.acquire();
       let failed = false;
       try {
-        await connection.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
-        await connection.query("SET LOCAL lock_timeout = '2s'");
+        // WP-2423 M35: BEGIN and its limit in one simple-protocol round trip.
+        await connection.query(
+          "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY; SET LOCAL lock_timeout = '2s'",
+        );
         await connection.query(
           "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
           [resources.scope.brandReference, resources.scope.storeReference],

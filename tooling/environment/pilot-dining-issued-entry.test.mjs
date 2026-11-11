@@ -113,15 +113,21 @@ it("keeps an unavailable answer for the rest of the same check", async () => {
 });
 
 it("resolves on every call when no single transaction is lent", async () => {
-  const binding = (await entries()).binding(runner);
+  const composed = await entries();
+  const binding = composed.binding(runner);
   expect(await binding.validate(session, at)).toBe("Current");
   await binding.resolve({ session, observedAt: at, purpose: "DiningAdmission" });
   await binding.resolve({ session, observedAt: at, purpose: "DiningAdmission" });
   expect(seen.resolves).toEqual(["GuestSessionBinding", "DiningAdmission", "DiningAdmission"]);
-  expect(seen.issues).toBe(3);
+  // WP-2423 M35: the issued code is append-only, so it is read once; the context every time.
+  expect(seen.issues).toBe(1);
   // Not a table guest or a malformed code: no read at all.
   expect(await binding.validate({ ...session, channel: "Pickup" }, at)).toBe("Unavailable");
   expect(await binding.validate({ ...session, qrReference: "x" }, at)).toBe("Unavailable");
-  expect(seen.issues).toBe(3);
-  expect(runs).toBe(3);
+  expect(seen.issues).toBe(1);
+  expect(runs).toBe(1);
+  // Another check of the same composition does not read the code again either.
+  expect(await composed.binding(runner).validate(session, at)).toBe("Current");
+  expect(seen.issues).toBe(1);
+  expect(seen.resolves).toHaveLength(4);
 });
