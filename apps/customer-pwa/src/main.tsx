@@ -4,6 +4,7 @@ import {
   createCustomerStartClient,
   type CustomerEntryStartSource,
 } from "./entry/start-client.js";
+import { reloadOnEntryCodeChange } from "./entry/entry-code-change.js";
 import type { CustomerEntryResumedContext } from "./entry/types.js";
 import { loadRuntimePaymentConfiguration } from "./payment/payment-runtime-configuration.js";
 import type { MenuJourneyContext } from "./menu/types.js";
@@ -237,5 +238,12 @@ async function start() {
     </StrictMode>,
   );
   startCustomerServiceWorker();
+  // A second Store's code opened in this same tab changes only the address's fragment, which the
+  // browser does not load again: the page starts again at that code, never at the earlier Store.
+  reloadOnEntryCodeChange({
+    events: window,
+    hash: () => window.location.hash,
+    reload: () => window.location.reload(),
+  });
 }
 void start();
