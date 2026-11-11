@@ -82,14 +82,30 @@ export function createMerchantOrdinaryRefundApprovals(options: {
             query.storeReference === scope.storeReference &&
             (await still());
           const observedAt = String(current.context.resolvedAt);
+          const authority = createMerchantOrdinaryRefundAuthority(configuration.workforce);
           const entries = await createPostgresOrdinaryRefundApprovalQueueRuntime({
             scope,
             providerAccountReference: configuration.providerAccountReference,
             environment: configuration.environment,
             authorize,
             businessDate: configuration.businessDate,
+            // WP-2423 M14: a cashier (Staff) never sends their own request, so it is listed at
+            // once; if their role can't be read it waits the usual minute (never hidden).
+            requesterMaySend: async (_tx, query) => {
+              try {
+                const facts = await authority(tx, {
+                  ...scope,
+                  orderReference: query.orderReference,
+                  actorReference: query.requesterReference,
+                  permissionCode: "payment.refund.request",
+                  observedAt,
+                });
+                return facts.role !== "Staff";
+              } catch {
+                return true;
+              }
+            },
           })(tx, { observedAt });
-          const authority = createMerchantOrdinaryRefundAuthority(configuration.workforce);
           // Only the order number is shown: a plain read of Ordering's immutable order number, no
           // Order row lock. Locking the Order after the refund fences the queue holds would invert
           // the canonical lock order (acquireOrdinaryRefundRequestFences; v15 2026-10-18 40P01).

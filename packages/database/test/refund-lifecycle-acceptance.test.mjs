@@ -473,7 +473,7 @@ it("a cashier's refund request is recorded, never sent by them, and listed for a
   await withAutoAcceptWorld({ caseId: "wp2423_rl_staff", orderType: "Pickup" }, async (world) => {
     const { assert, paid, kitchenScreen, transactions, seedPaidPickup, query, fresh } = world;
     await kitchenScreen.seenNow();
-    const order = await seedPaidPickup({ quantity: 2, paidMinutesAgo: 6 });
+    const order = await seedPaidPickup({ quantity: 3, paidMinutesAgo: 6 });
     assert.equal(
       (await transactions().run((tx) => paid.consume(tx, order.event))).result.status,
       "AwaitingOrderAcceptance",
@@ -581,5 +581,52 @@ it("a cashier's refund request is recorded, never sent by them, and listed for a
       queue.map((entry) => [entry.requestReference, entry.state, entry.requesterReference]),
       [[command.requestReference, "NotSent", cashier.actor]],
     );
+    // WP-2423 M14: a cashier's request made just now (a second unit of three; refunding every
+    // unit before acceptance is Can't make it) is listed at once when the requester may
+    // not send it (the manager is alerted without the minute's wait); otherwise after a minute.
+    const second = {
+      ...command,
+      requestReference: fresh(),
+      operationReference: fresh(),
+      expectedClaimVersion: 1,
+    };
+    assert.equal(
+      (await request({ sessionCookie: cashier.sessionCookie, csrf: cashier.csrf, command: second }))
+        .status,
+      "Created",
+    );
+    const listed = (requesterMaySend) =>
+      transactions().run((tx) =>
+        createPostgresOrdinaryRefundApprovalQueueRuntime({
+          scope: world.ownerScope,
+          providerAccountReference: world.provider,
+          environment: "Test",
+          authorize: async () => true,
+          businessDate,
+          ...(requesterMaySend === undefined ? {} : { requesterMaySend }),
+        })(tx, { observedAt: world.now() }),
+      );
+    assert.deepEqual(
+      (await listed(undefined)).map((entry) => entry.requestReference),
+      [command.requestReference],
+    );
+    assert.deepEqual(
+      (await listed(async () => true)).map((entry) => entry.requestReference),
+      [command.requestReference],
+    );
+    const asked = [];
+    assert.deepEqual(
+      (
+        await listed(async (_tx, value) => {
+          asked.push(value.requesterReference);
+          return false;
+        })
+      ).map((entry) => [entry.requestReference, entry.state]),
+      [
+        [second.requestReference, "NotSent"],
+        [command.requestReference, "NotSent"],
+      ],
+    );
+    assert.deepEqual(asked, [cashier.actor]);
   });
 });

@@ -85,6 +85,16 @@ export function createPostgresOrdinaryRefundApprovalQueueRuntime(options: {
   /** Current caller authority for this Store (and Order when given), retained through commit. */
   authorize(tx: ConsumerTransaction, query: Scope & { orderReference?: string }): Promise<boolean>;
   businessDate: EscalationOptions["businessDate"];
+  /**
+   * WP-2423 M14 (DEC-OWNER-DEFAULTS-2026-11-06 item 2): whether the person who asked may send
+   * the refund themselves. false (a cashier): nobody will prepare it with the request, so it is
+   * listed at once and the manager is alerted without waiting. true or absent: listed once it has
+   * waited notSentAfterMilliseconds (a manager's own request is prepared and sent with it).
+   */
+  requesterMaySend?(
+    tx: ConsumerTransaction,
+    query: { orderReference: string; requesterReference: string },
+  ): Promise<boolean>;
 }) {
   const scope = {
     tenantReference: String(parsePaymentReference(options.scope.tenantReference)),
@@ -114,16 +124,21 @@ export function createPostgresOrdinaryRefundApprovalQueueRuntime(options: {
         requestReference: candidate.requestReference,
       };
       const evaluated = await escalation(tx, query);
-      // WP-2423 M14/M16: a request needing no approval that nobody prepared (a cashier's, who
-      // may not send it) is listed for a manager or the owner to send, once it has waited a
-      // minute (a manager's own request is prepared with it and sent at once).
+      // WP-2423 M14/M16: a request needing no approval that nobody prepared is listed for a
+      // manager or the owner to send: a cashier's at once (they never send it), anyone else's once
+      // it has waited a minute (a manager's own request is prepared with it and sent at once).
       const notSent =
         candidate.approvalReference === null && !evaluated.decision.requiresIndependentApproval;
       const current = await subject(tx, { ...query, observedAt: evaluated.observedAt });
       if (
         notSent &&
         Date.parse(evaluated.observedAt) - Date.parse(current.request.requestedAt) <
-          notSentAfterMilliseconds
+          notSentAfterMilliseconds &&
+        (options.requesterMaySend === undefined ||
+          (await options.requesterMaySend(tx, {
+            orderReference: current.request.orderReference,
+            requesterReference: current.requesterReference,
+          })))
       )
         continue;
       const approval =
