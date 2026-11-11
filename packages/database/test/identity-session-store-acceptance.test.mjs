@@ -368,6 +368,7 @@ async function prove(context) {
         "platform_actor_directory_revision",
         "staff_pin_attempt",
         "staff_pin_credential",
+        "staff_pin_device_limit_clear",
         "staff_pin_session",
         "store_sign_in_device",
         "store_staff_account",

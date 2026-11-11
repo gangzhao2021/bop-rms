@@ -769,10 +769,23 @@ export async function exerciseSubmissionInventoryPayment({
         assert.equal(response.status, 200);
         assert.equal(response.headers.get("cache-control"), "no-store");
         assert.equal(response.headers.get("referrer-policy"), "no-referrer");
-        assert.deepEqual(await response.json(), {
-          schemaVersion: 1,
-          clientSecret: stripePayload.client_secret,
-        });
+        const handed = await response.json();
+        // WP-2423 M19: with the effective deadline (never after the payment window; an earlier
+        // stock cutoff counts) and the server's time the page counts it from.
+        assert.deepEqual(Object.keys(handed).sort(), [
+          "clientSecret",
+          "payBy",
+          "schemaVersion",
+          "serverNow",
+        ]);
+        assert.equal(handed.schemaVersion, 1);
+        assert(handed.clientSecret === stripePayload.client_secret);
+        assert.ok(
+          Date.parse(handed.payBy) <=
+            Date.parse(String(record.intent.preparation.capacityExpiresAt)),
+          "the hand-off deadline is within the payment window",
+        );
+        assert.ok(Number.isFinite(Date.parse(handed.serverNow)));
         assert.equal(handoffReads, 1);
         assert.deepEqual(
           await store.resolveOperation(record.intent.paymentOperationReference),

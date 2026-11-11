@@ -194,6 +194,19 @@ export async function exerciseCounterCardMachinePayment({
     "GRANT SELECT ON rms_ordering.checkout_contact_redaction,rms_ordering.checkout_details_record,rms_ordering.digital_receipt_record,rms_ordering.order_checkout_details_link,rms_ordering.order_submission_record TO " +
       role,
   );
+  // WP-2423 M61: the one-order read's record of who did what reads who handed a pickup over, who
+  // asked for and approved each refund, and the members' names (pilot api SELECT grants).
+  await admin.query("GRANT USAGE ON SCHEMA rms_fulfillment,bop_membership TO " + role);
+  await admin.query(
+    "GRANT SELECT ON rms_fulfillment.pickup_handoff_record,rms_fulfillment.fulfillment,rms_payment.ordinary_refund_request,rms_payment.ordinary_refund_decline,rms_payment.ordinary_refund_operation,rms_payment.ordinary_refund_observation,rms_payment.ordinary_refund_approval,bop_membership.membership,bop_membership.member_profile_version TO " +
+      role,
+  );
+  // ... and the Store's role assignments that label staff by role when they have no name.
+  await admin.query("GRANT USAGE ON SCHEMA bop_permission TO " + role);
+  await admin.query(
+    "GRANT SELECT ON bop_permission.role_administration_version,bop_permission.role,bop_permission.role_assignment,bop_permission.role_assignment_change,bop_permission.role_assignment_change_decision,bop_permission.role_assignment_sole_operator_approval TO " +
+      role,
+  );
   const unpaidQueue = createPersistentMerchantOrderQueue({
     persistence: { ...counterSession.persistence, now: () => new Date().toISOString() },
     quoteVersion,

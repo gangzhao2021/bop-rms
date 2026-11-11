@@ -372,7 +372,10 @@ export async function exerciseAdditionalDiningPayment({
     accepted = { status: "Created", record: persisted };
     const oldReplay = await journey.replayInitialPayment();
     assert.equal(oldReplay.status, 200);
-    assert.deepEqual(await oldReplay.json(), original);
+    // The same answer as the first time; only the server's time is read again (WP-2423 M19).
+    const replayed = await oldReplay.json();
+    assert.ok(Number.isFinite(Date.parse(replayed.serverNow)), replayed.serverNow);
+    assert.deepEqual({ ...replayed, serverNow: null }, { ...original, serverNow: null });
     assert.equal(journey.additionalPayment.resolutions, 1);
   } else {
     accepted = await service.create(command);
