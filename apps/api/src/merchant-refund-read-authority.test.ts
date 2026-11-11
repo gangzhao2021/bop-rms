@@ -29,7 +29,8 @@ it("names sole operator off for an owner, nothing for a manager or finance", asy
     canRead: true,
     canRequest: false,
     requestBlocked: "SoleOperatorOff",
-    canSend: false,
+    // b9: an owner who may not request still sends (holding execute), as on Approvals.
+    canSend: true,
   });
   expect(
     await refundReadAccess(workforce(["owner"]), {} as never, base, role, () => true, on),
@@ -39,7 +40,22 @@ it("names sole operator off for an owner, nothing for a manager or finance", asy
   ).toEqual({ canRead: true, canRequest: true, requestBlocked: null, canSend: true });
   expect(
     await refundReadAccess(workforce(["finance"]), {} as never, base, role, () => true),
-  ).toEqual({ canRead: true, canRequest: false, requestBlocked: null, canSend: false });
+  ).toEqual({ canRead: true, canRequest: false, requestBlocked: null, canSend: true });
+});
+
+// b9 refund-cashier-authorization: sending (online, or recording the card-machine refund) needs
+// payment.refund.execute; an approver without it reads only.
+it("lets an approver send only while they hold execute", async () => {
+  const without = vi.fn(async (_tx: unknown, query: { permissionCode: string }) => ({
+    decision: { effect: query.permissionCode === "payment.refund.execute" ? "Deny" : "Allow" },
+    activeRoleCodes: ["finance"],
+  })) as never;
+  expect(await refundReadAccess(without, {} as never, base, role, () => true)).toEqual({
+    canRead: true,
+    canRequest: false,
+    requestBlocked: null,
+    canSend: false,
+  });
 });
 
 // WP-2423 M14 (DEC-OWNER-DEFAULTS-2026-11-06 item 2): a cashier records a refund request; a

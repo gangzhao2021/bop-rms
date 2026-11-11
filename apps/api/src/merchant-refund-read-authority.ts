@@ -36,8 +36,10 @@ export async function refundReadAccess(
    */
   readonly requestBlocked: "SoleOperatorOff" | null;
   /**
-   * WP-2423 M14: this reader may send what they request (payment.refund.execute). A cashier's
-   * request is recorded only; a manager or the owner sends it.
+   * WP-2423 M14: this reader may send a refund (payment.refund.execute), online or by recording
+   * the one made on the Store's card machine or from the drawer. A cashier's request is recorded
+   * only; a manager or the owner sends it. An Owner/Finance approver who holds execute sends too
+   * (as on Approvals), whether or not they may request.
    */
   readonly canSend: boolean;
 }> {
@@ -70,11 +72,17 @@ export async function refundReadAccess(
   }
   const approve = await workforce(tx, { ...base, permissionCode: "payment.refund.approve" });
   const approver = role("payment.refund.approve", approve.activeRoleCodes);
+  const canRead =
+    approve.decision.effect === "Allow" && (approver === "Owner" || approver === "Finance");
   return Object.freeze({
-    canRead:
-      approve.decision.effect === "Allow" && (approver === "Owner" || approver === "Finance"),
+    canRead,
     canRequest: false,
     requestBlocked: requestRole === "Owner" ? "SoleOperatorOff" : null,
-    canSend: false,
+    // b9 refund-cashier-authorization: the approver may still send (a cashier's request, or
+    // record the card-machine refund) when they hold execute, as Approvals lets them.
+    canSend:
+      canRead &&
+      (await workforce(tx, { ...base, permissionCode: "payment.refund.execute" })).decision
+        .effect === "Allow",
   });
 }

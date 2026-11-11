@@ -64,7 +64,7 @@ function setup() {
     kdsOperatorProfileAllows: () => true,
     allowed,
   });
-  doubles.access.mockResolvedValue({ canRead: true, canRequest: true });
+  doubles.access.mockResolvedValue({ canRead: true, canRequest: true, canSend: true });
   const leg = { paymentIntentReference: id(8), paymentTransactionReference: id(9) };
   doubles.context.mockImplementation((owner: { authorize: Authorize }) => async () => {
     during.push(await owner.authorize({}, { orderReference: id(6) }));
@@ -153,11 +153,32 @@ it("WP-2423: records resolving the caller and refund-handler role in full only a
 });
 it("WP-2423: refuses someone who is not a refund handler before any owner read", async () => {
   const f = setup();
-  doubles.access.mockResolvedValue({ canRead: false, canRequest: false });
+  doubles.access.mockResolvedValue({ canRead: false, canRequest: false, canSend: false });
   await expect(f.recordRefund(f.input)).rejects.toMatchObject({
     code: "CARD_MACHINE_REFUND_PERMISSION_DENIED",
   });
   expect(doubles.cards).not.toHaveBeenCalled();
+});
+// b9 refund-cashier-authorization (WP-2423 M14): a cashier reads and asks for refunds; recording
+// the machine refund as made sends it, which only a manager or the owner does.
+it("WP-2423 M14: refuses a cashier who reads refunds but may not send them, before any owner read", async () => {
+  const f = setup();
+  doubles.access.mockResolvedValue({ canRead: true, canRequest: true, canSend: false });
+  await expect(f.recordRefund(f.input)).rejects.toMatchObject({
+    code: "CARD_MACHINE_REFUND_PERMISSION_DENIED",
+  });
+  expect(doubles.cards).not.toHaveBeenCalled();
+  expect(doubles.record).not.toHaveBeenCalled();
+});
+it("WP-2423 M14: a manager's send permission withdrawn during the record refuses it inside the transaction", async () => {
+  const f = setup();
+  doubles.access
+    .mockResolvedValueOnce({ canRead: true, canRequest: true, canSend: true })
+    .mockResolvedValueOnce({ canRead: true, canRequest: true, canSend: false });
+  await expect(f.recordRefund(f.input)).rejects.toMatchObject({
+    code: "CARD_MACHINE_REFUND_PERMISSION_DENIED",
+  });
+  expect(f.rolledBack()).toMatchObject({ code: "CARD_MACHINE_REFUND_PERMISSION_DENIED" });
 });
 it.each([
   ["Session ended", "allowed"],
@@ -167,8 +188,8 @@ it.each([
   if (which === "allowed") f.allowed.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
   else
     doubles.access
-      .mockResolvedValueOnce({ canRead: true, canRequest: true })
-      .mockResolvedValueOnce({ canRead: false, canRequest: false });
+      .mockResolvedValueOnce({ canRead: true, canRequest: true, canSend: true })
+      .mockResolvedValueOnce({ canRead: false, canRequest: false, canSend: false });
   await expect(f.recordRefund(f.input)).rejects.toMatchObject({
     code: "CARD_MACHINE_REFUND_PERMISSION_DENIED",
   });

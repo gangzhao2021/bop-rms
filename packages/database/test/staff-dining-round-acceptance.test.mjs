@@ -2059,7 +2059,7 @@ async function exerciseCardMachinePartialRefund({
   const minutes = (m) => m * 60_000;
   const from = time(-minutes(240)),
     until = new Date(Date.now() + minutes(600)).toISOString();
-  const [manager, owner] = [id(0x801), id(0x802)];
+  const [manager, owner, cashier] = [id(0x801), id(0x802), id(0x803)];
   const brandFact = createBrand({
     brandReference: scope.brandReference,
     code: "SYNTHETIC_STAFF_ROUND",
@@ -2095,6 +2095,13 @@ async function exerciseCardMachinePartialRefund({
       id: id(0x811),
       code: "store_owner",
       actions: ["merchant.access", "payment.refund.approve", "payment.refund.execute"],
+    },
+    // b9 refund-cashier-authorization: Front of House as catalog v27 has it (WP-2423 M14), mapped
+    // as Staff: asks for refunds, never sends them.
+    cashier: {
+      id: id(0x812),
+      code: "front_of_house",
+      actions: ["merchant.access", "payment.refund.request"],
     },
   };
   let permissionNumber = 0x850;
@@ -2134,6 +2141,7 @@ async function exerciseCardMachinePartialRefund({
   for (const [i, [actor, held]] of [
     [manager, roleSets.manager],
     [owner, roleSets.owner],
+    [cashier, roleSets.cashier],
   ].entries()) {
     const m = 0x900 + i * 0x10;
     await admin.query(
@@ -2164,7 +2172,7 @@ async function exerciseCardMachinePartialRefund({
     );
   }
   const currentActor = async (_tx, reference, authenticatedAt) => {
-    assert.ok([manager, owner].includes(reference));
+    assert.ok([manager, owner, cashier].includes(reference));
     return createIdentityActor({
       actorType: "User",
       actorReference: reference,
@@ -2176,7 +2184,7 @@ async function exerciseCardMachinePartialRefund({
       recentMfaAt: null,
     });
   };
-  const cookies = { manager, owner };
+  const cookies = { manager, owner, cashier };
   signedIn.cookies = new Set(Object.keys(cookies));
   signedIn.scopeFor = async (tx, cookie, action) => {
     const actorReference = cookies[cookie];
@@ -2558,6 +2566,34 @@ async function exerciseCardMachinePartialRefund({
       authentication: staffSession.authentication,
     })({ ...recordA(), sessionCookie: staffSession.sessionCookie, csrf: staffSession.csrf }),
     { code: "CARD_MACHINE_REFUND_PERMISSION_DENIED" },
+  );
+  // b9 refund-cashier-authorization (WP-2423 M14): the cashier reads the request and is told a
+  // manager or the owner sends it; recording the machine refund as made sends it, so a cashier
+  // is refused, at the start and with nothing written.
+  const cashierPage = await paymentPage({
+    ...session("cashier"),
+    query: { paymentIntentReference: saved.paymentIntentReference },
+  });
+  assert.deepEqual(
+    [cashierPage.canRequest, cashierPage.canSend, cashierPage.pendingRefundMinor],
+    [true, false, String(amountA)],
+  );
+  assert.deepEqual(
+    [pending.canRequest, pending.canSend],
+    [true, true],
+    "the manager may send it",
+  );
+  await assert.rejects(machineRefund()(recordA({}, "cashier")), {
+    code: "CARD_MACHINE_REFUND_PERMISSION_DENIED",
+  });
+  assert.deepEqual(await machineRows(), []);
+  assert.equal(
+    (
+      await one(
+        "SELECT count(*)::int AS n FROM platform_audit.audit_record WHERE action_code='PAYMENT_CARD_MACHINE_REFUND_RECORDED'",
+      )
+    )[0].n,
+    0,
   );
   await assert.rejects(machineRefund()(recordA({ slipReference: "4111 1111 1111 1111" })), {
     code: "CARD_MACHINE_REFUND_INPUT_INVALID",

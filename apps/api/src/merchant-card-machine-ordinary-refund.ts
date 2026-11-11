@@ -82,9 +82,12 @@ export interface CardMachineOrdinaryRefundResult {
  * The request itself went through the online rules (Manager request with reason and per-item
  * quantities, allocation incl. tax and tip from the original quote, cumulative cap) and, when the
  * escalation rules require it now, an Owner/Finance approval (or the sole operator's own) must be
- * recorded first. The amount is the request's, never typed. No Provider is called. The person
- * recording is a refund handler (a Manager who may request or an Owner/Finance member who may
- * approve); a kitchen display sign-in records nothing.
+ * recorded first. The amount is the request's, never typed. No Provider is called. Recording it
+ * sends the refund, so the person recording is one who may send refunds (payment.refund.execute,
+ * never a cashier mapped as Staff: WP-2423 M14, DEC-OWNER-DEFAULTS-2026-11-06 item 2): a Manager,
+ * the Owner, or a Finance approver holding execute. A cashier who reads the request, even their
+ * own, records nothing; a kitchen display sign-in records nothing. Checked at the start and again
+ * before the commit; the record carries the recorder as its actor and is append-only.
  */
 export function createMerchantCardMachineOrdinaryRefund(options: {
   persistence: PersistentMerchantBffOptions;
@@ -163,18 +166,19 @@ export function createMerchantCardMachineOrdinaryRefund(options: {
                 }),
               });
               const role = createOrdinaryRefundRoleResolver(configuration.roleMapping);
-              // Refund handlers only: a Manager who may request or an Owner/Finance member who
-              // may approve (the same people who read refunds).
-              const handler = async () =>
-                (
-                  await refundReadAccess(
-                    workforce,
-                    tx,
-                    { ...scope, actorReference, observedAt },
-                    role,
-                    current.kdsOperatorProfileAllows,
-                  )
-                ).canRead;
+              // Only those who may send a refund record one as made (b9 refund-cashier-
+              // authorization): reading refunds is not enough, a cashier (Staff) asks and a
+              // manager or the owner refunds on the machine and records it.
+              const handler = async () => {
+                const access = await refundReadAccess(
+                  workforce,
+                  tx,
+                  { ...scope, actorReference, observedAt },
+                  role,
+                  current.kdsOperatorProfileAllows,
+                );
+                return access.canRead && access.canSend;
+              };
               if (!(await handler())) return denied();
               return { current, tx, scope, actorReference, observedAt, configuration, handler };
             },
