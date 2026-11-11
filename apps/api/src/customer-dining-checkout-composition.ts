@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { parseOrderCapacityLink } from "@rms/ordering";
+import { parseOrderCapacityLink, type DiningCartCheckoutHoldPort } from "@rms/ordering";
 import {
   createGuestSession,
   GuestSessionService,
@@ -36,6 +36,12 @@ export interface CustomerDiningCheckoutCompositionOptions {
   >;
   readonly now: () => unknown;
   readonly clock?: Pick<DiningCheckoutClockOptions, "repository" | "ordering" | "audit">;
+  /**
+   * WP-2423 shared-table-checkout (a): checkout_scope_held. Another phone at a pay-first table
+   * chose this round's dishes and pays them: nobody else starts a checkout session of that cart
+   * version (the same answer as another guest's checkout holding it).
+   */
+  readonly scopeFence?: DiningCartCheckoutHoldPort;
 }
 const unavailable = (): never => {
   throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");

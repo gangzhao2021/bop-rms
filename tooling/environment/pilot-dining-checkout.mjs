@@ -13,6 +13,7 @@ import {
   createPostgresDiningCheckoutCommitmentStore,
 } from "../../packages/rms/dining/src/index.ts";
 import { createCustomerConfiguredDiningSessionValidation } from "../../apps/api/dist/customer-dining-session-validation.js";
+import { createCustomerDiningCheckoutHold } from "../../apps/api/dist/customer-checkout-hold.js";
 /**
  * `openGate: false` (WP-2423 Q7 slice 2) is the staff-entered table round: the staff command
  * applies its own opening rule before the table guest is opened and again before payment (a paper
@@ -39,6 +40,9 @@ export function createInternalDiningCheckout(resources, entry, pickup, { openGat
     now,
     submissions: repository,
     references: { generate: resources.credentials.reference },
+    // WP-2423 shared-table-checkout (a): no checkout session of a cart version another phone at a
+    // pay-first table chose dishes for (checkout_scope_held).
+    scopeFence: createCustomerDiningCheckoutHold(resources.transactions, scope),
     dining: {
       current: createPostgresDiningGuestBindingStore(resources.transactions, scope),
       repository,

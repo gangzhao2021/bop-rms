@@ -55,6 +55,11 @@ import {
   unavailableCustomerDiningRoundWithdrawHandler,
 } from "./customer-dining-round-withdraw.js";
 import {
+  customerDiningCheckoutScopeRoute,
+  type CustomerDiningCheckoutScopeHandler,
+  unavailableCustomerDiningCheckoutScopeHandler,
+} from "./customer-dining-checkout-scope.js";
+import {
   CustomerPaymentResultHandler,
   customerPaymentResultRoute,
   unavailableCustomerPaymentResultHandler,
@@ -191,6 +196,8 @@ export interface AppOptions {
   customerDiningStaffCall?: CustomerDiningStaffCallHandler;
   /** WP-2423 M38: the guest paying for a table round stops and puts the dishes back. */
   customerDiningRoundWithdraw?: CustomerDiningRoundWithdrawHandler;
+  /** WP-2423 shared-table-checkout (a): the payer at a pay-first table chooses the round's dishes. */
+  customerDiningCheckoutScope?: CustomerDiningCheckoutScopeHandler;
   customerSessionBootstrap?: ReturnType<typeof createCustomerSessionBootstrapHandler>;
   /** WP-2423: the guest's Store — published address, phone, open now and today's hours. */
   customerStoreProfile?: ReturnType<typeof createCustomerStoreProfileHandler>;
@@ -284,6 +291,7 @@ export function createApp({
   customerDiningInvitation,
   customerDiningStaffCall,
   customerDiningRoundWithdraw,
+  customerDiningCheckoutScope,
   customerSessionBootstrap,
   customerStoreProfile,
   customerPickupCode,
@@ -504,6 +512,8 @@ export function createApp({
   app.post(
     customerDiningRoundWithdrawRoute,
     customerDiningRoundWithdraw?.handler() ?? unavailableCustomerDiningRoundWithdrawHandler,
+    customerDiningCheckoutScopeRoute,
+    customerDiningCheckoutScope?.handler() ?? unavailableCustomerDiningCheckoutScopeHandler,
   );
   app.post(
     customerOrderSubmissionRoute,

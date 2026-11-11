@@ -95,7 +95,47 @@ export interface CustomerCartDisplayView {
      * can't be read.
      */
     readonly staffRemoved?: readonly CustomerCartStaffRemoval[];
+    /**
+     * WP-2423 shared-table-checkout (a): at a table that pays per round, which dishes the next
+     * payer starts with (the Store's setting), whether a phone is paying for dishes it chose, and
+     * the dishes waiting for the next round. Absent for a pickup Cart and when not composed.
+     */
+    readonly tablePay?: CustomerCartTablePay;
   };
+}
+export interface CustomerCartTablePay {
+  readonly defaultChoice: "WholeTable" | "OwnDishes";
+  /** A phone is paying for dishes it chose: this phone or another one (never which). */
+  readonly payer: null | {
+    readonly thisPhone: boolean;
+    readonly choice: "Mine" | "Chosen";
+    /** When the other phones may take their dishes back unless the payer keeps them. */
+    readonly expiresAt: string;
+    readonly reserved: boolean;
+  };
+  /** Dishes set aside for the next round (no reference of who added them, only whether it was
+   * this phone). */
+  readonly waiting: readonly {
+    readonly waitingLineReference: string;
+    readonly quantity: number;
+    readonly names: Readonly<Record<string, string>>;
+    readonly withOptions: boolean;
+    readonly mine: boolean;
+  }[];
+  /** Nobody is paying for the round they wait on: this phone may give them back now. */
+  readonly returnable: boolean;
+}
+/** WP-2423 shared-table-checkout (a): Ordering's scope record, with the Store's setting and the
+ * table's checkout hold (fail-closed: a read that fails makes the cart read unavailable). */
+export interface CustomerCartTablePayPort {
+  read(input: {
+    readonly diningSessionReference: string;
+    readonly cartReference: string;
+    readonly cartVersion: number;
+    readonly participantReference: string;
+    readonly guestSessionReference: string;
+    readonly observedAt: string;
+  }): Promise<CustomerCartTablePay>;
 }
 export interface CustomerCartStaffRemoval {
   readonly removedAt: string;
@@ -189,15 +229,87 @@ export interface CustomerDiningCartViewPorts {
   readonly adders?: CartAdderStandingPort;
   readonly rounds?: CustomerCartRecentRoundsPort;
   readonly staffRemovals?: CustomerCartStaffRemovalsPort;
+  readonly tablePay?: CustomerCartTablePayPort;
 }
 type ViewPorts = Omit<CustomerCartViewPorts, "reads"> & {
   readonly adders?: CartAdderStandingPort;
   readonly rounds?: CustomerCartRecentRoundsPort;
   readonly staffRemovals?: CustomerCartStaffRemovalsPort;
+  readonly tablePay?: CustomerCartTablePayPort;
   readonly reads: {
     read(input: unknown): Promise<PickupCartReadResult | DiningCartReadResult | null>;
   };
 };
+const localePattern = /^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/u;
+function tablePayView(value: unknown): CustomerCartTablePay {
+  const raw = closed(value, ["defaultChoice", "payer", "waiting", "returnable"]);
+  if (
+    (raw.defaultChoice !== "WholeTable" && raw.defaultChoice !== "OwnDishes") ||
+    typeof raw.returnable !== "boolean" ||
+    !Array.isArray(raw.waiting) ||
+    raw.waiting.length > 100
+  )
+    return unavailable();
+  let payer: CustomerCartTablePay["payer"] = null;
+  if (raw.payer !== null) {
+    const found = closed(raw.payer, ["thisPhone", "choice", "expiresAt", "reserved"]);
+    if (
+      typeof found.thisPhone !== "boolean" ||
+      typeof found.reserved !== "boolean" ||
+      (found.choice !== "Mine" && found.choice !== "Chosen")
+    )
+      return unavailable();
+    payer = Object.freeze({
+      thisPhone: found.thisPhone,
+      choice: found.choice,
+      expiresAt: parseOrderingInstant(found.expiresAt),
+      reserved: found.reserved,
+    });
+  }
+  const waiting = raw.waiting.map((candidate: unknown) => {
+    const line = closed(candidate, [
+      "waitingLineReference",
+      "quantity",
+      "names",
+      "withOptions",
+      "mine",
+    ]);
+    if (
+      typeof line.quantity !== "number" ||
+      !Number.isSafeInteger(line.quantity) ||
+      line.quantity < 1 ||
+      line.quantity > 999 ||
+      typeof line.withOptions !== "boolean" ||
+      typeof line.mine !== "boolean" ||
+      line.names === null ||
+      typeof line.names !== "object"
+    )
+      return unavailable();
+    return Object.freeze({
+      waitingLineReference: String(parseOrderingReference(line.waitingLineReference)),
+      quantity: line.quantity,
+      names: Object.freeze(
+        Object.fromEntries(
+          Object.entries(line.names as Readonly<Record<string, unknown>>).filter(
+            (entry): entry is [string, string] =>
+              localePattern.test(entry[0]) &&
+              typeof entry[1] === "string" &&
+              entry[1].length > 0 &&
+              entry[1].length <= 200,
+          ),
+        ) as Record<string, string>,
+      ),
+      withOptions: line.withOptions,
+      mine: line.mine,
+    });
+  });
+  return Object.freeze({
+    defaultChoice: raw.defaultChoice,
+    payer,
+    waiting: Object.freeze(waiting),
+    returnable: raw.returnable,
+  });
+}
 const viewerFields = [
   "guestSessionReference",
   "guestSessionVersion",
@@ -549,6 +661,24 @@ function createViewQuery(ports: ViewPorts, mode: "Pickup" | "DineIn") {
             staffRemoved = undefined;
           }
         }
+        // WP-2423 shared-table-checkout (a): who is paying for which dishes (fail-closed).
+        let tablePay: CustomerCartTablePay | undefined;
+        if (
+          mode === "DineIn" &&
+          ports.tablePay !== undefined &&
+          first.viewer !== null &&
+          cart.diningSessionReference !== null
+        )
+          tablePay = tablePayView(
+            await ports.tablePay.read({
+              diningSessionReference: String(cart.diningSessionReference),
+              cartReference: String(cart.cartReference),
+              cartVersion: cart.aggregateVersion,
+              participantReference: String(first.viewer.participantReference),
+              guestSessionReference: String(first.viewer.guestSessionReference),
+              observedAt: first.observedAt,
+            }),
+          );
         const items = Object.freeze(
           cart.items.map((item, index) => {
             const description = closed(descriptions[index], [
@@ -693,6 +823,7 @@ function createViewQuery(ports: ViewPorts, mode: "Pickup" | "DineIn") {
             placedOrder: final.placedOrder,
             ...(recentRounds === undefined ? {} : { recentRounds }),
             ...(staffRemoved === undefined ? {} : { staffRemoved }),
+            ...(tablePay === undefined ? {} : { tablePay }),
           }),
         });
       } catch (error) {

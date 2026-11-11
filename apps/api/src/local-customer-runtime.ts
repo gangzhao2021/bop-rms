@@ -48,6 +48,10 @@ import {
   createCustomerDiningRoundWithdraw,
   type CustomerDiningRoundWithdrawOptions,
 } from "./customer-dining-round-withdraw.js";
+import {
+  CustomerDiningCheckoutScopeHandler,
+  createCustomerDiningCheckoutScope,
+} from "./customer-dining-checkout-scope.js";
 import { CustomerDiningBindingHandler } from "./customer-dining-binding.js";
 import {
   createCustomerDiningJoinComposition,
@@ -89,6 +93,7 @@ import {
 } from "@rms/ordering";
 import { createCustomerCartReadPort } from "./customer-cart-read-composition.js";
 import { createCustomerCartAdderStanding } from "./customer-cart-adder-standing.js";
+import { createCustomerCartTablePay } from "./customer-cart-table-pay.js";
 import { CustomerCartHandler, type CustomerCartReplacementPort } from "./customer-cart.js";
 import {
   createPostgresGuestParticipantSessionSource,
@@ -587,6 +592,16 @@ export function createLocalCustomerRuntime(options: LocalCustomerRuntimeOptions)
             );
           }),
       },
+      // WP-2423 shared-table-checkout (a): at a pay-first table, a phone paying for dishes it
+      // chose, and the dishes waiting for the next round.
+      ...(options.diningStaffCall === undefined
+        ? {}
+        : {
+            tablePay: createCustomerCartTablePay(staffCartTransactions, {
+              tenantReference: options.diningStaffCall.tenantReference,
+              ...scope,
+            }),
+          }),
       // WP-2423: a timed-out table Cart is replaced through the owner command, not a dead end.
       ...(options.cartReplacement === undefined ? {} : { replacement: options.cartReplacement }),
     };
@@ -711,6 +726,26 @@ export function createLocalCustomerRuntime(options: LocalCustomerRuntimeOptions)
             port: createCustomerDiningRoundWithdraw({
               ...withdraw,
               scope: { tenantReference, ...scope },
+              credentials: entry.session.credentials,
+              now,
+            }),
+          });
+        })();
+  // WP-2423 shared-table-checkout (a): at a pay-first table the payer chooses this round's dishes;
+  // the same bound Guest Session check, transactions and references as the staff call.
+  const customerDiningCheckoutScope =
+    options.diningStaffCall === undefined
+      ? undefined
+      : (() => {
+          const { tenantReference, transactions, binding, newReference } = options.diningStaffCall;
+          return new CustomerDiningCheckoutScopeHandler({
+            allowedOrigin: options.allowedOrigin,
+            now,
+            port: createCustomerDiningCheckoutScope({
+              scope: { tenantReference, ...scope },
+              transactions,
+              binding,
+              newReference,
               credentials: entry.session.credentials,
               now,
             }),
@@ -895,6 +930,7 @@ export function createLocalCustomerRuntime(options: LocalCustomerRuntimeOptions)
     ...(customerDiningInvitation === undefined ? {} : { customerDiningInvitation }),
     ...(customerDiningStaffCall === undefined ? {} : { customerDiningStaffCall }),
     ...(customerDiningRoundWithdraw === undefined ? {} : { customerDiningRoundWithdraw }),
+    ...(customerDiningCheckoutScope === undefined ? {} : { customerDiningCheckoutScope }),
     ...(configuredQuote !== undefined
       ? {
           customerQuote: new CustomerQuoteHandler({

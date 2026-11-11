@@ -12,6 +12,8 @@ import {
   readForeignDiningCheckoutScope,
   returnDiningWaitingLines,
 } from "../../rms/ordering/src/index.ts";
+import { createCustomerCartTablePay } from "../../../apps/api/src/customer-cart-table-pay.ts";
+import { createCustomerDiningCheckoutHold } from "../../../apps/api/src/customer-checkout-hold.ts";
 import { orderWriteFixture } from "../../rms/ordering/src/tests/order-creation-store.fixture.ts";
 import { seedSubmissionCart } from "../test-support/dining-order-submission-seed.mjs";
 import { grantPilotApiAcl } from "../test-support/pilot-api-acl.mjs";
@@ -149,7 +151,7 @@ it("WP-2423 (shared-table-checkout): at a pay-first table A pays only what A add
         actor: phone,
         observedAt: when,
         newReference: next,
-        audit: audit("ORDERING_CART_WAITING_RETURN", when),
+        audit: () => audit("ORDERING_CART_WAITING_RETURN", when),
         heldByOther: async () => null,
       });
       // A chooses at the instant the fixture's round was priced (its quote and checkout validation
@@ -300,6 +302,47 @@ it("WP-2423 (shared-table-checkout): at a pay-first table A pays only what A add
         reserved: true,
       });
       assert.equal(await foreign(phoneA, later(chosenAt, 1000)), null);
+      // The API's composed reads, as the pilot role: the cart edit/quote/checkout hold port and
+      // what each phone's cart shows.
+      const tenantScope = { tenantReference: id(0xeee), ...scope };
+      const hold = createCustomerDiningCheckoutHold({ run: inTransaction }, tenantScope);
+      const holdFor = (phone) =>
+        hold.read({
+          diningSessionReference: phone.diningSessionReference,
+          cartReference,
+          cartVersion: f.cart.aggregateVersion,
+          participantReference: phone.participantReference,
+          observedAt: later(chosenAt, 1000),
+        });
+      assert.deepEqual(await holdFor(phoneB), { heldUntil: later(chosenAt, 5 * 60_000) });
+      assert.equal(await holdFor(phoneA), null);
+      const tablePay = createCustomerCartTablePay({ run: inTransaction }, tenantScope);
+      const seenBy = (phone, when = later(chosenAt, 1000)) =>
+        tablePay.read({
+          diningSessionReference: phone.diningSessionReference,
+          cartReference,
+          cartVersion: f.cart.aggregateVersion,
+          participantReference: phone.participantReference,
+          guestSessionReference: phone.guestSessionReference,
+          observedAt: when,
+        });
+      const onB = await seenBy(phoneB);
+      assert.equal(onB.defaultChoice, "WholeTable");
+      assert.deepEqual(onB.payer, {
+        thisPhone: false,
+        choice: "Mine",
+        expiresAt: later(chosenAt, 5 * 60_000),
+        reserved: true,
+      });
+      assert.deepEqual(
+        onB.waiting.map((line) => [line.quantity, line.mine, line.withOptions]),
+        [[lineB.quantity, true, lineB.optionSelections.length > 0]],
+      );
+      assert.equal(onB.returnable, false);
+      const onA = await seenBy(phoneA);
+      assert.equal(onA.payer?.thisPhone, true);
+      assert.equal(onA.waiting[0]?.mine, false);
+      assert.equal(onA.returnable, false);
       assert.match(await tryDetails(phoneB), /CHECKOUT_SCOPE_HELD/u);
       assert.equal(await tryDetails(phoneA), "written");
       // B can't take the dish back while A pays, nor can a checkout hold be ignored.
@@ -351,6 +394,9 @@ it("WP-2423 (shared-table-checkout): at a pay-first table A pays only what A add
       // The scope ended with the round; B may now pay, and B's phone gives its dish back.
       assert.equal(await foreign(phoneB, later(at, 1000)), null);
       assert.equal(await tryDetails(phoneB), "written");
+      const afterRound = await seenBy(phoneB, later(at, 1500));
+      assert.equal(afterRound.payer, null);
+      assert.equal(afterRound.returnable, true);
       const returnedAt = later(at, 2000);
       const back = await inTransaction((tx) =>
         returnDiningWaitingLines(tx, scope, giveBack(phoneB, 5, returnedAt)),
@@ -578,7 +624,7 @@ it("WP-2423 (shared-table-checkout): A picks dishes, keeps them longer, and ever
         actor: phone,
         observedAt: when,
         newReference: next,
-        audit: audit("ORDERING_CART_WAITING_RETURN", when),
+        audit: () => audit("ORDERING_CART_WAITING_RETURN", when),
         heldByOther: async () => null,
       });
       const carts = createPostgresCartQueryStore({ run: inTransaction }, scope);

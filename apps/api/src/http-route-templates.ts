@@ -16,6 +16,7 @@ import {
   customerDiningStaffCallWithdrawRoute,
 } from "./customer-dining-staff-call.js";
 import { customerDiningRoundWithdrawRoute } from "./customer-dining-round-withdraw.js";
+import { customerDiningCheckoutScopeRoute } from "./customer-dining-checkout-scope.js";
 import { customerPaymentResultRoute } from "./customer-payment-result.js";
 import { customerPaymentHandoffRoute } from "./customer-payment-handoff.js";
 import { customerPaymentIntentRoute } from "./customer-payment-intent.js";
@@ -78,6 +79,7 @@ export const apiRouteTemplates = Object.freeze([
   customerDiningStaffCallRoute,
   customerDiningStaffCallWithdrawRoute,
   customerDiningRoundWithdrawRoute,
+  customerDiningCheckoutScopeRoute,
   customerCheckoutDetailsRoute,
   customerCheckoutDetailsCurrentRoute,
   customerCheckoutPolicyRoute,

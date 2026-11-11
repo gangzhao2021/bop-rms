@@ -444,6 +444,50 @@ describe("WP-1205 Customer Cart HTTP contract", () => {
     }
   });
 
+  it("WP-2423 shared-table-checkout (a): a table Cart passes on who is paying for chosen dishes and what waits; a pickup Cart can't", async () => {
+    const tablePay = {
+      defaultChoice: "OwnDishes" as const,
+      payer: {
+        thisPhone: false,
+        choice: "Mine" as const,
+        expiresAt: "2026-08-02T20:05:00.000Z",
+        reserved: true,
+      },
+      waiting: [
+        {
+          waitingLineReference: id(31),
+          quantity: 2,
+          names: { "en-CA": "Mapo tofu", "zh-Hans-CA": "麻婆豆腐" },
+          withOptions: true,
+          mine: true,
+        },
+      ],
+      returnable: false,
+    };
+    port.result = {
+      status: "Found",
+      view: view({ orderType: "DineIn", serviceMode: "DineIn", placedOrder: null, tablePay }),
+    };
+    const response = await request("/bff/customer/cart", { headers: headers() });
+    expect(response.status).toBe(200);
+    expect(((await response.json()) as CustomerCartView).cart.tablePay).toEqual(tablePay);
+    for (const overrides of [
+      { tablePay },
+      { orderType: "DineIn" as const, tablePay: { ...tablePay, defaultChoice: "Everyone" } },
+      {
+        orderType: "DineIn" as const,
+        tablePay: { ...tablePay, payer: { ...tablePay.payer, participant: id(7) } },
+      },
+      {
+        orderType: "DineIn" as const,
+        tablePay: { ...tablePay, waiting: [{ ...tablePay.waiting[0], quantity: 0 }] },
+      },
+    ]) {
+      port.result = { status: "Found", view: view(overrides as never) };
+      expect((await request("/bff/customer/cart", { headers: headers() })).status).toBe(503);
+    }
+  });
+
   it("WP-2423 M03: an emptied pickup Cart names the guest's Order its dishes went to", async () => {
     const placedOrder = { orderReference: id(9), orderNumber: "13", notMade: false };
     port.result = {

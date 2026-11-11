@@ -111,6 +111,28 @@ export interface CustomerCartView {
       readonly quantity: number;
       readonly names: Readonly<Record<string, string>>;
     }[];
+    /**
+     * WP-2423 shared-table-checkout (a): at a pay-first table, which dishes the payer starts with,
+     * whether a phone (this one or another, never which) is paying for dishes it chose and until
+     * when they are kept, and the dishes waiting for the next round.
+     */
+    readonly tablePay?: {
+      readonly defaultChoice: "WholeTable" | "OwnDishes";
+      readonly payer: null | {
+        readonly thisPhone: boolean;
+        readonly choice: "Mine" | "Chosen";
+        readonly expiresAt: string;
+        readonly reserved: boolean;
+      };
+      readonly waiting: readonly {
+        readonly waitingLineReference: string;
+        readonly quantity: number;
+        readonly names: Readonly<Record<string, string>>;
+        readonly withOptions: boolean;
+        readonly mine: boolean;
+      }[];
+      readonly returnable: boolean;
+    };
   };
 }
 
@@ -455,6 +477,9 @@ function publicView(value: unknown): CustomerCartView {
     ...(root.cart !== null && typeof root.cart === "object" && "staffRemoved" in root.cart
       ? ["staffRemoved"]
       : []),
+    ...(root.cart !== null && typeof root.cart === "object" && "tablePay" in root.cart
+      ? ["tablePay"]
+      : []),
   ]);
   if (cart.orderType !== "DineIn" && cart.orderType !== "Pickup")
     throw new TypeError("invalid order type");
@@ -575,7 +600,75 @@ function publicView(value: unknown): CustomerCartView {
       ...(cart.staffRemoved === undefined
         ? {}
         : { staffRemoved: staffRemovedView(cart.staffRemoved, cart.orderType) }),
+      ...(cart.tablePay === undefined
+        ? {}
+        : { tablePay: tablePayView(cart.tablePay, cart.orderType) }),
     }),
+  });
+}
+function localeNames(value: unknown): Readonly<Record<string, string>> {
+  if (value === null || typeof value !== "object" || Array.isArray(value))
+    throw new TypeError("invalid names");
+  const names: Record<string, string> = {};
+  for (const [locale, name] of Object.entries(value as Record<string, unknown>)) {
+    if (!/^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/u.test(locale)) throw new TypeError("invalid names");
+    names[locale] = text(name, 200);
+  }
+  return Object.freeze(names);
+}
+function tablePayView(
+  value: unknown,
+  orderType: "DineIn" | "Pickup",
+): NonNullable<CustomerCartView["cart"]["tablePay"]> {
+  if (orderType !== "DineIn") throw new TypeError("invalid table pay");
+  const raw = closed(value, ["defaultChoice", "payer", "waiting", "returnable"]);
+  if (
+    (raw.defaultChoice !== "WholeTable" && raw.defaultChoice !== "OwnDishes") ||
+    typeof raw.returnable !== "boolean" ||
+    !Array.isArray(raw.waiting) ||
+    raw.waiting.length > 100
+  )
+    throw new TypeError("invalid table pay");
+  let payer: NonNullable<CustomerCartView["cart"]["tablePay"]>["payer"] = null;
+  if (raw.payer !== null) {
+    const found = closed(raw.payer, ["thisPhone", "choice", "expiresAt", "reserved"]);
+    if (
+      typeof found.thisPhone !== "boolean" ||
+      typeof found.reserved !== "boolean" ||
+      (found.choice !== "Mine" && found.choice !== "Chosen")
+    )
+      throw new TypeError("invalid table payer");
+    payer = Object.freeze({
+      thisPhone: found.thisPhone,
+      choice: found.choice,
+      expiresAt: canonicalInstant(found.expiresAt),
+      reserved: found.reserved,
+    });
+  }
+  return Object.freeze({
+    defaultChoice: raw.defaultChoice,
+    payer,
+    waiting: Object.freeze(
+      raw.waiting.map((candidate) => {
+        const line = closed(candidate, [
+          "waitingLineReference",
+          "quantity",
+          "names",
+          "withOptions",
+          "mine",
+        ]);
+        if (typeof line.withOptions !== "boolean" || typeof line.mine !== "boolean")
+          throw new TypeError("invalid waiting dish");
+        return Object.freeze({
+          waitingLineReference: scalar(line.waitingLineReference, uuidV7),
+          quantity: positive(line.quantity, 999),
+          names: localeNames(line.names),
+          withOptions: line.withOptions,
+          mine: line.mine,
+        });
+      }),
+    ),
+    returnable: raw.returnable,
   });
 }
 function staffRemovedView(

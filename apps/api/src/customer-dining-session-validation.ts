@@ -8,6 +8,7 @@ import {
   createConfiguredCheckoutValidationService,
   parseCheckoutSessionAllocation,
   CheckoutValidationError,
+  CheckoutSessionServiceError,
   type CheckoutValidationPorts,
   type ConfiguredCheckoutValidationPorts,
 } from "@rms/ordering";
@@ -82,7 +83,26 @@ function create<V extends 1 | 2>(
       fingerprint = current;
       return { guestSession: guest };
     };
-    await authorize();
+    const { guestSession } = await authorize();
+    // WP-2423 shared-table-checkout (a): checkout_scope_held. Another phone chose this round's
+    // dishes and pays them; the database refuses this session too, this answers it plainly first.
+    if (
+      options.preparation.scopeFence !== undefined &&
+      guestSession.diningSessionReference !== null &&
+      guestSession.diningParticipantReference !== null
+    ) {
+      const held = await options.preparation.scopeFence
+        .read({
+          diningSessionReference: String(guestSession.diningSessionReference),
+          cartReference: allocation.cartReference,
+          cartVersion: allocation.cartVersion,
+          participantReference: String(guestSession.diningParticipantReference),
+          observedAt: now(),
+        })
+        .catch(unavailable);
+      if (held !== null)
+        throw new CheckoutSessionServiceError("CHECKOUT_IN_PROGRESS", held.heldUntil);
+    }
     const preparation = createCustomerDiningSubmissionPreparation({
       ...options.preparation,
       references: {

@@ -634,8 +634,9 @@ export interface ReturnDiningWaitingLinesInput {
   readonly actor: DiningCheckoutScopeActor;
   readonly observedAt: string;
   newReference(): string;
-  /** System audit ORDERING_CART_WAITING_RETURN on CUSTOMER_PWA, Restricted, counts only. */
-  readonly audit: AppendAuditRecordInput;
+  /** System audit ORDERING_CART_WAITING_RETURN on CUSTOMER_PWA, Restricted, counts only, for
+   * the cart the dishes come back to. */
+  audit(cartReference: string): AppendAuditRecordInput;
   /** Another participant's Dining checkout hold on this cart version (its end), or null. */
   heldByOther(cartReference: string, cartVersion: number): Promise<string | null>;
 }
@@ -738,7 +739,7 @@ export async function returnDiningWaitingLines(
         : "CartChanged";
   const version = cart.aggregateVersion + 1;
   const audit = checkAudit(
-    input.audit,
+    input.audit(cart.cartReference),
     at,
     scope,
     "ORDERING_CART_WAITING_RETURN",
