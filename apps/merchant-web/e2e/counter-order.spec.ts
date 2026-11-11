@@ -1691,6 +1691,8 @@ for (const variant of ["off the first page", "no Orders access"] as const)
 // released: it stays on the counter's "Sent, not paid yet" list (and Home) saying it is kept and
 // must be entered again from the slip; a manager then links the new paper order (whose payment is
 // recorded) and the old one closes as entered again. Front of house is told a manager links it.
+// v15 batch-8 review: the new orders are read from the server (the re-entered one is already made
+// and gone from this list), the paper order's sale is shown, and a cheaper order can't be chosen.
 test("@production a paper order past its time stays listed until a manager links the re-entered order, at 1440, 1024 and 390", async ({
   page,
 }) => {
@@ -1712,55 +1714,45 @@ test("@production a paper order past its time stays listed until a manager links
       counter: { ...row.counter, canCloseAsReentered: manager },
     };
   };
-  const reentered = {
-    ...unpaidCounterRow({
-      orderNumber: "34",
-      payBy: ended,
-      recordedAfterOutage: true,
-      canCancelUnpaid: false,
-      amountDueMinor: null,
-    }),
-    orderReference: id(80),
-    initialBatchReference: id(81),
-    batches: [
-      {
-        orderBatchReference: id(81),
-        sequence: 1,
-        acceptanceStatus: "Accepted",
-        canRequestAcceptance: false,
-        canCancel: false,
-        staffCancellation: null,
-        canCancelItems: false,
-      },
-    ],
-    awaitingPayment: false,
-    currentPhase: "Accepted",
-    currentVersion: 2,
-    counter: {
-      recordedAfterOutage: true,
-      paidOnCardMachine: {
-        amountMinor: "1135",
-        takenAt: new Date(Date.now() - 50 * 60_000).toISOString(),
-        recordedAfterOutage: true,
-        refundedMinor: "0",
-      },
-      payBy: null,
-      amountDueMinor: null,
-      canCancelUnpaid: false,
-      canCloseAsReentered: false,
-      cancelledBeforePayment: null,
-    },
-  };
   await page.route("**/merchant/counter/menu", (route) => route.fulfill({ headers, json: menu }));
   await page.route("**/merchant/orders", (route) =>
     route.fulfill({
       headers,
       json: {
-        items: linked === null ? [reentered, stale()] : [reentered],
+        items: linked === null ? [stale()] : [],
         nextAfterOrderReference: null,
       },
     }),
   );
+  let choicesRead = 0;
+  await page.route("**/merchant/counter/orders/paper-reentry?*", (route) => {
+    choicesRead += 1;
+    expect(new URL(route.request().url()).searchParams.get("order")).toBe(id(70));
+    return route.fulfill({
+      headers,
+      json: {
+        paperOrder: { orderNumber: "31", saleMinor: "2000", currencyCode: "CAD" },
+        candidates: [
+          {
+            orderReference: id(90),
+            orderNumber: "36",
+            submittedAt: new Date(Date.now() - 10 * 60_000).toISOString(),
+            saleMinor: "500",
+            paidMinor: "500",
+            coversSale: false,
+          },
+          {
+            orderReference: id(80),
+            orderNumber: "34",
+            submittedAt: new Date(Date.now() - 20 * 60_000).toISOString(),
+            saleMinor: "2000",
+            paidMinor: "2300",
+            coversSale: true,
+          },
+        ],
+      },
+    });
+  });
   await page.route("**/merchant/counter/orders/cancel-unpaid", (route) => {
     linked = route.request().postDataJSON() as Record<string, unknown>;
     return route.fulfill({
@@ -1789,7 +1781,15 @@ test("@production a paper order past its time stays listed until a manager links
     await row.getByRole("button", { name: "Link the re-entered order" }).click();
     const dialog = page.getByRole("dialog", { name: "Paper order 31 was entered again" });
     await expect(dialog).toBeVisible();
-    await dialog.getByRole("radio", { name: /^Order 34 · sent .* · \$11\.35$/u }).check();
+    await expect(dialog).toContainText("Paper order 31: dishes $20.00 with tax, before tip.");
+    // A cheaper order can't carry a $20.00 sale: shown, but not choosable.
+    await expect(
+      dialog.getByRole("radio", { name: /^Order 36 · .*dishes \$5\.00/u }),
+    ).toBeDisabled();
+    await expect(dialog).toContainText("Less than this paper order: it can't carry this sale.");
+    await dialog
+      .getByRole("radio", { name: /^Order 34 · sent .* · dishes \$20\.00 · paid \$23\.00$/u })
+      .check();
     await dialog.getByRole("button", { name: "Close as entered again" }).click();
     await expect(dialog).toBeHidden();
     expect(linked).toMatchObject({
@@ -1800,6 +1800,7 @@ test("@production a paper order past its time stays listed until a manager links
       reenteredOrderReference: id(80),
     });
     await expect(list.getByRole("listitem").filter({ hasText: "Order 31" })).toHaveCount(0);
+    expect(choicesRead).toBeGreaterThan(0);
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
       `no horizontal overflow at ${width}`,

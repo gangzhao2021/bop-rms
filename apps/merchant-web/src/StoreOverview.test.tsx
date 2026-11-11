@@ -452,6 +452,7 @@ describe("WP-2423 P2 store overview", () => {
         cancelledBeforePayment: {
           reasonCode: "COUNTER_PAPER_REENTERED" as const,
           cancelledAt: "2026-10-21T17:30:00.000Z",
+          reenteredOrderNumber: "12",
         },
       },
     };

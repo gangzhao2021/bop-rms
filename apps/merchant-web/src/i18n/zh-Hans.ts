@@ -9553,7 +9553,17 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "No new paper order with its payment recorded yet. Enter this one again from its paper slip as a paper order first, then link it here.":
     "还没有已录入付款的新纸质订单。请先按纸质单把这单重新录入为纸质订单，再回到这里关联。",
   "New paper order": "新的纸质订单",
-  "Order {orderNumber} · sent {sentAt} · {amount}": "订单 {orderNumber} · {sentAt} 发送 · {amount}",
+  "Order {orderNumber} · sent {sentAt} · dishes {sale} · paid {paid}":
+    "订单 {orderNumber} · {sentAt} 发送 · 菜品 {sale} · 已付 {paid}",
+  "Paper order {orderNumber}: dishes {amount} with tax, before tip.":
+    "纸质订单 {orderNumber}：菜品 {amount}（含税，不含小费）。",
+  "Less than this paper order: it can't carry this sale.": "比这张纸质单少：不能记下这笔销售。",
+  "That new order's dishes come to less than this paper order's, so it can't carry this sale. Enter the paper slip again in full, then link that order.":
+    "所选新订单的菜品金额比这张纸质单少，不能记下这笔销售。请按纸质单完整重新录入，再关联那张订单。",
+  "Reading the new paper orders…": "正在读取新的纸质订单…",
+  "No answer from the system. Try again.": "系统没有回应，请再试一次。",
+  "Closed by staff · entered again as order {orderNumber}, which carries its sale":
+    "员工已关闭 · 已按纸质单重新录入为订单 {orderNumber}，这笔销售记在新订单上",
   "Close as entered again": "记为已重新录入",
   "Enter it again above as a paper order from its slip, then link the new order here.":
     "请在上方按纸质单重新录入为纸质订单，再在这里关联新订单。",

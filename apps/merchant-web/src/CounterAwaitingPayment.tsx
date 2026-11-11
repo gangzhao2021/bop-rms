@@ -8,7 +8,7 @@ import {
   paperAwaitingReentry,
   paymentWindowNotice,
 } from "./counter-payment.js";
-import { PaperReentryAction, paperReentryCandidates } from "./PaperReentryAction.js";
+import { PaperReentryAction } from "./PaperReentryAction.js";
 import {
   createCurrentOrderQueueClient,
   CurrentOrderQueueError,
@@ -91,8 +91,6 @@ export function CounterAwaitingPayment({
 }) {
   const client = useMemo(() => createCurrentOrderQueueClient(fetcher), [fetcher]);
   const [orders, setOrders] = useState<readonly Order[] | null>(null);
-  /** Every order of the read, for the paper orders a re-entered one may be linked to. */
-  const [listed, setListed] = useState<readonly Order[]>([]);
   const [failed, setFailed] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const [reads, setReads] = useState(0);
@@ -214,7 +212,6 @@ export function CounterAwaitingPayment({
             (order) => counterAwaitingCardMachine(order) || paperAwaitingReentry(order),
           ),
         );
-        setListed(view.items);
         const charging = excluded.current;
         const listed =
           charging == null
@@ -330,7 +327,6 @@ export function CounterAwaitingPayment({
                       </p>
                       <PaperReentryAction
                         order={order}
-                        candidates={paperReentryCandidates(listed, order)}
                         csrf={csrf}
                         timeZone={timeZone}
                         fetcher={fetcher}

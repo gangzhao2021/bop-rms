@@ -2009,11 +2009,17 @@ function OrderStatusNotes({
       {cancelledUnpaid(order) ? (
         <span className="order-staff-cancelled">
           {/* WP-2423 M127: staff cancelled it before payment, and why (recorded with their name). */}
-          {order.counter?.cancelledBeforePayment
-            ? t("Cancelled before payment by staff · {reason}", {
-                reason: counterCancelReasonText(order.counter.cancelledBeforePayment.reasonCode),
+          {order.counter?.cancelledBeforePayment?.reenteredOrderNumber
+            ? // DEC-PAPER-ORDER-NEVER-RELEASED: paid on paper, never "cancelled before payment":
+              // the books carry its sale as the new order named here.
+              t("Closed by staff · entered again as order {orderNumber}, which carries its sale", {
+                orderNumber: order.counter.cancelledBeforePayment.reenteredOrderNumber,
               })
-            : t("Cancelled before payment")}
+            : order.counter?.cancelledBeforePayment
+              ? t("Cancelled before payment by staff · {reason}", {
+                  reason: counterCancelReasonText(order.counter.cancelledBeforePayment.reasonCode),
+                })
+              : t("Cancelled before payment")}
         </span>
       ) : null}
       {order.batches.map((batch) =>

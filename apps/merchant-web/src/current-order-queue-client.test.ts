@@ -1101,7 +1101,11 @@ it("v15 751dd768 ①: reads what an unsent counter order still has to be charged
         cancelledAt: "2026-09-14T00:00:10.000Z",
       },
     })?.cancelledBeforePayment,
-  ).toEqual({ reasonCode: "COUNTER_GUEST_LEFT_UNPAID", cancelledAt: "2026-09-14T00:00:10.000Z" });
+  ).toEqual({
+    reasonCode: "COUNTER_GUEST_LEFT_UNPAID",
+    cancelledAt: "2026-09-14T00:00:10.000Z",
+    reenteredOrderNumber: null,
+  });
   // DEC-PAPER-ORDER-NEVER-RELEASED: a paper order a manager may close as entered again, and the
   // reason it then reads with; a live order is never closed that way.
   const paperRead = read({

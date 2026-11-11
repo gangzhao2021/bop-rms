@@ -276,10 +276,29 @@ const counterCancelReasons = [
 export type CounterCancelReason = (typeof counterCancelReasons)[number];
 function counterCancelled(value: unknown) {
   if (value === null) return null;
-  const raw = exact(value, ["reasonCode", "cancelledAt"]);
+  // DEC-PAPER-ORDER-NEVER-RELEASED: a paper order closed as entered again names the new order's
+  // number (absent from an older server).
+  const withReentry = typeof value === "object" && Object.hasOwn(value, "reenteredOrderNumber");
+  const raw = exact(value, [
+    "reasonCode",
+    "cancelledAt",
+    ...(withReentry ? ["reenteredOrderNumber"] : []),
+  ]);
   const reasonCode = counterCancelReasons.find((code) => code === raw.reasonCode);
   if (reasonCode === undefined) return fail();
-  return Object.freeze({ reasonCode, cancelledAt: instant(raw.cancelledAt) });
+  if (
+    withReentry &&
+    (reasonCode !== "COUNTER_PAPER_REENTERED" ||
+      typeof raw.reenteredOrderNumber !== "string" ||
+      !/^[1-9][0-9]{0,18}$/u.test(raw.reenteredOrderNumber))
+  )
+    return fail();
+  return Object.freeze({
+    reasonCode,
+    cancelledAt: instant(raw.cancelledAt),
+    /** The new order now carrying this paper order's sale, else null. */
+    reenteredOrderNumber: withReentry ? (raw.reenteredOrderNumber as string) : null,
+  });
 }
 /** WP-2423 Q7: a pickup order staff took at the counter, and its card-machine payment. */
 function parseCounter(value: unknown, sourceChannel: unknown) {

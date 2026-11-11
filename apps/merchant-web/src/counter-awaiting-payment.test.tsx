@@ -249,6 +249,52 @@ it("a cancelled order with no payment says so instead of a dash", () => {
   ).toContain("Cancelled before payment");
 });
 
+it("DEC-PAPER-ORDER-NEVER-RELEASED: a paper order closed as entered again names the new order carrying its sale on Orders", () => {
+  const closed = parse({
+    ...counterItem(
+      {},
+      {
+        recordedAfterOutage: true,
+        canCancelUnpaid: false,
+        canCloseAsReentered: false,
+        cancelledBeforePayment: {
+          reasonCode: "COUNTER_PAPER_REENTERED",
+          cancelledAt: "2026-10-21T17:30:00.000Z",
+          reenteredOrderNumber: "34",
+        },
+      },
+    ),
+    awaitingPayment: false,
+    currentPhase: "Cancelled",
+  });
+  expect(closed.counter?.cancelledBeforePayment?.reenteredOrderNumber).toBe("34");
+  const html = renderToStaticMarkup(
+    <CurrentOrderQueueRows
+      view={{ items: [closed], nextAfterOrderReference: null, unreadable: [] }}
+      timeZone="America/Toronto"
+    />,
+  );
+  expect(html).toContain("Closed by staff · entered again as order 34, which carries its sale");
+  // It was paid on paper: never "cancelled before payment".
+  expect(html).not.toContain("Cancelled before payment");
+  // The order number is only for that reason, and only digits.
+  for (const wrong of [
+    { reasonCode: "COUNTER_GUEST_LEFT_UNPAID", reenteredOrderNumber: "34" },
+    { reasonCode: "COUNTER_PAPER_REENTERED", reenteredOrderNumber: "id-34" },
+  ])
+    expect(() =>
+      parse(
+        counterItem(
+          {},
+          {
+            recordedAfterOutage: true,
+            cancelledBeforePayment: { cancelledAt: "2026-10-21T17:30:00.000Z", ...wrong },
+          },
+        ),
+      ),
+    ).toThrow();
+});
+
 it("says how many orders the list shows without page jargon", () => {
   expect(
     orderCountText({ shown: 50, total: 50, filtered: false, olderPage: false, morePages: true }),
@@ -333,7 +379,7 @@ it("DEC-PAPER-ORDER-PAID-AT-SEND: a paper order's refusals and its recorded cash
 
 it("DEC-PAPER-ORDER-NEVER-RELEASED: a paper order past its time stays open, to be entered again and linked by a manager", async () => {
   const { paperAwaitingReentry } = await import("./counter-payment.js");
-  const { paperReentryCandidates, paperReentryOutcome } = await import("./PaperReentryAction.js");
+  const { parsePaperReentryChoices, paperReentryOutcome } = await import("./PaperReentryAction.js");
   const after = Date.parse(payBy) + 60_000;
   const paper = parse(
     counterItem(
@@ -374,40 +420,45 @@ it("DEC-PAPER-ORDER-NEVER-RELEASED: a paper order past its time stays open, to b
   );
   expect(html).toContain("The order stays open: enter it again from the paper slip");
   expect(html).not.toMatch(/taken off|released|Not paid\./u);
-  // The new paper orders it may stand for: sent after it, with their payment recorded.
-  const paidPaper = (n: number, submittedAt: string, extra: Record<string, unknown> = {}) =>
-    parse(
-      counterItem(
-        {
-          orderReference: ref(100 + n),
-          orderNumber: String(n),
-          submittedAt,
-          observedAt: "2026-10-21T17:30:00.000Z",
-          awaitingPayment: false,
-        },
-        {
-          recordedAfterOutage: true,
-          payBy: null,
-          canCancelUnpaid: false,
-          cancelledBeforePayment: null,
-          paidOnCardMachine: {
-            amountMinor: "2720",
-            takenAt: "2026-10-21T16:50:00.000Z",
-            recordedAfterOutage: true,
-            refundedMinor: "0",
-          },
-          ...extra,
-        },
-      ),
-    );
-  const newer = paidPaper(9, "2026-10-21T17:25:00.000Z");
-  const newest = paidPaper(10, "2026-10-21T17:26:00.000Z");
-  const earlier = paidPaper(5, "2026-10-21T16:00:00.000Z");
+  // The new paper orders it may stand for are read from the server (any business day), with both
+  // orders' amounts; a cheaper one is marked as unable to carry the sale. The read is strict.
+  const choices = parsePaperReentryChoices({
+    paperOrder: { orderNumber: "7", saleMinor: "20000", currencyCode: "CAD" },
+    candidates: [
+      {
+        orderReference: ref(110),
+        orderNumber: "10",
+        submittedAt: "2026-10-21T17:26:00.000Z",
+        saleMinor: "500",
+        paidMinor: "500",
+        coversSale: false,
+      },
+      {
+        orderReference: ref(109),
+        orderNumber: "9",
+        submittedAt: "2026-10-21T17:25:00.000Z",
+        saleMinor: "20000",
+        paidMinor: "23000",
+        coversSale: true,
+      },
+    ],
+  });
   expect(
-    paperReentryCandidates([paper, earlier, newer, parse(counterItem()), newest], paper).map(
-      (order) => order.orderNumber,
-    ),
-  ).toEqual(["10", "9"]);
+    choices.candidates.map((candidate) => [candidate.orderNumber, candidate.coversSale]),
+  ).toEqual([
+    ["10", false],
+    ["9", true],
+  ]);
+  expect(() =>
+    parsePaperReentryChoices({ paperOrder: choices.paperOrder, candidates: [], extra: 1 }),
+  ).toThrow();
+  expect(() =>
+    parsePaperReentryChoices({
+      paperOrder: { ...choices.paperOrder, saleMinor: "1.5" },
+      candidates: [],
+    }),
+  ).toThrow();
+  expect(paperReentryOutcome(409, "paper_reentry_amount_lower")).toBe("Lower");
   expect(paperReentryOutcome(409, "paper_reentry_used")).toBe("Used");
   expect(paperReentryOutcome(409, "paper_reentry_invalid")).toBe("Invalid");
   expect(paperReentryOutcome(409, "paper_order_still_recordable")).toBe("Recordable");
