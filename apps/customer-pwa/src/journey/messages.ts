@@ -1104,7 +1104,7 @@ export const orderStatusText = Object.freeze({
     },
     get refundedNothingToCollect() {
       return t(
-        "The store refunded everything on this order and won't make it. The money goes back to your original payment.",
+        "The store refunded everything on this order and won’t make it. The money goes back to your original payment.",
       );
     },
     get notCollectedHeading() {

@@ -102,7 +102,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Refunded – not provided": "已退款，不提供",
   "{count} of {quantity} refunded – not provided": "{quantity} 份中 {count} 份已退款，不提供",
   "Refunded, nothing to collect": "已退款，无需取餐",
-  "The store refunded everything on this order and won't make it. The money goes back to your original payment.":
+  "The store refunded everything on this order and won’t make it. The money goes back to your original payment.":
     "店家已退回这单的全部餐品，不会再做。钱会退回你原来的付款方式。",
   "Being remade": "正在重做",
   "Being remade · we'll bring it to your table shortly": "正在重做 · 很快送到你的桌上",

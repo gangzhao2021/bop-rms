@@ -552,6 +552,26 @@ describe("independent order status sources", () => {
         parseOrderStatusView({ ...input, sources: { ...input.sources, remakes } }, id(1)),
       ).toThrow();
   });
+  it("WP-2423 M10: admits refunded units the store will not provide, never more than the item has", () => {
+    const input = sourced();
+    const item = input.order.batches[0]?.items[0];
+    if (!item) throw new Error("fixture");
+    const entry = { orderItemReference: item.orderItemReference, quantity: item.quantity };
+    expect(
+      parseOrderStatusView({ ...input, sources: { ...input.sources, withdrawals: [entry] } }, id(1))
+        .sources?.withdrawals,
+    ).toEqual([entry]);
+    for (const withdrawals of [
+      [],
+      [entry, entry],
+      [{ ...entry, quantity: item.quantity + 1 }],
+      [{ ...entry, quantity: 0 }],
+      [{ ...entry, orderItemReference: id(99) }],
+    ])
+      expect(() =>
+        parseOrderStatusView({ ...input, sources: { ...input.sources, withdrawals } }, id(1)),
+      ).toThrow();
+  });
   it("WP-2423 Q6 step 2: admits items the store cancelled with their refund", () => {
     const input = sourced();
     const batch = input.order.batches[0];

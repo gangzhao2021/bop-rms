@@ -1374,6 +1374,30 @@ it("WP-2423 Q26: a ready pickup with a dish being remade says to wait, not that 
   expect(html).toContain("Checking your pickup code");
 });
 
+it("WP-2423 M10: an order the store refunded in full and won't make shows nothing to collect and no code", () => {
+  const state = readyState();
+  if (state.status !== "ready") throw new Error("fixture");
+  const items = state.view.order.batches.flatMap((batch) => batch.items);
+  const html = render({
+    ...state,
+    view: {
+      ...state.view,
+      sources: {
+        checkedAt: "2026-08-11T14:00:00.000Z",
+        kitchen: null,
+        payments: null,
+        withdrawals: items.map((item) => ({
+          orderItemReference: item.orderItemReference,
+          quantity: item.quantity,
+        })),
+      },
+    },
+  });
+  expect(html).toContain("Refunded, nothing to collect");
+  expect(html).toContain("Refunded – not provided");
+  expect(html).not.toContain("Checking your pickup code");
+});
+
 describe("WP-2423 D5: item prices before tax, then subtotal, tax and total", () => {
   const money = (amountMinor: bigint) => ({ amountMinor, currencyCode: "CAD" });
   function pricedView(): OrderStatusView {
