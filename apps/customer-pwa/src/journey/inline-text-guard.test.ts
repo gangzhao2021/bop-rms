@@ -72,9 +72,10 @@ function attributeName(node: ts.Node): string | null {
 const machineCodes: Readonly<Record<string, ReadonlySet<string>>> = {
   // One-time order link page states (compared, never shown).
   "../resume/ResumeScreen.tsx": new Set(["Opening", "Expired", "Open", "TryAgain", "TooManyTries"]),
-  // What the page tells the table page it did (router state, never shown).
-  "../cart/CartPage.tsx": new Set(["Held", "Sent"]),
-  "../checkout/CheckoutPage.tsx": new Set(["Held", "Sent"]),
+  // What the page tells the table page it did (router state, never shown), and the guest's
+  // service channel the store-service read is asked about (v15 M30/M34; never shown).
+  "../cart/CartPage.tsx": new Set(["Held", "Sent", "Pickup"]),
+  "../checkout/CheckoutPage.tsx": new Set(["Held", "Sent", "Pickup"]),
   // Contact-method and receipt-choice values of the checkout details contract.
   "../checkout/CheckoutDetailsForm.tsx": new Set([
     "Phone",
@@ -212,9 +213,10 @@ function pageSources(directory: string): string[] {
  * A literal rendered to a guest doesn't belong here: it goes through `t()`.
  */
 const pageMachineCodes: Readonly<Record<string, ReadonlySet<string>>> = {
-  // What the page tells the table page it did (router state, never shown).
-  "cart/CartPage.tsx": new Set(["Held", "Sent"]),
-  "checkout/CheckoutPage.tsx": new Set(["Held", "Sent"]),
+  // What the page tells the table page it did (router state, never shown), and the guest's
+  // service channel the store-service read is asked about (v15 M30/M34; never shown).
+  "cart/CartPage.tsx": new Set(["Held", "Sent", "Pickup"]),
+  "checkout/CheckoutPage.tsx": new Set(["Held", "Sent", "Pickup"]),
   "checkout/CheckoutDetailsForm.tsx": new Set([
     "Phone",
     "Email",
@@ -255,6 +257,9 @@ const pageMachineCodes: Readonly<Record<string, ReadonlySet<string>>> = {
     "Loading",
     // M116: how the next opening is worded inside a line (never shown).
     "Line",
+    // The guest's service channel the store-service notice is asked about (never shown).
+    "Pickup",
+    "DineIn",
     "88px",
     "(min-width: 960px) 45vw, (min-width: 736px) 640px, calc(100vw - 64px)",
     "configure-price- - ",
