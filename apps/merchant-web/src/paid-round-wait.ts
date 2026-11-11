@@ -82,6 +82,12 @@ export function paidRoundWaitText(
  */
 export function tableRoundWaitText(roundNumber: number, paidAt: string, now: number): string {
   const { minutes, tier } = paidRoundWait(paidAt, now);
+  // Its own words for under a minute: "paid just now" reads 刚付款 in Chinese, never 刚刚已付款.
+  if (minutes < 1)
+    return t(
+      "Round {roundNumber} paid just now · accept it on the Orders page to send it to the kitchen",
+      { roundNumber: roundNumber },
+    );
   const waited = waitedAgoText(minutes);
   return tier === "urgent"
     ? t(

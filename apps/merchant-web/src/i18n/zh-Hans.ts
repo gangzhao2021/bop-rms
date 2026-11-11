@@ -3680,7 +3680,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Round {roundNumber}": "第 {roundNumber} 轮",
   "Open the order to accept it": "打开订单去接单",
   "Round {roundNumber} paid {waited} · accept it on the Orders page to send it to the kitchen":
-    "第 {roundNumber} 轮{waited}已付款 · 请在订单页接单以发送到后厨",
+    "第 {roundNumber} 轮 {waited}已付款 · 请在订单页接单以发送到后厨",
+  "Round {roundNumber} paid just now · accept it on the Orders page to send it to the kitchen":
+    "第 {roundNumber} 轮刚付款 · 请在订单页接单以发送到后厨",
   "Round {sequence}": "第 {sequence} 轮",
   "Round {sequence} cancellation refund": "第 {sequence} 轮取消退款",
   "Round {sequence} cancelled": "第 {sequence} 轮已取消",
@@ -9589,7 +9591,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{hours} h {rest} min ago": "{hours} 小时 {rest} 分钟前",
   "1 day ago": "1 天前",
   "{days} days ago": "{days} 天前",
-  "paid {waited}": "{waited}已付",
+  "paid {waited}": "{waited}已付款",
+  "paid just now": "刚付款",
   "Paid {waited} · the guest is waiting. Accept it to send it to the kitchen":
     "{waited}已付款 · 顾客在等待。接单后会发送到后厨",
   "Accept now · paid {waited}. It is never refunded automatically. If it can't be made, use Can't make it · refund: the guest gets a full refund.":
@@ -9599,7 +9602,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Accept now · paid {waited}. It is never refunded automatically. If it can't be made, ask a manager to refuse it: the guest gets a full refund.":
     "请立即接单 · {waited}已付款。不会自动退款。如果做不了，请找经理拒单，客人会全额退款。",
   "Round {roundNumber} paid {waited} and still not accepted · open the order now: accept it, or turn it down there for a full refund":
-    "第 {roundNumber} 轮{waited}已付款，仍未接单 · 请立即打开订单：接单，或在订单里拒单并全额退款",
+    "第 {roundNumber} 轮 {waited}已付款，仍未接单 · 请立即打开订单：接单，或在订单里拒单并全额退款",
   "1 item is paid and waits for you to accept it. Accept it on the Orders page, or turn the round down there for a full refund.":
     "1 项客人已付款，等你接单。请在订单页接单，或在那里拒掉这一轮并全额退款。",
   "{count} items are paid and wait for you to accept them. Accept them on the Orders page, or turn the round down there for a full refund.":

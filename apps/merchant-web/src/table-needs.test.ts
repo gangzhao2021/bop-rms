@@ -4,6 +4,7 @@ import { compareTables, tableInTab, tableNeed, tablesFreeingSoon } from "./table
 import { tableFactsFromBill, type TableOrderFacts } from "./table-order-facts.js";
 import type { TableBill } from "./table-checkout-client.js";
 import { listFactsOf } from "./DiningSessionWorkspace.js";
+import { setLanguageForTest } from "./i18n/i18n.js";
 
 const id = (n: number) => `00000000-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 const now = Date.parse("2026-10-27T19:42:00.000Z");
@@ -498,4 +499,27 @@ it("v15 batch 8: a paid round waiting since last week reads in days", () => {
     now,
   );
   expect(need).toMatchObject({ words: "Paid round to accept", detail: "paid 6 days ago" });
+  const justPaid = table(1, {
+    paymentTiming: "PayFirst",
+    roundsAwaitingAcceptance: [{ roundNumber: 1, paidAt: new Date(now - 20_000).toISOString() }],
+  });
+  expect(tableNeed(justPaid, null, now)).toMatchObject({ detail: "paid just now" });
+  setLanguageForTest("zh-Hans");
+  try {
+    expect(tableNeed(justPaid, null, now)).toMatchObject({ detail: "刚付款" });
+    expect(
+      tableNeed(
+        table(1, {
+          paymentTiming: "PayFirst",
+          roundsAwaitingAcceptance: [
+            { roundNumber: 1, paidAt: new Date(now - 9823 * 60_000).toISOString() },
+          ],
+        }),
+        null,
+        now,
+      ),
+    ).toMatchObject({ detail: "6 天前已付款" });
+  } finally {
+    setLanguageForTest("en");
+  }
 });

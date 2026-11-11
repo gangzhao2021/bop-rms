@@ -178,7 +178,8 @@ export function tableNeed(
       since: oldestPaid.paidAt,
       words: t("Paid round to accept"),
       // v15 batch 8: a round paid last week reads "paid 6 days ago", never in thousands of minutes.
-      detail: t("paid {waited}", { waited: waitedAgoText(waited) }),
+      detail:
+        waited < 1 ? t("paid just now") : t("paid {waited}", { waited: waitedAgoText(waited) }),
       step: null,
     };
   }

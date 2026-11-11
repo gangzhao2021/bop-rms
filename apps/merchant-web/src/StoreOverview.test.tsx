@@ -677,7 +677,14 @@ describe("v15 finding: the store system card follows the server's answer, not th
     setLanguageForTest("zh-Hans");
     try {
       expect(tableRoundWaitText(1, paidAt, later)).toBe(
-        "第 1 轮6 天前已付款，仍未接单 · 请立即打开订单：接单，或在订单里拒单并全额退款",
+        "第 1 轮 6 天前已付款，仍未接单 · 请立即打开订单：接单，或在订单里拒单并全额退款",
+      );
+      // Under a minute the round "just paid": 刚付款, never 刚刚已付款.
+      expect(tableRoundWaitText(1, paidAt, Date.parse(paidAt) + 20_000)).toBe(
+        "第 1 轮刚付款 · 请在订单页接单以发送到后厨",
+      );
+      expect(tableRoundWaitText(1, paidAt, Date.parse(paidAt) + 4 * 60_000)).toBe(
+        "第 1 轮 4 分钟前已付款 · 请在订单页接单以发送到后厨",
       );
     } finally {
       setLanguageForTest("en");
