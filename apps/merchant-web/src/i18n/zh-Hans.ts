@@ -448,6 +448,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "一笔 {amount} 的退款已批准，还没发出。由批准人在“审批”里发送。",
   "A refund of {amount} is recorded but not sent yet. Open the payment under Payments and refunds to see whether it waits for approval, or to send it.":
     "一笔 {amount} 的退款已记录，还没发出。请在“付款与退款”里打开这笔付款，看它是否在等批准，或去发送。",
+  "A refund of {amount} is recorded but not sent yet. A manager or the owner sends it.":
+    "一笔 {amount} 的退款已记录，还没发出。由店长或店主发出。",
   "A refund of {amount} is recorded but not sent yet. Open the payment under Payments and refunds to send it.":
     "一笔 {amount} 的退款已记录，还没发出。请在“付款与退款”里打开这笔付款去发送。",
   "A refund of {amount} is still to be made on the card machine. Refund it on the machine, then record the slip under Payments and refunds.":

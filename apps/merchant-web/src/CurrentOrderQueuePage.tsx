@@ -1014,15 +1014,23 @@ export function OnlineRefundNote({
         : ""}
       {toSend > 0n
         ? " " +
-          (approvals === null
+          // A reader who can't open payments (a cashier) is told who sends it, not where.
+          (order.canViewPayments !== true
             ? t(
-                "A refund of {amount} is recorded but not sent yet. Open the payment under Payments and refunds to see whether it waits for approval, or to send it.",
-                { amount: amount(toSend) },
+                "A refund of {amount} is recorded but not sent yet. A manager or the owner sends it.",
+                {
+                  amount: amount(toSend),
+                },
               )
-            : t(
-                "A refund of {amount} is recorded but not sent yet. Open the payment under Payments and refunds to send it.",
-                { amount: amount(toSend) },
-              ))
+            : approvals === null
+              ? t(
+                  "A refund of {amount} is recorded but not sent yet. Open the payment under Payments and refunds to see whether it waits for approval, or to send it.",
+                  { amount: amount(toSend) },
+                )
+              : t(
+                  "A refund of {amount} is recorded but not sent yet. Open the payment under Payments and refunds to send it.",
+                  { amount: amount(toSend) },
+                ))
         : ""}
       {onMachine > 0n
         ? " " +

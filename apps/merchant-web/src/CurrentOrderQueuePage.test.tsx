@@ -674,6 +674,18 @@ it("WP-2423 M16: a refund recorded but never sent is not called on its way", () 
   expect(note(position("1569", "1569"))).toContain(
     "Open the payment under Payments and refunds to see whether it waits for approval, or to send it.",
   );
+  // A cashier (no payment access) can't open the payment page: they are told who sends it.
+  const cashierNote = renderToStaticMarkup(
+    <OnlineRefundNote
+      order={{ ...order, canViewPayments: false }}
+      position={position("1569", "1569")}
+      approvals={null}
+    />,
+  );
+  expect(cashierNote).toContain(
+    "A refund of $15.69 is recorded but not sent yet. A manager or the owner sends it.",
+  );
+  expect(cashierNote).not.toContain("Payments and refunds");
   expect(note(position("1569", "0"))).toContain(
     "A refund of $15.69 was sent and is waiting on the card company.",
   );
