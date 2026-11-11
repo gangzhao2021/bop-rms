@@ -395,19 +395,18 @@ describe("Owner #26 (DEC-PRICE-HOLD): the confirmed price is kept until its hold
     "price-hold-dish-changes: prices again a dish listed with another %s (same product version)",
     async (changed) => {
       const s = await listedSince({ dishChanges: async () => [changed] });
-      const again = await s.service
-        .attach({ ...s.command, operationReference: id(91) })
-        .catch(() => undefined);
-      expect(again?.status).not.toBe("Held");
+      // Priced again and the new price attached for the guest (who is shown the dish as it is).
+      const again = await s.service.attach({ ...s.command, operationReference: id(91) });
+      expect(again.status).toBe("Attached");
+      expect(again.attachment.operationReference).toBe(id(91));
       expect(s.quoteCart).toHaveBeenCalledTimes(2);
     },
   );
   it("price-hold-dish-changes: never holds a dish on a newer menu it cannot compare", async () => {
     const s = await listedSince({});
-    const again = await s.service
-      .attach({ ...s.command, operationReference: id(91) })
-      .catch(() => undefined);
-    expect(again?.status).not.toBe("Held");
+    const again = await s.service.attach({ ...s.command, operationReference: id(91) });
+    expect(again.status).toBe("Attached");
+    expect(again.attachment.operationReference).toBe(id(91));
     expect(s.quoteCart).toHaveBeenCalledTimes(2);
   });
   it("price-hold-dish-changes: comparing the menus failing is try again, never the held price", async () => {
@@ -450,10 +449,18 @@ describe("Owner #26 (DEC-PRICE-HOLD): the confirmed price is kept until its hold
       "Held",
     );
     expect(s.quoteCart).toHaveBeenCalledTimes(1);
-    // A cut: a new quote at today's price (the lower of the two).
+    // A cut: a new quote at today's price (the lower of the two), attached for the guest.
     today = 100n;
-    await s.service.attach({ ...s.command, operationReference: id(92) }).catch(() => undefined);
+    const cut = fixture(false, 100n).quote;
+    s.quoteCart.mockResolvedValueOnce(cut);
+    const passedOn = await s.service.attach({ ...s.command, operationReference: id(92) });
+    expect(passedOn.status).toBe("Attached");
+    expect(passedOn.attachment.operationReference).toBe(id(92));
     expect(s.quoteCart).toHaveBeenCalledTimes(2);
+    expect(passedOn.attachment.total.amountMinor).toBe(cut.total.amountMinor);
+    expect(cut.total.amountMinor).toBeLessThan(
+      (first.attachment as { total: { amountMinor: bigint } }).total.amountMinor,
+    );
   });
   it("is an outage, never a new price or a refusal, when the held Quote cannot be read", async () => {
     const s = setup(false, undefined, undefined, async () => {
