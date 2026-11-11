@@ -1,5 +1,9 @@
 import { parsePublishingDigest } from "@bop/publishing";
-import type { ValidateCatalogSelectionInput } from "../../contracts/selection-validation.js";
+import type {
+  CatalogDishChange,
+  CatalogDishChangeKey,
+  ValidateCatalogSelectionInput,
+} from "../../contracts/selection-validation.js";
 import { createPostgresAvailabilityQueryStore } from "./availability-query-store.js";
 import { createCurrentAvailabilityQueryService } from "../../application/current-availability-query-service.js";
 import {
@@ -20,7 +24,10 @@ import {
 import type { CurrentSelectionSourcePorts } from "../../application/current-selection-source.js";
 import type { AvailabilityQueryTransactionRunner } from "./availability-query-store.js";
 import { createPostgresCurrentMenuReleaseStore } from "./current-menu-release-store.js";
-import { createPostgresPublishedMenuQueryStore } from "./published-menu-query-store.js";
+import {
+  createPostgresPublishedMenuQueryStore,
+  listPublishedDishChanges,
+} from "./published-menu-query-store.js";
 import { createPostgresCurrentSkuStore } from "./current-sku-store.js";
 import {
   OptionBindingSourceError,
@@ -365,6 +372,25 @@ export function createPostgresCatalogOrderSnapshotSource(
       }
     },
     explainMany: standings.explainMany,
+    /**
+     * WP-2423 (DEC-PRICE-HOLD §3): for each line priced on one menu version and sold now on
+     * another, whether the guest is told a different name or different allergens. A held price
+     * is kept only for a dish shown the same; any failure is the dependency's, never "unchanged".
+     */
+    async dishChanges(
+      keys: readonly CatalogDishChangeKey[],
+    ): Promise<readonly (readonly CatalogDishChange[])[]> {
+      try {
+        if (!Array.isArray(keys)) throw new Error("invalid keys");
+        if (keys.every((key) => key.fromMenuVersionReference === key.toMenuVersionReference))
+          return keys.map(() => Object.freeze([]));
+        return await runner.run((tx) =>
+          listPublishedDishChanges(tx as never, ownerScope, structuredClone(keys)),
+        );
+      } catch {
+        throw new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE");
+      }
+    },
   });
 }
 

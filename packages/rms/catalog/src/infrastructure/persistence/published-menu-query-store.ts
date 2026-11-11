@@ -28,6 +28,10 @@ import {
   parseSellableAllergenDisclosure,
   type SellableAllergenDisclosure,
 } from "../../domain/allergen-provenance.js";
+import type {
+  CatalogDishChange,
+  CatalogDishChangeKey,
+} from "../../contracts/selection-validation.js";
 
 export interface PublishedMenuQueryTransaction {
   query(sql: string, values: readonly unknown[]): Promise<unknown>;
@@ -643,6 +647,85 @@ export async function listPublishedSellableAllergenDisclosures(
       );
     }
     return disclosures;
+  } finally {
+    await transaction.query(
+      "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+      [brand, store],
+    );
+  }
+}
+/**
+ * WP-2423 (DEC-PRICE-HOLD §3, price-hold-dish-changes): what the guest is told differently about
+ * each dish between the menu version its price was confirmed on and the one it is sold on now —
+ * its published name or its published allergen disclosure. Reads the published projection,
+ * current or retired (rows are never changed or deleted), for menus that include the Store. A dish
+ * that either version does not show with one name and one disclosure is answered as both changed,
+ * never as unchanged. Keys on one version answer no change. Caller owns the transaction and the
+ * Store's authorization; the Store context is restored before returning.
+ */
+export async function listPublishedDishChanges(
+  transaction: ConsumerTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  keys: readonly CatalogDishChangeKey[],
+): Promise<readonly (readonly CatalogDishChange[])[]> {
+  if (!Array.isArray(keys) || keys.length > 200) throw new CatalogError("CATALOG_INPUT_INVALID");
+  const parsed = keys.map((key) => ({
+    sellable: parseCatalogReference(key.sellableReference),
+    productVersion: parseCatalogReference(key.productVersionReference),
+    from: parseCatalogReference(key.fromMenuVersionReference),
+    to: parseCatalogReference(key.toMenuVersionReference),
+  }));
+  const moved = parsed.filter((key) => key.from !== key.to);
+  if (moved.length === 0) return parsed.map(() => Object.freeze([]));
+  const brand = parseCatalogReference(scope.brandReference),
+    store = parseCatalogReference(scope.storeReference);
+  await transaction.query(
+    "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id','',true)",
+    [brand],
+  );
+  try {
+    const rows = (
+      await transaction.query(
+        "SELECT DISTINCT p.menu_version_id::text menu_version,v.sellable_id::text sellable," +
+          "v.product_version_id::text product_version,v.localized_names_json::text names," +
+          "v.allergen_disclosure_json::text disclosure " +
+          "FROM rms_catalog.published_menu_projection_sellable v " +
+          "JOIN rms_catalog.published_menu_projection p ON p.generation_id=v.generation_id AND p.menu_id=v.menu_id AND p.brand_id=v.brand_id " +
+          "JOIN rms_catalog.published_menu_projection_generation g ON g.generation_id=p.generation_id AND g.menu_id=p.menu_id AND g.brand_id=p.brand_id " +
+          "WHERE v.brand_id=$1 AND g.generation_status IN ('Active','Retired') " +
+          "AND p.store_ids_json @> jsonb_build_array($2::text) AND p.menu_version_id=ANY($3::uuid[]) AND v.sellable_id=ANY($4::uuid[])",
+        [
+          brand,
+          store,
+          [...new Set(moved.flatMap((key) => [key.from, key.to]))],
+          [...new Set(moved.map((key) => key.sellable))],
+        ],
+      )
+    ).rows as readonly Record<string, unknown>[];
+    const facts = (menuVersion: string, sellable: string, productVersion: string) => {
+      const found = rows.filter(
+        (row) =>
+          row.menu_version === menuVersion &&
+          row.sellable === sellable &&
+          row.product_version === productVersion,
+      );
+      const names = new Set(found.map((row) => String(row.names)));
+      const disclosures = new Set(found.map((row) => String(row.disclosure)));
+      return names.size === 1 && disclosures.size === 1
+        ? { name: [...names][0], disclosure: [...disclosures][0] }
+        : null;
+    };
+    return parsed.map((key) => {
+      if (key.from === key.to) return Object.freeze([]);
+      const before = facts(key.from, key.sellable, key.productVersion);
+      const after = facts(key.to, key.sellable, key.productVersion);
+      if (before === null || after === null)
+        return Object.freeze(["Name", "Allergens"] as CatalogDishChange[]);
+      const changes: CatalogDishChange[] = [];
+      if (before.name !== after.name) changes.push("Name");
+      if (before.disclosure !== after.disclosure) changes.push("Allergens");
+      return Object.freeze(changes);
+    });
   } finally {
     await transaction.query(
       "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",

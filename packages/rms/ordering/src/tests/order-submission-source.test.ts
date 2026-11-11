@@ -21,11 +21,15 @@ function fixture() {
     input.lines.map((line) => line.pricing),
   );
   const capture = vi.fn(async (): Promise<unknown> => input.lines[0]?.catalog);
+  // WP-2423 (DEC-PRICE-HOLD §3): the dish is shown the same on both menus unless a test says not.
+  const dishChanges = vi.fn(
+    async (keys: readonly unknown[]): Promise<readonly (readonly string[])[]> => keys.map(() => []),
+  );
   const source = createOrderSubmissionSource({
     scope: { brandReference: input.cart.brandReference, storeReference: input.cart.storeReference },
     carts: { load },
     pricing: { load: pricing },
-    catalog: { capture },
+    catalog: { capture, dishChanges },
     clock: { now: () => time },
   });
   return {
@@ -34,6 +38,7 @@ function fixture() {
     load,
     pricing,
     capture,
+    dishChanges,
     source,
     setTime: (value: string) => {
       time = value;
@@ -123,7 +128,7 @@ it("Owner #26 (DEC-PRICE-HOLD): a later round validated before a listing is read
     },
     carts: { load: f.load },
     pricing: { load: f.pricing },
-    catalog: { capture },
+    catalog: { capture, dishChanges: f.dishChanges },
     clock: { now: () => sentAt },
     currentMenuVersion: async () => listedSince,
   });
@@ -133,6 +138,42 @@ it("Owner #26 (DEC-PRICE-HOLD): a later round validated before a listing is read
     capturedAt: sentAt,
   });
   expect(result.lines[0]?.pricing).toEqual(f.input.lines[0]?.pricing);
+});
+it("price-hold-dish-changes (DEC-PRICE-HOLD §3): a dish renamed or given other allergens and listed inside the hold is never ordered at the held price", async () => {
+  const f = fixture();
+  const listedSince = "01a7ee00-0000-7000-8000-00000000cafe";
+  const line = f.input.lines[0]?.catalog as { menuVersionReference: string };
+  f.capture.mockResolvedValue({ ...f.input.lines[0]?.catalog, menuVersionReference: listedSince });
+  // Same product version (the draft was edited in place), but the guest is told another thing.
+  for (const changed of [["Name"], ["Allergens"], ["Name", "Allergens"]]) {
+    f.dishChanges.mockResolvedValueOnce([changed]);
+    await expect(f.source.load({ evidence: f.evidence } as never)).rejects.toMatchObject({
+      code: "CHECKOUT_REQUOTE_REQUIRED",
+    });
+  }
+  expect(f.dishChanges).toHaveBeenLastCalledWith([
+    expect.objectContaining({
+      fromMenuVersionReference: line.menuVersionReference,
+      toMenuVersionReference: listedSince,
+    }),
+  ]);
+  // A source that cannot compare the menus prices the dish again too, never holds it unchecked.
+  const unchecked = createOrderSubmissionSource({
+    scope: {
+      brandReference: f.input.cart.brandReference,
+      storeReference: f.input.cart.storeReference,
+    },
+    carts: { load: f.load },
+    pricing: { load: f.pricing },
+    catalog: { capture: f.capture },
+    clock: { now: () => new Date(Date.parse(f.input.snapshotCapturedAt) + 50).toISOString() },
+  });
+  await expect(unchecked.load({ evidence: f.evidence } as never)).rejects.toMatchObject({
+    code: "CHECKOUT_REQUOTE_REQUIRED",
+  });
+  // Shown the same: the held price stands.
+  const kept = await f.source.load({ evidence: f.evidence } as never);
+  expect(kept.lines[0]?.pricing).toEqual(f.input.lines[0]?.pricing);
 });
 it("denies foreign scope without reading Cart", async () => {
   const f = fixture();

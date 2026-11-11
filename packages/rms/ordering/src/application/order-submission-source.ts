@@ -1,5 +1,5 @@
 import { readClosedRecord } from "@bop/identity";
-import type { ValidateCatalogSelectionInput } from "@rms/catalog";
+import type { CatalogDishChangeKey, ValidateCatalogSelectionInput } from "@rms/catalog";
 import {
   parseCartAggregate,
   parseOrderingInstant,
@@ -39,7 +39,14 @@ export interface OrderSubmissionSourceOptions {
   readonly scope: Readonly<{ brandReference: string; storeReference: string }>;
   readonly carts: { load(reference: string): Promise<unknown> };
   readonly pricing: { load(input: { readonly evidence: unknown }): Promise<readonly unknown[]> };
-  readonly catalog: { capture(input: ValidateCatalogSelectionInput): Promise<unknown> };
+  readonly catalog: {
+    capture(input: ValidateCatalogSelectionInput): Promise<unknown>;
+    /**
+     * WP-2423 (DEC-PRICE-HOLD §3): whether a dish sold now on a newer menu than its price is shown
+     * with another name or other allergens. Without it such a dish is priced again.
+     */
+    dishChanges?(keys: readonly CatalogDishChangeKey[]): Promise<readonly (readonly unknown[])[]>;
+  };
   readonly clock: { now(): string };
   /**
    * WP-2423 DEC-MERCHANT-LOCK-SCOPE: the menu version in force now (null when none is). Asked only
@@ -237,10 +244,43 @@ function createVersionedOrderSubmissionSource<V extends 1 | 2>(
           fresh();
           lines = await captureAll(capturedAt);
         }
+        // WP-2423 (DEC-PRICE-HOLD §3, price-hold-dish-changes): the same product version may
+        // be renamed or given other allergens and listed (its draft is edited in place). A dish
+        // the guest would be told about differently is never ordered or charged at the held
+        // price: the guest's page prices it again and shows it as it is now.
+        const moved: CatalogDishChangeKey[] = [];
+        for (const line of lines) {
+          const item = cart.items.find(
+            (value) => value.cartItemReference === line.cartItemReference,
+          );
+          const priced = item?.catalogSelectionEvidence;
+          if (item === undefined || priced == null) throw new OrderSubmissionSourceError();
+          if (line.catalog.menuVersionReference !== priced.menuVersionReference)
+            moved.push({
+              sellableReference: item.sellableReference,
+              productVersionReference: priced.productVersionReference,
+              fromMenuVersionReference: priced.menuVersionReference,
+              toMenuVersionReference: line.catalog.menuVersionReference,
+            });
+        }
+        if (moved.length > 0) {
+          const dishChanges = options.catalog.dishChanges;
+          if (dishChanges === undefined)
+            throw new CheckoutValidationError("CHECKOUT_REQUOTE_REQUIRED");
+          const changes = await dishChanges(moved);
+          if (
+            !Array.isArray(changes) ||
+            changes.length !== moved.length ||
+            changes.some((change) => !Array.isArray(change) || change.length > 0)
+          )
+            throw new CheckoutValidationError("CHECKOUT_REQUOTE_REQUIRED");
+        }
         fresh();
         assertCartLifecycleActive(cart.lifecycle, last);
         return Object.freeze({ cart, lines: Object.freeze(lines) });
-      } catch {
+      } catch (error) {
+        if (error instanceof CheckoutValidationError && error.code === "CHECKOUT_REQUOTE_REQUIRED")
+          throw error;
         if (await menuMovedOn(options, validatedLines))
           throw new CheckoutValidationError("CHECKOUT_REQUOTE_REQUIRED");
         throw new OrderSubmissionSourceError();

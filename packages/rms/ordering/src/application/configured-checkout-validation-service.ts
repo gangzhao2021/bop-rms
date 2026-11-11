@@ -1,7 +1,8 @@
 import { assertGuestSessionUsable, createGuestSession } from "@bop/identity";
-import type { ValidateCatalogSelectionInput } from "@rms/catalog";
+import type { CatalogDishChangeKey, ValidateCatalogSelectionInput } from "@rms/catalog";
 import type { ConfiguredPriceQuoteSnapshot, PriceQuoteHistoryReader } from "@rms/pricing";
 import { parseCartAggregate, parseOrderingInstant } from "../domain/cart.js";
+import { parseOrderCatalogLineSnapshot } from "../domain/order-item-snapshot.js";
 import { CheckoutValidationError } from "../domain/checkout-validation.js";
 import { bindConfiguredCartQuote } from "./configured-cart-quote-binding.js";
 import { createVersionedCheckoutValidationService } from "./checkout-validation-service.js";
@@ -9,7 +10,14 @@ import type { CheckoutValidationPorts } from "./ports/checkout-validation-ports.
 
 export interface ConfiguredCheckoutValidationPorts extends CheckoutValidationPorts<2> {
   readonly history: PriceQuoteHistoryReader<ConfiguredPriceQuoteSnapshot>;
-  readonly snapshots: { capture(input: ValidateCatalogSelectionInput): Promise<unknown> };
+  readonly snapshots: {
+    capture(input: ValidateCatalogSelectionInput): Promise<unknown>;
+    /**
+     * WP-2423 (DEC-PRICE-HOLD §3): whether a dish found on a newer menu than its price is shown
+     * with another name or other allergens. Without it such a dish is priced again.
+     */
+    dishChanges?(keys: readonly CatalogDishChangeKey[]): Promise<readonly (readonly unknown[])[]>;
+  };
   readonly pricingChannelCode: string;
   readonly now: () => string;
 }
@@ -19,9 +27,56 @@ const unavailable = (): never => {
 const json = (value: unknown) =>
   JSON.stringify(value, (_key, v: unknown) => (typeof v === "bigint" ? v.toString() : v));
 /** Complete chosen-option evidence; caller owns current session/CSRF and fulfillment authority. */
+async function sameDishesOn(
+  ports: Pick<ConfiguredCheckoutValidationPorts, "snapshots">,
+  cart: ReturnType<typeof parseCartAggregate>,
+  catalogLines: readonly { readonly cartItemReference: string; readonly snapshot: unknown }[],
+): Promise<void> {
+  const moved: CatalogDishChangeKey[] = [];
+  for (const line of catalogLines) {
+    const item = cart.items.find((value) => value.cartItemReference === line.cartItemReference);
+    const priced = item?.catalogSelectionEvidence;
+    if (item === undefined || priced == null || line.snapshot === null) continue;
+    let snapshot: ReturnType<typeof parseOrderCatalogLineSnapshot>;
+    try {
+      snapshot = parseOrderCatalogLineSnapshot(line.snapshot);
+    } catch {
+      continue;
+    }
+    if (
+      snapshot.productVersionReference === priced.productVersionReference &&
+      snapshot.menuVersionReference !== priced.menuVersionReference
+    )
+      moved.push({
+        sellableReference: item.sellableReference,
+        productVersionReference: priced.productVersionReference,
+        fromMenuVersionReference: priced.menuVersionReference,
+        toMenuVersionReference: snapshot.menuVersionReference,
+      });
+  }
+  if (moved.length === 0) return;
+  const dishChanges = ports.snapshots.dishChanges;
+  if (dishChanges === undefined) throw new CheckoutValidationError("CHECKOUT_REQUOTE_REQUIRED");
+  let changes: readonly (readonly unknown[])[];
+  try {
+    changes = await dishChanges(moved);
+  } catch {
+    return unavailable();
+  }
+  if (
+    !Array.isArray(changes) ||
+    changes.length !== moved.length ||
+    changes.some((change) => !Array.isArray(change) || change.length > 0)
+  )
+    throw new CheckoutValidationError("CHECKOUT_REQUOTE_REQUIRED");
+}
 export function createConfiguredCheckoutValidationService(
   ports: ConfiguredCheckoutValidationPorts,
 ) {
+  const assertSameDishes = (
+    cart: ReturnType<typeof parseCartAggregate>,
+    catalogLines: readonly { readonly cartItemReference: string; readonly snapshot: unknown }[],
+  ) => sameDishesOn(ports, cart, catalogLines);
   return Object.freeze({
     async validate(input: unknown) {
       let last: string | undefined;
@@ -69,6 +124,11 @@ export function createConfiguredCheckoutValidationService(
               }),
             });
           }
+          // WP-2423 (DEC-PRICE-HOLD §3, price-hold-dish-changes): inside the hold a dish found
+          // on a newer menu keeps its price only when the guest is told the same name and the
+          // same allergens; otherwise checkout asks for a new price and the guest sees the dish
+          // as it is now (allergen safety before the confirmed price).
+          await assertSameDishes(cart, catalogLines);
           const checked = bindConfiguredCartQuote({
             cart,
             quote,

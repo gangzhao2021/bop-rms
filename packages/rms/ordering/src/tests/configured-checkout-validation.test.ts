@@ -1,5 +1,5 @@
 import { createGuestSession } from "@bop/identity";
-import { expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { fixture, id } from "./configured-cart-quote.fixture.js";
 import { parseCartAggregate } from "../domain/cart.js";
 import { parseConfiguredCartQuoteAttachment } from "../domain/cart-quote-attachment.js";
@@ -7,7 +7,10 @@ import {
   createConfiguredCheckoutValidationService,
   type ConfiguredCheckoutValidationPorts,
 } from "../application/configured-checkout-validation-service.js";
-function setup(dining = false) {
+function setup(
+  dining = false,
+  dishChanges?: NonNullable<ConfiguredCheckoutValidationPorts["snapshots"]["dishChanges"]>,
+) {
   const f = fixture(dining),
     q = f.quote;
   let at = f.observedAt;
@@ -105,7 +108,7 @@ function setup(dining = false) {
     authorization: { authorize },
     repository: { loadCart, loadQuote: async () => attachment },
     history: { load },
-    snapshots: { capture },
+    snapshots: dishChanges === undefined ? { capture } : { capture, dishChanges },
     pricingChannelCode: f.pricingChannelCode,
     now: () => at,
     references: { hashIntent: () => q.inputDigest },
@@ -197,4 +200,49 @@ it.each(["expired", "backwards"])("rejects %s clock after history wait", async (
   });
   await expect(s.service.validate(s.command)).rejects.toThrow();
   expect(s.fulfillment).not.toHaveBeenCalled();
+});
+
+describe("price-hold-dish-changes (DEC-PRICE-HOLD §3): a dish listed since its price was confirmed", () => {
+  const listed = (s: ReturnType<typeof setup>) => {
+    const snapshot = s.f.catalogLines[0]?.snapshot;
+    if (!snapshot) throw new Error("missing fixture");
+    s.capture.mockResolvedValue({ ...snapshot, menuVersionReference: id(970) });
+  };
+  it("keeps the held price when the guest is told the same name and allergens", async () => {
+    const dishChanges = vi.fn(async (keys: readonly unknown[]) => keys.map(() => []));
+    const s = setup(false, dishChanges);
+    listed(s);
+    await expect(s.service.validate(s.command)).resolves.toMatchObject({ quoteVersion: 2 });
+    expect(dishChanges).toHaveBeenCalledWith([
+      expect.objectContaining({
+        fromMenuVersionReference: s.cart.items[0]?.catalogSelectionEvidence?.menuVersionReference,
+        toMenuVersionReference: id(970),
+      }),
+    ]);
+  });
+  it.each([[["Name"]], [["Allergens"]]])(
+    "asks for a new price when the dish is listed with another %s",
+    async (changed) => {
+      const s = setup(false, async () => [changed]);
+      listed(s);
+      await expect(s.service.validate(s.command)).rejects.toMatchObject({
+        code: "CHECKOUT_REQUOTE_REQUIRED",
+      });
+      expect(s.fulfillment).not.toHaveBeenCalled();
+    },
+  );
+  it("asks for a new price when the menus cannot be compared, and says try again on an outage", async () => {
+    const unchecked = setup(false);
+    listed(unchecked);
+    await expect(unchecked.service.validate(unchecked.command)).rejects.toMatchObject({
+      code: "CHECKOUT_REQUOTE_REQUIRED",
+    });
+    const outage = setup(false, async () => {
+      throw new Error("no database");
+    });
+    listed(outage);
+    await expect(outage.service.validate(outage.command)).rejects.toMatchObject({
+      code: "CHECKOUT_DEPENDENCY_UNAVAILABLE",
+    });
+  });
 });

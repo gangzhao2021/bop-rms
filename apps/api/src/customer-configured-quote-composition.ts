@@ -143,6 +143,17 @@ export function createCustomerConfiguredQuoteComposition(
       loadLatest: latestQuotes.loadLatest,
     },
     pricing: {
+      // WP-2423 (DEC-PRICE-HOLD §2): today's price, worked out and not recorded (no request,
+      // no audit written), so a cut inside a hold is passed on.
+      async estimate(input, identity) {
+        const candidate = await options.candidate(
+          structuredClone(input),
+          Object.freeze({ ...identity }),
+        );
+        return decodeConfiguredPriceQuoteSnapshot(
+          encodeConfiguredPriceQuoteSnapshot(candidate.quote),
+        );
+      },
       async quoteCart(input, identity) {
         try {
           const existing = await requests.resolve({

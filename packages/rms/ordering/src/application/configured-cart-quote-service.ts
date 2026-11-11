@@ -5,7 +5,7 @@ import {
   readClosedRecord,
   type GuestSession,
 } from "@bop/identity";
-import type { ValidateCatalogSelectionInput } from "@rms/catalog";
+import type { CatalogDishChangeKey, ValidateCatalogSelectionInput } from "@rms/catalog";
 import {
   decodeConfiguredPriceQuoteSnapshot,
   encodeConfiguredPriceQuoteSnapshot,
@@ -51,9 +51,27 @@ export interface ConfiguredCartQuotePorts {
         readonly guestSessionReference: string;
       },
     ): Promise<ConfiguredPriceQuoteSnapshot>;
+    /**
+     * WP-2423 (DEC-PRICE-HOLD §2, price-hold-dish-changes): what the Cart costs at today's prices,
+     * worked out and never recorded. Inside a hold the guest pays the lower of the confirmed price
+     * and today's: a cut made since is passed on with a new quote.
+     */
+    estimate?(
+      input: PricingCartInput,
+      identity: {
+        readonly operationReference: string;
+        readonly guestSessionReference: string;
+      },
+    ): Promise<ConfiguredPriceQuoteSnapshot>;
   };
   readonly catalog: {
     capture(input: ValidateCatalogSelectionInput): Promise<unknown>;
+    /**
+     * WP-2423 (DEC-PRICE-HOLD §3): whether each dish is shown with another name or other
+     * allergens on the menu it is sold on now than on the one its price was confirmed on. Without
+     * it a dish found on a newer menu is never held (it is priced again and shown again).
+     */
+    dishChanges?(keys: readonly CatalogDishChangeKey[]): Promise<readonly (readonly unknown[])[]>;
     /**
      * WP-2423 (guest-cart-503): each line's standing now (Catalog `CatalogLineStanding`). A line
      * capture refuses is named to the guest only when this says so from a stable fact; any other
@@ -337,14 +355,91 @@ export function createConfiguredCartQuoteService(ports: ConfiguredCartQuotePorts
             )
           ) {
             let sameDishes = true;
+            const moved: CatalogDishChangeKey[] = [];
             for (const item of cart.items) {
               const captured = await ports.catalog.capture(selectionOf(item, now()));
               // Not sold now (sold out, off the menu): named as for any price.
               if (captured === null) return await refuse(item);
               const snapshot = parseOrderCatalogLineSnapshot(captured);
+              const priced = item.catalogSelectionEvidence;
+              if (snapshot.productVersionReference !== priced?.productVersionReference)
+                sameDishes = false;
+              else if (snapshot.menuVersionReference !== priced.menuVersionReference)
+                moved.push({
+                  sellableReference: item.sellableReference,
+                  productVersionReference: priced.productVersionReference,
+                  fromMenuVersionReference: priced.menuVersionReference,
+                  toMenuVersionReference: snapshot.menuVersionReference,
+                });
+              await authorize();
+            }
+            // WP-2423 (DEC-PRICE-HOLD §3, price-hold-dish-changes): the restaurant may rename a
+            // dish or change its allergens without a new product version (its draft is edited in
+            // place). A dish the guest would now be told about differently is not held: the Cart
+            // is priced again, and the guest sees the dish as it is now before paying.
+            if (sameDishes && moved.length > 0) {
+              const dishChanges = ports.catalog.dishChanges;
+              if (dishChanges === undefined) sameDishes = false;
+              else {
+                let changes: readonly (readonly unknown[])[];
+                try {
+                  changes = await dishChanges(moved);
+                } catch {
+                  return fail();
+                }
+                if (
+                  !Array.isArray(changes) ||
+                  changes.length !== moved.length ||
+                  changes.some((change) => !Array.isArray(change) || change.length > 0)
+                )
+                  sameDishes = false;
+                await authorize();
+              }
+            }
+            // WP-2423 (DEC-PRICE-HOLD §2, price-hold-dish-changes): the guest pays the lower of
+            // the confirmed price and today's. A cut made inside the hold (a listing, or a
+            // Store's own price) is passed on with a new quote; a rise keeps the confirmed price.
+            if (sameDishes && ports.pricing.estimate !== undefined) {
+              let today: ConfiguredPriceQuoteSnapshot | null = null;
+              try {
+                today = decodeConfiguredPriceQuoteSnapshot(
+                  encodeConfiguredPriceQuoteSnapshot(
+                    await ports.pricing.estimate(
+                      {
+                        brandReference: cart.brandReference,
+                        storeReference: cart.storeReference,
+                        cartReference,
+                        cartVersion: expectedCartVersion,
+                        sourceChannel: cart.sourceChannel,
+                        orderType: cart.orderType,
+                        requestedAt: now(),
+                        lines: Object.freeze(
+                          cart.items.map((item) => ({
+                            lineReference: item.cartItemReference,
+                            sellableReference: item.sellableReference,
+                            quantity: item.quantity,
+                            optionSelections: item.optionSelections,
+                            catalogSelectionEvidence: item.catalogSelectionEvidence as NonNullable<
+                              typeof item.catalogSelectionEvidence
+                            >,
+                          })),
+                        ),
+                      },
+                      {
+                        operationReference,
+                        guestSessionReference: first.session.sessionReference,
+                      },
+                    ),
+                  ),
+                );
+              } catch {
+                // Today's price could not be worked out: the guest keeps the price confirmed.
+                today = null;
+              }
               if (
-                snapshot.productVersionReference !==
-                item.catalogSelectionEvidence?.productVersionReference
+                today !== null &&
+                today.total.currencyCode === latest.total.currencyCode &&
+                today.total.amountMinor < latest.total.amountMinor
               )
                 sameDishes = false;
               await authorize();

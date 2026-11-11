@@ -13,6 +13,10 @@ function setup(
   evidence?: ConfiguredCartQuotePorts["evidence"],
   explainMany?: NonNullable<ConfiguredCartQuotePorts["catalog"]["explainMany"]>,
   loadLatest?: NonNullable<ConfiguredCartQuotePorts["repository"]["loadLatest"]>,
+  more: {
+    readonly dishChanges?: NonNullable<ConfiguredCartQuotePorts["catalog"]["dishChanges"]>;
+    readonly estimate?: NonNullable<ConfiguredCartQuotePorts["pricing"]["estimate"]>;
+  } = {},
 ) {
   const f = fixture(dining);
   const snapshot = f.catalogLines[0]?.snapshot;
@@ -83,8 +87,12 @@ function setup(
   const attach = vi.fn(persist);
   const service = createConfiguredCartQuoteService({
     authorization: { authorize },
-    pricing: { quoteCart },
-    catalog: explainMany === undefined ? { capture } : { capture, explainMany },
+    pricing: more.estimate === undefined ? { quoteCart } : { quoteCart, estimate: more.estimate },
+    catalog: {
+      capture,
+      ...(explainMany === undefined ? {} : { explainMany }),
+      ...(more.dishChanges === undefined ? {} : { dishChanges: more.dishChanges }),
+    },
     references: {
       hashIntent: (value) => "sha256:" + createHash("sha256").update(value).digest("hex"),
       equals: (left, right) => left === right,
@@ -353,6 +361,98 @@ describe("Owner #26 (DEC-PRICE-HOLD): the confirmed price is kept until its hold
     const s = await held();
     s.capture.mockResolvedValue({ ...s.snapshot, productVersionReference: id(93) } as never);
     await s.service.attach({ ...s.command, operationReference: id(94) }).catch(() => undefined);
+    expect(s.quoteCart).toHaveBeenCalledTimes(2);
+  });
+  /** A held cart whose dish is now sold on a menu listed since (same product version). */
+  const listedSince = async (more: Parameters<typeof setup>[4]) => {
+    let latest: unknown = null;
+    const s = setup(false, undefined, undefined, async () => latest, more);
+    const first = await s.service.attach(s.command);
+    expect(first.status).toBe("Attached");
+    latest = first.attachment;
+    const attached = first.attachment;
+    s.resolveOperation.mockImplementation(async (reference?: unknown) =>
+      reference === attached.operationReference ? attached : null,
+    );
+    s.capture.mockResolvedValue({ ...s.snapshot, menuVersionReference: id(95) } as never);
+    return s;
+  };
+  it("price-hold-dish-changes: keeps the confirmed price when a listing shows the dish the same", async () => {
+    const dishChanges = vi.fn(async (keys: readonly unknown[]) => keys.map(() => []));
+    const s = await listedSince({ dishChanges });
+    const again = await s.service.attach({ ...s.command, operationReference: id(91) });
+    expect(again.status).toBe("Held");
+    expect(dishChanges).toHaveBeenCalledWith([
+      expect.objectContaining({
+        sellableReference: s.f.cart.items[0]?.sellableReference,
+        fromMenuVersionReference: s.f.cart.items[0]?.catalogSelectionEvidence?.menuVersionReference,
+        toMenuVersionReference: id(95),
+      }),
+    ]);
+    expect(s.quoteCart).toHaveBeenCalledTimes(1);
+  });
+  it.each([[["Name"]], [["Allergens"]], [["Name", "Allergens"]]])(
+    "price-hold-dish-changes: prices again a dish listed with another %s (same product version)",
+    async (changed) => {
+      const s = await listedSince({ dishChanges: async () => [changed] });
+      const again = await s.service
+        .attach({ ...s.command, operationReference: id(91) })
+        .catch(() => undefined);
+      expect(again?.status).not.toBe("Held");
+      expect(s.quoteCart).toHaveBeenCalledTimes(2);
+    },
+  );
+  it("price-hold-dish-changes: never holds a dish on a newer menu it cannot compare", async () => {
+    const s = await listedSince({});
+    const again = await s.service
+      .attach({ ...s.command, operationReference: id(91) })
+      .catch(() => undefined);
+    expect(again?.status).not.toBe("Held");
+    expect(s.quoteCart).toHaveBeenCalledTimes(2);
+  });
+  it("price-hold-dish-changes: comparing the menus failing is try again, never the held price", async () => {
+    const s = await listedSince({
+      dishChanges: async () => {
+        throw new Error("no database");
+      },
+    });
+    await expect(
+      s.service.attach({ ...s.command, operationReference: id(91) }),
+    ).rejects.toMatchObject({ code: "CART_DEPENDENCY_UNAVAILABLE" });
+    expect(s.quoteCart).toHaveBeenCalledTimes(1);
+  });
+  it("price-hold-dish-changes: passes on a price cut made inside the hold, keeps it through a rise", async () => {
+    // Today's price of the cart's choice (it was $1.25 when confirmed).
+    let today: bigint | "fails" = 125n;
+    const estimate = vi.fn<NonNullable<ConfiguredCartQuotePorts["pricing"]["estimate"]>>(
+      async () => {
+        if (today === "fails") throw new Error("no prices");
+        return fixture(false, today).quote;
+      },
+    );
+    let latest: unknown = null;
+    const s = setup(false, undefined, undefined, async () => latest, { estimate });
+    const first = await s.service.attach(s.command);
+    latest = first.attachment;
+    const attached = first.attachment;
+    s.resolveOperation.mockImplementation(async (reference?: unknown) =>
+      reference === attached.operationReference ? attached : null,
+    );
+    // A rise (or the same price): the confirmed price is kept.
+    for (const value of [200n, 125n]) {
+      today = value;
+      const kept = await s.service.attach({ ...s.command, operationReference: id(91) });
+      expect(kept.status).toBe("Held");
+    }
+    // Today's price cannot be worked out: the guest keeps the price confirmed.
+    today = "fails";
+    expect((await s.service.attach({ ...s.command, operationReference: id(91) })).status).toBe(
+      "Held",
+    );
+    expect(s.quoteCart).toHaveBeenCalledTimes(1);
+    // A cut: a new quote at today's price (the lower of the two).
+    today = 100n;
+    await s.service.attach({ ...s.command, operationReference: id(92) }).catch(() => undefined);
     expect(s.quoteCart).toHaveBeenCalledTimes(2);
   });
   it("is an outage, never a new price or a refusal, when the held Quote cannot be read", async () => {

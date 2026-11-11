@@ -1,7 +1,7 @@
 import { createConfiguredPriceQuote, type OptionPriceRuleSnapshot } from "@rms/pricing";
 import { input } from "./order-pricing-quote.fixture.js";
 export const id = (n: number) => "018fb000-0000-7000-8000-" + n.toString(16).padStart(12, "0");
-export function fixture(dining = false) {
+export function fixture(dining = false, optionAmountMinor = 125n) {
   const source = input();
   const first = source.lines[0],
     entry = source.priceBook.entries[0];
@@ -35,7 +35,7 @@ export function fixture(dining = false) {
     orderType: null,
     lifecycle: "Published",
     currencyMetadata: base.currencyMetadata,
-    unitAmount: { amountMinor: 125n, currencyCode: base.currencyMetadata.currencyCode },
+    unitAmount: { amountMinor: optionAmountMinor, currencyCode: base.currencyMetadata.currencyCode },
     includedQuantity: 1,
     quantityBasis: "PerItemChoice",
     effectivePeriod: entry.effectivePeriod,
