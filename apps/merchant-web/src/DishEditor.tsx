@@ -1,4 +1,10 @@
-import { allergenName, listSeparator, t } from "./i18n/i18n.js";
+import {
+  allergenName,
+  holdUnsavedWork,
+  leavingWithUnsavedWork,
+  listSeparator,
+  t,
+} from "./i18n/i18n.js";
 import { MenuSectionSelect } from "./MenuSectionSelect.js";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { Link } from "react-router";
@@ -277,13 +283,21 @@ export function DishEditor({
   const focusExtra = useRef<string | null>(null);
   const formElement = useRef<HTMLFormElement>(null);
   // b7 (sold-out-allergens): what staff typed or ticked and have not saved. Switching the language
-  // (which reloads the page), a refresh or closing the tab asks first instead of losing it.
+  // (which reloads the page) asks first in the staff's words; a refresh or closing the tab asks
+  // through the browser.
   const [edited, setEdited] = useState(false);
   useEffect(() => {
     if (!edited && !busy) return;
-    const warn = (event: BeforeUnloadEvent) => event.preventDefault();
+    const release = holdUnsavedWork();
+    // Staff who already said "switch anyway" are not asked twice.
+    const warn = (event: BeforeUnloadEvent) => {
+      if (!leavingWithUnsavedWork()) event.preventDefault();
+    };
     window.addEventListener("beforeunload", warn);
-    return () => window.removeEventListener("beforeunload", warn);
+    return () => {
+      release();
+      window.removeEventListener("beforeunload", warn);
+    };
   }, [edited, busy]);
   useEffect(() => {
     if (source === null || openApply === null || openedApply.current) return;

@@ -254,8 +254,37 @@ export function withContentLocale(
   };
 }
 
+/**
+ * b7 (sold-out-allergens): forms with typed but unsaved work (a new dish half filled in) hold the
+ * language switch: it asks first, in the staff's words, instead of reloading the work away.
+ */
+const unsavedWork = new Set<symbol>();
+let leavingOnPurpose = false;
+/** Marks unsaved work on screen until the returned release is called (on save, close or unmount). */
+export function holdUnsavedWork(): () => void {
+  const key = Symbol("unsaved");
+  unsavedWork.add(key);
+  return () => {
+    unsavedWork.delete(key);
+  };
+}
+/** True once staff chose to switch language and lose unsaved work (the page asks no more). */
+export function leavingWithUnsavedWork(): boolean {
+  return leavingOnPurpose;
+}
+
 /** Chooses a language for this device and reloads, so every text follows it. */
 export function chooseLanguage(language: StaffLanguage): void {
+  if (
+    language !== current &&
+    unsavedWork.size > 0 &&
+    !globalThis.confirm(
+      t(
+        "What you typed here is not saved yet. Switching the language reloads the page and loses it. Switch anyway?",
+      ),
+    )
+  )
+    return;
   try {
     globalThis.localStorage.setItem(STORAGE_KEY, language);
   } catch {
@@ -263,5 +292,6 @@ export function chooseLanguage(language: StaffLanguage): void {
   }
   if (language === current) return;
   current = language;
+  leavingOnPurpose = unsavedWork.size > 0;
   globalThis.location.reload();
 }

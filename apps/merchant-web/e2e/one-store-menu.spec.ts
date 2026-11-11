@@ -826,6 +826,19 @@ test("@production one dish edited on the one-page menu: names, price, choices, a
     expectedVersion: 0,
     sectionReference: id(141),
   });
+  // b7 (M166): its choices never said whether they add allergens; staff are told, not left guessing.
+  await expect(editor.getByRole("note").filter({ hasText: "Not answered yet" })).toContainText(
+    "Not answered yet whether these choices add allergens:",
+  );
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await editor.getByRole("note").filter({ hasText: "Not answered yet" }).scrollIntoViewIfNeeded();
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.screenshot({ path: `test-results/one-store-choices-unanswered-${width}.png` });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
   await editor.getByRole("button", { name: "Save dish" }).click();
   await expect(
     page.getByText("Siu mai (TEST) saved. Guests see it when the menu is listed."),
@@ -1750,6 +1763,26 @@ test("@production switching the language with an unsaved new dish asks first and
       },
     }),
   );
+  // A new dish reads the Brand's tax classes and choice groups.
+  await page.route("**/merchant/commerce/products/query", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        screenId: "CAT-PRODUCT-LIST",
+        sourceAsOf: at,
+        locale: "en-CA",
+        permissions: {},
+        productTypes: [],
+        sellingUnits: [],
+        taxClasses: [],
+        optionSetChoices: [],
+        products: [],
+      },
+    }),
+  );
+  await page.route("**/merchant/commerce/option-prices/query", (route) =>
+    route.fulfill({ headers, json: { screenId: "PRICE-OPTION-LIST", products: [] } }),
+  );
   for (const width of [1440, 1024, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
     await page.goto("/app/commerce/menus");
@@ -1759,19 +1792,37 @@ test("@production switching the language with an unsaved new dish asks first and
     await fresh.getByLabel("Price ($)").fill("6.50");
     const asked: string[] = [];
     page.once("dialog", (dialog) => {
-      asked.push(dialog.type());
+      asked.push(dialog.type() + ": " + dialog.message());
       void dialog.dismiss();
     });
-    const toChinese = page.getByRole("button", { name: "切换到中文" }).first();
-    await toChinese.click();
-    await expect.poll(() => asked).toEqual(["beforeunload"]);
-    // Staff stayed: the page was not reloaded and nothing typed is lost.
+    await page.getByRole("button", { name: "切换到中文" }).first().click();
+    await expect
+      .poll(() => asked)
+      .toEqual([
+        "confirm: What you typed here is not saved yet. Switching the language reloads the page and loses it. Switch anyway?",
+      ]);
+    // Staff stayed: still English, nothing typed is lost.
     await expect(fresh.getByLabel("English name")).toHaveValue("Hot and sour soup (TEST)");
     await expect(fresh.getByLabel("Price ($)")).toHaveValue("6.50");
+    await expect(page.getByRole("button", { name: "切换到中文" }).first()).toBeVisible();
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);
     await page.screenshot({ path: `test-results/one-store-language-draft-${width}.png` });
+    // Closed, nothing is left to keep: the switch would go on without asking.
+    await fresh.getByRole("button", { name: "Close" }).click();
+    await expect(fresh).toHaveCount(0);
   }
   await page.setViewportSize({ width: 1440, height: 900 });
+  // Staff who say "switch anyway" are asked once, and the page comes back in Chinese.
+  await page.getByRole("button", { name: "New dish" }).click();
+  await page.getByRole("form", { name: "New dish" }).getByLabel("English name").fill("Soup (TEST)");
+  const dialogs: string[] = [];
+  page.on("dialog", (dialog) => {
+    dialogs.push(dialog.type());
+    void dialog.accept();
+  });
+  await page.getByRole("button", { name: "切换到中文" }).first().click();
+  await expect(page.getByRole("button", { name: "Switch to English" }).first()).toBeVisible();
+  expect(dialogs).toEqual(["confirm"]);
 });
