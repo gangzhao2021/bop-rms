@@ -1183,6 +1183,8 @@ function MenuItemCard({
                   ? t("Served 9 am to 2 am")
                   : t("Sold out")}
               </span>
+            ) : primaryVariant(family).sellable.alcohol === "LastCall" ? (
+              <span className="menu-sold-out">{t("Last call · until 2:00")}</span>
             ) : null}
           </span>
           {alreadyOrdered > 0 ? (
@@ -1342,6 +1344,11 @@ function SellableDetail({
         )}
         {sellable.alcohol === "OutsideHours" ? (
           <p className="menu-sold-out">{t("Alcohol is served from 9 am to 2 am.")}</p>
+        ) : sellable.alcohol === "LastCall" ? (
+          // WP-2423 (M93, Owner decision 18): 30 minutes before the cutoff.
+          <p className="menu-sold-out" role="note">
+            {t("Last call for alcohol: orders close at 2:00.")}
+          </p>
         ) : sellable.availability === "SoldOut" ? (
           <p className="menu-sold-out">{sized ? t("This size is sold out") : t("Sold out")}</p>
         ) : null}

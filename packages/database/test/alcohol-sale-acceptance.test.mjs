@@ -239,6 +239,18 @@ it("sells a marked dish only at tables, while switched on and within the hours",
       assert.deepEqual([...sale.skus], [sku]);
       assert.equal(sale.offered, true);
       assert.equal(sale.withinHours, true);
+      assert.equal(sale.lastCall, undefined);
+      // WP-2423 (M93, Owner decision 18): from 1:30 Store time it is last call; at 2:00 it ends.
+      const lastCall = await runForStore((tx) =>
+        readAlcoholSale(tx, ids, "2026-10-08T05:40:00.000Z", [sku]),
+      ); // 01:40 in Toronto
+      assert.equal(lastCall.withinHours, true);
+      assert.equal(lastCall.lastCall, true);
+      const closed = await runForStore((tx) =>
+        readAlcoholSale(tx, ids, "2026-10-08T06:00:00.000Z", [sku]),
+      ); // 02:00 in Toronto
+      assert.equal(closed.withinHours, false);
+      assert.equal(closed.lastCall, undefined);
 
       // Cleared: an ordinary dish again.
       await mark(false, 1);

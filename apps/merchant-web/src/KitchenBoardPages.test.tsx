@@ -1993,3 +1993,16 @@ describe("WP-2423 (M171): a table's marked allergens on its tickets", () => {
     ).toThrow("KITCHEN_BOARD_INVALID");
   });
 });
+
+describe("WP-2423 (M93): a dish with alcohol tells the kitchen to check ID", () => {
+  it("reads the mark and shows Check ID (19+); anything but true is refused", () => {
+    const view = (checkId: unknown) =>
+      parseKitchenBoardView({
+        ...kitchenBoardFixture(),
+        items: [{ ...kitchenItemFixture(), checkId }],
+      });
+    expect(view(true).items[0]?.checkId).toBe(true);
+    expect(() => view(false)).toThrow("KITCHEN_BOARD_INVALID");
+    expect(parseKitchenBoardView(kitchenBoardFixture()).items[0]?.checkId).toBeUndefined();
+  });
+});

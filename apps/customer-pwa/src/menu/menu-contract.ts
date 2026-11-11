@@ -529,7 +529,9 @@ function sellable(value: unknown, language: MenuLanguage): MenuSellable {
     presentationRole: raw.presentationRole as MenuSellable["presentationRole"],
     pinned: raw.pinned,
     availability: raw.availability as MenuSellable["availability"],
-    ...(raw.alcohol === "OnSale" || raw.alcohol === "OutsideHours" ? { alcohol: raw.alcohol } : {}),
+    ...(raw.alcohol === "OnSale" || raw.alcohol === "LastCall" || raw.alcohol === "OutsideHours"
+      ? { alcohol: raw.alcohol }
+      : {}),
     price: priced ? { amount: price.amount as string, currency: price.currency as string } : null,
     ...(() => {
       const disclosure = allergenDisclosure(raw.allergenDisclosure, language);

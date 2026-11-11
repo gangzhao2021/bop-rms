@@ -69,6 +69,8 @@ export interface KitchenBoardItem {
   readonly chase?: { readonly count: number; readonly lastChasedAt: string };
   /** Owner 2026-11-03: entered after an outage from a paper slip: it may already be made. */
   readonly takenOnPaper?: boolean;
+  /** WP-2423 (M93): the dish contains alcohol; check ID (19+) when serving it. */
+  readonly checkId?: boolean;
   /**
    * WP-2423 item 8 ⑧ (decision 5): the dish's kitchen section (档口); null: no section. Absent from
    * older servers (no section filter then).
@@ -432,6 +434,7 @@ function item(value: unknown): KitchenBoardItem {
   const hasChase = value !== null && typeof value === "object" && Object.hasOwn(value, "chase");
   const hasPaper =
     value !== null && typeof value === "object" && Object.hasOwn(value, "takenOnPaper");
+  const hasCheckId = value !== null && typeof value === "object" && Object.hasOwn(value, "checkId");
   const hasSection =
     value !== null && typeof value === "object" && Object.hasOwn(value, "kitchenSection");
   const hasPartSections =
@@ -460,6 +463,7 @@ function item(value: unknown): KitchenBoardItem {
     ...(hasComboParts ? ["comboParts"] : []),
     ...(hasChase ? ["chase"] : []),
     ...(hasPaper ? ["takenOnPaper"] : []),
+    ...(hasCheckId ? ["checkId"] : []),
     ...(hasSection ? ["kitchenSection"] : []),
     ...(hasPartSections ? ["comboPartSections"] : []),
     ...(hasPlacedAt ? ["placedAt"] : []),
@@ -502,6 +506,13 @@ function item(value: unknown): KitchenBoardItem {
     ...(hasSection ? { kitchenSection: input.kitchenSection as string | null } : {}),
     ...(hasPartSections ? { comboPartSections: comboPartSections(input.comboPartSections) } : {}),
     ...(input.takenOnPaper === true ? { takenOnPaper: true } : {}),
+    ...(hasCheckId
+      ? input.checkId === true
+        ? { checkId: true }
+        : (() => {
+            throw new Error("KITCHEN_BOARD_INVALID");
+          })()
+      : {}),
     ...(chase === null
       ? {}
       : {

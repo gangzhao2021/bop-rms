@@ -1620,6 +1620,10 @@ function WorkCard({
           </ul>
         ) : null}
         <KitchenAllergenLine item={item} />
+        {item.checkId === true ? (
+          // WP-2423 (M93, Owner decision 18): alcohol is served to 19+ only.
+          <p className="kitchen-work-item__table-allergy">{t("Check ID (19+)")}</p>
+        ) : null}
         {containsTableAllergy(item) ? (
           <p className="kitchen-work-item__table-allergy" role="alert">
             {t("Contains a table allergy")}

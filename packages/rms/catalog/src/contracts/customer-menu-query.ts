@@ -83,7 +83,7 @@ export interface CustomerMenuSellableDto {
   /** WP-2423 8.6: SoldOut while the Store has marked the item sold out (ordering is refused). */
   readonly availability: "Available" | "SoldOut";
   /** WP-2423 DEC-ALCOHOL: the dish contains alcohol; OutsideHours can't be ordered right now. */
-  readonly alcohol?: "OnSale" | "OutsideHours";
+  readonly alcohol?: "OnSale" | "LastCall" | "OutsideHours";
   readonly optionRules: readonly CustomerMenuOptionRuleDto[];
   /** WP-2423: the published description in the customer's language (menu language otherwise). */
   readonly description: string | null;

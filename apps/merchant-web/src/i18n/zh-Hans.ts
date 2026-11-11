@@ -8967,4 +8967,5 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Has a dish sold out now": "含现在已售罄的菜",
   "This guest ordered before {dish} sold out. Offer a swap, or cancel that dish with a refund (reason: sold out).":
     "这位客人在 {dish} 售罄前已下单。可以请客人换一道，或取消这道菜并退款（原因：售罄）。",
+  "Check ID (19+)": "查证件（19 岁以上）",
 });

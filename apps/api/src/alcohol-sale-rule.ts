@@ -21,11 +21,19 @@ export function withinAlcoholHours(localTime: string): boolean {
   const time = localTime.slice(0, 5);
   return time >= salesOpenAt || time < salesCloseAt;
 }
+/** WP-2423 (M93, Owner decision 18): last call starts 30 minutes before the 2:00 cutoff. */
+const lastCallFrom = "01:30";
+export function alcoholLastCall(localTime: string): boolean {
+  const time = localTime.slice(0, 5);
+  return time >= lastCallFrom && time < salesCloseAt;
+}
 export interface AlcoholSale {
   /** The sizes asked about whose dish contains alcohol. */
   readonly skus: ReadonlySet<string>;
   readonly offered: boolean;
   readonly withinHours: boolean;
+  /** WP-2423 (M93): within the last 30 minutes before the cutoff (absent: not). */
+  readonly lastCall?: true;
 }
 
 /** Reads the Store's switch and clock only when one of the sizes asked about contains alcohol. */
@@ -55,6 +63,7 @@ export async function readAlcoholSale(
     skus,
     offered: setting.alcohol,
     withinHours: withinAlcoholHours(String(local.localTime)),
+    ...(alcoholLastCall(String(local.localTime)) ? { lastCall: true as const } : {}),
   };
 }
 
@@ -65,7 +74,7 @@ export function alcoholMenuFact<
   fact: F,
   sale: AlcoholSale,
   orderType: "Pickup" | "DineIn" | undefined,
-): F & { readonly alcohol?: "OnSale" | "OutsideHours" } {
+): F & { readonly alcohol?: "OnSale" | "LastCall" | "OutsideHours" } {
   if (!sale.offered || orderType !== "DineIn") return { ...fact, availability: "NotOffered" };
   if (!sale.withinHours) {
     return {
@@ -74,7 +83,8 @@ export function alcoholMenuFact<
       alcohol: "OutsideHours",
     };
   }
-  return { ...fact, alcohol: "OnSale" };
+  // WP-2423 (M93): still orderable, and guests are told orders close at 2:00.
+  return { ...fact, alcohol: sale.lastCall === true ? "LastCall" : "OnSale" };
 }
 
 /** Whether this size can be ordered now; true for anything that contains no alcohol. */

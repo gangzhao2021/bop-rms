@@ -24,6 +24,7 @@ import {
   withSellableAllergenChange,
   type SellableAllergenChange,
   sellableDisclosureKey,
+  listAlcoholSkus,
 } from "@rms/catalog";
 import {
   createPostgresCounterOrderEntryStore,
@@ -183,6 +184,8 @@ export interface KitchenPreparation {
    * made it. It still goes through the board so its records close.
    */
   readonly takenOnPaper?: boolean;
+  /** WP-2423 (M93, Owner decision 18): the dish contains alcohol; check ID (19+) when serving. */
+  readonly checkId?: boolean;
 }
 const unavailableAllergens: KitchenItemAllergens = Object.freeze({ status: "Unavailable" });
 const noPreparation: KitchenPreparation = Object.freeze({
@@ -235,6 +238,7 @@ const itemView = (
   customerNote: preparation.customerNote,
   kitchenSection: preparation.kitchenSection,
   ...(preparation.takenOnPaper === true ? { takenOnPaper: true as const } : {}),
+  ...(preparation.checkId === true ? { checkId: true as const } : {}),
 });
 /**
  * WP-2423 Q3: Kitchen gives each work item's menu keys, Catalog the disclosure published for them.
@@ -368,6 +372,7 @@ export async function kitchenPreparation(
         item.workItemReference,
         Object.freeze({
           ...(takenOnPaper ? { takenOnPaper: true } : {}),
+          ...(facts?.checkId === true ? { checkId: true } : {}),
           allergens: facts?.allergens ?? unavailableAllergens,
           customerNote: facts?.customerNote ?? null,
           kitchenSection: sections.get(item.workItemReference) ?? null,
@@ -485,7 +490,12 @@ async function kitchenAllergens(
   scope: { readonly brandReference: string; readonly storeReference: string },
   /** Work item → the options chosen on it, or null when unknown. */
   chosenOptions: ReadonlyMap<string, readonly string[] | null>,
-): Promise<ReadonlyMap<string, { allergens: KitchenItemAllergens; customerNote: string | null }>> {
+): Promise<
+  ReadonlyMap<
+    string,
+    { allergens: KitchenItemAllergens; customerNote: string | null; checkId?: boolean }
+  >
+> {
   const keys = await listKitchenWorkItemPreparationFacts(transaction, scope, [
     ...chosenOptions.keys(),
   ]);
@@ -517,7 +527,14 @@ async function kitchenAllergens(
       changes.set(key, change);
   const named = (names: Readonly<Record<string, string>>, code: string) =>
     names["en-CA"] ?? names.en ?? Object.values(names)[0] ?? code;
-  return new Map(
+  // WP-2423 (M93, Owner decision 18): a dish that contains alcohol tells the cook or bar to check ID.
+  const alcohol =
+    keys.size === 0
+      ? new Set<string>()
+      : await listAlcoholSkus(transaction as never, scope, [
+          ...new Set([...keys.values()].map((key) => key.skuReference)),
+        ]);
+  const facts = new Map(
     [...keys].map(([workItem, key]) => {
       const disclosure = disclosures.get(
         sellableDisclosureKey({
@@ -563,6 +580,12 @@ async function kitchenAllergens(
         },
       ] as const;
     }),
+  );
+  return new Map(
+    [...facts].map(([workItem, value]) => [
+      workItem,
+      alcohol.has(String(keys.get(workItem)?.skuReference)) ? { ...value, checkId: true } : value,
+    ]),
   );
 }
 

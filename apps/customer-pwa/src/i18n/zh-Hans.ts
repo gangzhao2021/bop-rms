@@ -1707,4 +1707,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Sold out today": "今天已售罄",
   "Only {name} is left today": "今天只剩 {name}",
   "I have an allergy question": "我想问过敏问题",
+  "Last call for alcohol: orders close at 2:00.": "酒水最后点单：2:00 截止。",
+  "Last call · until 2:00": "最后点单 · 2:00 截止",
 });
