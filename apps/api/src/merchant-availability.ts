@@ -142,6 +142,16 @@ const contexts = [
 export type ItemAvailabilityStatus =
   "Available" | "SoldOut" | "Unavailable" | "NotOffered" | "Varies";
 const soldOutReason = soldOutReasonCode;
+/**
+ * A Store's own part of an availability rule code. Not the reference's leading digits: Stores
+ * opened weeks apart share them (UUIDv7 time prefix), and rule codes are unique across the Brand.
+ */
+const storeCode = (storeReference: string) =>
+  createHash("sha256")
+    .update("bop-rms/store-availability-code:" + storeReference)
+    .digest("hex")
+    .slice(0, 8)
+    .toUpperCase();
 const offeredReason = storeOfferedReasonCode;
 const effectiveAt = (rule: AvailabilityRuleAggregate, at: string) =>
   rule.lifecycle === "Active" &&
@@ -564,13 +574,7 @@ export function createMerchantAvailability(options: {
               ? created
               : setLifecycle(created.aggregate, "Active");
           };
-          // A Store's own code part. Not the reference's leading digits: Stores opened weeks apart
-          // share them (UUIDv7 time prefix), and rule codes are unique across the Brand.
-          const store8 = createHash("sha256")
-            .update("bop-rms/store-availability-code:" + s.owner.storeReference)
-            .digest("hex")
-            .slice(0, 8)
-            .toUpperCase();
+          const store8 = storeCode(s.owner.storeReference);
           try {
             const before = itemAvailability(rules, s.owner, sku.skuReference, at);
             if (body.action === "Offer") {
@@ -635,6 +639,107 @@ export function createMerchantAvailability(options: {
             if (mapped !== undefined) return fail(mapped);
             throw error;
           }
+        }),
+      ),
+    );
+  };
+
+  /**
+   * WP-2423 (v15 batch 5): "List it" by the Brand at a Brand with several Stores puts each dish on
+   * the menu live at every Store the menu serves where nobody has decided it yet — a new dish the
+   * Brand lists is on sale at every Store, as in a chain. A dish a Store hid (or ever offered and
+   * stopped) stays as that Store decided. Only with the Brand's own availability authority; without
+   * it nothing is written and the answer says so (the review told the person beforehand).
+   */
+  const offerAtOtherStores = async (input: {
+    sessionCookie: unknown;
+    csrf: unknown;
+    operationReference: string;
+    skuReferences: readonly string[];
+    /** The Stores the menu serves (others are left alone). */
+    storeReferences: readonly string[];
+  }) => {
+    const current = await session(input);
+    return retryTransactionConflict(() =>
+      options.persistence.transactions.run((tx) =>
+        withRememberedBrandAuthorization(tx, async () => {
+          const s = await scopeFor(tx, input.sessionCookie, current.sessionReference);
+          if (!s.brandAuthority) return { allowed: false as const, offered: 0 };
+          const at = options.persistence.now();
+          const served = new Set(input.storeReferences);
+          const others = (await listBrandStoreReferences(tx as never, s.owner)).filter(
+            (store) => store !== s.owner.storeReference && served.has(store),
+          );
+          const skus = (await listBrandSkuChoices(ptx(tx), s.owner)).filter(
+            (sku) => sku.active && input.skuReferences.includes(sku.skuReference),
+          );
+          let offered = 0;
+          for (const storeReference of others) {
+            const at8 = storeCode(storeReference);
+            const there = { ...s, owner: { ...s.owner, storeReference } };
+            const rules = await listStoreAvailabilityRules(ptx(tx), there.owner);
+            for (const sku of skus) {
+              const decided = rules.some(
+                (rule) =>
+                  rule.sellableReference === sku.skuReference &&
+                  rule.storeReference === storeReference &&
+                  rule.reasonCode === offeredReason,
+              );
+              if (decided) continue;
+              const operation = derivedReference(
+                input.operationReference,
+                "offer:" + storeReference + ":" + sku.skuReference,
+              );
+              const service = availabilityService(tx, there, operation, false, (step) => ({
+                change: "OfferedAtStore",
+                ruleStep:
+                  step === derivedReference(operation, "create") ? "RuleCreated" : "RuleActivated",
+                item: itemLabel(
+                  name(sku.productLocalizedNames, sku.skuCode),
+                  name(sku.localizedNames, sku.skuCode),
+                ),
+                itemReference: sku.skuReference,
+                storeReference,
+                authority: "BrandListing",
+                commandReference: input.operationReference,
+              }));
+              try {
+                const created = await service.create({
+                  internalCode: ("OFFER-" + at8 + "-" + sku.skuCode).slice(0, 64),
+                  decision: "Available",
+                  priority: 100,
+                  reasonCode: offeredReason,
+                  effectiveUntil: null,
+                  sellableReference: sku.skuReference,
+                  sellableType: "Sku",
+                  storeReference,
+                  channelCodes: [],
+                  orderTypeCodes: [],
+                  effectiveFrom: at,
+                  operationReference: derivedReference(operation, "create"),
+                  requestedAt: at,
+                });
+                if (created.aggregate.lifecycle !== "Active")
+                  await service.changeLifecycle({
+                    ruleReference: created.aggregate.ruleReference,
+                    targetLifecycle: "Active",
+                    expectedAggregateVersion: created.aggregate.aggregateVersion,
+                    operationReference: derivedReference(
+                      operation,
+                      "Active:" + created.aggregate.ruleReference,
+                    ),
+                    requestedAt: at,
+                  });
+                offered += 1;
+              } catch (error) {
+                const mapped =
+                  error instanceof CatalogError ? catalogErrors[error.code] : undefined;
+                if (mapped !== undefined) return fail(mapped);
+                throw error;
+              }
+            }
+          }
+          return { allowed: true as const, offered };
         }),
       ),
     );
@@ -809,5 +914,5 @@ export function createMerchantAvailability(options: {
       }),
     });
   }
-  return { query, command };
+  return { query, command, offerAtOtherStores };
 }

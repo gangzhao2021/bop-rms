@@ -24,6 +24,9 @@ import {
   listCurrentIngredientDeclarations,
   listSellableAllergenChangesSince,
   listStoreAvailabilityRules,
+  listCurrentProductOptionBindings,
+  listStoreChoiceOptions,
+  storeOfferedReasonCode,
   parseCatalogHash,
   parseCatalogReference,
   optionBindingDefaultRules,
@@ -41,8 +44,10 @@ import {
   currentStorePriceBook,
   listBrandPriceBooks,
   listPriceBookDraftPurposes,
+  listWaitingOptionPriceRules,
   type CurrencyMetadataSnapshot,
 } from "@rms/pricing";
+import { optionPriceRuleReference } from "./merchant-option-prices.js";
 import { listInventoryRecipeIngredientFacts } from "@rms/inventory";
 import {
   listRecipes,
@@ -1229,6 +1234,86 @@ export function createMerchantMenus(options: {
     await brandScope(tx, s.owner.brandReference);
     return missing;
   };
+  /**
+   * WP-2423 (v15 batch 5): the rest of what "List it" puts live, for its review — each choice
+   * price waiting (which dish, which choice, from → to) and, at a Brand with several Stores, the
+   * dishes on the menu nobody has decided at one of its other Stores yet, and whether this person's
+   * listing puts them live there (the Brand's own availability authority) or each Store must.
+   */
+  const listingReview = async (
+    tx: unknown,
+    s: Scope,
+    view: {
+      readonly storeReferences: readonly string[];
+      readonly skuReferences: readonly string[];
+    },
+    severalStores: boolean,
+  ) => {
+    const onDishes = new Map(
+      (await listCurrentProductOptionBindings(ptx(tx) as never, s.owner)).map((row) => [
+        row.bindingReference + ":" + row.optionReference,
+        row.productReference,
+      ]),
+    );
+    const waiting = (
+      await listWaitingOptionPriceRules(ptx(tx) as never, {
+        brandReference: s.owner.brandReference,
+      })
+    ).filter(
+      (rule) =>
+        onDishes.has(rule.bindingReference + ":" + rule.optionReference) &&
+        rule.ruleReference ===
+          optionPriceRuleReference(rule.bindingReference, rule.optionReference) &&
+        rule.amountMinor !== rule.publishedAmountMinor,
+    );
+    const optionNames =
+      waiting.length === 0
+        ? new Map<string, Readonly<Record<string, string>>>()
+        : new Map(
+            (await listStoreChoiceOptions(ptx(tx) as never, s.owner, 1000)).map((option) => [
+              option.optionReference,
+              option.localizedNames,
+            ]),
+          );
+    await brandScope(tx, s.owner.brandReference);
+    const choicePriceChanges = waiting.map((rule) => ({
+      productReference:
+        onDishes.get(rule.bindingReference + ":" + rule.optionReference) ?? rule.bindingReference,
+      optionReference: rule.optionReference,
+      optionName: name(optionNames.get(rule.optionReference) ?? {}, ""),
+      fromMinor: rule.publishedAmountMinor,
+      toMinor: rule.amountMinor,
+    }));
+    if (!severalStores) return { choicePriceChanges, otherStores: null };
+    const served = new Set(view.storeReferences);
+    const others = (await listBrandStoreReferences(ptx(tx) as never, s.owner)).filter(
+      (store) => store !== s.owner.storeReference && served.has(store),
+    );
+    const undecided = new Set<string>();
+    for (const storeReference of others) {
+      const rules = await listStoreAvailabilityRules(ptx(tx), { ...s.owner, storeReference });
+      for (const sku of view.skuReferences)
+        if (
+          !rules.some(
+            (rule) =>
+              rule.sellableReference === sku &&
+              rule.storeReference === storeReference &&
+              rule.reasonCode === storeOfferedReasonCode,
+          )
+        )
+          undecided.add(sku);
+    }
+    await brandScope(tx, s.owner.brandReference);
+    return {
+      choicePriceChanges,
+      otherStores: {
+        storeCount: others.length,
+        notDecided: [...undecided],
+        listingOffers: (await s.decision(availabilityPermission))?.effect === "Allow",
+      },
+    };
+  };
+
   const menuView = (aggregate: MenuAggregate) => ({
     menuReference: aggregate.menuReference,
     internalCode: aggregate.internalCode,
@@ -1398,6 +1483,17 @@ export function createMerchantMenus(options: {
             })()),
             mayOfferHere,
             ...(await priceListing(tx, s)),
+            ...(await listingReview(
+              tx,
+              s,
+              {
+                storeReferences: loaded.aggregate.draft.storeReferences.map(String),
+                skuReferences: loaded.aggregate.draft.sections.flatMap((section) =>
+                  section.placements.map((placement) => String(placement.sellableReference)),
+                ),
+              },
+              brandStores.length > 1,
+            )),
             customerView,
             allergenRegistry: (await currentAllergenRegistry(ptx(tx) as never, s.owner)) !== null,
           };

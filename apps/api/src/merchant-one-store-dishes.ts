@@ -513,6 +513,8 @@ interface MenuBuilder {
     readonly versionReference: string;
     readonly name: string;
     readonly sections: readonly MenuSection[];
+    /** The Stores the menu serves (absent in older reads). */
+    readonly storeReferences?: readonly string[];
   };
   /** The version's review and publication; null while it is being edited. */
   readonly publication: { readonly state: string } | null;
@@ -562,7 +564,8 @@ export function createMerchantOneStoreDishes(options: {
   readonly menus: ReturnType<typeof createMerchantMenus>;
   readonly dishAllergens: ReturnType<typeof createMerchantDishAllergens>;
   readonly optionRecipes: ReturnType<typeof createMerchantOptionRecipes>;
-  readonly availability: Pick<ReturnType<typeof createMerchantAvailability>, "query" | "command">;
+  readonly availability: Pick<ReturnType<typeof createMerchantAvailability>, "query" | "command"> &
+    Partial<Pick<ReturnType<typeof createMerchantAvailability>, "offerAtOtherStores">>;
   /** WP-2423 item 8 ⑥ part 4: combos (absent: combos cannot be saved; "List it" skips them). */
   readonly combos?: Pick<
     ReturnType<typeof createMerchantCombos>,
@@ -1513,11 +1516,18 @@ export function createMerchantOneStoreDishes(options: {
     // Every dish on the menu that was never decided at the store is offered with it (read again:
     // listing its combos may have changed it).
     const listed = await loadMenu(session, body.menuReference);
-    await offerUndecided(
-      session,
-      new Set(listed.menu.sections.flatMap((s) => s.items.map((item) => item.skuReference))),
-      step,
+    const onMenu = new Set(
+      listed.menu.sections.flatMap((s) => s.items.map((item) => item.skuReference)),
     );
+    await offerUndecided(session, onMenu, step);
+    // WP-2423 (v15 batch 5): at a Brand with several Stores, the Brand's listing puts them live
+    // at the menu's other Stores too, where nobody decided them (a Store's own hide stays).
+    await options.availability.offerAtOtherStores?.({
+      ...session,
+      operationReference: step("offer-other-stores"),
+      skuReferences: [...onMenu],
+      storeReferences: listed.menu.storeReferences ?? [],
+    });
     return options.menus.command({
       ...session,
       body: { action: "List", operationReference: step("menu"), menuReference: body.menuReference },

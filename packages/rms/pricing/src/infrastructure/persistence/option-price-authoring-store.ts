@@ -178,6 +178,8 @@ export async function listWaitingOptionPriceRules(
     readonly optionReference: string;
     readonly aggregateVersion: number;
     readonly amountMinor: string;
+    /** WP-2423 (v15 batch 5): the published price it replaces (null: none yet, a new choice). */
+    readonly publishedAmountMinor: string | null;
     readonly draftAuthorActorReference: string;
   }[]
 > {
@@ -186,9 +188,10 @@ export async function listWaitingOptionPriceRules(
   return (
     await tx.query(
       `SELECT r.option_price_rule_id::text rule,r.binding_id::text binding,r.option_id::text option,r.aggregate_version::text version,
-         v.unit_amount_minor::text amount,r.draft_author_actor_id::text author
+         v.unit_amount_minor::text amount,c.unit_amount_minor::text published,r.draft_author_actor_id::text author
        FROM rms_pricing.option_price_rule r
        JOIN rms_pricing.option_price_rule_version v ON v.option_price_rule_version_id=r.draft_version_id AND v.brand_id=r.brand_id
+       LEFT JOIN rms_pricing.option_price_rule_version c ON c.option_price_rule_version_id=r.current_version_id AND c.brand_id=r.brand_id AND c.lifecycle='Published'
        WHERE r.brand_id=$1 AND r.draft_version_id IS NOT NULL AND ${brandWideVersion}
        ORDER BY r.option_price_rule_id`,
       [brand],
@@ -199,6 +202,7 @@ export async function listWaitingOptionPriceRules(
     optionReference: String(row.option),
     aggregateVersion: Number(row.version),
     amountMinor: String(row.amount),
+    publishedAmountMinor: row.published === null ? null : String(row.published),
     draftAuthorActorReference: String(row.author),
   }));
 }
