@@ -416,7 +416,8 @@ describe("WP-1205 Customer Cart HTTP contract", () => {
     expect((await plain.json()) as CustomerCartView).not.toHaveProperty("cart.recentRounds");
     // v15 batch-5: a staff round, and whether this phone's dishes are in it, are passed on; a
     // half-said one is not.
-    const staff = [{ ...recentRounds[0], enteredByStaff: true, withThisPhoneDishes: false }];
+    const staffRound = recentRounds[0] as (typeof recentRounds)[number];
+    const staff = [{ ...staffRound, enteredByStaff: true, withThisPhoneDishes: false }];
     port.result = {
       status: "Found",
       view: view({
@@ -434,7 +435,7 @@ describe("WP-1205 Customer Cart HTTP contract", () => {
         orderType: "DineIn",
         serviceMode: "DineIn",
         placedOrder: null,
-        recentRounds: [{ ...recentRounds[0], enteredByStaff: true }] as never,
+        recentRounds: [{ ...staffRound, enteredByStaff: true }] as never,
       }),
     };
     expect((await request("/bff/customer/cart", { headers: headers() })).status).toBe(503);
