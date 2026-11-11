@@ -131,7 +131,7 @@ export async function listStaffCartRemovals(
   const rows = rowsOf(
     await tx.query(
       `SELECT sellable_id::text AS sellable, quantity,
-        to_char(occurred_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS occurred_at
+        to_char(occurred_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS removed_at
        FROM rms_ordering.cart_staff_line_removal
        WHERE brand_id=$1 AND store_id=$2 AND dining_session_id=$3 AND occurred_at >= $4
        ORDER BY occurred_at DESC, operation_id DESC LIMIT 20`,
@@ -148,7 +148,7 @@ export async function listStaffCartRemovals(
       Object.freeze({
         sellableReference: String(parseOrderingReference(row.sellable)),
         quantity: Number(row.quantity),
-        occurredAt: String(parseOrderingInstant(row.occurred_at)),
+        occurredAt: String(parseOrderingInstant(row.removed_at)),
       }),
     ),
   );
