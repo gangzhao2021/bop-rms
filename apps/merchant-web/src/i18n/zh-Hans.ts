@@ -8220,6 +8220,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "这笔款是在门店刷卡机上付的。申请记录并批准后，请在那台刷卡机上退这笔金额，再到申请下记录。",
   "Paid on the store's card machine. After the request is recorded, refund this amount on that machine and record it under the request.":
     "这笔款是在门店刷卡机上付的。申请记录后，请在那台刷卡机上退这笔金额，再到申请下记录。",
+  "Paid on the store's card machine. Recording this request does not refund anything yet: once it is approved, a manager or the owner sends it from Approvals.":
+    "这笔款是在门店刷卡机上付的。记录这笔申请还不会退款：批准后，由店长或店主在“审批”里发出。",
+  "Paid on the store's card machine. Recording this request does not refund anything yet: a manager or the owner sends it from Approvals.":
+    "这笔款是在门店刷卡机上付的。记录这笔申请还不会退款：由店长或店主在“审批”里发出。",
   "Paid on the store's card machine. Its refunds are made on that machine and recorded here; they count on the day they are made.":
     "这笔款是在门店刷卡机上付的。退款要在那台刷卡机上办理，再到这里记录，并计入办理当天。",
   "Paid, refund pending": "已付款，退款处理中",

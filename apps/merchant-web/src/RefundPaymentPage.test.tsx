@@ -16,6 +16,7 @@ import {
   paymentRefundStateLabel,
   paymentStateLabel,
   refundEverythingQuantities,
+  cardMachineReviewText,
   refundSendsOnConfirm,
   refundWizardSections,
   requestBlockedMessage,
@@ -485,4 +486,19 @@ it("WP-2423 M14: a cashier's review never says the refund is sent on confirming"
   expect(refundSendsOnConfirm({ approvalRequired: true }, false, true)).toBe(false);
   expect(refundSendsOnConfirm({ approvalRequired: false }, true, true)).toBe(false);
   expect(refundSendsOnConfirm(null, false, true)).toBe(false);
+});
+
+it("v15 batch 5: a cashier's card-machine review matches what they are told after recording", () => {
+  // The review told a cashier to refund on the machine and record it, which a cashier can't do;
+  // after recording they read that a manager or the owner sends it from Approvals.
+  for (const approvalRequired of [false, true]) {
+    const cashier = cardMachineReviewText(approvalRequired, false);
+    expect(cashier).toContain("a manager or the owner sends it from Approvals");
+    expect(cashier).not.toContain("refund this amount on that machine");
+  }
+  expect(cardMachineReviewText(false, true)).toContain("refund this amount on that machine");
+  expect(cardMachineReviewText(true, true)).toContain("recorded and approved");
+  setLanguageForTest("zh-Hans");
+  expect(cardMachineReviewText(false, false)).toContain("由店长或店主在“审批”里发出");
+  expect(cardMachineReviewText(true, false)).toContain("批准后");
 });

@@ -687,6 +687,28 @@ export const refundSendsOnConfirm = (
   onMachine: boolean,
   canSend: boolean,
 ) => canSend && preview !== null && !onMachine && preview.approvalRequired !== true;
+/**
+ * The review step for a refund paid on the store's card machine. M14: a cashier neither sends nor
+ * records the machine refund, so they are told what the result says after recording: a manager
+ * or the owner sends it from Approvals (v15 batch 5: the review told a cashier to refund it on the
+ * machine themselves).
+ */
+export const cardMachineReviewText = (approvalRequired: boolean, canSend: boolean) =>
+  !canSend
+    ? approvalRequired
+      ? t(
+          "Paid on the store's card machine. Recording this request does not refund anything yet: once it is approved, a manager or the owner sends it from Approvals.",
+        )
+      : t(
+          "Paid on the store's card machine. Recording this request does not refund anything yet: a manager or the owner sends it from Approvals.",
+        )
+    : approvalRequired
+      ? t(
+          "Paid on the store's card machine. After the request is recorded and approved, refund this amount on that machine and record it under the request.",
+        )
+      : t(
+          "Paid on the store's card machine. After the request is recorded, refund this amount on that machine and record it under the request.",
+        );
 function RefundWizard({
   orderReference,
   paymentIntentReference,
@@ -1481,15 +1503,7 @@ function RefundWizard({
             </div>
           </dl>
           {previewOnMachine ? (
-            <p>
-              {preview.approvalRequired === true
-                ? t(
-                    "Paid on the store's card machine. After the request is recorded and approved, refund this amount on that machine and record it under the request.",
-                  )
-                : t(
-                    "Paid on the store's card machine. After the request is recorded, refund this amount on that machine and record it under the request.",
-                  )}
-            </p>
+            <p>{cardMachineReviewText(preview.approvalRequired === true, canSend)}</p>
           ) : sendsNow ? (
             <p>
               {t(
