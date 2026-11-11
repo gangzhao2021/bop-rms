@@ -1,13 +1,16 @@
 import { readPublishedStoreTipOff } from "../../packages/rms/store/src/index.ts";
 import console from "node:console";
 import { GuestSessionService } from "../../packages/bop/identity/src/index.ts";
-import { createConfiguredCheckoutValidationService } from "../../packages/rms/ordering/src/index.ts";
+import {
+  CheckoutValidationError,
+  createConfiguredCheckoutValidationService,
+} from "../../packages/rms/ordering/src/index.ts";
 import { createPostgresPaymentTipSelectionStore } from "../../packages/rms/payment/src/index.ts";
 import { createCustomerCheckoutSessionAuthorization } from "../../apps/api/dist/customer-checkout-session-authorization.js";
 import { createCustomerAdditionalDiningHistoryAuthorization } from "../../apps/api/dist/customer-additional-dining-history-authorization.js";
 import { createInternalOrderSourceOptions } from "./pilot-order-sources.mjs";
 import { createInternalCheckout } from "./pilot-checkout.mjs";
-import { customerRoundRefusalLine } from "../../apps/api/dist/customer-round-refusal.js";
+import { customerRoundRefusal } from "../../apps/api/dist/customer-round-refusal.js";
 export async function createInternalAdditionalSubmission(
   resources,
   checkout,
@@ -221,19 +224,18 @@ export async function createInternalAdditionalSubmission(
             delete line.validatedAt;
             return line;
           });
-        if (
-          JSON.stringify(lines(fresh)) !== JSON.stringify(lines(v)) ||
-          now() >= fresh.validUntil ||
-          context.observedAt > now()
-        )
-          throw new Error("ADDITIONAL_CATALOG_CHANGED");
+        // WP-2423 expected refusals: the menu moved on since checkout (a price, option or name
+        // changed), or the checkout window lapsed while the guest decided. Nothing is sent; the
+        // cart prices again (the guest's plain "the menu changed"), not "unavailable, try again".
+        if (JSON.stringify(lines(fresh)) !== JSON.stringify(lines(v)) || now() >= fresh.validUntil)
+          throw new CheckoutValidationError("CHECKOUT_REQUOTE_REQUIRED");
+        // The round's own time ahead of the server clock: no moment of service does that.
+        if (context.observedAt > now()) throw new Error("ADDITIONAL_CLOCK_AHEAD");
       } catch (error) {
-        // WP-2423 expected refusals: a dish ran out or the menu moved on since checkout.
-        const refused = customerRoundRefusalLine("CUSTOMER_ADDITIONAL_ROUND_REFUSED", error);
-        if (refused !== null) {
-          console.log(refused);
-          throw error;
-        }
+        // WP-2423 expected refusals (a dish ran out, came off the menu, the menu moved on): the
+        // batch store answers them as themselves and the payment's catch logs the one information
+        // line for the attempt; only an unexpected failure is logged here.
+        if (customerRoundRefusal(error) !== null) throw error;
         const code = error?.code ?? error?.message;
         console.error(
           JSON.stringify({
