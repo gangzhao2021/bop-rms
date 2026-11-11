@@ -9320,4 +9320,5 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Sent. Take {amount} in cash with tax and tip (rounded to 5 cents).":
     "已送出。请收现金 {amount}，含税和小费（按 5 分取整）。",
   "Cash total (rounded to 5 cents)": "现金合计（按 5 分取整）",
+  "Sent and paid in cash: {amount} with tax and tip.": "已送出并现金付款：{amount}，含税和小费。",
 });

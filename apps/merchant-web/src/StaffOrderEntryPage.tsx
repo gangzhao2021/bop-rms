@@ -1856,9 +1856,15 @@ export function StaffOrderEntryPage({
                           totalMinor: cad(placed.totalMinor),
                         })
                       : phase === "Paid" || phase === "Accepted"
-                        ? t("Sent and paid: {totalMinor} with tax and tip.", {
-                            totalMinor: cad(placed.totalMinor),
-                          })
+                        ? changeDue !== null
+                          ? t("Sent and paid in cash: {amount} with tax and tip.", {
+                              amount: cad(
+                                cashTender(BigInt(placed.totalMinor), "").cashDueMinor.toString(),
+                              ),
+                            })
+                          : t("Sent and paid: {totalMinor} with tax and tip.", {
+                              totalMinor: cad(placed.totalMinor),
+                            })
                         : placed.recordedAfterOutage
                           ? t(
                               "Sent. This paper order was paid during the outage: don't charge again, record it below.",

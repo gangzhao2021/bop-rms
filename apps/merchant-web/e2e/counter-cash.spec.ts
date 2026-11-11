@@ -246,6 +246,7 @@ test("@production the cashier takes cash for a counter order, sees the change an
       .filter({ hasText: "Cash recorded. Give $15.75 change. Sent to the kitchen." }),
   ).toBeVisible();
   await expect(page.locator(".counter-order__charge")).toContainText("Change to give$15.75");
+  await expect(page.getByText("Sent and paid in cash: $4.25 with tax and tip.")).toBeVisible();
   // The browser sends the cash handed over; the amount and the rounding are the server's.
   expect(payments.at(-1)).toEqual({
     operationReference: expect.stringMatching(/^[0-9a-f-]{36}$/u),
