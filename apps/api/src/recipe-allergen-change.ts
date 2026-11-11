@@ -70,6 +70,9 @@ export async function recordRecipeAllergenChange(
         skuReference: input.skuReference,
         observedAt: input.at,
         selections: [],
+        // A Brand-wide change is read by every Store without its own recipe: resolve the Brand's
+        // recipe, never the acting Store's own one.
+        ...(input.storeReference === null ? { brandRecipeOnly: true } : {}),
       } as never,
       registryVersionReference: registry.registryVersionReference,
       defaultLocale: input.locale,

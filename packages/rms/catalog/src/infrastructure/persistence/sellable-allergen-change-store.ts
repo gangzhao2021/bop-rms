@@ -148,7 +148,9 @@ export async function recordSellableAllergenChange(
 }
 
 /**
- * Per dish, the latest change at this Store (its own or the Brand's) recorded after that menu
+ * Per dish, the latest change at this Store (its own, or the Brand's unless this Store's own
+ * recipe was in effect when the Brand's was changed: a Store using its own recipe keeps it),
+ * recorded after that menu
  * version was first reviewed (its allergens resolved for listing) — the changes guests and the
  * kitchen read on top of what was listed. A menu listed again is a new version with its own
  * review, so older changes no longer apply to it. Taking the version's first review never leaves
@@ -174,6 +176,12 @@ export async function listSellableAllergenChangesSince(
        JOIN rms_catalog.sellable_allergen_change c ON c.brand_id=$1 AND c.sku_id=k.sku AND (c.store_id IS NULL OR c.store_id=$2)
        WHERE c.recorded_at > COALESCE((SELECT min((r.snapshot_json->>'createdAt')::timestamptz) FROM rms_catalog.menu_review_content r
                                        WHERE r.brand_id=$1 AND r.menu_version_id=k.version),'-infinity'::timestamptz)
+         -- A Brand-wide change does not reach a Store whose own recipe was in effect then (this
+         -- Store's latest own change before it bound a Store recipe).
+         AND NOT (c.store_id IS NULL AND (
+           SELECT o.cause FROM rms_catalog.sellable_allergen_change o
+           WHERE o.brand_id=$1 AND o.sku_id=k.sku AND o.store_id=$2 AND o.recorded_at < c.recorded_at
+           ORDER BY o.recorded_at DESC,o.change_id DESC LIMIT 1) IS NOT DISTINCT FROM 'RecipeBound')
        ORDER BY k.version,k.sku,c.recorded_at DESC,c.change_id DESC`,
       [brand, store, versions, skus],
     );

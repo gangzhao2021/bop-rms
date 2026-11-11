@@ -13,7 +13,16 @@ export function createPostgresBaseRecipeSource(
   const brand = parseRecipeReference(brandInput);
   return Object.freeze({
     async resolve(
-      input: Readonly<{ storeReference: string; skuReference: string; occurredAt: string }>,
+      input: Readonly<{
+        storeReference: string;
+        skuReference: string;
+        occurredAt: string;
+        /**
+         * WP-2423 (M77/M167): the Brand's recipe only, as every Store without its own recipe uses
+         * it, even where this Store has its own.
+         */
+        brandRecipeOnly?: boolean;
+      }>,
     ) {
       const store = parseRecipeReference(input.storeReference),
         sku = parseRecipeReference(input.skuReference);
@@ -54,7 +63,12 @@ export function createPostgresBaseRecipeSource(
           )
             return fail();
           const local = rows.filter((row) => row.store === store),
-            candidates = local.length ? local : rows;
+            candidates =
+              input.brandRecipeOnly === true
+                ? rows.filter((row) => row.store === null)
+                : local.length
+                  ? local
+                  : rows;
           if (candidates.length !== 1) return fail();
           const selected = candidates[0];
           if (!selected || selected.current_lifecycle !== "Published") return fail();

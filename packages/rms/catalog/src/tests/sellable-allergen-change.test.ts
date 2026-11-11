@@ -1,22 +1,26 @@
 import { describe, expect, it } from "vitest";
 import { changedAllergenDisclosure } from "../application/customer-menu-query-service.js";
-import { withSellableAllergenChange } from "../domain/sellable-allergen-change.js";
+import {
+  withSellableAllergenChange,
+  type SellableAllergenNow,
+} from "../domain/sellable-allergen-change.js";
 
 /** WP-2423 (M77, M167): synthetic, TEST-only allergens. */
 const ref = (n: number) => "01909b00-0000-7000-8000-" + n.toString(16).padStart(12, "0");
-const egg = {
+type Allergen = SellableAllergenNow;
+const egg: Allergen = {
   allergenReference: ref(1),
   code: "EGG",
   localizedNames: { "en-CA": "Eggs", "zh-Hans": "蛋" },
   classification: "Contains" as const,
 };
-const milk = {
+const milk: Allergen = {
   ...egg,
   allergenReference: ref(2),
   code: "MILK",
   localizedNames: { "en-CA": "Milk" },
 };
-const change = (allergens: (typeof egg)[] | null) => ({
+const change = (allergens: Allergen[] | null) => ({
   skuReference: ref(9),
   storeReference: null,
   cause: "RecipeBound" as const,
@@ -27,7 +31,7 @@ const listed = (code: string, classification: "Contains" | "CrossContactPossible
   code,
   classification,
 });
-const entry = (a: typeof egg) => ({ code: a.code, classification: a.classification });
+const entry = (a: Allergen) => ({ code: a.code, classification: a.classification });
 
 describe("WP-2423 (M77, M167): a recipe change read with the listed allergens", () => {
   it("adds what the recipe brings, keeps Contains over May contain, and says it changed", () => {

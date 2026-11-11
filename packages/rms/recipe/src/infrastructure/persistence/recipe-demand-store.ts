@@ -87,6 +87,7 @@ function createDemandSource(runner: RecipeTransactionRunner, brand: string) {
         occurredAt: string;
         requestedYieldMicrounits: string;
         selections: readonly RecipeOptionSelection[];
+        brandRecipeOnly?: boolean;
       }>,
     ) {
       try {
@@ -98,6 +99,7 @@ function createDemandSource(runner: RecipeTransactionRunner, brand: string) {
             storeReference: input.storeReference,
             skuReference: input.skuReference,
             occurredAt: input.occurredAt,
+            ...(input.brandRecipeOnly === true ? { brandRecipeOnly: true } : {}),
           });
           const rules = await createPostgresRecipeModifierSource({
             run: async (work) => work(tx),
@@ -368,6 +370,11 @@ export interface RecipeReviewInput {
   readonly skuReference: string;
   readonly observedAt: string;
   readonly selections: readonly RecipeOptionSelection[];
+  /**
+   * WP-2423 (M77/M167): resolve the Brand's recipe as every Store without its own uses it, even
+   * where this Store has its own (a Brand-wide recipe change is recorded for every Store).
+   */
+  readonly brandRecipeOnly?: true;
 }
 
 /** What a menu review found missing, named by the recipe-side source so staff can fix it. */
@@ -407,6 +414,8 @@ export function createPostgresRecipeReviewSource(options: {
   };
   /** Validates the request, admits the Actor and holds the Recipe sources for the review. */
   const begin = async (tx: RecipeTransaction, input: RecipeReviewInput) => {
+    const brandRecipeOnly =
+      input !== null && typeof input === "object" && Object.hasOwn(input, "brandRecipeOnly");
     const raw = preparationObject(input, [
       "actorType",
       "actorReference",
@@ -417,8 +426,10 @@ export function createPostgresRecipeReviewSource(options: {
       "skuReference",
       "observedAt",
       "selections",
+      ...(brandRecipeOnly ? ["brandRecipeOnly"] : []),
     ]);
     if (
+      (brandRecipeOnly && raw.brandRecipeOnly !== true) ||
       raw.actorType !== "User" ||
       raw.action !== "ResolveMenuRecipeFacts" ||
       raw.purpose !== "ReviewMenu" ||
@@ -445,7 +456,7 @@ export function createPostgresRecipeReviewSource(options: {
     const runner = {
       run: async <T>(work: (transaction: RecipeTransaction) => Promise<T>) => work(tx),
     };
-    return { store, sku, at, selections, allowed, runner };
+    return { store, sku, at, selections, allowed, runner, brandRecipeOnly };
   };
   const factsOf = (
     scope: { store: string; sku: string; at: string },
@@ -487,7 +498,12 @@ export function createPostgresRecipeReviewSource(options: {
   ) => {
     const scope = await begin(tx, { ...input, selections: [] });
     const base = await createPostgresBaseRecipeSource(scope.runner, brand)
-      .resolve({ storeReference: scope.store, skuReference: scope.sku, occurredAt: scope.at })
+      .resolve({
+        storeReference: scope.store,
+        skuReference: scope.sku,
+        occurredAt: scope.at,
+        ...(scope.brandRecipeOnly ? { brandRecipeOnly: true } : {}),
+      })
       .catch((): never => {
         throw new RecipeReviewGapError({ missing: "Recipe" });
       });
@@ -583,6 +599,7 @@ export function createPostgresRecipeReviewSource(options: {
           occurredAt: scope.at,
           selections: scope.selections,
           requestedYieldMicrounits: "1",
+          ...(scope.brandRecipeOnly ? { brandRecipeOnly: true } : {}),
         });
         const rules = await createPostgresRecipeModifierSource(scope.runner).resolve(
           resolved.snapshot,
