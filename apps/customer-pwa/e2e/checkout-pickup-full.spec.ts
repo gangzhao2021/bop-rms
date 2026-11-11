@@ -158,7 +158,6 @@ for (const screen of [
         operations.push(route.request().headers()["idempotency-key"]);
         return route.fulfill({
           status: 409,
-          headers: { "retry-after": "60" },
           json: {
             schemaVersion: 1,
             error: {
@@ -191,7 +190,9 @@ for (const screen of [
       if (screen.touch) await proceed.tap();
       else await proceed.click();
       const alert = page.getByRole("alert");
-      await expect(alert).toContainText("The kitchen is fully booked for pickup orders right now");
+      await expect(alert).toContainText("all the pickup orders it can make this hour");
+      // No promised wait: a place may only open with the next hour.
+      await expect(alert).not.toContainText("minute");
       await expect(alert).toContainText("hasn’t been charged");
       await expect(alert).toContainText("order at the counter");
       await expect(page.getByText("couldn’t start your checkout", { exact: false })).toHaveCount(0);

@@ -1437,8 +1437,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "现在不能用手机下新单。要加菜请找店员。",
   "The store isn’t taking new orders right now — it’s closed, or the kitchen has stopped taking orders for today — so this order hasn’t been charged. To add something, ask a staff member.":
     "门店现在不接新单（已打烊，或厨房今天已停止接单），这一单没有扣款。要加菜请找店员。",
-  "The kitchen is fully booked for pickup orders right now, so this order hasn’t been charged. A spot often opens within a few minutes: try again shortly, or order at the counter.":
-    "厨房这会儿的自取订单已经排满，这一单没有扣款。通常几分钟内就会空出名额：请稍后再试，或到柜台点单。",
+  "The kitchen has taken all the pickup orders it can make this hour, so this order hasn’t been charged. You can try again later, or order at the counter.":
+    "厨房这一小时能做的自取订单已经排满，这一单没有扣款。可以稍后再试，或到柜台点单。",
   "It stopped before payment started (it closed, or the kitchen stopped taking orders for today), so this order hasn’t been charged. To add something, ask a staff member.":
     "付款开始前门店已停止接单（已打烊，或厨房今天已停止接单），这一单没有扣款。要加菜请找店员。",
   "The kitchen stopped taking orders at {time}": "厨房 {time} 已停止接单",

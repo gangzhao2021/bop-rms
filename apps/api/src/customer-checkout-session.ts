@@ -215,11 +215,10 @@ export class CustomerCheckoutSessionHandler {
           reject(response, 409, "checkout_in_progress");
           return;
         }
-        // WP-2423 (checkout-session-outage): this hour's online pickup orders are full. A place
-        // can free up (an unpaid order lapses) or the next hour opens: the guest may try again in
-        // a minute, and is never told the system is down.
+        // WP-2423 (checkout-session-outage): this hour's online pickup orders are full, and the
+        // guest is never told the system is down. No Retry-After: accepted orders never lapse, so
+        // a place may only open with the next hour; nothing here can promise a time.
         if (error instanceof CheckoutSessionServiceError && error.code === "PICKUP_FULL") {
-          response.setHeader("Retry-After", "60");
           reject(response, 409, "pickup_full");
           return;
         }

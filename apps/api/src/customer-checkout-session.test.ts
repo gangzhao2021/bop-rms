@@ -404,12 +404,13 @@ async function logged(create: CustomerCheckoutSessionPort["create"]) {
   await vi.waitFor(() => expect(entries.length).toBe(1));
   return { response, entry: entries[0] };
 }
-it("answers a full pickup hour with 409 pickup_full and a short Retry-After, never 503", async () => {
+it("answers a full pickup hour with 409 pickup_full and no Retry-After, never 503", async () => {
   const { response } = await logged(
     vi.fn().mockRejectedValue(new CheckoutSessionServiceError("PICKUP_FULL")),
   );
   expect(response.status).toBe(409);
-  expect(response.headers.get("retry-after")).toBe("60");
+  // A place may only open with the next hour (accepted orders never lapse): no promised wait.
+  expect(response.headers.get("retry-after")).toBe(null);
   expect(await response.json()).toEqual({
     schemaVersion: 1,
     error: {

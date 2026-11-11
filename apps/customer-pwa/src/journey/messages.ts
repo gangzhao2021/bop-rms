@@ -1088,7 +1088,7 @@ export const checkoutText = Object.freeze({
    */
   get pickupFull() {
     return t(
-      "The kitchen is fully booked for pickup orders right now, so this order hasn’t been charged. A spot often opens within a few minutes: try again shortly, or order at the counter.",
+      "The kitchen has taken all the pickup orders it can make this hour, so this order hasn’t been charged. You can try again later, or order at the counter.",
     );
   },
   /** WP-2423: the restaurant listed a menu change while this guest was checking out. */
