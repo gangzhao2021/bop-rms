@@ -82,6 +82,7 @@ import {
   commonText,
   lineEstimateLabel,
   quoteIssueMessage,
+  specificCartIssues,
 } from "../journey/messages.js";
 
 function StateMessage({
@@ -135,6 +136,7 @@ function CartItem({
 }) {
   const foreign = item.warnings.includes("OTHER_PARTICIPANT_ITEM");
   // WP-2423 (guest-cart-503): a line that can't be sold now may be removed by anyone at the table.
+  // WP-2423 (M154): its quantity can't change either (the Store would refuse it); only Remove.
   const unsellable = cartLineUnsellable(item);
   // WP-2423 (same-table-ordering, M36): the phone that added it has left the table; anyone may
   // change or remove it.
@@ -197,7 +199,9 @@ function CartItem({
         <button
           type="button"
           aria-describedby={foreign ? ownershipDescription : undefined}
-          disabled={readOnly || (foreign && !stranded) || pending || item.quantity <= 1}
+          disabled={
+            readOnly || (foreign && !stranded) || pending || unsellable || item.quantity <= 1
+          }
           aria-label={cartText.line.decreaseLabel(item.displayName)}
           onClick={() => void updateQuantity(item.quantity - 1)}
         >
@@ -209,7 +213,9 @@ function CartItem({
         <button
           type="button"
           aria-describedby={foreign ? ownershipDescription : undefined}
-          disabled={readOnly || (foreign && !stranded) || pending || item.quantity >= 100}
+          disabled={
+            readOnly || (foreign && !stranded) || pending || unsellable || item.quantity >= 100
+          }
           aria-label={cartText.line.increaseLabel(item.displayName)}
           onClick={() => void updateQuantity(item.quantity + 1)}
         >
@@ -482,6 +488,13 @@ function CartSummary({
   );
 }
 
+/** WP-2423 (M154): the exact reason a change was refused ("This dish just sold out."), or null. */
+function specificRefusal(state: CartState): string | null {
+  if (state.status !== "validation" || !("issueCodes" in state)) return null;
+  const code = state.issueCodes.find((issue) => specificCartIssues.includes(issue));
+  return code === undefined ? null : cartIssueMessage(code);
+}
+
 function ErrorState({
   state,
   controller,
@@ -538,12 +551,20 @@ function ErrorState({
   const issues = state.issueCodes
     .map(cartIssueMessage)
     .filter((issue): issue is string => issue !== null);
+  // WP-2423 (M154): a refusal that says exactly what happened ("This dish just sold out.") is the
+  // headline; "This choice can't be ordered as selected" would send the guest to choices it lacks.
+  const specific = specificRefusal(state);
   return (
-    <StateMessage heading={message[0]} tone={state.status === "conflict" ? "warning" : "error"}>
-      <p>{message[1]}</p>
-      {issues.map((issue) => (
-        <p key={issue}>{issue}</p>
-      ))}
+    <StateMessage
+      heading={specific ?? message[0]}
+      tone={state.status === "conflict" ? "warning" : "error"}
+    >
+      {specific === null ? <p>{message[1]}</p> : null}
+      {issues
+        .filter((issue) => issue !== specific)
+        .map((issue) => (
+          <p key={issue}>{issue}</p>
+        ))}
       <div className="cart-state__actions">
         {retry ? (
           <button type="button" onClick={() => void controller.retry()}>
@@ -1433,7 +1454,7 @@ function OpenCartPage({
             : state.status === "ready" && cartShowsPriceChanges
               ? // WP-2423 M74: never "up to date" while a dish's price changed since it was added.
                 cartText.pricesChangedSinceAdded
-              : cartText.stateAnnouncement[state.status]}
+              : (specificRefusal(state) ?? cartText.stateAnnouncement[state.status])}
       </div>
     </CustomerPage>
   );

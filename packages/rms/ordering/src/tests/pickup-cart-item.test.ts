@@ -128,7 +128,7 @@ const input = {
   operationReference: ids.operation,
   expectedAggregateVersion: 1,
 };
-function setup() {
+function setup(standing?: () => Promise<readonly unknown[]>) {
   let current = cart();
   const history = new Map<string, CartItemOperationRecord>();
   const authorize = vi.fn(
@@ -178,7 +178,10 @@ function setup() {
     sessions: { authorize },
     binding: { current: binding },
     repository: { load, commit, resolveOperation: async (ref) => history.get(ref) ?? null },
-    catalog: { validateSelection: catalog },
+    catalog: {
+      validateSelection: catalog,
+      ...(standing === undefined ? {} : { explainMany: standing }),
+    },
     references: {
       generate,
       hashIntent: (value) => "sha256:" + createHash("sha256").update(value).digest("hex"),
@@ -330,6 +333,26 @@ describe("authorized Pickup item writes", () => {
     f.catalog.mockResolvedValue({ status: "Rejected", reason: "OPTION_NOT_ENABLED" } as never);
     await expect(f.service.add(input)).rejects.toMatchObject({ code: "CART_SELECTION_INVALID" });
     expect(f.commit).not.toHaveBeenCalled();
+  });
+  // WP-2423 (M154, b7 sold-out-allergens): a dish staff marked sold out after the guest opened it
+  // is refused as sold out, on add and on "+" in the cart, not as "can't be ordered as selected".
+  it("names a dish sold out since the guest opened it as sold out, on add and on a quantity change", async () => {
+    const standing = vi.fn(async () => ["SoldOut"] as const);
+    const f = setup(standing);
+    await f.service.add(input);
+    f.catalog.mockResolvedValue({ status: "Rejected", reason: "SELLABLE_UNAVAILABLE" } as never);
+    await expect(
+      f.service.add({
+        ...input,
+        operationReference: ids.thirdOperation,
+        expectedAggregateVersion: 2,
+      }),
+    ).rejects.toMatchObject({ code: "CART_SELECTION_INVALID", reason: "SoldOut" });
+    await expect(f.service.update(update)).rejects.toMatchObject({
+      code: "CART_SELECTION_INVALID",
+      reason: "SoldOut",
+    });
+    expect(standing).toHaveBeenCalledTimes(2);
   });
   it("rejects an elapsed lifecycle before Catalog", async () => {
     const f = setup();

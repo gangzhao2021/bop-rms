@@ -243,6 +243,17 @@ export function createPickupCartItemService(options: PickupCartItemOptions) {
             await assertCurrentAuthority(true);
             return result;
           },
+          // WP-2423 (M154): a refused dish says why (sold out, not offered, choices changed), as at
+          // a table. Without it every Pickup refusal read as "can't be ordered as selected".
+          ...(options.catalog.explainMany === undefined
+            ? {}
+            : {
+                explainMany: (
+                  inputs: Parameters<
+                    NonNullable<CartItemCommandPorts["catalog"]["explainMany"]>
+                  >[0],
+                ) => options.catalog.explainMany?.(inputs) ?? Promise.resolve([]),
+              }),
         },
         repository: {
           resolveOperation: (reference) => options.repository.resolveOperation(reference),

@@ -132,7 +132,7 @@ const input = {
   operationReference: ids.operation,
   expectedAggregateVersion: 1,
 };
-function setup() {
+function setup(standing?: () => Promise<readonly unknown[]>) {
   let current = cart();
   const history = new Map<string, CartItemOperationRecord>();
   const authorize = vi.fn(
@@ -210,7 +210,10 @@ function setup() {
       });
       return { load, commit, resolveOperation: historyRead };
     },
-    catalog: { validateSelection: catalog },
+    catalog: {
+      validateSelection: catalog,
+      ...(standing === undefined ? {} : { explainMany: standing }),
+    },
     references: {
       generate,
       hashIntent: (value) => "sha256:" + createHash("sha256").update(value).digest("hex"),
@@ -392,6 +395,19 @@ describe("current-authorized Dining item commands", () => {
       ),
     ).rejects.toMatchObject({ code: "CART_PERMISSION_DENIED" });
     expect(f.commit).toHaveBeenCalledTimes(1);
+  });
+  // WP-2423 (M154, b7 sold-out-allergens): at a table too, a dish sold out since it was opened is
+  // refused as sold out.
+  it("names a dish sold out since the guest opened it as sold out", async () => {
+    const standing = vi.fn(async () => ["SoldOut"] as const);
+    const f = setup(standing);
+    f.catalog.mockResolvedValue({ status: "Rejected", reason: "SELLABLE_UNAVAILABLE" } as never);
+    await expect(f.service.add(input)).rejects.toMatchObject({
+      code: "CART_SELECTION_INVALID",
+      reason: "SoldOut",
+    });
+    expect(standing).toHaveBeenCalledOnce();
+    expect(f.commit).not.toHaveBeenCalled();
   });
   it("preserves expected-version conflicts", async () => {
     const f = setup();

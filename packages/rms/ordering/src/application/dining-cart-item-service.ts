@@ -3,6 +3,7 @@ import { parseGuestRawCredential, readClosedRecord } from "@bop/identity";
 import {
   assertDiningCartNotHeld,
   CartCheckoutInProgressError,
+  CartSelectionRejectedError,
   CartError,
   type DiningCartCheckoutHoldPort,
   parseCartAggregate,
@@ -400,6 +401,10 @@ export function createDiningCartItemService(options: DiningCartItemOptions) {
     } catch (error) {
       if (guardFailure !== null) throw guardFailure;
       if (error instanceof CartCheckoutInProgressError) throw error;
+      // WP-2423 (M154): keep why the dish was refused (sold out, not offered, choices changed) so
+      // the guest at a table reads it, as on Pickup; the code alone read "can't be ordered".
+      if (error instanceof CartSelectionRejectedError)
+        throw new CartSelectionRejectedError(error.reason);
       if (error instanceof CartError) throw new CartError(error.code);
       return unavailable();
     }

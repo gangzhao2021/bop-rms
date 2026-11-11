@@ -233,6 +233,20 @@ describe("CUST-CART page contract", () => {
     expect(html).not.toContain("can’t be ordered as selected");
   });
 
+  it("WP-2423 (M154): a dish sold out since it was added says so as the headline, with the way back", () => {
+    const html = renderPage({
+      status: "validation",
+      cart: cart(),
+      issueCodes: ["CATALOG_ITEM_SOLD_OUT"],
+      retryAfterSeconds: null,
+      canRetrySameOperation: false,
+    });
+    expect(html).toContain("This dish just sold out.");
+    expect(html).not.toContain("can’t be ordered as selected");
+    expect(html).not.toContain("Review this item");
+    expect(html).toContain('href="/menu"');
+  });
+
   it.each([
     ["loading", "Loading cart"],
     ["empty", "Your cart is empty"],
@@ -973,6 +987,15 @@ describe("WP-2423 item 6: a table that pays at the end", () => {
     // Order waits until no such line is left, and says why.
     expect(html).toMatch(/disabled="" aria-describedby="cart-remove-unavailable">Place order/u);
     expect(html).toContain("Remove the dishes that aren’t available right now, then order.");
+    // M154 (b7 sold-out-allergens): on the guest's own line too, more or fewer of a dish that
+    // can't be sold now can't be asked for; only Remove is offered.
+    const own = page({
+      status: "ready",
+      cart: tableCart({ items: [{ ...item, quantity: 2, warnings: ["ITEM_UNAVAILABLE"] }] }),
+    });
+    expect(own).toContain('disabled="" aria-label="Increase Synthetic tea quantity"');
+    expect(own).toContain('disabled="" aria-label="Decrease Synthetic tea quantity"');
+    expect(own).toMatch(/<button class="cart-link-button" type="button">Remove/u);
     const options = page({
       status: "ready",
       cart: tableCart({ items: [{ ...item, warnings: ["ITEM_OPTIONS_CHANGED"] }] }),
