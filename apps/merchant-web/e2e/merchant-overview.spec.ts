@@ -123,7 +123,8 @@ test("@production Merchant Overview uses the authorized workspace snapshot at de
           // WP-2423 (3cd0f8dd M7): a table whose order is all served, still open.
           { ...order(4, "Accepted", 4, "DineIn"), currentPhase: "Fulfilled" },
           { ...order(3, "Accepted", 3, "DineIn"), readyToServeItemCount: 1 },
-          order(2, "Submitted", 1),
+          // b7 (M23): staff marked a dish in it sold out after the guest ordered.
+          { ...order(2, "Submitted", 1), soldOutNow: true },
           order(1, "Accepted", 2),
         ],
         nextAfterOrderReference: moreOrders ? id(1) : null,
@@ -292,6 +293,13 @@ test("@production Merchant Overview uses the authorized workspace snapshot at de
   const needs = page.getByRole("region", { name: "Needs attention" });
   const now = page.getByRole("region", { name: "Right now" });
   await expect(needs.getByText("1 awaiting acceptance")).toBeVisible();
+  // b7 (M23): Home names the order holding a dish sold out since it was ordered, with what to do.
+  await expect(needs.getByText("Orders with a dish sold out since it was ordered")).toBeVisible();
+  await expect(
+    needs.getByText(
+      "1 order waiting to be accepted. Open each on Orders: offer the guest a swap, or cancel that dish with a refund.",
+    ),
+  ).toBeVisible();
   await expect(needs.getByText("1 ready to serve")).toBeVisible();
   await expect(now.getByRole("link", { name: "Waiting for pickup" })).toHaveAttribute(
     "href",

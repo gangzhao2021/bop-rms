@@ -299,6 +299,14 @@ for (const screen of [
           // Iced says what it adds; Hot adds nothing and says nothing.
           await expect(page.getByText("Adds: Milk", { exact: true })).toBeVisible();
           await expect(page.getByText(/^Adds:/u)).toHaveCount(1);
+          // b7: the dish's list holds what a choice adds; Hot says nothing, so guests are asked
+          // to check with staff (never read as safe).
+          await expect(page.getByText("Allergen information (all choices)")).toBeVisible();
+          await expect(
+            page.getByText(
+              "A choice can add allergens not listed here. If you have an allergy, ask staff before ordering.",
+            ),
+          ).toBeVisible();
           await page.screenshot({
             path: `test-results/choice-adds-${screen.width}.png`,
             fullPage: true,
