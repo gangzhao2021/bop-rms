@@ -59,8 +59,10 @@ export async function createIssuedDiningEntries(resources, { loadProfile, loadKe
    * binding check (pilot-customer-entry). Within it the guest's QR/table context is resolved once
    * per session and instant and reused for the check's later purposes: here registration
    * authorization is constant and public-store authorization only tells CustomerEntry from the
-   * other purposes, and the Brand, Store and table rows it read stay share-locked by this same
-   * transaction (the issued code row is append-only), so a second read could only repeat it.
+   * other purposes, and the Brand and Store rows it read stay share-locked by this same
+   * transaction (the issued code row is append-only). The table row is read without a lock
+   * (WP-2423 M68 lock order); reusing that read within one check is the same as the guest acting
+   * an instant earlier, and whatever changes the table re-reads it under its own locks.
    */
   const binding = (runner, { oneTransaction = false } = {}) => {
     const resolved = oneTransaction ? new Map() : null;

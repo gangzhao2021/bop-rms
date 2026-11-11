@@ -68,8 +68,8 @@ export function createCustomerAdditionalDiningSubmissionRuntime(
       return retryTransactionConflict(() =>
         options.transactions.run(async (transaction) => {
           // WP-2423 lock order: the Order's disposition fence comes before the guest identity
-          // check below, which reads the Dining table row FOR SHARE (acceptance and payment
-          // outcomes take the fence, then lock that row FOR UPDATE).
+          // check below (acceptance and payment outcomes take the fence, then lock the Dining
+          // table row FOR UPDATE). Since M68 that check reads the table row without a lock.
           await transaction.query(
             "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
             [options.brandReference, options.storeReference],

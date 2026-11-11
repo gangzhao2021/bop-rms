@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createDiningTable,
   createPostgresDiningTableStore,
+  createPostgresDiningPublicTableReader,
   type DiningTableOperationRecord,
 } from "../index.js";
 import { diningTableCommandIntent } from "../application/dining-table-record.js";
@@ -229,5 +230,29 @@ describe("authorized table pagination", () => {
     const f = setup([]);
     await expect(f.read(101)).rejects.toThrow();
     expect(f.query).not.toHaveBeenCalled();
+  });
+});
+
+describe("WP-2423 M68 guest table read lock order", () => {
+  it("reads the guest's table without locking its row, before any command lock", async () => {
+    const published = { ...table(), lifecycle: "Published", qrStatus: "Active", qrVersion: 1 };
+    const query = vi.fn(async (sql: string) =>
+      sql.startsWith("SELECT set_config")
+        ? { rows: [{}] }
+        : { rows: [{ table: createDiningTable(published) }] },
+    );
+    const read = await createPostgresDiningPublicTableReader({
+      transaction: { query },
+      scope,
+      authorize: async () => true,
+    }).read({ tableReference: id(4), purpose: "DiningAdmission", observedAt: at });
+    expect(read?.qrVersion).toBe(1);
+    const statements = query.mock.calls.map((call) => String(call[0]));
+    expect(statements.some((sql) => sql.includes("rms_dining.dining_table"))).toBe(true);
+    // A row lock here deadlocked with commands that take DiningTable:<table> first (40P01).
+    expect(
+      statements.filter((sql) => /\bFOR (SHARE|UPDATE|KEY SHARE|NO KEY UPDATE)\b/u.test(sql)),
+    ).toEqual([]);
+    expect(statements.filter((sql) => sql.includes("advisory"))).toEqual([]);
   });
 });

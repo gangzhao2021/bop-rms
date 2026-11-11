@@ -1509,9 +1509,9 @@ export function createCustomerDiningSessionRead(
         throw new OrderStatusProjectionError("ORDER_STATUS_INPUT_INVALID");
       }
       const deps = (dependencies ?? ((c) => postgresDependencies(options, c)))(credentials);
-      // v15 2026-10-16: this read authorizes (reading the Dining table row FOR SHARE) before it
-      // knows the order, so it cannot take the Order fence first; a deadlock or lock wait with a
-      // payment outcome or acceptance is rerun instead of answering 503.
+      // v15 2026-10-16: this read authorizes before it knows the order, so it cannot take the
+      // Order fence first (since M68 the authorization's table read takes no row lock); a lock
+      // wait or deadlock with a payment outcome or acceptance is rerun instead of answering 503.
       const transactions = {
         run: <T>(work: (transaction: ConsumerTransaction) => Promise<T>) =>
           retryTransactionConflict(() => options.transactions.run(work)),

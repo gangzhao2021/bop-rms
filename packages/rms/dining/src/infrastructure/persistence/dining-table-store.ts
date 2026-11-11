@@ -342,8 +342,8 @@ export function createPostgresDiningTableStore(
 }
 
 /** Restricted public fact query; never grants Staff permissions or discovers tables.
- * The caller must retain this transaction through the dependent operation and fence
- * authorization for the exact public mapping and purpose before/after this read.
+ * The caller must fence authorization for the exact public mapping and purpose before/after this
+ * read. It reads the committed row and takes no lock on it (WP-2423 M68 lock order).
  */
 export function createPostgresDiningPublicTableReader(options: {
   transaction: DiningTableTransaction;
@@ -393,9 +393,15 @@ export function createPostgresDiningPublicTableReader(options: {
           "SELECT set_config('bop.brand_id',$1,true), set_config('bop.store_id',$2,true)",
           [scope.brandReference, scope.storeReference],
         );
+        // WP-2423 M68 lock order (docs/spec/design/dining-table-lock-order.md): this read runs in
+        // the guest's own transaction before the command takes `DiningTable:<table>`. A row lock
+        // here (it was FOR SHARE) made the order row-then-advisory while every table command goes
+        // advisory-then-row: two guests calling staff together, or a guest acting while staff
+        // start or move the table, deadlocked (40P01). The committed row is the guest's evidence;
+        // whatever changes the table re-reads it under its own advisory and row lock.
         const result = rows(
           await tx.query(
-            'SELECT table_snapshot AS "table" FROM rms_dining.dining_table WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND table_id=$4 FOR SHARE',
+            'SELECT table_snapshot AS "table" FROM rms_dining.dining_table WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND table_id=$4',
             [scope.tenantReference, scope.brandReference, scope.storeReference, tableReference],
           ),
         );

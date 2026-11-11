@@ -142,9 +142,9 @@ export function createCustomerOrderStatusRead(
       try {
         return await transactions.run(async (transaction) => {
           // WP-2423 lock order: the Order's disposition fence comes before the guest authorization
-          // below reads the Dining table row FOR SHARE. Taken after it, a payment outcome holding
-          // the fence and waiting for that row deadlocked this read (v15 2026-10-16: 40P01 each
-          // time a guest reopened the payment result).
+          // below. When that authorization still read the Dining table row FOR SHARE, a payment
+          // outcome holding the fence and waiting for that row deadlocked this read (v15
+          // 2026-10-16: 40P01); since M68 it reads the row without a lock, and the order stays.
           await acquireOrderDispositionFence(transaction, { ...options.scope, orderReference });
           const runner: CartQueryTransactionRunner = { run: async (work) => work(transaction) };
           let previous: string | undefined;
