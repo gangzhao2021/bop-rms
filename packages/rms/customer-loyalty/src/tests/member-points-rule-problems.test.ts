@@ -3,7 +3,7 @@ import {
   MemberPointsRuleInvalidError,
   memberPointsRuleProblems,
   parseMemberPointsRuleChange,
-} from "./member-points.js";
+} from "../domain/member-points.js";
 
 const rule = {
   earnPointsPerDollar: 1,
