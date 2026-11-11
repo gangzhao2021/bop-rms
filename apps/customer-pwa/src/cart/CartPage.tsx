@@ -1179,10 +1179,14 @@ export function CartPage(props: CartPageProps) {
               storeDisplayName: props.menuContext.storeDisplayName,
             })}
           </h2>
-          <ClosedStoreNotice closed={closed} />
-          <Link className="cart-primary-link" to="/menu">
-            {t("Back to menu")}
-          </Link>
+          <ClosedStoreNotice
+            closed={closed}
+            primary={
+              <Link className="cart-primary-link" to="/menu">
+                {t("Back to menu")}
+              </Link>
+            }
+          />
         </section>
       </CustomerPage>
     );
