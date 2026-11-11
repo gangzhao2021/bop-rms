@@ -105,6 +105,8 @@ async function openTable(page: Page) {
 
 const line = (n: number, names: Record<string, string>, change: Record<string, unknown> = {}) => ({
   cartItemReference: id(n),
+  sellableReference: id(n + 0x400),
+  optionSelections: [],
   names,
   quantity: 1,
   withOptions: false,

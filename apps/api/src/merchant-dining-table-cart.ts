@@ -100,6 +100,15 @@ export function parseMerchantDiningTableCartCommand(
 
 export interface MerchantDiningTableCartLine {
   readonly cartItemReference: string;
+  /**
+   * WP-2423 M35: the dish and options chosen, so the staff round screen names, marks (sold out)
+   * and estimates the line from the menu it holds. Never the guest's note.
+   */
+  readonly sellableReference: string;
+  readonly optionSelections: readonly {
+    readonly optionReference: string;
+    readonly quantity: number;
+  }[];
   /** The dish's published name by locale (empty when it is on no current menu). */
   readonly names: Readonly<Record<string, string>>;
   readonly quantity: number;
@@ -279,6 +288,8 @@ export function createMerchantDiningTableCart(options: {
                       : phoneOf.get(line.addedByParticipantReference);
                   return Object.freeze({
                     cartItemReference: line.cartItemReference,
+                    sellableReference: line.sellableReference,
+                    optionSelections: line.optionSelections,
                     names: names.get(line.sellableReference) ?? Object.freeze({}),
                     quantity: line.quantity,
                     withOptions: line.optionCount > 0,

@@ -19,6 +19,12 @@ export class TableCartError extends Error {
 export type TableCartRemovalReason = "GuestAsked" | "GuestLeft" | "CantMake";
 export interface TableCartLine {
   readonly cartItemReference: string;
+  /** WP-2423 M35: the dish and its options, to name and estimate it from the menu staff hold. */
+  readonly sellableReference: string;
+  readonly optionSelections: readonly {
+    readonly optionReference: string;
+    readonly quantity: number;
+  }[];
   readonly names: Readonly<Record<string, string>>;
   readonly quantity: number;
   readonly withOptions: boolean;
@@ -63,6 +69,8 @@ export function parseTableCart(value: unknown): TableCart | null {
   const lines = cart.lines.map((entry: unknown) => {
     const line = exact(entry, [
       "cartItemReference",
+      "sellableReference",
+      "optionSelections",
       "names",
       "quantity",
       "withOptions",
@@ -71,6 +79,8 @@ export function parseTableCart(value: unknown): TableCart | null {
     ]);
     const names = exact(line.names, Object.keys((line.names as object | null) ?? {}));
     if (
+      !Array.isArray(line.optionSelections) ||
+      line.optionSelections.length > 100 ||
       typeof line.withOptions !== "boolean" ||
       typeof line.phoneLeft !== "boolean" ||
       Object.values(names).some((name) => typeof name !== "string")
@@ -78,6 +88,16 @@ export function parseTableCart(value: unknown): TableCart | null {
       return fail();
     return Object.freeze({
       cartItemReference: ref(line.cartItemReference),
+      sellableReference: ref(line.sellableReference),
+      optionSelections: Object.freeze(
+        (line.optionSelections as unknown[]).map((value) => {
+          const option = exact(value, ["optionReference", "quantity"]);
+          return Object.freeze({
+            optionReference: ref(option.optionReference),
+            quantity: count(option.quantity, 99),
+          });
+        }),
+      ),
       names: Object.freeze({ ...(names as Record<string, string>) }),
       quantity: count(line.quantity, 999),
       withOptions: line.withOptions,

@@ -138,6 +138,8 @@ export {
   readStaffDiningCart,
   listStaffCartRemovals,
   removeStaffDiningCartLine,
+  removeStaffDiningCartLines,
+  type StaffCartLinesRemovalInput,
   type StaffDiningCart,
   type StaffDiningCartLine,
   type StaffCartRemovalReason,

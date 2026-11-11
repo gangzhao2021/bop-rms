@@ -12,6 +12,8 @@ const id = (n: number) => "01a4d520-0000-7000-8000-" + n.toString(16).padStart(1
 const csrf = "A".repeat(43);
 const line = (n: number, phoneNumber: number | null, phoneLeft = false) => ({
   cartItemReference: id(100 + n),
+  sellableReference: id(500 + n),
+  optionSelections: [],
   names: {
     "en-CA": n === 1 ? "Mapo tofu" : "Spring rolls",
     "zh-Hans-CA": n === 1 ? "麻婆豆腐" : "春卷",

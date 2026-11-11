@@ -29,6 +29,14 @@ export interface StaffDiningCartLine {
   readonly sellableReference: string;
   readonly quantity: number;
   readonly optionCount: number;
+  /**
+   * WP-2423 M35 (shared-table-cart-staff-round): the options chosen, so the staff round screen
+   * names and estimates the guest's line from the menu it holds (never the guest's note).
+   */
+  readonly optionSelections: readonly {
+    readonly optionReference: string;
+    readonly quantity: number;
+  }[];
   readonly addedByParticipantReference: string | null;
   readonly addedAt: string;
 }
@@ -76,6 +84,14 @@ function view(cart: CartAggregate): StaffDiningCart {
           sellableReference: String(item.sellableReference),
           quantity: item.quantity,
           optionCount: item.optionSelections.length,
+          optionSelections: Object.freeze(
+            item.optionSelections.map((option) =>
+              Object.freeze({
+                optionReference: String(option.optionReference),
+                quantity: option.quantity,
+              }),
+            ),
+          ),
           addedByParticipantReference:
             item.addedByParticipantReference === null
               ? null
@@ -314,4 +330,122 @@ export async function removeStaffDiningCartLine(
     return unavailable();
   await appendAuditRecordInTransaction(tx as never, audit);
   return Object.freeze({ status: "Removed" as const, cartVersion: next.aggregateVersion });
+}
+
+export interface StaffCartLinesRemovalInput {
+  readonly diningSessionReference: string;
+  readonly cartReference: string;
+  /** The cart version staff decided on. */
+  readonly expectedCartVersion: number;
+  /** The guests' lines staff keep (sent with their round): with `lines`, exactly the cart then. */
+  readonly keep: readonly string[];
+  /** Each line staff take out, with its own operation reference and Audit record. */
+  readonly lines: readonly {
+    readonly cartItemReference: string;
+    readonly reason: StaffCartRemovalReason;
+    readonly operationReference: string;
+    readonly audit: AppendAuditRecordInput;
+  }[];
+  readonly actorReference: string;
+  readonly observedAt: string;
+  readonly hashIntent: (value: string) => string;
+  readonly checkoutHeld: (cartVersion: number) => Promise<boolean>;
+}
+
+/**
+ * WP-2423 M35/M06 (shared-table-cart-staff-round): staff decide on every guest line of the
+ * table's cart at once (send it with their round, or take it out). All the lines staff take out
+ * leave in one transaction, each recorded and audited as its own staff removal at the next cart
+ * version, or none does: a cart that moved on since staff decided (another version, or lines that
+ * are not exactly the ones they decided on) is CART_VERSION_CONFLICT with nothing removed. The
+ * same operations again answer `AlreadyRemoved` with the version they produced.
+ */
+export async function removeStaffDiningCartLines(
+  tx: CartQueryTransaction,
+  scopeInput: { readonly brandReference: string; readonly storeReference: string },
+  input: StaffCartLinesRemovalInput,
+): Promise<{ readonly status: "Removed" | "AlreadyRemoved"; readonly cartVersion: number }> {
+  const scope = scoped(scopeInput);
+  const expected = input.expectedCartVersion;
+  if (
+    !Number.isSafeInteger(expected) ||
+    expected < 1 ||
+    input.lines.length === 0 ||
+    input.lines.length > 30 ||
+    input.keep.length > 100
+  )
+    throw new CartError("CART_INPUT_INVALID");
+  const cartReference = parseOrderingReference(input.cartReference);
+  const session = parseOrderingReference(input.diningSessionReference);
+  const removing = input.lines.map((line) =>
+    String(parseOrderingReference(line.cartItemReference)),
+  );
+  const keeping = input.keep.map((line) => String(parseOrderingReference(line)));
+  const operations = input.lines.map((line) =>
+    String(parseOrderingReference(line.operationReference)),
+  );
+  if (
+    new Set([...removing, ...keeping]).size !== removing.length + keeping.length ||
+    new Set(operations).size !== operations.length
+  )
+    throw new CartError("CART_INPUT_INVALID");
+  await setScope(tx, scope.brandReference, scope.storeReference);
+  // The cart row lock first, as every cart writer takes it, so the decision and the removals see
+  // one cart state.
+  const locked = rowsOf(
+    await tx.query(
+      "SELECT order_type, dining_session_id::text AS session FROM rms_ordering.cart WHERE brand_id=$1 AND store_id=$2 AND cart_id=$3 FOR UPDATE",
+      [scope.brandReference, scope.storeReference, cartReference],
+    ),
+  );
+  if (locked.length !== 1) throw new CartError("CART_UNAVAILABLE");
+  if (locked[0]?.order_type !== "DineIn" || locked[0]?.session !== session)
+    throw new CartError("CART_PERMISSION_DENIED");
+  const prior = rowsOf(
+    await tx.query(
+      "SELECT operation_id::text AS operation, result_aggregate_version FROM rms_ordering.cart_staff_line_removal WHERE brand_id=$1 AND store_id=$2 AND operation_id = ANY($3::uuid[])",
+      [scope.brandReference, scope.storeReference, operations],
+    ),
+  );
+  if (prior.length === 0) {
+    const current = await createPostgresDiningCartReadStore(lent(tx), scope).current({
+      ...scope,
+      diningSessionReference: session,
+      observedAt: parseOrderingInstant(input.observedAt),
+    });
+    if (current === null || current.cartReference !== cartReference)
+      throw new CartError("CART_PERMISSION_DENIED");
+    const decided = new Set([...removing, ...keeping]);
+    if (
+      current.aggregateVersion !== expected ||
+      current.items.length !== decided.size ||
+      current.items.some((item) => !decided.has(String(item.cartItemReference)))
+    )
+      throw new CartError("CART_VERSION_CONFLICT");
+  } else if (prior.length !== operations.length) throw new CartError("CART_IDEMPOTENCY_CONFLICT");
+  let version = expected;
+  let replayed = 0;
+  for (const [index, line] of input.lines.entries()) {
+    const removed = await removeStaffDiningCartLine(tx, scopeInput, {
+      operationReference: line.operationReference,
+      diningSessionReference: input.diningSessionReference,
+      cartReference: input.cartReference,
+      cartItemReference: line.cartItemReference,
+      expectedCartVersion: expected + index,
+      reason: line.reason,
+      actorReference: input.actorReference,
+      observedAt: input.observedAt,
+      audit: line.audit,
+      hashIntent: input.hashIntent,
+      checkoutHeld: input.checkoutHeld,
+    });
+    if (removed.status === "AlreadyRemoved") replayed += 1;
+    version = Math.max(version, removed.cartVersion);
+  }
+  if (replayed !== 0 && replayed !== input.lines.length)
+    throw new CartError("CART_IDEMPOTENCY_CONFLICT");
+  return Object.freeze({
+    status: replayed === 0 ? ("Removed" as const) : ("AlreadyRemoved" as const),
+    cartVersion: version,
+  });
 }

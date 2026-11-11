@@ -1,7 +1,14 @@
+import { createHash } from "node:crypto";
 import { canonicalizeRfc8785, sha256Hex } from "@bop/audit";
 import type { ConsumerTransaction } from "@bop/eventing";
 import { readClosedRecord } from "@bop/identity";
-import { listDiningSessionTableLabels } from "@rms/dining";
+import {
+  createPostgresDiningCheckoutHoldSource,
+  createPostgresDiningTableStore,
+  listDiningSessionTableLabels,
+  parseDiningReference,
+} from "@rms/dining";
+import { listStoreMenuSellableNames } from "@rms/catalog";
 import {
   createPostgresAdditionalDiningExecutionReader,
   createPostgresStaffDiningRoundEntryStore,
@@ -10,6 +17,10 @@ import {
   parseOrderingInstant,
   parseOrderingReference,
   StaffDiningRoundEntryError,
+  CartError,
+  readStaffDiningCart,
+  removeStaffDiningCartLines,
+  type StaffCartRemovalReason,
   type OrderPaymentPreparationEvidence,
   type StaffDiningRoundEntryRecord,
 } from "@rms/ordering";
@@ -34,6 +45,8 @@ import {
 import type { DiningPayLaterRound } from "./dining-pay-later-round.js";
 import { readStaffDiningRoundPaymentPreparation } from "./staff-dining-round-payment-preparation.js";
 import { keepingCause, onlyRefusal } from "./merchant-failure.js";
+import { staffContentLocale } from "./staff-content-locale.js";
+import { staffCartReasonCode } from "./merchant-dining-table-cart.js";
 
 /**
  * WP-2423 Q7 slice 2 (DEC-STAFF-DINE-IN-ROUND): entering a round for a table on behalf of its
@@ -89,6 +102,29 @@ export interface StaffRoundPendingItem {
 }
 /** At most this many of the guests' unsellable items are removed with one round. */
 export const staffRoundRemovableLimit = 30;
+/** At most this many guest lines are decided on with one round (a table cart holds fewer). */
+export const staffRoundTableCartLimit = 100;
+const removalReasons: readonly unknown[] = ["GuestAsked", "GuestLeft", "CantMake"];
+
+/**
+ * WP-2423 M35 (shared-table-cart-staff-round): what staff decided for one of the guests' unsent
+ * lines they were shown: send it with this round, or take it out of the table's cart (recorded as
+ * theirs, with why: the guest asked, the guest left, the kitchen can't make it).
+ */
+export interface StaffRoundTableCartDecision {
+  readonly cartItemReference: string;
+  readonly decision: "Send" | "Remove";
+  readonly reason: StaffCartRemovalReason | null;
+}
+/**
+ * The guests' unsent lines staff take in, as they saw them (that cart version). `decisions`: one
+ * per line (M35); null for the earlier form, where every line is sent but `removeUnavailable`.
+ */
+export interface StaffRoundTableCartChoice {
+  readonly expectedCartVersion: number;
+  readonly removeUnavailable: readonly string[];
+  readonly decisions: readonly StaffRoundTableCartDecision[] | null;
+}
 
 export class StaffDiningRoundError extends Error {
   readonly code: StaffDiningRoundErrorCode;
@@ -306,10 +342,7 @@ export function parseStaffDiningRoundCommand(value: unknown): {
    * WP-2423 (staff-round-soldout): `removeUnavailable` are the guests' lines staff saw marked as
    * not sellable now, taken out of the Cart first (the Ordering owner decides at that instant).
    */
-  readonly includeTableCart: {
-    readonly expectedCartVersion: number;
-    readonly removeUnavailable: readonly string[];
-  } | null;
+  readonly includeTableCart: StaffRoundTableCartChoice | null;
 } {
   try {
     const includes =
@@ -322,18 +355,20 @@ export function parseStaffDiningRoundCommand(value: unknown): {
       "recordedAfterOutage",
       ...(includes ? ["includeTableCart"] : []),
     ]);
-    let includeTableCart: {
-      readonly expectedCartVersion: number;
-      readonly removeUnavailable: readonly string[];
-    } | null = null;
+    let includeTableCart: StaffRoundTableCartChoice | null = null;
     if (includes) {
-      const removes =
+      const has = (key: string) =>
         raw.includeTableCart !== null &&
         typeof raw.includeTableCart === "object" &&
-        Object.hasOwn(raw.includeTableCart, "removeUnavailable");
+        Object.hasOwn(raw.includeTableCart, key);
+      const removes = has("removeUnavailable");
+      const decides = has("lines");
+      // One form or the other: per-line decisions, or (earlier screens) the unsellable lines only.
+      if (removes && decides) return fail("STAFF_ROUND_INPUT_INVALID");
       const include = readClosedRecord(raw.includeTableCart, [
         "expectedCartVersion",
         ...(removes ? ["removeUnavailable"] : []),
+        ...(decides ? ["lines"] : []),
       ]);
       const expectedCartVersion = include.expectedCartVersion;
       if (
@@ -350,12 +385,55 @@ export function parseStaffDiningRoundCommand(value: unknown): {
       );
       if (new Set(removeUnavailable).size !== removeUnavailable.length)
         return fail("STAFF_ROUND_INPUT_INVALID");
+      let decisions: readonly StaffRoundTableCartDecision[] | null = null;
+      if (decides) {
+        const given = include.lines;
+        if (!Array.isArray(given) || given.length === 0 || given.length > staffRoundTableCartLimit)
+          return fail("STAFF_ROUND_INPUT_INVALID");
+        decisions = Object.freeze(
+          given.map((entry: unknown) => {
+            const withReason =
+              entry !== null && typeof entry === "object" && Object.hasOwn(entry, "reason");
+            const line = readClosedRecord(entry, [
+              "cartItemReference",
+              "decision",
+              ...(withReason ? ["reason"] : []),
+            ]);
+            if (line.decision !== "Send" && line.decision !== "Remove")
+              return fail("STAFF_ROUND_INPUT_INVALID");
+            if (withReason && (line.decision !== "Remove" || !removalReasons.includes(line.reason)))
+              return fail("STAFF_ROUND_INPUT_INVALID");
+            return Object.freeze({
+              cartItemReference: String(parseOrderingReference(line.cartItemReference)),
+              decision: line.decision,
+              reason:
+                line.decision === "Remove"
+                  ? withReason
+                    ? (line.reason as StaffCartRemovalReason)
+                    : ("GuestAsked" as const)
+                  : null,
+            });
+          }),
+        );
+        const references = decisions.map((line) => line.cartItemReference);
+        if (
+          new Set(references).size !== references.length ||
+          decisions.filter((line) => line.decision === "Remove").length > staffRoundRemovableLimit
+        )
+          return fail("STAFF_ROUND_INPUT_INVALID");
+      }
       includeTableCart = Object.freeze({
         expectedCartVersion,
         removeUnavailable: Object.freeze(removeUnavailable),
+        decisions,
       });
     }
     if (!Array.isArray(raw.lines)) return fail("STAFF_ROUND_INPUT_INVALID");
+    // WP-2423 M35: a round of only the guests' lines (their phone died, or they asked staff to
+    // send what is in the cart): no line of staff's own, at least one guest line sent.
+    const guestOnly =
+      raw.lines.length === 0 &&
+      (includeTableCart?.decisions ?? []).some((line) => line.decision === "Send");
     const notes = raw.lines.map((line: unknown) => {
       const note = readClosedRecord(line, [
         "sellableReference",
@@ -367,11 +445,14 @@ export function parseStaffDiningRoundCommand(value: unknown): {
     });
     const parsed = parseCounterOrderCommand({
       operationReference: raw.operationReference,
-      lines: raw.lines.map((line: Record<string, unknown>) => ({
-        sellableReference: line.sellableReference,
-        quantity: line.quantity,
-        optionSelections: line.optionSelections,
-      })),
+      // The counter's own rule wants a line; a guest-only round has none of its own to check.
+      lines: guestOnly
+        ? [{ sellableReference: raw.operationReference, quantity: 1, optionSelections: [] }]
+        : raw.lines.map((line: Record<string, unknown>) => ({
+            sellableReference: line.sellableReference,
+            quantity: line.quantity,
+            optionSelections: line.optionSelections,
+          })),
       tip: raw.tip,
       recordedAfterOutage: raw.recordedAfterOutage,
     });
@@ -379,7 +460,11 @@ export function parseStaffDiningRoundCommand(value: unknown): {
       operationReference: parsed.operationReference,
       tableReference: String(parseOrderingReference(raw.tableReference)),
       lines: Object.freeze(
-        parsed.lines.map((line, index) => Object.freeze({ ...line, note: notes[index] ?? null })),
+        guestOnly
+          ? []
+          : parsed.lines.map((line, index) =>
+              Object.freeze({ ...line, note: notes[index] ?? null }),
+            ),
       ),
       tip: parsed.tip,
       recordedAfterOutage: parsed.recordedAfterOutage,
@@ -416,9 +501,29 @@ export function createMerchantStaffDiningRound(options: {
   inProgressMs?: number;
   /** DEC-DINE-IN-PAY-LATER: rounds of tables opened pay later go to the kitchen unpaid. */
   payLater?(scope: StaffScope["selected"]): DiningPayLaterRound;
+  /** The Audit retention of a staff removal of a guest line (default the pilot's own). */
+  retentionPolicyCode?: string;
+  retentionPolicyVersion?: number;
 }) {
   const resolveScope = createMerchantStoreScope(options.persistence);
   const now = () => options.persistence.now();
+  /** The guests' unsent items as the Cart stands now, for staff to decide again. */
+  const tableCartRefusal = async (
+    items: readonly StaffRoundPendingItem[],
+    version: number,
+  ): Promise<StaffDiningRoundError> => {
+    const refusal = new StaffDiningRoundError("STAFF_ROUND_TABLE_CART_HAS_ITEMS", null, items);
+    refusal.tableCart = {
+      cartVersion: version,
+      guestsCanSend:
+        options.pipeline.guestsCanSend === undefined
+          ? true
+          : await options.pipeline.guestsCanSend(),
+    };
+    return refusal;
+  };
+  const hashIntent = (value: string) =>
+    "sha256:" + createHash("sha256").update(value).digest("hex");
   return async (input: {
     sessionCookie: unknown;
     csrf: unknown;
@@ -444,6 +549,14 @@ export function createMerchantStaffDiningRound(options: {
             command.includeTableCart.removeUnavailable.length === 0
               ? {}
               : { removeUnavailable: [...command.includeTableCart.removeUnavailable].sort() }),
+            // M35: each guest line's decision (in any order: the same decisions).
+            ...(command.includeTableCart?.decisions == null
+              ? {}
+              : {
+                  tableCartLines: [...command.includeTableCart.decisions]
+                    .map((line) => [line.cartItemReference, line.decision, line.reason ?? ""])
+                    .sort((a, b) => (a[0] ?? "").localeCompare(b[0] ?? "")),
+                }),
           }),
         ),
     );
@@ -498,6 +611,159 @@ export function createMerchantStaffDiningRound(options: {
             ),
         ),
       );
+    /**
+     * WP-2423 M35: the table's cart as staff decide on it. Null when there is nothing to decide
+     * (no open table, no cart, no unsent line) or when the decisions sent are for exactly this
+     * cart; otherwise its lines, named in the staff member's language, to decide again.
+     */
+    const tableCartMoved = async (
+      tx: ConsumerTransaction,
+      scope: StaffScope,
+    ): Promise<{
+      readonly cartVersion: number;
+      readonly items: readonly StaffRoundPendingItem[];
+    } | null> => {
+      const owner = {
+        brandReference: scope.selected.brandReference,
+        storeReference: scope.selected.storeReference,
+      };
+      const table = await createPostgresDiningTableStore(
+        { run: (work) => work(tx as never) },
+        scope.selected,
+        { hashIntent, equals: (a, b) => a === b },
+      ).loadTable(parseDiningReference(command.tableReference));
+      const session = table?.activeDiningSessionReference ?? null;
+      if (session === null) return null;
+      const current = await readStaffDiningCart(tx as never, owner, String(session), now());
+      if (current === null || current.lines.length === 0) return null;
+      const include = command.includeTableCart;
+      const decided =
+        include?.decisions == null
+          ? null
+          : new Set(include.decisions.map((line) => line.cartItemReference));
+      if (
+        include !== null &&
+        include.expectedCartVersion === current.cartVersion &&
+        (decided === null ||
+          (decided.size === current.lines.length &&
+            current.lines.every((line) => decided.has(line.cartItemReference))))
+      )
+        return null;
+      const names = await listStoreMenuSellableNames(
+        tx as never,
+        owner,
+        current.lines.map((line) => line.sellableReference),
+      );
+      // The Catalog read moves the scope to the Brand; restore the Store for what follows.
+      await (tx as unknown as { query(sql: string, values: unknown[]): Promise<unknown> }).query(
+        "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+        [owner.brandReference, owner.storeReference],
+      );
+      const chosen = staffContentLocale();
+      const nameOf = (byLocale: Readonly<Record<string, string>> | undefined) => {
+        const entries = Object.entries(byLocale ?? {});
+        return (
+          (chosen === null ? undefined : byLocale?.[chosen]) ??
+          entries.find(
+            ([locale]) => chosen !== null && locale.split("-")[0] === chosen.split("-")[0],
+          )?.[1] ??
+          entries[0]?.[1] ??
+          ""
+        );
+      };
+      return Object.freeze({
+        cartVersion: current.cartVersion,
+        items: Object.freeze(
+          current.lines.map((line) =>
+            Object.freeze({
+              cartItemReference: line.cartItemReference,
+              name: nameOf(names.get(line.sellableReference)),
+              quantity: line.quantity,
+              // Read only, before a table guest exists: whether it can be sold now is shown by
+              // the staff screen's own menu, and checked again when the round is sent.
+              standing: "Available" as const,
+            }),
+          ),
+        ),
+      });
+    };
+    /**
+     * WP-2423 M06/M35: the guests' lines staff take out of the table's cart with this round, in
+     * one transaction as the staff member's own removals (Ordering's staff removal), each with
+     * its own Audit record. Not while a guest is paying for that cart version.
+     */
+    const removeGuestLines = async (
+      tx: ConsumerTransaction,
+      scope: StaffScope,
+      allowed: () => Promise<boolean>,
+      input: {
+        readonly diningSessionReference: string;
+        readonly cartReference: string;
+        readonly expectedCartVersion: number;
+        readonly keep: readonly string[];
+        readonly removals: readonly {
+          readonly cartItemReference: string;
+          readonly reason: StaffCartRemovalReason;
+        }[];
+      },
+    ) => {
+      if (!(await allowed())) return fail("STAFF_ROUND_PERMISSION_DENIED");
+      const observedAt = now();
+      const holds = createPostgresDiningCheckoutHoldSource(
+        { run: (work) => work(tx as never) },
+        scope.selected,
+      );
+      return removeStaffDiningCartLines(
+        tx as never,
+        {
+          brandReference: scope.selected.brandReference,
+          storeReference: scope.selected.storeReference,
+        },
+        {
+          diningSessionReference: input.diningSessionReference,
+          cartReference: input.cartReference,
+          expectedCartVersion: input.expectedCartVersion,
+          keep: input.keep,
+          lines: input.removals.map((line) => {
+            const operationReference = options.nextReference();
+            return {
+              cartItemReference: line.cartItemReference,
+              reason: line.reason,
+              operationReference,
+              audit: {
+                auditId: options.nextReference(),
+                brandId: scope.selected.brandReference,
+                storeId: scope.selected.storeReference,
+                actor: { type: "User" as const, reference: scope.actorReference },
+                actionCode: "ORDERING_CART_ITEM_REMOVE_BY_STAFF",
+                targetType: "OrderingCart",
+                targetId: input.cartReference,
+                reasonCode: staffCartReasonCode(line.reason),
+                correlationId: command.operationReference,
+                occurredAt: observedAt,
+                sourceChannel: "API" as const,
+                dataClassification: "Internal" as const,
+                retentionPolicyCode: options.retentionPolicyCode ?? "AUDIT_DEFAULT",
+                retentionPolicyVersion: options.retentionPolicyVersion ?? 1,
+              },
+            };
+          }),
+          actorReference: scope.actorReference,
+          observedAt,
+          hashIntent,
+          // Any guest's checkout of this cart version (staff are never a participant), asked
+          // under the cart row lock.
+          checkoutHeld: async (cartVersion) =>
+            (await holds.read({
+              diningSessionReference: input.diningSessionReference,
+              cartReference: input.cartReference,
+              cartVersion,
+              participantReference: scope.actorReference,
+              observedAt,
+            })) !== null,
+        },
+      );
+    };
     const entries = (scope: StaffScope, allowed: () => Promise<boolean>) =>
       createPostgresStaffDiningRoundEntryStore({
         brandReference: scope.selected.brandReference,
@@ -668,6 +934,11 @@ export function createMerchantStaffDiningRound(options: {
       // DEC-STAFF-DINE-IN-ROUND (2026-10-15): a table without a code is refused with nothing changed.
       if (!(await options.pipeline.tableHasQr({ tableReference: command.tableReference })))
         return fail("STAFF_ROUND_TABLE_QR_MISSING");
+      // WP-2423 M35: guests' unsent lines staff haven't decided on (or a cart that moved on since
+      // they did) are refused here, read only, before the table is opened, a table guest joins or
+      // the round is recorded: the refusal is quick and leaves nothing behind.
+      const stale = await inScope((tx, scope) => tableCartMoved(tx, scope));
+      if (stale !== null) throw await tableCartRefusal(stale.items, stale.cartVersion);
       const table = await options.pipeline.openTable(
         { sessionCookie: input.sessionCookie, csrf: input.csrf },
         { tableReference: command.tableReference },
@@ -740,21 +1011,6 @@ export function createMerchantStaffDiningRound(options: {
           operationReference: options.nextReference(),
           requestedAt: now(),
         });
-      /** The guests' unsent items as the Cart stands now, for staff to decide again. */
-      const tableCartRefusal = async (
-        items: readonly StaffRoundPendingItem[],
-        version: number,
-      ): Promise<StaffDiningRoundError> => {
-        const refusal = new StaffDiningRoundError("STAFF_ROUND_TABLE_CART_HAS_ITEMS", null, items);
-        refusal.tableCart = {
-          cartVersion: version,
-          guestsCanSend:
-            options.pipeline.guestsCanSend === undefined
-              ? true
-              : await options.pipeline.guestsCanSend(),
-        };
-        return refusal;
-      };
       // Items guests put in the table's shared Cart and haven't sent yet would be sent and charged
       // with this round. Staff either ask the guests to send or remove them (while guests can
       // still send), or add them to this round, as they saw them: only that same Cart version is
@@ -766,40 +1022,81 @@ export function createMerchantStaffDiningRound(options: {
       if (pending.length > 0) {
         if (include === null || include.expectedCartVersion !== cart.cartVersion)
           throw await tableCartRefusal(pending, cart.cartVersion);
+        // WP-2423 M35: the lines staff take out, and why. Per line, as staff decided each one; in
+        // the earlier form, the lines they were shown as not sellable now (the kitchen can't
+        // make them).
+        const removals =
+          include.decisions === null
+            ? include.removeUnavailable.map((cartItemReference) => ({
+                cartItemReference,
+                reason: "CantMake" as StaffCartRemovalReason,
+              }))
+            : include.decisions
+                .filter((line) => line.decision === "Remove")
+                .map((line) => ({
+                  cartItemReference: line.cartItemReference,
+                  reason: line.reason ?? ("GuestAsked" as StaffCartRemovalReason),
+                }));
+        const out = new Set(removals.map((line) => line.cartItemReference));
+        const decided =
+          include.decisions === null
+            ? null
+            : new Set(include.decisions.map((line) => line.cartItemReference));
         // WP-2423 (staff-round-soldout): a guest line that can't be sold now is never sent, so
         // staff decide on each one they were shown; one they didn't see (or one gone) is refused.
-        const listed = new Set(include.removeUnavailable);
         if (
           pending.some(
-            (item) => item.standing !== "Available" && !listed.has(item.cartItemReference),
+            (item) => item.standing !== "Available" && !out.has(item.cartItemReference),
           ) ||
-          [...listed].some(
+          [...out].some(
             (reference) => !pending.some((item) => item.cartItemReference === reference),
-          )
+          ) ||
+          (decided !== null &&
+            (decided.size !== pending.length ||
+              pending.some((item) => !decided.has(item.cartItemReference))))
         )
           throw await tableCartRefusal(pending, cart.cartVersion);
-        if (listed.size > 0) {
-          // Taken out before any line of this round goes in, with the guest Cart's own remove
-          // (attributed to this round's table guest, audited, a new Cart version). The Ordering
-          // owner removes another guest's line only while a Catalog fact says it can't be sold, so
-          // a dish guests can still have stays; removed lines are not put back if the round fails.
-          let removed: "Removed" | "Kept" = "Kept";
+        if (out.size > 0) {
+          // WP-2423 M06/M35: taken out before any line of this round goes in, all at once as the
+          // staff member's own removals (who, why, the dish, whose phone added it; each audited),
+          // or none at all when the cart moved on. Never put back if the round then fails: that
+          // was the staff member's decision, and every phone at the table is told.
+          const keep = pending
+            .map((item) => item.cartItemReference)
+            .filter((reference) => !out.has(reference));
           try {
-            if (options.pipeline.removeItems !== undefined)
-              removed = await options.pipeline.removeItems(credentials, {
+            await inScope((tx, scope, allowed) =>
+              removeGuestLines(tx, scope, allowed, {
+                diningSessionReference: table.diningSessionReference,
                 cartReference: cart.cartReference,
-                cartVersion,
-                cartItemReferences: [...listed],
-              });
+                expectedCartVersion: cart.cartVersion,
+                keep,
+                removals,
+              }),
+            );
           } catch (error) {
-            report(error);
+            if (error instanceof StaffDiningRoundError) throw error;
+            const code = error instanceof CartError ? error.code : null;
+            if (code === "CART_CHECKOUT_IN_PROGRESS")
+              return fail("STAFF_ROUND_TABLE_CHECKOUT_IN_PROGRESS");
+            if (
+              code === "CART_VERSION_CONFLICT" ||
+              code === "CART_ITEM_NOT_FOUND" ||
+              code === "CART_PERMISSION_DENIED" ||
+              code === "CART_UNAVAILABLE"
+            ) {
+              const fresh = await selectAgain();
+              if (fresh.status !== "Selected")
+                return fail("STAFF_ROUND_TABLE_CHECKOUT_IN_PROGRESS");
+              throw await tableCartRefusal(fresh.pendingItems, fresh.cartVersion);
+            }
+            throw error;
           }
           const after = await selectAgain();
           if (after.status !== "Selected") return fail("STAFF_ROUND_TABLE_CHECKOUT_IN_PROGRESS");
-          const kept = pending.filter((item) => !listed.has(item.cartItemReference));
+          const kept = pending.filter((item) => !out.has(item.cartItemReference));
           // Only the rest exactly as staff saw it, every item still sellable, is taken in.
           const asSeen =
-            removed === "Removed" &&
             after.cartReference === cart.cartReference &&
             after.pendingItems.length === kept.length &&
             after.pendingItems.every(
@@ -816,6 +1113,10 @@ export function createMerchantStaffDiningRound(options: {
           pending = after.pendingItems;
         }
       }
+      // A round of only the guests' lines whose lines are gone (sent from a phone meanwhile):
+      // nothing to send; staff see the cart as it is now.
+      if (command.lines.length === 0 && pending.length === 0)
+        throw await tableCartRefusal(pending, cartVersion);
       /** The guests' lines this round takes in (never removed when the round fails). */
       const guestLines = new Set(pending.map((item) => item.cartItemReference));
       // The Cart line each round line went to, to name a line the checkout finds short.
@@ -832,6 +1133,8 @@ export function createMerchantStaffDiningRound(options: {
       removeRoundItems = async () => {
         const references = ownLines();
         const removeItems = options.pipeline.removeItems;
+        // A round of only the guests' lines put nothing of its own in the cart.
+        if (command.lines.length === 0) return "Removed";
         try {
           // Only when every line sent so far is known to its Cart line.
           if (
