@@ -18,8 +18,14 @@ export function OrderAcceptanceAction({
   onUnknown,
   resumeUnknown = false,
   paused = false,
+  held = false,
   closeWith = null,
 }: {
+  /**
+   * Accept all is sending this list's accepts right now: a row's own Accept waits for it, so the
+   * same round is never sent twice at once (staff would see a "changed" answer for nothing).
+   */
+  readonly held?: boolean;
   /**
    * merchant-outage-recovery M100: this device has no network, so an Accept could not be sent.
    * Only offline pauses it: a list that could not be refreshed still accepts, because the server
@@ -59,7 +65,7 @@ export function OrderAcceptanceAction({
   const pending = useRef<AbortController | null>(null);
   useEffect(() => () => pending.current?.abort(), []);
   const accept = async () => {
-    if (pending.current !== null || paused) return;
+    if (pending.current !== null || paused || held) return;
     const controller = new AbortController();
     pending.current = controller;
     setState("Submitting");
@@ -91,7 +97,7 @@ export function OrderAcceptanceAction({
       {state === "Idle" || state === "Submitting" || state === "Unknown" || state === "Changed" ? (
         <button
           data-state={state}
-          disabled={state === "Submitting" || paused}
+          disabled={state === "Submitting" || paused || held}
           onClick={() => void accept()}
         >
           {state === "Unknown"

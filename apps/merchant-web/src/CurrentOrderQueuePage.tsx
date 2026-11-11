@@ -3962,6 +3962,7 @@ export function CurrentOrderQueuePage({
         batch.sequence === 1 ? order.orderNumber : order.orderNumber + " · round " + batch.sequence
       }
       paused={offline}
+      held={acceptAll.running}
       operation={() => prepareAcceptance(order, batch)}
       onUnknown={() => unknownOutcomes.current.add(batch.orderBatchReference)}
       onRejected={() => {
@@ -4795,6 +4796,7 @@ export function CurrentOrderQueuePage({
                               key={batch.orderBatchReference}
                               resumeUnknown={unknownOutcomes.current.has(batch.orderBatchReference)}
                               paused={offline}
+                              held={acceptAll.running}
                               csrf={csrf}
                               closeWith="RefundInstead"
                               orderNumber={

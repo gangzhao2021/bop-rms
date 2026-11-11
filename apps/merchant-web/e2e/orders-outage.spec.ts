@@ -305,7 +305,9 @@ for (const width of [390, 1024, 1440])
           },
         });
       });
+    let acceptRequests = 0;
     await page.route("**/merchant/orders/accept", async (route) => {
+      acceptRequests += 1;
       slowList = true;
       const body = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>;
       await new Promise((resolve) => setTimeout(resolve, 600));
@@ -319,6 +321,10 @@ for (const width of [390, 1024, 1440])
       .getByRole("button", { name: /^To accept/u })
       .click();
     await page.getByRole("button", { name: "Accept all 2" }).click();
+    // While Accept all sends them, a row's own Accept waits, so no round is sent twice at once.
+    const rowAccepts = page.getByRole("button", { name: /^Accept(ing)? ORD-/u });
+    await expect(rowAccepts.first()).toBeVisible();
+    for (const button of await rowAccepts.all()) await expect(button).toBeDisabled();
     const dropped = page.getByText("The network dropped", { exact: false });
     const again = page.getByRole("button", { name: /^Accept again/u });
     // Looked at as it is at each moment (not waited out): during the accepts, and after the
@@ -332,6 +338,7 @@ for (const width of [390, 1024, 1440])
     expect(await dropped.count()).toBe(0);
     expect(await again.count()).toBe(0);
     expect([...accepted].sort()).toEqual([1, 2]);
+    expect(acceptRequests).toBe(2);
     await expectNoInternalText(page);
   });
 
