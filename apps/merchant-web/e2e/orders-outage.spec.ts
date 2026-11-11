@@ -376,3 +376,58 @@ test("@production a new order is marked until opened, and sound stays on across 
     "true",
   );
 });
+
+for (const width of [390, 1024, 1440])
+  test(`@production staff are told when online pickup is full this hour and how many guests it turned away, at ${width}`, async ({
+    page,
+  }) => {
+    // v15 2026-11-11 (Test Merchant 2): for about 25 minutes online pickup guests were turned
+    // away because the hour was full, while counter staff saw nothing.
+    await page.setViewportSize({ width, height: 900 });
+    let pickupHour: Record<string, unknown> | null = {
+      full: true,
+      endsAt: "2026-11-11T22:00:00.000Z",
+      turnedAway: 6,
+    };
+    await page.route("**/merchant/session", (route) => route.fulfill({ headers, json: session }));
+    for (const pattern of ["**/merchant/orders?*", "**/merchant/orders"])
+      await page.route(pattern, (route) =>
+        route.fulfill({
+          headers,
+          json: {
+            items: [round(1, new Date(Date.now() - 60_000).toISOString(), true)],
+            nextAfterOrderReference: null,
+            ...(pickupHour === null ? {} : { pickupHour }),
+          },
+        }),
+      );
+    await page.goto("/operations/orders");
+    await expect(page.getByRole("heading", { name: "ORD-1", exact: true })).toBeVisible();
+    await expect(
+      page.getByText(
+        /^Online pickup is full for the hour ending 17:00\. 6 online guests have been turned away this hour\.$/u,
+      ),
+    ).toBeVisible();
+    await expect(
+      page.getByText(
+        "Counter orders still go through. Cancel any unpaid counter order whose customer has left: it holds a place.",
+      ),
+    ).toBeVisible();
+    // A place opened: staff still see how many were turned away this hour.
+    pickupHour = { full: false, endsAt: "2026-11-11T22:00:00.000Z", turnedAway: 6 };
+    await page.getByRole("button", { name: "Refresh orders" }).click();
+    await expect(
+      page.getByText("Online pickup has room again. 6 online guests were turned away this hour."),
+    ).toBeVisible();
+    await expect(page.getByText("Counter orders still go through", { exact: false })).toHaveCount(
+      0,
+    );
+    // The next hour, with room: nothing is said.
+    pickupHour = null;
+    await page.getByRole("button", { name: "Refresh orders" }).click();
+    await expect(page.getByText("Online pickup", { exact: false })).toHaveCount(0);
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await expectNoInternalText(page);
+  });

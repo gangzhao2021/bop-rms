@@ -1220,6 +1220,28 @@ it("WP-2423: reads one order's detail with its lines and hides other Stores' ord
     batches: item.batches.map((batch) => ({ ...batch, waitingForStaff: null })),
     paymentPosition: position,
   });
+  // DEC-CHECKOUT-SESSION-OUTAGE (review): Orders is told when online pickup is full this hour and
+  // how many online guests it turned away; a Store with room says nothing.
+  const pickupHour = { full: true, endsAt: "2026-11-11T22:00:00.000Z", turnedAway: 6 };
+  queue.mockResolvedValueOnce({
+    items: [item],
+    nextAfterOrderReference: null,
+    lines: null,
+    pickupContact: null,
+    pickupHour,
+  } as never);
+  const full = (await (await request(root, "/merchant/orders", { headers })).json()) as {
+    pickupHour?: unknown;
+  };
+  expect(full.pickupHour).toEqual(pickupHour);
+  queue.mockResolvedValueOnce({
+    items: [item],
+    nextAfterOrderReference: null,
+    lines: null,
+    pickupContact: null,
+  } as never);
+  const room = (await (await request(root, "/merchant/orders", { headers })).json()) as object;
+  expect(room).not.toHaveProperty("pickupHour");
 });
 
 it("protects price management transport and sanitizes command failures", async () => {

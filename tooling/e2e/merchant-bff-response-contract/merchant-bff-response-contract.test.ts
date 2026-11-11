@@ -626,6 +626,8 @@ const queueView = {
   // WP-2423 M163: read on the order detail only.
   moneyTakenBack: [],
   paidOrderWatch,
+  // DEC-CHECKOUT-SESSION-OUTAGE: online pickup is full this hour and turned guests away.
+  pickupHour: { full: true, endsAt: at(45), turnedAway: 2 },
 } satisfies Queue;
 const line = (n: number, batch: string, canCancel: boolean) => ({
   orderItemReference: id(0x7000 + n),
@@ -674,6 +676,8 @@ const detailView = {
   // WP-2423 M163: $2.00 given back in cash after a refund made by mistake.
   moneyTakenBack: [{ method: "Cash", amountMinor: "200", currencyCode: "CAD", recordedAt: at(26) }],
   paidOrderWatch,
+  // DEC-CHECKOUT-SESSION-OUTAGE: online pickup is full this hour and turned guests away.
+  pickupHour: { full: true, endsAt: at(45), turnedAway: 2 },
 } satisfies Queue;
 const pickupDetailView = {
   items: [heldPickup],
@@ -721,6 +725,8 @@ const pickupDetailView = {
   },
   moneyTakenBack: [],
   paidOrderWatch,
+  // DEC-CHECKOUT-SESSION-OUTAGE: online pickup is full this hour and turned guests away.
+  pickupHour: { full: true, endsAt: at(45), turnedAway: 2 },
 } satisfies Queue;
 
 type KitchenList = Extract<Output<"kitchenQuery">, { items: unknown }>;

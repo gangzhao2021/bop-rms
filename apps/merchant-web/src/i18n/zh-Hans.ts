@@ -8941,6 +8941,19 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{orders} could not be accepted here: open it to see why.":
     "{orders} 在这里接不了单，请打开看原因。",
   "The bill couldn't be read just now. Trying again by itself.": "账单暂时读不到，正在自动重试。",
+  "Online pickup is full for the hour ending {time}. New online orders are turned away.":
+    "到 {time} 为止的这一小时线上自取已满。新的线上订单会被婉拒。",
+  "Online pickup is full for the hour ending {time}. 1 online guest has been turned away this hour.":
+    "到 {time} 为止的这一小时线上自取已满。本小时已婉拒 1 位线上顾客。",
+  "Online pickup is full for the hour ending {time}. {count} online guests have been turned away this hour.":
+    "到 {time} 为止的这一小时线上自取已满。本小时已婉拒 {count} 位线上顾客。",
+  "Online pickup has room again. 1 online guest was turned away this hour.":
+    "线上自取又有名额了。本小时曾婉拒 1 位线上顾客。",
+  "Online pickup has room again. {count} online guests were turned away this hour.":
+    "线上自取又有名额了。本小时曾婉拒 {count} 位线上顾客。",
+  "Counter orders still go through. Cancel any unpaid counter order whose customer has left: it holds a place.":
+    "柜台单照常可以下。顾客已离开、还没付款的柜台单请取消：它占着名额。",
+
   "The bill could not be read again; showing the last update. Trying again by itself.":
     "账单暂时无法重新读取，显示的是上次的内容，正在自动重试。",
   "The network dropped, so this may not have gone through. Once you're connected, check whether the change is there before you do it again.":

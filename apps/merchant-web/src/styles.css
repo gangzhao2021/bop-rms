@@ -7650,6 +7650,24 @@ body:has(.product-complete-draft) .bop-shell__header,
 .order-queue-stale {
   border-color: var(--bop-color-warning);
 }
+/* DEC-CHECKOUT-SESSION-OUTAGE: online pickup is full this hour, or has turned guests away. */
+.order-queue-pickup-full {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--bop-color-warning);
+  border-radius: var(--bop-radius-control);
+  font-size: 14px;
+}
+.order-queue-pickup-full p {
+  margin: 0;
+}
+.order-queue-pickup-full p:first-child {
+  font-weight: 600;
+}
+.order-queue-pickup-full p + p {
+  margin-top: 4px;
+  color: var(--bop-color-text-muted);
+}
 /* WP-2423 (2026-10-16 v15): ingredients of an ended order returned to stock. */
 .order-queue-released {
   border-color: var(--bop-color-success-mark);

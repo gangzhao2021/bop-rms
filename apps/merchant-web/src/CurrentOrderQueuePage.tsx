@@ -98,6 +98,7 @@ import {
   isAwaitingAcceptance,
   ordersAwaitingAcceptance,
   type OrderPickupContact,
+  type PickupHourNotice,
 } from "./current-order-queue-client.js";
 import {
   floorServerProblemHeading,
@@ -3386,6 +3387,58 @@ function SoundIcon({ on }: { readonly on: boolean }) {
   );
 }
 
+/**
+ * DEC-CHECKOUT-SESSION-OUTAGE (review, v15 Test Merchant 2): online pickup guests were turned away
+ * for about 25 minutes while counter staff saw nothing. While the hour is full, or once it has
+ * turned guests away, Orders says so, with what staff can do: counter orders still go through, and
+ * an unpaid counter order whose customer left holds a place until it is cancelled.
+ */
+export function PickupHourNoticeLine({
+  notice,
+  timeZone,
+}: {
+  readonly notice: PickupHourNotice;
+  readonly timeZone: string | undefined;
+}) {
+  const until = storeTime(notice.endsAt, timeZone);
+  const count = String(notice.turnedAway);
+  return (
+    <div className="order-queue-pickup-full" role="status">
+      <p>
+        {notice.full
+          ? notice.turnedAway === 0
+            ? t(
+                "Online pickup is full for the hour ending {time}. New online orders are turned away.",
+                {
+                  time: until,
+                },
+              )
+            : notice.turnedAway === 1
+              ? t(
+                  "Online pickup is full for the hour ending {time}. 1 online guest has been turned away this hour.",
+                  { time: until },
+                )
+              : t(
+                  "Online pickup is full for the hour ending {time}. {count} online guests have been turned away this hour.",
+                  { time: until, count },
+                )
+          : notice.turnedAway === 1
+            ? t("Online pickup has room again. 1 online guest was turned away this hour.")
+            : t("Online pickup has room again. {count} online guests were turned away this hour.", {
+                count,
+              })}
+      </p>
+      {notice.full ? (
+        <p>
+          {t(
+            "Counter orders still go through. Cancel any unpaid counter order whose customer has left: it holds a place.",
+          )}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 export function CurrentOrderQueuePage({
   storeLabel,
   csrf,
@@ -4117,6 +4170,9 @@ export function CurrentOrderQueuePage({
                         storeReference={pauseStoreReference}
                         fetcher={fetcher}
                       />
+                    )}
+                    {state.view.pickupHour === undefined ? null : (
+                      <PickupHourNoticeLine notice={state.view.pickupHour} timeZone={timeZone} />
                     )}
                   </>
                 )}

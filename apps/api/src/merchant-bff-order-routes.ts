@@ -289,6 +289,7 @@ export function installMerchantOrderRoutes(
           items: view.items.filter((item) => item.earlierDay !== true).map(row),
           nextAfterOrderReference: view.nextAfterOrderReference,
           ...(view.paidOrderWatch === undefined ? {} : { paidOrderWatch: view.paidOrderWatch }),
+          ...(view.pickupHour === undefined ? {} : { pickupHour: view.pickupHour }),
         });
       })
       .catch((error: unknown) => refundReadFailure(response, error));

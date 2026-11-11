@@ -566,6 +566,31 @@ export interface UnreadableQueuedOrder {
   readonly orderType: "DineIn" | "Pickup" | null;
   readonly phase: string | null;
 }
+/**
+ * DEC-CHECKOUT-SESSION-OUTAGE (review): online pickup this hour, as staff are told it on Orders —
+ * full (counter orders still go through) until `endsAt`, and how many online guests it turned away.
+ */
+export interface PickupHourNotice {
+  readonly full: boolean;
+  readonly endsAt: string;
+  readonly turnedAway: number;
+}
+function parsePickupHour(value: unknown): PickupHourNotice {
+  const raw = exact(value, ["full", "endsAt", "turnedAway"]);
+  if (
+    typeof raw.full !== "boolean" ||
+    typeof raw.endsAt !== "string" ||
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(raw.endsAt) ||
+    !Number.isSafeInteger(raw.turnedAway) ||
+    (raw.turnedAway as number) < 0
+  )
+    return fail();
+  return Object.freeze({
+    full: raw.full,
+    endsAt: raw.endsAt,
+    turnedAway: raw.turnedAway as number,
+  });
+}
 export function parseCurrentOrderQueue(value: unknown, after: string | null = null) {
   // WP-2423 (2026-10-16 v15): earlier-day Orders listed with today's (older tables with a round
   // today, Orders still holding stock) come apart from the page (absent from an older server).
@@ -574,13 +599,18 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
   // DEC-PAID-ORDER-AUTO-ACCEPT: only at a Store that has it on or has orders from it.
   const withWatch =
     value !== null && typeof value === "object" && Object.hasOwn(value, "paidOrderWatch");
+  // DEC-CHECKOUT-SESSION-OUTAGE: only while online pickup is full or has turned guests away.
+  const withPickupHour =
+    value !== null && typeof value === "object" && Object.hasOwn(value, "pickupHour");
   const raw = exact(value, [
     ...(withEarlier ? ["earlierDayItems"] : []),
     ...(withWatch ? ["paidOrderWatch"] : []),
+    ...(withPickupHour ? ["pickupHour"] : []),
     "items",
     "nextAfterOrderReference",
   ]);
   const paidOrderWatch = parsePaidOrderWatch(raw.paidOrderWatch);
+  const pickupHour = withPickupHour ? parsePickupHour(raw.pickupHour) : null;
   // The page holds up to 50 Orders; earlier-day Orders (first page only) up to 50 more. An older
   // server mixed both in `items`.
   if (
@@ -1308,6 +1338,7 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
     nextAfterOrderReference: next,
     /** DEC-PAID-ORDER-AUTO-ACCEPT: absent at a Store that does not use it. */
     ...(paidOrderWatch === null ? {} : { paidOrderWatch }),
+    ...((pickupHour === null ? {} : { pickupHour }) as { readonly pickupHour?: PickupHourNotice }),
     unreadable: Object.freeze(unreadable),
   });
 }

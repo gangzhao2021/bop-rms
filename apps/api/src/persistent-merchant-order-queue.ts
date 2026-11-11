@@ -48,6 +48,7 @@ import {
   listStorePickupAcceptanceDeadlines,
   listStoreUncollectedPickupOrders,
   listOrderPickupHandoffActors,
+  readCurrentPickupHour,
 } from "@rms/fulfillment";
 import {
   cardMachinePaymentTakenMinor,
@@ -492,6 +493,17 @@ export function createPersistentMerchantOrderQueue(options: {
               : await withOptionalRead(
                   businessTransaction,
                   () => readPaidOrderWatch(businessTransaction, ownerScope, String(source.now())),
+                  null,
+                );
+          // DEC-CHECKOUT-SESSION-OUTAGE (review): staff are told when online pickup is full this
+          // hour and how many online guests it turned away. An unreadable answer never blanks Orders.
+          const pickupHour =
+            ownerScope === null || input.orderReference !== undefined
+              ? null
+              : await withOptionalRead(
+                  businessTransaction,
+                  () =>
+                    readCurrentPickupHour(businessTransaction, ownerScope, String(source.now())),
                   null,
                 );
           const automaticBatches = [...autoAcceptance]
@@ -1818,6 +1830,16 @@ export function createPersistentMerchantOrderQueue(options: {
             pickupContact,
             paymentPosition,
             ...(moneyTakenBack === null ? {} : { moneyTakenBack }),
+            // DEC-CHECKOUT-SESSION-OUTAGE: only while the hour is full or has turned guests away.
+            ...(pickupHour === null || (!pickupHour.full && pickupHour.turnedAway === 0)
+              ? {}
+              : {
+                  pickupHour: Object.freeze({
+                    full: pickupHour.full,
+                    endsAt: pickupHour.endsAt,
+                    turnedAway: pickupHour.turnedAway,
+                  }),
+                }),
             // DEC-PAID-ORDER-AUTO-ACCEPT: only at a Store that has it on or has orders from it.
             ...(paidOrderWatch === null
               ? {}

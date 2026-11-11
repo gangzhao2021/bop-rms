@@ -52,6 +52,31 @@ it("preserves current version and validates newest-first pagination", () => {
     parseCurrentOrderQueue({ items: [row(2)], nextAfterOrderReference: null }, id(1)),
   ).toThrow();
 });
+it("DEC-CHECKOUT-SESSION-OUTAGE: reads when online pickup is full and how many guests it turned away", () => {
+  const pickupHour = { full: true, endsAt: "2026-11-11T22:00:00.000Z", turnedAway: 6 };
+  expect(
+    parseCurrentOrderQueue({ items: [row(1)], nextAfterOrderReference: null, pickupHour })
+      .pickupHour,
+  ).toEqual(pickupHour);
+  expect(
+    parseCurrentOrderQueue({ items: [row(1)], nextAfterOrderReference: null }),
+  ).not.toHaveProperty("pickupHour");
+  for (const broken of [
+    { ...pickupHour, turnedAway: -1 },
+    { ...pickupHour, turnedAway: 1.5 },
+    { ...pickupHour, full: "yes" },
+    { ...pickupHour, endsAt: "22:00" },
+    { ...pickupHour, extra: 1 },
+    null,
+  ])
+    expect(() =>
+      parseCurrentOrderQueue({
+        items: [row(1)],
+        nextAfterOrderReference: null,
+        pickupHour: broken,
+      }),
+    ).toThrow();
+});
 it("WP-2423 (2026-10-16 v15): a full page with earlier-day Orders holding stock still reads", () => {
   // The v15 answer that blanked the Orders page: 50 Orders of the page with a next page, plus 18
   // Orders of earlier days whose stock is still set aside (listed first, under today).
