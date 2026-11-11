@@ -14,6 +14,8 @@ import {
   createCustomerCartSelectionInventory,
   createCustomerCartStockCoverage,
 } from "../../apps/api/dist/customer-cart-selection-inventory.js";
+/** WP-2423 (checkout-session-outage): a failure the API can log by its code (never a message). */
+const coded = (code) => Object.assign(new Error(code), { code });
 export function createInternalCheckout(resources, configuredEntry, catalogOptions) {
   const { scope, transactions, now, credentials } = resources,
     reference = credentials.reference;
@@ -119,10 +121,10 @@ export function createInternalCheckout(resources, configuredEntry, catalogOption
     const catalog = {
       async validateSelection(selection) {
         const authority = await access.authorize(request, selection.observedAt);
-        if (!authority) throw new Error("INTERNAL_CHECKOUT_AUTHORITY_UNAVAILABLE");
+        if (!authority) throw coded("INTERNAL_CHECKOUT_AUTHORITY_UNAVAILABLE");
         const cart = await carts.load(request.cartReference);
         if (!cart || cart.aggregateVersion !== request.cartVersion)
-          throw new Error("INTERNAL_CHECKOUT_CART_CHANGED");
+          throw coded("INTERNAL_CHECKOUT_CART_CHANGED");
         // Stock is checked per configuration: the same item with the same options.
         const configuration = (selections) =>
           JSON.stringify(
@@ -181,10 +183,10 @@ export function createInternalCheckout(resources, configuredEntry, catalogOption
     const stock = {
       async covers({ lines, observedAt }) {
         const authority = await access.authorize(request, observedAt);
-        if (!authority) throw new Error("INTERNAL_CHECKOUT_AUTHORITY_UNAVAILABLE");
+        if (!authority) throw coded("INTERNAL_CHECKOUT_AUTHORITY_UNAVAILABLE");
         const cart = await carts.load(request.cartReference);
         if (!cart || cart.aggregateVersion !== request.cartVersion)
-          throw new Error("INTERNAL_CHECKOUT_CART_CHANGED");
+          throw coded("INTERNAL_CHECKOUT_CART_CHANGED");
         const own = new Map(cart.items.map((item) => [item.cartItemReference, item]));
         const options = (selections) =>
           JSON.stringify(
@@ -202,7 +204,7 @@ export function createInternalCheckout(resources, configuredEntry, catalogOption
             line.quantity < 1 ||
             line.quantity > item.quantity
           )
-            throw new Error("INTERNAL_CHECKOUT_STOCK_LINE_UNKNOWN");
+            throw coded("INTERNAL_CHECKOUT_STOCK_LINE_UNKNOWN");
         }
         // Ordering asks one question at a time; each holds the guest's Cart access open (as the
         // selection check above does) while Inventory answers.

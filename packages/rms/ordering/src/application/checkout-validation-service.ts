@@ -84,7 +84,14 @@ function version(value: unknown): number {
 }
 
 function dependency<T>(operation: Promise<T>): Promise<T> {
-  return operation.catch(() => fail("CHECKOUT_DEPENDENCY_UNAVAILABLE"));
+  // WP-2423 (checkout-session-outage): the owner's failure stays behind the plain answer (never
+  // shown, never enumerated), so the API can log its code.
+  return operation.catch((cause: unknown) => {
+    const error = new CheckoutValidationError("CHECKOUT_DEPENDENCY_UNAVAILABLE");
+    if (cause !== null && typeof cause === "object")
+      Object.defineProperty(error, "cause", { value: cause, enumerable: false });
+    throw error;
+  });
 }
 
 function sessionScope(sessionValue: unknown, cart: CartAggregate, observedAt: OrderingInstant) {

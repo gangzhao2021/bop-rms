@@ -253,6 +253,29 @@ describe("Checkout Session creation", () => {
     await expect(listed.create(f.input)).rejects.toMatchObject({ code: "REQUOTE_REQUIRED" });
     expect(f.counts().writes).toBe(0);
   });
+  it("WP-2423 (checkout-session-outage): a full pickup hour is its own answer, and an unexpected failure keeps its cause for the log", async () => {
+    const f = setup();
+    const full = createCheckoutSessionService({
+      ...f.ports,
+      validate: async () => {
+        throw new CheckoutSessionServiceError("PICKUP_FULL");
+      },
+    });
+    await expect(full.create(f.input)).rejects.toMatchObject({ code: "PICKUP_FULL" });
+    expect(f.counts().writes).toBe(0);
+    const owner = Object.assign(new Error("not shown"), { code: "ASAP_CAPACITY_CONFLICT" });
+    const failing = createCheckoutSessionService({
+      ...f.ports,
+      validate: async () => {
+        throw owner;
+      },
+    });
+    const error = await failing.create(f.input).catch((value: unknown) => value);
+    expect(error).toMatchObject({ code: "DEPENDENCY_UNAVAILABLE" });
+    expect((error as { cause?: unknown }).cause).toBe(owner);
+    expect(Object.keys(error as object)).not.toContain("cause");
+    expect(f.counts().writes).toBe(0);
+  });
   it("WP-2423 M03: refuses a checkout of dishes already ordered before allocating anything", async () => {
     const f = setup();
     const asked: unknown[] = [];

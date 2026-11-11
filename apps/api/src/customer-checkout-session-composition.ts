@@ -14,6 +14,7 @@ import {
   createCustomerCheckoutSessionAuthorization,
   type CustomerCheckoutSessionAuthorizationOptions,
 } from "./customer-checkout-session-authorization.js";
+import { withFailureCause } from "./customer-failure-diagnostic.js";
 
 export interface CustomerCheckoutSessionOptions extends CustomerCheckoutSessionAuthorizationOptions {
   readonly quoteVersion: 1 | 2;
@@ -96,7 +97,8 @@ export function createCustomerCheckoutSessionComposition(options: CustomerChecko
         }).create(command);
       } catch (error) {
         if (error instanceof CheckoutSessionServiceError) throw error;
-        throw new CheckoutSessionServiceError("DEPENDENCY_UNAVAILABLE");
+        // WP-2423 (checkout-session-outage): the cause is kept for the log line, never shown.
+        throw withFailureCause(new CheckoutSessionServiceError("DEPENDENCY_UNAVAILABLE"), error);
       }
     },
   });

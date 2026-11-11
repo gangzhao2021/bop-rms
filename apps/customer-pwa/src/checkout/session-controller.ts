@@ -12,7 +12,15 @@ export type CheckoutSessionState =
   | { readonly status: "idle" | "pending" }
   | { readonly status: "ready"; readonly session: CheckoutSessionView }
   | {
-      readonly status: "unknown" | "denied" | "conflict" | "invalid" | "offline" | "store_closed";
+      readonly status:
+        | "unknown"
+        | "denied"
+        | "conflict"
+        | "invalid"
+        | "offline"
+        | "store_closed"
+        /** WP-2423: this hour's online pickup orders are full; the same checkout may try again. */
+        | "pickup_full";
       readonly canRetry: boolean;
     }
   | {
@@ -141,10 +149,14 @@ export function createCheckoutSessionController(
               : "unknown";
         publish({
           status: code,
-          // WP-2423 Q4: a closed Store may reopen; the same checkout can be retried then.
+          // WP-2423 Q4: a closed Store may reopen; the same checkout can be retried then. A full
+          // pickup hour frees a place when an unpaid order lapses, or the next hour opens.
           canRetry:
             attempt.current() &&
-            (code === "unknown" || code === "offline" || code === "store_closed"),
+            (code === "unknown" ||
+              code === "offline" ||
+              code === "store_closed" ||
+              code === "pickup_full"),
         });
       } finally {
         flight = null;

@@ -44,6 +44,8 @@ export class CheckoutSessionClientError extends Error {
       | "requote_required"
       /** WP-2423 M03: these dishes are already in an order; nothing was created or charged. */
       | "already_ordered"
+      /** WP-2423: this hour's online pickup orders are full; nothing was created or charged. */
+      | "pickup_full"
       | "unknown",
     /** WP-2423: the server's bounded wait before retrying, when it sent one. */
     readonly retryAfterSeconds: number | null = null,
@@ -156,6 +158,10 @@ export function createCheckoutSessionClient() {
         throw new CheckoutSessionClientError("item_unavailable", null, refusedLine(payload, false));
       if (response.status === 409 && errorCode(payload) === "checkout_session_requote_required")
         throw new CheckoutSessionClientError("requote_required");
+      // WP-2423 (checkout-session-outage): the kitchen's online pickup orders for this hour are
+      // full. Not an outage: never asked again by itself; the guest may try again shortly.
+      if (response.status === 409 && errorCode(payload) === "checkout_session_pickup_full")
+        throw new CheckoutSessionClientError("pickup_full", retryAfterSeconds(response));
       // WP-2423 M03: these dishes are already in an order (another tab, a stale page): the page
       // opens that order instead of asking the guest to change a cart that can't be paid.
       if (response.status === 409 && errorCode(payload) === "checkout_session_already_ordered")

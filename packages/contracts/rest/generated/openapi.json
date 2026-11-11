@@ -249,7 +249,8 @@
                   "checkout_session_intent_conflict",
                   "checkout_session_service_unavailable",
                   "checkout_session_item_short",
-                  "checkout_session_item_unavailable"
+                  "checkout_session_item_unavailable",
+                  "checkout_session_pickup_full"
                 ]
               },
               "messageKey": {

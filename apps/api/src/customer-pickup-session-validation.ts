@@ -1,5 +1,6 @@
 import { GuestSessionService, parseCanonicalInstant, parseGuestRawCredential } from "@bop/identity";
 import {
+  CheckoutSessionServiceError,
   createCheckoutValidationService,
   createConfiguredCheckoutValidationService,
   parseCheckoutSessionAllocation,
@@ -22,6 +23,18 @@ type Options<V extends 1 | 2> = Pick<
 const unavailable = (): never => {
   throw new CheckoutValidationError("CHECKOUT_DEPENDENCY_UNAVAILABLE");
 };
+/**
+ * WP-2423 (checkout-session-outage, v15 2026-11-11): Fulfillment refused the pickup because this
+ * hour's pickup capacity is taken (counter orders count against it too). By name and code: the
+ * pilot can load Fulfillment as two copies.
+ */
+function isPickupFull(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    error.name === "AsapCapacityError" &&
+    (error as { code?: unknown }).code === "ASAP_CAPACITY_INSUFFICIENT"
+  );
+}
 function create<V extends 1 | 2>(
   options: Options<V>,
   quoteVersion: V,
@@ -131,7 +144,15 @@ function create<V extends 1 | 2>(
       },
     };
     // Prepare before validation's observation so owner evidence cannot originate in its future.
-    const prepared = await preparation.prepare(prepareInput);
+    let prepared: Awaited<ReturnType<typeof preparation.prepare>>;
+    try {
+      prepared = await preparation.prepare(prepareInput);
+    } catch (error) {
+      // The guest is told the hour is full (nothing created or charged), never "try again later"
+      // as if the system were down.
+      if (isPickupFull(error)) throw new CheckoutSessionServiceError("PICKUP_FULL");
+      throw error;
+    }
     if (prepared.record.paymentOperationReference !== allocation.paymentOperationReference)
       return unavailable();
     const ports = { ...options.checkout, authorization: { authorize }, fulfillment };

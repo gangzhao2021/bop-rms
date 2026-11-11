@@ -6,6 +6,8 @@ import {
 } from "@rms/ordering";
 import type { Request, RequestHandler, Response } from "express";
 import { checkoutHoldRetrySeconds } from "./customer-checkout-hold.js";
+import { customerFailureCode } from "./customer-failure-diagnostic.js";
+import { markRequestFailure } from "./request-correlation.js";
 
 export const customerCheckoutSessionReadRoute = "/api/v1/checkout-sessions/:checkout_session_id";
 export const customerCheckoutSessionRoute = "/api/v1/carts/:cart_id/checkout-sessions";
@@ -43,7 +45,7 @@ function refusedLine(error: CheckoutSessionServiceError) {
 function reject(
   response: Response,
   status: number,
-  explicit?: "store_closed" | "checkout_in_progress" | "requote_required",
+  explicit?: "store_closed" | "checkout_in_progress" | "requote_required" | "pickup_full",
 ) {
   if (explicit === "checkout_in_progress") {
     // DEC-DINING-ANY-PARTICIPANT-SUBMIT: same code as the Cart and quote refusals.
@@ -157,9 +159,12 @@ export class CustomerCheckoutSessionHandler {
                   ITEM_SHORT: 409,
                   REQUOTE_REQUIRED: 409,
                   ALREADY_ORDERED: 409,
+                  PICKUP_FULL: 409,
                 } as const
               )[error.code]
             : 503;
+        // WP-2423 (checkout-session-outage): a 503 logs what caused it, as a code (no PII).
+        if (status === 503) markRequestFailure(request, customerFailureCode(error));
         // WP-2423: say which item is short (or can't be sold) and how many are left; nothing was
         // created or charged, and the guest's Cart stays as it is.
         if (
@@ -210,6 +215,14 @@ export class CustomerCheckoutSessionHandler {
           reject(response, 409, "checkout_in_progress");
           return;
         }
+        // WP-2423 (checkout-session-outage): this hour's online pickup orders are full. A place
+        // can free up (an unpaid order lapses) or the next hour opens: the guest may try again in
+        // a minute, and is never told the system is down.
+        if (error instanceof CheckoutSessionServiceError && error.code === "PICKUP_FULL") {
+          response.setHeader("Retry-After", "60");
+          reject(response, 409, "pickup_full");
+          return;
+        }
         // WP-2423 Q4: say plainly that the Store is not taking orders; nothing was charged.
         reject(
           response,
@@ -249,13 +262,15 @@ export class CustomerCheckoutSessionHandler {
           },
         });
       } catch {
+        markRequestFailure(request, "CHECKOUT_SESSION_RESULT_INVALID");
         reject(response, 503);
       }
     };
   }
 }
-export const unavailableCustomerCheckoutSessionHandler: RequestHandler = (_request, response) => {
+export const unavailableCustomerCheckoutSessionHandler: RequestHandler = (request, response) => {
   protect(response);
+  markRequestFailure(request, "CHECKOUT_SESSION_NOT_CONFIGURED");
   reject(response, 503);
 };
 
@@ -298,6 +313,11 @@ export class CustomerCheckoutSessionReadHandler {
       try {
         result = await this.#port.read(input);
       } catch (error) {
+        if (
+          !(error instanceof CheckoutSessionServiceError) ||
+          error.code === "DEPENDENCY_UNAVAILABLE"
+        )
+          markRequestFailure(request, customerFailureCode(error));
         reject(
           response,
           error instanceof CheckoutSessionServiceError
@@ -313,6 +333,7 @@ export class CustomerCheckoutSessionReadHandler {
                   ITEM_SHORT: 409,
                   REQUOTE_REQUIRED: 409,
                   ALREADY_ORDERED: 409,
+                  PICKUP_FULL: 409,
                 } as const
               )[error.code]
             : 503,
@@ -335,6 +356,7 @@ export class CustomerCheckoutSessionReadHandler {
           },
         });
       } catch {
+        markRequestFailure(request, "CHECKOUT_SESSION_RESULT_INVALID");
         reject(response, 503);
       }
     };

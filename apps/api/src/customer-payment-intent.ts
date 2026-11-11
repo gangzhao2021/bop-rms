@@ -263,6 +263,7 @@ function failure(error: unknown) {
         ITEM_SHORT: 409,
         REQUOTE_REQUIRED: 409,
         ALREADY_ORDERED: 409,
+        PICKUP_FULL: 409,
       } as const
     )[error.code];
   if (error instanceof PaymentTipSelectionError)

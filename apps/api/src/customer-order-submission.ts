@@ -101,6 +101,8 @@ function failure(error: unknown): Failure {
       ITEM_SHORT: "order_requote_required",
       REQUOTE_REQUIRED: "order_requote_required",
       ALREADY_ORDERED: "order_already_ordered",
+      // Not raised by submission: pickup capacity is taken when checkout starts.
+      PICKUP_FULL: "order_service_unavailable",
     } as const;
     return codes[error.code];
   }

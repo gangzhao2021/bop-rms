@@ -85,7 +85,10 @@ export class CheckoutSessionServiceError extends Error {
       | "REQUOTE_REQUIRED"
       /** WP-2423 M03: these dishes are already in an Order (`placedOrder` names the guest's
        * own); nothing was created and nothing will be charged again. */
-      | "ALREADY_ORDERED",
+      | "ALREADY_ORDERED"
+      /** WP-2423 (checkout-session-outage): this hour's online pickup orders are full (the
+       * Store's pickup capacity); nothing was created or charged. A place may free up. */
+      | "PICKUP_FULL",
     readonly heldUntil: string | null = null,
     readonly line: CheckoutLineRefusal | null = null,
     readonly placedOrder: PlacedOrderReference | null = null,
@@ -132,6 +135,16 @@ function cartMovedOn(error: unknown): boolean {
 }
 const fail = (code: CheckoutSessionServiceError["code"]): never => {
   throw new CheckoutSessionServiceError(code);
+};
+/**
+ * WP-2423 (checkout-session-outage): an unexpected failure keeps what caused it (never shown,
+ * never enumerated), so the API can log its code; the guest still gets the plain answer.
+ */
+const unavailableBecause = (cause: unknown): never => {
+  const error = new CheckoutSessionServiceError("DEPENDENCY_UNAVAILABLE");
+  if (cause !== null && typeof cause === "object")
+    Object.defineProperty(error, "cause", { value: cause, enumerable: false });
+  throw error;
 };
 function request(value: unknown): CheckoutSessionRequest {
   try {
@@ -296,14 +309,14 @@ export function createCheckoutSessionService(ports: CheckoutSessionPorts) {
             await refuseOrdered(orderedAuthority);
           } catch (ordered) {
             if (ordered instanceof CheckoutSessionServiceError) throw ordered;
-            return fail("DEPENDENCY_UNAVAILABLE");
+            return unavailableBecause(ordered);
           }
         }
         if (error instanceof CheckoutSessionServiceError) throw error;
         const refusal = checkoutItemRefusal(error);
         if (refusal !== null) throw refusal;
         if (cartMovedOn(error)) return fail("INTENT_CONFLICT");
-        return fail("DEPENDENCY_UNAVAILABLE");
+        return unavailableBecause(error);
       }
     },
   });

@@ -362,3 +362,72 @@ it("reads a current-authorized session through GET without disclosing owner oper
   read.mockResolvedValue({ ...session, checkoutSessionReference: id(90) });
   expect((await fetch(url, { headers })).status).toBe(503);
 });
+
+/**
+ * WP-2423 (checkout-session-outage, v15 2026-11-11): for about 25 minutes every online pickup
+ * checkout at one Store answered 503 "service unavailable" with no logged cause. The cause was
+ * the Store's pickup hour being full (Fulfillment's ASAP_CAPACITY_INSUFFICIENT, rewritten to
+ * DEPENDENCY_UNAVAILABLE). A full hour is a plain 409 the guest can act on; any 503 logs its cause.
+ */
+async function logged(create: CustomerCheckoutSessionPort["create"]) {
+  const entries: { statusCode?: number; error?: unknown }[] = [];
+  const server = createServer(
+    createApp({
+      requestLogger: { info: (entry: unknown) => entries.push(entry as never) },
+      customerCheckoutSession: new CustomerCheckoutSessionHandler({
+        port: { quoteVersion: 1, create },
+        allowedOrigin: "https://customer.example",
+      }),
+    }),
+  );
+  servers.push(server);
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const response = await fetch(
+    "http://127.0.0.1:" +
+      (server.address() as AddressInfo).port +
+      "/api/v1/carts/" +
+      id(3) +
+      "/checkout-sessions",
+    {
+      method: "POST",
+      headers: {
+        origin: "https://customer.example",
+        "sec-fetch-site": "same-origin",
+        "content-type": "application/json",
+        "idempotency-key": id(11),
+        "x-csrf-token": "c".repeat(43),
+        cookie: "__Host-bop-guest=" + "s".repeat(43),
+      },
+      body: JSON.stringify({ cartVersion: 4, quoteReference: id(4) }),
+    },
+  );
+  await vi.waitFor(() => expect(entries.length).toBe(1));
+  return { response, entry: entries[0] };
+}
+it("answers a full pickup hour with 409 pickup_full and a short Retry-After, never 503", async () => {
+  const { response } = await logged(
+    vi.fn().mockRejectedValue(new CheckoutSessionServiceError("PICKUP_FULL")),
+  );
+  expect(response.status).toBe(409);
+  expect(response.headers.get("retry-after")).toBe("60");
+  expect(await response.json()).toEqual({
+    schemaVersion: 1,
+    error: {
+      code: "checkout_session_pickup_full",
+      messageKey: "customer.checkoutSession.pickup_full",
+    },
+  });
+});
+it("logs the cause of a 503 as its code, and nothing else from the error", async () => {
+  const failure = new CheckoutSessionServiceError("DEPENDENCY_UNAVAILABLE");
+  Object.defineProperty(failure, "cause", {
+    value: Object.assign(new Error("guest@example.test cart " + id(3)), {
+      code: "ASAP_CAPACITY_CONFLICT",
+    }),
+  });
+  const { response, entry } = await logged(vi.fn().mockRejectedValue(failure));
+  expect(response.status).toBe(503);
+  expect(entry?.statusCode).toBe(503);
+  expect(entry?.error).toEqual({ code: "ASAP_CAPACITY_CONFLICT", value: undefined });
+  expect(JSON.stringify(entry)).not.toContain("guest@example.test");
+});

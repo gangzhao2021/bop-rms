@@ -28,6 +28,8 @@ export function checkoutSessionAlert(
       return pageOffline ? null : checkoutText.offline;
     case "store_closed":
       return checkoutText.storeClosed;
+    case "pickup_full":
+      return checkoutText.pickupFull;
     case "checkout_in_progress":
       return checkoutInProgressMessage(state.retryAfterSeconds);
     case "unknown":

@@ -208,6 +208,9 @@ const CheckoutSessionErrorBody = z
           // WP-2423: 409, the Store's stock can't make the Cart as it stands (nothing created).
           "checkout_session_item_short",
           "checkout_session_item_unavailable",
+          // WP-2423 (checkout-session-outage): 409, this hour's online pickup orders are full;
+          // nothing was created or charged (Retry-After: a place may free up).
+          "checkout_session_pickup_full",
         ]),
         messageKey: z.string().regex(/^customer\.checkoutSession\.[a-z_]+$/u),
         // WP-2423: the guest's own Cart line the refusal is about; `available` (item_short only)

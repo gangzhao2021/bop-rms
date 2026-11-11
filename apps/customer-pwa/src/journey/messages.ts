@@ -1082,6 +1082,15 @@ export const checkoutText = Object.freeze({
       "The store isn’t taking new orders right now — it’s closed, or the kitchen has stopped taking orders for today — so this order hasn’t been charged. To add something, ask a staff member.",
     );
   },
+  /**
+   * WP-2423 (checkout-session-outage): the kitchen has taken all the online pickup orders it can
+   * make this hour (orders at the counter count too). Said plainly, with what the guest can do.
+   */
+  get pickupFull() {
+    return t(
+      "The kitchen is fully booked for pickup orders right now, so this order hasn’t been charged. A spot often opens within a few minutes: try again shortly, or order at the counter.",
+    );
+  },
   /** WP-2423: the restaurant listed a menu change while this guest was checking out. */
   get menuUpdatedPricedAgain() {
     return t(
