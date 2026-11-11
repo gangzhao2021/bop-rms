@@ -4,6 +4,7 @@ import { defineConfig } from "vite";
 import { loadEnv } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
 import { shouldUseLocalCustomerDemoEntry } from "./src/customer-demo-entry.js";
+import { customerContentSecurityPolicy } from "./scripts/content-security-policy.mjs";
 
 export default defineConfig(({ command, mode }) => {
   const candidate = loadEnv(mode, ".", "BOP_").BOP_DEPLOYMENT_ID ?? "local-dev";
@@ -60,5 +61,7 @@ export default defineConfig(({ command, mode }) => {
       }),
     ],
     build: { target: "es2024" },
+    // M106: the production-build proof serves pages under the customer policy the pilot sends.
+    preview: { headers: { "Content-Security-Policy": customerContentSecurityPolicy } },
   };
 });

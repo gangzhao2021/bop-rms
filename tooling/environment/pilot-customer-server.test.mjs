@@ -96,7 +96,9 @@ test("a Pilot Store serves pickup entry on its address but no DEMO launcher, leg
           (response) => {
             let body = "";
             response.on("data", (chunk) => (body += chunk));
-            response.on("end", () => resolve({ status: response.statusCode, body }));
+            response.on("end", () =>
+              resolve({ status: response.statusCode, body, headers: response.headers }),
+            );
           },
         );
         call.on("error", reject);
@@ -127,6 +129,21 @@ test("a Pilot Store serves pickup entry on its address but no DEMO launcher, leg
       "/bff/internal-test/pickup-entry",
       "/bff/internal-test/dining-entry?table=table-1",
     ]);
+    // M106: every customer page (the shell at any address, and its offline page) is served under
+    // the customer Content-Security-Policy; the staff app keeps its own answer.
+    const { customerContentSecurityPolicy } =
+      await import("../../apps/customer-pwa/scripts/content-security-policy.mjs");
+    for (const path of ["/", "/menu", "/cart", "/offline.html"]) {
+      const page = await get(path);
+      expect(page.status, path).toBe(200);
+      expect(page.headers["content-security-policy"], path).toBe(customerContentSecurityPolicy);
+    }
+    expect((await get("/app")).headers["content-security-policy"]).not.toBe(
+      customerContentSecurityPolicy,
+    );
+    expect(customerContentSecurityPolicy).toMatch(/(?:^|; )script-src 'self'[^;]*(?:;|$)/u);
+    expect(customerContentSecurityPolicy).not.toContain("unsafe-inline");
+    expect(customerContentSecurityPolicy).toContain("frame-ancestors 'none'");
     for (const path of ["/internal-test/dining", "/internal-test/staff"]) {
       const page = await get(path);
       expect(page.body, path).not.toContain("DEMO_STAFF_LOGIN");

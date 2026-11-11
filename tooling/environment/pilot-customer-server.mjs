@@ -40,6 +40,7 @@ import {
   publicApiEncoding,
 } from "./pilot-static-assets.mjs";
 import { INTERNAL_CUSTOMER_ORIGIN } from "./pilot-hosting.mjs";
+import { customerContentSecurityPolicy } from "../../apps/customer-pwa/scripts/content-security-policy.mjs";
 import { isInternalTest, isPilotRuntime, matchesPilotEnvironment } from "./pilot-environment.mjs";
 const require = createRequire(new URL("../../apps/api/package.json", import.meta.url));
 const express = require("express");
@@ -568,6 +569,12 @@ export async function startInternalCustomerServer({
     if (productImageDirectory !== undefined)
       app.get("/media/images/:name", createPilotProductImages(productImageDirectory).fileHandler);
     const assets = resolve("apps/customer-pwa/dist");
+    // M106: the customer pages (the app shell and its offline page) carry the customer policy.
+    const customerPolicy = (_req, res, next) => {
+      res.setHeader("Content-Security-Policy", customerContentSecurityPolicy);
+      next();
+    };
+    app.get(["/index.html", "/offline.html"], customerPolicy);
     app.use(createPilotStaticAssets(assets));
     const merchantAssets = resolve("apps/merchant-web/dist");
     app.use(createPilotStaticAssets(merchantAssets));
@@ -575,8 +582,8 @@ export async function startInternalCustomerServer({
     app.get([...pilotMerchantAppPaths], (_req, res) =>
       res.set("Cache-Control", "no-store").sendFile(resolve(merchantAssets, "index.html")),
     );
-    app.get("/{*path}", (_req, res) =>
-      res.set("Cache-Control", "no-store").sendFile(resolve(assets, "index.html")),
+    app.get("/{*path}", customerPolicy, (_req, res) =>
+      res.set("Cache-Control", "no-store").sendFile("index.html", { root: assets }),
     );
     const secure = { key: await readFile(keyFile), cert: await readFile(certificateFile) };
     // WP-2423: `front` states each guest's address only when hosting.json says it can.
