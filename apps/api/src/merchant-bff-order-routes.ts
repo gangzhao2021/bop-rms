@@ -148,7 +148,11 @@ function orderQueueRow(item: MerchantOrderQueueItem) {
       // DEC-PAID-ORDER-AUTO-ACCEPT: only where they apply, so a tablet at a Store without it keeps
       // reading the list it knows.
       ...(batch.acceptedAutomaticallyAt === undefined
-        ? {}
+        ? // WP-2423 M10/M14 (DEC-OWNER-DEFAULTS-2026-11-06 item 2): a paid batch still waiting,
+          // which whoever may accept it may decline ("Can't make it"); sent only then.
+          batch.canCantMake === true
+          ? { canCantMake: true as const }
+          : {}
         : {
             acceptedAutomaticallyAt: batch.acceptedAutomaticallyAt,
             canCantMake: batch.canCantMake === true,

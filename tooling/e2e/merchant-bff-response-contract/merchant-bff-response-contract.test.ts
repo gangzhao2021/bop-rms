@@ -1079,6 +1079,41 @@ describe("merchant BFF responses carry every read-model field the browser parses
     ]);
   });
 
+  it("WP-2423 M10/M14: Can't make it on a paid pickup still waiting reaches the page", async () => {
+    // v15 batch 5: the read model offered it, the BFF kept it only for an automatic acceptance,
+    // so a cashier saw Accept alone on a paid order nobody had accepted yet.
+    const {
+      acceptedAutomaticallyAt: _at,
+      reachedKitchen: _reached,
+      kept: _kept,
+      canKeep: _canKeep,
+      notSentAutomatically: _notSent,
+      ...waitingBatch
+    } = heldPickup.batches[0]!;
+    const waiting = {
+      ...heldPickup,
+      orderReference: id(0x903),
+      acceptanceHold: null,
+      batches: [{ ...waitingBatch, canCantMake: true }],
+    } as unknown as QueueItem;
+    for (const offered of [true, false]) {
+      stub("orderQueue").mockResolvedValue({
+        ...queueView,
+        items: [
+          {
+            ...waiting,
+            batches: [{ ...waiting.batches[0]!, canCantMake: offered }],
+          } as unknown as QueueItem,
+        ],
+      });
+      const view = await throughClient(() =>
+        createCurrentOrderQueueClient(fetcher).load(null, signal()),
+      );
+      expect(view.items[0]?.batches[0]?.canCantMake).toBe(offered);
+      expect(view.items[0]?.batches[0]?.acceptedAutomaticallyAt ?? null).toBeNull();
+    }
+  });
+
   it("order detail", async () => {
     for (const model of [detailView, pickupDetailView]) {
       stub("orderQueue").mockResolvedValue(model);
