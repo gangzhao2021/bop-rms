@@ -78,6 +78,11 @@ export interface OrdersSummary {
    * payment. Pickup readiness is a Fulfillment fact (the pickup queue), so pickups are not counted.
    */
   readonly readyToServe: number;
+  /**
+   * WP-2423 (M23): orders not yet accepted that hold a dish sold out or off the menu since it was
+   * ordered (Orders marks them "Has a dish sold out now"). Absent when none.
+   */
+  readonly soldOutNow?: number;
   /** Whether any open order is dine-in; a pickup-only Store has nothing to serve at tables. */
   readonly dineIn: boolean;
   /** The first page was full; there are more open orders than counted here. */
@@ -190,6 +195,9 @@ export function summarizeOrders(queue: CurrentOrderQueue, now = Date.now()): Ord
           ? order.currentPhase === "Ready"
           : order.readyToServeItemCount > 0),
     ).length,
+    ...((count) => (count > 0 ? { soldOutNow: count } : {}))(
+      open.filter((order) => order.soldOutNow === true).length,
+    ),
     dineIn: dineIn.length > 0,
     more: queue.nextAfterOrderReference !== null,
     servedDineIn: new Set(
@@ -539,6 +547,20 @@ export function attentionItems(
         detail: t(
           "{orders} paid but not in the kitchen, or not refunded as it should be. Open each on Orders to see what to do.",
           { orders: countOf(o.paidStuck, "order") },
+        ),
+        state: t("Needs you"),
+        tone: "danger",
+        href: "/operations/orders",
+        action: t("View orders"),
+      });
+    // WP-2423 (M23): first, so staff offer a swap or cancel that dish before accepting.
+    if ((o.soldOutNow ?? 0) > 0)
+      items.push({
+        key: "sold-out-now",
+        title: t("Orders with a dish sold out since it was ordered"),
+        detail: t(
+          "{orders} waiting to be accepted. Open each on Orders: offer the guest a swap, or cancel that dish with a refund.",
+          { orders: countOf(o.soldOutNow ?? 0, "order") },
         ),
         state: t("Needs you"),
         tone: "danger",

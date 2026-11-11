@@ -397,6 +397,33 @@ describe("WP-2423 P2 store overview", () => {
       ["Open exceptions", "3 open · None overdue"],
     ]);
   });
+  it("WP-2423 (M23): an order holding a dish sold out since it was ordered is named on Home first", () => {
+    const queue = parseCurrentOrderQueue(currentOrderQueueFixture(), null);
+    const marked = {
+      ...queue,
+      items: queue.items.map((order) =>
+        isAwaitingAcceptance(order) ? { ...order, soldOutNow: true as const } : order,
+      ),
+    };
+    const summary = summarizeOrders(marked);
+    expect(summary.soldOutNow).toBe(1);
+    expect(summarizeOrders(queue).soldOutNow).toBeUndefined();
+    const items = attentionItems(
+      { ...initialOverviewState, orders: { kind: "Ready", value: summary } },
+      null,
+    );
+    expect(items.map((item) => [item.key, item.title, item.detail, item.tone]).slice(0, 2)).toEqual(
+      [
+        [
+          "sold-out-now",
+          "Orders with a dish sold out since it was ordered",
+          "1 order waiting to be accepted. Open each on Orders: offer the guest a swap, or cancel that dish with a refund.",
+          "danger",
+        ],
+        ["orders", "Orders waiting to be accepted", expect.any(String), "warning"],
+      ],
+    );
+  });
   it("WP-2423 M04: a paid order that did not reach the kitchen comes first among orders", () => {
     const items = attentionItems(
       {
