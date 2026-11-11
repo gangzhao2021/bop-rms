@@ -1695,6 +1695,32 @@ it("the real staff round command takes a round from table entry to the card mach
         await rows("SELECT count(*)::int AS n FROM rms_payment.card_machine_payment"),
         paymentsBefore,
       );
+      // DEC-PAPER-ORDER-PAID-AT-SEND (v15 batch-5 review): a paper send checks its paid-at the same
+      // way before anything is placed (the pilot composition, as the pilot API role), so a time
+      // the payment record would refuse never leaves a placed, unpaid paper order behind.
+      const { paperPaidAtCheck } = await store.counterFor(server);
+      await assert.rejects(
+        paperPaidAtCheck({
+          ...as(server),
+          takenAt: new Date(Date.parse(opening) - 1).toISOString(),
+        }),
+        { code: "CARD_MACHINE_TAKEN_BEFORE_RECORDS" },
+      );
+      await assert.rejects(
+        paperPaidAtCheck({
+          ...as(server),
+          takenAt: new Date(Date.now() + 5 * 60_000).toISOString(),
+        }),
+        { code: "CARD_MACHINE_INPUT_INVALID" },
+      );
+      await paperPaidAtCheck({
+        ...as(server),
+        takenAt: new Date(Math.max(Date.parse(opening) + 1000, Date.now() - 60_000)).toISOString(),
+      });
+      assert.deepEqual(
+        await rows("SELECT count(*)::int AS n FROM rms_payment.card_machine_payment"),
+        paymentsBefore,
+      );
       // WP-2423 (v15 fabf0261): the first round was sent live in the system, so it is paid as it
       // is recorded. A back-dated paid-at for it (the counter and Orders never send one) is
       // refused and nothing is written; only a round taken on paper has an earlier paid-at.

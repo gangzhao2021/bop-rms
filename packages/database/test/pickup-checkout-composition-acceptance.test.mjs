@@ -131,9 +131,12 @@ it.each([
   [true, true, true],
   // WP-2423 M127: a live counter order nobody paid for is cancelled by a manager (pilot ACL).
   [true, false, true],
+  // DEC-PAPER-ORDER-PAID-AT-SEND: a paper counter order paid in cash during the outage is recorded
+  // as the send records it, at its cash total with no change.
+  [true, true, true, "Cash"],
 ])(
-  "prepares Pickup through persisted Identity, Cart, Quote and shared capacity with original recovery (configured=%s, positive=%s, counter=%s)",
-  async (configured, positive, counter) => {
+  "prepares Pickup through persisted Identity, Cart, Quote and shared capacity with original recovery (configured=%s, positive=%s, counter=%s, paper=%s)",
+  async (configured, positive, counter, paperTender = "CardMachine") => {
     await withIsolatedDatabase({ caseId: "wp2402_pickup" }, async (env) => {
       const checkoutJourney = { tenantReference: id(1) };
       const admin = new Client(env.clientConfig);
@@ -1440,6 +1443,7 @@ it.each([
             at: observedAt,
             positive,
             pilot,
+            paperTender,
           });
           // The cancelled order's journey ends with its cancellation (the other cases cover the rest).
           if (pilot !== null) return;

@@ -7,6 +7,7 @@ import {
   createPaymentStatusEventConsumerService,
   createPostgresCardMachinePaymentStore,
   createPostgresPaymentStatusStore,
+  roundCashTotal,
 } from "../../rms/payment/src/index.ts";
 import { createOrderPaidContextSource } from "../../../apps/api/src/order-paid-context-source.ts";
 import { createOrderCapturedPaymentSource } from "../../../apps/api/src/order-captured-payment-source.ts";
@@ -14,7 +15,12 @@ import { createCustomerOrderPaymentClaimAdmission } from "../../../apps/api/src/
 import { createCustomerIntactReservationPaymentAction } from "../../../apps/api/src/customer-payment-workflow-action.ts";
 import { createCustomerInventoryPaymentClaimAdmission } from "../../../apps/api/src/customer-inventory-payment-admission.ts";
 import { createCustomerCapacityPaymentClaimAdmission } from "../../../apps/api/src/customer-capacity-payment-admission.ts";
-import { createMerchantCardMachinePayment } from "../../../apps/api/src/merchant-card-machine-payment.ts";
+import {
+  createMerchantCardMachinePayment,
+  createMerchantPaperPaidAtCheck,
+} from "../../../apps/api/src/merchant-card-machine-payment.ts";
+import { recordPaperOrderPayment } from "../../../apps/api/src/merchant-paper-order-payment.ts";
+import { readStoreFirstConfigurationGoverningFrom } from "../../rms/store/src/index.ts";
 import { createMerchantCounterOrderCancellation } from "../../../apps/api/src/merchant-counter-order-cancellation.ts";
 import { createPersistentMerchantOrderQueue } from "../../../apps/api/src/persistent-merchant-order-queue.ts";
 import { seedMerchantAcceptanceSession } from "./merchant-acceptance-session.mjs";
@@ -47,7 +53,14 @@ export async function exerciseCounterCardMachinePayment({
    * manager cancels it as the pilot API role (exactly the rendered pilot ACL). The journey ends there.
    */
   pilot = null,
+  /**
+   * DEC-PAPER-ORDER-PAID-AT-SEND: how the paper order was paid during the outage. Its payment is
+   * recorded the way the counter send records it (the paid-at checked before placing, then the
+   * payment command the send composes at the server's total; cash at the cash total, no change).
+   */
+  paperTender = "CardMachine",
 }) {
+  const paperCash = paperTender === "Cash";
   const id = (n) => "01909995-0000-7000-8000-" + n.toString(16).padStart(12, "0");
   let sequence = 0x5000;
   const next = () => id(++sequence);
@@ -153,9 +166,13 @@ export async function exerciseCounterCardMachinePayment({
       orderReference: String(order.order.orderReference),
       orderBatchReference: String(batch.orderBatchReference),
       expectedTotalMinor: amounts.total.amountMinor.toString(),
-      slipReference: "AUTH 482913",
+      slipReference: paperCash ? null : "AUTH 482913",
       // A paper order paid during an outage, entered once the system was back.
       takenAt: new Date(Date.parse(at) - 20 * 60_000).toISOString(),
+      // Paid in cash during the outage: the cash total was taken and the change given then.
+      ...(paperCash
+        ? { tenderedMinor: roundCashTotal(amounts.total.amountMinor).roundedMinor.toString() }
+        : {}),
       ...overrides,
     },
   });
@@ -164,7 +181,7 @@ export async function exerciseCounterCardMachinePayment({
       await admin.query(
         "SELECT (SELECT count(*)::int FROM rms_payment.card_machine_payment) AS payments," +
           "(SELECT count(*)::int FROM platform_eventing.outbox_event WHERE event_type='PaymentSucceeded') AS events," +
-          "(SELECT count(*)::int FROM platform_audit.audit_record WHERE action_code='PAYMENT_CARD_MACHINE_RECORDED') AS audits",
+          "(SELECT count(*)::int FROM platform_audit.audit_record WHERE action_code IN ('PAYMENT_CARD_MACHINE_RECORDED','PAYMENT_COUNTER_CASH_RECORDED')) AS audits",
       )
     ).rows[0];
   const before = await counts();
@@ -320,8 +337,68 @@ export async function exerciseCounterCardMachinePayment({
   merchant.allowed = true;
   assert.deepEqual(await counts(), before);
 
-  const paid = await command(payInput());
+  // v15 batch-5 review: the send checks the paid-at as the payment record will, before anything is
+  // placed: a time after the server's now (a device clock ahead), one past the back-entry window
+  // and one before the Store's records begin are refused, and nothing is written.
+  const paidAtCheck = createMerchantPaperPaidAtCheck({
+    persistence: { transactions: runner, now: () => new Date().toISOString() },
+    authentication: { authorize: async () => ({ sessionReference: merchant.sessionReference }) },
+  });
+  const auth = { sessionCookie: merchant.cookie, csrf: "synthetic-csrf" };
+  const paperTakenAt = payInput().command.takenAt;
+  await paidAtCheck({ ...auth, takenAt: paperTakenAt });
+  await assert.rejects(
+    paidAtCheck({ ...auth, takenAt: new Date(Date.now() + 5 * 60_000).toISOString() }),
+    { code: "CARD_MACHINE_INPUT_INVALID" },
+  );
+  await assert.rejects(
+    paidAtCheck({ ...auth, takenAt: new Date(Date.now() - 73 * 60 * 60_000).toISOString() }),
+    { code: "CARD_MACHINE_INPUT_INVALID" },
+  );
+  const opening = await runner.run((tx) =>
+    readStoreFirstConfigurationGoverningFrom(tx, ownerScope),
+  );
+  if (opening !== null && Date.now() - Date.parse(opening) < 72 * 60 * 60_000)
+    await assert.rejects(
+      paidAtCheck({ ...auth, takenAt: new Date(Date.parse(opening) - 1000).toISOString() }),
+      { code: "CARD_MACHINE_TAKEN_BEFORE_RECORDS" },
+    );
+  merchant.allowed = false;
+  await assert.rejects(paidAtCheck({ ...auth, takenAt: paperTakenAt }), {
+    code: "CARD_MACHINE_PERMISSION_DENIED",
+  });
+  merchant.allowed = true;
+  assert.deepEqual(await counts(), before);
+
+  // The send's own composition: the payment command at the server's total, as paid.
+  const answer = await recordPaperOrderPayment(
+    command,
+    auth,
+    {
+      orderReference: String(order.order.orderReference),
+      orderBatchReference: String(batch.orderBatchReference),
+      totalMinor: amounts.total.amountMinor.toString(),
+    },
+    {
+      operationReference: id(1),
+      tender: paperTender,
+      slipReference: paperCash ? null : "AUTH 482913",
+      takenAt: paperTakenAt,
+    },
+  );
+  assert.ok("payment" in answer, JSON.stringify(answer));
+  const paid = answer.payment;
   assert.equal(paid.status, "Recorded");
+  if (paperCash) {
+    // The cash total (rounded to 5 cents) as taken, change 0: given during the outage.
+    const cashTotal = roundCashTotal(amounts.total.amountMinor);
+    assert.deepEqual(paid.cash, {
+      cashTotalMinor: cashTotal.roundedMinor.toString(),
+      roundingMinor: cashTotal.roundingMinor.toString(),
+      tenderedMinor: cashTotal.roundedMinor.toString(),
+      changeMinor: "0",
+    });
+  } else assert.equal(paid.cash, undefined);
   assert.equal(paid.amountMinor, amounts.total.amountMinor.toString());
   assert.equal(paid.recordingReason, "RecordedAfterOutage");
   assert.deepEqual(await counts(), {
@@ -367,7 +444,7 @@ export async function exerciseCounterCardMachinePayment({
     authorize: async () => true,
   });
   const saved = await runner.run((tx) => cards.loadByOperation(tx, id(1)));
-  assert.equal(saved.slipReference, "AUTH 482913");
+  assert.equal(saved.slipReference, paperCash ? null : "AUTH 482913");
   assert.equal(saved.paymentOperationReference, clock.paymentOperationReference);
   assert.equal(saved.preparation.tip.amountMinor, amounts.tip.amountMinor);
   const event = (
@@ -387,24 +464,43 @@ export async function exerciseCounterCardMachinePayment({
       to: new Date(Date.now() + 60_000).toISOString(),
     }),
   );
-  assert.deepEqual(day, {
+  const none = {
+    paymentCount: 0,
+    backEnteredCount: 0,
+    takenMinor: 0n,
+    tipMinor: 0n,
+    refundCount: 0,
+    refundedMinor: 0n,
+  };
+  const taken = {
     paymentCount: 1,
     backEnteredCount: 1,
     takenMinor: amounts.total.amountMinor,
     tipMinor: amounts.tip.amountMinor,
     refundCount: 0,
     refundedMinor: 0n,
-    // WP-2423 M52: the counter's cash, apart from the machine.
-    cash: {
-      paymentCount: 0,
-      backEnteredCount: 0,
-      takenMinor: 0n,
-      tipMinor: 0n,
-      roundingMinor: 0n,
-      refundCount: 0,
-      refundedMinor: 0n,
-    },
-  });
+  };
+  // A paper cash sale counts in the day's cash at its cash total (its rounding apart), never on
+  // the machine; a paper card sale on the machine.
+  const cashRounding = roundCashTotal(amounts.total.amountMinor).roundingMinor;
+  assert.deepEqual(
+    day,
+    paperCash
+      ? {
+          ...none,
+          // WP-2423 M52: the counter's cash, apart from the machine.
+          cash: {
+            ...taken,
+            takenMinor: amounts.total.amountMinor + cashRounding,
+            roundingMinor: cashRounding,
+          },
+        }
+      : {
+          ...taken,
+          // WP-2423 M52: the counter's cash, apart from the machine.
+          cash: { ...none, roundingMinor: 0n },
+        },
+  );
 
   const paymentScope = { ...ownerScope, providerAccountReference: id(90), environment: "Test" };
   const paymentEvent = await runner.run(
@@ -485,12 +581,25 @@ export async function exerciseCounterCardMachinePayment({
         assert.equal(item.sourceChannel, "Pos");
         assert.deepEqual(item.counter, {
           recordedAfterOutage: true,
-          paidOnCardMachine: {
-            amountMinor: amounts.total.amountMinor.toString(),
-            takenAt: String(saved.takenAt),
-            recordedAfterOutage: true,
-            refundedMinor: "0",
-          },
+          paidOnCardMachine: paperCash
+            ? {
+                // Orders shows the paper cash sale at its cash total, its change 0.
+                amountMinor: roundCashTotal(amounts.total.amountMinor).roundedMinor.toString(),
+                takenAt: String(saved.takenAt),
+                recordedAfterOutage: true,
+                refundedMinor: "0",
+                cash: {
+                  changeMinor: "0",
+                  roundingMinor: roundCashTotal(amounts.total.amountMinor).roundingMinor.toString(),
+                  tenderedMinor: roundCashTotal(amounts.total.amountMinor).roundedMinor.toString(),
+                },
+              }
+            : {
+                amountMinor: amounts.total.amountMinor.toString(),
+                takenAt: String(saved.takenAt),
+                recordedAfterOutage: true,
+                refundedMinor: "0",
+              },
           // Paid: nothing left to charge and no release time.
           payBy: null,
           amountDueMinor: null,
