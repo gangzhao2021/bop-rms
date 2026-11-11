@@ -1329,6 +1329,16 @@
 .orders-page .order-row__paid {
   white-space: nowrap;
 }
+/* v15 batch 7: the amount stays on one line, but how it was paid ("Paid at the table · guest's
+   phone · Refunded $5.00") wraps inside its column instead of pushing the page sideways. */
+.orders-page .order-workbench-amount {
+  min-width: 0;
+}
+.orders-page .order-row__paid {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: end;
+}
 @container order-list (min-width: 513px) and (max-width: 800px) {
   .orders-page .order-row {
     grid-template-columns: minmax(0, 1fr) 9.5rem;

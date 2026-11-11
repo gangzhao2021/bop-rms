@@ -259,6 +259,8 @@
 .table-checkout__totals dd {
   margin: 0;
   font-variant-numeric: tabular-nums;
+  /* v15 batch 7: an amount never breaks across lines ("−$10" / ".00"); its label wraps instead. */
+  white-space: nowrap;
 }
 .table-checkout__total {
   font-size: 20px;

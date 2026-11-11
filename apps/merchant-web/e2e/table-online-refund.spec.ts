@@ -23,7 +23,7 @@ const refund = (state: string) => ({
   state,
 });
 
-async function orderPage(page: Page, reads: () => unknown) {
+async function orderPage(page: Page, reads: () => unknown, refundedMinor?: string) {
   const scope = {
     brandLabel: "Synthetic Brand",
     storeLabel: "Synthetic Store",
@@ -90,7 +90,11 @@ async function orderPage(page: Page, reads: () => unknown) {
             canViewPayments: true,
             tableBill: {
               totalMinor: "4000",
-              paid: { amountMinor: "4600", method: "Online" },
+              paid: {
+                amountMinor: "4600",
+                method: "Online",
+                ...(refundedMinor === undefined ? {} : { refundedMinor }),
+              },
             },
           },
         ],
@@ -300,3 +304,42 @@ test("@production a refund on a PIN sign-in asks to confirm it's you, not for a 
   await expect(page.getByRole("region", { name: "Confirm it's you" })).toBeVisible();
   await expect(page.getByText("A manager refunds this payment", { exact: false })).toHaveCount(0);
 });
+
+// v15 batch 7: a table order with a refund says so on its row ("Paid at the table · guest's
+// phone · Refunded $10.00") without pushing the page sideways, with the order open beside it.
+for (const width of [1440, 1024, 390])
+  test(`@production a refunded table order's row fits at ${width} with the order open`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await orderPage(
+      page,
+      () => ({
+        orderReference: id(1),
+        payment: { ...payment, onlineRefunds: [refund("Refunded")], refundableMinor: "3600" },
+        parts: [],
+      }),
+      "1000",
+    );
+    await page.goto("/operations/orders");
+    await expect(
+      page.getByRole("button", { name: "Refund to the card", exact: true }),
+    ).toBeVisible();
+    if (width !== 390)
+      await expect(page.locator(".order-row__paid").first()).toContainText("Refunded $10.00");
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    );
+    expect(overflow).toBeLessThanOrEqual(0);
+    // The refunded amount in the order reads on one line, never "−$10" then ".00".
+    const lines = await page
+      .locator(".table-payment dd", { hasText: "$10.00" })
+      .first()
+      .evaluate((dd) => {
+        const range = document.createRange();
+        range.selectNodeContents(dd);
+        return new Set([...range.getClientRects()].map((rect) => Math.round(rect.top))).size;
+      });
+    expect(lines).toBe(1);
+    await page.screenshot({ path: `test-results/orders-table-refund-row-${width}.png` });
+  });
