@@ -23,7 +23,8 @@ function parseTableBill(
   readonly partlyPaid?: {
     readonly remainingMinor: string;
     readonly paidParts: number;
-    readonly partCount: number;
+    /** Null: guests are paying by dish (a part per payment, no fixed count). */
+    readonly partCount: number | null;
   };
   readonly paid: {
     readonly amountMinor: string;
@@ -86,7 +87,7 @@ function parseTableBill(
       typeof parts.remainingMinor !== "string" ||
       !minorAmount.test(parts.remainingMinor) ||
       !Number.isSafeInteger(parts.paidParts) ||
-      !Number.isSafeInteger(parts.partCount)
+      (parts.partCount !== null && !Number.isSafeInteger(parts.partCount))
     )
       return fail();
     return Object.freeze({
@@ -94,7 +95,7 @@ function parseTableBill(
       partlyPaid: Object.freeze({
         remainingMinor: parts.remainingMinor,
         paidParts: parts.paidParts as number,
-        partCount: parts.partCount as number,
+        partCount: parts.partCount as number | null,
       }),
       paid: null,
     });

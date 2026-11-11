@@ -5566,6 +5566,18 @@ async function journey(journeyEnding) {
           );
           assert.equal(half.owed.totalMinor, (totalMinor - unitMinor).toString());
           assert.equal(half.rounds[0].paid, false);
+          // v15 batch 7: the Tables list says what is left and how many paid by dish, never a
+          // number of parts ("1 of 1 parts paid" while money is still due).
+          const halfQueued = await createPersistentMerchantOrderQueue({
+            persistence: persistenceOf(server),
+            quoteVersion: 1,
+            acceptanceConfigured: true,
+          })({ sessionCookie: server.sessionCookie, afterOrderReference: null, orderReference });
+          assert.deepEqual(halfQueued.items[0].tableBill.partlyPaid, {
+            remainingMinor: (totalMinor - unitMinor).toString(),
+            paidParts: 1,
+            partCount: null,
+          });
           // Phone A still showed "Pay the whole table" (no split when it opened): the table
           // changed, it is told so (never "invalid"), and nothing is started or recorded.
           const intentsBefore = created();

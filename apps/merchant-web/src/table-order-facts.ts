@@ -27,7 +27,8 @@ export interface TableOrderFacts {
     readonly partlyPaid?: {
       readonly remainingMinor: string;
       readonly paidParts: number;
-      readonly partCount: number;
+      /** Null: guests are paying by dish (no fixed number of parts). */
+      readonly partCount: number | null;
     };
     readonly paid: { readonly amountMinor: string } | null;
   } | null;

@@ -291,12 +291,18 @@ export function tableNeed(
       rank: 3,
       words: t("Waiting for payment"),
       // Owner 2026-11-03 walkthrough: part by part, what is still to collect.
+      // v15 batch 7: guests paying by dish have no number of parts; never "1 of 1 paid".
       detail: order?.bill?.partlyPaid
-        ? t("{amount} to go · {paid} of {count} parts paid", {
-            amount: cad(order.bill.partlyPaid.remainingMinor),
-            paid: String(order.bill.partlyPaid.paidParts),
-            count: String(order.bill.partlyPaid.partCount),
-          })
+        ? order.bill.partlyPaid.partCount === null
+          ? t("{amount} to go · paying by dish, {paid} paid", {
+              amount: cad(order.bill.partlyPaid.remainingMinor),
+              paid: String(order.bill.partlyPaid.paidParts),
+            })
+          : t("{amount} to go · {paid} of {count} parts paid", {
+              amount: cad(order.bill.partlyPaid.remainingMinor),
+              paid: String(order.bill.partlyPaid.paidParts),
+              count: String(order.bill.partlyPaid.partCount),
+            })
         : order?.bill
           ? cad(order.bill.totalMinor)
           : null,

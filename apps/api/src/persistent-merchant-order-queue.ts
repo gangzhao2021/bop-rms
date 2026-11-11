@@ -660,7 +660,8 @@ export function createPersistentMerchantOrderQueue(options: {
               partlyPaid?: {
                 remainingMinor: string;
                 paidParts: number;
-                partCount: number;
+                /** Null: guests are paying by dish (a part per payment, no fixed count). */
+                partCount: number | null;
               };
               paid: {
                 amountMinor: string;
@@ -1399,7 +1400,8 @@ export function createPersistentMerchantOrderQueue(options: {
                             owed - parts.reduce((sum, entry) => sum + entry.roundsMinor, 0n)
                           ).toString(),
                           paidParts: parts.length,
-                          partCount: plan.parts.length,
+                          // Guests paying by dish add a part with each payment: no count yet.
+                          partCount: plan.mode === "ByGuests" ? null : plan.parts.length,
                         },
                       }
                     : {}),

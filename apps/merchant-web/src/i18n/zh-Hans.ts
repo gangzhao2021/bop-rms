@@ -6176,6 +6176,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Needs attention": "需要处理",
   "Part {number} paid by": "第 {number} 份付款方式",
   "{amount} to go · {paid} of {count} parts paid": "还差 {amount} · 已付 {paid}/{count} 份",
+  "{amount} to go · paying by dish, {paid} paid": "还差 {amount} · 按菜付，已付 {paid} 笔",
   "Table {table}: {amount} cash received. Change {change}.":
     "{table} 号桌：已收现金 {amount}，找零 {change}。",
   "Table {table}: {amount} received on the card machine.": "{table} 号桌：刷卡机已收 {amount}。",

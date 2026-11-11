@@ -57,6 +57,20 @@ it("WP-2423 item 8 ①: names what each table needs, with its one next step", ()
       now,
     ),
   ).toMatchObject({ detail: "$11.54 to go · 2 of 3 parts paid", step: "TakePayment" });
+  // v15 batch 7: guests paying by dish have no number of parts, so never "1 of 1 parts paid".
+  expect(
+    tableNeed(
+      table(8, { session: { phase: "Closing", version: 3, orderReference: id(208) } }),
+      facts({
+        bill: {
+          totalMinor: "4238",
+          partlyPaid: { remainingMinor: "2825", paidParts: 1, partCount: null },
+          paid: null,
+        },
+      }),
+      now,
+    ),
+  ).toMatchObject({ detail: "$28.25 to go · paying by dish, 1 paid", step: "TakePayment" });
   // Owner 2026-11-03: before its bill is read, a table checking out is never said to owe.
   expect(
     tableNeed(
