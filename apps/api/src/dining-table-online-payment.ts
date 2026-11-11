@@ -13,6 +13,7 @@ import {
 import {
   diningTableFreeUnits,
   diningTableGuestPart,
+  publicBill as publicBillOf,
   readDiningTableBill,
   roundOrdersOf,
   tableTipMinor,
@@ -299,10 +300,11 @@ export function createDiningTableOnlinePayments(options: DiningTableOnlinePaymen
           attempt.outcome === null &&
           attempt.guestSessionReference === authority.guestSessionReference,
       ) ?? attempts.find((attempt) => attempt.outcome === null && attempt.part === null);
-    const { settlementRecord, splitPlanRecord, dishAdders, splitRounds, ...publicBill } = current;
-    void settlementRecord;
-    void dishAdders;
-    void splitRounds;
+    // M89 (v15 batch 8): the bill's public fields only, as every staff read sends them. The
+    // owner's working rows (the dishes a split is worked out from) hold bigint amounts, which no
+    // JSON answer can carry: the staff stop was recorded, then failed to answer.
+    const { splitPlanRecord } = current;
+    const publicBill = publicBillOf(current);
     const mineParts = new Set(
       (splitPlanRecord?.guestParts ?? [])
         .filter(

@@ -5909,6 +5909,9 @@ async function journey(journeyEnding) {
           })({ ...as(server), command: { diningSessionReference: sessionReference } });
           assert.equal(stopped.status, "Stopped");
           assert.equal(stopped.bill.onlinePayment?.status, "Cancelled");
+          // M89 (v15 batch 8): the answer is written as JSON, as the staff route writes it (a
+          // bigint left in the bill turned the recorded stop into a 503).
+          assert.equal(JSON.parse(JSON.stringify(stopped)).bill.onlinePayment?.status, "Cancelled");
           assert.equal(intents.get("pi_TEST000002").status, "Cancelled");
           assert.deepEqual(
             await rows(
@@ -5946,6 +5949,7 @@ async function journey(journeyEnding) {
           })({ ...as(server), command: { diningSessionReference: sessionReference } });
           assert.equal(stoppedAgain.status, "Stopped");
           assert.equal(stoppedAgain.bill.onlinePayment?.status, "Cancelled");
+          assert.equal(JSON.parse(JSON.stringify(stoppedAgain)).status, "Stopped");
           assert.equal(intents.get("pi_TEST000003").status, "Cancelled");
 
           // ── The guest comes back and pays: captured → the table's one payment, by round.
