@@ -185,22 +185,30 @@ export function staffRoundPaymentNotice(
   return minutes <= staffRoundUrgentMinutes
     ? {
         tier: "urgent",
-        text: t(
-          "{minutes} min left: record the card-machine payment for {value} entered by staff by {at}, or {value2} cancelled.",
-          {
-            minutes: String(minutes),
-            value: count === 1 ? "the round" : "the rounds",
-            at: at,
-            value2: count === 1 ? "it is" : "they are",
-          },
-        ),
+        // v15 batch 8: whole sentences per count, so no English word sits in the Chinese.
+        text:
+          count === 1
+            ? t(
+                "{minutes} min left: record the card-machine payment for the round entered by staff by {at}, or it is cancelled.",
+                { minutes: String(minutes), at },
+              )
+            : t(
+                "{minutes} min left: record the card-machine payment for the rounds entered by staff by {at}, or they are cancelled.",
+                { minutes: String(minutes), at },
+              ),
       }
     : {
         tier: "warning",
-        text: t(
-          "{rounds} entered by staff {value} card-machine payment. Record it by {at}; the kitchen starts once it is recorded.",
-          { rounds: rounds, value: count === 1 ? "awaits" : "await", at: at },
-        ),
+        text:
+          count === 1
+            ? t(
+                "A round entered by staff is waiting for its card-machine payment. Record it by {at}; the kitchen starts once it is recorded.",
+                { at },
+              )
+            : t(
+                "{rounds} entered by staff are waiting for their card-machine payment. Record them by {at}; the kitchen starts once they are recorded.",
+                { rounds, at },
+              ),
       };
 }
 

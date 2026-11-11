@@ -1,6 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, it } from "vitest";
+import { setLanguageForTest } from "./i18n/i18n.js";
 import {
   DiningEntryCode,
   elapsedText,
@@ -68,7 +69,7 @@ it("WP-2423 item 5: warns before a staff round's payment time ends, urgently in 
   expect(staffRoundPaymentNotice(table, now, "America/Toronto")).toBeNull();
   expect(staffRoundPaymentNotice(waiting, now, "America/Toronto")).toEqual({
     tier: "warning",
-    text: "A round entered by staff awaits card-machine payment. Record it by 08:30; the kitchen starts once it is recorded.",
+    text: "A round entered by staff is waiting for its card-machine payment. Record it by 08:30; the kitchen starts once it is recorded.",
   });
   expect(
     staffRoundPaymentNotice(waiting, Date.parse(payBy) - 4 * 60_000 - 1, "America/Toronto"),
@@ -82,8 +83,27 @@ it("WP-2423 item 5: warns before a staff round's payment time ends, urgently in 
   expect(ended?.text).toContain("refund it on the machine");
   const two = { ...waiting, staffRoundsAwaitingPayment: [{ payBy }, { payBy }] };
   expect(staffRoundPaymentNotice(two, now, "America/Toronto")?.text).toMatch(
-    /^2 rounds entered by staff await/u,
+    /^2 rounds entered by staff are waiting/u,
   );
+  // v15 batch 8: in Chinese every word is Chinese (no "awaits", "the round" or "it is").
+  setLanguageForTest("zh-Hans");
+  try {
+    for (const [notice, at] of [
+      [waiting, now],
+      [waiting, Date.parse(payBy) - 4 * 60_000 - 1],
+      [two, now],
+      [two, Date.parse(payBy) - 4 * 60_000 - 1],
+    ] as const) {
+      const text = staffRoundPaymentNotice(notice, at, "America/Toronto")?.text ?? "";
+      expect(text).toMatch(/[\u4e00-\u9fff]/u);
+      expect(text).not.toMatch(/[A-Za-z]{2,}/u);
+    }
+    expect(staffRoundPaymentNotice(waiting, now, "America/Toronto")?.text).toBe(
+      "员工录入的一轮正在等待刷卡机付款。请在 08:30 前记录；记录后后厨才开始制作。",
+    );
+  } finally {
+    setLanguageForTest("en");
+  }
 });
 
 it("WP-2423 follow-up: a table with an open session reads as seated, never available", () => {

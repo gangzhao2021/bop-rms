@@ -132,13 +132,16 @@ export function guestsLeftRoundText(
             "{name}: not paid, no money was taken. It is being cancelled automatically now; check again in a minute.",
             { name: name },
           )
-        : t(
-            "{name}: not paid, no money was taken. It will be cancelled now (otherwise automatically{value}); nothing is refunded.",
-            {
-              name: name,
-              value: round.cancelsAt === null ? "" : " at " + storeTime(round.cancelsAt, timeZone),
-            },
-          );
+        : // v15 batch 8: the time is part of a whole sentence, never an English "at" in Chinese.
+          round.cancelsAt === null
+          ? t(
+              "{name}: not paid, no money was taken. It will be cancelled now (otherwise automatically); nothing is refunded.",
+              { name },
+            )
+          : t(
+              "{name}: not paid, no money was taken. It will be cancelled now (otherwise automatically at {at}); nothing is refunded.",
+              { name, at: storeTime(round.cancelsAt, timeZone) },
+            );
     case "WaitingForStaff":
       // WP-2423 item 8 ⑤: never sent to the kitchen, never cancelled by time; closing cancels it.
       return t(

@@ -5912,8 +5912,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{minutes} min ago": "{minutes} 分钟前",
   "{minutes} min left to charge · released at {at} if unpaid":
     "还剩 {minutes} 分钟收款 · 未付款将于 {at} 释放",
-  "{minutes} min left: record the card-machine payment for {value} entered by staff by {at}, or {value2} cancelled.":
-    "还剩 {minutes} 分钟：请在 {at} 前为员工录入的{value}记录刷卡机付款，否则{value2}会被取消。",
   "{minutes} min left: record the payment by {at} or the order is released and its items go back to stock.":
     "还剩 {minutes} 分钟：请在 {at} 前记录付款，否则订单会被释放，商品退回库存。",
   "{minutes} min left: record the payment by {at} or this round is cancelled and its items go back to stock.":
@@ -5948,8 +5946,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "{name}：从未发送到后厨，且已全额退款。它将被关闭；不会再退款。",
   "{name}: not paid, no money was taken. It is being cancelled automatically now; check again in a minute.":
     "{name}：未付款，没有收取任何费用。正在自动取消；请一分钟后再查看。",
-  "{name}: not paid, no money was taken. It will be cancelled now (otherwise automatically{value}); nothing is refunded.":
-    "{name}：未付款，没有收取任何费用。现在会被取消（否则会自动取消{value}）；不会退款。",
   "{name}: paid {value} on the card machine but never sent to the kitchen. It will be cancelled; then refund it on the card machine and record that on the Orders page.":
     "{name}：已用刷卡机付款 {value}，但从未发送到后厨。它将被取消；之后请在刷卡机上退款，并在订单页记录。",
   "{name}: paid {value} online but never sent to the kitchen. It will be cancelled and the guest refunded.":
@@ -6001,8 +5997,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{rounds} awaiting acceptance in {orders}": "{orders}中有 {rounds} 等待接单",
   "{rounds} entered by staff wasn't paid by {at} and is being cancelled; it won't go to the kitchen. If the card machine was charged, refund it on the machine.":
     "员工录入的{rounds}未在 {at} 前付款，正在取消；不会发送到后厨。如果刷卡机已收款，请在刷卡机上退款。",
-  "{rounds} entered by staff {value} card-machine payment. Record it by {at}; the kitchen starts once it is recorded.":
-    "员工录入的{rounds}{value}刷卡机付款。请在 {at} 前记录；记录后后厨才开始制作。",
   "{seatedCount} seated": "{seatedCount} 张有客",
   "{served} served.": "已上桌 {served}。",
   "{setName} · {optionName} on {productName}": "{productName} 上的 {setName} · {optionName}",
@@ -9572,4 +9566,16 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{orders} taken during the outage. Record each from its paper slip on Counter order, or enter it again once its time has passed. Until then the sale isn't in the day's takings.":
     "停电/断网时收款的 {orders}还没录入付款。请在柜台点单按纸质单逐一录入；录入时间已过的，按纸质单重新录入。录入前这些销售不计入当天营业额。",
   "Go to Counter order": "前往柜台点单",
+  "{minutes} min left: record the card-machine payment for the round entered by staff by {at}, or it is cancelled.":
+    "还剩 {minutes} 分钟：请在 {at} 前为员工录入的这一轮记录刷卡机付款，否则会被取消。",
+  "{minutes} min left: record the card-machine payment for the rounds entered by staff by {at}, or they are cancelled.":
+    "还剩 {minutes} 分钟：请在 {at} 前为员工录入的这几轮记录刷卡机付款，否则会被取消。",
+  "A round entered by staff is waiting for its card-machine payment. Record it by {at}; the kitchen starts once it is recorded.":
+    "员工录入的一轮正在等待刷卡机付款。请在 {at} 前记录；记录后后厨才开始制作。",
+  "{rounds} entered by staff are waiting for their card-machine payment. Record them by {at}; the kitchen starts once they are recorded.":
+    "员工录入的{rounds}正在等待刷卡机付款。请在 {at} 前记录；记录后后厨才开始制作。",
+  "{name}: not paid, no money was taken. It will be cancelled now (otherwise automatically); nothing is refunded.":
+    "{name}：未付款，没有收取任何费用。现在会被取消（否则也会自动取消）；不会退款。",
+  "{name}: not paid, no money was taken. It will be cancelled now (otherwise automatically at {at}); nothing is refunded.":
+    "{name}：未付款，没有收取任何费用。现在会被取消（否则会在 {at} 自动取消）；不会退款。",
 });

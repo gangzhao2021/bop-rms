@@ -107,6 +107,21 @@ it("DEC-TABLE-CLOSE-GUESTS-LEFT: words each round for staff, with amounts and no
   expect(texts[1]).toContain("refund it on the card machine");
   expect(texts[2]).toContain("already refunded in full");
   expect(texts[3]).toContain("It will be cancelled now (otherwise automatically at 15:20)");
+  // v15 batch 8: in Chinese the time reads as Chinese, with no English "at".
+  setLanguageForTest("zh-Hans");
+  try {
+    const unpaidZh = guestsLeftRoundText(
+      round({ state: "NotPaid", refund: null, cancelsAt: "2026-10-15T19:20:00.000Z" }),
+      "America/Toronto",
+      now,
+    );
+    expect(unpaidZh).toBe(
+      "第 4 轮：未付款，没有收取任何费用。现在会被取消（否则会在 15:20 自动取消）；不会退款。",
+    );
+    expect(unpaidZh).not.toMatch(/[A-Za-z]{2,}/u);
+  } finally {
+    setLanguageForTest("en");
+  }
   // WP-2423 abandoned payment: a payment started and never finished is cancelled too.
   expect(
     guestsLeftRoundText(
