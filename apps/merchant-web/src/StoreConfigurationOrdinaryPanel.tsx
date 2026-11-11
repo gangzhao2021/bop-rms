@@ -125,6 +125,13 @@ const checkText: Record<StoreConfigurationPublicationCheckCode, { pass: string; 
       "This Store's go-live check is not approved, so its configuration cannot be published.",
     ),
   },
+  // M109 (DEC-STORE-PHONE-BEFORE-PICKUP): pickup guests are not in front of staff.
+  StorePhone: {
+    pass: t("The store has a phone number for pickup guests, or does not offer pickup."),
+    fail: t(
+      "This setup offers pickup, and pickup guests call the store about allergies or their order. Add the store's phone number under Name and contact shown to customers, or take pickup out of the service modes in step 3.",
+    ),
+  },
 };
 const checksPass = (checks: StoreConfigurationPublicationChecks | undefined) =>
   checks === undefined || checks.checks.every((check) => check.outcome === "Pass");

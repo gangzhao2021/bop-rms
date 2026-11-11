@@ -563,6 +563,11 @@ export function checkWords(code: string): string {
       return t(
         "The opening hours need another look: each day you open needs its times, for an order type you offer. Fix them above, then press the button again.",
       );
+    case "StorePhone":
+      // M109: pickup guests call the store about allergies or their order.
+      return t(
+        "Pickup guests call the store about allergies or their order, so pickup needs the store's phone number. Enter it above, or untick Pickup, then press the button again.",
+      );
     case "Fees":
       return t(
         "A charge set under All settings, step by step is for an order type this store does not offer. Turn it off there, or offer that order type here, then press the button again.",

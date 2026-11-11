@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { findInternalText, staticText } from "../e2e/internal-text-patterns.js";
 import { StoreConfigurationPublicationChecklist } from "./StoreConfigurationOrdinaryPanel.js";
+import { checkWords } from "./StoreFirstOpeningPanel.js";
 import {
   StoreSetupLiveSettings,
   liveStoreSettingsChange,
@@ -17,7 +18,7 @@ import type { StoreConfigurationSnapshot } from "./store-configuration-client.js
 
 const id = (n: number) => `01902421-1013-7000-8000-${n.toString(16).padStart(12, "0")}`;
 const checks = (failing: readonly string[]) => ({
-  profile: "StoreConfigurationPublicationChecksV1" as const,
+  profile: "StoreConfigurationPublicationChecksV2" as const,
   configurationReference: id(10),
   checkedAt: "2026-10-15T14:00:00.000Z",
   checks: storeConfigurationPublicationCheckCodes.map((code) => ({
@@ -55,6 +56,23 @@ describe("WP-2423 DEC-STORE-SETUP-PUBLICATION Store setup publication screens", 
     expect(
       renderToStaticMarkup(<StoreConfigurationPublicationChecklist checks={checks([])} />),
     ).toContain("Every check passed.");
+  });
+  it("M109: says a setup offering pickup needs the store's phone, and where to add it", () => {
+    const html = renderToStaticMarkup(
+      <StoreConfigurationPublicationChecklist checks={checks(["StorePhone"])} />,
+    );
+    expect(html).toContain("1 check needs attention");
+    expect(html).toContain(
+      "Needs attention: This setup offers pickup, and pickup guests call the store about allergies or their order. Add the store&#x27;s phone number under Name and contact shown to customers, or take pickup out of the service modes in step 3.",
+    );
+    expect(
+      renderToStaticMarkup(<StoreConfigurationPublicationChecklist checks={checks([])} />),
+    ).toContain("Ready: The store has a phone number for pickup guests, or does not offer pickup.");
+    expect(findInternalText([staticText(html)], [/\bUTC\b/u])).toEqual([]);
+    // The new store's one page says it in its own words, not "does not match BOP support".
+    expect(checkWords("StorePhone")).toBe(
+      "Pickup guests call the store about allergies or their order, so pickup needs the store's phone number. Enter it above, or untick Pickup, then press the button again.",
+    );
   });
   it("offers the live Store's tax, Brand settings, holidays and start, and changes only those", () => {
     const content = createUnconfiguredStoreSetupContentV2();

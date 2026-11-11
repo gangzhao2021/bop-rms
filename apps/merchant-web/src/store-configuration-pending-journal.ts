@@ -92,8 +92,9 @@ export interface StoreConfigurationOrdinaryWorkspace {
    * quotes use), or null when none; absent when not read. */
   readonly storeTaxConfigurationReference?: string | null;
 }
-/** Every check blocks sending, approval and publication; the screen explains each in plain words. */
-export const storeConfigurationPublicationCheckCodes = [
+/** Every check blocks sending, approval and publication; the screen explains each in plain words.
+ * M109 (DEC-STORE-PHONE-BEFORE-PICKUP): V2 appends StorePhone; V1 answers kept earlier still read. */
+const storeConfigurationPublicationCheckCodesV1 = [
   "Tax",
   "BrandSettings",
   "TimeZone",
@@ -103,10 +104,16 @@ export const storeConfigurationPublicationCheckCodes = [
   "Fees",
   "GoLive",
 ] as const;
+export const storeConfigurationPublicationCheckCodes = [
+  ...storeConfigurationPublicationCheckCodesV1,
+  "StorePhone",
+] as const;
 export type StoreConfigurationPublicationCheckCode =
   (typeof storeConfigurationPublicationCheckCodes)[number];
+type PublicationChecksProfile =
+  "StoreConfigurationPublicationChecksV1" | "StoreConfigurationPublicationChecksV2";
 export interface StoreConfigurationPublicationChecks {
-  readonly profile: "StoreConfigurationPublicationChecksV1";
+  readonly profile: PublicationChecksProfile;
   readonly configurationReference: string;
   readonly checkedAt: string;
   readonly checks: readonly {
@@ -509,24 +516,30 @@ export async function parseStoreConfigurationOrdinaryWorkspace(
         "checkedAt",
         "checks",
       ]);
+      const codes: readonly StoreConfigurationPublicationCheckCode[] =
+        c.profile === "StoreConfigurationPublicationChecksV1"
+          ? storeConfigurationPublicationCheckCodesV1
+          : storeConfigurationPublicationCheckCodes;
       if (
-        c.profile !== "StoreConfigurationPublicationChecksV1" ||
+        (c.profile !== "StoreConfigurationPublicationChecksV1" &&
+          c.profile !== "StoreConfigurationPublicationChecksV2") ||
         latest === null ||
         c.configurationReference !== latest.configurationReference ||
         !Array.isArray(c.checks) ||
-        c.checks.length !== storeConfigurationPublicationCheckCodes.length
+        c.checks.length !== codes.length
       )
         return fail();
+      const profile: PublicationChecksProfile = c.profile;
       const checkedAt = instant(c.checkedAt);
       if (checkedAt > observedAt) return fail();
       publicationChecks = Object.freeze({
-        profile: "StoreConfigurationPublicationChecksV1" as const,
+        profile,
         configurationReference: latest.configurationReference,
         checkedAt,
         checks: Object.freeze(
           (c.checks as unknown[]).map((entry, index) => {
             const e = closed(entry, ["code", "outcome"]);
-            const code = storeConfigurationPublicationCheckCodes[index];
+            const code = codes[index];
             if (
               code === undefined ||
               e.code !== code ||

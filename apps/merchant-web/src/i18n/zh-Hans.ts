@@ -8242,6 +8242,13 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "So pickup guests can reach you about allergies or their order.":
     "方便自取客人就过敏或订单问题联系你。",
   "Add phone number": "添加电话",
+  "Setup step": "设置步骤",
+  "The store has a phone number for pickup guests, or does not offer pickup.":
+    "门店有供自取客人联系的电话，或不提供自取。",
+  "This setup offers pickup, and pickup guests call the store about allergies or their order. Add the store's phone number under Name and contact shown to customers, or take pickup out of the service modes in step 3.":
+    "这份设置提供自取，自取客人要打电话问门店过敏或订单的事。请在“向顾客显示的名称和联系方式”里添加门店电话，或在第 3 步的服务方式里去掉自取。",
+  "Pickup guests call the store about allergies or their order, so pickup needs the store's phone number. Enter it above, or untick Pickup, then press the button again.":
+    "自取客人要打电话问门店过敏或订单的事，所以提供自取需要门店电话。请在上面填写电话，或取消勾选“自取”，然后再按一次按钮。",
   "Phone number (needed while the store takes pickup orders)": "电话号码（门店接自取订单时必填）",
   "Pickup guests call this number about allergies or their order. Add a phone number, or turn pickup off in Store features first.":
     "自取客人会打这个电话说过敏或订单的事。请填写电话号码，或先在门店功能里关闭自取。",

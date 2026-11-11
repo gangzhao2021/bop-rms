@@ -12,8 +12,11 @@ import {
  * lists them in plain words so the Owner sees what to fix and where. The saved address, contact,
  * payment and receipt settings are read again from their owners when the configuration is sent
  * for approval (they are append-only, chosen from saved versions, and cannot vanish).
+ *
+ * DEC-STORE-PHONE-BEFORE-PICKUP (M109): V2 appends `StorePhone` (a configuration that offers pickup
+ * needs the Store's published phone). V1 lists, read back from earlier answers, stay readable.
  */
-export const storeConfigurationPublicationCheckCodes = Object.freeze([
+export const storeConfigurationPublicationCheckCodesV1 = Object.freeze([
   "Tax",
   "BrandSettings",
   "TimeZone",
@@ -23,14 +26,24 @@ export const storeConfigurationPublicationCheckCodes = Object.freeze([
   "Fees",
   "GoLive",
 ] as const);
+export const storeConfigurationPublicationCheckCodes = Object.freeze([
+  ...storeConfigurationPublicationCheckCodesV1,
+  "StorePhone",
+] as const);
 export type StoreConfigurationPublicationCheckCode =
   (typeof storeConfigurationPublicationCheckCodes)[number];
 export interface StoreConfigurationPublicationCheck {
   readonly code: StoreConfigurationPublicationCheckCode;
   readonly outcome: "Pass" | "Fail";
 }
+type ChecksProfile =
+  "StoreConfigurationPublicationChecksV1" | "StoreConfigurationPublicationChecksV2";
+const codesOf = (profile: ChecksProfile): readonly StoreConfigurationPublicationCheckCode[] =>
+  profile === "StoreConfigurationPublicationChecksV1"
+    ? storeConfigurationPublicationCheckCodesV1
+    : storeConfigurationPublicationCheckCodes;
 export interface StoreConfigurationPublicationChecks {
-  readonly profile: "StoreConfigurationPublicationChecksV1";
+  readonly profile: ChecksProfile;
   readonly configurationReference: string;
   readonly checkedAt: string;
   readonly checks: readonly StoreConfigurationPublicationCheck[];
@@ -45,6 +58,8 @@ export interface StoreConfigurationPublicationFacts {
   } | null;
   /** The Store's go-live check (Live Gate) is approved for the codes this deployment requires. */
   readonly goLive: boolean;
+  /** M109: the Store's current published profile has a phone pickup guests can call. */
+  readonly storePhone: boolean;
 }
 
 const fixedOrder = (results: Readonly<Record<StoreConfigurationPublicationCheckCode, boolean>>) =>
@@ -79,7 +94,7 @@ export function evaluateStoreConfigurationPublication(input: {
     );
   const basis = configuration.setupBasis;
   return Object.freeze({
-    profile: "StoreConfigurationPublicationChecksV1",
+    profile: "StoreConfigurationPublicationChecksV2",
     configurationReference: configuration.configurationReference,
     checkedAt: at,
     checks: fixedOrder({
@@ -113,6 +128,9 @@ export function evaluateStoreConfigurationPublication(input: {
             fee.orderTypes.every((mode) => configuration.enabledServiceModes.includes(mode)),
         ),
       GoLive: facts.goLive,
+      // M109: pickup guests order away from the counter and call the Store about allergies or
+      // their order, so a configuration offering pickup needs the Store's published phone.
+      StorePhone: !configuration.enabledServiceModes.includes("Pickup") || facts.storePhone,
     }),
   });
 }
@@ -125,17 +143,18 @@ export function parseStoreConfigurationPublicationChecks(
 ): StoreConfigurationPublicationChecks {
   const r = readClosedRecord(value, ["profile", "configurationReference", "checkedAt", "checks"]);
   if (
-    r.profile !== "StoreConfigurationPublicationChecksV1" ||
-    !Array.isArray(r.checks) ||
-    r.checks.length !== storeConfigurationPublicationCheckCodes.length
+    (r.profile !== "StoreConfigurationPublicationChecksV1" &&
+      r.profile !== "StoreConfigurationPublicationChecksV2") ||
+    !Array.isArray(r.checks)
   )
+    throw new Error("STORE_CONFIGURATION_PUBLICATION_CHECKS_INVALID");
+  const profile: ChecksProfile = r.profile;
+  const codes = codesOf(profile);
+  if (r.checks.length !== codes.length)
     throw new Error("STORE_CONFIGURATION_PUBLICATION_CHECKS_INVALID");
   const checks = r.checks.map((entry: unknown, index: number) => {
     const c = readClosedRecord(entry, ["code", "outcome"]);
-    if (
-      c.code !== storeConfigurationPublicationCheckCodes[index] ||
-      (c.outcome !== "Pass" && c.outcome !== "Fail")
-    )
+    if (c.code !== codes[index] || (c.outcome !== "Pass" && c.outcome !== "Fail"))
       throw new Error("STORE_CONFIGURATION_PUBLICATION_CHECKS_INVALID");
     return Object.freeze({
       code: c.code as StoreConfigurationPublicationCheckCode,
@@ -143,7 +162,7 @@ export function parseStoreConfigurationPublicationChecks(
     });
   });
   return Object.freeze({
-    profile: "StoreConfigurationPublicationChecksV1",
+    profile,
     configurationReference: parseStoreAdministrationReference(r.configurationReference),
     checkedAt: parseCanonicalInstant(r.checkedAt),
     checks: Object.freeze(checks),

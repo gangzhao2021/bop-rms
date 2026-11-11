@@ -481,3 +481,51 @@ it("expiry after valid refresh but before the atomic delete retains the original
   );
   expect(await journal.load()).toEqual(cursor);
 });
+
+it("M109: reads the server's V2 checks with StorePhone, and a V1 list answered before", async () => {
+  const latest = configuration("Draft");
+  const codes = [
+    "Tax",
+    "BrandSettings",
+    "TimeZone",
+    "BusinessDayStart",
+    "Hours",
+    "EffectiveDate",
+    "Fees",
+    "GoLive",
+  ];
+  const read = async (publicationChecks: unknown) =>
+    parseStoreConfigurationOrdinaryWorkspace(
+      {
+        profile: "StoreConfigurationOrdinaryWorkspaceV1",
+        scope,
+        latest,
+        current: null,
+        expectedHead: {
+          configurationReference: latest.configurationReference,
+          configurationVersion: latest.configurationVersion,
+          contentDigest: await publicationValueDigest(latest),
+        },
+        original: null,
+        observedAt: at,
+        validUntil: until,
+        businessReferenceValidation: "NotEvaluated",
+        publicationChecks,
+      },
+      scope,
+    );
+  const list = (profile: string, names: readonly string[]) => ({
+    profile,
+    configurationReference: latest.configurationReference,
+    checkedAt: at,
+    checks: names.map((code) => ({ code, outcome: code === "StorePhone" ? "Fail" : "Pass" })),
+  });
+  const v2 = await read(list("StoreConfigurationPublicationChecksV2", [...codes, "StorePhone"]));
+  expect(v2.publicationChecks?.checks.at(-1)).toEqual({ code: "StorePhone", outcome: "Fail" });
+  const v1 = await read(list("StoreConfigurationPublicationChecksV1", codes));
+  expect(v1.publicationChecks?.checks.map((check) => check.code)).toEqual(codes);
+  await expect(read(list("StoreConfigurationPublicationChecksV2", codes))).rejects.toThrow();
+  await expect(
+    read(list("StoreConfigurationPublicationChecksV1", [...codes, "StorePhone"])),
+  ).rejects.toThrow();
+});

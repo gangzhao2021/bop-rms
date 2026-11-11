@@ -4,6 +4,7 @@ import {
   evaluateStoreConfigurationPublication,
   storeConfigurationPublicationReady,
 } from "../../apps/api/dist/merchant-store-configuration-publication-checks.js";
+import { readPublishedStoreBusinessPhone } from "../../apps/api/dist/merchant-store-public-profile.js";
 import {
   createPostgresAsPublishedStorePublicationProof,
   createPostgresCurrentStorePublicationProof,
@@ -112,12 +113,25 @@ export async function storeConfigurationPublicationChecks(operating, tx, input) 
     { brandReference: operating.brandReference, storeReference: operating.storeReference },
     at,
   );
+  // M109: only a configuration offering pickup needs the Store's published phone.
+  const storePhone =
+    configuration.enabledServiceModes.includes("Pickup") &&
+    (await readPublishedStoreBusinessPhone(
+      tx,
+      {
+        tenantReference: operating.tenantReference,
+        brandReference: operating.brandReference,
+        storeReference: operating.storeReference,
+      },
+      () => authorize(tx, at),
+      at,
+    )) !== null;
   return evaluateStoreConfigurationPublication({
     configuration,
     current: published.configuration,
     storeTimeZone: operating.timeZone,
     observedAt: at,
-    facts: { tax, goLive },
+    facts: { tax, goLive, storePhone },
   });
 }
 

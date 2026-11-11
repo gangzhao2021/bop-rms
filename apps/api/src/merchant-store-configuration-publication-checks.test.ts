@@ -94,6 +94,7 @@ const tax = {
 const facts: StoreConfigurationPublicationFacts = {
   tax,
   goLive: true,
+  storePhone: true,
 };
 const outcome = (value: ReturnType<typeof evaluateStoreConfigurationPublication>) =>
   Object.fromEntries(value.checks.map((c) => [c.code, c.outcome]));
@@ -160,6 +161,41 @@ describe("WP-2423 DEC-STORE-SETUP-PUBLICATION publication checks", () => {
     expect(storeConfigurationPublicationReady(evaluate({}, { ...facts, goLive: false }))).toBe(
       false,
     );
+  });
+  it("M109: a configuration offering pickup needs the Store's published phone; one without pickup does not", () => {
+    const noPhone = { ...facts, storePhone: false };
+    const checks = evaluate({}, noPhone);
+    expect(checks.profile).toBe("StoreConfigurationPublicationChecksV2");
+    expect(checks.checks.at(-1)).toEqual({ code: "StorePhone", outcome: "Fail" });
+    expect(storeConfigurationPublicationReady(checks)).toBe(false);
+    // Every other check still passes: only the phone blocks.
+    expect(checks.checks.filter((c) => c.outcome === "Fail").map((c) => c.code)).toEqual([
+      "StorePhone",
+    ]);
+    const dineInOnly = evaluate(
+      {
+        enabledServiceModes: ["DineIn"],
+        weeklySchedule: base.weeklySchedule.map((d, i) => ({
+          ...d,
+          intervals: i === 0 ? [interval(["DineIn"])] : [],
+        })),
+      },
+      noPhone,
+    );
+    expect(outcome(dineInOnly).StorePhone).toBe("Pass");
+    expect(storeConfigurationPublicationReady(dineInOnly)).toBe(true);
+    expect(outcome(evaluate()).StorePhone).toBe("Pass");
+  });
+  it("M109: still reads a V1 list (no StorePhone) saved before, and no other mix", () => {
+    const v2 = evaluate();
+    const v1 = {
+      ...v2,
+      profile: "StoreConfigurationPublicationChecksV1",
+      checks: v2.checks.slice(0, -1),
+    };
+    expect(parseStoreConfigurationPublicationChecks(JSON.parse(JSON.stringify(v1)))).toEqual(v1);
+    expect(() => parseStoreConfigurationPublicationChecks({ ...v1, checks: v2.checks })).toThrow();
+    expect(() => parseStoreConfigurationPublicationChecks({ ...v2, checks: v1.checks })).toThrow();
   });
   it("parses only the closed, ordered check list", () => {
     const checks = evaluate();
