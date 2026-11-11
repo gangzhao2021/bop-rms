@@ -34,7 +34,7 @@ const tableReferences = {
 // WP-2423 M68 (c) DEC-DATABASE-RESILIENCE: every Dining command and the guest's table read
 // run as a restricted NOBYPASSRLS role holding exactly the rendered pilot api grants (table setup
 // as a separate staff role, as in dining-staff-call); the owner client only reads counts and locks.
-it("two guests calling staff at one table at once never deadlock: one call, one already asked", async () => {
+it("two guests calling staff at one table at once never deadlock, and staff changing the table never wait for a guest whose stale check is then refused", async () => {
   await withIsolatedDatabase({ caseId: "wp2423_lock_order" }, async (context) => {
     const admin = new Client(context.clientConfig);
     await admin.connect();
@@ -500,6 +500,118 @@ it("two guests calling staff at one table at once never deadlock: one call, one 
       assert.deepEqual(statuses, ["AlreadyOpen", "Called"]);
       assert.equal(await deadlocks(), before);
       assert.deepEqual(await counts(), { calls: 1, closures: 0 });
+
+      // WP-2423 M68 (c): the guest's table check no longer holds the row, so a staff change to the
+      // table no longer waits for a guest's transaction in flight. A guest write that checked the
+      // old table must then not land after the change as if nothing happened: the write fence
+      // re-reads the table under DiningTable:<table> and the row lock, and the write re-checks
+      // the guest's table context before it commits. Each case holds a guest's call open after
+      // its first check, makes the staff change (it must finish at once, no lock waiters), then
+      // lets the call go on: it is refused, and no call is recorded.
+      const staffChange = async (action, minute) => {
+        const current = await tableReader.loadTable(id(20));
+        const started = Date.now();
+        await tableService.executeTable({
+          action,
+          operationReference: id(++sequence),
+          candidate: transitionDiningTable(
+            current,
+            action,
+            at(minute),
+            action === "SetBlock" ? "CLEANING" : null,
+          ),
+          expectedAggregateVersion: current.aggregateVersion,
+          observedAt: at(minute),
+        });
+        return Date.now() - started;
+      };
+      const heldCall = async (participant, operation, minute, change) => {
+        let release;
+        const held = new Promise((resolve) => {
+          release = resolve;
+        });
+        let scanned = null;
+        let checked;
+        const checkedOnce = new Promise((resolve) => {
+          checked = resolve;
+        });
+        const store = createPostgresDiningStaffCallStore(runner(), {
+          scope,
+          ...hashes,
+          // The guest's QR context: the table's current QR version must still be the one this
+          // guest scanned (configured-dining-qr-context compares qrVersion with the code's).
+          authorize: async (tx, command) => {
+            const table = await createPostgresDiningPublicTableReader({
+              transaction: tx,
+              scope,
+              authorize: async () => true,
+            }).read({
+              tableReference: id(20),
+              purpose: "DiningAdmission",
+              observedAt: command.observedAt,
+            });
+            if (table === null) return false;
+            if (scanned === null) {
+              scanned = table.qrVersion;
+              checked();
+              await held;
+            }
+            // The table's state is left to the store's own write fence (the blocked case).
+            return table.qrVersion === scanned;
+          },
+        });
+        const calling = store
+          .call(asGuest(participant, sessionId, operation, minute), "Question")
+          .then(
+            (value) => ({ status: value.status, reason: value.reason ?? null }),
+            (error) => ({ status: "Error", reason: error.code ?? error.message }),
+          );
+        await checkedOnce;
+        let waited;
+        try {
+          waited = await change();
+        } finally {
+          release();
+        }
+        const waiting = (
+          await admin.query(
+            "SELECT count(*)::int n FROM pg_locks WHERE NOT granted AND pid<>pg_backend_pid()",
+          )
+        ).rows[0].n;
+        return { result: await calling, waited, waiting };
+      };
+      // The guest withdraws the open call, so each case below would make a new one.
+      const open = (
+        await admin.query("SELECT call_id::text AS id FROM rms_dining.dining_staff_call")
+      ).rows[0].id;
+      assert.equal(
+        (await fenced(false).withdraw(asGuest(guest, sessionId, 304, 6), open)).status,
+        "Closed",
+      );
+      const callsBefore = (await counts()).calls;
+      // Staff close the table off for cleaning while a guest's call is on its way.
+      const blocked = await heldCall(guest, 302, 7, () => staffChange("SetBlock", 7));
+      assert.ok(blocked.waited < 1500, `staff waited ${blocked.waited} ms for a guest`);
+      assert.equal(blocked.waiting, 0);
+      assert.deepEqual(blocked.result, { status: "Refused", reason: "NotSeated" });
+      assert.equal((await counts()).calls, callsBefore);
+      await staffChange("ClearBlock", 8);
+      // Staff issue the table a new QR code (the old one stops working) during a guest's call.
+      const rotated = await heldCall(guest, 303, 9, () => staffChange("IssueQr", 9));
+      assert.ok(rotated.waited < 1500, `staff waited ${rotated.waited} ms for a guest`);
+      assert.equal(rotated.waiting, 0);
+      assert.deepEqual(rotated.result, {
+        status: "Error",
+        reason: "DINING_SESSION_PERMISSION_DENIED",
+      });
+      assert.equal((await counts()).calls, callsBefore);
+      // Control: the same guest's call with a current check is made.
+      assert.equal(
+        (await fenced(false).call(asGuest(guest, sessionId, 305, 10), "Question")).status,
+        "Called",
+      );
+      assert.equal((await counts()).calls, callsBefore + 1);
+      assert.equal(await deadlocks(), before);
       assert.equal(active, 0);
     } finally {
       await admin.end();

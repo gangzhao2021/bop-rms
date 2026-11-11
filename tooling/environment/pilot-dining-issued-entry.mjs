@@ -61,8 +61,15 @@ export async function createIssuedDiningEntries(resources, { loadProfile, loadKe
    * authorization is constant and public-store authorization only tells CustomerEntry from the
    * other purposes, and the Brand and Store rows it read stay share-locked by this same
    * transaction (the issued code row is append-only). The table row is read without a lock
-   * (WP-2423 M68 lock order); reusing that read within one check is the same as the guest acting
-   * an instant earlier, and whatever changes the table re-reads it under its own locks.
+   * (WP-2423 M68 lock order, DEC-DATABASE-RESILIENCE (c)): every purpose of this one check is
+   * answered from the table as committed at that read, so a QR rotation, block or close that
+   * commits while the check is still running is not seen by it. That is the check answering at
+   * the instant of its read, as it would have a moment earlier: the check itself changes no table
+   * fact, and the old share lock also ended with this transaction, before the guest's next step.
+   * Each later step checks again in its own transaction, and a Dining write fence takes
+   * `DiningTable:<table>` and the row lock and re-reads the table (open, Available, this session)
+   * before it writes (dining-table-lock-order acceptance: a guest's call that checked a table
+   * staff then blocked, or whose QR code staff then replaced, is refused).
    */
   const binding = (runner, { oneTransaction = false } = {}) => {
     const resolved = oneTransaction ? new Map() : null;
