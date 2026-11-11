@@ -220,7 +220,7 @@ it("price book: a single store's author publishes alone; no price approval or a 
         },
       });
       const small = selling.product.sizes[0].skuReference;
-      const draft = async (code) => {
+      const draft = async () => {
         const book = (
           await command({
             action: "CreateDraft",
@@ -254,7 +254,7 @@ it("price book: a single store's author publishes alone; no price approval or a 
 
       // ── 1. One store: the author publishes alone; the mark and Audit say SingleStoreListing.
       scope.as(owner);
-      const bookA = await draft("prices-a");
+      const bookA = await draft();
       const listing = publish(bookA, "SingleStoreListing");
       const published = await command(listing);
       assert.equal(published.lifecycle, "Published");
@@ -275,12 +275,12 @@ it("price book: a single store's author publishes alone; no price approval or a 
       assert.equal((await command(listing)).status, "AlreadyApplied");
       assert.equal((await marks()).length, 1);
       // Without asking for it, the author still cannot publish their own draft.
-      const bookB = await draft("prices-b");
+      const bookB = await draft();
       await rejects(command(publish(bookB)), "ApprovalRequired");
 
       // ── 2. Kai has no price approval: cannot publish, even their own draft as a listing.
       scope.as(noah);
-      const kais = await draft("prices-kai");
+      const kais = await draft();
       await rejects(command(publish(kais, "SingleStoreListing")), "PermissionDenied");
       assert.equal((await marks()).length, 1);
 

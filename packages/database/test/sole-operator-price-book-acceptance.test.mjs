@@ -193,7 +193,7 @@ it("price book: the author publishes alone only as an in-effect, re-verified sol
         },
       });
       const small = selling.product.sizes[0].skuReference;
-      const draft = async (code) => {
+      const draft = async () => {
         const book = (
           await command({
             action: "CreateDraft",
@@ -227,7 +227,7 @@ it("price book: the author publishes alone only as an in-effect, re-verified sol
 
       // ── 1. Sole operator not set: the author can't publish their own draft, marked or not.
       scope.as(owner);
-      const bookA = await draft("prices-a");
+      const bookA = await draft();
       const viewA = await prices.query({ ...session, priceBookReference: bookA });
       assert.deepEqual(viewA.soleOperator, {
         status: "NotSet",
@@ -304,7 +304,7 @@ it("price book: the author publishes alone only as an in-effect, re-verified sol
         from,
         enrolledAt,
       });
-      const bookB = await draft("prices-b");
+      const bookB = await draft();
       const lapsed = (await prices.query({ ...session, priceBookReference: bookB })).soleOperator;
       assert.deepEqual(
         [lapsed.status, lapsed.otherApprovers],
@@ -323,7 +323,7 @@ it("price book: the author publishes alone only as an in-effect, re-verified sol
         [noah],
       );
       scope.as(owner);
-      const bookC = await draft("prices-c");
+      const bookC = await draft();
       assert.equal(
         (await prices.query({ ...session, priceBookReference: bookC })).soleOperator.status,
         "Effective",

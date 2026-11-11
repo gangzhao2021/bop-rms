@@ -11,14 +11,12 @@ import {
   createPaymentStatusEventConsumerService,
   createPaymentTerminalService,
   createPostgresAdmittedPaymentIntentCreationStore,
-  createPostgresOrderPaymentAttemptPosition,
   createPostgresPaymentProviderObservationStore,
   createPostgresPaymentStatusStore,
   createPostgresPaymentTerminalSource,
   createPostgresPaymentTerminalStore,
   listOrderPaymentTerminalOutcomes,
   listOrderPaymentsDue,
-  listStoreOrderBatchPaymentOutcomes,
   parsePaymentInstant,
   paymentProviderAdmissionKillSwitchKey,
 } from "../../rms/payment/src/index.ts";
@@ -104,7 +102,6 @@ it("tells an unpaid order's deadline and newest attempt, and reports a newer car
           }
         },
       };
-      const rows = async (sql, values = []) => (await admin.query(sql, values)).rows;
 
       // ── Test-only Provider: one Provider intent per attempt (idempotency key), decline or capture.
       const provider = new Map(),

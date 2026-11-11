@@ -526,7 +526,8 @@ it("v15 2026-11-03: an earlier day's handed-over order is not one to check and c
 
 it("WP-2423 M121: ?order=3 finds order 3 only, never 13 or 30", () => {
   const fixture = pickupQueueFixture();
-  const base = fixture.items[0]!;
+  const base = fixture.items[0];
+  if (base === undefined) throw new Error("fixture");
   const view = parsePickupQueueView({
     ...fixture,
     items: ["3", "13", "30"].map((number, index) => ({

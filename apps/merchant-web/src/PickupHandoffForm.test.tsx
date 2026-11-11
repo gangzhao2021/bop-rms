@@ -72,7 +72,9 @@ afterEach(() => {
 });
 
 it("WP-2423 M21: after the code matches, one tap hands every remaining item to the customer", async () => {
-  const fetcher = vi.fn(async (_url: string, _init?: RequestInit) => answer());
+  const fetcher = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>(async () =>
+    answer(),
+  );
   const recorded = vi.fn();
   const { container } = await mount(
     <PickupHandoffForm
@@ -103,7 +105,9 @@ it("WP-2423 M21: after the code matches, one tap hands every remaining item to t
 });
 
 it("WP-2423 M21: a counter order is called and handed over in one tap, recorded as a called number", async () => {
-  const fetcher = vi.fn(async (_url: string, _init?: RequestInit) => answer());
+  const fetcher = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>(async () =>
+    answer(),
+  );
   const { container } = await mount(
     <PickupHandoffForm
       item={item(true)}
@@ -126,7 +130,9 @@ it("WP-2423 M21: a counter order is called and handed over in one tap, recorded 
 });
 
 it("WP-2423 M21: someone else collecting still needs the initial and the confirmation", async () => {
-  const fetcher = vi.fn(async (_url: string, _init?: RequestInit) => answer());
+  const fetcher = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>(async () =>
+    answer(),
+  );
   const { container } = await mount(
     <PickupHandoffForm
       item={item(false)}

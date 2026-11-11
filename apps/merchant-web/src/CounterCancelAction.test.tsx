@@ -24,7 +24,9 @@ it("WP-2423 M127: cancels with the reason chosen, and a lost answer retries the 
   let answer: () => Response = () => {
     throw new TypeError("offline");
   };
-  const fetcher = vi.fn(async (_url: string, _init?: RequestInit) => answer());
+  const fetcher = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>(async () =>
+    answer(),
+  );
   const cancelled = vi.fn();
   const { container } = await mount(
     <CounterCancelAction
