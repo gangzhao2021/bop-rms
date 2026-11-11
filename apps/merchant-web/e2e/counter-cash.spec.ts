@@ -800,6 +800,8 @@ test("@production refunding a dish of a cash counter order speaks of cash from t
         paymentState: "Captured",
         paymentMethod: "CardMachine",
         paidInCash: true,
+        // $10.75 taken in cash, nothing given back yet.
+        cashLeftMinor: given ? "710" : "1075",
         currencyCode: "CAD",
         capturedAmountMinor: "1074",
         confirmedRefundMinor: given ? "367" : "0",
@@ -958,12 +960,16 @@ test("@production refunding a dish of a cash counter order speaks of cash from t
   await page.getByRole("button", { name: "Review refund" }).click();
   const review = page.getByRole("region", { name: "Review this refund" });
   await expect(review).toContainText(
-    "Paid in cash. After the request is recorded, give this amount back in cash from the drawer, in whole nickels (rounded to 5 cents), and record it under the request.",
+    "Paid in cash. After the request is recorded, give back $3.65 from the drawer (the refund of $3.67, in whole nickels) and record it under the request.",
   );
   await expect(main).not.toContainText("card machine");
   await page.getByRole("checkbox", { name: /I confirm/ }).check();
   await page.getByRole("button", { name: "Record refund request" }).click();
-  await expect(page.getByText(/Now give it back in cash from the drawer/u)).toBeVisible();
+  await expect(
+    page.getByText(
+      "Request recorded for $3.67. Now give back $3.65 from the drawer (in whole nickels) and record it under the request above.",
+    ),
+  ).toBeVisible();
   const requests = page.getByRole("region", { name: "Refunds on this order" });
   await expect(requests).toContainText("To give back in cash");
   await expect(requests).toContainText("Hand back $3.65 from the drawer");
@@ -998,6 +1004,331 @@ test("@production refunding a dish of a cash counter order speaks of cash from t
     ).toBe(true);
     await page.screenshot({
       path: `test-results/counter-cash-payment-${width}.png`,
+      fullPage: true,
+    });
+  }
+});
+
+// v15 batch 8 (review): the usual case in a restaurant — a cashier asks for a cash refund and a
+// manager or the owner gives it back. Neither the cashier's page nor Approvals ever says the card
+// machine, a slip, or "send": they name the cash the drawer gives back, in whole nickels.
+test("@production a cashier's cash refund names a manager giving it back from the drawer", async ({
+  page,
+}) => {
+  await signIn(page);
+  const intent = id(341),
+    attempt = id(342);
+  let requested: Record<string, unknown> | null = null;
+  await page.route("**/merchant/payments/refunds/approvals", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        observedAt: new Date().toISOString(),
+        canApprove: false,
+        soleOperator: null,
+        entries: [],
+      },
+    }),
+  );
+  await page.route("**/merchant/payments/refunds/context", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        paymentIntentReference: intent,
+        paymentAttemptReference: attempt,
+        orderReference: id(340),
+        orderBatchReference: id(343),
+        observedAt: new Date().toISOString(),
+        paymentState: "Captured",
+        paymentMethod: "CardMachine",
+        paidInCash: true,
+        cashLeftMinor: "1075",
+        currencyCode: "CAD",
+        capturedAmountMinor: "1074",
+        confirmedRefundMinor: "0",
+        pendingRefundMinor: requested === null ? "0" : "367",
+        canRequest: true,
+        requestBlocked: null,
+        // A cashier asks; a manager or the owner gives it back.
+        canSend: false,
+      },
+    }),
+  );
+  await page.route("**/merchant/payments/refunds/items", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        orderReference: id(340),
+        orderNumber: "36",
+        canRequest: true,
+        claimVersion: requested === null ? 0 : 1,
+        recentRequests:
+          requested === null
+            ? []
+            : [
+                {
+                  requestReference: String(requested.requestReference),
+                  operationReference: String(requested.operationReference),
+                  claimVersion: 1,
+                  requestedAt: "2026-10-13T16:30:00.000Z",
+                  reasonCode: "QUALITY_ISSUE",
+                  currencyCode: "CAD",
+                  amountMinor: "367",
+                  decline: null,
+                  progress: "Recorded",
+                  paymentMethod: "CardMachine",
+                },
+              ],
+        items: [
+          {
+            orderBatchReference: id(343),
+            orderItemReference: id(344),
+            label: "Soy milk",
+            quantity: 1,
+            unclaimedQuantity: requested === null ? 1 : 0,
+            paymentCaptured: true,
+            refundedByCancellation: false,
+            paymentIntentReference: intent,
+            paymentMethod: "CardMachine",
+          },
+        ],
+      },
+    }),
+  );
+  await page.route("**/merchant/payments/refunds/preview", (route) => {
+    const body = JSON.parse(route.request().postData() ?? "{}");
+    return route.fulfill({
+      headers,
+      json: {
+        status: "Previewed",
+        requestReference: body.requestReference,
+        operationReference: body.operationReference,
+        claimVersion: 0,
+        currencyCode: "CAD",
+        amountMinor: "367",
+        paymentAttemptReferences: [attempt],
+        approvalRequired: false,
+        escalationReasons: [],
+        approveAlone: false,
+        components: {
+          netAmountMinor: "325",
+          taxAmountMinor: "42",
+          tipAmountMinor: "0",
+          serviceChargeAmountMinor: "0",
+          serviceChargeTaxAmountMinor: "0",
+        },
+      },
+    });
+  });
+  await page.route("**/merchant/payments/refunds/request", (route) => {
+    requested = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>;
+    return route.fulfill({
+      status: 202,
+      headers,
+      json: {
+        status: "RequestRecorded",
+        requestReference: requested.requestReference,
+        operationReference: requested.operationReference,
+        claimVersion: 1,
+        currencyCode: "CAD",
+        amountMinor: "367",
+        paymentAttemptReferences: [attempt],
+        approvalRequired: false,
+        escalationReasons: [],
+        approveAlone: false,
+        replayed: false,
+      },
+    });
+  });
+  await page.route("**/merchant/payments/refunds/status", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        orderReference: id(340),
+        requestReference: requested?.requestReference,
+        operationReference: requested?.operationReference,
+        observedAt: new Date().toISOString(),
+        currencyCode: "CAD",
+        amountMinor: "367",
+        payments: [
+          {
+            paymentAttemptReference: attempt,
+            paymentIntentReference: intent,
+            state: "NotDispatched",
+            method: "CardMachine",
+            refundedOnCardMachineAt: null,
+            cardMachineSlipReference: null,
+            executionOperationReference: null,
+            executionApprovalReference: null,
+            amountMinor: "367",
+            confirmedMinor: "0",
+            pendingMinor: "367",
+            cashGivenBackMinor: "365",
+          },
+        ],
+      },
+    }),
+  );
+  const main = page.getByRole("main");
+  await page.goto("/app/operations/payments/" + intent + "/refund");
+  await page.getByRole("spinbutton", { name: /Soy milk/ }).fill("1");
+  await page.getByRole("combobox", { name: "Reason" }).selectOption("QUALITY_ISSUE");
+  await page.getByRole("button", { name: "Review refund" }).click();
+  await expect(page.getByRole("region", { name: "Review this refund" })).toContainText(
+    "Paid in cash. Recording this request gives nothing back yet: a manager or the owner gives back $3.65 from the drawer (the refund of $3.67, in whole nickels) and records it on the payment page.",
+  );
+  await page.getByRole("checkbox", { name: /I confirm/ }).check();
+  await page.getByRole("button", { name: "Record refund request" }).click();
+  await expect(
+    page.getByText(
+      "Request recorded for $3.67. Nothing is given back yet: a manager or the owner gives back $3.65 from the drawer (in whole nickels) and records it on the payment page.",
+    ),
+  ).toBeVisible();
+  await expect(main).not.toContainText("card machine");
+  await expect(main).not.toContainText("sends it");
+});
+
+test("@production on Approvals a cash refund is approved and given back from the drawer, never on the machine", async ({
+  page,
+}) => {
+  const entry = {
+    orderReference: id(350),
+    orderNumber: "35",
+    requestReference: id(351),
+    requestOperationReference: id(352),
+    paymentAttemptReferences: [id(353)],
+    paymentIntentReferences: [id(354)],
+    paymentMethod: "CardMachine",
+    // $3.67 asked; the drawer gives back $3.65 (whole nickels, as the server counts it).
+    cashGivenBackMinor: "365",
+    currencyCode: "CAD",
+    amountMinor: "367",
+    reasonCode: "QUALITY_ISSUE",
+    note: null,
+    escalationReasons: ["MoreThan24Hours"],
+    requestedAt: new Date(Date.now() - 60_000).toISOString(),
+    requesterName: "Mia",
+    requestedByYou: false,
+    requesterVerifiedUntil: new Date(Date.now() + 14 * 60_000).toISOString(),
+    state: "AwaitingApproval",
+    approvalReference: null,
+    approvedAt: null,
+    approverName: null,
+    canApprove: true,
+    soleOperatorApproval: false,
+  };
+  const notSent = {
+    ...entry,
+    orderNumber: "36",
+    requestReference: id(355),
+    requestOperationReference: id(356),
+    escalationReasons: [],
+    requesterName: "Sam",
+    state: "NotSent",
+    canApprove: false,
+  };
+  await page.route("**/merchant/session", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        authenticated: true,
+        csrf: "a".repeat(43),
+        workspace: {
+          screenId: "HOME-OVERVIEW",
+          selectedScope: scope,
+          authorizedStores: [scope],
+          businessDate: "2026-10-13",
+          storeStatus: "Open",
+          freshness: "Current",
+          dashboardAvailability: "UnavailableUntilWP1905",
+          navigation: [
+            {
+              screenId: "APPROVAL-INBOX",
+              label: "Approvals",
+              href: "/app/approvals",
+              permission: "workflow.operate",
+            },
+          ],
+        },
+      },
+    }),
+  );
+  await page.route("**/merchant/organization/sole-operator", (route) =>
+    route.fulfill({ headers, json: { brandOwner: false } }),
+  );
+  await page.route("**/merchant/identity/step-up", (route) => {
+    if (route.request().method() === "GET")
+      return route.fulfill({ headers, json: { validUntil: null } });
+    const at = Date.now();
+    return route.fulfill({
+      headers,
+      json: {
+        status: "Verified",
+        verifiedAt: new Date(at).toISOString(),
+        validUntil: new Date(at + 15 * 60_000).toISOString(),
+      },
+    });
+  });
+  await page.route("**/merchant/payments/refunds/approvals", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        observedAt: new Date().toISOString(),
+        canApprove: true,
+        canSend: true,
+        soleOperator: null,
+        entries: [entry, notSent],
+      },
+    }),
+  );
+  await page.route("**/merchant/payments/refunds/approve", (route) =>
+    route.fulfill({
+      status: 202,
+      headers,
+      json: {
+        status: "Approved",
+        approvalReference: JSON.parse(route.request().postData() ?? "{}").approvalReference,
+        replayed: false,
+        payments: [
+          {
+            paymentAttemptReference: id(353),
+            operationReference: id(357),
+            state: "RecordOnCardMachine",
+          },
+        ],
+      },
+    }),
+  );
+  await page.goto("/app/approvals");
+  const main = page.getByRole("main");
+  const waiting = page.getByRole("listitem").filter({ hasText: "Order 36" });
+  await expect(waiting).toContainText("Asked by Sam, waiting for you to give it back in cash");
+  await expect(waiting).toContainText(
+    "Paid in cash: give back $3.65 from the drawer (the refund of $3.67, in whole nickels), then record it on the payment page.",
+  );
+  const card = page.getByRole("listitem").filter({ hasText: "Order 35" });
+  await expect(card).toContainText("Cash at the counter");
+  await card.getByRole("button", { name: "Approve giving back $3.65 in cash" }).click();
+  const dialog = page.getByRole("dialog", { name: "Confirm it is you" });
+  await dialog.getByLabel("Six-digit code").fill("123456");
+  await dialog.getByRole("button", { name: "Verify" }).click();
+  await expect(card).toContainText("Approved — give back $3.65 in cash, then record it");
+  await expect(card.getByRole("status")).toContainText(
+    "Approved. Give back $3.65 in cash from the drawer (the refund of $3.67, in whole nickels), then record it on the payment page.",
+  );
+  await expect(card.getByRole("link", { name: "Record the cash given back" })).toHaveAttribute(
+    "href",
+    "/app/operations/payments/" + id(354),
+  );
+  await expect(main).not.toContainText("card machine");
+  await expect(main).not.toContainText("slip");
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.screenshot({
+      path: `test-results/counter-cash-approvals-${width}.png`,
       fullPage: true,
     });
   }

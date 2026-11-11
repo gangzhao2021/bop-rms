@@ -73,3 +73,27 @@ it("reads only a well-formed answer", () => {
   expect(parseCantMakeResult({ ...answer({}), refundAmountMinor: 2340 })).toBeNull();
   expect(parseCantMakeResult(null)).toBeNull();
 });
+
+it("v15 batch 8: a counter cash payment is given back in cash from the drawer, never on the machine", () => {
+  // The dialog's amount is the server's whole nickels ($10.75 for a $10.74 order).
+  const shown = {
+    refundMethod: "CardMachine",
+    paidInCash: true,
+    paidMinor: "1075",
+    refundMinor: "1075",
+  } as const;
+  const text = cantMakeDoneText(
+    answer({ refundMethod: "CardMachine", refundAmountMinor: "1074" }),
+    shown,
+  );
+  expect(text).toBe(
+    "Cancelled. Give back $10.75 in cash from the drawer, in whole nickels, then record it on the order. The guest is told.",
+  );
+  expect(cantMakeDoneText(null, shown)).not.toMatch(/card machine/u);
+  expect(
+    cantMakeDoneText(
+      answer({ refundMethod: "CardMachine", refundStatus: "Refunded", status: "AlreadyCancelled" }),
+      shown,
+    ),
+  ).toBe("Cancelled. $10.75 was given back in cash. The guest is told.");
+});

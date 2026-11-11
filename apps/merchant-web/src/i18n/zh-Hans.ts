@@ -9501,17 +9501,44 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Given back in cash": "已退还现金",
   "To give back in cash": "待退还现金",
   "{amount} to give back in cash once an owner approves it.": "店主批准后退还现金 {amount}。",
-  "Paid in cash. Recording this request gives nothing back yet: once it is approved, a manager or the owner gives the cash back and records it.":
-    "现金付款。记录这个请求还不会退钱：批准后，由店长或店主退还现金并记录。",
-  "Paid in cash. Recording this request gives nothing back yet: a manager or the owner gives the cash back and records it.":
-    "现金付款。记录这个请求还不会退钱：由店长或店主退还现金并记录。",
-  "Paid in cash. After the request is recorded and approved, give this amount back in cash from the drawer, in whole nickels (rounded to 5 cents), and record it under the request.":
-    "现金付款。请求记录并批准后，请从钱箱退还这笔现金（按 5 分取整），再在请求下记录。",
-  "Paid in cash. After the request is recorded, give this amount back in cash from the drawer, in whole nickels (rounded to 5 cents), and record it under the request.":
-    "现金付款。请求记录后，请从钱箱退还这笔现金（按 5 分取整），再在请求下记录。",
-  "Request recorded for {total}. Now give it back in cash from the drawer, in whole nickels, and record it under the request above.":
-    "已记录 {total} 的退款请求。请从钱箱退还现金（按 5 分取整），再在上面的请求下记录。",
+  "Paid in cash. Recording this request gives nothing back yet: once it is approved, a manager or the owner gives back {drawer} from the drawer (the refund of {requested}, in whole nickels) and records it on the payment page.":
+    "现金付款。记录这个请求还不会退钱：批准后，由店长或店主从钱箱退还现金 {drawer}（退款 {requested}，按 5 分取整），并在付款页记录。",
+  "Paid in cash. Recording this request gives nothing back yet: a manager or the owner gives back {drawer} from the drawer (the refund of {requested}, in whole nickels) and records it on the payment page.":
+    "现金付款。记录这个请求还不会退钱：由店长或店主从钱箱退还现金 {drawer}（退款 {requested}，按 5 分取整），并在付款页记录。",
+  "Paid in cash. After the request is recorded and approved, give back {drawer} from the drawer (the refund of {requested}, in whole nickels) and record it under the request.":
+    "现金付款。请求记录并批准后，请从钱箱退还现金 {drawer}（退款 {requested}，按 5 分取整），再在请求下记录。",
+  "Paid in cash. After the request is recorded, give back {drawer} from the drawer (the refund of {requested}, in whole nickels) and record it under the request.":
+    "现金付款。请求记录后，请从钱箱退还现金 {drawer}（退款 {requested}，按 5 分取整），再在请求下记录。",
+  "Request recorded for {total}. Nothing is given back yet. You run this business alone: open Approvals and approve it yourself after confirming it is you, then give back {drawer} from the drawer (in whole nickels) and record it here.":
+    "已记录 {total} 的退款请求，还没有退钱。这家店只有你一人经营：确认是你本人后，打开“审批”自己批准，再从钱箱退还现金 {drawer}（按 5 分取整）并在这里记录。",
+  "Request recorded for {total}. Nothing is given back yet: once the owner approves it, give back {drawer} from the drawer (in whole nickels) and record it here. Ask the owner to open Approvals on this device or theirs. If more than 15 minutes pass after your verification, you'll be asked to verify again here.":
+    "已记录 {total} 的退款请求，还没有退钱：店主批准后，请从钱箱退还现金 {drawer}（按 5 分取整）并在这里记录。请店主在这台设备或自己的设备上打开“审批”。如果你验证后超过 15 分钟，这里会请你再验证一次。",
+  "Request recorded for {total}. Nothing is given back yet: once the owner approves it, a manager or the owner gives back {drawer} from the drawer (in whole nickels) and records it on the payment page. Ask the owner to open Approvals on this device or theirs. If more than 15 minutes pass after your verification, you'll be asked to verify again here.":
+    "已记录 {total} 的退款请求，还没有退钱：店主批准后，由店长或店主从钱箱退还现金 {drawer}（按 5 分取整），并在付款页记录。请店主在这台设备或自己的设备上打开“审批”。如果你验证后超过 15 分钟，这里会请你再验证一次。",
+  "Request recorded for {total}. Now give back {drawer} from the drawer (in whole nickels) and record it under the request above.":
+    "已记录 {total} 的退款请求。请从钱箱退还现金 {drawer}（按 5 分取整），再在上面的请求下记录。",
+  "Request recorded for {total}. Nothing is given back yet: a manager or the owner gives back {drawer} from the drawer (in whole nickels) and records it on the payment page.":
+    "已记录 {total} 的退款请求，还没有退钱：由店长或店主从钱箱退还现金 {drawer}（按 5 分取整），并在付款页记录。",
   "Paid in cash at the counter. Its refunds are given back in cash from the drawer, in whole nickels (rounded to 5 cents), and recorded here; they count on the day they are given back.":
     "在柜台用现金付款。退款从钱箱以现金退还（按 5 分取整），并在这里记录；按退还当天计入。",
   "Record {amount} given back in cash": "记录已退还现金 {amount}",
+  "Asked by {name}, waiting for you to give it back in cash": "{name} 提交，等你退还现金",
+  "Asked by {name}, waiting for a manager or the owner to give it back in cash":
+    "{name} 提交，等店长或店主退还现金",
+  "Recorded, not given back yet. The guest has not been refunded.":
+    "已记录，还没有退还。顾客还没有拿到退款。",
+  "Paid in cash: give back {cash} from the drawer (the refund of {amount}, in whole nickels), then record it on the payment page.":
+    "现金付款：请从钱箱退还现金 {cash}（退款 {amount}，按 5 分取整），再在付款页记录。",
+  "Paid in cash: a manager or the owner gives back {cash} from the drawer (the refund of {amount}, in whole nickels) and records it on the payment page.":
+    "现金付款：由店长或店主从钱箱退还现金 {cash}（退款 {amount}，按 5 分取整），并在付款页记录。",
+  "Cash at the counter": "柜台现金",
+  "Approved — give back {cash} in cash, then record it": "已批准 — 请退还现金 {cash}，再记录",
+  "Approve giving back {cash} in cash": "批准退还现金 {cash}",
+  "Approved. Give back {cash} in cash from the drawer (the refund of {amountMinor}, in whole nickels), then record it on the payment page. It counts on the day it is given back.":
+    "已批准。请从钱箱退还现金 {cash}（退款 {amountMinor}，按 5 分取整），再在付款页记录。按退还当天计入。",
+  "Record the cash given back": "记录已退还的现金",
+  "Cancelled. {amount} was given back in cash. The guest is told.":
+    "已取消。已退还现金 {amount}。已通知顾客。",
+  "Cancelled. Give back {amount} in cash from the drawer, in whole nickels, then record it on the order. The guest is told.":
+    "已取消。请从钱箱退还现金 {amount}（按 5 分取整），再在订单上记录。已通知顾客。",
 });

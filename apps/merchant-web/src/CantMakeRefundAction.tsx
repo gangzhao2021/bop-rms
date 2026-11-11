@@ -72,6 +72,18 @@ export function cantMakeDoneText(
       ? result.refundAmountMinor
       : (shown?.refundMinor ?? null);
   const amount = amountMinor === null ? null : orderMoney({ amountMinor, currencyCode: "CAD" });
+  // v15 batch 8: a counter cash payment goes back in cash from the drawer, never on the machine.
+  // Not reached today (can't-make needs automatic acceptance or an online payment awaiting it), so
+  // it names the dialog's own whole-nickel amount, the server's, rather than guess a rounding.
+  if (method === "CardMachine" && shown?.paidInCash === true) {
+    const cash = orderMoney({ amountMinor: shown.refundMinor, currencyCode: "CAD" });
+    return result?.refundStatus === "Refunded"
+      ? t("Cancelled. {amount} was given back in cash. The guest is told.", { amount: cash })
+      : t(
+          "Cancelled. Give back {amount} in cash from the drawer, in whole nickels, then record it on the order. The guest is told.",
+          { amount: cash },
+        );
+  }
   if (method === "CardMachine") {
     if (result?.refundStatus === "Refunded")
       return amount === null

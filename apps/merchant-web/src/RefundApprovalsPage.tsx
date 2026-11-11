@@ -140,6 +140,15 @@ export function waitingText(requestedAt: string, now: number): string {
   return t("Waiting {count} days", { count: Math.floor(hours / 24) });
 }
 
+/**
+ * v15 batch 8: what goes back from the drawer when the request's payment was taken in cash at the
+ * counter (whole nickels, as the server counts it), else null (a card or online payment).
+ */
+export const cashBackOf = (entry: RefundApprovalEntry): string | null =>
+  entry.paymentMethod === "CardMachine" && entry.cashGivenBackMinor !== null
+    ? formatCad(entry.cashGivenBackMinor)
+    : null;
+
 const person = (entry: RefundApprovalEntry) =>
   entry.requestedByYou ? t("You") : (entry.requesterName ?? t("The staff member who asked"));
 
@@ -163,6 +172,7 @@ export function NotSentCard({
   const paymentPage =
     "/app/operations/payments/" + (entry.paymentIntentReferences[0] ?? "") + "/refund";
   const onMachine = entry.paymentMethod === "CardMachine";
+  const cash = cashBackOf(entry);
   return (
     <li className="refund-approval-card">
       <header className="refund-approval-card__header">
@@ -174,11 +184,19 @@ export function NotSentCard({
         </h3>
         {done === null ? (
           <p className="refund-approval-card__waiting">
-            {canSend
-              ? t("Asked by {name}, waiting for you to send", { name: person(entry) })
-              : t("Asked by {name}, waiting for a manager or the owner to send", {
-                  name: person(entry),
-                })}
+            {cash !== null
+              ? canSend
+                ? t("Asked by {name}, waiting for you to give it back in cash", {
+                    name: person(entry),
+                  })
+                : t("Asked by {name}, waiting for a manager or the owner to give it back in cash", {
+                    name: person(entry),
+                  })
+              : canSend
+                ? t("Asked by {name}, waiting for you to send", { name: person(entry) })
+                : t("Asked by {name}, waiting for a manager or the owner to send", {
+                    name: person(entry),
+                  })}
           </p>
         ) : null}
       </header>
@@ -201,10 +219,28 @@ export function NotSentCard({
         ) : null}
         <div>
           <dt>{t("Status")}</dt>
-          <dd>{done ?? t("Recorded, not sent yet. The guest has not been refunded.")}</dd>
+          <dd>
+            {done ??
+              (cash !== null
+                ? t("Recorded, not given back yet. The guest has not been refunded.")
+                : t("Recorded, not sent yet. The guest has not been refunded."))}
+          </dd>
         </div>
       </dl>
-      {done !== null ? null : onMachine ? (
+      {done !== null ? null : cash !== null ? (
+        <p>
+          {canSend
+            ? t(
+                "Paid in cash: give back {cash} from the drawer (the refund of {amount}, in whole nickels), then record it on the payment page.",
+                { cash, amount: formatCad(entry.amountMinor) },
+              )
+            : t(
+                "Paid in cash: a manager or the owner gives back {cash} from the drawer (the refund of {amount}, in whole nickels) and records it on the payment page.",
+                { cash, amount: formatCad(entry.amountMinor) },
+              )}{" "}
+          <Link to={paymentPage}>{t("Open the payment")}</Link>
+        </p>
+      ) : onMachine ? (
         <p>
           {t(
             "Paid on the store's card machine: refund it on the machine, then record it on the payment page.",
@@ -238,7 +274,7 @@ export function NotSentCard({
 }
 
 /** One refund awaiting approval: who asked, why, and the in-person approval that sends it. */
-function ApprovalCard({
+export function ApprovalCard({
   entry,
   csrf,
   viewerVerifiedUntil,
@@ -477,6 +513,8 @@ function ApprovalCard({
   const busy = outcome.kind === "Busy";
   // WP-2423 item 4: a card-machine refund is made on the store's machine once approved.
   const onMachine = entry.paymentMethod === "CardMachine";
+  // v15 batch 8: a counter cash payment goes back in cash from the drawer, never on the machine.
+  const cash = cashBackOf(entry);
   const machineApproved = onMachine && (entry.state === "Approved" || outcome.kind === "OnMachine");
   // Owner 2026-11-04 walkthrough: once decided, "waiting" and "approve before" are no longer true.
   const decided = outcome.kind === "Sent" || outcome.kind === "Declined" || machineApproved;
@@ -510,7 +548,13 @@ function ApprovalCard({
         </div>
         <div>
           <dt>{t("Paid with")}</dt>
-          <dd>{onMachine ? t("Store card machine") : t("Online card")}</dd>
+          <dd>
+            {cash !== null
+              ? t("Cash at the counter")
+              : onMachine
+                ? t("Store card machine")
+                : t("Online card")}
+          </dd>
         </div>
         {facts?.paidMinor == null ? null : (
           <div>
@@ -550,7 +594,9 @@ function ApprovalCard({
             {outcome.kind === "Declined"
               ? t("Declined — nothing was refunded")
               : machineApproved
-                ? t("Approved — refund it on the store's card machine, then record it")
+                ? cash !== null
+                  ? t("Approved — give back {cash} in cash, then record it", { cash })
+                  : t("Approved — refund it on the store's card machine, then record it")
                 : outcome.kind === "Sent"
                   ? outcome.unknown
                     ? t("Approved — sending result unknown")
@@ -678,13 +724,15 @@ function ApprovalCard({
                     ? t("Retry same approval")
                     : entry.state === "Approved"
                       ? t("Send approved refund")
-                      : onMachine
-                        ? t("Approve card machine refund of {amountMinor}", {
-                            amountMinor: formatCad(entry.amountMinor),
-                          })
-                        : t("Approve and refund {amountMinor}", {
-                            amountMinor: formatCad(entry.amountMinor),
-                          })}
+                      : cash !== null
+                        ? t("Approve giving back {cash} in cash", { cash })
+                        : onMachine
+                          ? t("Approve card machine refund of {amountMinor}", {
+                              amountMinor: formatCad(entry.amountMinor),
+                            })
+                          : t("Approve and refund {amountMinor}", {
+                              amountMinor: formatCad(entry.amountMinor),
+                            })}
           </button>
           {entry.state === "AwaitingApproval" && outcome.kind !== "Sent" && !declining ? (
             <button type="button" disabled={busy} onClick={() => setDeclining(true)}>
@@ -755,7 +803,17 @@ function ApprovalCard({
         </p>
       ) : null}
       <ApprovalFailureNotice outcome={outcome} csrf={csrf} fetcher={fetcher} />
-      {machineApproved ? (
+      {machineApproved && cash !== null ? (
+        <div role="status">
+          <p>
+            {t(
+              "Approved. Give back {cash} in cash from the drawer (the refund of {amountMinor}, in whole nickels), then record it on the payment page. It counts on the day it is given back.",
+              { cash, amountMinor: formatCad(entry.amountMinor) },
+            )}
+          </p>
+          <Link to={paymentDetail}>{t("Record the cash given back")}</Link>
+        </div>
+      ) : machineApproved ? (
         <div role="status">
           <p>
             {t(

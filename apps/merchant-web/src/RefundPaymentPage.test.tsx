@@ -17,6 +17,8 @@ import {
   paymentStateLabel,
   refundEverythingQuantities,
   cardMachineReviewText,
+  cashDrawerGivesBackMinor,
+  cashRequestRecordedText,
   refundSendsOnConfirm,
   refundWizardSections,
   requestBlockedMessage,
@@ -41,6 +43,7 @@ const context = {
   paymentState: "Captured" as const,
   paymentMethod: "CardMachine" as const,
   paidInCash: false,
+  cashLeftMinor: null,
   currencyCode: "CAD" as const,
   capturedAmountMinor: "593",
   confirmedRefundMinor: "0",
@@ -507,7 +510,7 @@ it("v15 batch 5: a cashier's card-machine review matches what they are told afte
 it("v15 batch 8: a counter cash payment is described as cash from the drawer, never the card machine", () => {
   const html = renderToStaticMarkup(
     <PaymentFinancialSummary
-      initial={{ ...context, paidInCash: true }}
+      initial={{ ...context, paidInCash: true, cashLeftMinor: "1075" }}
       csrf={"a".repeat(43)}
       revision={0}
       onContext={vi.fn()}
@@ -524,18 +527,62 @@ it("v15 batch 8: a counter cash payment is described as cash from the drawer, ne
   expect(requestProgressLabel("Recorded", "CardMachine", "AwaitingApproval", true)).toBe(
     "Waiting for owner approval",
   );
+  // The review names the requested amount and the whole nickels the drawer gives back, for a
+  // cashier (a manager or the owner gives it back) and after approval alike: never "sent".
+  const cash = { requested: "$3.67", drawer: "$3.65" };
   for (const approvalRequired of [false, true])
     for (const canSend of [false, true]) {
-      const review = cardMachineReviewText(approvalRequired, canSend, true);
+      const review = cardMachineReviewText(approvalRequired, canSend, cash);
       expect(review).toMatch(/^Paid in cash\./u);
-      expect(review).not.toMatch(/card machine|on that machine/u);
-      if (canSend) expect(review).toContain("whole nickels");
+      expect(review).not.toMatch(/card machine|on that machine|sends?\b/u);
+      expect(review).toContain("give");
+      expect(review).toContain(
+        "back $3.65 from the drawer (the refund of $3.67, in whole nickels)",
+      );
+      if (!canSend) expect(review).toContain("a manager or the owner gives back $3.65");
+      if (approvalRequired) expect(review).toContain("approved");
     }
+  // The drawer amount: whole nickels, never more than the drawer still holds of the payment.
+  expect(cashDrawerGivesBackMinor("367", "1075")).toBe("365");
+  expect(cashDrawerGivesBackMinor("368", "1075")).toBe("370");
+  expect(cashDrawerGivesBackMinor("338", "335")).toBe("335");
+  expect(cashDrawerGivesBackMinor("367", null)).toBe("365");
+  expect(cashDrawerGivesBackMinor("367", "0")).toBe("0");
+  // After recording: the same words as the review and Approvals, for every way it can go.
+  const recorded = (awaitingApproval: boolean, approveAlone: boolean, canSend: boolean) =>
+    cashRequestRecordedText({
+      total: "$3.67",
+      drawer: "$3.65",
+      awaitingApproval,
+      approveAlone,
+      canSend,
+    });
+  for (const text of [
+    recorded(false, false, false),
+    recorded(false, false, true),
+    recorded(true, false, false),
+    recorded(true, false, true),
+    recorded(true, true, true),
+  ]) {
+    expect(text).toContain("Request recorded for $3.67.");
+    expect(text).toContain("$3.65 from the drawer (in whole nickels)");
+    expect(text).not.toMatch(/card machine|\bsen[dt]s?\b/u);
+  }
+  expect(recorded(false, false, false)).toContain("a manager or the owner gives back $3.65");
+  expect(recorded(true, false, false)).toContain(
+    "once the owner approves it, a manager or the owner gives back",
+  );
+  expect(recorded(false, false, true)).toContain("Now give back $3.65");
   // A card-machine payment keeps its card-machine words.
   expect(requestProgressLabel("Recorded", "CardMachine", null)).toBe(
     "To refund on the card machine",
   );
   setLanguageForTest("zh-Hans");
   expect(requestProgressLabel("Recorded", "CardMachine", null, true)).toBe("待退还现金");
-  expect(cardMachineReviewText(false, true, true)).toContain("按 5 分取整");
+  expect(cardMachineReviewText(false, true, cash)).toContain(
+    "请从钱箱退还现金 $3.65（退款 $3.67，按 5 分取整）",
+  );
+  expect(cardMachineReviewText(true, false, cash)).toContain("由店长或店主从钱箱退还现金 $3.65");
+  expect(recorded(true, false, false)).toContain("店主批准后，由店长或店主从钱箱退还现金 $3.65");
+  expect(recorded(false, false, true)).toContain("请从钱箱退还现金 $3.65（按 5 分取整）");
 });

@@ -1,6 +1,7 @@
 import { dollarsToMinor } from "./store-price-pages.js";
 import { countOf, t } from "./i18n/i18n.js";
 import { orderMoney } from "./order-money.js";
+import { cashTotalMinor } from "./table-checkout-client.js";
 import { refundErrorText as errorMessage } from "./OrderPaymentLinks.js";
 import {
   RefundExecutionAction,
@@ -716,24 +717,31 @@ export const refundSendsOnConfirm = (
 export const cardMachineReviewText = (
   approvalRequired: boolean,
   canSend: boolean,
-  /** v15 batch 8: a counter cash payment goes back in cash from the drawer, in whole nickels. */
-  paidInCash = false,
+  /**
+   * v15 batch 8: a counter cash payment goes back in cash from the drawer, in whole nickels: the
+   * requested amount and what the drawer gives back for it (cashDrawerGivesBackMinor), as written.
+   */
+  cash: { readonly requested: string; readonly drawer: string } | null = null,
 ) =>
-  paidInCash
+  cash !== null
     ? !canSend
       ? approvalRequired
         ? t(
-            "Paid in cash. Recording this request gives nothing back yet: once it is approved, a manager or the owner gives the cash back and records it.",
+            "Paid in cash. Recording this request gives nothing back yet: once it is approved, a manager or the owner gives back {drawer} from the drawer (the refund of {requested}, in whole nickels) and records it on the payment page.",
+            cash,
           )
         : t(
-            "Paid in cash. Recording this request gives nothing back yet: a manager or the owner gives the cash back and records it.",
+            "Paid in cash. Recording this request gives nothing back yet: a manager or the owner gives back {drawer} from the drawer (the refund of {requested}, in whole nickels) and records it on the payment page.",
+            cash,
           )
       : approvalRequired
         ? t(
-            "Paid in cash. After the request is recorded and approved, give this amount back in cash from the drawer, in whole nickels (rounded to 5 cents), and record it under the request.",
+            "Paid in cash. After the request is recorded and approved, give back {drawer} from the drawer (the refund of {requested}, in whole nickels) and record it under the request.",
+            cash,
           )
         : t(
-            "Paid in cash. After the request is recorded, give this amount back in cash from the drawer, in whole nickels (rounded to 5 cents), and record it under the request.",
+            "Paid in cash. After the request is recorded, give back {drawer} from the drawer (the refund of {requested}, in whole nickels) and record it under the request.",
+            cash,
           )
     : !canSend
       ? approvalRequired
@@ -750,6 +758,61 @@ export const cardMachineReviewText = (
         : t(
             "Paid on the store's card machine. After the request is recorded, refund this amount on that machine and record it under the request.",
           );
+/**
+ * v15 batch 8: what the drawer gives back for a cash refund of `requestedMinor` — rounded to whole
+ * nickels by the table's cash rule and never more than the drawer still holds of the payment
+ * (`cashLeftMinor`, from the server; null from an older server: not capped). The server's
+ * cardMachineRefundGivenBackMinor, which records it, applies the same rule.
+ */
+export function cashDrawerGivesBackMinor(
+  requestedMinor: string,
+  cashLeftMinor: string | null,
+): string {
+  const requested = BigInt(requestedMinor);
+  if (requested <= 0n) return "0";
+  const rounded = cashTotalMinor(requested);
+  if (cashLeftMinor === null) return rounded.toString();
+  const left = BigInt(cashLeftMinor);
+  return (left <= 0n ? 0n : rounded < left ? rounded : left).toString();
+}
+/**
+ * v15 batch 8: the message after recording a request, for a counter cash payment: nothing goes
+ * back until it is given back from the drawer, after approval when one is needed, by a manager or
+ * the owner when a cashier asked; it is never "sent". Same words as the review and Approvals.
+ */
+export function cashRequestRecordedText(input: {
+  readonly total: string;
+  readonly drawer: string;
+  readonly awaitingApproval: boolean;
+  readonly approveAlone: boolean;
+  readonly canSend: boolean;
+}): string {
+  const values = { total: input.total, drawer: input.drawer };
+  if (input.awaitingApproval && input.approveAlone)
+    return t(
+      "Request recorded for {total}. Nothing is given back yet. You run this business alone: open Approvals and approve it yourself after confirming it is you, then give back {drawer} from the drawer (in whole nickels) and record it here.",
+      values,
+    );
+  if (input.awaitingApproval)
+    return input.canSend
+      ? t(
+          "Request recorded for {total}. Nothing is given back yet: once the owner approves it, give back {drawer} from the drawer (in whole nickels) and record it here. Ask the owner to open Approvals on this device or theirs. If more than 15 minutes pass after your verification, you'll be asked to verify again here.",
+          values,
+        )
+      : t(
+          "Request recorded for {total}. Nothing is given back yet: once the owner approves it, a manager or the owner gives back {drawer} from the drawer (in whole nickels) and records it on the payment page. Ask the owner to open Approvals on this device or theirs. If more than 15 minutes pass after your verification, you'll be asked to verify again here.",
+          values,
+        );
+  return input.canSend
+    ? t(
+        "Request recorded for {total}. Now give back {drawer} from the drawer (in whole nickels) and record it under the request above.",
+        values,
+      )
+    : t(
+        "Request recorded for {total}. Nothing is given back yet: a manager or the owner gives back {drawer} from the drawer (in whole nickels) and records it on the payment page.",
+        values,
+      );
+}
 function RefundWizard({
   orderReference,
   paymentIntentReference,
@@ -758,10 +821,13 @@ function RefundWizard({
   blockedMessage = null,
   canSend = true,
   paidInCash = false,
+  cashLeftMinor = null,
 }: {
   readonly orderReference: string;
   /** v15 batch 8: this payment was taken in cash at the counter (given back in cash). */
   readonly paidInCash?: boolean;
+  /** v15 batch 8: the cash the drawer still holds of it (null: not cash, or an older server). */
+  readonly cashLeftMinor?: string | null;
   /** The payment this page is for: what "Refund everything" means when items can't be mixed. */
   readonly paymentIntentReference: string;
   readonly csrf: string;
@@ -1109,33 +1175,40 @@ function RefundWizard({
             ? t("This request was already recorded; nothing repeated. ")
             : "";
         const total = amount(result?.amountMinor ?? null);
+        const cashRecorded =
+          paidInCash && previewOnMachine && result != null && outcome.kind !== "Refunded"
+            ? cashRequestRecordedText({
+                total,
+                drawer: amount(cashDrawerGivesBackMinor(result.amountMinor, cashLeftMinor)),
+                awaitingApproval: outcome.kind === "AwaitingApproval",
+                approveAlone: result.approveAlone === true,
+                canSend,
+              })
+            : null;
         setMessage(
           recovered +
-            (outcome.kind === "Refunded"
-              ? t("Refunded {total} to the customer's original payment method.", { total })
-              : outcome.kind === "WaitingForAnswer"
-                ? t(
-                    "Sent — waiting for the card provider's answer. {total} stays set aside until it answers; the request above shows the result.",
-                    { total },
-                  )
-                : outcome.kind === "AwaitingApproval" && result?.approveAlone
+            (cashRecorded !== null
+              ? cashRecorded
+              : outcome.kind === "Refunded"
+                ? t("Refunded {total} to the customer's original payment method.", { total })
+                : outcome.kind === "WaitingForAnswer"
                   ? t(
-                      "Request recorded for {total}. Nothing is refunded yet. You run this business alone: open Approvals and approve it yourself after confirming it is you; it is sent once approved.",
+                      "Sent — waiting for the card provider's answer. {total} stays set aside until it answers; the request above shows the result.",
                       { total },
                     )
-                  : outcome.kind === "AwaitingApproval"
+                  : outcome.kind === "AwaitingApproval" && result?.approveAlone
                     ? t(
-                        "Request recorded for {total}. Nothing is refunded yet: it is sent once the owner approves it. Ask the owner to open Approvals on this device or theirs. If more than 15 minutes pass after your verification, you'll be asked to verify again here.",
+                        "Request recorded for {total}. Nothing is refunded yet. You run this business alone: open Approvals and approve it yourself after confirming it is you; it is sent once approved.",
                         { total },
                       )
-                    : !canSend
+                    : outcome.kind === "AwaitingApproval"
                       ? t(
-                          "Request recorded for {total}. Nothing is refunded yet: a manager or the owner sends it from Approvals.",
+                          "Request recorded for {total}. Nothing is refunded yet: it is sent once the owner approves it. Ask the owner to open Approvals on this device or theirs. If more than 15 minutes pass after your verification, you'll be asked to verify again here.",
                           { total },
                         )
-                      : paidInCash
+                      : !canSend
                         ? t(
-                            "Request recorded for {total}. Now give it back in cash from the drawer, in whole nickels, and record it under the request above.",
+                            "Request recorded for {total}. Nothing is refunded yet: a manager or the owner sends it from Approvals.",
                             { total },
                           )
                         : t(
@@ -1553,7 +1626,18 @@ function RefundWizard({
             </div>
           </dl>
           {previewOnMachine ? (
-            <p>{cardMachineReviewText(preview.approvalRequired === true, canSend, paidInCash)}</p>
+            <p>
+              {cardMachineReviewText(
+                preview.approvalRequired === true,
+                canSend,
+                paidInCash
+                  ? {
+                      requested: amount(preview.amountMinor),
+                      drawer: amount(cashDrawerGivesBackMinor(preview.amountMinor, cashLeftMinor)),
+                    }
+                  : null,
+              )}
+            </p>
           ) : sendsNow ? (
             <p>
               {t(
@@ -2125,6 +2209,7 @@ function PaymentContent({
               blockedMessage={requestBlockedMessage(context)}
               canSend={context.canSend}
               paidInCash={context.paidInCash}
+              cashLeftMinor={context.cashLeftMinor}
             />
           )}
         </>
