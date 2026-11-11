@@ -1404,3 +1404,57 @@ for (const width of [1440, 1024, 390])
     ).toBe(true);
     await row.screenshot({ path: `test-results/tables-paid-row-${width}.png` });
   });
+
+// Review of f9d052f0: a table checking out that the order queue never brings is read from its own
+// bill on every list read, so a guest who pays on the phone between two reads turns the row to
+// paid at the next read — the row never keeps telling staff to take a payment already made.
+test("@production a table checking out the queue never brings reads paid once the guest pays between two reads", async ({
+  page,
+}) => {
+  await page.clock.install({ time: new Date("2026-10-15T19:00:00.000Z") });
+  await floor(page, { phase: "Closing", version: 7 });
+  await page.route("**/merchant/orders*", (route) => route.abort("timedout"));
+  let guestPaid = false;
+  let billReads = 0;
+  await page.route("**/merchant/dining/table-bill", (route) => {
+    billReads += 1;
+    const bill = unpaidBill("Closing", 7);
+    return route.fulfill({
+      headers,
+      json: guestPaid
+        ? {
+            ...bill,
+            rounds: bill.rounds.map((round) => ({ ...round, paid: true })),
+            owed: { subtotalMinor: "0", taxMinor: "0", totalMinor: "0" },
+            settlement: {
+              method: "Online",
+              roundsMinor: "3393",
+              tipMinor: "0",
+              roundingMinor: "0",
+              totalMinor: "3393",
+              tenderedMinor: null,
+              changeMinor: null,
+              recordedAt: "2026-10-15T19:00:20.000Z",
+              recordedAfterOutage: false,
+            },
+          }
+        : bill,
+    });
+  });
+  await page.goto("/operations/dining");
+  const row = page
+    .locator(".table-row")
+    .filter({ has: page.getByRole("button", { name: "Select T2", exact: true }) });
+  await expect(row).toContainText("Waiting for payment");
+  await expect(row).toContainText("$33.93");
+  const firstReads = billReads;
+  // The guest pays in full on the phone; the queue still never answers.
+  guestPaid = true;
+  // The list reads again every 30 seconds (two 15-second ticks).
+  await page.clock.fastForward(15_500);
+  await page.clock.fastForward(15_500);
+  await expect(row).toContainText("Paid · close when the guests leave");
+  await expect(row).not.toContainText("Waiting for payment");
+  await expect(row).not.toContainText("Checking the bill");
+  expect(billReads).toBeGreaterThan(firstReads);
+});

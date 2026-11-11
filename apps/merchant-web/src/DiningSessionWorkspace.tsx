@@ -589,9 +589,12 @@ export function DiningSessionWorkspace({
   // v15 batch 8: a table checking out that the queue read did not bring is said from its own
   // bill (the panel's), never "Checking the bill" once that bill is read. By Order.
   const [billFacts, setBillFacts] = useState<ReadonlyMap<string, TableOrderFacts>>(new Map());
+  const polls = useRef(0);
   const keepLastBills = async (
     items: readonly StaffDiningTable[],
     facts: ReadonlyMap<string, TableOrderFacts>,
+    /** This list read's number: a table checking out the queue did not bring is read once in each. */
+    poll: number,
     /** Only these tables are read now; the others keep what was read before. */
     only?: (table: StaffDiningTable) => boolean,
   ) => {
@@ -602,7 +605,14 @@ export function DiningSessionWorkspace({
         const session = table.currentDiningSessionReference;
         const order = table.session?.orderReference;
         if (session === null || !order) continue;
-        const key = JSON.stringify([table.session?.phase, facts.get(order) ?? null]);
+        // A table checking out that the queue did not bring is said from this bill alone, and the
+        // guest may pay on the phone between two reads: it is read again on every list read (once
+        // per read, shared by the read beside the queue and the one after it), never kept stale.
+        const queued = facts.get(order);
+        const key = JSON.stringify([
+          table.session?.phase,
+          queued ?? (table.session?.phase === "Closing" ? { poll } : null),
+        ]);
         const prior = lastBills.current.get(session);
         if (only !== undefined && !only(table)) {
           if (prior !== undefined) kept.set(session, prior);
@@ -642,16 +652,19 @@ export function DiningSessionWorkspace({
     );
     // v15 batch 8: the tables' own bills are read beside the queue (a slow queue read under load
     // left tables paid in full on "Checking the bill"), then again for what the queue changed.
+    polls.current += 1;
+    const poll = polls.current;
     const bills = keepLastBills(
       items,
       orderFactsNow.current,
+      poll,
       (table) => table.session?.phase === "Closing",
     );
     try {
       const facts = await loadTableOrderFacts(orders, signal);
       if (!signal.aborted) setOrderFacts(facts);
       await bills;
-      if (!signal.aborted) void keepLastBills(items, facts);
+      if (!signal.aborted) void keepLastBills(items, facts, poll);
     } catch {
       /* The list still shows each table's own state; the dishes are read again with it. */
     }
