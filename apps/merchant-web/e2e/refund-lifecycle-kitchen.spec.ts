@@ -218,10 +218,44 @@ test("@production M10/M14: a cashier, whose request a manager sends, is not offe
   ).toBeVisible();
   await page.getByRole("combobox", { name: "Reason" }).selectOption("WRONG_ITEM");
   await page.getByRole("button", { name: "Review refund" }).click();
-  await expect(page.getByRole("region", { name: "Review this refund" })).toContainText("$15.00");
+  const review = page.getByRole("region", { name: "Review this refund" });
+  await expect(review).toContainText("$15.00");
   expect(previews.at(-1)?.withdraw).toBeUndefined();
+  // v15 batch 5: the cashier records a request; they are never told it is sent on confirming.
+  await expect(review).toContainText(
+    "Recording this request does not refund anything yet: a manager or the owner sends it from Approvals.",
+  );
+  await expect(review).not.toContainText("as soon as you confirm");
+  await expect(review.getByRole("button", { name: "Record refund request" })).toBeVisible();
+  await expect(review.getByRole("button", { name: /^Send / })).toHaveCount(0);
   await expectNoInternalText(page);
   await noHorizontalScroll(page, "refund-stop-making-cashier");
+});
+
+test("@production M10: a cashier refunding all of an order nobody accepted is pointed to Can't make it", async ({
+  page,
+}) => {
+  await signIn(page);
+  await noApprovals(page);
+  await page.route("**/merchant/payments/refunds/context", (route) =>
+    route.fulfill({ headers, json: context({ canSend: false }) }),
+  );
+  await twoDishes(page);
+  await page.route("**/merchant/payments/refunds/preview", (route) =>
+    route.fulfill({ status: 409, headers, json: { error: "refund_order_not_accepted" } }),
+  );
+  await page.goto("/app/operations/payments/" + id(31) + "/refund");
+  await page.getByRole("spinbutton", { name: /Fries/ }).fill("2");
+  await page.getByRole("spinbutton", { name: /Noodles/ }).fill("1");
+  await page.getByRole("combobox", { name: "Reason" }).selectOption("WRONG_ITEM");
+  await page.getByRole("button", { name: "Review refund" }).click();
+  const status = page.locator(".refund-status");
+  await expect(status).toContainText(
+    "Nothing was recorded. This order hasn't been accepted yet, so refunding all of it means turning it down: use Can't make it on the order",
+  );
+  await expect(status).not.toContainText("Refuse and refund");
+  await expectNoInternalText(page);
+  await noHorizontalScroll(page, "refund-not-accepted-cashier");
 });
 
 test("@production M14: a cashier's refund request waits for a manager to send it, on Approvals and Home", async ({
@@ -281,7 +315,15 @@ test("@production M14: a cashier's refund request waits for a manager to send it
   await page.reload();
   await expect(page.getByText("A manager or the owner sends it.")).toBeVisible();
   await expect(page.getByRole("button", { name: "Send refund" })).toHaveCount(0);
+  // v15 batch 5: never "waiting for you to send" to someone who can't send it.
+  await expect(
+    page.getByText("Asked by Mia, waiting for a manager or the owner to send"),
+  ).toBeVisible();
+  await expect(page.getByText("waiting for you to send")).toHaveCount(0);
   await noHorizontalScroll(page, "approvals-not-sent-cashier");
+  // Nor does their Home list it as something for them to do.
+  await page.goto("/app");
+  await expect(page.locator(".overview-attention")).not.toContainText("waiting for you to send");
 });
 
 test("@production M163: a manager records money taken back after a refund made by mistake", async ({
@@ -418,6 +460,8 @@ test("@production M10: the cook's ticket strikes through the refunded units and 
           item(1, "担担面", 2, { refundedQuantity: 1, refundedBy: ["Mia"] }),
           // Being made, refunded in full: stop, and clear it with Finished.
           item(2, "炒饭", 1, { refundedQuantity: 1, refundedBy: ["Mia"] }),
+          // v15 batch 5: refunded by the owner, who has no name on record: named by role.
+          item(3, "牛肉面", 3, { refundedQuantity: 1, refundedByRoles: ["Owner"] }),
         ],
         nextCursor: null,
       },
@@ -431,6 +475,9 @@ test("@production M10: the cook's ticket strikes through the refunded units and 
   const stopped = page.locator(".kitchen-ticket").filter({ hasText: "炒饭" });
   await expect(stopped).toContainText(
     "Refunded · stop, don't make it · press Finished to clear it · Refunded by Mia",
+  );
+  await expect(page.locator(".kitchen-ticket").filter({ hasText: "牛肉面" })).toContainText(
+    "1 refunded · don't make it · make 2 · Refunded by the owner",
   );
   const strike = await partly
     .locator(".kitchen-work-item__count-refunded")
@@ -530,4 +577,126 @@ test("@production M10: a refund that needs the owner's approval does not stop th
     "Nothing was recorded. This would refund and stop every dish of the pickup",
   );
   await noHorizontalScroll(page, "refund-stop-refused");
+});
+
+test("@production M10: a pickup with a refunded dish is handed over on what is still in the bag", async ({
+  page,
+}) => {
+  await noApprovals(page);
+  await page.route("**/merchant/session", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        authenticated: true,
+        csrf: "a".repeat(43),
+        workspace: {
+          screenId: "HOME-OVERVIEW",
+          selectedScope: scope,
+          authorizedStores: [scope],
+          businessDate: "2026-11-10",
+          storeStatus: "Open",
+          freshness: "Current",
+          dashboardAvailability: "UnavailableUntilWP1905",
+          navigation: [
+            {
+              screenId: "FUL-PICKUP-QUEUE",
+              label: "Pickup",
+              href: "/operations/pickup",
+              permission: "fulfillment.operate",
+            },
+          ],
+        },
+      },
+    }),
+  );
+  // v15 batch 5, order 24: 3 ordered, 1 refunded with "Stop making it too", 2 in the bag.
+  let handedOver = false;
+  await page.route("**/merchant/pickup/query", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        source: "CurrentFulfillment",
+        workstation: { deviceReference: id(510), pickupLocationReference: id(511) },
+        storeReference: scope.storeReference,
+        observedAt: new Date().toISOString(),
+        nextAfterFulfillmentReference: null,
+        items: handedOver
+          ? []
+          : [
+              {
+                fulfillmentReference: id(501),
+                orderReference: id(502),
+                orderNumber: "24",
+                phase: "Ready",
+                aggregateVersion: "3",
+                readyAt: new Date(Date.now() - 5 * 60_000).toISOString(),
+                publicOrderReference: null,
+                proof: {
+                  kind: "HumanCode",
+                  generation: 1,
+                  expiresAt: new Date(Date.now() + 50 * 60_000).toISOString(),
+                },
+                items: [
+                  {
+                    fulfillmentItemReference: id(503),
+                    orderedQuantity: 3,
+                    readyQuantity: 3,
+                    handedOverQuantity: 0,
+                    refundedQuantity: 1,
+                  },
+                ],
+              },
+            ],
+      },
+    }),
+  );
+  await page.route("**/merchant/pickup/identity-check", (route) =>
+    route.fulfill({ headers, json: { status: "Available", name: "Sam Lee", phoneLast4: "0123" } }),
+  );
+  const handoffs: Record<string, unknown>[] = [];
+  await page.route("**/merchant/pickup/handoff", (route) => {
+    const request = route.request().postDataJSON();
+    handoffs.push(request);
+    // As the server: only what is still owed (ordered less refunded) is accepted.
+    if (
+      JSON.stringify(request.quantities) !==
+      JSON.stringify([{ fulfillmentItemReference: id(503), quantity: 2 }])
+    )
+      return route.fulfill({ status: 422, headers, json: { error: "PICKUP_HANDOFF_NOT_READY" } });
+    handedOver = true;
+    return route.fulfill({
+      headers,
+      json: {
+        status: "Applied",
+        handoffReference: id(504),
+        fulfillmentReference: request.fulfillmentReference,
+        nextAggregateVersion: "4",
+        nextPhase: "Completed",
+      },
+    });
+  });
+  await page.goto("/operations/pickup");
+  const card = page
+    .locator(".pickup-queue__card")
+    .filter({ has: page.getByRole("heading", { name: "Order 24", exact: true }) });
+  await expect(card).toBeVisible();
+  await card.getByRole("button", { name: "Guest can’t show the code" }).click();
+  const dialog = page.getByRole("dialog", { name: "Confirm pickup handoff" });
+  await expect(dialog).toContainText("1 refunded, not in the bag");
+  await dialog
+    .getByLabel("Why the code can't be shown")
+    .selectOption({ label: "Phone is dead, lost or left behind" });
+  await expect(dialog.getByText("Sam Lee")).toBeVisible();
+  await dialog
+    .getByLabel("Checked in person")
+    .selectOption({ label: "Order number and last four digits of the phone" });
+  await dialog.getByLabel("Collected by").selectOption("Customer");
+  await dialog.getByLabel("Collector’s initial").fill("S***");
+  await dialog.getByLabel("I matched this order", { exact: false }).check();
+  await expectNoInternalText(page);
+  await noHorizontalScroll(page, "pickup-refunded-handover");
+  await dialog.getByRole("button", { name: "Confirm and record handoff" }).click();
+  await expect(page.getByText("Order 24 handed over.", { exact: false })).toBeVisible();
+  expect(handoffs).toHaveLength(1);
+  expect(handoffs[0]?.quantities).toEqual([{ fulfillmentItemReference: id(503), quantity: 2 }]);
 });
