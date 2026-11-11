@@ -30,8 +30,14 @@ export type RefundWithdrawalRecordsRefusal =
   | "ORDINARY_REFUND_WITHDRAW_HANDED_OVER"
   /** Every dish of the pickup would be refunded and stopped: Cancel order closes it instead. */
   | "ORDINARY_REFUND_WITHDRAW_EVERYTHING"
-  /** The kitchen started the dish (or stock moved) while the refund was being recorded. */
-  | "ORDINARY_REFUND_WITHDRAW_KITCHEN_CHANGED";
+  /** The kitchen started the dish while the refund was being recorded. */
+  | "ORDINARY_REFUND_WITHDRAW_KITCHEN_CHANGED"
+  /**
+   * The dish's stock can't be returned line by line (stock was offline when the order was placed,
+   * reserved before per-dish tracking, has no record, or was partly returned already). Retrying
+   * never helps: staff untick "stop making it too" (the guest keeps the food) or use Cancel items.
+   */
+  | "ORDINARY_REFUND_WITHDRAW_STOCK_NOT_RELEASABLE";
 const refuse = (code: RefundWithdrawalRecordsRefusal): never => {
   throw new Error(code);
 };
@@ -172,7 +178,12 @@ export async function applyRefundWithdrawalRecords(
         authorize: input.allowed,
         cartLineReferences: [entry.cart],
       });
-      if (released.status === "NotReleasable") refuse("ORDINARY_REFUND_WITHDRAW_KITCHEN_CHANGED");
+      if (released.status === "NotReleasable")
+        refuse(
+          released.reason === "ProductionStarted"
+            ? "ORDINARY_REFUND_WITHDRAW_KITCHEN_CHANGED"
+            : "ORDINARY_REFUND_WITHDRAW_STOCK_NOT_RELEASABLE",
+        );
     }
   } catch (error) {
     if (error instanceof KitchenBatchCancellationError && error.code === "KITCHEN_WORK_STARTED")

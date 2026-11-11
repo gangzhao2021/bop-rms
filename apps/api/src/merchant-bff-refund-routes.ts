@@ -38,6 +38,7 @@ function refundRequestFailed(response: express.Response, error: unknown) {
     ["ORDINARY_REFUND_WITHDRAW_HANDED_OVER", "refund_withdraw_handed_over"],
     ["ORDINARY_REFUND_WITHDRAW_EVERYTHING", "refund_withdraw_everything"],
     ["ORDINARY_REFUND_WITHDRAW_KITCHEN_CHANGED", "refund_withdraw_kitchen_changed"],
+    ["ORDINARY_REFUND_WITHDRAW_STOCK_NOT_RELEASABLE", "refund_withdraw_stock_not_releasable"],
   ] as const)
     if (failureNamed(error, code)) {
       response.status(409).set("Cache-Control", NO_STORE).json({ error: answer });
