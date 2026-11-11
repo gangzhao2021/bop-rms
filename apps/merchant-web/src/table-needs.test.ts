@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { StaffDiningTable } from "./dining-session-client.js";
 import { compareTables, tableInTab, tableNeed, tablesFreeingSoon } from "./table-needs.js";
-import type { TableOrderFacts } from "./table-order-facts.js";
+import { tableFactsFromBill, type TableOrderFacts } from "./table-order-facts.js";
+import type { TableBill } from "./table-checkout-client.js";
+import { listFactsOf } from "./DiningSessionWorkspace.js";
 
 const id = (n: number) => `00000000-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 const now = Date.parse("2026-10-27T19:42:00.000Z");
@@ -404,4 +406,96 @@ it("WP-2423 (M171): an allergy question is named, red at once, and comes before 
     now,
   );
   expect(allergy.rank).toBeLessThan(question.rank);
+});
+
+describe("v15 batch 8: a table checking out the order queue did not bring", () => {
+  const closing = table(7, { session: { phase: "Closing", version: 3, orderReference: id(207) } });
+  const bill = (changes: Record<string, unknown>) =>
+    ({
+      owed: { subtotalMinor: "0", taxMinor: "0", totalMinor: "0" },
+      settlement: null,
+      split: null,
+      ...changes,
+    }) as unknown as TableBill;
+  const part = (partNumber: number, amountMinor: string, paid: boolean) => ({
+    partNumber,
+    amountMinor,
+    payment: paid ? { totalMinor: amountMinor } : null,
+  });
+  it("is said from its own bill: paid by dish in full is paid, never 'Checking the bill'", () => {
+    const own = tableFactsFromBill(
+      bill({
+        split: {
+          mode: "ByGuests",
+          paidInFull: true,
+          paidParts: 2,
+          remainingMinor: "0",
+          parts: [part(1, "1413", true), part(2, "2825", true)],
+        },
+      }),
+    );
+    const facts = listFactsOf(closing, new Map(), new Map([[id(207), own]]));
+    expect(tableNeed(closing, facts, now)).toMatchObject({
+      tone: "done",
+      words: "Paid · close when the guests leave",
+      detail: "$42.38",
+    });
+    // A table paid whole, and one still owing part of its bill.
+    expect(
+      tableNeed(
+        closing,
+        tableFactsFromBill(
+          bill({ settlement: { roundsMinor: "2500", totalMinor: "2825" }, split: null }),
+        ),
+        now,
+      ),
+    ).toMatchObject({ words: "Paid · close when the guests leave", detail: "$28.25" });
+    expect(
+      tableNeed(
+        closing,
+        tableFactsFromBill(
+          bill({
+            owed: { subtotalMinor: "1250", taxMinor: "163", totalMinor: "1413" },
+            split: {
+              mode: "ByGuests",
+              paidInFull: false,
+              paidParts: 1,
+              remainingMinor: "1413",
+              parts: [part(1, "2825", true)],
+            },
+          }),
+        ),
+        now,
+      ),
+    ).toMatchObject({
+      words: "Waiting for payment",
+      detail: "$14.13 to go · paying by dish, 1 paid",
+    });
+  });
+  it("the queue's own facts come first, and an open table is never said from its bill", () => {
+    const queue = facts({ readyToServe: 1 });
+    const own = tableFactsFromBill(bill({ settlement: { roundsMinor: "100", totalMinor: "113" } }));
+    expect(listFactsOf(closing, new Map([[id(207), queue]]), new Map([[id(207), own]]))).toBe(
+      queue,
+    );
+    expect(listFactsOf(table(7), new Map(), new Map([[id(207), own]]))).toBeNull();
+    // Before either is read: still "Checking the bill".
+    expect(tableNeed(closing, listFactsOf(closing, new Map(), new Map()), now).words).toBe(
+      "Checking the bill",
+    );
+  });
+});
+
+it("v15 batch 8: a paid round waiting since last week reads in days", () => {
+  const need = tableNeed(
+    table(1, {
+      paymentTiming: "PayFirst",
+      roundsAwaitingAcceptance: [
+        { roundNumber: 1, paidAt: new Date(now - 9823 * 60_000).toISOString() },
+      ],
+    }),
+    null,
+    now,
+  );
+  expect(need).toMatchObject({ words: "Paid round to accept", detail: "paid 6 days ago" });
 });

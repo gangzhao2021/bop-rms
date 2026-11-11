@@ -1359,3 +1359,48 @@ test("@production a round waiting for staff OK is decided in checkout before the
   expect(settles[0]).toMatchObject({ method: "CardMachine", owedMinor: "3393" });
   await expectNoInternalText(page, ["Temporarily unavailable"]);
 });
+
+// v15 batch 8 (table-pay-by-dish, print-orders-records): a table paid in full reads paid on the
+// Tables list even when the order queue read is slow or fails: the row is said from the table's
+// own bill (the panel's), never "Checking the bill" while the money is in.
+for (const width of [1440, 1024, 390])
+  test(`@production a table paid in full reads paid on the list without the order queue at ${width}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await floor(page, { phase: "Closing", version: 7 });
+    // The order queue never answers in time (load on the server).
+    await page.route("**/merchant/orders*", (route) => route.abort("timedout"));
+    await page.route("**/merchant/dining/table-bill", (route) =>
+      route.fulfill({
+        headers,
+        json: {
+          ...unpaidBill("Closing", 7),
+          rounds: unpaidBill("Closing", 7).rounds.map((round) => ({ ...round, paid: true })),
+          owed: { subtotalMinor: "0", taxMinor: "0", totalMinor: "0" },
+          settlement: {
+            method: "Online",
+            roundsMinor: "3393",
+            tipMinor: "0",
+            roundingMinor: "0",
+            totalMinor: "3393",
+            tenderedMinor: null,
+            changeMinor: null,
+            recordedAt: "2026-10-15T19:05:00.000Z",
+            recordedAfterOutage: false,
+          },
+        },
+      }),
+    );
+    await page.goto("/operations/dining");
+    const row = page
+      .locator(".table-row")
+      .filter({ has: page.getByRole("button", { name: "Select T2", exact: true }) });
+    await expect(row).toContainText("Paid · close when the guests leave");
+    await expect(row).toContainText("$33.93");
+    await expect(row).not.toContainText("Checking the bill");
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await row.screenshot({ path: `test-results/tables-paid-row-${width}.png` });
+  });

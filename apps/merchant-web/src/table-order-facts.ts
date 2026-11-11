@@ -7,6 +7,7 @@ import {
   type DiningServeReadyResult,
 } from "./dining-serve-ready-client.js";
 import { serviceOperationReference } from "./service-control-client.js";
+import type { TableBill } from "./table-checkout-client.js";
 
 /**
  * WP-2423 item 8 ① (the Tables page is the server's main screen): what the list needs to know of
@@ -32,6 +33,45 @@ export interface TableOrderFacts {
     };
     readonly paid: { readonly amountMinor: string } | null;
   } | null;
+}
+
+/**
+ * v15 batch 8: a table checking out whose Order the queue read did not bring (a slow or failed
+ * read, or an Order past the pages read) is said from its own bill — the one the table's panel
+ * shows — so a table paid in full never reads "Checking the bill". Payment's figures only; what
+ * the kitchen still has is not known from the bill, so nothing is said about dishes.
+ */
+export function tableFactsFromBill(bill: TableBill): TableOrderFacts {
+  const split = bill.split;
+  const paidParts = (split?.parts ?? []).filter((part) => part.payment !== null);
+  const paid =
+    bill.settlement !== null
+      ? { amountMinor: bill.settlement.totalMinor }
+      : split !== null && split.paidInFull
+        ? {
+            amountMinor: paidParts
+              .reduce((sum, part) => sum + BigInt(part.payment?.totalMinor ?? "0"), 0n)
+              .toString(),
+          }
+        : null;
+  return {
+    readyToServe: 0,
+    inKitchen: false,
+    allServed: false,
+    bill: {
+      totalMinor: bill.settlement !== null ? bill.settlement.roundsMinor : bill.owed.totalMinor,
+      ...(paid === null && split !== null && paidParts.length > 0
+        ? {
+            partlyPaid: {
+              remainingMinor: split.remainingMinor,
+              paidParts: paidParts.length,
+              partCount: split.mode === "ByGuests" ? null : split.parts.length,
+            },
+          }
+        : {}),
+      paid,
+    },
+  };
 }
 
 /** Order phases in which the kitchen still has work for the table. */

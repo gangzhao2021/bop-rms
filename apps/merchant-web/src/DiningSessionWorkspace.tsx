@@ -16,6 +16,7 @@ import { DiningServeReadyClientError } from "./dining-serve-ready-client.js";
 import { serveReadySummary } from "./dining-serve-ready.js";
 import {
   loadTableOrderFacts,
+  tableFactsFromBill,
   prepareServeAllReady,
   type TableOrderFacts,
 } from "./table-order-facts.js";
@@ -85,6 +86,22 @@ const tableBlockReasons = [
   ["OUT_OF_SERVICE", t("Out of service")],
   ["AREA_CLOSED", t("Section closed")],
 ] as const;
+/**
+ * The facts the Tables list says a table's need from: the order queue's for its Order; for a table
+ * checking out that the queue did not bring, its own bill's (v15 batch 8).
+ */
+export function listFactsOf(
+  table: StaffDiningTable,
+  orderFacts: ReadonlyMap<string, TableOrderFacts>,
+  billFacts: ReadonlyMap<string, TableOrderFacts>,
+): TableOrderFacts | null {
+  const order = table.session?.orderReference;
+  if (!order) return null;
+  return (
+    orderFacts.get(order) ??
+    (table.session?.phase === "Closing" ? (billFacts.get(order) ?? null) : null)
+  );
+}
 /** WP-2423 follow-up: how long a session has been open, in words staff read at a glance. */
 export function elapsedText(minutes: number): string {
   if (minutes < 60) return t("{minutes} min", { minutes: String(minutes) });
@@ -484,6 +501,8 @@ export function DiningSessionWorkspace({
     [result, setResult] = useState<TableResult | null>(null),
     [state, setState] = useState<"Idle" | "Loading" | "Submitting" | "Unknown">("Idle");
   const [orderFacts, setOrderFacts] = useState<ReadonlyMap<string, TableOrderFacts>>(new Map());
+  const orderFactsNow = useRef(orderFacts);
+  orderFactsNow.current = orderFacts;
   const [tab, setTab] = useState<TableTab>("Needs");
   const detailRef = useRef<HTMLElement | null>(null);
   const pending = useRef<AbortController | null>(null),
@@ -564,12 +583,19 @@ export function DiningSessionWorkspace({
   /** The open tables' dishes and bills, from the order queue (kept on a failed read). */
   // Owner 2026-11-03 (operating continuity): each open table's bill stays on this device, so staff
   // can still see what a table owes when the connection drops. Read again only when it changed.
-  const lastBills = useRef(new Map<string, { key: string; bill: LastTableBill }>());
+  const lastBills = useRef(
+    new Map<string, { key: string; bill: LastTableBill; facts: TableOrderFacts }>(),
+  );
+  // v15 batch 8: a table checking out that the queue read did not bring is said from its own
+  // bill (the panel's), never "Checking the bill" once that bill is read. By Order.
+  const [billFacts, setBillFacts] = useState<ReadonlyMap<string, TableOrderFacts>>(new Map());
   const keepLastBills = async (
     items: readonly StaffDiningTable[],
     facts: ReadonlyMap<string, TableOrderFacts>,
+    /** Only these tables are read now; the others keep what was read before. */
+    only?: (table: StaffDiningTable) => boolean,
   ) => {
-    const kept = new Map<string, { key: string; bill: LastTableBill }>();
+    const kept = new Map<string, { key: string; bill: LastTableBill; facts: TableOrderFacts }>();
     const client = createTableCheckoutClient();
     try {
       for (const table of items) {
@@ -578,27 +604,53 @@ export function DiningSessionWorkspace({
         if (session === null || !order) continue;
         const key = JSON.stringify([table.session?.phase, facts.get(order) ?? null]);
         const prior = lastBills.current.get(session);
+        if (only !== undefined && !only(table)) {
+          if (prior !== undefined) kept.set(session, prior);
+          continue;
+        }
         if (prior?.key === key) {
           kept.set(session, prior);
           continue;
         }
         const bill = await client.bill(csrf, session);
         if (bill.paymentTiming === "PayLater")
-          kept.set(session, { key, bill: lastTableBill(table.stableLabel, bill) });
+          kept.set(session, {
+            key,
+            bill: lastTableBill(table.stableLabel, bill),
+            facts: tableFactsFromBill(bill),
+          });
       }
     } catch {
       return; // Not read this time (or not allowed): what was kept stays until the next read.
     }
     lastBills.current = kept;
+    const byOrder = new Map<string, TableOrderFacts>();
+    for (const table of items) {
+      const entry =
+        table.currentDiningSessionReference === null
+          ? undefined
+          : kept.get(table.currentDiningSessionReference);
+      if (entry !== undefined && table.session?.orderReference)
+        byOrder.set(table.session.orderReference, entry.facts);
+    }
+    setBillFacts(byOrder);
     saveLastBills([...kept.values()].map((entry) => entry.bill));
   };
   const loadFacts = async (items: readonly StaffDiningTable[], signal: AbortSignal) => {
     const orders = items.flatMap((table) =>
       table.session?.orderReference ? [table.session.orderReference] : [],
     );
+    // v15 batch 8: the tables' own bills are read beside the queue (a slow queue read under load
+    // left tables paid in full on "Checking the bill"), then again for what the queue changed.
+    const bills = keepLastBills(
+      items,
+      orderFactsNow.current,
+      (table) => table.session?.phase === "Closing",
+    );
     try {
       const facts = await loadTableOrderFacts(orders, signal);
       if (!signal.aborted) setOrderFacts(facts);
+      await bills;
       if (!signal.aborted) void keepLastBills(items, facts);
     } catch {
       /* The list still shows each table's own state; the dishes are read again with it. */
@@ -962,16 +1014,10 @@ export function DiningSessionWorkspace({
       tables
         .map((table) => ({
           table,
-          need: tableNeed(
-            table,
-            table.session?.orderReference
-              ? (orderFacts.get(table.session.orderReference) ?? null)
-              : null,
-            now,
-          ),
+          need: tableNeed(table, listFactsOf(table, orderFacts, billFacts), now),
         }))
         .sort(compareTables),
-    [tables, orderFacts, now],
+    [tables, orderFacts, billFacts, now],
   );
   const counts = new Map(
     tableTabs.map((value) => [
