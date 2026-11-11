@@ -925,7 +925,11 @@ export function TableCheckout({
                       </label>
                       {/* Owner 2026-11-03 walkthrough: the usual amounts are one tap. */}
                       {cashDue === null ? null : (
-                        <div className="table-checkout__cash-quick" role="group">
+                        <div
+                          className="table-checkout__cash-quick"
+                          role="group"
+                          aria-label={t("Quick cash amounts")}
+                        >
                           {cashQuickAmounts(cashDue).map((amount, index) => (
                             <button
                               key={amount.toString()}

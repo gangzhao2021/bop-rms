@@ -92,7 +92,8 @@ export function CashTenderFields({
           onChange={(event) => receive(event.currentTarget.value)}
         />
       </label>
-      <div className="cash-tender__quick" role="group" aria-label={t("Cash received")}>
+      {/* v15 batch 8: its own name, so a screen reader tells the quick amounts from the field. */}
+      <div className="cash-tender__quick" role="group" aria-label={t("Quick cash amounts")}>
         {cashQuickAmounts(tender.cashDueMinor).map((amount, index) => (
           <button
             key={amount.toString()}

@@ -33,6 +33,9 @@ describe("counter cash (WP-2423 M52)", () => {
     expect(markup).toContain("Cash total $22.45 (rounded to 5 cents)");
     expect(markup).toContain("Exact $22.45");
     expect(markup).toContain("Change $7.55");
+    // v15 batch 8: the typed amount and the quick amounts have different names for a screen reader.
+    expect(markup).toContain('aria-label="Quick cash amounts"');
+    expect(markup).not.toContain('aria-label="Cash received"');
   });
 
   it("sends the cash handed over and reads the change the server worked out", async () => {
