@@ -81,6 +81,7 @@ it("lists every open exception past 500 lifetime cases and pages resolved histor
       const scope = { brandReference: id(1), storeReference: id(2) };
       const ownerScope = { tenantReference: id(3), ...scope };
       const queryLog = [];
+      let breakCauses = false;
       /**
        * The pilot exception snapshot (tooling/environment/pilot-exception-snapshot.mjs): one
        * REPEATABLE READ transaction under the api role with the runner's limits, accepting only
@@ -106,7 +107,15 @@ it("lists every open exception past 500 lifetime cases and pages resolved histor
                   "the exception snapshot refuses: " + String(sql).slice(0, 60),
                 );
                 queryLog.push(sql);
-                return client.query(sql, values === undefined ? [] : [...values]);
+                // Test-only: a real PostgreSQL failure of the order-cause read (an unknown table).
+                const statement =
+                  breakCauses && sql.includes("rms_ordering.order_termination_record")
+                    ? sql.replace(
+                        "rms_ordering.order_termination_record",
+                        "rms_ordering.no_such_table",
+                      )
+                    : sql;
+                return client.query(statement, values === undefined ? [] : [...values]);
               },
             });
             await client.query("COMMIT");
@@ -224,7 +233,7 @@ it("lists every open exception past 500 lifetime cases and pages resolved histor
             requiredLiveGateRequirementCodes: ["SYNTHETIC_STORE_READY"],
           },
         },
-        onUnexpected: (error) => unexpected.push(error),
+        onUnexpected: (error, read) => unexpected.push([read ?? "ReconciliationDetail", error]),
         // Test-only: the coverage the pilot reads from the owners is out of scope here.
         metadata: async (_tx, { storeLabel }) => ({
           storeLabel,
@@ -251,6 +260,22 @@ it("lists every open exception past 500 lifetime cases and pages resolved histor
       );
       assert.deepEqual(unexpected, []);
       assert.equal(first.items.filter((item) => item.status === "Resolved").length, 25);
+
+      // v15 batch 7 review: when the order-cause read fails in PostgreSQL, every case is still
+      // listed (titled by its kind) and the failure is logged as a cause read, not as UNAVAILABLE.
+      breakCauses = true;
+      const withoutCauses = await read(session.sessionCookie);
+      breakCauses = false;
+      assert.deepEqual(
+        withoutCauses.items.map((item) => item.exceptionReference),
+        first.items.map((item) => item.exceptionReference),
+      );
+      assert.ok(withoutCauses.items.every((item) => item.cause === undefined));
+      assert.deepEqual(
+        unexpected.map(([what, error]) => [what, error?.code]),
+        [["OrderCause", "42P01"]],
+      );
+      unexpected.length = 0;
       assert.notEqual(first.olderResolvedBefore, null);
 
       // Page the resolved history to its end: newest first, no repeats, every case once.

@@ -338,9 +338,15 @@ export async function createInternalMerchant(
       // WP-2423 item 10: its own host, so it is wrapped here as well as the shared one above.
       transactions: refusalsStayReal(createInternalExceptionSnapshotTransactions(resources)),
     },
-    // WP-2423 D3 / v15 M44: an unreadable reconciliation detail or order cause is logged (code and frames only).
-    onUnexpected: (error) =>
-      reportUnexpected("INTERNAL_ORDER_EXCEPTION_RECONCILIATION_DETAIL_UNAVAILABLE", error),
+    // WP-2423 D3 / v15 M44: an unreadable reconciliation detail or order cause is logged under
+    // its own code (code and frames only).
+    onUnexpected: (error, read) =>
+      reportUnexpected(
+        read === "OrderCause"
+          ? "INTERNAL_ORDER_EXCEPTION_ORDER_CAUSE_UNAVAILABLE"
+          : "INTERNAL_ORDER_EXCEPTION_RECONCILIATION_DETAIL_UNAVAILABLE",
+        error,
+      ),
     // WP-2423: a business day's totals difference names its day by the scheduler's own runs.
     settlementDays: {
       dayEndOf: dailySettlementDayEnd,

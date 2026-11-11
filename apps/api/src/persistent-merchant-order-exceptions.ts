@@ -50,9 +50,11 @@ export function createPersistentMerchantOrderExceptions(options: {
   };
   /**
    * WP-2423 D3: an unexpected failure reading what a payment reconciliation difference is about
-   * (the card then says its details could not be loaded). Callers log code and frames only.
+   * (the card then says its details could not be loaded), or (v15 M44, `read` "OrderCause") why a
+   * case's Order ended (the case then keeps its kind as the title). Callers log code and frames
+   * only, under a code for which read failed.
    */
-  onUnexpected?(error: unknown): void;
+  onUnexpected?(error: unknown, read?: "OrderCause"): void;
 }) {
   const persistence = options.persistence,
     resolve = createMerchantStoreScope(persistence);
@@ -87,27 +89,47 @@ export function createPersistentMerchantOrderExceptions(options: {
       a.brandReference === b.brandReference &&
       a.storeReference === b.storeReference &&
       a.sessionReference === b.sessionReference;
+    /** The owner's transaction, with each reply's rows checked before an owner read sees them. */
+    const checked = (original: {
+      query(sql: string, values: readonly unknown[]): Promise<unknown>;
+    }) => {
+      const tx: ConsumerTransaction = {
+        async query<Row = Record<string, unknown>>(sql: string, values: readonly unknown[]) {
+          const result = await original.query(sql, values);
+          if (!result || typeof result !== "object") return unavailable();
+          const rows = Object.getOwnPropertyDescriptor(result, "rows"),
+            count = Object.getOwnPropertyDescriptor(result, "rowCount");
+          if (
+            !rows ||
+            !("value" in rows) ||
+            !Array.isArray(rows.value) ||
+            !count ||
+            !("value" in count) ||
+            (count.value !== null && (!Number.isSafeInteger(count.value) || count.value < 0))
+          )
+            return unavailable();
+          return { rows: rows.value as readonly Row[], rowCount: count.value as number | null };
+        },
+      };
+      return tx;
+    };
+    /** This request's scope once its cases' transaction rechecked it in full before the reply. */
+    let verified: MerchantExceptionScope | null = null;
+    /** v15 batch 7 review: the short read-only transactions of this request's order-cause read. */
+    const causeRuns = new WeakSet<ConsumerTransaction>();
+    const causeTransactions = {
+      run: <T>(work: (tx: ConsumerTransaction) => Promise<T>) =>
+        persistence.transactions.run(async (original) => {
+          if (verified === null) return unavailable();
+          const tx = checked(original);
+          causeRuns.add(tx);
+          return work(tx);
+        }),
+    };
     const transactions = {
       run: <T>(work: (tx: ConsumerTransaction) => Promise<T>) =>
         persistence.transactions.run(async (original) => {
-          const tx: ConsumerTransaction = {
-            async query<Row = Record<string, unknown>>(sql: string, values: readonly unknown[]) {
-              const result = await original.query(sql, values);
-              if (!result || typeof result !== "object") return unavailable();
-              const rows = Object.getOwnPropertyDescriptor(result, "rows"),
-                count = Object.getOwnPropertyDescriptor(result, "rowCount");
-              if (
-                !rows ||
-                !("value" in rows) ||
-                !Array.isArray(rows.value) ||
-                !count ||
-                !("value" in count) ||
-                (count.value !== null && (!Number.isSafeInteger(count.value) || count.value < 0))
-              )
-                return unavailable();
-              return { rows: rows.value as readonly Row[], rowCount: count.value as number | null };
-            },
-          };
+          const tx = checked(original);
           return withMerchantTransactionAuthorization(
             {
               transaction: tx,
@@ -118,7 +140,10 @@ export function createPersistentMerchantOrderExceptions(options: {
               },
               recheck: async (value) => {
                 const again = await resolve(original, cookie, "operations.order-exception.manage");
-                return matches(scopeOf(again), scopeOf(value)) && (await again.allowed()) === true;
+                const ok =
+                  matches(scopeOf(again), scopeOf(value)) && (await again.allowed()) === true;
+                verified = ok ? scopeOf(value) : null;
+                return ok;
               },
               denied,
             },
@@ -135,6 +160,7 @@ export function createPersistentMerchantOrderExceptions(options: {
     };
     return createMerchantOrderExceptionRead({
       transactions,
+      causeTransactions,
       authorize,
       orderNumbers: async (tx, scope, orderReferences) => {
         if (!matches(await authorize(tx), scope)) return unavailable();
@@ -149,7 +175,14 @@ export function createPersistentMerchantOrderExceptions(options: {
         return numbers;
       },
       orderCauses: async (tx, scope, orderReferences) => {
-        if (!matches(await authorize(tx), scope)) return unavailable();
+        // In its own transaction after the cases (see causeTransactions), for the scope this
+        // request's cases' transaction just rechecked in full; it only titles those cases.
+        if (
+          causeRuns.has(tx)
+            ? verified === null || !matches(verified, scope)
+            : !matches(await authorize(tx), scope)
+        )
+          return unavailable();
         const causes = new Map<string, MerchantExceptionOrderCause>();
         try {
           for (let start = 0; start < orderReferences.length; start += 100)
@@ -160,8 +193,9 @@ export function createPersistentMerchantOrderExceptions(options: {
             ))
               causes.set(order, cause);
         } catch (error) {
-          // v15 M44: the cases keep their kind as the title, but the failure is reported, not hidden.
-          options.onUnexpected?.(error);
+          // v15 M44: read in its own transaction (merchant-order-exception-read), so the cases
+          // stay on the page with their kind as the title; the failure is reported, not hidden.
+          options.onUnexpected?.(error, "OrderCause");
           throw error;
         }
         return causes;

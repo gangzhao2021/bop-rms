@@ -37,7 +37,13 @@ vi.mock("@rms/payment", () => ({
 import { createPersistentMerchantOrderExceptions } from "./persistent-merchant-order-exceptions.js";
 type Options = Parameters<typeof createPersistentMerchantOrderExceptions>[0];
 const id = (n: number) => "0190fa86-0000-7000-8000-" + String(n).padStart(12, "0");
-function fixture(onUnexpected?: Options["onUnexpected"]) {
+function fixture(
+  onUnexpected?: Options["onUnexpected"],
+  run?: (
+    work: (tx: object) => Promise<unknown>,
+    original: { query: (...args: unknown[]) => Promise<unknown> },
+  ) => Promise<unknown>,
+) {
   const state = { allowed: true, store: id(3), session: id(4) };
   d.scope.mockImplementation(async () => ({
     selected: { tenantReference: id(1) },
@@ -60,7 +66,10 @@ function fixture(onUnexpected?: Options["onUnexpected"]) {
     }));
   const read = createPersistentMerchantOrderExceptions({
     persistence: {
-      transactions: { run: async (work: (tx: object) => Promise<unknown>) => work(original) },
+      transactions: {
+        run: async (work: (tx: object) => Promise<unknown>) =>
+          run === undefined ? work(original) : run(work, original),
+      },
       now: () => "2026-09-21T10:00:00.000Z",
       publication: {},
     } as unknown as Options["persistence"],
@@ -296,9 +305,33 @@ it("DEC-EXCEPTION-CONFIRMED-REFUND-DUE: a confirmed refund is due when its Store
   );
 });
 
-it("v15 M44: a failed order-cause read is reported, not silently dropped", async () => {
+it("v15 M44: a failed order-cause read is reported, and every case stays on the page with its kind", async () => {
   const onUnexpected = vi.fn();
-  const f = fixture(onUnexpected);
+  // As PostgreSQL and the pilot exception snapshot behave: once a statement failed, the rest of
+  // that transaction fails (25P02), SAVEPOINT is refused, and the run fails even if the work
+  // swallowed the error.
+  const runs: { failed: boolean }[] = [];
+  const f = fixture(onUnexpected, async (work, original) => {
+    const run = { failed: false };
+    runs.push(run);
+    const result = await work({
+      query: async (sql: unknown, values: unknown) => {
+        if (run.failed) throw Object.assign(Error("in failed transaction"), { code: "25P02" });
+        if (typeof sql !== "string" || /^\s*SAVEPOINT\b/iu.test(sql)) {
+          run.failed = true;
+          throw Error("INTERNAL_EXCEPTION_SNAPSHOT_UNAVAILABLE");
+        }
+        try {
+          return await original.query(sql, values);
+        } catch (error) {
+          run.failed = true;
+          throw error;
+        }
+      },
+    });
+    if (run.failed) throw Error("TENANT_DATABASE_TRANSACTION_FAILED");
+    return result;
+  });
   d.list.mockResolvedValue({
     items: [
       {
@@ -330,6 +363,11 @@ it("v15 M44: a failed order-cause read is reported, not silently dropped", async
     return { rows: [], rowCount: 0 };
   }) as never);
   const view = await f.read("synthetic-cookie");
+  expect(view.items.map((item) => [item.exceptionReference, item.kind])).toEqual([
+    [id(9), "PaidWithoutFulfillableOrder"],
+  ]);
   expect(view.items[0]).not.toHaveProperty("cause");
-  expect(onUnexpected).toHaveBeenCalledWith(failure);
+  expect(onUnexpected).toHaveBeenCalledWith(failure, "OrderCause");
+  // The cases' own read finished cleanly; only the cause read's transaction failed.
+  expect(runs.map((run) => run.failed)).toEqual([false, true]);
 });

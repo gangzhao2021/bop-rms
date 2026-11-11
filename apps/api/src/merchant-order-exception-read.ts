@@ -57,6 +57,13 @@ export const RESOLVED_PAGE_SIZE = 25;
  */
 export function createMerchantOrderExceptionRead(options: {
   readonly transactions: { run<T>(work: (tx: ConsumerTransaction) => Promise<T>): Promise<T> };
+  /**
+   * v15 batch 7 review: the transactions `orderCauses` runs in, after the cases' own transaction
+   * has finished and rechecked the caller (default: `transactions`, authorizing again).
+   */
+  readonly causeTransactions?: {
+    run<T>(work: (tx: ConsumerTransaction) => Promise<T>): Promise<T>;
+  };
   authorize(
     tx: ConsumerTransaction,
     input: {
@@ -90,7 +97,8 @@ export function createMerchantOrderExceptionRead(options: {
   ): Promise<ReadonlyMap<string, string>>;
   /**
    * v15 M44: why each linked Order ended (Ordering's own record), so a case says "Rejected · sold
-   * out · refunded" instead of its kind. A missing entry keeps the kind as the title.
+   * out · refunded" instead of its kind. A missing entry keeps the kind as the title. Called in
+   * its own transaction after the cases are read; when it fails the cases keep their kind.
    */
   orderCauses?(
     tx: ConsumerTransaction,
@@ -198,12 +206,6 @@ export function createMerchantOrderExceptionRead(options: {
           options.orderNumbers && linked.length > 0
             ? await options.orderNumbers(tx, scope, linked)
             : new Map<string, string>();
-        const causes =
-          options.orderCauses && linked.length > 0
-            ? await options
-                .orderCauses(tx, scope, linked)
-                .catch(() => new Map<string, MerchantExceptionOrderCause>())
-            : new Map<string, MerchantExceptionOrderCause>();
         const reconciliationSources = items.filter(
           (source) =>
             source.kind === "PaymentReconciliationDifference" && source.sourceOwner === "Payment",
@@ -221,51 +223,66 @@ export function createMerchantOrderExceptionRead(options: {
           current.sessionReference !== scope.sessionReference
         )
           return unavailable();
-        return Object.freeze({
-          screenId: "OPS-ORDER-EXCEPTION" as const,
-          projectionName: projection.projectionName,
-          storeLabel: metadata.storeLabel,
-          businessDate: projection.businessDate,
-          projectedAt: projection.projectedAt,
-          freshnessStatus: projection.freshnessStatus,
-          /** WP-2423: the cursor for the next page of older resolved cases (null: none). */
-          olderResolvedBefore: resolved.next,
-          items: Object.freeze(
-            projection.rows.map((row) =>
-              Object.freeze({
-                exceptionReference: row.sourceReference,
-                orderReference: row.orderReference,
-                orderNumber:
-                  row.orderReference === null ? null : (numbers.get(row.orderReference) ?? null),
-                kind: row.kind,
-                severity: row.severity,
-                status: row.status,
-                providerState: row.providerState,
-                compensationStatus: row.compensationStatus,
-                sourceOwner: row.sourceOwner,
-                createdAt: row.createdAt,
-                dueAt: row.dueAt,
-                ownerStatus:
-                  (assignments.get(row.sourceReference) ?? row.ownerReference !== null)
-                    ? ("Assigned" as const)
-                    : ("Unassigned" as const),
-                sourceFinal: row.sourceStatus === "Final",
-                ...(row.orderReference !== null && causes.has(row.orderReference)
-                  ? { cause: causes.get(row.orderReference) }
-                  : {}),
-                ...(row.kind === "PaymentReconciliationDifference" &&
-                row.sourceOwner === "Payment" &&
-                details.has(row.sourceReference)
-                  ? { reconciliation: details.get(row.sourceReference) }
-                  : {}),
-              }),
+        const build = (causes: ReadonlyMap<string, MerchantExceptionOrderCause>) =>
+          Object.freeze({
+            screenId: "OPS-ORDER-EXCEPTION" as const,
+            projectionName: projection.projectionName,
+            storeLabel: metadata.storeLabel,
+            businessDate: projection.businessDate,
+            projectedAt: projection.projectedAt,
+            freshnessStatus: projection.freshnessStatus,
+            /** WP-2423: the cursor for the next page of older resolved cases (null: none). */
+            olderResolvedBefore: resolved.next,
+            items: Object.freeze(
+              projection.rows.map((row) =>
+                Object.freeze({
+                  exceptionReference: row.sourceReference,
+                  orderReference: row.orderReference,
+                  orderNumber:
+                    row.orderReference === null ? null : (numbers.get(row.orderReference) ?? null),
+                  kind: row.kind,
+                  severity: row.severity,
+                  status: row.status,
+                  providerState: row.providerState,
+                  compensationStatus: row.compensationStatus,
+                  sourceOwner: row.sourceOwner,
+                  createdAt: row.createdAt,
+                  dueAt: row.dueAt,
+                  ownerStatus:
+                    (assignments.get(row.sourceReference) ?? row.ownerReference !== null)
+                      ? ("Assigned" as const)
+                      : ("Unassigned" as const),
+                  sourceFinal: row.sourceStatus === "Final",
+                  ...(row.orderReference !== null && causes.has(row.orderReference)
+                    ? { cause: causes.get(row.orderReference) }
+                    : {}),
+                  ...(row.kind === "PaymentReconciliationDifference" &&
+                  row.sourceOwner === "Payment" &&
+                  details.has(row.sourceReference)
+                    ? { reconciliation: details.get(row.sourceReference) }
+                    : {}),
+                }),
+              ),
             ),
-          ),
-        });
+          });
+        return { scope, linked, build };
       })
       .catch(
         keepingCause(() => {
           throw Error("MERCHANT_ORDER_EXCEPTION_UNAVAILABLE");
         }),
-      );
+      )
+      .then(async ({ scope, linked, build }) => {
+        const orderCauses = options.orderCauses;
+        if (!orderCauses || linked.length === 0) return build(new Map());
+        // v15 batch 7 review: why each Order ended is read in its own short transaction after the
+        // cases, so a failed cause read (logged by the adapter) leaves every case on the page,
+        // titled by its kind. In the same transaction it could not: a failed statement aborts a
+        // PostgreSQL transaction, and the pilot's read-only exception snapshot refuses SAVEPOINT
+        // and fails the whole read once any statement failed.
+        const causes = await (options.causeTransactions ?? options.transactions)
+          .run((tx) => orderCauses(tx, scope, linked))
+          .catch(() => new Map<string, MerchantExceptionOrderCause>());
+        return build(causes);
+      });
 }
