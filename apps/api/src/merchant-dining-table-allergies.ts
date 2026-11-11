@@ -31,19 +31,14 @@ interface Tx {
 /** The allergen list staff tick from: code and its names, in list order. */
 export async function tableAllergenChoices(
   tx: Tx,
-  scope: { readonly brandReference: string },
+  scope: { readonly brandReference: string; readonly storeReference: string },
 ): Promise<readonly { readonly code: string; readonly name: string; readonly nameZh: string }[]> {
-  // The list is the Brand's (read with no Store selected); the caller's Store is restored.
-  const before = (
-    (await tx.query(
-      "SELECT current_setting('bop.brand_id',true) brand,current_setting('bop.store_id',true) store",
-      [],
-    )) as { rows: { brand: string | null; store: string | null }[] }
-  ).rows[0];
+  // The list is the Brand's (read with no Store selected); the caller's Store scope is put back
+  // from what the caller already knows, with no read of its own (the Tables read's budget).
   const registry = await currentAllergenRegistry(tx as never, scope);
   await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
-    before?.brand ?? "",
-    before?.store ?? "",
+    scope.brandReference,
+    scope.storeReference,
   ]);
   return Object.freeze(
     (registry?.entries ?? []).map((entry) => {

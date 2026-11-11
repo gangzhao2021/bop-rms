@@ -1514,10 +1514,17 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
       // order queue 131, order detail 133.
       // 2026-11-03: telling staff from phones adds two fixed reads (tables 82), one for the page
       // however many tables are open; each open table used to cost two phone reads of its own.
+      // 2026-11-11 batch 5 (integ5): the one-order read gained the order's record of who did what
+      // (M61: round acceptances, refund requesters and approvers, the member names that name them),
+      // money taken back (M163) and dishes sold out since ordered (M23), each one fixed read for the
+      // order, never per line: order detail 171. Tables gained the table allergies (M171) and the
+      // allergen list staff tick from, two fixed reads for the page (the list now restores the
+      // caller's Store without a settings read): tables 89. 3d below still proves tables do not
+      // grow with each open table.
       const budgets = {
         orderQueue: 160,
-        orderDetail: 160,
-        diningTables: 85,
+        orderDetail: 180,
+        diningTables: 95,
         diningOrderProgress: 130,
         kitchenUntilProjection: 60,
         pickup: 75,

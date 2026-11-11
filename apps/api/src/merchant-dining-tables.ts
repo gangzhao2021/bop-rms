@@ -539,6 +539,7 @@ export function createMerchantDiningTables(options: {
           // Marking needs dining.operate, which this read already requires.
           const allergenChoices = await tableAllergenChoices(tx, {
             brandReference: String(current.context.brand.brandReference),
+            storeReference: String(current.store.storeReference),
           });
           // WP-2423 Q28 DEC-DINING-STAFF-CALL: the open call of each open session (one read).
           const staffCalls = await merchantDiningStaffCallStore(tx, {
