@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { tableCartChange } from "./table-cart-change.js";
 import type { CartItemView, CartView } from "./types.js";
-import { cartText, tableCartChangedDishes, checkoutText } from "../journey/messages.js";
+import {
+  cartText,
+  tableCartAddedDishes,
+  tableCartChangedDishes,
+  checkoutText,
+} from "../journey/messages.js";
 
 const id = (n: number) => `01902423-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 const line = (n: number, displayName: string, quantity = 1): CartItemView =>
@@ -268,7 +273,7 @@ describe("v15 batch 7 table-pay-by-dish: staff take a dish out while this phone 
       byStaff: [{ displayName: "Lemon tea", quantity: 1 }],
     });
     if (change.kind !== "choiceEnded") throw new Error("expected choiceEnded");
-    const said = checkoutText.tableChoiceEnded(change.byStaff);
+    const said = checkoutText.tableChoiceEnded(tableCartAddedDishes(change.byStaff));
     expect(said).toContain("Staff removed Lemon tea ×1");
     expect(said).toContain("Nothing was charged. Choose again what you pay for.");
     expect(said).not.toContain("Someone at your table");
@@ -282,7 +287,7 @@ describe("v15 batch 7 table-pay-by-dish: staff take a dish out while this phone 
         withPay(view(6, [tea, cucumber]), noPayer),
       ),
     ).toEqual({ kind: "choiceEnded", byStaff: [] });
-    expect(checkoutText.tableChoiceEnded([])).toContain("The cart changed");
+    expect(checkoutText.tableChoiceEnded("")).toContain("The cart changed");
   });
 
   it("another phone's checkout says staff removed the dish, not someone at the table", () => {
@@ -297,8 +302,10 @@ describe("v15 batch 7 table-pay-by-dish: staff take a dish out while this phone 
       reduced: [],
       byStaff: [{ displayName: "Lemon tea", quantity: 1 }],
     });
-    expect(checkoutText.tableCartStaffRemoved([{ displayName: "Lemon tea", quantity: 1 }])).toBe(
-      "Staff removed Lemon tea ×1 from the cart.",
-    );
+    expect(
+      checkoutText.tableCartStaffRemoved(
+        tableCartAddedDishes([{ displayName: "Lemon tea", quantity: 1 }]),
+      ),
+    ).toBe("Staff removed Lemon tea ×1 from the cart.");
   });
 });

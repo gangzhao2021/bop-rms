@@ -62,6 +62,7 @@ import {
   commonText,
   lineEstimateLabel,
   quoteIssueMessage,
+  tableCartAddedDishes,
   tableCartChangedDishes,
 } from "../journey/messages.js";
 import {
@@ -1033,7 +1034,9 @@ export function CheckoutPage({
               {[
                 ...(tableChange.byStaff === undefined
                   ? []
-                  : [checkoutText.tableCartStaffRemoved(tableChange.byStaff)]),
+                  : [
+                      checkoutText.tableCartStaffRemoved(tableCartAddedDishes(tableChange.byStaff)),
+                    ]),
                 ...(tableChange.byStaff !== undefined &&
                 tableChange.added.length +
                   tableChange.removed.length +
@@ -1045,7 +1048,9 @@ export function CheckoutPage({
             </p>
           ) : null}
           {tableChange?.kind === "choiceEnded" ? (
-            <p role="alert">{checkoutText.tableChoiceEnded(tableChange.byStaff)}</p>
+            <p role="alert">
+              {checkoutText.tableChoiceEnded(tableCartAddedDishes(tableChange.byStaff))}
+            </p>
           ) : null}
           {menuUpdated && sessionState.status === "idle" && sendState === "idle" ? (
             <p role="status">{checkoutText.menuUpdatedPricedAgain}</p>
