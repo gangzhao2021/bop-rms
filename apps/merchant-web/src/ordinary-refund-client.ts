@@ -16,6 +16,8 @@ export class OrdinaryRefundClientError extends Error {
       | "Changed"
       /** WP-2423 M10: every dish of an order nobody accepted yet: use Can't make it instead. */
       | "OrderNotAccepted"
+      /** WP-2423 M163: more than the order's refunds (less what was taken back) is refused. */
+      | "RecoveryAboveRefunded"
       | "Unavailable"
       | "OutcomeUnknown"
       | "NotFound",
@@ -249,6 +251,62 @@ const slipReferenceShape = (value: unknown): value is string =>
   typeof value === "string" &&
   /^[A-Za-z0-9][A-Za-z0-9 #./-]{0,39}$/u.test(value) &&
   value.replace(/[^0-9]/gu, "").length <= 12;
+/** WP-2423 M163: money taken back after a refund made by mistake. */
+export interface RefundRecoveryCommand {
+  readonly orderReference: string;
+  readonly operationReference: string;
+  readonly method: "Cash" | "CardMachine";
+  readonly amountMinor: string;
+  readonly reasonCode: "REFUNDED_TOO_MUCH" | "WRONG_ITEM_REFUNDED" | "OTHER";
+  /** The card machine's slip reference (required on the card machine, never for cash). */
+  readonly slipReference?: string;
+}
+export interface RefundRecoveryView {
+  readonly recoveryReference: string;
+  readonly method: "Cash" | "CardMachine";
+  readonly amountMinor: string;
+  readonly currencyCode: "CAD";
+  readonly reasonCode: "REFUNDED_TOO_MUCH" | "WRONG_ITEM_REFUNDED" | "OTHER";
+  readonly businessDate: string;
+  readonly recordedAt: string;
+  readonly recordedByName: string | null;
+}
+function parseRefundRecovery(value: unknown): RefundRecoveryView {
+  const raw = exact(value, [
+    "recoveryReference",
+    "method",
+    "amountMinor",
+    "currencyCode",
+    "reasonCode",
+    "businessDate",
+    "recordedAt",
+    "recordedByName",
+  ]);
+  if (
+    (raw.method !== "Cash" && raw.method !== "CardMachine") ||
+    raw.currencyCode !== "CAD" ||
+    typeof raw.amountMinor !== "string" ||
+    !/^[1-9][0-9]{0,15}$/u.test(raw.amountMinor) ||
+    !["REFUNDED_TOO_MUCH", "WRONG_ITEM_REFUNDED", "OTHER"].includes(String(raw.reasonCode)) ||
+    typeof raw.businessDate !== "string" ||
+    !/^\d{4}-\d{2}-\d{2}$/u.test(raw.businessDate) ||
+    typeof raw.recordedAt !== "string" ||
+    !Number.isFinite(Date.parse(raw.recordedAt)) ||
+    (raw.recordedByName !== null &&
+      (typeof raw.recordedByName !== "string" || raw.recordedByName.length > 200))
+  )
+    return fail();
+  return Object.freeze({
+    recoveryReference: ref(raw.recoveryReference),
+    method: raw.method,
+    amountMinor: raw.amountMinor,
+    currencyCode: "CAD" as const,
+    reasonCode: raw.reasonCode as RefundRecoveryView["reasonCode"],
+    businessDate: raw.businessDate,
+    recordedAt: raw.recordedAt,
+    recordedByName: raw.recordedByName as string | null,
+  });
+}
 export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
   const send = async (
     path: string,
@@ -295,7 +353,9 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
               ? "Changed"
               : error === "refund_order_not_accepted"
                 ? "OrderNotAccepted"
-                : "Conflict",
+                : error === "recovery_above_refunded"
+                  ? "RecoveryAboveRefunded"
+                  : "Conflict",
           );
         if (error === "retry_later") throw new RetryLater();
         return fail();
@@ -343,6 +403,7 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
             error.code === FULL_SIGN_IN_REQUIRED ||
             error.code === "Conflict" ||
             error.code === "OrderNotAccepted" ||
+            error.code === "RecoveryAboveRefunded" ||
             (!mutation && error.code === "Changed"))
         )
           throw error;
@@ -363,6 +424,7 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
         );
         const withBlocked = Object.hasOwn(reply, "requestBlocked");
         const withSend = Object.hasOwn(reply, "canSend");
+        const withRecovery = Object.hasOwn(reply, "recoveries");
         const data = exact(reply, [
           "paymentIntentReference",
           "paymentAttemptReference",
@@ -378,7 +440,19 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
           "canRequest",
           ...(withBlocked ? ["requestBlocked"] : []),
           ...(withSend ? ["canSend"] : []),
+          ...(withRecovery ? ["canRecover", "recoveries"] : []),
         ]);
+        // WP-2423 M163: money taken back on the order (absent from an older server: none).
+        if (
+          withRecovery &&
+          (typeof data.canRecover !== "boolean" ||
+            !Array.isArray(data.recoveries) ||
+            data.recoveries.length > 1000)
+        )
+          return fail();
+        const recoveries = withRecovery
+          ? (data.recoveries as unknown[]).map(parseRefundRecovery)
+          : [];
         if (typeof data.canRequest !== "boolean") return fail();
         if (withSend && typeof data.canSend !== "boolean") return fail();
         // WP-2423 M13: why they may not record a request (absent from an older server).
@@ -444,8 +518,58 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
            * manager or the owner sends it. An older server: whoever may request sends.
            */
           canSend: withSend ? (data.canSend as boolean) : data.canRequest,
+          /** WP-2423 M163: may record money taken back (a Store Manager or the Owner). */
+          canRecover: withRecovery ? (data.canRecover as boolean) : false,
+          recoveries: Object.freeze(recoveries),
         });
       }, false);
+    },
+    /**
+     * WP-2423 M163 (DEC-OWNER-DEFAULTS-2026-11-06 item 5): record money taken back on an order
+     * after a refund made by mistake. One operation per attempt: after an unknown result, retry
+     * with the same operation and the server answers the same record.
+     */
+    async recover(command: RefundRecoveryCommand, csrf: string, signal?: AbortSignal) {
+      ref(command.orderReference);
+      ref(command.operationReference);
+      if (
+        (command.method !== "Cash" && command.method !== "CardMachine") ||
+        !/^[1-9][0-9]{0,8}$/u.test(command.amountMinor) ||
+        !["REFUNDED_TOO_MUCH", "WRONG_ITEM_REFUNDED", "OTHER"].includes(command.reasonCode) ||
+        (command.method === "CardMachine") !== (command.slipReference !== undefined) ||
+        (command.slipReference !== undefined && !slipReferenceShape(command.slipReference))
+      )
+        return fail();
+      return boundary(async () => {
+        const data = exact(
+          await send(
+            "/merchant/payments/refunds/recover",
+            JSON.stringify({
+              orderReference: command.orderReference,
+              operationReference: command.operationReference,
+              method: command.method,
+              amountMinor: command.amountMinor,
+              reasonCode: command.reasonCode,
+              ...(command.slipReference === undefined
+                ? {}
+                : { slipReference: command.slipReference }),
+            }),
+            csrf,
+            200,
+            signal,
+          ),
+          ["status", "orderReference", "recovery"],
+        );
+        if (
+          (data.status !== "Recorded" && data.status !== "AlreadyRecorded") ||
+          data.orderReference !== command.orderReference
+        )
+          return fail();
+        const recovery = parseRefundRecovery(data.recovery);
+        if (recovery.amountMinor !== command.amountMinor || recovery.method !== command.method)
+          return fail();
+        return Object.freeze({ status: data.status, recovery });
+      }, true);
     },
     async status(
       orderReference: string,

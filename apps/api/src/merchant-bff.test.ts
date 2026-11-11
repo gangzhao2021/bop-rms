@@ -2654,6 +2654,7 @@ describe("WP-2423 P1 merchant settlement read route", () => {
     cash: null,
     unpaidWriteOffs: null,
     comps: null,
+    moneyTakenBack: null,
     unmatchedProviderCharges: null,
     dayEndCheck: null,
     projectedAt: "2026-09-22T09:00:00.000Z",
@@ -4593,6 +4594,8 @@ it("protects refund payment context and preserves unknown amounts", async () => 
     canRequest: false,
     requestBlocked: null,
     canSend: false,
+    canRecover: false,
+    recoveries: [],
   };
   const query = vi.fn<NonNullable<MerchantBffRouterOptions["refundPaymentContext"]>>(async () => ({
     ...data,

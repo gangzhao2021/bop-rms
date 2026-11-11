@@ -120,6 +120,8 @@ export interface SettlementView {
    * when unreadable, undefined from older servers.
    */
   readonly comps?: SettlementAmount | null;
+  /** WP-2423 M163: money taken back in the day after refunds made by mistake, by who. */
+  readonly moneyTakenBack?: SettlementWriteOffs | null;
   /** WP-2423: Provider charges matching no order, and their refunds, in the day; null when not
    * read, undefined when the server does not report them. */
   readonly unmatchedProviderCharges?: {
@@ -217,6 +219,9 @@ export function parseSettlementView(value: unknown): SettlementView {
       : []),
     ...(value !== null && typeof value === "object" && Object.hasOwn(value, "comps")
       ? ["comps"]
+      : []),
+    ...(value !== null && typeof value === "object" && Object.hasOwn(value, "moneyTakenBack")
+      ? ["moneyTakenBack"]
       : []),
     ...(value !== null &&
     typeof value === "object" &&
@@ -479,6 +484,7 @@ export function parseSettlementView(value: unknown): SettlementView {
       ? {}
       : { unpaidWriteOffs: writeOffs(raw.unpaidWriteOffs) }),
     ...(raw.comps === undefined ? {} : { comps: amount(raw.comps) }),
+    ...(raw.moneyTakenBack === undefined ? {} : { moneyTakenBack: writeOffs(raw.moneyTakenBack) }),
     ...(raw.unmatchedProviderCharges === undefined
       ? {}
       : {

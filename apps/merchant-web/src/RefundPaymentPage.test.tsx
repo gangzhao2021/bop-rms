@@ -1,3 +1,4 @@
+import type { RefundRecoveryView } from "./ordinary-refund-client.js";
 import { MemoryRouter } from "react-router";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, expect, it, vi } from "vitest";
@@ -5,6 +6,7 @@ import { cardMachineRefundRecordedText } from "./CardMachineRequestRefund.js";
 import {
   CardMachineRefundDone,
   cardMachineRefundToRecord,
+  MoneyTakenBack,
   cardMachineRequestsToCheck,
   nextFinancialSummary,
   PaymentFinancialSummary,
@@ -39,6 +41,8 @@ const context = {
   canRequest: true,
   requestBlocked: null as "SoleOperatorOff" | null,
   canSend: true,
+  canRecover: false,
+  recoveries: [] as RefundRecoveryView[],
 };
 
 it("WP-2423: the payment summary says Paid, never the internal Captured state", () => {
@@ -372,4 +376,36 @@ it("WP-2423 M13: an owner whose sole operator is off is told how a refund gets r
   expect(
     renderToStaticMarkup(<MemoryRouter>{requestBlockedMessage(owner)}</MemoryRouter>),
   ).toContain("Only a store manager records refund requests");
+});
+
+it("WP-2423 M163: a manager takes money back on a refunded order; what was taken back is listed", () => {
+  const refunded = { ...context, confirmedRefundMinor: "593", pendingRefundMinor: "0" };
+  const html = (value: typeof refunded) =>
+    renderToStaticMarkup(
+      <MemoryRouter>
+        <MoneyTakenBack context={value} csrf="c" onRecorded={() => undefined} />
+      </MemoryRouter>,
+    );
+  expect(html({ ...refunded, canRecover: true })).toContain("Take money back");
+  // Nothing refunded, or a reader who may not record it: nothing is offered.
+  expect(html({ ...refunded, canRecover: true, confirmedRefundMinor: "0" })).toBe("");
+  expect(html(refunded)).toBe("");
+  const listed = html({
+    ...refunded,
+    canRecover: false,
+    recoveries: [
+      {
+        recoveryReference: "01909974-0000-7000-8000-000000000070",
+        method: "Cash" as const,
+        amountMinor: "500",
+        currencyCode: "CAD" as const,
+        reasonCode: "REFUNDED_TOO_MUCH" as const,
+        businessDate: "2026-11-10",
+        recordedAt: "2026-11-10T12:00:00.000Z",
+        recordedByName: "Sam",
+      },
+    ],
+  });
+  expect(listed).toContain("Money taken back +$5.00 · Cash · Sam");
+  expect(listed).not.toContain("Take money back");
 });

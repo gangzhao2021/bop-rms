@@ -1,3 +1,5 @@
+import { readOrderRefundRecoveries, refundRecoveryPermission } from "./merchant-refund-recovery.js";
+import { withOptionalRead } from "./merchant-round-business-date.js";
 import type { ConsumerTransaction } from "@bop/eventing";
 import { readClosedRecord, parseOpaqueUuidV7 } from "@bop/identity";
 import {
@@ -167,6 +169,21 @@ export function createMerchantRefundPaymentContext(options: {
       };
       if (!(await readAccess())) return deny();
       authority.recheckBeforeReply(readAccess);
+      // WP-2423 M163: money taken back on this payment's order, and whether this reader may
+      // record it (a Store Manager or the Owner). Unreadable: none shown, nothing offered.
+      const recoveryFacts = async (orderReference: string) => {
+        const canRecover =
+          (await current.authorizeAction(refundRecoveryPermission))?.effect === "Allow";
+        const recoveries = await withOptionalRead(
+          businessTransaction,
+          () => readOrderRefundRecoveries(businessTransaction, scope, orderReference),
+          null,
+        );
+        return {
+          canRecover: canRecover && recoveries !== null,
+          recoveries: recoveries ?? [],
+        };
+      };
       const allowed = (tx?: unknown) => authority.guard(tx);
       const resolvedAt = String(current.context.resolvedAt);
       // v15 2026-10-18 (dd750045): once the Order is known, the payment's refunds are read at a
@@ -234,6 +251,7 @@ export function createMerchantRefundPaymentContext(options: {
           canRequest: viewer.canRequest,
           requestBlocked: viewer.requestBlocked,
           canSend: viewer.canSend,
+          ...(await recoveryFacts(card.orderReference)),
         });
       }
       const binding = await createPostgresPaymentIntentBindingSource({
@@ -277,6 +295,7 @@ export function createMerchantRefundPaymentContext(options: {
           canRequest: viewer.canRequest,
           requestBlocked: viewer.requestBlocked,
           canSend: viewer.canSend,
+          ...({ canRecover: false, recoveries: [] } as Awaited<ReturnType<typeof recoveryFacts>>),
         });
       }
       if (
@@ -313,6 +332,7 @@ export function createMerchantRefundPaymentContext(options: {
         requestBlocked: viewer.requestBlocked,
         // WP-2423 M14: a cashier's request is recorded only; a manager or the owner sends it.
         canSend: viewer.canSend,
+        ...(await recoveryFacts(binding.orderReference)),
       });
     }
   };

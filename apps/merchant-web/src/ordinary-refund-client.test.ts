@@ -302,6 +302,8 @@ const context = {
   canRequest: true,
   requestBlocked: null,
   canSend: true,
+  canRecover: false,
+  recoveries: [],
 };
 it("WP-2423 M14: a cashier's context says they request but do not send; an older server's means whoever requests sends", async () => {
   const older: Partial<typeof context> = { ...context };
@@ -777,4 +779,46 @@ it("WP-2423 M10: a full refund of an order nobody accepted is told to use Refuse
   expect(refundErrorText(error)).toBe(
     "This order hasn't been accepted. Use Refuse and refund on the order to refund it in full.",
   );
+});
+
+it("WP-2423 M163: money taken back is read with the payment, and recorded once per operation", async () => {
+  const recovery = {
+    recoveryReference: id(70),
+    method: "Cash",
+    amountMinor: "500",
+    currencyCode: "CAD",
+    reasonCode: "REFUNDED_TOO_MUCH",
+    businessDate: "2026-11-10",
+    recordedAt: "2026-11-10T12:00:00.000Z",
+    recordedByName: "Sam",
+  };
+  const read = await createOrdinaryRefundClient(
+    vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(response({ ...context, canRecover: true, recoveries: [recovery] })),
+  ).context(id(6), csrf);
+  expect(read).toMatchObject({ canRecover: true, recoveries: [recovery] });
+  const command = {
+    orderReference: id(1),
+    operationReference: id(71),
+    method: "Cash" as const,
+    amountMinor: "500",
+    reasonCode: "REFUNDED_TOO_MUCH" as const,
+  };
+  const fetcher = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(response({ status: "Recorded", orderReference: id(1), recovery }))
+    .mockResolvedValueOnce(response({ error: "recovery_above_refunded" }, 409));
+  const client = createOrdinaryRefundClient(fetcher);
+  await expect(client.recover(command, csrf)).resolves.toMatchObject({ status: "Recorded" });
+  expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body))).toEqual(command);
+  await expect(client.recover(command, csrf)).rejects.toMatchObject({
+    code: "RecoveryAboveRefunded",
+  });
+  // A card-machine recovery needs its slip; too many digits (a card number) never leave here.
+  await expect(client.recover({ ...command, method: "CardMachine" }, csrf)).rejects.toThrow();
+  await expect(
+    client.recover({ ...command, method: "CardMachine", slipReference: "4111111111111111" }, csrf),
+  ).rejects.toThrow();
+  expect(fetcher).toHaveBeenCalledTimes(2);
 });

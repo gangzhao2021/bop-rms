@@ -557,7 +557,12 @@ function TablePaymentBlock({
                     <dd>{reasonText(reason)}</dd>
                   </div>
                 </dl>
-                <p>{t("Once recorded, it can't be changed.")}</p>
+                <p>
+                  {/* WP-2423 M163: a mistaken refund is corrected by a new record, never edited. */}
+                  {t(
+                    "Once recorded, it can't be changed. If too much was given back, use Take money back on the order's payment.",
+                  )}
+                </p>
                 <div className="table-checkout__confirm-actions">
                   <button type="button" disabled={busy} onClick={() => setReviewing(false)}>
                     {t("Back")}

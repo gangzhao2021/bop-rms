@@ -1,4 +1,5 @@
 /** Merchant BFF public contract: the workspace snapshot, navigation, Session service and router options. */
+import type { createMerchantRefundRecovery } from "./merchant-refund-recovery.js";
 import type { createMerchantGuestTableStartOff } from "./merchant-dining-guest-table-start.js";
 import type { createMerchantStoreOpening } from "./merchant-store-opening.js";
 import type { createMerchantCounterOrderCancellation } from "./merchant-counter-order-cancellation.js";
@@ -568,6 +569,8 @@ export interface MerchantBffRouterOptions {
   readonly ordinaryRefundApproval?: ReturnType<typeof createMerchantOrdinaryRefundApproval>;
   /** WP-2423 Q5: an Owner/Finance member declines a refund nothing was prepared for. */
   readonly ordinaryRefundDecline?: ReturnType<typeof createMerchantOrdinaryRefundDecline>;
+  /** WP-2423 M163: money taken back after a refund made by mistake (manager or owner). */
+  readonly refundRecovery?: ReturnType<typeof createMerchantRefundRecovery>;
   /** WP-2423 Q5: where one refund request stands, for anyone who may read refunds. */
   readonly ordinaryRefundProgress?: ReturnType<typeof createMerchantOrdinaryRefundProgress>;
   /** WP-2423 Q5: refunds at this Store awaiting approval or approved and not yet sent. */

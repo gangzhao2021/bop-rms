@@ -257,6 +257,15 @@ describe("DEC-PERM-CATALOG Store permission catalog", () => {
     expect(frontOfHouse).not.toContain("payment.refund.execute");
     expect(storeRoleTemplateActions("kitchen")).not.toContain("payment.refund.request");
   });
+  it("v27 WP-2423 M163: the owner and managers record money taken back; cashiers and the kitchen don't", () => {
+    for (const template of ["owner", "store-manager", "area-manager"] as const)
+      expect(storeRoleTemplateActions(template)).toContain("payment.refund.recover");
+    for (const template of ["front-of-house", "kitchen", "inventory-manager"] as const)
+      expect(storeRoleTemplateActions(template)).not.toContain("payment.refund.recover");
+    expect(
+      storePermissionCatalog().find((entry) => entry.code === "payment.refund.recover"),
+    ).toMatchObject({ risk: "High" });
+  });
   it("v24 WP-2423 取舍 18: the Owner changes the points rules; managers read members; others neither", () => {
     expect(storePermissionCatalogVersion).toBe(27);
     expect(storeRoleTemplateActions("owner")).toEqual(

@@ -822,6 +822,7 @@ describe("migration catalog", () => {
       "2000_322_create_role_preset_offer_decision",
       "2000_420_alter_staff_cancellation_cant_make_unaccepted",
       "2000_421_create_order_item_refund_withdrawal",
+      "2000_422_create_payment_refund_recovery",
       "2000_433_alter_dining_table_cash_refund_nickel",
       "2000_450_alter_checkout_contact_redaction_staff_request",
       "2000_460_alter_pickup_not_collected_store_closing",

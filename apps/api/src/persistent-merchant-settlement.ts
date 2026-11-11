@@ -11,6 +11,7 @@ import {
   createPostgresUnmatchedCaptureRefundStore,
 } from "@rms/payment";
 import { listStorePriceReductionsDecided } from "@rms/ordering";
+import { listRefundRecoveriesByBusinessDate } from "@rms/payment";
 import { createMerchantBusinessDayWindows } from "./merchant-business-day-window.js";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import {
@@ -487,6 +488,50 @@ export function createPersistentMerchantSettlement(options: {
           return {
             count: writeOffs.count,
             amountMinor: writeOffs.amountMinor.toString(),
+            currencyCode: "CAD" as const,
+            recordedBy,
+          };
+        }),
+      // WP-2423 M163: money taken back on the day after refunds made by mistake, by who.
+      moneyTakenBack: (tx, scope, window) =>
+        optional(async () => {
+          if (!(await guard(scope)(tx))) return null;
+          const recoveries = await listRefundRecoveriesByBusinessDate(
+            tx,
+            {
+              tenantReference: scope.tenantReference,
+              brandReference: scope.brandReference,
+              storeReference: scope.storeReference,
+            },
+            window.businessDate,
+          );
+          const byActor = new Map<string, { count: number; amountMinor: bigint }>();
+          for (const recovery of recoveries) {
+            const total = byActor.get(recovery.actorReference) ?? { count: 0, amountMinor: 0n };
+            total.count++;
+            total.amountMinor += recovery.amountMinor;
+            byActor.set(recovery.actorReference, total);
+          }
+          const recordedBy = [];
+          for (const [actor, total] of byActor) {
+            let name: string | null = null;
+            try {
+              name = (await loadStoreMember(tx, scope, actor)).displayName;
+            } catch (error) {
+              if (!(error instanceof MemberDirectoryError)) throw error;
+            }
+            recordedBy.push({
+              name,
+              count: total.count,
+              amountMinor: total.amountMinor.toString(),
+            });
+          }
+          if (!(await guard(scope)(tx))) return null;
+          return {
+            count: recoveries.length,
+            amountMinor: recoveries
+              .reduce((sum, recovery) => sum + recovery.amountMinor, 0n)
+              .toString(),
             currencyCode: "CAD" as const,
             recordedBy,
           };

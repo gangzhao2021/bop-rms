@@ -172,6 +172,14 @@ const databaseAccessManifestInput = {
       piiClassification: ["indirect_identifier", "payment"],
     },
     {
+      table: "refund_recovery",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/payment" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "financial-compliance",
+      piiClassification: ["indirect_identifier", "payment"],
+    },
+    {
       table: "ordinary_refund_decline",
       classification: "append-only-record",
       writeOwner: { kind: "module", id: "@rms/payment" },
@@ -876,6 +884,24 @@ const databaseAccessManifestInput = {
       principal: { kind: "module", id: "@rms/payment" },
       source:
         "packages/rms/payment/src/infrastructure/persistence/ordinary-refund-approval-store.ts",
+    },
+    {
+      id: "refund-recovery.read",
+      operation: "read",
+      readPattern: "owner-repository",
+      mechanism: "repository",
+      target: { schema: "rms_payment", table: "refund_recovery" },
+      principal: { kind: "module", id: "@rms/payment" },
+      source: "packages/rms/payment/src/infrastructure/persistence/refund-recovery-store.ts",
+    },
+    {
+      id: "refund-recovery.write",
+      operation: "write",
+      readPattern: null,
+      mechanism: "repository",
+      target: { schema: "rms_payment", table: "refund_recovery" },
+      principal: { kind: "module", id: "@rms/payment" },
+      source: "packages/rms/payment/src/infrastructure/persistence/refund-recovery-store.ts",
     },
     {
       id: "ordinary-refund-decline.read",

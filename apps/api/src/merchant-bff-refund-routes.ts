@@ -236,6 +236,54 @@ export function installMerchantRefundRoutes(
       });
   });
 
+  // WP-2423 M163 (DEC-OWNER-DEFAULTS-2026-11-06 item 5): money taken back after a refund made by
+  // mistake. More than the order's confirmed refunds (less earlier takings) is refused 409.
+  router.post("/payments/refunds/recover", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant"),
+      csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    const command = options.refundRecovery;
+    if (!command) {
+      response.status(503).json({ error: "refund_recovery_unavailable" });
+      return;
+    }
+    void command({ sessionCookie, csrf, command: request.body })
+      .then((result) =>
+        response.set("Cache-Control", NO_STORE).json({
+          status: result.status,
+          orderReference: result.orderReference,
+          recovery: {
+            recoveryReference: result.recovery.recoveryReference,
+            method: result.recovery.method,
+            amountMinor: result.recovery.amountMinor,
+            currencyCode: result.recovery.currencyCode,
+            reasonCode: result.recovery.reasonCode,
+            businessDate: result.recovery.businessDate,
+            recordedAt: result.recovery.recordedAt,
+            recordedByName: result.recovery.recordedByName,
+          },
+        }),
+      )
+      .catch((error: unknown) => {
+        if (failureNamed(error, "REFUND_RECOVERY_ABOVE_REFUNDED")) {
+          response
+            .status(409)
+            .set("Cache-Control", NO_STORE)
+            .json({ error: "recovery_above_refunded" });
+          return;
+        }
+        failed(response, error);
+      });
+  });
+
   router.post("/payments/refunds/progress", sameOriginMutation(options), (request, response) => {
     const sessionCookie = cookie(request, "__Host-bop-merchant"),
       csrf = exactHeader(request, "x-bop-csrf");
@@ -349,6 +397,18 @@ export function installMerchantRefundRoutes(
           requestBlocked: result.requestBlocked,
           // WP-2423 M14: whether they send what they request (a cashier's waits for a manager).
           canSend: result.canSend,
+          // WP-2423 M163: money taken back on the order, and whether they may record it.
+          canRecover: result.canRecover,
+          recoveries: result.recoveries.map((recovery) => ({
+            recoveryReference: recovery.recoveryReference,
+            method: recovery.method,
+            amountMinor: recovery.amountMinor,
+            currencyCode: recovery.currencyCode,
+            reasonCode: recovery.reasonCode,
+            businessDate: recovery.businessDate,
+            recordedAt: recovery.recordedAt,
+            recordedByName: recovery.recordedByName,
+          })),
         }),
       )
       .catch((error: unknown) => {

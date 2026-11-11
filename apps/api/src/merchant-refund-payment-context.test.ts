@@ -42,6 +42,14 @@ vi.mock("@rms/payment", async (original) => ({
   createPostgresPaymentTerminalStore: () => ({ read: d.terminal }),
   createPostgresOrderPaymentRefundPosition: () => d.position,
 }));
+// WP-2423 M163: money taken back on the order (owner read), none unless a test says so.
+vi.mock("./merchant-refund-recovery.js", async (original) => ({
+  ...(await original<object>()),
+  readOrderRefundRecoveries: async () => [],
+}));
+vi.mock("./merchant-round-business-date.js", () => ({
+  withOptionalRead: async (_tx: unknown, work: () => Promise<unknown>) => work(),
+}));
 const id = (n: number) => "01909974-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 type Options = Parameters<typeof createMerchantRefundPaymentContext>[0];
 const at = "2026-09-20T12:00:00.000Z";
@@ -55,6 +63,7 @@ function setup() {
     actorReference: id(4),
     allowed,
     kdsOperatorProfileAllows: vi.fn<(action: string) => boolean>(() => true),
+    authorizeAction: vi.fn(async () => ({ effect: "Allow" })),
   };
   d.resolve.mockResolvedValue(current);
   const run = vi.fn(async (work: (tx: object) => Promise<unknown>) => work(tx));
@@ -117,6 +126,8 @@ it("binds actual captured payment and returns distinct confirmed and pending ref
     canRequest: true,
     requestBlocked: null,
     canSend: true,
+    canRecover: true,
+    recoveries: [],
   });
   expect(d.position.mock.calls[0]?.[1]).toEqual({
     orderReference: id(9),
@@ -143,6 +154,8 @@ it.each([null, { ...terminal, outcome: "Failed" }])(
       canRequest: true,
       requestBlocked: null,
       canSend: true,
+      canRecover: false,
+      recoveries: [],
     });
     expect(d.position).not.toHaveBeenCalled();
   },

@@ -1,3 +1,4 @@
+import { dollarsToMinor } from "./store-price-pages.js";
 import { countOf, t } from "./i18n/i18n.js";
 import { orderMoney } from "./order-money.js";
 import { refundErrorText as errorMessage } from "./OrderPaymentLinks.js";
@@ -1879,6 +1880,9 @@ function PaymentContent({
               onFinancialChange={refreshFinancial}
             />
           ) : null}
+          {!wizard ? (
+            <MoneyTakenBack context={context} csrf={csrf} onRecorded={refreshFinancial} />
+          ) : null}
           {context.paymentState !== "Captured" ? (
             <p>{t("A refund can be requested once this payment is paid.")}</p>
           ) : !wizard && context.canRequest && refundableMinor(context) > 0n ? (
@@ -1930,6 +1934,213 @@ export function paymentLoadFailure(error: unknown): PaymentLoadFailure {
       retry: false,
     };
   return { message: errorMessage(error), retry: true };
+}
+const recoveryReasons = [
+  ["REFUNDED_TOO_MUCH", () => t("Refunded too much")],
+  ["WRONG_ITEM_REFUNDED", () => t("The wrong item was refunded")],
+  ["OTHER", () => t("Other")],
+] as const;
+/**
+ * WP-2423 M163 (DEC-OWNER-DEFAULTS-2026-11-06 item 5): staff refunded too much by mistake and the
+ * guest gives the money back. A Store Manager or the Owner records it on the order, in their name,
+ * on today's business day; the refund stays as it was. Lists what was already taken back.
+ */
+export function MoneyTakenBack({
+  context,
+  csrf,
+  onRecorded,
+}: {
+  readonly context: Context;
+  readonly csrf: string;
+  readonly onRecorded: () => void;
+}) {
+  const [open, setOpen] = useState(false),
+    [method, setMethod] = useState<"Cash" | "CardMachine">("Cash"),
+    [dollars, setDollars] = useState(""),
+    [reason, setReason] = useState<(typeof recoveryReasons)[number][0]>("REFUNDED_TOO_MUCH"),
+    [slip, setSlip] = useState(""),
+    [confirmed, setConfirmed] = useState(false),
+    [busy, setBusy] = useState(false),
+    [message, setMessage] = useState("");
+  // One record per attempt: a retry after an unknown result reuses it.
+  const operation = useRef<string | null>(null);
+  const refunded = BigInt(context.confirmedRefundMinor ?? "0");
+  const taken = context.recoveries.reduce((sum, entry) => sum + BigInt(entry.amountMinor), 0n);
+  const left = refunded - taken;
+  if (context.recoveries.length === 0 && (!context.canRecover || left <= 0n)) return null;
+  const submit = async () => {
+    const amountMinor = dollarsToMinor(dollars);
+    if (amountMinor === null || BigInt(amountMinor) <= 0n) {
+      setMessage(t("Enter the amount taken back, for example 5.00."));
+      return;
+    }
+    if (BigInt(amountMinor) > left) {
+      setMessage(
+        t("That is more than was refunded on this order ({amount}).", {
+          amount: amount(left.toString()),
+        }),
+      );
+      return;
+    }
+    if (method === "CardMachine" && slip.trim() === "") {
+      setMessage(t("Enter the card machine slip's reference."));
+      return;
+    }
+    if (!confirmed) {
+      setMessage(t("Confirm that this adds a record and the refund stays as it was."));
+      return;
+    }
+    operation.current ??= serviceOperationReference();
+    setBusy(true);
+    setMessage("");
+    try {
+      await client.recover(
+        {
+          orderReference: context.orderReference,
+          operationReference: operation.current,
+          method,
+          amountMinor,
+          reasonCode: reason,
+          ...(method === "CardMachine" ? { slipReference: slip.trim() } : {}),
+        },
+        csrf,
+      );
+      operation.current = null;
+      setOpen(false);
+      setDollars("");
+      setSlip("");
+      setConfirmed(false);
+      setMessage(t("Recorded: {amount} taken back.", { amount: amount(amountMinor) }));
+      onRecorded();
+    } catch (error) {
+      setMessage(
+        error instanceof OrdinaryRefundClientError && error.code === "RecoveryAboveRefunded"
+          ? t("That is more than was refunded on this order. Nothing was recorded.")
+          : error instanceof OrdinaryRefundClientError && error.code === "Denied"
+            ? t("Only a store manager or the owner records money taken back.")
+            : t(
+                "Couldn't confirm it was recorded. Press Record again: it is never recorded twice.",
+              ),
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <section aria-labelledby="money-taken-back-heading" className="refund-requests">
+      <h2 id="money-taken-back-heading">{t("Money taken back")}</h2>
+      {context.recoveries.length > 0 ? (
+        <ul>
+          {context.recoveries.map((entry) => (
+            <li key={entry.recoveryReference} className="refund-request">
+              {t("Money taken back +{amount} · {method} · {name}", {
+                amount: amount(entry.amountMinor),
+                method: entry.method === "Cash" ? t("Cash") : t("Card machine"),
+                name: entry.recordedByName ?? t("someone no longer on staff"),
+              })}{" "}
+              · <SourceTime instant={entry.recordedAt} />
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {message !== "" ? <p role="status">{message}</p> : null}
+      {!context.canRecover || left <= 0n ? null : !open ? (
+        <p>
+          <button type="button" className="refund-text" onClick={() => setOpen(true)}>
+            {t("Take money back")}
+          </button>
+        </p>
+      ) : (
+        <form
+          className="refund-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void submit();
+          }}
+        >
+          <p className="refund-form__hint">
+            {t("If too much was refunded and the guest gives it back, record it here.")}
+          </p>
+          <fieldset className="refund-form__field">
+            <legend>{t("How it was taken back")}</legend>
+            <label>
+              <input
+                type="radio"
+                name="recovery-method"
+                checked={method === "Cash"}
+                onChange={() => setMethod("Cash")}
+              />{" "}
+              {t("Cash")}
+            </label>{" "}
+            <label>
+              <input
+                type="radio"
+                name="recovery-method"
+                checked={method === "CardMachine"}
+                onChange={() => setMethod("CardMachine")}
+              />{" "}
+              {t("Charged on the card machine")}
+            </label>
+          </fieldset>
+          <div className="refund-form__field">
+            <label htmlFor="recovery-amount">
+              {t("Amount (up to {amount})", { amount: amount(left.toString()) })}
+            </label>
+            <input
+              id="recovery-amount"
+              inputMode="decimal"
+              autoComplete="off"
+              value={dollars}
+              onChange={(event) => setDollars(event.target.value)}
+            />
+          </div>
+          {method === "CardMachine" ? (
+            <div className="refund-form__field">
+              <label htmlFor="recovery-slip">{t("Card machine slip reference")}</label>
+              <input
+                id="recovery-slip"
+                autoComplete="off"
+                value={slip}
+                onChange={(event) => setSlip(event.target.value)}
+              />
+            </div>
+          ) : null}
+          <div className="refund-form__field">
+            <label htmlFor="recovery-reason">{t("Reason")}</label>
+            <select
+              id="recovery-reason"
+              value={reason}
+              onChange={(event) =>
+                setReason(event.target.value as (typeof recoveryReasons)[number][0])
+              }
+            >
+              {recoveryReasons.map(([code, label]) => (
+                <option key={code} value={code}>
+                  {label()}
+                </option>
+              ))}
+            </select>
+          </div>
+          <label className="refund-line__stop">
+            <input
+              type="checkbox"
+              checked={confirmed}
+              onChange={(event) => setConfirmed(event.target.checked)}
+            />{" "}
+            {t("This adds a record. The refund stays as it was.")}
+          </label>
+          <p>
+            <button type="submit" className="refund-primary" disabled={busy}>
+              {t("Record money taken back")}
+            </button>{" "}
+            <button type="button" className="refund-text" onClick={() => setOpen(false)}>
+              {t("Cancel")}
+            </button>
+          </p>
+        </form>
+      )}
+    </section>
+  );
 }
 
 export function RefundPaymentPage({

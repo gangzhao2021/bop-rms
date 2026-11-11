@@ -437,6 +437,41 @@ export function SettlementReport({
           </p>
         </section>
       )}
+      {/* WP-2423 M163: money taken back after refunds made by mistake (refunds unchanged). */}
+      {view.moneyTakenBack === undefined ||
+      view.moneyTakenBack === null ||
+      view.moneyTakenBack.count === 0 ? null : (
+        <section
+          className="store-card settlement__write-offs"
+          aria-labelledby="settlement-money-taken-back"
+        >
+          <header>
+            <h3 id="settlement-money-taken-back">{t("Money taken back")}</h3>
+          </header>
+          <ul className="overview-counts settlement__totals" aria-label={t("Money taken back")}>
+            <li>
+              <span className="overview-count__label">{t("Taken back")}</span>
+              <strong className="overview-count__value">{money(view.moneyTakenBack)}</strong>
+              <span className="overview-count__detail">
+                {t("{count} times", { count: view.moneyTakenBack.count })}
+              </span>
+            </li>
+          </ul>
+          {view.moneyTakenBack.recordedBy.map((person, index) => (
+            <p key={index}>
+              {t("Recorded by {name}: {amount}", {
+                name: person.name ?? t("someone no longer on staff"),
+                amount: formatSettlementMoney(person.amountMinor, "CAD"),
+              })}
+            </p>
+          ))}
+          <p className="bop-muted">
+            {t(
+              "Refunded too much by mistake and given back by the guest. The refunds above stay as they were; net refunds are refunds less this.",
+            )}
+          </p>
+        </section>
+      )}
       {view.currentDaySelfApprovedRefunds !== null &&
       view.currentDaySelfApprovedRefunds.count > 0 ? (
         <p role="status" className="settlement__self-approved-today">

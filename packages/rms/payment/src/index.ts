@@ -321,3 +321,15 @@ export * from "./domain/dining-table-settlement.js";
 // WP-2423 item 8 ④ DEC-DINE-IN-SPLIT-BILL: a table bill split into parts paid one by one.
 export * from "./domain/dining-table-split.js";
 export * from "./infrastructure/persistence/dining-table-settlement-store.js";
+// WP-2423 M163: money taken back after a refund made by mistake (append-only, attributed).
+export {
+  createPostgresRefundRecoveryStore,
+  listRefundRecoveriesByBusinessDate,
+  listRefundRecoveriesByOrders,
+  refundRecoveryMethods,
+  refundRecoveryReasons,
+  RefundRecoveryError,
+  type RefundRecovery,
+  type RefundRecoveryMethod,
+  type RefundRecoveryReason,
+} from "./infrastructure/persistence/refund-recovery-store.js";

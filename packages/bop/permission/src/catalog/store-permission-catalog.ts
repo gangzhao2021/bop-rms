@@ -86,7 +86,9 @@
  * v27 (2026-11-10, WP-2423 M14, DEC-OWNER-DEFAULTS-2026-11-06 item 2, Owner accepted): Front of
  * House also holds payment.refund.request: a cashier records a refund request with a reason; it
  * never approves or sends one (payment.refund.approve and payment.refund.execute stay with the
- * Store Manager and the Owner), so a manager or the owner sends it.
+ * Store Manager and the Owner), so a manager or the owner sends it. The same version adds
+ * payment.refund.recover (WP-2423 M163, item 5): the Owner and the Store and Area Managers record
+ * money taken back after a refund made by mistake, in their own name; the refund is never changed.
  */
 export const storePermissionCatalogVersion = 27 as const;
 export type PermissionRisk = "Low" | "Medium" | "High";
@@ -377,6 +379,8 @@ const catalog: readonly StorePermissionDefinition[] = Object.freeze([
     ["payment.refund.request", "Request an ordinary refund within policy", "High"],
     ["payment.refund.approve", "Approve a refund above the requester's limit", "High"],
     ["payment.refund.execute", "Execute an approved refund", "High"],
+    // v27 (WP-2423 M163): record money taken back after a refund made by mistake.
+    ["payment.refund.recover", "Record money taken back after a refund made by mistake", "High"],
     // v17 (WP-2423): the day-end settlement page, apart from exception handling.
     [
       "payment.settlement.read",
@@ -550,6 +554,8 @@ const storeManagerTemplate: readonly string[] = Object.freeze([
   ]),
   "payment.refund.request",
   "payment.refund.execute",
+  // v27 (WP-2423 M163): records money taken back after a refund made by mistake, in their name.
+  "payment.refund.recover",
   // v17 (WP-2423): reads the day-end settlement.
   "payment.settlement.read",
   ...pick([

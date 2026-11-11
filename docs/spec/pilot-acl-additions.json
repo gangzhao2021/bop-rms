@@ -6209,6 +6209,24 @@
       "privilege": "INSERT",
       "principal": "api",
       "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); WP-2423 DEC-OWNER-DEFAULTS-2026-11-06 item 4 (M10): staff refunding a dish choose \"stop making it too\"; the kitchen, pickup and guest reads leave those units out (append-only)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "refund_recovery",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); WP-2423 DEC-OWNER-DEFAULTS-2026-11-06 item 5 (M163): a manager or the owner records money taken back after a refund made by mistake, on the same order and day; the refund is never changed (append-only)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "refund_recovery",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); WP-2423 DEC-OWNER-DEFAULTS-2026-11-06 item 5 (M163): a manager or the owner records money taken back after a refund made by mistake, on the same order and day; the refund is never changed (append-only)"
     }
   ]
 }

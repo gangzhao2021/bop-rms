@@ -452,6 +452,39 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "一笔 {amount} 的退款已记录，还没发出。请在“付款与退款”里打开这笔付款，看它是否在等批准，或去发送。",
   "Refunded · stop, don't make it": "已退款 · 停止制作",
   "Stop making it too": "不再制作这道菜",
+  "Record money taken back after a refund made by mistake": "记录多退后收回的钱",
+  "Refunded too much": "退多了",
+  "The wrong item was refunded": "退错了菜",
+  "Enter the amount taken back, for example 5.00.": "请输入收回的金额，例如 5.00。",
+  "That is more than was refunded on this order ({amount}).":
+    "这超过了这单已退的金额（{amount}）。",
+  "Enter the card machine slip's reference.": "请输入刷卡机小票上的参考号。",
+  "Confirm that this adds a record and the refund stays as it was.":
+    "请确认：这会新增一条记录，原来的退款不变。",
+  "Recorded: {amount} taken back.": "已记录：收回 {amount}。",
+  "That is more than was refunded on this order. Nothing was recorded.":
+    "这超过了这单已退的金额。没有记录。",
+  "Only a store manager or the owner records money taken back.": "只有店长或店主可以记录收回的钱。",
+  "Couldn't confirm it was recorded. Press Record again: it is never recorded twice.":
+    "没能确认是否已记录。请再按一次记录：不会重复记录。",
+  "Money taken back +{amount} · {method} · {name}": "已收回 +{amount} · {method} · {name}",
+  "Take money back": "收回多退的钱",
+  "If too much was refunded and the guest gives it back, record it here.":
+    "如果退多了、顾客把钱还回来，在这里记录。",
+  "How it was taken back": "怎么收回的",
+  "Amount (up to {amount})": "金额（最多 {amount}）",
+  "Card machine slip reference": "刷卡机小票参考号",
+  "This adds a record. The refund stays as it was.": "这会新增一条记录，原来的退款不变。",
+  "Record money taken back": "记录收回的钱",
+  "Once recorded, it can't be changed. If too much was given back, use Take money back on the order's payment.":
+    "记录后不能更改。如果退多了，请在这单的付款页面用“收回多退的钱”。",
+  "Money taken back": "已收回的多退款",
+  "Taken back": "已收回",
+  "{count} times": "{count} 次",
+  "Recorded by {name}: {amount}": "{name} 记录：{amount}",
+  "someone no longer on staff": "已离职员工",
+  "Refunded too much by mistake and given back by the guest. The refunds above stay as they were; net refunds are refunds less this.":
+    "多退了钱、顾客又还回来的金额。上面的退款保持不变；净退款为退款减去这一项。",
   Note: "备注",
   "Open the payment": "打开这笔付款",
   "Asked by {name}, waiting for you to send": "{name} 提交，等你发送",

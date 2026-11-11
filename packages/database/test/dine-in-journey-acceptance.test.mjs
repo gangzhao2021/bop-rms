@@ -94,6 +94,8 @@ import { createMerchantOrdinaryRefundApproval } from "../../../apps/api/src/merc
 import { createMerchantOrdinaryRefundItems } from "../../../apps/api/src/merchant-ordinary-refund-items.ts";
 import { createMerchantOrdinaryRefundCommand } from "../../../apps/api/src/merchant-ordinary-refund-command.ts";
 import { createOrdinaryRefundFollowThrough } from "../../../tooling/environment/pilot-ordinary-refund-follow-through.mjs";
+import { createMerchantRefundRecovery } from "../../../apps/api/src/merchant-refund-recovery.ts";
+import { listRefundRecoveriesByBusinessDate } from "../../rms/payment/src/index.ts";
 import { createMerchantOrdinaryRefundSendCommand } from "../../../apps/api/src/merchant-ordinary-refund-send-command.ts";
 import { createOriginalReceiptIssuance } from "../../../apps/api/src/original-receipt-issuance.ts";
 import { createRefundReceiptIssuance } from "../../../apps/api/src/refund-receipt-issuance.ts";
@@ -2240,6 +2242,8 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
             "workflow.operate",
             "payment.refund.request",
             "payment.refund.execute",
+            // WP-2423 M163: records money taken back after a refund made by mistake.
+            "payment.refund.recover",
           ],
         },
         owner: {
@@ -3271,6 +3275,112 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
       assert.equal(position3After.unsentMinor, 0n);
       assert.equal(position3After.pendingMinor, 0n);
       assert.ok(position3After.confirmedMinor > 0n, "the guest's card is refunded");
+      // ── WP-2423 M163 (DEC-OWNER-DEFAULTS-2026-11-06 item 5): round 3 was refunded in full by
+      // mistake and the guest pays part of it back in cash. The Store Manager records "money taken
+      // back" on the same order and day, in their name, under the restricted API role; the refund
+      // stays as it was, and no more than the confirmed refunds can be taken back.
+      const recover = createMerchantRefundRecovery({
+        persistence,
+        authentication,
+        resolveConfiguration: async () => ({
+          providerAccountReference: provider,
+          environment: "Test",
+        }),
+        businessDate,
+        nextReference: fresh,
+        retentionPolicyCode: "FINANCIAL_COMPLIANCE",
+        retentionPolicyVersion: 1,
+      });
+      const takeBack = {
+        orderReference,
+        operationReference: fresh(),
+        method: "Cash",
+        amountMinor: "500",
+        reasonCode: "REFUNDED_TOO_MUCH",
+      };
+      const refundsBefore = await admin.query(
+        "SELECT count(*)::int AS n FROM rms_payment.ordinary_refund_request WHERE order_id=$1",
+        [orderReference],
+      );
+      const taken = await recover({ ...session("manager"), command: takeBack });
+      assert.equal(taken.status, "Recorded");
+      assert.deepEqual(
+        [taken.recovery.method, taken.recovery.amountMinor, taken.recovery.reasonCode],
+        ["Cash", "500", "REFUNDED_TOO_MUCH"],
+      );
+      // A retry answers the same record.
+      assert.equal(
+        (await recover({ ...session("manager"), command: takeBack })).status,
+        "AlreadyRecorded",
+      );
+      // The owner here may not record it (no payment.refund.recover); nothing more is written.
+      await assert.rejects(
+        recover({ ...session("owner"), command: { ...takeBack, operationReference: fresh() } }),
+      );
+      // More than was refunded (less what was taken back) is refused.
+      const refundedNow = (await positionOf(pay1)).confirmedMinor + position3After.confirmedMinor;
+      await assert.rejects(
+        recover({
+          ...session("manager"),
+          command: {
+            ...takeBack,
+            operationReference: fresh(),
+            amountMinor: String(refundedNow - 500n + 1n),
+          },
+        }),
+        { code: "REFUND_RECOVERY_ABOVE_REFUNDED" },
+      );
+      // Charged back on the card machine needs its slip reference.
+      await assert.rejects(
+        recover({
+          ...session("manager"),
+          command: { ...takeBack, operationReference: fresh(), method: "CardMachine" },
+        }),
+      );
+      assert.deepEqual(
+        await admin
+          .query(
+            "SELECT method,amount_minor::text AS amount,actor_id::text AS actor,permission_code FROM rms_payment.refund_recovery WHERE order_id=$1",
+            [orderReference],
+          )
+          .then((result) => result.rows),
+        [
+          {
+            method: "Cash",
+            amount: "500",
+            actor: manager,
+            permission_code: "payment.refund.recover",
+          },
+        ],
+      );
+      // The refunds themselves are unchanged, and the record cannot be changed by the API role.
+      assert.deepEqual(
+        (
+          await admin.query(
+            "SELECT count(*)::int AS n FROM rms_payment.ordinary_refund_request WHERE order_id=$1",
+            [orderReference],
+          )
+        ).rows,
+        refundsBefore.rows,
+      );
+      assert.equal((await positionOf(pay3)).confirmedMinor, position3After.confirmedMinor);
+      await assert.rejects(
+        transactions(api).run(async (tx) => {
+          await tx.query(
+            "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+            [scope.brandReference, scope.storeReference],
+          );
+          await tx.query("UPDATE rms_payment.refund_recovery SET amount_minor=1", []);
+        }),
+      );
+      // The day's settlement reads it on the day it was recorded.
+      const day = await transactions(api).run((tx) =>
+        listRefundRecoveriesByBusinessDate(tx, ownerScope, taken.recovery.businessDate),
+      );
+      assert.deepEqual(
+        day.map((recovery) => recovery.amountMinor),
+        [500n],
+      );
     } finally {
       vi.unstubAllEnvs();
       signedIn.cookies = new Set();

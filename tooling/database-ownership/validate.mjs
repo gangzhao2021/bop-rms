@@ -2430,6 +2430,11 @@ async function scanUnsupported(root, module, diagnostics) {
             owner: "payment",
             tables: ["payment_intent", "payment_terminal_fact"],
           },
+          // WP-2423 M163: money taken back after a refund made by mistake.
+          "src/infrastructure/persistence/refund-recovery-store.ts": {
+            owner: "payment",
+            tables: ["refund_recovery"],
+          },
           // WP-2423 Q7: payments and refunds staff record from the Store's own card machine.
           "src/infrastructure/persistence/card-machine-payment-store.ts": {
             owner: "payment",

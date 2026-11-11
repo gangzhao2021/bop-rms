@@ -1,3 +1,4 @@
+import { createMerchantRefundRecovery } from "../../apps/api/dist/merchant-refund-recovery.js";
 import { withServerRefundPreparation } from "../../apps/api/dist/merchant-ordinary-refund-request-preparation.js";
 import { createMerchantStoreOpening } from "../../apps/api/dist/merchant-store-opening.js";
 import {
@@ -1679,6 +1680,19 @@ export async function createInternalMerchant(
       ordinaryRefundApproval,
       ordinaryRefundApprovals,
       ordinaryRefundDecline,
+      // WP-2423 M163: money taken back after a refund made by mistake (manager or owner).
+      refundRecovery: logUnexpected(
+        "INTERNAL_REFUND_RECOVERY_UNAVAILABLE",
+        createMerchantRefundRecovery({
+          persistence,
+          authentication: service,
+          resolveConfiguration: refundConfiguration,
+          businessDate: refundBusinessDate,
+          nextReference: () => resources.credentials.reference(),
+          retentionPolicyCode: "FINANCIAL_COMPLIANCE",
+          retentionPolicyVersion: 1,
+        }),
+      ),
       ...(mfaStepUp === undefined ? {} : { mfaStepUp }),
       ...(providerStepUp === undefined ? {} : { providerStepUp }),
       // WP-2423 Q19 (DEC-SOLE-OPERATOR-APPROVAL): the Brand Owner turns sole operator on/off.
