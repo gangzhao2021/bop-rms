@@ -895,9 +895,7 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
           element={
             <LocalDemoRoute notice={demo?.Notice ?? null}>
               {reconnect !== null ? (
-                <WorkspacePage title={t("Operations")}>
-                  <WorkspaceReconnectPanel reconnect={reconnect} />
-                </WorkspacePage>
+                <WorkspaceReconnectPanel reconnect={reconnect} />
               ) : (
                 <MerchantShell
                   overview={DemoOverview === undefined ? null : <DemoOverview />}
@@ -936,9 +934,7 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
               {state.kind === "Ready" && !state.switching ? (
                 <TaskInboxPage key={state.workspace.selectedScope.storeReference + state.csrf} />
               ) : reconnect !== null ? (
-                <WorkspacePage title={t("Tasks")}>
-                  <WorkspaceReconnectPanel reconnect={reconnect} />
-                </WorkspacePage>
+                <WorkspaceReconnectPanel reconnect={reconnect} />
               ) : (
                 <AppFrame title={t("Tasks")} description="TASK-INBOX">
                   <TaskInboxStatePanel

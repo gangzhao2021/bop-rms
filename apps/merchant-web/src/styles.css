@@ -10421,3 +10421,26 @@ tr[data-drop-target="true"] {
   cursor: pointer;
   min-height: 32px;
 }
+/* merchant-outage-recovery M01 (live v15 2026-11-10): the reconnecting page reads as a page, with the
+   page's own title row and margins; Try now is a real button. */
+.workspace-reconnect__body {
+  display: grid;
+  gap: var(--bop-space-3);
+  max-width: 44rem;
+}
+.workspace-reconnect__body p {
+  margin: 0;
+}
+.workspace-reconnect__retry {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--bop-space-3) var(--bop-space-4);
+  margin-top: var(--bop-space-2);
+}
+.workspace-reconnect__retry .shell-action {
+  min-height: 44px;
+}
+.workspace-reconnect__retry p {
+  color: var(--bop-color-text-muted);
+}

@@ -174,3 +174,56 @@ test("@production a sign-out is still a sign-out, not a reconnect", async ({ pag
   await page.waitForTimeout(6_000);
   expect(reads).toBe(1);
 });
+
+for (const width of [390, 1024, 1440])
+  test(`@production the reconnecting page reads as a page at ${width}: clear of the language switch, with margins and a real Try now button`, async ({
+    page,
+  }) => {
+    // Live v15 2026-11-10: its first line ran under 中文, it sat flush against the sidebar and the
+    // top edge (and the phone's left edge), and Try now looked like plain text.
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    let down = false;
+    await page.route("**/merchant/session", (route) =>
+      down ? maintenance(route) : route.fulfill({ headers, json: session }),
+    );
+    await routeOrders(page);
+    await page.goto("/operations/orders");
+    await expect(page.getByRole("heading", { name: "ORD-100", exact: true })).toBeVisible();
+    down = true;
+    await page.reload();
+    const heading = page.getByRole("heading", { name: "Can't connect right now", level: 1 });
+    await expect(heading).toBeVisible();
+    const language = page.getByRole("button", { name: "切换到中文" });
+    await expect(language).toHaveCount(1);
+    const h = (await heading.boundingBox())!;
+    const l = (await language.boundingBox())!;
+    const overlaps =
+      h.x < l.x + l.width && l.x < h.x + h.width && h.y < l.y + l.height && l.y < h.y + h.height;
+    expect(overlaps).toBe(false);
+    // Margins: off the top edge, and off the sidebar (or the phone's edge) by the page gutter.
+    expect(h.y).toBeGreaterThanOrEqual(16);
+    const text = (await page.getByText("Retrying on its own.", { exact: false }).boundingBox())!;
+    if (width === 390) expect(text.x).toBeGreaterThanOrEqual(16);
+    else {
+      const nav = (await page.locator(".workspace-sidebar").boundingBox())!;
+      expect(text.x).toBeGreaterThanOrEqual(nav.x + nav.width + 16);
+    }
+    // Try now is drawn as a button (a border or a fill), at least 44 px tall.
+    const tryNow = page.getByRole("button", { name: "Try now" });
+    const look = await tryNow.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return {
+        border: style.borderTopStyle !== "none" && parseFloat(style.borderTopWidth) > 0,
+        fill:
+          style.backgroundColor !== "rgba(0, 0, 0, 0)" && style.backgroundColor !== "transparent",
+        height: element.getBoundingClientRect().height,
+      };
+    });
+    expect(look.border || look.fill).toBe(true);
+    expect(look.height).toBeGreaterThanOrEqual(44);
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.screenshot({ path: `test-results/reconnect-${width}.png` });
+    await expectNoInternalText(page);
+  });

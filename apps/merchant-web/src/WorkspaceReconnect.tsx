@@ -1,6 +1,6 @@
 import { t } from "./i18n/i18n.js";
 import { createContext, useContext, type ReactNode } from "react";
-import { StatePanel } from "@bop-rms/ui";
+import { WorkspacePage } from "./WorkspacePage.js";
 import { StoreTimeZoneContext, storeTime } from "./StoreTime.js";
 import type { MerchantNavigationItem } from "./merchant-workspace.js";
 
@@ -30,29 +30,34 @@ export function useWorkspaceReconnect(): WorkspaceReconnect | null {
   return useContext(WorkspaceReconnectContext);
 }
 
-/** What staff see in place of a page while the workspace answer cannot be read. */
+/**
+ * What staff see in place of a page while the workspace answer cannot be read. Live v15 2026-11-10:
+ * it is a page of its own (title row with the language switch, the page's margins, a real button),
+ * not a bare panel under the switch and against the sidebar.
+ */
 export function WorkspaceReconnectPanel({ reconnect }: { readonly reconnect: WorkspaceReconnect }) {
   // Before the first answer this tab may not know the Store's zone: the device's own clock then.
   const timeZone =
     useContext(StoreTimeZoneContext) ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
   if (reconnect.gate === "Broken")
     return (
-      <StatePanel heading={t("This page can't be opened")} tone="error" status>
-        <p>
-          {t(
-            "The system's answer could not be read. Reload the page; if it happens again, keep serving with paper slips and tell the store's owner.",
-          )}
-        </p>
-      </StatePanel>
+      <WorkspacePage title={t("This page can't be opened")} className="workspace-reconnect">
+        <div className="workspace-reconnect__body" role="status" data-reconnect="Broken">
+          <p>
+            {t(
+              "The system's answer could not be read. Reload the page; if it happens again, keep serving with paper slips and tell the store's owner.",
+            )}
+          </p>
+        </div>
+      </WorkspacePage>
     );
   const offline = reconnect.gate === "Offline";
   return (
-    <div className="workspace-reconnect" data-reconnect={reconnect.gate}>
-      <StatePanel
-        heading={offline ? t("This device is offline") : t("Can't connect right now")}
-        tone="offline"
-        status
-      >
+    <WorkspacePage
+      title={offline ? t("This device is offline") : t("Can't connect right now")}
+      className="workspace-reconnect"
+    >
+      <div className="workspace-reconnect__body" role="status" data-reconnect={reconnect.gate}>
         <p>
           {offline
             ? t("Check the wifi. The page opens again by itself when the network is back.")
@@ -66,16 +71,16 @@ export function WorkspaceReconnectPanel({ reconnect }: { readonly reconnect: Wor
             "Paid orders that nobody accepts in time may be refunded automatically, and this screen can't warn you while it is reconnecting. Check new orders on a screen that is still connected; if none is, follow the paper-slip steps in the store runbook.",
           )}
         </p>
-        <p>
-          <button type="button" onClick={reconnect.retry}>
+        <div className="workspace-reconnect__retry">
+          <button type="button" className="shell-action" onClick={reconnect.retry}>
             {t("Try now")}
           </button>
-        </p>
-        {reconnect.lastTriedAt === null ? null : (
-          <p>{t("Last tried {time}", { time: storeTime(reconnect.lastTriedAt, timeZone) })}</p>
-        )}
-      </StatePanel>
-    </div>
+          {reconnect.lastTriedAt === null ? null : (
+            <p>{t("Last tried {time}", { time: storeTime(reconnect.lastTriedAt, timeZone) })}</p>
+          )}
+        </div>
+      </div>
+    </WorkspacePage>
   );
 }
 
