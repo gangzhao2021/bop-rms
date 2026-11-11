@@ -1654,6 +1654,9 @@ function TablePanel({
           locked={locked}
           onChanged={onChanged}
           roundPhones={roundPhones}
+          mergedTableLabels={(table.session.mergedTables ?? []).map(
+            (merged) => merged.fromTableLabel,
+          )}
         />
       ) : seated ? (
         <p className="table-panel__notice">{t("Nothing ordered yet.")}</p>

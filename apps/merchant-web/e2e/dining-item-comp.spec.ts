@@ -241,7 +241,7 @@ test("@production a manager discounts a started dish from the Tables page; only 
   );
   // What is left to pay shows under it at once, before checkout.
   await expect(details.getByRole("list", { name: "Comps and discounts" })).toContainText(
-    "To pay after comps$20.91",
+    "Whole bill to pay after comps$20.91",
   );
   // DEC-TAX-WHOLE-RECEIPT: the table's order shows the bill's tax rounding on its own line, and
   // its Total less the comp is what is left to pay (the figure checkout takes).

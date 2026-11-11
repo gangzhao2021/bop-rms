@@ -1,4 +1,4 @@
-import { t } from "./i18n/i18n.js";
+import { saidTable, t } from "./i18n/i18n.js";
 import { useEffect, useMemo, useState } from "react";
 import {
   CurrentOrderLines,
@@ -40,7 +40,10 @@ export function TableOrderRounds({
   onChanged,
   fetcher,
   roundPhones,
+  mergedTableLabels = [],
 }: {
+  /** v15 batch 7: tables merged into this one; their dishes are on this table's bill too. */
+  readonly mergedTableLabels?: readonly string[];
   readonly orderReference: string;
   readonly csrf: string;
   readonly timeZone?: string | undefined;
@@ -199,9 +202,17 @@ export function TableOrderRounds({
                 <span>−{orderMoney({ amountMinor: comp.amountMinor, currencyCode: "CAD" })}</span>
               </li>
             ))}
-            {bill !== null && bill.paid === null ? (
+            {/* v15 batch 7: this is the whole table's bill (every round, and the tables merged
+                into it), never one round's; a table merged away pays on the other table's bill. */}
+            {bill !== null && bill.paid === null && bill.mergedInto === undefined ? (
               <li className="table-order-rounds__owed">
-                <span>{t("To pay after comps")}</span>
+                <span>
+                  {mergedTableLabels.length === 0
+                    ? t("Whole bill to pay after comps")
+                    : t("Whole bill to pay after comps, with {tables}", {
+                        tables: mergedTableLabels.map((label) => saidTable(label)).join(", "),
+                      })}
+                </span>
                 <span>{orderMoney({ amountMinor: bill.totalMinor, currencyCode: "CAD" })}</span>
               </li>
             ) : null}
