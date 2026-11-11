@@ -823,7 +823,7 @@ customer menu or `Orders` loads on mobile data, the host is up and only the stor
 
    **What staff see meanwhile (merchant-outage-recovery):** a screen that was open keeps what it last
    showed, marked "Orders could not be refreshed. Showing the last update; retrying automatically."
-   (订单暂时无法刷新，显示的是上次的内容，正在自动重试。). A screen opened or reloaded while the
+   (订单无法刷新。显示的是上次更新的内容；正在自动重试。). A screen opened or reloaded while the
    system cannot answer says **暂时连不上 / Can't connect right now** and "正在自动重试"; while the
    pilot service itself is stopped, a reload shows the maintenance page instead. Either way the
    screen comes back by itself once the system answers: nobody needs to reload. While a screen is
@@ -831,6 +831,12 @@ customer menu or `Orders` loads on mobile data, the host is up and only the stor
    on a screen that is still connected, or work from paper slips. A device with no network says
    **这台设备没有联网** and `Accept` (接单) waits for the network; a list that only could not be
    refreshed still accepts (the server refuses an outdated accept).
+   A staff page (`Orders`, `Kitchen`, `Tables`, Home …) reloaded with no network at all comes from the
+   copy this device kept the last time it opened a staff page: **这台设备没有联网 / This device is
+   offline**, "请检查无线网络" and the paper-slip steps with each table's last bill; with the network
+   but no system it says **现在连不上系统**. It goes back to the system by itself. The device keeps
+   that copy only when it trusts the pilot's certificate (see the certificate steps above): a
+   browser that opens the pilot past a certificate warning shows its own error page instead.
 
 #### When guests can't start a phone payment
 
