@@ -32,6 +32,12 @@ export interface DiningCartAuthorityPorts {
     }): Promise<unknown>;
   };
   readonly now: () => string;
+  /**
+   * WP-2423 M35 (DEC-STAFF-ROUND-SPEED): runs one check (the Guest Session, its Dining
+   * participation, the Guest Session again) as one unit of the owners' reads, in one transaction
+   * where the composition can. The same reads, in the same order. Absent: each read runs alone.
+   */
+  readonly together?: <T>(work: () => Promise<T>) => Promise<T>;
 }
 const participationFields = [
   "schemaVersion",
@@ -214,7 +220,9 @@ export function createDiningCartAuthority(ports: DiningCartAuthorityPorts) {
           return denied();
         }
       };
-      async function authorize() {
+      const authorize = () =>
+        ports.together === undefined ? authorizeOnce() : ports.together(authorizeOnce);
+      async function authorizeOnce() {
         const initial = await sessionAt(credential, tick());
         const from = tick();
         usable(initial, from);

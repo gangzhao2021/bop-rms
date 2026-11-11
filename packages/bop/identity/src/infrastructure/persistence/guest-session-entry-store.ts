@@ -9,6 +9,13 @@ import {
 import { parseCanonicalInstant, parseOpaqueUuidV7 } from "../../contracts/identity-actor.js";
 import type { GuestSessionStorePort } from "../../application/ports/guest-session-ports.js";
 
+/**
+ * WP-2423 M35 (DEC-STAFF-ROUND-SPEED): marks a plain read with no side effect, so the pilot's
+ * transaction runner may answer an identical repeat of it from the same transaction while nothing
+ * that could change its answer ran in between. An ordinary SQL comment everywhere else.
+ */
+const stableRead = "-- bop:stable-read\n";
+
 export interface GuestSessionEntryTransaction {
   query(sql: string, values: readonly unknown[]): Promise<unknown>;
 }
@@ -418,7 +425,7 @@ function createGuestEntryStore(
         return await run(async (transaction) => {
           const found = record(
             await transaction.query(
-              `${select} AND session_selector_hash = decode($3, 'hex')${fenceResolve ? " FOR UPDATE" : ""}`,
+              `${fenceResolve ? "" : stableRead}${select} AND session_selector_hash = decode($3, 'hex')${fenceResolve ? " FOR UPDATE" : ""}`,
               [brand, store, selector],
             ),
           );

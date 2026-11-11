@@ -6,6 +6,13 @@ import {
 import type { DiningTableTransaction } from "./dining-table-store.js";
 
 /**
+ * WP-2423 M35 (DEC-STAFF-ROUND-SPEED): marks a plain read with no side effect, so the pilot's
+ * transaction runner may answer an identical repeat of it from the same transaction while nothing
+ * that could change its answer ran in between. An ordinary SQL comment everywhere else.
+ */
+const stableRead = "-- bop:stable-read\n";
+
+/**
  * WP-2423 shared-table-checkout (b), lost cookie (DEC-DINING-CHECKOUT-SCOPE; 2000_525): Dining's
  * own record that a participant's phone came back on a later Guest Session (Identity's continuity
  * rotation, in the same transaction). Written only while the participant is Active at a table still
@@ -125,7 +132,8 @@ export async function isDiningGuestSessionSuperseded(
   return (
     rowsOf(
       await tx.query(
-        "SELECT 1 FROM rms_dining.dining_participant_readmission WHERE brand_id=$1 AND store_id=$2 AND from_guest_session_id=$3",
+        stableRead +
+          "SELECT 1 FROM rms_dining.dining_participant_readmission WHERE brand_id=$1 AND store_id=$2 AND from_guest_session_id=$3",
         [ids.brand, ids.store, ref(guestSessionReference)],
       ),
     ).length > 0

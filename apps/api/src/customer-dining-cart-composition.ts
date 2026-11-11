@@ -328,6 +328,11 @@ export interface CustomerDiningCartCompositionOptions {
   readonly scope: { readonly brandReference: string; readonly storeReference: string };
   readonly sessions: Pick<GuestSessionService, "resolve" | "authorize">;
   readonly participation: DiningCartReadPorts["participation"];
+  /**
+   * WP-2423 M35 (DEC-STAFF-ROUND-SPEED): runs one guest check (Guest Session, Dining participation,
+   * Guest Session again) in one transaction, with the same reads in the same order.
+   */
+  readonly together?: DiningCartReadPorts["together"];
   /** DEC-DINING-ANY-PARTICIPANT-SUBMIT: Dining's current hold of the table Cart version by
    * another participant's checkout; edits to a held version are refused. */
   readonly checkoutHold: DiningCartCheckoutHoldPort;
@@ -397,6 +402,7 @@ export function createCustomerDiningCartComposition(
   const now = options.now;
   const sessions = options.sessions;
   const participation = cartParticipation(options.participation);
+  const together = options.together === undefined ? {} : { together: options.together };
   const writer = createPostgresDiningCartSelectionStore(options.selectionTransactions, {
     ...options.selection,
     scope: fixedScope,
@@ -407,6 +413,7 @@ export function createCustomerDiningCartComposition(
       scope: fixedScope,
       sessions,
       participation,
+      ...together,
       now,
       carts: createPostgresDiningCartReadStore(options.cartTransactions, fixedScope),
     }),
@@ -456,6 +463,7 @@ export function createCustomerDiningCartComposition(
             scope: fixedScope,
             sessions,
             participation,
+            ...together,
             checkoutHold: options.checkoutHold,
             now,
             references: itemOptions.references,
@@ -481,6 +489,7 @@ export function createCustomerDiningCartComposition(
         createDiningCartSelectionService({
           scope: fixedScope,
           participation,
+          ...together,
           selection: writer,
           now,
           sessions: {

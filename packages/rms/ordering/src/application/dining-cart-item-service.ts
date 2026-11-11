@@ -35,6 +35,8 @@ export interface DiningCartItemOptions {
   readonly scope: DiningCartAuthorityPorts["scope"];
   readonly sessions: PickupCartRemovalOptions["sessions"];
   readonly participation: DiningCartAuthorityPorts["participation"];
+  /** WP-2423 M35: one guest check as one unit of reads (see DiningCartAuthorityPorts). */
+  readonly together?: DiningCartAuthorityPorts["together"];
   /** DEC-DINING-ANY-PARTICIPANT-SUBMIT: refuse edits to a Cart version another participant is
    * checking out (an edit would silently invalidate that checkout). */
   readonly checkoutHold?: DiningCartCheckoutHoldPort;
@@ -210,6 +212,7 @@ export function createDiningCartItemService(options: DiningCartItemOptions) {
     const authority = createDiningCartAuthority({
       scope: { brandReference, storeReference },
       participation: options.participation,
+      ...(options.together === undefined ? {} : { together: options.together }),
       now: options.now,
       sessions: {
         resolve: ({ sessionCredential, observedAt }) =>

@@ -75,7 +75,8 @@ it("resolves current Tenant owner facts in the retained transaction and immutabl
     purpose: "CustomerEntry",
   });
   expect(x.query).toHaveBeenCalledWith(
-    "SELECT * FROM bop_tenant.store WHERE brand_id=$1 AND store_id=$2 FOR SHARE",
+    // WP-2423 M35: the owner marks it a stable read (an SQL comment).
+    "-- bop:stable-read\nSELECT * FROM bop_tenant.store WHERE brand_id=$1 AND store_id=$2 FOR SHARE",
     [id(3), id(4)],
   );
   expect(await x.service.resolve({ ...x.request, purpose: "CustomerCart" })).not.toBeNull();

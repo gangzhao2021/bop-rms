@@ -3,6 +3,7 @@ import {
   createPostgresDiningCartParticipationStore,
 } from "../../packages/rms/dining/src/index.ts";
 import { createCustomerDiningCheckoutHold } from "../../apps/api/dist/customer-checkout-hold.js";
+import { runTogether } from "../../packages/database/dist/transaction-runner.js";
 export function createInternalDiningCart(resources, items, { createCart }) {
   const scope = {
     tenantReference: resources.publicProfile.binding.tenantReference,
@@ -17,6 +18,9 @@ export function createInternalDiningCart(resources, items, { createCart }) {
         repository: createPostgresDiningCartParticipationStore(resources.transactions, scope),
         now: resources.now,
       }),
+      // WP-2423 M35 (DEC-STAFF-ROUND-SPEED): each guest check (Guest Session, its place at the
+      // table, the Guest Session again) runs in one transaction: same reads, same order.
+      together: runTogether,
       // DEC-DINING-ANY-PARTICIPANT-SUBMIT: edits and quotes wait while another guest pays.
       checkoutHold: createCustomerDiningCheckoutHold(resources.transactions, scope),
       selectionTransactions: resources.transactions,

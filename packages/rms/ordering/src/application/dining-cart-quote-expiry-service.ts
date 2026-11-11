@@ -37,6 +37,8 @@ export interface DiningCartQuoteExpiryOptions {
   readonly scope: PickupCartQuoteOptions["scope"];
   readonly sessions: PickupCartQuoteOptions["sessions"];
   readonly participation: DiningCartAuthorityPorts["participation"];
+  /** WP-2423 M35: one guest check as one unit of reads (see DiningCartAuthorityPorts). */
+  readonly together?: DiningCartAuthorityPorts["together"];
   readonly carts: { loadCart(reference: string): Promise<unknown> };
   readonly quoteVersion?: 1 | 2;
   readonly requests: Pick<
@@ -138,6 +140,7 @@ export function createDiningCartQuoteExpiryService(options: DiningCartQuoteExpir
     const authority = createDiningCartAuthority({
       scope: { brandReference, storeReference },
       participation: options.participation,
+      ...(options.together === undefined ? {} : { together: options.together }),
       now,
       sessions: {
         resolve: ({ sessionCredential, observedAt }) =>

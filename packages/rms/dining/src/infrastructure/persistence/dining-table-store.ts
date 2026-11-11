@@ -27,6 +27,13 @@ import {
   snapshot,
 } from "../../application/dining-table-record.js";
 
+/**
+ * WP-2423 M35 (DEC-STAFF-ROUND-SPEED): marks a plain read with no side effect, so the pilot's
+ * transaction runner may answer an identical repeat of it from the same transaction while nothing
+ * that could change its answer ran in between. An ordinary SQL comment everywhere else.
+ */
+const stableRead = "-- bop:stable-read\n";
+
 export interface DiningTableTransaction {
   query(sql: string, values: readonly unknown[]): Promise<unknown>;
 }
@@ -144,7 +151,8 @@ export function createPostgresDiningTableStore(
   ) => {
     const result = rows(
       await transaction.query(
-        `SELECT table_snapshot AS "table" FROM rms_dining.dining_table WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND table_id=$4${lock ? " FOR UPDATE" : ""}`,
+        (lock ? "" : stableRead) +
+          `SELECT table_snapshot AS "table" FROM rms_dining.dining_table WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND table_id=$4${lock ? " FOR UPDATE" : ""}`,
         [tenant, brand, store, tableReference],
       ),
     );
@@ -401,7 +409,8 @@ export function createPostgresDiningPublicTableReader(options: {
         // whatever changes the table re-reads it under its own advisory and row lock.
         const result = rows(
           await tx.query(
-            'SELECT table_snapshot AS "table" FROM rms_dining.dining_table WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND table_id=$4',
+            stableRead +
+              'SELECT table_snapshot AS "table" FROM rms_dining.dining_table WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND table_id=$4',
             [scope.tenantReference, scope.brandReference, scope.storeReference, tableReference],
           ),
         );

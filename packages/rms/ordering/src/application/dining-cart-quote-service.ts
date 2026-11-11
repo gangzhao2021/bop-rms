@@ -18,6 +18,8 @@ import type { PickupCartQuoteOptions } from "./pickup-cart-quote-service.js";
 
 export interface DiningCartQuoteOptions extends Omit<PickupCartQuoteOptions, "binding"> {
   readonly participation: DiningCartAuthorityPorts["participation"];
+  /** WP-2423 M35: one guest check as one unit of reads (see DiningCartAuthorityPorts). */
+  readonly together?: DiningCartAuthorityPorts["together"];
 }
 function denied(): never {
   throw new CartError("CART_PERMISSION_DENIED");
@@ -93,6 +95,7 @@ export function createDiningCartQuoteService(options: DiningCartQuoteOptions) {
         const authority = createDiningCartAuthority({
           scope: { brandReference: brand, storeReference: store },
           participation: options.participation,
+          ...(options.together === undefined ? {} : { together: options.together }),
           now,
           sessions: {
             resolve: ({ sessionCredential, observedAt }) =>

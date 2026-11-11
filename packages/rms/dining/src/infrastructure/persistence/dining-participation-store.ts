@@ -17,6 +17,13 @@ import {
 } from "../../application/dining-cart-participation-query.js";
 import type { DiningTableStoreScope, DiningTableTransactionRunner } from "./dining-table-store.js";
 
+/**
+ * WP-2423 M35 (DEC-STAFF-ROUND-SPEED): marks a plain read with no side effect, so the pilot's
+ * transaction runner may answer an identical repeat of it from the same transaction while nothing
+ * that could change its answer ran in between. An ordinary SQL comment everywhere else.
+ */
+const stableRead = "-- bop:stable-read\n";
+
 function closed(value: unknown, keys: readonly string[]) {
   const copied = captureSessionData(value);
   if (
@@ -192,7 +199,8 @@ function createParticipationStore(
           }
           const found = rows(
             await tx.query(
-              "SELECT s.session_snapshot AS session,p.participant_snapshot AS participant,t.table_snapshot AS table FROM rms_dining.dining_session s JOIN rms_dining.dining_participant p ON p.tenant_id=s.tenant_id AND p.brand_id=s.brand_id AND p.store_id=s.store_id AND p.session_id=s.session_id JOIN rms_dining.dining_table t ON t.tenant_id=s.tenant_id AND t.brand_id=s.brand_id AND t.store_id=s.store_id AND t.table_id=s.table_id WHERE s.tenant_id=$1 AND s.brand_id=$2 AND s.store_id=$3 AND s.session_id=$4 AND p.participant_id=$5",
+              stableRead +
+                "SELECT s.session_snapshot AS session,p.participant_snapshot AS participant,t.table_snapshot AS table FROM rms_dining.dining_session s JOIN rms_dining.dining_participant p ON p.tenant_id=s.tenant_id AND p.brand_id=s.brand_id AND p.store_id=s.store_id AND p.session_id=s.session_id JOIN rms_dining.dining_table t ON t.tenant_id=s.tenant_id AND t.brand_id=s.brand_id AND t.store_id=s.store_id AND t.table_id=s.table_id WHERE s.tenant_id=$1 AND s.brand_id=$2 AND s.store_id=$3 AND s.session_id=$4 AND p.participant_id=$5",
               [tenant, brand, store, input.session, input.participant],
             ),
           );

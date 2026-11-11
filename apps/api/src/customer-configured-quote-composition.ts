@@ -71,6 +71,8 @@ export type CustomerConfiguredQuoteCompositionOptions = {
         ConfiguredCustomerQuoteOptions,
         { orderType: "DineIn" }
       >["participation"];
+      /** WP-2423 M35 (DEC-STAFF-ROUND-SPEED): one guest check in one transaction. */
+      readonly together?: Extract<ConfiguredCustomerQuoteOptions, { orderType: "DineIn" }>["together"];
       /** DEC-DINING-ANY-PARTICIPANT-SUBMIT: Dining's current hold of the table Cart version by
        * another participant's checkout; required for a table's Cart. */
       readonly checkoutHold: DiningCartCheckoutHoldPort;
@@ -130,6 +132,7 @@ export function createCustomerConfiguredQuoteComposition(
           orderType: "DineIn" as const,
           // WP-2423 item 6: a table checking out is said as such, never as a Store fault.
           participation: cartParticipation(options.participation),
+          ...(options.together === undefined ? {} : { together: options.together }),
           checkoutHold: options.checkoutHold,
         }),
     catalog: createPostgresCatalogOrderSnapshotSource(
@@ -314,6 +317,7 @@ export function createCustomerConfiguredQuoteHttpComposition(
       : createDiningCartQuoteExpiryService({
           ...common,
           participation: cartParticipation(options.participation),
+          ...(options.together === undefined ? {} : { together: options.together }),
           carts: {
             loadCart: createPostgresCartQueryStore(options.cartTransactions, options.scope).load,
           },

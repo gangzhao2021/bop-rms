@@ -19,6 +19,13 @@ import type {
 } from "../../application/dining-guest-binding-query.js";
 import type { DiningTableStoreScope, DiningTableTransactionRunner } from "./dining-table-store.js";
 
+/**
+ * WP-2423 M35 (DEC-STAFF-ROUND-SPEED): marks a plain read with no side effect, so the pilot's
+ * transaction runner may answer an identical repeat of it from the same transaction while nothing
+ * that could change its answer ran in between. An ordinary SQL comment everywhere else.
+ */
+const stableRead = "-- bop:stable-read\n";
+
 function closed(value: unknown, keys: readonly string[]) {
   const copied = captureSessionData(value);
   if (
@@ -184,7 +191,8 @@ export function createPostgresDiningGuestBindingStore(
           );
           const found = rows(
             await tx.query(
-              "SELECT s.session_snapshot AS session,p.participant_snapshot AS participant,t.table_snapshot AS table,a.admission_snapshot AS admission,to_char(mv.occurred_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') AS moved_at FROM rms_dining.dining_session s JOIN rms_dining.dining_participant p ON p.tenant_id=s.tenant_id AND p.brand_id=s.brand_id AND p.store_id=s.store_id AND p.session_id=s.session_id JOIN rms_dining.dining_identity_admission a ON a.tenant_id=p.tenant_id AND a.brand_id=p.brand_id AND a.store_id=p.store_id AND a.session_id=p.session_id AND a.participant_id=p.participant_id JOIN rms_dining.dining_table t ON t.tenant_id=s.tenant_id AND t.brand_id=s.brand_id AND t.store_id=s.store_id AND t.table_id=s.table_id " +
+              stableRead +
+                "SELECT s.session_snapshot AS session,p.participant_snapshot AS participant,t.table_snapshot AS table,a.admission_snapshot AS admission,to_char(mv.occurred_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') AS moved_at FROM rms_dining.dining_session s JOIN rms_dining.dining_participant p ON p.tenant_id=s.tenant_id AND p.brand_id=s.brand_id AND p.store_id=s.store_id AND p.session_id=s.session_id JOIN rms_dining.dining_identity_admission a ON a.tenant_id=p.tenant_id AND a.brand_id=p.brand_id AND a.store_id=p.store_id AND a.session_id=p.session_id AND a.participant_id=p.participant_id JOIN rms_dining.dining_table t ON t.tenant_id=s.tenant_id AND t.brand_id=s.brand_id AND t.store_id=s.store_id AND t.table_id=s.table_id " +
                 // WP-2423 (table-move-payment): staff's first recorded Move of this session off the
                 // table this phone joined at, after it joined. The phone then follows the party.
                 "LEFT JOIN LATERAL (SELECT m.occurred_at FROM rms_dining.dining_session_move_operation m WHERE m.tenant_id=s.tenant_id AND m.brand_id=s.brand_id AND m.store_id=s.store_id AND m.session_id=s.session_id AND m.source_table_id=(a.admission_snapshot->>'tableReference')::uuid AND m.occurred_at>=(a.admission_snapshot->>'consumedAt')::timestamptz ORDER BY m.occurred_at LIMIT 1) mv ON true WHERE s.tenant_id=$1 AND s.brand_id=$2 AND s.store_id=$3 AND s.session_id=$4 AND p.participant_id=$5",

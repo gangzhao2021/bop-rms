@@ -363,3 +363,73 @@ describe("current-authorized shared Dining Cart selection", () => {
     expect(f.select).not.toHaveBeenCalled();
   });
 });
+
+describe("WP-2423 M35 (DEC-STAFF-ROUND-SPEED): each guest check as one unit of reads", () => {
+  it("runs every read of one check (session, place, session) inside one `together` call, and the action outside it", async () => {
+    const f = fixture();
+    const trace: string[] = [];
+    let inside = false;
+    const together = vi.fn(async <T>(work: () => Promise<T>) => {
+      inside = true;
+      trace.push("begin");
+      try {
+        return await work();
+      } finally {
+        inside = false;
+        trace.push("end");
+      }
+    });
+    f.resolve.mockImplementation(async () => {
+      trace.push(inside ? "session" : "session outside");
+      return guest();
+    });
+    f.participate.mockImplementation(async () => {
+      trace.push(inside ? "place" : "place outside");
+      return membership();
+    });
+    f.select.mockImplementation(async () => {
+      trace.push(inside ? "select inside" : "select");
+      return receipt();
+    });
+    const service = createDiningCartSelectionService({
+      scope: f.scope,
+      sessions: { resolve: f.resolve },
+      participation: { resolve: f.participate },
+      selection: { select: f.select },
+      now: f.now,
+      together,
+    });
+    await service.select(input());
+    // The same reads in the same order as without it: before and after the action, two checks.
+    expect(trace).toEqual([
+      "begin",
+      "session",
+      "place",
+      "session",
+      "end",
+      "select",
+      "begin",
+      "session",
+      "place",
+      "session",
+      "end",
+    ]);
+    expect(together).toHaveBeenCalledTimes(2);
+  });
+  it("a check that fails inside `together` still refuses the action", async () => {
+    const f = fixture();
+    f.participate.mockResolvedValue(null);
+    const service = createDiningCartSelectionService({
+      scope: f.scope,
+      sessions: { resolve: f.resolve },
+      participation: { resolve: f.participate },
+      selection: { select: f.select },
+      now: f.now,
+      together: (work) => work(),
+    });
+    await expect(service.select(input())).rejects.toMatchObject({
+      code: "CART_PERMISSION_DENIED",
+    });
+    expect(f.select).not.toHaveBeenCalled();
+  });
+});

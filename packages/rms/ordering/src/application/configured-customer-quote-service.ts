@@ -34,6 +34,8 @@ export type ConfiguredCustomerQuoteOptions = Omit<ConfiguredCartQuotePorts, "aut
     | {
         readonly orderType: "DineIn";
         readonly participation: DiningCartAuthorityPorts["participation"];
+        /** WP-2423 M35: one guest check as one unit of reads (see DiningCartAuthorityPorts). */
+        readonly together?: DiningCartAuthorityPorts["together"];
         /** DEC-DINING-ANY-PARTICIPANT-SUBMIT: refuse to re-price a Cart version that another
          * participant is checking out (a new quote would silently invalidate that checkout). */
         readonly checkoutHold?: DiningCartCheckoutHoldPort;
@@ -99,6 +101,7 @@ export function createConfiguredCustomerQuoteService(options: ConfiguredCustomer
                 scope: { brandReference: brand, storeReference: store },
                 now,
                 participation: options.participation,
+                ...(options.together === undefined ? {} : { together: options.together }),
                 sessions: { resolve: ({ observedAt }) => sessions.authorize(observedAt) },
               })
             : null;

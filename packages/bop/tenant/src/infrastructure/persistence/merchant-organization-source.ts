@@ -7,6 +7,13 @@ import {
   parseCanonicalInstant,
 } from "../../domain/brand-store.js";
 import type { TenantOrganizationPort } from "../../application/ports/tenant-organization-port.js";
+
+/**
+ * WP-2423 M35 (DEC-STAFF-ROUND-SPEED): marks a plain read with no side effect, so the pilot's
+ * transaction runner may answer an identical repeat of it from the same transaction while nothing
+ * that could change its answer ran in between. An ordinary SQL comment everywhere else.
+ */
+const stableRead = "-- bop:stable-read\n";
 export interface MerchantOrganizationTransaction {
   query(sql: string, values: readonly unknown[]): Promise<unknown>;
 }
@@ -166,7 +173,7 @@ export function createPostgresMerchantOrganizationSource(
         if (reference !== brand) return unavailable();
         await setScope("");
         const row = one(
-          await tx.query("SELECT * FROM bop_tenant.brand WHERE brand_id=$1 FOR SHARE", [brand]),
+          await tx.query(stableRead + "SELECT * FROM bop_tenant.brand WHERE brand_id=$1 FOR SHARE", [brand]),
         );
         await setScope(store);
         if (!row) return null;
@@ -195,7 +202,7 @@ export function createPostgresMerchantOrganizationSource(
         await setScope(store);
         const row = one(
           await tx.query(
-            "SELECT * FROM bop_tenant.store WHERE brand_id=$1 AND store_id=$2 FOR SHARE",
+            stableRead + "SELECT * FROM bop_tenant.store WHERE brand_id=$1 AND store_id=$2 FOR SHARE",
             [brand, store],
           ),
         );

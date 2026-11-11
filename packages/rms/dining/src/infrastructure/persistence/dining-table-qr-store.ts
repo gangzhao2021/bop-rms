@@ -2,6 +2,13 @@ import { parseDiningInstant, parseDiningReference } from "../../contracts/dining
 import { parseQrSignedPayload, type QrSignedPayload } from "../../contracts/qr-table-context.js";
 
 /**
+ * WP-2423 M35 (DEC-STAFF-ROUND-SPEED): marks a plain read with no side effect, so the pilot's
+ * transaction runner may answer an identical repeat of it from the same transaction while nothing
+ * that could change its answer ran in between. An ordinary SQL comment everywhere else.
+ */
+const stableRead = "-- bop:stable-read\n";
+
+/**
  * WP-2423 Q11 (DEC-TABLE-QR-ISSUANCE): the table QR codes a Store prints. One row per IssueQr table
  * operation; the signed code is kept exactly as printed (it is public and carries no secret) so a
  * damaged sticker can be reprinted unchanged. A table keeps one public table reference across
@@ -138,7 +145,8 @@ export function createPostgresDiningTableQrStore(
     await context();
     const rows = rowsOf(
       await transaction.query(
-        "SELECT " +
+        stableRead +
+          "SELECT " +
           columns +
           " FROM rms_dining.dining_table_qr_issue WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND " +
           where,
