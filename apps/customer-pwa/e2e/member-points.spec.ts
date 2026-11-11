@@ -299,3 +299,42 @@ test.describe("@production member points when something is down", () => {
     await expectNoInternalText(page);
   });
 });
+
+// v15 batch 8 (table-pay-by-dish): a phone that paid its own part on its own card is offered that
+// part's points only, never asked "Which part did you pay?" beside a part paid at the counter. A
+// phone that paid nothing itself is still asked, as before.
+for (const width of widths)
+  test.describe(`@production points on a table paid in parts at ${String(width)}px`, () => {
+    test.use({ viewport: { width, height: 900 }, serviceWorkers: "block" });
+    const parts = (certain: boolean) => ({
+      body: {
+        ...offer.body,
+        claim: {
+          until: "2026-11-03T18:00:00.000Z",
+          parts: [
+            { partNumber: 1, points: 125, certain },
+            { partNumber: 2, points: 250, certain: false },
+          ],
+        },
+      },
+    });
+    test("the phone that paid part 1 is offered part 1 and asked nothing", async ({ page }) => {
+      await serve(page, { State: () => parts(true) });
+      await page.goto("/orders/" + orderReference + "/receipt");
+      await expect(
+        page.getByRole("heading", { name: "Join and earn 125 points on this order" }),
+      ).toBeVisible();
+      await expect(page.getByText("Which part did you pay?")).toHaveCount(0);
+      await expect(page.getByText(/250 points/u)).toHaveCount(0);
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true);
+      await expectNoInternalText(page);
+    });
+    test("a phone that paid nothing itself is still asked which part", async ({ page }) => {
+      await serve(page, { State: () => parts(false) });
+      await page.goto("/orders/" + orderReference + "/receipt");
+      await expect(page.getByText("Which part did you pay?")).toBeVisible();
+      await expect(page.getByRole("radio", { name: "Part 2 · 250 points" })).toBeVisible();
+    });
+  });

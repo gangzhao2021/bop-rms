@@ -113,6 +113,29 @@ interface OfferedSource extends ClaimSource {
   readonly refundedPoints: number;
 }
 
+/**
+ * v15 batch 8: which phone paid a table's payment — this one, another one (its own card on its
+ * own phone), or unknown (cash or the card machine at the counter: any phone at the table may say
+ * it was theirs).
+ */
+export function paymentPhone(
+  settlement: { readonly onlinePaymentReference: string | null },
+  online: readonly {
+    readonly onlinePaymentReference: string;
+    readonly guestSessionReference: unknown;
+  }[],
+  guestSessionReference: unknown,
+): "ThisPhone" | "OtherPhone" | "Unknown" {
+  if (settlement.onlinePaymentReference === null) return "Unknown";
+  const attempt = online.find(
+    (entry) => entry.onlinePaymentReference === settlement.onlinePaymentReference,
+  );
+  if (attempt === undefined) return "Unknown";
+  return String(attempt.guestSessionReference) === String(guestSessionReference)
+    ? "ThisPhone"
+    : "OtherPhone";
+}
+
 export function createCustomerMember(options: {
   readonly access: StatusReadOptions;
   readonly tenantReference: string;
@@ -216,31 +239,32 @@ export function createCustomerMember(options: {
     const order = bill.orderReference;
     if (order === null) return [];
     const online = await settlementStore.listOnlinePaymentsByOrders(tx as never, [order]);
+    const payer = (settlement: { readonly onlinePaymentReference: string | null }) =>
+      paymentPhone(settlement, online, guest.sessionReference);
     const paidOnThisPhone = (settlement: { readonly onlinePaymentReference: string | null }) =>
-      settlement.onlinePaymentReference !== null &&
-      online.some(
-        (attempt) =>
-          attempt.onlinePaymentReference === settlement.onlinePaymentReference &&
-          String(attempt.guestSessionReference) === String(guest.sessionReference),
-      );
+      payer(settlement) === "ThisPhone";
     // Paid at the counter or on the card machine: certain only when this is the table's one phone.
     const phones = await loadDiningGuestPhones(tx as never, scope, diningSessionReference);
     const onlyPhone =
       phones.length === 1 &&
       String(phones[0]?.participantReference) === String(guest.diningParticipantReference);
+    // v15 batch 8: a payment another phone made on its own card earns for that phone only: this
+    // phone is never asked "which part did you pay?" about it, nor can it claim it.
     if (bill.settlementRecord !== null && bill.settlementRecord.part === null)
-      return [
-        {
-          sourceReference: bill.settlementRecord.settlementReference,
-          orderReference: order,
-          partNumber: null,
-          paidDishesMinor: bill.rounds.reduce(
-            (sum, round) => sum + BigInt(round.subtotalMinor),
-            0n,
-          ),
-          certain: paidOnThisPhone(bill.settlementRecord) || onlyPhone,
-        },
-      ];
+      return payer(bill.settlementRecord) === "OtherPhone"
+        ? []
+        : [
+            {
+              sourceReference: bill.settlementRecord.settlementReference,
+              orderReference: order,
+              partNumber: null,
+              paidDishesMinor: bill.rounds.reduce(
+                (sum, round) => sum + BigInt(round.subtotalMinor),
+                0n,
+              ),
+              certain: paidOnThisPhone(bill.settlementRecord) || onlyPhone,
+            },
+          ];
     if (bill.splitPlanRecord === null) return [];
     const settlements = await settlementStore.listByOrders(tx as never, [order]);
     const sources: ClaimSource[] = [];
@@ -249,7 +273,7 @@ export function createCustomerMember(options: {
       const part = bill.splitPlanRecord.parts.find(
         (entry) => entry.partNumber === settlement.part?.partNumber,
       );
-      if (part === undefined) continue;
+      if (part === undefined || payer(settlement) === "OtherPhone") continue;
       sources.push({
         sourceReference: settlement.settlementReference,
         orderReference: order,

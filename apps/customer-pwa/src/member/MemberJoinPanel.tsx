@@ -110,12 +110,17 @@ export function MemberJoinPanel({
         </button>
       </p>
     );
-  const several = claim.parts.length > 1;
-  const chosen = several ? claim.parts.find((entry) => entry.partNumber === part) : claim.parts[0];
-  const points = chosen?.points ?? Math.max(...claim.parts.map((entry) => entry.points));
+  // v15 batch 8: a phone that paid a part on its own card knows which part it paid: it is offered
+  // that part only, never asked "which part did you pay?" beside parts others paid at the counter.
+  const parts = claim.parts.some((entry) => entry.certain === true)
+    ? claim.parts.filter((entry) => entry.certain === true)
+    : claim.parts;
+  const several = parts.length > 1;
+  const chosen = several ? parts.find((entry) => entry.partNumber === part) : parts[0];
+  const points = chosen?.points ?? Math.max(...parts.map((entry) => entry.points));
   // v15 M60: a refund on this order already takes its share off these points.
-  const afterRefund = (chosen ?? claim.parts[0])?.afterRefund === true;
-  const partNumber = several ? part : (claim.parts[0]?.partNumber ?? null);
+  const afterRefund = (chosen ?? parts[0])?.afterRefund === true;
+  const partNumber = several ? part : (parts[0]?.partNumber ?? null);
   const add = async () => {
     setBusy(true);
     setProblem(null);
@@ -145,7 +150,7 @@ export function MemberJoinPanel({
       {several ? (
         <fieldset className="member-panel__parts">
           <legend>{t("Which part did you pay?")}</legend>
-          {claim.parts.map((entry) => (
+          {parts.map((entry) => (
             <label key={entry.partNumber}>
               <input
                 type="radio"
