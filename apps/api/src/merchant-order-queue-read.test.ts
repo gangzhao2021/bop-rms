@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   carried: vi.fn(),
   holding: vi.fn(),
   earlierOpen: vi.fn(),
+  earlierPaidWaiting: vi.fn(),
   state: vi.fn(),
   fence: vi.fn(),
   remakes: vi.fn(async (): Promise<unknown[]> => []),
@@ -23,6 +24,7 @@ vi.mock("@rms/kitchen", async (original) => ({
 vi.mock("./merchant-stock-holding-orders.js", () => ({
   readEarlierOrdersHoldingStock: mocks.holding,
   readEarlierOpenPickupOrders: mocks.earlierOpen,
+  readEarlierOrdersAwaitingPaidAcceptance: mocks.earlierPaidWaiting,
 }));
 vi.mock("@rms/ordering", () => ({
   parseOrderingInstant: (value: string) => value,
@@ -66,6 +68,8 @@ beforeEach(() => {
   mocks.holding.mockResolvedValue([]);
   mocks.earlierOpen.mockReset();
   mocks.earlierOpen.mockResolvedValue([]);
+  mocks.earlierPaidWaiting.mockReset();
+  mocks.earlierPaidWaiting.mockResolvedValue([]);
   mocks.state.mockReset();
   mocks.state.mockResolvedValue(null);
   mocks.fence.mockReset();
@@ -318,6 +322,50 @@ it("WP-2423 (2026-11-03): an accepted pickup of an earlier day is listed with to
   mocks.earlierOpen.mockRejectedValue(new Error("unavailable"));
   const without = await run({ sessionCookie: "synthetic", afterOrderReference: null, limit: 50 });
   expect(without.items.map((item) => item.orderReference)).toEqual([id(101)]);
+});
+
+it("v15 batch 7: an earlier day's Order with a paid round never accepted is listed with today's", async () => {
+  mocks.cancelled.mockResolvedValue({ phase: "Cancelled", orderVersion: 2 });
+  mocks.carried.mockResolvedValue([]);
+  mocks.earlierPaidWaiting.mockResolvedValue([id(110)]);
+  mocks.list.mockImplementation(
+    async (input: { onlyOrderReference?: string; excludeOrderReferences?: string[] }) =>
+      input.onlyOrderReference !== undefined
+        ? { items: [indexItem(110, "2026-10-09")], nextAfterOrderReference: null }
+        : {
+            items: [indexItem(111, "2026-10-15")].filter(
+              (item) => !(input.excludeOrderReferences ?? []).includes(item.orderReference),
+            ),
+            nextAfterOrderReference: null,
+          },
+  );
+  const run = createMerchantOrderQueueRead({
+    transactions: {
+      run: async (work) => work({ query: async () => ({ rows: [], rowCount: 0 }) }),
+    },
+    authorize: async () => scope,
+    quoteVersion: 1,
+    now: () => "2026-10-16T06:00:00.000Z",
+    today: async () => ({ businessDate: "2026-10-15", startsAt: "2026-10-15T08:00:00.000Z" }),
+  });
+  const view = await run({ sessionCookie: "synthetic", afterOrderReference: null, limit: 50 });
+  expect(mocks.earlierPaidWaiting).toHaveBeenCalledWith(
+    expect.anything(),
+    expect.objectContaining({ storeReference: id(3) }),
+    expect.objectContaining({ businessDate: "2026-10-15" }),
+    50,
+  );
+  expect(view.items.map((item) => [item.orderReference, item.earlierDay])).toEqual([
+    [id(110), true],
+    [id(111), false],
+  ]);
+  // A later page does not list it again.
+  const later = await run({ sessionCookie: "synthetic", afterOrderReference: id(111), limit: 50 });
+  expect(later.items.some((item) => item.orderReference === id(110))).toBe(false);
+  // An unreadable answer never blanks the Orders page.
+  mocks.earlierPaidWaiting.mockRejectedValue(new Error("unavailable"));
+  const without = await run({ sessionCookie: "synthetic", afterOrderReference: null, limit: 50 });
+  expect(without.items.map((item) => item.orderReference)).toEqual([id(111)]);
 });
 
 it("WP-2423: counts a table's items ready to serve in any round, as the Tables close dialog does", async () => {

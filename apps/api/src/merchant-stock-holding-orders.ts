@@ -5,6 +5,7 @@ import { listStoreUncollectedPickupOrders } from "@rms/fulfillment";
 import { listStoreSubmissionsHoldingStock } from "@rms/inventory";
 import {
   listStoreEarlierOpenPickupOrders,
+  listStoreEarlierOrdersWithPaidRoundsAwaitingAcceptance,
   listStoreOrdersOfSubmissions,
   parseOrderingInstant,
   parseOrderingReference,
@@ -138,6 +139,24 @@ export async function readEarlierOpenPickupOrders(
     ))
       uncollected.add(reference);
   return Object.freeze(open.filter((reference) => !uncollected.has(reference)));
+}
+
+/**
+ * v15 batch 7 (DEC-DINE-IN-PAID-ROUND-WAIT): Orders of earlier business days with a paid round
+ * staff never accepted (oldest first), so Orders lists them with today's and staff can accept them
+ * or use Can't make it · refund. Read only; the caller authorizes and owns the transaction.
+ */
+export async function readEarlierOrdersAwaitingPaidAcceptance(
+  transaction: ConsumerTransaction,
+  scope: StoreScope,
+  today: Readonly<{ businessDate: string }>,
+  limit: number,
+): Promise<readonly string[]> {
+  return listStoreEarlierOrdersWithPaidRoundsAwaitingAcceptance(
+    transaction,
+    { brandReference: scope.brandReference, storeReference: scope.storeReference },
+    { beforeBusinessDate: today.businessDate, limit },
+  );
 }
 
 export const endedOrderStockReleaseErrorCodes = [

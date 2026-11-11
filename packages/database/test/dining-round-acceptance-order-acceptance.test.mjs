@@ -21,6 +21,7 @@ import {
   createPostgresOrderSubmittedConsumer,
   createPostgresStaffDiningRoundEntryStore,
   listStorePaidDiningRoundsAwaitingAcceptance,
+  listStoreEarlierOrdersWithPaidRoundsAwaitingAcceptance,
   parseAdditionalDiningBatchSnapshot,
 } from "../../rms/ordering/src/index.ts";
 import { createPostgresCapturedBatchPaymentSource } from "../../rms/payment/src/index.ts";
@@ -852,6 +853,32 @@ it.each(["Unpaid", "Cancelled", "PaidFirst"])(
             [[R1.batch.orderBatchReference, 1]],
           );
           assert.equal(waitingRounds[0].paidAt, before.batches[0].awaitingAcceptanceSince);
+          // v15 batch 7: seen from the next business day, this Order is one Orders lists with
+          // today's (a paid round nobody accepted); seen from its own day it is not "earlier".
+          const [{ day: orderDay, next: nextDay }] = await one(
+            "SELECT business_date::text AS day,(business_date+1)::text AS next FROM rms_ordering.order_header WHERE order_id=$1",
+            [orderReference],
+          );
+          const earlierPaidWaiting = (beforeBusinessDate) =>
+            transactions().run((tx) =>
+              listStoreEarlierOrdersWithPaidRoundsAwaitingAcceptance(tx, scope, {
+                beforeBusinessDate,
+                limit: 50,
+              }),
+            );
+          assert.deepEqual(await earlierPaidWaiting(nextDay), [orderReference]);
+          assert.deepEqual(await earlierPaidWaiting(orderDay), []);
+          // Another Store's role sees none of it.
+          assert.deepEqual(
+            await transactions().run((tx) =>
+              listStoreEarlierOrdersWithPaidRoundsAwaitingAcceptance(
+                tx,
+                { ...scope, storeReference: scope.brandReference.slice(0, 24) + "0000000077aa" },
+                { beforeBusinessDate: nextDay, limit: 50 },
+              ),
+            ),
+            [],
+          );
           // Home's count and the Orders list read the same capability.
           assert.equal((await listed()).batches[0].canRequestAcceptance, true);
 
@@ -931,6 +958,8 @@ it.each(["Unpaid", "Cancelled", "PaidFirst"])(
           const afterOne = await queued();
           assert.equal(afterOne.batches[0].acceptanceStatus, "Accepted");
           assert.equal(afterOne.batches[0].awaitingAcceptanceSince, null);
+          // Accepted: nothing paid waits, so it is no longer carried onto later days' Orders.
+          assert.deepEqual(await earlierPaidWaiting(nextDay), []);
           assert.deepEqual(
             await transactions().run((tx) =>
               listStorePaidDiningRoundsAwaitingAcceptance(tx, scope, [

@@ -13,6 +13,7 @@ import {
 import { withOptionalRead } from "./merchant-round-business-date.js";
 import {
   readEarlierOpenPickupOrders,
+  readEarlierOrdersAwaitingPaidAcceptance,
   readEarlierOrdersHoldingStock,
   type EarlierOrderHoldingStock,
 } from "./merchant-stock-holding-orders.js";
@@ -141,8 +142,20 @@ export function createMerchantOrderQueueRead(options: {
               [] as readonly string[],
             ),
       );
+      // v15 batch 7: an earlier-day Order with a paid round staff never accepted is listed first
+      // with today's too: the guest paid, and only staff decide (accept it, or Can't make it ·
+      // refund). An unreadable answer never blanks the Orders page.
+      const earlierPaidWaiting =
+        today === null
+          ? []
+          : await withOptionalRead(
+              transaction,
+              () => readEarlierOrdersAwaitingPaidAcceptance(transaction, scope, today, input.limit),
+              [] as readonly string[],
+            );
       const carriedOrders = new Set([
         ...carried.map((order) => order.orderReference),
+        ...earlierPaidWaiting,
         ...heldByOrder.keys(),
         ...openEarlierPickups,
       ]);
@@ -155,6 +168,7 @@ export function createMerchantOrderQueueRead(options: {
         ? [
             ...new Set([
               ...carried.map((order) => order.orderReference),
+              ...earlierPaidWaiting,
               ...heldByOrder.keys(),
               ...openEarlierPickups,
             ]),

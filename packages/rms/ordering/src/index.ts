@@ -354,6 +354,7 @@ export {
   listStoreOrdersWithRoundsSince,
   listStoreOrdersOfSubmissions,
   listStoreEarlierOpenPickupOrders,
+  listStoreEarlierOrdersWithPaidRoundsAwaitingAcceptance,
   type StoreSubmissionOrder,
   type StoreOrderRoundSubmission,
   listStoreUnfulfillablePaidOrders,
