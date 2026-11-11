@@ -15,6 +15,7 @@ import {
 import { input as quoteInput } from "../../rms/pricing/src/tests/price-quote.fixture.ts";
 import { createMerchantStoreConfigurationOrdinary } from "../../../apps/api/dist/merchant-store-configuration-ordinary.js";
 import { createMerchantStoreConfigurationWithdrawal } from "../../../apps/api/dist/merchant-store-configuration-withdrawal.js";
+import { createMerchantStorePublicProfile } from "../../../apps/api/dist/merchant-store-public-profile.js";
 import { appendAuditRecordInTransaction } from "../../bop/audit/src/index.ts";
 import { renderPilotAclSql } from "../../../tooling/environment/pilot-acl-render.mjs";
 import { createInternalStoreConfiguration } from "../../../tooling/environment/pilot-store-configuration.mjs";
@@ -1056,6 +1057,34 @@ it("WP-2423 Q4: a Store Manager changes hours on a configuration from Store setu
           read.current.configurationReference,
         );
       }
+      // M109: the Store's first own setup offers pickup, so the Owner publishes the Store's phone
+      // pickup guests call (Name and contact shown to customers) before sending it.
+      const storeProfile = createMerchantStorePublicProfile({
+        persistence: people.owner.persistence,
+        authentication: people.owner.authentication,
+      });
+      const shown = await storeProfile.read({ sessionCookie: people.owner.sessionCookie });
+      const phoned = await storeProfile({
+        sessionCookie: people.owner.sessionCookie,
+        csrf: people.owner.csrf,
+        command: {
+          expectedVersion: 0,
+          operationReference: reference(),
+          details: {
+            storeDisplayNames: Object.fromEntries(
+              shown.locales.map((locale) => [locale, "Synthetic Store"]),
+            ),
+            address: {
+              addressLines: ["1 Synthetic Street"],
+              locality: "Toronto",
+              regionCode: "ON",
+              postalCode: "M5H 1A1",
+            },
+            businessPhone: "416-555-0142",
+          },
+        },
+      });
+      assert.equal(phoned.current.businessPhone, "+14165550142");
       await publishStep(people.owner, "Materialize", {
         setupSelector: {
           setupDraftReference: revision1.setupDraftReference,
