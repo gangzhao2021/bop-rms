@@ -1667,7 +1667,8 @@ test("@production a listing whose answer the dropped network lost continues with
     return route.fulfill({ headers, json: { status: "Listed", menuReference: MENU } });
   });
   await page.goto("/app/commerce/menus");
-  await page.getByRole("button", { name: "List it" }).click();
+  // Batch 5: List it first shows what goes live; its own List it sends the listing.
+  await listIt(page);
   await expect(
     page.getByText("The network dropped, so we can't tell whether the menu was listed.", {
       exact: false,
