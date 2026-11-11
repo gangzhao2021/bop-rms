@@ -682,6 +682,26 @@ export interface MenuBuilderView extends MenuViewBase {
   readonly priceDraft?: MenuPriceDraft | null;
   /** WP-2423 M71: price changes started on the Prices page: never listed from here. */
   readonly priceChangesOnPricesPage?: number;
+  /** WP-2423 (v15 batch 5): the choice prices "List it" puts live (absent in older views). */
+  readonly choicePriceChanges?: readonly {
+    readonly productReference: string;
+    readonly optionReference: string;
+    /** "" when the choice has no name to show. */
+    readonly optionName: string;
+    /** null: the choice had no price yet. */
+    readonly fromMinor: string | null;
+    readonly toMinor: string;
+  }[];
+  /**
+   * WP-2423 (v15 batch 5): at a Brand with several Stores, the dishes on the menu nobody has
+   * decided at one of its other Stores yet, and whether this person's listing puts them live there.
+   * null or absent: one Store.
+   */
+  readonly otherStores?: {
+    readonly storeCount: number;
+    readonly notDecided: readonly string[];
+    readonly listingOffers: boolean;
+  } | null;
   /** WP-2423 M70: where this person may change a dish's price (absent: one Store). */
   readonly pricePowers?: {
     readonly severalStores: boolean;

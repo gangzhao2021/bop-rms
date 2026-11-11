@@ -150,7 +150,11 @@ const json = (value: unknown, status = 200) =>
     headers: { "content-type": "application/json", "cache-control": "no-store" },
   });
 /** A fetch for the page's own requests; `menu` answers each menu read (in order). */
-function server(menu: () => Promise<unknown>) {
+function server(
+  menu: () => Promise<unknown>,
+  /** Answers a one-page command instead of the usual answer (a throw: the answer is lost). */
+  answer?: (body: Record<string, unknown>) => Promise<unknown> | undefined,
+) {
   const sent: Record<string, unknown>[] = [];
   const fetcher = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
@@ -160,6 +164,8 @@ function server(menu: () => Promise<unknown>) {
     if (path === "/merchant/commerce/one-store-combos/query") return json({ combos: [] });
     if (path === "/merchant/commerce/one-store-dishes/command") {
       sent.push(body);
+      const own = answer?.(body);
+      if (own !== undefined) return json(await own);
       return json(
         body.action === "SaveDish"
           ? { status: "Saved", productReference: body.productReference, choicesWaiting: false }
@@ -191,8 +197,11 @@ function server(menu: () => Promise<unknown>) {
   }) as typeof fetch;
   return { fetcher, sent };
 }
-async function page(menu: () => Promise<unknown>) {
-  const { fetcher, sent } = server(menu);
+async function page(
+  menu: () => Promise<unknown>,
+  answer?: (body: Record<string, unknown>) => Promise<unknown> | undefined,
+) {
+  const { fetcher, sent } = server(menu, answer);
   const csrf = "a".repeat(43);
   const { container } = await mount(
     <MemoryRouter initialEntries={["/app/commerce/menus"]}>
@@ -410,4 +419,142 @@ it("WP-2423 (M77, M167): a recipe that changed a listed dish's allergens offers 
   await click(buttonNamed(container, "List it"));
   await settle(10);
   expect(sent.map((command) => command.action)).toEqual(["ListAll"]);
+});
+
+/** WP-2423 (v15 batch 5): a Brand with several Stores, this person may change this Store's price. */
+const severalStores = () => {
+  const read = builder(id(3), "Listed", id(3));
+  return {
+    ...read,
+    stores: { severalStores: true, servesHere: true },
+    pricePowers: { severalStores: true, mayAllStores: true, mayThisStore: true },
+    sellables: read.sellables.map((sku) => ({
+      ...sku,
+      brandPriceMinor: sku.priceMinor,
+      storePriceMinor: null,
+      pendingBrandPriceMinor: null,
+    })),
+  };
+};
+const storePriceAnswer = (body: Record<string, unknown>, listingNeeded: boolean) => ({
+  status: "Saved",
+  productReference: body.productReference,
+  choicesWaiting: false,
+  price: {
+    brandPriceMinor: "1288",
+    pendingBrandPriceMinor: null,
+    storePriceMinor: body.priceMinor,
+  },
+  listingNeeded,
+});
+const changeStorePrice = async (editor: HTMLElement, dollars: string) => {
+  const price = [...editor.querySelectorAll("input")].find(
+    (input) => input.closest("label")?.textContent?.startsWith("Price") === true,
+  );
+  await typeInto(price, dollars);
+  const onlyHere = [...editor.querySelectorAll('input[type="radio"][name="price-scope"]')].find(
+    (input) => input.closest("label")?.textContent?.includes("Only at this Store") === true,
+  );
+  await click(onlyHere);
+};
+
+it("WP-2423 (v15 batch 5): a price saved for this Store only says guests pay it from now, and that nothing waits to be listed", async () => {
+  const { container, sent } = await page(
+    async () => severalStores(),
+    (body) =>
+      body.action === "SaveDish" ? Promise.resolve(storePriceAnswer(body, false)) : undefined,
+  );
+  const editor = await editDish(container, "Dan dan noodles (TEST)");
+  await changeStorePrice(editor, "13.50");
+  await click(buttonNamed(editor, "Save dish"));
+  await settle(10);
+  expect(sent).toEqual([
+    expect.objectContaining({
+      action: "SaveDish",
+      priceMinor: "1350",
+      priceScope: "ThisStore",
+      expectedPriceMinor: "1288",
+    }),
+  ]);
+  expect(container.textContent).toContain(
+    "Dan dan noodles (TEST): guests at this Store pay $13.50 from now. Nothing else changed, so there is nothing to list.",
+  );
+  expect(container.textContent).not.toContain("Guests see it when the menu is listed.");
+});
+
+it("WP-2423 (v15 batch 5): a save whose answer was lost goes again unchanged, as the same save", async () => {
+  let saves = 0;
+  const { container, sent } = await page(
+    async () => severalStores(),
+    (body) => {
+      if (body.action !== "SaveDish") return undefined;
+      saves += 1;
+      // The first save applied, but its answer never came back.
+      if (saves === 1) return Promise.reject(new TypeError("Failed to fetch"));
+      return Promise.resolve(storePriceAnswer(body, false));
+    },
+  );
+  const editor = await editDish(container, "Dan dan noodles (TEST)");
+  await changeStorePrice(editor, "13.50");
+  await click(buttonNamed(editor, "Save dish"));
+  await settle(10);
+  expect(sent).toHaveLength(1);
+  expect(container.textContent).not.toContain("guests at this Store pay");
+  // Save again with nothing touched: the same save, compared with the price it was sent against.
+  await click(buttonNamed(editor, "Save dish"));
+  await settle(10);
+  expect(container.textContent).not.toContain("This form changed after saving stopped");
+  expect(sent).toHaveLength(2);
+  expect(sent[1]).toEqual(sent[0]);
+  expect(sent[1]).toMatchObject({ priceMinor: "1350", expectedPriceMinor: "1288" });
+  expect(container.textContent).toContain("guests at this Store pay $13.50 from now.");
+});
+
+it("WP-2423 (v15 batch 5): What goes live names each extra price and the dishes the other Stores do not sell yet", async () => {
+  const menu = () => ({
+    ...severalStores(),
+    listingStep: "Submit",
+    choicePriceChanges: [
+      {
+        productReference: id(132),
+        optionReference: id(90),
+        optionName: "Garlic (TEST)",
+        fromMinor: "50",
+        toMinor: "80",
+      },
+      {
+        productReference: id(132),
+        optionReference: id(91),
+        optionName: "Egg (TEST)",
+        fromMinor: null,
+        toMinor: "120",
+      },
+    ],
+    otherStores: { storeCount: 2, notDecided: [id(30)], listingOffers: true },
+  });
+  const { container } = await page(async () => menu());
+  await click(buttonNamed(container, "List it"));
+  await settle(5);
+  const review = container.querySelector('[aria-labelledby="listing-review"]');
+  expect(review?.textContent).toContain("Extra prices");
+  expect(review?.textContent).toContain(
+    "Dan dan noodles (TEST), Garlic (TEST): +$0.50 → +$0.80 (every Store)",
+  );
+  expect(review?.textContent).toContain("Dan dan noodles (TEST), Egg (TEST): +$1.20 (new)");
+  expect(review?.textContent).toContain(
+    "Guests at the other Stores can order these once listed: Har gow (TEST).",
+  );
+});
+
+it("WP-2423 (v15 batch 5): without the Brand's say over other Stores, the review says the new dish stays hidden there", async () => {
+  const { container } = await page(async () => ({
+    ...severalStores(),
+    listingStep: "Submit",
+    otherStores: { storeCount: 1, notDecided: [id(30)], listingOffers: false },
+  }));
+  await click(buttonNamed(container, "List it"));
+  await settle(5);
+  expect(container.textContent).toContain(
+    "These stay hidden at the other Stores until each Store shows them to guests: Har gow (TEST).",
+  );
 });

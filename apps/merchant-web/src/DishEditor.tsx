@@ -75,7 +75,8 @@ const carriedLine = (group: ProductOptionSetChoice, options: ReadonlyMap<string,
  * WP-2423 item 8 ⑥ DEC-SINGLE-STORE-MENU (Owner 2026-10-28 decisions 7–8): one dish edited on the
  * one-page menu — English and Chinese names and descriptions, price, tax class, section, choice
  * groups with each choice's price, and its allergens (declared by staff). Saving keeps everything
- * waiting; guests see it when the menu is listed. A new dish is the same form, empty, or (item 3)
+ * waiting; guests see it when the menu is listed, except a price at this Store only (several
+ * Stores), which guests pay from the save on. A new dish is the same form, empty, or (item 3)
  * copied from another dish, or carried on from the one just saved: after the first drink, each next
  * one is its names, its price and one allergen tick.
  */
@@ -236,7 +237,11 @@ export function DishEditor({
   // WP-2423 M70: a price sent by a save that got no answer may already be the dish's: until a save
   // answers, the price is sent again, compared with that one (a price put back is not lost).
   const [unansweredPrice, setUnansweredPrice] = useState<string | null>(null);
-  const sent = useRef<string | null>(null);
+  // What the save that has no answer yet sent: the same form goes again exactly as it was sent.
+  const sent = useRef<{
+    readonly fingerprint: string;
+    readonly content: Omit<SaveDishCommand, "operationReference">;
+  } | null>(null);
   useEffect(() => {
     let active = true;
     if (client.loadDish === undefined) return;
@@ -451,23 +456,32 @@ export function DishEditor({
         readonly name: string;
         /** Saved with no allergens declared (it cannot be listed until they are). */
         readonly undeclared: boolean;
+        /** WP-2423 (v15 batch 5): this Store's own price set by the save, live now (null: none). */
+        readonly storePriceMinor: string | null;
+        /** Something the save changed waits for "List it". */
+        readonly listingNeeded: boolean;
       }
   > => {
     const content = dishContent(allergenValues);
     if (client.oneStore === undefined) throw new MenuPageError("Unavailable");
     if (loaded.current !== null && JSON.stringify(content) === loaded.current) return "Unchanged";
     // WP-2423 item 10: a save that stopped goes again as the same operation, so it finishes rather
-    // than making a second product. Different content must not go under it.
-    const fingerprint = JSON.stringify(content);
-    if (operation !== null && sent.current !== fingerprint) throw new FormChangedAfterStop();
-    sent.current = fingerprint;
+    // than making a second product. Different content must not go under it. The price it was
+    // compared with is the one that save sent (v15 batch 5: the form now compares with the price
+    // that save may have set, which is not a change staff made).
+    const fingerprint = JSON.stringify({ ...content, expectedPriceMinor: null });
+    if (operation !== null && sent.current?.fingerprint !== fingerprint)
+      throw new FormChangedAfterStop();
+    const request = operation !== null && sent.current !== null ? sent.current.content : content;
+    sent.current = { fingerprint, content: request };
     const reference = operation ?? newOperationReference();
     setOperation(reference);
-    if (content.priceMinor !== null && dish !== null) setUnansweredPrice(content.priceMinor);
-    const result = (await client.oneStore({ ...content, operationReference: reference })) as {
+    if (request.priceMinor !== null && dish !== null) setUnansweredPrice(request.priceMinor);
+    const result = (await client.oneStore({ ...request, operationReference: reference })) as {
       productReference?: unknown;
       choicesWaiting?: unknown;
       price?: unknown;
+      listingNeeded?: unknown;
     } | null;
     setOperation(null);
     // WP-2423 M70: what the dish's prices are now, as the save left them: the next save compares
@@ -486,6 +500,9 @@ export function DishEditor({
         content.allergens === null &&
         !recipeAllergens &&
         dish?.allergens.source !== "StaffDeclared",
+      storePriceMinor: request.priceScope === "ThisStore" ? request.priceMinor : null,
+      // An older server says nothing: what was saved then always waited for "List it".
+      listingNeeded: result?.listingNeeded !== false,
     };
   };
   const saveFailed = (error: unknown) => {
@@ -504,14 +521,32 @@ export function DishEditor({
     setProblem(oneStoreSaveFailureText(error, productReference !== null || exists));
   };
   // The result of a save in the owner's words, including a mark that could not be set.
+  // WP-2423 (v15 batch 5): a price at this Store only is charged from now; the screen says so,
+  // and says what still waits for "List it" (nothing, when the price was all that changed).
   const savedText = (
-    result: { name: string; choicesWaiting: boolean; undeclared: boolean },
+    result: {
+      name: string;
+      choicesWaiting: boolean;
+      undeclared: boolean;
+      storePriceMinor: string | null;
+      listingNeeded: boolean;
+    },
     notSet: readonly string[],
   ) =>
     [
+      result.storePriceMinor !== null
+        ? t("{item}: guests at this Store pay {price} from now.", {
+            item: result.name,
+            price: "$" + minorToDollars(result.storePriceMinor),
+          })
+        : "",
       result.choicesWaiting || result.undeclared
         ? t("{item} saved. Declare its allergens, then list it.", { item: result.name })
-        : t("{item} saved. Guests see it when the menu is listed.", { item: result.name }),
+        : result.storePriceMinor === null
+          ? t("{item} saved. Guests see it when the menu is listed.", { item: result.name })
+          : result.listingNeeded
+            ? t("Its other changes go live when the menu is listed.")
+            : t("Nothing else changed, so there is nothing to list."),
       notSet.length > 0
         ? t("{marks} could not be set. Open the dish with Edit and set it.", {
             marks: notSet.join(t(", ")),

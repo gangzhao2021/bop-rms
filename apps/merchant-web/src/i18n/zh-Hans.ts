@@ -6967,6 +6967,17 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "请为每种过敏原选择“含有”“可能含有”或“不含”。这次没有申报，全部回答之前这道菜不能上架。",
   "Save dish": "保存菜品",
   "{item} saved. Guests see it when the menu is listed.": "{item} 已保存。菜单上架后客人能看到。",
+  "{item}: guests at this Store pay {price} from now.": "{item}：本店客人从现在起付 {price}。",
+  "Its other changes go live when the menu is listed.": "其他改动在菜单上架后生效。",
+  "Nothing else changed, so there is nothing to list.": "其他内容没有改动，无需上架。",
+  "Extra prices": "加料价格",
+  "{dish}, {choice}: +{to} (new)": "{dish}，{choice}：+{to}（新）",
+  "{dish}, {choice}: +{from} → +{to}": "{dish}，{choice}：+{from} → +{to}",
+  "a choice": "一个选项",
+  "Guests at the other Stores can order these once listed: {dishes}. A Store that should not sell one hides it there.":
+    "上架后其他门店的客人也能点：{dishes}。哪家门店不卖，就在那家门店隐藏。",
+  "These stay hidden at the other Stores until each Store shows them to guests: {dishes}.":
+    "这些菜在其他门店仍对客人隐藏，要各门店自己“显示给客人”：{dishes}。",
   "The dish could not be read. Check the connection and try again.":
     "读不到这道菜。请检查网络后重试。",
   "Reading the dish…": "正在读取菜品…",
