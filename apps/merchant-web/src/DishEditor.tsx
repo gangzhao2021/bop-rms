@@ -276,6 +276,15 @@ export function DishEditor({
   // The new choice whose extra takes focus once it is on the form.
   const focusExtra = useRef<string | null>(null);
   const formElement = useRef<HTMLFormElement>(null);
+  // b7 (sold-out-allergens): what staff typed or ticked and have not saved. Switching the language
+  // (which reloads the page), a refresh or closing the tab asks first instead of losing it.
+  const [edited, setEdited] = useState(false);
+  useEffect(() => {
+    if (!edited && !busy) return;
+    const warn = (event: BeforeUnloadEvent) => event.preventDefault();
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [edited, busy]);
   useEffect(() => {
     if (source === null || openApply === null || openedApply.current) return;
     openedApply.current = true;
@@ -568,6 +577,7 @@ export function DishEditor({
         );
         return;
       }
+      setEdited(false);
       onSaved(savedText(result, await marksOf(result.productReference)), result.productReference);
     } catch (error) {
       saveFailed(error);
@@ -627,6 +637,7 @@ export function DishEditor({
       setMarksOpen(false);
       setDescriptionsOpen(false);
       setCopiedFrom("");
+      setEdited(false);
       focusName.current = true;
       setFresh((current) => current + 1);
       onSavedKeepOpen?.(result.productReference);
@@ -791,6 +802,7 @@ export function DishEditor({
       className="dish-editor"
       aria-label={label}
       onKeyDown={onEnter}
+      onChange={() => setEdited(true)}
       onSubmit={(event) => {
         event.preventDefault();
         void save();

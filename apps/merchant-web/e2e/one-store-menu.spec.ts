@@ -1690,3 +1690,88 @@ test("@production a listing whose answer the dropped network lost continues with
   expect(listings).toHaveLength(2);
   expect(listings[1]?.operationReference).toBe(listings[0]?.operationReference);
 });
+
+/**
+ * b7 (sold-out-allergens): switching the language reloads the page. With a new dish half typed,
+ * the browser asks first; staying keeps every field, and once the dish is closed the switch goes on.
+ */
+test("@production switching the language with an unsaved new dish asks first and keeps the draft", async ({
+  page,
+}) => {
+  released = null;
+  refuseListing = false;
+  await session(page);
+  await page.route("**/merchant/commerce/menus/query", (route) => {
+    const body = route.request().postDataJSON() as { menuReference: string | null };
+    const view = builder(3, [
+      [30, 31],
+      [32, 33],
+    ]);
+    if (body.menuReference !== null) return route.fulfill({ headers, json: view });
+    return route.fulfill({
+      headers,
+      json: {
+        screenId: "CAT-MENU-LIST",
+        sourceAsOf: at,
+        viewer: id(50),
+        permissions: view.permissions,
+        menus: [
+          {
+            menuReference: MENU,
+            internalCode: "MAIN",
+            aggregateVersion: 3,
+            currentVersionReference: id(2),
+            localizedNames: { "en-CA": "TEST menu" },
+            placements: 4,
+            publication: null,
+            latestRelease: null,
+          },
+        ],
+      },
+    });
+  });
+  await page.route("**/merchant/commerce/availability/query", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        screenId: "CAT-AVAILABILITY",
+        sourceAsOf: at,
+        viewer: id(50),
+        timeZone: scope.timeZone,
+        permissions: { mayOffer: true, mayMarkSoldOut: true, mayMarkUntilBack: true },
+        items: [30, 31, 32, 33].map((n) => ({
+          skuReference: id(n),
+          skuCode: "SKU_" + n,
+          productName: "x",
+          sizeName: "x",
+          status: "Available",
+          soldOutUntil: null,
+        })),
+      },
+    }),
+  );
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await page.goto("/app/commerce/menus");
+    await page.getByRole("button", { name: "New dish" }).click();
+    const fresh = page.getByRole("form", { name: "New dish" });
+    await fresh.getByLabel("English name").fill("Hot and sour soup (TEST)");
+    await fresh.getByLabel("Price ($)").fill("6.50");
+    const asked: string[] = [];
+    page.once("dialog", (dialog) => {
+      asked.push(dialog.type());
+      void dialog.dismiss();
+    });
+    const toChinese = page.getByRole("button", { name: "切换到中文" }).first();
+    await toChinese.click();
+    await expect.poll(() => asked).toEqual(["beforeunload"]);
+    // Staff stayed: the page was not reloaded and nothing typed is lost.
+    await expect(fresh.getByLabel("English name")).toHaveValue("Hot and sour soup (TEST)");
+    await expect(fresh.getByLabel("Price ($)")).toHaveValue("6.50");
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.screenshot({ path: `test-results/one-store-language-draft-${width}.png` });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+});
