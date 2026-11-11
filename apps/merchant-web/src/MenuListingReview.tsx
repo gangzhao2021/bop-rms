@@ -59,7 +59,7 @@ export function MenuListingReview({
   const blocked = moved;
   return (
     <section className="one-menu__pending one-menu__review" aria-labelledby="listing-review">
-      <h3 id="listing-review">{t("What goes live")}</h3>
+      <h2 id="listing-review">{t("What goes live")}</h2>
       <ul>
         <li>{t("The menu as it is on this page: dishes, sections, photos and descriptions.")}</li>
         {draft === null || draft.prices.length === 0 ? (
@@ -84,7 +84,7 @@ export function MenuListingReview({
       </ul>
       {choices.length > 0 ? (
         <>
-          <h4>{t("Extra prices")}</h4>
+          <h3>{t("Extra prices")}</h3>
           <ul>
             {choices.map((choice) => (
               <li key={choice.productReference + choice.optionReference}>
@@ -130,7 +130,7 @@ export function MenuListingReview({
       ) : null}
       {elsewhere > 0 ? (
         <>
-          <h4>{t("Not included")}</h4>
+          <h3>{t("Not included")}</h3>
           <p className="one-menu__note">
             {elsewhere === 1
               ? t(

@@ -333,6 +333,15 @@
   background: var(--bop-color-surface-default);
   color: var(--bop-color-text-muted);
 }
+/* The review's headings follow the page's (h1, then h2), at the sizes they had as h3 and h4. */
+.one-menu .one-menu__review h2 {
+  font-size: 1.17em;
+  margin-block: 1em;
+}
+.one-menu .one-menu__review h3 {
+  font-size: 1em;
+  margin-block: 1.33em;
+}
 .one-menu .one-menu__pending {
   margin: 8px 0 16px;
   padding: 8px 0 8px 12px;
