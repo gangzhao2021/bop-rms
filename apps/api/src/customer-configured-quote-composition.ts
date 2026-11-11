@@ -72,7 +72,10 @@ export type CustomerConfiguredQuoteCompositionOptions = {
         { orderType: "DineIn" }
       >["participation"];
       /** WP-2423 M35 (DEC-STAFF-ROUND-SPEED): one guest check in one transaction. */
-      readonly together?: Extract<ConfiguredCustomerQuoteOptions, { orderType: "DineIn" }>["together"];
+      readonly together?: Extract<
+        ConfiguredCustomerQuoteOptions,
+        { orderType: "DineIn" }
+      >["together"];
       /** DEC-DINING-ANY-PARTICIPANT-SUBMIT: Dining's current hold of the table Cart version by
        * another participant's checkout; required for a table's Cart. */
       readonly checkoutHold: DiningCartCheckoutHoldPort;

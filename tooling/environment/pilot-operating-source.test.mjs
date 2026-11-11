@@ -91,7 +91,9 @@ it("WP-2423 StoreOperatingSource: the time zone comes from the bound Store recor
           queries.push([sql, values]);
           // WP-2423 M35: the owner marks the Store read a stable read (a leading SQL comment).
           return {
-            rows: sql.replace(/^-- bop:stable-read\n/u, "").startsWith("SELECT * FROM bop_tenant.store")
+            rows: sql
+              .replace(/^-- bop:stable-read\n/u, "")
+              .startsWith("SELECT * FROM bop_tenant.store")
               ? [row]
               : [],
           };

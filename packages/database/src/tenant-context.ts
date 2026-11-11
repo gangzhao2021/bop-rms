@@ -166,7 +166,10 @@ const transactionSetup =
  * dashes) or the empty Store, never any other text.
  */
 export function tenantContextScopeStatement(scope: Readonly<{ brandId: string; storeId: string }>) {
-  if (!uuidV7Pattern.test(scope.brandId) || (scope.storeId !== "" && !uuidV7Pattern.test(scope.storeId)))
+  if (
+    !uuidV7Pattern.test(scope.brandId) ||
+    (scope.storeId !== "" && !uuidV7Pattern.test(scope.storeId))
+  )
     throw new TenantContextDatabaseError("TENANT_DATABASE_SCOPE_INVALID");
   return `SELECT set_config('bop.brand_id', '${scope.brandId}', true), set_config('bop.store_id', '${scope.storeId}', true)`;
 }
@@ -220,7 +223,9 @@ export async function withTenantContextTransaction<T>(
     // fails, the transaction is rolled back like any other setup failure.
     began = true;
     await client.query(
-      [begin, ...(setup === undefined ? [] : [setup]), tenantContextScopeStatement(scope)].join("; "),
+      [begin, ...(setup === undefined ? [] : [setup]), tenantContextScopeStatement(scope)].join(
+        "; ",
+      ),
     );
     callbackActive = true;
     result = await callback(client);

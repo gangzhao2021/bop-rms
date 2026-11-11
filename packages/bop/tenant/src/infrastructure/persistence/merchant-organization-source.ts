@@ -173,7 +173,10 @@ export function createPostgresMerchantOrganizationSource(
         if (reference !== brand) return unavailable();
         await setScope("");
         const row = one(
-          await tx.query(stableRead + "SELECT * FROM bop_tenant.brand WHERE brand_id=$1 FOR SHARE", [brand]),
+          await tx.query(
+            stableRead + "SELECT * FROM bop_tenant.brand WHERE brand_id=$1 FOR SHARE",
+            [brand],
+          ),
         );
         await setScope(store);
         if (!row) return null;
@@ -202,7 +205,8 @@ export function createPostgresMerchantOrganizationSource(
         await setScope(store);
         const row = one(
           await tx.query(
-            stableRead + "SELECT * FROM bop_tenant.store WHERE brand_id=$1 AND store_id=$2 FOR SHARE",
+            stableRead +
+              "SELECT * FROM bop_tenant.store WHERE brand_id=$1 AND store_id=$2 FOR SHARE",
             [brand, store],
           ),
         );

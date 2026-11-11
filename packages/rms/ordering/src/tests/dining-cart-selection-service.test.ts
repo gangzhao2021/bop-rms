@@ -369,7 +369,9 @@ describe("WP-2423 M35 (DEC-STAFF-ROUND-SPEED): each guest check as one unit of r
     const f = fixture();
     const trace: string[] = [];
     let inside = false;
-    const together = vi.fn(async <T>(work: () => Promise<T>) => {
+    let calls = 0;
+    const together = async <T>(work: () => Promise<T>): Promise<T> => {
+      calls += 1;
       inside = true;
       trace.push("begin");
       try {
@@ -378,7 +380,7 @@ describe("WP-2423 M35 (DEC-STAFF-ROUND-SPEED): each guest check as one unit of r
         inside = false;
         trace.push("end");
       }
-    });
+    };
     f.resolve.mockImplementation(async () => {
       trace.push(inside ? "session" : "session outside");
       return guest();
@@ -414,7 +416,7 @@ describe("WP-2423 M35 (DEC-STAFF-ROUND-SPEED): each guest check as one unit of r
       "session",
       "end",
     ]);
-    expect(together).toHaveBeenCalledTimes(2);
+    expect(calls).toBe(2);
   });
   it("a check that fails inside `together` still refuses the action", async () => {
     const f = fixture();

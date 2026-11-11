@@ -14,7 +14,8 @@ const setup =
   "SET LOCAL idle_in_transaction_session_timeout = '5s'; " +
   `SELECT set_config('bop.brand_id', '${scope.brandId}', true), set_config('bop.store_id', '', true)`;
 function fixture(failure?: string) {
-  const query = vi.fn(async (sql: string) => {
+  const query = vi.fn(async (sql: string, values?: unknown[]): Promise<{ rows: unknown[] }> => {
+    void values;
     if (sql === failure) throw new Error("private SQL/bind failure");
     return { rows: [] };
   });
@@ -65,32 +66,26 @@ describe("WP-2212 pooled transaction runner", () => {
     ).toThrow();
     expect(f.connect).not.toHaveBeenCalled();
   });
-  it.each([
-    "SELECT secret",
-    "COMMIT",
-    setup,
-    "release",
-  ])("bounds %s failure without retry", async (failure) => {
-    const f = fixture(failure);
-    const error = await f.runner
-      .run(async (t) => {
-        await t.query("SELECT secret", []);
-      })
-      .catch((e: unknown) => e);
-    expect(error).toMatchObject({ code: "TENANT_DATABASE_TRANSACTION_FAILED" });
-    expect(error).not.toHaveProperty("cause");
-    expect(String(error)).not.toContain("private");
-    expect(f.connect).toHaveBeenCalledTimes(1);
-    expect(f.release).toHaveBeenCalledTimes(1);
-    if (failure !== "release") expect(f.release).toHaveBeenCalledWith(true);
-  });
+  it.each(["SELECT secret", "COMMIT", setup, "release"])(
+    "bounds %s failure without retry",
+    async (failure) => {
+      const f = fixture(failure);
+      const error = await f.runner
+        .run(async (t) => {
+          await t.query("SELECT secret", []);
+        })
+        .catch((e: unknown) => e);
+      expect(error).toMatchObject({ code: "TENANT_DATABASE_TRANSACTION_FAILED" });
+      expect(error).not.toHaveProperty("cause");
+      expect(String(error)).not.toContain("private");
+      expect(f.connect).toHaveBeenCalledTimes(1);
+      expect(f.release).toHaveBeenCalledTimes(1);
+      if (failure !== "release") expect(f.release).toHaveBeenCalledWith(true);
+    },
+  );
   it.each([
     ["COMMIT", "Connection terminated unexpectedly", "08006"],
-    [
-      setup,
-      "Client has encountered a connection error and is not queryable",
-      "08006",
-    ],
+    [setup, "Client has encountered a connection error and is not queryable", "08006"],
     ["COMMIT", "private SQL/bind failure", null],
   ])(
     "WP-2423 (v15 2026-10-17): %s failing with %j keeps SQLSTATE %s for retry decisions",

@@ -253,7 +253,9 @@ function transactionState(
           conflictDiagnostic ??= diagnostic;
         }
         throw new TenantContextDatabaseError(
-          conflicted ? "TENANT_DATABASE_TRANSACTION_CONFLICT" : "TENANT_DATABASE_TRANSACTION_FAILED",
+          conflicted
+            ? "TENANT_DATABASE_TRANSACTION_CONFLICT"
+            : "TENANT_DATABASE_TRANSACTION_FAILED",
           diagnostic,
         );
       } finally {
@@ -284,7 +286,10 @@ function transactionState(
         throw new TenantContextDatabaseError("TENANT_DATABASE_TRANSACTION_CONCURRENT_QUERY");
       // The first conflict's SQLSTATE stays visible to logging (lock timeout vs serialization).
       if (conflicted)
-        throw new TenantContextDatabaseError("TENANT_DATABASE_TRANSACTION_CONFLICT", conflictDiagnostic);
+        throw new TenantContextDatabaseError(
+          "TENANT_DATABASE_TRANSACTION_CONFLICT",
+          conflictDiagnostic,
+        );
       // A caller that turned a failed query into its own error keeps that error; the first
       // failure's SQLSTATE rides along (non-enumerable) so a 503 can be logged with its cause.
       if (failed && failureDiagnostic !== null) attachFailureDiagnostic(error, failureDiagnostic);

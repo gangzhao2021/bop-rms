@@ -56,7 +56,10 @@ const mayUndo = (sql: string) =>
 export const stableReadMarker = "-- bop:stable-read\n";
 
 /** The statement without its stable-read marker, and whether it had one. */
-export function stableReadStatement(sql: string): { readonly sql: string; readonly stable: boolean } {
+export function stableReadStatement(sql: string): {
+  readonly sql: string;
+  readonly stable: boolean;
+} {
   return typeof sql === "string" && sql.startsWith(stableReadMarker)
     ? { sql: sql.slice(stableReadMarker.length), stable: true }
     : { sql, stable: false };
@@ -90,7 +93,11 @@ export interface TransactionStatementMemo {
    * nothing since that could change its answer, is answered.
    */
   plan(sql: string, values: readonly unknown[], stable?: boolean): TransactionStatementPlan;
-  /** The result to answer instead of running the statement, or null to run it. */
+  /**
+   * The result to answer instead of running the statement, or null to run it. Unlike `plan`, a
+   * scope setting is only answered when the transaction already holds it (nothing is deferred),
+   * for callers that send every statement they are not answered themselves.
+   */
   answer(sql: string, values: readonly unknown[], stable?: boolean): object | null;
   /** Records a statement that ran successfully (with its result, for a stable read). */
   observe(sql: string, values: readonly unknown[], result?: unknown, stable?: boolean): void;
@@ -242,11 +249,20 @@ export function createTransactionStatementMemo(
     sql: string,
     values: readonly unknown[],
     stable = false,
+    defer = true,
   ): TransactionStatementPlan => {
     if (typeof sql !== "string" || !Array.isArray(values))
       return { kind: "Run", settings: pendingSettings() };
     const remembered = classify(sql, values);
     if (remembered?.kind === "settings") {
+      // Without deferral (`answer`): only a repeat of what the transaction holds and was written.
+      if (
+        !defer &&
+        !remembered.pairs.every(
+          ([name, value]) => settings.get(name) === value && (wanted.get(name) ?? value) === value,
+        )
+      )
+        return { kind: "Run", settings: pendingSettings() };
       for (const [name, value] of remembered.pairs) wanted.set(name, value);
       return {
         kind: "Answer",
@@ -269,7 +285,7 @@ export function createTransactionStatementMemo(
   return Object.freeze({
     plan,
     answer(sql: string, values: readonly unknown[], stable = false) {
-      const planned = plan(sql, values, stable);
+      const planned = plan(sql, values, stable, false);
       return planned.kind === "Answer" ? planned.result : null;
     },
     observe(sql: string, values: readonly unknown[], result?: unknown, stable = false) {
