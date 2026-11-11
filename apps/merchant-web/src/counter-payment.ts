@@ -10,7 +10,11 @@ import type { CurrentOrderQueue } from "./current-order-queue-client.js";
  */
 const cad = (amountMinor: string) => orderMoney({ amountMinor, currencyCode: "CAD" });
 
-export function payErrorText(error: CounterOrderClientError) {
+export function payErrorText(
+  error: CounterOrderClientError,
+  /** WP-2423 M52: the payment was cash (no slip to check). */
+  inCash = false,
+) {
   switch (error.code) {
     case "AmountChanged":
       return error.totalMinor === null
@@ -29,7 +33,9 @@ export function payErrorText(error: CounterOrderClientError) {
         "This order can no longer be paid (released or changed). Refund the card machine payment if you charged it.",
       );
     case "Invalid":
-      return t("Check the slip reference and the paid-at time.");
+      return inCash
+        ? t("Check the cash received and the paid-at time.")
+        : t("Check the slip reference and the paid-at time.");
     case "CashShort":
       return t("The cash received is less than the cash total.");
     case "TakenBeforeRecords":

@@ -9287,10 +9287,14 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "客人是现金付款。请从钱箱退还 {cash}（退款 {amount}，按 5 分取整），再在这里记录。",
   "Given back earlier, while the system was unreachable": "系统连不上时已经退还",
   " (cash)": "（现金）",
-  "Paid in cash ": "已现金付款 ",
-  " · change {change}": " · 找零 {change}",
-  " · given back in full": " · 已全部退还",
-  " · {refunded} given back": " · 已退还 {refunded}",
+  "Paid in cash {paid} · change {change} · given back in full":
+    "现金付款 {paid} · 找零 {change} · 已全部退还",
+  "Paid in cash {paid} · change {change} · {refunded} given back":
+    "现金付款 {paid} · 找零 {change} · 已退还 {refunded}",
+  "Paid in cash {paid} · change {change}": "现金付款 {paid} · 找零 {change}",
+  "Paid in cash {paid} · given back in full": "现金付款 {paid} · 已全部退还",
+  "Paid in cash {paid} · {refunded} given back": "现金付款 {paid} · 已退还 {refunded}",
+  "Paid in cash {paid}": "现金付款 {paid}",
   "Cash given back in full, including any tip.": "现金已全部退还，含小费。",
   "Give back {value} in cash, then record it here.": "请退还现金 {value}，再在这里记录。",
   "It was paid in cash: give back {value} in cash, then record it here.":
@@ -9301,8 +9305,14 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Cash to give back": "需要退还的现金",
   "Take {amount} in cash": "收现金 {amount}",
   "How the guest pays": "客人怎么付",
-  "Count the cash before you record it. Once recorded, only a manager can give it back.":
-    "先点清现金再记录。记录后只有店长能退还。",
+  "Count the cash before you record it. Once recorded, it goes back only by cancelling the order or by a refund a manager records.":
+    "先点清现金再记录。记录后只能通过取消订单，或由店长记录退款来退还。",
+  "Check the cash received and the paid-at time.": "请检查收到的现金和付款时间。",
+  "No answer from the system. Record again: it sends the same {amount} received, so it is never counted twice.":
+    "系统没有回应。请再次记录：会发送同样的收款 {amount}，不会重复计入。",
+  "That is {change} in change. Check the cash received before you record it.":
+    "找零 {change}。记录前请核对收到的现金。",
+  "I counted {amount} received": "我已点清收到的 {amount}",
   "Paid in cash.": "已现金付款。",
   "Cash recorded. Give {change} change. It is not in the kitchen yet: accept it in Orders now (or ask a manager to); an order that isn't accepted in time expires and the cash must be given back.":
     "现金已记录。请找零 {change}。还没送到厨房：请现在在“订单”里接单（或请店长接单）；没有及时接单的订单会过期，现金要退还给客人。",

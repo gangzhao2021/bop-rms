@@ -4,6 +4,7 @@ import { CashTenderFields, cashTender } from "./CashTenderFields.js";
 import { cardMachinePaymentText } from "./CurrentOrderQueuePage.js";
 import { paidNoteText, payErrorText } from "./counter-payment.js";
 import { CounterOrderClientError, createCounterOrderClient } from "./staff-order-entry.js";
+import { setLanguageForTest } from "./i18n/i18n.js";
 
 const id = (n: number) => "01a7e562-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 
@@ -24,6 +25,8 @@ describe("counter cash (WP-2423 M52)", () => {
         dueMinor={2247n}
         received="30.00"
         onReceived={() => undefined}
+        largeChangeConfirmed={false}
+        onLargeChangeConfirmed={() => undefined}
         disabled={false}
       />,
     );
@@ -114,5 +117,70 @@ describe("counter cash (WP-2423 M52)", () => {
       "Paid in cash $22.45 · $4.35 given back",
     );
     expect(cardMachinePaymentText(2245n, 0n)).toBe("Paid on card machine $22.45");
+  });
+
+  it("checks a large change before it is recorded (a mistyped amount is never recorded as cash)", () => {
+    // "5000" typed for $50.00 on a $22.47 order.
+    expect(cashTender(2247n, "5000")).toMatchObject({ largeChange: true, ready: false });
+    expect(cashTender(2247n, "5000", true)).toMatchObject({ ready: true });
+    // A $100 bill is a usual amount: no check.
+    expect(cashTender(2247n, "100")).toMatchObject({ largeChange: false, ready: true });
+    const markup = renderToStaticMarkup(
+      <CashTenderFields
+        idPrefix="t"
+        dueMinor={2247n}
+        received="5000"
+        onReceived={() => undefined}
+        largeChangeConfirmed={false}
+        onLargeChangeConfirmed={() => undefined}
+        disabled={false}
+      />,
+    );
+    expect(markup).toContain(
+      "That is $4,977.55 in change. Check the cash received before you record it.",
+    );
+    expect(markup).toContain("I counted $5,000.00 received");
+  });
+
+  it("keeps the cash received as sent while a Record has no answer", () => {
+    const markup = renderToStaticMarkup(
+      <CashTenderFields
+        idPrefix="t"
+        dueMinor={2247n}
+        received="30.00"
+        onReceived={() => undefined}
+        largeChangeConfirmed={false}
+        onLargeChangeConfirmed={() => undefined}
+        unanswered
+        disabled={false}
+      />,
+    );
+    expect(markup).toMatch(/<input id="t-received"[^>]*disabled=""/u);
+    expect(markup).toContain(
+      "No answer from the system. Record again: it sends the same $30.00 received, so it is never counted twice.",
+    );
+  });
+
+  it("speaks of cash, not a slip, when a cash entry is refused", () => {
+    const invalid = new CounterOrderClientError("Invalid");
+    expect(payErrorText(invalid, true)).toBe("Check the cash received and the paid-at time.");
+    expect(payErrorText(invalid)).toBe("Check the slip reference and the paid-at time.");
+  });
+
+  it("says what was paid in cash in whole sentences (each language keeps its word order)", () => {
+    expect(cardMachinePaymentText(2245n, 2245n, 0n, { changeMinor: "755" })).toBe(
+      "Paid in cash $22.45 · change $7.55 · given back in full",
+    );
+    expect(cardMachinePaymentText(2245n, 2245n, 0n, { changeMinor: "0" })).toBe(
+      "Paid in cash $22.45 · given back in full",
+    );
+    try {
+      setLanguageForTest("zh-Hans");
+      expect(cardMachinePaymentText(2245n, 435n, 0n, { changeMinor: "755" })).toBe(
+        "现金付款 $22.45 · 找零 $7.55 · 已退还 $4.35",
+      );
+    } finally {
+      setLanguageForTest("en");
+    }
   });
 });

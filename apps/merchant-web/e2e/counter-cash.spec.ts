@@ -512,3 +512,112 @@ test("@production after a reload the cashier takes cash for a sent counter order
     },
   ]);
 });
+
+// WP-2423 M52: a Record with no answer keeps the cash received as sent, so recording again is the
+// same payment and shows the change really recorded; a large change is checked before recording.
+test("@production a cash record with no answer is sent again unchanged, and a large change is checked first", async ({
+  page,
+}) => {
+  await signIn(page);
+  await page.route("**/merchant/counter/menu", (route) => route.fulfill({ headers, json: menu }));
+  await page.route("**/merchant/counter/orders", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        status: "Placed",
+        orderReference: id(40),
+        orderBatchReference: id(41),
+        orderNumber: "16",
+        orderVersion: 1,
+        orderMinor: "424",
+        tipMinor: "0",
+        totalMinor: "424",
+        payBy: new Date(Date.now() + 30 * 60_000).toISOString(),
+        recordedAfterOutage: false,
+      },
+    }),
+  );
+  const payments: Record<string, unknown>[] = [];
+  await page.route("**/merchant/orders/card-machine-payment", (route) => {
+    const body = route.request().postDataJSON() as Record<string, unknown>;
+    payments.push(body);
+    // The first Record reached the server, but its answer was lost on the way back.
+    if (payments.length === 1) return route.abort("failed");
+    return route.fulfill({
+      headers,
+      json: {
+        status: "AlreadyRecorded",
+        orderReference: id(40),
+        orderBatchReference: id(41),
+        amountMinor: "424",
+        recordingReason: "AtCounter",
+        takenAt: new Date().toISOString(),
+        recordedAt: new Date().toISOString(),
+        cash: {
+          cashTotalMinor: "425",
+          roundingMinor: "1",
+          tenderedMinor: String(payments[0]?.tenderedMinor),
+          changeMinor: String(Number(payments[0]?.tenderedMinor) - 425),
+        },
+        acceptance: "Accepted",
+      },
+    });
+  });
+
+  await page.goto("/operations/order-entry");
+  await page.getByRole("button", { name: "Add Banana Bread" }).click();
+  await page.getByRole("button", { name: "Send order" }).click();
+  await page
+    .getByRole("group", { name: "How the guest pays" })
+    .getByRole("radio", { name: "Cash" })
+    .check();
+  const received = page.getByRole("textbox", { name: "Cash received" });
+  const record = page.getByRole("button", { name: "Cash received · $4.25" });
+  // "5000" typed for $50.00: $4,995.75 in change is checked before it can be recorded.
+  await received.fill("5000");
+  await expect(
+    page.getByText("That is $4,995.75 in change. Check the cash received before you record it."),
+  ).toBeVisible();
+  await expect(record).toBeDisabled();
+  await received.fill("50");
+  await expect(page.getByText("Change $45.75")).toBeVisible();
+  await expect(page.getByText(/in change\. Check the cash received/u)).toHaveCount(0);
+  // A $100 bill is still a usual amount: $95.75 change records without the check.
+  await received.fill("100");
+  await expect(record).toBeEnabled();
+  // A real $200 for a $4.25 order: the cashier confirms it, then records.
+  await received.fill("200");
+  await expect(record).toBeDisabled();
+  await page.getByRole("checkbox", { name: "I counted $200.00 received" }).check();
+  await expect(record).toBeEnabled();
+  await record.click();
+  // The cash received stays as sent until the payment is answered.
+  await expect(received).toBeDisabled();
+  await expect(received).toHaveValue("200");
+  await expect(
+    page.getByText(
+      "No answer from the system. Record again: it sends the same $200.00 received, so it is never counted twice.",
+    ),
+  ).toBeVisible();
+  await expect(page.getByRole("radio", { name: "Card machine" })).toBeDisabled();
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.screenshot({
+      path: `test-results/counter-cash-unanswered-${width}.png`,
+      fullPage: true,
+    });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await record.click();
+  // The same payment, and the change that was really recorded.
+  expect(payments).toHaveLength(2);
+  expect(payments[1]).toEqual(payments[0]);
+  await expect(
+    page
+      .getByRole("status")
+      .filter({ hasText: "Cash recorded. Give $195.75 change. Sent to the kitchen." }),
+  ).toBeVisible();
+});

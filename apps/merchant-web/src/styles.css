@@ -8097,6 +8097,21 @@ body:has(.product-complete-draft) .bop-shell__header,
 .cash-tender__change[data-short="true"] {
   color: var(--bop-color-danger);
 }
+/* WP-2423 M52: a large change is checked before the cash is recorded. */
+.cash-tender__check {
+  display: grid;
+  gap: var(--bop-space-2);
+  font-weight: 600;
+}
+.cash-tender__check label {
+  display: flex;
+  align-items: center;
+  gap: var(--bop-space-2);
+  min-height: 44px;
+}
+.cash-tender__check input {
+  width: auto;
+}
 .order-counter-paid,
 .order-counter-outage {
   display: block;

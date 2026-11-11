@@ -718,6 +718,10 @@ export function StaffOrderEntryPage({
   // WP-2423 M52 (DEC-COUNTER-CASH): how the counter guest pays, and the cash they handed over.
   const [tender, setTender] = useState<"CardMachine" | "Cash">("CardMachine");
   const [received, setReceived] = useState("");
+  const [largeChangeConfirmed, setLargeChangeConfirmed] = useState(false);
+  // WP-2423 M52: a cash Record that got no answer keeps the cash received as sent until it is
+  // answered, so recording again is the same payment (never a new one the server calls paid).
+  const [cashUnanswered, setCashUnanswered] = useState(false);
   const [changeDue, setChangeDue] = useState<string | null>(null);
   const [placed, setPlaced] = useState<PlacedCounterOrder | null>(null);
   const [phase, setPhase] = useState<
@@ -1205,7 +1209,9 @@ export function StaffOrderEntryPage({
   const recordPayment = async (expectedTotalMinor: string) => {
     if (placed === null || phase !== "Charge") return;
     const inCash = tender === "Cash" && !tableMode;
-    const cash = inCash ? cashTender(BigInt(expectedTotalMinor), received) : null;
+    const cash = inCash
+      ? cashTender(BigInt(expectedTotalMinor), received, largeChangeConfirmed)
+      : null;
     if (cash !== null ? !cash.ready : !validSlipReference(slip.trim())) return;
     if (placed.recordedAfterOutage && paperInstant === null) return;
     const takenAt = placed.recordedAfterOutage ? paperInstant : null;
@@ -1240,9 +1246,13 @@ export function StaffOrderEntryPage({
           ? error
           : new CounterOrderClientError("Unavailable");
       if (failure.code !== "OutcomeUnknown") payOperation.current = null;
+      setCashUnanswered(inCash && failure.code === "OutcomeUnknown");
       if (failure.code === "AmountChanged" && failure.totalMinor !== null)
         setPlaced({ ...placed, totalMinor: failure.totalMinor });
-      setProblem(payErrorText(failure));
+      // A cash Record with no answer says so beside the cash received it keeps.
+      setProblem(
+        inCash && failure.code === "OutcomeUnknown" ? null : payErrorText(failure, inCash),
+      );
       setPhase("Charge");
       if (placed.recordedAfterOutage && paidAtRefusal(failure)) {
         setPaidAtRefused(true);
@@ -1250,6 +1260,7 @@ export function StaffOrderEntryPage({
       }
       return;
     }
+    setCashUnanswered(false);
     refreshMenu();
     setAwaitingKey((value) => value + 1);
     // WP-2423 D1: the server accepts the paid order or round with the payment record (at the
@@ -1273,6 +1284,8 @@ export function StaffOrderEntryPage({
     setPaidAt("");
     setSlip("");
     setReceived("");
+    setLargeChangeConfirmed(false);
+    setCashUnanswered(false);
     setChangeDue(null);
     setProblem(null);
     setPaidNote(null);
@@ -1294,6 +1307,8 @@ export function StaffOrderEntryPage({
     setSlip("");
     setTender("CardMachine");
     setReceived("");
+    setLargeChangeConfirmed(false);
+    setCashUnanswered(false);
     setChangeDue(null);
     setProblem(null);
     setProblemNeedsTableCode(false);
@@ -2198,7 +2213,10 @@ export function StaffOrderEntryPage({
                   {tableMode ? null : (
                     // WP-2423 M52 (DEC-COUNTER-CASH): a counter guest pays on the card machine or
                     // in cash, by the table's cash rules.
-                    <fieldset className="counter-order__tender" disabled={phase === "Recording"}>
+                    <fieldset
+                      className="counter-order__tender"
+                      disabled={phase === "Recording" || cashUnanswered}
+                    >
                       <legend>{t("How the guest pays")}</legend>
                       <label>
                         <input
@@ -2236,6 +2254,9 @@ export function StaffOrderEntryPage({
                         setReceived(value);
                         setProblem(null);
                       }}
+                      largeChangeConfirmed={largeChangeConfirmed}
+                      onLargeChangeConfirmed={setLargeChangeConfirmed}
+                      unanswered={cashUnanswered}
                       disabled={phase === "Recording"}
                     />
                   ) : (
@@ -2307,7 +2328,8 @@ export function StaffOrderEntryPage({
                       disabled={
                         phase === "Recording" ||
                         (counterCash
-                          ? !cashTender(BigInt(placed.totalMinor), received).ready
+                          ? !cashTender(BigInt(placed.totalMinor), received, largeChangeConfirmed)
+                              .ready
                           : !validSlipReference(slip.trim())) ||
                         (placed.recordedAfterOutage && paperInstant === null)
                       }
@@ -2334,7 +2356,7 @@ export function StaffOrderEntryPage({
                       )
                     : counterCash
                       ? t(
-                          "Count the cash before you record it. Once recorded, only a manager can give it back.",
+                          "Count the cash before you record it. Once recorded, it goes back only by cancelling the order or by a refund a manager records.",
                         )
                       : placedCancellable
                         ? t(

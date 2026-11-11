@@ -820,19 +820,25 @@ export function cardMachinePaymentText(
 ): string {
   const money = (minor: bigint) =>
     orderMoney({ amountMinor: minor.toString(), currencyCode: "CAD" });
-  if (cash !== null)
-    return (
-      t("Paid in cash ") +
-      money(paid) +
-      (BigInt(cash.changeMinor) > 0n
-        ? t(" · change {change}", { change: money(BigInt(cash.changeMinor)) })
-        : "") +
-      (refunded >= paid
-        ? t(" · given back in full")
+  // Whole sentences, so each language keeps its own word order.
+  if (cash !== null) {
+    const values = {
+      paid: money(paid),
+      change: money(BigInt(cash.changeMinor)),
+      refunded: money(refunded),
+    };
+    if (BigInt(cash.changeMinor) > 0n)
+      return refunded >= paid
+        ? t("Paid in cash {paid} · change {change} · given back in full", values)
         : refunded > 0n
-          ? t(" · {refunded} given back", { refunded: money(refunded) })
-          : "")
-    );
+          ? t("Paid in cash {paid} · change {change} · {refunded} given back", values)
+          : t("Paid in cash {paid} · change {change}", values);
+    return refunded >= paid
+      ? t("Paid in cash {paid} · given back in full", values)
+      : refunded > 0n
+        ? t("Paid in cash {paid} · {refunded} given back", values)
+        : t("Paid in cash {paid}", values);
+  }
   return (
     t("Paid on card machine ") +
     money(paid) +

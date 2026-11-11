@@ -98,6 +98,10 @@ export function StaffRoundPaymentAction({
   // WP-2423 M52: a counter order (not a table round) may be paid in cash, by the table's rules.
   const [tender, setTender] = useState<"CardMachine" | "Cash">("CardMachine");
   const [received, setReceived] = useState("");
+  const [largeChangeConfirmed, setLargeChangeConfirmed] = useState(false);
+  // WP-2423 M52: a cash Record that got no answer keeps the cash received as sent until it is
+  // answered, so recording again is the same payment (never a new one the server calls paid).
+  const [cashUnanswered, setCashUnanswered] = useState(false);
   const [paidAt, setPaidAt] = useState("");
   const [amount, setAmount] = useState(amountDueMinor);
   const [reading, setReading] = useState<"Idle" | "Reading" | "Failed" | "NotDue">("Idle");
@@ -192,7 +196,7 @@ export function StaffRoundPaymentAction({
       </div>
     );
   const inCash = subject === "order" && tender === "Cash";
-  const cash = inCash ? cashTender(BigInt(amount), received) : null;
+  const cash = inCash ? cashTender(BigInt(amount), received, largeChangeConfirmed) : null;
   const record = async () => {
     if (busy || amount === null) return;
     if (cash !== null ? !cash.ready : !validSlipReference(slip.trim())) return;
@@ -232,6 +236,7 @@ export function StaffRoundPaymentAction({
             ? t("Paid and sent to the kitchen.")
             : t("Paid, but not sent to the kitchen yet. Accept it on this order now."),
       );
+      setCashUnanswered(false);
       onRecorded(result);
     } catch (error) {
       const failure =
@@ -239,9 +244,13 @@ export function StaffRoundPaymentAction({
           ? error
           : new CounterOrderClientError("Unavailable");
       if (failure.code !== "OutcomeUnknown") operation.current = null;
+      setCashUnanswered(inCash && failure.code === "OutcomeUnknown");
       if (failure.code === "AmountChanged" && failure.totalMinor !== null)
         setAmount(failure.totalMinor);
-      setMessage(payErrorText(failure));
+      // A cash Record with no answer says so beside the cash received it keeps.
+      setMessage(
+        inCash && failure.code === "OutcomeUnknown" ? null : payErrorText(failure, inCash),
+      );
       if (recordedAfterOutage && paidAtRefusal(failure)) {
         setPaidAtRefused(true);
         setFocusPaidAt((value) => value + 1);
@@ -287,7 +296,7 @@ export function StaffRoundPaymentAction({
           })()
         : null}
       {subject === "order" ? (
-        <fieldset className="counter-order__tender" disabled={busy}>
+        <fieldset className="counter-order__tender" disabled={busy || cashUnanswered}>
           <legend>{t("How the guest pays")}</legend>
           <label>
             <input
@@ -318,6 +327,9 @@ export function StaffRoundPaymentAction({
             setReceived(value);
             setMessage(null);
           }}
+          largeChangeConfirmed={largeChangeConfirmed}
+          onLargeChangeConfirmed={setLargeChangeConfirmed}
+          unanswered={cashUnanswered}
           disabled={busy}
         />
       ) : (
