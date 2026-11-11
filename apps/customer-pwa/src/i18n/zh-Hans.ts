@@ -1730,4 +1730,32 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Our kitchen shares {shares}.": "本店后厨{shares}共用。",
   "Any dish may contain traces.": "任何菜都可能含有微量。",
   "Adds: {allergens}": "加：{allergens}",
+  "Someone at your table just started paying for some of these dishes. Check again.":
+    "同桌刚刚有人开始付其中几道菜，请再看一下。",
+  "Staff split this bill. Pay one of its parts.": "店员已经分好这张账单，请付其中一份。",
+  "Everything on the bill is paid ({count} payments). Thank you!":
+    "账单都已付清（共 {count} 笔），谢谢！",
+  "Paying {amount} for the dishes you chose.": "正在为你选的菜付 {amount}。",
+  "Paying {amount} for the dishes you chose, tip included.":
+    "正在为你选的菜付 {amount}（含小费）。",
+  "Tip (for the dishes you pay)": "小费（按你付的菜）",
+  "Choose the dishes you pay for": "请选择要付的菜",
+  "Your table is paying by dish: {paid} paid so far · {amount} to go.":
+    "这桌正在按菜付：已付 {paid} 笔 · 还剩 {amount}。",
+  "you paid": "你付的",
+  "Which dishes are you paying for?": "这次付哪些菜？",
+  "The rest of the table ({count} dishes · {amount})": "付剩下的（{count} 道菜 · {amount}）",
+  "The whole table ({count} dishes · {amount})": "付全桌（{count} 道菜 · {amount}）",
+  "Only what I added (nothing of yours is left to pay)": "只付我加的（你加的菜都已有人付）",
+  "Only what I added ({count} · {amount})": "只付我加的（{count} 道 · {amount}）",
+  "Choose dishes to pay for": "选择要付的菜",
+  "A dish": "一道菜",
+  "you added": "你加的",
+  "{count} left": "还剩 {count} 份",
+  "One less {dish}": "{dish} 少一份",
+  "One more {dish}": "{dish} 多一份",
+  "Amounts include tax.": "金额含税。",
+  "Dishes you don’t choose stay for the others at your table. Amounts include tax.":
+    "没选的菜留给同桌其他人付。金额含税。",
+  "Chosen: {amount}": "已选：{amount}",
 });

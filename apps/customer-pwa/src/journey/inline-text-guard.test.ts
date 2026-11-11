@@ -238,7 +238,9 @@ const pageMachineCodes: Readonly<Record<string, ReadonlySet<string>>> = {
   // What the error says in a log; a guest never sees it.
   "dining/SettledTableReceipt.tsx": new Set(["settled table receipt "]),
   // The name of the kind of tip sent to the server.
-  "dining/TablePayPanel.tsx": new Set(["None", "Amount", "Percent"]),
+  // The name of the kind of tip sent to the server, and which dishes this phone pays (WP-2423
+  // 同桌结账: Whole / Mine / Chosen, never rendered).
+  "dining/TablePayPanel.tsx": new Set(["None", "Amount", "Percent", "Whole", "Mine", "Chosen"]),
   // The guest's answer to a free table (Start, Join, NewParty) and what starting it gave the menu
   // (Started, Refused, InUse): intents passed between handlers, never rendered.
   "entry/EntryContextPage.tsx": new Set([

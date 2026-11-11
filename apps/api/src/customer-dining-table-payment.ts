@@ -273,6 +273,8 @@ export function customerTablePaymentBody(view: DiningTableOnlinePaymentView) {
                 subtotalMinor: part.subtotalMinor,
                 dishes: part.dishes,
                 ...(part.choice === undefined ? {} : { choice: part.choice }),
+                // WP-2423 同桌结账: this phone paid this part (other guests' stay unnamed).
+                ...((view.paidByMe ?? []).includes(part.partNumber) ? { byYou: true } : {}),
                 status:
                   part.payment !== null
                     ? "Paid"

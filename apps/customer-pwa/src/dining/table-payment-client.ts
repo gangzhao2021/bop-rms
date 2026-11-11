@@ -54,7 +54,10 @@ export interface TablePaymentView {
    * "Mine": this guest is paying it; "Paying": someone else is.
    */
   readonly split: null | {
-    readonly mode: "Even" | "ByRounds" | "ByItems";
+    /** "ByGuests": guests at the table pay by dish as they go (WP-2423 同桌结账). */
+    readonly mode: "Even" | "ByRounds" | "ByItems" | "ByGuests";
+    /** Every part paid (by dish: the parts cover the whole bill). */
+    readonly paidInFull: boolean;
     readonly paidParts: number;
     readonly remainingMinor: string;
     readonly parts: readonly {
@@ -68,6 +71,32 @@ export interface TablePaymentView {
         readonly shared: boolean;
       }[];
       readonly status: "Paid" | "Mine" | "Paying" | "ToPay";
+      /** WP-2423 同桌结账: this phone paid this part. */
+      readonly byYou: boolean;
+    }[];
+  };
+  /**
+   * WP-2423 同桌结账 (DEC-OWNER-DEFAULTS-2026-11-06): what this phone may pay by dish — null when
+   * the table is paid, staff split it another way, or an older server. `mine`: what "only what I
+   * added" comes to (null: nothing of theirs left to pay). Each dish: the units still to pay.
+   */
+  readonly choices: null | {
+    /** The Store's setting: what this phone starts with. */
+    readonly defaultScope: "WholeTable" | "OwnDishes";
+    readonly mine: null | { readonly count: number; readonly amountMinor: string };
+    readonly dishes: readonly {
+      readonly orderItemReference: string;
+      readonly displayName: string;
+      readonly roundNumber: number;
+      readonly mine: boolean;
+      readonly unitMinor: readonly string[];
+      readonly unitSubtotalMinor: readonly string[];
+    }[];
+    /** What is left of each round: a choice taking its last dishes pays exactly this. */
+    readonly rounds: readonly {
+      readonly roundNumber: number;
+      readonly restMinor: string;
+      readonly restSubtotalMinor: string;
     }[];
   };
   readonly receipt: null | {
@@ -81,6 +110,20 @@ export interface TablePaymentView {
     readonly paidAt: string;
   };
 }
+/**
+ * WP-2423 同桌结账: which dishes this phone pays — only what it added, dishes it chooses (also for
+ * others at the table), or the rest once others paid some. Absent: the whole table.
+ */
+export type TablePayChoice =
+  | { readonly kind: "Mine" }
+  | { readonly kind: "Rest" }
+  | {
+      readonly kind: "Chosen";
+      readonly dishes: readonly {
+        readonly orderItemReference: string;
+        readonly quantity: number;
+      }[];
+    };
 export type TablePaymentErrorCode =
   | "not-checking-out"
   | "already-paid"
@@ -94,6 +137,10 @@ export type TablePaymentErrorCode =
   | "tip-choices-changed"
   /** WP-2423 item 8 ⑤: some of the table's dishes wait for staff to confirm them first. */
   | "rounds-waiting"
+  /** WP-2423 同桌结账: someone at the table just started paying for some of these dishes. */
+  | "dishes-taken"
+  /** Staff split the bill: the guest pays one of its parts. */
+  | "split-by-staff"
   | "unavailable";
 export class TablePaymentClientError extends Error {
   constructor(readonly code: TablePaymentErrorCode) {
@@ -182,6 +229,7 @@ export function parseTablePaymentView(value: unknown): TablePaymentView {
                   : fail(),
           }),
     split: splitOf(p.split),
+    choices: choicesOf(p.choices),
     receipt:
       receipt === null || receipt === undefined
         ? null
@@ -217,31 +265,107 @@ function tipsOf(value: unknown): TablePaymentView["tips"] {
   return Object.freeze({ enabled: raw.enabled, tierPercents: Object.freeze(tiers.map(Number)) });
 }
 
-function splitOf(value: unknown): TablePaymentView["split"] {
+const reference = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+function choicesOf(value: unknown): TablePaymentView["choices"] {
   if (value === undefined || value === null) return null;
   const raw = value as Record<string, unknown>;
+  const mine = raw.mine as Record<string, unknown> | null;
   if (
-    (raw.mode !== "Even" && raw.mode !== "ByRounds" && raw.mode !== "ByItems") ||
-    !Number.isSafeInteger(raw.paidParts) ||
-    !Array.isArray(raw.parts) ||
-    raw.parts.length < 2 ||
-    raw.parts.length > 20
+    !Array.isArray(raw.dishes) ||
+    raw.dishes.length > 500 ||
+    !Array.isArray(raw.rounds) ||
+    (raw.defaultScope !== "WholeTable" && raw.defaultScope !== "OwnDishes")
   )
     return fail();
   return Object.freeze({
+    defaultScope: raw.defaultScope,
+    mine:
+      mine === null || mine === undefined
+        ? null
+        : Object.freeze({
+            count:
+              Number.isSafeInteger(mine.count) && Number(mine.count) > 0
+                ? Number(mine.count)
+                : fail(),
+            amountMinor: amount(mine.amountMinor),
+          }),
+    dishes: Object.freeze(
+      raw.dishes.map((value: unknown) => {
+        const dish = value as Record<string, unknown>;
+        if (
+          typeof dish.orderItemReference !== "string" ||
+          !reference.test(dish.orderItemReference) ||
+          typeof dish.displayName !== "string" ||
+          !Number.isSafeInteger(dish.roundNumber) ||
+          typeof dish.mine !== "boolean" ||
+          !Array.isArray(dish.unitMinor) ||
+          dish.unitMinor.length < 1 ||
+          !Array.isArray(dish.unitSubtotalMinor) ||
+          dish.unitSubtotalMinor.length !== dish.unitMinor.length
+        )
+          return fail();
+        return Object.freeze({
+          orderItemReference: dish.orderItemReference,
+          displayName: dish.displayName,
+          roundNumber: dish.roundNumber as number,
+          mine: dish.mine,
+          unitMinor: Object.freeze(dish.unitMinor.map(amount)),
+          unitSubtotalMinor: Object.freeze(dish.unitSubtotalMinor.map(amount)),
+        });
+      }),
+    ),
+    rounds: Object.freeze(
+      raw.rounds.map((value: unknown) => {
+        const round = value as Record<string, unknown>;
+        if (!Number.isSafeInteger(round.roundNumber)) return fail();
+        return Object.freeze({
+          roundNumber: round.roundNumber as number,
+          restMinor: amount(round.restMinor),
+          restSubtotalMinor: amount(round.restSubtotalMinor),
+        });
+      }),
+    ),
+  });
+}
+
+function splitOf(value: unknown): TablePaymentView["split"] {
+  if (value === undefined || value === null) return null;
+  const raw = value as Record<string, unknown>;
+  const byGuests = raw.mode === "ByGuests";
+  if (
+    (raw.mode !== "Even" &&
+      raw.mode !== "ByRounds" &&
+      raw.mode !== "ByItems" &&
+      raw.mode !== "ByGuests") ||
+    !Number.isSafeInteger(raw.paidParts) ||
+    !Array.isArray(raw.parts) ||
+    // Guests paying by dish start with no part and add one each time someone pays.
+    raw.parts.length < (byGuests ? 0 : 2) ||
+    raw.parts.length > (byGuests ? 100 : 20)
+  )
+    return fail();
+  let previous = 0;
+  return Object.freeze({
     mode: raw.mode,
+    // An older server: every part paid.
+    paidInFull:
+      typeof raw.paidInFull === "boolean"
+        ? raw.paidInFull
+        : raw.parts.length > 0 && raw.paidParts === raw.parts.length,
     paidParts: raw.paidParts as number,
     remainingMinor: amount(raw.remainingMinor),
     parts: Object.freeze(
       raw.parts.map((value: unknown, index: number) => {
         const part = value as Record<string, unknown>;
-        if (
-          part.partNumber !== index + 1 ||
-          !["Paid", "Mine", "Paying", "ToPay"].includes(String(part.status))
-        )
+        // By dish, a part whose payment failed is left out: the numbers that remain go up.
+        const numbered = byGuests
+          ? Number.isSafeInteger(part.partNumber) && Number(part.partNumber) > previous
+          : part.partNumber === index + 1;
+        if (!numbered || !["Paid", "Mine", "Paying", "ToPay"].includes(String(part.status)))
           return fail();
+        previous = Number(part.partNumber);
         return Object.freeze({
-          partNumber: index + 1,
+          partNumber: previous,
           amountMinor: amount(part.amountMinor),
           subtotalMinor: amount(part.subtotalMinor),
           dishes: Object.freeze(
@@ -261,6 +385,7 @@ function splitOf(value: unknown): TablePaymentView["split"] {
             }),
           ),
           status: part.status as "Paid" | "Mine" | "Paying" | "ToPay",
+          byYou: part.byYou === true,
         });
       }),
     ),
@@ -278,6 +403,8 @@ const errorCodes: Readonly<Record<string, TablePaymentErrorCode>> = {
   table_tips_turned_off: "tips-off",
   table_tip_choices_changed: "tip-choices-changed",
   table_rounds_waiting: "rounds-waiting",
+  table_dishes_taken: "dishes-taken",
+  table_split_by_staff: "split-by-staff",
 };
 
 export function createTablePaymentClient(request: typeof fetch = globalThis.fetch) {
@@ -322,13 +449,19 @@ export function createTablePaymentClient(request: typeof fetch = globalThis.fetc
      * Pay the whole table — or, for a split bill, one part (WP-2423 item 8 ④) — with this tip;
      * the same operation comes back to the same payment.
      */
-    async start(operationReference: string, tip: TableTip, partNumber: number | null = null) {
+    async start(
+      operationReference: string,
+      tip: TableTip,
+      partNumber: number | null = null,
+      choice: TablePayChoice | null = null,
+    ) {
       return parseTablePaymentView(
         await post("", {
           action: "Start",
           operationReference,
           tip,
           ...(partNumber === null ? {} : { partNumber }),
+          ...(choice === null ? {} : { choice }),
           ...guestLocale(),
         }),
       );

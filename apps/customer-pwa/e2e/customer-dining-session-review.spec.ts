@@ -1542,3 +1542,257 @@ test.describe("@production DEC-DINE-IN-PAY-LATER S4 the guest pays the whole tab
     );
   });
 });
+
+// WP-2423 同桌结账 (DEC-OWNER-DEFAULTS-2026-11-06): at a table that pays at the end each phone
+// chooses which dishes it pays — the whole table (the Store's default), only what it added, or the
+// dishes it picks for others — and what others already paid is shown without naming them.
+test.describe("@production 同桌结账 guests pay by dish at a table that pays at the end", () => {
+  test.use({ serviceWorkers: "block" });
+  const payLater = {
+    schemaVersion: 1,
+    session: {
+      ...session.session,
+      paymentTiming: "PayLater",
+      rounds: [{ ...session.session.rounds[0], payment: "OnTableBill" }],
+    },
+  };
+  const dumplings = id(0xd1),
+    tea = id(0xd2),
+    noodles = id(0xd3);
+  const choicesOf = (defaultScope: string, tookNoodles: boolean) => ({
+    defaultScope,
+    mine: tookNoodles ? { count: 3, amountMinor: "1017" } : { count: 4, amountMinor: "2373" },
+    dishes: [
+      {
+        orderItemReference: dumplings,
+        displayName: "Synthetic pork dumplings",
+        roundNumber: 1,
+        mine: true,
+        unitMinor: ["339", "339", "339"],
+        unitSubtotalMinor: ["300", "300", "300"],
+      },
+      {
+        orderItemReference: tea,
+        displayName: "Synthetic jasmine tea",
+        roundNumber: 1,
+        mine: false,
+        unitMinor: ["283"],
+        unitSubtotalMinor: ["250"],
+      },
+      ...(tookNoodles
+        ? []
+        : [
+            {
+              orderItemReference: noodles,
+              displayName: "Synthetic beef noodle soup",
+              roundNumber: 2,
+              mine: true,
+              unitMinor: ["1356"],
+              unitSubtotalMinor: ["1200"],
+            },
+          ]),
+    ],
+    rounds: [
+      { roundNumber: 1, restMinor: "1301", restSubtotalMinor: "1150" },
+      ...(tookNoodles ? [] : [{ roundNumber: 2, restMinor: "1356", restSubtotalMinor: "1200" }]),
+    ],
+  });
+  const tableWith = async (
+    page: Page,
+    options: {
+      readonly defaultScope?: "WholeTable" | "OwnDishes";
+      readonly othersPaidNoodles?: boolean;
+      readonly start?: (body: Record<string, unknown>) => { status: number; json?: unknown };
+    },
+  ) => {
+    await page.route("**/bff/customer/payment-configuration", (route) =>
+      route.fulfill({
+        headers: { "cache-control": "no-store" },
+        json: {
+          schemaVersion: 1,
+          mode: "stripe",
+          publishableKey: "pk_test_SyntheticBrowserOnly",
+          returnUrl: "https://synthetic-return.invalid/return",
+          wallets: false,
+          internalTestEntry: false,
+        },
+      }),
+    );
+    await page.route("https://js.stripe.com/**", (route) =>
+      route.fulfill({ contentType: "application/javascript", body: syntheticStripe }),
+    );
+    await page.route("**/api/v1/dine-in/table-payment/handoff", (route) =>
+      route.fulfill({
+        headers: { "cache-control": "no-store" },
+        json: { schemaVersion: 1, clientSecret: "pi_SYNTHETIC_secret_SYNTHETIC" },
+      }),
+    );
+    const starts: Record<string, unknown>[] = [];
+    let paying: null | { totalMinor: string } = null;
+    const others = options.othersPaidNoodles === true;
+    await page.route("**/api/v1/dine-in/table-payment", (route) => {
+      const body = route.request().postDataJSON() as Record<string, unknown>;
+      if (body.action === "Start") {
+        starts.push(body);
+        const answer = options.start?.(body);
+        if (answer !== undefined && answer.status !== 200)
+          return route.fulfill({
+            status: answer.status,
+            headers: { "cache-control": "no-store" },
+            json: answer.json,
+          });
+        paying = { totalMinor: String((answer?.json as { totalMinor?: string })?.totalMinor) };
+      }
+      return route.fulfill({
+        headers: { "cache-control": "no-store" },
+        json: {
+          schemaVersion: 1,
+          payment: {
+            tableLabel: "12",
+            checkingOut: true,
+            rounds: [],
+            owed: others
+              ? {
+                  subtotalMinor: "1150",
+                  taxMinor: "151",
+                  totalMinor: "1301",
+                  taxRoundingMinor: "1",
+                }
+              : {
+                  subtotalMinor: "2350",
+                  taxMinor: "307",
+                  totalMinor: "2657",
+                  taxRoundingMinor: "1",
+                },
+            consistent: true,
+            tips: { enabled: true, tierPercents: [10, 15, 18] },
+            state: paying === null ? "NotPaid" : "Paying",
+            attempt: paying === null ? null : { ...paying, tipMinor: "0", partNumber: 2 },
+            split:
+              others || paying !== null
+                ? {
+                    mode: "ByGuests",
+                    paidInFull: false,
+                    paidParts: others ? 1 : 0,
+                    remainingMinor: others ? "1301" : "2657",
+                    parts: others
+                      ? [
+                          {
+                            partNumber: 1,
+                            amountMinor: "1356",
+                            subtotalMinor: "1200",
+                            dishes: [
+                              {
+                                displayName: "Synthetic beef noodle soup",
+                                quantity: 1,
+                                shared: false,
+                              },
+                            ],
+                            status: "Paid",
+                          },
+                        ]
+                      : [],
+                  }
+                : null,
+            choices:
+              paying === null ? choicesOf(options.defaultScope ?? "WholeTable", others) : null,
+            receipt: null,
+          },
+        },
+      });
+    });
+    await enterTable(page, () => ({ status: 200, json: payLater }));
+    return { pay: page.getByRole("region", { name: "Pay the bill" }), starts };
+  };
+
+  for (const [width, height] of [
+    [390, 844],
+    [1024, 900],
+    [1440, 900],
+  ] as const)
+    test(`the whole table to start; only what I added pays this phone's dishes (${width})`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height });
+      const { pay, starts } = await tableWith(page, {
+        start: () => ({ status: 200, json: { totalMinor: "2373" } }),
+      });
+      const scope = pay.getByRole("group", { name: "Which dishes are you paying for?" });
+      await expect(
+        scope.getByRole("radio", { name: "The whole table (5 dishes · $26.57)" }),
+      ).toBeChecked();
+      await expect(scope).toContainText("Amounts include tax.");
+      await scope.getByRole("radio", { name: "Only what I added (4 · $23.73)" }).check();
+      await expect(scope).toContainText(
+        "Dishes you don’t choose stay for the others at your table.",
+      );
+      await pay.getByRole("radio", { name: "No tip" }).check();
+      await expectNoHorizontalOverflow(page);
+      await pay.screenshot({ path: `test-results/guest-pay-by-dish-mine-${width}.png` });
+      await pay.getByRole("button", { name: "Pay $23.73" }).click();
+      await expect(pay).toContainText("Paying $23.73 for the dishes you chose.");
+      expect(starts).toEqual([
+        {
+          action: "Start",
+          operationReference: expect.stringMatching(/^[0-9a-f-]{36}$/u),
+          tip: { kind: "None" },
+          choice: { kind: "Mine" },
+        },
+      ]);
+      await expectNoInternalText(page);
+    });
+
+  test("a Store that starts with each guest's own dishes; choosing dishes pays for another's tea", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    const { pay, starts } = await tableWith(page, {
+      defaultScope: "OwnDishes",
+      start: () => ({ status: 200, json: { totalMinor: "283" } }),
+    });
+    const scope = pay.getByRole("group", { name: "Which dishes are you paying for?" });
+    await expect(
+      scope.getByRole("radio", { name: "Only what I added (4 · $23.73)" }),
+    ).toBeChecked();
+    await scope.getByRole("radio", { name: "Choose dishes to pay for" }).check();
+    await expect(pay.getByRole("button", { name: "Choose the dishes you pay for" })).toBeDisabled();
+    await scope.getByRole("button", { name: "One more Synthetic jasmine tea" }).click();
+    await expect(scope).toContainText("Chosen: $2.83");
+    await pay.getByRole("radio", { name: "No tip" }).check();
+    await expectNoHorizontalOverflow(page);
+    await pay.screenshot({ path: "test-results/guest-pay-by-dish-chosen-390.png" });
+    await pay.getByRole("button", { name: "Pay $2.83" }).click();
+    expect(starts.at(-1)?.choice).toEqual({
+      kind: "Chosen",
+      dishes: [{ orderItemReference: tea, quantity: 1 }],
+    });
+    await expectNoInternalText(page);
+  });
+
+  test("after someone paid the noodles: the rest of the table, and a dish someone just took", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    const { pay, starts } = await tableWith(page, {
+      othersPaidNoodles: true,
+      start: () => ({
+        status: 409,
+        json: { schemaVersion: 1, error: { code: "table_dishes_taken" } },
+      }),
+    });
+    await expect(pay).toContainText("Your table is paying by dish: 1 paid so far · $13.01 to go.");
+    await expect(pay).toContainText("Synthetic beef noodle soup · $13.56 · paid");
+    const scope = pay.getByRole("group", { name: "Which dishes are you paying for?" });
+    await expect(
+      scope.getByRole("radio", { name: "The rest of the table (4 dishes · $13.01)" }),
+    ).toBeChecked();
+    await pay.getByRole("radio", { name: "No tip" }).check();
+    await pay.getByRole("button", { name: "Pay $13.01" }).click();
+    expect(starts.at(-1)?.choice).toEqual({ kind: "Rest" });
+    await expect(pay.getByRole("alert")).toContainText(
+      "Someone at your table just started paying for some of these dishes. Check again.",
+    );
+    await pay.screenshot({ path: "test-results/guest-pay-by-dish-rest-390.png" });
+    await expectNoInternalText(page);
+  });
+});

@@ -132,6 +132,8 @@ export interface DiningTableOnlinePaymentView {
    * or not at checkout) — the dishes still to pay (those this phone added marked), and what "only
    * what I added" comes to (null when nothing of theirs is left to pay).
    */
+  /** WP-2423 同桌结账: the parts of the bill this phone paid for (by dish), by part number. */
+  readonly paidByMe: readonly number[];
   readonly choices: null | {
     /** The Store's setting: the whole table, or only what this phone added, chosen to start. */
     readonly defaultScope: "WholeTable" | "OwnDishes";
@@ -301,6 +303,16 @@ export function createDiningTableOnlinePayments(options: DiningTableOnlinePaymen
     void settlementRecord;
     void dishAdders;
     void splitRounds;
+    const mineParts = new Set(
+      (splitPlanRecord?.guestParts ?? [])
+        .filter(
+          (part) =>
+            part.withdrawn === null &&
+            authority.guestSessionReference !== null &&
+            part.guestSessionReference === authority.guestSessionReference,
+        )
+        .map((part) => part.partNumber),
+    );
     return Object.freeze({
       lastOwnDeclined: lastOwnDeclinedOf(
         attempts,
@@ -308,6 +320,11 @@ export function createDiningTableOnlinePayments(options: DiningTableOnlinePaymen
         splitPlanRecord?.splitPlanReference ?? null,
       ),
       bill: publicBill,
+      paidByMe: Object.freeze(
+        (publicBill.split?.parts ?? [])
+          .filter((part) => part.payment !== null && mineParts.has(part.partNumber))
+          .map((part) => part.partNumber),
+      ),
       choices: choicesOf(current, authority),
       attempt:
         open === undefined

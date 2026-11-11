@@ -15,6 +15,12 @@ import {
   type TablePaymentView,
   type TableTip,
 } from "./table-payment-client.js";
+import {
+  initialPayScope,
+  payDishCount,
+  paySelection,
+  type TablePayScope,
+} from "./table-pay-choice.js";
 
 const money = (amountMinor: string) => formatMoney(amountMinor, "CAD");
 /** "0": no tip; "other": an amount the guest types; otherwise one of the Store's percentages. */
@@ -70,6 +76,10 @@ function problemText(error: unknown) {
       return t(
         "Some of your table’s dishes are waiting for staff to confirm them. Ask staff to confirm them, then pay.",
       );
+    case "dishes-taken":
+      return t("Someone at your table just started paying for some of these dishes. Check again.");
+    case "split-by-staff":
+      return t("Staff split this bill. Pay one of its parts.");
     default:
       return t("We couldn’t reach the payment service. Check your connection and try again.");
   }
@@ -146,6 +156,10 @@ export function TablePayPanel({
   const [confirmedTip, setConfirmedTip] = useState<string | null>(null);
   // WP-2423 item 8 ④: the part of a split bill this guest pays (null: the next one to pay).
   const [part, setPart] = useState<number | null>(null);
+  // WP-2423 同桌结账: which dishes this phone pays (null: what the Store starts with), and how many
+  // of each dish when the guest chooses.
+  const [scope, setScope] = useState<TablePayScope | null>(null);
+  const [quantities, setQuantities] = useState<ReadonlyMap<string, number>>(new Map());
   const [clientSecret, setClientSecret] = useState<string | null>(null);
   // WP-2423 item 2: the card form's one-time value couldn't be read; the guest asks again.
   const [handoffFailed, setHandoffFailed] = useState(false);
@@ -226,14 +240,32 @@ export function TablePayPanel({
       ? tip
       : null;
 
+  // WP-2423 同桌结账: guests paying by dish choose their dishes; a bill staff split, a part.
+  const choices = view.choices;
+  const byDish = choices !== null && (view.split === null || view.split.mode === "ByGuests");
+  const payScope: TablePayScope =
+    !byDish || choices === null
+      ? "Whole"
+      : scope === "Mine" && choices.mine === null
+        ? "Whole"
+        : (scope ?? initialPayScope(choices));
+  const selection = byDish ? paySelection(view, payScope, quantities) : null;
   const toPay = view.split?.parts.filter((entry) => entry.status === "ToPay") ?? [];
   const chosen =
-    view.split === null
+    view.split === null || byDish
       ? null
       : (toPay.find((entry) => entry.partNumber === part) ?? toPay[0] ?? null);
   // A split bill: the chosen part's own amount, and its tip on its own share before tax.
-  const subtotal = chosen ? chosen.subtotalMinor : view.owed.subtotalMinor;
-  const amountDue = chosen ? chosen.amountMinor : view.owed.totalMinor;
+  const subtotal = selection
+    ? selection.subtotalMinor
+    : chosen
+      ? chosen.subtotalMinor
+      : view.owed.subtotalMinor;
+  const amountDue = selection
+    ? selection.amountMinor
+    : chosen
+      ? chosen.amountMinor
+      : view.owed.totalMinor;
   // A typed tip is whole cents, and never more than the bill before tax (the server agrees).
   const typedMinor = chosenTip === OTHER ? parseTipAmount(typed.trim()) : null;
   const typedTooHigh = typedMinor !== null && BigInt(typedMinor) > BigInt(subtotal);
@@ -253,8 +285,10 @@ export function TablePayPanel({
         : tipMinor(chosenTip, subtotal);
   const pay = async () => {
     if (busy || chosenTipMinor === null || chosenTip === null) return;
-    if (view.split !== null && chosen === null) return;
-    const key = `${chosenTip}:${chosenTipMinor}:${chosen?.partNumber ?? "table"}`;
+    if (byDish ? selection === null : view.split !== null && chosen === null) return;
+    const key = `${chosenTip}:${chosenTipMinor}:${chosen?.partNumber ?? "table"}:${JSON.stringify(
+      selection?.choice ?? null,
+    )}`;
     // A failed payment is followed by a new one; a lost answer is retried with the same one.
     if (operation.current?.key !== key || view.state === "Failed")
       operation.current = { key, reference: uuidv7() };
@@ -268,11 +302,13 @@ export function TablePayPanel({
           operation.current.reference,
           tipOf(chosenTip, typedMinor),
           chosen?.partNumber ?? null,
+          selection?.choice ?? null,
         ),
       );
     } catch (error) {
+      // The bill is read again first (its answer clears old messages), then this one is said.
+      if (error instanceof TablePaymentClientError && error.code !== "unavailable") await read();
       setProblem(startProblemText(error));
-      if (error instanceof TablePaymentClientError && error.code !== "unavailable") void read();
     } finally {
       setBusy(false);
     }
@@ -352,9 +388,13 @@ export function TablePayPanel({
       <section className="order-status__card dining-session__table-pay" aria-labelledby="table-pay">
         <h2 id="table-pay">{t("Pay the bill")}</h2>
         <p role="status">
-          {t("Every part of the bill is paid ({count} parts). Thank you!", {
-            count: String(view.split.parts.length),
-          })}
+          {view.split.mode === "ByGuests"
+            ? t("Everything on the bill is paid ({count} payments). Thank you!", {
+                count: String(view.split.parts.length),
+              })
+            : t("Every part of the bill is paid ({count} parts). Thank you!", {
+                count: String(view.split.parts.length),
+              })}
         </p>
         <MemberJoinPanel />
       </section>
@@ -370,23 +410,31 @@ export function TablePayPanel({
       ) : view.state === "Paying" && view.attempt !== null ? (
         <>
           <p>
-            {view.attempt.partNumber === null
+            {view.attempt.partNumber !== null && view.split?.mode === "ByGuests"
               ? view.attempt.tipMinor === "0"
-                ? t("Paying {amount} for the whole table.", {
+                ? t("Paying {amount} for the dishes you chose.", {
                     amount: money(view.attempt.totalMinor),
                   })
-                : t("Paying {amount} for the whole table, tip included.", {
+                : t("Paying {amount} for the dishes you chose, tip included.", {
                     amount: money(view.attempt.totalMinor),
                   })
-              : view.attempt.tipMinor === "0"
-                ? t("Paying {amount} for part {number}.", {
-                    amount: money(view.attempt.totalMinor),
-                    number: String(view.attempt.partNumber),
-                  })
-                : t("Paying {amount} for part {number}, tip included.", {
-                    amount: money(view.attempt.totalMinor),
-                    number: String(view.attempt.partNumber),
-                  })}
+              : view.attempt.partNumber === null
+                ? view.attempt.tipMinor === "0"
+                  ? t("Paying {amount} for the whole table.", {
+                      amount: money(view.attempt.totalMinor),
+                    })
+                  : t("Paying {amount} for the whole table, tip included.", {
+                      amount: money(view.attempt.totalMinor),
+                    })
+                : view.attempt.tipMinor === "0"
+                  ? t("Paying {amount} for part {number}.", {
+                      amount: money(view.attempt.totalMinor),
+                      number: String(view.attempt.partNumber),
+                    })
+                  : t("Paying {amount} for part {number}, tip included.", {
+                      amount: money(view.attempt.totalMinor),
+                      number: String(view.attempt.partNumber),
+                    })}
           </p>
           {configuration?.mode === "simulation" ? (
             <div className="payment-retry__simulated">
@@ -456,7 +504,19 @@ export function TablePayPanel({
               )}
             </p>
           ) : null}
-          {view.split !== null ? (
+          {byDish && choices !== null ? (
+            <TablePayDishes
+              view={view}
+              choices={choices}
+              scope={payScope}
+              quantities={quantities}
+              onScope={setScope}
+              onQuantity={(reference, quantity) =>
+                setQuantities((current) => new Map(current).set(reference, quantity))
+              }
+              selectionMinor={selection?.amountMinor ?? null}
+            />
+          ) : view.split !== null ? (
             <div className="dining-session__split">
               <p>
                 {view.split.mode === "Even"
@@ -541,9 +601,11 @@ export function TablePayPanel({
           {tipOptions.length === 0 ? null : (
             <fieldset className="dining-session__tip">
               <legend>
-                {view.split !== null
-                  ? t("Tip (for your part)")
-                  : t("Tip (once, for the whole table)")}
+                {byDish && selection?.choice !== null && selection !== null
+                  ? t("Tip (for the dishes you pay)")
+                  : view.split !== null && !byDish
+                    ? t("Tip (for your part)")
+                    : t("Tip (once, for the whole table)")}
               </legend>
               {tipOptions.map((choice) => (
                 <label key={choice}>
@@ -628,21 +690,179 @@ export function TablePayPanel({
               chosenTipMinor === null ||
               !view.consistent ||
               view.owed.totalMinor === "0" ||
-              (view.split !== null && chosen === null)
+              (byDish ? selection === null : view.split !== null && chosen === null)
             }
             onClick={() => void pay()}
           >
             {busy
               ? t("Starting your payment…")
-              : total === null
-                ? chosenTip === OTHER
-                  ? t("Enter the tip to pay")
-                  : t("Choose a tip to pay")
-                : t("Pay {amount}", { amount: money(total) })}
+              : byDish && selection === null
+                ? t("Choose the dishes you pay for")
+                : total === null
+                  ? chosenTip === OTHER
+                    ? t("Enter the tip to pay")
+                    : t("Choose a tip to pay")
+                  : t("Pay {amount}", { amount: money(total) })}
           </button>
         </>
       )}
       {problem ? <p role="alert">{problem}</p> : null}
     </section>
+  );
+}
+
+/**
+ * WP-2423 同桌结账 (DEC-OWNER-DEFAULTS-2026-11-06): which dishes this phone pays — the whole table
+ * (or what is left of it), only what it added, or dishes the guest chooses (also for others). What
+ * others at the table paid is listed without naming them; this phone's own payments say so.
+ */
+function TablePayDishes({
+  view,
+  choices,
+  scope,
+  quantities,
+  onScope,
+  onQuantity,
+  selectionMinor,
+}: {
+  readonly view: TablePaymentView;
+  readonly choices: NonNullable<TablePaymentView["choices"]>;
+  readonly scope: TablePayScope;
+  readonly quantities: ReadonlyMap<string, number>;
+  readonly onScope: (scope: TablePayScope) => void;
+  readonly onQuantity: (orderItemReference: string, quantity: number) => void;
+  readonly selectionMinor: string | null;
+}) {
+  const parts = view.split?.parts ?? [];
+  const started = parts.length > 0;
+  const wholeMinor = paySelection(view, "Whole", quantities)?.amountMinor ?? view.owed.totalMinor;
+  const allCount = payDishCount(choices, false);
+  return (
+    <div className="dining-session__split dining-session__pay-dishes">
+      {started ? (
+        <>
+          <p>
+            {t("Your table is paying by dish: {paid} paid so far · {amount} to go.", {
+              paid: String(parts.filter((entry) => entry.status === "Paid").length),
+              amount: money(view.owed.totalMinor),
+            })}
+          </p>
+          <ul className="dining-session__paid-parts">
+            {parts.map((entry) => (
+              <li key={entry.partNumber} data-status={entry.status}>
+                {entry.dishes
+                  .map(
+                    (dish) => (dish.quantity > 1 ? `${dish.quantity} × ` : "") + dish.displayName,
+                  )
+                  .join(", ")}{" "}
+                · {money(entry.amountMinor)} ·{" "}
+                {entry.status === "Paid"
+                  ? entry.byYou
+                    ? t("you paid")
+                    : t("paid")
+                  : t("being paid")}
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : null}
+      <fieldset className="dining-session__pay-scope">
+        <legend>{t("Which dishes are you paying for?")}</legend>
+        <label>
+          <input
+            type="radio"
+            name="table-pay-scope"
+            checked={scope === "Whole"}
+            onChange={() => onScope("Whole")}
+          />{" "}
+          {started
+            ? t("The rest of the table ({count} dishes · {amount})", {
+                count: String(allCount),
+                amount: money(wholeMinor),
+              })
+            : t("The whole table ({count} dishes · {amount})", {
+                count: String(allCount),
+                amount: money(wholeMinor),
+              })}
+        </label>
+        <label>
+          <input
+            type="radio"
+            name="table-pay-scope"
+            checked={scope === "Mine"}
+            disabled={choices.mine === null}
+            onChange={() => onScope("Mine")}
+          />{" "}
+          {choices.mine === null
+            ? t("Only what I added (nothing of yours is left to pay)")
+            : t("Only what I added ({count} · {amount})", {
+                count: String(choices.mine.count),
+                amount: money(choices.mine.amountMinor),
+              })}
+        </label>
+        <label>
+          <input
+            type="radio"
+            name="table-pay-scope"
+            checked={scope === "Chosen"}
+            onChange={() => onScope("Chosen")}
+          />{" "}
+          {t("Choose dishes to pay for")}
+        </label>
+        {scope === "Chosen" ? (
+          <ul className="dining-session__pay-choose">
+            {choices.dishes.map((dish) => {
+              const quantity = Math.min(
+                quantities.get(dish.orderItemReference) ?? 0,
+                dish.unitMinor.length,
+              );
+              const name = dish.displayName || t("A dish");
+              return (
+                <li key={dish.orderItemReference}>
+                  <span className="dining-session__pay-dish">
+                    {name}
+                    {dish.mine ? <small> · {t("you added")}</small> : null}
+                    <small>
+                      {" "}
+                      · {money(dish.unitMinor[0] ?? "0")}
+                      {dish.unitMinor.length > 1
+                        ? ` · ${t("{count} left", { count: String(dish.unitMinor.length) })}`
+                        : ""}
+                    </small>
+                  </span>
+                  <span className="dining-session__pay-stepper">
+                    <button
+                      type="button"
+                      aria-label={t("One less {dish}", { dish: name })}
+                      disabled={quantity === 0}
+                      onClick={() => onQuantity(dish.orderItemReference, quantity - 1)}
+                    >
+                      −
+                    </button>
+                    <output aria-live="polite">{quantity}</output>
+                    <button
+                      type="button"
+                      aria-label={t("One more {dish}", { dish: name })}
+                      disabled={quantity >= dish.unitMinor.length}
+                      onClick={() => onQuantity(dish.orderItemReference, quantity + 1)}
+                    >
+                      +
+                    </button>
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        ) : null}
+        <p className="dining-session__pay-note">
+          {scope === "Whole"
+            ? t("Amounts include tax.")
+            : t("Dishes you don’t choose stay for the others at your table. Amounts include tax.")}
+          {scope === "Chosen" && selectionMinor !== null
+            ? ` ${t("Chosen: {amount}", { amount: money(selectionMinor) })}`
+            : ""}
+        </p>
+      </fieldset>
+    </div>
   );
 }

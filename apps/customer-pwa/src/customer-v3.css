@@ -247,6 +247,79 @@
   color: var(--bop-color-text-muted);
 }
 
+/* WP-2423 同桌结账: which dishes this phone pays. Rows on hairlines, the dish on the left and its
+   − / + discs on the right (as the menu's stepper); what others paid is muted words, never names. */
+.customer-page .dining-session__paid-parts {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--bop-color-text-muted);
+  font-size: 0.875rem;
+}
+.customer-page .dining-session__paid-parts li {
+  padding-block: var(--bop-space-2);
+  border-bottom: 1px solid var(--bop-color-border-default);
+}
+.customer-page .dining-session__pay-choose {
+  display: grid;
+  margin: 0 0 0 calc(20px + var(--bop-space-2));
+  padding: 0;
+  list-style: none;
+}
+.customer-page .dining-session__pay-choose li {
+  display: flex;
+  min-height: 52px;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--bop-space-3);
+  border-bottom: 1px solid var(--bop-color-border-default);
+}
+.customer-page .dining-session__pay-dish {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.customer-page .dining-session__pay-dish small {
+  color: var(--bop-color-text-muted);
+  font-size: 0.875rem;
+}
+.customer-page .dining-session__pay-stepper {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--bop-space-1);
+}
+.customer-page .dining-session__pay-stepper button,
+.customer-page .dining-session__pay-stepper button:disabled {
+  width: 40px;
+  height: 40px;
+  min-height: 40px;
+  padding: 0;
+  border: 1px solid var(--bop-color-border-control);
+  border-radius: 50%;
+  background: var(--bop-color-surface-default);
+  color: var(--bop-color-text-default);
+  font: inherit;
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.customer-page .dining-session__pay-stepper button:disabled {
+  color: var(--bop-color-text-muted);
+  cursor: default;
+}
+.customer-page .dining-session__pay-stepper output {
+  min-width: 2ch;
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+  text-align: center;
+}
+.customer-page .dining-session__pay-note {
+  margin: var(--bop-space-2) 0 0;
+  color: var(--bop-color-text-muted);
+  font-size: 0.875rem;
+}
+
 /* WP-2423 取舍 18 DEC-MEMBER-POINTS: joining, using points and the member page. */
 .customer-page .member-panel,
 .customer-page .member-at-table {
