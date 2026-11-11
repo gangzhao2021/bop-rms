@@ -266,6 +266,24 @@ export interface OrderLineRounds {
 }
 /** WP-2423 OPS-ORDER-DETAIL: what was ordered — items with options and notes, and the totals. */
 /** WP-2423 (M23): why a line can't be made as ordered now, in staff words. */
+/**
+ * v15 batch-5: what each unpaid round's dishes wait for — a round staff entered for its
+ * card-machine payment, a guest's for the guest to pay — by round number.
+ */
+export function roundPaymentWaits(
+  batches: readonly Pick<
+    QueuedOrder["batches"][number],
+    "sequence" | "paymentDue" | "staffRound"
+  >[],
+): ReadonlyMap<number, "CardMachine" | "Guest"> {
+  return new Map(
+    batches.flatMap((batch) =>
+      batch.paymentDue === null
+        ? []
+        : [[batch.sequence, batch.staffRound !== null ? "CardMachine" : "Guest"] as const],
+    ),
+  );
+}
 export function soldOutNowText(reason: "SoldOut" | "Hidden" | "ChoiceSoldOut"): string {
   return reason === "SoldOut"
     ? t("Sold out now")
@@ -472,22 +490,7 @@ export function CurrentOrderLines({
             )
           }
         >
-          <RoundPaymentWaitContext.Provider
-            value={
-              new Map(
-                rounds.batches.flatMap((batch) =>
-                  batch.paymentDue === null
-                    ? []
-                    : [
-                        [
-                          batch.sequence,
-                          batch.staffRound !== null ? ("CardMachine" as const) : ("Guest" as const),
-                        ] as const,
-                      ],
-                ),
-              )
-            }
-          >
+          <RoundPaymentWaitContext.Provider value={roundPaymentWaits(rounds.batches)}>
             {[...rounds.batches]
               .sort((a, b) => a.sequence - b.sequence)
               .map((batch) => {
@@ -1742,9 +1745,10 @@ function QueuedOrderLines({
     </>
   ) : (
     <>
-      {roundHead !== undefined && batches !== undefined
-        ? // A round's acceptance or payment step never waits for its items to be read.
-          [...batches]
+      {roundHead !== undefined && batches !== undefined ? (
+        <RoundPaymentWaitContext.Provider value={roundPaymentWaits(batches)}>
+          {/* A round's acceptance or payment step never waits for its items to be read. */}
+          {[...batches]
             .sort((a, b) => a.sequence - b.sequence)
             .map((batch) => (
               <section
@@ -1758,8 +1762,9 @@ function QueuedOrderLines({
                 {roundHead(batch)}
                 <DiningRoundProgressItems sequence={batch.sequence} />
               </section>
-            ))
-        : null}
+            ))}
+        </RoundPaymentWaitContext.Provider>
+      ) : null}
       <p className="order-lines-state" role="status">
         {state.kind === "Loading"
           ? t("Reading items…")
