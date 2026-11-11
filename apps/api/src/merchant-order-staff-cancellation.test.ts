@@ -410,6 +410,7 @@ it("WP-2423 v15 2026-10-18: previews what the cancellation refunds without writi
     orderReference: id(5),
     orderBatchReference: id(6),
     refundMethod: "Online",
+    paidInCash: false,
     paidMinor: "1130",
     refundMinor: "0",
     currencyCode: "CAD",
@@ -425,8 +426,23 @@ it("WP-2423 v15 2026-10-18: previews what the cancellation refunds without writi
   d.cardMachineRefunds.mockResolvedValue([{ amountMinor: 1486n }]);
   expect(await preview(input)).toMatchObject({
     refundMethod: "CardMachine",
+    paidInCash: false,
     paidMinor: "2486",
     refundMinor: "1000",
+  });
+  // v15 batch 8: a counter order paid in cash ($24.86, $24.85 in cash after a $3.65 cash refund)
+  // is given back in cash: the dialog is told so, and what is left of the cash is a whole nickel.
+  d.cardMachinePayment.mockResolvedValue({
+    cardMachinePaymentReference: id(8),
+    preparation: { total: { amountMinor: 2486n, currencyCode: "CAD" } },
+    cash: { roundingMinor: -1n, tenderedMinor: 3000n, changeMinor: 515n },
+  });
+  d.cardMachineRefunds.mockResolvedValue([{ amountMinor: 365n }]);
+  expect(await preview(input)).toMatchObject({
+    refundMethod: "CardMachine",
+    paidInCash: true,
+    paidMinor: "2485",
+    refundMinor: "2120",
   });
   // Read-only: nothing cancelled, recorded or released.
   expect(d.commit).not.toHaveBeenCalled();

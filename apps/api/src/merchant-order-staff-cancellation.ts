@@ -199,6 +199,7 @@ async function readStaffCancellationRemaining(
   allowed: () => Promise<boolean>,
 ): Promise<{
   readonly refundMethod: "Online" | "CardMachine";
+  readonly paidInCash: boolean;
   readonly paidMinor: bigint;
   readonly remainingMinor: bigint;
 } | null> {
@@ -213,6 +214,7 @@ async function readStaffCancellationRemaining(
   const card = await cardStore.loadByBatch(tx, orderReference, String(plan.orderBatchReference));
   let result: {
     refundMethod: "Online" | "CardMachine";
+    paidInCash: boolean;
     paidMinor: bigint;
     remainingMinor: bigint;
   } | null = null;
@@ -220,6 +222,9 @@ async function readStaffCancellationRemaining(
     const refunds = await cardStore.refunds(tx, card.cardMachinePaymentReference);
     result = {
       refundMethod: "CardMachine",
+      // A counter cash payment: what is left goes back from the drawer in whole nickels (the
+      // cash taken and every cash refund are whole nickels, so the rest is too).
+      paidInCash: card.cash !== undefined,
       paidMinor: cardMachinePaymentTakenMinor(card),
       remainingMinor:
         cardMachinePaymentTakenMinor(card) -
@@ -242,6 +247,7 @@ async function readStaffCancellationRemaining(
     });
     result = {
       refundMethod: "Online",
+      paidInCash: false,
       paidMinor: position.capturedMinor,
       remainingMinor: position.remainingMinor,
     };
@@ -665,6 +671,11 @@ export interface StaffOrderCancellationPreview {
   readonly orderReference: string;
   readonly orderBatchReference: string;
   readonly refundMethod: "Online" | "CardMachine";
+  /**
+   * v15 batch 8: a counter order paid in cash goes back in cash from the drawer (whole nickels),
+   * never on the card machine; the cancel dialog says so.
+   */
+  readonly paidInCash: boolean;
   /** What the customer paid for this order (pickup) or round (dine-in), tip included. */
   readonly paidMinor: string;
   /** What the cancellation refunds now: the payment less every refund already made or on its way. */
@@ -780,6 +791,7 @@ export function createMerchantOrderStaffCancellationPreview(
               orderReference,
               orderBatchReference,
               refundMethod: position.refundMethod,
+              paidInCash: position.paidInCash,
               paidMinor: position.paidMinor.toString(),
               refundMinor: position.remainingMinor.toString(),
               currencyCode: "CAD" as const,

@@ -125,6 +125,7 @@ it("binds actual captured payment and returns distinct confirmed and pending ref
     observedAt: at,
     paymentState: "Captured",
     paymentMethod: "Online",
+    paidInCash: false,
     currencyCode: "CAD",
     capturedAmountMinor: "2260",
     confirmedRefundMinor: "100",
@@ -153,6 +154,7 @@ it.each([null, { ...terminal, outcome: "Failed" }])(
       observedAt: at,
       paymentState: value === null ? "Unresolved" : "Failed",
       paymentMethod: "Online",
+      paidInCash: false,
       currencyCode: null,
       capturedAmountMinor: null,
       confirmedRefundMinor: null,
@@ -292,6 +294,8 @@ describe("a counter cash payment", () => {
     const f = setup();
     expect(await f.operation(f.input)).toMatchObject({
       paymentMethod: "CardMachine",
+      // v15 batch 8: the page says its refunds go back in cash, never on the card machine.
+      paidInCash: true,
       capturedAmountMinor: "2243",
       confirmedRefundMinor: "2243",
       pendingRefundMinor: "0",

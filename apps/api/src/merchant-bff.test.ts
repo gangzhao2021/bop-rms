@@ -3256,10 +3256,12 @@ it("v15 a2458cff: the Orders page reports rows it left out to the operator's log
 });
 
 it("WP-2423 v15 2026-10-18: the cancel preview route returns only the refund it reads", async () => {
+  // v15 batch 8: including whether the money goes back in cash (a counter cash payment).
   const result = {
     orderReference: "0190fa01-0000-7000-8000-000000000001",
     orderBatchReference: "0190fa01-0000-7000-8000-000000000002",
-    refundMethod: "Online" as const,
+    refundMethod: "CardMachine" as const,
+    paidInCash: true,
     paidMinor: "1130",
     refundMinor: "0",
     currencyCode: "CAD" as const,
@@ -4859,6 +4861,7 @@ it("protects refund payment context and preserves unknown amounts", async () => 
     observedAt: "2026-09-20T12:00:00.000Z",
     paymentState: "Unresolved" as const,
     paymentMethod: "Online" as const,
+    paidInCash: false as const,
     currencyCode: null,
     capturedAmountMinor: null,
     confirmedRefundMinor: null,

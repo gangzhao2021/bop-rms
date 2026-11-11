@@ -144,6 +144,15 @@ it("WP-2423 M52: the counter takes cash by the table's rules; replay, concurrenc
       assert.equal(saved.status, "Created");
       assert.deepEqual(saved.record.cash, cash);
       assert.equal(cardMachinePaymentTakenMinor(saved.record), 2245n);
+      // v15 batch 8: the payment page and the cancel dialog read the payment back, as the pilot API
+      // role, by its intent and by its round, and tell staff it was cash (given back from the
+      // drawer), never a card-machine payment.
+      const byIntent = await asApi((tx) => cards().loadByIntent(tx, record.paymentIntentReference));
+      const byBatch = await asApi((tx) =>
+        cards().loadByBatch(tx, first.orderReference, first.batch),
+      );
+      assert.deepEqual(byIntent?.cash, cash);
+      assert.deepEqual(byBatch?.cash, cash);
       const row = (
         await admin.query(
           "SELECT tender,total_minor::text,rounding_minor::text,tendered_minor::text,change_minor::text,slip_reference,actor_id::text FROM rms_payment.card_machine_payment WHERE operation_id=$1",
