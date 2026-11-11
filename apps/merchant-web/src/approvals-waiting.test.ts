@@ -8,16 +8,42 @@ import { NeedsAttention, initialOverviewState } from "./StoreOverview.js";
 it("WP-2423 Q35: counts refunds to approve apart from approved ones not sent yet", () => {
   expect(
     summarizeApprovalsWaiting([
-      { state: "AwaitingApproval" },
-      { state: "Approved" },
-      { state: "AwaitingApproval" },
+      { state: "AwaitingApproval", canApprove: true },
+      { state: "Approved", canApprove: false },
+      { state: "AwaitingApproval", canApprove: true },
     ]),
   ).toEqual({ awaiting: 2, approvedNotSent: 1, notSent: 0 });
   expect(summarizeApprovalsWaiting([])).toEqual({ awaiting: 0, approvedNotSent: 0, notSent: 0 });
   // WP-2423 M14: a cashier's request that needs no approval waits for someone to send it.
-  expect(summarizeApprovalsWaiting([{ state: "NotSent" }]).notSent).toBe(1);
+  expect(summarizeApprovalsWaiting([{ state: "NotSent", canApprove: false }]).notSent).toBe(1);
   // A cashier, who can't send, is never told a request waits for them.
-  expect(summarizeApprovalsWaiting([{ state: "NotSent" }], false).notSent).toBe(0);
+  expect(summarizeApprovalsWaiting([{ state: "NotSent", canApprove: false }], false).notSent).toBe(
+    0,
+  );
+});
+
+it("v15 batch 5: a cashier's Home and badge count nothing they can neither approve nor send", () => {
+  // The cashier's approvals read lists the store's requests, none of which the cashier can act on.
+  const cashier = summarizeApprovalsWaiting(
+    [
+      { state: "AwaitingApproval", canApprove: false },
+      { state: "Approved", canApprove: false },
+      { state: "NotSent", canApprove: false },
+    ],
+    false,
+  );
+  expect(cashier).toEqual({ awaiting: 0, approvedNotSent: 0, notSent: 0 });
+  expect(approvalsBadgeCount(cashier, null)).toBe(0);
+  // A manager who sends but can't approve this request (an owner's approval) only sees the send.
+  expect(
+    summarizeApprovalsWaiting(
+      [
+        { state: "AwaitingApproval", canApprove: false },
+        { state: "Approved", canApprove: false },
+      ],
+      true,
+    ),
+  ).toEqual({ awaiting: 0, approvedNotSent: 1, notSent: 0 });
 });
 
 it("WP-2423 Q35: the home page says what waits for the approver, and nothing when not read", () => {

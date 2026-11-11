@@ -20,17 +20,23 @@ export interface ApprovalsWaiting {
 }
 
 /**
- * `canSend`: the reader sends refunds. A cashier's request waits for a manager or the owner, so
- * it is never counted as something a cashier has to do (v15 batch 5: Home told a cashier it was
- * "waiting for you to send").
+ * `canSend`: the reader sends refunds. Only what the reader can act on is counted: a request to
+ * approve only when this reader may approve that one (`canApprove`), and an approved or cashier's
+ * request only when this reader sends refunds. A cashier's request waits for a manager or the
+ * owner, so it is never counted as something a cashier has to do (v15 batch 5: Home told a cashier
+ * it was "waiting for you to send", and later "1 to approve" though a cashier can't approve).
  */
 export function summarizeApprovalsWaiting(
-  entries: readonly { readonly state: "AwaitingApproval" | "Approved" | "NotSent" }[],
+  entries: readonly {
+    readonly state: "AwaitingApproval" | "Approved" | "NotSent";
+    readonly canApprove: boolean;
+  }[],
   canSend = true,
 ): ApprovalsWaiting {
   return {
-    awaiting: entries.filter((entry) => entry.state === "AwaitingApproval").length,
-    approvedNotSent: entries.filter((entry) => entry.state === "Approved").length,
+    awaiting: entries.filter((entry) => entry.state === "AwaitingApproval" && entry.canApprove)
+      .length,
+    approvedNotSent: canSend ? entries.filter((entry) => entry.state === "Approved").length : 0,
     notSent: canSend ? entries.filter((entry) => entry.state === "NotSent").length : 0,
   };
 }
