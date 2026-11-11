@@ -295,3 +295,41 @@ it("DEC-EXCEPTION-CONFIRMED-REFUND-DUE: a confirmed refund is due when its Store
     "2026-09-21T09:15:00.000Z",
   );
 });
+
+it("v15 M44: a failed order-cause read is reported, not silently dropped", async () => {
+  const onUnexpected = vi.fn();
+  const f = fixture(onUnexpected);
+  d.list.mockResolvedValue({
+    items: [
+      {
+        sourceReference: id(9),
+        tenantReference: id(1),
+        brandReference: id(2),
+        storeReference: id(3),
+        orderReference: id(10),
+        paymentReference: id(11),
+        diningReference: null,
+        kind: "PaidWithoutFulfillableOrder",
+        severity: "Critical",
+        sourceOwner: "Payment",
+        sourceStatus: "Open",
+        providerState: "Unknown",
+        compensationStatus: "Pending",
+        sourceVersion: 1n,
+        sourceDigest: `sha256:${"a".repeat(64)}`,
+        createdAt: "2026-09-21T00:00:00.000Z",
+        updatedAt: "2026-09-21T00:00:00.000Z",
+        resolutionEvidenceReference: null,
+      },
+    ],
+    next: null,
+  });
+  const failure = Error("ORDER_TERMINATION_READ_FAILED");
+  f.original.query.mockImplementation(async (sql: unknown) => {
+    if (typeof sql === "string" && sql.includes("order_termination_record")) throw failure;
+    return { rows: [], rowCount: 0 };
+  });
+  const view = await f.read("synthetic-cookie");
+  expect(view.items[0]).not.toHaveProperty("cause");
+  expect(onUnexpected).toHaveBeenCalledWith(failure);
+});

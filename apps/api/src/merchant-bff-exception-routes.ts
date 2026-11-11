@@ -70,6 +70,8 @@ export function installMerchantExceptionRoutes(
             dueAt: item.dueAt,
             ownerStatus: item.ownerStatus,
             sourceFinal: item.sourceFinal,
+            // v15 M44: why the linked Order ended, so the case is titled by its cause.
+            ...(item.cause === undefined ? {} : { cause: item.cause }),
             // WP-2423 D3: what a payment reconciliation difference is about (the read's own DTO).
             ...(item.reconciliation === undefined ? {} : { reconciliation: item.reconciliation }),
           })),

@@ -530,6 +530,48 @@ describe("merchant order exception read route", () => {
     expect(result.headers.get("cache-control")).toBe("no-store");
     expect(await result.json()).toMatchObject({ olderResolvedBefore: null });
   });
+  it("v15 M44: sends each case's order cause so the page titles it by why the order ended", async () => {
+    const item = {
+      exceptionReference: "0190fa86-0000-7000-8000-000000000041",
+      orderReference: "0190fa86-0000-7000-8000-000000000042",
+      orderNumber: "21",
+      kind: "PaidWithoutFulfillableOrder" as const,
+      severity: "High" as const,
+      status: "Open" as const,
+      providerState: "Captured" as const,
+      compensationStatus: "Pending" as const,
+      sourceOwner: "Ordering" as const,
+      createdAt: "2026-09-12T15:00:00.000Z",
+      dueAt: "2026-09-12T15:15:00.000Z",
+      ownerStatus: "Unassigned" as const,
+      sourceFinal: false,
+    };
+    const read = vi.fn(async () => ({
+      screenId: "OPS-ORDER-EXCEPTION" as const,
+      projectionName: "merchant_order_exception_v1" as const,
+      storeLabel: "Synthetic Store",
+      businessDate: "2026-09-12",
+      projectedAt: "2026-09-12T15:00:00.000Z",
+      freshnessStatus: "Fresh" as const,
+      olderResolvedBefore: null,
+      items: [
+        { ...item, cause: { kind: "StoreRejected" as const, reasonCode: "SOLD_OUT" } },
+        { ...item, exceptionReference: "0190fa86-0000-7000-8000-000000000043" },
+      ],
+    }));
+    const root = await serve(fakeService(), read as never);
+    const result = await request(root, "/merchant/order-exceptions", {
+      headers: {
+        host: "merchant.invalid",
+        cookie: "__Host-bop-merchant=" + sessionCookie,
+        "sec-fetch-site": "same-origin",
+      },
+    });
+    expect(result.status).toBe(200);
+    const body = (await result.json()) as { items: Record<string, unknown>[] };
+    expect(body.items[0]?.cause).toEqual({ kind: "StoreRejected", reasonCode: "SOLD_OUT" });
+    expect(body.items[1]).not.toHaveProperty("cause");
+  });
   it("WP-2423: passes only an older-resolved cursor through", async () => {
     const cursor = "0190fa86-0000-7000-8000-000000000030";
     const read = vi.fn(async () => ({

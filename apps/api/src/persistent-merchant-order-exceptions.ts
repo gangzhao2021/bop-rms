@@ -151,13 +151,19 @@ export function createPersistentMerchantOrderExceptions(options: {
       orderCauses: async (tx, scope, orderReferences) => {
         if (!matches(await authorize(tx), scope)) return unavailable();
         const causes = new Map<string, MerchantExceptionOrderCause>();
-        for (let start = 0; start < orderReferences.length; start += 100)
-          for (const [order, cause] of await listOrderTerminationCauses(
-            tx,
-            scope,
-            orderReferences.slice(start, start + 100),
-          ))
-            causes.set(order, cause);
+        try {
+          for (let start = 0; start < orderReferences.length; start += 100)
+            for (const [order, cause] of await listOrderTerminationCauses(
+              tx,
+              scope,
+              orderReferences.slice(start, start + 100),
+            ))
+              causes.set(order, cause);
+        } catch (error) {
+          // v15 M44: the cases keep their kind as the title, but the failure is reported, not hidden.
+          options.onUnexpected?.(error);
+          throw error;
+        }
         return causes;
       },
       sources: (scope) =>
