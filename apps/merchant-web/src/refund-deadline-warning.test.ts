@@ -42,6 +42,33 @@ describe("WP-2423 warn before an unaccepted paid order is refunded", () => {
     ).toEqual([]);
   });
 
+  it("live v15 2026-11-10: a staff list shows every paid order waiting, quietly until the last five minutes", () => {
+    const deadlines = [
+      { orderNumber: "29", acceptBy: at(25 * 60) },
+      { orderNumber: "30", acceptBy: at(4 * 60), kitchenStart: true },
+      { orderNumber: "31", acceptBy: at(20 * 60), kitchenStart: true },
+    ];
+    const warnings = refundWarnings(deadlines, now, Number.POSITIVE_INFINITY);
+    expect(warnings.map((warning) => [warning.orderNumber, warning.tier])).toEqual([
+      ["30", "warning"],
+      ["31", "waiting"],
+      ["29", "waiting"],
+    ]);
+    expect(warnings[2]?.text).toBe(
+      "Order 29 is paid and waiting to be accepted. It will be refunded automatically in 25 min unless someone accepts it.",
+    );
+    expect(warnings[1]?.text).toBe(
+      "Order 31 is paid and waiting for the kitchen. It will be refunded automatically in 20 min unless the kitchen starts it.",
+    );
+    // Said once, never chimed; the chime still comes at 2 minutes and 30 seconds.
+    const due = refundAlertsDue(warnings.slice(1), new Set());
+    expect(due.chime).toBe(false);
+    expect(due.announce).toContain("Order 29 is paid and waiting to be accepted.");
+    // Everywhere else nothing changes.
+    expect(refundWarnings(deadlines, now).map((warning) => warning.orderNumber)).toEqual(["30"]);
+    expect(findInternalText(warnings.map((warning) => warning.text))).toEqual([]);
+  });
+
   it("lists only orders in their last five minutes, soonest first", () => {
     const warnings = refundWarnings(
       [

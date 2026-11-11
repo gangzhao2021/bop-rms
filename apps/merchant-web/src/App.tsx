@@ -624,6 +624,7 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
   // WP-2423 M61: on a registered tablet's staff list the warning is always there to re-check the
   // Store's waiting paid orders (a new one placed after everyone left the tablet included); a
   // browser that is not a registered tablet stops at the first answer and shows nothing new.
+  const [staffListTimeZone, setStaffListTimeZone] = useState<string | null>(null);
   const remembered = useMemo(() => {
     if (
       demo !== null ||
@@ -2327,7 +2328,10 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
           }
         />
         {/* WP-2423 (design "A"): staff switch to themselves with their PIN; no sign-in needed. */}
-        <Route path="/operations/switch-staff" element={<StaffSwitchPage />} />
+        <Route
+          path="/operations/switch-staff"
+          element={<StaffSwitchPage onTimeZone={setStaffListTimeZone} />}
+        />
         {/* WP-2423 DEC-COGNITO-STORE-STAFF: staff sign in with their own account; no sign-in needed. */}
         <Route path="/operations/sign-in" element={<StaffSignInPage />} />
         {/* The kitchen display sign-in comes back here; the server started a kitchen display. */}
@@ -2423,8 +2427,14 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
             canAccept={remembered.canAccept}
             initial={remembered}
             {...(tabletRecheck === undefined ? {} : { recheck: tabletRecheck })}
-            timeZone={remembered.timeZone ?? undefined}
+            // A tablet nobody signed in to in this tab knows the Store's time zone from its list.
+            timeZone={remembered.timeZone ?? staffListTimeZone ?? undefined}
             remember
+            // Live v15 2026-11-10: nobody signed in at a shared tablet sees Orders, so its staff
+            // list shows every paid order waiting from the start, not only near the refund.
+            {...(pathname === "/operations/switch-staff"
+              ? { leadMs: Number.POSITIVE_INFINITY }
+              : {})}
           />
         ) : null}
         {/* AGENTS.md "Warn before timeouts": ordering's last day, for whoever works this screen. */}

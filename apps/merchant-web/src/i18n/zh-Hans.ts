@@ -2915,6 +2915,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Order {orderNumber} paid": "订单 {orderNumber} 已付款",
   "Order {orderNumber} was paid on the store's card machine. Refund {amount} to the customer's card on the machine first, then record it here.":
     "订单 {orderNumber} 是在门店刷卡机上付款的。请先在刷卡机上向顾客的卡退回 {amount}，再在此记录。",
+  "Order {orderNumber} is paid and waiting for the kitchen. It will be refunded automatically {when} unless the kitchen starts it.":
+    "订单 {orderNumber} 已付款，等待后厨开始制作。若后厨未开始制作，将于{when}自动退款。",
+  "Order {orderNumber} is paid and waiting to be accepted. It will be refunded automatically {when} unless someone accepts it.":
+    "订单 {orderNumber} 已付款，等待接单。若无人接单，将于{when}自动退款。",
   "Order {orderNumber} will be refunded automatically {when} unless someone accepts it.":
     "订单 {orderNumber} 若无人接单，将于{when}自动退款。",
   "Order {orderNumber} · {amountMinor}": "订单 {orderNumber} · {amountMinor}",
@@ -8502,6 +8506,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Last checked at {time}, before this screen signed out.":
     "最后查看时间 {time}，是在这个屏幕退出登录之前。",
   "Orders about to be refunded": "即将自动退款的订单",
+  "Paid orders waiting to be accepted": "已付款、等待接单的订单",
   "Making it by hand on Orders": "去订单页点“正在手工做”",
   "Accepted automatically · sent {minutes} min ago": "已自动接单 · {minutes} 分钟前送后厨",
   "Accepted automatically": "已自动接单",

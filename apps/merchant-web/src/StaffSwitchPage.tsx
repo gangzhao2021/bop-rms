@@ -300,9 +300,20 @@ export function StaffSwitchView({
   );
 }
 
-export function StaffSwitchPage({ client }: { readonly client?: StaffPinClient }) {
+export function StaffSwitchPage({
+  client,
+  onTimeZone,
+}: {
+  readonly client?: StaffPinClient;
+  /** The Store's time zone once the list is read (the refund countdown above it uses it). */
+  readonly onTimeZone?: (timeZone: string) => void;
+}) {
   const source = useMemo(() => client ?? createStaffPinClient(), [client]);
   const [load, setLoad] = useState<SwitchLoad>({ kind: "Loading" });
+  const readyZone = load.kind === "Ready" ? load.timeZone : null;
+  useEffect(() => {
+    if (readyZone !== null) onTimeZone?.(readyZone);
+  }, [onTimeZone, readyZone]);
   const [person, setPerson] = useState<SwitchStaffChoice | null>(null);
   // The digits typed so far. Only their count is ever rendered.
   const [pin, setPin] = useState("");

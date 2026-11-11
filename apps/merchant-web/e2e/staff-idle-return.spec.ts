@@ -196,6 +196,35 @@ test("@production an unused shared tablet returns to the staff list, which still
   }
 });
 
+for (const width of [390, 1024, 1440])
+  test(`@production the staff list shows a paid order waiting long before its refund at ${width}`, async ({
+    page,
+  }) => {
+    // Live v15 2026-11-10: order 29 was paid with 30 minutes to accept, and the tablet's staff
+    // list said nothing for 25 of them. Nobody signed in there sees Orders.
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await page.clock.install({ time: T0 });
+    const state = await tablet(page);
+    state.waiting["29"] = new Date(T0 + 28 * minute).toISOString();
+    await page.goto("/operations/switch-staff");
+    await expect(page.getByRole("button", { name: "Ana Lopez" })).toBeVisible();
+    const waiting = page.getByRole("region", { name: "Paid orders waiting to be accepted" });
+    await expect(waiting).toContainText(
+      "Order 29 is paid and waiting to be accepted. It will be refunded automatically in 28 min unless someone accepts it.",
+    );
+    await expect(waiting).toContainText("Sign in to accept it.");
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.screenshot({ path: `test-results/staff-list-waiting-${width}.png` });
+    // In its last five minutes it turns into the usual countdown.
+    await advance(page, 24 * minute);
+    await expect(page.getByRole("region", { name: "Orders about to be refunded" })).toContainText(
+      "Order 29 will be refunded automatically in 4 min unless someone accepts it.",
+    );
+    await expectNoInternalText(page);
+  });
+
 test("@production a return that cannot reach the server never lets Back resume the previous person", async ({
   page,
 }) => {

@@ -20,7 +20,11 @@ export interface RefundDeadline {
   readonly notReached?: boolean;
 }
 
-export type RefundWarningTier = "warning" | "urgent" | "final";
+/**
+ * "waiting": more than five minutes left, shown only where nobody would otherwise see the order
+ * (a shared tablet's staff list); quiet, no chime.
+ */
+export type RefundWarningTier = "waiting" | "warning" | "urgent" | "final";
 
 export interface RefundWarning {
   readonly orderNumber: string;
@@ -38,9 +42,19 @@ export const REFUND_WARNING_LEAD_MS = 5 * 60_000;
 export const REFUND_URGENT_MS = 2 * 60_000;
 export const REFUND_FINAL_MS = 30_000;
 
-export function refundWarningTier(leftMs: number): RefundWarningTier | null {
-  if (leftMs <= 0 || leftMs > REFUND_WARNING_LEAD_MS) return null;
-  return leftMs <= REFUND_FINAL_MS ? "final" : leftMs <= REFUND_URGENT_MS ? "urgent" : "warning";
+export function refundWarningTier(
+  leftMs: number,
+  /** How long before the refund an order is shown at all (the staff list: the whole window). */
+  leadMs = REFUND_WARNING_LEAD_MS,
+): RefundWarningTier | null {
+  if (leftMs <= 0 || leftMs > Math.max(leadMs, REFUND_WARNING_LEAD_MS)) return null;
+  return leftMs <= REFUND_FINAL_MS
+    ? "final"
+    : leftMs <= REFUND_URGENT_MS
+      ? "urgent"
+      : leftMs <= REFUND_WARNING_LEAD_MS
+        ? "warning"
+        : "waiting";
 }
 
 /** Plain staff wording, e.g. "Order 9 will be refunded automatically in 2 min unless someone accepts it." */
@@ -49,11 +63,23 @@ export function refundWarningText(
   leftMs: number,
   kitchenStart = false,
   notReached = false,
+  /** Long before the refund (the staff list): says first that the order is paid and waiting. */
+  waiting = false,
 ): string {
   const when =
     leftMs <= 60_000
       ? t("in less than a minute")
       : t("in {value} min", { value: Math.ceil(leftMs / 60_000) });
+  if (waiting && !notReached)
+    return kitchenStart
+      ? t(
+          "Order {orderNumber} is paid and waiting for the kitchen. It will be refunded automatically {when} unless the kitchen starts it.",
+          { orderNumber, when },
+        )
+      : t(
+          "Order {orderNumber} is paid and waiting to be accepted. It will be refunded automatically {when} unless someone accepts it.",
+          { orderNumber, when },
+        );
   if (notReached)
     return t(
       "Order {orderNumber} did not reach the kitchen. It will be refunded automatically {when} unless someone taps Making it by hand on Orders.",
@@ -101,15 +127,20 @@ export function refundWarningUnsureText(orderNumber: string, leftMs: number): st
   );
 }
 
-/** Orders inside their last five minutes, soonest first. */
+/**
+ * Orders inside their last five minutes, soonest first. `leadMs` widens that (live v15
+ * 2026-11-10: a shared tablet's staff list shows every paid order waiting, since nobody signed in
+ * there sees Orders, and the order would otherwise appear only five minutes before its refund).
+ */
 export function refundWarnings(
   deadlines: readonly RefundDeadline[],
   now: number,
+  leadMs = REFUND_WARNING_LEAD_MS,
 ): readonly RefundWarning[] {
   return deadlines
     .flatMap((deadline) => {
       const leftMs = Date.parse(deadline.acceptBy) - now;
-      const tier = Number.isFinite(leftMs) ? refundWarningTier(leftMs) : null;
+      const tier = Number.isFinite(leftMs) ? refundWarningTier(leftMs, leadMs) : null;
       return tier === null
         ? []
         : [
@@ -125,6 +156,7 @@ export function refundWarnings(
                 leftMs,
                 deadline.kitchenStart === true,
                 deadline.notReached === true,
+                tier === "waiting",
               ),
             },
           ];
@@ -149,7 +181,7 @@ export function refundAlertsDue(
   );
   return {
     keys: due.map((warning) => `${warning.orderNumber}|${warning.acceptBy}|${warning.tier}`),
-    chime: due.some((warning) => warning.tier !== "warning"),
+    chime: due.some((warning) => warning.tier === "urgent" || warning.tier === "final"),
     announce: due.length === 0 ? null : due.map((warning) => warning.text).join(" "),
   };
 }

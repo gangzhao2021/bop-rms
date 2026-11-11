@@ -129,6 +129,7 @@ export function RefundDeadlineWatch({
   timeZone,
   remember = false,
   onDeadlines,
+  leadMs,
 }: {
   /** The signed-in read; never used while `signedOut`. */
   readonly read: ((signal: AbortSignal) => Promise<readonly RefundDeadline[] | null>) | null;
@@ -158,6 +159,11 @@ export function RefundDeadlineWatch({
   readonly remember?: boolean;
   /** Each successful signed-in read (for the Session keep-alive while orders wait). */
   readonly onDeadlines?: (deadlines: readonly RefundDeadline[]) => void;
+  /**
+   * Live v15 2026-11-10: how long before its refund a paid order shows here (default: the last
+   * five minutes). A shared tablet's staff list shows every paid order waiting.
+   */
+  readonly leadMs?: number;
 }) {
   const [deadlines, setDeadlines] = useState<readonly RefundDeadline[]>(
     () => initial?.deadlines ?? [],
@@ -273,7 +279,7 @@ export function RefundDeadlineWatch({
   // filters, Counter order categories, Tables details) sit below it through this height.
   // Stacked with the paid order alarm under it; the page's sticky parts sit below both.
   const pinWarning = useMemo(() => pinnedHeightRef("refund"), []);
-  const warnings = refundWarnings(deadlines, now);
+  const warnings = refundWarnings(deadlines, now, leadMs);
   // Out of date without a sign-in: no sound or announcement for an order that may be handled.
   const unsure = refundCountdownUnsure(signedOut, checkedAt, now);
   useEffect(() => {
@@ -311,7 +317,11 @@ export function RefundDeadlineWatch({
       className="refund-deadline-warning"
       data-tier={unsure ? "unsure" : warnings[0]?.tier}
       data-signed-out={signedOut ? "true" : undefined}
-      aria-label={t("Orders about to be refunded")}
+      aria-label={
+        warnings[0]?.tier === "waiting"
+          ? t("Paid orders waiting to be accepted")
+          : t("Orders about to be refunded")
+      }
     >
       {/* Heard once per new step (5 min, 2 min, 30 s); the countdown itself stays quiet. */}
       <p className="visually-hidden" role="alert">
