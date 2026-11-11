@@ -352,67 +352,81 @@ export function createMerchantPaperReentryCandidates(options: {
       return fail("COUNTER_CANCEL_INPUT_INVALID");
     }
     try {
-      return await options.persistence.transactions.run(async (transaction) => {
-        const current = await resolveScope(
-          transaction,
-          input.sessionCookie,
-          staffOrderCancellationPermission,
-        ).catch(onlyRefusal(() => fail("COUNTER_CANCEL_PERMISSION_DENIED")));
-        const allowed = async () => (await current.allowed()) === true;
-        if (!(await allowed())) return fail("COUNTER_CANCEL_PERMISSION_DENIED");
-        const tx = transaction as unknown as ConsumerTransaction;
-        const selected = {
-          tenantReference: String(current.selected.tenantReference),
-          brandReference: String(current.context.brand.brandReference),
-          storeReference: String(current.store.storeReference),
-        };
-        await options.installContext(tx, selected);
-        const paper = await loadCounterOrderBatch(tx, selected, orderReference);
-        if (paper === null || !paper.recordedAfterOutage || paper.sale === null)
-          return fail("COUNTER_CANCEL_NOT_FOUND");
-        const sale = paper.sale;
-        const listed = await listPaperReentryCandidates(tx, selected, orderReference);
-        const references = new Set(listed.map((candidate) => candidate.orderReference));
-        // Whether each one's payment is recorded is Payment's fact.
-        const paid = await createPostgresCardMachinePaymentStore({
-          scope: selected,
-          authorize: async (_t, value) => references.has(value.orderReference) && (await allowed()),
-        }).listByBatches(
-          tx,
-          listed.map((candidate) => ({
-            orderReference: candidate.orderReference,
-            orderBatchReference: candidate.orderBatchReference,
-          })),
-        );
-        if (!(await allowed())) return fail("COUNTER_CANCEL_PERMISSION_DENIED");
-        const candidates = listed.flatMap((candidate) => {
-          const payment = paid.get(candidate.orderBatchReference);
-          if (
-            payment === undefined ||
-            candidate.sale === null ||
-            candidate.sale.currencyCode !== sale.currencyCode
-          )
-            return [];
-          return [
-            Object.freeze({
-              orderReference: candidate.orderReference,
-              orderNumber: candidate.orderNumber,
-              submittedAt: candidate.submittedAt,
-              saleMinor: candidate.sale.amountMinor.toString(),
-              paidMinor: cardMachinePaymentTakenMinor(payment).toString(),
-              coversSale: candidate.sale.amountMinor >= sale.amountMinor,
-            }),
-          ];
-        });
-        return Object.freeze({
-          paperOrder: Object.freeze({
-            orderNumber: paper.orderNumber,
-            saleMinor: sale.amountMinor.toString(),
-            currencyCode: sale.currencyCode,
-          }),
-          candidates: Object.freeze(candidates),
-        });
-      });
+      return await options.persistence.transactions.run((transaction) =>
+        withMerchantTransactionAuthorization(
+          {
+            transaction,
+            resolve: async () => {
+              const current = await resolveScope(
+                transaction,
+                input.sessionCookie,
+                staffOrderCancellationPermission,
+              ).catch(onlyRefusal(() => fail("COUNTER_CANCEL_PERMISSION_DENIED")));
+              if ((await current.allowed()) !== true)
+                return fail("COUNTER_CANCEL_PERMISSION_DENIED");
+              return current;
+            },
+            recheck: async (current) => (await current.allowed()) === true,
+            denied: () => fail("COUNTER_CANCEL_PERMISSION_DENIED"),
+          },
+          async (authority) => {
+            const current = authority.scope;
+            const allowed = () => authority.guard();
+            const tx = transaction as unknown as ConsumerTransaction;
+            const selected = {
+              tenantReference: String(current.selected.tenantReference),
+              brandReference: String(current.context.brand.brandReference),
+              storeReference: String(current.store.storeReference),
+            };
+            await options.installContext(tx, selected);
+            const paper = await loadCounterOrderBatch(tx, selected, orderReference);
+            if (paper === null || !paper.recordedAfterOutage || paper.sale === null)
+              return fail("COUNTER_CANCEL_NOT_FOUND");
+            const sale = paper.sale;
+            const listed = await listPaperReentryCandidates(tx, selected, orderReference);
+            const references = new Set(listed.map((candidate) => candidate.orderReference));
+            // Whether each one's payment is recorded is Payment's fact.
+            const paid = await createPostgresCardMachinePaymentStore({
+              scope: selected,
+              authorize: async (_t, value) =>
+                references.has(value.orderReference) && (await allowed()),
+            }).listByBatches(
+              tx,
+              listed.map((candidate) => ({
+                orderReference: candidate.orderReference,
+                orderBatchReference: candidate.orderBatchReference,
+              })),
+            );
+            const candidates = listed.flatMap((candidate) => {
+              const payment = paid.get(candidate.orderBatchReference);
+              if (
+                payment === undefined ||
+                candidate.sale === null ||
+                candidate.sale.currencyCode !== sale.currencyCode
+              )
+                return [];
+              return [
+                Object.freeze({
+                  orderReference: candidate.orderReference,
+                  orderNumber: candidate.orderNumber,
+                  submittedAt: candidate.submittedAt,
+                  saleMinor: candidate.sale.amountMinor.toString(),
+                  paidMinor: cardMachinePaymentTakenMinor(payment).toString(),
+                  coversSale: candidate.sale.amountMinor >= sale.amountMinor,
+                }),
+              ];
+            });
+            return Object.freeze({
+              paperOrder: Object.freeze({
+                orderNumber: paper.orderNumber,
+                saleMinor: sale.amountMinor.toString(),
+                currencyCode: sale.currencyCode,
+              }),
+              candidates: Object.freeze(candidates),
+            });
+          },
+        ),
+      );
     } catch (error) {
       if (error instanceof CounterCancellationError) throw error;
       return keepingCause(() => fail("COUNTER_CANCEL_UNAVAILABLE"))(error);
