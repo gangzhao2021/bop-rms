@@ -31,8 +31,11 @@ export function CashTenderFields({
   received,
   onReceived,
   disabled,
+  showDue = true,
 }: {
   readonly idPrefix: string;
+  /** Whether to say the cash total here (false when the page already shows it). */
+  readonly showDue?: boolean;
   /** What the order comes to (tax and tip included), before the cash rounding. */
   readonly dueMinor: bigint;
   readonly received: string;
@@ -42,9 +45,11 @@ export function CashTenderFields({
   const tender = cashTender(dueMinor, received);
   return (
     <div className="cash-tender">
-      <p className="cash-tender__due">
-        {t("Cash total {amount} (rounded to 5 cents)", { amount: cad(tender.cashDueMinor) })}
-      </p>
+      {showDue ? (
+        <p className="cash-tender__due">
+          {t("Cash total {amount} (rounded to 5 cents)", { amount: cad(tender.cashDueMinor) })}
+        </p>
+      ) : null}
       <label>
         {t("Cash received")}
         <input

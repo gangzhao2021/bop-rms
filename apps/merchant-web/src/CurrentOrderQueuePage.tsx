@@ -1916,7 +1916,9 @@ function OrderPhase({
           ? t("Not collected")
           : order.unfulfillable !== null
             ? cardMachineOwed(order) !== null
-              ? t("Expired · refund on card machine")
+              ? order.counter?.paidOnCardMachine?.cash != null
+                ? t("Expired · give back cash")
+                : t("Expired · refund on card machine")
               : t("Expired · refunded")
             : orderPhaseLabel(order)}
     </span>
@@ -2073,7 +2075,13 @@ export function orderAmountNote(
   const machine =
     order.counter?.paidOnCardMachine != null ||
     order.batches.some((batch) => batch.staffRound?.paidOnCardMachine != null);
-  const parts = [machine ? t("Card machine") : null, refund].filter((part) => part !== null);
+  // WP-2423 M52: a counter order paid in cash says so (staff then give back cash, not a card refund).
+  const cash =
+    order.counter?.paidOnCardMachine?.cash != null &&
+    !order.batches.some((batch) => batch.staffRound?.paidOnCardMachine != null);
+  const parts = [machine ? (cash ? t("Cash") : t("Card machine")) : null, refund].filter(
+    (part) => part !== null,
+  );
   return parts.length === 0 ? null : parts.join(" · ");
 }
 

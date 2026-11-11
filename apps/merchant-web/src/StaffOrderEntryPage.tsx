@@ -1423,7 +1423,7 @@ export function StaffOrderEntryPage({
                   store: storeLabel,
                 },
               )
-          : t("{store} · Pickup · paid on the store's card machine", { store: storeLabel })
+          : t("{store} · Pickup · paid at the counter, card machine or cash", { store: storeLabel })
       }
       className="counter-order"
     >
@@ -1863,9 +1863,21 @@ export function StaffOrderEntryPage({
                           ? t(
                               "Sent. This paper order was paid during the outage: don't charge again, record it below.",
                             )
-                          : t("Sent. Charge {totalMinor} with tax and tip on the card machine.", {
-                              totalMinor: cad(placed.totalMinor),
-                            })
+                          : counterCash
+                            ? t(
+                                "Sent. Take {amount} in cash with tax and tip (rounded to 5 cents).",
+                                {
+                                  amount: cad(
+                                    cashTender(
+                                      BigInt(placed.totalMinor),
+                                      "",
+                                    ).cashDueMinor.toString(),
+                                  ),
+                                },
+                              )
+                            : t("Sent. Charge {totalMinor} with tax and tip on the card machine.", {
+                                totalMinor: cad(placed.totalMinor),
+                              })
                     : tablePaysLater
                       ? t(
                           "About {value} before tax. It goes on the table's bill; the table pays once at the end.",
@@ -2125,12 +2137,24 @@ export function StaffOrderEntryPage({
                 <dt>{t("Tip")}</dt>
                 <dd>{cad(placed.tipMinor)}</dd>
               </div>
-              <div>
-                <dt>{t("To charge")}</dt>
-                <dd>
-                  <strong>{cad(placed.totalMinor)}</strong>
-                </dd>
-              </div>
+              {counterCash ? (
+                // WP-2423 M52: cash is rounded to 5 cents; the order's amount stays as above.
+                <div>
+                  <dt>{t("Cash total (rounded to 5 cents)")}</dt>
+                  <dd>
+                    <strong>
+                      {cad(cashTender(BigInt(placed.totalMinor), "").cashDueMinor.toString())}
+                    </strong>
+                  </dd>
+                </div>
+              ) : (
+                <div>
+                  <dt>{t("To charge")}</dt>
+                  <dd>
+                    <strong>{cad(placed.totalMinor)}</strong>
+                  </dd>
+                </div>
+              )}
               {changeDue !== null && (phase === "Paid" || phase === "Accepted") ? (
                 <div>
                   <dt>{t("Change to give")}</dt>
@@ -2199,6 +2223,7 @@ export function StaffOrderEntryPage({
                   {counterCash ? (
                     <CashTenderFields
                       idPrefix="counter-cash"
+                      showDue={false}
                       dueMinor={BigInt(placed.totalMinor)}
                       received={received}
                       onReceived={(value) => {

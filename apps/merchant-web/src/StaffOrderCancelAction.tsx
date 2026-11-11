@@ -122,6 +122,8 @@ export function staffCancellationSummary(
 ) {
   if (batch.staffCancellation === null) return null;
   const machine = batch.staffCancellation.refundMethod === "CardMachine";
+  // WP-2423 M52: a counter order paid in cash is given back in cash.
+  const cash = machine && order.counter?.paidOnCardMachine?.cash != null;
   // WP-2423 M16: cancelled after earlier refunds covered the payment: refunded only once those
   // earlier refunds are confirmed too.
   const coveredInFlight =
@@ -134,10 +136,14 @@ export function staffCancellationSummary(
       : t("Round {sequence} cancelled", { sequence: batch.sequence })) +
     (batch.staffCancellation.refundStatus === "Refunded" && !coveredInFlight
       ? machine
-        ? t(" · refunded on card machine")
+        ? cash
+          ? t(" · cash given back")
+          : t(" · refunded on card machine")
         : t(" · refunded")
       : machine
-        ? t(" · refund on card machine")
+        ? cash
+          ? t(" · give back cash")
+          : t(" · refund on card machine")
         : t(" · refund pending"))
   );
 }

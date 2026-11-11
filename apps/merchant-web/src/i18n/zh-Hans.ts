@@ -9312,4 +9312,12 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "断网期间收的现金已补录并接单。如果已经做好并交给客人，请在“厨房”标为已做好，在“取餐”标为已交付。",
   "Cash recorded. Give {change} change. Sent to the kitchen.":
     "现金已记录。请找零 {change}。已送到厨房。",
+  " · cash given back": " · 现金已退还",
+  " · give back cash": " · 需退还现金",
+  "Expired · give back cash": "已过期 · 需退还现金",
+  "{store} · Pickup · paid at the counter, card machine or cash":
+    "{store} · 自取 · 在柜台付款，刷卡机或现金",
+  "Sent. Take {amount} in cash with tax and tip (rounded to 5 cents).":
+    "已送出。请收现金 {amount}，含税和小费（按 5 分取整）。",
+  "Cash total (rounded to 5 cents)": "现金合计（按 5 分取整）",
 });
