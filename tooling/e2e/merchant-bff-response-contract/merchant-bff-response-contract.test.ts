@@ -754,6 +754,8 @@ const kitchenItem = (n: number, status: "Queued" | "Completed"): KitchenList["it
   chase: { count: 1, lastChasedAt: at(20) },
   takenOnPaper: true,
   workItemCreatedAt: at(16),
+  // merchant-outage-recovery M120: when the round was sent (the wait counts from it).
+  placedAt: at(15),
   acceptedAt: at(16),
   orderItemReadyAt: status === "Completed" ? at(25) : null,
   ticketAggregateVersion: "3",
