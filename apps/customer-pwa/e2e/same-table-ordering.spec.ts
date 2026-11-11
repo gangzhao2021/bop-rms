@@ -87,6 +87,9 @@ interface Table {
     sentByThisPhone: boolean;
     lines: number[];
     paymentState?: "AwaitingPayment" | "Paid" | "PayLater" | "Cancelled" | "Returned";
+    /** v15 batch-5: staff entered it; whether this phone's dishes are in it. */
+    enteredByStaff?: boolean;
+    withThisPhoneDishes?: boolean;
   }[];
   /** v15 batch 7: a phone's choice of what it pays for this round (absent: not told). */
   payer?: {
@@ -97,6 +100,8 @@ interface Table {
   } | null;
   /** v15 batch 7: dishes staff took out lately (the cart's own record). */
   staffRemoved?: { removedAt: string; quantity: number; names: Record<string, string> }[];
+  /** v15 batch-5: the table page's rounds (empty by default). */
+  sessionRounds?: unknown[];
 }
 interface Seen {
   quotes: number;
@@ -164,6 +169,12 @@ async function stubTable(page: Page, table: Table) {
             sentByThisPhone: round.sentByThisPhone,
             cartItemReferences: round.lines.map(id),
             ...(round.paymentState === undefined ? {} : { paymentState: round.paymentState }),
+            ...(round.enteredByStaff === undefined
+              ? {}
+              : {
+                  enteredByStaff: round.enteredByStaff,
+                  withThisPhoneDishes: round.withThisPhoneDishes ?? true,
+                }),
           })),
           ...(table.payer === undefined
             ? {}
@@ -244,11 +255,25 @@ async function stubTable(page: Page, table: Table) {
                 schemaVersion: 1,
                 session: {
                   tableLabel: "12",
-                  orderNumber: null,
+                  orderNumber: table.sessionRounds === undefined ? null : "1042",
                   checkedAt: new Date().toISOString(),
                   paymentTiming: "PayFirst",
-                  rounds: [],
-                  summary: null,
+                  rounds: table.sessionRounds ?? [],
+                  summary:
+                    table.sessionRounds === undefined
+                      ? null
+                      : {
+                          paid: { amountMinor: "0", currencyCode: "CAD" },
+                          refunded: { amountMinor: "0", currencyCode: "CAD" },
+                          refundPending: { amountMinor: "0", currencyCode: "CAD" },
+                          due: { amountMinor: "1229", currencyCode: "CAD" },
+                          // Only what is owed: the stopped rounds are not on it.
+                          ordered: {
+                            subtotal: { amountMinor: "1088", currencyCode: "CAD" },
+                            tax: { amountMinor: "141", currencyCode: "CAD" },
+                            total: { amountMinor: "1229", currencyCode: "CAD" },
+                          },
+                        },
                 },
               }
             : path === "table-payment"
@@ -575,3 +600,114 @@ for (const screen of [
     });
   });
 }
+
+// v15 batch-5 (shared-table-staff-round): staff sent a round from the table's cart and took this
+// phone's only dish out. The phone is told which dish staff took out and that staff take that
+// round's payment on the card machine; it is never told someone is paying with its dishes in it.
+// The table page reads the rounds its payers stopped as not charged, with no tax or total.
+for (const width of [390, 1024, 1440])
+  test(`@production v15 batch-5: a staff round and a stopped round read plainly at ${width}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    const table: Table = {
+      version: 7,
+      items: [],
+      staffRemoved: [
+        {
+          removedAt: new Date(Date.now() - 2000).toISOString(),
+          quantity: 1,
+          names: { "en-CA": "Steamed rice (TEST)" },
+        },
+      ],
+      rounds: [
+        {
+          roundNumber: 1,
+          sentByThisPhone: false,
+          lines: [2],
+          paymentState: "AwaitingPayment",
+          enteredByStaff: true,
+          withThisPhoneDishes: false,
+        },
+      ],
+      sessionRounds: [2, 3].map((roundNumber) => ({
+        roundNumber,
+        orderedBy: "You",
+        submittedAt: new Date(Date.now() - 60_000).toISOString(),
+        status: "NotPaidCancelled",
+        payment: "NotCharged",
+        cancelsAt: null,
+        storeCancellationReason: null,
+        ...(roundNumber === 2 ? { stoppedBeforePaying: true } : {}),
+        items: [
+          {
+            displayName: "Synthetic noodles",
+            quantity: 1,
+            servedQuantity: 0,
+            cancelled: false,
+            lineTotal: { amountMinor: "1331", currencyCode: "CAD" },
+            priceBeforeTax: { amountMinor: "1178", currencyCode: "CAD" },
+          },
+        ],
+        subtotal: { amountMinor: "1178", currencyCode: "CAD" },
+        tax: { amountMinor: "153", currencyCode: "CAD" },
+        itemsTotal: { amountMinor: "1331", currencyCode: "CAD" },
+      })),
+    };
+    await stubTable(page, table);
+    // The table page lists rounds 1..n: round 1 here is the staff round.
+    table.sessionRounds = [
+      {
+        roundNumber: 1,
+        orderedBy: "Staff",
+        submittedAt: new Date(Date.now() - 30_000).toISOString(),
+        status: "AwaitingPayment",
+        payment: "Awaiting",
+        cancelsAt: new Date(Date.now() + 25 * 60_000).toISOString(),
+        storeCancellationReason: null,
+        items: [
+          {
+            displayName: "Synthetic har gow",
+            quantity: 1,
+            servedQuantity: 0,
+            cancelled: false,
+            lineTotal: { amountMinor: "1229", currencyCode: "CAD" },
+            priceBeforeTax: { amountMinor: "1088", currencyCode: "CAD" },
+          },
+        ],
+        subtotal: { amountMinor: "1088", currencyCode: "CAD" },
+        tax: { amountMinor: "141", currencyCode: "CAD" },
+        itemsTotal: { amountMinor: "1229", currencyCode: "CAD" },
+      },
+      ...(table.sessionRounds ?? []),
+    ];
+    await enterTable(page, "/cart");
+    await expect(page.getByText("Staff removed Steamed rice (TEST) from the cart.")).toBeVisible();
+    await expect(
+      page.getByText("Staff are taking payment for round 1 on the card machine."),
+    ).toBeVisible();
+    await expect(page.getByText("Someone at your table is paying", { exact: false })).toHaveCount(
+      0,
+    );
+    await expect(page.getByText("Your dishes are in it", { exact: false })).toHaveCount(0);
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.screenshot({ path: `test-results/staff-round-cart-${width}.png`, fullPage: true });
+    await page.getByRole("link", { name: "See your table" }).click();
+    await expect(
+      page.getByText(
+        "This round was stopped before anyone paid, and its dishes went back to your table’s cart. Nobody was charged for it.",
+      ),
+    ).toBeVisible();
+    const main = page.locator("main");
+    await expect(main).not.toContainText("$1.53");
+    await expect(main).not.toContainText("$13.31");
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    expect(await page.locator("body").innerText()).not.toMatch(
+      /[0-9a-f]{8}-[0-9a-f]{4}-7|NotPaidCancelled|AwaitingPayment|stoppedBeforePaying/u,
+    );
+    await page.screenshot({ path: `test-results/staff-round-table-${width}.png`, fullPage: true });
+  });
