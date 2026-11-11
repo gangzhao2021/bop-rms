@@ -937,6 +937,60 @@ it("two phones at once: one Session, both joined, no lock wait, and an earlier c
   });
 }, 180_000);
 
+/**
+ * WP-2423 M88 (shared-table-cart-staff-round): a party of four sits down at a table already open
+ * and every phone scans its printed QR at the same moment, each through its own API process (its
+ * own composition, so nothing in memory puts them in turn: only the database and the join's
+ * bounded retry after a lost race). As the restricted pilot API role: all four are Joined, the
+ * table keeps its one Session and gains exactly four guests, and none is refused for the table's
+ * join budget.
+ */
+it("M88: four phones scanning an open table at once from separate API processes all join it", async () => {
+  await withIsolatedDatabase({ caseId: "wp2423_gs_four" }, async (context) => {
+    const { admin, transactions, credentials } = await setup(context);
+    try {
+      await seedTable(admin, 22);
+      await setSwitch(transactions, true);
+      const identity = guests();
+      // The table is open: the first phone started it.
+      const first = composeJoin({ transactions, credentials, identity });
+      assert.equal((await tap(first, identity.scan(95, 22))).status, "Joined");
+      const participants = () =>
+        count(
+          admin,
+          "SELECT count(*)::int AS n FROM rms_dining.dining_participant p JOIN rms_dining.dining_session s USING (session_id) WHERE s.table_id=$1",
+          [id(22)],
+        );
+      assert.equal(await participants(), 1);
+      const phones = [96, 97, 98, 99].map((guest) => ({
+        join: composeJoin({ transactions, credentials, identity }),
+        phone: identity.scan(guest, 22),
+      }));
+      const answers = await Promise.all(phones.map(({ join, phone }) => tap(join, phone)));
+      assert.deepEqual(
+        answers.map((answer) => [answer.status, answer.reason ?? null]),
+        Array.from({ length: 4 }, () => ["Joined", null]),
+      );
+      assert.equal(
+        await count(
+          admin,
+          "SELECT count(*)::int AS n FROM rms_dining.dining_session WHERE table_id=$1",
+          [id(22)],
+        ),
+        1,
+      );
+      assert.equal(await participants(), 5);
+      // Each phone is its own guest at the table (no two answers name the same one).
+      assert.equal(
+        new Set(answers.map((answer) => JSON.stringify(answer.participant ?? answer))).size,
+        4,
+      );
+    } finally {
+      await admin.end();
+    }
+  });
+}, 180_000);
+
 it("budgets: the 4th start at a table and the 41st at a Store in 10 minutes are refused, nothing written", async () => {
   await withIsolatedDatabase({ caseId: "wp2423_gs_budget" }, async (context) => {
     const { admin, transactions, credentials } = await setup(context);
