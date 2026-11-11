@@ -84,6 +84,8 @@ export async function exerciseCounterCardMachinePayment({
   );
   // WP-2423 Q7 slice 2: the staff record of a dine-in round (pilot-acl-additions, api SELECT).
   await admin.query("GRANT SELECT ON rms_ordering.staff_dining_round_entry TO " + role);
+  // v15 batch 7 (merged tables' rounding on the order read; pilot-acl-additions, api SELECT).
+  await admin.query("GRANT SELECT ON rms_ordering.order_merge TO " + role);
   // WP-2423 M160: a back-entered paid-at time is checked against when the Store's records begin
   // (pilot api SELECT grants).
   await admin.query("GRANT USAGE ON SCHEMA rms_store TO " + role);
