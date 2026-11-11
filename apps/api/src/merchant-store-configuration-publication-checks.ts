@@ -58,18 +58,29 @@ export interface StoreConfigurationPublicationFacts {
   } | null;
   /** The Store's go-live check (Live Gate) is approved for the codes this deployment requires. */
   readonly goLive: boolean;
-  /** M109: the Store's current published profile has a phone pickup guests can call (read only
-   * when the configuration starts offering pickup; otherwise not consulted). */
+  /** M109: the Store's current published profile has a phone pickup guests can call (consulted
+   * only when the configuration starts offering pickup). */
   readonly storePhone: boolean;
+  /** M109: the Store has published a configuration made from Store setup before. Until it has,
+   * the pickup in force was installed by the opening tool, not offered by the Owner. */
+  readonly ownerSetupPublished: boolean;
 }
 
-/** M109: the configuration offers pickup and the one in force does not (or there is none). */
+/**
+ * M109: the configuration offers pickup and the one in force does not (or there is none), or it is
+ * the Store's first own setup: the pickup the opening tool installed was never the Owner's choice,
+ * so the first setup from Store setup that offers pickup starts it. An hours-only change (no setup
+ * basis) on that installed configuration does not: a Store already taking pickup orders keeps
+ * changing its hours, and Home asks it for the phone.
+ */
 export const storeConfigurationStartsPickup = (
-  configuration: Pick<StoreConfigurationVersion, "enabledServiceModes">,
+  configuration: Pick<StoreConfigurationVersion, "enabledServiceModes" | "setupBasis">,
   current: Pick<StoreConfigurationVersion, "enabledServiceModes"> | null,
+  ownerSetupPublished: boolean,
 ) =>
   configuration.enabledServiceModes.includes("Pickup") &&
-  !(current?.enabledServiceModes.includes("Pickup") ?? false);
+  (!(current?.enabledServiceModes.includes("Pickup") ?? false) ||
+    (!ownerSetupPublished && configuration.setupBasis !== undefined));
 
 const fixedOrder = (results: Readonly<Record<StoreConfigurationPublicationCheckCode, boolean>>) =>
   Object.freeze(
@@ -141,7 +152,9 @@ export function evaluateStoreConfigurationPublication(input: {
       // their order, so a configuration that starts offering pickup needs the Store's published
       // phone. A Store already offering it keeps it (its Home asks for the phone), so its hours
       // and other changes are not held up.
-      StorePhone: !storeConfigurationStartsPickup(configuration, current) || facts.storePhone,
+      StorePhone:
+        !storeConfigurationStartsPickup(configuration, current, facts.ownerSetupPublished) ||
+        facts.storePhone,
     }),
   });
 }

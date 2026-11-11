@@ -262,130 +262,161 @@ it("M109: the phone cleared first and pickup turned on meanwhile leave pickup of
 
 // The Store setup publication checks as the pilot composes them (tooling reads the phone from the
 // Store's published profile in the caller's transaction, as the pilot API role).
-it("M109: Store setup's check fails a setup that starts offering pickup until the store publishes a phone", async () => {
-  await withAutoAcceptWorld(
-    { caseId: "wp2423_phone_check", orderType: "Pickup" },
-    async (world) => {
-      const { assert, fresh, ownerScope, transactions } = world;
-      const owner = await world.session(
-        ["organization.manage", "organization.store.read", "organization.store.publish"],
-        "01a6aa0a",
-      );
-      const id = (n) => "01902421-1013-7000-8000-" + n.toString(16).padStart(12, "0");
-      const interval = (modes) => ({
-        startLocalTime: "08:00:00",
-        endLocalTime: "20:00:00",
-        endsNextDay: false,
-        serviceModes: modes,
-        orderCutoffSeconds: 0,
-        leadTimeSeconds: 0,
-      });
-      const week = (modes) =>
-        Array.from({ length: 7 }, (_, i) => ({
-          isoWeekday: i + 1,
-          intervals: i === 0 ? [interval(modes)] : [],
-        }));
-      const shared = {
-        brandReference: ownerScope.brandReference,
-        storeReference: ownerScope.storeReference,
-        source: "StoreOverride",
-        brandBaseVersionReference: id(11),
-        defaultLocale: "en-CA",
-        currencyCode: "CAD",
-        timeZone: "America/Toronto",
-        businessDayStartLocalTime: "04:00:00",
-        addressReference: id(12),
-        contactReference: id(13),
-        receiptReference: id(14),
-        taxConfigurationReference: id(15),
-        paymentConfigurationReference: id(16),
-        capacityConfigurationReference: null,
-        exceptions: [],
-        effectiveUntil: null,
-        authoredByReference: id(4),
-        dataClassification: "ConfigurationMetadata",
-      };
-      const at = world.now();
-      // The Store in force is dine-in only (TEST-ONLY synthetic configuration).
-      const live = createStoreConfigurationVersion({
-        ...shared,
-        configurationReference: id(20),
-        configurationVersion: 1,
-        lifecycle: "Published",
-        enabledServiceModes: ["DineIn"],
-        weeklySchedule: week(["DineIn"]),
-        effectiveFrom: "2026-10-01T04:00:00.000Z",
-        supersedesConfigurationReference: null,
-        reasonCode: "STORE_SETUP_MATERIALIZATION",
-        approvedByReference: id(5),
-        approvalEvidenceReference: id(21),
-        publicationReference: id(22),
-        liveGateEvidenceReference: id(23),
-        createdAt: "2026-10-01T04:00:00.000Z",
-        updatedAt: "2026-10-01T04:00:00.000Z",
-      });
-      // The setup adds pickup.
-      const setup = createStoreConfigurationVersion({
-        ...shared,
-        configurationReference: id(30),
-        configurationVersion: 2,
-        lifecycle: "Draft",
-        enabledServiceModes: ["DineIn", "Pickup"],
-        weeklySchedule: week(["DineIn", "Pickup"]),
-        effectiveFrom: at,
-        supersedesConfigurationReference: id(20),
-        reasonCode: "STORE_SETUP_MATERIALIZATION",
-        approvedByReference: null,
-        approvalEvidenceReference: null,
-        publicationReference: null,
-        liveGateEvidenceReference: null,
-        createdAt: at,
-        updatedAt: at,
-      });
-      const operating = {
-        tenantReference: ownerScope.tenantReference,
-        brandReference: ownerScope.brandReference,
-        storeReference: ownerScope.storeReference,
-        requiredLiveGateRequirementCodes: [],
-      };
-      const storePhoneCheck = () =>
-        transactions().run(async (tx) => {
-          await tx.query(
-            "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id',$3,true)",
-            [ownerScope.tenantReference, ownerScope.brandReference, ownerScope.storeReference],
-          );
-          const checks = await storeConfigurationPublicationChecks(operating, tx, {
-            configuration: setup,
-            published: { configuration: live },
-            at: world.now(),
-            authorize: async () => true,
-          });
-          return checks.checks.find((check) => check.code === "StorePhone").outcome;
-        });
-      assert.equal(await storePhoneCheck(), "Fail");
-      const published = await createMerchantStorePublicProfile({
-        persistence: { ...owner.persistence, now: world.now },
-        authentication: owner.authentication,
-      })({
-        sessionCookie: owner.sessionCookie,
-        csrf: owner.csrf,
-        command: {
-          expectedVersion: 0,
-          operationReference: fresh(),
-          details: {
-            storeDisplayNames: { "en-CA": "Synthetic Store" },
-            address: {
-              addressLines: ["1 Synthetic Street"],
-              locality: "Ottawa",
-              regionCode: "ON",
-              postalCode: "K1A 0A1",
+const storePhoneCheckCase = (input) =>
+  withAutoAcceptWorld({ caseId: input.caseId, orderType: "Pickup" }, async (world) => {
+    const { assert, fresh, ownerScope, transactions } = world;
+    const owner = await world.session(
+      ["organization.manage", "organization.store.read", "organization.store.publish"],
+      input.actor,
+    );
+    const id = (n) => "01902421-1013-7000-8000-" + n.toString(16).padStart(12, "0");
+    const interval = (modes) => ({
+      startLocalTime: "08:00:00",
+      endLocalTime: "20:00:00",
+      endsNextDay: false,
+      serviceModes: modes,
+      orderCutoffSeconds: 0,
+      leadTimeSeconds: 0,
+    });
+    const week = (modes) =>
+      Array.from({ length: 7 }, (_, i) => ({
+        isoWeekday: i + 1,
+        intervals: i === 0 ? [interval(modes)] : [],
+      }));
+    const shared = {
+      brandReference: ownerScope.brandReference,
+      storeReference: ownerScope.storeReference,
+      source: "StoreOverride",
+      brandBaseVersionReference: id(11),
+      defaultLocale: "en-CA",
+      currencyCode: "CAD",
+      timeZone: "America/Toronto",
+      businessDayStartLocalTime: "04:00:00",
+      addressReference: id(12),
+      contactReference: id(13),
+      receiptReference: id(14),
+      taxConfigurationReference: id(15),
+      paymentConfigurationReference: id(16),
+      capacityConfigurationReference: null,
+      exceptions: [],
+      effectiveUntil: null,
+      authoredByReference: id(4),
+      dataClassification: "ConfigurationMetadata",
+    };
+    const at = world.now();
+    // The Store in force (TEST-ONLY synthetic configuration).
+    const live = createStoreConfigurationVersion({
+      ...shared,
+      configurationReference: id(20),
+      configurationVersion: 1,
+      lifecycle: "Published",
+      enabledServiceModes: input.liveModes,
+      weeklySchedule: week(input.liveModes),
+      effectiveFrom: "2026-10-01T04:00:00.000Z",
+      supersedesConfigurationReference: null,
+      reasonCode: "STORE_SETUP_MATERIALIZATION",
+      approvedByReference: id(5),
+      approvalEvidenceReference: id(21),
+      publicationReference: id(22),
+      liveGateEvidenceReference: id(23),
+      createdAt: "2026-10-01T04:00:00.000Z",
+      updatedAt: "2026-10-01T04:00:00.000Z",
+    });
+    // The setup offers pickup.
+    const setup = createStoreConfigurationVersion({
+      ...shared,
+      ...(input.fromSetup
+        ? {
+            setupBasis: {
+              profile: "StoreSetupConfigurationBasisV2",
+              tenantReference: ownerScope.tenantReference,
+              setupDraftReference: id(31),
+              sourceRevision: 1,
+              sourceSnapshotDigest: "sha256:" + "a".repeat(64),
+              feeContexts: ["ServiceCharge", "DeliveryFee", "Tip"].map((chargeType) => ({
+                chargeType,
+                state: "Disabled",
+              })),
             },
-            businessPhone: "613-555-0142",
-          },
-        },
+          }
+        : {}),
+      configurationReference: id(30),
+      configurationVersion: 2,
+      lifecycle: "Draft",
+      enabledServiceModes: ["DineIn", "Pickup"],
+      weeklySchedule: week(["DineIn", "Pickup"]),
+      effectiveFrom: at,
+      supersedesConfigurationReference: id(20),
+      reasonCode: "STORE_SETUP_MATERIALIZATION",
+      approvedByReference: null,
+      approvalEvidenceReference: null,
+      publicationReference: null,
+      liveGateEvidenceReference: null,
+      createdAt: at,
+      updatedAt: at,
+    });
+    const operating = {
+      tenantReference: ownerScope.tenantReference,
+      brandReference: ownerScope.brandReference,
+      storeReference: ownerScope.storeReference,
+      requiredLiveGateRequirementCodes: [],
+    };
+    const storePhoneCheck = () =>
+      transactions().run(async (tx) => {
+        await tx.query(
+          "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id',$3,true)",
+          [ownerScope.tenantReference, ownerScope.brandReference, ownerScope.storeReference],
+        );
+        const checks = await storeConfigurationPublicationChecks(operating, tx, {
+          configuration: setup,
+          published: { configuration: live },
+          at: world.now(),
+          authorize: async () => true,
+        });
+        return checks.checks.find((check) => check.code === "StorePhone").outcome;
       });
-      assert.equal(published.current.businessPhone, "+16135550142");
-      assert.equal(await storePhoneCheck(), "Pass");
-    },
-  );
+    assert.equal(await storePhoneCheck(), "Fail");
+    const published = await createMerchantStorePublicProfile({
+      persistence: { ...owner.persistence, now: world.now },
+      authentication: owner.authentication,
+    })({
+      sessionCookie: owner.sessionCookie,
+      csrf: owner.csrf,
+      command: {
+        expectedVersion: 0,
+        operationReference: fresh(),
+        details: {
+          storeDisplayNames: { "en-CA": "Synthetic Store" },
+          address: {
+            addressLines: ["1 Synthetic Street"],
+            locality: "Ottawa",
+            regionCode: "ON",
+            postalCode: "K1A 0A1",
+          },
+          businessPhone: "613-555-0142",
+        },
+      },
+    });
+    assert.equal(published.current.businessPhone, "+16135550142");
+    assert.equal(await storePhoneCheck(), "Pass");
+  });
+
+it("M109: Store setup's check fails a setup that starts offering pickup until the store publishes a phone", async () => {
+  await storePhoneCheckCase({
+    caseId: "wp2423_phone_check",
+    actor: "01a6aa0a",
+    liveModes: ["DineIn"],
+    fromSetup: false,
+  });
+});
+
+// A new Store: the opening tool installed a configuration that offers pickup, and the Owner has
+// published nothing from Store setup yet. Its first setup is where the Owner offers pickup.
+it("M109: a new store's first setup offering pickup fails the check until the store publishes a phone, although the installed configuration offers pickup", async () => {
+  await storePhoneCheckCase({
+    caseId: "wp2423_phone_first",
+    actor: "01a6aa0b",
+    liveModes: ["DineIn", "Pickup"],
+    fromSetup: true,
+  });
 });

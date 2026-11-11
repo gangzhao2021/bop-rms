@@ -10,6 +10,7 @@ import {
   createPostgresAsPublishedStorePublicationProof,
   createPostgresCurrentStorePublicationProof,
   createPostgresStoreBusinessDateSource,
+  hasOwnerPublishedStoreSetup,
   StoreConfigurationAdministrationServiceError,
   StoreConfigurationReferenceUnavailableError,
 } from "../../packages/rms/store/src/index.ts";
@@ -114,9 +115,19 @@ export async function storeConfigurationPublicationChecks(operating, tx, input) 
     { brandReference: operating.brandReference, storeReference: operating.storeReference },
     at,
   );
-  // M109: only a configuration that starts offering pickup needs the Store's published phone.
+  // M109: only a configuration that starts offering pickup needs the Store's published phone. A
+  // Store's first own setup starts it even when the installed configuration already offers pickup
+  // (read only when that is what decides it).
+  const ownerSetupPublished =
+    !configuration.enabledServiceModes.includes("Pickup") ||
+    configuration.setupBasis === undefined ||
+    !published.configuration.enabledServiceModes.includes("Pickup") ||
+    (await hasOwnerPublishedStoreSetup(tx, {
+      brandReference: operating.brandReference,
+      storeReference: operating.storeReference,
+    }));
   const storePhone =
-    storeConfigurationStartsPickup(configuration, published.configuration) &&
+    storeConfigurationStartsPickup(configuration, published.configuration, ownerSetupPublished) &&
     (await readPublishedStoreBusinessPhone(
       tx,
       {
@@ -132,7 +143,7 @@ export async function storeConfigurationPublicationChecks(operating, tx, input) 
     current: published.configuration,
     storeTimeZone: operating.timeZone,
     observedAt: at,
-    facts: { tax, goLive, storePhone },
+    facts: { tax, goLive, storePhone, ownerSetupPublished },
   });
 }
 

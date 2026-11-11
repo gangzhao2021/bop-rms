@@ -95,6 +95,7 @@ const facts: StoreConfigurationPublicationFacts = {
   tax,
   goLive: true,
   storePhone: true,
+  ownerSetupPublished: true,
 };
 const outcome = (value: ReturnType<typeof evaluateStoreConfigurationPublication>) =>
   Object.fromEntries(value.checks.map((c) => [c.code, c.outcome]));
@@ -220,6 +221,31 @@ describe("WP-2423 DEC-STORE-SETUP-PUBLICATION publication checks", () => {
     const checks = evaluate({}, { ...facts, storePhone: false });
     expect(outcome(checks).StorePhone).toBe("Pass");
     expect(storeConfigurationPublicationReady(checks)).toBe(true);
+  });
+  it("M109: a new Store's first own setup offering pickup needs the phone although the installed configuration already offers it", () => {
+    const firstSetup = { ...facts, storePhone: false, ownerSetupPublished: false };
+    const checks = evaluate({}, firstSetup);
+    expect(outcome(checks).StorePhone).toBe("Fail");
+    expect(storeConfigurationPublicationReady(checks)).toBe(false);
+    expect(outcome(evaluate({}, { ...firstSetup, storePhone: true })).StorePhone).toBe("Pass");
+    // An hours-only change (no setup basis) on the installed configuration is not held up.
+    const hoursOnly = evaluateStoreConfigurationPublication({
+      configuration: createStoreConfigurationVersion(v1),
+      current,
+      storeTimeZone: "America/Toronto",
+      observedAt: at,
+      facts: firstSetup,
+    });
+    expect(outcome(hoursOnly).StorePhone).toBe("Pass");
+    // A first setup without pickup does not need it.
+    const dineIn = {
+      enabledServiceModes: ["DineIn"],
+      weeklySchedule: base.weeklySchedule.map((d, i) => ({
+        ...d,
+        intervals: i === 0 ? [interval(["DineIn"])] : [],
+      })),
+    };
+    expect(outcome(evaluate(dineIn, firstSetup)).StorePhone).toBe("Pass");
   });
   it("M109: still reads a V1 list (no StorePhone) saved before, and no other mix", () => {
     const v2 = evaluate();
