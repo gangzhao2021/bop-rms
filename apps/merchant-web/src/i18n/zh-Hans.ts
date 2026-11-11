@@ -8940,6 +8940,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Turn sound on": "打开声音",
   "{orders} could not be accepted here: open it to see why.":
     "{orders} 在这里接不了单，请打开看原因。",
+  "The bill couldn't be read just now. Trying again by itself.": "账单暂时读不到，正在自动重试。",
   "The bill could not be read again; showing the last update. Trying again by itself.":
     "账单暂时无法重新读取，显示的是上次的内容，正在自动重试。",
   "The network dropped, so this may not have gone through. Once you're connected, check whether the change is there before you do it again.":

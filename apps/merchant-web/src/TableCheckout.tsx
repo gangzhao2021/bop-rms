@@ -52,6 +52,12 @@ function outcomeUnknown(error: unknown): boolean {
   );
 }
 
+/**
+ * v15 2026-11-11: the longest one read of the bill may take before it is given up. A busy evening's
+ * merged-table read took 7–8 s; a read still open after this is treated as lost.
+ */
+export const billReadCeilingMs = 25_000;
+
 function errorText(error: unknown): string {
   const code =
     error instanceof TableCheckoutError
@@ -285,6 +291,13 @@ export function TableCheckout({
     }
     const controller = new AbortController();
     billReading.current = true;
+    // A read that never settles (Wi-Fi dropped mid-request, a socket gone silent) has a ceiling:
+    // it is given up, staff are told, and the next 5 s tick reads again.
+    const ceiling = window.setTimeout(() => {
+      controller.abort();
+      billReading.current = false;
+      setReadProblem(t("The bill couldn't be read just now. Trying again by itself."));
+    }, billReadCeilingMs);
     client
       .bill(csrf, sessionReference, controller.signal)
       .then((value) => {
@@ -296,9 +309,11 @@ export function TableCheckout({
         if (!controller.signal.aborted) setReadProblem(errorText(error));
       })
       .finally(() => {
+        window.clearTimeout(ceiling);
         if (!controller.signal.aborted) billReading.current = false;
       });
     return () => {
+      window.clearTimeout(ceiling);
       controller.abort();
       billReading.current = false;
     };

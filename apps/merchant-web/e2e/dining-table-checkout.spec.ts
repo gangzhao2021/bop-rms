@@ -1511,3 +1511,63 @@ for (const width of [390, 1024, 1440])
     ).toBe(true);
     await expectNoInternalText(page);
   });
+
+for (const width of [390, 1024, 1440])
+  test(`@production a bill read that never answers is given up, staff are told, and the next read shows the bill, at ${width}`, async ({
+    page,
+  }) => {
+    // Review of checkout-session-outage: a re-read waits for the one still running, so a read that
+    // never settles (tablet Wi-Fi dropped mid-request) would stop every later re-read.
+    await page.clock.install();
+    await page.setViewportSize({ width, height: 900 });
+    await floor(page, { phase: "Closing", version: 7 });
+    await page.route("**/merchant/dining/table-close-plan", (route) =>
+      route.fulfill({
+        headers,
+        json: {
+          orderReference: id(3),
+          diningSessionReference: id(2),
+          orderVersion: 4,
+          observedAt: "2026-10-15T19:00:00.000Z",
+          rounds: [],
+          closeBlockers: [],
+          totals: { onlineMinor: "0", cardMachineMinor: "0" },
+        },
+      }),
+    );
+    let reads = 0;
+    await page.route("**/merchant/dining/table-bill", async (route) => {
+      reads += 1;
+      // The first read never answers.
+      if (reads === 1) return;
+      await route.fulfill({
+        headers,
+        json: {
+          ...unpaidBill("Closing", 7),
+          taxRoundingMinor: "0",
+          owed: { subtotalMinor: "3003", taxMinor: "390", totalMinor: "3393" },
+          tips: { enabled: false, tierPercents: [12, 18, 20] },
+        },
+      });
+    });
+    await page.goto("/operations/dining");
+    await page.getByRole("button", { name: "Select T2", exact: true }).click();
+    const checkout = page.getByRole("region", { name: "Checkout" });
+    await expect(checkout.getByText("Reading the bill…")).toBeVisible();
+    await expect.poll(() => reads).toBe(1);
+    // Ticks before the ceiling never start a second read while the first is open.
+    await page.clock.runFor(20_000);
+    expect(reads).toBe(1);
+    await page.clock.runFor(5_500);
+    await expect(
+      checkout.getByText("The bill couldn't be read just now. Trying again by itself."),
+    ).toBeVisible();
+    await page.clock.runFor(5_000);
+    await expect(checkout.getByText("Round 1")).toBeVisible();
+    await expect(checkout.getByText("couldn't be read just now", { exact: false })).toHaveCount(0);
+    expect(reads).toBe(2);
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await expectNoInternalText(page);
+  });
