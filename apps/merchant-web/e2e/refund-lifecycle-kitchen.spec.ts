@@ -100,14 +100,8 @@ async function noHorizontalScroll(page: Page, name: string) {
   await page.setViewportSize({ width: 1440, height: 900 });
 }
 
-test("@production M10: refunding a dish not started stops the kitchen too; one being made stays with the guest", async ({
-  page,
-}) => {
-  await signIn(page);
-  await noApprovals(page);
-  await page.route("**/merchant/payments/refunds/context", (route) =>
-    route.fulfill({ headers, json: context() }),
-  );
+/** The items route of order 21 (Fries not started, Noodles being made) and its previews. */
+async function twoDishes(page: Page) {
   await page.route("**/merchant/payments/refunds/items", (route) =>
     route.fulfill({
       headers,
@@ -175,6 +169,18 @@ test("@production M10: refunding a dish not started stops the kitchen too; one b
       },
     });
   });
+  return previews;
+}
+
+test("@production M10: refunding a dish not started stops the kitchen too; one being made stays with the guest", async ({
+  page,
+}) => {
+  await signIn(page);
+  await noApprovals(page);
+  await page.route("**/merchant/payments/refunds/context", (route) =>
+    route.fulfill({ headers, json: context() }),
+  );
+  const previews = await twoDishes(page);
   await page.goto("/app/operations/payments/" + id(31) + "/refund");
   await page.getByRole("spinbutton", { name: /Fries/ }).fill("1");
   await page.getByRole("spinbutton", { name: /Noodles/ }).fill("1");
@@ -191,6 +197,31 @@ test("@production M10: refunding a dish not started stops the kitchen too; one b
   expect(previews.at(-1)?.withdraw).toEqual([{ orderItemReference: id(3), quantity: 1 }]);
   await expectNoInternalText(page);
   await noHorizontalScroll(page, "refund-stop-making");
+});
+
+test("@production M10/M14: a cashier, whose request a manager sends, is not offered Stop making it too and is told what to do", async ({
+  page,
+}) => {
+  await signIn(page);
+  await noApprovals(page);
+  await page.route("**/merchant/payments/refunds/context", (route) =>
+    route.fulfill({ headers, json: context({ canSend: false }) }),
+  );
+  const previews = await twoDishes(page);
+  await page.goto("/app/operations/payments/" + id(31) + "/refund");
+  await page.getByRole("spinbutton", { name: /Fries/ }).fill("1");
+  await expect(page.getByRole("checkbox", { name: /Stop making it too/ })).toHaveCount(0);
+  await expect(
+    page.getByText(
+      "A manager sends this refund, so the kitchen isn't told now. To stop making a dish the kitchen hasn't started, use Cancel items on the order, or ask a manager.",
+    ),
+  ).toBeVisible();
+  await page.getByRole("combobox", { name: "Reason" }).selectOption("WRONG_ITEM");
+  await page.getByRole("button", { name: "Review refund" }).click();
+  await expect(page.getByRole("region", { name: "Review this refund" })).toContainText("$15.00");
+  expect(previews.at(-1)?.withdraw).toBeUndefined();
+  await expectNoInternalText(page);
+  await noHorizontalScroll(page, "refund-stop-making-cashier");
 });
 
 test("@production M14: a cashier's refund request waits for a manager to send it, on Approvals and Home", async ({
