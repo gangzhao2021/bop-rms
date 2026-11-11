@@ -349,6 +349,7 @@ export function createGuestOrderSteps(options: {
         quoteReference: String(quote.quoteReference),
         subtotalMinor: quote.subtotal.amountMinor,
         totalMinor: quote.total.amountMinor,
+        ...(result.sinceAdded === undefined ? {} : { sinceAdded: result.sinceAdded }),
       };
     },
     async saveDetails(credentials, input) {

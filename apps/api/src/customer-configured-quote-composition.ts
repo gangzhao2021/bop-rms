@@ -1,4 +1,5 @@
 import { cartParticipation } from "./customer-dining-cart-composition.js";
+import type { QuoteLineSinceAdded } from "./customer-quote.js";
 import { createCustomerQuotePort } from "./customer-quote-composition.js";
 import {
   CartError,
@@ -11,6 +12,7 @@ import {
   createPostgresAnyCartQuoteReader,
   createPostgresConfiguredCartQuoteStore,
   createPostgresPickupCartBindingReader,
+  createPostgresCartLineFirstQuoteReader,
   type ConfiguredCustomerQuoteOptions,
   type DiningCartCheckoutHoldPort,
 } from "@rms/ordering";
@@ -20,6 +22,7 @@ import {
   createPostgresCurrentMenuReleaseStore,
 } from "@rms/catalog";
 import {
+  createPostgresConfiguredPriceQuoteHistoryReader,
   createPostgresConfiguredPriceQuoteRequestStore,
   createPostgresCurrentConfiguredQuoteService,
   decodeConfiguredPriceQuoteSnapshot,
@@ -315,6 +318,20 @@ export function createCustomerConfiguredQuoteHttpComposition(
             loadCart: createPostgresCartQueryStore(options.cartTransactions, options.scope).load,
           },
         });
+  const firstQuotes = createPostgresCartLineFirstQuoteReader(
+    options.attachmentTransactions,
+    options.scope,
+  );
+  const history = createPostgresConfiguredPriceQuoteHistoryReader(
+    options.pricingTransactions,
+    options.scope,
+  );
+  const catalog = createPostgresCatalogOrderSnapshotSource(
+    options.catalogTransactions,
+    { ...options.catalogScope, ...options.scope, orderType: options.orderType },
+    { ...options.catalogSafety, clock: { now: options.now } },
+    options.catalogReferences,
+  );
   return createCustomerQuotePort({
     quoteVersion: 2,
     scope: options.scope,
@@ -322,5 +339,55 @@ export function createCustomerConfiguredQuoteHttpComposition(
     requests,
     expiry,
     now: options.now,
+    // WP-2423 price-hold-dish-changes (DEC-PRICE-HOLD §3, M74): what this cart was first priced at
+    // for each line, and whether the dish is shown with another name or other allergens since.
+    sinceAdded: async (quote) => {
+      const first = await firstQuotes.load({
+        cartReference: String(quote.cartReference),
+        lineReferences: quote.lines.map((line) => String(line.lineReference)),
+      });
+      const earlier = new Map<string, Promise<ConfiguredPriceQuoteSnapshot | null>>();
+      const lines: Omit<QuoteLineSinceAdded, "changes">[] = [];
+      const keys: Parameters<typeof catalog.dishChanges>[0][number][] = [];
+      const sameProduct: boolean[] = [];
+      for (const line of quote.lines) {
+        const found = first.get(String(line.lineReference));
+        if (found === undefined || found.quoteReference === String(quote.quoteReference)) continue;
+        if (found.quoteVersion !== 2) continue;
+        let read = earlier.get(found.quoteReference);
+        if (read === undefined) {
+          read = history.load(found.quoteReference);
+          earlier.set(found.quoteReference, read);
+        }
+        const before = (await read)?.lines.find(
+          (value) => String(value.lineReference) === String(line.lineReference),
+        );
+        if (before === undefined) continue;
+        lines.push({
+          cartItemReference: String(line.lineReference),
+          quantity: before.quantity,
+          subtotal: before.subtotal,
+        });
+        sameProduct.push(
+          String(before.productVersionReference) === String(line.productVersionReference),
+        );
+        keys.push({
+          sellableReference: String(line.sellableReference),
+          productVersionReference: String(line.productVersionReference),
+          fromMenuVersionReference: String(before.menuVersionReference),
+          toMenuVersionReference: String(line.menuVersionReference),
+        });
+      }
+      if (lines.length === 0) return [];
+      const changes = await catalog.dishChanges(keys);
+      return lines.map((line, index) => ({
+        ...line,
+        // Another product version is another dish: shown again in full.
+        changes:
+          sameProduct[index] === true
+            ? (changes[index] ?? ["Name", "Allergens"])
+            : (["Name", "Allergens"] as const),
+      }));
+    },
   });
 }

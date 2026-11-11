@@ -1,3 +1,4 @@
+import type { QuoteLineSinceAdded } from "./customer-quote.js";
 import { canonicalizeRfc8785, sha256Hex } from "@bop/audit";
 import {
   isTipPercent,
@@ -280,6 +281,8 @@ export interface CounterGuestPipeline {
         readonly quoteReference: string;
         readonly subtotalMinor: bigint;
         readonly totalMinor: bigint;
+        /** price-hold-dish-changes: each line as the cart was first priced for it, when told. */
+        readonly sinceAdded?: readonly QuoteLineSinceAdded[];
       }
     | { readonly status: "NotPriced" }
     /**

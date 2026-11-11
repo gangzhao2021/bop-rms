@@ -187,6 +187,37 @@ describe("WP-1103/1104 Customer Quote API", () => {
     expect(body.quote.priceChange).toBeNull();
   });
 
+  it("price-hold-dish-changes: says each line as the cart was first priced for it, and what changed about the dish", async () => {
+    const service = new Port();
+    service.result = {
+      status: "Current",
+      quote: quote(),
+      sinceAdded: [
+        {
+          cartItemReference: id(6),
+          quantity: 1,
+          subtotal: { amountMinor: 950n, currencyCode: "CAD" } as never,
+          changes: ["Name", "Allergens"],
+        },
+      ],
+    };
+    const body = (await (await post(await listen(service))).json()) as {
+      quote: { sinceAdded?: unknown };
+    };
+    expect(body.quote.sinceAdded).toEqual([
+      {
+        cartItemReference: id(6),
+        quantity: 1,
+        subtotal: { amountMinor: "950", currency: "CAD" },
+        changes: ["Name", "Allergens"],
+      },
+    ]);
+    // Never said when the Store did not work it out.
+    service.result = { status: "Current", quote: quote() };
+    const plain = (await (await post(await listen(service))).json()) as { quote: object };
+    expect(Object.hasOwn(plain.quote, "sinceAdded")).toBe(false);
+  });
+
   it("returns a replacement Quote with an explicit price-increase decision", async () => {
     const service = new Port();
     service.result = { status: "Requoted", requote: requote() };

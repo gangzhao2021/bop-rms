@@ -119,6 +119,36 @@ describe("authorized Quote HTTP bridge", () => {
       expect(result.quote).not.toBe(f.quote);
     },
   );
+  it("price-hold-dish-changes: adds each line as first priced once the answer is settled; a failure leaves the price answered", async () => {
+    const f = fixture();
+    const line = {
+      cartItemReference: id(6),
+      quantity: 1,
+      subtotal: f.quote.subtotal,
+      changes: ["Allergens"] as const,
+    };
+    const sinceAdded = vi.fn(async () => [line]);
+    const port = createCustomerQuotePort({
+      scope: f.scope,
+      attachment: { attach: f.attach },
+      requests: { resolve: f.resolve },
+      now: f.now,
+      sinceAdded,
+    });
+    expect(await port.quoteCart(f.input)).toEqual({
+      status: "Created",
+      quote: f.quote,
+      sinceAdded: [line],
+    });
+    expect(sinceAdded).toHaveBeenCalledWith(f.quote);
+    sinceAdded.mockRejectedValueOnce(new Error("no database"));
+    expect(await port.quoteCart(f.input)).toEqual({ status: "Created", quote: f.quote });
+    // Not asked for an answer that is not a price.
+    f.attach.mockRejectedValueOnce(new Error("down"));
+    sinceAdded.mockClear();
+    expect(await port.quoteCart(f.input)).toEqual({ status: "Unavailable" });
+    expect(sinceAdded).not.toHaveBeenCalled();
+  });
   it("Owner #26 (DEC-PRICE-HOLD): a new request inside the hold answers the confirmed Quote, read by its own operation", async () => {
     const f = fixture();
     f.attach.mockResolvedValue({ status: "Held", attachment: f.attachment } as never);

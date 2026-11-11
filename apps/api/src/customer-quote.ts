@@ -22,6 +22,19 @@ export interface QuoteCartCommand {
   readonly requestedAt: string;
 }
 
+/**
+ * WP-2423 price-hold-dish-changes (DEC-PRICE-HOLD §3, M74): a cart line as this cart was first
+ * priced for it (any earlier quote), and how the dish is shown differently now. The guest's page
+ * names what changed since the dish was added, after a reload or on another phone too, and asks
+ * the guest to confirm before ordering. Only lines first priced by another quote are listed.
+ */
+export interface QuoteLineSinceAdded {
+  readonly cartItemReference: string;
+  readonly quantity: number;
+  readonly subtotal: PriceQuoteSnapshot["subtotal"];
+  readonly changes: readonly ("Name" | "Allergens")[];
+}
+
 /** WP-2423 item 8 ⑦ (Owner decision 11): the tips the Store offers, worked out on the subtotal. */
 export interface QuoteTipChoices {
   readonly enabled: boolean;
@@ -32,11 +45,13 @@ export type QuoteCartResult =
       readonly status: "Created";
       readonly quote: PriceQuoteSnapshot | ConfiguredPriceQuoteSnapshot;
       readonly tips?: QuoteTipChoices;
+      readonly sinceAdded?: readonly QuoteLineSinceAdded[];
     }
   | {
       readonly status: "Current";
       readonly quote: PriceQuoteSnapshot | ConfiguredPriceQuoteSnapshot;
       readonly tips?: QuoteTipChoices;
+      readonly sinceAdded?: readonly QuoteLineSinceAdded[];
     }
   | {
       readonly status: "Requoted";
@@ -191,6 +206,7 @@ function publicQuote(
   quote: PriceQuoteSnapshot | ConfiguredPriceQuoteSnapshot,
   requote?: PriceQuoteRequoteResult,
   tips?: QuoteTipChoices,
+  sinceAdded?: readonly QuoteLineSinceAdded[],
 ) {
   return {
     schemaVersion: 1,
@@ -217,6 +233,16 @@ function publicQuote(
         quantity: line.quantity,
         subtotal: money(line.subtotal),
       })),
+      ...(sinceAdded === undefined
+        ? {}
+        : {
+            sinceAdded: sinceAdded.map((line) => ({
+              cartItemReference: line.cartItemReference,
+              quantity: line.quantity,
+              subtotal: money(line.subtotal),
+              changes: [...line.changes],
+            })),
+          }),
       priceChange:
         requote === undefined
           ? null
@@ -317,6 +343,7 @@ export class CustomerQuoteHandler {
                 quote,
                 result.status === "Requoted" ? result.requote : undefined,
                 result.tips,
+                result.status === "Requoted" ? undefined : result.sinceAdded,
               ),
             );
         } catch {

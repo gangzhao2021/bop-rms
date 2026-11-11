@@ -46,7 +46,12 @@ import {
   type PriceQuoteSnapshot,
   type PriceQuoteQueryTransactionRunner,
 } from "@rms/pricing";
-import type { CustomerQuotePort, QuoteCartCommand, QuoteCartResult } from "./customer-quote.js";
+import type {
+  CustomerQuotePort,
+  QuoteCartCommand,
+  QuoteCartResult,
+  QuoteLineSinceAdded,
+} from "./customer-quote.js";
 import { logGuestFailure } from "./guest-failure-log.js";
 
 type AttachmentEntry = ReturnType<typeof createPickupCartQuoteService>;
@@ -207,11 +212,28 @@ export function createCustomerQuotePort(options: {
     "resolve"
   >;
   readonly now: () => string;
+  /**
+   * WP-2423 price-hold-dish-changes: each line as this cart was first priced for it. Read after the
+   * answer is settled; a failure leaves it out (the price answered stands), never refuses it.
+   */
+  readonly sinceAdded?: (
+    quote: PriceQuoteSnapshot | ConfiguredPriceQuoteSnapshot,
+  ) => Promise<readonly QuoteLineSinceAdded[]>;
 }): CustomerQuotePort {
   const scope = Object.freeze({
     brandReference: parseOrderingReference(options.scope.brandReference),
     storeReference: parseOrderingReference(options.scope.storeReference),
   });
+  const withSinceAdded = async (result: QuoteCartResult): Promise<QuoteCartResult> => {
+    if (options.sinceAdded === undefined) return result;
+    if (result.status !== "Created" && result.status !== "Current") return result;
+    try {
+      const lines = await options.sinceAdded(result.quote);
+      return Object.freeze({ ...result, sinceAdded: Object.freeze([...lines]) });
+    } catch {
+      return result;
+    }
+  };
   return Object.freeze({
     async quoteCart(input: QuoteCartCommand): Promise<QuoteCartResult> {
       let command: ReturnType<typeof copyCommand>;
@@ -259,7 +281,7 @@ export function createCustomerQuotePort(options: {
         return initialFailure(error);
       }
       // Any failure after an attempted successful command preserves outcome uncertainty.
-      return await answer(command, saved, true);
+      return await withSinceAdded(await answer(command, saved, true));
     },
   });
   /**

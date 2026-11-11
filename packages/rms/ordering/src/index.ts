@@ -98,6 +98,7 @@ export {
   createPostgresConfiguredCartQuoteReader,
   createPostgresCartQuoteReader,
   createPostgresAnyCartQuoteReader,
+  createPostgresCartLineFirstQuoteReader,
   type CartQuoteReader,
   type CartQuoteStore,
 } from "./infrastructure/persistence/cart-quote-store.js";

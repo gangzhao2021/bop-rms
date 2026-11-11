@@ -515,3 +515,85 @@ export function createPostgresConfiguredCartQuoteReader(
   const { loadLatest } = createQuoteAccess(runner, scope, parseConfiguredCartQuoteAttachment);
   return Object.freeze({ loadLatest });
 }
+
+/**
+ * WP-2423 price-hold-dish-changes (DEC-PRICE-HOLD §3, M74): the first Quote that priced each cart
+ * line — what the guest was first shown for it on this cart, whatever cart version it was —
+ * with the menu version and quantity it was priced at. Attachments are never changed or removed,
+ * so a reload or another phone finds the same answer. A line never priced is absent.
+ */
+export function createPostgresCartLineFirstQuoteReader(
+  runner: CartQueryTransactionRunner,
+  scope: Readonly<{ brandReference: string; storeReference: string }>,
+) {
+  const { run } = createQuoteAccess(runner, scope, parseAnyCartQuoteAttachment);
+  const brand = parseOrderingReference(scope.brandReference),
+    store = parseOrderingReference(scope.storeReference);
+  return Object.freeze({
+    async load(input: {
+      readonly cartReference: string;
+      readonly lineReferences: readonly string[];
+    }): Promise<
+      ReadonlyMap<
+        string,
+        {
+          readonly quoteReference: string;
+          readonly quoteVersion: number;
+          readonly menuVersionReference: string;
+          readonly productVersionReference: string;
+          readonly quantity: number;
+        }
+      >
+    > {
+      try {
+        const cartReference = parseOrderingReference(input.cartReference);
+        if (!Array.isArray(input.lineReferences) || input.lineReferences.length > 200) fail();
+        const lines = input.lineReferences.map((line) => parseOrderingReference(line));
+        if (lines.length === 0) return new Map();
+        return await run(async (tx) => {
+          const found = rows(
+            await tx.query(
+              "SELECT DISTINCT ON (l.cart_line_id) l.cart_line_id::text AS line,a.quote_id::text AS quote," +
+                "a.quote_version AS version,l.menu_version_id::text AS menu,l.product_version_id::text AS product,l.quantity " +
+                "FROM rms_ordering.cart_quote_attachment_line l JOIN rms_ordering.cart_quote_attachment a " +
+                "ON a.operation_id=l.operation_id AND a.brand_id=l.brand_id AND a.store_id=l.store_id AND a.cart_id=l.cart_id " +
+                "WHERE l.brand_id=$1 AND l.store_id=$2 AND l.cart_id=$3 AND l.cart_line_id=ANY($4::uuid[]) " +
+                "ORDER BY l.cart_line_id, a.attached_at, a.operation_id",
+              [brand, store, cartReference, lines],
+            ),
+          );
+          const first = new Map<
+            string,
+            {
+              readonly quoteReference: string;
+              readonly quoteVersion: number;
+              readonly menuVersionReference: string;
+              readonly productVersionReference: string;
+              readonly quantity: number;
+            }
+          >();
+          for (const value of found) {
+            const row = closed(value, ["line", "quote", "version", "menu", "product", "quantity"]);
+            const quantity = Number(row.quantity),
+              version = Number(row.version);
+            if (!Number.isSafeInteger(quantity) || quantity < 1 || (version !== 1 && version !== 2))
+              fail();
+            first.set(
+              parseOrderingReference(row.line),
+              Object.freeze({
+                quoteReference: parseOrderingReference(row.quote),
+                quoteVersion: version,
+                menuVersionReference: parseOrderingReference(row.menu),
+                productVersionReference: parseOrderingReference(row.product),
+                quantity,
+              }),
+            );
+          }
+          return first;
+        });
+      } catch {
+        return fail();
+      }
+    },
+  });
+}
