@@ -57,9 +57,72 @@ const established = (store: string, table: string | null, resumed = false) => ({
   csrfToken: "N".repeat(43),
 });
 
+/** An order's status read: paid, or (with a time to pay) still to be paid. */
+const orderStatus = (orderReference: string, orderNumber: string, payBy?: string) => {
+  const batch = id(0xbb0);
+  const now = new Date().toISOString();
+  return {
+    schemaVersion: 1,
+    status: {
+      projectionName: "ordering_order_status_v1",
+      projectionVersion: 1,
+      sourceCheckpoint: id(0xcc0),
+      projectedAt: now,
+      freshnessStatus: "Fresh",
+      order: {
+        orderReference,
+        orderNumber,
+        orderType: "Pickup",
+        canonicalPhase: "Submitted",
+        paymentStatus: "NotReported",
+        kitchenStatus: "Unavailable",
+        fulfillmentStatus: "Unavailable",
+        fulfilledAt: null,
+        eta: null,
+        submittedAt: now,
+        batches: [
+          {
+            orderBatchReference: batch,
+            submittedAt: now,
+            items: [
+              {
+                orderItemReference: id(0xdd0),
+                displayName: "Synthetic tea",
+                quantity: 1,
+                lineTotal: { amountMinor: "1500", currencyCode: "CAD" },
+              },
+            ],
+          },
+        ],
+      },
+      sources: {
+        checkedAt: now,
+        kitchen: null,
+        ...(payBy === undefined
+          ? {
+              payments: [
+                {
+                  status: "Succeeded",
+                  occurredAt: now,
+                  amount: { amountMinor: "1500", currencyCode: "CAD" },
+                  freshnessStatus: "Fresh",
+                },
+              ],
+            }
+          : {
+              payments: [],
+              paymentsDue: [{ orderBatchReference: batch, payBy, lastAttempt: "Open" }],
+            }),
+      },
+    },
+  };
+};
+
 interface Phone {
   /** The visit this phone's cookie names now (null: none), and its latest order. */
   visit: { store: string; order?: ReturnType<typeof order> } | null;
+  /** Orders still to be paid, by order reference, and by when. */
+  unpaid?: Record<string, string>;
   /** Visits kept on the phone besides it. */
   kept: { store: string; order?: ReturnType<typeof order> }[];
   entries: { qrToken?: unknown }[];
@@ -93,6 +156,19 @@ async function installation(page: Page, phone: Phone) {
           }),
         }),
   );
+  // The order's own status, read on the visit that placed it.
+  await page.route("**/api/v1/orders/*/status*", (route) => {
+    const reference = new URL(route.request().url()).pathname.split("/")[4] ?? "";
+    const placed = [phone.visit, ...phone.kept].find((v) => v?.order?.orderReference === reference);
+    return placed?.order === undefined
+      ? route.fulfill({ status: 404, headers: json, body: "{}" })
+      : route.fulfill({
+          headers: json,
+          body: JSON.stringify(
+            orderStatus(reference, placed.order.orderNumber, phone.unpaid?.[reference]),
+          ),
+        });
+  });
   await page.route("**/bff/customer/pickup-entry*", (route) => {
     const store = new URL(route.request().url()).searchParams.get("store") ?? "";
     return route.fulfill({
@@ -193,6 +269,49 @@ for (const width of [390, 1024, 1440])
         { publicStoreReference: TM2, publicTableReference: null },
       ]);
       await page.getByRole("button", { name: "切换到中文" }).click();
+      expect(violations).toEqual([]);
+    });
+
+    test("another Store's code with the first Store's order still unpaid says so first, with its time to pay", async ({
+      page,
+    }) => {
+      const violations = watchPolicy(page);
+      const payBy = new Date(Date.now() + 20 * 60_000).toISOString();
+      const phone: Phone = {
+        visit: { store: TM2, order: order(14) },
+        kept: [],
+        entries: [],
+        unpaid: { [order(14).orderReference]: payBy },
+      };
+      await installation(page, phone);
+      await page.goto(`/#pickup=${DEMO}`);
+      const main = page.getByRole("main");
+      await expect(main.getByRole("heading", { name: "Your order 14" })).toBeVisible();
+      await expect(main).toContainText("Not paid yet. Pay by");
+      await expect(main.getByRole("link", { name: "Finish paying" })).toHaveAttribute(
+        "href",
+        `/orders/${order(14).orderReference}`,
+      );
+      // Nothing started at DEMO yet: the order can still be paid on its own visit.
+      expect(phone.entries).toHaveLength(0);
+      await noHorizontalOverflow(page);
+      await expectNoInternalText(page);
+      await page.screenshot({ path: `test-results/b3-unpaid-${width}.png`, fullPage: true });
+      await main.getByRole("button", { name: "Order from the QR code you just scanned" }).click();
+      await expect(main).toContainText("Pickup from DEMO Café is selected.");
+      await expect(page.getByRole("note")).toContainText(
+        "Your order at Test Merchant 2 isn’t paid yet. Pay by",
+      );
+      await expect(page.getByRole("note")).toContainText(
+        "Scan Test Merchant 2’s pickup QR code again to pay for it.",
+      );
+      expect(phone.entries.map((entry) => storeOfCode(String(entry.qrToken)))).toEqual([
+        { publicStoreReference: DEMO, publicTableReference: null },
+      ]);
+      await noHorizontalOverflow(page);
+      await page.screenshot({ path: `test-results/b3-unpaid-onward-${width}.png`, fullPage: true });
+      await page.getByRole("button", { name: "切换到中文" }).click();
+      await expect(page.getByRole("note")).toContainText("还未付款");
       expect(violations).toEqual([]);
     });
 

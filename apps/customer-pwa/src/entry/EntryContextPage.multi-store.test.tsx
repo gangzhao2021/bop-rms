@@ -3,6 +3,8 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { afterEach, expect, it, vi } from "vitest";
+import { formatClockTime } from "../journey/format.js";
+import type { CustomerOrderStatusClient } from "../order-status/order-status-controller.js";
 import { EntryContextPage } from "./EntryContextPage.js";
 import type {
   CustomerEntryClient,
@@ -53,6 +55,21 @@ const client = (
   startNew: vi.fn(async () => state),
   ...extra,
 });
+// The kept order's own status read, as the phone can still make it before the new Store starts.
+const payBy = "2026-11-11T19:30:00.000Z";
+const statusOf = (sources: object) => ({
+  order: { orderType: "Pickup", canonicalPhase: "Submitted", batches: [] },
+  sources: { checkedAt: "2026-11-11T19:05:00.000Z", kitchen: null, payments: [], ...sources },
+});
+// Paid: nothing is due any more.
+const paid = statusOf({});
+const unpaid = statusOf({
+  paymentsDue: [{ orderBatchReference: "x", payBy, lastAttempt: "Open" }],
+});
+const reads = (load: () => Promise<unknown>): CustomerOrderStatusClient => ({
+  load: vi.fn(load),
+  subscribe: () => () => undefined,
+});
 function Where() {
   return <p data-testid="where">{useLocation().pathname}</p>;
 }
@@ -89,6 +106,7 @@ it("another Store's pickup code opens that Store at once, and names the order ke
   );
   const page = await open({
     client: demo,
+    orderStatusClient: reads(async () => paid),
     currentOrder: order13,
     restoredStore: { publicStoreReference: TM2, storeDisplayName: "Test Merchant 2" },
   });
@@ -134,4 +152,63 @@ it("the kept Store's code shows the kept order at once, and Order more goes to i
   });
   expect(page.querySelector('[data-testid="where"]')?.textContent).toBe("/menu");
   expect(kept.startNew).not.toHaveBeenCalled();
+});
+
+it("another Store's code with the kept order still unpaid warns first, with its time and a way to pay", async () => {
+  const demo = client(
+    { kind: "Established", context: pickupAt(DEMO, "DEMO Café") },
+    { leavesPickupVisit: true },
+  );
+  const page = await open({
+    client: demo,
+    orderStatusClient: reads(async () => unpaid),
+    currentOrder: order13,
+    restoredStore: { publicStoreReference: TM2, storeDisplayName: "Test Merchant 2" },
+  });
+  const time = formatClockTime(payBy);
+  expect(page.textContent).toContain("Your order 13");
+  expect(page.textContent).toContain(
+    `Not paid yet. Pay by ${time}, or it is cancelled and you won’t be charged.`,
+  );
+  const pay = [...page.querySelectorAll("a")].find((a) => a.textContent === "Finish paying");
+  expect(pay?.getAttribute("href")).toBe(`/orders/${order13.orderReference}`);
+  // DEMO's visit has not started: paying still happens on Test Merchant 2's visit.
+  expect(demo.start).not.toHaveBeenCalled();
+  const onward = [...page.querySelectorAll("button")].find(
+    (b) => b.textContent === "Order from the QR code you just scanned",
+  );
+  expect(onward).toBeDefined();
+  await act(async () => {
+    onward?.click();
+  });
+  for (let i = 0; i < 3; i++)
+    await act(async () => {
+      await Promise.resolve();
+    });
+  expect(demo.start).toHaveBeenCalledTimes(1);
+  expect(demo.startNew).not.toHaveBeenCalled();
+  const text = page.textContent ?? "";
+  expect(text).toContain("Pickup from DEMO Café");
+  // The warning stays on the page the guest goes on with.
+  expect(text).toContain(
+    `Your order at Test Merchant 2 isn’t paid yet. Pay by ${time}, or it is cancelled and you won’t be charged. Scan Test Merchant 2’s pickup QR code again to pay for it.`,
+  );
+});
+
+it("another Store's code whose kept order can't be read shows that order first, never guessing it is paid", async () => {
+  const demo = client(
+    { kind: "Established", context: pickupAt(DEMO, "DEMO Café") },
+    { leavesPickupVisit: true },
+  );
+  const page = await open({
+    client: demo,
+    orderStatusClient: reads(async () => {
+      throw new Error("offline");
+    }),
+    currentOrder: order13,
+    restoredStore: { publicStoreReference: TM2, storeDisplayName: "Test Merchant 2" },
+  });
+  expect(page.textContent).toContain("Your order 13");
+  expect(page.textContent).not.toContain("Not paid yet");
+  expect(demo.start).not.toHaveBeenCalled();
 });

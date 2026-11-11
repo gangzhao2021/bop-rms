@@ -524,6 +524,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Orders on this phone": "这部手机上的订单",
   "Your order at {storeDisplayName} is kept on this phone. Scan {storeDisplayName}’s pickup QR code again to go back to it.":
     "你在{storeDisplayName}的订单仍保存在这部手机上，再扫{storeDisplayName}的自取二维码就能回去。",
+  "Your order at {storeDisplayName} isn’t paid yet. Pay by {time}, or it is cancelled and you won’t be charged. Scan {storeDisplayName}’s pickup QR code again to pay for it.":
+    "你在{storeDisplayName}的订单还未付款。请在 {time} 前付款，否则会取消，不会扣款。再扫{storeDisplayName}的自取二维码就能去付款。",
+  "Order from the QR code you just scanned": "改在刚扫的二维码点单",
   "This table’s visit has ended": "这桌的用餐已结束",
   "Open your table to see its bill and receipt.": "打开“你的桌位”查看账单和收据。",
   "Your party’s table changed": "你们换桌了",

@@ -75,7 +75,12 @@ export interface EntryContextPageProps {
   /** M105 (B.3): the Store of the visit this phone restored, before this scan. */
   readonly restoredStore?:
     { readonly publicStoreReference: string; readonly storeDisplayName: string } | undefined;
+  /** The kept pickup order's status read (default: the HTTP read). */
+  readonly orderStatusClient?: CustomerOrderStatusClient | undefined;
 }
+
+/** How long the kept order's payment read may hold the scanned place back before it is shown. */
+const keptOrderReadMs = 5000;
 
 const browserStoreProfile: StoreProfileLoader = createStoreProfileClient();
 
@@ -95,12 +100,17 @@ export function EntryContextPage({
   store,
   storeProfile,
   restoredStore,
+  orderStatusClient,
 }: EntryContextPageProps) {
-  // M105 (B.3): another Store's code, or a table's, opens that place at once; the pickup order this
-  // phone has elsewhere is kept and named below the new visit (never shown under this Store's code).
-  const [holding, setHolding] = useState(
-    currentOrder !== undefined && client.leavesPickupVisit !== true,
-  );
+  // M105 (B.3): another Store's code, or a table's, opens that place at once when the pickup order
+  // this phone has elsewhere is settled (paid, collected, cancelled); it is kept and named below the
+  // new visit. M18: one still to be paid, or one whose payment can't be read, is shown first, with
+  // its time to pay, while its own visit can still pay for it (the scan starts nothing until then).
+  const leaving = currentOrder !== undefined && client.leavesPickupVisit === true;
+  const [checkingKept, setCheckingKept] = useState(leaving && currentOrder.orderType === "Pickup");
+  const [keptPayment, setKeptPayment] = useState<CurrentOrderPayment | undefined>(undefined);
+  const [holding, setHolding] = useState(currentOrder !== undefined && !leaving);
+  const [keptStatusClient] = useState(() => orderStatusClient ?? createHttpOrderStatusClient());
   // M105 (B.3): a pickup order at another Store stays on this phone; its own code comes back to it.
   const [keptElsewhere] = useState(() =>
     currentOrder?.orderType === "Pickup" && restoredStore !== undefined ? restoredStore : null,
@@ -168,12 +178,38 @@ export function EntryContextPage({
       }
     }
     runCurrent.current = run;
-    if (!holding) void run("start");
+    if (!holding && !checkingKept) void run("start");
     return () => {
       active = false;
       runCurrent.current = null;
     };
-  }, [client, holding]);
+  }, [client, holding, checkingKept]);
+
+  // M18: the kept pickup order's payment, read before another code's visit starts.
+  const keptReference = checkingKept ? currentOrder?.orderReference : undefined;
+  useEffect(() => {
+    if (keptReference === undefined) return;
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const unread = new Promise<"unread">((resolve) => {
+      timer = setTimeout(() => resolve("unread"), keptOrderReadMs);
+    });
+    void Promise.race([keptStatusClient.load(keptReference).then(currentOrderPayment), unread])
+      .catch(() => "unread" as const)
+      .then((payment) => {
+        if (stopped) return;
+        // Settled: the scanned place opens. Due, or not known: the order comes first.
+        if (payment === "unread" || payment?.kind === "due") {
+          setKeptPayment(payment === "unread" ? undefined : payment);
+          setHolding(true);
+        }
+        setCheckingKept(false);
+      });
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+    };
+  }, [keptReference, keptStatusClient]);
 
   useEffect(() => {
     if (state.kind !== "Loading") heading.current?.focus();
@@ -307,6 +343,16 @@ export function EntryContextPage({
         }}
       />
     );
+  if (holding && currentOrder && leaving)
+    return (
+      <CurrentOrderView
+        order={currentOrder}
+        store={store}
+        orderStatusClient={keptStatusClient}
+        payment={keptPayment}
+        onLeave={() => setHolding(false)}
+      />
+    );
   if (holding && currentOrder)
     return (
       <CurrentOrderView
@@ -350,7 +396,11 @@ export function EntryContextPage({
       starting={answered === "Start" || answered === "NewParty"}
       state={state}
       storeProfile={storeProfile === undefined ? browserStoreProfile : storeProfile}
-      keptElsewhere={keptElsewhere}
+      keptElsewhere={
+        keptElsewhere !== null && keptPayment?.kind === "due"
+          ? { ...keptElsewhere, payBy: keptPayment.payBy }
+          : keptElsewhere
+      }
     />
   );
 }
@@ -372,16 +422,22 @@ export function CurrentOrderView({
   order,
   store,
   onStartNew,
+  onLeave,
   orderStatusClient,
   payment: shownPayment,
 }: Readonly<{
   order: CustomerCurrentOrder;
   store?: CustomerStoreContext | undefined;
   onStartNew?: (() => void) | undefined;
+  /**
+   * M105/M18: the guest scanned another code while this pickup order is still to be paid (or its
+   * payment couldn't be read). They can pay here first, or go on to the code they scanned.
+   */
+  onLeave?: (() => void) | undefined;
   /** WP-2423 M18: the order status read used to tell an unpaid pickup (default: the HTTP read). */
   orderStatusClient?: CustomerOrderStatusClient;
-  /** The payment state already known (tests); otherwise it is read once. */
-  payment?: CurrentOrderPayment;
+  /** The payment state already known; otherwise (absent or undefined) it is read once. */
+  payment?: CurrentOrderPayment | undefined;
 }>) {
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => heading.current?.focus(), []);
@@ -461,7 +517,18 @@ export function CurrentOrderView({
               </ul>
             </section>
           )}
-          {onStartNew ? (
+          {onLeave ? (
+            <>
+              <p>
+                {t(
+                  "This order stays on this phone. Scan this store’s pickup code again to come back to it.",
+                )}
+              </p>
+              <button className="entry-secondary-action" type="button" onClick={onLeave}>
+                {t("Order from the QR code you just scanned")}
+              </button>
+            </>
+          ) : onStartNew ? (
             <>
               {/* M104: said as it works. Order more goes on with this pickup visit, and this
                   Store's pickup code scanned again comes back to it. A new order from another code
@@ -513,7 +580,14 @@ export interface EntryContextViewProps {
   readonly storeProfile?: StoreProfileLoader | null | undefined;
   /** M105 (B.3): the Store where this phone still has a pickup order (null: none). */
   readonly keptElsewhere?:
-    { readonly publicStoreReference: string; readonly storeDisplayName: string } | null | undefined;
+    | {
+        readonly publicStoreReference: string;
+        readonly storeDisplayName: string;
+        /** M18: that order is still to be paid by then. */
+        readonly payBy?: string | undefined;
+      }
+    | null
+    | undefined;
 }
 
 export function EntryContextView({
@@ -585,10 +659,18 @@ export function EntryContextView({
       (keptElsewhere.publicStoreReference !== at.publicStoreReference ||
         at.channel !== "Pickup") ? (
         <p className="entry-context entry-kept-elsewhere" role="note">
-          {t(
-            "Your order at {storeDisplayName} is kept on this phone. Scan {storeDisplayName}’s pickup QR code again to go back to it.",
-            { storeDisplayName: keptElsewhere.storeDisplayName },
-          )}
+          {keptElsewhere.payBy === undefined
+            ? t(
+                "Your order at {storeDisplayName} is kept on this phone. Scan {storeDisplayName}’s pickup QR code again to go back to it.",
+                { storeDisplayName: keptElsewhere.storeDisplayName },
+              )
+            : t(
+                "Your order at {storeDisplayName} isn’t paid yet. Pay by {time}, or it is cancelled and you won’t be charged. Scan {storeDisplayName}’s pickup QR code again to pay for it.",
+                {
+                  storeDisplayName: keptElsewhere.storeDisplayName,
+                  time: formatClockTime(keptElsewhere.payBy),
+                },
+              )}
         </p>
       ) : null}
       {/* Below the started visit, so its arrival moves nothing the guest is reading. */}
