@@ -839,6 +839,82 @@ test("@production WP-2423 M19: the payment page says until when to pay, warns in
   await expect(main.getByRole("button", { name: "Pay securely" })).toHaveCount(0);
 });
 
+for (const width of [390, 1024, 1440])
+  test(`@production a guest who never paid is told time ran out at the deadline, never that the payment is still being confirmed (${width}px)`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await page.clock.install();
+    const now = Date.now();
+    const payBy = new Date(now + 60_000).toISOString();
+    // The Store cancels the unpaid payment a few seconds after its deadline.
+    let cancelled = false;
+    const reads: string[] = [];
+    await page.route(`**/api/v1/checkout-sessions/${session}/payment-result`, (route) => {
+      reads.push(cancelled ? "Failed" : "Pending");
+      return route.fulfill({
+        status: 200,
+        headers: { "cache-control": "no-store" },
+        json: {
+          schemaVersion: 1,
+          payment: {
+            checkoutSessionReference: session,
+            paymentIntentReference: id(11),
+            orderReference: id(12),
+            status: cancelled ? "Failed" : "Pending",
+            total: { amountMinor: "2260", currency: "CAD" },
+            payBy,
+            failure: cancelled ? "NotCompleted" : null,
+          },
+        },
+      });
+    });
+    await checkout(page, {
+      channel: "Pickup",
+      intents: (route) =>
+        route.fulfill({
+          status: 201,
+          json: {
+            schemaVersion: 1,
+            payment: {
+              checkoutSessionReference: session,
+              paymentIntentReference: id(11),
+              orderReference: id(12),
+              creationStatus: "Created",
+              total: { amountMinor: "2260", currency: "CAD" },
+              payBy,
+            },
+            serverNow: new Date(now).toISOString(),
+          },
+        }),
+    });
+    await goToPayment(page);
+    const main = page.getByRole("main");
+    await expect(main.getByText("Synthetic secure card component")).toBeVisible();
+    // The guest never presses Pay. One second past the deadline:
+    await page.clock.runFor(61_000);
+    await expect(main.getByRole("heading", { name: "Time to pay ran out" })).toBeVisible();
+    await expect(main).toContainText("This order is being cancelled and you haven’t been charged.");
+    await expect(main.getByText("Synthetic secure card component")).toHaveCount(0);
+    await expect(page.getByText("still being confirmed", { exact: false })).toHaveCount(0);
+    await expect(page.getByText("Don’t start another payment", { exact: false })).toHaveCount(0);
+    await expect(page).toHaveURL(/\/checkout\/payment$/u);
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1),
+    ).toBe(true);
+    await expectNoInternalText(page);
+    await page.screenshot({ path: `test-results/time-up-${width}.png`, fullPage: true });
+    await page.getByRole("button", { name: "切换到中文" }).click();
+    await expect(main.getByRole("heading", { name: "付款时间已过" })).toBeVisible();
+    await expect(main).toContainText("这笔订单正在取消，你没有被扣款。");
+    // Once the Store has cancelled it, the result says so; it never read "still being confirmed".
+    cancelled = true;
+    await page.clock.runFor(3_100);
+    await expect(page).toHaveURL(/\/checkout\/result$/u);
+    await expect(page.getByRole("main")).toContainText("这笔付款没有及时完成，已取消，没有扣款。");
+    expect(reads[0]).toBe("Pending");
+  });
+
 test("@production WP-2423 M19: a payment whose time ran out before a card was offered says so, with a way back", async ({
   page,
 }) => {

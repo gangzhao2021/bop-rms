@@ -2,7 +2,10 @@ import { t } from "../i18n/i18n.js";
 import { useRef, useState } from "react";
 import { formatCartMoney } from "../cart/format-money.js";
 import { formatClockTime } from "../journey/format.js";
-import { markCheckoutCardOffered } from "../session/customer-transaction-context.js";
+import {
+  markCheckoutCardOffered,
+  markCheckoutCardSubmitted,
+} from "../session/customer-transaction-context.js";
 import {
   createSessionPaymentClient,
   SessionPaymentClientError,
@@ -97,6 +100,7 @@ export function ResumePaymentPanel({
     if (!online || flight.current) return;
     flight.current = true;
     setState({ step: "submitting" });
+    markCheckoutCardSubmitted();
     try {
       await client.simulateResume(checkoutSessionReference, outcome);
       setState({ step: "offer" });

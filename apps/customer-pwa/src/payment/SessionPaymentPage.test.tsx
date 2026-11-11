@@ -6,6 +6,7 @@ import {
   paymentStartFailureState,
   resolveUnknownPayment,
   SessionPaymentPage,
+  statusAtPaymentDeadline,
 } from "./SessionPaymentPage.js";
 import { checkoutReturnFor } from "./checkout-return.js";
 import { SessionPaymentClientError } from "./session-payment-client.js";
@@ -144,5 +145,20 @@ describe("WP-2423 M17: an unclear payment is read before anything is offered", (
     expect(resolveUnknownPayment({ status: "Unknown", paymentIntentReference: intent })).toBe(
       "checking",
     );
+  });
+});
+
+describe("Guest payment state: the time to pay runs out on the payment page", () => {
+  it("an open card form nobody submitted says time ran out at once, never 'still being confirmed'", () => {
+    expect(statusAtPaymentDeadline("card", false)).toBe("time_up");
+  });
+  it("a card that was submitted, or no card offered yet, is read before anything is said", () => {
+    expect(statusAtPaymentDeadline("card", true)).toBe("unknown");
+    expect(statusAtPaymentDeadline("ready", false)).toBe("unknown");
+    expect(statusAtPaymentDeadline("processing", false)).toBe("unknown");
+  });
+  it("a payment being confirmed, or a page already saying what happened, stays as it is", () => {
+    for (const status of ["confirming", "unknown", "window_ended", "denied", "time_up"])
+      expect(statusAtPaymentDeadline(status, false)).toBeNull();
   });
 });

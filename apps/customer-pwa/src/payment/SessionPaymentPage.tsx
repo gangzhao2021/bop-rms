@@ -12,8 +12,10 @@ import {
   getCheckoutSessionReference,
   getCheckoutTipSelection,
   markCheckoutCardOffered,
+  markCheckoutCardSubmitted,
   setTablePaymentTiming,
   wasCheckoutCardOffered,
+  wasCheckoutCardSubmitted,
 } from "../session/customer-transaction-context.js";
 import { formatCartMoney } from "../cart/format-money.js";
 import { CustomerPage, PageHeading, type CustomerStoreContext } from "../journey/CustomerPage.js";
@@ -136,6 +138,20 @@ export function resolveUnknownPayment(
   return result.paymentIntentReference === null ? "not_started" : "result";
 }
 
+/**
+ * Guest payment state: what the payment page shows when the time to pay runs out. A card form still
+ * open that nobody in this tab submitted charged nothing: the guest is told time ran out at once,
+ * while the Store cancels the order (never "still being confirmed, don't pay again"). Anything a
+ * card may have reached is read, never guessed. Null: the page stays as it is.
+ */
+export function statusAtPaymentDeadline(
+  status: string,
+  cardSubmitted: boolean,
+): "time_up" | "unknown" | null {
+  if (status === "card" && !cardSubmitted) return "time_up";
+  return status === "card" || status === "ready" || status === "processing" ? "unknown" : null;
+}
+
 /** Back to where this guest's dishes are now (never a screen saying the cart is empty). */
 function CheckoutReturnLink({
   to,
@@ -218,6 +234,8 @@ function PreparedSessionPaymentPage({
     | "expired"
     /** WP-2423 M19: the time to pay ran out before a card was offered; nothing was charged. */
     | "window_ended"
+    /** Time ran out with the card form open and never submitted; the Store is cancelling it. */
+    | "time_up"
     | "unavailable"
   >("loading");
   /** WP-2423 M19: until when this payment is accepted, on the server's clock. */
@@ -384,15 +402,16 @@ function PreparedSessionPaymentPage({
   // At the deadline the card is no longer offered; the payment's result says what happened.
   useEffect(() => {
     if (phase !== "ended") return;
-    if (status === "card" || status === "ready" || status === "processing") {
+    const next = statusAtPaymentDeadline(status, wasCheckoutCardSubmitted());
+    if (next !== null) {
       setSecret(null);
-      setStatus("unknown");
+      setStatus(next);
     }
   }, [phase, status]);
   // WP-2423 M17: an unclear payment is read, never guessed. Only "no payment exists" offers the
   // card again; a payment that exists goes to its result, which offers that same attempt.
   useEffect(() => {
-    if (status !== "unknown" || !sessionReference) return;
+    if ((status !== "unknown" && status !== "time_up") || !sessionReference) return;
     let stopped = false;
     let timer: number | undefined;
     const read = async () => {
@@ -403,7 +422,12 @@ function PreparedSessionPaymentPage({
         answer = null;
       }
       if (stopped || !alive.current) return;
-      const next = resolveUnknownPayment(answer);
+      const resolved = resolveUnknownPayment(answer);
+      // Time ran out: the result page is shown once the Store has cancelled (or settled) it.
+      const next =
+        status === "time_up" && resolved === "result" && answer?.status === "Pending"
+          ? "checking"
+          : resolved;
       if (next === "paid" || next === "result") {
         void navigate("/checkout/result", { replace: true });
         return;
@@ -435,6 +459,7 @@ function PreparedSessionPaymentPage({
       return;
     flight.current = true;
     setStatus("confirming");
+    markCheckoutCardSubmitted();
     try {
       await (outcome === "approve" ? client.simulate : client.simulateDecline)(
         sessionReference,
@@ -681,6 +706,13 @@ function PreparedSessionPaymentPage({
           <button type="button" disabled={!online} onClick={() => void prepare(true)}>
             {t("Continue to payment")}
           </button>
+        </section>
+      ) : null}
+      {status === "time_up" ? (
+        <section className="checkout-attention" role="alert">
+          <h2>{t("Time to pay ran out")}</h2>
+          <p>{t("This order is being cancelled and you haven’t been charged.")}</p>
+          <p>{t("This page updates by itself.")}</p>
         </section>
       ) : null}
       {status === "window_ended" ? (

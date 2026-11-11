@@ -7,7 +7,10 @@ import {
   type SessionPaymentView,
 } from "./session-payment-client.js";
 import { StripeCardForm } from "./StripeCardForm.js";
-import { markCheckoutCardOffered } from "../session/customer-transaction-context.js";
+import {
+  markCheckoutCardOffered,
+  markCheckoutCardSubmitted,
+} from "../session/customer-transaction-context.js";
 
 export type RetryCardConfiguration =
   | { readonly mode: "simulation" }
@@ -111,6 +114,7 @@ export function RetryCardPanel({
     if (!online || flight.current) return;
     flight.current = true;
     setState({ step: "submitting" });
+    markCheckoutCardSubmitted();
     try {
       await client.simulateRetry(checkoutSessionReference, outcome);
       setState({ step: "offer" });

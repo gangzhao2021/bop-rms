@@ -1720,6 +1720,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "We’re checking your payment. This page updates by itself.": "正在确认你的付款，本页会自动更新。",
   "Check now": "立即查看",
   "Time to pay ran out": "付款时间已过",
+  "This order is being cancelled and you haven’t been charged.": "这笔订单正在取消，你没有被扣款。",
+  "This page updates by itself.": "本页会自动更新。",
   "Your order was cancelled and you haven’t been charged.": "订单已取消，没有扣款。",
   "Pay by {time}": "请在 {time} 前付款",
   "About 5 minutes left to pay. After {time} this order is cancelled and you won’t be charged.":

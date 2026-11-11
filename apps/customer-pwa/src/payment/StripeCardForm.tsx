@@ -7,6 +7,7 @@ import { SlowWaitNote } from "../journey/SlowWaitNote.js";
 import {
   captureCustomerCsrfContext,
   markCheckoutCardOffered,
+  markCheckoutCardSubmitted,
 } from "../session/customer-transaction-context.js";
 
 /** On packed restaurant Wi-Fi the form can be slow; past this the guest is told what they can do. */
@@ -167,6 +168,8 @@ export function StripeCardForm({
         setError(true);
         return;
       }
+      // From here the card may be charged: no page may say this payment charged nothing.
+      markCheckoutCardSubmitted();
       const result = await active.stripe.confirmPayment({
         elements: active.elements,
         confirmParams: { return_url: returnUrl },

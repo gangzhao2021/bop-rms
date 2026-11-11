@@ -190,6 +190,21 @@ export function wasCheckoutCardOffered(): boolean {
 }
 
 /**
+ * Guest payment state: a card (or the simulated one) was submitted in this tab since it loaded. Until
+ * then nobody in this tab could have paid, so a payment whose time ran out while its card form was
+ * open can be said to have charged nothing while the Store cancels it. Memory only, never sent.
+ */
+let checkoutCardSubmitted = false;
+
+export function markCheckoutCardSubmitted(): void {
+  checkoutCardSubmitted = true;
+}
+
+export function wasCheckoutCardSubmitted(): boolean {
+  return checkoutCardSubmitted;
+}
+
+/**
  * WP-2423 item 6 (DEC-DINE-IN-PAY-LATER): how this table pays, as last read. A table's timing is fixed
  * when it opens, so it stays good for the visit; memory only, cleared with the credential.
  */
