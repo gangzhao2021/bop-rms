@@ -226,6 +226,7 @@ function CartItem({
           type="button"
           aria-describedby={foreign ? ownershipDescription : undefined}
           disabled={readOnly || (foreign && !unsellable && !stranded) || pending}
+          aria-label={cartText.line.removeLabel(item.displayName)}
           onClick={() => void controller.removeItem(item.cartItemReference)}
         >
           {cartText.line.remove}

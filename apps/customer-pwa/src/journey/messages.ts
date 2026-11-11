@@ -623,6 +623,8 @@ export const cartText = Object.freeze({
     get remove() {
       return t("Remove");
     },
+    /** v15 batch-5: each line's Remove names its dish for a screen reader. */
+    removeLabel: (item: string) => t("Remove {item}", { item }),
   }),
   summary: Object.freeze({
     get heading() {

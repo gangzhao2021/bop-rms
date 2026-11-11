@@ -160,7 +160,7 @@ for (const width of [390, 1024]) {
       history.pushState(null, "", "/cart");
       window.dispatchEvent(new PopStateEvent("popstate"));
     });
-    await page.getByRole("button", { name: "Remove", exact: true }).click();
+    await page.getByRole("button", { name: "Remove Synthetic noodles", exact: true }).click();
     await expect(page.getByText("We couldn’t confirm this change")).toBeVisible();
     await expect(
       page.getByText(

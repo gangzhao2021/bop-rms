@@ -131,6 +131,8 @@ describe("CUST-CART page contract", () => {
     expect(html).not.toContain("Added by another guest");
     expect(html).toContain('type="button" aria-label="Increase Synthetic tea quantity"');
     expect(html).not.toContain('disabled="" aria-label="Increase Synthetic tea quantity"');
+    // v15 batch-5: Remove names the dish it acts on, as the quantity buttons do.
+    expect(html).toContain('aria-label="Remove Synthetic tea"');
   });
 
   it("renders exact Cart fields, Quote, boundaries and accessible controls", () => {
@@ -710,7 +712,7 @@ describe("WP-2423 item 6: a table that pays at the end", () => {
     // − (already at the end of its range is not the point: all three controls are held).
     expect(html).toContain('disabled="" aria-label="Decrease Synthetic tea quantity"');
     expect(html).toContain('disabled="" aria-label="Increase Synthetic tea quantity"');
-    expect(html).toMatch(/disabled="">Remove/u);
+    expect(html).toMatch(/disabled="" aria-label="Remove [^"]+">Remove/u);
     expect(html).toContain('aria-disabled="true"');
     // Its answer is only said here, so the journey bar holds still with Continue shopping.
     expect(html).toMatch(/<a aria-disabled="true"[^>]*href="\/menu"[^>]*>Menu<\/a>/u);
@@ -806,7 +808,7 @@ describe("WP-2423 item 6: a table that pays at the end", () => {
     expect(html).toContain(">Try again</button>");
     expect(html).not.toContain("Check your table");
     expect(html).not.toContain('disabled="" aria-label="Increase Synthetic tea quantity"');
-    expect(html).not.toMatch(/disabled="">Remove/u);
+    expect(html).not.toMatch(/disabled="" aria-label="Remove [^"]+">Remove/u);
     expect(html).toMatch(/type="button">Place order</u);
   });
 
@@ -982,7 +984,9 @@ describe("WP-2423 item 6: a table that pays at the end", () => {
     expect(html).not.toContain("Only they can change this item.");
     expect(html).not.toContain("ITEM_UNAVAILABLE");
     // Remove is enabled for that line; the other controls stay the adder's.
-    expect(html).toMatch(/aria-describedby="cart-item-ownership-[^"]+">Remove/u);
+    expect(html).toMatch(
+      /aria-describedby="cart-item-ownership-[^"]+" aria-label="Remove [^"]+">Remove/u,
+    );
     expect(html).toContain('disabled="" aria-label="Increase Synthetic tea quantity"');
     // Order waits until no such line is left, and says why.
     expect(html).toMatch(/disabled="" aria-describedby="cart-remove-unavailable">Place order/u);
@@ -1022,7 +1026,9 @@ describe("WP-2423 item 6: a table that pays at the end", () => {
     expect(html).not.toContain("ADDER_LEFT_TABLE");
     expect(html).not.toContain("Please check this item with staff");
     // M36: Remove and the quantity controls are enabled; ordering is not held by it.
-    expect(html).toMatch(/aria-describedby="cart-item-ownership-[^"]+">Remove/u);
+    expect(html).toMatch(
+      /aria-describedby="cart-item-ownership-[^"]+" aria-label="Remove [^"]+">Remove/u,
+    );
     expect(html).not.toContain('disabled="" aria-label="Increase Synthetic tea quantity"');
     expect(html).toContain('aria-label="Increase Synthetic tea quantity"');
     expect(html).not.toContain("cart-remove-unavailable");
