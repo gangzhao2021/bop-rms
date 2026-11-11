@@ -172,6 +172,8 @@ export interface TableSplit {
   /** By dish: what the dishes nobody pays for yet come to, and before tax (null: none). */
   readonly restMinor: string | null;
   readonly restSubtotalMinor: string | null;
+  /** By dish: dishes are left but what they come to couldn't be read (never "all chosen"). */
+  readonly restUnavailable: boolean;
   /** By dish: which part each unit of each dish went to (null: all the parts share it). */
   readonly dishChoices: readonly {
     readonly orderItemReference: string;
@@ -351,6 +353,7 @@ function splitOf(value: unknown): TableSplit | null {
         : raw.parts.length > 0 && raw.paidParts === raw.parts.length,
     restMinor: optionalAmount(raw.restMinor),
     restSubtotalMinor: optionalAmount(raw.restSubtotalMinor),
+    restUnavailable: raw.restUnavailable === true,
     dishChoices: Object.freeze(
       raw.dishChoices.map((value: unknown) => {
         const choice = value as Record<string, unknown>;

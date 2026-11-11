@@ -226,11 +226,15 @@ export function TableSplitControls({
         <p className="table-split__progress">
           {split.paidInFull
             ? t("Every dish is paid.")
-            : split.restMinor === null
-              ? t("Every dish is chosen; waiting for the guests' payments to finish.")
-              : t("Not chosen yet · {amount}. Take it at the counter below.", {
-                  amount: cad(split.restMinor),
-                })}
+            : split.restUnavailable
+              ? t(
+                  "We couldn't work out what is left to pay just now. Refresh the bill and try again.",
+                )
+              : split.restMinor === null
+                ? t("Every dish is chosen; waiting for the guests' payments to finish.")
+                : t("Not chosen yet · {amount}. Take it at the counter below.", {
+                    amount: cad(split.restMinor),
+                  })}
         </p>
         <p className="table-split__hint">
           {t(

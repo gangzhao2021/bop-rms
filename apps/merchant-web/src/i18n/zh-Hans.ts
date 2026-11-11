@@ -6786,6 +6786,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Guests paying by dish": "客人手机按菜付",
   "Payments by dish": "按菜付的款",
   "Every dish is paid.": "每道菜都已付清。",
+  "We couldn't work out what is left to pay just now. Refresh the bill and try again.":
+    "暂时算不出还剩多少要付。请刷新账单再试。",
   "Every dish is chosen; waiting for the guests' payments to finish.":
     "每道菜都有人选了，等客人付款完成。",
   "Not chosen yet · {amount}. Take it at the counter below.":

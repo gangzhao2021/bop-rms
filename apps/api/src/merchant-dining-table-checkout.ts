@@ -308,6 +308,11 @@ export interface DiningTableBill {
     readonly restMinor?: string | null;
     /** ByGuests: "the rest" before tax (a percentage tip at the counter is on it). */
     readonly restSubtotalMinor?: string | null;
+    /**
+     * ByGuests: dishes are left to pay but what they come to could not be worked out on this read
+     * (restMinor is then null too, but not because every dish is chosen): staff read it again.
+     */
+    readonly restUnavailable?: boolean;
   };
   /**
    * WP-2423 同桌结账 (DEC-OWNER-DEFAULTS-2026-11-06): the dishes still to pay, by dish, for guests
@@ -1096,18 +1101,20 @@ export async function readDiningTableBill(
   if (split !== null && split.mode === "ByGuests") {
     const free = diningTableFreeUnits(result, null);
     let restMinor: string | null = null,
-      restSubtotalMinor: string | null = null;
+      restSubtotalMinor: string | null = null,
+      restUnavailable = false;
     if (free.length > 0)
       try {
         const rest = diningTableGuestPart(result, free).part;
         restMinor = rest.amountMinor.toString();
         restSubtotalMinor = rest.subtotalMinor.toString();
       } catch {
-        restMinor = null;
+        // Not "every dish is chosen": the rest exists but can't be priced on this read.
+        restUnavailable = true;
       }
     return Object.freeze({
       ...result,
-      split: Object.freeze({ ...split, restMinor, restSubtotalMinor }),
+      split: Object.freeze({ ...split, restMinor, restSubtotalMinor, restUnavailable }),
     });
   }
   return Object.freeze(result);

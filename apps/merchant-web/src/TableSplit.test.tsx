@@ -230,4 +230,18 @@ describe("WP-2423 同桌结账: guests paying by dish, staff take the rest", () 
     expect(html).not.toContain("Split evenly");
     expect(render(byGuests(true))).toContain("Every dish is paid.");
   });
+
+  it("says the rest couldn't be worked out, never that every dish is chosen", () => {
+    const value = byGuests(false);
+    const split = value.split as Record<string, unknown>;
+    split.restMinor = null;
+    split.restSubtotalMinor = null;
+    split.restUnavailable = true;
+    expect(parseTableBill(value).split?.restUnavailable).toBe(true);
+    const html = render(value);
+    expect(html).toContain(
+      "We couldn&#x27;t work out what is left to pay just now. Refresh the bill and try again.",
+    );
+    expect(html).not.toContain("Every dish is chosen");
+  });
 });
