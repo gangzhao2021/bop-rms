@@ -215,7 +215,8 @@ const sets: Readonly<Record<StarterStoreType, StarterRoleSetDefinition>> = Objec
   },
   CounterOnly: {
     storeType: "CounterOnly",
-    label: "Counter service only, no table service",
+    // Guests may sit at pay-first tables: Counter seats and closes them; nobody serves at the table.
+    label: "Counter service: guests order and pay first, no waiters",
     add: ["counter"],
     keep: ["store_manager", "kitchen"],
     putAway: ["front_of_house", "inventory_manager"],

@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { afterEach, expect, it, vi } from "vitest";
 import { setLanguageForTest } from "./i18n/i18n.js";
+import { zhHans } from "./i18n/zh-Hans.js";
 import {
   StarterRoleSetOffer,
   afterApprovalFailure,
@@ -63,7 +64,7 @@ it("asks what kind of shop this is, before any role is added", () => {
     "Dessert shop",
     "Hotpot restaurant",
     "Full-service Chinese restaurant",
-    "Counter service only, no table service",
+    "Counter service: guests order and pay first, no waiters",
   ])
     expect(html).toContain(kind);
   expect(html).not.toContain("Use these roles");
@@ -203,4 +204,17 @@ it("reads the roles again after an approval run fails other than offline, so the
   // A lost answer keeps the same steps for Try again; what did go through is read again.
   expect(afterApprovalFailure("Offline", rest, 0)).toEqual({ pending: rest, reread: false });
   expect(afterApprovalFailure("Offline", rest, 1)).toEqual({ pending: rest, reread: true });
+});
+
+it("names the button it points to, and a counter shop's kind matches its Counter role", () => {
+  // The Chinese line points at the button by its own Chinese label.
+  expect(
+    zhHans["Offline. Nothing was confirmed; Try again sends the same request again."],
+  ).toContain("“" + zhHans["Try again"] + "”");
+  // Counter seats pay-first tables, so the counter shop's kind never says it has no tables.
+  setLanguageForTest("zh-Hans");
+  const html = render({ storeType: "CounterOnly" });
+  expect(html).toContain("柜台点单、先付款，没有服务员");
+  expect(html).not.toContain("没有桌边服务");
+  expect(html).toContain("安排先付款的桌位");
 });

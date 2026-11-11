@@ -460,7 +460,7 @@ export function starterStoreTypeLabel(type: StarterStoreType): string {
         ? t("Hotpot restaurant")
         : type === "FullService"
           ? t("Full-service Chinese restaurant")
-          : t("Counter service only, no table service");
+          : t("Counter service: guests order and pay first, no waiters");
 }
 export interface StarterRoleView {
   readonly key: string;

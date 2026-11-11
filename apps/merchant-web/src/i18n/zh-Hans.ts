@@ -9203,7 +9203,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Send {name} with this round": "把 {name} 一起送",
   "Taken out": "已删掉",
   "Offline. Nothing was confirmed; Try again sends the same request again.":
-    "网络断开，没有确认成功；按“再试一次”会发送同一个请求。",
+    "网络断开，没有确认成功；按“重试”会发送同一个请求。",
   "Your roles changed meanwhile. Check the list again, then choose.":
     "角色刚被别人改过，请重新看一下列表再选。",
   "You cannot approve these on your own now: someone else also approves roles, or Sole operator is off.":
@@ -9251,7 +9251,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Dessert shop": "甜品店",
   "Hotpot restaurant": "火锅店",
   "Full-service Chinese restaurant": "中餐正餐（桌边服务）",
-  "Counter service only, no table service": "只有柜台点单，没有桌边服务",
+  "Counter service: guests order and pay first, no waiters": "柜台点单、先付款，没有服务员",
   "Drink maker": "饮品师",
   "Dessert maker": "甜品师",
   Floor: "楼面",
