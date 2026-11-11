@@ -3,6 +3,7 @@ import type { ConsumerTransaction } from "@bop/eventing";
 import { parseOpaqueUuidV7, readClosedRecord } from "@bop/identity";
 import {
   cardMachineBackEntryWindowMs,
+  cardMachineRefundGivenBackMinor,
   CardMachinePaymentError,
   createOrdinaryRefundRoleResolver,
   createPostgresCardMachinePaymentStore,
@@ -313,7 +314,22 @@ export function createMerchantCardMachineOrdinaryRefund(options: {
               }
               if (!approved) return fail("CARD_MACHINE_REFUND_APPROVAL_REQUIRED");
             }
-            const amount = ordinaryRefundPaymentAmount(leg);
+            // WP-2423 M52/M131: cash from a counter cash payment goes back in whole nickels (never
+            // more than the drawer still holds of it), handed over without a machine slip.
+            const amount =
+              payment.cash === undefined
+                ? ordinaryRefundPaymentAmount(leg)
+                : cardMachineRefundGivenBackMinor(
+                    payment,
+                    ordinaryRefundPaymentAmount(leg),
+                    (await cards.refunds(tx, payment.cardMachinePaymentReference)).reduce(
+                      (sum, refund) => sum + refund.amountMinor,
+                      0n,
+                    ),
+                  );
+            if (amount <= 0n) return fail("CARD_MACHINE_REFUND_NOTHING_OWED");
+            if (payment.cash !== undefined && command.slipReference !== null)
+              return fail("CARD_MACHINE_REFUND_INPUT_INVALID");
             const recordedAt = parsePaymentInstant(options.persistence.now());
             const refundedAt =
               command.refundedAt === null ? recordedAt : parsePaymentInstant(command.refundedAt);

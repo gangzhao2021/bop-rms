@@ -8,6 +8,8 @@ import {
 } from "@rms/ordering";
 import {
   cardMachineBackEntryWindowMs,
+  cardMachinePaymentTakenMinor,
+  cardMachineRefundGivenBackMinor,
   CardMachinePaymentError,
   createPostgresCardMachinePaymentStore,
   parseCardMachineRefundRecord,
@@ -265,8 +267,16 @@ function createRecord(
             const refunded = (
               await payments.refunds(tx, payment.cardMachinePaymentReference)
             ).reduce((sum, refund) => sum + refund.amountMinor, 0n);
-            const owed = payment.preparation.total.amountMinor - refunded;
+            // WP-2423 M52/M131: a counter cash payment gives back what the drawer still holds of it
+            // (whole nickels, the cash rounding included), handed over without a machine slip.
+            const owed = cardMachineRefundGivenBackMinor(
+              payment,
+              cardMachinePaymentTakenMinor(payment) - refunded,
+              refunded,
+            );
             if (owed <= 0n) return fail("CARD_MACHINE_REFUND_NOTHING_OWED");
+            if (payment.cash !== undefined && command.slipReference !== null)
+              return fail("CARD_MACHINE_REFUND_INPUT_INVALID");
             const recordedAt = parsePaymentInstant(options.persistence.now());
             const refundedAt =
               command.refundedAt === null ? recordedAt : parsePaymentInstant(command.refundedAt);

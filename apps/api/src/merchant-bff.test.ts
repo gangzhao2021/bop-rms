@@ -3517,6 +3517,19 @@ it("WP-2423 Q7: protects counter order and card-machine transport and maps refus
     ...paid,
     acceptance: "Accepted",
   });
+  // WP-2423 M52: cash at the counter answers with the cash total, what was handed over and the change.
+  const cash = {
+    cashTotalMinor: "1280",
+    roundingMinor: "0",
+    tenderedMinor: "2000",
+    changeMinor: "720",
+  };
+  cardMachinePayment.mockResolvedValueOnce({ ...paid, cash, acceptance: "Accepted" } as never);
+  expect(await (await submit("/orders/card-machine-payment")).json()).toEqual({
+    ...paid,
+    cash,
+    acceptance: "Accepted",
+  });
   for (const [code, status, error] of [
     ["CARD_MACHINE_INPUT_INVALID", 400, "card_machine_input_invalid"],
     ["CARD_MACHINE_PERMISSION_DENIED", 403, "card_machine_permission_denied"],
@@ -3527,6 +3540,8 @@ it("WP-2423 Q7: protects counter order and card-machine transport and maps refus
     ["CARD_MACHINE_IDEMPOTENCY_CONFLICT", 409, "card_machine_conflict"],
     // WP-2423 M160: a paid-at time before the Store started recording sales.
     ["CARD_MACHINE_TAKEN_BEFORE_RECORDS", 409, "taken_before_records"],
+    // WP-2423 M52: less cash handed over than the cash total.
+    ["CARD_MACHINE_CASH_TENDER_SHORT", 409, "cash_tender_short"],
     ["CARD_MACHINE_UNAVAILABLE", 503, "card_machine_payment_unavailable"],
   ] as const) {
     cardMachinePayment.mockRejectedValueOnce(new CardMachinePaymentCommandError(code));

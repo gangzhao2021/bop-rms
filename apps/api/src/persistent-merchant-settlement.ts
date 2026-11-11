@@ -597,9 +597,29 @@ export function createPersistentMerchantSettlement(options: {
           };
         }),
       // DEC-DINE-IN-PAY-LATER (cash): tables paid in cash, cash given back, net and rounding.
+      // WP-2423 M52: with the counter's cash sales (walk-up and pickup) and cash given back there.
       cash: (tx, scope, window) =>
         optional(async () => {
-          const { cash } = await tableWindow(tx, scope, window);
+          const { cash: table } = await tableWindow(tx, scope, window);
+          const counter = (
+            await createPostgresCardMachinePaymentStore({
+              scope: {
+                tenantReference: scope.tenantReference,
+                brandReference: scope.brandReference,
+                storeReference: scope.storeReference,
+              },
+              authorize: async (t) => t === tx && (await guard(scope)(tx)),
+            }).summarize(tx, { from: window.startsAt, to: window.endsAt })
+          ).cash;
+          const cash = {
+            count: table.count + counter.paymentCount,
+            amountMinor: table.amountMinor + counter.takenMinor,
+            tipMinor: table.tipMinor + counter.tipMinor,
+            roundingMinor: table.roundingMinor + counter.roundingMinor,
+            refundCount: table.refundCount + counter.refundCount,
+            refundedMinor: table.refundedMinor + counter.refundedMinor,
+            backEntered: table.backEntered + counter.backEnteredCount,
+          };
           // WP-2423 M163: cash taken back after a refund made by mistake is in the drawer.
           const back = (await takenBack(tx, scope, window)).cash;
           return {

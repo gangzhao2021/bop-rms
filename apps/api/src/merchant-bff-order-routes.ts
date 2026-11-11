@@ -575,6 +575,8 @@ export function installMerchantOrderRoutes(
           recordingReason: result.recordingReason,
           takenAt: result.takenAt,
           recordedAt: result.recordedAt,
+          // WP-2423 M52: a cash payment's cash total, what was handed over and the change.
+          ...(result.cash == null ? {} : { cash: result.cash }),
           // D1: whether the server accepted it with the payment (it is then in the kitchen).
           acceptance: result.acceptance ?? "NotAccepted",
         });
@@ -596,6 +598,7 @@ export function installMerchantOrderRoutes(
             CARD_MACHINE_ALREADY_PAID: [409, "already_paid"],
             CARD_MACHINE_IDEMPOTENCY_CONFLICT: [409, "card_machine_conflict"],
             CARD_MACHINE_TAKEN_BEFORE_RECORDS: [409, "taken_before_records"],
+            CARD_MACHINE_CASH_TENDER_SHORT: [409, "cash_tender_short"],
             CARD_MACHINE_UNAVAILABLE: [503, "card_machine_payment_unavailable"],
           } as const
         )[error.code];

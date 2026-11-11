@@ -50,6 +50,7 @@ import {
   listOrderPickupHandoffActors,
 } from "@rms/fulfillment";
 import {
+  cardMachinePaymentTakenMinor,
   createPostgresCardMachinePaymentStore,
   createPostgresDiningTableSettlementStore,
   diningTableSplitPaidInFull,
@@ -552,11 +553,17 @@ export function createPersistentMerchantOrderQueue(options: {
             string,
             {
               recordedAfterOutage: boolean;
+              /**
+               * WP-2423 M52: for a counter order paid in cash, amountMinor is the cash taken (the
+               * cash rounding to 5 cents included) and `cash` says what was handed over and the
+               * change; absent when paid on the card machine.
+               */
               paidOnCardMachine: {
                 amountMinor: string;
                 takenAt: string;
                 recordedAfterOutage: boolean;
                 refundedMinor: string;
+                cash?: { tenderedMinor: string; changeMinor: string; roundingMinor: string };
               } | null;
               /**
                * WP-2423 (v15 751dd768): while it is unpaid, when it is released if not paid
@@ -771,8 +778,9 @@ export function createPersistentMerchantOrderQueue(options: {
               const paid = counterPayments.get(order)?.[0];
               if (paid !== undefined) addCardMachineTip(paid.payment);
               if (paid !== undefined && recordFacts !== null) {
+                const method = paid.payment.cash === undefined ? "CardMachine" : "Cash";
                 recordFacts.payments.push({
-                  method: "CardMachine",
+                  method,
                   part: null,
                   batch: null,
                   actor: String(paid.payment.actorReference),
@@ -780,7 +788,7 @@ export function createPersistentMerchantOrderQueue(options: {
                 });
                 for (const refund of paid.refunds)
                   recordFacts.refunds.push({
-                    method: "CardMachine",
+                    method,
                     amountMinor: refund.amountMinor.toString(),
                     actor: String(refund.actorReference),
                     approver: null,
@@ -842,12 +850,21 @@ export function createPersistentMerchantOrderQueue(options: {
                   paid === undefined
                     ? null
                     : {
-                        amountMinor: paid.payment.preparation.total.amountMinor.toString(),
+                        amountMinor: cardMachinePaymentTakenMinor(paid.payment).toString(),
                         takenAt: String(paid.payment.takenAt),
                         recordedAfterOutage: paid.payment.recordingReason === "RecordedAfterOutage",
                         refundedMinor: paid.refunds
                           .reduce((sum, refund) => sum + refund.amountMinor, 0n)
                           .toString(),
+                        ...(paid.payment.cash === undefined
+                          ? {}
+                          : {
+                              cash: {
+                                tenderedMinor: paid.payment.cash.tenderedMinor.toString(),
+                                changeMinor: paid.payment.cash.changeMinor.toString(),
+                                roundingMinor: paid.payment.cash.roundingMinor.toString(),
+                              },
+                            }),
                       },
               });
             }

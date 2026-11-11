@@ -694,6 +694,16 @@ function computeSales(
           payment.paymentIntentReference,
         ]);
       }
+      // WP-2423 M52/M131: cash from a counter payment goes back in whole nickels; what it differs
+      // from the dishes' shares is cash rounding handed back (not sales, tax or tip).
+      if (refund.channel === "Cash")
+        roundingShare =
+          refund.amountMinor -
+          refund.items.reduce(
+            (sum, share) =>
+              sum + share.netMinor + share.taxMinor + share.serviceChargeMinor + share.tipMinor,
+            0n,
+          );
     } else {
       // A whole-payment refund returns what remained of each item and of the tip, over every
       // round line of a table's payment (a refund is off the whole bill, not its last round).

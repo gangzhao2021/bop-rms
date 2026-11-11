@@ -15,6 +15,8 @@ import {
   parseCardMachinePaymentRecord,
   parseCardMachineSlipReference,
   parsePaymentDigest,
+  planCounterCashTender,
+  cardMachinePaymentTakenMinor,
   parsePaymentInstant,
   type CardMachinePaymentRecord,
   type PaymentIntentClaimAdmission,
@@ -43,6 +45,11 @@ export const cardMachinePaymentCommandErrorCodes = [
    * the system (its first configuration governed). Nothing was recorded; the slip time is checked.
    */
   "CARD_MACHINE_TAKEN_BEFORE_RECORDS",
+  /**
+   * WP-2423 M52: the cash handed over is less than the cash total (rounded to 5 cents). Nothing
+   * was recorded.
+   */
+  "CARD_MACHINE_CASH_TENDER_SHORT",
   "CARD_MACHINE_UNAVAILABLE",
 ] as const;
 export type CardMachinePaymentCommandErrorCode =
@@ -73,10 +80,25 @@ export interface CardMachinePaymentResult {
   readonly recordingReason: CardMachinePaymentRecord["recordingReason"];
   readonly takenAt: string;
   readonly recordedAt: string;
+  /**
+   * WP-2423 M52: a counter order paid in cash — the cash total (rounded to 5 cents), what the
+   * guest handed over and the change to give back. Null for the card machine.
+   */
+  readonly cash?: {
+    readonly cashTotalMinor: string;
+    readonly roundingMinor: string;
+    readonly tenderedMinor: string;
+    readonly changeMinor: string;
+  } | null;
 }
 
 export function parseCardMachinePaymentCommand(value: unknown) {
   try {
+    // WP-2423 M52: a cash payment at the counter also says what the guest handed over.
+    const inCash =
+      value !== null &&
+      typeof value === "object" &&
+      Object.prototype.hasOwnProperty.call(value, "tenderedMinor");
     const raw = readClosedRecord(value, [
       "operationReference",
       "orderReference",
@@ -84,10 +106,19 @@ export function parseCardMachinePaymentCommand(value: unknown) {
       "expectedTotalMinor",
       "slipReference",
       "takenAt",
+      ...(inCash ? ["tenderedMinor"] : []),
     ]);
     if (
       typeof raw.expectedTotalMinor !== "string" ||
       !/^[1-9][0-9]{0,15}$/u.test(raw.expectedTotalMinor)
+    )
+      return fail("CARD_MACHINE_INPUT_INVALID");
+    const tendered = inCash ? raw.tenderedMinor : null;
+    if (
+      tendered !== null &&
+      (typeof tendered !== "string" ||
+        !/^[1-9][0-9]{0,15}$/u.test(tendered) ||
+        raw.slipReference !== null)
     )
       return fail("CARD_MACHINE_INPUT_INVALID");
     return Object.freeze({
@@ -99,6 +130,8 @@ export function parseCardMachinePaymentCommand(value: unknown) {
         raw.slipReference === null ? null : parseCardMachineSlipReference(raw.slipReference),
       /** A back-entered paper order: when it was actually paid. Null at the counter. */
       takenAt: raw.takenAt === null ? null : String(parsePaymentInstant(raw.takenAt)),
+      /** WP-2423 M52: cash handed over (exact cents); null when paid on the card machine. */
+      tenderedMinor: tendered as string | null,
     });
   } catch (error) {
     if (error instanceof CardMachinePaymentCommandError) throw error;
@@ -242,6 +275,8 @@ export function createMerchantCardMachinePayment(options: {
             expectedTotalMinor: command.expectedTotalMinor,
             slipReference: command.slipReference,
             takenAt: command.takenAt,
+            // A cash payment is a different intent (the card one's digest is unchanged).
+            ...(command.tenderedMinor === null ? {} : { tenderedMinor: command.tenderedMinor }),
           }),
         ),
     );
@@ -254,6 +289,15 @@ export function createMerchantCardMachinePayment(options: {
         recordingReason: record.recordingReason,
         takenAt: String(record.takenAt),
         recordedAt: String(record.recordedAt),
+        cash:
+          record.cash === undefined
+            ? null
+            : Object.freeze({
+                cashTotalMinor: cardMachinePaymentTakenMinor(record).toString(),
+                roundingMinor: record.cash.roundingMinor.toString(),
+                tenderedMinor: record.cash.tenderedMinor.toString(),
+                changeMinor: record.cash.changeMinor.toString(),
+              }),
       });
     try {
       // WP-2423: one authorized run. The staff member and the counter-order permission are
@@ -342,6 +386,10 @@ export function createMerchantCardMachinePayment(options: {
             // refused before anything is written.
             if (command.takenAt !== null && !staffEntry.recordedAfterOutage)
               return fail("CARD_MACHINE_INPUT_INVALID");
+            // WP-2423 M52: cash is taken at the counter (walk-up and pickup); a table's cash is
+            // taken with its bill at checkout.
+            if (command.tenderedMinor !== null && staffEntry.kind !== "CounterPickup")
+              return fail("CARD_MACHINE_INPUT_INVALID");
             const order = { submissionReference: staffEntry.submissionReference };
             const current = staffEntry.current;
             if (current === null) return fail("CARD_MACHINE_NOT_PAYABLE");
@@ -351,6 +399,11 @@ export function createMerchantCardMachinePayment(options: {
               return fail("CARD_MACHINE_AMOUNT_CHANGED", total);
             if (recordedAt >= String(preparation.capacityExpiresAt))
               return fail("CARD_MACHINE_PAYMENT_WINDOW_CLOSED");
+            // The table's cash rules: rounded to 5 cents, at least that handed over, the change.
+            const cash =
+              command.tenderedMinor === null
+                ? null
+                : planCounterCashTender(preparation, BigInt(command.tenderedMinor));
             const record = parseCardMachinePaymentRecord({
               tenantReference: scope.tenantReference,
               brandReference: scope.brandReference,
@@ -373,6 +426,7 @@ export function createMerchantCardMachinePayment(options: {
               actorReference,
               eventReference: options.nextReference(),
               auditReference: options.nextReference(),
+              ...(cash === null ? {} : { cash }),
             });
             const admitted = await options
               .admission({ scope, preparation, allowed, kind: staffEntry.kind })
@@ -393,6 +447,8 @@ export function createMerchantCardMachinePayment(options: {
         if (error.code === "CARD_MACHINE_INPUT_INVALID") return fail("CARD_MACHINE_INPUT_INVALID");
         if (error.code === "CARD_MACHINE_PERMISSION_DENIED")
           return fail("CARD_MACHINE_PERMISSION_DENIED");
+        if (error.code === "CARD_MACHINE_CASH_TENDER_SHORT")
+          return fail("CARD_MACHINE_CASH_TENDER_SHORT");
       }
       const code = (error as { code?: unknown } | null)?.code;
       if (code === "STORE_SERVICE_PERMISSION_DENIED") return fail("CARD_MACHINE_PERMISSION_DENIED");

@@ -19,6 +19,7 @@ import {
   type StaffOrderCancellationRecord,
 } from "@rms/ordering";
 import {
+  cardMachinePaymentTakenMinor,
   createPostgresCardMachinePaymentStore,
   createPostgresPaymentCompensationRefundPositionSource,
   readPaymentRemainingRefundable,
@@ -120,7 +121,9 @@ export async function readCardMachineCancellationRefund(
     });
   // Nothing left on the machine payment (refunded in full item by item before an older record
   // without AlreadyRefunded): there is no 0.00 refund to make or record.
-  if (own === undefined && payment.preparation.total.amountMinor - refunded <= 0n)
+  // WP-2423 M52: a counter cash payment gives back what the drawer took (rounding included).
+  const taken = cardMachinePaymentTakenMinor(payment);
+  if (own === undefined && taken - refunded <= 0n)
     return Object.freeze({
       status: "Refunded" as const,
       amountMinor: refunded.toString(),
@@ -128,7 +131,7 @@ export async function readCardMachineCancellationRefund(
     });
   return Object.freeze({
     status: own === undefined ? ("Pending" as const) : ("Refunded" as const),
-    amountMinor: (own?.amountMinor ?? payment.preparation.total.amountMinor - refunded).toString(),
+    amountMinor: (own?.amountMinor ?? taken - refunded).toString(),
     cardMachinePaymentReference: payment.cardMachinePaymentReference,
   });
 }
@@ -217,9 +220,9 @@ async function readStaffCancellationRemaining(
     const refunds = await cardStore.refunds(tx, card.cardMachinePaymentReference);
     result = {
       refundMethod: "CardMachine",
-      paidMinor: card.preparation.total.amountMinor,
+      paidMinor: cardMachinePaymentTakenMinor(card),
       remainingMinor:
-        card.preparation.total.amountMinor -
+        cardMachinePaymentTakenMinor(card) -
         refunds.reduce((sum, refund) => sum + refund.amountMinor, 0n),
     };
   } else if (options.resolveRefundConfiguration !== undefined) {

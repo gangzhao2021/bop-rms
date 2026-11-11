@@ -9,6 +9,9 @@ import {
 } from "./store-sales-report.js";
 import { businessDatesBetween } from "./persistent-merchant-store-reports.js";
 
+const fail = (): never => {
+  throw new Error("fixture");
+};
 const ref = (n: number) => "01a7c000-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 const sku = { latteLarge: ref(901), latteSmall: ref(902), muffin: ref(903) };
 const names = {
@@ -881,6 +884,66 @@ describe("store sales report (WP-2423 Q14)", () => {
       }).reconciliation.matchesSettlement,
     ).toBe(false);
     expect(storeSalesReportCsv(view, "summary").split("\r\n")[0]).toContain("cash_collected");
+  });
+  it("WP-2423 M52/M131: a counter order paid in cash is cash; a dish given back in nickels keeps its sales and tax", () => {
+    const counter = order(400, "Pickup", "Pos", [c1Items]);
+    const latte = c1Items[0] ?? fail();
+    // $4.52 with tax and a $0.50 tip: $5.02, $5.00 in cash (rounded down 2 cents).
+    const paid: StoreSalesPayment = {
+      ...payment("CardMachine", 400, 0, c1Items, 50, "2026-10-14T16:30:00.000Z"),
+      channel: "Cash",
+      roundingMinor: -2n,
+    };
+    const view = computeStoreSalesReport({
+      ...today,
+      orders: [counter],
+      payments: [paid],
+      refundedPayments: [],
+      refunds: [
+        // The latte ($4.52) goes back as $4.50 in cash.
+        {
+          channel: "Cash",
+          kind: "Cash",
+          refundReference: ref(961),
+          orderReference: paid.orderReference,
+          paymentIntentReference: paid.paymentIntentReference,
+          amountMinor: 450n,
+          refundedAt: "2026-10-14T17:00:00.000Z",
+          items: [
+            {
+              orderItemReference: latte.orderItemReference,
+              unitCount: 1,
+              netMinor: 400n,
+              taxMinor: 52n,
+              tipMinor: 0n,
+              serviceChargeMinor: 0n,
+            },
+          ],
+        },
+      ],
+      settlement: {
+        onlineCaptured: { count: 0, amountMinor: 0n },
+        onlineRefunded: { count: 0, amountMinor: 0n },
+        cardMachineTaken: { count: 0, amountMinor: 0n, tipMinor: 0n },
+        cardMachineRefunded: { count: 0, amountMinor: 0n },
+        cashTaken: { count: 1, amountMinor: 500n, tipMinor: 50n, roundingMinor: -2n },
+        cashRefunded: { count: 1, amountMinor: 450n },
+      },
+    });
+    const cash = view.byChannel.find((row) => row.channel === "Cash");
+    expect(cash).toMatchObject({
+      paymentCount: 1,
+      collectedMinor: "500",
+      tipsMinor: "50",
+      cashRoundingMinor: "-2",
+      refundsMinor: "450",
+    });
+    expect(view.summary.refunds).toMatchObject({
+      salesMinor: "400",
+      taxMinor: "52",
+      cashRoundingMinor: "-2",
+    });
+    expect(view.reconciliation.matchesSettlement).toBe(true);
   });
   it("WP-2423 item 8 ① segment 2: a manager's comp is its own line, off net sales and tax, in the export", () => {
     // Two dishes; the second (10.00 + 1.30 tax) comped in full before the table paid in cash.
