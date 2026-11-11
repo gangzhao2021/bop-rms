@@ -139,3 +139,32 @@ export async function isDiningGuestSessionSuperseded(
     ).length > 0
   );
 }
+
+/**
+ * v15 batch 8 (member points): every Guest Session this participant's phone has used at its table
+ * — the one it came on and each later one after a lost cookie — so a payment made on its own card
+ * before the rotation is still known as this phone's. The participant's current session is the
+ * caller's; this adds the earlier ones (and the later ones, when asked about an earlier session).
+ */
+export async function listDiningParticipantGuestSessions(
+  tx: DiningTableTransaction,
+  scope: DiningReadmissionScope,
+  participantReference: string,
+): Promise<readonly string[]> {
+  const ids = await scoped(tx, scope);
+  const found = rowsOf(
+    await tx.query(
+      stableRead +
+        `SELECT from_guest_session_id::text AS from_session,to_guest_session_id::text AS to_session
+ FROM rms_dining.dining_participant_readmission WHERE brand_id=$1 AND store_id=$2 AND participant_id=$3
+ ORDER BY occurred_at,readmission_id LIMIT 50`,
+      [ids.brand, ids.store, ref(participantReference)],
+    ),
+  );
+  const sessions = new Set<string>();
+  for (const row of found) {
+    sessions.add(ref(row.from_session));
+    sessions.add(ref(row.to_session));
+  }
+  return Object.freeze([...sessions]);
+}

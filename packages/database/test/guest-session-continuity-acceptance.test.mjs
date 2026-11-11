@@ -9,6 +9,7 @@ import {
 import {
   createDiningTable,
   isDiningGuestSessionSuperseded,
+  listDiningParticipantGuestSessions,
   parseDiningIdentityAdmission,
   parseDiningParticipant,
   parseDiningSession,
@@ -342,6 +343,14 @@ it("WP-2423 (shared-table-checkout): a phone that lost its cookie comes back as 
       assert.equal(
         await runner.run((tx) => isDiningGuestSessionSuperseded(tx, scope, newSession.id)),
         false,
+      );
+      // v15 batch 8 (member points): both sessions are A's phone, so a payment A made on its own
+      // card before the cookie was lost is still A's to earn on, never another phone's.
+      assert.deepEqual(
+        [
+          ...(await runner.run((tx) => listDiningParticipantGuestSessions(tx, scope, phoneA))),
+        ].sort(),
+        [sessionA, newSession.id].sort(),
       );
       // "Only what I added" on the new session finds A's dish.
       const chosenAt = new Date().toISOString();

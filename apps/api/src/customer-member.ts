@@ -13,7 +13,7 @@ import {
   type MemberPhoneProtector,
   type MemberPointsRule,
 } from "@rms/customer-loyalty";
-import { listDiningSessionMergedInto } from "@rms/dining";
+import { listDiningParticipantGuestSessions, listDiningSessionMergedInto } from "@rms/dining";
 import { loadDiningGuestPhones } from "./dining-guest-phones.js";
 import {
   createPostgresOrderPriceReductionStore,
@@ -116,7 +116,8 @@ interface OfferedSource extends ClaimSource {
 /**
  * v15 batch 8: which phone paid a table's payment — this one, another one (its own card on its
  * own phone), or unknown (cash or the card machine at the counter: any phone at the table may say
- * it was theirs).
+ * it was theirs). `thisPhone` is every Guest Session this phone has used at the table: a phone
+ * that lost its cookie and came back as the same guest still owns what it paid before.
  */
 export function paymentPhone(
   settlement: { readonly onlinePaymentReference: string | null },
@@ -124,16 +125,32 @@ export function paymentPhone(
     readonly onlinePaymentReference: string;
     readonly guestSessionReference: unknown;
   }[],
-  guestSessionReference: unknown,
+  thisPhone: readonly unknown[],
 ): "ThisPhone" | "OtherPhone" | "Unknown" {
   if (settlement.onlinePaymentReference === null) return "Unknown";
   const attempt = online.find(
     (entry) => entry.onlinePaymentReference === settlement.onlinePaymentReference,
   );
   if (attempt === undefined) return "Unknown";
-  return String(attempt.guestSessionReference) === String(guestSessionReference)
+  return thisPhone.some((session) => String(session) === String(attempt.guestSessionReference))
     ? "ThisPhone"
     : "OtherPhone";
+}
+
+/**
+ * v15 batch 8 (Owner default: one phone, its own part): a table paid in parts, where this phone
+ * certainly paid some part (on its own card, or it is the table's one phone), offers this phone
+ * only the parts it certainly paid — never also a part paid at the counter that another guest may
+ * have paid. Applied to every part, claimed or not, so a phone that already claimed its own part
+ * is not then offered someone else's. A phone that certainly paid nothing is still asked which
+ * part was theirs, among the parts paid at the counter.
+ */
+export function partsThisPhoneMayClaim<T extends { readonly certain: boolean }>(
+  sources: readonly T[],
+): readonly T[] {
+  return sources.some((source) => source.certain)
+    ? sources.filter((source) => source.certain)
+    : sources;
 }
 
 export function createCustomerMember(options: {
@@ -239,8 +256,20 @@ export function createCustomerMember(options: {
     const order = bill.orderReference;
     if (order === null) return [];
     const online = await settlementStore.listOnlinePaymentsByOrders(tx as never, [order]);
+    // The sessions this guest's phone used here: a lost cookie gives the same guest a new one.
+    const thisPhone: readonly unknown[] =
+      online.length === 0 || typeof guest.diningParticipantReference !== "string"
+        ? [guest.sessionReference]
+        : [
+            guest.sessionReference,
+            ...(await listDiningParticipantGuestSessions(
+              tx as never,
+              scope,
+              guest.diningParticipantReference,
+            )),
+          ];
     const payer = (settlement: { readonly onlinePaymentReference: string | null }) =>
-      paymentPhone(settlement, online, guest.sessionReference);
+      paymentPhone(settlement, online, thisPhone);
     const paidOnThisPhone = (settlement: { readonly onlinePaymentReference: string | null }) =>
       payer(settlement) === "ThisPhone";
     // Paid at the counter or on the card machine: certain only when this is the table's one phone.
@@ -282,7 +311,9 @@ export function createCustomerMember(options: {
         certain: paidOnThisPhone(settlement) || onlyPhone,
       });
     }
-    return sources.sort((a, b) => (a.partNumber ?? 0) - (b.partNumber ?? 0));
+    return partsThisPhoneMayClaim(
+      sources.sort((a, b) => (a.partNumber ?? 0) - (b.partNumber ?? 0)),
+    );
   };
   /**
    * Pickup, and a table that pays each round first: each paid round of the guest's own Order earns
