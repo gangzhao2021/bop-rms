@@ -592,6 +592,15 @@ for (const screen of [
       await expect(page.getByRole("button", { name: /Continue to payment/u })).toHaveCount(0);
       const again = page.getByRole("link", { name: "Choose again" });
       await expect(again).toBeInViewport();
+      // v15 batch 8: the ended choice is no longer this guest's order: nothing is listed as "Your
+      // order" (not the dish staff took out, not another phone's), and Choose again is the only
+      // step — no Refresh prices or Try again beside it.
+      await expect(page.getByText("Synthetic noodles", { exact: true })).toHaveCount(0);
+      await expect(page.getByText("Synthetic sesame soup", { exact: true })).toHaveCount(0);
+      await expect(page.getByRole("heading", { name: /^Your order$/iu })).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "Refresh prices" })).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "Try again" })).toHaveCount(0);
+      await expect(page.getByRole("main").getByRole("button")).toHaveCount(0);
       await page.screenshot({ path: info.outputPath(`choice-ended-${screen.width}.png`) });
       await again.click();
       await expect(page).toHaveURL(/\/cart$/u);

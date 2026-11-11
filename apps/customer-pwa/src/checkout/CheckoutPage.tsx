@@ -638,6 +638,29 @@ export function CheckoutPage({
         </section>
       </CustomerPage>
     );
+  // v15 batch 8 (DEC-DINING-CHECKOUT-SCOPE 15): this phone's choice of dishes ended before it
+  // paid. What this page priced is no longer this guest's order (staff took a dish out, or another
+  // phone chose the dishes meanwhile), so it lists nothing as "Your order" and offers one step:
+  // choose again. Prices, refreshes and retries belong to the next choice.
+  if (
+    tableChange?.kind === "choiceEnded" &&
+    (sessionState.status === "idle" || sessionState.status === "conflict")
+  )
+    return (
+      <CustomerPage step="checkout" store={resolvedStore} className="checkout-page">
+        <PageHeading title={checkoutText.pageTitle} />
+        <section className="checkout-attention">
+          <p role="alert">
+            {checkoutText.tableChoiceEnded(tableCartAddedDishes(tableChange.byStaff))}
+          </p>
+          <div className="cart-state__actions">
+            <Link className="checkout-continue__button" to="/cart" replace>
+              {checkoutText.chooseAgain}
+            </Link>
+          </div>
+        </section>
+      </CustomerPage>
+    );
   return (
     <CustomerPage step="checkout" store={resolvedStore} className="checkout-page">
       <PageHeading title={payLater ? checkoutText.placeOrder : checkoutText.pageTitle} />
@@ -1156,12 +1179,7 @@ export function CheckoutPage({
               ) : null}
             </p>
           ) : null}
-          {tableChange?.kind === "choiceEnded" && sessionState.status === "idle" ? (
-            // v15 batch 7: the old choice is over; the cart asks which dishes to pay again.
-            <Link className="checkout-continue__button" to="/cart" replace>
-              {checkoutText.chooseAgain}
-            </Link>
-          ) : tableChange?.kind === "changed" && sessionState.status === "idle" ? (
+          {tableChange?.kind === "changed" && sessionState.status === "idle" ? (
             <button
               type="button"
               className="checkout-continue__button"
