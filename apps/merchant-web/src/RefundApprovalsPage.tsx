@@ -349,29 +349,33 @@ function ApprovalCard({
         message:
           code === "AlreadyPrepared"
             ? t("This refund was already sent, so it can no longer be declined. Refresh the list.")
-            : code === "AlreadyDeclined"
-              ? t("This refund was already declined. Refresh the list.")
-              : code === "SamePerson"
-                ? t("You asked for this refund. Another owner or finance member must decide.")
-                : code === "NeedsReverification"
-                  ? t("Confirm it is you with your authenticator code, then decline.")
-                  : code === "NotPermitted"
-                    ? t(
-                        "Only an owner or finance member who didn't ask for this refund can decline it.",
-                      )
-                    : code === "Denied"
-                      ? t("Your session has ended. Sign in again, then decline.")
-                      : code === "Refused"
-                        ? t(
-                            "This decline was refused just now. Nothing was declined. Sign out and in, then try again; if it is still refused, ask the owner to check your role.",
-                          )
-                        : code === "Unavailable"
+            : code === "DishesStopped"
+              ? t(
+                  "The kitchen and the counter already left this refund's dishes out, so it can't be declined. Send it from Approvals.",
+                )
+              : code === "AlreadyDeclined"
+                ? t("This refund was already declined. Refresh the list.")
+                : code === "SamePerson"
+                  ? t("You asked for this refund. Another owner or finance member must decide.")
+                  : code === "NeedsReverification"
+                    ? t("Confirm it is you with your authenticator code, then decline.")
+                    : code === "NotPermitted"
+                      ? t(
+                          "Only an owner or finance member who didn't ask for this refund can decline it.",
+                        )
+                      : code === "Denied"
+                        ? t("Your session has ended. Sign in again, then decline.")
+                        : code === "Refused"
                           ? t(
-                              "Couldn't decline just now. Nothing was declined. Press Decline again.",
+                              "This decline was refused just now. Nothing was declined. Sign out and in, then try again; if it is still refused, ask the owner to check your role.",
                             )
-                          : t(
-                              "Result unknown. Decline again with the same reason — it is recorded once.",
-                            ),
+                          : code === "Unavailable"
+                            ? t(
+                                "Couldn't decline just now. Nothing was declined. Press Decline again.",
+                              )
+                            : t(
+                                "Result unknown. Decline again with the same reason — it is recorded once.",
+                              ),
       });
     } finally {
       pending.current = null;

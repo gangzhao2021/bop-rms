@@ -63,6 +63,8 @@ export type ApprovalFailure =
   | "NeedsReverification"
   | "Changed"
   | "AlreadyPrepared"
+  /** WP-2423 M10: the kitchen and the counter already left this refund's dishes out. */
+  | "DishesStopped"
   | "AlreadyDeclined"
   | "NotPermitted"
   | "RequesterNotEligible"
@@ -566,6 +568,8 @@ function refusal(status: number, data: unknown): never {
     throw new RefundApprovalClientError("RequesterNotEligible");
   if (status === 409 && error === "refund_already_prepared")
     throw new RefundApprovalClientError("AlreadyPrepared");
+  if (status === 409 && error === "refund_dishes_stopped")
+    throw new RefundApprovalClientError("DishesStopped");
   if (status === 409 && error === "refund_already_declined")
     throw new RefundApprovalClientError("AlreadyDeclined");
   if (status === 409 && error === "sole_operator_not_in_effect")

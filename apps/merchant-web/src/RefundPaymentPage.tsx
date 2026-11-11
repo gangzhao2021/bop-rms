@@ -673,6 +673,8 @@ function RefundWizard({
     [approvals, setApprovals] = useState<ReadonlyMap<string, RefundApprovalEntry>>(new Map()),
     [verifiedUntil, setVerifiedUntil] = useState<string | null>(null),
     [preview, setPreview] = useState<Preview | null>(null),
+    // WP-2423 M10: the previewed request asks the kitchen to stop making some dishes.
+    [previewStops, setPreviewStops] = useState(false),
     [confirmed, setConfirmed] = useState(false),
     [message, setMessage] = useState(""),
     // WP-2423: the request was refused on an unconfirmed PIN sign-in (retry the same one after).
@@ -939,6 +941,7 @@ function RefundWizard({
       operation.current = intent;
       const result = await intent.preview(csrf, controller.signal);
       if (!controller.signal.aborted) {
+        setPreviewStops(withdraw.length > 0);
         setPreview(result);
         setState("Idle");
       }
@@ -1455,6 +1458,15 @@ function RefundWizard({
               {t("Recording this request does not refund anything yet: it is sent once approved.")}
             </p>
           )}
+          {preview.approvalRequired === true && previewStops ? (
+            // WP-2423 M10: the kitchen and the counter change only with a refund nobody can
+            // decline any more; the server refuses this combination too.
+            <p className="refund-withdraw-approval" role="alert">
+              {t(
+                "This refund needs the owner's approval, so the kitchen isn't told now. Untick Stop making it too to ask for approval; for a dish the kitchen hasn't started, use Cancel items on the order.",
+              )}
+            </p>
+          ) : null}
           {preview.approvalRequired === true ? (
             <section aria-label={t("Owner approval needed")} className="refund-escalation">
               <h4>{t("Needs owner approval")}</h4>
@@ -1502,7 +1514,9 @@ function RefundWizard({
             type="button"
             className="refund-primary"
             disabled={
-              !confirmed || locked || (preview.approvalRequired === true && !verificationCurrent())
+              !confirmed ||
+              locked ||
+              (preview.approvalRequired === true && (previewStops || !verificationCurrent()))
             }
             onClick={() => void submit()}
           >

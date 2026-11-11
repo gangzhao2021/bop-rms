@@ -316,3 +316,187 @@ test("@production M163: a manager records money taken back after a refund made b
   await expectNoInternalText(page);
   await noHorizontalScroll(page, "money-taken-back-listed");
 });
+
+test("@production M10: the cook's ticket strikes through the refunded units and says who refunded them", async ({
+  page,
+}) => {
+  await noApprovals(page);
+  const at = new Date().toISOString();
+  await page.route("**/merchant/session", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        authenticated: true,
+        csrf: "a".repeat(43),
+        workspace: {
+          screenId: "HOME-OVERVIEW",
+          selectedScope: scope,
+          authorizedStores: [scope],
+          businessDate: "2026-11-10",
+          storeStatus: "Open",
+          freshness: "Current",
+          dashboardAvailability: "UnavailableUntilWP1905",
+          navigation: [
+            {
+              screenId: "KIT-KITCHEN-QUEUE",
+              label: "Kitchen",
+              href: "/operations/kitchen",
+              permission: "kitchen.operate",
+            },
+          ],
+        },
+      },
+    }),
+  );
+  const item = (n: number, name: string, required: number, refund: Record<string, unknown>) => ({
+    workItemReference: id(400 + n),
+    ticketReference: id(450 + n),
+    orderReference: id(470 + n),
+    orderItemReference: id(420 + n),
+    stationReference: id(52),
+    localizedDisplayNames: { "zh-Hans": name },
+    allergens: { status: "Unavailable" },
+    orderLabel: { orderNumber: String(30 + n), orderType: "Pickup", tableLabel: null },
+    customerNote: null,
+    selectedOptions: [],
+    status: "In Progress",
+    requiredQuantity: required,
+    completedQuantity: 0,
+    workItemCreatedAt: at,
+    acceptedAt: at,
+    orderItemReadyAt: null,
+    ticketAggregateVersion: "7",
+    workItemVersion: "3",
+    ...refund,
+  });
+  await page.route("**/merchant/kitchen/query", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        storeReference: scope.storeReference,
+        operatorStatus: "Named",
+        projectionName: "kitchen_work_queue_v1",
+        projectionVersion: 1,
+        projectionGenerationReference: id(6),
+        projectedAt: at,
+        partial: false,
+        stale: false,
+        freshnessStatus: "Fresh",
+        items: [
+          // Being made, 1 of 2 refunded by Mia: 2× struck through, 1× still to make.
+          item(1, "担担面", 2, { refundedQuantity: 1, refundedBy: ["Mia"] }),
+          // Being made, refunded in full: stop, and clear it with Finished.
+          item(2, "炒饭", 1, { refundedQuantity: 1, refundedBy: ["Mia"] }),
+        ],
+        nextCursor: null,
+      },
+    }),
+  );
+  await page.goto("/operations/kitchen");
+  const partly = page.locator(".kitchen-ticket").filter({ hasText: "担担面" });
+  await expect(partly.locator(".kitchen-work-item__count-refunded")).toHaveText("2×");
+  await expect(partly.locator(".kitchen-work-item__count")).toContainText("1×");
+  await expect(partly).toContainText("1 refunded · don't make it · make 1 · Refunded by Mia");
+  const stopped = page.locator(".kitchen-ticket").filter({ hasText: "炒饭" });
+  await expect(stopped).toContainText(
+    "Refunded · stop, don't make it · press Finished to clear it · Refunded by Mia",
+  );
+  const strike = await partly
+    .locator(".kitchen-work-item__count-refunded")
+    .evaluate((node) => getComputedStyle(node).textDecorationLine);
+  expect(strike).toContain("line-through");
+  await expectNoInternalText(page);
+  await noHorizontalScroll(page, "kitchen-refunded-struck-through");
+});
+
+test("@production M10: a refund that needs the owner's approval does not stop the kitchen, and a refused stop says why", async ({
+  page,
+}) => {
+  await signIn(page);
+  await noApprovals(page);
+  await page.route("**/merchant/payments/refunds/context", (route) =>
+    route.fulfill({ headers, json: context({ capturedAmountMinor: "30000" }) }),
+  );
+  await page.route("**/merchant/payments/refunds/items", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        orderReference: id(1),
+        orderNumber: "21",
+        canRequest: true,
+        canWithdraw: true,
+        claimVersion: 0,
+        recentRequests: [],
+        items: [
+          {
+            orderBatchReference: id(90),
+            orderItemReference: id(3),
+            label: "Catering tray",
+            quantity: 2,
+            unclaimedQuantity: 2,
+            paymentCaptured: true,
+            refundedByCancellation: false,
+            paymentIntentReference: id(31),
+            paymentMethod: "Online",
+            kitchen: "NotStarted",
+            withdrawnQuantity: 0,
+          },
+        ],
+      },
+    }),
+  );
+  let approvalRequired = true;
+  await page.route("**/merchant/payments/refunds/preview", (route) => {
+    const command = JSON.parse(route.request().postData() ?? "{}");
+    return route.fulfill({
+      headers,
+      json: {
+        status: "Previewed",
+        requestReference: command.requestReference,
+        operationReference: command.operationReference,
+        claimVersion: 0,
+        currencyCode: "CAD",
+        amountMinor: "15000",
+        paymentAttemptReferences: [id(32)],
+        approvalRequired,
+        escalationReasons: approvalRequired ? ["OrderOrdinaryTotalAboveCad100"] : [],
+        approveAlone: false,
+        components: {
+          netAmountMinor: "13274",
+          taxAmountMinor: "1726",
+          tipAmountMinor: "0",
+          serviceChargeAmountMinor: "0",
+          serviceChargeTaxAmountMinor: "0",
+        },
+      },
+    });
+  });
+  await page.route("**/merchant/payments/refunds/request", (route) =>
+    route.fulfill({ status: 409, headers, json: { error: "refund_withdraw_everything" } }),
+  );
+  await page.goto("/app/operations/payments/" + id(31) + "/refund");
+  await page.getByRole("spinbutton", { name: /Catering tray/ }).fill("1");
+  await expect(page.getByRole("checkbox", { name: /Stop making it too/ })).toBeChecked();
+  await page.getByRole("combobox", { name: "Reason" }).selectOption("WRONG_ITEM");
+  await page.getByRole("button", { name: "Review refund" }).click();
+  const review = page.getByRole("region", { name: "Review this refund" });
+  await expect(review).toContainText(
+    "This refund needs the owner's approval, so the kitchen isn't told now.",
+  );
+  await page.getByRole("checkbox", { name: /I confirm/ }).check();
+  await expect(
+    page.getByRole("button", { name: "Record request for owner approval" }),
+  ).toBeDisabled();
+  await expectNoInternalText(page);
+  await noHorizontalScroll(page, "refund-stop-needs-approval");
+  // Without approval: the refund is sent, and a stop the server refuses says why.
+  approvalRequired = false;
+  await page.getByRole("button", { name: "Review refund" }).click();
+  await expect(review).not.toContainText("the kitchen isn't told now");
+  await page.getByRole("checkbox", { name: /I confirm/ }).check();
+  await page.getByRole("button", { name: /Send \$150\.00 refund/ }).click();
+  await expect(page.locator(".refund-status")).toContainText(
+    "Nothing was recorded. This would refund and stop every dish of the pickup",
+  );
+  await noHorizontalScroll(page, "refund-stop-refused");
+});

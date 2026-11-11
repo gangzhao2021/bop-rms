@@ -778,8 +778,9 @@ const kitchenItem = (n: number, status: "Queued" | "Completed"): KitchenList["it
   takenOnPaper: true,
   // WP-2423 (M93): the dish contains alcohol; check ID when serving it (sent only then).
   checkId: true,
-  // WP-2423 M10: one unit refunded and not to be made.
+  // WP-2423 M10: one unit refunded and not to be made, and who refunded it.
   refundedQuantity: 1,
+  refundedBy: ["Mia"],
   workItemCreatedAt: at(16),
   // merchant-outage-recovery M120: when the round was sent (the wait counts from it).
   placedAt: at(15),

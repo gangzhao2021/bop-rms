@@ -136,6 +136,8 @@ function item(value: unknown) {
     ...("takenOnPaper" in raw ? { takenOnPaper: raw.takenOnPaper } : {}),
     // WP-2423 M10: refunded units not to be made, when this server gives them.
     ...("refundedQuantity" in raw ? { refundedQuantity: raw.refundedQuantity } : {}),
+    // WP-2423 M10: who refunded them (names), when this server gives them.
+    ...("refundedBy" in raw ? { refundedBy: raw.refundedBy } : {}),
     // WP-2423 item 8 ⑧: the dish's kitchen section, when this source gives it.
     ...("kitchenSection" in raw ? { kitchenSection: raw.kitchenSection } : {}),
     status: raw.status,

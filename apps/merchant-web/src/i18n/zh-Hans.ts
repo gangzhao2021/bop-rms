@@ -451,6 +451,22 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "A refund of {amount} is recorded but not sent yet. Open the payment under Payments and refunds to see where it stands.":
     "一笔 {amount} 的退款已记录，还没发出。请在“付款与退款”里打开这笔付款，查看进展。",
   "Refunded · stop, don't make it": "已退款 · 停止制作",
+  "Refunded · stop, don't make it · press Finished to clear it":
+    "已退款 · 停止制作 · 按“做好了”清掉这道菜",
+  "Refunded by {names}": "退款人：{names}",
+  "Nothing was recorded. This refund needs the owner's approval, so the kitchen isn't told now. Untick Stop making it too to ask for approval; for a dish the kitchen hasn't started, use Cancel items on the order.":
+    "没有记录。这笔退款要店主批准，所以现在不通知后厨。取消勾选“不再制作这道菜”再提交审批；后厨还没开始做的菜，请在订单上用“取消商品”。",
+  "This refund needs the owner's approval, so the kitchen isn't told now. Untick Stop making it too to ask for approval; for a dish the kitchen hasn't started, use Cancel items on the order.":
+    "这笔退款要店主批准，所以现在不通知后厨。取消勾选“不再制作这道菜”再提交审批；后厨还没开始做的菜，请在订单上用“取消商品”。",
+  "Nothing was recorded. Part of this order was already handed over, so its dishes can't be stopped. Untick Stop making it too: the guest keeps the food.":
+    "没有记录。这单已经交出一部分，菜不能再停。请取消勾选“不再制作这道菜”：顾客保留餐品。",
+  "Nothing was recorded. This would refund and stop every dish of the pickup, leaving nothing to collect. If the kitchen hasn't started, use Cancel order on the order; otherwise untick Stop making it too: the guest keeps the food.":
+    "没有记录。这样会把这单自取的每道菜都退款并停做，没有东西可取。后厨还没开始的话，请在订单上用“取消订单”；否则取消勾选“不再制作这道菜”：顾客保留餐品。",
+  "Nothing was recorded. The kitchen just started one of these dishes. Look again and choose.":
+    "没有记录。后厨刚开始做其中一道菜。请重新看一下再选。",
+  "The kitchen and the counter already left this refund's dishes out, so it can't be declined. Send it from Approvals.":
+    "后厨和柜台已经按这笔退款把菜去掉了，所以不能拒绝。请在“审批”里发出。",
+
   "Stop making it too": "不再制作这道菜",
   "Record money taken back after a refund made by mistake": "记录多退后收回的钱",
   "Refunded too much": "退多了",

@@ -137,6 +137,39 @@ describe("WP-1804 Kitchen Board screens", () => {
       html.indexOf('class="kitchen-work-item__quantity"'),
     );
   });
+  it("WP-2423 M10: a dish refunded in part shows the ordered count struck through, what is left to make and who refunded it", () => {
+    const partly = parseKitchenBoardView({
+      ...kitchenBoardFixture(),
+      items: [
+        {
+          ...kitchenItemFixture(),
+          status: "In Progress",
+          refundedQuantity: 1,
+          refundedBy: ["Mia"],
+        },
+      ],
+    });
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <KitchenBoardScreen view={partly} />
+      </MemoryRouter>,
+    );
+    expect(html).toContain('<s class="kitchen-work-item__count-refunded">2×</s> 1×');
+    expect(html).toContain("1 refunded · don&#x27;t make it · make 1 · Refunded by Mia");
+    // Every unit refunded: stop, and the cook clears it with Finished; no name: none is made up.
+    const all = parseKitchenBoardView({
+      ...kitchenBoardFixture(),
+      items: [{ ...kitchenItemFixture(), status: "In Progress", refundedQuantity: 2 }],
+    });
+    const stopped = renderToStaticMarkup(
+      <MemoryRouter>
+        <KitchenBoardScreen view={all} />
+      </MemoryRouter>,
+    );
+    expect(stopped).toContain("Refunded · stop, don&#x27;t make it · press Finished to clear it");
+    expect(stopped).toContain('<s class="kitchen-work-item__count-refunded">2×</s> 0×');
+    expect(stopped).not.toContain("Refunded by");
+  });
   it("groups work items into station lanes without inventing missing queue facts", () => {
     const second = {
       ...kitchenItemFixture(),

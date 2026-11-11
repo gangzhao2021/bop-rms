@@ -20,6 +20,15 @@ export class OrdinaryRefundClientError extends Error {
       | "RecoveryAboveRefunded"
       /** WP-2423 M163: this attempt was already recorded with other details (nothing more is). */
       | "RecoveryConflict"
+      /**
+       * WP-2423 M10: "stop making it too" the kitchen or the counter can't do as asked (the refund
+       * needs approval, part was handed over, every dish would be stopped, the kitchen just
+       * started). Nothing was recorded.
+       */
+      | "WithdrawNeedsApproval"
+      | "WithdrawHandedOver"
+      | "WithdrawEverything"
+      | "WithdrawKitchenChanged"
       | "Unavailable"
       | "OutcomeUnknown"
       | "NotFound",
@@ -359,7 +368,15 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
                   ? "RecoveryAboveRefunded"
                   : error === "recovery_conflict"
                     ? "RecoveryConflict"
-                    : "Conflict",
+                    : error === "refund_withdraw_needs_approval"
+                      ? "WithdrawNeedsApproval"
+                      : error === "refund_withdraw_handed_over"
+                        ? "WithdrawHandedOver"
+                        : error === "refund_withdraw_everything"
+                          ? "WithdrawEverything"
+                          : error === "refund_withdraw_kitchen_changed"
+                            ? "WithdrawKitchenChanged"
+                            : "Conflict",
           );
         if (error === "retry_later") throw new RetryLater();
         return fail();
@@ -409,6 +426,10 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
             error.code === "OrderNotAccepted" ||
             error.code === "RecoveryAboveRefunded" ||
             error.code === "RecoveryConflict" ||
+            error.code === "WithdrawNeedsApproval" ||
+            error.code === "WithdrawHandedOver" ||
+            error.code === "WithdrawEverything" ||
+            error.code === "WithdrawKitchenChanged" ||
             (!mutation && error.code === "Changed"))
         )
           throw error;

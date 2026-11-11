@@ -15,6 +15,23 @@ const DENIED_TEXT = t(
 );
 
 /** What staff are told when a payment or refund read or command fails. */
+/** WP-2423 M10: why "Stop making it too" was not done as asked; nothing was recorded. */
+const withdrawRefusalText = (code: string) =>
+  code === "WithdrawNeedsApproval"
+    ? t(
+        "Nothing was recorded. This refund needs the owner's approval, so the kitchen isn't told now. Untick Stop making it too to ask for approval; for a dish the kitchen hasn't started, use Cancel items on the order.",
+      )
+    : code === "WithdrawHandedOver"
+      ? t(
+          "Nothing was recorded. Part of this order was already handed over, so its dishes can't be stopped. Untick Stop making it too: the guest keeps the food.",
+        )
+      : code === "WithdrawEverything"
+        ? t(
+            "Nothing was recorded. This would refund and stop every dish of the pickup, leaving nothing to collect. If the kitchen hasn't started, use Cancel order on the order; otherwise untick Stop making it too: the guest keeps the food.",
+          )
+        : t(
+            "Nothing was recorded. The kitchen just started one of these dishes. Look again and choose.",
+          );
 export const refundErrorText = (error: unknown) =>
   needsFullSignIn(error)
     ? FULL_SIGN_IN_REQUIRED_TEXT
@@ -28,9 +45,11 @@ export const refundErrorText = (error: unknown) =>
             t(
               "This order hasn't been accepted. Use Refuse and refund on the order to refund it in full.",
             )
-          : error instanceof OrdinaryRefundClientError && error.code === "Conflict"
-            ? t("The payment or refund selection changed. Refresh before trying again.")
-            : t("Unable to refresh this information. Try again.");
+          : error instanceof OrdinaryRefundClientError && error.code.startsWith("Withdraw")
+            ? withdrawRefusalText(error.code)
+            : error instanceof OrdinaryRefundClientError && error.code === "Conflict"
+              ? t("The payment or refund selection changed. Refresh before trying again.")
+              : t("Unable to refresh this information. Try again.");
 
 export function OrderPaymentLinks({
   orderReference,

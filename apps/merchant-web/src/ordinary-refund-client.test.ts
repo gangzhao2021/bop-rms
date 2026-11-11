@@ -782,6 +782,27 @@ it("WP-2423 M10: a full refund of an order nobody accepted is told to use Refuse
   );
 });
 
+it("WP-2423 M10: stop making it too that can't be done as asked says why and that nothing was recorded", async () => {
+  for (const [answer, code, text] of [
+    ["refund_withdraw_needs_approval", "WithdrawNeedsApproval", "owner's approval"],
+    ["refund_withdraw_handed_over", "WithdrawHandedOver", "already handed over"],
+    ["refund_withdraw_everything", "WithdrawEverything", "Cancel order"],
+    ["refund_withdraw_kitchen_changed", "WithdrawKitchenChanged", "just started"],
+  ] as const) {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(response(preview))
+      .mockResolvedValueOnce(response({ error: answer }, 409));
+    const operation = createOrdinaryRefundClient(fetcher).prepareRequest(command());
+    await operation.preview(csrf);
+    const error = await operation.submit(csrf).catch((e: unknown) => e);
+    // A refusal, never "couldn't confirm, press again" (nothing was recorded).
+    expect(error).toMatchObject({ code });
+    expect(refundErrorText(error)).toContain("Nothing was recorded.");
+    expect(refundErrorText(error)).toContain(text);
+  }
+});
+
 it("WP-2423 M163: money taken back is read with the payment, and recorded once per operation", async () => {
   const recovery = {
     recoveryReference: id(70),

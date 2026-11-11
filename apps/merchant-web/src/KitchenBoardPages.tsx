@@ -1531,7 +1531,15 @@ function WorkCard({
           {/* WP-2423 UI refresh: "2×" leads the line as on a kitchen ticket; the quantity is also
               read out below ("Quantity 0 / 2"), so the prefix is not repeated to screen readers. */}
           <span className="kitchen-work-item__count" aria-hidden="true">
-            {item.requiredQuantity}×
+            {item.refundedQuantity === undefined || !isActiveKitchenWork(item) ? (
+              <>{item.requiredQuantity}×</>
+            ) : (
+              // WP-2423 M10: the ordered count struck through, then what is still to be made.
+              <>
+                <s className="kitchen-work-item__count-refunded">{item.requiredQuantity}×</s>{" "}
+                {item.requiredQuantity - Math.min(item.refundedQuantity, item.requiredQuantity)}×
+              </>
+            )}
           </span>
           {showDetails ? (
             <Link
@@ -1559,11 +1567,14 @@ function WorkCard({
           // WP-2423 M10: the guest was refunded for these and the store said not to make them.
           <p className="kitchen-work-item__cancelled" role="alert">
             {item.refundedQuantity >= item.requiredQuantity
-              ? t("Refunded · stop, don't make it")
+              ? t("Refunded · stop, don't make it · press Finished to clear it")
               : t("{count} refunded · don't make it · make {left}", {
                   count: item.refundedQuantity,
                   left: item.requiredQuantity - item.refundedQuantity,
                 })}
+            {item.refundedBy === undefined
+              ? null
+              : " · " + t("Refunded by {names}", { names: item.refundedBy.join(t(", ")) })}
           </p>
         )}
         {item.comboPartOf === undefined ? null : (

@@ -52,4 +52,12 @@ it("WP-2423 M10: refunded units the kitchen is told not to make, never more than
     parseKitchenWorkItemView({ ...item, refundedQuantity: Number(item.requiredQuantity) + 1 }),
   ).toThrow();
   expect(() => parseKitchenWorkItemView({ ...item, refundedQuantity: 0 })).toThrow();
+  // Who refunded them: names only, with the refunded units.
+  expect(
+    parseKitchenWorkItemView({ ...item, refundedQuantity: 1, refundedBy: ["Mia"] }).refundedBy,
+  ).toEqual(["Mia"]);
+  expect(() => parseKitchenWorkItemView({ ...item, refundedBy: ["Mia"] })).toThrow();
+  expect(() =>
+    parseKitchenWorkItemView({ ...item, refundedQuantity: 1, refundedBy: [] }),
+  ).toThrow();
 });

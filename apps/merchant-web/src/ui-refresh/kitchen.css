@@ -318,6 +318,12 @@
   font-weight: 800;
   font-variant-numeric: tabular-nums;
 }
+/* WP-2423 M10: the ordered count of a refunded dish, struck through before what is still made. */
+.kitchen-work-item__count-refunded {
+  font-weight: 600;
+  opacity: 0.55;
+  text-decoration-thickness: 2px;
+}
 .kitchen-work-item__detail-link {
   min-height: 44px;
   min-width: 0;
