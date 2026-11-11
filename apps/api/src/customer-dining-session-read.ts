@@ -163,10 +163,7 @@ export interface CustomerDiningSessionFacts {
      * WP-2423 item 8 ④ (v15 2026-10-28 a): a split bill being paid part by part — how many parts
      * there are and are paid.
      */
-    readonly splitParts?: {
-      readonly count: number;
-      readonly paid: number;
-    } | null;
+    readonly splitParts?: CustomerSplitParts | null;
     readonly unpaidCancellations: ReadonlySet<string>;
     /** WP-2423 item 8 ⑦ 4b-3: the order items that are the table's per-head tea (still charged). */
     readonly teaItems?: ReadonlySet<string>;
@@ -312,7 +309,7 @@ export interface CustomerDiningSessionView {
     readonly due: CustomerMoney;
     readonly closedByStaff?: true;
     /** WP-2423 item 8 ④: the table pays in parts (count, how many are paid). */
-    readonly splitParts?: { readonly count: number; readonly paid: number };
+    readonly splitParts?: CustomerSplitParts;
     /** WP-2423 取舍 18: why what was paid is less than what was ordered. */
     readonly pointsUsed?: CustomerMoney;
     /** v15 2026-11-02: what staff took off (comps, discounts), tax included. */
@@ -385,6 +382,28 @@ const movedFrom = (facts: CustomerDiningSessionFacts) =>
     : {};
 
 /** Pure composition of the owner facts into the customer-safe table view. */
+/**
+ * WP-2423 item 8 ④ / 同桌结账: a bill being paid part by part, as the table page says it. Staff's
+ * split (Even, ByRounds, ByItems) has a fixed number of parts; guests paying by dish (ByGuests)
+ * add a part with each payment, so there is no count to say until the bill is paid (`count`
+ * null). `paid`: the payments recorded so far. Null once paid in full or with no split.
+ */
+export interface CustomerSplitParts {
+  readonly count: number | null;
+  readonly paid: number;
+}
+export function customerSplitParts(
+  plan: { readonly mode: string; readonly parts: readonly unknown[] } | undefined,
+  settlements: readonly { readonly part: unknown }[],
+  paidInFull: boolean,
+): CustomerSplitParts | null {
+  if (plan === undefined || plan.mode === "Whole" || paidInFull) return null;
+  return {
+    count: plan.mode === "ByGuests" ? null : plan.parts.length,
+    paid: settlements.filter((settlement) => settlement.part !== null).length,
+  };
+}
+
 export function composeCustomerDiningSession(
   facts: CustomerDiningSessionFacts,
 ): CustomerDiningSessionView {
@@ -1314,13 +1333,7 @@ function postgresDependencies(
           ...(teaItems.size === 0 ? {} : { teaItems }),
           ...(teaLines.size === 0 ? {} : { teaLines }),
           ...(chargeLines.size === 0 ? {} : { chargeLines }),
-          splitParts:
-            splitPlan === undefined || splitPlan.mode === "Whole" || splitPaid
-              ? null
-              : {
-                  count: splitPlan.parts.length,
-                  paid: tableSettlements.filter((settlement) => settlement.part !== null).length,
-                },
+          splitParts: customerSplitParts(splitPlan, tableSettlements, splitPaid),
           tableSettlement:
             tableSettlements.length === 0
               ? null

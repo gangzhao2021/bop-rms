@@ -592,22 +592,27 @@ function TableSummary({ view }: { readonly view: DiningSessionView }) {
           : payLater
             ? t("Item prices are before tax. ")
             : t("Item prices are before tax. Rounds that were never paid are not included. ")}
-        {payLater && summary.splitParts !== undefined
+        {payLater && summary.splitParts !== undefined && summary.splitParts.count === null
           ? t(
-              "The table is paying the bill in {count} parts; {paid} paid so far. Each part has its own tip, and cash is rounded to the nearest 5 cents.",
-              { count: String(summary.splitParts.count), paid: String(summary.splitParts.paid) },
+              "The table is paying by dish; {paid} paid so far. Each payment has its own tip, and cash is rounded to the nearest 5 cents.",
+              { paid: String(summary.splitParts.paid) },
             )
-          : payLater
-            ? summary.cashRounding !== undefined
-              ? t(
-                  "The table paid once at the end. Cash is rounded to the nearest 5 cents; card payments are not rounded.",
-                )
+          : payLater && summary.splitParts !== undefined
+            ? t(
+                "The table is paying the bill in {count} parts; {paid} paid so far. Each part has its own tip, and cash is rounded to the nearest 5 cents.",
+                { count: String(summary.splitParts.count), paid: String(summary.splitParts.paid) },
+              )
+            : payLater
+              ? summary.cashRounding !== undefined
+                ? t(
+                    "The table paid once at the end. Cash is rounded to the nearest 5 cents; card payments are not rounded.",
+                  )
+                : t(
+                    "Rounds go to the kitchen when they are sent. The table pays once at the end, with tax and any tip.",
+                  )
               : t(
-                  "Rounds go to the kitchen when they are sent. The table pays once at the end, with tax and any tip.",
-                )
-            : t(
-                "Paid amounts include tax and any tip. Amounts waiting for payment include tax, before any tip. Each guest pays for the rounds they order.",
-              )}
+                  "Paid amounts include tax and any tip. Amounts waiting for payment include tax, before any tip. Each guest pays for the rounds they order.",
+                )}
       </p>
     </section>
   );
@@ -821,6 +826,21 @@ export function DiningSessionPage({
       document.removeEventListener("visibilitychange", tick);
     };
   }, [showingTable, load]);
+  // v15 batch 7: staff split the bill (or a guest paid a part) — the table's summary says so, and
+  // the pay section reads the bill at once, never offering the whole table until the next tick.
+  const splitFact =
+    state.status === "ready" && state.view.summary?.splitParts !== undefined
+      ? JSON.stringify(state.view.summary.splitParts)
+      : state.status === "ready"
+        ? "none"
+        : null;
+  const seenSplitFact = useRef<string | null>(null);
+  useEffect(() => {
+    if (splitFact === null) return;
+    if (seenSplitFact.current !== null && seenSplitFact.current !== splitFact)
+      setBillReadKey((value) => value + 1);
+    seenSplitFact.current = splitFact;
+  }, [splitFact]);
   return (
     <DiningSessionScreen
       state={state}
@@ -828,7 +848,11 @@ export function DiningSessionPage({
       cartClient={cartClient}
       menu={menu}
       placed={placed}
-      onRefresh={() => void load()}
+      onRefresh={() => {
+        // v15 batch 7: "Refresh now" reads the pay section too.
+        void load();
+        setBillReadKey((value) => value + 1);
+      }}
       billReadKey={billReadKey}
       invitation={
         // Stays mounted while a table is shown (also during a failed refresh), so a code on

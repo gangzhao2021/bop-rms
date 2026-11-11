@@ -150,8 +150,11 @@ export interface DiningSessionView {
     /** DEC-DINE-IN-PAY-LATER: the tip and cash rounding of the table's one payment, once paid. */
     readonly tableTip?: DiningMoney;
     readonly cashRounding?: DiningMoney;
-    /** WP-2423 item 8 ④: the table pays in parts — how many, and how many are paid. */
-    readonly splitParts?: { readonly count: number; readonly paid: number };
+    /**
+     * WP-2423 item 8 ④: the table pays in parts — how many, and how many are paid. Count null:
+     * guests are paying by dish (no fixed number of parts).
+     */
+    readonly splitParts?: { readonly count: number | null; readonly paid: number };
     /** WP-2423 取舍 18: what points took off the bill, tax included. */
     readonly pointsUsed?: DiningMoney;
     /** v15 2026-11-02: what staff took off (comps, discounts), tax included. */
@@ -511,9 +514,11 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
       ...(withSplit
         ? (() => {
             const parts = record(raw.splitParts, ["count", "paid"]);
-            const total = count(parts.count, 2),
+            // 同桌结账: guests paying by dish add a part with each payment, so there is no count
+            // (null); staff's split always has 2 parts or more.
+            const total = parts.count === null ? null : count(parts.count, 2),
               paid = count(parts.paid, 0);
-            if (paid > total) return invalid();
+            if (total !== null && paid > total) return invalid();
             return { splitParts: Object.freeze({ count: total, paid }) };
           })()
         : {}),

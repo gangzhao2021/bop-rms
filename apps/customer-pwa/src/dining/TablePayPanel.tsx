@@ -168,12 +168,15 @@ export function TablePayPanel({
   const operation = useRef<{ key: string; reference: string } | null>(null);
   const configuration = paymentConfiguration();
 
-  const read = useCallback(async () => {
+  const read = useCallback(async (): Promise<TablePaymentView | null> => {
     try {
-      setView(await client.read());
+      const next = await client.read();
+      setView(next);
       setProblem(null);
+      return next;
     } catch (error) {
       setProblem(problemText(error));
+      return null;
     }
   }, [client]);
   useEffect(() => {
@@ -307,8 +310,20 @@ export function TablePayPanel({
       );
     } catch (error) {
       // The bill is read again first (its answer clears old messages), then this one is said.
-      if (error instanceof TablePaymentClientError && error.code !== "unavailable") await read();
-      setProblem(startProblemText(error));
+      const again =
+        error instanceof TablePaymentClientError && error.code !== "unavailable"
+          ? await read()
+          : null;
+      // v15 batch 7: another phone started paying some dishes, and what is left can be paid
+      // now: the bill changed (read again), never "someone is paying" as if this guest must wait.
+      setProblem(
+        error instanceof TablePaymentClientError &&
+          error.code === "another-guest-paying" &&
+          again !== null &&
+          again.state !== "AnotherGuestPaying"
+          ? problemText(new TablePaymentClientError("bill-changed"))
+          : startProblemText(error),
+      );
     } finally {
       setBusy(false);
     }

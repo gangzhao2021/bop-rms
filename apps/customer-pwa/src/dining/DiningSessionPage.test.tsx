@@ -824,6 +824,27 @@ describe("WP-2423 item 8 ④ v15 a: a table paying its split bill in parts", () 
     expect(html).not.toContain("To pay at the end");
     expect(html).not.toContain("The table paid once at the end");
   });
+
+  it("v15 batch 7: a table paying by dish says how many paid, never a count of parts", () => {
+    const html = render({
+      status: "ready",
+      view: view({
+        paymentTiming: "PayLater",
+        summary: {
+          paid: cad("1413"),
+          refunded: cad("0"),
+          refundPending: cad("0"),
+          due: cad("2825"),
+          splitParts: { count: null, paid: 1 },
+        },
+      }),
+      refreshing: false,
+    });
+    expect(html).toContain("Still to pay");
+    expect(html).toContain("$28.25");
+    expect(html).toContain("The table is paying by dish; 1 paid so far.");
+    expect(html).not.toContain("parts");
+  });
 });
 
 it("Owner 2026-11-03: a receipt shows what went back", () => {

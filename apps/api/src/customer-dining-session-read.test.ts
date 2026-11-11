@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   composeCustomerDiningSession,
   createCustomerDiningSessionRead,
+  customerSplitParts,
   mergeBillOrderFacts,
   type CustomerDiningSessionDependencies,
   type CustomerDiningSessionFacts,
@@ -640,6 +641,23 @@ describe("WP-2423 item 8 ④ v15 a: a split bill paid part by part", () => {
       due: { amountMinor: 339n },
       splitParts: { count: 3, paid: 2 },
     });
+  });
+});
+
+describe("v15 batch 7 table-pay-by-dish: what the table page says about the parts", () => {
+  it("gives staff's split its count, guests paying by dish none, and nothing once paid", () => {
+    const paidOne = [{ part: null }, { part: { partNumber: 1 } }];
+    expect(customerSplitParts({ mode: "Even", parts: [1, 2, 3] }, paidOne, false)).toEqual({
+      count: 3,
+      paid: 1,
+    });
+    expect(customerSplitParts({ mode: "ByGuests", parts: [1] }, paidOne, false)).toEqual({
+      count: null,
+      paid: 1,
+    });
+    expect(customerSplitParts({ mode: "ByGuests", parts: [1, 2] }, paidOne, true)).toBeNull();
+    expect(customerSplitParts({ mode: "Whole", parts: [] }, [], false)).toBeNull();
+    expect(customerSplitParts(undefined, [], false)).toBeNull();
   });
 });
 

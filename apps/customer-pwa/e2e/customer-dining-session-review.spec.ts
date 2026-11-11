@@ -1603,6 +1603,10 @@ test.describe("@production 同桌结账 guests pay by dish at a table that pays 
       readonly defaultScope?: "WholeTable" | "OwnDishes";
       readonly othersPaidNoodles?: boolean;
       readonly start?: (body: Record<string, unknown>) => { status: number; json?: unknown };
+      /** v15 batch 7: the table page's summary as the server sends it (default: payLater's). */
+      readonly summary?: Record<string, unknown>;
+      /** v15 batch 7: once `on`, staff have split the bill evenly in two (read live). */
+      readonly evenSplit?: { on: boolean };
     },
   ) => {
     await page.route("**/bff/customer/payment-configuration", (route) =>
@@ -1697,11 +1701,52 @@ test.describe("@production 同桌结账 guests pay by dish at a table that pays 
             choices:
               paying === null ? choicesOf(options.defaultScope ?? "WholeTable", others) : null,
             receipt: null,
+            ...(options.evenSplit?.on === true
+              ? {
+                  split: {
+                    mode: "Even",
+                    paidInFull: false,
+                    paidParts: 0,
+                    remainingMinor: "2657",
+                    parts: [
+                      {
+                        partNumber: 1,
+                        amountMinor: "1329",
+                        subtotalMinor: "1175",
+                        dishes: [],
+                        status: "ToPay",
+                      },
+                      {
+                        partNumber: 2,
+                        amountMinor: "1328",
+                        subtotalMinor: "1175",
+                        dishes: [],
+                        status: "ToPay",
+                      },
+                    ],
+                  },
+                  choices: null,
+                }
+              : {}),
           },
         },
       });
     });
-    await enterTable(page, () => ({ status: 200, json: payLater }));
+    await enterTable(page, () => ({
+      status: 200,
+      json:
+        options.evenSplit?.on === true
+          ? {
+              ...payLater,
+              session: {
+                ...payLater.session,
+                summary: { ...payLater.session.summary, splitParts: { count: 2, paid: 0 } },
+              },
+            }
+          : options.summary === undefined
+            ? payLater
+            : { ...payLater, session: { ...payLater.session, summary: options.summary } },
+    }));
     return { pay: page.getByRole("region", { name: "Pay the bill" }), starts };
   };
 
@@ -1793,6 +1838,100 @@ test.describe("@production 同桌结账 guests pay by dish at a table that pays 
       "Someone at your table just started paying for some of these dishes. Check again.",
     );
     await pay.screenshot({ path: "test-results/guest-pay-by-dish-rest-390.png" });
+    await expectNoInternalText(page);
+  });
+
+  // v15 batch 7 table-pay-by-dish (blocker): once the first guest paid their dishes, the table page
+  // says so in a by-dish count (no number of parts) and every phone can still pay the rest.
+  for (const [width, height] of [
+    [390, 844],
+    [1024, 900],
+    [1440, 900],
+  ] as const)
+    test(`after the first guest paid by dish, the table page loads and the rest can be paid (${width})`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height });
+      const { pay, starts } = await tableWith(page, {
+        othersPaidNoodles: true,
+        summary: {
+          ...payLater.session.summary,
+          paid: cad("1356"),
+          due: cad("1301"),
+          splitParts: { count: null, paid: 1 },
+        },
+        start: () => ({ status: 200, json: { totalMinor: "1301" } }),
+      });
+      await expect(page.getByText("We couldn’t load your table")).toHaveCount(0);
+      await expect(page.getByText("The table is paying by dish; 1 paid so far.")).toBeVisible();
+      await expect(page.getByText(/in 1 parts|1 of 1/u)).toHaveCount(0);
+      await expect(pay).toContainText(
+        "Your table is paying by dish: 1 paid so far · $13.01 to go.",
+      );
+      await pay.getByRole("radio", { name: "No tip" }).check();
+      await expectNoHorizontalOverflow(page);
+      await page.screenshot({ path: `test-results/guest-pay-by-dish-after-first-${width}.png` });
+      await pay.getByRole("button", { name: "Pay $13.01" }).click();
+      expect(starts.at(-1)?.choice).toEqual({ kind: "Rest" });
+      await expectNoInternalText(page);
+    });
+
+  // v15 batch 7: staff split the bill evenly while the guest looks at the table; "Refresh now"
+  // reads the pay section too, so it offers the parts, never the whole table, at once.
+  for (const [width, height] of [
+    [390, 844],
+    [1024, 900],
+    [1440, 900],
+  ] as const)
+    test(`staff split the bill evenly; Refresh now shows the parts at once (${width})`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height });
+      const evenSplit = { on: false };
+      const { pay } = await tableWith(page, { evenSplit });
+      await expect(pay.getByRole("button", { name: "Choose a tip to pay" })).toBeVisible();
+      await expect(
+        pay.getByRole("radio", { name: "The whole table (5 dishes · $26.57)" }),
+      ).toBeChecked();
+      evenSplit.on = true;
+      await page.getByRole("button", { name: "Refresh now" }).click();
+      await expect(
+        page.getByText("The table is paying the bill in 2 parts; 0 paid so far."),
+      ).toBeVisible();
+      await expect(pay).toContainText("Your table split the bill evenly in 2 parts.", {
+        timeout: 3_000,
+      });
+      await expect(pay.getByRole("radio", { name: /The whole table/u })).toHaveCount(0);
+      await expectNoHorizontalOverflow(page);
+      await page.screenshot({ path: `test-results/guest-pay-split-refresh-${width}.png` });
+      await expectNoInternalText(page);
+    });
+
+  // v15 batch 7: this phone still showed the whole table when another phone started paying its
+  // dishes; the bill is read again and the rest can be paid now, so it never says to wait.
+  test("a whole-table tap after another phone started paying by dish: the bill changed, pay the rest", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    let first = true;
+    const { pay } = await tableWith(page, {
+      othersPaidNoodles: true,
+      start: () => {
+        if (!first) return { status: 200, json: { totalMinor: "1301" } };
+        first = false;
+        return {
+          status: 409,
+          json: { schemaVersion: 1, error: { code: "table_another_guest_paying" } },
+        };
+      },
+    });
+    await pay.getByRole("radio", { name: "No tip" }).check();
+    await pay.getByRole("button", { name: "Pay $13.01" }).click();
+    await expect(pay.getByRole("alert")).toContainText(
+      "The bill just changed. It has been read again: check it and pay again.",
+    );
+    await expect(pay).not.toContainText("Someone else at your table is paying the bill right now.");
+    await expect(pay.getByRole("button", { name: "Pay $13.01" })).toBeEnabled();
     await expectNoInternalText(page);
   });
 });

@@ -349,3 +349,25 @@ describe("M91/M41: dish progress and a paid round the store has not accepted", (
     expect(() => parseDiningSessionView(wrongWait)).toThrow(DiningSessionClientError);
   });
 });
+
+describe("v15 batch 7 table-pay-by-dish: a table paying by dish after the first guest paid", () => {
+  it("reads a bill paid by dish with one payment so far, and still refuses a broken split", () => {
+    const base = payload() as { session: { summary: Record<string, unknown> } };
+    const byDish = structuredClone(base);
+    byDish.session.summary.splitParts = { count: null, paid: 1 };
+    expect(parseDiningSessionView(byDish).summary?.splitParts).toEqual({ count: null, paid: 1 });
+    const even = structuredClone(base);
+    even.session.summary.splitParts = { count: 2, paid: 1 };
+    expect(parseDiningSessionView(even).summary?.splitParts).toEqual({ count: 2, paid: 1 });
+    for (const splitParts of [
+      { count: 1, paid: 1 },
+      { count: 2, paid: 3 },
+      { count: null, paid: -1 },
+      { paid: 1 },
+    ]) {
+      const value = structuredClone(base);
+      value.session.summary.splitParts = splitParts;
+      expect(() => parseDiningSessionView(value)).toThrow(DiningSessionClientError);
+    }
+  });
+});

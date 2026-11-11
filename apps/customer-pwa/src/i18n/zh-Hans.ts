@@ -1429,6 +1429,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Still to pay": "还要付",
   "The table is paying the bill in {count} parts; {paid} paid so far. Each part has its own tip, and cash is rounded to the nearest 5 cents.":
     "这桌分成 {count} 份付款，已付 {paid} 份。每份各自加小费，现金按 5 分取整。",
+  "The table is paying by dish; {paid} paid so far. Each payment has its own tip, and cash is rounded to the nearest 5 cents.":
+    "这桌按菜付款，已付 {paid} 笔。每笔各自加小费，现金按 5 分取整。",
   "Staff have paused joining by scan at this table. Ask staff, or the person who joined first, for the table’s join code.":
     "店员暂停了这桌的扫码加入。请向店员或先入桌的人要入桌码。",
   "This table isn’t open yet. Please ask staff to seat you.": "这张桌还没开台，请找店员。",
