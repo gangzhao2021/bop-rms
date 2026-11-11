@@ -261,7 +261,6 @@ async function exerciseAlreadyAtTable({
   admin,
   scope,
   at,
-  session,
   credentials,
   reference,
   run,

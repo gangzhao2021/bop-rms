@@ -339,7 +339,8 @@ it("M126 I.5: another store's payment is NotFound, a role without refunds Denied
   expect(fetcher).toHaveBeenCalledTimes(3);
 });
 it("WP-2423 M13: reads why an owner may not record, and an older server's answer as no reason", async () => {
-  const { requestBlocked: _omitted, ...older } = context;
+  const older: Record<string, unknown> = { ...context };
+  delete older.requestBlocked;
   const fetcher = vi
     .fn<typeof fetch>()
     .mockResolvedValueOnce(

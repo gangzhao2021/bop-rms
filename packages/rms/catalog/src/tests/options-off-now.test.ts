@@ -166,7 +166,7 @@ it("a required group emptied by sold-out marks makes the dish sold out; one choi
   // An optional group emptied is not a reason.
   expect(
     publishedRequiredGroupSoldOut(
-      [{ ...rules[0]!, minimumSelections: 0 }],
+      rules.slice(0, 1).map((rule) => ({ ...rule, minimumSelections: 0 })),
       "CUSTOMER_PWA",
       new Set([id(21), id(22)]),
     ),

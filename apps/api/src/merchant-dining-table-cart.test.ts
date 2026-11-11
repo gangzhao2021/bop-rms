@@ -47,11 +47,10 @@ describe("Table cart command", () => {
       operationReference: id(5),
       ...change,
     };
-    for (const [key, value] of Object.entries(command))
-      if (value === undefined) delete command[key];
-    expect(() => parseMerchantDiningTableCartCommand(command)).toThrow(
-      MerchantDiningTableCartError,
+    const sent = Object.fromEntries(
+      Object.entries(command).filter(([, value]) => value !== undefined),
     );
+    expect(() => parseMerchantDiningTableCartCommand(sent)).toThrow(MerchantDiningTableCartError);
   });
 
   it("records each reason as its own Audit reason code", () => {
