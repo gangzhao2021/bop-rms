@@ -2332,6 +2332,11 @@ async function scanUnsupported(root, module, diagnostics) {
               "order_fulfillment_completion_record",
               "order_payment_acceptance_wait",
               "order_payment_disposition_record",
+              // DEC-PAPER-ORDER-NEVER-RELEASED: a paper order is never released by its window, and
+              // is closed only as entered again at no lower sale amount, linked to the new order.
+              "counter_order_entry",
+              "cart_quote_attachment",
+              "counter_paper_reentry",
             ],
           },
           // WP-2423 / DEC-PILOT-BATCH-PHASE-01: Ordering's Kitchen progress inbox record and the

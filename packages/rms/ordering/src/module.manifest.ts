@@ -101,6 +101,7 @@ const moduleManifestInput =
         "cart_line",
         "cart_operation_record",
         "cart_staff_line_removal",
+        "counter_paper_reentry",
         "dining_round_cart_return",
         "dining_checkout_scope",
         "dining_checkout_scope_extension",

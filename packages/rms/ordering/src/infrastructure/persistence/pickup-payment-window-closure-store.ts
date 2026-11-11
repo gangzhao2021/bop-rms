@@ -657,7 +657,12 @@ export type CounterUnpaidCancellationResult = Readonly<
          */
         | "ReentryInvalid"
         /** The re-entered order already stands for another paper order. */
-        | "ReentryUsed";
+        | "ReentryUsed"
+        /**
+         * The re-entered order's sale (dishes with tax, before tip) is lower than this paper order's:
+         * linking it would take the difference out of the books.
+         */
+        | "ReentryAmountLower";
     }
 >;
 
@@ -673,7 +678,8 @@ function paperReentryOperationReference(brand: string, store: string, reentered:
 
 /**
  * DEC-PAPER-ORDER-NEVER-RELEASED: the batch of a counter order, whether it was entered from paper,
- * when it was sent and whether it has ended. Null when the Order is not a counter order of this
+ * when it was sent, whether it has ended, its order number and its sale (the quote total: dishes
+ * with tax, before tip; null without a quote). Null when the Order is not a counter order of this
  * Store. Caller authorizes and owns the transaction.
  */
 export async function loadCounterOrderBatch(
@@ -685,6 +691,8 @@ export async function loadCounterOrderBatch(
   readonly recordedAfterOutage: boolean;
   readonly submittedAt: string;
   readonly ended: boolean;
+  readonly orderNumber: string;
+  readonly sale: { readonly amountMinor: bigint; readonly currencyCode: string } | null;
 } | null> {
   const brand = parseOrderingReference(scope.brandReference),
     store = parseOrderingReference(scope.storeReference),
@@ -694,22 +702,112 @@ export async function loadCounterOrderBatch(
     `SELECT b.order_batch_id::text AS batch,e.recorded_after_outage AS paper,
       to_char(b.submitted_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS submitted,
       EXISTS (SELECT 1 FROM rms_ordering.order_termination_record t
-        WHERE t.brand_id=b.brand_id AND t.store_id=b.store_id AND t.order_id=b.order_id) AS ended
+        WHERE t.brand_id=b.brand_id AND t.store_id=b.store_id AND t.order_id=b.order_id) AS ended,
+      h.order_number AS number,q.total_minor::text AS sale,q.currency_code AS currency
     FROM rms_ordering.order_batch b
+    JOIN rms_ordering.order_header h ON h.brand_id=b.brand_id AND h.store_id=b.store_id
+      AND h.order_id=b.order_id
     JOIN rms_ordering.counter_order_entry e ON e.brand_id=b.brand_id AND e.store_id=b.store_id
       AND e.cart_id=b.source_cart_id
+    LEFT JOIN rms_ordering.cart_quote_attachment q ON q.brand_id=b.brand_id
+      AND q.store_id=b.store_id AND q.quote_id=b.quote_id
     WHERE b.brand_id=$1 AND b.store_id=$2 AND b.order_id=$3 LIMIT 2`,
     [brand, store, order],
   );
   if (found.rows.length > 1) return fail();
   const row = found.rows[0];
   if (row === undefined) return null;
-  if (typeof row.paper !== "boolean" || typeof row.ended !== "boolean") return fail();
+  if (
+    typeof row.paper !== "boolean" ||
+    typeof row.ended !== "boolean" ||
+    typeof row.number !== "string" ||
+    !/^[1-9][0-9]{0,18}$/u.test(row.number) ||
+    (row.sale !== null &&
+      (typeof row.sale !== "string" || !/^(0|[1-9][0-9]{0,18})$/u.test(row.sale))) ||
+    (row.sale !== null && (typeof row.currency !== "string" || !/^[A-Z]{3}$/u.test(row.currency)))
+  )
+    return fail();
   return Object.freeze({
     orderBatchReference: String(parseOrderingReference(row.batch)),
     recordedAfterOutage: row.paper,
     submittedAt: parseOrderingInstant(row.submitted),
     ended: row.ended,
+    orderNumber: row.number,
+    sale:
+      row.sale === null
+        ? null
+        : Object.freeze({ amountMinor: BigInt(row.sale), currencyCode: String(row.currency) }),
+  });
+}
+
+/**
+ * DEC-PAPER-ORDER-NEVER-RELEASED: the paper counter orders of this Store that may stand for paper
+ * order `orderReference` once it was entered again from its slip: sent no earlier than it, still
+ * open and not standing for another paper order yet, newest first, at most `limit` (whatever
+ * business day they belong to). Whether their payment is recorded is Payment's fact (the caller
+ * asks it). Caller authorizes and owns the transaction.
+ */
+export async function listPaperReentryCandidates(
+  transaction: ConsumerTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  orderReference: string,
+  limit = 20,
+): Promise<
+  readonly {
+    readonly orderReference: string;
+    readonly orderBatchReference: string;
+    readonly orderNumber: string;
+    readonly submittedAt: string;
+    readonly sale: { readonly amountMinor: bigint; readonly currencyCode: string } | null;
+  }[]
+> {
+  const brand = parseOrderingReference(scope.brandReference),
+    store = parseOrderingReference(scope.storeReference),
+    order = parseOrderingReference(orderReference);
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 50) return fail();
+  await scoped(transaction, brand, store);
+  const found = await transaction.query(
+    `SELECT b.order_id::text AS order_id,b.order_batch_id::text AS batch,h.order_number AS number,
+      to_char(b.submitted_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS submitted,
+      q.total_minor::text AS sale,q.currency_code AS currency
+    FROM rms_ordering.order_batch mine
+    JOIN rms_ordering.order_batch b ON b.brand_id=mine.brand_id AND b.store_id=mine.store_id
+      AND b.order_id<>mine.order_id AND b.submitted_at>=mine.submitted_at
+    JOIN rms_ordering.order_header h ON h.brand_id=b.brand_id AND h.store_id=b.store_id
+      AND h.order_id=b.order_id
+    JOIN rms_ordering.counter_order_entry e ON e.brand_id=b.brand_id AND e.store_id=b.store_id
+      AND e.cart_id=b.source_cart_id AND e.recorded_after_outage
+    LEFT JOIN rms_ordering.cart_quote_attachment q ON q.brand_id=b.brand_id
+      AND q.store_id=b.store_id AND q.quote_id=b.quote_id
+    WHERE mine.brand_id=$1 AND mine.store_id=$2 AND mine.order_id=$3
+      AND NOT EXISTS (SELECT 1 FROM rms_ordering.order_termination_record t
+        WHERE t.brand_id=b.brand_id AND t.store_id=b.store_id AND t.order_id=b.order_id)
+      AND NOT EXISTS (SELECT 1 FROM rms_ordering.counter_paper_reentry r
+        WHERE r.brand_id=b.brand_id AND r.store_id=b.store_id AND r.reentered_order_id=b.order_id)
+    ORDER BY b.submitted_at DESC,b.order_id DESC LIMIT $4`,
+    [brand, store, order, limit],
+  );
+  return found.rows.map((row) => {
+    if (
+      typeof row.number !== "string" ||
+      !/^[1-9][0-9]{0,18}$/u.test(row.number) ||
+      (row.sale !== null &&
+        (typeof row.sale !== "string" ||
+          !/^(0|[1-9][0-9]{0,18})$/u.test(row.sale) ||
+          typeof row.currency !== "string" ||
+          !/^[A-Z]{3}$/u.test(row.currency)))
+    )
+      return fail();
+    return Object.freeze({
+      orderReference: String(parseOrderingReference(row.order_id)),
+      orderBatchReference: String(parseOrderingReference(row.batch)),
+      orderNumber: row.number,
+      submittedAt: parseOrderingInstant(row.submitted),
+      sale:
+        row.sale === null
+          ? null
+          : Object.freeze({ amountMinor: BigInt(row.sale), currencyCode: String(row.currency) }),
+    });
   });
 }
 
@@ -836,12 +934,20 @@ export function createPostgresCounterUnpaidCancellation(options: {
         return answer({ status: "NotEligible", reason: "PaperOrder" });
       if (!counter.recordedAfterOutage && reenteredOrderReference !== null)
         return answer({ status: "NotEligible", reason: "NotPaperOrder" });
+      // The link written with the termination: which new order carries the sale, at what amounts.
+      let reentryLink: {
+        readonly reenteredOrderReference: string;
+        readonly reenteredOrderNumber: string;
+        readonly paperSaleMinor: bigint;
+        readonly reenteredSaleMinor: bigint;
+        readonly currencyCode: string;
+      } | null = null;
       if (reenteredOrderReference !== null) {
         if (reenteredOrderReference === identity.orderReference)
           return answer({ status: "NotEligible", reason: "ReentryInvalid" });
         const used = await transaction.query(
-          "SELECT order_id::text AS order_id FROM rms_ordering.order_termination_record WHERE brand_id=$1 AND store_id=$2 AND operation_id=$3 LIMIT 2",
-          [brand, store, operationReference],
+          "SELECT order_id::text AS order_id FROM rms_ordering.counter_paper_reentry WHERE brand_id=$1 AND store_id=$2 AND reentered_order_id=$3 LIMIT 2",
+          [brand, store, reenteredOrderReference],
         );
         if (used.rows.length > 1) return fail();
         if (used.rows.length === 1 && used.rows[0]?.order_id !== identity.orderReference)
@@ -851,13 +957,26 @@ export function createPostgresCounterUnpaidCancellation(options: {
         const reentered = await loadCounterOrderBatch(transaction, owner, reenteredOrderReference);
         if (mine === null) return fail();
         if (
-          used.rows.length === 0 &&
-          (reentered === null ||
-            !reentered.recordedAfterOutage ||
-            reentered.ended ||
-            reentered.submittedAt < mine.submittedAt)
+          reentered === null ||
+          !reentered.recordedAfterOutage ||
+          (used.rows.length === 0 && reentered.ended) ||
+          reentered.submittedAt < mine.submittedAt ||
+          mine.sale === null ||
+          reentered.sale === null ||
+          reentered.sale.currencyCode !== mine.sale.currencyCode
         )
           return answer({ status: "NotEligible", reason: "ReentryInvalid" });
+        // A sale is never closed by a cheaper order: the new order carries at least the paper
+        // order's dishes with tax, to the cent.
+        if (reentered.sale.amountMinor < mine.sale.amountMinor)
+          return answer({ status: "NotEligible", reason: "ReentryAmountLower" });
+        reentryLink = Object.freeze({
+          reenteredOrderReference,
+          reenteredOrderNumber: reentered.orderNumber,
+          paperSaleMinor: mine.sale.amountMinor,
+          reenteredSaleMinor: reentered.sale.amountMinor,
+          currencyCode: mine.sale.currencyCode,
+        });
       }
       const link = counter.link;
       // Same Order disposition fence as acceptance, payment outcome and termination.
@@ -955,6 +1074,36 @@ export function createPostgresCounterUnpaidCancellation(options: {
         ),
         terminatedAt: cancelledAt,
       });
+      if (reentryLink !== null) {
+        // The new order is claimed first: a second manager linking the same new order to another
+        // paper order at the same moment waits here for the first, then is told it is taken
+        // (never "no answer"), and nothing of theirs is written.
+        const claimed = await transaction.query(
+          "INSERT INTO rms_ordering.counter_paper_reentry (brand_id,store_id,order_id,reentered_order_id,termination_id,paper_sale_minor,reentered_sale_minor,currency_code,actor_id,recorded_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT DO NOTHING RETURNING order_id::text AS order_id",
+          [
+            brand,
+            store,
+            identity.orderReference,
+            reentryLink.reenteredOrderReference,
+            terminationReference,
+            reentryLink.paperSaleMinor.toString(),
+            reentryLink.reenteredSaleMinor.toString(),
+            reentryLink.currencyCode,
+            actorReference,
+            cancelledAt,
+          ],
+        );
+        if (claimed.rows.length !== 1) {
+          const taken = await transaction.query(
+            "SELECT order_id::text AS order_id FROM rms_ordering.counter_paper_reentry WHERE brand_id=$1 AND store_id=$2 AND reentered_order_id=$3 LIMIT 2",
+            [brand, store, reentryLink.reenteredOrderReference],
+          );
+          if (taken.rows.length === 1 && taken.rows[0]?.order_id !== identity.orderReference)
+            return answer({ status: "NotEligible", reason: "ReentryUsed" });
+          // This paper order was closed by someone else meanwhile.
+          return answer({ status: "NotEligible", reason: "Terminated" });
+        }
+      }
       const result = await createPostgresOrderTerminationStore({
         brandReference: brand,
         storeReference: store,
@@ -976,6 +1125,8 @@ export function createPostgresCounterUnpaidCancellation(options: {
           reasonCode: candidate.reasonCode,
           occurredAt: candidate.terminatedAt,
           sourceChannel: "MERCHANT_WEB",
+          // The termination's own Audit summary is fixed ({phase}); which new order now carries the
+          // sale is the counter_paper_reentry record written in the same transaction.
           afterSummary: { phase: candidate.phase },
           dataClassification: "Restricted",
           retentionPolicyCode: "FINANCIAL_COMPLIANCE",
@@ -1005,6 +1156,11 @@ export async function listCounterUnpaidCancellations(
       readonly cancelledAt: string;
       /** WP-2423 M61: the staff member who cancelled (for the order's record; never shown as is). */
       readonly actorReference: string;
+      /**
+       * DEC-PAPER-ORDER-NEVER-RELEASED: a paper order closed as entered again names the new order
+       * now carrying its sale (its number for staff), else null.
+       */
+      readonly reentered: { readonly orderReference: string; readonly orderNumber: string } | null;
     }
   >
 > {
@@ -1015,6 +1171,11 @@ export async function listCounterUnpaidCancellations(
       readonly cancelledAt: string;
       /** WP-2423 M61: the staff member who cancelled (for the order's record; never shown as is). */
       readonly actorReference: string;
+      /**
+       * DEC-PAPER-ORDER-NEVER-RELEASED: a paper order closed as entered again names the new order
+       * now carrying its sale (its number for staff), else null.
+       */
+      readonly reentered: { readonly orderReference: string; readonly orderNumber: string } | null;
     }
   >();
   if (orderReferences.length === 0) return result;
@@ -1024,17 +1185,30 @@ export async function listCounterUnpaidCancellations(
     orders = orderReferences.map((value) => parseOrderingReference(value));
   await scoped(transaction, brand, store);
   const found = await transaction.query(
-    "SELECT order_id::text AS order_id,reason_code,actor_id::text AS actor_id,to_char(terminated_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') AS at FROM rms_ordering.order_termination_record " +
-      "WHERE brand_id=$1 AND store_id=$2 AND order_id=ANY($3::uuid[]) AND actor_type='User' AND purpose_code=$4",
+    "SELECT t.order_id::text AS order_id,t.reason_code,t.actor_id::text AS actor_id,to_char(t.terminated_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') AS at," +
+      "r.reentered_order_id::text AS reentered,h.order_number AS reentered_number FROM rms_ordering.order_termination_record t " +
+      "LEFT JOIN rms_ordering.counter_paper_reentry r ON r.brand_id=t.brand_id AND r.store_id=t.store_id AND r.termination_id=t.termination_id " +
+      "LEFT JOIN rms_ordering.order_header h ON h.brand_id=r.brand_id AND h.store_id=r.store_id AND h.order_id=r.reentered_order_id " +
+      "WHERE t.brand_id=$1 AND t.store_id=$2 AND t.order_id=ANY($3::uuid[]) AND t.actor_type='User' AND t.purpose_code=$4",
     [brand, store, orders, counterUnpaidCancellationPolicy.purposeCode],
   );
   for (const row of found.rows) {
     const reasonCode = counterUnpaidCancellationReasons.find((code) => code === row.reason_code);
     if (reasonCode === undefined || row.actor_id === null) return fail();
+    // A paper order closed as entered again always has its link (written in the same transaction).
+    if ((reasonCode === "COUNTER_PAPER_REENTERED") !== (row.reentered !== null)) return fail();
+    if (row.reentered !== null && typeof row.reentered_number !== "string") return fail();
     result.set(String(parseOrderingReference(row.order_id)), {
       reasonCode,
       cancelledAt: parseOrderingInstant(row.at),
       actorReference: String(parseOrderingReference(row.actor_id)),
+      reentered:
+        row.reentered === null
+          ? null
+          : Object.freeze({
+              orderReference: String(parseOrderingReference(row.reentered)),
+              orderNumber: String(row.reentered_number),
+            }),
     });
   }
   return result;

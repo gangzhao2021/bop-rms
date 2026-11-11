@@ -421,6 +421,15 @@ const databaseAccessManifestInput = {
       piiClassification: ["indirect_identifier"],
     },
     {
+      // DEC-PAPER-ORDER-NEVER-RELEASED: which new paper order carries a closed paper order's sale.
+      table: "counter_paper_reentry",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/ordering" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "transactional",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       table: "cart_quote_attachment",
       classification: "append-only-record",
       writeOwner: { kind: "module", id: "@rms/ordering" },

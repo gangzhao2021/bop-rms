@@ -1,6 +1,7 @@
 import { canonicalizeRfc8785, sha256Hex } from "../../bop/audit/src/index.ts";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { setTimeout as delay } from "node:timers/promises";
 import { URL } from "node:url";
 import pg from "pg";
 import { it, vi } from "vitest";
@@ -13,6 +14,7 @@ import {
 } from "../../rms/inventory/src/index.ts";
 import {
   createPostgresCounterUnpaidCancellation,
+  listCounterUnpaidCancellations,
   createOrderTerminatedPaymentDisposition,
   createPostgresOrderExecutionReader,
   createPostgresOrderInitialExecutionReader,
@@ -31,6 +33,11 @@ import { createInternalOpenPaymentResolution } from "../../../tooling/environmen
 import { createPaidWithoutFulfillableInventoryRelease } from "../../../apps/api/src/paid-without-fulfillable-inventory-release.ts";
 import { renderPilotAclSql } from "../../../tooling/environment/pilot-acl-render.mjs";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
+import { seedMerchantAcceptanceSession } from "../test-support/merchant-acceptance-session.mjs";
+import {
+  createMerchantCounterOrderCancellation,
+  createMerchantPaperReentryCandidates,
+} from "../../../apps/api/src/merchant-counter-order-cancellation.ts";
 import { ensureSyntheticStockPlace } from "../test-support/stock-place.mjs";
 const { Client } = pg;
 const id = (n) => "0190a7c2-0000-7000-8000-" + n.toString(16).padStart(12, "0");
@@ -106,7 +113,7 @@ it("closes unpaid pickup orders after the payment window, returns their stock on
         );
       const owner = (tx) => createPostgresStockReservationStore({ run: (work) => work(tx) }, scope);
 
-      // Item, stock place, one account holding 10 KG on hand.
+      // Item, stock place, one account holding 20 KG on hand.
       await admin.query(
         "INSERT INTO rms_inventory.inventory_item VALUES ($1,$2,$3,'SYNTHETIC','RawMaterial',$4,$5)",
         [tenant, brand, item, time(-minutes(60)), actor],
@@ -168,7 +175,7 @@ it("closes unpaid pickup orders after the payment window, returns their stock on
       });
       await scoped((tx) =>
         tx.query(
-          "INSERT INTO rms_inventory.stock_movement (tenant_id,brand_id,store_id,account_id,movement_id,ledger_version,movement_type,base_quantity_delta,record_json,audit_id,occurred_at) VALUES ($1,$2,$3,$4,$5,2,'Receive','10',$6,$7,$8)",
+          "INSERT INTO rms_inventory.stock_movement (tenant_id,brand_id,store_id,account_id,movement_id,ledger_version,movement_type,base_quantity_delta,record_json,audit_id,occurred_at) VALUES ($1,$2,$3,$4,$5,2,'Receive','20',$6,$7,$8)",
           [
             tenant,
             brand,
@@ -181,9 +188,9 @@ it("closes unpaid pickup orders after the payment window, returns their stock on
               brandReference: brand,
               itemReference: item,
               movementType: "Receive",
-              quantityDelta: "10",
+              quantityDelta: "20",
               unitCode: "KG",
-              baseQuantityDelta: "10",
+              baseQuantityDelta: "20",
               baseUnitCode: "KG",
               conversionMultiplier: "1",
               sourceScope: { scopeType: "Location", scopeReference: location },
@@ -196,7 +203,7 @@ it("closes unpaid pickup orders after the payment window, returns their stock on
               performedBy: actor,
               occurredAt: time(-minutes(60)),
               before: balance(1, "0", "0", "0"),
-              after: balance(2, "10", "0", "10"),
+              after: balance(2, "20", "0", "20"),
               auditReference: id(22),
               correctsMovementReference: null,
             },
@@ -211,7 +218,7 @@ it("closes unpaid pickup orders after the payment window, returns their stock on
         [brand, store, slot, time(-minutes(60)), time(minutes(120)), businessDate],
       );
       await admin.query(
-        "INSERT INTO rms_fulfillment.capacity_slot_configuration (brand_id,store_id,slot_id,config_version,capacity_limit,published_at) VALUES ($1,$2,$3,1,10,$4)",
+        "INSERT INTO rms_fulfillment.capacity_slot_configuration (brand_id,store_id,slot_id,config_version,capacity_limit,published_at) VALUES ($1,$2,$3,1,30,$4)",
         [brand, store, slot, time(-minutes(120))],
       );
       const stock = async () =>
@@ -247,6 +254,10 @@ it("closes unpaid pickup orders after the payment window, returns their stock on
           // an outage (its counter Cart and entry), whose payment record did not go through.
           // "live": a counter order staff took live (not from paper).
           paper = false,
+          // A counter order's sale: its quote total (dishes with tax, before tip), in cents.
+          sale = 1130,
+          // Its payment recorded on the card machine (a re-entered paper order is paid at send).
+          cardMachine = false,
         },
       ) {
         assert.ok(lines === null || lines.length <= 2);
@@ -440,6 +451,72 @@ it("closes unpaid pickup orders after the payment window, returns their stock on
               paper === true,
             ],
           );
+          // The counter Cart's quote (Ordering's record of what the order sells for).
+          await admin.query(
+            "INSERT INTO rms_ordering.cart_quote_attachment (operation_id,brand_id,store_id,cart_id,cart_version,guest_session_id,intent_digest,quote_id,quote_version,quote_input_digest,currency_code,currency_metadata_version,currency_metadata_version_id,subtotal_minor,discount_minor,tax_minor,fee_minor,total_minor,line_count,warnings_json,quote_created_at,quote_expires_at,attached_at,idempotency_expires_at) VALUES ($1,$2,$3,$4,1,$5,$6,$7,1,$8,'CAD',1,$9,$10,0,$11,0,$12,1,'[]',$13,$14,$13,$13::timestamptz+interval '24 hours')",
+            [
+              id(base100 + 94),
+              brand,
+              store,
+              refs.cart,
+              refs.guest,
+              hash(["quote-intent", n]),
+              refs.quote,
+              hash(["quote-input", n]),
+              id(base100 + 93),
+              sale - Math.round((sale * 0.13) / 1.13),
+              Math.round((sale * 0.13) / 1.13),
+              sale,
+              createdAt,
+              new Date(Date.parse(createdAt) + minutes(15)).toISOString(),
+            ],
+          );
+          if (cardMachine)
+            // TEST-ONLY fixture: the paper order's payment recorded at its send (card machine).
+            await admin.query(
+              "INSERT INTO rms_payment.card_machine_payment (tenant_id,brand_id,store_id,card_machine_payment_id,payment_intent_id,payment_attempt_id,payment_operation_id,operation_id,intent_digest,order_id,order_batch_id,submission_id,preparation_json,order_allocation_minor,tip_minor,total_minor,currency_code,payment_environment,slip_reference,recording_reason,taken_at,recorded_at,actor_id,event_id,audit_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14,0,$14,'CAD','Test','AUTH 0001','RecordedAfterOutage',$15,$16,$17,$18,$19)",
+              [
+                tenant,
+                brand,
+                store,
+                id(base100 + 80),
+                id(base100 + 81),
+                id(base100 + 82),
+                refs.payment,
+                id(base100 + 83),
+                hash(["card-machine", n]),
+                refs.order,
+                refs.batch,
+                refs.submission,
+                JSON.stringify({
+                  preparationReference: id(base100 + 84),
+                  orderReference: refs.order,
+                  orderBatchReference: refs.batch,
+                  submissionReference: refs.submission,
+                  sourceCartReference: refs.cart,
+                  sourceCartVersion: 1,
+                  brandReference: brand,
+                  storeReference: store,
+                  guestSessionReference: refs.guest,
+                  quoteReference: refs.quote,
+                  capacityAllocationReference: refs.commitment,
+                  readiness: "PaymentPending",
+                  transactionBoundary: "OrderSubmissionPaymentPreparation",
+                  orderAllocation: { amountMinor: String(sale), currencyCode: "CAD" },
+                  tip: { amountMinor: "0", currencyCode: "CAD" },
+                  total: { amountMinor: String(sale), currencyCode: "CAD" },
+                  committedAt: createdAt,
+                  capacityExpiresAt: time(minutes(10)),
+                  sourceDigest: hash(["preparation", n]),
+                }),
+                sale,
+                time(-minutes(40)),
+                createdAt,
+                actor,
+                id(base100 + 85),
+                id(base100 + 86),
+              ],
+            );
         }
         await admin.query(
           "INSERT INTO rms_ordering.order_number_allocation " +
@@ -717,7 +794,23 @@ it("closes unpaid pickup orders after the payment window, returns their stock on
       const reenteredAgain = await submit(9, { quantity: "0.25", paper: true, paid: "Wait" });
       const secondPaper = await submit(10, { quantity: "0.25", paper: true });
       const liveCounter = await submit(11, { quantity: "0.25", paper: "live", paid: "Wait" });
-      assert.deepEqual(await stock(), { onHand: "10", reserved: "9" });
+      // v15 batch-8 review: a cheaper paid paper order ($5.00 against $11.30), a third paper order
+      // past its window, paid and unpaid new paper orders, one still inside its window, and the
+      // paper orders two managers link at the same moment.
+      const cheapPaid = await submit(12, {
+        quantity: "0.25",
+        paper: true,
+        sale: 500,
+        cardMachine: true,
+      });
+      const thirdPaper = await submit(13, { quantity: "0.25", paper: true });
+      const paidNew = await submit(14, { quantity: "0.25", paper: true, cardMachine: true });
+      const unpaidNew = await submit(15, { quantity: "0.25", paper: true });
+      const inWindow = await submit(16, { quantity: "0.25", paper: true, requestedAgo: 10 });
+      const sharedNew = await submit(17, { quantity: "0.25", paper: true, cardMachine: true });
+      const fourthPaper = await submit(18, { quantity: "0.25", paper: true });
+      const fifthPaper = await submit(19, { quantity: "0.25", paper: true });
+      assert.deepEqual(await stock(), { onHand: "20", reserved: "11" });
 
       let allowed = true;
       let references = 0x7000;
@@ -774,7 +867,7 @@ it("closes unpaid pickup orders after the payment window, returns their stock on
       assert.equal(closed.status, "Closed");
       assert.equal(closed.paymentEvidence, "NoPaymentStarted");
       assert.deepEqual(closed.inventory, { status: "Released", entryCount: 2 });
-      assert.deepEqual(await stock(), { onHand: "10", reserved: "7" });
+      assert.deepEqual(await stock(), { onHand: "20", reserved: "9" });
       const after = await counts();
       assert.deepEqual(after, {
         reservations: before.reservations + 2,
@@ -863,7 +956,7 @@ it("closes unpaid pickup orders after the payment window, returns their stock on
       assert.deepEqual(replay.inventory, { status: "AlreadyApplied", entryCount: 2 });
       assert.deepEqual(await counts(), after);
       assert.deepEqual(await discover(), [open.refs.order, abandoned.refs.order]);
-      assert.deepEqual(await stock(), { onHand: "10", reserved: "7" });
+      assert.deepEqual(await stock(), { onHand: "20", reserved: "9" });
 
       // A payment captured after the closure: Ordering classifies it SubmissionCancelled (refunded
       // by compensation) and the paid-outcome stock release finds the stock already returned.
@@ -946,7 +1039,7 @@ it("closes unpaid pickup orders after the payment window, returns their stock on
         })(tx, late),
       );
       assert.deepEqual(lateRelease, { status: "NothingToRelease", reason: "AlreadyReleased" });
-      assert.deepEqual(await stock(), { onHand: "10", reserved: "7" });
+      assert.deepEqual(await stock(), { onHand: "20", reserved: "9" });
       assert.equal((await counts()).movements, after.movements);
 
       // Payment intent created at checkout but never confirmed (Provider still asks the customer to
@@ -955,7 +1048,7 @@ it("closes unpaid pickup orders after the payment window, returns their stock on
       assert.equal(unconfirmed.status, "Closed");
       assert.equal(unconfirmed.paymentEvidence, "PaymentUnresolved");
       assert.deepEqual(unconfirmed.inventory, { status: "Released", entryCount: 1 });
-      assert.deepEqual(await stock(), { onHand: "10", reserved: "6" });
+      assert.deepEqual(await stock(), { onHand: "20", reserved: "8" });
       assert.deepEqual(await discover(), [open.refs.order]);
 
       // WP-2423 abandoned pickup payment: the closed Order's card payment is then settled with the
@@ -1076,7 +1169,7 @@ it("closes unpaid pickup orders after the payment window, returns their stock on
       assert.equal(await sweep.runOnce(), 0);
       assert.equal(providerCalls.length, 2);
       assert.deepEqual(await discover(), [open.refs.order]);
-      assert.deepEqual(await stock(), { onHand: "10", reserved: "6" });
+      assert.deepEqual(await stock(), { onHand: "20", reserved: "8" });
       vi.unstubAllEnvs();
 
       // History stays append-only; another Store cannot see or close the Order.
@@ -1305,6 +1398,321 @@ it("closes unpaid pickup orders after the payment window, returns their stock on
       });
       assert.deepEqual(await counts(), afterReentry);
       assert.equal((await reenter(secondPaper, reenteredAgain.refs.order)).status, "Cancelled");
+
+      // v15 batch-8 review: the link is readable by anyone checking the books: which new order now
+      // carries each closed paper order's sale, both sales to the cent, who linked it, and the
+      // termination that closed it; Orders reads the new order's number from it.
+      const links = async () =>
+        (
+          await admin.query(
+            "SELECT order_id::text AS paper,reentered_order_id::text AS reentered,paper_sale_minor::text AS paper_sale,reentered_sale_minor::text AS reentered_sale,currency_code AS currency,actor_id::text AS actor FROM rms_ordering.counter_paper_reentry ORDER BY recorded_at,order_id",
+          )
+        ).rows;
+      assert.deepEqual(await links(), [
+        {
+          paper: paperOrder.refs.order,
+          reentered: reentered.refs.order,
+          paper_sale: "1130",
+          reentered_sale: "1130",
+          currency: "CAD",
+          actor,
+        },
+        {
+          paper: secondPaper.refs.order,
+          reentered: reenteredAgain.refs.order,
+          paper_sale: "1130",
+          reentered_sale: "1130",
+          currency: "CAD",
+          actor,
+        },
+      ]);
+      const ordersRead = await scoped((tx) =>
+        listCounterUnpaidCancellations(tx, scope, [
+          paperOrder.refs.order,
+          secondPaper.refs.order,
+          liveCounter.refs.order,
+        ]),
+      );
+      assert.deepEqual(ordersRead.get(paperOrder.refs.order)?.reentered, {
+        orderReference: reentered.refs.order,
+        orderNumber: "8",
+      });
+      assert.deepEqual(ordersRead.get(secondPaper.refs.order)?.reentered, {
+        orderReference: reenteredAgain.refs.order,
+        orderNumber: "9",
+      });
+      assert.equal(ordersRead.has(liveCounter.refs.order), false);
+      // The link is append-only, and the database itself refuses a cheaper new order, a made-up
+      // amount, or a link without its termination.
+      await assert.rejects(
+        admin.query("UPDATE rms_ordering.counter_paper_reentry SET reentered_sale_minor=0"),
+        /append-only paper order re-entry/u,
+      );
+      await assert.rejects(
+        admin.query("DELETE FROM rms_ordering.counter_paper_reentry"),
+        /append-only paper order re-entry/u,
+      );
+
+      // A $11.30 paper sale is never closed by a $5.00 new order (it would leave the books).
+      const beforeCheap = await counts();
+      assert.deepEqual(await reenter(thirdPaper, cheapPaid.refs.order), {
+        status: "NotEligible",
+        reason: "ReentryAmountLower",
+      });
+      assert.deepEqual(await counts(), beforeCheap);
+      await assert.rejects(
+        scoped(async (tx) => {
+          await tx.query(
+            "INSERT INTO rms_ordering.counter_paper_reentry (brand_id,store_id,order_id,reentered_order_id,termination_id,paper_sale_minor,reentered_sale_minor,currency_code,actor_id,recorded_at) VALUES ($1,$2,$3,$4,$5,1130,500,'CAD',$6,$7)",
+            [
+              brand,
+              store,
+              thirdPaper.refs.order,
+              cheapPaid.refs.order,
+              id(0x7e01),
+              actor,
+              new Date(Date.now()).toISOString().replace(/\.\d{3}Z$/u, ".000Z"),
+            ],
+          );
+        }),
+        /counter_paper_reentry_sale_kept/u,
+      );
+      await assert.rejects(
+        scoped(async (tx) => {
+          await tx.query(
+            "INSERT INTO rms_ordering.counter_paper_reentry (brand_id,store_id,order_id,reentered_order_id,termination_id,paper_sale_minor,reentered_sale_minor,currency_code,actor_id,recorded_at) VALUES ($1,$2,$3,$4,$5,1,1,'CAD',$6,$7)",
+            [
+              brand,
+              store,
+              thirdPaper.refs.order,
+              cheapPaid.refs.order,
+              id(0x7e02),
+              actor,
+              new Date(Date.now()).toISOString().replace(/\.\d{3}Z$/u, ".000Z"),
+            ],
+          );
+        }),
+        /a re-entry links two paper orders at their own sale amounts/u,
+      );
+      assert.deepEqual(await counts(), beforeCheap);
+
+      // The manager's command itself (real API code; only the merchant session is seeded) runs as
+      // the pilot API role holding exactly the rendered pilot ACL: its own checks of the window,
+      // the new order's recorded payment and the stock released after the window.
+      const pilotRunner = {
+        async acquire() {
+          const client = new Client(context.clientConfig);
+          await client.connect();
+          await client.query("SET ROLE " + role);
+          return {
+            query: (sql, values) => client.query(sql, [...values]),
+            release: () => client.end(),
+          };
+        },
+        async run(work) {
+          const client = new Client(context.clientConfig);
+          await client.connect();
+          try {
+            await client.query("BEGIN");
+            await client.query("SET LOCAL ROLE " + role);
+            await client.query("SET LOCAL lock_timeout='5s'");
+            const result = await work({ query: (sql, values) => client.query(sql, [...values]) });
+            await client.query("COMMIT");
+            return result;
+          } catch (error) {
+            await client.query("ROLLBACK");
+            throw error;
+          } finally {
+            await client.end();
+          }
+        },
+      };
+      const manager = id(0x7d00);
+      const seeded = await seedMerchantAcceptanceSession({
+        admin,
+        runner: pilotRunner,
+        scope,
+        actor: manager,
+        at: new Date().toISOString(),
+        extraPermissions: ["ordering.order.cancel"],
+        referencePrefix: "01909b85",
+        sessionReferencePrefix: "01909b86",
+      });
+      const installContext = async (tx, selected) => {
+        await tx.query(
+          "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id',$3,true)",
+          [selected.tenantReference, selected.brandReference, selected.storeReference],
+        );
+      };
+      let apiKey = 0x7c00;
+      const persistence = {
+        ...seeded.persistence,
+        transactions: pilotRunner,
+        now: () => new Date().toISOString(),
+      };
+      const linkCommand = createMerchantCounterOrderCancellation({
+        persistence,
+        authentication: seeded.authentication,
+        installContext,
+        nextReference: () => id(apiKey++),
+      });
+      const apiReenter = (target, reenteredOrderReference) =>
+        linkCommand({
+          sessionCookie: seeded.sessionCookie,
+          csrf: seeded.csrf,
+          command: {
+            operationReference: id(apiKey++),
+            orderReference: target.refs.order,
+            orderBatchReference: target.refs.batch,
+            expectedOrderVersion: 1,
+            reasonCode: "COUNTER_PAPER_REENTERED",
+            reenteredOrderReference,
+          },
+        });
+      const beforeApi = await counts();
+      await assert.rejects(apiReenter(inWindow, paidNew.refs.order), {
+        code: "COUNTER_CANCEL_PAPER_STILL_RECORDABLE",
+      });
+      // The new order's payment must be recorded (Payment's record, read as the pilot role).
+      await assert.rejects(apiReenter(thirdPaper, unpaidNew.refs.order), {
+        code: "COUNTER_CANCEL_REENTRY_INVALID",
+      });
+      await assert.rejects(apiReenter(thirdPaper, cheapPaid.refs.order), {
+        code: "COUNTER_CANCEL_REENTRY_AMOUNT_LOWER",
+      });
+      assert.deepEqual(await counts(), beforeApi);
+      // The dialog's read (any business day): the paid paper orders still free, with both sales;
+      // the cheaper one is offered as unable to carry the sale.
+      const choices = createMerchantPaperReentryCandidates({ persistence, installContext });
+      const offered = await choices({
+        sessionCookie: seeded.sessionCookie,
+        orderReference: thirdPaper.refs.order,
+      });
+      assert.deepEqual(offered.paperOrder, {
+        orderNumber: "13",
+        saleMinor: "1130",
+        currencyCode: "CAD",
+      });
+      assert.deepEqual(
+        offered.candidates.map((candidate) => [
+          candidate.orderNumber,
+          candidate.saleMinor,
+          candidate.paidMinor,
+          candidate.coversSale,
+        ]),
+        [
+          ["17", "1130", "1130", true],
+          ["14", "1130", "1130", true],
+          ["12", "500", "500", false],
+        ],
+      );
+      const heldBefore = await stock();
+      const movementsBefore = (await counts()).movements;
+      const linked = await apiReenter(thirdPaper, paidNew.refs.order);
+      assert.equal(linked.status, "Cancelled");
+      // Its stock goes back once, after its window, under the manager's name; the sale stays in
+      // the books once, as order 14.
+      const heldAfter = await stock();
+      assert.equal(Number(heldAfter.reserved), Number(heldBefore.reserved) - 0.25);
+      assert.equal(heldAfter.onHand, heldBefore.onHand);
+      assert.equal((await counts()).movements, movementsBefore + 1);
+      assert.equal(
+        (
+          await admin.query(
+            "SELECT record_json->>'performedBy' AS actor FROM rms_inventory.stock_movement WHERE movement_type='Release' ORDER BY ledger_version DESC LIMIT 1",
+          )
+        ).rows[0].actor,
+        manager,
+      );
+      // A retry of the same link answers with what was recorded and releases nothing again.
+      assert.equal((await apiReenter(thirdPaper, paidNew.refs.order)).status, "AlreadyCancelled");
+      assert.equal((await counts()).movements, movementsBefore + 1);
+      assert.deepEqual((await links()).at(-1), {
+        paper: thirdPaper.refs.order,
+        reentered: paidNew.refs.order,
+        paper_sale: "1130",
+        reentered_sale: "1130",
+        currency: "CAD",
+        actor: manager,
+      });
+      assert.equal(
+        (
+          await choices({
+            sessionCookie: seeded.sessionCookie,
+            orderReference: inWindow.refs.order,
+          })
+        ).candidates.some((candidate) => candidate.orderNumber === "14"),
+        false,
+      );
+
+      // Two managers link the same new order to two paper orders at the same moment: the second
+      // waits for the first, then is told that order is taken (never "no answer"), and nothing of
+      // theirs is written.
+      const begin = async () => {
+        const client = new Client(context.clientConfig);
+        await client.connect();
+        await client.query("BEGIN");
+        await client.query("SET LOCAL ROLE " + role);
+        await client.query("SET LOCAL lock_timeout='10s'");
+        await client.query(
+          "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id',$3,true)",
+          [tenant, brand, store],
+        );
+        return client;
+      };
+      const [first, second] = [await begin(), await begin()];
+      try {
+        const asTx = (client) => ({ query: (sql, values) => client.query(sql, [...values]) });
+        const linkIn = (client, target) =>
+          reentry.cancel(asTx(client), {
+            orderReference: target.refs.order,
+            orderBatchReference: target.refs.batch,
+            operationReference: id(reentryKey++),
+            expectedOrderVersion: 1,
+            actorReference: actor,
+            cancelledAt: new Date().toISOString(),
+            terminationReference: id(reentryKey++),
+            auditReference: id(reentryKey++),
+            reasonCode: "COUNTER_PAPER_REENTERED",
+            reenteredOrderReference: sharedNew.refs.order,
+          });
+        assert.equal((await linkIn(first, fourthPaper)).status, "Cancelled");
+        const racing = linkIn(second, fifthPaper);
+        // The second waits on the first's claim of the new order.
+        const pid = second.processID;
+        for (let tries = 0; ; tries++) {
+          const waiting = (
+            await admin.query(
+              "SELECT count(*)::int AS n FROM pg_stat_activity WHERE pid=$1 AND wait_event_type='Lock'",
+              [pid],
+            )
+          ).rows[0].n;
+          if (waiting === 1) break;
+          assert.ok(tries < 100, "the second link waits for the first");
+          await delay(50);
+        }
+        await first.query("COMMIT");
+        assert.deepEqual(await racing, { status: "NotEligible", reason: "ReentryUsed" });
+        await second.query("ROLLBACK");
+      } finally {
+        await first.end();
+        await second.end();
+      }
+      assert.deepEqual(
+        (await links())
+          .filter((row) => row.reentered === sharedNew.refs.order)
+          .map((row) => row.paper),
+        [fourthPaper.refs.order],
+      );
+      assert.equal(
+        (
+          await admin.query(
+            "SELECT count(*)::int AS n FROM rms_ordering.order_termination_record WHERE order_id=$1",
+            [fifthPaper.refs.order],
+          )
+        ).rows[0].n,
+        0,
+      );
       // Another Store cannot close it.
       await assert.rejects(
         scoped((tx) =>

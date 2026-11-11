@@ -6515,6 +6515,24 @@
       "privilege": "SELECT",
       "principal": "api",
       "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); WP-2423 shared-table-checkout (b) lost cookie: a phone that lost its cookie but kept its page storage scans the table again and is the same phone at the table (no login, no contact) (2000_523, 2000_525)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "counter_paper_reentry",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); DEC-PAPER-ORDER-NEVER-RELEASED: a paper order closed as entered again names the new order carrying its sale, at no lower amount (2000_740)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "counter_paper_reentry",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); DEC-PAPER-ORDER-NEVER-RELEASED: a paper order closed as entered again names the new order carrying its sale, at no lower amount (2000_740)"
     }
   ]
 }
