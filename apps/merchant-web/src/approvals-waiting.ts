@@ -19,13 +19,19 @@ export interface ApprovalsWaiting {
   readonly notSent: number;
 }
 
+/**
+ * `canSend`: the reader sends refunds. A cashier's request waits for a manager or the owner, so
+ * it is never counted as something a cashier has to do (v15 batch 5: Home told a cashier it was
+ * "waiting for you to send").
+ */
 export function summarizeApprovalsWaiting(
   entries: readonly { readonly state: "AwaitingApproval" | "Approved" | "NotSent" }[],
+  canSend = true,
 ): ApprovalsWaiting {
   return {
     awaiting: entries.filter((entry) => entry.state === "AwaitingApproval").length,
     approvedNotSent: entries.filter((entry) => entry.state === "Approved").length,
-    notSent: entries.filter((entry) => entry.state === "NotSent").length,
+    notSent: canSend ? entries.filter((entry) => entry.state === "NotSent").length : 0,
   };
 }
 
@@ -54,7 +60,8 @@ export function useApprovalsWaiting(
       client
         .approvals(current.signal)
         .then((view) => {
-          if (!current.signal.aborted) setWaiting(summarizeApprovalsWaiting(view.entries));
+          if (!current.signal.aborted)
+            setWaiting(summarizeApprovalsWaiting(view.entries, view.canSend));
         })
         .catch(() => {
           if (!current.signal.aborted) setWaiting(null);

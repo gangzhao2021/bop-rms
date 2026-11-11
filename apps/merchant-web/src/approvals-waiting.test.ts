@@ -16,6 +16,8 @@ it("WP-2423 Q35: counts refunds to approve apart from approved ones not sent yet
   expect(summarizeApprovalsWaiting([])).toEqual({ awaiting: 0, approvedNotSent: 0, notSent: 0 });
   // WP-2423 M14: a cashier's request that needs no approval waits for someone to send it.
   expect(summarizeApprovalsWaiting([{ state: "NotSent" }]).notSent).toBe(1);
+  // A cashier, who can't send, is never told a request waits for them.
+  expect(summarizeApprovalsWaiting([{ state: "NotSent" }], false).notSent).toBe(0);
 });
 
 it("WP-2423 Q35: the home page says what waits for the approver, and nothing when not read", () => {
