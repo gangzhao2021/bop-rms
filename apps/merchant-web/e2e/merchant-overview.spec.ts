@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { expectNoInternalText } from "./internal-text-guard";
 import { settlementViewFixture } from "../src/settlement.fixtures";
+import { notPausedServiceControl } from "./service-control-state";
 
 test("@production Merchant Overview uses the authorized workspace snapshot at desktop and mobile widths", async ({
   page,
@@ -440,6 +441,13 @@ test("@production Home reads only the summaries the staff member's screens permi
     route.fulfill({
       headers: { "cache-control": "no-store" },
       json: { name: "Recorded", displayName: "Ava" },
+    }),
+  );
+  // Batch 5 (v15 M30): Home reads whether ordering is paused; it is not.
+  await page.route("**/merchant/service-control", (route) =>
+    route.fulfill({
+      headers: { "cache-control": "no-store" },
+      json: notPausedServiceControl(scope.storeReference),
     }),
   );
   // Staff with no row of store system alerts read when ordering stops; it is not about to.

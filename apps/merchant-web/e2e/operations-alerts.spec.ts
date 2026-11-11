@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { expectNoInternalText } from "./internal-text-guard";
 import { settlementViewFixture } from "../src/settlement.fixtures";
+import { notPausedServiceControl } from "./service-control-state";
 
 // The real pilot navigation shape (tooling/environment/pilot-merchant.mjs), trimmed per role the
 // way the BFF trims it by permission. The card must not depend on any one of these entries: the
@@ -271,6 +272,47 @@ async function pilotHome(
   // Ordering is not about to stop, unless a test says so.
   await page.route("**/merchant/ordering-ending", (route) =>
     route.fulfill({ headers, json: { endsAt: null, support: null } }),
+  );
+  // WP-2423 store-service-controls (v15 M30, batch 5): every pilot role may pause ordering
+  // (`operations.ordering.pause`, catalog v26), so Home reads the Store's pause state; nothing is
+  // paused here.
+  await page.route("**/merchant/service-control", (route) =>
+    route.fulfill({ headers, json: notPausedServiceControl(scope.storeReference, scope.timeZone) }),
+  );
+  // M109 (batch 5): the Owner is asked for a missing store phone only while pickup is on; this
+  // Store is dine-in only, so Home asks nothing.
+  await page.route("**/merchant/store/features", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        version: 0,
+        templateCode: null,
+        modules: {
+          counterOrder: true,
+          pickup: false,
+          inventory: false,
+          loyalty: false,
+          alcohol: false,
+        },
+        changedAt: null,
+        services: {
+          version: 0,
+          staffCall: false,
+          chaseDish: false,
+          askPartySize: false,
+          changedAt: null,
+        },
+        teaCharge: { version: 0, teaSellableReference: null, changedAt: null },
+        teaChoices: [],
+        tips: {
+          version: 0,
+          enabled: false,
+          tierPercents: [10, 15, 18],
+          changedAt: null,
+          offInStoreSetup: false,
+        },
+      },
+    }),
   );
   await page.route("**/merchant/operations-alerts", (route) => {
     alertReads.push(route.request().method());
