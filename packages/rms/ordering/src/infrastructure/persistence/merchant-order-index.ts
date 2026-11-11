@@ -965,11 +965,13 @@ export async function listStoreEarlierOrdersWithPaidRoundsAwaitingAcceptance(
   );
   const rows = (
     await transaction.query(
+      // v15 batch 7 review: driven from the Store's paid rounds that waited (far fewer than its
+      // Orders, and every one still open is wanted), then each Order by its key; it runs on every
+      // Orders poll, so it must not scan the Store's whole Order history.
       `SELECT h.order_id::text order_id
-        FROM rms_ordering.order_header h
-        WHERE h.brand_id=$1 AND h.store_id=$2 AND h.business_date<$3::date
-          AND EXISTS (SELECT 1 FROM rms_ordering.order_payment_acceptance_wait w
-              WHERE w.brand_id=h.brand_id AND w.store_id=h.store_id AND w.order_id=h.order_id
+        FROM (SELECT DISTINCT w.order_id
+              FROM rms_ordering.order_payment_acceptance_wait w
+              WHERE w.brand_id=$1 AND w.store_id=$2
                 AND NOT EXISTS (SELECT 1 FROM rms_ordering.order_acceptance_record a
                     WHERE a.brand_id=w.brand_id AND a.store_id=w.store_id AND a.order_id=w.order_id
                       AND a.order_batch_id=w.order_batch_id)
@@ -978,7 +980,9 @@ export async function listStoreEarlierOrdersWithPaidRoundsAwaitingAcceptance(
                       AND d.order_batch_id=w.order_batch_id)
                 AND NOT EXISTS (SELECT 1 FROM rms_ordering.order_staff_cancellation s
                     WHERE s.brand_id=w.brand_id AND s.store_id=w.store_id AND s.order_id=w.order_id
-                      AND s.order_batch_id=w.order_batch_id))
+                      AND s.order_batch_id=w.order_batch_id)) o
+        JOIN rms_ordering.order_header h ON h.order_id=o.order_id
+        WHERE h.brand_id=$1 AND h.store_id=$2 AND h.business_date<$3::date
           AND NOT EXISTS (SELECT 1 FROM rms_ordering.order_termination_record t
               WHERE t.brand_id=h.brand_id AND t.store_id=h.store_id AND t.order_id=h.order_id)
         ORDER BY h.business_date,h.order_id
