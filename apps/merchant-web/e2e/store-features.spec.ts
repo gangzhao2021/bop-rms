@@ -17,7 +17,39 @@ const scope = {
   timeZone: "America/Toronto",
 };
 
+/** WP-2423 (M178): the kitchen's cross-contact statement, answered as the server would. */
+const kitchenStatementSaves: unknown[] = [];
+async function kitchenStatement(page: Page) {
+  let statement: { handledAllergenCodes: string[]; sharedEquipment: string[] } | null = null;
+  await page.route("**/merchant/store/kitchen-statement", (route) => {
+    const body = route.request().postDataJSON() as {
+      action: string;
+      handledAllergenCodes?: string[];
+      sharedEquipment?: string[];
+    };
+    if (body.action === "Change") {
+      kitchenStatementSaves.push(body);
+      statement = {
+        handledAllergenCodes: body.handledAllergenCodes ?? [],
+        sharedEquipment: body.sharedEquipment ?? [],
+      };
+    }
+    return route.fulfill({
+      headers,
+      json: {
+        status: "Current",
+        statement,
+        allergenChoices: [
+          { code: "PEANUT", name: "Peanuts", nameZh: "花生" },
+          { code: "SESAME", name: "Sesame", nameZh: "芝麻" },
+        ],
+      },
+    });
+  });
+}
+
 async function session(page: Page) {
+  await kitchenStatement(page);
   await page.route("**/merchant/session", (route) =>
     route.fulfill({
       headers,
@@ -597,6 +629,29 @@ test("@production the owner sends paid orders straight to the kitchen, and back"
   await save.click();
   await expect(page.getByText("Saved. Paid orders wait for Accept on Orders again.")).toBeVisible();
   expect(commands.at(-1)).toMatchObject({ pickup: false, dineIn: false, expectedVersion: 1 });
+  // WP-2423 (M178): the owner ticks what the kitchen uses and shares; guests read it on the menu.
+  const section = page.getByRole("group", { name: "Kitchen allergens" });
+  await expect(section).toContainText("Not set yet.");
+  await section.getByRole("group", { name: "Our kitchen uses:" }).getByLabel("Peanuts").check();
+  await section.getByRole("group", { name: "Shared in our kitchen:" }).getByLabel("Woks").check();
+  await section.getByRole("button", { name: "Save kitchen allergens" }).click();
+  await expect(section.getByText("Saved. Guests see it on the menu.")).toBeVisible();
+  expect(kitchenStatementSaves.at(-1)).toMatchObject({
+    action: "Change",
+    handledAllergenCodes: ["PEANUT"],
+    sharedEquipment: ["Woks"],
+  });
+  await expect(section).not.toContainText("Not set yet.");
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+        ),
+      )
+      .toBe(true);
+  }
 });
 
 /** DEC-DINING-GUEST-TABLE-START: the switch, only where guests pay each round first. */
