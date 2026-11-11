@@ -1544,12 +1544,39 @@ export function parseOrderRecordPeople(value: unknown): OrderRecordPeople | null
     paidOnlineByGuest: raw.paidOnlineByGuest,
   });
 }
+function parseMoneyTakenBack(value: unknown) {
+  if (!Array.isArray(value) || value.length > 100) return fail();
+  return Object.freeze(
+    value.map((entry: unknown) => {
+      const raw = exact(entry, ["method", "amountMinor", "currencyCode", "recordedAt"]);
+      if (
+        (raw.method !== "Cash" && raw.method !== "CardMachine") ||
+        typeof raw.amountMinor !== "string" ||
+        !minorPattern.test(raw.amountMinor) ||
+        raw.amountMinor === "0" ||
+        raw.currencyCode !== "CAD" ||
+        typeof raw.recordedAt !== "string" ||
+        !Number.isFinite(Date.parse(raw.recordedAt))
+      )
+        return fail();
+      return Object.freeze({
+        method: raw.method as "Cash" | "CardMachine",
+        amountMinor: raw.amountMinor,
+        currencyCode: "CAD" as const,
+        recordedAt: raw.recordedAt,
+      });
+    }),
+  );
+}
 export function parseCurrentOrderDetail(value: unknown, orderReference: string) {
   // WP-2423: refunds of the online payment (absent from an older server).
   const withPosition =
     value !== null && typeof value === "object" && Object.hasOwn(value, "paymentPosition");
   // WP-2423 M61: who did what (absent from an older server).
   const withRecord = value !== null && typeof value === "object" && Object.hasOwn(value, "record");
+  // WP-2423 M163: money taken back on the order (absent: not read, or an older server).
+  const withTakenBack =
+    value !== null && typeof value === "object" && Object.hasOwn(value, "moneyTakenBack");
   const raw = exact(value, [
     "screenId",
     "order",
@@ -1557,6 +1584,7 @@ export function parseCurrentOrderDetail(value: unknown, orderReference: string) 
     "pickupContact",
     ...(withPosition ? ["paymentPosition"] : []),
     ...(withRecord ? ["record"] : []),
+    ...(withTakenBack ? ["moneyTakenBack"] : []),
   ]);
   if (raw.screenId !== "OPS-ORDER-DETAIL") return fail();
   const queue = parseCurrentOrderQueue({ items: [raw.order], nextAfterOrderReference: null });
@@ -1697,6 +1725,8 @@ export function parseCurrentOrderDetail(value: unknown, orderReference: string) 
     order,
     /** WP-2423: refunded and refunding amounts of the online payment (null when not read). */
     paymentPosition,
+    /** WP-2423 M163: money taken back after a refund made by mistake (null: not read). */
+    moneyTakenBack: withTakenBack ? parseMoneyTakenBack(raw.moneyTakenBack) : null,
     pickupContact: parsePickupContact(raw.pickupContact, order.orderType),
     /** WP-2423 M61: who did what (null when not read or from an older server). */
     record: withRecord ? parseOrderRecordPeople(raw.record) : null,

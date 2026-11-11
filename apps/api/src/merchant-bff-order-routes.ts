@@ -50,6 +50,8 @@ export function orderDetailResponse(
     lines: view.lines,
     // WP-2423: refunds of the online payment, when Payment's position could be read.
     paymentPosition: view.paymentPosition,
+    // WP-2423 M163: money taken back on this order after a refund made by mistake (absent: not read).
+    ...("moneyTakenBack" in view ? { moneyTakenBack: view.moneyTakenBack } : {}),
     // WP-2423 Q10: the pickup customer's contact for this order (detail only).
     pickupContact:
       view.pickupContact === null

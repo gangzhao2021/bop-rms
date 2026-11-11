@@ -57,6 +57,7 @@ import {
   listStoreOrderBatchesWithOnlinePayment,
   listStoreOrderOnlinePaidTotals,
   listStoreOrdersWithOnlineRefunds,
+  listRefundRecoveriesByOrders,
   readStoreOrderOnlinePaidTip,
   listOrderOrdinaryRefundApprovers,
   listOrderOrdinaryRefundRequesters,
@@ -1744,12 +1745,39 @@ export function createPersistentMerchantOrderQueue(options: {
                       paidOnline.has(only.orderReference) && !counter.has(only.orderReference),
                   });
                 })();
+          // WP-2423 M163: money taken back on this order after a refund made by mistake (order
+          // detail, beside its refunds). Unreadable: left out, never said "none".
+          const moneyTakenBack =
+            only === undefined || ownerScope === null || tenantReference === null
+              ? null
+              : await withOptionalRead(
+                  businessTransaction,
+                  async () =>
+                    Object.freeze(
+                      (
+                        await listRefundRecoveriesByOrders(
+                          businessTransaction,
+                          { tenantReference, ...ownerScope },
+                          [only.orderReference],
+                        )
+                      ).map((recovery) =>
+                        Object.freeze({
+                          method: recovery.method,
+                          amountMinor: recovery.amountMinor.toString(),
+                          currencyCode: recovery.currencyCode,
+                          recordedAt: recovery.recordedAt,
+                        }),
+                      ),
+                    ),
+                  null,
+                );
           return Object.freeze({
             ...result,
             lines: detailLines,
             record,
             pickupContact,
             paymentPosition,
+            ...(moneyTakenBack === null ? {} : { moneyTakenBack }),
             // DEC-PAID-ORDER-AUTO-ACCEPT: only at a Store that has it on or has orders from it.
             ...(paidOrderWatch === null
               ? {}

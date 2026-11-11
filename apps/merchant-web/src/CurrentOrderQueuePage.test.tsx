@@ -12,6 +12,7 @@ import {
   orderMoney,
   CurrentOrderQueueRows,
   onlinePaymentText,
+  MoneyTakenBackNote,
   OnlineRefundNote,
   storeTime,
   filterCurrentOrderItems,
@@ -1468,48 +1469,77 @@ it("WP-2423: lines of a round cancelled for a failed payment are marked and not 
     canCancelItems: false,
     paymentDue: null,
   };
-  const detail = parseCurrentOrderDetail(
-    {
-      screenId: "OPS-ORDER-DETAIL",
-      pickupContact: null,
-      order: {
-        orderReference: unpaidId(1),
-        orderNumber: "ORD-1007",
-        orderType: "DineIn",
-        sourceChannel: "Qr",
-        submittedAt: "2026-09-14T00:00:00.000Z",
-        observedAt: "2026-09-14T00:40:00.000Z",
-        initialBatchReference: unpaidId(90),
-        batches: [
-          batch,
-          {
-            ...batch,
-            orderBatchReference: unpaidId(91),
-            sequence: 2,
-            acceptanceStatus: "Cancelled",
-          },
-        ],
-        canRequestAcceptance: false,
-        unfulfillable: null,
-        pickupNotCollected: false,
-        acceptBy: null,
-        awaitingPayment: false,
-        currentPhase: "Accepted",
-        currentVersion: 4,
-      },
-      lines: {
-        items: [line(1, 90, "1130"), line(2, 91, "1130")],
-        totals: {
-          subtotal: { amountMinor: "2000", currencyCode: "CAD" },
-          discount: { amountMinor: "0", currencyCode: "CAD" },
-          tax: { amountMinor: "260", currencyCode: "CAD" },
-          fee: { amountMinor: "0", currencyCode: "CAD" },
-          total: { amountMinor: "2260", currencyCode: "CAD" },
+  const detailInput = {
+    screenId: "OPS-ORDER-DETAIL",
+    pickupContact: null,
+    order: {
+      orderReference: unpaidId(1),
+      orderNumber: "ORD-1007",
+      orderType: "DineIn",
+      sourceChannel: "Qr",
+      submittedAt: "2026-09-14T00:00:00.000Z",
+      observedAt: "2026-09-14T00:40:00.000Z",
+      initialBatchReference: unpaidId(90),
+      batches: [
+        batch,
+        {
+          ...batch,
+          orderBatchReference: unpaidId(91),
+          sequence: 2,
+          acceptanceStatus: "Cancelled",
         },
+      ],
+      canRequestAcceptance: false,
+      unfulfillable: null,
+      pickupNotCollected: false,
+      acceptBy: null,
+      awaitingPayment: false,
+      currentPhase: "Accepted",
+      currentVersion: 4,
+    },
+    lines: {
+      items: [line(1, 90, "1130"), line(2, 91, "1130")],
+      totals: {
+        subtotal: { amountMinor: "2000", currencyCode: "CAD" },
+        discount: { amountMinor: "0", currencyCode: "CAD" },
+        tax: { amountMinor: "260", currencyCode: "CAD" },
+        fee: { amountMinor: "0", currencyCode: "CAD" },
+        total: { amountMinor: "2260", currencyCode: "CAD" },
       },
+    },
+  };
+  const detail = parseCurrentOrderDetail(detailInput, unpaidId(1));
+  // WP-2423 M163: money taken back on the order is read with the detail and said plainly.
+  expect(detail.moneyTakenBack).toBeNull();
+  const takenBack = parseCurrentOrderDetail(
+    {
+      ...detailInput,
+      moneyTakenBack: [
+        {
+          method: "Cash",
+          amountMinor: "500",
+          currencyCode: "CAD",
+          recordedAt: "2026-09-14T01:00:00.000Z",
+        },
+      ],
     },
     unpaidId(1),
   );
+  expect(renderToStaticMarkup(<MoneyTakenBackNote entries={takenBack.moneyTakenBack} />)).toContain(
+    "Money taken back $5.00 · Cash",
+  );
+  expect(renderToStaticMarkup(<MoneyTakenBackNote entries={detail.moneyTakenBack} />)).toBe("");
+  expect(() =>
+    parseCurrentOrderDetail(
+      {
+        ...detailInput,
+        moneyTakenBack: [
+          { method: "Cash", amountMinor: "0", currencyCode: "CAD", recordedAt: "x" },
+        ],
+      },
+      unpaidId(1),
+    ),
+  ).toThrow();
   const unpaid = unpaidCancelledBatches(detail.view);
   expect([...unpaid]).toEqual([unpaidId(91)]);
   expect(storeCancelledBatches(detail.view).size).toBe(0);

@@ -1068,6 +1068,33 @@ export function OnlineRefundNote({
   );
 }
 /**
+ * WP-2423 M163: money taken back on this order after a refund made by mistake, as recorded (the
+ * refunds themselves stay as they were). Nothing when none or not read.
+ */
+export function MoneyTakenBackNote({
+  entries,
+}: {
+  readonly entries: CurrentOrderDetail["moneyTakenBack"];
+}) {
+  if (entries === null || entries.length === 0) return null;
+  return (
+    <p className="order-counter-note" role="note">
+      {entries
+        .map((entry) =>
+          t("Money taken back {amount} · {method}", {
+            amount: orderMoney({
+              amountMinor: entry.amountMinor,
+              currencyCode: entry.currencyCode,
+            }),
+            method: entry.method === "Cash" ? t("Cash") : t("Charged on the card machine"),
+          }),
+        )
+        .join(" · ")}
+      {" " + t("The refund stays as it was.")}
+    </p>
+  );
+}
+/**
  * WP-2423 M16: the refund note with this order's approval state read from Payment's approval queue
  * when some of its refund is not sent; a failed or refused read leaves the note neutral.
  */
@@ -1638,6 +1665,7 @@ function QueuedOrderLines({
   return state.kind === "Ready" ? (
     <>
       <PickupContactPanel contact={state.detail.pickupContact} />
+      <MoneyTakenBackNote entries={state.detail.moneyTakenBack} />
       <LiveOnlineRefundNote
         order={state.detail.order}
         position={state.detail.paymentPosition}

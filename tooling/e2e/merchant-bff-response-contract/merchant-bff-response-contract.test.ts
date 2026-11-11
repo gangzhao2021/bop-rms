@@ -613,6 +613,8 @@ const queueView = {
   pickupContact: null,
   paymentPosition: null,
   record: null,
+  // WP-2423 M163: read on the order detail only.
+  moneyTakenBack: [],
   paidOrderWatch,
 } satisfies Queue;
 const line = (n: number, batch: string, canCancel: boolean) => ({
@@ -657,6 +659,8 @@ const detailView = {
     refundOnMachineMinor: "0",
   },
   record: null,
+  // WP-2423 M163: $2.00 given back in cash after a refund made by mistake.
+  moneyTakenBack: [{ method: "Cash", amountMinor: "200", currencyCode: "CAD", recordedAt: at(26) }],
   paidOrderWatch,
 } satisfies Queue;
 const pickupDetailView = {
@@ -703,6 +707,7 @@ const pickupDetailView = {
     writeOff: null,
     paidOnlineByGuest: false,
   },
+  moneyTakenBack: [],
   paidOrderWatch,
 } satisfies Queue;
 

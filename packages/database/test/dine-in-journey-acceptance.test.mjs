@@ -3395,6 +3395,20 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
         day.map((recovery) => recovery.amountMinor),
         [500n],
       );
+      // The Orders page's order detail lists it, read as the restricted merchant role.
+      const detailAfterTakeBack = await createPersistentMerchantOrderQueue({
+        persistence: { ...queueSession.persistence, now },
+        quoteVersion: 1,
+        acceptanceConfigured: true,
+        resolveRefundConfiguration: async () => ({
+          providerAccountReference: provider,
+          environment: "Test",
+        }),
+      })({ sessionCookie: queueSession.sessionCookie, afterOrderReference: null, orderReference });
+      assert.deepEqual(
+        detailAfterTakeBack.moneyTakenBack?.map((entry) => [entry.method, entry.amountMinor]),
+        [["Cash", "500"]],
+      );
       // The Store sales reports and Today's summary read it by when it was recorded.
       const recordedAt = Date.parse(taken.recovery.recordedAt);
       const inWindow = await transactions(api).run((tx) =>

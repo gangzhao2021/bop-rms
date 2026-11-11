@@ -504,6 +504,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Request recorded for {total}. Nothing is refunded yet: a manager or the owner sends it from Approvals.":
     "已记录 {total} 的退款申请。还没有退款：由店长或店主在“审批”里发出。",
   "A manager or the owner sends it.": "由店长或店主发出。",
+  "Money taken back {amount} · {method}": "收回 {amount} · {method}",
+  "The refund stays as it was.": "退款保持不变。",
   "Cash taken back after a refund made by mistake": "误退后收回的现金",
   "Money taken back after refunds made by mistake": "误退后收回的钱",
   "Counted in the table cash and the card-machine batch": "已计入桌台现金和刷卡机批次",
