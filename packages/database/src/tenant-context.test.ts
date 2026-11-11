@@ -12,6 +12,9 @@ import {
 
 const BRAND = "018f3f7a-8b1c-7a11-8d01-000000000041";
 const STORE = "018f3f7a-8b1c-7a11-8d01-000000000042";
+/** WP-2423 M35: the validated scope, written into the BEGIN round trip. */
+const scopeText = (brand: string, store: string) =>
+  `SELECT set_config('bop.brand_id', '${brand}', true), set_config('bop.store_id', '${store}', true)`;
 
 class FakeClient {
   readonly trace: { text: string; values?: readonly unknown[] }[] = [];
@@ -45,13 +48,9 @@ describe("transaction-local Tenant database context", () => {
       return "result";
     });
     expect(value).toBe("result");
-    // WP-2423 item 4: both scope settings in one bound statement (one round trip, not two).
+    // WP-2423 item 4 and M35: BEGIN and both scope settings in one round trip.
     expect(client.trace).toEqual([
-      { text: "BEGIN" },
-      {
-        text: "SELECT set_config('bop.brand_id', $1, true), set_config('bop.store_id', $2, true)",
-        values: [BRAND, ""],
-      },
+      { text: "BEGIN; " + scopeText(BRAND, "") },
       { text: "CALLBACK" },
       { text: "COMMIT" },
     ]);
@@ -61,20 +60,30 @@ describe("transaction-local Tenant database context", () => {
     expect(client.released).toBe(1);
   });
 
-  it("sets Store context with the same static SQL and no identifier interpolation", async () => {
+  it("sets Store context in the same round trip, writing only validated UUIDv7 values", async () => {
     const client = new FakeClient();
     await withTenantContextTransaction(
       pool(client),
       { brandId: BRAND, storeId: STORE },
       async () => undefined,
     );
-    expect(client.trace[1]).toEqual({
-      text: "SELECT set_config('bop.brand_id', $1, true), set_config('bop.store_id', $2, true)",
-      values: [BRAND, STORE],
-    });
-    expect(
-      client.trace.some((item) => item.text.includes(BRAND) || item.text.includes(STORE)),
-    ).toBe(false);
+    expect(client.trace[0]).toEqual({ text: "BEGIN; " + scopeText(BRAND, STORE) });
+    // Anything that is not a UUIDv7 never reaches the text: refused before a connection is taken.
+    let acquired = 0;
+    for (const storeId of [STORE + "'", "x', true); RESET ROLE; --", STORE.toUpperCase()])
+      await expect(
+        withTenantContextTransaction(
+          {
+            connect: async () => {
+              acquired += 1;
+              return new FakeClient() as unknown as PoolClient;
+            },
+          },
+          { brandId: BRAND, storeId },
+          async () => undefined,
+        ),
+      ).rejects.toMatchObject({ code: "TENANT_DATABASE_SCOPE_INVALID" });
+    expect(acquired).toBe(0);
   });
 
   it("rejects malformed, unknown-field and accessor-bearing scope before pool acquisition", async () => {
@@ -141,10 +150,7 @@ describe("transaction-local Tenant database context", () => {
       }),
     );
 
-    for (const failure of [
-      "SELECT set_config('bop.brand_id', $1, true), set_config('bop.store_id', $2, true)",
-      "COMMIT",
-    ]) {
+    for (const failure of ["BEGIN; " + scopeText(BRAND, ""), "COMMIT"]) {
       const client = new FakeClient();
       client.failOn = failure;
       await expect(
@@ -161,11 +167,7 @@ describe("transaction-local Tenant database context", () => {
     }
   });
   it("WP-2423 (v15 2026-10-17): reports a setup or COMMIT on a lost connection as 08006", async () => {
-    for (const failure of [
-      "BEGIN",
-      "SELECT set_config('bop.brand_id', $1, true), set_config('bop.store_id', $2, true)",
-      "COMMIT",
-    ]) {
+    for (const failure of ["BEGIN; " + scopeText(BRAND, ""), "COMMIT"]) {
       const client = new FakeClient();
       client.query = async (text: string, values?: readonly unknown[]) => {
         client.trace.push({ text, ...(values === undefined ? {} : { values }) });
@@ -206,8 +208,7 @@ describe("transaction-local Tenant database context", () => {
       limits,
     );
     expect(client.trace.map((item) => item.text)).toEqual([
-      "BEGIN; " + limits,
-      "SELECT set_config('bop.brand_id', $1, true), set_config('bop.store_id', $2, true)",
+      "BEGIN; " + limits + "; " + scopeText(BRAND, STORE),
       "COMMIT",
     ]);
     const snapshot = new FakeClient();
@@ -219,11 +220,11 @@ describe("transaction-local Tenant database context", () => {
       limits,
     );
     expect(snapshot.trace[0]?.text).toBe(
-      "BEGIN ISOLATION LEVEL REPEATABLE READ, READ ONLY; " + limits,
+      "BEGIN ISOLATION LEVEL REPEATABLE READ, READ ONLY; " + limits + "; " + scopeText(BRAND, ""),
     );
     // A failure after BEGIN in the same round trip rolls back and discards the connection.
     const failing = new FakeClient();
-    failing.failOn = "BEGIN; " + limits;
+    failing.failOn = "BEGIN; " + limits + "; " + scopeText(BRAND, "");
     await expect(
       withTenantContextTransaction(
         pool(failing),

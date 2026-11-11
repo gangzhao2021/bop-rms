@@ -1,3 +1,5 @@
+import { stableReadStatement } from "./transaction-statement-memo.js";
+
 /**
  * WP-2423 (v15 2026-10-18, 55P03): staff screens poll lists (Orders, Home's count, the pickup
  * queue) every 15 s on several devices at once. Those reads reuse the owners' command readers,
@@ -35,7 +37,8 @@ export type SnapshotReadStatement =
 
 /** What a snapshot read does with one statement: answer it locally, or run (a rewrite of) it. */
 export function snapshotReadStatement(sql: string): SnapshotReadStatement {
-  const text = sql.trim();
+  // WP-2423 M35: an owner's stable-read marker (a leading comment) never hides a lock clause.
+  const text = stableReadStatement(sql).sql.trim();
   if (advisoryLock.test(text)) {
     const column = /pg_advisory_xact_lock_shared/iu.test(text)
       ? "pg_advisory_xact_lock_shared"

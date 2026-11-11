@@ -3,10 +3,16 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createTenantTransactionRunner,
   isRetryableTransactionConflict,
+  runTogether,
   type DatabaseTransaction,
 } from "./transaction-runner.js";
 
 const scope = { brandId: "018f3f7a-8b1c-7a11-8d01-000000000041" };
+// WP-2423 item 4 and M35: BEGIN, the three limits and the (validated) scope in one round trip.
+const setup =
+  "BEGIN; SET LOCAL statement_timeout = '5s'; SET LOCAL lock_timeout = '2s'; " +
+  "SET LOCAL idle_in_transaction_session_timeout = '5s'; " +
+  `SELECT set_config('bop.brand_id', '${scope.brandId}', true), set_config('bop.store_id', '', true)`;
 function fixture(failure?: string) {
   const query = vi.fn(async (sql: string) => {
     if (sql === failure) throw new Error("private SQL/bind failure");
@@ -34,12 +40,8 @@ describe("WP-2212 pooled transaction runner", () => {
         return 42;
       }),
     ).toBe(42);
-    // WP-2423 item 4: BEGIN and the three limits in one round trip, then the scope in one.
-    expect(f.query.mock.calls.slice(0, 2).map(([sql]) => sql)).toEqual([
-      "BEGIN; SET LOCAL statement_timeout = '5s'; SET LOCAL lock_timeout = '2s'; " +
-        "SET LOCAL idle_in_transaction_session_timeout = '5s'",
-      "SELECT set_config('bop.brand_id', $1, true), set_config('bop.store_id', $2, true)",
-    ]);
+    // WP-2423 item 4 and M35: BEGIN, the three limits and the scope in one round trip.
+    expect(f.query.mock.calls.slice(0, 2).map(([sql]) => sql)).toEqual([setup, "SELECT $1"]);
     expect(f.query.mock.calls.at(-1)?.[0]).toBe("COMMIT");
     expect(f.release).toHaveBeenCalledWith(false);
     await expect(escaped?.query("SELECT 1", [])).rejects.toMatchObject({
@@ -66,9 +68,7 @@ describe("WP-2212 pooled transaction runner", () => {
   it.each([
     "SELECT secret",
     "COMMIT",
-    "BEGIN; SET LOCAL statement_timeout = '5s'; SET LOCAL lock_timeout = '2s'; " +
-      "SET LOCAL idle_in_transaction_session_timeout = '5s'",
-    "SELECT set_config('bop.brand_id', $1, true), set_config('bop.store_id', $2, true)",
+    setup,
     "release",
   ])("bounds %s failure without retry", async (failure) => {
     const f = fixture(failure);
@@ -87,8 +87,7 @@ describe("WP-2212 pooled transaction runner", () => {
   it.each([
     ["COMMIT", "Connection terminated unexpectedly", "08006"],
     [
-      "BEGIN; SET LOCAL statement_timeout = '5s'; SET LOCAL lock_timeout = '2s'; " +
-        "SET LOCAL idle_in_transaction_session_timeout = '5s'",
+      setup,
       "Client has encountered a connection error and is not queryable",
       "08006",
     ],
@@ -298,26 +297,119 @@ describe("WP-2423 repeated scope settings and held locks", () => {
     const scopeSql = "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)";
     const lockSql = "SELECT pg_advisory_xact_lock(hashtextextended($1,0))";
     const store = "018f3f7a-8b1c-7a11-8d01-000000000042";
-    const ran = () =>
-      f.query.mock.calls.filter(([sql]) => sql === scopeSql || sql === lockSql).length;
+    const sent = () => f.query.mock.calls.map(([sql]) => sql).filter((sql) => sql !== setup);
     await f.runner.run(async (transaction) => {
       // The runner installed the brand and an empty Store before the callback.
       await transaction.query(scopeSql, [scope.brandId, ""]);
-      expect(ran()).toBe(0);
+      // M35: a scope setting goes with the next statement that runs, once.
       await transaction.query(scopeSql, [scope.brandId, store]);
       await transaction.query(scopeSql, [scope.brandId, store]);
+      expect(sent()).toEqual([]);
       await transaction.query(lockSql, ["k"]);
       await transaction.query(lockSql, ["k"]);
-      expect(ran()).toBe(2);
+      expect(sent()).toEqual(["SELECT set_config('bop.store_id',$1,true)", lockSql]);
+      expect(f.query.mock.calls.at(-2)?.[1]).toEqual([store]);
       await transaction.query("ROLLBACK TO SAVEPOINT s", []);
       await transaction.query(lockSql, ["k"]);
+      // Written last, with nothing after it: never sent.
       await transaction.query(scopeSql, [scope.brandId, store]);
-      expect(ran()).toBe(4);
+      expect(sent()).toHaveLength(4);
     });
     await f.runner.run(async (transaction) => {
       await transaction.query(lockSql, ["k"]);
     });
-    expect(ran()).toBe(5);
+    expect(sent().filter((sql) => sql === lockSql)).toHaveLength(3);
+  });
+  it("M35: answers an owner's repeated stable read inside one transaction, never across, and never sends the marker", async () => {
+    const f = fixture();
+    const read = "SELECT table_snapshot FROM rms_dining.dining_table WHERE table_id=$1";
+    f.query.mockImplementation(async (sql: string) =>
+      sql === read ? { rows: [{ table_snapshot: { v: 1 } }] } : { rows: [] },
+    );
+    const reads = () => f.query.mock.calls.filter(([sql]) => sql === read).length;
+    await f.runner.run(async (transaction) => {
+      const first = await transaction.query("-- bop:stable-read\n" + read, ["t"]);
+      const again = await transaction.query("-- bop:stable-read\n" + read, ["t"]);
+      expect(again).toMatchObject({ rows: [{ table_snapshot: { v: 1 } }] });
+      expect(again).not.toBe(first);
+      expect(reads()).toBe(1);
+      await transaction.query("UPDATE rms_dining.dining_table SET x=$1", ["v"]);
+      await transaction.query("-- bop:stable-read\n" + read, ["t"]);
+      expect(reads()).toBe(2);
+      // Unmarked: always sent.
+      await transaction.query(read, ["t"]);
+      expect(reads()).toBe(3);
+    });
+    await f.runner.run(async (transaction) => {
+      await transaction.query("-- bop:stable-read\n" + read, ["t"]);
+    });
+    expect(reads()).toBe(4);
+    expect(f.query.mock.calls.some(([sql]) => sql.includes("bop:stable-read"))).toBe(false);
+  });
+});
+
+describe("WP-2423 M35 runTogether (DEC-STAFF-ROUND-SPEED)", () => {
+  const store = "018f3f7a-8b1c-7a11-8d01-000000000042";
+  it("joins the runs of one call on one pool into one transaction, each under its own scope", async () => {
+    const f = fixture();
+    const storeRunner = createTenantTransactionRunner(f.pool, { ...scope, storeId: store });
+    const value = await runTogether(async () => {
+      await f.runner.run((t) => t.query("SELECT a", []));
+      await storeRunner.run((t) => t.query("SELECT b", []));
+      await f.runner.run((t) => t.query("SELECT c", []));
+      // Nothing commits before the work ends.
+      expect(f.query.mock.calls.some(([sql]) => sql === "COMMIT")).toBe(false);
+      return "checked";
+    });
+    expect(value).toBe("checked");
+    expect(f.connect).toHaveBeenCalledTimes(1);
+    expect(f.query.mock.calls.map(([sql, values]) => [sql, values ?? null])).toEqual([
+      [setup, null],
+      ["SELECT a", []],
+      ["SELECT set_config('bop.store_id',$1,true)", [store]],
+      ["SELECT b", []],
+      ["SELECT set_config('bop.store_id',$1,true)", [""]],
+      ["SELECT c", []],
+      ["COMMIT", null],
+    ]);
+    // Outside a call every run is its own transaction again.
+    await f.runner.run((t) => t.query("SELECT d", []));
+    expect(f.connect).toHaveBeenCalledTimes(2);
+  });
+  it("rolls everything back when the work fails, and reports the work's own error", async () => {
+    const f = fixture();
+    const failure = new Error("not current");
+    await expect(
+      runTogether(async () => {
+        await f.runner.run((t) => t.query("SELECT a", []));
+        throw failure;
+      }),
+    ).rejects.toBe(failure);
+    expect(f.query.mock.calls.some(([sql]) => sql === "COMMIT")).toBe(false);
+    expect(f.query.mock.calls.at(-1)?.[0]).toBe("ROLLBACK");
+  });
+  it("a failed statement fails the joined run and every later one; nothing is committed", async () => {
+    const f = fixture("SELECT broken");
+    const error = await runTogether(async () => {
+      await f.runner.run((t) => t.query("SELECT broken", [])).catch(() => undefined);
+      await f.runner.run(async () => "fine");
+    }).catch((e: unknown) => e);
+    expect(error).toMatchObject({ code: "TENANT_DATABASE_TRANSACTION_FAILED" });
+    expect(f.query.mock.calls.some(([sql]) => sql === "COMMIT")).toBe(false);
+  });
+  it("leaves snapshot reads, other pools and work without a run as they were", async () => {
+    const f = fixture();
+    const g = fixture();
+    await runTogether(async () => {
+      await f.runner.runSnapshot((t) => t.query("SELECT a", []));
+      await f.runner.run((t) => t.query("SELECT b", []));
+      await g.runner.run((t) => t.query("SELECT c", []));
+    });
+    expect(f.connect).toHaveBeenCalledTimes(2);
+    expect(g.connect).toHaveBeenCalledTimes(1);
+    const h = fixture();
+    expect(await runTogether(async () => 1)).toBe(1);
+    expect(h.connect).not.toHaveBeenCalled();
   });
 });
 

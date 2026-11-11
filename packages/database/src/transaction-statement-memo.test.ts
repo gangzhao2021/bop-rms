@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { createTransactionStatementMemo } from "./transaction-statement-memo.js";
+import {
+  createTransactionStatementMemo,
+  stableReadMarker,
+  stableReadStatement,
+} from "./transaction-statement-memo.js";
 
 const brand = "018f3f7a-8b1c-7a11-8d01-000000000041",
   store = "018f3f7a-8b1c-7a11-8d01-000000000042",
@@ -9,28 +13,46 @@ const brandOnlySql = "SELECT set_config('bop.brand_id',$1,true),set_config('bop.
 const lockSql = "SELECT pg_advisory_xact_lock(hashtextextended($1,0))";
 const tableSql =
   "LOCK TABLE bop_membership.membership,bop_membership.store_assignment IN SHARE MODE";
+const readSql = "SELECT table_snapshot FROM rms_dining.dining_table WHERE table_id=$1";
+const lockedReadSql = "SELECT * FROM bop_tenant.brand WHERE brand_id=$1 FOR SHARE";
+const result = (value: string) => ({ command: "SELECT", rowCount: 1, rows: [{ value }] });
+/** The settings the next ordinary statement is sent after (null: none). */
+const pending = (memo: ReturnType<typeof createTransactionStatementMemo>) => {
+  const planned = memo.plan("SELECT 1", []);
+  return planned.kind === "Run" ? planned.settings : "answered";
+};
 
 describe("WP-2423 transaction statement memo", () => {
-  it("answers a scope setting only when every setting already holds the written value", () => {
+  it("records a scope setting and sends it with the next statement only when it changes one", () => {
     const memo = createTransactionStatementMemo({ "bop.brand_id": brand, "bop.store_id": store });
     expect(memo.answer(scopeSql, [brand, store])).toMatchObject({
       rows: [{ set_config: store }],
       rowCount: 1,
     });
-    expect(memo.answer(scopeSql, [brand, other])).toBeNull();
-    expect(memo.answer(brandOnlySql, [brand])).toBeNull();
-    memo.observe(brandOnlySql, [brand]);
-    expect(memo.answer(brandOnlySql, [brand])).not.toBeNull();
-    expect(memo.answer(scopeSql, [brand, store])).toBeNull();
-    // The tenant setting was never written here, so it is never assumed.
-    expect(
-      memo.answer("SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true)", [
-        brand,
-        brand,
-      ]),
-    ).toBeNull();
+    expect(pending(memo)).toBeNull();
+    // M35: a different value is answered too, and goes with the next statement that runs.
+    expect(memo.answer(scopeSql, [brand, other])).not.toBeNull();
+    expect(pending(memo)).toEqual({
+      sql: "SELECT set_config('bop.store_id',$1,true)",
+      values: [other],
+    });
+    memo.observe("SELECT set_config('bop.store_id',$1,true)", [other]);
+    expect(pending(memo)).toBeNull();
+    // Written back before anything ran: nothing is sent at all.
+    memo.answer(brandOnlySql, [brand]);
+    memo.answer(scopeSql, [brand, other]);
+    expect(pending(memo)).toBeNull();
+    // The tenant setting was never written here: it is sent, never assumed.
+    memo.answer(
+      "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true)",
+      [brand, brand],
+    );
+    expect(pending(memo)).toEqual({
+      sql: "SELECT set_config('bop.tenant_id',$1,true)",
+      values: [brand],
+    });
   });
-  it("never answers other settings, non-text values or session-wide settings", () => {
+  it("never records other settings, non-text values or session-wide settings", () => {
     const memo = createTransactionStatementMemo();
     for (const [sql, values] of [
       ["SELECT set_config('statement_timeout',$1,true)", ["5s"]],
@@ -39,6 +61,7 @@ describe("WP-2423 transaction statement memo", () => {
       [scopeSql, [brand, null]],
       ["SELECT set_config('bop.brand_id',$1,true), now()", [brand]],
     ] as const) {
+      expect(memo.answer(sql, values)).toBeNull();
       memo.observe(sql, values);
       expect(memo.answer(sql, values)).toBeNull();
     }
@@ -90,9 +113,12 @@ describe("WP-2423 transaction statement memo", () => {
     const memo = createTransactionStatementMemo({ "bop.brand_id": brand, "bop.store_id": store });
     memo.observe("SAVEPOINT s", []);
     memo.observe(lockSql, ["a"]);
+    memo.observe(readSql, ["t"], result("x"), true);
     memo.observe("RELEASE SAVEPOINT s", []);
-    expect(memo.answer(scopeSql, [brand, store])).not.toBeNull();
+    memo.answer(scopeSql, [brand, store]);
+    expect(pending(memo)).toBeNull();
     expect(memo.answer(lockSql, ["a"])).not.toBeNull();
+    expect(memo.answer(readSql, ["t"], true)).toMatchObject({ rows: [{ value: "x" }] });
   });
   it.each([
     "ROLLBACK TO SAVEPOINT s",
@@ -112,18 +138,25 @@ describe("WP-2423 transaction statement memo", () => {
   ])("forgets everything after %s", (sql) => {
     const memo = createTransactionStatementMemo({ "bop.brand_id": brand, "bop.store_id": store });
     memo.observe(lockSql, ["a"]);
+    memo.observe(lockedReadSql, [brand], result("b"), true);
     memo.observe(sql, [brand]);
-    expect(memo.answer(scopeSql, [brand, store])).toBeNull();
+    // What the transaction holds is unknown again: a scope setting written now is sent.
+    memo.answer(scopeSql, [brand, store]);
+    expect(pending(memo)).not.toBeNull();
     expect(memo.answer(lockSql, ["a"])).toBeNull();
+    expect(memo.answer(lockedReadSql, [brand], true)).toBeNull();
   });
   it("forgets everything on request (a failed statement)", () => {
     const memo = createTransactionStatementMemo({ "bop.brand_id": brand, "bop.store_id": store });
     memo.observe(tableSql, []);
+    memo.observe(readSql, ["t"], result("x"), true);
     memo.forget();
-    expect(memo.answer(scopeSql, [brand, store])).toBeNull();
+    memo.answer(scopeSql, [brand, store]);
+    expect(pending(memo)).not.toBeNull();
     expect(memo.answer(tableSql, [])).toBeNull();
+    expect(memo.answer(readSql, ["t"], true)).toBeNull();
   });
-  it("keeps what it remembers across ordinary reads and writes that cannot undo it", () => {
+  it("keeps settings and locks across ordinary reads and writes that cannot undo them", () => {
     const memo = createTransactionStatementMemo({ "bop.brand_id": brand, "bop.store_id": store });
     memo.observe(lockSql, ["a"]);
     for (const sql of [
@@ -132,22 +165,86 @@ describe("WP-2423 transaction statement memo", () => {
       "INSERT INTO x(a) VALUES ($1) ON CONFLICT DO NOTHING",
     ])
       memo.observe(sql, ["v", "w"]);
-    expect(memo.answer(scopeSql, [brand, store])).not.toBeNull();
+    memo.answer(scopeSql, [brand, store]);
+    expect(pending(memo)).toBeNull();
     expect(memo.answer(lockSql, ["a"])).not.toBeNull();
   });
   it("never answers a setting it was not seeded with or did not observe (identity session)", () => {
     const memo = createTransactionStatementMemo({ "bop.identity_session_id": "s" });
     const sessionSql = "SELECT set_config('bop.identity_session_id',$1,true)";
-    // Seeding only accepts the scope settings it knows; the session is one of them.
-    expect(memo.answer(sessionSql, ["s"])).not.toBeNull();
-    expect(memo.answer(sessionSql, ["t"])).toBeNull();
-    memo.observe(sessionSql, ["t"]);
-    expect(memo.answer(sessionSql, ["s"])).toBeNull();
-    expect(
-      createTransactionStatementMemo({ "bop.other": "s" }).answer(
-        "SELECT set_config('bop.other',$1,true)",
-        ["s"],
-      ),
-    ).toBeNull();
+    memo.answer(sessionSql, ["s"]);
+    expect(pending(memo)).toBeNull();
+    memo.answer(sessionSql, ["t"]);
+    expect(pending(memo)).toEqual({ sql: sessionSql, values: ["t"] });
+    const unknown = createTransactionStatementMemo({ "bop.other": "s" });
+    expect(unknown.answer("SELECT set_config('bop.other',$1,true)", ["s"])).toBeNull();
+  });
+  it("lets a joined run set the scope its statements see", () => {
+    const memo = createTransactionStatementMemo({ "bop.brand_id": brand, "bop.store_id": store });
+    memo.useScope({ "bop.brand_id": brand, "bop.store_id": "" });
+    expect(pending(memo)).toEqual({ sql: "SELECT set_config('bop.store_id',$1,true)", values: [""] });
+  });
+});
+
+describe("WP-2423 M35 stable reads (DEC-STAFF-ROUND-SPEED)", () => {
+  const stable = (memo: ReturnType<typeof createTransactionStatementMemo>, sql = readSql) =>
+    memo.answer(sql, ["t"], true);
+  it("strips the owner's marker and says it was there", () => {
+    expect(stableReadStatement(stableReadMarker + readSql)).toEqual({ sql: readSql, stable: true });
+    expect(stableReadStatement(readSql)).toEqual({ sql: readSql, stable: false });
+  });
+  it("answers an identical repeat under the same scope with its own copy of the rows", () => {
+    const memo = createTransactionStatementMemo({ "bop.brand_id": brand, "bop.store_id": store });
+    expect(stable(memo)).toBeNull();
+    memo.observe(readSql, ["t"], result("x"), true);
+    const first = stable(memo) as { rows: { value: string }[] };
+    expect(first).toMatchObject({ rows: [{ value: "x" }] });
+    first.rows[0]!.value = "changed by the caller";
+    expect(stable(memo)).toMatchObject({ rows: [{ value: "x" }] });
+    // Other values, another scope, or an unmarked statement: never answered.
+    expect(memo.answer(readSql, ["u"], true)).toBeNull();
+    expect(memo.answer(readSql, ["t"])).toBeNull();
+    memo.answer(scopeSql, [brand, other]);
+    expect(stable(memo)).toBeNull();
+    memo.answer(scopeSql, [brand, store]);
+    expect(stable(memo)).not.toBeNull();
+  });
+  it("stays across plain reads; forgets after a write, a new lock, an owner function or a new row lock", () => {
+    for (const [sql, kept] of [
+      ["SELECT snapshot_json FROM rms_ordering.checkout_session_record WHERE id=$1", true],
+      ["SELECT to_char(clock_timestamp() AT TIME ZONE 'UTC','YYYY') AS observed_at", true],
+      ["INSERT INTO platform_audit.audit_record (a) VALUES ($1)", false],
+      ["UPDATE rms_dining.dining_table SET x=$1", false],
+      ["WITH x AS (DELETE FROM a RETURNING 1) SELECT 1", false],
+      [lockSql, false],
+      [tableSql, false],
+      ["SELECT rms_ordering.append_round($1)", false],
+      ["SELECT nextval('rms_ordering.seq')", false],
+      ["SELECT * FROM rms_dining.dining_session WHERE id=$1 FOR UPDATE", false],
+      ["SELECT 1 INTO TEMP x", false],
+    ] as const) {
+      const memo = createTransactionStatementMemo({ "bop.brand_id": brand, "bop.store_id": store });
+      memo.observe(readSql, ["t"], result("x"), true);
+      memo.observe(sql, ["v"]);
+      expect(stable(memo) !== null, sql).toBe(kept);
+    }
+  });
+  it("keeps a row-locked stable read across writes (its row lock is held), and a first row lock forgets the rest", () => {
+    const memo = createTransactionStatementMemo({ "bop.brand_id": brand, "bop.store_id": store });
+    memo.observe(readSql, ["t"], result("x"), true);
+    memo.observe(lockedReadSql, ["t"], result("b"), true);
+    expect(stable(memo)).toBeNull();
+    expect(stable(memo, lockedReadSql)).toMatchObject({ rows: [{ value: "b" }] });
+    memo.observe("UPDATE rms_dining.dining_table SET x=$1", ["v"]);
+    expect(stable(memo, lockedReadSql)).not.toBeNull();
+    // Its repeat (the lock already held) does not forget anything.
+    memo.observe(readSql, ["t"], result("y"), true);
+    memo.observe(lockedReadSql, ["t"], result("b"), true);
+    expect(stable(memo)).toMatchObject({ rows: [{ value: "y" }] });
+  });
+  it("never answers a read whose values are not plain text or numbers", () => {
+    const memo = createTransactionStatementMemo();
+    memo.observe(readSql, [{ a: 1 }], result("x"), true);
+    expect(memo.answer(readSql, [{ a: 1 }], true)).toBeNull();
   });
 });

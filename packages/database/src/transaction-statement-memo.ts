@@ -47,6 +47,21 @@ const resets =
 const mayUndo = (sql: string) =>
   /set_config|\/\*/iu.test(sql) || sql.split(";").some((statement) => resets.test(statement));
 
+/**
+ * WP-2423 M35 (DEC-STAFF-ROUND-SPEED, staff round speed): an owner store marks a read whose answer
+ * can only change when data changes by starting its SQL with this line. Such a read is a plain
+ * SELECT with no side effect (a trailing row-locking clause is allowed); its owner keeps it so.
+ * The marker is an ordinary SQL comment, so the statement means the same everywhere else.
+ */
+export const stableReadMarker = "-- bop:stable-read\n";
+
+/** The statement without its stable-read marker, and whether it had one. */
+export function stableReadStatement(sql: string): { readonly sql: string; readonly stable: boolean } {
+  return typeof sql === "string" && sql.startsWith(stableReadMarker)
+    ? { sql: sql.slice(stableReadMarker.length), stable: true }
+    : { sql, stable: false };
+}
+
 type Remembered =
   | { readonly kind: "settings"; readonly pairs: readonly (readonly [string, string])[] }
   | {
@@ -57,11 +72,30 @@ type Remembered =
       readonly exclusiveKey: string | null;
     };
 
+/** What the transaction does with one statement. */
+export type TransactionStatementPlan =
+  /** Answer it without a round trip. */
+  | { readonly kind: "Answer"; readonly result: object }
+  /** Send it, after `settings` (when not null) brings the scope settings to what was written. */
+  | {
+      readonly kind: "Run";
+      readonly settings: { readonly sql: string; readonly values: readonly string[] } | null;
+    };
+
 export interface TransactionStatementMemo {
+  /**
+   * The plan for one statement while no other statement of the transaction is in flight. A scope
+   * setting is only recorded here and sent before the next statement that runs (when it differs
+   * from what the transaction holds); a repeat of a lock already held, or of a stable read with
+   * nothing since that could change its answer, is answered.
+   */
+  plan(sql: string, values: readonly unknown[], stable?: boolean): TransactionStatementPlan;
   /** The result to answer instead of running the statement, or null to run it. */
-  answer(sql: string, values: readonly unknown[]): object | null;
-  /** Records a statement that ran successfully. */
-  observe(sql: string, values: readonly unknown[]): void;
+  answer(sql: string, values: readonly unknown[], stable?: boolean): object | null;
+  /** Records a statement that ran successfully (with its result, for a stable read). */
+  observe(sql: string, values: readonly unknown[], result?: unknown, stable?: boolean): void;
+  /** The scope settings the next statements run under (sent with the next one that runs). */
+  useScope(scope: Readonly<Record<string, string>>): void;
   /** Forgets everything (a failed statement, or anything the memo cannot reason about). */
   forget(): void;
 }
@@ -120,45 +154,157 @@ const resultOf = (column: string, value: string | null) =>
     fields: [],
   });
 
+// A stable read with a trailing row-locking clause: once it ran, this transaction holds the row
+// lock, so no other transaction can change the row until this one ends.
+const rowLockingClause =
+  /\s+FOR\s+(?:UPDATE|NO\s+KEY\s+UPDATE|SHARE|KEY\s+SHARE)(?:\s+OF\s+[a-z_][a-z0-9_.]*(?:\s*,\s*[a-z_][a-z0-9_.]*)*)?(?:\s+(?:NOWAIT|SKIP\s+LOCKED))?\s*;?\s*$/iu;
+const leadingComments = /^(?:\s+|--[^\n]*(?:\n|$)|\/\*[\s\S]*?\*\/)*/u;
+/**
+ * True unless the statement is one plain read that cannot change data, take a lock or change a
+ * setting: a SELECT without a row-locking clause, a schema-qualified (owner) function call, INTO,
+ * or a built-in that locks, writes or changes state. Anything else makes the memo forget the
+ * stable reads it holds without a row lock; erring towards "may change" only costs a round trip.
+ */
+function mayChange(sql: string): boolean {
+  const text = sql.replace(leadingComments, "").replace(/;\s*$/u, "");
+  // A savepoint taken or released changes no data, setting or lock.
+  if (/^(?:SAVEPOINT|RELEASE)\s+(?:SAVEPOINT\s+)?[a-z_][a-z0-9_]*$/iu.test(text)) return false;
+  return (
+    !/^SELECT\b/iu.test(text) ||
+    text.includes(";") ||
+    /\bFOR\s+(?:UPDATE|NO\s+KEY\s+UPDATE|SHARE|KEY\s+SHARE)\b/iu.test(text) ||
+    /\bINTO\b/iu.test(text) ||
+    /\b[a-z_][a-z0-9_]*\s*\.\s*"?[a-z_][a-z0-9_]*"?\s*\(/iu.test(text) ||
+    /\b(?:pg_advisory\w*|pg_try_advisory\w*|nextval|setval|set_config|pg_notify|lo_\w+|dblink\w*|pg_sleep\w*|txid_current\w*|pg_current_xact_id\w*)\s*\(/iu.test(
+      text,
+    )
+  );
+}
+const plainValue = (value: unknown) =>
+  value === null || ["string", "number", "boolean"].includes(typeof value);
+// Each answer is its own copy of the rows, so a caller changing one never changes a later answer.
+const copyResult = (result: unknown): object => {
+  const value = result as { rows?: unknown };
+  return Object.freeze({
+    ...(result as object),
+    rows: Array.isArray(value.rows)
+      ? value.rows.map((row: unknown) =>
+          row !== null && typeof row === "object" ? { ...(row as object) } : row,
+        )
+      : value.rows,
+  });
+};
+
 export function createTransactionStatementMemo(
   initialSettings: Readonly<Record<string, string>> = {},
 ): TransactionStatementMemo {
+  /** The scope settings the transaction holds on the server, as far as the memo knows. */
   const settings = new Map<string, string>();
+  /** The scope settings the caller wrote last; sent before the next statement that runs. */
+  const wanted = new Map<string, string>();
   const held = new Set<string>();
-  const seed = () => {
-    for (const [name, value] of Object.entries(initialSettings))
-      if (scopeSettings.has(name) && typeof value === "string") settings.set(name, value);
-  };
-  seed();
+  /** Stable reads answered from here: key → result, and whether this transaction holds its row lock. */
+  const reads = new Map<string, { readonly result: object; readonly locked: boolean }>();
+  for (const [name, value] of Object.entries(initialSettings))
+    if (scopeSettings.has(name) && typeof value === "string") {
+      settings.set(name, value);
+      wanted.set(name, value);
+    }
   const forget = () => {
     settings.clear();
+    wanted.clear();
     held.clear();
+    reads.clear();
+  };
+  const forgetUnlockedReads = () => {
+    for (const [key, read] of reads) if (!read.locked) reads.delete(key);
+  };
+  // The scope settings a stable read runs under (once the pending ones are sent), in fixed order.
+  const readKey = (sql: string, values: readonly unknown[]) =>
+    values.every(plainValue)
+      ? JSON.stringify([
+          [...scopeSettings].map((name) => wanted.get(name) ?? settings.get(name) ?? null),
+          sql.trim(),
+          values,
+        ])
+      : null;
+  const pendingSettings = () => {
+    const changed = [...wanted].filter(([name, value]) => settings.get(name) !== value);
+    if (changed.length === 0) return null;
+    return Object.freeze({
+      sql:
+        "SELECT " +
+        changed.map(([name], index) => `set_config('${name}',$${index + 1},true)`).join(","),
+      values: Object.freeze(changed.map(([, value]) => value)),
+    });
+  };
+  const plan = (
+    sql: string,
+    values: readonly unknown[],
+    stable = false,
+  ): TransactionStatementPlan => {
+    if (typeof sql !== "string" || !Array.isArray(values))
+      return { kind: "Run", settings: pendingSettings() };
+    const remembered = classify(sql, values);
+    if (remembered?.kind === "settings") {
+      for (const [name, value] of remembered.pairs) wanted.set(name, value);
+      return {
+        kind: "Answer",
+        result: resultOf("set_config", remembered.pairs.at(-1)?.[1] ?? null),
+      };
+    }
+    if (
+      remembered?.kind === "lock" &&
+      (held.has(remembered.key) ||
+        (remembered.exclusiveKey !== null && held.has(remembered.exclusiveKey)))
+    )
+      return { kind: "Answer", result: resultOf(remembered.column, "") };
+    if (stable && remembered === null) {
+      const key = readKey(sql, values);
+      const read = key === null ? undefined : reads.get(key);
+      if (read !== undefined) return { kind: "Answer", result: copyResult(read.result) };
+    }
+    return { kind: "Run", settings: pendingSettings() };
   };
   return Object.freeze({
-    answer(sql: string, values: readonly unknown[]) {
-      if (typeof sql !== "string" || !Array.isArray(values)) return null;
-      const remembered = classify(sql, values);
-      if (remembered === null) return null;
-      if (remembered.kind === "settings")
-        return remembered.pairs.every(([name, value]) => settings.get(name) === value)
-          ? resultOf("set_config", remembered.pairs.at(-1)?.[1] ?? null)
-          : null;
-      return held.has(remembered.key) ||
-        (remembered.exclusiveKey !== null && held.has(remembered.exclusiveKey))
-        ? resultOf(remembered.column, "")
-        : null;
+    plan,
+    answer(sql: string, values: readonly unknown[], stable = false) {
+      const planned = plan(sql, values, stable);
+      return planned.kind === "Answer" ? planned.result : null;
     },
-    observe(sql: string, values: readonly unknown[]) {
+    observe(sql: string, values: readonly unknown[], result?: unknown, stable = false) {
       if (typeof sql !== "string" || !Array.isArray(values)) return forget();
       const remembered = classify(sql, values);
       if (remembered === null) {
         // Anything else that could change a setting or release a lock: forget it all.
-        if (mayUndo(sql)) forget();
+        if (mayUndo(sql)) return forget();
+        const text = sql.trim();
+        if (stable && !mayChange(text.replace(rowLockingClause, ""))) {
+          const key = readKey(text, values);
+          const locked = rowLockingClause.test(text);
+          // A first row lock may order this transaction after another: earlier reads are stale.
+          if (locked && (key === null || !reads.has(key))) forgetUnlockedReads();
+          if (key !== null && result !== null && typeof result === "object")
+            reads.set(key, { result: copyResult(result), locked });
+          return;
+        }
+        if (mayChange(text)) forgetUnlockedReads();
         return;
       }
       if (remembered.kind === "settings")
-        for (const [name, value] of remembered.pairs) settings.set(name, value);
-      else held.add(remembered.key);
+        for (const [name, value] of remembered.pairs) {
+          settings.set(name, value);
+          wanted.set(name, value);
+        }
+      else {
+        // A lock taken for the first time may order this transaction after another one.
+        if (!held.has(remembered.key)) forgetUnlockedReads();
+        held.add(remembered.key);
+      }
+    },
+    useScope(scope: Readonly<Record<string, string>>) {
+      for (const [name, value] of Object.entries(scope))
+        if (scopeSettings.has(name) && typeof value === "string") wanted.set(name, value);
     },
     forget,
   });
