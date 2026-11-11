@@ -1437,7 +1437,9 @@ it.each(["Qr", "Pos"])(
               ).rows[0].n,
               0,
             );
-            assert.equal(catalogValidations, 1);
+            // WP-2423 (M154): the refused shortage is validated once, then read once more, read-only, to
+            // tell the guest why it was refused (sold out, not offered, choices changed).
+            assert.equal(catalogValidations, 2);
             catalogValidations = 0; // Existing assertions below count the accepted operation/replays.
             const lost = await sendItem();
             assert.equal(lost.status, 503);
@@ -1523,7 +1525,8 @@ it.each(["Qr", "Pos"])(
               await revoked.text();
             }
             assert.deepEqual(await itemFacts(), finalItems);
-            assert.equal(catalogValidations, 2);
+            // The withdrawn dish's refusal is read once more, read-only, to say why (WP-2423 M154).
+            assert.equal(catalogValidations, 3);
           } finally {
             await admin.query("DROP OWNED BY " + catalogRole);
             await admin.query("DROP ROLE " + catalogRole);
