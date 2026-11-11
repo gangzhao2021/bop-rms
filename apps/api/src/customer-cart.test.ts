@@ -324,6 +324,8 @@ describe("WP-1205 Customer Cart HTTP contract", () => {
     [{ status: "RateLimited", retryAfterSeconds: 7 }, 429, "cart_rate_limited"],
     // WP-2423: briefly unavailable (table Cart expiry still being recorded) with a retry hint.
     [{ status: "RetryLater", retryAfterSeconds: 5 }, 503, "cart_service_unavailable"],
+    // WP-2423 (outage-reads-and-retry): a plain outage says when to try again too.
+    [{ status: "Unavailable" }, 503, "cart_service_unavailable"],
     [{ status: "OrderProcessing", retryAfterSeconds: 10 }, 409, "cart_order_processing"],
     [{ status: "OrderProcessing", retryAfterSeconds: null }, 409, "cart_order_processing"],
     // DEC-DINING-ANY-PARTICIPANT-SUBMIT: another guest is paying; wait until their hold ends.

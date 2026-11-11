@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import {
   acquireTenantConnection,
   isTransientConnectionAcquireFailure,
+  remainingRequestAcquireBudgetMs,
+  runWithRequestAcquireBudget,
 } from "./connection-acquire.js";
 import { createTenantTransactionRunner } from "./transaction-runner.js";
 
@@ -204,5 +206,47 @@ describe("WP-2423 M68 (a) bounded retry when no connection is free", () => {
       expect(() => createTenantTransactionRunner(pool, scope, { acquireBudgetMs })).toThrow(
         expect.objectContaining({ code: "TENANT_DATABASE_SCOPE_INVALID" }),
       );
+  });
+});
+
+describe("WP-2423 (outage-reads-and-retry) one waiting budget per request", () => {
+  it("a request's later transactions wait only what is left, so it answers within 15 s", async () => {
+    vi.useFakeTimers();
+    try {
+      // Every connection is busy: each acquire waits in the pool's queue until its time runs out.
+      const connect = vi.fn(() => new Promise<PoolClient>(() => undefined));
+      const started = Date.now();
+      const outcome = runWithRequestAcquireBudget(10_000, async () => {
+        const failures: number[] = [];
+        for (let read = 0; read < 3; read++) {
+          await acquireTenantConnection({ connect }, { budgetMs: 10_000 }).catch(
+            (error: { code?: string }) => {
+              expect(error.code).toBe("TENANT_DATABASE_ACQUIRE_FAILED");
+              failures.push(Date.now() - started);
+            },
+          );
+        }
+        return failures;
+      });
+      await vi.advanceTimersByTimeAsync(10_000);
+      // Before: three reads of 10 s each (30 s). Now the first spends the request's 10 s and the
+      // next two answer "busy" at once, without queueing again.
+      expect(await outcome).toEqual([10_000, 10_000, 10_000]);
+      expect(connect).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("only waiting is counted: connections that come at once never spend the budget", async () => {
+    const ready = client();
+    const connect = vi.fn(async () => ready);
+    await runWithRequestAcquireBudget(50, async () => {
+      for (let step = 0; step < 40; step++)
+        await expect(acquireTenantConnection({ connect }, { budgetMs: 2000 })).resolves.toBe(ready);
+      expect(remainingRequestAcquireBudgetMs()).toBeGreaterThan(0);
+    });
+    // Outside a request each acquire keeps its own budget.
+    expect(remainingRequestAcquireBudgetMs()).toBeUndefined();
   });
 });

@@ -8,6 +8,7 @@ import {
 import type { CoreTelemetry } from "@bop-rms/observability";
 import type { Request, RequestHandler } from "express";
 import { v7 as uuidV7 } from "uuid";
+import { withRequestAcquireBudget } from "./request-acquire-budget.js";
 
 const requestContextKey = Symbol("bop.request-correlation");
 const requestErrorCodeKey = Symbol("bop.request-error-code");
@@ -208,7 +209,10 @@ export function createRequestCorrelationMiddleware({
     };
     response.once("finish", complete);
     response.once("close", complete);
-    if (telemetryOperation === undefined) next();
-    else telemetryOperation.run(next);
+    // WP-2423 (outage-reads-and-retry): one connection waiting budget for the whole request.
+    withRequestAcquireBudget(() => {
+      if (telemetryOperation === undefined) next();
+      else telemetryOperation.run(next);
+    });
   };
 }
