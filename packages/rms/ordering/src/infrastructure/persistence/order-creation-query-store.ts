@@ -575,7 +575,8 @@ export async function readLatestCartOrder(
  * is declined), Cancelled (closed by the payment window — deadline, payment not started or not
  * completed: nobody on staff touched it), PaidNotMade (charged, but with nothing it could still
  * make — closed by the window as the payment arrived, or cancelled meanwhile — so the payment
- * is being refunded; checked first, since the guest was charged whatever else happened),
+ * is being refunded; checked first, since the guest was charged whatever else happened), Returned
+ * (its guest stopped before paying and its dishes came back to the cart, 2000_412),
  * StaffCancelled (staff cancelled it after it was sent: the whole round, or every one of its
  * dishes taken off), PayLater (sent to the
  * kitchen to be paid at the end), Paid, WaitingForStaff (a guest round held for staff that no one
@@ -593,7 +594,8 @@ export type RecentCartRoundPaymentState =
   | "Cancelled"
   | "StaffDeclined"
   | "StaffCancelled"
-  | "PaidNotMade";
+  | "PaidNotMade"
+  | "Returned";
 const recentCartRoundPaymentStates: readonly RecentCartRoundPaymentState[] = Object.freeze([
   "AwaitingPayment",
   "WaitingForStaff",
@@ -603,6 +605,7 @@ const recentCartRoundPaymentStates: readonly RecentCartRoundPaymentState[] = Obj
   "StaffDeclined",
   "StaffCancelled",
   "PaidNotMade",
+  "Returned",
 ]);
 export interface RecentCartRound {
   readonly roundNumber: number;
@@ -643,6 +646,9 @@ export async function readRecentCartRounds(
              WHEN EXISTS (SELECT 1 FROM rms_ordering.order_payment_disposition_record x
                WHERE x.brand_id=$1 AND x.store_id=$2 AND x.order_batch_id=q.order_batch_id
                  AND x.disposition='PaidWithoutFulfillableOrder') THEN 'PaidNotMade'
+             WHEN EXISTS (SELECT 1 FROM rms_ordering.dining_round_cart_return x
+               WHERE x.brand_id=$1 AND x.store_id=$2 AND x.order_batch_id=q.order_batch_id)
+               THEN 'Returned'
              WHEN EXISTS (SELECT 1 FROM rms_ordering.order_batch_checkout_cancellation x
                WHERE x.brand_id=$1 AND x.store_id=$2 AND x.order_batch_id=q.order_batch_id
                  AND x.reason_code='STAFF_CANCELLED_UNPAID') THEN 'StaffDeclined'

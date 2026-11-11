@@ -720,6 +720,7 @@ const orderCancelledPayload = z.strictObject({
     "PAYMENT_NOT_STARTED",
     "PAYMENT_NOT_COMPLETED",
     "STAFF_CANCELLED_UNPAID",
+    "GUEST_CANCELLED_UNPAID",
   ]),
   itemCount: z.int().min(1).max(100),
   cancelledAt: z.iso.datetime({ offset: false }),

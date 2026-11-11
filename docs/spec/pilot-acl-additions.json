@@ -6317,6 +6317,24 @@
       "privilege": "INSERT",
       "principal": "api",
       "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 同桌结账 (DEC-OWNER-DEFAULTS-2026-11-06 \"不能设一个默认，再加其他选项吗？\" / \"默认付全桌吧\"; 门店可在设置里改默认): what a guest paying on their phone at a shared table starts with, the whole table or only what they added; the Store's setting is versioned (append-only)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "dining_round_cart_return",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); WP-2423 shared-table-cart-staff-round M38: the guest paying for a table round stops before paying and its dishes come back to the table cart, once, recorded with who asked (2000_412)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "dining_round_cart_return",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); WP-2423 shared-table-cart-staff-round M38: the guest paying for a table round stops before paying and its dishes come back to the table cart, once, recorded with who asked (2000_412)"
     }
   ]
 }

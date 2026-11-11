@@ -19,6 +19,8 @@ export const orderCancelledReasonCodes = [
   // the deadline), or a manager cancelled the unpaid round before its deadline.
   "PAYMENT_NOT_COMPLETED",
   "STAFF_CANCELLED_UNPAID",
+  // WP-2423 M38: the guest whose phone sent the round stopped before paying.
+  "GUEST_CANCELLED_UNPAID",
 ] as const;
 export type OrderCancelledReasonCode = (typeof orderCancelledReasonCodes)[number];
 

@@ -28,6 +28,7 @@ export async function createRuntime(
     createInternalEntryCodeCheck,
     createPaymentWebhookReceiver,
     createInternalPayLaterRound,
+    createInternalDiningRoundWithdraw,
     providerAccountReference,
     publicOrigin = INTERNAL_CUSTOMER_ORIGIN,
   },
@@ -86,6 +87,14 @@ export async function createRuntime(
       diningAdmission: configuredEntry.diningAdmission,
       diningInvitation: configuredEntry.diningInvitation,
       diningStaffCall: configuredEntry.diningStaffCall,
+      // WP-2423 M38: "Don't pay. Put the dishes back" at a pay-first table.
+      ...(await (async () => {
+        const withdraw =
+          createInternalDiningRoundWithdraw === undefined
+            ? undefined
+            : await createInternalDiningRoundWithdraw(resources, configuredEntry);
+        return withdraw === undefined ? {} : { diningRoundWithdraw: withdraw };
+      })()),
       pickupCode: {
         readiness: ready.storeOptions,
         proof: proof.storeOptions,

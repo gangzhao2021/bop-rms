@@ -18,6 +18,8 @@ import { loadPilotPaymentConfig } from "./pilot-payment-config.mjs";
 import { createPilotStripeWebhookReceiver } from "./pilot-stripe-webhook.mjs";
 import { currentPilotEnvironment, matchesPilotEnvironment } from "./pilot-environment.mjs";
 import { createCustomerDiningPayLaterRound } from "../../apps/api/dist/customer-dining-pay-later-round.js";
+import { createInternalBatchCancellation } from "./pilot-batch-cancellation.mjs";
+import { createInternalOpenPaymentResolution } from "./pilot-open-payment-resolution.mjs";
 import { createInternalOrder } from "./pilot-order.mjs";
 import { createInternalCheckout } from "./pilot-checkout.mjs";
 import { createInternalCheckoutDetails } from "./pilot-checkout-details.mjs";
@@ -232,6 +234,39 @@ export function composeCustomerDependencies(directory, installation, config, hos
         now: resources.now,
         newReference: resources.credentials.reference,
       });
+    },
+    // WP-2423 M38: at a pay-first table the guest paying for a round stops before paying and its
+    // dishes come back to the table cart: Payment resolves the round's online attempt with the
+    // configured Provider, then the System's own unpaid round cancellation (same Workflow as the
+    // manager's, installed for the business worker) records the guest's reason.
+    createInternalDiningRoundWithdraw: async (resources, configuredEntry) => {
+      const worker = await installation.loadBusinessWorker();
+      if (worker.workloads?.batchCancellation !== true) return undefined;
+      const staffCall = configuredEntry.diningStaffCall;
+      const cancellation = await createInternalBatchCancellation(resources, {
+        loadWorkflow: installation.loadCancellationWorkflow,
+        expectedDatabaseName,
+        systemActorReference: worker.actors.paidOutcome,
+        ...account,
+      });
+      const payment = createInternalOpenPaymentResolution(resources, {
+        createSimulatedProvider: (opts = {}) =>
+          createPilotPaymentProvider(opts, {
+            directory,
+            path: join(directory, "simulated-provider.sqlite"),
+            loadProfile: installation.loadProfile,
+            expectedDatabaseName,
+          }),
+        ...account,
+      });
+      return {
+        tenantReference: staffCall.tenantReference,
+        transactions: resources.transactions,
+        binding: staffCall.binding,
+        resolvePayment: (operation) => payment.resolve(operation),
+        cancellation,
+        newReference: resources.credentials.reference,
+      };
     },
     createInternalPaymentTerminal: (r, c, i, s) =>
       createInternalPaymentTerminal(r, c, i, s, account),

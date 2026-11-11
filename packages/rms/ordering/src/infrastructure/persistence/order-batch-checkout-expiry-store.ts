@@ -485,7 +485,11 @@ export function createPostgresOrderBatchCheckoutCancellationStore(options: {
           // WP-2423 abandoned payment: a manager's cancellation before the deadline names them.
           (record.reasonCode === "STAFF_CANCELLED_UNPAID"
             ? audit.actor.type !== "User" || audit.sourceChannel !== "MERCHANT_WEB"
-            : audit.actor.type !== "System" || audit.sourceChannel !== "SYSTEM") ||
+            : // WP-2423 M38: the guest's own cancellation, on their channel (the Guest Session
+              // that asked is kept with the dishes' return to the table cart).
+              record.reasonCode === "GUEST_CANCELLED_UNPAID"
+              ? audit.actor.type !== "System" || audit.sourceChannel !== "CUSTOMER_PWA"
+              : audit.actor.type !== "System" || audit.sourceChannel !== "SYSTEM") ||
           audit.actionCode !== "ORDERING_BATCH_CHECKOUT_CANCELLED" ||
           audit.targetType !== "OrderBatch" ||
           audit.targetId !== record.orderBatchReference ||

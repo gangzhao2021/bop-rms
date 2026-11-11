@@ -1795,4 +1795,18 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "第 {round} 轮已付款，但做不了，款项正在原路退回。有问题请问店员。",
   "Round {round} from someone at your table was paid but couldn’t be made. Their payment is being refunded.":
     "同桌有人付款的第 {round} 轮做不了，款项正在退回。",
+  "Round {round} wasn’t paid, so it wasn’t ordered. Its dishes are back in the cart.":
+    "第 {round} 轮没有付款，所以没有下单，菜已放回购物车。",
+  "Don’t pay. Put the dishes back": "先不付，把菜放回购物车",
+  "The dishes are back in the cart. Nothing was charged.": "菜已放回购物车，没有扣款。",
+  "Your payment went through, so this round is paid and goes to the kitchen.":
+    "你的付款已成功，这一轮已付款，会送到厨房。",
+  "Your payment may still be going through. Wait a minute, then check again.":
+    "你的付款可能还在处理中，请稍等一分钟再看。",
+  "This table is closed, so the dishes can’t go back to the cart. Ask staff.":
+    "这一桌已结束，菜不能放回购物车。请问店员。",
+  "This round can’t be stopped now. Ask staff if you need help.":
+    "这一轮现在不能取消。需要帮助请问店员。",
+  "We couldn’t reach the store. Try again; nothing is done twice.":
+    "暂时连不上店里。请再试一次，不会重复操作。",
 });

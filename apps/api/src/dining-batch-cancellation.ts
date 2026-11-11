@@ -217,131 +217,182 @@ export function createDiningBatchCancellation(
       | { status: "Created" | "Existing"; record: Cancellation }
       | { status: "NotEligible"; reason: StaffUnpaidRoundRefusal }
     > {
-      const operationReference = parseOrderingReference(input.operationReference),
-        orderReference = parseOrderingReference(input.orderReference),
-        orderBatchReference = parseOrderingReference(input.orderBatchReference),
-        actorReference = parseOrderingReference(input.actorReference),
-        started = parseOrderingInstant(options.now());
-      const refuse = (reason: StaffUnpaidRoundRefusal) =>
-        Object.freeze({ status: "NotEligible" as const, reason });
-      if (options.paymentAccount === undefined || typeof options.inventory !== "function")
-        return unavailable();
-      const identity = { orderReference, orderBatchReference };
-      const allowed = async (tx: unknown) =>
-        tx === transaction &&
-        (await input.authorize(transaction)) === true &&
-        (await options.authorize(transaction, identity));
-      if (!(await allowed(transaction))) return unavailable();
-      // Replay of the same staff command: the original outcome, nothing written.
-      const original = await createPostgresOrderBatchCheckoutCancellationReader({
-        ...scope,
-        now: options.now,
-        authorize: allowed,
-      }).loadOperation(transaction, { orderReference, orderBatchReference, operationReference });
-      if (original !== null) {
-        if (
-          original.reasonCode !== "STAFF_CANCELLED_UNPAID" ||
-          (await options.inventory(
-            transaction,
-            Object.freeze({ mode: "Verify", cancellation: original }),
-          )) !== true
-        )
-          return unavailable();
-        return Object.freeze({ status: "Existing" as const, record: original });
-      }
-      // Takes the payment operation fence and reads the round's current owner facts.
-      const evidence = await createDiningBatchCancellationSource({
-        ...options,
-        scope,
-        authorize: allowed,
-      }).loadForStaff(transaction, identity);
-      if (evidence === null) return refuse("NotFound");
-      const round = evidence.round;
-      const target = evidence.items.filter(
-        (item) => item.orderBatchReference === orderBatchReference,
-      );
-      if (
-        target.some((item) => item.phase !== "Submitted" || item.everAccepted || item.everStarted)
-      )
-        return refuse("NotCancellable");
-      const runner = {
-        run: <T>(work: (tx: ConsumerTransaction) => Promise<T>) => work(transaction),
-      };
-      const card = await createPostgresCardMachinePaymentStore({
-        scope: { brandReference: scope.brandReference, storeReference: scope.storeReference },
-        authorize: async (tx) => tx === transaction && (await allowed(tx)),
-      }).loadByPaymentOperation(transaction, round.paymentOperationReference);
-      if (card !== null) return refuse("Paid");
-      let unconfirmed = false;
-      const stored = await createPostgresPaymentIntentCreationStore(
-        runner,
-        { brandReference: scope.brandReference, storeReference: scope.storeReference },
-        { now: options.now, generateObservationReference: unavailable },
-      ).resolveOperation(round.paymentOperationReference);
-      if (stored !== null) {
-        const payment = parsePaymentIntentCreationRecord(stored);
-        const fact = await createPostgresPaymentTerminalStore(runner, {
-          brandReference: scope.brandReference,
-          storeReference: scope.storeReference,
-          providerAccountReference: options.paymentAccount.providerAccountReference,
-          environment: options.paymentAccount.environment,
-        }).read(payment.intent.paymentIntentReference);
-        if (fact?.outcome === "Succeeded") return refuse("Paid");
-        if (
-          fact === null ||
-          fact.outcome !== "Failed" ||
-          String(fact.paymentAttemptReference) !== String(payment.attempt.paymentAttemptReference)
-        ) {
-          if (input.paymentUnconfirmed !== true) return refuse("PaymentInProgress");
-          const deadline = (
-            await listStoreDiningBatchPaymentDeadlines(
-              transaction,
-              { brandReference: scope.brandReference, storeReference: scope.storeReference },
-              [orderReference],
-            )
-          ).find((entry) => entry.orderBatchReference === orderBatchReference);
-          if (
-            deadline === undefined ||
-            !isPaymentUnconfirmed(deadline.paymentDeadline, options.now()) ||
-            !(await allowed(transaction))
-          )
-            return refuse("PaymentInProgress");
-          unconfirmed = true;
-        }
-      }
-      // WP-2423 item 8 ⑤: a round waiting for staff is cancelled by this staff member's decision,
-      // so its hold is released (Cancelled, in their name) in the same transaction; it never stays
-      // "waiting" after it was cancelled, which would stop the table from paying. The held-round
-      // Cancel released it already; the Store's automatic cancellation never reaches a held round.
-      const holds = createPostgresOrderRoundStaffHoldStore({
-        brandReference: scope.brandReference,
-        storeReference: scope.storeReference,
-        authorize: async (tx) => allowed(tx),
-      });
-      const hold = await holds.load({ transaction, orderReference, orderBatchReference });
-      if (hold !== null && hold.release?.outcome === "Confirmed") return refuse("NotCancellable");
-      if (hold !== null && hold.release === null)
-        await holds.release({
-          transaction,
-          operationReference,
-          orderReference,
-          orderBatchReference,
-          outcome: "Cancelled",
-          actorReference,
-          observedAt: started,
-        });
-      return await write(transaction, {
-        operationReference,
-        evidence,
-        identity: round,
+      return cancelUnpaid(transaction, input, {
         reasonCode: "STAFF_CANCELLED_UNPAID",
-        actorReference,
-        allowed,
-        started,
-        ...(unconfirmed ? { afterSummary: { providerPaymentUnconfirmed: true } as const } : {}),
+        actorReference: parseOrderingReference(input.actorReference),
+      });
+    },
+    /**
+     * WP-2423 shared-table-cart-staff-round M38 (2000_411): the guest whose phone sent a round at a
+     * pay-first table stops before paying ("Don't pay. Put the dishes back"). The same proof as a
+     * manager's (under the round's payment operation fence nothing was charged; the caller asks the
+     * Provider first and cancels a never-confirmed attempt), with the reason GUEST_CANCELLED_UNPAID
+     * and the System as the audit actor on the guest's channel; the caller authorized the round's
+     * own guest and records the Guest Session with the dishes' return. A round waiting for staff
+     * is theirs to decide, so it is refused. Same operation reference → the original outcome.
+     */
+    async cancelUnpaidForGuest(
+      transaction: ConsumerTransaction,
+      input: {
+        operationReference: string;
+        orderReference: string;
+        orderBatchReference: string;
+        authorize(tx: ConsumerTransaction): Promise<boolean>;
+      },
+    ): Promise<
+      | { status: "Created" | "Existing"; record: Cancellation }
+      | { status: "NotEligible"; reason: StaffUnpaidRoundRefusal }
+    > {
+      return cancelUnpaid(transaction, input, {
+        reasonCode: "GUEST_CANCELLED_UNPAID",
+        actorReference: null,
       });
     },
   });
+  async function cancelUnpaid(
+    transaction: ConsumerTransaction,
+    input: {
+      operationReference: string;
+      orderReference: string;
+      orderBatchReference: string;
+      authorize(tx: ConsumerTransaction): Promise<boolean>;
+      paymentUnconfirmed?: boolean;
+    },
+    by: {
+      readonly reasonCode: "STAFF_CANCELLED_UNPAID" | "GUEST_CANCELLED_UNPAID";
+      readonly actorReference: string | null;
+    },
+  ): Promise<
+    | { status: "Created" | "Existing"; record: Cancellation }
+    | { status: "NotEligible"; reason: StaffUnpaidRoundRefusal }
+  > {
+    const operationReference = parseOrderingReference(input.operationReference),
+      orderReference = parseOrderingReference(input.orderReference),
+      orderBatchReference = parseOrderingReference(input.orderBatchReference),
+      actorReference = by.actorReference,
+      started = parseOrderingInstant(options.now());
+    const refuse = (reason: StaffUnpaidRoundRefusal) =>
+      Object.freeze({ status: "NotEligible" as const, reason });
+    if (options.paymentAccount === undefined || typeof options.inventory !== "function")
+      return unavailable();
+    const identity = { orderReference, orderBatchReference };
+    const allowed = async (tx: unknown) =>
+      tx === transaction &&
+      (await input.authorize(transaction)) === true &&
+      (await options.authorize(transaction, identity));
+    if (!(await allowed(transaction))) return unavailable();
+    // Replay of the same staff command: the original outcome, nothing written.
+    const original = await createPostgresOrderBatchCheckoutCancellationReader({
+      ...scope,
+      now: options.now,
+      authorize: allowed,
+    }).loadOperation(transaction, { orderReference, orderBatchReference, operationReference });
+    if (original !== null) {
+      if (
+        original.reasonCode !== by.reasonCode ||
+        (await options.inventory(
+          transaction,
+          Object.freeze({ mode: "Verify", cancellation: original }),
+        )) !== true
+      )
+        return unavailable();
+      return Object.freeze({ status: "Existing" as const, record: original });
+    }
+    // Takes the payment operation fence and reads the round's current owner facts.
+    const evidence = await createDiningBatchCancellationSource({
+      ...options,
+      scope,
+      authorize: allowed,
+    }).loadForStaff(transaction, identity);
+    if (evidence === null) return refuse("NotFound");
+    const round = evidence.round;
+    const target = evidence.items.filter(
+      (item) => item.orderBatchReference === orderBatchReference,
+    );
+    if (target.some((item) => item.phase !== "Submitted" || item.everAccepted || item.everStarted))
+      return refuse("NotCancellable");
+    const runner = {
+      run: <T>(work: (tx: ConsumerTransaction) => Promise<T>) => work(transaction),
+    };
+    const card = await createPostgresCardMachinePaymentStore({
+      scope: { brandReference: scope.brandReference, storeReference: scope.storeReference },
+      authorize: async (tx) => tx === transaction && (await allowed(tx)),
+    }).loadByPaymentOperation(transaction, round.paymentOperationReference);
+    if (card !== null) return refuse("Paid");
+    let unconfirmed = false;
+    const stored = await createPostgresPaymentIntentCreationStore(
+      runner,
+      { brandReference: scope.brandReference, storeReference: scope.storeReference },
+      { now: options.now, generateObservationReference: unavailable },
+    ).resolveOperation(round.paymentOperationReference);
+    if (stored !== null) {
+      const payment = parsePaymentIntentCreationRecord(stored);
+      const fact = await createPostgresPaymentTerminalStore(runner, {
+        brandReference: scope.brandReference,
+        storeReference: scope.storeReference,
+        providerAccountReference: options.paymentAccount.providerAccountReference,
+        environment: options.paymentAccount.environment,
+      }).read(payment.intent.paymentIntentReference);
+      if (fact?.outcome === "Succeeded") return refuse("Paid");
+      if (
+        fact === null ||
+        fact.outcome !== "Failed" ||
+        String(fact.paymentAttemptReference) !== String(payment.attempt.paymentAttemptReference)
+      ) {
+        if (input.paymentUnconfirmed !== true || by.actorReference === null)
+          return refuse("PaymentInProgress");
+        const deadline = (
+          await listStoreDiningBatchPaymentDeadlines(
+            transaction,
+            { brandReference: scope.brandReference, storeReference: scope.storeReference },
+            [orderReference],
+          )
+        ).find((entry) => entry.orderBatchReference === orderBatchReference);
+        if (
+          deadline === undefined ||
+          !isPaymentUnconfirmed(deadline.paymentDeadline, options.now()) ||
+          !(await allowed(transaction))
+        )
+          return refuse("PaymentInProgress");
+        unconfirmed = true;
+      }
+    }
+    // WP-2423 item 8 ⑤: a round waiting for staff is cancelled by this staff member's decision,
+    // so its hold is released (Cancelled, in their name) in the same transaction; it never stays
+    // "waiting" after it was cancelled, which would stop the table from paying. The held-round
+    // Cancel released it already; the Store's automatic cancellation never reaches a held round.
+    const holds = createPostgresOrderRoundStaffHoldStore({
+      brandReference: scope.brandReference,
+      storeReference: scope.storeReference,
+      authorize: async (tx) => allowed(tx),
+    });
+    const hold = await holds.load({ transaction, orderReference, orderBatchReference });
+    if (hold !== null && hold.release?.outcome === "Confirmed") return refuse("NotCancellable");
+    // A round waiting for staff is staff's decision, not the guest's.
+    if (hold !== null && hold.release === null && actorReference === null)
+      return refuse("NotCancellable");
+    if (hold !== null && hold.release === null && actorReference !== null)
+      await holds.release({
+        transaction,
+        operationReference,
+        orderReference,
+        orderBatchReference,
+        outcome: "Cancelled",
+        actorReference,
+        observedAt: started,
+      });
+    return await write(transaction, {
+      operationReference,
+      evidence,
+      identity: round,
+      reasonCode: by.reasonCode,
+      actorReference,
+      ...(by.reasonCode === "GUEST_CANCELLED_UNPAID" ? { channel: "CUSTOMER_PWA" as const } : {}),
+      allowed,
+      started,
+      ...(unconfirmed ? { afterSummary: { providerPaymentUnconfirmed: true } as const } : {}),
+    });
+  }
   /** The failure reason of the payment a PaymentFailed expiry names (Payment's terminal fact). */
   async function failureReason(
     transaction: ConsumerTransaction,
@@ -379,6 +430,8 @@ export function createDiningBatchCancellation(
       };
       reasonCode: Cancellation["reasonCode"];
       actorReference: string | null;
+      /** WP-2423 M38: the guest's own cancellation is recorded on their channel. */
+      channel?: "CUSTOMER_PWA";
       allowed(tx: unknown): Promise<boolean>;
       started: string;
       afterSummary?: { readonly providerPaymentUnconfirmed: true };
@@ -463,7 +516,8 @@ export function createDiningBatchCancellation(
           correlationId: candidate.operationReference,
           reasonCode: candidate.reasonCode,
           occurredAt: candidate.cancelledAt,
-          sourceChannel: input.actorReference === null ? "SYSTEM" : "MERCHANT_WEB",
+          sourceChannel:
+            input.channel ?? (input.actorReference === null ? "SYSTEM" : "MERCHANT_WEB"),
           ...(input.afterSummary === undefined ? {} : { afterSummary: input.afterSummary }),
           dataClassification: "Restricted",
           retentionPolicyCode: "AUDIT_DEFAULT",

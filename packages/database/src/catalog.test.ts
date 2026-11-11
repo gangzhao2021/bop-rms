@@ -820,6 +820,8 @@ describe("migration catalog", () => {
       "2000_320_alter_role_administration_revisions",
       "2000_321_create_role_administration_sole_operator_approval",
       "2000_322_create_role_preset_offer_decision",
+      "2000_411_alter_batch_cancellation_guest_cancelled",
+      "2000_412_create_dining_round_cart_return",
       "2000_420_alter_staff_cancellation_cant_make_unaccepted",
       "2000_421_create_order_item_refund_withdrawal",
       "2000_422_create_payment_refund_recovery",

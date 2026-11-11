@@ -151,9 +151,14 @@ function roundWaitingForStaff(round: number, byThisPhone: boolean): string {
 function roundNotOrdered(
   round: number,
   payLater: boolean,
-  paymentState: "Cancelled" | "StaffDeclined" | "StaffCancelled" | "PaidNotMade",
+  paymentState: "Cancelled" | "StaffDeclined" | "StaffCancelled" | "PaidNotMade" | "Returned",
   byThisPhone: boolean,
 ): string {
+  // WP-2423 M38: the guest paying for it stopped before paying; the dishes are back in the cart.
+  if (paymentState === "Returned")
+    return t("Round {round} wasn’t paid, so it wasn’t ordered. Its dishes are back in the cart.", {
+      round: String(round),
+    });
   // WP-2423: the guest was charged, so never "wasn't paid": the payment is being refunded.
   if (paymentState === "PaidNotMade")
     return byThisPhone
@@ -197,7 +202,8 @@ function roundStillOpen(
     paymentState === "Cancelled" ||
     paymentState === "StaffDeclined" ||
     paymentState === "StaffCancelled" ||
-    paymentState === "PaidNotMade"
+    paymentState === "PaidNotMade" ||
+    paymentState === "Returned"
   )
     return roundNotOrdered(round, payLater, paymentState, byThisPhone);
   return null;
@@ -528,6 +534,25 @@ export const cartText = Object.freeze({
     ) =>
       roundStillOpen(round, false, payLater, paymentState) ??
       t("Round {round} was sent by someone at your table.", { round: String(round) }),
+    /** WP-2423 M38: the guest paying for their round stops and puts its dishes back. */
+    get roundWithdraw() {
+      return t("Don’t pay. Put the dishes back");
+    },
+    roundWithdrawOutcome: (
+      outcome:
+        "Returned" | "Paid" | "PaymentPending" | "NotWithdrawable" | "TableClosed" | "Unknown",
+    ) =>
+      outcome === "Returned"
+        ? t("The dishes are back in the cart. Nothing was charged.")
+        : outcome === "Paid"
+          ? t("Your payment went through, so this round is paid and goes to the kitchen.")
+          : outcome === "PaymentPending"
+            ? t("Your payment may still be going through. Wait a minute, then check again.")
+            : outcome === "TableClosed"
+              ? t("This table is closed, so the dishes can’t go back to the cart. Ask staff.")
+              : outcome === "NotWithdrawable"
+                ? t("This round can’t be stopped now. Ask staff if you need help.")
+                : t("We couldn’t reach the store. Try again; nothing is done twice."),
     /** WP-2423 shared-table-checkout (c): staff took a dish out of the table's cart. */
     staffRemoved: (dish: string) => t("Staff removed {dish} from the cart.", { dish }),
     /** The same, for a dish on no current menu (it has no name to show). */

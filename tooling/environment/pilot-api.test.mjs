@@ -105,6 +105,15 @@ function dependencies() {
         channelCheckoutDetails: { pickup: port("d"), dining: port("d") },
       }),
       createInternalMenuStoreFacts: async () => port("facts"),
+      // WP-2423 M38: "Don't pay. Put the dishes back" at a pay-first table.
+      createInternalDiningRoundWithdraw: async () => ({
+        tenantReference: "tenant",
+        transactions,
+        binding: port("binding"),
+        resolvePayment: port("resolvePayment"),
+        cancellation: port("cancellation"),
+        newReference: () => "reference",
+      }),
       // DEC-STRIPE-PILOT-WIRING: Stripe mode wires the webhook receiver (null with the simulator).
       createPaymentWebhookReceiver: async () => port("webhook"),
       providerAccountReference: "account",

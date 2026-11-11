@@ -26,14 +26,19 @@ const references = [
  * online payment never began); PAYMENT_NOT_COMPLETED — the guest started paying online and never
  * finished, so Payment cancelled that attempt at the Provider (WP-2423 abandoned payment).
  * Before the deadline: STAFF_CANCELLED_UNPAID — a manager cancelled the unpaid round (no expiry
- * evidence exists yet). Nothing was charged in any case.
+ * evidence exists yet); GUEST_CANCELLED_UNPAID — the guest whose phone sent it stopped before paying
+ * (WP-2423 M38, 2000_411; its dishes come back to the table cart). Nothing was charged in any case.
  */
 export const orderBatchCheckoutCancellationReasonCodes = [
   "CHECKOUT_DEADLINE_REACHED",
   "PAYMENT_NOT_STARTED",
   "PAYMENT_NOT_COMPLETED",
   "STAFF_CANCELLED_UNPAID",
+  "GUEST_CANCELLED_UNPAID",
 ] as const;
+/** WP-2423: the reasons recorded before the deadline (no expiry evidence exists yet). */
+export const unpaidRoundCancelledBeforeDeadline = (reasonCode: string): boolean =>
+  reasonCode === "STAFF_CANCELLED_UNPAID" || reasonCode === "GUEST_CANCELLED_UNPAID";
 export type OrderBatchCheckoutCancellationReasonCode =
   (typeof orderBatchCheckoutCancellationReasonCodes)[number];
 /** Append-only owner fact. Parsing grants no permission and releases no stock.
@@ -65,8 +70,10 @@ export function parseOrderBatchCheckoutCancellation(value: unknown) {
       next !== expected + 1 ||
       raw.phase !== "Cancelled" ||
       !(orderBatchCheckoutCancellationReasonCodes as readonly unknown[]).includes(raw.reasonCode) ||
-      // Staff cancel before the deadline, so only that reason has no expiry evidence.
-      (raw.reasonCode === "STAFF_CANCELLED_UNPAID") !== (raw.expiryRecordReference === null) ||
+      // Staff or the guest cancel before the deadline, so only those reasons have no expiry
+      // evidence.
+      unpaidRoundCancelledBeforeDeadline(String(raw.reasonCode)) !==
+        (raw.expiryRecordReference === null) ||
       (raw.expiryRecordReference === null) !== (raw.expiryEvidenceDigest === null) ||
       !Array.isArray(raw.orderItemReferences) ||
       raw.orderItemReferences.length === 0
@@ -112,7 +119,7 @@ export function createOrderBatchCheckoutCancellation(input: {
     const record = parseOrderBatchCheckoutCancellation(input.record);
     // A staff cancellation before the deadline has no expiry evidence; the writer's source proves
     // the round, its submission and payment operation from Ordering's own records instead.
-    if (record.reasonCode === "STAFF_CANCELLED_UNPAID") {
+    if (unpaidRoundCancelledBeforeDeadline(record.reasonCode)) {
       if (input.expiry !== null) return fail();
       return resolveItems(record, input.items);
     }

@@ -50,6 +50,11 @@ import {
   unavailableCustomerDiningStaffCallHandler,
 } from "./customer-dining-staff-call.js";
 import {
+  customerDiningRoundWithdrawRoute,
+  type CustomerDiningRoundWithdrawHandler,
+  unavailableCustomerDiningRoundWithdrawHandler,
+} from "./customer-dining-round-withdraw.js";
+import {
   CustomerPaymentResultHandler,
   customerPaymentResultRoute,
   unavailableCustomerPaymentResultHandler,
@@ -184,6 +189,8 @@ export interface AppOptions {
   customerDiningInvitation?: CustomerDiningInvitationHandler;
   /** WP-2423 Q28 DEC-DINING-STAFF-CALL: a seated guest asks staff to come to the table. */
   customerDiningStaffCall?: CustomerDiningStaffCallHandler;
+  /** WP-2423 M38: the guest paying for a table round stops and puts the dishes back. */
+  customerDiningRoundWithdraw?: CustomerDiningRoundWithdrawHandler;
   customerSessionBootstrap?: ReturnType<typeof createCustomerSessionBootstrapHandler>;
   /** WP-2423: the guest's Store — published address, phone, open now and today's hours. */
   customerStoreProfile?: ReturnType<typeof createCustomerStoreProfileHandler>;
@@ -276,6 +283,7 @@ export function createApp({
   customerDiningSession,
   customerDiningInvitation,
   customerDiningStaffCall,
+  customerDiningRoundWithdraw,
   customerSessionBootstrap,
   customerStoreProfile,
   customerPickupCode,
@@ -492,6 +500,10 @@ export function createApp({
   app.post(
     customerDiningStaffCallWithdrawRoute,
     customerDiningStaffCall?.withdraw() ?? unavailableCustomerDiningStaffCallHandler,
+  );
+  app.post(
+    customerDiningRoundWithdrawRoute,
+    customerDiningRoundWithdraw?.handler() ?? unavailableCustomerDiningRoundWithdrawHandler,
   );
   app.post(
     customerOrderSubmissionRoute,

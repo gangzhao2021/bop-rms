@@ -78,7 +78,9 @@ export type CartRoundPaymentState =
   | "Cancelled"
   | "StaffDeclined"
   | "StaffCancelled"
-  | "PaidNotMade";
+  | "PaidNotMade"
+  /** M38: its guest stopped before paying; its dishes came back to the cart. */
+  | "Returned";
 
 /** WP-2423 M03: an order the guest already placed from this cart (its store number for display). */
 export interface CartPlacedOrder {

@@ -42,6 +42,7 @@ import { CustomerPage, PageHeading, type CustomerStoreContext } from "../journey
 import { formatMinutesUntil, formatMoney } from "../journey/format.js";
 import { SlowWaitNote } from "../journey/SlowWaitNote.js";
 import { startTableCartPoll, tableCartPollIntervalMs } from "./table-cart-poll.js";
+import { createRoundWithdrawClient, type RoundWithdrawOutcome } from "./round-withdraw-client.js";
 import {
   quoteConsistentLinePrices,
   cartLinesSubtotal,
@@ -292,6 +293,56 @@ function TableRoundNotes({
     </>
   );
 }
+
+/**
+ * WP-2423 M38: this phone's round still being paid at a table that pays as it orders (the guest
+ * pressed "Continue to payment" and has not paid): the guest may stop and put the dishes back.
+ */
+export const withdrawableOwnRound = (cart: CartView, payLater: boolean) => {
+  if (payLater) return null;
+  const own = cart.cart.recentRounds?.find((round) => round.sentByThisPhone);
+  return own !== undefined && own.paymentState === "AwaitingPayment" ? own : null;
+};
+/**
+ * WP-2423 M38: "Don't pay. Put the dishes back". The store first makes sure nothing was charged,
+ * so a payment that went through (or may still) is said as such and nothing changes. A lost answer
+ * keeps the same operation, so tapping again never cancels twice.
+ */
+export function RoundWithdrawAction({
+  roundNumber,
+  onReturned,
+  client = defaultRoundWithdrawClient,
+}: {
+  readonly roundNumber: number;
+  readonly onReturned: () => void;
+  readonly client?: ReturnType<typeof createRoundWithdrawClient>;
+}) {
+  const operation = useRef<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [outcome, setOutcome] = useState<RoundWithdrawOutcome | null>(null);
+  const tap = async () => {
+    operation.current ??= client.newOperationReference();
+    setBusy(true);
+    try {
+      const result = await client.withdraw(operation.current, roundNumber);
+      setOutcome(result);
+      if (result !== "Unknown") operation.current = null;
+      if (result === "Returned") onReturned();
+    } finally {
+      setBusy(false);
+    }
+  };
+  const text = outcome === null ? null : cartText.line.roundWithdrawOutcome(outcome);
+  return (
+    <div className="cart-state__actions">
+      <button type="button" disabled={busy} onClick={() => void tap()}>
+        {cartText.line.roundWithdraw}
+      </button>
+      {text === null ? null : <p role="status">{text}</p>}
+    </div>
+  );
+}
+const defaultRoundWithdrawClient = createRoundWithdrawClient();
 
 /**
  * WP-2423 shared-table-checkout (c): the dishes staff took out of this table's cart lately, named
@@ -713,10 +764,22 @@ function CartContent({
         </div>
       </StateMessage>
     ) : state.status === "ready" &&
-      (tableRoundSentByOther(state.cart) !== null || tableOpenRoundByOther(state.cart) !== null) ? (
-      // WP-2423 (same-table-ordering): another phone's round took this cart's dishes.
+      (tableRoundSentByOther(state.cart) !== null ||
+        tableOpenRoundByOther(state.cart) !== null ||
+        withdrawableOwnRound(state.cart, timing === "PayLater") !== null) ? (
+      // WP-2423 (same-table-ordering): another phone's round took this cart's dishes, or (M38)
+      // this phone is paying for the round that did.
       <StateMessage heading={commonText.emptyCartHeading}>
         <TableRoundNotes cart={state.cart} payLater={timing === "PayLater"} />
+        {(() => {
+          const own = withdrawableOwnRound(state.cart, timing === "PayLater");
+          return own === null ? null : (
+            <RoundWithdrawAction
+              roundNumber={own.roundNumber}
+              onReturned={() => void controller.load()}
+            />
+          );
+        })()}
         <div className="cart-state__actions">
           <Link className="cart-primary-link" to="/dine-in/session">
             {cartText.seeYourTable}
@@ -869,6 +932,15 @@ function CartContent({
         </div>
       ) : null}
       <TableRoundNotes cart={cart} payLater={payLater} className="cart-stale" />
+      {(() => {
+        const own = withdrawableOwnRound(cart, payLater);
+        return own === null ? null : (
+          <RoundWithdrawAction
+            roundNumber={own.roundNumber}
+            onReturned={() => void controller.load()}
+          />
+        );
+      })()}
       {staffRemovedDishes(cart).map((dish, index) => (
         <p key={"staff-removed:" + String(index)} className="cart-stale" role="status">
           {staffRemovedNotice(dish)}

@@ -102,7 +102,8 @@ export interface CustomerCartView {
         | "Cancelled"
         | "StaffDeclined"
         | "StaffCancelled"
-        | "PaidNotMade";
+        | "PaidNotMade"
+        | "Returned";
     }[];
     /** WP-2423 shared-table-checkout (c): dishes staff took out of this table's cart lately. */
     readonly staffRemoved?: readonly {
@@ -625,7 +626,8 @@ function recentRoundsView(
           raw.paymentState !== "Cancelled" &&
           raw.paymentState !== "StaffDeclined" &&
           raw.paymentState !== "StaffCancelled" &&
-          raw.paymentState !== "PaidNotMade") ||
+          raw.paymentState !== "PaidNotMade" &&
+          raw.paymentState !== "Returned") ||
         typeof raw.sentByThisPhone !== "boolean" ||
         !Array.isArray(raw.cartItemReferences) ||
         raw.cartItemReferences.length > 100

@@ -178,6 +178,7 @@ export async function createInternalBatchCancellation(
   return Object.freeze({
     cancel: service.cancel,
     cancelUnpaidForStaff: service.cancelUnpaidForStaff,
+    cancelUnpaidForGuest: service.cancelUnpaidForGuest,
     loadPublished,
   });
 }

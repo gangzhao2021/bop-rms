@@ -146,6 +146,12 @@ export {
   type StaffCartRemovalRecord,
   type StaffCartLineRemovalInput,
 } from "./infrastructure/persistence/cart-staff-line-store.js";
+export {
+  findGuestDiningRound,
+  returnDiningRoundToCart,
+  type DiningRoundCartReturn,
+  type DiningRoundCartReturnInput,
+} from "./infrastructure/persistence/dining-round-cart-return-store.js";
 
 export * from "./domain/dining-cart-selection.js";
 

@@ -5178,7 +5178,8 @@
                 "CHECKOUT_DEADLINE_REACHED",
                 "PAYMENT_NOT_STARTED",
                 "PAYMENT_NOT_COMPLETED",
-                "STAFF_CANCELLED_UNPAID"
+                "STAFF_CANCELLED_UNPAID",
+                "GUEST_CANCELLED_UNPAID"
               ],
               "type": "string"
             },

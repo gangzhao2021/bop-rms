@@ -43,6 +43,11 @@ import {
   createCustomerDiningStaffCall,
   type CustomerDiningStaffCallOptions,
 } from "./customer-dining-staff-call.js";
+import {
+  CustomerDiningRoundWithdrawHandler,
+  createCustomerDiningRoundWithdraw,
+  type CustomerDiningRoundWithdrawOptions,
+} from "./customer-dining-round-withdraw.js";
 import { CustomerDiningBindingHandler } from "./customer-dining-binding.js";
 import {
   createCustomerDiningJoinComposition,
@@ -186,6 +191,16 @@ export interface LocalCustomerRuntimeOptions {
   /** WP-2423 Q28 DEC-DINING-STAFF-CALL: a seated guest asks staff to come to the table. */
   readonly diningStaffCall?: Omit<
     CustomerDiningStaffCallOptions,
+    "scope" | "credentials" | "now"
+  > & {
+    readonly tenantReference: string;
+  };
+  /**
+   * WP-2423 M38: at a pay-first table the guest paying for a round stops before paying and its
+   * dishes come back to the table's cart (Payment's resolution and the unpaid round cancellation).
+   */
+  readonly diningRoundWithdraw?: Omit<
+    CustomerDiningRoundWithdrawOptions,
     "scope" | "credentials" | "now"
   > & {
     readonly tenantReference: string;
@@ -686,6 +701,21 @@ export function createLocalCustomerRuntime(options: LocalCustomerRuntimeOptions)
             }),
           });
         })();
+  const customerDiningRoundWithdraw =
+    options.diningRoundWithdraw === undefined
+      ? undefined
+      : (() => {
+          const { tenantReference, ...withdraw } = options.diningRoundWithdraw;
+          return new CustomerDiningRoundWithdrawHandler({
+            allowedOrigin: options.allowedOrigin,
+            port: createCustomerDiningRoundWithdraw({
+              ...withdraw,
+              scope: { tenantReference, ...scope },
+              credentials: entry.session.credentials,
+              now,
+            }),
+          });
+        })();
   const payment = options.payment;
   const paymentAccess =
     payment === undefined
@@ -864,6 +894,7 @@ export function createLocalCustomerRuntime(options: LocalCustomerRuntimeOptions)
     ...(customerDiningBinding === undefined ? {} : { customerDiningBinding }),
     ...(customerDiningInvitation === undefined ? {} : { customerDiningInvitation }),
     ...(customerDiningStaffCall === undefined ? {} : { customerDiningStaffCall }),
+    ...(customerDiningRoundWithdraw === undefined ? {} : { customerDiningRoundWithdraw }),
     ...(configuredQuote !== undefined
       ? {
           customerQuote: new CustomerQuoteHandler({

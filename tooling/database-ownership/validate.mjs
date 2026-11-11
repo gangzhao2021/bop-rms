@@ -3810,6 +3810,15 @@ async function scanUnsupported(root, module, diagnostics) {
             module.manifest.ownedDatabase?.tables?.includes(table),
           ) &&
           moduleRelative === "src/infrastructure/persistence/cart-staff-line-store.ts";
+        // WP-2423 shared-table-cart-staff-round M38: a round its guest stopped paying for comes
+        // back to the table cart once, recorded in its own append-only record.
+        const acceptedDiningRoundCartReturnAsset =
+          module.packageName === "@rms/ordering" &&
+          module.manifest.ownedDatabase?.schema === "rms_ordering" &&
+          ["cart", "cart_line", "dining_round_cart_return"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/dining-round-cart-return-store.ts";
         const acceptedCartQuoteAsset =
           module.packageName === "@rms/ordering" &&
           module.manifest.ownedDatabase?.schema === "rms_ordering" &&
@@ -4148,6 +4157,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedCartOperationAsset &&
           !acceptedCartItemWriterAsset &&
           !acceptedCartStaffLineAsset &&
+          !acceptedDiningRoundCartReturnAsset &&
           !acceptedPickupBindingAsset &&
           !acceptedCartLifecycleAsset &&
           !acceptedCartQuoteAsset &&

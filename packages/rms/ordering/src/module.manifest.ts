@@ -101,6 +101,7 @@ const moduleManifestInput =
         "cart_line",
         "cart_operation_record",
         "cart_staff_line_removal",
+        "dining_round_cart_return",
         "cart_quote_attachment",
         "cart_quote_expiry_record",
         "cart_quote_attachment_line",
