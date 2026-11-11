@@ -15,6 +15,7 @@ import {
 } from "../../rms/ordering/src/index.ts";
 import { createCustomerCartTablePay } from "../../../apps/api/src/customer-cart-table-pay.ts";
 import { createCustomerDiningCheckoutHold } from "../../../apps/api/src/customer-checkout-hold.ts";
+import { readStaffGuestChoosing } from "../../../apps/api/src/merchant-dining-table-cart.ts";
 import { orderWriteFixture } from "../../rms/ordering/src/tests/order-creation-store.fixture.ts";
 import { seedSubmissionCart } from "../test-support/dining-order-submission-seed.mjs";
 import { grantPilotApiAcl } from "../test-support/pilot-api-acl.mjs";
@@ -949,11 +950,48 @@ it("v15 batch 7: staff take a dish out while A is choosing; A's choice ends and 
       assert.equal(seen.live?.chooserParticipantReference, phoneA.participantReference);
       assert.equal(seen.live?.cartVersion, f.cart.aggregateVersion);
       assert.equal(seen.cartVersion, f.cart.aggregateVersion);
-      // Staff take A's dish out because A asked: recorded, the cart's next version.
+      // The staff note as the table page composes it, from the live scope under this role: A's
+      // phone and until when, on the version staff see; once that time passed, "ran out".
+      const phones = new Map([[phoneA.participantReference, 1]]);
+      const staffNote = (tx, observedAt, cartVersion, read) =>
+        readStaffGuestChoosing(tx, {
+          paying: false,
+          cart: { cartReference, cartVersion },
+          observedAt,
+          phoneNumberOf: (participant) => phones.get(participant) ?? null,
+          read:
+            read ??
+            (async () =>
+              (
+                await readDiningCheckoutScopeState(tx, scope, {
+                  diningSessionReference: phoneA.diningSessionReference,
+                  observedAt,
+                })
+              ).live),
+        });
+      const expiresAt = seen.live?.expiresAt;
+      assert.deepEqual(
+        await inTransaction((tx) => staffNote(tx, later(chosenAt, 500), f.cart.aggregateVersion)),
+        { phoneNumber: 1, until: expiresAt, held: true },
+      );
+      assert.deepEqual(
+        await inTransaction((tx) => staffNote(tx, later(expiresAt, 1000), f.cart.aggregateVersion)),
+        { phoneNumber: 1, until: expiresAt, held: false },
+      );
+      // Another cart version than the one A chose on: no note.
+      assert.equal(
+        await inTransaction((tx) =>
+          staffNote(tx, later(chosenAt, 500), f.cart.aggregateVersion - 1),
+        ),
+        null,
+      );
+      // Staff take A's dish out because A asked: recorded, the cart's next version. The note read
+      // after it in the same transaction fails here (a statement error): only the note is left
+      // out, the removal still commits.
       const staff = id(0x501);
       const removedAt = later(chosenAt, 1000);
-      const removed = await inTransaction((tx) =>
-        removeStaffDiningCartLine(tx, scope, {
+      const removed = await inTransaction(async (tx) => {
+        const removal = await removeStaffDiningCartLine(tx, scope, {
           operationReference: id(2),
           diningSessionReference: phoneA.diningSessionReference,
           cartReference,
@@ -980,9 +1018,24 @@ it("v15 batch 7: staff take a dish out while A is choosing; A's choice ends and 
             retentionPolicyCode: "AUDIT_DEFAULT",
             retentionPolicyVersion: 1,
           },
-        }),
-      );
+        });
+        assert.equal(
+          await staffNote(tx, removedAt, f.cart.aggregateVersion + 1, async () => {
+            await tx.query("SELECT 1 FROM rms_ordering.no_such_relation", []);
+            return null;
+          }),
+          null,
+        );
+        return removal;
+      });
       assert.ok(removed);
+      // The note after the removal: A's choice ended, nothing to say.
+      assert.equal(
+        await inTransaction((tx) =>
+          staffNote(tx, later(removedAt, 500), f.cart.aggregateVersion + 1),
+        ),
+        null,
+      );
       // A's choice is no longer live: A's phone shows no payer and asks A to choose again.
       const after = await inTransaction((tx) =>
         readDiningCheckoutScopeState(tx, scope, {

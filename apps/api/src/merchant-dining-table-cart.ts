@@ -153,7 +153,7 @@ export type StaffGuestChoosing = null | {
  * the version the choice was made on, and never while a guest is paying. The note is
  * informational: a failed read leaves it out and never takes the staff read or removal down.
  */
-export async function staffGuestChoosing(input: {
+interface StaffGuestChoosingInput {
   readonly paying: boolean;
   readonly cart: { readonly cartReference: string; readonly cartVersion: number };
   readonly observedAt: string;
@@ -164,7 +164,10 @@ export async function staffGuestChoosing(input: {
     readonly expiresAt: string;
   } | null>;
   readonly phoneNumberOf: (participantReference: string) => number | null;
-}): Promise<StaffGuestChoosing> {
+}
+export async function staffGuestChoosing(
+  input: StaffGuestChoosingInput,
+): Promise<StaffGuestChoosing> {
   if (input.paying) return null;
   let choice: Awaited<ReturnType<typeof input.read>>;
   try {
@@ -182,6 +185,32 @@ export async function staffGuestChoosing(input: {
     phoneNumber: input.phoneNumberOf(choice.chooserParticipantReference),
     until: choice.expiresAt,
     held: Date.parse(choice.expiresAt) > Date.parse(input.observedAt),
+  });
+}
+
+/**
+ * `staffGuestChoosing` inside the staff read's (or removal's) own transaction: the read runs in
+ * a savepoint, so a failed read (a statement error aborts the whole transaction otherwise) is
+ * rolled back alone and the removal recorded before it still commits.
+ */
+export async function readStaffGuestChoosing(
+  tx: { query(sql: string, values: readonly unknown[]): Promise<unknown> },
+  input: StaffGuestChoosingInput,
+): Promise<StaffGuestChoosing> {
+  return staffGuestChoosing({
+    ...input,
+    read: async () => {
+      await tx.query("SAVEPOINT staff_table_cart_choice", []);
+      try {
+        const live = await input.read();
+        await tx.query("RELEASE SAVEPOINT staff_table_cart_choice", []);
+        return live;
+      } catch (error) {
+        await tx.query("ROLLBACK TO SAVEPOINT staff_table_cart_choice", []);
+        await tx.query("RELEASE SAVEPOINT staff_table_cart_choice", []);
+        throw error;
+      }
+    },
   });
 }
 
@@ -333,26 +362,18 @@ export function createMerchantDiningTableCart(options: {
           const paying = await guestPaying(cart.cartReference, cart.cartVersion);
           // In its own savepoint: a failed read only leaves the note out, never the staff
           // removal made above in this transaction.
-          const guestChoosing = await staffGuestChoosing({
+          const guestChoosing = await readStaffGuestChoosing(tx, {
             paying,
             cart,
             observedAt,
             phoneNumberOf: (participant) => phoneOf.get(participant)?.phoneNumber ?? null,
-            read: async () => {
-              await tx.query("SAVEPOINT staff_table_cart_choice", []);
-              try {
-                const { live } = await readDiningCheckoutScopeState(cartTx, owner, {
+            read: async () =>
+              (
+                await readDiningCheckoutScopeState(cartTx, owner, {
                   diningSessionReference: session,
                   observedAt,
-                });
-                await tx.query("RELEASE SAVEPOINT staff_table_cart_choice", []);
-                return live;
-              } catch (error) {
-                await tx.query("ROLLBACK TO SAVEPOINT staff_table_cart_choice", []);
-                await tx.query("RELEASE SAVEPOINT staff_table_cart_choice", []);
-                throw error;
-              }
-            },
+                })
+              ).live,
           });
           return Object.freeze({
             cart: Object.freeze({
