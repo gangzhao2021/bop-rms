@@ -1,3 +1,9 @@
+import {
+  pickupLinkPattern,
+  publicStoreReferencePattern,
+  tableLauncherPattern,
+} from "./entry-address.js";
+
 interface InternalLocation {
   readonly origin: string;
   readonly pathname: string;
@@ -14,13 +20,10 @@ export async function loadInternalEntryToken({
   readonly fetcher: typeof fetch;
 }): Promise<string | undefined> {
   if (!enabled || location.pathname !== "/" || location.search !== "") return undefined;
-  const dining = /^#internal-dining=([a-z][a-z0-9-]{0,39})$/.exec(location.hash);
+  const dining = tableLauncherPattern.exec(location.hash);
   // 2026-11-01: a Store's own pickup link or poster (`/#pickup=<public Store reference>`) opens
   // pickup ordering at that Store, at an installation with several Stores.
-  const pickup =
-    /^#pickup=([0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/.exec(
-      location.hash,
-    );
+  const pickup = pickupLinkPattern.exec(location.hash);
   if (location.hash !== "" && !dining && !pickup) return undefined;
   // DEC-PILOT-RUNTIME-ENVIRONMENT: the Store's own address opens pickup ordering on whichever
   // origin served the app (the server answers same-origin only); the DEMO table launcher exists
@@ -33,8 +36,6 @@ export async function loadInternalEntryToken({
       : "/bff/customer/pickup-entry";
   return fetchEntryToken(fetcher, path);
 }
-
-const publicStorePattern = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 
 /**
  * M02 (v15 07b7a1b7): a pickup code for one named Store ("Start a new order" at the restored
@@ -53,7 +54,7 @@ export async function loadPickupEntryToken({
   if (!enabled) return undefined;
   if (publicStoreReference === undefined)
     return fetchEntryToken(fetcher, "/bff/customer/pickup-entry");
-  if (!publicStorePattern.test(publicStoreReference)) return undefined;
+  if (!publicStoreReferencePattern.test(publicStoreReference)) return undefined;
   return fetchEntryToken(fetcher, `/bff/customer/pickup-entry?store=${publicStoreReference}`);
 }
 

@@ -1,5 +1,4 @@
-/** A Store's pickup link, a table's QR code, or the InternalTest table launcher in the address. */
-const entryCodeFragment = /^#(?:qr|pickup|internal-dining)=/u;
+import { isEntryCodeAddress } from "./entry-address.js";
 
 /**
  * Guest entry, same-tab scan: a phone already on a Store's page that opens another Store's pickup
@@ -15,7 +14,7 @@ export function reloadOnEntryCodeChange(input: {
 }): () => void {
   let reloading = false;
   const changed = () => {
-    if (reloading || !entryCodeFragment.test(input.hash())) return;
+    if (reloading || !isEntryCodeAddress(input.hash())) return;
     reloading = true;
     input.reload();
   };

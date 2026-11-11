@@ -5,6 +5,7 @@ import {
   type CustomerEntryStartSource,
 } from "./entry/start-client.js";
 import { reloadOnEntryCodeChange } from "./entry/entry-code-change.js";
+import { isEntryLinkAddress } from "./entry/entry-address.js";
 import type { CustomerEntryResumedContext } from "./entry/types.js";
 import { loadRuntimePaymentConfiguration } from "./payment/payment-runtime-configuration.js";
 import type { MenuJourneyContext } from "./menu/types.js";
@@ -108,7 +109,7 @@ async function start() {
   // M106: a Store's pickup link or the internal table launcher asks for its entry code at once,
   // beside the session restore and the payment configuration, not after both.
   const internalCodeLoad =
-    /^#(?:pickup|internal-dining)=/u.test(hash) &&
+    isEntryLinkAddress(hash) &&
     entryLocation.pathname === "/" &&
     entryLocation.search === "" &&
     scannedCode === null
@@ -155,7 +156,7 @@ async function start() {
       ? { kind: "None" }
       : scannedCode !== null
         ? { kind: "Code", load: async () => scannedCode, names }
-        : /^#(?:pickup|internal-dining)=/u.test(hash) && entryLocation.search === ""
+        : isEntryLinkAddress(hash) && entryLocation.search === ""
           ? {
               kind: "Code",
               names,

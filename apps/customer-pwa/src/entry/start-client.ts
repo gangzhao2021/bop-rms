@@ -4,6 +4,7 @@ import type {
   CustomerEntryResumedContext,
   CustomerEntryScreenState,
 } from "./types.js";
+import { pickupLinkPattern, tableLauncherPattern } from "./entry-address.js";
 
 /**
  * M02 (v15 07b7a1b7): how the start page finds where this phone is. A phone stays at the Store and
@@ -64,12 +65,11 @@ export function addressCodePlace(
           table: names.publicTableReference !== null,
         });
   }
-  const pickup =
-    /^#pickup=([0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/u.exec(hash);
+  const pickup = pickupLinkPattern.exec(hash);
   if (pickup?.[1] !== undefined)
     return Object.freeze({ publicStoreReference: pickup[1], table: false });
   // The InternalTest table launcher always opens a table.
-  if (hash.startsWith("#internal-dining="))
+  if (tableLauncherPattern.test(hash))
     return Object.freeze({ publicStoreReference: null, table: true });
   return undefined;
 }

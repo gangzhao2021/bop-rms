@@ -4,6 +4,7 @@ import {
   rememberContinuityToken,
 } from "./table-continuity.js";
 import { guestReadRetryWaitsMs } from "../network/read-retry.js";
+import { qrCodePrefix } from "./entry-address.js";
 import type {
   CustomerEntryBrowseContext,
   CustomerEntryClient,
@@ -495,8 +496,9 @@ export function consumeCustomerQrFragment(input: {
   readonly replaceState: CustomerEntryBrowserBoundary["replaceState"];
 }): string | null {
   input.replaceState(null, "", input.pathname);
-  if (input.pathname !== "/" || input.search !== "" || !input.hash.startsWith("#qr=")) return null;
-  const token = input.hash.slice(4);
+  if (input.pathname !== "/" || input.search !== "" || !input.hash.startsWith(qrCodePrefix))
+    return null;
+  const token = input.hash.slice(qrCodePrefix.length);
   if (
     token.length < 1 ||
     token.length > 2048 ||
