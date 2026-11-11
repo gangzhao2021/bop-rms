@@ -675,6 +675,25 @@ describe("WP-2423 (outage-reads-and-retry): records that can't be read are no an
       });
     },
   );
+  it("a malformed reference is an answer, never 'busy' for ever: the phone is told to scan again", async () => {
+    const f = fixture();
+    const prepared = await f.service.prepare(f.input);
+    f.setTime(1);
+    await f.service.activate(f.activation(prepared));
+    vi.mocked(f.options.contexts.resolve).mockRejectedValue(
+      Object.assign(new Error("dining session input is invalid"), {
+        code: "DINING_SESSION_INPUT_INVALID",
+      }),
+    );
+    const guard = createCustomerDiningSessionBinding({
+      scope: f.options.scope,
+      binding: f.options.session.binding,
+      repository: f.options.dining.binding,
+      contexts: f.options.contexts,
+      now: f.options.now,
+    });
+    expect(await guard.validate(f.saved().candidate.session, at(1))).toBe("Unavailable");
+  });
   it("what the records say stays the answer: a table context that no longer matches", async () => {
     const f = fixture();
     const prepared = await f.service.prepare(f.input);

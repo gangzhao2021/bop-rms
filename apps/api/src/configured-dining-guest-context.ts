@@ -9,7 +9,7 @@ import { assertCurrentDiningGuestTableContext } from "@rms/dining";
 import { createConfiguredDiningQrContext } from "./configured-dining-qr-context.js";
 import {
   confirmTransactionAnswered,
-  guestBindingSourceUnavailable,
+  guestBindingReadFailure,
   isGuestDependencyFailure,
 } from "./guest-binding-dependency.js";
 
@@ -61,7 +61,7 @@ export function createConfiguredDiningGuestContext(
           return found;
         })
         .catch((error: unknown) => {
-          throw isGuestDependencyFailure(error) ? error : guestBindingSourceUnavailable(error);
+          throw guestBindingReadFailure(error);
         });
       return assertCurrentDiningGuestTableContext(
         {

@@ -23,10 +23,7 @@ import {
   type QrTableContextEvidence,
   type DiningAdmissionConsumptionPorts,
 } from "@rms/dining";
-import {
-  guestBindingSourceUnavailable,
-  isGuestDependencyFailure,
-} from "./guest-binding-dependency.js";
+import { guestBindingReadFailure, isGuestDependencyFailure } from "./guest-binding-dependency.js";
 
 export interface CustomerDiningBindingCompositionOptions {
   readonly scope: Readonly<{ brandReference: string; storeReference: string }>;
@@ -88,9 +85,10 @@ export function createCustomerDiningSessionBinding(options: {
       // WP-2423 (outage-reads-and-retry): a record that can't be read (the owners' reads throw;
       // their answers are null or "Unavailable") says nothing about this phone: thrown as a passing
       // fault, so the guest is told "try again" and keeps the cart, never "your session ended".
+      // A malformed reference or a registration that doesn't fit stays "Unavailable".
       const read = <T>(work: () => Promise<T>): Promise<T> =>
         work().catch((error: unknown) => {
-          throw isGuestDependencyFailure(error) ? error : guestBindingSourceUnavailable(error);
+          throw guestBindingReadFailure(error);
         });
       try {
         if (

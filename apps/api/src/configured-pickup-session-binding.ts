@@ -7,7 +7,7 @@ import {
 import { createConfiguredPickupQrContext } from "./configured-pickup-qr-context.js";
 import {
   confirmTransactionAnswered,
-  guestBindingSourceUnavailable,
+  guestBindingReadFailure,
   isGuestDependencyFailure,
 } from "./guest-binding-dependency.js";
 
@@ -58,7 +58,7 @@ export function createConfiguredPickupSessionBinding(
             return found;
           })
           .catch((error: unknown) => {
-            throw isGuestDependencyFailure(error) ? error : guestBindingSourceUnavailable(error);
+            throw guestBindingReadFailure(error);
           });
         return current !== null &&
           current.brandLifecycle === "Active" &&

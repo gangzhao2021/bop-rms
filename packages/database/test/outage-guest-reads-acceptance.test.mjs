@@ -5,7 +5,10 @@
 //     never "Unavailable" (read as "your session ended"); once a connection is free, what the
 //     records say is the answer again;
 //  2. the transactions of one request share one connection-waiting budget, so a request of
-//     several reads answers "busy" within the budget instead of waiting it once per read.
+//     several reads answers "busy" within the budget instead of waiting it once per read;
+//  3. the same for a table guest's check of the table's QR records (the dining context), while a
+//     registration that doesn't fit the phone's QR stays the answer "Unavailable" (scan again),
+//     never "busy" for ever.
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { URL } from "node:url";
@@ -13,6 +16,7 @@ import pg from "pg";
 import { it } from "vitest";
 import { createGuestSession } from "../../bop/identity/src/index.ts";
 import { createConfiguredPickupSessionBinding } from "../../../apps/api/src/configured-pickup-session-binding.ts";
+import { createConfiguredDiningGuestContext } from "../../../apps/api/src/configured-dining-guest-context.ts";
 import { renderPilotAclSql } from "../../../tooling/environment/pilot-acl-render.mjs";
 import { runWithRequestAcquireBudget } from "../src/connection-acquire.ts";
 import { createTenantTransactionRunner } from "../src/transaction-runner.ts";
@@ -128,9 +132,50 @@ it("an outage of the Store's records never reads as an ended guest session, and 
         revokedAt: null,
       });
 
+      // The table guest's check: the same Store, a table QR, as the pilot composes it.
+      const tablePayload = { ...payload, qrReference: id(13), publicTableReference: id(14) };
+      tablePayload.channel = "DineIn";
+      const tableContext = (registration = {}) =>
+        createConfiguredDiningGuestContext({
+          transactions: runner,
+          binding: {
+            tenantReference: id(5),
+            publicStoreReference: id(4),
+            brandReference: id(1),
+            storeReference: id(2),
+            lookupEvidenceReference: id(6),
+            validFrom: earlier,
+            validUntil: later,
+          },
+          authorize: async () => true,
+          registration: {
+            payload: tablePayload,
+            tableReference: id(15),
+            state: "Enabled",
+            contextEvidenceReference: id(16),
+            validFrom: earlier,
+            validUntil: later,
+            ...registration,
+          },
+          authorizeRegistration: async () => true,
+        });
+      const tableSession = createGuestSession({
+        ...session,
+        sessionReference: id(18),
+        publicTableReference: id(14),
+        channel: "DineIn",
+        qrReference: id(13),
+      });
+
       // 1. Every connection busy (a rush): the guest is told to try again, not that the visit ended.
       held = await pool.connect();
       await assert.rejects(binding.validate(session, at), (error) => {
+        assert.equal(error.dependencyFailure, true);
+        assert.equal(error.cause?.code, "TENANT_DATABASE_ACQUIRE_FAILED");
+        return true;
+      });
+      // A table guest too: before, the context answered null and the phone read "you left".
+      await assert.rejects(tableContext().validate(tableSession, at), (error) => {
         assert.equal(error.dependencyFailure, true);
         assert.equal(error.cause?.code, "TENANT_DATABASE_ACQUIRE_FAILED");
         return true;
@@ -153,6 +198,13 @@ it("an outage of the Store's records never reads as an ended guest session, and 
       held.release();
       held = null;
       assert.equal(await binding.validate(session, at), "Unavailable");
+      assert.equal(await tableContext().validate(tableSession, at), "Unavailable");
+      // A registration that can't fit any phone's QR (its validity ends as it begins) is an answer
+      // too: "Unavailable", so the phone is told to scan again, not "busy" for ever.
+      assert.equal(
+        await tableContext({ validFrom: later, validUntil: later }).validate(tableSession, at),
+        "Unavailable",
+      );
     } finally {
       held?.release();
       await pool.end().catch(() => undefined);
