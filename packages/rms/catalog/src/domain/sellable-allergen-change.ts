@@ -15,7 +15,8 @@ export interface SellableAllergenChange {
   readonly skuReference: string;
   /** Null: every Store of the Brand. */
   readonly storeReference: string | null;
-  readonly cause: "RecipeBound" | "RecipeEnded";
+  /** WP-2423: StaffDeclared — staff changed a listed dish's allergen answers on the Menu page. */
+  readonly cause: "RecipeBound" | "RecipeEnded" | "StaffDeclared";
   /** Null: the dish's allergens could not be resolved after the change (staff are asked). */
   readonly allergens: readonly SellableAllergenNow[] | null;
   readonly recordedAt: string;

@@ -102,6 +102,6 @@ it("WP-2423 (M77, M167): a dish a recipe changed since the listing tells the own
     }) as unknown as Parameters<typeof allergenSummary>[0];
   expect(allergenSummary(dish(false), choices)).toBe("Allergens from its recipe");
   expect(allergenSummary(dish(true), choices)).toBe(
-    "Allergens from its recipe · Allergens changed by a recipe. List the menu again so guests get the reviewed list.",
+    "Allergens from its recipe · Allergens changed since this menu was listed. Guests see them now; list the menu again to make it the reviewed list.",
   );
 });

@@ -257,3 +257,71 @@ it("WP-2423 (M77, M167): a Brand-wide recipe change is resolved from the Brand r
     }
   });
 });
+
+/**
+ * Remaining from the second review: staff changing a listed dish's allergen answers on the Menu
+ * page reached guests and the kitchen only after "List it", so adding milk left it out until then.
+ */
+it("WP-2423 (M77, M167): staff changing a listed dish's allergens tell guests at once, until it is listed again", async () => {
+  await withIsolatedDatabase({ caseId: "wp2423_alg_staff" }, async (context) => {
+    const admin = new Client(context.clientConfig);
+    await admin.connect();
+    const role = await createPilotApiRole(admin, context, "wp2423_acs");
+    const f = await createOneStoreMenuFixture(admin, context, { role });
+    try {
+      const { milk } = f.allergenList;
+      const rice = await f.saveDish({ name: "Plain congee (TEST)", nameZh: "白粥", allergens: [] });
+      assert.equal((await f.listAll()).status, "Listed");
+      const listedVersion = async () =>
+        (
+          await admin.query(
+            "SELECT menu_version_id::text version FROM rms_catalog.menu_publication_release WHERE menu_id=$1 ORDER BY release_sequence DESC LIMIT 1",
+            [f.menuReference],
+          )
+        ).rows[0].version;
+      const guestSees = async () =>
+        (
+          await createCustomerMenuStoreFacts({
+            transactions: { run: (work) => f.asApi(work) },
+            currencyMetadata: f.currencyMetadata,
+            priceChannelCode: "CUSTOMER_WEB",
+          }).load({
+            brandReference: f.brandReference,
+            storeReference: f.storeReference,
+            channelCode: "CUSTOMER_PWA",
+            orderTypeCode: "DINE_IN",
+            requestedAt: new Date().toISOString(),
+            sellableReferences: [rice.skuReference],
+            menuVersionReference: await listedVersion(),
+          })
+        ).get(rice.skuReference)?.allergenChange;
+      // The same answers again: nothing changed, nothing recorded.
+      await f.saveDish({
+        productReference: rice.productReference,
+        name: "Plain congee (TEST)",
+        nameZh: "白粥",
+        allergens: [],
+      });
+      assert.equal(await guestSees(), undefined);
+      // Staff now answer that it contains milk.
+      await f.saveDish({
+        productReference: rice.productReference,
+        name: "Plain congee (TEST)",
+        nameZh: "白粥",
+        allergens: [{ allergenReference: milk, classification: "Contains" }],
+      });
+      const change = await guestSees();
+      assert.equal(change?.cause, "StaffDeclared");
+      assert.deepEqual(
+        change?.allergens?.map((a) => [a.code, a.classification]),
+        [["MILK", "Contains"]],
+      );
+      // Listed again, the reviewed list names milk and the change no longer applies.
+      assert.equal((await f.listAll()).status, "Listed");
+      assert.equal(await guestSees(), undefined);
+    } finally {
+      await f.close();
+      await admin.end();
+    }
+  });
+});

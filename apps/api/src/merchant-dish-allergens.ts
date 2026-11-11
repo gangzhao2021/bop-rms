@@ -5,6 +5,7 @@ import {
   listBrandSkuChoices,
   listIngredientDeclarationHistory,
   recordIngredientAllergenDeclaration,
+  recordSellableAllergenChange,
   staffAllergenDeclarationSource,
 } from "@rms/catalog";
 import {
@@ -434,6 +435,35 @@ export async function declareDishAllergens(
         d.itemVersionReference === item.configurationOperationReference &&
         Date.parse(d.validUntil) > Date.parse(at),
     );
+    // WP-2423 (M77, M167): a listed dish whose answers staff change here tells guests and the
+    // kitchen at once (with the listed ones, until the menu is listed again), as a recipe bound
+    // after listing does; a first declaration is reviewed at listing as before.
+    const before = history[0];
+    if (before !== undefined && allergenKey(before.allergens) !== allergenKey(declared)) {
+      const entries = new Map(registry.entries.map((entry) => [entry.allergenReference, entry]));
+      await recordSellableAllergenChange(tx as never, s, {
+        changeReference: input.nextReference(),
+        operationReference: step("allergen-change"),
+        skuReference: sku.skuReference,
+        storeReference: null,
+        cause: "StaffDeclared",
+        allergens: declared.flatMap((answer) => {
+          const entry = entries.get(answer.allergenReference);
+          return entry === undefined
+            ? []
+            : [
+                {
+                  allergenReference: String(entry.allergenReference),
+                  code: String(entry.code),
+                  localizedNames: entry.localizedNames as Readonly<Record<string, string>>,
+                  classification: answer.classification as "Contains" | "CrossContactPossible",
+                },
+              ];
+        }),
+        actorReference: actor,
+        recordedAt: at,
+      });
+    }
     const declaration =
       latest !== undefined && allergenKey(latest.allergens) === allergenKey(declared)
         ? latest

@@ -107,7 +107,7 @@ export async function recordSellableAllergenChange(
   const brand = reference(scope.brandReference);
   const allergens = allergensOf(input.allergens);
   if (
-    (input.cause !== "RecipeBound" && input.cause !== "RecipeEnded") ||
+    !["RecipeBound", "RecipeEnded", "StaffDeclared"].includes(input.cause) ||
     !instant.test(input.recordedAt)
   )
     return invalid();
@@ -192,7 +192,10 @@ export async function listSellableAllergenChangesSince(
         Object.freeze({
           skuReference: String(row.sku),
           storeReference: row.store === null ? null : String(row.store),
-          cause: row.cause === "RecipeEnded" ? "RecipeEnded" : "RecipeBound",
+          cause:
+            row.cause === "RecipeEnded" || row.cause === "StaffDeclared"
+              ? row.cause
+              : "RecipeBound",
           allergens: allergensOf(row.allergens),
           recordedAt: String(row.recorded_at),
         }),

@@ -3853,8 +3853,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "客人和厨房会马上看到新配方的过敏原（连同已上架的）。请重新上架菜单，让它成为审核过的清单。",
   "A recipe changed what some dishes contain. Guests and the kitchen already see those allergens with the listed ones; list the menu to make them the reviewed list.":
     "配方改变了部分菜品的成分。客人和厨房已经能看到这些过敏原（连同已上架的）；请上架菜单，让它成为审核过的清单。",
-  "Allergens changed by a recipe. List the menu again so guests get the reviewed list.":
-    "配方改变了过敏原。请重新上架菜单，让客人看到审核过的清单。",
+  "Allergens changed since this menu was listed. Guests see them now; list the menu again to make it the reviewed list.":
+    "上架后过敏原改了。客人现在已能看到；请重新上架，让它成为审核过的清单。",
   "Every choice of a group guests must choose from is sold out here. Bring one back under Extras and choices.":
     "顾客必须选的一组里，本店每一项都售罄了。请在“加料和选项”里恢复其中一项。",
   "Sold out today": "今天售罄",

@@ -20,7 +20,7 @@ export function allergenSummary(dish: MenuDish, choices: readonly AllergenChoice
   // WP-2423 (M77, M167): guests and the kitchen already read the recipe's allergens with the
   // listed ones; listing again makes them the reviewed list.
   return dish.allergens.changedByRecipe === true
-    ? `${summary} · ${t("Allergens changed by a recipe. List the menu again so guests get the reviewed list.")}`
+    ? `${summary} · ${t("Allergens changed since this menu was listed. Guests see them now; list the menu again to make it the reviewed list.")}`
     : summary;
 }
 function declaredSummary(dish: MenuDish, choices: readonly AllergenChoice[]): string {
