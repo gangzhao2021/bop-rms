@@ -86,7 +86,7 @@ interface Table {
     roundNumber: number;
     sentByThisPhone: boolean;
     lines: number[];
-    paymentState?: "AwaitingPayment" | "Paid" | "PayLater" | "Cancelled";
+    paymentState?: "AwaitingPayment" | "Paid" | "PayLater" | "Cancelled" | "Returned";
   }[];
 }
 interface Seen {
@@ -425,3 +425,62 @@ for (const screen of [
     });
   });
 }
+
+test("@production M38: the phone paying for its round stops, and the dishes are back in the table's cart", async ({
+  page,
+}) => {
+  // The payer pressed "Continue to payment": its round holds both phones' dishes, the cart is empty.
+  const table: Table = {
+    version: 4,
+    items: [],
+    rounds: [
+      { roundNumber: 1, sentByThisPhone: true, lines: [2, 6], paymentState: "AwaitingPayment" },
+    ],
+  };
+  await stubTable(page, table);
+  const asked: { body: unknown; key: string | undefined }[] = [];
+  await page.route("**/api/v1/dine-in/rounds/withdraw", (route) => {
+    asked.push({
+      body: route.request().postDataJSON(),
+      key: route.request().headers()["idempotency-key"],
+    });
+    table.version = 6;
+    table.items = [
+      mine(),
+      { reference: 7, name: "Synthetic sesame soup", quantity: 1, other: true },
+    ];
+    table.rounds = [
+      { roundNumber: 1, sentByThisPhone: true, lines: [2, 6], paymentState: "Returned" },
+    ];
+    return route.fulfill({
+      status: 200,
+      headers: { "cache-control": "no-store" },
+      json: { schemaVersion: 1, status: "Returned" },
+    });
+  });
+  await enterTable(page, "/cart");
+  await expect(page.getByText("You’re paying for round 1.", { exact: false })).toBeVisible();
+  const stop = page.getByRole("button", { name: "Don’t pay. Put the dishes back" });
+  await expect(stop).toBeVisible();
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await expect(stop).toBeVisible();
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.screenshot({ path: `test-results/round-withdraw-${width}.png`, fullPage: true });
+  }
+  await stop.click();
+  await expect(
+    page.getByText("Round 1 wasn’t paid, so it wasn’t ordered. Its dishes are back in the cart."),
+  ).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Synthetic sesame soup" })).toBeVisible();
+  expect(asked).toHaveLength(1);
+  expect(asked[0]?.body).toEqual({ roundNumber: 1 });
+  expect(asked[0]?.key).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7/u);
+  // No internal references or codes on the page.
+  expect(await page.locator("body").innerText()).not.toMatch(
+    /[0-9a-f]{8}-[0-9a-f]{4}-7|GUEST_CANCELLED|AwaitingPayment|Returned\b/u,
+  );
+  await page.screenshot({ path: "test-results/round-withdraw-returned.png", fullPage: true });
+});
