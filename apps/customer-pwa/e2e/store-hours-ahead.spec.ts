@@ -126,6 +126,51 @@ test.describe("@production the Store's hours ahead", () => {
     await page.screenshot({ path: "test-results/orders-stopped-390.png" });
   });
 
+  test("a paused pickup says until when in sentences that end with one period", async ({
+    page,
+  }) => {
+    // WP-2423 store-service-controls (v15 M30 live check): "until 8:08 a.m.." read twice.
+    await page.route("**/api/v1/customer/store", (route) =>
+      route.fulfill({
+        status: 200,
+        headers: { "cache-control": "private, max-age=30" },
+        json: {
+          ...syntheticStoreProfile,
+          store: {
+            ...syntheticStoreProfile.store,
+            hours: {
+              ...syntheticStoreProfile.store.hours,
+              status: "Paused",
+              pausedUntil: "08:08:00",
+            },
+          },
+        },
+      }),
+    );
+    await enterOpen(page);
+    await page.goto("/#qr=aaa.bbb.ccc");
+    await expect(
+      page.getByRole("heading", { level: 1, name: "Synthetic Store", exact: true }),
+    ).toBeVisible();
+    await page.evaluate(() => {
+      history.pushState(null, "", "/menu");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    const notice = page.getByRole("alert", { name: "Last orders" });
+    await expect(notice).toHaveText(
+      "Online pickup ordering is paused until 8:08 a.m. You can order at the counter, or come back after 8:08 a.m.",
+    );
+    for (const width of [1440, 1024, 390]) {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+      await expect(notice).toBeVisible();
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true);
+    }
+    await expectNoInternalText(page);
+    await page.screenshot({ path: "test-results/pickup-paused-390.png" });
+  });
+
   test("a guest who scans on a holiday is told so and when the Store opens next", async ({
     page,
   }) => {
