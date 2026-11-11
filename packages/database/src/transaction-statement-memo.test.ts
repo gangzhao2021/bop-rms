@@ -247,18 +247,35 @@ describe("WP-2423 M35 stable reads (DEC-STAFF-ROUND-SPEED)", () => {
       expect(stable(memo) !== null, sql).toBe(kept);
     }
   });
-  it("keeps a row-locked stable read across writes (its row lock is held), and a first row lock forgets the rest", () => {
+  it("keeps a row-locked stable read across new locks and row-locking reads, and a first row lock forgets the rest", () => {
     const memo = createTransactionStatementMemo({ "bop.brand_id": brand, "bop.store_id": store });
     memo.observe(readSql, ["t"], result("x"), true);
     memo.observe(lockedReadSql, ["t"], result("b"), true);
     expect(stable(memo)).toBeNull();
     expect(stable(memo, lockedReadSql)).toMatchObject({ rows: [{ value: "b" }] });
-    memo.observe("UPDATE rms_dining.dining_table SET x=$1", ["v"]);
+    memo.observe(lockSql, ["k"]);
+    memo.observe(tableSql, []);
+    memo.observe("SELECT * FROM rms_dining.dining_session WHERE id=$1 FOR UPDATE", ["s"]);
     expect(stable(memo, lockedReadSql)).not.toBeNull();
     // Its repeat (the lock already held) does not forget anything.
     memo.observe(readSql, ["t"], result("y"), true);
     memo.observe(lockedReadSql, ["t"], result("b"), true);
     expect(stable(memo)).toMatchObject({ rows: [{ value: "y" }] });
+  });
+  it("forgets a row-locked stable read after any statement that may write, as this transaction may change the row it locked", () => {
+    for (const sql of [
+      "UPDATE bop_tenant.brand SET display_name=$1 WHERE brand_id='t'",
+      "INSERT INTO platform_audit.audit_record (a) VALUES ($1)",
+      "WITH x AS (UPDATE bop_tenant.brand SET a=$1 RETURNING 1) SELECT 1",
+      "SELECT bop_tenant.rename_brand($1)",
+      "SELECT bop_tenant.rename_brand($1) FOR UPDATE",
+      "DELETE FROM rms_dining.dining_table WHERE id=$1",
+    ]) {
+      const memo = createTransactionStatementMemo({ "bop.brand_id": brand, "bop.store_id": store });
+      memo.observe(lockedReadSql, ["t"], result("b"), true);
+      memo.observe(sql, ["v"]);
+      expect(stable(memo, lockedReadSql), sql).toBeNull();
+    }
   });
   it("never answers a read whose values are not plain text or numbers", () => {
     const memo = createTransactionStatementMemo();

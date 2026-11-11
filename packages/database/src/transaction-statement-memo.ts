@@ -162,7 +162,8 @@ const resultOf = (column: string, value: string | null) =>
   });
 
 // A stable read with a trailing row-locking clause: once it ran, this transaction holds the row
-// lock, so no other transaction can change the row until this one ends.
+// lock, so no other transaction can change the row until this one ends. This transaction itself
+// still can, so any statement that may write forgets row-locked reads too.
 const rowLockingClause =
   /\s+FOR\s+(?:UPDATE|NO\s+KEY\s+UPDATE|SHARE|KEY\s+SHARE)(?:\s+OF\s+[a-z_][a-z0-9_.]*(?:\s*,\s*[a-z_][a-z0-9_.]*)*)?(?:\s+(?:NOWAIT|SKIP\s+LOCKED))?\s*;?\s*$/iu;
 const leadingComments = /^(?:\s+|--[^\n]*(?:\n|$)|\/\*[\s\S]*?\*\/)*/u;
@@ -304,7 +305,12 @@ export function createTransactionStatementMemo(
             reads.set(key, { result: copyResult(result), locked });
           return;
         }
-        if (mayChange(text)) forgetUnlockedReads();
+        // A statement that may write (anything but a plain read, with or without a row lock) may
+        // change a row this transaction itself holds locked, and its own later read sees that
+        // change: forget every stable read. A plain row-locking read or a new lock writes nothing,
+        // so only reads taken without a row lock (now possibly older than the lock) are forgotten.
+        if (mayChange(text.replace(rowLockingClause, ""))) reads.clear();
+        else if (mayChange(text)) forgetUnlockedReads();
         return;
       }
       if (remembered.kind === "settings")
