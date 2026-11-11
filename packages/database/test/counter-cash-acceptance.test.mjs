@@ -9,11 +9,13 @@ import {
   cardMachinePaymentTakenMinor,
   cardMachineRefundGivenBackMinor,
   createPostgresCardMachinePaymentStore,
+  createPostgresOrderFinancialPosition,
   parseCardMachinePaymentRecord,
   parseCardMachineRefundRecord,
   planCounterCashTender,
 } from "../../rms/payment/src/index.ts";
 import { preparation } from "../../rms/payment/src/tests/payment-intent-creation.fixture.ts";
+import { createPostgresOrdinaryRefundCaptureSource } from "../../rms/payment/src/infrastructure/persistence/ordinary-refund-capture-source.ts";
 import { renderPilotAclSql } from "../../../tooling/environment/pilot-acl-render.mjs";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 
@@ -371,6 +373,155 @@ it("WP-2423 M52: the counter takes cash by the table's rules; replay, concurrenc
           refundedMinor: 2245n,
         },
       });
+
+      // 6. M52/M131 (review): the Order's refunded amounts read from the database as the pilot API
+      // role. Cash goes back in whole nickels; the Order never counts the rounding, and once the
+      // drawer gave back all the cash it took, the Order is refunded in full.
+      const position = (orderReference) =>
+        asApi((tx) =>
+          createPostgresOrderFinancialPosition({
+            scope: { tenantReference: tenant, brandReference: brand, storeReference: store },
+            providerAccountReference: id(++n),
+            environment: "Test",
+            authorize: async () => true,
+          })(tx, { orderReference, observedAt: new Date().toISOString() }),
+        );
+      // $22.43 taken as $22.45: $4.35 and $18.10 went back ($22.45): the Order got $22.43.
+      const roundedUp = (await position(first.orderReference)).settlement;
+      assert.equal(roundedUp.confirmedRefundMinor, 2243n);
+      assert.deepEqual(roundedUp.refundAllocation, {
+        orderMinor: 2043n,
+        tipMinor: 200n,
+        unallocatedMinor: 0n,
+      });
+      // $22.47 taken as $22.45, cancelled: the drawer gives back $22.45, the Order is refunded
+      // $22.47 in full (it was read as $22.45, two cents never refunded).
+      const down = order(2047n, 200n);
+      const downPaid = await asApi((tx) =>
+        cards().record(
+          tx,
+          paymentOf(down, id(++n), { cash: planCounterCashTender(down.preparation, 3000n) }),
+        ),
+      );
+      const refundOn = (paid, amountMinor, extra = {}) =>
+        refundOf(amountMinor, {
+          cardMachinePaymentReference: paid.record.cardMachinePaymentReference,
+          orderReference: paid.record.orderReference,
+          ...extra,
+        });
+      const owed = cardMachineRefundGivenBackMinor(
+        downPaid.record,
+        cardMachinePaymentTakenMinor(downPaid.record),
+        0n,
+      );
+      assert.equal(owed, 2245n);
+      await asApi((tx) => cards().recordRefund(tx, refundOn(downPaid, owed)));
+      const cancelled = (await position(down.orderReference)).settlement;
+      assert.equal(cancelled.capturedMinor, 2247n);
+      assert.equal(cancelled.confirmedRefundMinor, 2247n);
+      assert.equal(cancelled.pendingRefundMinor, 0n);
+      assert.deepEqual(cancelled.refundAllocation, {
+        orderMinor: 2047n,
+        tipMinor: 200n,
+        unallocatedMinor: 0n,
+      });
+
+      // 7. M52/M131 (review): a new refund request on a cash payment, as the pilot API role: what is
+      // left is the Order's, a request under 3 cents is refused, and once the drawer is empty nothing
+      // more can be requested (refusals, never an outage).
+      const dishes = order(2047n, 200n);
+      const dishesPaid = await asApi((tx) =>
+        cards().record(
+          tx,
+          paymentOf(dishes, id(++n), { cash: planCounterCashTender(dishes.preparation, 3000n) }),
+        ),
+      );
+      const requestAt = new Date().toISOString();
+      const request = (amountMinor) => ({
+        tenantReference: tenant,
+        brandReference: brand,
+        storeReference: store,
+        orderReference: dishes.orderReference,
+        requestReference: id(++n),
+        operationReference: id(++n),
+        actorReference: actor,
+        auditReference: id(++n),
+        expectedClaimVersion: 0,
+        policyVersion: "PILOT_ORDINARY_REFUND_V1",
+        allocationVersion: "ORDINARY_REFUND_ALLOCATION_V1",
+        reasonCode: "CUSTOMER_REQUEST",
+        requestedAt: requestAt,
+        currencyCode: "CAD",
+        amountMinor,
+        payments: [
+          {
+            paymentTransactionReference: dishesPaid.record.cardMachinePaymentReference,
+            paymentIntentReference: dishesPaid.record.paymentIntentReference,
+            paymentAttemptReference: dishesPaid.record.paymentAttemptReference,
+            firstCaptureReference: dishesPaid.record.cardMachinePaymentReference,
+            sourceReference: id(++n),
+            sourceDigest: digest(++n),
+            items: [
+              {
+                orderItemReference: id(++n),
+                refundUnitOrdinals: [1],
+                components: {
+                  netAmountMinor: amountMinor,
+                  taxAmountMinor: 0n,
+                  tipAmountMinor: 0n,
+                  serviceChargeAmountMinor: 0n,
+                  serviceChargeTaxAmountMinor: 0n,
+                },
+              },
+            ],
+          },
+        ],
+      });
+      const balance = (value, history = []) =>
+        asApi((tx) =>
+          createPostgresOrdinaryRefundCaptureSource({
+            scope: {
+              tenantReference: tenant,
+              brandReference: brand,
+              storeReference: store,
+              providerAccountReference: id(++n),
+              environment: "Test",
+            },
+            now: () => new Date().toISOString(),
+            authorize: async () => true,
+            validatePricing: async () => true,
+            allowCardMachine: true,
+          })(tx, { request: value, history }),
+        );
+      const dish = request(438n);
+      assert.deepEqual(
+        (await balance(dish)).map((entry) => [
+          entry.capturedAmountMinor,
+          entry.otherOccupiedAmountMinor,
+        ]),
+        [[2247n, 0n]],
+      );
+      // Under 3 cents can't be handed back in cash.
+      await assert.rejects(balance(request(2n)), /ORDINARY_REFUND_CASH_UNDER_NICKEL/u);
+      // The order is cancelled: the drawer gives back all $22.45 it took (the rounding included).
+      await asApi((tx) =>
+        cards().recordRefund(
+          tx,
+          refundOn(
+            dishesPaid,
+            cardMachineRefundGivenBackMinor(
+              dishesPaid.record,
+              cardMachinePaymentTakenMinor(dishesPaid.record),
+              0n,
+            ),
+          ),
+        ),
+      );
+      // The drawer is empty: the 2 cents of the Order it never held can't be requested (all of it
+      // is taken), and a request already made revalidates as it was.
+      assert.equal((await balance(request(4n)))[0].otherOccupiedAmountMinor, 2247n);
+      assert.equal((await balance(request(2n)))[0].otherOccupiedAmountMinor, 2247n);
+      assert.equal((await balance(dish, [dish]))[0].otherOccupiedAmountMinor, 2245n);
     } finally {
       for (const client of clients) await client.end().catch(() => undefined);
       await admin.end();
