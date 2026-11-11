@@ -97,6 +97,7 @@ const d = vi.hoisted(() => ({
   plan: vi.fn(),
   execute: vi.fn(),
   prior: vi.fn(),
+  priors: vi.fn(async (): Promise<Map<string, unknown>> => new Map()),
   selections: vi.fn(async (actions: readonly string[]) => actions.map((action) => ({ action }))),
 }));
 vi.mock("./merchant-staff-labels.js", () => ({
@@ -115,6 +116,7 @@ vi.mock("@bop/permission", async (original) => ({
   planRoleAdministrationChange: d.plan,
   executeRoleAdministration: d.execute,
   findRoleAdministrationOperation: d.prior,
+  findRoleAdministrationOperations: d.priors,
   buildRolePermissionSelections: (_tx: unknown, actions: readonly string[]) =>
     d.selections(actions),
 }));
@@ -688,9 +690,9 @@ describe("WP-2423 store-type starter roles", () => {
   });
   it("the same reference for another kind of shop is a conflict, never a second set", async () => {
     const f = setup();
-    const teaStep = starterStepReference(id(9), "TeaShop:counter:Create");
-    d.prior.mockImplementation(async (_tx: unknown, _scope: unknown, reference: string) =>
-      reference === teaStep ? { roleReference: id(0x70) } : null,
+    const teaStep = starterStepReference(id(9), "TeaShop:Keep:counter:Create");
+    d.priors.mockResolvedValueOnce(
+      new Map([[teaStep, { commandType: "SaveDraft", actorReference: id(5) }]]),
     );
     await expect(
       f.service.applyStarterSet({
@@ -719,5 +721,111 @@ describe("WP-2423 store-type starter roles", () => {
       "identity.role.change",
       "identity.role.deactivate",
     ]);
+  });
+  const recordedSteps = (steps: readonly string[], actorReference = id(5)) =>
+    new Map(
+      steps.map((label) => [
+        starterStepReference(id(9), label),
+        { commandType: "SaveDraft", actorReference },
+      ]),
+    );
+  it("a retry of the same apply answers from what it recorded and changes nothing", async () => {
+    const f = setup();
+    d.priors.mockResolvedValueOnce(
+      recordedSteps([
+        "TeaShop:PutAway:counter:Create",
+        "TeaShop:PutAway:counter:Submit",
+        "TeaShop:PutAway:kitchen:Deactivate",
+      ]),
+    );
+    await expect(
+      f.service.applyStarterSet({
+        ...f.input,
+        body: { storeType: "TeaShop", operationReference: id(9), putAway: true },
+      }),
+    ).resolves.toEqual({ storeType: "TeaShop", added: 1, putAway: 1 });
+    expect(d.execute).not.toHaveBeenCalled();
+  });
+  it("Try again with another choice about removing, or by another person, is a conflict", async () => {
+    for (const [recorded, putAway] of [
+      [recordedSteps(["TeaShop:Keep:counter:Create"]), true],
+      [recordedSteps(["TeaShop:PutAway:counter:Create"], id(8)), true],
+    ] as const) {
+      const f = setup();
+      d.priors.mockResolvedValueOnce(recorded);
+      await expect(
+        f.service.applyStarterSet({
+          ...f.input,
+          body: { storeType: "TeaShop", operationReference: id(9), putAway },
+        }),
+      ).rejects.toMatchObject({ code: "Conflict" });
+    }
+    expect(d.execute).not.toHaveBeenCalled();
+  });
+  it("an apply that would change nothing is a conflict, so no reference is spent without a trace", async () => {
+    const f = setup();
+    const here = (code: string, name: string) => {
+      const version = { ...record, code, displayName: name, lifecycle: "Active" };
+      return roleView({ record: version, effective: version, opening: null });
+    };
+    d.list.mockResolvedValue([here("starter_counter", "Counter")]);
+    await expect(
+      f.service.applyStarterSet({
+        ...f.input,
+        body: { storeType: "CounterOnly", operationReference: id(9), putAway: false },
+      }),
+    ).rejects.toMatchObject({ code: "Conflict" });
+    expect(d.execute).not.toHaveBeenCalled();
+  });
+  it("a starter role not approved, or withdrawn, before it was on is said so and sent again", async () => {
+    const withdrawn = {
+      ...record,
+      code: "starter_counter",
+      displayName: "Counter",
+      lifecycle: "Withdrawn",
+      roleReference: id(0x71),
+      version: 3,
+    };
+    const roles = [roleView({ record: withdrawn, effective: null, opening: null })];
+    expect(
+      starterSetView(roles as never, "CounterOnly").roles.map((role) => [
+        role.state,
+        role.roleReference,
+      ]),
+    ).toEqual([["NotApproved", id(0x71)]]);
+    for (const lifecycle of ["Rejected", "Withdrawn"])
+      expect(
+        starterSetView(
+          [
+            roleView({ record: { ...withdrawn, lifecycle }, effective: null, opening: null }),
+          ] as never,
+          "CounterOnly",
+        ).roles[0]?.state,
+      ).toBe("NotApproved");
+    const f = setup();
+    d.list.mockResolvedValue(roles);
+    d.load
+      .mockResolvedValueOnce(roles[0])
+      .mockResolvedValue(
+        roleView({ record: { ...withdrawn, lifecycle: "Draft", version: 4 }, effective: null }),
+      );
+    d.plan.mockImplementation((input: { operation: string }) => ({
+      ...withdrawn,
+      version: input.operation === "Revise" ? 4 : 5,
+    }));
+    d.execute.mockImplementation(async (input: { operation: string }) => ({
+      roleReference: id(0x71),
+      version: input.operation === "Revise" ? 4 : 5,
+      lifecycle: input.operation === "Revise" ? "Draft" : "InReview",
+    }));
+    await expect(
+      f.service.applyStarterSet({
+        ...f.input,
+        body: { storeType: "CounterOnly", operationReference: id(9), putAway: false },
+      }),
+    ).resolves.toEqual({ storeType: "CounterOnly", added: 1, putAway: 0 });
+    expect(
+      d.execute.mock.calls.map((call) => (call[0] as { operation: string }).operation),
+    ).toEqual(["Revise", "Submit"]);
   });
 });

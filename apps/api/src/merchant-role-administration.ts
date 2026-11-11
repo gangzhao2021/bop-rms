@@ -7,6 +7,7 @@ import {
   planRoleAdministrationChange,
   executeRoleAdministration,
   findRoleAdministrationOperation,
+  findRoleAdministrationOperations,
   listRoleAdministration,
   loadRoleAdministration,
   buildRolePermissionSelections,
@@ -1131,9 +1132,12 @@ export function createMerchantRoleAdministration(options: {
    * Starts the Store's roles from a kind of shop's set, in one transaction: each starter role the
    * Store does not have is created under its fixed code and sent for approval (approved by another
    * person, or by a sole owner alone, then turned on like any role), and, when asked, each preset
-   * the shop does not use that nobody holds is removed (it can be brought back). A retry under the
-   * same reference finds everything done and changes nothing; the same reference for another kind
-   * of shop is a conflict.
+   * the shop does not use that nobody holds is removed (it can be brought back). A starter role that
+   * was not approved, or was withdrawn, before it was ever on is sent for approval again. A retry
+   * under the same reference answers from what the first attempt recorded and changes nothing; the
+   * same reference for another kind of shop, another choice about removing, or another person is a
+   * conflict. An apply that would change nothing is a conflict too (the owner saw roles since
+   * changed), so every applied reference leaves a record a retry is checked against.
    */
   const applyStarterSet = async (input: {
     sessionCookie: unknown;
@@ -1159,24 +1163,44 @@ export function createMerchantRoleAdministration(options: {
             if (needed.some((code) => decisions.get(code)?.effect !== "Allow"))
               return fail("PermissionDenied");
             const ownerScope = ownerScopeOf(scope);
-            const step = (storeType: StarterStoreType, label: string) =>
-              starterStepReference(request.operationReference, storeType + ":" + label);
-            for (const other of starterStoreTypes) {
-              if (other === request.storeType) continue;
-              const set = starterRoleSet(other);
-              for (const label of [
-                ...set.add.map((key) => key + ":Create"),
-                ...set.putAway.map((code) => code + ":Deactivate"),
-              ])
-                if (
-                  (await findRoleAdministrationOperation(
-                    asRoleTx(tx),
-                    ownerScope,
-                    step(other, label),
-                  )) !== null
-                )
-                  return fail("Conflict");
-            }
+            const viewer = String(scope.actorReference);
+            const step = (label: string) =>
+              starterStepReference(
+                request.operationReference,
+                starterIntent(request) + ":" + label,
+              );
+            // What a first attempt under this reference recorded, for every apply it could have
+            // been: the same apply is answered from its own steps, any other is a conflict.
+            const probes = starterStoreTypes.flatMap((storeType) =>
+              [false, true].flatMap((putAway) =>
+                starterStepLabels(storeType).map((label) => ({
+                  same: storeType === request.storeType && putAway === request.putAway,
+                  label,
+                  reference: starterStepReference(
+                    request.operationReference,
+                    starterIntent({ storeType, putAway }) + ":" + label,
+                  ),
+                })),
+              ),
+            );
+            const recorded = await findRoleAdministrationOperations(
+              asRoleTx(tx),
+              ownerScope,
+              probes.map((probe) => probe.reference),
+            );
+            const found = probes.filter((probe) => recorded.has(probe.reference));
+            if (
+              found.some(
+                (probe) => !probe.same || recorded.get(probe.reference)?.actorReference !== viewer,
+              )
+            )
+              return fail("Conflict");
+            if (found.length > 0)
+              return {
+                storeType: request.storeType,
+                added: found.filter((probe) => /:(Create|Revise)$/u.test(probe.label)).length,
+                putAway: found.filter((probe) => probe.label.endsWith(":Deactivate")).length,
+              };
             const roles = await listRoleAdministration(
               asRoleTx(tx),
               ownerScope,
@@ -1186,34 +1210,50 @@ export function createMerchantRoleAdministration(options: {
             let added = 0,
               putAway = 0;
             for (const role of plan.roles) {
-              if (role.state !== "ToAdd") continue;
+              if (role.state !== "ToAdd" && role.state !== "NotApproved") continue;
               const definition = starterRole(role.key);
-              const create: RoleCommandInput = {
-                operation: "Create",
-                roleReference: null,
-                expectedVersion: null,
-                operationReference: step(request.storeType, role.key + ":Create"),
-                reasonCode: starterSetReason,
-                draft: {
-                  displayName: definition.displayName,
-                  description: definition.description,
-                  actions: [...definition.actions],
-                },
+              const draft = {
+                displayName: definition.displayName,
+                description: definition.description,
+                actions: [...definition.actions],
               };
+              // Not approved, or withdrawn, before it was ever on: sent for approval again.
+              const again =
+                role.state === "NotApproved"
+                  ? roles.find((item) => item.record.roleReference === role.roleReference)
+                  : undefined;
+              const write: RoleCommandInput =
+                again === undefined
+                  ? {
+                      operation: "Create",
+                      roleReference: null,
+                      expectedVersion: null,
+                      operationReference: step(role.key + ":Create"),
+                      reasonCode: starterSetReason,
+                      draft,
+                    }
+                  : {
+                      operation: "Revise",
+                      roleReference: again.record.roleReference,
+                      expectedVersion: again.record.version,
+                      operationReference: step(role.key + ":Revise"),
+                      reasonCode: starterSetReason,
+                      draft,
+                    };
               const created = await executeCommand(
                 tx,
                 scope,
                 decisions,
                 guard,
-                create,
-                roleCommandIntentDigest(create),
-                definition.roleCode,
+                write,
+                roleCommandIntentDigest(write),
+                again === undefined ? definition.roleCode : undefined,
               );
               const submit: RoleCommandInput = {
                 operation: "Submit",
                 roleReference: created.roleReference,
                 expectedVersion: created.version,
-                operationReference: step(request.storeType, role.key + ":Submit"),
+                operationReference: step(role.key + ":Submit"),
                 reasonCode: starterSetReason,
                 draft: null,
               };
@@ -1238,7 +1278,7 @@ export function createMerchantRoleAdministration(options: {
                   operation: "Deactivate",
                   roleReference: preset.roleReference,
                   expectedVersion: role.record.version,
-                  operationReference: step(request.storeType, role.record.code + ":Deactivate"),
+                  operationReference: step(role.record.code + ":Deactivate"),
                   reasonCode: starterSetReason,
                   draft: null,
                 };
@@ -1252,6 +1292,9 @@ export function createMerchantRoleAdministration(options: {
                 );
                 putAway += 1;
               }
+            // An apply that changes nothing leaves no trace for a retry to answer from: what the
+            // owner saw is out of date (someone changed the roles meanwhile).
+            if (added + putAway === 0) return fail("Conflict");
             if (!(await guard(tx))) return fail("PermissionDenied");
             return { storeType: request.storeType, added, putAway };
           },
@@ -1262,6 +1305,19 @@ export function createMerchantRoleAdministration(options: {
   return { list, detail, command, waiting, declineOffer, starterSets, applyStarterSet };
 }
 
+/** An apply's whole intent, part of each step's reference: another intent never replays it. */
+const starterIntent = (apply: {
+  readonly storeType: StarterStoreType;
+  readonly putAway: boolean;
+}) => apply.storeType + ":" + (apply.putAway ? "PutAway" : "Keep");
+/** The steps an apply for this kind of shop can record (each role's first one, each removal). */
+const starterStepLabels = (storeType: StarterStoreType) => {
+  const set = starterRoleSet(storeType);
+  return [
+    ...set.add.flatMap((key) => [key + ":Create", key + ":Revise"]),
+    ...set.putAway.map((code) => code + ":Deactivate"),
+  ];
+};
 /** The reason every starter-set step is recorded with. */
 export const starterSetReason = "ROLE_STARTER_SET";
 const starterActions = [
@@ -1298,10 +1354,10 @@ export function starterSetView(
   const store = roles.filter((role) => role.record.storeReference !== null);
   const byCode = new Map(store.map((role) => [String(role.record.code), role]));
   const named = store.filter((role) => role.effective?.lifecycle !== "Deactivated");
-  const taken = (name: string) =>
+  const taken = (name: string, self?: RoleAdministrationRoleView) =>
     named.some(
       (role) =>
-        sameName(role.record.displayName, name) ||
+        (role !== self && sameName(role.record.displayName, name)) ||
         (role.effective !== null && sameName(role.effective.displayName, name)),
     );
   const set = starterRoleSet(storeType);
@@ -1320,9 +1376,14 @@ export function starterSetView(
             ? taken(definition.displayName)
               ? ("NameTaken" as const)
               : ("ToAdd" as const)
-            : have.effective?.lifecycle === "Deactivated"
-              ? ("Removed" as const)
-              : ("Added" as const),
+            : have.effective === null &&
+                (have.record.lifecycle === "Rejected" || have.record.lifecycle === "Withdrawn")
+              ? taken(definition.displayName, have)
+                ? ("NameTaken" as const)
+                : ("NotApproved" as const)
+              : have.effective?.lifecycle === "Deactivated"
+                ? ("Removed" as const)
+                : ("Added" as const),
         roleReference: have?.record.roleReference ?? null,
       };
     }),

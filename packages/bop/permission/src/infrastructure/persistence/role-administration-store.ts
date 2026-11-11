@@ -492,6 +492,32 @@ export async function findRoleAdministrationOperation(
         lifecycle: String(row.lifecycle),
       };
 }
+/**
+ * Which of `operationReferences` were recorded, and by whom: a command made of several steps (a
+ * starter-set apply) learns in one read which of its steps a first attempt already took.
+ */
+export async function findRoleAdministrationOperations(
+  tx: RoleAdministrationTransaction,
+  scope: RoleAdministrationScope,
+  operationReferences: readonly string[],
+): Promise<ReadonlyMap<string, { readonly commandType: string; readonly actorReference: string }>> {
+  if (operationReferences.length === 0) return new Map();
+  await tx.query(scopeSql, [scope.brandReference, scope.storeReference]);
+  const rows = (
+    await tx.query(
+      `SELECT o.operation_reference::text reference,o.command_type,o.actor_reference::text actor
+       FROM bop_permission.role_administration_operation o
+       WHERE o.brand_id=$1 AND o.operation_reference=ANY($2::uuid[])`,
+      [scope.brandReference, [...operationReferences]],
+    )
+  ).rows;
+  return new Map(
+    rows.map((row) => [
+      String(row.reference),
+      { commandType: String(row.command_type), actorReference: String(row.actor) },
+    ]),
+  );
+}
 /** Active catalog definitions a role may select, keyed by action code. */
 export async function readPermissionDefinitionReferences(
   tx: RoleAdministrationTransaction,

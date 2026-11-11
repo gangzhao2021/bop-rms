@@ -396,15 +396,17 @@ it("starter roles: apply a kind of shop's set, approve alone, edit, remove and a
       );
       assert.equal((await roles.starterSets(as("ana"))).started, true);
 
-      // ── A retry changes nothing; the same reference for another kind of shop is a conflict.
+      // ── A retry answers as the first attempt did and changes nothing; the same reference for
+      // another kind of shop, or with another choice about removing, is a conflict.
       const count = await versions();
       assert.deepEqual(await apply("ana", "TeaShop", reference), {
         storeType: "TeaShop",
-        added: 0,
-        putAway: 0,
+        added: 2,
+        putAway: 2,
       });
       assert.equal(await versions(), count);
       await assert.rejects(apply("ana", "Hotpot", reference), refused("Conflict"));
+      await assert.rejects(apply("ana", "TeaShop", reference, false), refused("Conflict"));
       assert.equal(await versions(), count);
       assert.equal(await roleIdOf(storeA, "starter_floor"), null);
 
@@ -505,16 +507,45 @@ it("starter roles: apply a kind of shop's set, approve alone, edit, remove and a
       await send("ana", "Create", null, {
         draft: { displayName: "runner", description: "Runs dishes", actions: ["merchant.access"] },
       });
+      // 收银 is how Cashier reads in Chinese: Cashier would show as a second 收银.
+      await send("ana", "Create", null, {
+        draft: { displayName: "收银", description: "Takes payment", actions: ["merchant.access"] },
+      });
       assert.deepEqual(
         (await setOf("ana", "Hotpot")).roles.map((role) => role.state),
-        ["ToAdd", "NameTaken", "ToAdd"],
+        ["ToAdd", "NameTaken", "NameTaken"],
       );
       assert.deepEqual(await apply("ana", "Hotpot", fresh(), false), {
         storeType: "Hotpot",
-        added: 2,
+        added: 1,
         putAway: 0,
       });
       assert.equal(await roleIdOf(storeA, "starter_runner"), null);
+      assert.equal(await roleIdOf(storeA, "starter_cashier"), null);
+
+      // ── Nothing left to add: the apply is refused as out of date, and nothing is recorded.
+      const settled = await versions();
+      await assert.rejects(apply("ana", "Hotpot", fresh(), false), refused("Conflict"));
+      assert.equal(await versions(), settled);
+
+      // ── Floor, withdrawn before it was ever on, is said so and sent for approval again.
+      const floor = await roleIdOf(storeA, "starter_floor");
+      await send("ana", "Withdraw", floor);
+      assert.deepEqual(
+        (await setOf("ana", "Hotpot")).roles.map((role) => role.state),
+        ["NotApproved", "NameTaken", "NameTaken"],
+      );
+      assert.deepEqual(await apply("ana", "Hotpot", fresh(), false), {
+        storeType: "Hotpot",
+        added: 1,
+        putAway: 0,
+      });
+      item = await detail("ana", floor);
+      assert.deepEqual(
+        [item.state, item.change.status, item.change.permissions],
+        ["NotOn", "InReview", [...starterRole("floor").actions].sort()],
+      );
+      assert.equal(await roleIdOf(storeA, "starter_floor"), floor);
 
       // ── History is append-only: a recorded starter step cannot be rewritten.
       await assert.rejects(
