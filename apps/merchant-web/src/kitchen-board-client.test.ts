@@ -551,3 +551,20 @@ it("reads each chosen dish's section, and a server that does not give it", async
     }),
   ).toThrow();
 });
+it("merchant-outage-recovery M120: carries when the order was placed, so the ticket counts its wait from then, and the alcohol ID check", async () => {
+  const f = setup();
+  const placed = "2026-09-19T11:57:00.000Z";
+  f.fetcher.mockResolvedValue(
+    response({
+      ...metadata,
+      items: [{ ...item(), placedAt: placed, checkId: true }, item(7)],
+      nextCursor: null,
+    }),
+  );
+  const [first, second] = parseKitchenBoardView(await f.client.loadQueue()).items;
+  expect(first?.placedAt).toBe(placed);
+  expect(first?.checkId).toBe(true);
+  // An item the server could not date reads as before, from when the kitchen got it.
+  expect(second?.placedAt).toBeUndefined();
+  expect(second?.checkId).toBeUndefined();
+});

@@ -146,6 +146,11 @@ function item(value: unknown) {
     requiredQuantity: raw.requiredQuantity,
     completedQuantity: raw.completedQuantity,
     createdAt: raw.workItemCreatedAt,
+    // merchant-outage-recovery M120: when the order was placed; the ticket's wait counts from
+    // then, not from acceptance. Absent when the server could not date the round.
+    ...("placedAt" in raw ? { placedAt: raw.placedAt } : {}),
+    // WP-2423 (M93, Owner decision 18): the dish contains alcohol; check ID (19+) when serving.
+    ...("checkId" in raw ? { checkId: raw.checkId } : {}),
     allergenCue: "Unavailable",
     exceptionStatus: "Unavailable",
     selectedOptions: selectedOptions(raw.selectedOptions),
