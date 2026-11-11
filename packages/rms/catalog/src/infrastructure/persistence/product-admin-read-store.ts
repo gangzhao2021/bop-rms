@@ -220,6 +220,11 @@ export async function listProductVersionTaxClassifications(
  * WP-2423 shared-table-checkout (c): the published names of the given sellables on the Store's
  * current menus, for staff looking at a table's cart (dish names only). A sellable on no current
  * menu has no entry. Reads in the Brand scope and restores the caller's Store scope afterwards.
+ *
+ * WP-2423 staff-wording (v15 2026-11-11): a dish on several current menus carries every language
+ * any of them has, each from the most recently published menu that names it in that language. A
+ * menu published before the dish's Chinese name was entered no longer hides that name from staff
+ * who read Chinese (it named the guest's cart dish in English on the Tables and staff round).
  */
 export async function listStoreMenuSellableNames(
   tx: Tx,
@@ -236,7 +241,7 @@ export async function listStoreMenuSellableNames(
   try {
     const rows = (
       await tx.query(
-        `SELECT DISTINCT ON (v.sellable_id) v.sellable_id::text sellable, v.localized_names_json names
+        `SELECT v.sellable_id::text sellable, v.localized_names_json names
          FROM rms_catalog.published_menu_projection_checkpoint c
          JOIN rms_catalog.published_menu_projection_generation g ON g.generation_id=c.active_generation_id
           AND g.menu_id=c.menu_id AND g.brand_id=c.brand_id AND g.generation_status='Active'
@@ -247,19 +252,24 @@ export async function listStoreMenuSellableNames(
          WHERE c.consumer_name='catalog.published-menu-projection' AND c.brand_id=$1
           AND (p.store_ids_json IS NULL OR p.store_ids_json='[]'::jsonb OR p.store_ids_json @> jsonb_build_array($2::text))
           AND v.sellable_id=ANY($3::uuid[])
-         ORDER BY v.sellable_id, v.placement_id`,
+         ORDER BY v.sellable_id, g.last_rebuilt_at DESC, g.generation_id DESC, v.placement_id DESC`,
         [brand, store, sellables],
       )
     ).rows;
-    const names = new Map<string, Readonly<Record<string, string>>>();
+    const merged = new Map<string, Record<string, string>>();
     for (const row of rows) {
       const raw = row.names;
       if (raw === null || typeof raw !== "object" || Array.isArray(raw)) continue;
-      const localized: Record<string, string> = {};
+      const sellable = String(row.sellable);
+      const localized = merged.get(sellable) ?? {};
+      merged.set(sellable, localized);
+      // Newest publication first: a language it names is kept, older menus only add others.
       for (const [locale, name] of Object.entries(raw as Record<string, unknown>))
-        if (typeof name === "string" && name.trim() !== "") localized[locale] = name;
-      names.set(String(row.sellable), Object.freeze(localized));
+        if (typeof name === "string" && name.trim() !== "" && !Object.hasOwn(localized, locale))
+          localized[locale] = name;
     }
+    const names = new Map<string, Readonly<Record<string, string>>>();
+    for (const [sellable, localized] of merged) names.set(sellable, Object.freeze(localized));
     return names;
   } finally {
     await tx.query("SELECT set_config('bop.store_id',$1,true)", [
