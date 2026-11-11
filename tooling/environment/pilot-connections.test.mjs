@@ -1,6 +1,10 @@
 import { EventEmitter } from "node:events";
 import { expect, it } from "vitest";
-import { acquirePilotConnection, guardPilotPoolConnections } from "./pilot-connections.mjs";
+import {
+  acquirePilotConnection,
+  guardPilotPoolConnections,
+  pilotAcquireBudgetMs,
+} from "./pilot-connections.mjs";
 
 // WP-2423 pilot resilience (2026-10-15): v15 customer process exited three times on an unhandled
 // 'error' (FATAL 25P03, "Connection terminated unexpectedly") from a checked-out pool client.
@@ -42,7 +46,37 @@ it("WP-2423 M68: a guest's connection is retried through a brief exhaustion, the
   const quick = { sleep: async () => undefined };
   expect(await acquirePilotConnection(pool, quick)).toBe(ready);
   expect(attempts).toBe(3);
-  attempts = -10;
-  await expect(acquirePilotConnection(pool, quick)).rejects.toThrow("LOCAL_DATABASE_UNAVAILABLE");
-  expect(attempts).toBe(-6);
+  attempts = -1000;
+  await expect(acquirePilotConnection(pool, { ...quick, retries: 5 })).rejects.toThrow(
+    "LOCAL_DATABASE_UNAVAILABLE",
+  );
+  expect(attempts).toBe(-994);
+});
+
+it("WP-2423 M68: an entry retries a full pool for 10 s, a worker for one 2 s wait", async () => {
+  expect(pilotAcquireBudgetMs("/app/tooling/environment/pilot-api-entry.mjs")).toBe(10_000);
+  expect(pilotAcquireBudgetMs("/app/tooling/environment/pilot-https-entry.mjs")).toBe(10_000);
+  expect(pilotAcquireBudgetMs("/app/tooling/environment/pilot-business-worker.mjs")).toBe(2000);
+  let at = 0;
+  let attempts = 0;
+  const ready = { release: () => undefined };
+  // Every pooled connection busy: each attempt waits the pool's 2 s, the fourth gets one.
+  const pool = {
+    options: { connectionTimeoutMillis: 2000 },
+    async connect() {
+      attempts += 1;
+      if (attempts === 4) return ready;
+      at += 2000;
+      throw new Error("timeout exceeded when trying to connect");
+    },
+  };
+  const policy = {
+    budgetMs: 10_000,
+    now: () => at,
+    sleep: async (ms) => {
+      at += ms;
+    },
+  };
+  expect(await acquirePilotConnection(pool, policy)).toBe(ready);
+  expect(attempts).toBe(4);
 });

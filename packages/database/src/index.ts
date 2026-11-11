@@ -42,7 +42,9 @@ export {
 export {
   acquireTenantConnection,
   isTransientConnectionAcquireFailure,
+  tenantConnectionAcquireBudgetMaxMs,
   tenantConnectionRetryBaseMs,
+  tenantConnectionRetryCapMs,
   tenantConnectionRetryMinimumMs,
   type TenantConnectionAcquirePolicy,
 } from "./connection-acquire.ts";

@@ -8,7 +8,9 @@ import { isPilotRuntime } from "./pilot-environment.mjs";
 import {
   isPilotEntryProcess,
   pilotApiRoleMinimumLimit,
+  pilotEntryAcquireBudgetMs,
   pilotEntryAcquireMs,
+  pilotWorkerAcquireBudgetMs,
   pilotWorkerAcquireMs,
   pilotEffectiveRoleLimit,
   pilotProcessPoolSize,
@@ -45,15 +47,18 @@ export function guardPilotPoolConnections(pool, write = (line) => process.stderr
   pool.on("connect", (client) => client.on("error", report));
   return pool;
 }
+/** WP-2423 M68 (a): this process's whole acquire budget for one request (entries 10 s). */
+export const pilotAcquireBudgetMs = (entryFile = process.argv[1]) =>
+  isPilotEntryProcess(entryFile) ? pilotEntryAcquireBudgetMs : pilotWorkerAcquireBudgetMs;
 /**
  * WP-2423 M68 (a): a connection taken outside the transaction runner (admission, joins, snapshot
- * reads) gets the same bounded retry with jitter within the pool's acquire limit before the
- * request answers "busy, try again" (never a refusal).
+ * reads) gets the same retry with jitter, short pool waits until the request's acquire budget is
+ * spent, before the request answers "busy, try again" (never a refusal).
  */
 export async function acquirePilotConnection(pool, policy = {}) {
   try {
     return await acquireTenantConnection(pool, {
-      budgetMs: pool.options.connectionTimeoutMillis,
+      budgetMs: pilotAcquireBudgetMs(),
       ...policy,
     });
   } catch {
@@ -142,7 +147,8 @@ export async function createApplicationDatabase(
     await alignProcessClockToDatabase((sql) => pool.query(sql));
   let closing;
   return Object.freeze({
-    transactions: (scope) => createTenantTransactionRunner(pool, scope),
+    transactions: (scope) =>
+      createTenantTransactionRunner(pool, scope, { acquireBudgetMs: pilotAcquireBudgetMs() }),
     acquire: () => acquirePilotConnection(pool),
     async probe() {
       if (closing) return "not_ready";

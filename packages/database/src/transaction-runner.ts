@@ -7,7 +7,10 @@ import {
 } from "./tenant-context.js";
 import { createTransactionStatementMemo } from "./transaction-statement-memo.js";
 import { snapshotReadStatement } from "./snapshot-read.js";
-import { acquireTenantConnection } from "./connection-acquire.js";
+import {
+  acquireTenantConnection,
+  tenantConnectionAcquireBudgetMaxMs,
+} from "./connection-acquire.js";
 
 const retryableSqlStates: ReadonlySet<string> = new Set(["55P03", "40001", "40P01"]);
 function sqlState(error: unknown): string {
@@ -73,6 +76,7 @@ export function createTenantTransactionRunner(
     options: Pick<Pool["options"], "connectionTimeoutMillis" | "query_timeout">;
   },
   scope: TenantDatabaseScope,
+  acquire: { readonly acquireBudgetMs?: number } = {},
 ): DatabaseTransactionRunner {
   for (const timeout of [pool.options.connectionTimeoutMillis, pool.options.query_timeout]) {
     if (!Number.isInteger(timeout) || (timeout as number) < 1 || (timeout as number) > 10_000)
@@ -87,9 +91,16 @@ export function createTenantTransactionRunner(
   const fixedScope = Object.freeze(
     Object.defineProperties({}, Object.getOwnPropertyDescriptors(scope)),
   ) as TenantDatabaseScope;
-  // WP-2423 M68 (a): a brief pool exhaustion is retried a few times with jitter, all within the
-  // pool's own acquire limit, before the request answers "busy, try again".
-  const budgetMs = pool.options.connectionTimeoutMillis as number;
+  // WP-2423 M68 (a): each attempt waits in the pool's queue only for the pool's own short limit
+  // (`connectionTimeoutMillis`); attempts are retried with jitter until the request's acquire
+  // budget is spent (an entry gives 10 s inside the clients' 15 s; by default one attempt's time).
+  const budgetMs = acquire.acquireBudgetMs ?? (pool.options.connectionTimeoutMillis as number);
+  if (
+    !Number.isInteger(budgetMs) ||
+    budgetMs < (pool.options.connectionTimeoutMillis as number) ||
+    budgetMs > tenantConnectionAcquireBudgetMaxMs
+  )
+    throw new TenantContextDatabaseError("TENANT_DATABASE_SCOPE_INVALID");
   const connections = Object.freeze({
     connect: () => acquireTenantConnection(pool, { budgetMs }),
   }) as Pick<Pool, "connect">;

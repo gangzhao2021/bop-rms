@@ -51,7 +51,7 @@ describe("WP-2423 M68 (a) bounded retry when no connection is free", () => {
     expect(c.pauses).toEqual([25, 150]);
   });
 
-  it("stops after three retries and answers the outage, never a refusal", async () => {
+  it("keeps retrying until the request's acquire budget is spent, then answers the outage", async () => {
     const c = clock();
     const connect = vi.fn<() => Promise<PoolClient>>().mockRejectedValue(tooMany());
     await expect(
@@ -63,9 +63,10 @@ describe("WP-2423 M68 (a) bounded retry when no connection is free", () => {
       code: "TENANT_DATABASE_ACQUIRE_FAILED",
       diagnostic: { sqlState: "53300" },
     });
-    expect(connect).toHaveBeenCalledTimes(4);
-    expect(c.pauses).toEqual([50, 100, 200]);
-    expect(c.now()).toBeLessThan(5000);
+    // Doubling pauses capped at 800 ms, for as long as the budget leaves room for a try.
+    expect(c.pauses.slice(0, 6)).toEqual([50, 100, 200, 400, 800, 800]);
+    expect(connect.mock.calls.length).toBeGreaterThan(4);
+    expect(c.now()).toBeLessThanOrEqual(5000 - 100);
   });
 
   it("does not retry what waiting cannot fix", async () => {
@@ -89,6 +90,28 @@ describe("WP-2423 M68 (a) bounded retry when no connection is free", () => {
       acquireTenantConnection({ connect }, { budgetMs: 5000, now: c.now, sleep: c.sleep }),
     ).rejects.toMatchObject({ code: "TENANT_DATABASE_ACQUIRE_FAILED" });
     expect(connect).toHaveBeenCalledTimes(1);
+  });
+
+  it("a full pool: short queue waits are retried until a connection frees up", async () => {
+    const c = clock();
+    const ready = client();
+    // Every connection in this process is busy: each attempt waits the pool's 2 s, then the
+    // fourth finds one free, well inside the entry's 10 s budget.
+    let attempts = 0;
+    const connect = vi.fn<() => Promise<PoolClient>>(async () => {
+      attempts += 1;
+      if (attempts === 4) return ready;
+      c.advance(2000);
+      throw poolTimeout();
+    });
+    await expect(
+      acquireTenantConnection(
+        { connect },
+        { budgetMs: 10_000, now: c.now, sleep: c.sleep, random: () => 0.5 },
+      ),
+    ).resolves.toBe(ready);
+    expect(connect).toHaveBeenCalledTimes(4);
+    expect(c.pauses).toEqual([50, 100, 200]);
   });
 
   it("gives back a connection that arrives after the budget ran out", async () => {
@@ -139,5 +162,47 @@ describe("WP-2423 M68 (a) bounded retry when no connection is free", () => {
     await expect(runner.run(async () => "ordered")).resolves.toBe("ordered");
     expect(connect).toHaveBeenCalledTimes(2);
     expect(ready.release).toHaveBeenCalledWith(false);
+  });
+
+  it("a request's transaction waits past one pool wait for a full pool, within its budget", async () => {
+    vi.useFakeTimers();
+    try {
+      const ready = client();
+      let attempts = 0;
+      // Every pooled connection is busy for 5 s: the pool's 2 s queue wait runs out twice.
+      const connect = vi.fn(
+        () =>
+          new Promise<PoolClient>((resolve, reject) => {
+            attempts += 1;
+            if (attempts >= 3) {
+              resolve(ready);
+              return;
+            }
+            setTimeout(() => reject(poolTimeout()), 2000);
+          }),
+      );
+      const runner = createTenantTransactionRunner(
+        { connect, options: { connectionTimeoutMillis: 2000, query_timeout: 5000 } },
+        scope,
+        { acquireBudgetMs: 10_000 },
+      );
+      const ran = runner.run(async () => "ordered");
+      await vi.advanceTimersByTimeAsync(6000);
+      await expect(ran).resolves.toBe("ordered");
+      expect(connect).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("refuses an acquire budget shorter than one pool wait or past the clients' 15 s", () => {
+    const pool = {
+      connect: vi.fn(),
+      options: { connectionTimeoutMillis: 2000, query_timeout: 5000 },
+    };
+    for (const acquireBudgetMs of [1000, 15_001, 2.5])
+      expect(() => createTenantTransactionRunner(pool, scope, { acquireBudgetMs })).toThrow(
+        expect.objectContaining({ code: "TENANT_DATABASE_SCOPE_INVALID" }),
+      );
   });
 });

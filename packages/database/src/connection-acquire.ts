@@ -3,27 +3,33 @@ import { TenantContextDatabaseError, tenantContextDatabaseDiagnostic } from "./t
 
 /**
  * WP-2423 M68 (a), DEC-DATABASE-RESILIENCE (docs/spec/design/database-resilience.md): a request
- * that finds no database connection for a moment (every pooled connection busy, the role's
- * connection limit reached, the database restarting) tries again a few times with jitter before
- * the guest or staff member is told the system is busy. Every attempt stays inside the one
- * acquire budget the pool already gives a request (`connectionTimeoutMillis`: 5 s for entries,
- * 2 s for workers), so the request deadline is unchanged and a stuck database still fails fast.
- * Nothing has been sent when a connection is still being acquired, so a retry cannot repeat work.
+ * that finds no database connection for a moment (every pooled connection in this process busy,
+ * the role's connection limit reached, the database restarting) tries again with jitter before the
+ * guest or staff member is told the system is busy. Each attempt waits in the pool's own queue
+ * only for the pool's short per-attempt limit (`connectionTimeoutMillis`, which also bounds a new
+ * connection's handshake), and attempts go on until the request's acquire budget is spent: 10 s in
+ * an entry, inside the 15 s the phones and staff screens wait for an answer, leaving one
+ * statement's 5 s limit for the work. A worker keeps one attempt's 2 s: it tries again on its next
+ * cycle. Nothing has been sent while a connection is still being acquired, so a retry cannot
+ * repeat work.
  */
 export interface TenantConnectionAcquirePolicy {
-  /** Total time for every attempt together, in milliseconds (the pool's acquire limit). */
+  /** Total time for every attempt together, in milliseconds (the request's acquire budget). */
   readonly budgetMs: number;
-  /** Further attempts after the first; default 3. */
+  /** At most this many further attempts; the budget is the real bound. Default 20. */
   readonly retries?: number;
   readonly now?: () => number;
   readonly sleep?: (ms: number) => Promise<void>;
   readonly random?: () => number;
 }
 
-/** First pause before a retry; each further pause doubles, with jitter of 0.5–1.5×. */
+/** First pause before a retry; each further pause doubles up to the cap, with jitter 0.5–1.5×. */
 export const tenantConnectionRetryBaseMs = 50;
+export const tenantConnectionRetryCapMs = 800;
 /** No retry is started with less than this left of the budget: it could not finish in time. */
 export const tenantConnectionRetryMinimumMs = 100;
+/** The longest acquire budget a request may be given (the clients' own 15 s answer limit). */
+export const tenantConnectionAcquireBudgetMaxMs = 15_000;
 
 /**
  * Failures that pass by themselves: the pool's own wait ran out, a socket was lost or refused, the
@@ -68,13 +74,14 @@ export async function acquireTenantConnection(
   policy: TenantConnectionAcquirePolicy,
 ): Promise<PoolClient> {
   const budget = policy.budgetMs;
-  const retries = policy.retries ?? 3;
+  const retries = policy.retries ?? 20;
   if (
     !Number.isInteger(budget) ||
     budget < 1 ||
+    budget > tenantConnectionAcquireBudgetMaxMs ||
     !Number.isInteger(retries) ||
     retries < 0 ||
-    retries > 5
+    retries > 50
   )
     throw new TenantContextDatabaseError("TENANT_DATABASE_SCOPE_INVALID");
   const now = policy.now ?? Date.now;
@@ -106,7 +113,8 @@ export async function acquireTenantConnection(
       );
     } catch (error) {
       if (error instanceof TenantContextDatabaseError) throw error;
-      const pause = Math.round(tenantConnectionRetryBaseMs * 2 ** attempt * (0.5 + random()));
+      const step = Math.min(tenantConnectionRetryBaseMs * 2 ** attempt, tenantConnectionRetryCapMs);
+      const pause = Math.round(step * (0.5 + random()));
       if (
         attempt >= retries ||
         !isTransientConnectionAcquireFailure(error) ||

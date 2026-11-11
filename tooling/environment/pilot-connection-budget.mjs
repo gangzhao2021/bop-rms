@@ -15,12 +15,17 @@ const comfortable = processClasses(7, 5, 3, 2);
 const smallest = processClasses(3, 3, 2, 2);
 const perStore = ({ api, https, business, worker }) => api + https + business + 4 * worker;
 /**
- * How long a request waits for a connection in an entry: long enough for a burst of guests to be
- * served in turn, no longer than one stuck statement's own limit (5 s) so a stuck database still
- * fails fast. Workers keep 2 s: they retry on their next cycle.
+ * WP-2423 M68 (a): how long one attempt waits in the pool's queue for a connection (also the limit
+ * for opening a new one), and the request's whole acquire budget across attempts. An entry retries
+ * with jitter for up to 10 s: the phones and staff screens wait 15 s for an answer, which leaves
+ * one statement's 5 s limit for the work, so a burst of guests is served in turn and a stuck
+ * database still fails within the request. Workers keep one 2 s attempt: they retry on their next
+ * cycle.
  */
-export const pilotEntryAcquireMs = 5000;
+export const pilotEntryAcquireMs = 2000;
+export const pilotEntryAcquireBudgetMs = 10_000;
 export const pilotWorkerAcquireMs = 2000;
+export const pilotWorkerAcquireBudgetMs = 2000;
 /** Below this the role can't run even one Store: reported not ready. */
 export const pilotApiRoleMinimumLimit = perStore(smallest) + pilotOperatorHeadroom;
 /** What the database allows this role: its own limit, within what `max_connections` leaves. */

@@ -2,6 +2,7 @@ import { grantPilotApiAcl } from "../test-support/pilot-api-acl.mjs";
 import { createTenantTransactionRunner } from "../src/transaction-runner.ts";
 import {
   pilotApiRoleConnectionLimit,
+  pilotEntryAcquireBudgetMs,
   pilotEntryAcquireMs,
   pilotProcessPoolSize,
   planPilotConnections,
@@ -666,10 +667,11 @@ it.each([
               });
         const guestBurst = async ({ base, request }) => {
           const guests = Number(process.env.BURST_GUESTS ?? 30);
-          tenantRun = createTenantTransactionRunner(pool, {
-            brandId: burstBinding.brandReference,
-            storeId: burstBinding.storeReference,
-          });
+          tenantRun = createTenantTransactionRunner(
+            pool,
+            { brandId: burstBinding.brandReference, storeId: burstBinding.storeReference },
+            { acquireBudgetMs: pilotEntryAcquireBudgetMs },
+          );
           const statuses = {};
           const times = [];
           const timed = async (name, call) => {
