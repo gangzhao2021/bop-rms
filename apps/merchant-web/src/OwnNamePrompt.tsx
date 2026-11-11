@@ -31,6 +31,19 @@ export interface OwnNameClient {
   }): Promise<{ readonly status: "Applied" | "AlreadyApplied" }>;
 }
 
+/**
+ * WP-2423 M61 (v15 live check): a saved name is announced, so the workspace frame's "Name not added
+ * yet · signed in" line reads the name again at once instead of after a reload.
+ */
+const savedListeners = new Set<() => void>();
+export function onOwnNameSaved(listener: () => void): () => void {
+  savedListeners.add(listener);
+  return () => savedListeners.delete(listener);
+}
+function ownNameSaved() {
+  for (const listener of savedListeners) listener();
+}
+
 export const OWN_NAME_PURPOSE = t("Shown to your team so everyone can see who did what.");
 export const OWN_NAME_PROMPT = t(
   "Your store asks every staff member for their name. Orders, refunds and other records show it, so your team can see who did what.",
@@ -252,6 +265,7 @@ export function OwnNamePrompt({
       });
       pending.current = null;
       setState("Saved");
+      ownNameSaved();
     } catch (error) {
       if (error instanceof OwnNameError && error.code === "Conflict") pending.current = null;
       setProblem(ownNameFailureText(error));

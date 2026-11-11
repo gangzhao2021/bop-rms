@@ -1,6 +1,11 @@
 import { t } from "./i18n/i18n.js";
 import { useSyncExternalStore } from "react";
-import { createOwnNameClient, type OwnNameClient, type OwnNameState } from "./OwnNamePrompt.js";
+import {
+  createOwnNameClient,
+  onOwnNameSaved,
+  type OwnNameClient,
+  type OwnNameState,
+} from "./OwnNamePrompt.js";
 import { usePinStatusSnapshot } from "./StaffPinControls.js";
 import { StaffSessionGuard } from "./StaffSession.js";
 import type { StaffPinClient } from "./staff-pin-client.js";
@@ -22,6 +27,7 @@ export class NameStore {
   private readonly listeners = new Set<() => void>();
   private reading = false;
   private read = false;
+  private again = false;
   // A failed read (a short network drop) is tried again when the screen is back online, or when
   // the line is shown again, so the name returns without a reload.
   private readonly retryOnline = () => {
@@ -40,6 +46,13 @@ export class NameStore {
     };
   };
   readonly get = () => this.snapshot;
+  /** Reads the name again (it was just saved); the line keeps showing the old one meanwhile. */
+  readonly reload = () => {
+    this.read = false;
+    if (this.listeners.size === 0) return;
+    if (this.reading) this.again = true;
+    else this.load();
+  };
   private load() {
     if (this.reading) return;
     this.reading = true;
@@ -48,12 +61,19 @@ export class NameStore {
       (state) => {
         this.reading = false;
         this.set({ kind: "Ready", state });
+        this.readAgain();
       },
       () => {
         this.reading = false;
         this.set({ kind: "Failed" });
+        this.readAgain();
       },
     );
+  }
+  private readAgain() {
+    if (!this.again) return;
+    this.again = false;
+    this.load();
   }
   private set(next: NameSnapshot) {
     this.snapshot = next;
@@ -77,6 +97,11 @@ export function staffNameStoreFor(
   }
   return store;
 }
+
+// A name saved on Home is read again by the line that shows it.
+onOwnNameSaved(() => {
+  for (const store of names.values()) store.reload();
+});
 
 export function staffIdentityText(
   state: OwnNameState,
