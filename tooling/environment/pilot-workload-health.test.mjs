@@ -572,3 +572,19 @@ it("writes a Store's liveness privately and atomically, and never throws", () =>
     fs.rmSync(directory, { recursive: true, force: true });
   }
 });
+
+it("WP-2423 (outage-reads-and-retry): a report a database-aligned worker wrote a moment ago is current, not from the future", () => {
+  // demo-3 business-worker:events (v15 2026-11-11 14:04:48Z): its clock ran ~ms ahead of the
+  // supervisor's, and a healthy part raised pilot_attention_required.
+  const written = Date.parse(at);
+  for (const ahead of [1, 250, 1999])
+    expect(parsePilotWorkloadHealth(value, identity, written - ahead).state).toBe("running");
+  expect(
+    parseHostedLiveness(livenessRecord(), { pid: 42, started: "700" }, written - 1500),
+  ).toEqual(expect.objectContaining({ "business-worker": expect.anything() }));
+  // Further ahead than the clock may run is a wrong clock, still not a heartbeat.
+  expect(() => parsePilotWorkloadHealth(value, identity, written - 2001)).toThrow();
+  expect(() =>
+    parseHostedLiveness(livenessRecord(), { pid: 42, started: "700" }, written - 2001),
+  ).toThrow();
+});

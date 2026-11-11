@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
+import { pilotClockMaximumOffsetMs } from "./pilot-database-clock.mjs";
 const fail = () => {
   throw new Error("PILOT_WORKLOAD_HEALTH_UNAVAILABLE");
 };
@@ -24,6 +25,15 @@ const instant = (value) => {
     return fail();
   return Date.parse(value);
 };
+/**
+ * WP-2423 (outage-reads-and-retry, v15 2026-11-11): workers stamp their reports with the
+ * database-aligned clock (pilot-database-clock.mjs), which may run ahead of the supervisor's own by
+ * up to the allowed offset. A report written a moment ago by such a worker read as "from the
+ * future" and raised a false pilot_attention_required for a healthy Store worker; it is accepted
+ * within that offset. One further ahead is still a wrong clock, not a heartbeat.
+ */
+export const PILOT_HEALTH_CLOCK_TOLERANCE_MS = pilotClockMaximumOffsetMs;
+const fromTheFuture = (observed, now) => observed > now + PILOT_HEALTH_CLOCK_TOLERANCE_MS;
 const SAFE_FAILURE_CODE = /^[A-Z][A-Z0-9_]{2,79}$/u;
 const SQLSTATE = /^[0-9A-Z]{5}$/u;
 /** WP-2423 pilot resilience: transient failures that persist this long are alert-worthy. */
@@ -46,7 +56,7 @@ export function parsePilotWorkloadHealth(value, identity, now = Date.now()) {
   )
     return fail();
   const observed = instant(record.observedAt);
-  if (!Number.isFinite(now) || observed > now) return fail();
+  if (!Number.isFinite(now) || fromTheFuture(observed, now)) return fail();
   const snapshot = exact(record.snapshot, [
     "state",
     "cycleInFlight",
@@ -359,7 +369,11 @@ export function parseHostedLiveness(value, identity, now = Date.now()) {
   const record = exact(value, ["pid", "started", "observedAt", "services"]);
   if (record.pid !== identity.pid || record.started !== identity.started) return fail();
   const observed = instant(record.observedAt);
-  if (!Number.isFinite(now) || observed > now || now - observed >= HOSTED_LIVENESS_STALE_MS)
+  if (
+    !Number.isFinite(now) ||
+    fromTheFuture(observed, now) ||
+    now - observed >= HOSTED_LIVENESS_STALE_MS
+  )
     return fail();
   const services = record.services;
   if (!services || typeof services !== "object" || Array.isArray(services)) return fail();
