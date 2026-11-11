@@ -121,6 +121,7 @@ it("keeps business loop reports separate and refuses arbitrary file targets", ()
       contactRetention: "business-contact-retention.health.json",
       webhookEvidenceRetention: "business-webhook-evidence-retention.health.json",
       pickupCapacitySchedule: "business-pickup-capacity-schedule.health.json",
+      ordinaryRefundFollowThrough: "business-ordinary-refund-follow-through.health.json",
     });
     expect(() => createPilotWorkloadHealthObserver(directory, "../other")).toThrow();
     expect(() => pilotHealthComponents("api")).toThrow();

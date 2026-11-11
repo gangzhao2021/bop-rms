@@ -25,6 +25,7 @@ function fixture() {
               contactRetention: cycle,
               webhookEvidenceRetention: cycle,
               pickupCapacitySchedule: cycle,
+              ordinaryRefundFollowThrough: cycle,
             },
           }
         : cycle

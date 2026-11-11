@@ -196,6 +196,7 @@ export function createPilotWorkloadHealthObserver(directory, component) {
       "business-compensation",
       "business-inventory-release",
       "business-pickup-payment-expiry",
+      "business-ordinary-refund-follow-through",
       "reconciliation-worker",
       "daily-settlement-worker",
       "dining-exception-worker",
