@@ -39,18 +39,30 @@ export function staffCancellationReasonsFor(orderType: Order["orderType"]) {
 /** WP-2423 (v15 2026-10-18): what the cancellation would refund, as the server reads it. */
 export interface StaffCancelRefundPreview {
   readonly refundMethod: "Online" | "CardMachine";
+  /**
+   * v15 batch 8: a counter order paid in cash goes back in cash from the drawer, in whole nickels
+   * (the server's amounts already are), never on the card machine.
+   */
+  readonly paidInCash: boolean;
   readonly paidMinor: string;
   readonly refundMinor: string;
 }
 const minor = /^(0|[1-9][0-9]{0,17})$/;
 export function parseStaffCancelRefundPreview(
   value: unknown,
-  order: Pick<Order, "orderReference">,
+  order: Pick<Order, "orderReference"> & Partial<Pick<Order, "counter">>,
   batch: Pick<Batch, "orderBatchReference">,
 ): StaffCancelRefundPreview | null {
   if (value === null || typeof value !== "object") return null;
   const raw = value as Record<string, unknown>;
+  // v15 batch 8: an older server leaves it out; the order's own cash payment then says it.
+  const paidInCash =
+    raw.paidInCash === undefined
+      ? raw.refundMethod === "CardMachine" && order.counter?.paidOnCardMachine?.cash != null
+      : raw.paidInCash;
   if (
+    typeof paidInCash !== "boolean" ||
+    (paidInCash && raw.refundMethod !== "CardMachine") ||
     raw.orderReference !== order.orderReference ||
     raw.orderBatchReference !== batch.orderBatchReference ||
     (raw.refundMethod !== "Online" && raw.refundMethod !== "CardMachine") ||
@@ -64,6 +76,7 @@ export function parseStaffCancelRefundPreview(
     return null;
   return Object.freeze({
     refundMethod: raw.refundMethod,
+    paidInCash,
     paidMinor: raw.paidMinor,
     refundMinor: raw.refundMinor,
   });
@@ -93,6 +106,16 @@ export function staffCancelRefundText(
     return t("This {what} was already refunded in full; nothing more will be refunded.", {
       what: what,
     });
+  // v15 batch 8: a counter cash payment goes back in cash from the drawer, in whole nickels.
+  if (preview.paidInCash)
+    return refund >= paid
+      ? t("Give back {refundMinor} in cash from the drawer, tip included, in whole nickels.", {
+          refundMinor: money(preview.refundMinor),
+        })
+      : t(
+          "{already} was already given back. Give back the remaining {refundMinor} in cash from the drawer, in whole nickels.",
+          { already: money((paid - refund).toString()), refundMinor: money(preview.refundMinor) },
+        );
   if (refund >= paid)
     return machine
       ? t("Refund {refundMinor} in full, including tip, on the card machine.", {

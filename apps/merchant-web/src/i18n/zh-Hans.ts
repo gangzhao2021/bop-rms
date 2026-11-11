@@ -9492,4 +9492,26 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{what} The reason recorded is “Guests left”.": "{what}记录的原因为“顾客已离开”。",
   " · voided by {reviewedBy} ({reasonCode})": " · 已由 {reviewedBy} 作废（{reasonCode}）",
   " · reviewed by {reviewedBy} ({reasonCode})": " · 已由 {reviewedBy} 审核（{reasonCode}）",
+  "Give back {refundMinor} in cash from the drawer, tip included, in whole nickels.":
+    "从钱箱退还现金 {refundMinor}，含小费，按 5 分取整。",
+  "{already} was already given back. Give back the remaining {refundMinor} in cash from the drawer, in whole nickels.":
+    "已退还 {already}。请从钱箱退还剩下的现金 {refundMinor}，按 5 分取整。",
+  "Quick cash amounts": "常用现金金额",
+  "Approved — give it back in cash and record it": "已批准 — 请退还现金并记录",
+  "Given back in cash": "已退还现金",
+  "To give back in cash": "待退还现金",
+  "{amount} to give back in cash once an owner approves it.": "店主批准后退还现金 {amount}。",
+  "Paid in cash. Recording this request gives nothing back yet: once it is approved, a manager or the owner gives the cash back and records it.":
+    "现金付款。记录这个请求还不会退钱：批准后，由店长或店主退还现金并记录。",
+  "Paid in cash. Recording this request gives nothing back yet: a manager or the owner gives the cash back and records it.":
+    "现金付款。记录这个请求还不会退钱：由店长或店主退还现金并记录。",
+  "Paid in cash. After the request is recorded and approved, give this amount back in cash from the drawer, in whole nickels (rounded to 5 cents), and record it under the request.":
+    "现金付款。请求记录并批准后，请从钱箱退还这笔现金（按 5 分取整），再在请求下记录。",
+  "Paid in cash. After the request is recorded, give this amount back in cash from the drawer, in whole nickels (rounded to 5 cents), and record it under the request.":
+    "现金付款。请求记录后，请从钱箱退还这笔现金（按 5 分取整），再在请求下记录。",
+  "Request recorded for {total}. Now give it back in cash from the drawer, in whole nickels, and record it under the request above.":
+    "已记录 {total} 的退款请求。请从钱箱退还现金（按 5 分取整），再在上面的请求下记录。",
+  "Paid in cash at the counter. Its refunds are given back in cash from the drawer, in whole nickels (rounded to 5 cents), and recorded here; they count on the day they are given back.":
+    "在柜台用现金付款。退款从钱箱以现金退还（按 5 分取整），并在这里记录；按退还当天计入。",
+  "Record {amount} given back in cash": "记录已退还现金 {amount}",
 });

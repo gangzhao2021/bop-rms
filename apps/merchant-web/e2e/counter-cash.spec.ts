@@ -621,3 +621,384 @@ test("@production a cash record with no answer is sent again unchanged, and a la
       .filter({ hasText: "Cash recorded. Give $195.75 change. Sent to the kitchen." }),
   ).toBeVisible();
 });
+
+// v15 batch 8 (counter cash wording): a paid cash counter order's Cancel order dialog says the cash
+// goes back from the drawer in whole nickels, never the card machine; and Orders with an order open
+// beside a list of partly refunded cash orders fits a tablet without sideways scrolling.
+test("@production cancelling a cash counter order says cash back from the drawer, and the open list fits a tablet", async ({
+  page,
+}) => {
+  await signIn(page);
+  const cashOrder = (n: number, refundedMinor: string, canCancel: boolean) => ({
+    orderReference: id(300 - n * 2),
+    orderNumber: String(30 + n),
+    orderType: "Pickup",
+    sourceChannel: "Pos",
+    submittedAt: "2026-10-13T16:00:00.000Z",
+    observedAt: "2026-10-13T16:20:00.000Z",
+    initialBatchReference: id(301 - n * 2),
+    summary: {
+      items: [
+        { name: "Smashed cucumber with garlic and chili oil", option: null, quantity: 1 },
+        { name: "Soy milk", option: "Hot", quantity: 1 },
+      ],
+      lineCount: 2,
+      pickupName: null,
+      tableLabel: null,
+    },
+    counter: {
+      recordedAfterOutage: false,
+      paidOnCardMachine: {
+        amountMinor: "1074",
+        takenAt: "2026-10-13T16:01:00.000Z",
+        recordedAfterOutage: false,
+        refundedMinor,
+        cash: { tenderedMinor: "2000", changeMinor: "925", roundingMinor: "1" },
+      },
+    },
+    batches: [
+      {
+        orderBatchReference: id(301 - n * 2),
+        sequence: 1,
+        acceptanceStatus: "Accepted",
+        canRequestAcceptance: false,
+        canCancel,
+        staffCancellation: null,
+        canCancelItems: false,
+      },
+    ],
+    canRequestAcceptance: false,
+    currentPhase: "Accepted",
+    currentVersion: 3,
+    unfulfillable: null,
+    pickupNotCollected: false,
+    acceptBy: null,
+    awaitingPayment: false,
+  });
+  // Tables paid by phone and partly refunded, as on the live list beside the cash orders.
+  const tableOrder = (n: number) => ({
+    orderReference: id(280 - n * 2),
+    orderNumber: String(20 + n),
+    orderType: "DineIn",
+    sourceChannel: "Qr",
+    submittedAt: "2026-10-13T15:00:00.000Z",
+    observedAt: "2026-10-13T16:20:00.000Z",
+    initialBatchReference: id(281 - n * 2),
+    summary: {
+      items: [
+        { name: "Beef noodles (TEST)", option: null, quantity: 1 },
+        { name: "Beef noodles (TEST)", option: "Large", quantity: 1 },
+      ],
+      lineCount: 2,
+      pickupName: null,
+      tableLabel: "MRS " + String(n + 1) + " (TEST)",
+    },
+    batches: [
+      {
+        orderBatchReference: id(281 - n * 2),
+        sequence: 1,
+        acceptanceStatus: "Accepted",
+        canRequestAcceptance: false,
+        canCancel: false,
+        staffCancellation: null,
+        canCancelItems: false,
+      },
+    ],
+    canRequestAcceptance: false,
+    tableBill: {
+      totalMinor: "1212",
+      paid: { amountMinor: "1212", method: n % 2 === 0 ? "Online" : "Split", refundedMinor: "500" },
+    },
+    currentPhase: "Served",
+    currentVersion: 4,
+    unfulfillable: null,
+    pickupNotCollected: false,
+    acceptBy: null,
+    awaitingPayment: false,
+  });
+  const listed = {
+    items: [
+      cashOrder(0, "0", true),
+      ...Array.from({ length: 7 }, (_, n) => cashOrder(n + 1, n % 2 === 0 ? "500" : "365", false)),
+      ...Array.from({ length: 4 }, (_, n) => tableOrder(n)),
+    ],
+    nextAfterOrderReference: null,
+  };
+  await page.route("**/merchant/orders?*", (route) => route.fulfill({ headers, json: listed }));
+  await page.route("**/merchant/orders", (route) => route.fulfill({ headers, json: listed }));
+  await page.route("**/merchant/orders/cancel/preview", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        orderReference: id(300),
+        orderBatchReference: id(301),
+        refundMethod: "CardMachine",
+        paidInCash: true,
+        paidMinor: "1075",
+        refundMinor: "1075",
+        currencyCode: "CAD",
+      },
+    }),
+  );
+  // Opened on a wide screen, then the window narrows to a tablet with the order still open.
+  await page.goto("/operations/orders");
+  await page.getByRole("button", { name: "30", exact: true }).click();
+  await expect(orderPanel(page)).toContainText("Paid in cash");
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await expect(orderPanel(page)).toContainText("Paid in cash");
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.screenshot({ path: `test-results/counter-cash-open-${width}.png`, fullPage: true });
+  }
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await page.goto("/operations/orders");
+    await page.getByRole("button", { name: "30", exact: true }).click();
+    const entry = orderPanel(page);
+    await entry.getByRole("button", { name: "Cancel order" }).click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toContainText(
+      "Give back $10.75 in cash from the drawer, tip included, in whole nickels.",
+    );
+    await expect(dialog).not.toContainText("card machine");
+    await page.keyboard.press("Escape");
+  }
+});
+
+// v15 batch 8: the payment and refund pages of a counter cash payment speak of cash from the
+// drawer in whole nickels from the summary to the recorded refund, never of the card machine.
+test("@production refunding a dish of a cash counter order speaks of cash from the drawer throughout", async ({
+  page,
+}) => {
+  await signIn(page);
+  const intent = id(331),
+    attempt = id(332);
+  let requested: Record<string, unknown> | null = null;
+  let given = false;
+  await page.route("**/merchant/payments/refunds/approvals", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        observedAt: new Date().toISOString(),
+        canApprove: false,
+        soleOperator: null,
+        entries: [],
+      },
+    }),
+  );
+  await page.route("**/merchant/payments/refunds/context", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        paymentIntentReference: intent,
+        paymentAttemptReference: attempt,
+        orderReference: id(320),
+        orderBatchReference: id(321),
+        observedAt: new Date().toISOString(),
+        paymentState: "Captured",
+        paymentMethod: "CardMachine",
+        paidInCash: true,
+        currencyCode: "CAD",
+        capturedAmountMinor: "1074",
+        confirmedRefundMinor: given ? "367" : "0",
+        pendingRefundMinor: requested !== null && !given ? "367" : "0",
+        canRequest: true,
+        requestBlocked: null,
+        canSend: true,
+      },
+    }),
+  );
+  const request = () => ({
+    requestReference: String(requested?.requestReference),
+    operationReference: String(requested?.operationReference),
+    claimVersion: 1,
+    requestedAt: "2026-10-13T16:30:00.000Z",
+    reasonCode: "QUALITY_ISSUE",
+    currencyCode: "CAD",
+    amountMinor: "367",
+    decline: null,
+    progress: given ? "Refunded" : "Recorded",
+    paymentMethod: "CardMachine",
+  });
+  await page.route("**/merchant/payments/refunds/items", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        orderReference: id(320),
+        orderNumber: "35",
+        canRequest: true,
+        claimVersion: requested === null ? 0 : 1,
+        recentRequests: requested === null ? [] : [request()],
+        items: [
+          {
+            orderBatchReference: id(321),
+            orderItemReference: id(322),
+            label: "Soy milk",
+            quantity: 1,
+            unclaimedQuantity: requested === null ? 1 : 0,
+            paymentCaptured: true,
+            refundedByCancellation: false,
+            paymentIntentReference: intent,
+            paymentMethod: "CardMachine",
+          },
+          {
+            orderBatchReference: id(321),
+            orderItemReference: id(323),
+            label: "Smashed cucumber",
+            quantity: 1,
+            unclaimedQuantity: 1,
+            paymentCaptured: true,
+            refundedByCancellation: false,
+            paymentIntentReference: intent,
+            paymentMethod: "CardMachine",
+          },
+        ],
+      },
+    }),
+  );
+  await page.route("**/merchant/payments/refunds/preview", (route) => {
+    const body = JSON.parse(route.request().postData() ?? "{}");
+    return route.fulfill({
+      headers,
+      json: {
+        status: "Previewed",
+        requestReference: body.requestReference,
+        operationReference: body.operationReference,
+        claimVersion: 0,
+        currencyCode: "CAD",
+        amountMinor: "367",
+        paymentAttemptReferences: [attempt],
+        approvalRequired: false,
+        escalationReasons: [],
+        approveAlone: false,
+        components: {
+          netAmountMinor: "325",
+          taxAmountMinor: "42",
+          tipAmountMinor: "0",
+          serviceChargeAmountMinor: "0",
+          serviceChargeTaxAmountMinor: "0",
+        },
+      },
+    });
+  });
+  await page.route("**/merchant/payments/refunds/request", (route) => {
+    requested = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>;
+    return route.fulfill({
+      status: 202,
+      headers,
+      json: {
+        status: "RequestRecorded",
+        requestReference: requested.requestReference,
+        operationReference: requested.operationReference,
+        claimVersion: 1,
+        currencyCode: "CAD",
+        amountMinor: "367",
+        paymentAttemptReferences: [attempt],
+        approvalRequired: false,
+        escalationReasons: [],
+        approveAlone: false,
+        replayed: false,
+      },
+    });
+  });
+  await page.route("**/merchant/payments/refunds/status", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        orderReference: id(320),
+        requestReference: requested?.requestReference,
+        operationReference: requested?.operationReference,
+        observedAt: new Date().toISOString(),
+        currencyCode: "CAD",
+        amountMinor: "367",
+        payments: [
+          {
+            paymentAttemptReference: attempt,
+            paymentIntentReference: intent,
+            state: given ? "Confirmed" : "NotDispatched",
+            method: "CardMachine",
+            refundedOnCardMachineAt: given ? "2026-10-13T16:32:00.000Z" : null,
+            cardMachineSlipReference: null,
+            executionOperationReference: null,
+            executionApprovalReference: null,
+            amountMinor: "367",
+            confirmedMinor: given ? "367" : "0",
+            pendingMinor: given ? "0" : "367",
+            // $3.67 goes back as $3.65 from the drawer (whole nickels).
+            cashGivenBackMinor: "365",
+          },
+        ],
+      },
+    }),
+  );
+  await page.route("**/merchant/payments/refunds/card-machine-record", (route) => {
+    given = true;
+    return route.fulfill({
+      headers,
+      json: {
+        status: "Recorded",
+        orderReference: id(320),
+        requestReference: requested?.requestReference,
+        // What the drawer gave back, as the server records it (whole nickels).
+        amountMinor: "365",
+        refundedAt: "2026-10-13T16:32:00.000Z",
+        receipt: "NoDigitalReceipt",
+      },
+    });
+  });
+  const main = page.getByRole("main");
+  await page.goto("/app/operations/payments/" + intent + "/refund");
+  const summary = page.getByRole("region", { name: "Payment summary" });
+  await expect(summary).toContainText("Paid in cash at the counter.");
+  await expect(summary).toContainText("whole nickels");
+  await page.getByRole("spinbutton", { name: /Soy milk/ }).fill("1");
+  await page.getByRole("combobox", { name: "Reason" }).selectOption("QUALITY_ISSUE");
+  await page.getByRole("button", { name: "Review refund" }).click();
+  const review = page.getByRole("region", { name: "Review this refund" });
+  await expect(review).toContainText(
+    "Paid in cash. After the request is recorded, give this amount back in cash from the drawer, in whole nickels (rounded to 5 cents), and record it under the request.",
+  );
+  await expect(main).not.toContainText("card machine");
+  await page.getByRole("checkbox", { name: /I confirm/ }).check();
+  await page.getByRole("button", { name: "Record refund request" }).click();
+  await expect(page.getByText(/Now give it back in cash from the drawer/u)).toBeVisible();
+  const requests = page.getByRole("region", { name: "Refunds on this order" });
+  await expect(requests).toContainText("To give back in cash");
+  await expect(requests).toContainText("Hand back $3.65 from the drawer");
+  await expect(main).not.toContainText("card machine");
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.screenshot({
+      path: `test-results/counter-cash-refund-request-${width}.png`,
+      fullPage: true,
+    });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+
+  // The payment page itself, with the cash still to give back: its heading and record action stay
+  // in cash words before and after recording.
+  given = false;
+  await page.goto("/app/operations/payments/" + intent);
+  const pending = page.getByRole("region", { name: "Cash to give back" });
+  await expect(pending).toContainText("To give back in cash");
+  await pending.getByRole("button", { name: "Record $3.65 given back in cash" }).click();
+  await pending.getByRole("button", { name: "Gave back $3.65 in cash" }).click();
+  await expect(pending).toContainText("Cash given back recorded: $3.65");
+  await expect(page.getByRole("heading", { name: "Cash to give back" })).toBeVisible();
+  await expect(main).not.toContainText("card machine");
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.screenshot({
+      path: `test-results/counter-cash-payment-${width}.png`,
+      fullPage: true,
+    });
+  }
+});

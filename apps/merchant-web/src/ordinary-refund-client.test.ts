@@ -295,6 +295,7 @@ const context = {
   observedAt: "2026-09-20T12:00:00.000Z",
   paymentState: "Captured",
   paymentMethod: "Online",
+  paidInCash: false,
   currencyCode: "CAD",
   capturedAmountMinor: "2260",
   confirmedRefundMinor: "0",
@@ -371,6 +372,23 @@ it("payment context preserves unknown amounts rather than inventing zero", async
     .mockResolvedValueOnce(response({ ...unknown, capturedAmountMinor: "0" }));
   const client = createOrdinaryRefundClient(fetcher);
   await expect(client.context(id(6), csrf)).resolves.toEqual(unknown);
+  await expect(client.context(id(6), csrf)).rejects.toThrow();
+});
+it("v15 batch 8: reads a counter cash payment, and an older server's answer as not cash", async () => {
+  const machine = { ...context, paymentMethod: "CardMachine" };
+  const older: Record<string, unknown> = { ...machine };
+  delete older.paidInCash;
+  const fetcher = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(response({ ...machine, paidInCash: true }))
+    .mockResolvedValueOnce(response(older))
+    // Cash is only ever a payment taken at the counter, and the answer is a yes or no.
+    .mockResolvedValueOnce(response({ ...context, paidInCash: true }))
+    .mockResolvedValueOnce(response({ ...machine, paidInCash: "yes" }));
+  const client = createOrdinaryRefundClient(fetcher);
+  await expect(client.context(id(6), csrf)).resolves.toMatchObject({ paidInCash: true });
+  await expect(client.context(id(6), csrf)).resolves.toMatchObject({ paidInCash: false });
+  await expect(client.context(id(6), csrf)).rejects.toThrow();
   await expect(client.context(id(6), csrf)).rejects.toThrow();
 });
 it.each([

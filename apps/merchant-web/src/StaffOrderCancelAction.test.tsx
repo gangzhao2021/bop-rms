@@ -198,6 +198,63 @@ it("WP-2423 v15 2026-10-18: says what the cancellation refunds, or that nothing 
   expect(preview("100", "100", "Cash")).toBeNull();
 });
 
+it("v15 batch 8: a cash counter order is given back in cash from the drawer, never on the card machine", () => {
+  const preview = (
+    paidMinor: string,
+    refundMinor: string,
+    extra: Record<string, unknown>,
+    order: Parameters<typeof parseStaffCancelRefundPreview>[1] = { orderReference: id(1) },
+  ) =>
+    parseStaffCancelRefundPreview(
+      {
+        orderReference: id(1),
+        orderBatchReference: id(90),
+        refundMethod: "CardMachine",
+        paidMinor,
+        refundMinor,
+        currencyCode: "CAD",
+        ...extra,
+      },
+      order,
+      { orderBatchReference: id(90) },
+    );
+  const read = (value: ReturnType<typeof preview>) => {
+    if (value === null) throw new Error("fixture");
+    return value;
+  };
+  // Order 34 on v15: $10.74, $10.75 in cash.
+  const whole = staffCancelRefundText(true, read(preview("1075", "1075", { paidInCash: true })));
+  expect(whole).toBe("Give back $10.75 in cash from the drawer, tip included, in whole nickels.");
+  expect(whole).not.toContain("card machine");
+  // After a $3.65 cash refund of one dish, the rest of the cash.
+  expect(staffCancelRefundText(true, read(preview("1075", "710", { paidInCash: true })))).toBe(
+    "$3.65 was already given back. Give back the remaining $7.10 in cash from the drawer, in whole nickels.",
+  );
+  // A card-machine payment keeps its card-machine words.
+  expect(staffCancelRefundText(true, read(preview("1074", "1074", { paidInCash: false })))).toBe(
+    "Refund $10.74 in full, including tip, on the card machine.",
+  );
+  // An older server without the field: the order's own cash payment says it.
+  const cashOrder = {
+    orderReference: id(1),
+    counter: {
+      recordedAfterOutage: false,
+      paidOnCardMachine: {
+        amountMinor: "1074",
+        takenAt: "2026-10-13T16:01:00.000Z",
+        recordedAfterOutage: false,
+        refundedMinor: "0",
+        cash: { tenderedMinor: "2000", changeMinor: "925", roundingMinor: "1" },
+      },
+    },
+  } as unknown as Parameters<typeof parseStaffCancelRefundPreview>[1];
+  expect(read(preview("1075", "1075", {}, cashOrder)).paidInCash).toBe(true);
+  expect(read(preview("1074", "1074", {})).paidInCash).toBe(false);
+  // Cash is never an online refund, and the field is a yes or no.
+  expect(preview("1075", "1075", { paidInCash: true, refundMethod: "Online" })).toBeNull();
+  expect(preview("1075", "1075", { paidInCash: "yes" })).toBeNull();
+});
+
 it("WP-2423 Q6: summarises a cancelled pickup and a cancelled dine-in batch", () => {
   const cancellation = {
     reasonCode: "SOLD_OUT",

@@ -40,6 +40,7 @@ const context = {
   observedAt: "2026-10-15T17:52:00.000Z",
   paymentState: "Captured" as const,
   paymentMethod: "CardMachine" as const,
+  paidInCash: false,
   currencyCode: "CAD" as const,
   capturedAmountMinor: "593",
   confirmedRefundMinor: "0",
@@ -501,4 +502,40 @@ it("v15 batch 5: a cashier's card-machine review matches what they are told afte
   setLanguageForTest("zh-Hans");
   expect(cardMachineReviewText(false, false)).toContain("由店长或店主在“审批”里发出");
   expect(cardMachineReviewText(true, false)).toContain("批准后");
+});
+
+it("v15 batch 8: a counter cash payment is described as cash from the drawer, never the card machine", () => {
+  const html = renderToStaticMarkup(
+    <PaymentFinancialSummary
+      initial={{ ...context, paidInCash: true }}
+      csrf={"a".repeat(43)}
+      revision={0}
+      onContext={vi.fn()}
+    />,
+  );
+  expect(html).toContain("Paid in cash at the counter.");
+  expect(html).toContain("whole nickels");
+  expect(html).not.toContain("card machine");
+  expect(requestProgressLabel("Recorded", "CardMachine", null, true)).toBe("To give back in cash");
+  expect(requestProgressLabel("Refunded", "CardMachine", null, true)).toBe("Given back in cash");
+  expect(requestProgressLabel("Recorded", "CardMachine", "Approved", true)).toBe(
+    "Approved — give it back in cash and record it",
+  );
+  expect(requestProgressLabel("Recorded", "CardMachine", "AwaitingApproval", true)).toBe(
+    "Waiting for owner approval",
+  );
+  for (const approvalRequired of [false, true])
+    for (const canSend of [false, true]) {
+      const review = cardMachineReviewText(approvalRequired, canSend, true);
+      expect(review).toMatch(/^Paid in cash\./u);
+      expect(review).not.toMatch(/card machine|on that machine/u);
+      if (canSend) expect(review).toContain("whole nickels");
+    }
+  // A card-machine payment keeps its card-machine words.
+  expect(requestProgressLabel("Recorded", "CardMachine", null)).toBe(
+    "To refund on the card machine",
+  );
+  setLanguageForTest("zh-Hans");
+  expect(requestProgressLabel("Recorded", "CardMachine", null, true)).toBe("待退还现金");
+  expect(cardMachineReviewText(false, true, true)).toContain("按 5 分取整");
 });

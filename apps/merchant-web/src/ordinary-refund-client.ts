@@ -466,6 +466,8 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
         const withBlocked = Object.hasOwn(reply, "requestBlocked");
         const withSend = Object.hasOwn(reply, "canSend");
         const withRecovery = Object.hasOwn(reply, "recoveries");
+        // v15 batch 8: a counter cash payment (absent from an older server: not known as cash).
+        const withCash = Object.hasOwn(reply, "paidInCash");
         const data = exact(reply, [
           "paymentIntentReference",
           "paymentAttemptReference",
@@ -482,6 +484,7 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
           ...(withBlocked ? ["requestBlocked"] : []),
           ...(withSend ? ["canSend"] : []),
           ...(withRecovery ? ["canRecover", "recoveries"] : []),
+          ...(withCash ? ["paidInCash"] : []),
         ]);
         // WP-2423 M163: money taken back on the order (absent from an older server: none).
         if (
@@ -496,6 +499,9 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
           : [];
         if (typeof data.canRequest !== "boolean") return fail();
         if (withSend && typeof data.canSend !== "boolean") return fail();
+        const paidInCash = withCash ? data.paidInCash : false;
+        if (typeof paidInCash !== "boolean" || (paidInCash && data.paymentMethod !== "CardMachine"))
+          return fail();
         // WP-2423 M13: why they may not record a request (absent from an older server).
         const requestBlocked = withBlocked ? data.requestBlocked : null;
         if (requestBlocked !== null && requestBlocked !== "SoleOperatorOff") return fail();
@@ -546,6 +552,11 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
           observedAt: data.observedAt,
           paymentState: data.paymentState,
           paymentMethod: data.paymentMethod as "Online" | "CardMachine",
+          /**
+           * v15 batch 8: taken in cash at the counter; its refunds go back in cash from the drawer,
+           * in whole nickels, never on the card machine.
+           */
+          paidInCash,
           currencyCode: data.paymentState === "Captured" ? ("CAD" as const) : null,
           capturedAmountMinor,
           confirmedRefundMinor,

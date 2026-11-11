@@ -18,7 +18,12 @@ it("says what the server answered: a refund still on its way is never said to be
   expect(pending).toContain("Refund pending: $23.40");
   expect(pending).not.toMatch(/Refunded|in full/u);
   // The answer's amount, not an older, larger one the dialog read.
-  const stale = { refundMethod: "Online", paidMinor: "3000", refundMinor: "3000" } as const;
+  const stale = {
+    refundMethod: "Online",
+    paidInCash: false,
+    paidMinor: "3000",
+    refundMinor: "3000",
+  } as const;
   const partial = cantMakeDoneText(answer({ refundAmountMinor: "1050" }), stale);
   expect(partial).toContain("$10.50, what was left of the payment");
   expect(partial).not.toContain("$30.00");
@@ -43,7 +48,12 @@ it("nothing left to return is said plainly; the card machine is told what to ref
 });
 
 it("an unreadable answer falls back to the dialog's amount, and still says pending", () => {
-  const shown = { refundMethod: "Online", paidMinor: "2000", refundMinor: "1500" } as const;
+  const shown = {
+    refundMethod: "Online",
+    paidInCash: false,
+    paidMinor: "2000",
+    refundMinor: "1500",
+  } as const;
   const text = cantMakeDoneText(null, shown);
   expect(text).toContain("Refund pending: $15.00, what was left of the payment");
   expect(cantMakeDoneText(null, "Failed")).toContain(

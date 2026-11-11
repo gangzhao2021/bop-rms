@@ -125,8 +125,16 @@ export function requestProgressLabel(
   progress: RefundRequestProgress,
   paymentMethod: "Online" | "CardMachine",
   approvalState: RefundApprovalEntry["state"] | null,
+  /** v15 batch 8: a counter cash payment, given back in cash from the drawer. */
+  paidInCash = false,
 ): string {
   if (approvalState === "AwaitingApproval") return t("Waiting for owner approval");
+  if (paymentMethod === "CardMachine" && paidInCash)
+    return approvalState === "Approved"
+      ? t("Approved — give it back in cash and record it")
+      : progress === "Refunded"
+        ? t("Given back in cash")
+        : t("To give back in cash");
   if (paymentMethod === "CardMachine")
     return approvalState === "Approved"
       ? t("Approved — refund it on the card machine and record it")
@@ -267,9 +275,12 @@ function RecordedRequestStatus({
   held = false,
   refreshSignal,
   canSend = true,
+  paidInCash = false,
 }: {
   orderReference: string;
   entry: Items["recentRequests"][number];
+  /** v15 batch 8: the payment was taken in cash at the counter (given back in cash). */
+  paidInCash?: boolean;
   /**
    * WP-2423 M14: this reader may send a refund (payment.refund.execute). A cashier asks; a
    * manager or the owner sends it, so a cashier is never offered Send.
@@ -382,7 +393,12 @@ function RecordedRequestStatus({
     <RequestRow
       entry={entry}
       tone={requestTone(entry, approval?.state ?? null)}
-      state={requestProgressLabel(entry.progress, entry.paymentMethod, approval?.state ?? null)}
+      state={requestProgressLabel(
+        entry.progress,
+        entry.paymentMethod,
+        approval?.state ?? null,
+        paidInCash,
+      )}
       action={
         <button
           type="button"
@@ -435,9 +451,13 @@ function RecordedRequestStatus({
                     </p>
                   ) : approval?.state === "AwaitingApproval" ? (
                     <p>
-                      {t("{amount} to refund on the card machine once an owner approves it.", {
-                        amount: amount(payment.amountMinor),
-                      })}{" "}
+                      {payment.cashGivenBackMinor != null
+                        ? t("{amount} to give back in cash once an owner approves it.", {
+                            amount: amount(payment.cashGivenBackMinor),
+                          })
+                        : t("{amount} to refund on the card machine once an owner approves it.", {
+                            amount: amount(payment.amountMinor),
+                          })}{" "}
                       <Link to="/app/approvals">{t("Open Approvals")}</Link>
                     </p>
                   ) : recordedHere ? null : (
@@ -693,22 +713,43 @@ export const refundSendsOnConfirm = (
  * or the owner sends it from Approvals (v15 batch 5: the review told a cashier to refund it on the
  * machine themselves).
  */
-export const cardMachineReviewText = (approvalRequired: boolean, canSend: boolean) =>
-  !canSend
-    ? approvalRequired
-      ? t(
-          "Paid on the store's card machine. Recording this request does not refund anything yet: once it is approved, a manager or the owner sends it from Approvals.",
-        )
-      : t(
-          "Paid on the store's card machine. Recording this request does not refund anything yet: a manager or the owner sends it from Approvals.",
-        )
-    : approvalRequired
-      ? t(
-          "Paid on the store's card machine. After the request is recorded and approved, refund this amount on that machine and record it under the request.",
-        )
-      : t(
-          "Paid on the store's card machine. After the request is recorded, refund this amount on that machine and record it under the request.",
-        );
+export const cardMachineReviewText = (
+  approvalRequired: boolean,
+  canSend: boolean,
+  /** v15 batch 8: a counter cash payment goes back in cash from the drawer, in whole nickels. */
+  paidInCash = false,
+) =>
+  paidInCash
+    ? !canSend
+      ? approvalRequired
+        ? t(
+            "Paid in cash. Recording this request gives nothing back yet: once it is approved, a manager or the owner gives the cash back and records it.",
+          )
+        : t(
+            "Paid in cash. Recording this request gives nothing back yet: a manager or the owner gives the cash back and records it.",
+          )
+      : approvalRequired
+        ? t(
+            "Paid in cash. After the request is recorded and approved, give this amount back in cash from the drawer, in whole nickels (rounded to 5 cents), and record it under the request.",
+          )
+        : t(
+            "Paid in cash. After the request is recorded, give this amount back in cash from the drawer, in whole nickels (rounded to 5 cents), and record it under the request.",
+          )
+    : !canSend
+      ? approvalRequired
+        ? t(
+            "Paid on the store's card machine. Recording this request does not refund anything yet: once it is approved, a manager or the owner sends it from Approvals.",
+          )
+        : t(
+            "Paid on the store's card machine. Recording this request does not refund anything yet: a manager or the owner sends it from Approvals.",
+          )
+      : approvalRequired
+        ? t(
+            "Paid on the store's card machine. After the request is recorded and approved, refund this amount on that machine and record it under the request.",
+          )
+        : t(
+            "Paid on the store's card machine. After the request is recorded, refund this amount on that machine and record it under the request.",
+          );
 function RefundWizard({
   orderReference,
   paymentIntentReference,
@@ -716,8 +757,11 @@ function RefundWizard({
   onFinancialChange,
   blockedMessage = null,
   canSend = true,
+  paidInCash = false,
 }: {
   readonly orderReference: string;
+  /** v15 batch 8: this payment was taken in cash at the counter (given back in cash). */
+  readonly paidInCash?: boolean;
   /** The payment this page is for: what "Refund everything" means when items can't be mixed. */
   readonly paymentIntentReference: string;
   readonly csrf: string;
@@ -1089,10 +1133,15 @@ function RefundWizard({
                           "Request recorded for {total}. Nothing is refunded yet: a manager or the owner sends it from Approvals.",
                           { total },
                         )
-                      : t(
-                          "Request recorded for {total}. Now refund it on the store's card machine and record it under the request above.",
-                          { total },
-                        )),
+                      : paidInCash
+                        ? t(
+                            "Request recorded for {total}. Now give it back in cash from the drawer, in whole nickels, and record it under the request above.",
+                            { total },
+                          )
+                        : t(
+                            "Request recorded for {total}. Now refund it on the store's card machine and record it under the request above.",
+                            { total },
+                          )),
         );
         // The request appears in the list (and its units leave the selection) straight away.
         void reloadRequests();
@@ -1223,6 +1272,7 @@ function RefundWizard({
                   </RequestRow>
                 ) : (
                   <RecordedRequestStatus
+                    paidInCash={paidInCash}
                     held={heldRequest === entry.requestReference}
                     approval={approvals.get(entry.requestReference) ?? null}
                     canSend={canSend}
@@ -1503,7 +1553,7 @@ function RefundWizard({
             </div>
           </dl>
           {previewOnMachine ? (
-            <p>{cardMachineReviewText(preview.approvalRequired === true, canSend)}</p>
+            <p>{cardMachineReviewText(preview.approvalRequired === true, canSend, paidInCash)}</p>
           ) : sendsNow ? (
             <p>
               {t(
@@ -1725,9 +1775,13 @@ export function PaymentFinancialSummary({
           </dl>
           {context.paymentMethod === "CardMachine" ? (
             <p className="refund-summary__note">
-              {t(
-                "Paid on the store's card machine. Its refunds are made on that machine and recorded here; they count on the day they are made.",
-              )}
+              {context.paidInCash
+                ? t(
+                    "Paid in cash at the counter. Its refunds are given back in cash from the drawer, in whole nickels (rounded to 5 cents), and recorded here; they count on the day they are given back.",
+                  )
+                : t(
+                    "Paid on the store's card machine. Its refunds are made on that machine and recorded here; they count on the day they are made.",
+                  )}
             </p>
           ) : null}
         </section>
@@ -1885,7 +1939,8 @@ export function PendingCardMachineRefunds({
       className="card-machine-refunds-to-record refund-requests"
     >
       <h2 id="card-machine-refunds-heading">
-        {refunds !== null && refunds.length > 0 && refunds.every((r) => r.cashMinor !== null)
+        {context.paidInCash ||
+        (refunds !== null && refunds.length > 0 && refunds.every((r) => r.cashMinor !== null))
           ? t("Cash to give back")
           : t("Refunds to make on the card machine")}
       </h2>
@@ -1914,6 +1969,7 @@ export function PendingCardMachineRefunds({
                   entry.progress,
                   entry.paymentMethod,
                   approval?.state ?? null,
+                  context.paidInCash || cashMinor !== null,
                 )}
               >
                 {approval?.state === "AwaitingApproval" ? (
@@ -1945,7 +2001,13 @@ export function PendingCardMachineRefunds({
                       setOpen(entry.requestReference);
                     }}
                   >
-                    {t("Record the {amount} card-machine refund", { amount: amount(amountMinor) })}
+                    {context.paidInCash || cashMinor !== null
+                      ? t("Record {amount} given back in cash", {
+                          amount: amount(cashMinor ?? amountMinor),
+                        })
+                      : t("Record the {amount} card-machine refund", {
+                          amount: amount(amountMinor),
+                        })}
                   </button>
                 )}
               </RequestRow>
@@ -2062,6 +2124,7 @@ function PaymentContent({
               csrf={csrf}
               blockedMessage={requestBlockedMessage(context)}
               canSend={context.canSend}
+              paidInCash={context.paidInCash}
             />
           )}
         </>
