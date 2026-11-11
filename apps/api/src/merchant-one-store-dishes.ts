@@ -519,6 +519,41 @@ interface MenuBuilder {
   /** The Brand's allergen list (absent or empty: the Brand has none yet). */
   readonly allergenChoices?: readonly unknown[];
 }
+/** The menu read's sizes with where their allergens come from (as the menu page reads them). */
+interface MenuAllergenView {
+  readonly sellables?: readonly {
+    readonly skuReference: string;
+    readonly allergens?: {
+      readonly source?: string;
+      readonly declared?: readonly { allergenReference: string; classification: string }[];
+      readonly noIngredients?: boolean;
+      readonly unanswered?: readonly string[];
+    };
+  }[];
+}
+
+/**
+ * Whether the allergens a save sends are what the dish already declares (by staff, every allergen
+ * on the list answered): sending them again changes nothing guests read.
+ */
+export function sameAllergens(
+  menu: MenuAllergenView,
+  sku: string,
+  sent: NonNullable<SaveDishBody["allergens"]>,
+): boolean {
+  const now = menu.sellables?.find((x) => x.skuReference === sku)?.allergens;
+  if (now?.source !== "StaffDeclared" || (now.unanswered ?? []).length > 0) return false;
+  if (sent === "ComboParts") return false;
+  if (sent === "NoIngredients") return now.noIngredients === true;
+  if (now.noIngredients === true) return false;
+  const key = (answers: readonly { allergenReference: string; classification: string }[]) =>
+    answers
+      .filter((a) => a.classification !== "None")
+      .map((a) => a.allergenReference + ":" + a.classification)
+      .sort()
+      .join(",");
+  return key(sent) === key(now.declared ?? []);
+}
 
 export function createMerchantOneStoreDishes(options: {
   readonly products: Pick<ReturnType<typeof createMerchantProducts>, "query" | "command">;
@@ -823,6 +858,20 @@ export function createMerchantOneStoreDishes(options: {
     product: (productReference: string) => Promise<ProductDetail>,
     known: (productReference: string) => void,
   ) => {
+    // WP-2423 (v15 batch 5): a listed menu opens its draft just before the first write that
+    // "List it" must put live, so a save stopped after that write still leaves it to be listed
+    // (a retry finds the dish already changed and writes nothing more). A price at this Store
+    // only is live at once: a save that changed nothing else opens no draft, and the page never
+    // says "saved changes not listed yet" with nothing to list.
+    const opened: { menu: MenuBuilder | null; listingNeeded: boolean } = {
+      menu: null,
+      listingNeeded: false,
+    };
+    const forListing = async () => {
+      opened.listingNeeded = true;
+      opened.menu ??= await editableMenu(session, body.menuReference, step("menu-revise"));
+      return opened.menu;
+    };
     // 1. The product: names, descriptions, tax class and choice groups (one size). A command that
     // applied answers the product as it now is; a replay answers what it recorded back then, so
     // the product is read again.
@@ -830,6 +879,7 @@ export function createMerchantOneStoreDishes(options: {
     let detail: ProductDetail | null = null;
     let createdNow = false;
     if (productReference === null) {
+      await forListing();
       const code = newDishCode(body.operationReference);
       const created = (await options.products.command({
         ...session,
@@ -874,6 +924,7 @@ export function createMerchantOneStoreDishes(options: {
       detail.presentation.descriptionZh === body.descriptionZh &&
       JSON.stringify(detail.optionSets) === JSON.stringify(groups);
     if (!same || rebind) {
+      await forListing();
       const saved = (await options.products.command({
         ...session,
         body: {
@@ -908,7 +959,8 @@ export function createMerchantOneStoreDishes(options: {
       })) as unknown as { status: string; product: ProductDetail };
       detail = saved.status === "Applied" ? saved.product : await product(productReference);
     }
-    if (detail.lifecycle !== "Active" || detail.sizes.some((s) => s.lifecycle !== "Active"))
+    if (detail.lifecycle !== "Active" || detail.sizes.some((s) => s.lifecycle !== "Active")) {
+      await forListing();
       await options.products.command({
         ...session,
         body: {
@@ -918,6 +970,7 @@ export function createMerchantOneStoreDishes(options: {
           expectedAggregateVersion: detail.aggregateVersion,
         },
       });
+    }
     const sku = size.skuReference;
     // A new dish is offered at the store (one store: the store it was made for). One created just
     // now has no decision to read; on a replay, a dish staff hid since stays hidden.
@@ -934,6 +987,7 @@ export function createMerchantOneStoreDishes(options: {
 
     // 2. The price (M70): for every Store in the menu's own price draft (published by "List it"),
     // or at this Store only, at once. No price given: this save leaves it as it is.
+    if (body.priceMinor !== null && body.priceScope !== "ThisStore") await forListing();
     const price = body.priceMinor === null ? null : await savePrice(session, body, sku, step);
 
     // 3. Choice prices (waiting until "List it").
@@ -979,6 +1033,7 @@ export function createMerchantOneStoreDishes(options: {
           },
         ];
       });
+      if (prices.length > 0) await forListing();
       if (prices.length > 0)
         await options.optionPrices.command({
           ...session,
@@ -988,16 +1043,23 @@ export function createMerchantOneStoreDishes(options: {
     }
 
     // 4. Its place on the menu (moved to the chosen section, last), in an open draft. No section
-    // given: the place stays, but a listed menu still opens a draft for what changed to be listed.
-    const menu = await editableMenu(session, body.menuReference, step("menu-revise"));
+    // given: the place stays.
+    const read = opened.menu ?? (await loadMenu(session, body.menuReference));
     if (body.sectionCode !== null) {
-      const target = menu.menu.sections.find((s) => s.code === body.sectionCode);
-      if (target === undefined) return fail("NoSection");
-      const placed = target.items.some((item) => item.skuReference === sku);
-      const elsewhere = menu.menu.sections.some(
-        (s) => s.code !== body.sectionCode && s.items.some((item) => item.skuReference === sku),
-      );
-      if (!placed || elsewhere) {
+      const placedIn = (m: MenuBuilder) => {
+        const target = m.menu.sections.find((s) => s.code === body.sectionCode);
+        if (target === undefined) return fail("NoSection");
+        return {
+          placed: target.items.some((item) => item.skuReference === sku),
+          elsewhere: m.menu.sections.some(
+            (s) => s.code !== body.sectionCode && s.items.some((item) => item.skuReference === sku),
+          ),
+        };
+      };
+      const before = placedIn(read);
+      if (!before.placed || before.elsewhere) {
+        const menu = await forListing();
+        const { placed } = placedIn(menu);
         await options.menus.command({
           ...session,
           body: {
@@ -1023,7 +1085,11 @@ export function createMerchantOneStoreDishes(options: {
       }
     }
 
-    // 5. Its allergens, declared by staff (a generated recipe; a real recipe is kept).
+    // 5. Its allergens, declared by staff (a generated recipe; a real recipe is kept). A first
+    // declaration, or different answers, are reviewed when the menu is listed.
+    if (body.allergens !== null && !sameAllergens(read as MenuAllergenView, sku, body.allergens))
+      await forListing();
+    if ((body.choiceAllergens ?? []).length > 0) await forListing();
     if (body.allergens !== null)
       await options.dishAllergens.command({
         ...session,
@@ -1122,6 +1188,9 @@ export function createMerchantOneStoreDishes(options: {
       choicesWaiting,
       // WP-2423 M70: the dish's prices as this save left them (null: no price was sent).
       price,
+      // WP-2423 (v15 batch 5): something this save changed goes live with "List it" (false: a
+      // price at this Store only, live now, and nothing else changed).
+      listingNeeded: opened.listingNeeded,
     };
   };
 

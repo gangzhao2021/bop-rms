@@ -86,6 +86,9 @@ function fakes() {
     recipeMissing: false,
     // Store availability by size: absent = never decided here (NotOffered).
     offered: new Map<string, string>([[id(12), "Hidden"]]),
+    /** WP-2423 M70: the Brand has several Stores; this Store's own prices by size. */
+    multiStore: false,
+    storePrices: new Map<string, string>(),
   };
   const record = (name: string, body: Record<string, unknown>) =>
     calls.push(name + ":" + String(body.action));
@@ -162,7 +165,7 @@ function fakes() {
           return {
             books: state.books,
             viewer: id(50),
-            allStores: { multiStore: false, mayList: true },
+            allStores: { multiStore: state.multiStore, mayList: true },
             storeAssignment:
               state.assigned === null ? null : { priceBookReference: state.assigned },
           };
@@ -192,6 +195,19 @@ function fakes() {
         if (body.action === "AssignToStore") state.assigned = book.priceBookReference;
         book.aggregateVersion += 1;
         return {};
+      },
+    },
+    storePrices: {
+      query: async () => ({
+        prices: [...state.storePrices].map(([sellableReference, storePriceMinor]) => ({
+          sellableReference,
+          storePriceMinor,
+        })),
+      }),
+      command: async ({ body }: { body: Record<string, unknown> }) => {
+        record("storePrice", body);
+        state.storePrices.set(String(body.sellableReference), String(body.amountMinor));
+        return { status: "Applied" };
       },
     },
     optionPrices: {
@@ -251,6 +267,20 @@ function fakes() {
         menu: state.menu,
         publication: state.published ? { state: "Published" } : null,
         allergenChoices: state.allergenChoices,
+        // Where each size's allergens come from, as the menu page reads them.
+        sellables: Array.isArray(state.declared)
+          ? [
+              {
+                skuReference: id(11),
+                allergens: {
+                  source: "StaffDeclared",
+                  declared: state.declared,
+                  noIngredients: false,
+                  unanswered: [],
+                },
+              },
+            ]
+          : [],
       }),
       command: async ({ body }: { body: Record<string, unknown> }) => {
         record("menu", body);
@@ -375,6 +405,8 @@ describe("WP-2423 item 8 ⑥ one dish saved from the one-page menu", () => {
       skuReference: id(11),
     });
     expect(calls).toEqual([
+      // The listed menu opens its draft before the first change it will list.
+      "menu:Revise",
       "product:Create",
       "product:SaveDraft",
       "product:StartSelling",
@@ -382,7 +414,6 @@ describe("WP-2423 item 8 ⑥ one dish saved from the one-page menu", () => {
       "price:CreateDraft",
       "price:SaveDraft",
       "optionPrice:SetPrices",
-      "menu:Revise",
       "menu:SaveDraft",
       "allergens:DeclareDish",
       "optionRecipe:cover",
@@ -540,8 +571,8 @@ describe("WP-2423 item 8 ⑥ one dish saved from the one-page menu", () => {
       });
       expect(calls.filter((c) => c.startsWith("price"))).toEqual([]);
       expect(calls).not.toContain("menu:SaveDraft");
-      // A listed menu still opens a draft: what changed is listed with it.
-      expect(calls).toContain("menu:Revise");
+      // Nothing changed: the listed menu opens no draft, so nothing waits to be listed.
+      expect(calls).not.toContain("menu:Revise");
       expect(state.books[0]?.prices).toEqual([{ sellableReference: id(11), amountMinor: "999" }]);
       for (const missing of [{ priceMinor: null, priceScope: null }, { sectionCode: null }])
         expect(() => parseOneStoreDishBody(save(missing))).toThrow(MerchantOneStoreDishError);
@@ -551,6 +582,62 @@ describe("WP-2423 item 8 ⑥ one dish saved from the one-page menu", () => {
         ),
       ).toMatchObject({ priceMinor: null, sectionCode: null });
     });
+  });
+
+  it("WP-2423 (v15 batch 5): a price at this Store only is live at once and leaves nothing to list", async () => {
+    const { calls, state, dishes } = fakes();
+    await dishes.command({ ...session, body: save() });
+    await dishes.command({ ...session, body: listAll(id(101), state) });
+    state.multiStore = true;
+    calls.length = 0;
+    const result = await dishes.command({
+      ...session,
+      body: save({
+        productReference: id(10),
+        operationReference: id(140),
+        priceMinor: "1350",
+        priceScope: "ThisStore",
+        expectedPriceMinor: "1288",
+      }),
+    });
+    expect(calls).toEqual(["product:read", "storePrice:ChangeStorePrice", "allergens:DeclareDish"]);
+    expect(state.published).toBe(true);
+    expect(result).toMatchObject({ listingNeeded: false, price: { storePriceMinor: "1350" } });
+    // The same price with a new name: the name waits for "List it", the price does not.
+    calls.length = 0;
+    const renamed = await dishes.command({
+      ...session,
+      body: save({
+        productReference: id(10),
+        operationReference: id(141),
+        name: "Dan dan noodles, spicy (TEST)",
+        priceMinor: "1400",
+        priceScope: "ThisStore",
+        expectedPriceMinor: "1350",
+      }),
+    });
+    expect(calls.slice(0, 3)).toEqual(["product:read", "menu:Revise", "product:SaveDraft"]);
+    expect(calls).toContain("storePrice:ChangeStorePrice");
+    expect(renamed).toMatchObject({ listingNeeded: true, price: { storePriceMinor: "1400" } });
+  });
+
+  it("WP-2423 (v15 batch 5): changed allergens on a listed dish are listed with the menu", async () => {
+    const { calls, state, dishes } = fakes();
+    await dishes.command({ ...session, body: save() });
+    await dishes.command({ ...session, body: listAll(id(101), state) });
+    calls.length = 0;
+    const result = await dishes.command({
+      ...session,
+      body: save({
+        productReference: id(10),
+        operationReference: id(142),
+        priceMinor: null,
+        priceScope: null,
+        allergens: [{ allergenReference: PEANUT, classification: "CrossContactPossible" }],
+      }),
+    });
+    expect(calls).toEqual(["product:read", "menu:Revise", "allergens:DeclareDish"]);
+    expect(result).toMatchObject({ listingNeeded: true });
   });
 
   it("WP-2423 item 8 ⑦: declares a charge with no stock ingredients in the same save", async () => {
@@ -636,7 +723,7 @@ describe("WP-2423 item 8 ⑥ one dish saved from the one-page menu", () => {
         allergens: null,
       }),
     });
-    expect(calls).toEqual(["product:read", "price:CreateDraft", "price:SaveDraft", "menu:Revise"]);
+    expect(calls).toEqual(["product:read", "menu:Revise", "price:CreateDraft", "price:SaveDraft"]);
     expect(state.books[1]?.prices).toEqual([{ sellableReference: id(11), amountMinor: "1388" }]);
   });
 
