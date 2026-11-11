@@ -46,7 +46,16 @@ export function tableCloseBlockers(
           ),
     );
   const open = (progress?.items ?? []).filter((item) => item.remainingQuantity > 0);
-  const waiting = open.filter((item) => item.phase === "Submitted").length;
+  // v15 batch-5: a staff round's dishes wait for the card machine, said once above; they are
+  // never also a guest's payment on a phone.
+  const staffRounds = new Set(
+    table.staffRoundsAwaitingPayment.flatMap((round) =>
+      round.orderBatchReference === undefined ? [] : [round.orderBatchReference],
+    ),
+  );
+  const waiting = open.filter(
+    (item) => item.phase === "Submitted" && !staffRounds.has(item.orderBatchReference),
+  ).length;
   const unserved = open.filter((item) =>
     ["Accepted", "InProgress", "Ready"].includes(item.phase),
   ).length;

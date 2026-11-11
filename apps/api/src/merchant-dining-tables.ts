@@ -259,12 +259,13 @@ export function createMerchantDiningTables(options: {
               orderBatchReference: round.orderBatchReference,
             })),
           );
-          const awaiting = new Map<string, string[]>();
+          // v15 batch-5: with the round itself, so the close step counts its dishes once.
+          const awaiting = new Map<string, { payBy: string; orderBatchReference: string }[]>();
           for (const round of candidates) {
             if (paidOnCardMachine.has(round.orderBatchReference)) continue;
             awaiting.set(round.tableReference, [
               ...(awaiting.get(round.tableReference) ?? []),
-              round.payBy,
+              { payBy: round.payBy, orderBatchReference: String(round.orderBatchReference) },
             ]);
           }
           // WP-2423 abandoned payment ("warn before timeouts"): guest rounds of the party now at
@@ -691,7 +692,7 @@ export function createMerchantDiningTables(options: {
                   staffRoundsAwaitingPayment: Object.freeze(
                     (awaiting.get(table.tableReference) ?? [])
                       .slice(0, 20)
-                      .map((payBy) => Object.freeze({ payBy })),
+                      .map((round) => Object.freeze({ ...round })),
                   ),
                   // A guest started this table; only on such a table, so any other screen still
                   // open from before reads the same row it always did.

@@ -476,11 +476,13 @@ it("WP-2423 item 5: lists the party's staff rounds still awaiting card-machine p
     { orderReference: id(40), orderBatchReference: id(41) },
     { orderReference: id(40), orderBatchReference: id(42) },
   ]);
+  // v15 batch-5: with the round, so the close step counts its dishes once (as the card-machine
+  // payment, never also as a guest paying on a phone); the paid round is not listed.
   expect(view.items.map((item) => item.staffRoundsAwaitingPayment)).toEqual([
-    [{ payBy: "2026-09-25T12:10:00.000Z" }],
+    [{ payBy: "2026-09-25T12:10:00.000Z", orderBatchReference: id(41) }],
     [],
   ]);
-  expect(JSON.stringify(view)).not.toContain(id(41));
+  expect(JSON.stringify(view)).not.toContain(id(42));
 });
 
 it("WP-2423 abandoned payment: lists each party's unpaid guest rounds and who may cancel them", async () => {

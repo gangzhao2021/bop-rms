@@ -904,7 +904,7 @@ const tablesView = {
         },
       ],
       roundsAwaitingAcceptance: [{ roundNumber: 2, paidAt: at(14) }],
-      staffRoundsAwaitingPayment: [{ payBy: at(45) }],
+      staffRoundsAwaitingPayment: [{ payBy: at(45), orderBatchReference: id(0x9046) }],
     },
   ],
   nextAfterTableReference: null,

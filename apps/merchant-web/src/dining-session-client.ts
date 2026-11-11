@@ -77,7 +77,11 @@ export interface StaffDiningTable {
    * WP-2423 item 5: rounds staff entered for the party at this table that still wait for their
    * card-machine payment, each with the time it is cancelled if not recorded (oldest first).
    */
-  staffRoundsAwaitingPayment: readonly { readonly payBy: string }[];
+  /** v15 batch-5: with its round (absent from an older server), so its dishes count once. */
+  staffRoundsAwaitingPayment: readonly {
+    readonly payBy: string;
+    readonly orderBatchReference?: string;
+  }[];
   /**
    * WP-2423 abandoned payment: guest rounds of the party at this table nobody has paid for yet
    * (for example the guest started paying and left), each cancelled automatically at `payBy`
@@ -296,13 +300,17 @@ export function createDiningSessionClient(fetcher: typeof fetch = fetch) {
                   r.staffRoundsAwaitingPayment.length === 0)
               ? r.staffRoundsAwaitingPayment.map((entry) => {
                   const round = obj(entry);
+                  const withRound = Object.hasOwn(round, "orderBatchReference");
                   if (
-                    Object.keys(round).length !== 1 ||
+                    Object.keys(round).length !== (withRound ? 2 : 1) ||
                     typeof round.payBy !== "string" ||
                     !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(round.payBy)
                   )
                     return fail();
-                  return Object.freeze({ payBy: round.payBy });
+                  return Object.freeze({
+                    payBy: round.payBy,
+                    ...(withRound ? { orderBatchReference: ref(round.orderBatchReference) } : {}),
+                  });
                 })
               : fail();
         const guestAwaiting =

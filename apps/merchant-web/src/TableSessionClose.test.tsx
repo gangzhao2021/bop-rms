@@ -85,6 +85,34 @@ it("WP-2423 D4: explains what stops a table from closing, in staff words, with w
   for (const text of blockers) expect(text).not.toMatch(/[0-9a-f]{8}-|Submitted|Accepted|Batch/u);
 });
 
+it("v15 batch-5: a staff round's dishes are its card-machine payment, never also a guest paying on a phone", () => {
+  const staffRound = { ...item("Submitted", 1, 7), orderBatchReference: id(21) };
+  const guestRound = item("Submitted", 1, 8);
+  expect(
+    tableCloseBlockers(
+      {
+        staffRoundsAwaitingPayment: [
+          { payBy: "2026-10-15T19:30:00.000Z", orderBatchReference: id(21) },
+        ],
+      },
+      { items: [staffRound, { ...staffRound, orderItemReference: id(109) }] },
+    ),
+  ).toEqual([
+    "1 round entered by staff still waits for card-machine payment. Record the payment on the Orders page, or cancel the round there.",
+  ]);
+  // A guest's own unpaid round beside it is still said.
+  expect(
+    tableCloseBlockers(
+      {
+        staffRoundsAwaitingPayment: [
+          { payBy: "2026-10-15T19:30:00.000Z", orderBatchReference: id(21) },
+        ],
+      },
+      { items: [staffRound, guestRound] },
+    ),
+  ).toHaveLength(2);
+});
+
 it("v15 2026-10-28: a round paid with the table gets only its own guidance, not 'cancel on Orders'", () => {
   const cooking = { items: [item("Accepted", 1, 3)] };
   const payLater = { staffRoundsAwaitingPayment: [], paymentTiming: "PayLater" as const };
