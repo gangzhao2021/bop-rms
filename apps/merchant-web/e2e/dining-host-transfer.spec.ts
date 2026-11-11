@@ -127,7 +127,10 @@ test("@production staff confirms Host transfer and retains unknown operation acr
   await expect(retry).toBeEnabled();
   await expect(page.getByRole("button", { name: "Refresh phones", exact: true })).toBeDisabled();
   await retry.click();
-  await expect(page.getByText(/Host transfer recorded at/)).toBeVisible();
+  // Batch 5 wording (M144): staff read phones, not participants or hosts.
+  await expect(
+    page.getByText(/^Recorded at .*\. Refresh phones to see which phone sends the cart\.$/),
+  ).toBeVisible();
   await expect(page.getByRole("button", { name: "Refresh tables", exact: true })).toBeEnabled();
   expect(new Set(bodies).size).toBe(1);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
