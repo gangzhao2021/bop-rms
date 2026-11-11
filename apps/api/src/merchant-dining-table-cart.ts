@@ -132,9 +132,57 @@ export interface MerchantDiningTableCartView {
      * number is unknown; until when the others' dishes wait for it). Staff may still take a dish
      * out: that ends the choice and the phone is asked to choose again, never charged for more.
      */
-    readonly guestChoosing: null | { readonly phoneNumber: number | null; readonly until: string };
+    readonly guestChoosing: StaffGuestChoosing;
     readonly lines: readonly MerchantDiningTableCartLine[];
   };
+}
+
+/**
+ * `held` is false once the hold ran out (`until` passed): the payer's own phone keeps its choice
+ * on screen until it pays or goes back (DEC-DINING-CHECKOUT-SCOPE 13), so staff are told it ran
+ * out, never "is choosing … until" a time already past.
+ */
+export type StaffGuestChoosing = null | {
+  readonly phoneNumber: number | null;
+  readonly until: string;
+  readonly held: boolean;
+};
+
+/**
+ * What the table page says of a phone that chose what it pays: only for the cart staff see, at
+ * the version the choice was made on, and never while a guest is paying. The note is
+ * informational: a failed read leaves it out and never takes the staff read or removal down.
+ */
+export async function staffGuestChoosing(input: {
+  readonly paying: boolean;
+  readonly cart: { readonly cartReference: string; readonly cartVersion: number };
+  readonly observedAt: string;
+  readonly read: () => Promise<{
+    readonly cartReference: string;
+    readonly cartVersion: number;
+    readonly chooserParticipantReference: string;
+    readonly expiresAt: string;
+  } | null>;
+  readonly phoneNumberOf: (participantReference: string) => number | null;
+}): Promise<StaffGuestChoosing> {
+  if (input.paying) return null;
+  let choice: Awaited<ReturnType<typeof input.read>>;
+  try {
+    choice = await input.read();
+  } catch {
+    return null;
+  }
+  if (
+    choice === null ||
+    choice.cartReference !== input.cart.cartReference ||
+    choice.cartVersion !== input.cart.cartVersion
+  )
+    return null;
+  return Object.freeze({
+    phoneNumber: input.phoneNumberOf(choice.chooserParticipantReference),
+    until: choice.expiresAt,
+    held: Date.parse(choice.expiresAt) > Date.parse(input.observedAt),
+  });
 }
 
 /** The Audit reason code for a staff removal reason. */
@@ -283,31 +331,35 @@ export function createMerchantDiningTableCart(options: {
             [scope.brandReference, scope.storeReference],
           );
           const paying = await guestPaying(cart.cartReference, cart.cartVersion);
-          const choice = (
-            await readDiningCheckoutScopeState(cartTx, owner, {
-              diningSessionReference: session,
-              observedAt,
-            })
-          ).live;
-          const chooser =
-            choice === null || choice.cartReference !== cart.cartReference
-              ? undefined
-              : phoneOf.get(choice.chooserParticipantReference);
+          // In its own savepoint: a failed read only leaves the note out, never the staff
+          // removal made above in this transaction.
+          const guestChoosing = await staffGuestChoosing({
+            paying,
+            cart,
+            observedAt,
+            phoneNumberOf: (participant) => phoneOf.get(participant)?.phoneNumber ?? null,
+            read: async () => {
+              await tx.query("SAVEPOINT staff_table_cart_choice", []);
+              try {
+                const { live } = await readDiningCheckoutScopeState(cartTx, owner, {
+                  diningSessionReference: session,
+                  observedAt,
+                });
+                await tx.query("RELEASE SAVEPOINT staff_table_cart_choice", []);
+                return live;
+              } catch (error) {
+                await tx.query("ROLLBACK TO SAVEPOINT staff_table_cart_choice", []);
+                await tx.query("RELEASE SAVEPOINT staff_table_cart_choice", []);
+                throw error;
+              }
+            },
+          });
           return Object.freeze({
             cart: Object.freeze({
               cartReference: cart.cartReference,
               cartVersion: cart.cartVersion,
               guestPaying: paying,
-              guestChoosing:
-                paying ||
-                choice === null ||
-                choice.cartReference !== cart.cartReference ||
-                choice.cartVersion !== cart.cartVersion
-                  ? null
-                  : Object.freeze({
-                      phoneNumber: chooser?.phoneNumber ?? null,
-                      until: choice.expiresAt,
-                    }),
+              guestChoosing,
               lines: Object.freeze(
                 cart.lines.map((line) => {
                   const phone =
