@@ -104,6 +104,15 @@ export function createMerchantOrdinaryRefundRequest(options: {
   const withdrawNeedsApproval = (): never => {
     throw new Error("ORDINARY_REFUND_WITHDRAW_NEEDS_APPROVAL");
   };
+  /**
+   * WP-2423 M10/M14 (DEC-OWNER-DEFAULTS-2026-11-06 item 2): "stop making it too" on a cashier's
+   * request. A cashier records the request; a manager or the owner reviews and sends it, and may
+   * still decline it. The kitchen and the counter change only with a refund nobody can decline
+   * any more, so the cashier uses Cancel items for a dish not started, or asks a manager.
+   */
+  const withdrawNeedsSender = (): never => {
+    throw new Error("ORDINARY_REFUND_WITHDRAW_NEEDS_SENDER");
+  };
   const parseWithdraw = (value: unknown) => {
     if (
       !Array.isArray(value) ||
@@ -474,6 +483,9 @@ export function createMerchantOrdinaryRefundRequest(options: {
             if (!preview) {
               if (result.escalation?.requiresIndependentApproval === true)
                 return withdrawNeedsApproval();
+              // The role was read (and is rechecked before the commit) by Payment's authorize.
+              if (requesterRoleSeen === null || requesterRoleSeen === "Staff")
+                return withdrawNeedsSender();
               const withdrawals = await recordOrderItemRefundWithdrawals(
                 businessTransaction,
                 scope,

@@ -73,6 +73,7 @@ const changedCodes: ReadonlySet<string> = new Set([
   "ORDINARY_REFUND_WITHDRAW_NEEDS_APPROVAL",
   "ORDINARY_REFUND_WITHDRAW_HANDED_OVER",
   "ORDINARY_REFUND_WITHDRAW_EVERYTHING",
+  "ORDINARY_REFUND_WITHDRAW_NEEDS_SENDER",
 ]);
 const retryCodes: ReadonlySet<string> = new Set([
   "Unavailable",

@@ -455,4 +455,27 @@ it("WP-2423 M10: stop making it too takes the Order's fence before the refund, c
   await expect(operation(input)).rejects.toThrow("ORDINARY_REFUND_WITHDRAW_NEEDS_APPROVAL");
   expect(d.applyRecords).not.toHaveBeenCalled();
   expect(d.order).toEqual(["fence"]);
+  // M14: a cashier's request (no approval needed) waits for a manager or the owner to send it,
+  // and they may still decline it: the kitchen, the counter and the stock are left as they are.
+  d.order.length = 0;
+  d.withdrawals.mockClear();
+  d.record.mockImplementation(async (tx, value) => {
+    d.order.push("refund");
+    return recordOnce(tx, value);
+  });
+  f.configure.mockResolvedValue({
+    providerAccountReference: id(6),
+    environment: "Test" as const,
+    roleMapping: { Manager: ["manager"], Owner: ["owner"], Finance: [], Staff: ["staff"] },
+  });
+  d.workforce.mockResolvedValue({ decision: { effect: "Allow" }, activeRoleCodes: ["staff"] });
+  await expect(operation(input)).rejects.toThrow("ORDINARY_REFUND_WITHDRAW_NEEDS_SENDER");
+  expect(d.withdrawals).not.toHaveBeenCalled();
+  expect(d.applyRecords).not.toHaveBeenCalled();
+  expect(d.order).toEqual(["fence", "refund"]);
+  // The same cashier's request without "stop making it too" is recorded for a manager to send.
+  const { withdraw: _withdraw, ...plain } = input.command;
+  await expect(operation({ ...input, command: plain })).resolves.toMatchObject({
+    status: "Created",
+  });
 });

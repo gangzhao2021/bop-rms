@@ -34,6 +34,7 @@ function refundRequestFailed(response: express.Response, error: unknown) {
   // says why and what to do instead. Nothing was recorded.
   for (const [code, answer] of [
     ["ORDINARY_REFUND_WITHDRAW_NEEDS_APPROVAL", "refund_withdraw_needs_approval"],
+    ["ORDINARY_REFUND_WITHDRAW_NEEDS_SENDER", "refund_withdraw_needs_sender"],
     ["ORDINARY_REFUND_WITHDRAW_HANDED_OVER", "refund_withdraw_handed_over"],
     ["ORDINARY_REFUND_WITHDRAW_EVERYTHING", "refund_withdraw_everything"],
     ["ORDINARY_REFUND_WITHDRAW_KITCHEN_CHANGED", "refund_withdraw_kitchen_changed"],
