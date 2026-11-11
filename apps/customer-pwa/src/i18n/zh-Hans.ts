@@ -121,6 +121,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Ask a staff member at": "请询问店员：",
   "To tell the store about an allergy, call them or ask at the counter before you order. The QR code does not record allergy or health information.":
     "如有过敏，请在下单前致电门店或到柜台告诉店员。二维码不会记录过敏或健康信息。",
+  "To tell the store about an allergy, ask at the counter before you order. The QR code does not record allergy or health information.":
+    "如有过敏，请在下单前到柜台告诉店员。二维码不会记录过敏或健康信息。",
   "Ask a staff member for an accessible ordering option. Tell staff about allergies before ordering; the QR code does not record allergy or health information.":
     "如需其他点单方式，请向店员求助。点单前请告知店员过敏情况；扫码点单不会记录过敏或健康信息。",
   "Ask a staff member if you need help.": "需要帮助请问店员。",

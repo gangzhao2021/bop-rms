@@ -21,7 +21,7 @@ import {
   createStoreProfileClient,
   type StoreProfileLoader,
 } from "../store/store-profile-client.js";
-import { StoreIdentityCard } from "../store/StoreIdentity.js";
+import { StoreIdentityCard, useStoreProfile } from "../store/StoreIdentity.js";
 import { nextOpeningText } from "../store/store-hours-text.js";
 import { endSentence, formatClockTime, formatStoreLocalTime } from "../journey/format.js";
 import { unpaidPickup } from "../order-status/OrderStatusPage.js";
@@ -542,6 +542,12 @@ export function EntryContextView({
       : state.kind === "NotAccepting"
         ? (state.browse ?? null)
         : null);
+  // M109: "call them" only beside the number the store card shows; a store with no published
+  // phone (or one not read) is told at the counter.
+  const profile = useStoreProfile(
+    established !== null && established.channel === "Pickup" ? storeProfile : null,
+  );
+  const callable = established?.channel === "Pickup" && profile !== null && profile.phone !== null;
   return (
     <CustomerPage
       step="entry"
@@ -594,9 +600,13 @@ export function EntryContextView({
           <p>
             {/* M109: a pickup guest ordering from elsewhere has no staff member beside them. */}
             {at?.channel === "Pickup"
-              ? t(
-                  "To tell the store about an allergy, call them or ask at the counter before you order. The QR code does not record allergy or health information.",
-                )
+              ? callable
+                ? t(
+                    "To tell the store about an allergy, call them or ask at the counter before you order. The QR code does not record allergy or health information.",
+                  )
+                : t(
+                    "To tell the store about an allergy, ask at the counter before you order. The QR code does not record allergy or health information.",
+                  )
               : t(
                   "Ask a staff member for an accessible ordering option. Tell staff about allergies before ordering; the QR code does not record allergy or health information.",
                 )}

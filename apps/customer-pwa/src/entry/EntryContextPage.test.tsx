@@ -7,6 +7,7 @@ import type { CustomerEntryEstablishedContext, CustomerEntryScreenState } from "
 import { setSettledTable } from "../session/customer-transaction-context.js";
 import { zhHans as zh } from "../i18n/zh-Hans.js";
 import { formatStoreLocalTime } from "../journey/format.js";
+import type { StoreProfile, StoreProfileLoader } from "../store/store-profile-client.js";
 
 const context: CustomerEntryEstablishedContext = Object.freeze({
   brandDisplayName: "BOP Test Kitchen",
@@ -683,9 +684,54 @@ describe("M109: a pickup guest's help names the store, not a staff member beside
           />
         </MemoryRouter>,
       );
-    expect(at("Pickup")).toContain("call them or ask at the counter before you order");
+    expect(at("Pickup")).toContain("ask at the counter before you order");
     expect(at("Pickup")).not.toContain("Tell staff about allergies");
     expect(at("DineIn")).toContain("Tell staff about allergies before ordering");
+  });
+  it("says 'call them' only where the store card shows a number to call", () => {
+    const profile = (phone: string | null): StoreProfile => ({
+      storeDisplayName: "Test Merchant 2",
+      timeZone: "America/Toronto",
+      address: {
+        addressLines: ["1 Test St"],
+        locality: "Toronto",
+        regionCode: "ON",
+        postalCode: "M5V 1A1",
+        countryCode: "CA",
+      },
+      phone,
+      hours: null,
+    });
+    const loader = (value: StoreProfile | null): StoreProfileLoader =>
+      Object.assign(async () => value, { last: () => value });
+    const at = (load: StoreProfileLoader | null) =>
+      renderToStaticMarkup(
+        <MemoryRouter>
+          <EntryContextView
+            onContinue={vi.fn()}
+            storeProfile={load}
+            state={{
+              kind: "Established",
+              context: { ...context, channel: "Pickup", publicTableReference: null },
+            }}
+          />
+        </MemoryRouter>,
+      );
+    const withPhone = at(loader(profile("+14165550100")));
+    expect(withPhone).toContain("Call");
+    expect(withPhone).toContain("call them or ask at the counter before you order");
+    // Test Merchant 2 publishes no phone: no number on the card, so no "call them" either.
+    for (const html of [at(loader(profile(null))), at(loader(null)), at(null)]) {
+      expect(html).not.toContain("call them");
+      expect(html).toContain(
+        "To tell the store about an allergy, ask at the counter before you order. The QR code does not record allergy or health information.",
+      );
+    }
+    expect(
+      zh[
+        "To tell the store about an allergy, ask at the counter before you order. The QR code does not record allergy or health information."
+      ],
+    ).toBe("如有过敏，请在下单前到柜台告诉店员。二维码不会记录过敏或健康信息。");
   });
 });
 
