@@ -999,7 +999,9 @@ describe("WP-2423 item 6: a table that pays at the end", () => {
     });
     expect(own).toContain('disabled="" aria-label="Increase Synthetic tea quantity"');
     expect(own).toContain('disabled="" aria-label="Decrease Synthetic tea quantity"');
-    expect(own).toMatch(/<button class="cart-link-button" type="button">Remove/u);
+    expect(own).toMatch(
+      /<button class="cart-link-button" type="button" aria-label="Remove Synthetic tea">Remove/u,
+    );
     const options = page({
       status: "ready",
       cart: tableCart({ items: [{ ...item, warnings: ["ITEM_OPTIONS_CHANGED"] }] }),
