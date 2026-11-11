@@ -107,7 +107,9 @@ test("@production staff confirms Host transfer and retains unknown operation acr
   });
   await expect(transfer).toBeDisabled();
   await page.getByRole("button", { name: "Refresh phones", exact: true }).click();
-  await page.getByRole("combobox", { name: "Phone that sends the cart", exact: true }).selectOption(id(5));
+  await page
+    .getByRole("combobox", { name: "Phone that sends the cart", exact: true })
+    .selectOption(id(5));
   await expect(transfer).toBeDisabled();
   await page
     .getByRole("checkbox", {
@@ -123,9 +125,7 @@ test("@production staff confirms Host transfer and retains unknown operation acr
   await expect(page.getByRole("button", { name: "New join code", exact: true })).toBeDisabled();
   await retry.click();
   await expect(retry).toBeEnabled();
-  await expect(
-    page.getByRole("button", { name: "Refresh phones", exact: true }),
-  ).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Refresh phones", exact: true })).toBeDisabled();
   await retry.click();
   await expect(page.getByText(/Host transfer recorded at/)).toBeVisible();
   await expect(page.getByRole("button", { name: "Refresh tables", exact: true })).toBeEnabled();

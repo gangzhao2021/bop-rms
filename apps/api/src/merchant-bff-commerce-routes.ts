@@ -866,16 +866,14 @@ export function installMerchantCommerceRoutes(
       return;
     }
     // WP-2423 (cart-unsellable-dishes): a refusal that names the dishes it would affect.
-    response
-      .status(optionSetStatus[error.code])
-      .json(
-        error.problem !== null
-          ? { error: error.code, problem: error.problem }
-          : error.optionSetReference !== null
-            ? // WP-2423 M134: the group the Brand already has by that name.
-              { error: error.code, optionSetReference: error.optionSetReference }
-            : { error: error.code },
-      );
+    response.status(optionSetStatus[error.code]).json(
+      error.problem !== null
+        ? { error: error.code, problem: error.problem }
+        : error.optionSetReference !== null
+          ? // WP-2423 M134: the group the Brand already has by that name.
+            { error: error.code, optionSetReference: error.optionSetReference }
+          : { error: error.code },
+    );
   };
   const optionSetUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
   router.post("/commerce/option-sets/query", sameOriginMutation(options), (request, response) => {
