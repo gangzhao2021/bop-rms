@@ -17,6 +17,26 @@ import {
  * checkout holds the cart (Dining's public hold read). A read never writes: a phone that may give
  * the waiting dishes back asks for that itself.
  */
+/**
+ * Whether this phone may give the waiting dishes back now: nobody is paying for the round they wait
+ * on (it was sent, or its reservation ran out) and no other guest's checkout holds the cart. Never
+ * the payer's own phone while its choice is on the cart: it goes back only by its own "Back to
+ * cart", so a lapsed reservation never cancels the payer's choice from their own phone.
+ */
+export function tablePayReturnable(input: {
+  readonly waiting: number;
+  readonly cart: boolean;
+  readonly held: boolean;
+  readonly live: { readonly thisPhone: boolean; readonly reserved: boolean } | null;
+}): boolean {
+  return (
+    input.waiting > 0 &&
+    input.cart &&
+    !input.held &&
+    (input.live === null || (!input.live.reserved && !input.live.thisPhone))
+  );
+}
+
 export function createCustomerCartTablePay(
   transactions: CartQueryTransactionRunner,
   scope: {
@@ -86,14 +106,12 @@ export function createCustomerCartTablePay(
               }),
             ),
           ),
-          // Nobody is paying for the round they wait on (it was sent, or its reservation ran out)
-          // and no other guest's checkout holds the cart: this phone may give them back now. The
-          // payer's own phone goes back with "Back to cart" instead while its choice is reserved.
-          returnable:
-            state.waiting.length > 0 &&
-            state.cartReference !== null &&
-            !held &&
-            (live === null || !reserved),
+          returnable: tablePayReturnable({
+            waiting: state.waiting.length,
+            cart: state.cartReference !== null,
+            held,
+            live: live === null ? null : { thisPhone, reserved },
+          }),
         });
       }),
   });

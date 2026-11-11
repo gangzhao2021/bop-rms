@@ -99,6 +99,10 @@ export function TableWaitingDishes({ tablePay }: { readonly tablePay: CartTableP
 /**
  * Gives the waiting dishes back to the cart once nobody is paying for them (the server says
  * `returnable`). A read never writes: this phone asks, once per cart version, and reads again.
+ * The payer's own phone never does this by itself: its choice ends only by its own "Back to cart"
+ * (or the round being sent), so a lapsed reservation never cancels it behind the payer's back.
+ * Someone else started paying meanwhile, or the store couldn't be reached: it asks again after
+ * the wait the store named (or a few seconds), still at most once per cart version that succeeds.
  */
 export function useWaitingReturn(
   cart: CartView | null,
@@ -107,16 +111,29 @@ export function useWaitingReturn(
 ) {
   const { send } = useScopeCommand(client);
   const asked = useRef<number | null>(null);
+  const [retry, setRetry] = useState(0);
   const version = cart?.cart.version ?? null;
-  const returnable = cart?.cart.tablePay?.returnable === true;
+  const payerHere = cart?.cart.tablePay?.payer?.thisPhone === true;
+  const returnable = cart?.cart.tablePay?.returnable === true && !payerHere;
   useEffect(() => {
     if (!returnable || version === null || asked.current === version) return;
     asked.current = version;
+    let timer: number | undefined;
+    let live = true;
     void send({ action: "Return" }).then((outcome) => {
-      if (outcome.status === "Unknown") asked.current = null;
+      if (!live) return;
+      if (outcome.status === "Unknown" || outcome.status === "OtherPaying") {
+        asked.current = null;
+        const seconds = outcome.status === "OtherPaying" ? outcome.retryAfterSeconds : 5;
+        timer = window.setTimeout(() => setRetry((n) => n + 1), seconds * 1000);
+      }
       if (outcome.status !== "OtherPaying") reload();
     });
-  }, [returnable, version]);
+    return () => {
+      live = false;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [returnable, version, retry]);
 }
 
 type Scope = "Whole" | "Mine" | "Chosen";
@@ -318,11 +335,19 @@ export function TablePayChooser({
   );
 }
 
-/** On the payer's own cart while their choice is kept: what this round is, and the way back. */
+/**
+ * On the payer's own cart while their choice is kept: what this round is, the way back, and, as on
+ * the checkout page, the warning a minute before the choice stops being kept with "Keep them".
+ */
 export function PayerChoiceBanner({
+  payer,
+  now,
   onCancelled,
   client = browserCheckoutScopeClient(),
 }: {
+  readonly payer: NonNullable<CartTablePay["payer"]>;
+  readonly now?: () => number;
+  /** The choice ended (went back, or the cart changed): read the cart again. */
   readonly onCancelled: () => void;
   readonly client?: CheckoutScopeClient;
 }) {
@@ -339,6 +364,14 @@ export function PayerChoiceBanner({
     <section className="cart-pay-scope cart-pay-scope--chosen" aria-labelledby="cart-payer-heading">
       <h2 id="cart-payer-heading">{t("You're paying for the dishes in this cart")}</h2>
       <p>{t("The others' dishes wait for the next round.")}</p>
+      <ScopeExpiryWarning
+        payer={payer}
+        {...(now === undefined ? {} : { now })}
+        onBack={onCancelled}
+        onEnded={onCancelled}
+        client={client}
+        withBack={false}
+      />
       <Link className="cart-checkout-link" to="/checkout">
         {t("Continue to pay")}
       </Link>
@@ -364,8 +397,11 @@ export function ScopeExpiryWarning({
   onBack,
   onEnded,
   client = browserCheckoutScopeClient(),
+  withBack = true,
 }: {
   readonly payer: NonNullable<CartTablePay["payer"]>;
+  /** False where the page already shows its own "Back to cart". */
+  readonly withBack?: boolean;
   readonly now?: () => number;
   /** The payer went back: the cart has every dish again. */
   readonly onBack: () => void;
@@ -416,9 +452,11 @@ export function ScopeExpiryWarning({
         <button type="button" disabled={busy} onClick={() => void keep()}>
           {t("Keep them")}
         </button>
-        <button type="button" disabled={busy} onClick={() => void back()}>
-          {t("Back to cart")}
-        </button>
+        {withBack ? (
+          <button type="button" disabled={busy} onClick={() => void back()}>
+            {t("Back to cart")}
+          </button>
+        ) : null}
       </div>
       {problem === null ? null : <p>{problem}</p>}
     </section>

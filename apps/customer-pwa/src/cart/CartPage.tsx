@@ -1080,7 +1080,10 @@ function CartContent({
           </div>
         ) : cart.cart.tablePay?.payer?.thisPhone === true ? (
           // WP-2423 shared-table-checkout (a): this phone chose this round's dishes.
-          <PayerChoiceBanner onCancelled={() => void controller.refresh()} />
+          <PayerChoiceBanner
+            payer={cart.cart.tablePay.payer}
+            onCancelled={() => void controller.refresh()}
+          />
         ) : cart.cart.tablePay?.payer != null ? (
           <OtherPayerWaits />
         ) : cart.cart.tablePay !== undefined && othersItems > 0 ? (

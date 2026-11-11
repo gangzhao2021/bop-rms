@@ -5,6 +5,7 @@ import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createCheckoutScopeClient } from "./checkout-scope-client.js";
 import {
+  PayerChoiceBanner,
   ScopeExpiryWarning,
   TablePayChooser,
   TableWaitingDishes,
@@ -306,6 +307,98 @@ describe("WP-2423 shared-table-checkout (a): which dishes the payer pays at a pa
     await render(<Probe cart={tableCart({ ...waiting, returnable: true })} />);
     expect(sent.map((entry) => entry.body)).toEqual([{ action: "Return" }]);
     expect(reload).toHaveBeenCalledTimes(1);
+  });
+
+  it("the payer's own phone never gives the dishes back by itself, even once its reservation ran out", async () => {
+    const { client, sent } = server();
+    const reload = vi.fn();
+    function Probe({ cart }: { cart: CartView }) {
+      useWaitingReturn(cart, reload, client);
+      return null;
+    }
+    const lapsed: CartTablePay = {
+      ...idle,
+      payer: {
+        thisPhone: true,
+        choice: "Mine",
+        expiresAt: "2026-08-02T20:05:00.000Z",
+        reserved: false,
+      },
+      waiting: [
+        { waitingLineReference: id(9), quantity: 1, names: {}, withOptions: false, mine: false },
+      ],
+      returnable: true,
+    };
+    await render(<Probe cart={tableCart(lapsed)} />);
+    expect(sent).toEqual([]);
+    expect(reload).not.toHaveBeenCalled();
+  });
+
+  it("asks again at the same cart version when someone started paying just before, once that wait is over", async () => {
+    vi.useFakeTimers();
+    const conflict = () =>
+      new Response(
+        JSON.stringify({ schemaVersion: 1, error: { code: "cart_checkout_in_progress" } }),
+        {
+          status: 409,
+          headers: { "content-type": "application/json", "retry-after": "30" },
+        },
+      );
+    const { client, sent } = server(
+      conflict,
+      ok({ status: "Returned", cartVersion: 6, returnedUnits: 1 }),
+    );
+    const reload = vi.fn();
+    function Probe({ cart }: { cart: CartView }) {
+      useWaitingReturn(cart, reload, client);
+      return null;
+    }
+    const waiting: CartTablePay = {
+      ...idle,
+      waiting: [
+        { waitingLineReference: id(9), quantity: 1, names: {}, withOptions: false, mine: true },
+      ],
+      returnable: true,
+    };
+    await render(<Probe cart={tableCart(waiting)} />);
+    expect(sent).toHaveLength(1);
+    expect(reload).not.toHaveBeenCalled();
+    await act(async () => vi.advanceTimersByTime(30_000));
+    expect(sent.map((entry) => entry.body)).toEqual([{ action: "Return" }, { action: "Return" }]);
+    expect(sent[1]?.key).not.toBe(sent[0]?.key);
+    expect(reload).toHaveBeenCalledTimes(1);
+  });
+
+  it("on the payer's own cart, a minute before the choice runs out, it warns and keeps the dishes", async () => {
+    vi.useFakeTimers();
+    let clock = Date.parse("2026-08-02T20:04:30.000Z");
+    const { client, sent } = server(
+      ok({ status: "Extended", expiresAt: "2026-08-02T20:09:30.000Z" }),
+    );
+    await render(
+      <PayerChoiceBanner
+        payer={{
+          thisPhone: true,
+          choice: "Mine",
+          expiresAt: "2026-08-02T20:05:00.000Z",
+          reserved: true,
+        }}
+        now={() => clock}
+        onCancelled={() => undefined}
+        client={client}
+      />,
+    );
+    expect(container.textContent).toContain("The dishes you chose are kept for 30 more seconds.");
+    // One way back only: the banner's own.
+    expect(
+      [...container.querySelectorAll("button")].filter((b) => b.textContent === "Back to cart"),
+    ).toHaveLength(0);
+    await act(async () => button("Keep them").click());
+    expect(sent.map((entry) => entry.body)).toEqual([{ action: "Extend" }]);
+    expect(container.textContent).not.toContain("more seconds");
+    clock = Date.parse("2026-08-02T20:05:01.000Z");
+    await act(async () => vi.advanceTimersByTime(1000));
+    expect(container.textContent).not.toContain("more seconds");
   });
 
   it("reads another phone paying as a wait with its seconds, a changed cart as read again, and an outage as unknown", async () => {
