@@ -7,7 +7,7 @@ import {
 } from "./option-configuration.js";
 import { createBrowserPickupCartClient } from "../cart/pickup-cart-client.js";
 import { CustomerPage } from "../journey/CustomerPage.js";
-import { SlowAddNotice } from "../slow-wait.js";
+import { SlowAddNotice, useSlowWait } from "../slow-wait.js";
 import { formatDecimalMoney, formatMoney } from "../journey/format.js";
 import {
   cartIssueMessage,
@@ -508,6 +508,9 @@ export function MenuScreen({
   const withCart = context !== undefined && mode !== "detail" && closed === undefined;
   const justAdded = useBackOnMenu(browseFound);
   const [quickMessage, setQuickMessage] = useState<string | null>(null);
+  // Live v15 2026-11-10: a one-tap add still waiting after 3 s says so, as the dish page does.
+  const [quickAdding, setQuickAdding] = useState(0);
+  const quickSlow = useSlowWait(quickAdding > 0);
   const [cartReads, setCartReads] = useState(0);
   useEffect(() => {
     if (quickMessage === null) return;
@@ -531,6 +534,8 @@ export function MenuScreen({
               setQuickMessage(message);
               setCartReads((value) => value + 1);
             },
+            onBusy: (busy: boolean) =>
+              setQuickAdding((count) => Math.max(0, count + (busy ? 1 : -1))),
           },
     [channel, readOnlyNotice, taking],
   );
@@ -662,7 +667,11 @@ export function MenuScreen({
                 />
               ) : null}
             </div>
-            {justAdded || quickMessage !== null ? (
+            {quickSlow ? (
+              <p className="menu-added-toast" role="status">
+                {t("Still adding; the restaurant's system is busy. No need to tap again.")}
+              </p>
+            ) : justAdded || quickMessage !== null ? (
               <p className="menu-added-toast" role="status">
                 {quickMessage ?? t("Added to your cart.")}
               </p>
@@ -1057,6 +1066,8 @@ function useBackOnMenu(found: boolean): boolean {
 const MenuQuickAdd = createContext<{
   readonly channel: MenuJourneyContext["channel"];
   readonly onAdded: (message: string) => void;
+  /** A one-tap add started (true) or ended (false). */
+  readonly onBusy: (busy: boolean) => void;
 } | null>(null);
 
 export function quickAddable(family: MenuFamily): boolean {
@@ -1079,6 +1090,7 @@ function QuickAddButton({ family }: { readonly family: MenuFamily }) {
   const add = async () => {
     if (busy) return;
     setBusy(true);
+    quick.onBusy(true);
     const controller = createConfigureController({
       client:
         quick.channel === "Pickup"
@@ -1091,6 +1103,7 @@ function QuickAddButton({ family }: { readonly family: MenuFamily }) {
     );
     const state = controller.getState();
     setBusy(false);
+    quick.onBusy(false);
     if (state.status === "added")
       quick.onAdded(
         state.earlierCartCleared === true
