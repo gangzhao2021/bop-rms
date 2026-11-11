@@ -183,6 +183,9 @@ export function createCustomerStoreRouting({
     const credential = guestCookie(cookie);
     if (credential === null) return nobody;
     // Each Store's own hash of the cookie, in its own records (merchants don't share a guest key).
+    // A Store whose records can't be read now is an outage, never "no Store has this visit": the
+    // guest is asked to try again (503), never shown an empty cart or told to scan.
+    let unreadable = false;
     for (const { store, sessions } of owners) {
       let selector;
       try {
@@ -192,12 +195,19 @@ export function createCustomerStoreRouting({
       }
       const known = sessionStores.get(selector);
       if (known !== undefined) return known;
-      const found = await sessions.resolve(selector).catch(() => null);
+      let found;
+      try {
+        found = await sessions.resolve(selector);
+      } catch {
+        unreadable = true;
+        continue;
+      }
       if (found !== null) {
         remember(selector, store);
         return store;
       }
     }
+    if (unreadable) throw new Error("CUSTOMER_STORE_UNAVAILABLE");
     return nobody;
   };
 }

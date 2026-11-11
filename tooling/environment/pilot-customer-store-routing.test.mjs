@@ -254,3 +254,27 @@ it("live minor 25: nothing else sets the cookie — a replay, a malformed code, 
   const only = store(1, 1);
   expect(await routing([only])(scan(code))).toBe(only);
 });
+
+it("a Store whose guest records can't be read is an outage to retry, never 'no Store has this visit'", async () => {
+  const at = (failing) =>
+    createCustomerStoreRouting({
+      stores: [store(1, 1), store(2, 2, ["2:" + credential])],
+      createSessions: (transactions, scope) => ({
+        resolve: async (selector) => {
+          if (failing.includes(scope.storeReference)) throw new Error("connection lost");
+          return transactions.sessions.includes(selector) ? {} : null;
+        },
+      }),
+    });
+  const cart = { method: "GET", url: "/bff/customer/cart", cookie: cookieOf(credential) };
+  // The visit is at the second Store: the first one failing doesn't stop it being found.
+  expect((await at([ref(1)])(cart))?.storeReference).toBe(ref(2));
+  // No Store found it and one couldn't be read: retry, not "no merchant owns this".
+  const lost = { ...cart, cookie: cookieOf("b".repeat(43)) };
+  await expect(at([ref(1)])(lost)).rejects.toThrow("CUSTOMER_STORE_UNAVAILABLE");
+  expect(routingFailureAnswer(new Error("CUSTOMER_STORE_UNAVAILABLE"), lost).code).toBe(
+    "CUSTOMER_STORE_UNAVAILABLE",
+  );
+  // Every Store answered and none has it: nobody's.
+  expect(await at([])(lost)).toBeNull();
+});
