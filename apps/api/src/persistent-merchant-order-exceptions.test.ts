@@ -325,10 +325,10 @@ it("v15 M44: a failed order-cause read is reported, not silently dropped", async
     next: null,
   });
   const failure = Error("ORDER_TERMINATION_READ_FAILED");
-  f.original.query.mockImplementation(async (sql: unknown) => {
+  f.original.query.mockImplementation((async (sql: unknown) => {
     if (typeof sql === "string" && sql.includes("order_termination_record")) throw failure;
     return { rows: [], rowCount: 0 };
-  });
+  }) as never);
   const view = await f.read("synthetic-cookie");
   expect(view.items[0]).not.toHaveProperty("cause");
   expect(onUnexpected).toHaveBeenCalledWith(failure);
