@@ -5,7 +5,7 @@ import { OrderCreationError } from "@rms/ordering";
  * Dining's refusal of a round whose party staff moved off its table. Recognized by shape too, so it
  * survives a second copy of the owner module (the pilot composes owner stores from sources).
  */
-function isTableMoved(error: unknown): boolean {
+export function isTableMoved(error: unknown): boolean {
   if (error instanceof DiningCheckoutStoreError)
     return error.code === "DINING_CHECKOUT_STORE_TABLE_MOVED";
   if (error instanceof DiningCheckoutServiceError)

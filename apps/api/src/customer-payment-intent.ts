@@ -1,5 +1,6 @@
 import { CustomerStoreClosedError } from "./customer-store-open-gate.js";
 import { CustomerDiningPayLaterError } from "./customer-dining-pay-later-round.js";
+import { isTableMoved } from "./customer-dining-table-moved.js";
 import { GuestSessionError, readClosedRecord } from "@bop/identity";
 import {
   CartError,
@@ -232,6 +233,8 @@ function parse(
 }
 function failure(error: unknown) {
   if (error instanceof GuestSessionError) return 404;
+  // WP-2423 expected refusals: staff moved the table, however the refusal arrives (never a 503).
+  if (isTableMoved(error)) return 409;
   if (error instanceof CustomerDiningPayLaterError)
     return (
       { PayFirst: 409, PayLater: 409, NotJoined: 404, Invalid: 400, Unavailable: 503 } as const
@@ -342,8 +345,8 @@ function stockRejection(error: unknown): ExplicitRejection | undefined {
     (error instanceof CheckoutSessionServiceError && error.code === "REQUOTE_REQUIRED")
   )
     return "requote_required";
-  if (error instanceof OrderCreationError && error.code === "ORDER_CREATE_TABLE_MOVED")
-    return "table_moved";
+  // Ordering's refusal, or Dining's own when it reaches here without the table-moved latch.
+  if (isTableMoved(error)) return "table_moved";
   // WP-2423 expected refusals: Ordering's own "the Store is not taking orders" says so plainly.
   if (error instanceof CheckoutSessionServiceError && error.code === "STORE_CLOSED")
     return "store_closed";

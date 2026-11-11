@@ -21,6 +21,7 @@ import {
   command,
   preparation,
 } from "../../../packages/rms/payment/src/tests/payment-intent-creation.fixture.js";
+import { DiningCheckoutServiceError, DiningCheckoutStoreError } from "@rms/dining";
 import { createApp } from "./app.js";
 import { CustomerStoreClosedError } from "./customer-store-open-gate.js";
 import { CustomerDiningPayLaterError } from "./customer-dining-pay-later-round.js";
@@ -570,4 +571,55 @@ it("WP-2423 expected refusals: a refused next card is information; anything else
     expect(customerRoundRefusal(error)).toBeNull();
     expect(customerRoundRefusalLine("CUSTOMER_ROUND_REFUSED", error)).toBeNull();
   }
+});
+
+/**
+ * WP-2423 staff-wording-and-expected-refusals (review of 2ea4f62d): the other ordinary moments of
+ * service the handler already answers as a refusal (409/422, never 503) are information too:
+ * another guest at the table is paying, a dish came off the menu, the checkout window lapsed.
+ */
+it.each([
+  [new CheckoutSessionServiceError("CHECKOUT_IN_PROGRESS"), 409, "CHECKOUT_IN_PROGRESS"],
+  [new CheckoutSessionServiceError("ITEM_UNAVAILABLE"), 409, "ITEM_UNAVAILABLE"],
+  [new CheckoutValidationError("CHECKOUT_ITEM_UNAVAILABLE"), 422, "ITEM_UNAVAILABLE"],
+  [new CheckoutValidationError("CHECKOUT_QUOTE_EXPIRED"), 422, "CHECKOUT_EXPIRED"],
+  [new OrderCreationError("ORDER_CREATE_VALIDATION_EXPIRED"), 422, "CHECKOUT_EXPIRED"],
+] as const)(
+  "WP-2423 expected refusals: %s is answered as a refusal and logged as information",
+  async (error, status, refusal) => {
+    const f = await setup();
+    f.create.mockRejectedValue(error);
+    expect((await f.send()).status).toBe(status);
+    expect(customerRoundRefusal(error)).toBe(refusal);
+    expect(JSON.parse(customerRoundRefusalLine("CUSTOMER_ROUND_REFUSED", error) ?? "null")).toEqual(
+      { level: 30, time: expect.any(String), event: "CUSTOMER_ROUND_REFUSED", code: refusal },
+    );
+  },
+);
+it.each([
+  new DiningCheckoutStoreError("DINING_CHECKOUT_STORE_TABLE_MOVED"),
+  new DiningCheckoutServiceError("DINING_CHECKOUT_TABLE_MOVED"),
+  { name: "DiningCheckoutStoreError", code: "DINING_CHECKOUT_STORE_TABLE_MOVED" },
+  { name: "DiningCheckoutServiceError", code: "DINING_CHECKOUT_TABLE_MOVED" },
+])(
+  "WP-2423 expected refusals: Dining's own table-moved refusal %s says the table moved, as information",
+  async (error) => {
+    const f = await setup();
+    f.create.mockRejectedValue(error);
+    const response = await f.send();
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      schemaVersion: 1,
+      error: { code: "payment_table_moved", messageKey: "customer.payment.table_moved" },
+    });
+    expect(customerRoundRefusal(error)).toBe("TABLE_MOVED");
+  },
+);
+it("WP-2423 expected refusals: an order not ready for payment is an integrity failure, not a refusal", () => {
+  for (const error of [
+    new PaymentIntentCreationError("PAYMENT_INTENT_ORDER_NOT_READY"),
+    new DiningCheckoutStoreError("DINING_CHECKOUT_STORE_UNAVAILABLE"),
+    new DiningCheckoutServiceError("DINING_CHECKOUT_DEPENDENCY_UNAVAILABLE"),
+  ])
+    expect(customerRoundRefusal(error)).toBeNull();
 });

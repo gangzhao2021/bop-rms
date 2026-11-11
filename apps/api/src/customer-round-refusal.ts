@@ -1,3 +1,5 @@
+import { isTableMoved } from "./customer-dining-table-moved.js";
+
 /**
  * WP-2423 staff-wording-and-expected-refusals (v15 2026-11-11): the business refusals a guest's
  * round or payment meets in ordinary service, each answered on the phone in plain words (the
@@ -7,6 +9,16 @@
  * of them. They are expected, so the server logs them as information with their own code, never
  * as an error an operator must chase (a table move logged "INTERNAL_ADDITIONAL_PAYMENT_UNAVAILABLE"
  * at error level). Anything not listed here stays an unexpected failure.
+ *
+ * Also expected: another guest at the table is paying (shared tables, routine), a dish came off
+ * the menu, and the checkout window lapsed while the guest decided (the cart prices again). Staff
+ * moving the table is recognized however it arrives: Ordering's refusal, or Dining's own refusal
+ * reaching the catch without `refuseRoundOfMovedTable` or the latch (customer-dining-table-moved).
+ *
+ * Deliberately not listed: PaymentIntentCreationError PAYMENT_INTENT_ORDER_NOT_READY. Its causes are
+ * an unparseable or mismatched preparation record, a request time ahead of the server clock, a
+ * preparation window that is not the fixed 30 minutes, or a missing prior operation: integrity or
+ * clock failures nothing in ordinary service produces, so an operator must see them.
  *
  * Recognized by the error's name and code, not by class identity: the pilot composes some owner
  * stores from sources, so a second copy of an owner module can raise the same refusal.
@@ -23,20 +35,28 @@ export type CustomerRoundRefusal =
   | "RETRY_LIMIT"
   | "RETRY_PENDING"
   | "ALREADY_PAID"
-  | "WINDOW_ENDED";
+  | "WINDOW_ENDED"
+  | "CHECKOUT_IN_PROGRESS"
+  | "ITEM_UNAVAILABLE"
+  | "CHECKOUT_EXPIRED";
 
 const refusals: Readonly<Record<string, Readonly<Record<string, CustomerRoundRefusal>>>> = {
   OrderCreationError: {
     ORDER_CREATE_TABLE_MOVED: "TABLE_MOVED",
     ORDER_CREATE_STOCK_SHORT: "ITEMS_SHORT",
     ORDER_CREATE_ALREADY_ORDERED: "ALREADY_ORDERED",
+    ORDER_CREATE_VALIDATION_EXPIRED: "CHECKOUT_EXPIRED",
   },
   CheckoutValidationError: {
     CHECKOUT_STOCK_SHORT: "ITEMS_SHORT",
     CHECKOUT_REQUOTE_REQUIRED: "REQUOTE_REQUIRED",
+    CHECKOUT_ITEM_UNAVAILABLE: "ITEM_UNAVAILABLE",
+    CHECKOUT_QUOTE_EXPIRED: "CHECKOUT_EXPIRED",
   },
   CheckoutSessionServiceError: {
     STORE_CLOSED: "STORE_CLOSED",
+    CHECKOUT_IN_PROGRESS: "CHECKOUT_IN_PROGRESS",
+    ITEM_UNAVAILABLE: "ITEM_UNAVAILABLE",
     ITEM_SHORT: "ITEMS_SHORT",
     REQUOTE_REQUIRED: "REQUOTE_REQUIRED",
     ALREADY_ORDERED: "ALREADY_ORDERED",
@@ -56,6 +76,7 @@ export function customerRoundRefusal(error: unknown): CustomerRoundRefusal | nul
   if (error === null || typeof error !== "object") return null;
   const { name, code } = error as { name?: unknown; code?: unknown };
   if (name === "CustomerStoreClosedError") return "STORE_CLOSED";
+  if (isTableMoved(error)) return "TABLE_MOVED";
   if (typeof name !== "string" || typeof code !== "string" || !Object.hasOwn(refusals, name))
     return null;
   const byCode = refusals[name] as Readonly<Record<string, CustomerRoundRefusal>>;
