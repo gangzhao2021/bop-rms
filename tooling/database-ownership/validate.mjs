@@ -3855,6 +3855,7 @@ async function scanUnsupported(root, module, diagnostics) {
             "cart_line",
             "dining_checkout_scope",
             "dining_checkout_scope_extension",
+            "dining_checkout_scope_payer_session",
             "dining_cart_waiting_line",
             "dining_cart_waiting_line_resolution",
             "order_submission_record",

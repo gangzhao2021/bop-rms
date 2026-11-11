@@ -288,6 +288,60 @@ export async function readForeignDiningCheckoutScope(
   });
 }
 
+/**
+ * The paying phone came back on a later session (lost cookie, the readmission's transaction,
+ * 2000_526): the live scope its participant chose goes with the new session, so the fence and
+ * "Keep them" accept it as the payer, exactly as the API does. Nothing when no scope of this
+ * participant is live on the table's cart. The same operation replays.
+ */
+export async function carryDiningCheckoutScopeToSession(
+  tx: CartQueryTransaction,
+  scopeInput: { readonly brandReference: string; readonly storeReference: string },
+  input: {
+    readonly operationReference: string;
+    readonly diningSessionReference: string;
+    readonly participantReference: string;
+    readonly fromGuestSessionReference: string;
+    readonly toGuestSessionReference: string;
+    readonly observedAt: string;
+  },
+): Promise<{ readonly carried: boolean }> {
+  const scope = scoped(scopeInput);
+  const operation = parseOrderingReference(input.operationReference);
+  const session = parseOrderingReference(input.diningSessionReference);
+  const participant = parseOrderingReference(input.participantReference);
+  const from = parseOrderingReference(input.fromGuestSessionReference);
+  const to = parseOrderingReference(input.toGuestSessionReference);
+  const at = parseOrderingInstant(input.observedAt);
+  if (from === to) return invalid();
+  const cart = await currentCart(tx, scope, session, at);
+  if (cart === null) return Object.freeze({ carried: false });
+  await setScope(tx, scope.brandReference, scope.storeReference);
+  await lockCart(tx, scope, cart.cartReference, session);
+  const live = await liveScope(tx, scope, cart.cartReference);
+  if (live === null || live.chooserParticipantReference !== participant)
+    return Object.freeze({ carried: false });
+  await tx.query(
+    `INSERT INTO rms_ordering.dining_checkout_scope_payer_session
+     (brand_id,store_id,scope_id,dining_session_id,participant_id,from_guest_session_id,guest_session_id,
+      operation_id,recorded_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+     ON CONFLICT (brand_id,store_id,scope_id,guest_session_id) DO NOTHING`,
+    [
+      scope.brandReference,
+      scope.storeReference,
+      live.scopeReference,
+      session,
+      participant,
+      from,
+      to,
+      operation,
+      at,
+    ],
+  );
+  return Object.freeze({ carried: true });
+}
+
 export interface ChooseDiningCheckoutScopeInput {
   readonly operationReference: string;
   readonly cartReference: string;

@@ -6411,6 +6411,24 @@
     {
       "type": "table",
       "schema": "rms_ordering",
+      "object": "dining_checkout_scope_payer_session",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); WP-2423 shared-table-checkout: the paying phone back on a later session (lost cookie) keeps paying for the dishes it chose (DEC-DINING-CHECKOUT-SCOPE, 2000_526)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "dining_checkout_scope_payer_session",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); WP-2423 shared-table-checkout: the paying phone back on a later session (lost cookie) keeps paying for the dishes it chose (DEC-DINING-CHECKOUT-SCOPE, 2000_526)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
       "object": "dining_cart_waiting_line",
       "column": null,
       "privilege": "INSERT",

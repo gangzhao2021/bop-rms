@@ -380,6 +380,14 @@ const databaseAccessManifestInput = {
       piiClassification: ["indirect_identifier"],
     },
     {
+      table: "dining_checkout_scope_payer_session",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/ordering" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "transactional",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       table: "dining_cart_waiting_line",
       classification: "append-only-record",
       writeOwner: { kind: "module", id: "@rms/ordering" },

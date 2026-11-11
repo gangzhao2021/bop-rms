@@ -845,6 +845,7 @@ describe("migration catalog", () => {
       "2000_523_create_guest_session_continuity",
       "2000_524_alter_dining_table_split_by_guests",
       "2000_525_create_dining_participant_readmission",
+      "2000_526_create_dining_checkout_scope_payer_session",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),

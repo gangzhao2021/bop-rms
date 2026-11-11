@@ -20,6 +20,7 @@ import {
   parseDiningReference,
   recordDiningParticipantReadmission,
 } from "@rms/dining";
+import { carryDiningCheckoutScopeToSession } from "@rms/ordering";
 import type { RequestHandler, Response } from "express";
 import type { CustomerEntryPresentedTable } from "./customer-entry.js";
 import {
@@ -240,6 +241,15 @@ export function createCustomerDiningContinuity(options: CustomerDiningContinuity
               retentionPolicyVersion: 1,
             },
           });
+          // A payer whose choice of dishes is still live keeps paying from the new session.
+          await carryDiningCheckoutScopeToSession(tx as never, owner, {
+            operationReference,
+            diningSessionReference: rotated.from.diningSessionReference,
+            participantReference: rotated.from.participantReference,
+            fromGuestSessionReference: rotated.from.guestSessionReference,
+            toGuestSessionReference: rotated.toGuestSessionReference,
+            observedAt,
+          });
           return Object.freeze({
             sessionCredential: String(sessionCredential),
             continuityToken: await issueFor(tx, rotated.toGuestSessionReference, observedAt),
@@ -260,9 +270,7 @@ export function createCustomerDiningContinuity(options: CustomerDiningContinuity
 export function readmissionRefused(error: unknown): boolean {
   if (error instanceof DiningReadmissionError) return error.code === "DINING_READMISSION_REFUSED";
   return (
-    error !== null &&
-    typeof error === "object" &&
-    (error as { code?: unknown }).code === "23505"
+    error !== null && typeof error === "object" && (error as { code?: unknown }).code === "23505"
   );
 }
 

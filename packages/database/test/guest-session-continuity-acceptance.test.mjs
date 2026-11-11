@@ -13,7 +13,10 @@ import {
   parseDiningParticipant,
   parseDiningSession,
 } from "../../rms/dining/src/index.ts";
-import { chooseDiningCheckoutScope } from "../../rms/ordering/src/index.ts";
+import {
+  chooseDiningCheckoutScope,
+  extendDiningCheckoutScope,
+} from "../../rms/ordering/src/index.ts";
 import { createCustomerDiningContinuity } from "../../../apps/api/src/customer-dining-continuity.ts";
 import { orderWriteFixture } from "../../rms/ordering/src/tests/order-creation-store.fixture.ts";
 import { seedSubmissionCart } from "../test-support/dining-order-submission-seed.mjs";
@@ -65,10 +68,26 @@ it("WP-2423 (shared-table-checkout): a phone that lost its cookie comes back as 
         },
       };
       const at0 = new Date(Date.now() - 60_000).toISOString();
-      // The table cart with phone A's dish (the fixture's line, participant id(601)).
+      // The table cart with phone A's dish (the fixture's line, participant id(601)) and one of B's,
+      // one version before the fixture's round (A's dish alone).
       const f = orderWriteFixture({ namespace: "01902523", at: at0, dineIn: true });
-      await seedSubmissionCart(admin, f);
       const id = (n) => "01902523-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+      await seedSubmissionCart(admin, {
+        ...f,
+        cart: {
+          ...f.cart,
+          aggregateVersion: f.cart.aggregateVersion - 1,
+          items: [
+            f.cart.items[0],
+            {
+              ...f.cart.items[0],
+              cartItemReference: id(0x6b3),
+              addedByActorReference: id(0x6b4),
+              addedByParticipantReference: id(0x602),
+            },
+          ],
+        },
+      });
       const scope = { tenantReference: id(0xeee), ...f.scope };
       const diningSession = String(f.cart.diningSessionReference);
       const phoneA = String(f.cart.items[0].addedByParticipantReference);
@@ -330,7 +349,7 @@ it("WP-2423 (shared-table-checkout): a phone that lost its cookie comes back as 
         chooseDiningCheckoutScope(tx, f.scope, {
           operationReference: next(),
           cartReference: String(f.cart.cartReference),
-          expectedCartVersion: f.cart.aggregateVersion,
+          expectedCartVersion: f.cart.aggregateVersion - 1,
           choice: "Mine",
           lines: [],
           actor: {
@@ -360,13 +379,89 @@ it("WP-2423 (shared-table-checkout): a phone that lost its cookie comes back as 
           heldByOther: async () => null,
         }),
       );
-      // Every dish in this cart is A's: the round is the whole cart, A's dish found under A.
-      assert.deepEqual(mine, { status: "WholeCart", cartVersion: f.cart.aggregateVersion });
+      // A's dish is found under A: B's waits, the round is A's dish alone.
+      assert.deepEqual(mine, {
+        status: "Chosen",
+        cartVersion: f.cart.aggregateVersion,
+        expiresAt: new Date(Date.parse(chosenAt) + 5 * 60_000).toISOString(),
+        setAsideUnits: f.cart.items[0].quantity,
+      });
 
       // The used token again: no seat, no readmission. The new token works next time.
       assert.equal(await continuity.table(tokenA, now()), null);
       assert.equal(await continuity.readmit(tokenA, next(), now()), null);
       assert.ok((await continuity.table(back.continuityToken, now())) !== null);
+
+      // A loses the cookie again while paying: the choice goes with A's next session, which the
+      // database accepts as the payer (details, "Keep them") as the API does; B is still fenced.
+      const tryDetails = async (guestSessionReference) => {
+        try {
+          await runner.run(async (tx) => {
+            await tx.query(
+              "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+              [f.scope.brandReference, f.scope.storeReference],
+            );
+            const details = next();
+            await tx.query(
+              `INSERT INTO rms_ordering.checkout_details_record (brand_id,store_id,details_id,details_version,
+                 operation_id,guest_session_id,cart_id,snapshot_json,recorded_at)
+               VALUES ($1,$2,$3,1,$4,$5,$6,$7::jsonb,$8)`,
+              [
+                f.scope.brandReference,
+                f.scope.storeReference,
+                details,
+                next(),
+                guestSessionReference,
+                String(f.cart.cartReference),
+                JSON.stringify({
+                  brandReference: f.scope.brandReference,
+                  storeReference: f.scope.storeReference,
+                  detailsReference: details,
+                  detailsVersion: 1,
+                  guestSessionReference,
+                  cartReference: String(f.cart.cartReference),
+                  recordedAt: chosenAt,
+                }),
+                chosenAt,
+              ],
+            );
+            throw new Error("written");
+          });
+        } catch (error) {
+          return error.message;
+        }
+      };
+      const again = await continuity.readmit(back.continuityToken, next(), now());
+      assert.ok(again !== null);
+      const third = (
+        await admin.query(
+          "SELECT guest_session_id::text AS id FROM bop_identity.guest_session WHERE session_selector_hash=decode($1,'hex')",
+          [credentials.hashCredential("Session", again.sessionCredential)],
+        )
+      ).rows[0].id;
+      assert.deepEqual(
+        (
+          await admin.query(
+            "SELECT from_guest_session_id::text AS from, participant_id::text AS participant FROM rms_ordering.dining_checkout_scope_payer_session WHERE guest_session_id=$1",
+            [third],
+          )
+        ).rows,
+        [{ from: newSession.id, participant: phoneA }],
+      );
+      assert.equal(await tryDetails(third), "written");
+      assert.match(await tryDetails(sessionB), /CHECKOUT_SCOPE_HELD/u);
+      const kept = await runner.run((tx) =>
+        extendDiningCheckoutScope(tx, f.scope, {
+          operationReference: next(),
+          actor: {
+            diningSessionReference: diningSession,
+            guestSessionReference: third,
+            participantReference: phoneA,
+          },
+          observedAt: now(),
+        }),
+      );
+      assert.equal(kept.status, "Extended");
 
       // Two scans with B's token at once: one readmission, the other an ordinary entry.
       const raced = await Promise.all([
@@ -399,6 +494,7 @@ it("WP-2423 (shared-table-checkout): a phone that lost its cookie comes back as 
         "bop_identity.guest_session_continuity",
         "bop_identity.guest_session_continuity_use",
         "rms_dining.dining_participant_readmission",
+        "rms_ordering.dining_checkout_scope_payer_session",
       ]) {
         await assert.rejects(
           runner.run((tx) =>

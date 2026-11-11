@@ -153,6 +153,7 @@ export {
   type DiningRoundCartReturnInput,
 } from "./infrastructure/persistence/dining-round-cart-return-store.js";
 export {
+  carryDiningCheckoutScopeToSession,
   chooseDiningCheckoutScope,
   extendDiningCheckoutScope,
   readDiningCheckoutScopeState,
