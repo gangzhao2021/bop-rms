@@ -484,6 +484,8 @@ export async function prepareRealStaffRoundStore({
     restricted,
     persistenceOf,
     counterFor,
+    /** The pilot's configured customer entry for this staff member's composition (guest ports). */
+    customerEntryFor: (who) => customerFor(who).createInternalCustomerEntry(resources),
     /**
      * Staff seat a party at the table on the Tables page (Dining's own start command, as the pilot
      * composes it for this staff member); its session and the code issued for the party.

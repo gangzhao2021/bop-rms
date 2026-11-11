@@ -804,6 +804,48 @@ describe("WP-2423 item 6: a table that pays at the end", () => {
     expect(page({ status: "empty" })).toContain("Your cart is empty");
   });
 
+  it("M38: the phone paying for its round at a pay-first table is offered to stop and put the dishes back", () => {
+    const own = (paymentState: "AwaitingPayment" | "Returned") => ({
+      roundNumber: 1,
+      sentAt: "2026-11-06T16:01:00.000Z",
+      sentByThisPhone: true,
+      cartItemReferences: [],
+      paymentState,
+    });
+    const render = (
+      timing: "PayFirst" | "PayLater",
+      paymentState: "AwaitingPayment" | "Returned",
+    ) => {
+      setCustomerCsrfCredential("c".repeat(43));
+      setTablePaymentTiming(timing);
+      return renderToStaticMarkup(
+        <MemoryRouter>
+          <CartPage
+            controller={controller({
+              status: "ready",
+              // The payer's dishes left the cart with the round; a returned round's are back.
+              cart:
+                paymentState === "Returned"
+                  ? tableCart({ recentRounds: [own(paymentState)] })
+                  : tableCart({ items: [], recentRounds: [own(paymentState)] }),
+            })}
+            sendRound={round({ status: "idle" })}
+          />
+        </MemoryRouter>,
+      );
+    };
+    const paying = render("PayFirst", "AwaitingPayment");
+    expect(paying).toContain("You’re paying for round 1.");
+    expect(paying).toContain(">Don’t pay. Put the dishes back</button>");
+    // Nobody pays a round at a table that pays at the end; a returned round offers nothing.
+    expect(render("PayLater", "AwaitingPayment")).not.toContain("Put the dishes back");
+    const returned = render("PayFirst", "Returned");
+    expect(returned).not.toContain("</button>Don");
+    expect(returned).toContain(
+      "Round 1 wasn’t paid, so it wasn’t ordered. Its dishes are back in the cart.",
+    );
+  });
+
   it("M38: the newest round is reported, and an older one held for staff on its own line, never as being paid", () => {
     const sent = (
       roundNumber: number,

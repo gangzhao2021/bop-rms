@@ -247,7 +247,12 @@ export async function findGuestDiningRound(
     readonly guestSessionReference: string;
     readonly roundNumber: number;
   },
-): Promise<{ readonly orderReference: string; readonly orderBatchReference: string } | null> {
+): Promise<{
+  readonly orderReference: string;
+  readonly orderBatchReference: string;
+  /** Its dishes already came back to the cart (2000_412): nothing more to do. */
+  readonly returned: boolean;
+} | null> {
   const brand = parseOrderingReference(scopeInput.brandReference);
   const store = parseOrderingReference(scopeInput.storeReference);
   if (!Number.isSafeInteger(input.roundNumber) || input.roundNumber < 1 || input.roundNumber > 999)
@@ -258,7 +263,9 @@ export async function findGuestDiningRound(
   );
   const rows = rowsOf(
     await tx.query(
-      `SELECT r.order_id::text AS "order", r.order_batch_id::text AS batch
+      `SELECT r.order_id::text AS "order", r.order_batch_id::text AS batch,
+         EXISTS (SELECT 1 FROM rms_ordering.dining_round_cart_return x
+           WHERE x.brand_id=$1 AND x.store_id=$2 AND x.order_batch_id=r.order_batch_id) AS returned
        FROM (SELECT b.order_id, b.order_batch_id, s.guest_session_id,
                row_number() OVER (PARTITION BY b.order_id ORDER BY b.submitted_at, b.order_batch_id)
                  AS round_number
@@ -288,5 +295,6 @@ export async function findGuestDiningRound(
     : Object.freeze({
         orderReference: String(parseOrderingReference(row.order)),
         orderBatchReference: String(parseOrderingReference(row.batch)),
+        returned: row.returned === true,
       });
 }

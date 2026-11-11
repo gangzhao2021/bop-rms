@@ -80,6 +80,8 @@ export interface CustomerDiningRoundWithdrawOptions {
   >;
   newReference(): string;
   now(): string;
+  /** Told the original error of an unexpected failure (the pilot logs code and frames only). */
+  onUnexpected?(error: unknown): void;
   retentionPolicyCode?: string;
   retentionPolicyVersion?: number;
 }
@@ -193,6 +195,8 @@ export function createCustomerDiningRoundWithdraw(options: CustomerDiningRoundWi
           return identity === null ? null : { ...found, ...identity };
         });
         if (round === null) return Object.freeze({ status: "NotWithdrawable" as const });
+        // Its dishes already came back (the same tap, or another): nothing more is done.
+        if (round.returned) return Object.freeze({ status: "AlreadyReturned" as const });
         // 2. With the Provider, no transaction held: an unfinished attempt is cancelled first.
         const payment = await options.resolvePayment(round.paymentOperationReference);
         if (payment.status === "Paid") return Object.freeze({ status: "Paid" as const });
@@ -255,6 +259,11 @@ export function createCustomerDiningRoundWithdraw(options: CustomerDiningRoundWi
         // The table's cart ended (the table closed): the cancellation rolled back with it.
         if (error instanceof CartError && error.code === "CART_UNAVAILABLE")
           return Object.freeze({ status: "TableClosed" as const });
+        try {
+          options.onUnexpected?.(error);
+        } catch {
+          // Reporting never changes the answer.
+        }
         throw new CustomerDiningRoundWithdrawError("Unavailable");
       }
     },
