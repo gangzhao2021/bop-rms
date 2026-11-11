@@ -16,16 +16,17 @@ const disclosure =
   '{"registryVersionReference":"018f7300-0000-7000-8000-000000000019","items":[],"allergenFreeClaim":false,"assistanceCode":"ALLERGEN_ASSISTANCE_REQUIRED"}';
 
 /**
- * WP-2423 M68 (b) DEC-DATABASE-RESILIENCE: guests keep ordering while the owner publishes the
- * menu. The Publish transaction holds every lock it takes on guest-facing facts (the menu's
- * publication and reference keys, the Publishing family, the customer menu's projection key and
- * its generation rows) until COMMIT. A guest's menu read and the current-release check an order
- * makes run as the restricted pilot API role with the pilot's 2 s lock wait: they must answer at
- * once with the whole old menu while the publish is open, and with the whole new menu after it,
- * never wait on it and never fail. The publish side is held by the owner client (setup, the same
- * statements and keys as the Publish step); everything under test runs as the API role.
+ * WP-2423 M68 (b) DEC-DATABASE-RESILIENCE: a guest's menu read never waits for a menu being
+ * published. This guards the customer menu read alone (createPostgresPublishedMenuQueryStore
+ * loadCandidates, as the restricted pilot API role with the pilot's 2 s lock wait). The publish
+ * side is not the real Publish command: the owner client takes the advisory keys the Publish step
+ * takes today (the menu's publication and reference keys, the Publishing family, the customer
+ * menu's projection key) and makes the projection swap itself, holding them open. A cart quote,
+ * the current-release check at order submission and the real Publish command are not run here;
+ * a lock the real Publish step adds later (a row lock, or a key the quote or submission takes) is
+ * not caught by this guard.
  */
-it("a guest's menu and order check never wait for a menu being published", async () => {
+it("a guest's menu read never waits for a menu being published, and shows the whole old menu until it commits", async () => {
   await withIsolatedDatabase({ caseId: "wp2423_menu_guest" }, async (context) => {
     const admin = new Client(context.clientConfig);
     const holder = new Client(context.clientConfig);
@@ -171,7 +172,7 @@ it("a guest's menu and order check never wait for a menu being published", async
         [id(2), id(1), id(70), id(71), later],
       );
 
-      // Guests keep reading and ordering meanwhile: no wait, the whole old menu.
+      // Guests keep reading the menu meanwhile: no wait, the whole old menu.
       const waiters = async () =>
         (await admin.query("SELECT count(*)::int n FROM pg_locks WHERE NOT granted")).rows[0].n;
       const during = await Promise.all([guestMenu(), guestMenu(), guestMenu()]);
