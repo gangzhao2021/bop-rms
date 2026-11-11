@@ -304,6 +304,7 @@ test("@production M29: changing the guests at a paid table says the per-head cha
   // The table paid for two teas; its bill is settled.
   let tea = {
     status: "Paid",
+    settledBy: "Paid",
     charged: 2,
     expected: 2 as number | null,
     problem: null,
@@ -334,6 +335,20 @@ test("@production M29: changing the guests at a paid table says the per-head cha
     await expect(guests).toContainText("1 guest");
     await expect(guests).toContainText("Tea on the bill: 2 · guests: 1");
     await expect(guests.getByRole("status").filter({ hasText: said })).toBeVisible();
+    // A guest joins instead: nobody is owed money, so no refund is mentioned; the extra tea is
+    // said to be not charged and how to charge it.
+    await guests.getByRole("button", { name: "Change", exact: true }).click();
+    await guests.getByRole("textbox", { name: "Number of guests" }).fill("3");
+    await guests.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(guests).toContainText("3 guests");
+    await expect(guests).toContainText("Tea on the bill: 2 · guests: 3");
+    await expect(guests.getByText(said)).toHaveCount(0);
+    await expect(
+      guests.getByRole("status").filter({
+        hasText:
+          "This table has paid, so Tea on the bill stays at 2 and the extra guests' Tea isn't charged. To charge it, take a new order for it.",
+      }),
+    ).toBeVisible();
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);

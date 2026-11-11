@@ -146,6 +146,8 @@ export interface TableTeaView {
     readonly reason: "ChildNotCharged" | "GuestDeclined" | "Other";
   } | null;
   readonly overrideVersion?: number;
+  /** How a settled bill closed: guests paid, or it was recorded as left without paying. */
+  readonly settledBy?: "Paid" | "WrittenOff" | null;
   /** The item the Store charges per head, in the staff member's language. */
   readonly itemName?: string | null;
 }
@@ -189,6 +191,10 @@ export function createTableTeaClient(fetcher: typeof fetch = fetch): TableTeaCli
       !statuses.includes(String(raw.status)) ||
       !Number.isSafeInteger(raw.charged) ||
       (raw.expected !== null && !Number.isSafeInteger(raw.expected)) ||
+      (raw.settledBy !== undefined &&
+        raw.settledBy !== null &&
+        raw.settledBy !== "Paid" &&
+        raw.settledBy !== "WrittenOff") ||
       (raw.problem !== null &&
         ![
           "NeedsManager",
@@ -271,17 +277,32 @@ export function teaRefusalText(tea: TableTeaView | null): string | null {
   return null;
 }
 /**
- * M29 (v15 batch 5): a paid (or written-off) table's guest count can still be corrected, for the
- * day's guest numbers, but its bill is settled: the per-head charge stays as paid. Said whenever
- * the count and the charge differ, so a change never looks as if the bill followed it.
+ * M29 (v15 batch 5): a settled table's guest count can still be corrected, for the day's guest
+ * numbers, but its bill stays as settled. Said whenever the count and the charge differ, so a
+ * change never looks as if the bill followed it, and worded for what actually happened: a refund
+ * only when guests paid and the count went down; an extra guest's charge is not on the bill; a
+ * written-off table took no money, so nothing is refunded.
  */
 export function teaPaidText(tea: TableTeaView | null): string | null {
   if (tea === null || tea.status !== "Paid" || tea.expected === null) return null;
   if (tea.expected === tea.charged) return null;
-  return t(
-    "This table has paid, so {item} on the bill stays at {charged}. If a guest should get money back, a manager refunds it on the order.",
-    { item: teaItemName(tea), charged: String(tea.charged) },
-  );
+  const words = { item: teaItemName(tea), charged: String(tea.charged) };
+  if (tea.settledBy === "WrittenOff")
+    return t(
+      "This table was recorded as left without paying, so {item} on the bill stays at {charged}. Nothing is charged or refunded for the change.",
+      words,
+    );
+  if (tea.settledBy !== "Paid")
+    return t("This table's bill is settled, so {item} on the bill stays at {charged}.", words);
+  return tea.expected < tea.charged
+    ? t(
+        "This table has paid, so {item} on the bill stays at {charged}. If a guest should get money back, a manager refunds it on the order.",
+        words,
+      )
+    : t(
+        "This table has paid, so {item} on the bill stays at {charged} and the extra guests' {item} isn't charged. To charge it, take a new order for it.",
+        words,
+      );
 }
 // A read that fails is tried again quietly, sooner at first (a busy moment passes).
 const teaReadRetryMs = (attempt: number) => (attempt < 6 ? 5_000 : 15_000);

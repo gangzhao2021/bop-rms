@@ -118,19 +118,49 @@ describe("M29: a refused tea change says why, never that the system is busy", ()
 });
 
 describe("M29 (v15 batch 5): a paid table's guest count changing says the bill stays as paid", () => {
-  const paid = (charged: number, expected: number | null): TableTeaView => ({
+  const paid = (
+    charged: number,
+    expected: number | null,
+    settledBy: TableTeaView["settledBy"] = "Paid",
+  ): TableTeaView => ({
     status: "Paid",
+    settledBy,
     charged,
     expected,
     problem: null,
     itemName: "Tea",
   });
-  it("explains a count that no longer matches the paid charge, and nothing when it matches", () => {
+  it("offers a refund only when guests paid and the count went down", () => {
     expect(teaPaidText(paid(2, 1))).toBe(
       "This table has paid, so Tea on the bill stays at 2. If a guest should get money back, a manager refunds it on the order.",
     );
     expect(teaPaidText(paid(2, 2))).toBeNull();
     expect(teaPaidText(paid(2, null))).toBeNull();
     expect(teaPaidText({ ...paid(2, 1), status: "Charged" })).toBeNull();
+  });
+  it("says an extra guest's charge is not on the paid bill, with no refund", () => {
+    const text = teaPaidText(paid(2, 3));
+    expect(text).toBe(
+      "This table has paid, so Tea on the bill stays at 2 and the extra guests' Tea isn't charged. To charge it, take a new order for it.",
+    );
+    expect(text).not.toMatch(/refund|money back/i);
+  });
+  it("never tells staff a written-off table has paid or should be refunded", () => {
+    for (const expected of [1, 3]) {
+      const text = teaPaidText(paid(2, expected, "WrittenOff"));
+      expect(text).toBe(
+        "This table was recorded as left without paying, so Tea on the bill stays at 2. Nothing is charged or refunded for the change.",
+      );
+      expect(text).not.toMatch(/has paid|money back|refunds it/i);
+    }
+    // An older server that doesn't say how: worded to fit both, no refund step.
+    const older: TableTeaView = {
+      status: "Paid",
+      charged: 2,
+      expected: 1,
+      problem: null,
+      itemName: "Tea",
+    };
+    expect(teaPaidText(older)).toBe("This table's bill is settled, so Tea on the bill stays at 2.");
   });
 });

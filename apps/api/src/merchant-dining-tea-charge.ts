@@ -76,6 +76,14 @@ export function teaAfterCheckProblem(input: {
     return "NotAddedBack";
   return input.problem ?? "Unavailable";
 }
+/** M29: how a table's bill was settled, from the bill itself; a write-off took no money for the rest. */
+export type DiningTeaSettledBy = "Paid" | "WrittenOff" | null;
+export function teaSettledBy(bill: {
+  readonly settlement: unknown;
+  readonly writeOff: unknown;
+}): DiningTeaSettledBy {
+  return bill.writeOff !== null ? "WrittenOff" : bill.settlement !== null ? "Paid" : null;
+}
 const fail = (code: MerchantDiningTeaChargeErrorCode): never => {
   throw new MerchantDiningTeaChargeError(code);
 };
@@ -91,7 +99,7 @@ export interface DiningTeaChargeView {
     | "PaysEachRound"
     /** No party size recorded yet. */
     | "NoPartySize"
-    /** The table already paid (or was written off): a change is a refund or adjustment. */
+    /** The table's bill is settled (paid, or written off: see `settledBy`); the bill stays. */
     | "Paid"
     /** The tea on the bill doesn't match: adding or taking off didn't go through. */
     | "Mismatch";
@@ -109,6 +117,12 @@ export interface DiningTeaChargeView {
   } | null;
   /** The latest tea count version (what a new count is set against). */
   readonly overrideVersion: number;
+  /**
+   * M29: how a settled bill was closed. "Paid": guests paid (money back is a refund);
+   * "WrittenOff": staff recorded that the guests left without paying (no money to give back).
+   * Null while the bill is open.
+   */
+  readonly settledBy: DiningTeaSettledBy;
   /** Why it didn't match, when a step was refused. */
   /**
    * Why the charge could not be brought to the guests (M29): a manager must take tea off; the
@@ -248,7 +262,8 @@ export function createMerchantDiningTeaCharge(options: {
             tea,
             tableReference: String(session.tableReference),
             payLater: bill.paymentTiming === "PayLater",
-            paid: bill.settlement !== null || bill.writeOff !== null,
+            paid: teaSettledBy(bill) !== null,
+            settledBy: teaSettledBy(bill),
             orderReference: bill.orderReference,
             orderVersion: order.orderVersion,
             open: order.lines.filter((line) => !line.takenOff),
@@ -303,6 +318,7 @@ export function createMerchantDiningTeaCharge(options: {
               version: state.override.version,
             }),
       overrideVersion: state.overrideVersion,
+      settledBy: state.settledBy,
       problem,
       itemName: state.itemName,
     });
