@@ -920,6 +920,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "This order isn’t available on this phone": "这部手机上无法查看这笔订单",
   "This order was cancelled because its payment didn’t go through. You weren’t charged for it.":
     "这笔订单因付款未成功已取消，你没有被扣款。",
+  "This order was stopped before anyone paid, and its dishes went back to your table’s cart. Nobody was charged for it.":
+    "这笔订单在付款前已停止，菜品已放回本桌购物车，没有向任何人收费。",
   "This order was cancelled by the store. Nobody was charged for it.":
     "这笔订单已被门店取消，没有向任何人收费。",
   "This page checks for updates every few seconds.": "本页每隔几秒自动检查更新。",
@@ -941,6 +943,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "This round was cancelled because its payment didn’t go through. You weren’t charged for it.":
     "这一轮因付款未成功已取消，你没有被扣款。",
   "This round was cancelled by the store. ": "这一轮已被门店取消。",
+  "This round was stopped before anyone paid, and its dishes went back to your table’s cart. Nobody was charged for it.":
+    "这一轮在付款前已停止，菜品已放回本桌购物车，没有向任何人收费。",
   "This round was cancelled by the store. Nobody was charged for it.":
     "这一轮已被门店取消，没有向任何人收费。",
   "This round will be cancelled at {value1} ": "这一轮将于 {value1} 取消。",

@@ -146,6 +146,8 @@ export interface UnpaidBatchCancellation {
   readonly cancelledAt: string;
   /** The Store cancelled it before anyone paid (absent from an older server). */
   readonly byStore?: boolean;
+  /** WP-2423 M38: the guest paying for it stopped before paying (absent from an older server). */
+  readonly byGuest?: boolean;
 }
 
 export type StaffCancellationReason =

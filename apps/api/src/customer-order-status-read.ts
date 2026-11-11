@@ -694,6 +694,11 @@ export function createCustomerOrderStatusRead(
             cancelledAt: string;
             /** A manager cancelled it (nothing was charged); otherwise its payment never completed. */
             byStore: boolean;
+            /**
+             * WP-2423 M38: the guest paying for it stopped before paying and its dishes went back to
+             * the table's cart (nothing was charged), never a failed payment.
+             */
+            byGuest: boolean;
           }[] = [];
           if (result.order.orderType === "DineIn" && (await stillAuthorized())) {
             for (const entry of await listStoreUnpaidBatchCancellations(
@@ -705,6 +710,7 @@ export function createCustomerOrderStatusRead(
                 orderBatchReference: entry.orderBatchReference,
                 cancelledAt: entry.cancelledAt,
                 byStore: entry.reasonCode === "STAFF_CANCELLED_UNPAID",
+                byGuest: entry.reasonCode === "GUEST_CANCELLED_UNPAID",
               });
             const deadlines = new Map<string, string>();
             for (const entry of await listStoreDiningBatchPaymentDeadlines(

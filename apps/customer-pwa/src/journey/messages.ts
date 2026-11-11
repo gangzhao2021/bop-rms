@@ -1549,6 +1549,20 @@ export const orderStatusText = Object.freeze({
   get orderCancelledByStoreUnpaid() {
     return t("This order was cancelled by the store. Nobody was charged for it.");
   },
+  /**
+   * WP-2423 M38: the guest paying for it stopped before paying ("Don't pay. Put the dishes back").
+   * The table shares this page, so it says what happened, not who: never a failed payment.
+   */
+  get roundWithdrawnUnpaid() {
+    return t(
+      "This round was stopped before anyone paid, and its dishes went back to your table’s cart. Nobody was charged for it.",
+    );
+  },
+  get orderWithdrawnUnpaid() {
+    return t(
+      "This order was stopped before anyone paid, and its dishes went back to your table’s cart. Nobody was charged for it.",
+    );
+  },
   get roundCancelledUnpaid() {
     return t(
       "This round was cancelled because its payment didn’t go through. You weren’t charged for it.",

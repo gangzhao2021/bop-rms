@@ -767,6 +767,12 @@ function StatusContent({
       ?.filter((entry) => entry.byStore === true)
       .map((entry) => entry.orderBatchReference) ?? [],
   );
+  // WP-2423 M38: rounds the guest paying for them stopped before paying (dishes back in the cart).
+  const withdrawnByGuest = new Set(
+    view.sources?.unpaidCancellations
+      ?.filter((entry) => entry.byGuest === true)
+      .map((entry) => entry.orderBatchReference) ?? [],
+  );
   const notPaid = unpaidRounds(view);
   const awaitingPayment = awaitingPaymentRounds(view);
   const failedPayment = (orderBatchReference: string) =>
@@ -1108,9 +1114,13 @@ function StatusContent({
                     ? multipleBatches
                       ? orderStatusText.roundCancelledByStoreUnpaid
                       : orderStatusText.orderCancelledByStoreUnpaid
-                    : multipleBatches
-                      ? orderStatusText.roundCancelledUnpaid
-                      : orderStatusText.orderCancelledUnpaid}
+                    : withdrawnByGuest.has(batch.orderBatchReference)
+                      ? multipleBatches
+                        ? orderStatusText.roundWithdrawnUnpaid
+                        : orderStatusText.orderWithdrawnUnpaid
+                      : multipleBatches
+                        ? orderStatusText.roundCancelledUnpaid
+                        : orderStatusText.orderCancelledUnpaid}
                 </p>
               ) : failedPayment(batch.orderBatchReference) !== null ? (
                 <p className="order-status__warning" role="status">

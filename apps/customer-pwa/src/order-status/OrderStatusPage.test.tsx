@@ -1141,6 +1141,32 @@ describe("WP-2423: a dine-in round whose payment didn't go through", () => {
     expect(html).toMatch(/Total including tax<\/span><span>\$11\.30<\/span>/u);
   });
 
+  it("says a round the guest paying for it stopped went back to the cart, never that its payment failed", () => {
+    for (const [unpaid, text] of [
+      [
+        {
+          orderBatchReference: id(30),
+          cancelledAt: "2026-08-11T13:59:00.000Z",
+          byStore: false,
+          byGuest: true,
+        },
+        "This round was stopped before anyone paid, and its dishes went back to your table’s cart. Nobody was charged for it.",
+      ],
+    ] as const) {
+      const { state, view } = diningView({
+        batchPayments: [
+          { orderBatchReference: id(3), status: "Succeeded", cancelsAt: null },
+          { orderBatchReference: id(30), status: "Awaiting", cancelsAt: null },
+        ],
+        unpaidCancellations: [unpaid],
+      });
+      const html = render({ ...state, view });
+      expect(html).toContain(text);
+      expect(html).not.toContain("didn’t go through");
+      expect(html).not.toContain("cancelled by the store");
+    }
+  });
+
   it("totals every round's payment and shows served rounds as served while one awaits payment", () => {
     const { state, view: base } = diningView({});
     const [first, second] = base.order.batches;

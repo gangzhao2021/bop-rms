@@ -513,14 +513,21 @@ function parseSources(
         // WP-2423: `byStore` (a manager's cancellation) is absent from an older server.
         const withByStore =
           value !== null && typeof value === "object" && Object.hasOwn(value, "byStore");
+        // WP-2423 M38: `byGuest` (the payer stopped before paying) is absent from an older server.
+        const withByGuest =
+          value !== null && typeof value === "object" && Object.hasOwn(value, "byGuest");
         const entry = exact(value, [
           "orderBatchReference",
           "cancelledAt",
           ...(withByStore ? ["byStore"] : []),
+          ...(withByGuest ? ["byGuest"] : []),
         ]);
         const orderBatchReference = parseReference(entry.orderBatchReference);
         if (
           (withByStore && typeof entry.byStore !== "boolean") ||
+          (withByGuest && typeof entry.byGuest !== "boolean") ||
+          // Stopped by the store or by the guest paying, never both.
+          (entry.byStore === true && entry.byGuest === true) ||
           !batches.some((batch) => batch.orderBatchReference === orderBatchReference) ||
           seen.has(orderBatchReference) ||
           staffCancelled.has(orderBatchReference)
@@ -531,6 +538,7 @@ function parseSources(
           orderBatchReference,
           cancelledAt: sourceInstant(entry.cancelledAt),
           ...(withByStore ? { byStore: entry.byStore === true } : {}),
+          ...(withByGuest ? { byGuest: entry.byGuest === true } : {}),
         });
       }),
     );

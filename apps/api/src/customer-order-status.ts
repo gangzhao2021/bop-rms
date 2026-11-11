@@ -349,6 +349,7 @@ export class CustomerOrderStatusHandler {
                           orderBatchReference: cancellation.orderBatchReference,
                           cancelledAt: cancellation.cancelledAt,
                           byStore: cancellation.byStore,
+                          byGuest: cancellation.byGuest,
                         })),
                       }),
                   // WP-2423 Q9-G1: not accepted in time and refunded, or awaiting the Store after

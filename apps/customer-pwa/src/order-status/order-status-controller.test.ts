@@ -868,6 +868,16 @@ describe("WP-2423: dine-in round payments and unpaid cancellations", () => {
         id(1),
       ).sources?.unpaidCancellations,
     ).toEqual([{ ...cancellation, byStore: true }]);
+    // WP-2423 M38: a round the guest paying for it stopped before paying.
+    expect(
+      parseOrderStatusView(
+        dining({
+          batchPayments: [paid, { ...failed, cancelsAt: null }],
+          unpaidCancellations: [{ ...cancellation, byStore: false, byGuest: true }],
+        }),
+        id(1),
+      ).sources?.unpaidCancellations,
+    ).toEqual([{ ...cancellation, byStore: false, byGuest: true }]);
     expect(
       parseOrderStatusView(
         dining({ batchPayments: [{ ...paid, orderBatchReference: id(30), status: "Awaiting" }] }),
@@ -895,6 +905,8 @@ describe("WP-2423: dine-in round payments and unpaid cancellations", () => {
       { unpaidCancellations: [{ ...cancellation, cancelledAt: "2026-08-11T14:01:00.000Z" }] },
       { unpaidCancellations: [{ ...cancellation, reason: "PaymentFailed" }] },
       { unpaidCancellations: [{ ...cancellation, byStore: "STAFF_CANCELLED_UNPAID" }] },
+      { unpaidCancellations: [{ ...cancellation, byGuest: "GUEST_CANCELLED_UNPAID" }] },
+      { unpaidCancellations: [{ ...cancellation, byStore: true, byGuest: true }] },
       // A round is cancelled either by the store or for non-payment, never both.
       {
         unpaidCancellations: [cancellation],
