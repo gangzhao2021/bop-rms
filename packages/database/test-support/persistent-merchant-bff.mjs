@@ -404,6 +404,13 @@ export async function verifyPersistentMerchantBff({
     "GRANT SELECT ON rms_fulfillment.fulfillment,rms_fulfillment.fulfillment_item,rms_fulfillment.fulfillment_item_cancellation,rms_fulfillment.fulfillment_creation_operation,rms_fulfillment.fulfillment_item_ready_result,rms_fulfillment.fulfillment_ready_operation,rms_fulfillment.pickup_handoff_operation,rms_fulfillment.pickup_handoff_record,rms_fulfillment.pickup_handoff_item,rms_fulfillment.pickup_proof_operation,rms_fulfillment.pickup_proof_generation,rms_fulfillment.pickup_proof_invalidation,rms_fulfillment.pickup_proof_verification,rms_fulfillment.pickup_in_person_verification,rms_fulfillment.pickup_not_collected_record,rms_fulfillment.capacity_asap_commitment TO " +
       role,
   );
+  // WP-2423 M10: refunded units not handed over (Fulfillment's and Ordering's records; pilot api
+  // grants). The handoff records any Ordering withdrawal Fulfillment does not hold yet first.
+  await admin.query(
+    "GRANT SELECT,INSERT ON rms_fulfillment.fulfillment_item_withdrawal TO " + role,
+  );
+  await admin.query("GRANT USAGE ON SCHEMA rms_ordering TO " + role);
+  await admin.query("GRANT SELECT ON rms_ordering.order_item_refund_withdrawal TO " + role);
   // WP-2423 (DEC-PICKUP-COUNTER-CODE): the six-digit code and wrong-code checks (pilot api grants).
   await admin.query(
     "GRANT SELECT,INSERT ON rms_fulfillment.pickup_counter_code,rms_fulfillment.pickup_code_check_rejection TO " +

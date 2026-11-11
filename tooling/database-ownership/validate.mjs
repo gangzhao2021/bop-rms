@@ -2430,6 +2430,11 @@ async function scanUnsupported(root, module, diagnostics) {
             owner: "payment",
             tables: ["payment_intent", "payment_terminal_fact"],
           },
+          // WP-2423 M14: the requester's refund role when the request was recorded.
+          "src/infrastructure/persistence/ordinary-refund-requester-role-store.ts": {
+            owner: "payment",
+            tables: ["ordinary_refund_requester_role"],
+          },
           // WP-2423 M163: money taken back after a refund made by mistake.
           "src/infrastructure/persistence/refund-recovery-store.ts": {
             owner: "payment",

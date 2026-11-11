@@ -20,6 +20,8 @@ export interface PickupQueueReadItem {
     readonly orderedQuantity: number;
     readonly readyQuantity: number;
     readonly handedOverQuantity: number;
+    /** WP-2423 M10: of the ordered units, refunded and never handed over (absent: none). */
+    readonly withdrawnQuantity?: number;
   }[];
 }
 export interface PickupQueueReadPage {

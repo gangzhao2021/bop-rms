@@ -6335,6 +6335,42 @@
       "privilege": "SELECT",
       "principal": "api",
       "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); WP-2423 shared-table-cart-staff-round M38: the guest paying for a table round stops before paying and its dishes come back to the table cart, once, recorded with who asked (2000_412)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_fulfillment",
+      "object": "fulfillment_item_withdrawal",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); WP-2423 DEC-OWNER-DEFAULTS-2026-11-06 item 4 (M10): a refund with \"stop making it too\" records the refunded units with the pickup, so the bag and the handover count only what is still owed (append-only)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_fulfillment",
+      "object": "fulfillment_item_withdrawal",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); WP-2423 DEC-OWNER-DEFAULTS-2026-11-06 item 4 (M10): a refund with \"stop making it too\" records the refunded units with the pickup, so the bag and the handover count only what is still owed (append-only)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "ordinary_refund_requester_role",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); WP-2423 DEC-OWNER-DEFAULTS-2026-11-06 item 2 (M14): the refund role a requester held when the request was recorded, so a cashier's request is listed for a manager at once (append-only)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "ordinary_refund_requester_role",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); WP-2423 DEC-OWNER-DEFAULTS-2026-11-06 item 2 (M14): the refund role a requester held when the request was recorded, so a cashier's request is listed for a manager at once (append-only)"
     }
   ]
 }

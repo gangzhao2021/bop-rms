@@ -1,3 +1,4 @@
+import { listOrdinaryRefundRequesterRoles } from "./persistence/ordinary-refund-requester-role-store.js";
 import type { ConsumerTransaction } from "@bop/eventing";
 import { parsePaymentInstant } from "../application/payment-intent-creation.js";
 import { parsePaymentReference } from "../application/payment-provider-adapter.js";
@@ -90,10 +91,12 @@ export function createPostgresOrdinaryRefundApprovalQueueRuntime(options: {
    * the refund themselves. false (a cashier): nobody will prepare it with the request, so it is
    * listed at once and the manager is alerted without waiting. true or absent: listed once it has
    * waited notSentAfterMilliseconds (a manager's own request is prepared and sent with it).
+   * The role recorded with the request decides first; this is asked only for a request recorded
+   * before that record existed.
    */
   requesterMaySend?(
     tx: ConsumerTransaction,
-    query: { orderReference: string; requesterReference: string },
+    query: { orderReference: string; requesterReference: string; requestedAt: string },
   ): Promise<boolean>;
 }) {
   const scope = {
@@ -109,6 +112,27 @@ export function createPostgresOrdinaryRefundApprovalQueueRuntime(options: {
   });
   const subject = createPostgresOrdinaryRefundApprovalSubjectSource({ scope, authorize: byOrder });
   const approvals = createPostgresOrdinaryRefundApprovalReader({ scope, authorize: byOrder });
+  /** The requester's role when they asked (recorded with the request), else the caller's read. */
+  const requesterMaySend = async (
+    tx: ConsumerTransaction,
+    current: {
+      request: { requestReference: unknown; orderReference: string; requestedAt: unknown };
+      requesterReference: string;
+    },
+  ) => {
+    const recorded = (
+      await listOrdinaryRefundRequesterRoles(tx, scope, [String(current.request.requestReference)])
+    ).get(String(current.request.requestReference));
+    if (recorded !== undefined) return recorded !== "Staff";
+    return (
+      options.requesterMaySend === undefined ||
+      options.requesterMaySend(tx, {
+        orderReference: current.request.orderReference,
+        requesterReference: current.requesterReference,
+        requestedAt: String(current.request.requestedAt),
+      })
+    );
+  };
   return async (tx: ConsumerTransaction, value: { observedAt: string }) => {
     const observedAt = parsePaymentInstant(value.observedAt);
     const escalation = createPostgresOrdinaryRefundCurrentEscalationSource(options);
@@ -134,11 +158,7 @@ export function createPostgresOrdinaryRefundApprovalQueueRuntime(options: {
         notSent &&
         Date.parse(evaluated.observedAt) - Date.parse(current.request.requestedAt) <
           notSentAfterMilliseconds &&
-        (options.requesterMaySend === undefined ||
-          (await options.requesterMaySend(tx, {
-            orderReference: current.request.orderReference,
-            requesterReference: current.requesterReference,
-          })))
+        (await requesterMaySend(tx, current))
       )
         continue;
       const approval =

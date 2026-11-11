@@ -85,6 +85,8 @@ const moduleManifestInput =
         "ordinary_refund_decline",
         // WP-2423 M163: money taken back after a refund made by mistake.
         "refund_recovery",
+        // WP-2423 M14: the requester's refund role when the request was recorded.
+        "ordinary_refund_requester_role",
         "ordinary_refund_request_note",
         "ordinary_refund_request",
         "payment_compensation_operations",

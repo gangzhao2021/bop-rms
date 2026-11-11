@@ -334,3 +334,10 @@ export {
   type RefundRecoveryMethod,
   type RefundRecoveryReason,
 } from "./infrastructure/persistence/refund-recovery-store.js";
+
+// WP-2423 M14: the requester's refund role when the request was recorded.
+export {
+  listOrdinaryRefundRequesterRoles,
+  recordOrdinaryRefundRequesterRole,
+  type OrdinaryRefundRequesterRole,
+} from "./infrastructure/persistence/ordinary-refund-requester-role-store.js";

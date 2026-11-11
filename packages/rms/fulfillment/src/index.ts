@@ -54,7 +54,10 @@ export { createPostgresPickupFulfillmentStore } from "./infrastructure/persisten
 
 export {
   createPostgresFulfillmentItemCancellation,
+  createPostgresFulfillmentItemWithdrawal,
   createPostgresFulfillmentReadinessStore,
+  readPickupOwedUnits,
+  type FulfillmentItemWithdrawalResult,
 } from "./infrastructure/persistence/fulfillment-readiness-store.js";
 
 export * from "./domain/fulfillment-item-cancellation.js";

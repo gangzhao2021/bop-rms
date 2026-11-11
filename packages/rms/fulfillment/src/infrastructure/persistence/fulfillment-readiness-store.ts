@@ -68,6 +68,71 @@ async function readFulfillmentItemCancellations(
   if (rows.some((row) => String(row.fulfillmentReference) !== fulfillment)) return unavailable();
   return Object.freeze(rows);
 }
+/** WP-2423 M10: one refunded pickup line staff said not to hand over (append-only fact). */
+export interface FulfillmentItemWithdrawalRecord {
+  readonly withdrawalReference: string;
+  readonly operationReference: string;
+  readonly fulfillmentReference: string;
+  readonly fulfillmentItemReference: string;
+  readonly orderReference: string;
+  readonly orderBatchReference: string;
+  readonly orderItemReference: string;
+  readonly orderWithdrawalReference: string;
+  readonly withdrawnQuantity: number;
+  readonly actorReference: string;
+  readonly phase: "Pending" | "Ready";
+  readonly auditReference: string;
+  readonly withdrawnAt: string;
+}
+/** Owner reader of the refunded (withdrawn) units of one fulfillment, oldest first. */
+async function readFulfillmentItemWithdrawals(
+  tx: ConsumerTransaction,
+  brand: string,
+  store: string,
+  fulfillment: string,
+): Promise<readonly FulfillmentItemWithdrawalRecord[]> {
+  const result = await tx.query<Record<string, unknown>>(
+    "SELECT fulfillment_item_withdrawal_id::text AS id,operation_id::text AS operation," +
+      "fulfillment_id::text AS fulfillment,fulfillment_item_id::text AS item,order_id::text AS order_id," +
+      "order_batch_id::text AS batch,order_item_id::text AS order_item,order_withdrawal_id::text AS withdrawal," +
+      "withdrawn_quantity AS quantity,actor_id::text AS actor,phase,audit_id::text AS audit,withdrawn_at " +
+      "FROM rms_fulfillment.fulfillment_item_withdrawal WHERE brand_id=$1 AND store_id=$2 AND fulfillment_id=$3 " +
+      "ORDER BY withdrawn_at,fulfillment_item_withdrawal_id LIMIT 1001",
+    [brand, store, fulfillment],
+  );
+  if (!Array.isArray(result.rows) || result.rows.length > 1000) return unavailable();
+  return Object.freeze(
+    result.rows.map((row) => {
+      const quantity = row.quantity;
+      if (
+        typeof quantity !== "number" ||
+        !Number.isInteger(quantity) ||
+        quantity < 1 ||
+        quantity > 999 ||
+        (row.phase !== "Pending" && row.phase !== "Ready") ||
+        row.fulfillment !== fulfillment
+      )
+        return unavailable();
+      const at =
+        row.withdrawn_at instanceof Date ? row.withdrawn_at.toISOString() : row.withdrawn_at;
+      return Object.freeze({
+        withdrawalReference: String(parseReadinessReference(row.id)),
+        operationReference: String(parseReadinessReference(row.operation)),
+        fulfillmentReference: fulfillment,
+        fulfillmentItemReference: String(parseReadinessReference(row.item)),
+        orderReference: String(parseReadinessReference(row.order_id)),
+        orderBatchReference: String(parseReadinessReference(row.batch)),
+        orderItemReference: String(parseReadinessReference(row.order_item)),
+        orderWithdrawalReference: String(parseReadinessReference(row.withdrawal)),
+        withdrawnQuantity: quantity,
+        actorReference: String(parseReadinessReference(row.actor)),
+        phase: row.phase,
+        auditReference: String(parseReadinessReference(row.audit)),
+        withdrawnAt: String(parseReadinessInstant(at)),
+      });
+    }),
+  );
+}
 type Access =
   | { readonly access: "Current"; readonly orderReference: string }
   | { readonly access: "Recover"; readonly kitchenReadyResultReference: string };
@@ -103,6 +168,14 @@ export function createPostgresFulfillmentReadinessStore(options: {
   lockPickupProofByOrder(
     input: Parameters<FulfillmentReadinessPorts["repository"]["lockByOrder"]>[0],
   ): Promise<ReturnType<typeof foldPickupProofHistory> | null>;
+  /** WP-2423 M10: the locked pickup with what was withdrawn, for the withdrawal command. */
+  lockWithdrawalSourceByOrder(
+    input: Parameters<FulfillmentReadinessPorts["repository"]["lockByOrder"]>[0],
+  ): Promise<{
+    readonly readiness: ReturnType<typeof parseFulfillmentReadinessSource>;
+    readonly withdrawn: ReadonlyMap<string, number>;
+    readonly handedOver: boolean;
+  } | null>;
 } {
   const brand = parseReadinessReference(options.brandReference),
     store = parseReadinessReference(options.storeReference);
@@ -277,6 +350,48 @@ export function createPostgresFulfillmentReadinessStore(options: {
         };
       }),
     });
+    // WP-2423 M10: units staff refunded and said not to hand over. The kitchen's own facts (ready,
+    // phase, version) are unchanged; what is owed to the guest, proven and handed over is the
+    // ordered quantity less these. A line with nothing owed is left out; nothing owed at all:
+    // nothing to prove or hand over.
+    const withdrawals = await readFulfillmentItemWithdrawals(
+      tx,
+      brand,
+      store,
+      String(aggregate.fulfillmentReference),
+    );
+    const withdrawn = new Map<string, number>();
+    for (const row of withdrawals) {
+      if (
+        row.orderReference !== order ||
+        row.orderBatchReference !== String(aggregate.orderBatchReference) ||
+        row.withdrawnAt > lockedAt
+      )
+        return unavailable();
+      withdrawn.set(
+        row.fulfillmentItemReference,
+        (withdrawn.get(row.fulfillmentItemReference) ?? 0) + row.withdrawnQuantity,
+      );
+    }
+    const owedItems = readiness.items.flatMap((item) => {
+      const less = withdrawn.get(String(item.fulfillmentItemReference)) ?? 0;
+      const owedQuantity = item.orderedQuantity - less;
+      if (owedQuantity < 0) return unavailable();
+      if (owedQuantity === 0) return [];
+      return [
+        {
+          ...item,
+          orderedQuantity: owedQuantity,
+          readyQuantity: item.state === "Ready" ? owedQuantity : 0,
+        },
+      ];
+    });
+    const owed =
+      withdrawals.length === 0
+        ? readiness
+        : owedItems.length === 0
+          ? null
+          : parseFulfillmentReadinessSource({ ...readiness, items: owedItems });
     const proofHistory = await readPickupProofHistory(
       tx,
       brand,
@@ -307,10 +422,32 @@ export function createPostgresFulfillmentReadinessStore(options: {
           .length
       )
         return unavailable();
-      return { readiness, proof: null, handoff: null, hasHandoff: false, notCollected: false };
+      return {
+        readiness,
+        owed,
+        withdrawn,
+        proof: null,
+        handoff: null,
+        hasHandoff: false,
+        notCollected: false,
+      };
     }
     const readyAt = fold.readyAt ?? "";
-    const proof = foldPickupProofHistory(readiness, readyAt, proofHistory);
+    // Every unit refunded and none handed over (a withdrawal is refused once one is): nothing is
+    // left to prove, hand over or close as not collected.
+    if (owed === null) {
+      if (handoffHistory.length || notCollected) return unavailable();
+      return {
+        readiness,
+        owed,
+        withdrawn,
+        proof: null,
+        handoff: null,
+        hasHandoff: false,
+        notCollected: false,
+      };
+    }
+    const proof = foldPickupProofHistory(owed, readyAt, proofHistory);
     const inPerson = await readPickupInPersonVerifications(
       tx,
       brand,
@@ -323,7 +460,17 @@ export function createPostgresFulfillmentReadinessStore(options: {
       handoffHistory,
       inPerson,
     );
+    if (
+      withdrawals.length > 0 &&
+      handoffHistory.length > 0 &&
+      withdrawals.some((row) =>
+        handoffHistory.some((effect) => String(effect.record.handedOverAt) < row.withdrawnAt),
+      )
+    )
+      return unavailable();
     return {
+      owed,
+      withdrawn,
       handoff,
       hasHandoff: handoffHistory.length > 0,
       // WP-2423: closed as not collected; no later handoff or code.
@@ -426,6 +573,8 @@ export function createPostgresFulfillmentReadinessStore(options: {
         const fulfillment = parseReadinessReference(row.fulfillment_id),
           order = parseReadinessReference(row.order_id);
         const result = locked.get(String(order));
+        // WP-2423 M10: every unit refunded and none handed over: nothing left to collect.
+        if (result && result.owed === null) continue;
         if (
           !result?.proof ||
           String(result.proof.source.fulfillmentReference) !== String(fulfillment)
@@ -452,22 +601,30 @@ export function createPostgresFulfillmentReadinessStore(options: {
             ...(source.canonicalPhase === "Ready" && (await codeChecksLocked(tx, capability))
               ? { codeChecksLocked: true }
               : {}),
+            // WP-2423 M10: the units as ordered, and of them the refunded ones not handed over;
+            // a line refunded in full is listed with nothing to hand over.
             items: Object.freeze(
-              source.items.map((item) =>
-                Object.freeze({
-                  fulfillmentItemReference: item.fulfillmentItemReference,
-                  orderItemReference: String(
-                    result.readiness.items.find(
-                      (line) =>
-                        String(line.fulfillmentItemReference) ===
-                        String(item.fulfillmentItemReference),
-                    )?.orderItemReference ?? unavailable(),
-                  ),
-                  orderedQuantity: item.orderedQuantity,
-                  readyQuantity: item.readyQuantity,
-                  handedOverQuantity: item.handedOverQuantity,
-                }),
-              ),
+              result.readiness.items.map((line) => {
+                const item = source.items.find(
+                  (owed) =>
+                    String(owed.fulfillmentItemReference) === String(line.fulfillmentItemReference),
+                );
+                const less = result.withdrawn.get(String(line.fulfillmentItemReference)) ?? 0;
+                if (item === undefined && less !== line.orderedQuantity) return unavailable();
+                return Object.freeze({
+                  fulfillmentItemReference: line.fulfillmentItemReference,
+                  orderItemReference: String(line.orderItemReference),
+                  orderedQuantity: line.orderedQuantity,
+                  readyQuantity:
+                    item === undefined
+                      ? line.readyQuantity
+                      : item.readyQuantity === 0
+                        ? 0
+                        : item.readyQuantity + less,
+                  handedOverQuantity: item?.handedOverQuantity ?? 0,
+                  ...(less > 0 ? { withdrawnQuantity: less } : {}),
+                });
+              }),
             ),
           }),
         );
@@ -511,6 +668,16 @@ export function createPostgresFulfillmentReadinessStore(options: {
       );
       if (result?.hasHandoff) return unavailable();
       return result?.proof ?? null;
+    },
+    async lockWithdrawalSourceByOrder(input) {
+      scope(input);
+      const state = await current(input.transaction, parseReadinessReference(input.orderReference));
+      if (state === null) return null;
+      return Object.freeze({
+        readiness: state.readiness,
+        withdrawn: state.withdrawn,
+        handedOver: state.hasHandoff || state.notCollected,
+      });
     },
     async lockPickupHandoffByOrder(input) {
       scope(input);
@@ -938,4 +1105,353 @@ export function createPostgresFulfillmentItemCancellation(options: {
       }
     },
   });
+}
+
+interface WithdrawItemsInput {
+  readonly orderReference: string;
+  readonly orderBatchReference: string;
+  /** Per refunded line: the units not to hand over, and Ordering's withdrawal record of them. */
+  readonly lines: readonly {
+    readonly orderItemReference: string;
+    readonly quantity: number;
+    readonly orderWithdrawalReference: string;
+  }[];
+  readonly operationReference: string;
+  readonly auditReference: string;
+  readonly actorReference: string;
+  readonly withdrawnAt: string;
+  /** One new reference per withdrawn line. */
+  nextReference(): string;
+  /**
+   * CatchUp: records only the lines not recorded yet (a refund made before the pickup existed),
+   * skipping lines cancelled meanwhile. Refund (default): exactly these lines, or a replay of them.
+   */
+  readonly mode?: "Refund" | "CatchUp";
+}
+export type FulfillmentItemWithdrawalResult = Readonly<
+  | { status: "NoFulfillment" }
+  | { status: "Recorded" | "AlreadyRecorded"; fulfillmentReference: string; itemCount: number }
+  /** Something of the pickup was already handed over (or it was closed as not collected). */
+  | { status: "NotWithdrawable"; reason: "HandedOver" }
+>;
+
+/**
+ * WP-2423 M10 (DEC-OWNER-DEFAULTS-2026-11-06 item 4) Fulfillment owner command, called inside the
+ * refund transaction after the caller took the Order's disposition fence: staff refunded these
+ * units and said not to hand them over. One append-only fact per line; the pickup's phase and
+ * version do not change (the kitchen still finishes or clears the line), but its proof and handoff
+ * count only what is still owed. Valid while the pickup is Pending or Ready and nothing of it was
+ * handed over. An order without a pickup fulfillment (dine-in) returns NoFulfillment, no writes.
+ */
+export function createPostgresFulfillmentItemWithdrawal(options: {
+  readonly brandReference: string;
+  readonly storeReference: string;
+  readonly authorize: (
+    tx: ConsumerTransaction,
+    input: {
+      readonly orderReference: string;
+      readonly orderBatchReference: string;
+      readonly actorReference: string;
+    },
+  ) => Promise<boolean>;
+}) {
+  const guarded = <T>(work: () => T): T => {
+    try {
+      return work();
+    } catch {
+      return unavailable();
+    }
+  };
+  const brand = guarded(() => parseReadinessReference(options.brandReference));
+  const store = guarded(() => parseReadinessReference(options.storeReference));
+  const sha256 = (value: string) =>
+    "sha256:" + createHash("sha256").update(value, "utf8").digest("hex");
+
+  async function withdrawItems(
+    tx: ConsumerTransaction,
+    raw: WithdrawItemsInput,
+  ): Promise<FulfillmentItemWithdrawalResult> {
+    const input = guarded(() => {
+      if (!Array.isArray(raw.lines) || raw.lines.length < 1 || raw.lines.length > 100)
+        return unavailable();
+      return {
+        orderReference: String(parseReadinessReference(raw.orderReference)),
+        orderBatchReference: String(parseReadinessReference(raw.orderBatchReference)),
+        lines: raw.lines.map((line) => {
+          if (!Number.isInteger(line.quantity) || line.quantity < 1 || line.quantity > 999)
+            return unavailable();
+          return {
+            orderItemReference: String(parseReadinessReference(line.orderItemReference)),
+            orderWithdrawalReference: String(
+              parseReadinessReference(line.orderWithdrawalReference),
+            ),
+            quantity: line.quantity,
+          };
+        }),
+        operationReference: String(parseReadinessReference(raw.operationReference)),
+        auditReference: String(parseReadinessReference(raw.auditReference)),
+        actorReference: String(parseReadinessReference(raw.actorReference)),
+        withdrawnAt: String(parseReadinessInstant(raw.withdrawnAt)),
+      };
+    });
+    if (
+      input.operationReference === input.auditReference ||
+      new Set(input.lines.map((line) => line.orderItemReference)).size !== input.lines.length ||
+      new Set(input.lines.map((line) => line.orderWithdrawalReference)).size !== input.lines.length
+    )
+      return unavailable();
+    let authorized: boolean;
+    try {
+      authorized = await options.authorize(tx, {
+        orderReference: input.orderReference,
+        orderBatchReference: input.orderBatchReference,
+        actorReference: input.actorReference,
+      });
+    } catch {
+      return unavailable();
+    }
+    if (authorized !== true) return unavailable();
+    await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+      brand,
+      store,
+    ]);
+    const roots = await tx.query(
+      "SELECT fulfillment_id,order_batch_id FROM rms_fulfillment.fulfillment " +
+        "WHERE brand_id=$1 AND store_id=$2 AND order_id=$3",
+      [brand, store, input.orderReference],
+    );
+    if (roots.rows.length === 0) return Object.freeze({ status: "NoFulfillment" as const });
+    const root = roots.rows[0];
+    if (roots.rows.length !== 1 || !root || root.order_batch_id !== input.orderBatchReference)
+      return unavailable();
+    const fulfillment = guarded(() => String(parseReadinessReference(root.fulfillment_id)));
+    // The owner fold locks the pickup and validates its whole history. Authority and the current
+    // Ordering source were established by the caller under the Order's disposition fence.
+    const reader = createPostgresFulfillmentReadinessStore({
+      brandReference: brand,
+      storeReference: store,
+      sha256,
+      now: () => input.withdrawnAt,
+      authorize: async () => true,
+      validateCurrentSource: async () => true,
+    });
+    const locked = await reader.lockWithdrawalSourceByOrder({
+      brandReference: parseReadinessReference(brand),
+      storeReference: parseReadinessReference(store),
+      orderReference: parseReadinessReference(input.orderReference),
+      transaction: tx,
+    });
+    if (locked === null || String(locked.readiness.fulfillmentReference) !== fulfillment)
+      return unavailable();
+    const existing = await readFulfillmentItemWithdrawals(tx, brand, store, fulfillment);
+    const mine = existing.filter((row) =>
+      input.lines.some((line) => line.orderWithdrawalReference === row.orderWithdrawalReference),
+    );
+    if (raw.mode === "CatchUp") {
+      // Each recorded line must be the one asked; the rest are written below.
+      if (
+        mine.some(
+          (row) =>
+            !input.lines.some(
+              (line) =>
+                line.orderWithdrawalReference === row.orderWithdrawalReference &&
+                line.orderItemReference === row.orderItemReference &&
+                line.quantity === row.withdrawnQuantity,
+            ),
+        )
+      )
+        return unavailable();
+      input.lines = input.lines.filter(
+        (line) =>
+          !mine.some((row) => row.orderWithdrawalReference === line.orderWithdrawalReference) &&
+          locked.readiness.items.some(
+            (item) => String(item.orderItemReference) === line.orderItemReference,
+          ),
+      );
+      if (input.lines.length === 0)
+        return Object.freeze({
+          status: "AlreadyRecorded" as const,
+          fulfillmentReference: fulfillment,
+          itemCount: 0,
+        });
+    } else if (mine.length > 0) {
+      if (
+        mine.length !== input.lines.length ||
+        mine.some(
+          (row) =>
+            row.operationReference !== input.operationReference ||
+            row.actorReference !== input.actorReference ||
+            !input.lines.some(
+              (line) =>
+                line.orderWithdrawalReference === row.orderWithdrawalReference &&
+                line.orderItemReference === row.orderItemReference &&
+                line.quantity === row.withdrawnQuantity,
+            ),
+        )
+      )
+        return unavailable();
+      return Object.freeze({
+        status: "AlreadyRecorded" as const,
+        fulfillmentReference: fulfillment,
+        itemCount: mine.length,
+      });
+    }
+    if (locked.handedOver)
+      return Object.freeze({ status: "NotWithdrawable" as const, reason: "HandedOver" as const });
+    const readiness = locked.readiness;
+    const plan = input.lines.map((line) => {
+      const item = readiness.items.find(
+        (value) => String(value.orderItemReference) === line.orderItemReference,
+      );
+      if (item === undefined) return unavailable();
+      const already = locked.withdrawn.get(String(item.fulfillmentItemReference)) ?? 0;
+      if (line.quantity > item.orderedQuantity - already) return unavailable();
+      return {
+        ...line,
+        withdrawalReference: guarded(() => String(parseReadinessReference(raw.nextReference()))),
+        fulfillmentItemReference: String(item.fulfillmentItemReference),
+      };
+    });
+    const owned = [
+      input.operationReference,
+      input.auditReference,
+      ...plan.map((row) => row.withdrawalReference),
+    ];
+    if (
+      new Set(owned).size !== owned.length ||
+      owned.some((reference) =>
+        plan.some(
+          (row) =>
+            reference === row.orderWithdrawalReference || reference === row.orderItemReference,
+        ),
+      )
+    )
+      return unavailable();
+    const phase = readiness.canonicalPhase;
+    if (phase !== "Pending" && phase !== "Ready") return unavailable();
+    await tx.query("SAVEPOINT fulfillment_item_withdrawal", []);
+    try {
+      for (const row of plan)
+        await tx.query(
+          "INSERT INTO rms_fulfillment.fulfillment_item_withdrawal (fulfillment_item_withdrawal_id," +
+            "operation_id,brand_id,store_id,fulfillment_id,fulfillment_item_id,order_id,order_batch_id," +
+            "order_item_id,order_withdrawal_id,withdrawn_quantity,actor_type,actor_id,reason_code,phase," +
+            "audit_id,withdrawn_at,data_classification) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11," +
+            "'User',$12,'REFUNDED_NOT_PROVIDED',$13,$14,$15,'IndirectIdentifier')",
+          [
+            row.withdrawalReference,
+            input.operationReference,
+            brand,
+            store,
+            fulfillment,
+            row.fulfillmentItemReference,
+            input.orderReference,
+            input.orderBatchReference,
+            row.orderItemReference,
+            row.orderWithdrawalReference,
+            row.quantity,
+            input.actorReference,
+            phase,
+            input.auditReference,
+            input.withdrawnAt,
+          ],
+        );
+      await appendAuditRecordInTransaction(tx, {
+        auditId: input.auditReference,
+        brandId: brand,
+        storeId: store,
+        actor: { type: "User", reference: input.actorReference },
+        actionCode: "FULFILLMENT_ITEM_WITHDRAWN",
+        targetType: "Fulfillment",
+        targetId: fulfillment,
+        beforeSummary: { canonicalPhase: phase },
+        afterSummary: {
+          canonicalPhase: phase,
+          withdrawnItemCount: plan.length,
+          withdrawnQuantity: plan.reduce((sum, row) => sum + row.quantity, 0),
+          operationReference: input.operationReference,
+        },
+        reasonCode: "REFUNDED_NOT_PROVIDED",
+        correlationId: input.operationReference,
+        occurredAt: input.withdrawnAt,
+        sourceChannel: "MERCHANT_WEB",
+        dataClassification: "Confidential",
+        retentionPolicyCode: "FULFILLMENT_BUSINESS_RECORD",
+        retentionPolicyVersion: 1,
+      });
+      await tx.query("RELEASE SAVEPOINT fulfillment_item_withdrawal", []);
+    } catch {
+      await tx.query("ROLLBACK TO SAVEPOINT fulfillment_item_withdrawal", []);
+      await tx.query("RELEASE SAVEPOINT fulfillment_item_withdrawal", []);
+      return unavailable();
+    }
+    return Object.freeze({
+      status: "Recorded" as const,
+      fulfillmentReference: fulfillment,
+      itemCount: plan.length,
+    });
+  }
+
+  return Object.freeze({
+    async withdrawItems(
+      tx: ConsumerTransaction,
+      input: WithdrawItemsInput,
+    ): Promise<FulfillmentItemWithdrawalResult> {
+      try {
+        return await withdrawItems(tx, input);
+      } catch {
+        return unavailable();
+      }
+    },
+  });
+}
+
+/**
+ * WP-2423 M10: the units of the Order's pickup still owed to the guest (ordered, less cancelled
+ * lines and refunded units), under the pickup lock; null when the Order has no pickup (dine-in).
+ * The caller holds the Order's disposition fence and authorizes the Store.
+ */
+export async function readPickupOwedUnits(
+  tx: ConsumerTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  orderReference: string,
+  observedAt: string,
+): Promise<number | null> {
+  const brand = parseReadinessReference(scope.brandReference),
+    store = parseReadinessReference(scope.storeReference),
+    order = parseReadinessReference(orderReference);
+  await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+    brand,
+    store,
+  ]);
+  const roots = await tx.query(
+    "SELECT fulfillment_id FROM rms_fulfillment.fulfillment WHERE brand_id=$1 AND store_id=$2 AND order_id=$3",
+    [brand, store, order],
+  );
+  if (roots.rows.length === 0) return null;
+  if (roots.rows.length !== 1) return unavailable();
+  const reader = createPostgresFulfillmentReadinessStore({
+    brandReference: brand,
+    storeReference: store,
+    sha256: (value: string) => "sha256:" + createHash("sha256").update(value, "utf8").digest("hex"),
+    now: () => observedAt,
+    authorize: async () => true,
+    validateCurrentSource: async () => true,
+  });
+  const locked = await reader.lockWithdrawalSourceByOrder({
+    brandReference: brand,
+    storeReference: store,
+    orderReference: order,
+    transaction: tx,
+  });
+  if (locked === null) return 0;
+  return locked.readiness.items.reduce(
+    (sum, item) =>
+      sum +
+      Math.max(
+        0,
+        item.orderedQuantity - (locked.withdrawn.get(String(item.fulfillmentItemReference)) ?? 0),
+      ),
+    0,
+  );
 }

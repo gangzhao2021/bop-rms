@@ -65,6 +65,8 @@ const moduleManifestInput =
         "pickup_counter_code",
         "pickup_code_check_rejection",
         "fulfillment_item_cancellation",
+        // WP-2423 M10: refunded units of a pickup line that are never handed over.
+        "fulfillment_item_withdrawal",
         "fulfillment_ready_operation",
         "pickup_handoff_record",
         "pickup_handoff_item",

@@ -204,6 +204,15 @@ const databaseAccessManifestInput = {
       piiClassification: ["indirect_identifier", "payment"],
     },
     {
+      // WP-2423 M14: the requester's refund role when the request was recorded.
+      table: "ordinary_refund_requester_role",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/payment" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "financial-compliance",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       table: "ordinary_refund_decline",
       classification: "append-only-record",
       writeOwner: { kind: "module", id: "@rms/payment" },
@@ -986,6 +995,26 @@ const databaseAccessManifestInput = {
       target: { schema: "rms_payment", table: "refund_recovery" },
       principal: { kind: "module", id: "@rms/payment" },
       source: "packages/rms/payment/src/infrastructure/persistence/refund-recovery-store.ts",
+    },
+    {
+      id: "ordinary-refund-requester-role.read",
+      operation: "read",
+      readPattern: "owner-repository",
+      mechanism: "repository",
+      target: { schema: "rms_payment", table: "ordinary_refund_requester_role" },
+      principal: { kind: "module", id: "@rms/payment" },
+      source:
+        "packages/rms/payment/src/infrastructure/persistence/ordinary-refund-requester-role-store.ts",
+    },
+    {
+      id: "ordinary-refund-requester-role.write",
+      operation: "write",
+      readPattern: null,
+      mechanism: "repository",
+      target: { schema: "rms_payment", table: "ordinary_refund_requester_role" },
+      principal: { kind: "module", id: "@rms/payment" },
+      source:
+        "packages/rms/payment/src/infrastructure/persistence/ordinary-refund-requester-role-store.ts",
     },
     {
       id: "ordinary-refund-decline.read",

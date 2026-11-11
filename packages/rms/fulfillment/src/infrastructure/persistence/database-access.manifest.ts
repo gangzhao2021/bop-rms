@@ -27,6 +27,15 @@ const databaseAccessManifestInput = {
       piiClassification: ["indirect_identifier"],
     },
     {
+      // WP-2423 M10: refunded units of a pickup line that are never handed over.
+      table: "fulfillment_item_withdrawal",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/fulfillment" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "transactional",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       table: "fulfillment_item_cancellation",
       classification: "append-only-record",
       writeOwner: { kind: "module", id: "@rms/fulfillment" },
