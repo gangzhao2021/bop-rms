@@ -7,6 +7,11 @@ import {
 } from "@bop/identity";
 import { assertCurrentDiningGuestTableContext } from "@rms/dining";
 import { createConfiguredDiningQrContext } from "./configured-dining-qr-context.js";
+import {
+  confirmTransactionAnswered,
+  guestBindingSourceUnavailable,
+  isGuestDependencyFailure,
+} from "./guest-binding-dependency.js";
 
 type Options = Parameters<typeof createConfiguredDiningQrContext>[0];
 type Purpose = "GuestSessionBinding" | "DiningJoin" | "DiningAdmission";
@@ -42,27 +47,36 @@ export function createConfiguredDiningGuestContext(
         session.qrRevocationVersion !== expected.revocationVersion
       )
         return null;
-      return await options.transactions.run(async (transaction) => {
-        const context = await createConfiguredDiningQrContext({
-          ...options,
-          transaction,
-          evaluatedAt: at,
-          purpose: input.purpose,
-        }).resolve(expected);
-        return assertCurrentDiningGuestTableContext(
-          {
-            brandReference: session.brandReference,
-            storeReference: session.storeReference,
-            publicStoreReference: session.publicStoreReference,
-            publicTableReference: session.publicTableReference,
-            channel: session.channel,
-            qrRevocationVersion: session.qrRevocationVersion,
-            observedAt: at,
-          },
-          context,
-        );
-      });
-    } catch {
+      // WP-2423 (outage-reads-and-retry): the table's records that can't be read are a passing
+      // fault, never "this phone left the table" (see guest-binding-dependency).
+      const context = await options.transactions
+        .run(async (transaction) => {
+          const found = await createConfiguredDiningQrContext({
+            ...options,
+            transaction,
+            evaluatedAt: at,
+            purpose: input.purpose,
+          }).resolve(expected);
+          if (found === null) await confirmTransactionAnswered(transaction);
+          return found;
+        })
+        .catch((error: unknown) => {
+          throw isGuestDependencyFailure(error) ? error : guestBindingSourceUnavailable(error);
+        });
+      return assertCurrentDiningGuestTableContext(
+        {
+          brandReference: session.brandReference,
+          storeReference: session.storeReference,
+          publicStoreReference: session.publicStoreReference,
+          publicTableReference: session.publicTableReference,
+          channel: session.channel,
+          qrRevocationVersion: session.qrRevocationVersion,
+          observedAt: at,
+        },
+        context,
+      );
+    } catch (error) {
+      if (isGuestDependencyFailure(error)) throw error;
       return null;
     }
   };

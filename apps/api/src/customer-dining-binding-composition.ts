@@ -23,6 +23,10 @@ import {
   type QrTableContextEvidence,
   type DiningAdmissionConsumptionPorts,
 } from "@rms/dining";
+import {
+  guestBindingSourceUnavailable,
+  isGuestDependencyFailure,
+} from "./guest-binding-dependency.js";
 
 export interface CustomerDiningBindingCompositionOptions {
   readonly scope: Readonly<{ brandReference: string; storeReference: string }>;
@@ -81,32 +85,45 @@ export function createCustomerDiningSessionBinding(options: {
   const query = createDiningGuestBindingQuery({ scope, repository: options.repository, now });
   return Object.freeze({
     async validate(session: GuestSession, observedAt: CanonicalInstant) {
+      // WP-2423 (outage-reads-and-retry): a record that can't be read (the owners' reads throw;
+      // their answers are null or "Unavailable") says nothing about this phone: thrown as a passing
+      // fault, so the guest is told "try again" and keeps the cart, never "your session ended".
+      const read = <T>(work: () => Promise<T>): Promise<T> =>
+        work().catch((error: unknown) => {
+          throw isGuestDependencyFailure(error) ? error : guestBindingSourceUnavailable(error);
+        });
       try {
         if (
           session.brandReference !== scope.brandReference ||
           session.storeReference !== scope.storeReference
         )
           return "Unavailable";
-        if ((await options.binding.validate(session, observedAt)) !== "Current")
+        if ((await read(() => options.binding.validate(session, observedAt))) !== "Current")
           return "Unavailable";
         if (session.channel === "Pickup" || session.diningState === "ContextOnly") return "Current";
-        if (options.superseded !== undefined && (await options.superseded(session)))
+        const superseded = options.superseded;
+        if (superseded !== undefined && (await read(() => superseded(session))))
           return "Unavailable";
         const context = assertCurrentDiningGuestTableContext(
           contextInput(session, observedAt),
-          await options.contexts.resolve(
-            Object.freeze({ session, observedAt, purpose: "DiningAdmission" }),
+          await read(() =>
+            options.contexts.resolve(
+              Object.freeze({ session, observedAt, purpose: "DiningAdmission" }),
+            ),
           ),
         );
-        const current = await query.resolve({
-          purpose: "GuestSessionBinding",
-          diningSessionReference: session.diningSessionReference,
-          participantReference: session.diningParticipantReference,
-          tableReference: context.tableReference,
-        });
+        const current = await read(() =>
+          query.resolve({
+            purpose: "GuestSessionBinding",
+            diningSessionReference: session.diningSessionReference,
+            participantReference: session.diningParticipantReference,
+            tableReference: context.tableReference,
+          }),
+        );
         assertCurrentDiningGuestTableContext(contextInput(session, now()), context);
         return current === null ? "Unavailable" : "Current";
-      } catch {
+      } catch (error) {
+        if (isGuestDependencyFailure(error)) throw error;
         return "Unavailable";
       }
     },

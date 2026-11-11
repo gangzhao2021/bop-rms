@@ -179,3 +179,26 @@ it("fails closed for revoked registration, withdrawn authority, inactive Tenant 
   resolve.mockRejectedValueOnce(new Error("private source failure"));
   expect(await x.source.validate(x.session, parseCanonicalInstant(now))).toBe("Unavailable");
 });
+it("WP-2423 (outage-reads-and-retry): records that can't be read are a passing fault, not an ended session", async () => {
+  const x = sessionSetup();
+  // No free connection in a rush: the transaction never starts.
+  const exhausted = createConfiguredPickupSessionBinding({
+    ...x.options,
+    transactions: {
+      run: async () => {
+        throw Object.assign(new Error("tenant database connection is unavailable"), {
+          code: "TENANT_DATABASE_ACQUIRE_FAILED",
+        });
+      },
+    },
+  });
+  await expect(exhausted.validate(x.session, parseCanonicalInstant(now))).rejects.toMatchObject({
+    dependencyFailure: true,
+  });
+  // A statement cut off inside: the owners' reader says null, the transaction can't answer.
+  resolve.mockRejectedValueOnce(new Error("canceling statement due to statement timeout"));
+  x.tx.query.mockRejectedValueOnce(new Error("current transaction is aborted"));
+  await expect(x.source.validate(x.session, parseCanonicalInstant(now))).rejects.toMatchObject({
+    dependencyFailure: true,
+  });
+});

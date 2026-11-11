@@ -621,7 +621,8 @@ describe("WP-2423 shared-table-checkout (b): a phone that came back on a later s
         async () => {
           throw new Error("dining down");
         },
-        "Unavailable",
+        // WP-2423 (outage-reads-and-retry): still no seat, and said as "try again", not "left".
+        "DependencyFailure",
       ],
     ] as const) {
       const f = fixture();
@@ -637,8 +638,56 @@ describe("WP-2423 shared-table-checkout (b): a phone that came back on a later s
         now: f.options.now,
         superseded: check,
       });
-      expect(await guard.validate(f.saved().candidate.session, at(1))).toBe(expected);
+      if (expected === "DependencyFailure")
+        await expect(guard.validate(f.saved().candidate.session, at(1))).rejects.toMatchObject({
+          dependencyFailure: true,
+        });
+      else expect(await guard.validate(f.saved().candidate.session, at(1))).toBe(expected);
       expect(check).toHaveBeenCalledTimes(1);
     }
+  });
+});
+
+describe("WP-2423 (outage-reads-and-retry): records that can't be read are no answer", () => {
+  it.each(["base policy", "table context", "owner binding"] as const)(
+    "a %s read that fails is a passing fault, never 'this phone is no longer at the table'",
+    async (failing) => {
+      const f = fixture();
+      const prepared = await f.service.prepare(f.input);
+      f.setTime(1);
+      await f.service.activate(f.activation(prepared));
+      const down = Object.assign(new Error("timeout exceeded when trying to connect"), {});
+      if (failing === "base policy")
+        vi.mocked(f.options.session.binding.validate).mockRejectedValue(down);
+      if (failing === "table context")
+        vi.mocked(f.options.contexts.resolve).mockRejectedValue(down);
+      if (failing === "owner binding")
+        vi.mocked(f.options.dining.binding.readCurrent).mockRejectedValue(down);
+      const guard = createCustomerDiningSessionBinding({
+        scope: f.options.scope,
+        binding: f.options.session.binding,
+        repository: f.options.dining.binding,
+        contexts: f.options.contexts,
+        now: f.options.now,
+      });
+      await expect(guard.validate(f.saved().candidate.session, at(1))).rejects.toMatchObject({
+        dependencyFailure: true,
+      });
+    },
+  );
+  it("what the records say stays the answer: a table context that no longer matches", async () => {
+    const f = fixture();
+    const prepared = await f.service.prepare(f.input);
+    f.setTime(1);
+    await f.service.activate(f.activation(prepared));
+    vi.mocked(f.options.contexts.resolve).mockResolvedValue(null);
+    const guard = createCustomerDiningSessionBinding({
+      scope: f.options.scope,
+      binding: f.options.session.binding,
+      repository: f.options.dining.binding,
+      contexts: f.options.contexts,
+      now: f.options.now,
+    });
+    expect(await guard.validate(f.saved().candidate.session, at(1))).toBe("Unavailable");
   });
 });
