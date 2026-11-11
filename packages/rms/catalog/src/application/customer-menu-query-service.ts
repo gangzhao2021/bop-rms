@@ -17,8 +17,12 @@ import {
   type CatalogReference,
 } from "../domain/product.js";
 import {
+  sellableAllergenChangeForChoices,
+  sellableAllergenChoiceKey,
   withSellableAllergenChange,
   type SellableAllergenChange,
+  type SellableAllergenClassification,
+  type SellableAllergenNow,
 } from "../domain/sellable-allergen-change.js";
 import {
   parsePublishedMenuProjection,
@@ -208,6 +212,8 @@ export function changedAllergenDisclosure(
   disclosure: CustomerMenuSellableDto["allergenDisclosure"],
   change: SellableAllergenChange | undefined,
   name: (names: Readonly<Record<string, string>>) => string,
+  /** b7: the choices guests are offered, so what a staff answer adds is shown under each. */
+  offeredOptions: readonly string[] = [],
 ): CustomerMenuSellableDto["allergenDisclosure"] {
   if (change === undefined) return disclosure;
   const merged = withSellableAllergenChange(disclosure.items, change, (allergen) =>
@@ -218,29 +224,70 @@ export function changedAllergenDisclosure(
       classification: allergen.classification,
     }),
   );
-  if (!merged.changed) return disclosure;
+  const coded = (allergen: SellableAllergenNow) =>
+    Object.freeze({
+      code: allergen.code as CatalogCode,
+      classification: allergen.classification,
+    });
+  // WP-2423 (M166 with M77, b7): what a staff answer says a choice adds, under that choice.
+  let byOption = disclosure.byOption;
+  let optionChanged = false;
+  const choices = change.allergens === null ? undefined : change.choices;
+  if (choices !== undefined) {
+    const next: Record<
+      string,
+      readonly { code: CatalogCode; classification: SellableAllergenClassification }[]
+    > = { ...(byOption ?? {}) };
+    for (const option of offeredOptions) {
+      const adds = choices.options[sellableAllergenChoiceKey(option)];
+      if (adds === undefined || adds.length === 0) continue;
+      const found = withSellableAllergenChange(next[option] ?? [], { allergens: adds }, coded);
+      if (!found.changed) continue;
+      next[option] = found.items;
+      optionChanged = true;
+    }
+    if (optionChanged) byOption = Object.freeze(next);
+  }
+  if (!merged.changed && !optionChanged) return disclosure;
   const byChoice = disclosure.byChoice;
+  // Each reviewed set of choices takes the dish's own with what its chosen ones add (the whole
+  // change when it does not say what each adds).
+  let rebuilt: CustomerMenuSellableDto["allergenDisclosure"]["byChoice"];
+  if (byChoice !== undefined) {
+    const outcomes: (readonly {
+      code: CatalogCode;
+      classification: SellableAllergenClassification;
+    }[])[] = [];
+    const index = new Map<string, number>();
+    const sets = byChoice.sets.map(([outcome, ...chosen]) => {
+      const items = withSellableAllergenChange(
+        byChoice.outcomes[outcome as number] ?? [],
+        sellableAllergenChangeForChoices(
+          change,
+          chosen.map((at) => String(byChoice.options[at])),
+        ),
+        coded,
+      ).items;
+      const key = JSON.stringify(items);
+      let at = index.get(key);
+      if (at === undefined) {
+        at = outcomes.length;
+        index.set(key, at);
+        outcomes.push(Object.freeze(items));
+      }
+      return Object.freeze([at, ...chosen]);
+    });
+    rebuilt = Object.freeze({
+      ...byChoice,
+      outcomes: Object.freeze(outcomes),
+      sets: Object.freeze(sets),
+    });
+  }
   return Object.freeze({
     ...disclosure,
     items: merged.items,
-    ...(byChoice === undefined
-      ? {}
-      : {
-          byChoice: Object.freeze({
-            ...byChoice,
-            outcomes: Object.freeze(
-              byChoice.outcomes.map(
-                (outcome) =>
-                  withSellableAllergenChange(outcome, change, (allergen) =>
-                    Object.freeze({
-                      code: allergen.code as CatalogCode,
-                      classification: allergen.classification,
-                    }),
-                  ).items,
-              ),
-            ),
-          }),
-        }),
+    ...(rebuilt === undefined ? {} : { byChoice: rebuilt }),
+    ...(byOption === undefined ? {} : { byOption }),
     justUpdated: true as const,
   });
 }
@@ -343,6 +390,7 @@ function publicSellable(
         },
         fact?.allergenChange,
         (names) => localizedOptional(names, locale, defaultLocale) ?? "",
+        [...offeredOptions].filter((option) => !comboDishes.has(option)),
       ),
     ),
     displayPrice: Object.freeze(

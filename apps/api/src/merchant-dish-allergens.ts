@@ -887,6 +887,53 @@ export async function declareChoiceAllergens(
   return { itemReference: item.itemReference, adds: Object.freeze(adds) };
 }
 
+/**
+ * WP-2423 (M166, b7): what each answered choice of one dish size adds now, by the choice
+ * reference's last 12 characters (its stand-in's code): the latest staff declaration of each
+ * choice's stand-in on the current allergen list. Choices never answered are absent. In the
+ * caller's transaction.
+ */
+export async function currentChoiceAnswers(
+  tx: unknown,
+  s: {
+    readonly tenantReference: string;
+    readonly brandReference: string;
+    readonly storeReference: string;
+  },
+  skuReference: string,
+): Promise<
+  Record<
+    string,
+    readonly {
+      readonly allergenReference: string;
+      readonly classification: "Contains" | "CrossContactPossible";
+    }[]
+  >
+> {
+  const registry = await currentAllergenRegistry(tx as never, s);
+  if (registry === null) return {};
+  const known = new Set(registry.entries.map((entry) => String(entry.allergenReference)));
+  const prefix = ("DECL-OPT-" + skuReference.slice(-12) + "-").toUpperCase();
+  const answers: Record<
+    string,
+    { allergenReference: string; classification: "Contains" | "CrossContactPossible" }[]
+  > = {};
+  for (const item of await listInventoryRecipeIngredientFacts(tx as never, s)) {
+    if (item.stockTracked || !item.internalCode.startsWith(prefix)) continue;
+    const key = item.internalCode.slice(prefix.length).toLowerCase();
+    if (!/^[0-9a-f]{12}$/u.test(key)) continue;
+    const latest = (await listIngredientDeclarationHistory(tx as never, s, item.itemReference))[0];
+    if (latest === undefined) continue;
+    answers[key] = latest.allergens
+      .filter((a) => known.has(String(a.allergenReference)))
+      .map((a) => ({
+        allergenReference: String(a.allergenReference),
+        classification: a.classification === "Contains" ? "Contains" : "CrossContactPossible",
+      }));
+  }
+  return answers;
+}
+
 export function createMerchantDishAllergens(options: {
   persistence: PersistentMerchantBffOptions;
   authentication: Pick<MerchantBffService, "authorize">;
@@ -1015,12 +1062,13 @@ export function createMerchantDishAllergens(options: {
           );
           if ((await scope.authorizeAction("catalog.allergen.declare"))?.effect !== "Allow")
             return fail("PermissionDenied");
+          const s = {
+            tenantReference: String(scope.tenantReference),
+            brandReference: String(scope.context.brand.brandReference),
+            storeReference: String(scope.selectedStoreReference),
+          };
           await recordRecipeAllergenChange(tx, {
-            scope: {
-              tenantReference: String(scope.tenantReference),
-              brandReference: String(scope.context.brand.brandReference),
-              storeReference: String(scope.selectedStoreReference),
-            },
+            scope: s,
             skuReference: input.skuReference,
             storeReference: null,
             cause: "StaffDeclared",
@@ -1032,7 +1080,8 @@ export function createMerchantDishAllergens(options: {
             changeReference: options.references.next(),
             at: options.persistence.now(),
             locale: options.locale,
-            alsoAllergens: input.adds,
+            // b7: every answered choice of the dish (an earlier save's too), each kept apart.
+            choiceAllergens: await currentChoiceAnswers(tx, s, input.skuReference),
           });
         }),
       ),

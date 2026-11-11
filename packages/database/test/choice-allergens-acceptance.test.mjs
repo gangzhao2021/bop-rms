@@ -142,13 +142,36 @@ it("WP-2423 (M166): a choice's own allergens reach the listed menu for that choi
       });
       const changes = (
         await admin.query(
-          "SELECT cause,allergens_json allergens FROM rms_catalog.sellable_allergen_change WHERE sku_id=$1 ORDER BY recorded_at DESC,change_id DESC",
+          "SELECT cause,allergens_json allergens,choices_json choices FROM rms_catalog.sellable_allergen_change WHERE sku_id=$1 ORDER BY recorded_at DESC,change_id DESC",
           [dish.skuReference],
         )
       ).rows;
       assert.equal(changes[0]?.cause, "StaffDeclared");
       assert.deepEqual(codes(changes[0]?.allergens), ["MILK", "WHEAT"]);
-      assert.ok(codes((await guestSees()).items).includes("MILK"));
+      // b7: the change says which are the dish's own and what the choice adds.
+      assert.deepEqual(codes(changes[0]?.choices?.dish), ["WHEAT"]);
+      assert.deepEqual(Object.keys(changes[0]?.choices?.options ?? {}), [fried.slice(-12)]);
+      const now = await guestSees();
+      assert.ok(codes(now.items).includes("MILK"));
+      // b7: guests read it under Egg fried rice at once, and with plain rice the dish is wheat only.
+      assert.deepEqual(codes(now.byOption?.[fried]), ["MILK"]);
+      assert.equal(now.byOption?.[plain], undefined);
+      assert.equal(now.justUpdated, true);
+      if (now.byChoice !== undefined) {
+        const outcomeFor = (option) => {
+          const at = now.byChoice.options.indexOf(option);
+          const entry = now.byChoice.sets.find((set) => set.length === 2 && set[1] === at);
+          return entry === undefined ? undefined : codes(now.byChoice.outcomes[entry[0]]);
+        };
+        assert.deepEqual(outcomeFor(plain), ["WHEAT"]);
+        assert.deepEqual(outcomeFor(fried), ["MILK", "WHEAT"]);
+      }
+      // The record stays append-only for the api role.
+      await assert.rejects(
+        f.asApi((tx) =>
+          tx.query("UPDATE rms_catalog.sellable_allergen_change SET choices_json=NULL", []),
+        ),
+      );
     } finally {
       await f.close();
       await admin.end();

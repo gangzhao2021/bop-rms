@@ -19,7 +19,47 @@ export interface SellableAllergenChange {
   readonly cause: "RecipeBound" | "RecipeEnded" | "StaffDeclared";
   /** Null: the dish's allergens could not be resolved after the change (staff are asked). */
   readonly allergens: readonly SellableAllergenNow[] | null;
+  /**
+   * WP-2423 (M166 with M77, b7; 2000_680): when staff answered choices, which of `allergens` are
+   * the dish's own and what each choice adds (keyed by `sellableAllergenChoiceKey`). `allergens` still holds them
+   * all, so a reader that knows nothing of choices never leaves one out. Absent otherwise.
+   */
+  readonly choices?: SellableAllergenChoiceChange;
   readonly recordedAt: string;
+}
+/** A choice's key in `choices.options`: its option reference's last 12 characters (lower case). */
+export const sellableAllergenChoiceKey = (optionReference: string) =>
+  optionReference.slice(-12).toLowerCase();
+export interface SellableAllergenChoiceChange {
+  readonly dish: readonly SellableAllergenNow[];
+  readonly options: Readonly<Record<string, readonly SellableAllergenNow[]>>;
+}
+
+/**
+ * WP-2423 (b7): the change as it reaches one dish ordered with these choices — the dish's own
+ * allergens with what the chosen ones add. Unknown choices (null), or a change that does not say
+ * what each choice adds, keep the whole change, so it never leaves an allergen out.
+ */
+export function sellableAllergenChangeForChoices<T extends SellableAllergenChange>(
+  change: T | undefined,
+  chosen: readonly string[] | null,
+): T | undefined {
+  if (change === undefined || change.allergens === null || change.choices === undefined)
+    return change;
+  if (chosen === null) return change;
+  const merged = new Map<string, SellableAllergenNow>();
+  for (const allergen of [
+    ...change.choices.dish,
+    ...chosen.flatMap((option) => change.choices?.options[sellableAllergenChoiceKey(option)] ?? []),
+  ]) {
+    const before = merged.get(allergen.code);
+    if (
+      before === undefined ||
+      (before.classification !== "Contains" && allergen.classification === "Contains")
+    )
+      merged.set(allergen.code, allergen);
+  }
+  return { ...change, allergens: Object.freeze([...merged.values()]) };
 }
 
 /**

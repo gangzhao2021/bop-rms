@@ -22,6 +22,7 @@ import {
   listSellableAllergenChangesSince,
   sellableAllergenChangeKey,
   withSellableAllergenChange,
+  sellableAllergenChangeForChoices,
   type SellableAllergenChange,
   sellableDisclosureKey,
   listAlcoholSkus,
@@ -592,9 +593,13 @@ async function kitchenAllergens(
           classification: item.classification,
         }),
       );
+      // b7: a choice's staff-answered allergen reaches the ticket only when it was chosen.
       const merged = withSellableAllergenChange(
         listed,
-        changes.get(sellableAllergenChangeKey(key.menuVersionReference, key.skuReference)),
+        sellableAllergenChangeForChoices(
+          changes.get(sellableAllergenChangeKey(key.menuVersionReference, key.skuReference)),
+          chosen,
+        ),
         (allergen) =>
           Object.freeze({
             code: allergen.code,

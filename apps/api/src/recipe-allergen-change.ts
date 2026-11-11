@@ -2,6 +2,7 @@ import {
   currentAllergenRegistry,
   recordSellableAllergenChange,
   type SellableAllergenChange,
+  type SellableAllergenChoiceChange,
   type SellableAllergenNow,
 } from "@rms/catalog";
 import { createMenuRecipeAllergenSource } from "./menu-recipe-allergen-source.js";
@@ -43,13 +44,20 @@ export async function recordRecipeAllergenChange(
     readonly at: string;
     readonly locale: string;
     /**
-     * WP-2423 (M166 with M77): allergens a choice of the dish adds, recorded with the dish's own
-     * (the listed dish names every allergen a choice can add, so the change does too).
+     * WP-2423 (M166 with M77, b7): what each answered choice of the dish adds (by the choice
+     * reference's last 12 characters, as its stand-in is named). Recorded with the dish's own in
+     * `allergens` (the listed dish names every allergen a choice can add, so the change does too),
+     * and apart, so guests read each under its choice and the kitchen only on a dish ordered with it.
      */
-    readonly alsoAllergens?: readonly {
-      readonly allergenReference: string;
-      readonly classification: "Contains" | "CrossContactPossible";
-    }[];
+    readonly choiceAllergens?: Readonly<
+      Record<
+        string,
+        readonly {
+          readonly allergenReference: string;
+          readonly classification: "Contains" | "CrossContactPossible";
+        }[]
+      >
+    >;
   },
 ): Promise<{ readonly allergens: readonly SellableAllergenNow[] | null } | null> {
   const t = tx as Tx;
@@ -62,6 +70,7 @@ export async function recordRecipeAllergenChange(
     )
   ).rows[0];
   let allergens: SellableAllergenNow[] | null = null;
+  let choices: SellableAllergenChoiceChange | undefined;
   await t.query("SAVEPOINT recipe_allergen_change", []);
   try {
     const resolved = await createMenuRecipeAllergenSource({
@@ -92,21 +101,33 @@ export async function recordRecipeAllergenChange(
         if (before !== "Contains" && before !== "Unverified")
           strongest.set(String(assertion.allergenReference), assertion.classification);
       }
-    for (const added of input.alsoAllergens ?? []) {
-      const before = strongest.get(added.allergenReference);
-      if (before !== "Contains" && before !== "Unverified")
-        strongest.set(added.allergenReference, added.classification);
-    }
-    if (![...strongest.values()].includes("Unverified"))
-      allergens = resolved.allergens.registry
-        .filter((entry) => strongest.has(String(entry.allergenReference)))
+    const entries = (found: ReadonlyMap<string, string>) =>
+      resolved.allergens.registry
+        .filter((entry) => found.has(String(entry.allergenReference)))
         .map((entry) => ({
           allergenReference: String(entry.allergenReference),
           code: String(entry.code),
           localizedNames: entry.localizedNames,
-          classification: strongest.get(String(entry.allergenReference)) as
+          classification: found.get(String(entry.allergenReference)) as
             "Contains" | "CrossContactPossible",
         }));
+    const own = new Map(strongest);
+    const options: Record<string, SellableAllergenNow[]> = {};
+    for (const [option, adds] of Object.entries(input.choiceAllergens ?? {})) {
+      const mine = new Map<string, string>();
+      for (const added of adds) {
+        if (mine.get(added.allergenReference) !== "Contains")
+          mine.set(added.allergenReference, added.classification);
+        const before = strongest.get(added.allergenReference);
+        if (before !== "Contains" && before !== "Unverified")
+          strongest.set(added.allergenReference, added.classification);
+      }
+      if (mine.size > 0) options[option] = entries(mine);
+    }
+    if (![...strongest.values()].includes("Unverified")) {
+      allergens = entries(strongest);
+      if (input.choiceAllergens !== undefined) choices = { dish: entries(own), options };
+    }
     await t.query("RELEASE SAVEPOINT recipe_allergen_change", []);
   } catch {
     await t.query("ROLLBACK TO SAVEPOINT recipe_allergen_change", []);
@@ -123,6 +144,7 @@ export async function recordRecipeAllergenChange(
     storeReference: input.storeReference,
     cause: input.cause,
     allergens,
+    ...(choices === undefined ? {} : { choices }),
     actorReference: input.actorReference,
     recordedAt: input.at,
   });

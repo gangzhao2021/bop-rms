@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { changedAllergenDisclosure } from "../application/customer-menu-query-service.js";
 import {
+  sellableAllergenChangeForChoices,
   withSellableAllergenChange,
   type SellableAllergenNow,
 } from "../domain/sellable-allergen-change.js";
@@ -93,5 +94,61 @@ describe("WP-2423 (M77, M167): a recipe change read with the listed allergens", 
     // Nothing new: the listed disclosure as it was, not said updated.
     expect(changedAllergenDisclosure(disclosure, change([milk]), () => "")).toBe(disclosure);
     expect(changedAllergenDisclosure(disclosure, undefined, () => "")).toBe(disclosure);
+  });
+
+  // b7 (sold-out-allergens): staff tick Eggs for Egg fried rice on a listed Mapo tofu.
+  it("a choice's staff answer is read under that choice and only with it, the dish list says all choices", () => {
+    const rice = ref(30),
+      plain = ref(31);
+    const answered = {
+      ...change([milk, egg]),
+      cause: "StaffDeclared" as const,
+      choices: { dish: [milk], options: { [rice.slice(-12)]: [egg] } },
+    };
+    const disclosure = {
+      registryVersionReference: ref(50),
+      items: [
+        {
+          allergenReference: ref(2),
+          code: "MILK",
+          name: "Milk",
+          classification: "Contains" as const,
+        },
+      ],
+      allergenFreeClaim: false as const,
+      assistanceCode: "ALLERGEN_ASSISTANCE_REQUIRED" as const,
+      byChoice: {
+        options: [rice, plain],
+        outcomes: [[listed("MILK", "Contains")]],
+        sets: [
+          [0, 0],
+          [0, 1],
+        ],
+      },
+    } as never;
+    const seen = changedAllergenDisclosure(disclosure, answered, (names) => names["en-CA"] ?? "", [
+      rice,
+      plain,
+    ]);
+    expect(seen.justUpdated).toBe(true);
+    // Everything the dish may contain across its choices.
+    expect(seen.items.map((item) => item.code)).toEqual(["MILK", "EGG"]);
+    // Under the choice that adds it, and nowhere else.
+    expect(seen.byOption).toEqual({ [rice]: [listed("EGG", "Contains")] });
+    // With fried rice: milk and egg; with plain rice: milk only.
+    expect(seen.byChoice?.sets).toEqual([
+      [0, 0],
+      [1, 1],
+    ]);
+    expect(seen.byChoice?.outcomes).toEqual([
+      [listed("MILK", "Contains"), listed("EGG", "Contains")],
+      [listed("MILK", "Contains")],
+    ]);
+    // The kitchen: a dish ordered with plain rice is not told egg; unknown choices keep it all.
+    expect(sellableAllergenChangeForChoices(answered, [plain])?.allergens).toEqual([milk]);
+    expect(sellableAllergenChangeForChoices(answered, [rice])?.allergens).toEqual([milk, egg]);
+    expect(sellableAllergenChangeForChoices(answered, null)).toBe(answered);
+    // A change that does not say what each choice adds keeps the whole change.
+    expect(sellableAllergenChangeForChoices(change([egg]), [plain])?.allergens).toEqual([egg]);
   });
 });

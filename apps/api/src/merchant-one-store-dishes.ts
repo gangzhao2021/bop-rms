@@ -1182,7 +1182,8 @@ export function createMerchantOneStoreDishes(options: {
       }
     }
     // Choices now in use that add an allergen reach guests and the kitchen on the listed menu.
-    if (!choicesWaiting && choiceAdds.size > 0)
+    const allergensShownNow = !choicesWaiting && choiceAdds.size > 0;
+    if (allergensShownNow)
       await options.dishAllergens.recordChoiceAllergenChange({
         ...session,
         operationReference: body.operationReference,
@@ -1194,6 +1195,8 @@ export function createMerchantOneStoreDishes(options: {
       productReference,
       skuReference: sku,
       choicesWaiting,
+      // b7: guests and the kitchen already read what the answered choices add.
+      ...(allergensShownNow ? { allergensShownNow: true as const } : {}),
       // WP-2423 M70: the dish's prices as this save left them (null: no price was sent).
       price,
       // WP-2423 (v15 batch 5): something waits for "List it" — what this save changed, or what an

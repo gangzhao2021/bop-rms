@@ -1,5 +1,6 @@
 import type {
   SellableAllergenChange,
+  SellableAllergenChoiceChange,
   SellableAllergenNow,
 } from "../../domain/sellable-allergen-change.js";
 
@@ -86,6 +87,29 @@ function allergensOf(value: unknown): readonly SellableAllergenNow[] | null {
   );
 }
 
+/** A choice's key: the last 12 characters of its option reference (as its stand-in is named). */
+const optionKey = /^[0-9a-f]{12}$/u;
+function choicesOf(value: unknown): SellableAllergenChoiceChange | undefined {
+  if (value === null || value === undefined) return undefined;
+  const raw = value as Record<string, unknown>;
+  if (
+    typeof raw !== "object" ||
+    Array.isArray(raw) ||
+    raw.options === null ||
+    typeof raw.options !== "object" ||
+    Array.isArray(raw.options)
+  )
+    return invalid();
+  const entries = Object.entries(raw.options as Record<string, unknown>);
+  if (entries.length > 100 || entries.some(([key]) => !optionKey.test(key))) return invalid();
+  return Object.freeze({
+    dish: allergensOf(raw.dish) ?? invalid(),
+    options: Object.freeze(
+      Object.fromEntries(entries.map(([key, list]) => [key, allergensOf(list) ?? invalid()])),
+    ),
+  });
+}
+
 /**
  * Records one change (idempotent by operation: the same operation answers the change it
  * recorded; another change under it is refused).
@@ -100,15 +124,19 @@ export async function recordSellableAllergenChange(
     readonly storeReference: string | null;
     readonly cause: SellableAllergenChange["cause"];
     readonly allergens: readonly SellableAllergenNow[] | null;
+    /** WP-2423 (b7): the dish's own and what each answered choice adds (staff answers only). */
+    readonly choices?: SellableAllergenChoiceChange;
     readonly actorReference: string;
     readonly recordedAt: string;
   },
 ): Promise<{ readonly status: "Applied" | "AlreadyApplied" }> {
   const brand = reference(scope.brandReference);
   const allergens = allergensOf(input.allergens);
+  const choices = choicesOf(input.choices);
   if (
     !["RecipeBound", "RecipeEnded", "StaffDeclared"].includes(input.cause) ||
-    !instant.test(input.recordedAt)
+    !instant.test(input.recordedAt) ||
+    (choices !== undefined && (input.cause !== "StaffDeclared" || allergens === null))
   )
     return invalid();
   const row = [
@@ -122,11 +150,12 @@ export async function recordSellableAllergenChange(
     reference(input.actorReference),
     reference(input.operationReference),
     input.recordedAt,
+    choices === undefined ? null : JSON.stringify(choices),
   ];
   return inBrandScope(tx, brand, async () => {
     const inserted = await tx.query(
-      `INSERT INTO rms_catalog.sellable_allergen_change(change_id,tenant_id,brand_id,store_id,sku_id,cause,allergens_json,actor_id,operation_id,recorded_at)
-       VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10) ON CONFLICT (brand_id,operation_id) DO NOTHING`,
+      `INSERT INTO rms_catalog.sellable_allergen_change(change_id,tenant_id,brand_id,store_id,sku_id,cause,allergens_json,actor_id,operation_id,recorded_at,choices_json)
+       VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,$11::jsonb) ON CONFLICT (brand_id,operation_id) DO NOTHING`,
       row,
     );
     if ((inserted.rowCount ?? 0) === 1) return { status: "Applied" as const };
@@ -171,7 +200,7 @@ export async function listSellableAllergenChangesSince(
   return inBrandScope(tx, brand, async () => {
     const { rows } = await tx.query<Record<string, unknown>>(
       `SELECT DISTINCT ON (k.version,k.sku) k.version::text version,k.sku::text sku,c.store_id::text store,c.cause,
-         c.allergens_json allergens,to_char(c.recorded_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') recorded_at
+         c.allergens_json allergens,c.choices_json choices,to_char(c.recorded_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') recorded_at
        FROM unnest($3::uuid[],$4::uuid[]) k(version,sku)
        JOIN rms_catalog.sellable_allergen_change c ON c.brand_id=$1 AND c.sku_id=k.sku AND (c.store_id IS NULL OR c.store_id=$2)
        WHERE c.recorded_at > COALESCE((SELECT min((r.snapshot_json->>'createdAt')::timestamptz) FROM rms_catalog.menu_review_content r
@@ -197,6 +226,7 @@ export async function listSellableAllergenChangesSince(
               ? row.cause
               : "RecipeBound",
           allergens: allergensOf(row.allergens),
+          ...((choices) => (choices === undefined ? {} : { choices }))(choicesOf(row.choices)),
           recordedAt: String(row.recorded_at),
         }),
       );
