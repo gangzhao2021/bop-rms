@@ -266,6 +266,8 @@ export function App({
               store={store}
               menuContext={localizedMenuContext}
               menuClient={demo?.menuClient}
+              // The local demo reads no Store hours (it makes no application requests).
+              storeProfile={demo ? null : undefined}
               {...(demo ? { controller: demo.cartController } : {})}
             />
           }
@@ -277,6 +279,7 @@ export function App({
               store={store}
               menuContext={localizedMenuContext}
               menuClient={demo?.menuClient}
+              storeProfile={demo ? null : undefined}
               {...(checkoutNow === undefined ? {} : { now: checkoutNow })}
               {...(demo ? { controller: demo.checkoutController, now: demo.now } : {})}
             />
