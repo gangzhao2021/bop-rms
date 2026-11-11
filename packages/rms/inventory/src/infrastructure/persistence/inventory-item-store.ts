@@ -321,6 +321,9 @@ export function createPostgresInventoryItemStore(
                AND ($3::text IS NULL OR i.internal_code > $3)
                AND ($4::text IS NULL OR v.snapshot_json->>'lifecycle' = $4)
                AND ($5::text IS NULL OR i.internal_code ILIKE $5 OR EXISTS (SELECT 1 FROM jsonb_each_text(v.snapshot_json->'localizedNames') n WHERE n.value ILIKE $5))
+               -- WP-2423 (M169): a dish's or choice's stand-in for allergens staff declared
+               -- (DECL-, never stock-tracked) is not a supply item; the Menu page owns it.
+               AND NOT (i.internal_code LIKE 'DECL-%' AND v.snapshot_json->'trackingPolicy'->>'stockTrackingEnabled' = 'false')
              ORDER BY i.internal_code COLLATE "C" LIMIT $6`,
             [tenant, brand, raw.afterInternalCode, raw.lifecycle, pattern, (limit as number) + 1],
           ),

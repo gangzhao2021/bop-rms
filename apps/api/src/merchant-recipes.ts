@@ -380,6 +380,11 @@ export function createMerchantRecipes(options: {
           });
           const choices = {
             yieldUnits: Object.keys(recipeYieldUnits),
+            // WP-2423 (M169): stand-ins for allergens staff declared on the Menu page (never
+            // stock-tracked), so a generated recipe names them for what they are.
+            declaredItemReferences: items
+              .filter((item) => item.internalCode.startsWith("DECL-") && !item.stockTracked)
+              .map((item) => item.itemReference),
             items: items
               .filter(
                 (item) =>

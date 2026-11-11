@@ -689,7 +689,11 @@ function ReadOnlyRecipe({
             <tr key={index}>
               <td>
                 {item.kind === "InventoryItem"
-                  ? (items.get(item.sourceReference)?.name ?? t("Inactive item"))
+                  ? (items.get(item.sourceReference)?.name ??
+                    // WP-2423 (M169): the stand-in for allergens staff declared on the Menu page.
+                    (choices.declaredItemReferences?.includes(item.sourceReference) === true
+                      ? t("Allergens declared by staff (not a stock item)")
+                      : t("Inactive item")))
                   : (subs.get(item.sourceReference)?.name ?? t("Sub-recipe"))}
               </td>
               <td data-label={t("Quantity")}>

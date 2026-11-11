@@ -1572,6 +1572,50 @@ export async function skuRecipeUsesStock(
 }
 
 /**
+ * WP-2423 (M169): the dishes (sizes) whose recipe in effect at this Store uses any of these
+ * inventory items directly, so wasting a lot names the dishes it leaves short. Recipe's public read
+ * for the waste page; at most 50 items asked, at most 100 sizes answered.
+ */
+export async function listSkusUsingItemsAt(
+  tx: {
+    query(
+      sql: string,
+      values: readonly unknown[],
+    ): Promise<{ readonly rows: readonly Record<string, unknown>[] }>;
+  },
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  itemReferences: readonly string[],
+): Promise<readonly string[]> {
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+  if (
+    itemReferences.length > 50 ||
+    ![scope.brandReference, scope.storeReference, ...itemReferences].every((value) =>
+      uuid.test(value),
+    )
+  )
+    throw new Error("RECIPE_ITEM_USE_INPUT_INVALID");
+  if (itemReferences.length === 0) return [];
+  await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+    scope.brandReference,
+    scope.storeReference,
+  ]);
+  // A Store's own recipe for a size wins over the Brand's (as the base recipe source decides).
+  const { rows } = await tx.query(
+    `SELECT DISTINCT b.sku_id::text sku FROM rms_recipe.recipe_scope_binding b
+     JOIN rms_recipe.recipe_version v ON v.recipe_version_id=b.recipe_version_id AND v.brand_id=b.brand_id
+     ${currentSizeBinding.replace("LEFT JOIN rms_recipe.recipe_version_presentation f ON f.recipe_version_id=b.recipe_version_id AND f.brand_id=b.brand_id", "")}
+       AND (b.store_id IS NOT NULL OR NOT EXISTS (SELECT 1 FROM rms_recipe.recipe_scope_binding o WHERE o.brand_id=b.brand_id AND o.sku_id=b.sku_id AND o.store_id=$2 AND o.option_binding_id IS NULL
+            AND o.effective_from<=now() AND (o.effective_until IS NULL OR o.effective_until>now())
+            AND NOT EXISTS (SELECT 1 FROM rms_recipe.recipe_scope_binding_end e2 WHERE e2.brand_id=o.brand_id AND e2.recipe_scope_binding_id=o.recipe_scope_binding_id)))
+       AND EXISTS (SELECT 1 FROM jsonb_array_elements(v.snapshot_json->'ingredients') i
+                   WHERE i->>'sourceKind'='InventoryItem' AND i->>'sourceReference'=ANY($3::text[]))
+     ORDER BY 1 LIMIT 100`,
+    [scope.brandReference, scope.storeReference, [...itemReferences]],
+  );
+  return Object.freeze(rows.map((row) => String(row.sku)));
+}
+
+/**
  * WP-2423 item 8a: of these SKUs, the ones declared a charge with no stock ingredients and not given
  * a real recipe since: the kitchen's default is not to prepare them. Recipe's public read for
  * Kitchen, which never reads this table itself. A generated recipe declared again is a new recipe of

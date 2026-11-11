@@ -8958,4 +8958,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "只打勾：问清客人，不要写名字或健康情况。",
   "Table {table}: no allergies marked.": "{table} 号桌：没有标过敏。",
   "Table {table}: kitchen tickets will show {list}.": "{table} 号桌：后厨单会显示 {list}。",
+  "Allergens declared by staff (not a stock item)": "员工申报的过敏原（不是库存品）",
+  "Dishes that use what was thrown away: {dishes}. If none is left, guests already see them sold out. If some is left but you won't use it, mark them sold out.":
+    "用到报废品的菜：{dishes}。如果一点不剩，顾客那边已经显示售罄；如果还剩一些但不打算用，请把这些菜标为售罄。",
 });

@@ -1,3 +1,5 @@
+import { listBrandSkuChoices } from "@rms/catalog";
+import { listSkusUsingItemsAt } from "@rms/recipe";
 import {
   listStoreMembers,
   memberDisplayNames,
@@ -142,6 +144,17 @@ export function createMerchantStoreWaste(options: {
     };
   }
   const ledger = (tx: Tx) => tx as unknown as LedgerTransaction;
+  const named = (names: Readonly<Record<string, string>>) =>
+    names[options.locale] ?? names["en-CA"] ?? Object.values(names)[0] ?? "";
+  const skuName = (
+    product: Readonly<Record<string, string>>,
+    size: Readonly<Record<string, string>>,
+    code: string,
+  ) => {
+    const dish = named(product);
+    const sized = named(size);
+    return dish && sized && dish !== sized ? dish + " — " + sized : dish || sized || code;
+  };
 
   const query = async (input: {
     sessionCookie: unknown;
@@ -254,19 +267,38 @@ export function createMerchantStoreWaste(options: {
         const at = options.persistence.now();
         try {
           if (body.action === "Record") {
+            const lines = parseStoreWasteLines(body.lines);
             const result = await postStoreWaste(ledger(tx), scope.owner, {
               operationReference: body.operationReference,
               wasteReference: body.wasteReference,
-              lines: parseStoreWasteLines(body.lines),
+              lines,
               actorReference: scope.actor,
               occurredAt: at,
               auditReference: options.references.next(),
               nextReference: () => options.references.next(),
             });
+            // WP-2423 (M169): the dishes whose recipe here uses what was wasted, so staff can mark
+            // them sold out if what is left won't be used (none left: guests already see them
+            // sold out from stock). Named in the staff member's language.
+            const items = [...new Set(lines.map((line) => String(line.itemReference)))].slice(
+              0,
+              50,
+            );
+            const using = new Set(await listSkusUsingItemsAt(tx as never, scope.owner, items));
+            const dishesUsingItem =
+              using.size === 0
+                ? []
+                : (await listBrandSkuChoices(tx as never, scope.owner))
+                    .filter((sku) => using.has(sku.skuReference) && sku.active)
+                    .map((sku) => ({
+                      name: skuName(sku.productLocalizedNames, sku.localizedNames, sku.skuCode),
+                    }))
+                    .sort((a, b) => a.name.localeCompare(b.name));
             return {
               status: result.status,
               wasteReference: result.record.wasteReference,
               needsReview: result.record.needsReview,
+              dishesUsingItem,
             };
           }
           const result = await reviewStoreWaste(ledger(tx), scope.owner, {

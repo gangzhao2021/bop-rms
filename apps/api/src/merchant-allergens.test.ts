@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { canadaPriorityAllergensTest, parseAllergenCommandBody } from "./merchant-allergens.js";
+import {
+  canadaPriorityAllergensTest,
+  listedOnAllergensPage,
+  parseAllergenCommandBody,
+} from "./merchant-allergens.js";
 
 const id = (n: number) => "01909a1e-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 const declare = (change: Record<string, unknown> = {}) => ({
@@ -102,5 +106,20 @@ describe("WP-2423 declaration validity", () => {
   it("shows the last valid local date", async () => {
     const { validThroughDate } = await import("./merchant-allergens.js");
     expect(validThroughDate("2027-10-09T04:00:00.000Z", "America/Toronto")).toBe("2027-10-08");
+  });
+});
+
+describe("WP-2423 (M169): stand-ins on the Allergens page", () => {
+  it("leaves out a staff-declared stand-in while its answer is current, never a stock item", () => {
+    const standIn = { internalCode: "DECL-TART", stockTracked: false };
+    expect(listedOnAllergensPage(standIn, "Current")).toBe(false);
+    expect(listedOnAllergensPage(standIn, "ExpiringSoon")).toBe(true);
+    expect(listedOnAllergensPage(standIn, "RegistryChanged")).toBe(true);
+    expect(
+      listedOnAllergensPage({ internalCode: "DECL-FLOUR", stockTracked: true }, "Current"),
+    ).toBe(true);
+    expect(listedOnAllergensPage({ internalCode: "FLOUR", stockTracked: true }, "Current")).toBe(
+      true,
+    );
   });
 });

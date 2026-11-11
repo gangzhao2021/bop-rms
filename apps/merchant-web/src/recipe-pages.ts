@@ -181,6 +181,8 @@ export interface RecipeChoices {
     readonly yieldUnit: string;
   }[];
   readonly stations: readonly { readonly capabilityReference: string; readonly name: string }[];
+  /** WP-2423 (M169): stand-ins for allergens staff declared (absent from an older server). */
+  readonly declaredItemReferences?: readonly string[];
   readonly skus: readonly {
     readonly skuReference: string;
     readonly code: string;

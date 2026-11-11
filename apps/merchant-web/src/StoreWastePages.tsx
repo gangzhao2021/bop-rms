@@ -1,9 +1,9 @@
-import { systemText, t } from "./i18n/i18n.js";
+import { listSeparator, systemText, t } from "./i18n/i18n.js";
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { SourceTime, StaffTime, StoreTimeZoneContext, storeDate } from "./StoreTime.js";
 import { useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router";
+import { Link, useLocation, useNavigate, useParams } from "react-router";
 import { newOperationReference } from "./operation-reference.js";
 import { stockReasonText } from "./stock-reason-text.js";
 import {
@@ -313,7 +313,7 @@ export function StoreWasteFormPage({
     setBusy(true);
     setError(null);
     try {
-      await client.command({
+      const recorded = (await client.command({
         action: "Record",
         operationReference,
         wasteReference,
@@ -326,8 +326,11 @@ export function StoreWasteFormPage({
           reasonCode: line.reasonCode,
           note: line.note.trim() === "" ? null : line.note.trim(),
         })),
+      })) as { readonly dishesUsingItem?: unknown } | null | undefined;
+      // WP-2423 (M169): the dishes that use what was wasted, said on the record just recorded.
+      navigate(`/operations/inventory/waste/${wasteReference}`, {
+        state: { dishesUsingItem: wasteDishNames(recorded?.dishesUsingItem) },
       });
-      navigate(`/operations/inventory/waste/${wasteReference}`);
     } catch (failure) {
       setError(
         failure instanceof StoreWastePageError
@@ -498,12 +501,39 @@ export function StoreWasteFormPage({
   );
 }
 
+/** WP-2423 (M169): the dish names a waste record answered with (anything else: none). */
+export function wasteDishNames(value: unknown): readonly string[] {
+  if (!Array.isArray(value) || value.length > 100) return [];
+  return value.flatMap((entry: unknown) => {
+    const name = (entry as { name?: unknown } | null)?.name;
+    return typeof name === "string" && name.length > 0 && name.length <= 160 ? [name] : [];
+  });
+}
+
+/** WP-2423 (M169): after waste, the dishes it leaves short, and where to mark them sold out. */
+export function WasteDishesNote({ dishes }: { readonly dishes: readonly string[] }) {
+  if (dishes.length === 0) return null;
+  return (
+    <p className="waste-dishes-note" role="status">
+      {t(
+        "Dishes that use what was thrown away: {dishes}. If none is left, guests already see them sold out. If some is left but you won't use it, mark them sold out.",
+        { dishes: dishes.join(listSeparator()) },
+      )}{" "}
+      <Link to="/app/commerce/availability">{t("Item availability")}</Link>
+    </p>
+  );
+}
+
 export function StoreWasteDetailPage({
   client = unavailableStoreWasteClient,
 }: {
   readonly client?: StoreWasteClient;
 }) {
   const params = useParams();
+  const location = useLocation();
+  const wastedDishes = wasteDishNames(
+    (location.state as { dishesUsingItem?: unknown } | null)?.dishesUsingItem,
+  );
   const { state, reload } = useWaste(client, "INV-WASTE-DETAIL", params.id ?? null, false);
   const [busy, setBusy] = useState(false),
     [error, setError] = useState<StoreWasteErrorCode | null>(null),
@@ -564,6 +594,7 @@ export function StoreWasteDetailPage({
         </div>
         <Link to="/operations/inventory/waste">{t("Waste records")}</Link>
       </header>
+      <WasteDishesNote dishes={wastedDishes} />
       <table>
         <thead>
           <tr>

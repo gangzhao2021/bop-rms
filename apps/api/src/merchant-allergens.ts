@@ -206,6 +206,18 @@ export function validThroughDate(validUntil: string, timeZone: string): string {
   }).format(new Date(Date.parse(validUntil) - 1));
 }
 
+/**
+ * WP-2423 (M169): whether the Allergens page lists an item. A dish's or choice's stand-in for
+ * allergens staff declared on the Menu page (DECL-, never stock-tracked) is left out while its
+ * answer is current, and listed again when it expires soon or the list changed.
+ */
+export function listedOnAllergensPage(
+  item: { readonly internalCode: string; readonly stockTracked: boolean },
+  status: "Missing" | "RegistryChanged" | "ItemChanged" | "ExpiringSoon" | "Current",
+): boolean {
+  return !(item.internalCode.startsWith("DECL-") && !item.stockTracked && status === "Current");
+}
+
 export function createMerchantAllergens(options: {
   persistence: PersistentMerchantBffOptions;
   authentication: Pick<MerchantBffService, "authorize">;
@@ -272,7 +284,7 @@ export function createMerchantAllergens(options: {
             ...d,
             validThrough: validThroughDate(d.validUntil, s.timeZone),
           });
-          const rows = items.map((item) => {
+          const rows = items.flatMap((item) => {
             const found = declarations.get(item.itemReference);
             const d = found === undefined ? null : local(found);
             const status =
@@ -285,15 +297,21 @@ export function createMerchantAllergens(options: {
                     : Date.parse(d.validUntil) < soon
                       ? "ExpiringSoon"
                       : "Current";
-            return {
-              itemReference: item.itemReference,
-              itemVersionReference: item.configurationOperationReference,
-              internalCode: item.internalCode,
-              name: name(item.localizedNames, item.internalCode),
-              unitCode: item.unitCode,
-              status,
-              declaration: d,
-            };
+            // WP-2423 (M169): a dish's or choice's stand-in for allergens staff declared on the
+            // Menu page is not an ingredient to look after here, while its answer is current; it
+            // is listed again when it expires soon or the list changed, so that is never missed.
+            if (!listedOnAllergensPage(item, status)) return [];
+            return [
+              {
+                itemReference: item.itemReference,
+                itemVersionReference: item.configurationOperationReference,
+                internalCode: item.internalCode,
+                name: name(item.localizedNames, item.internalCode),
+                unitCode: item.unitCode,
+                status,
+                declaration: d,
+              },
+            ];
           });
           // WP-2423 Q19: a roster recorded and waiting for another person's approval; its recorder
           // sees whether they may approve it alone as sole operator, and why not. WP-2423 item 14:
