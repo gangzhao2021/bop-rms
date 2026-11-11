@@ -273,7 +273,9 @@ export function DiningRoundsProvider({
           : refused(error),
       );
       markBusy(false);
-      if (!lost) void load();
+      // M147: a refusal (served on another screen, changed) rereads this list and the page around
+      // it (the table's close section, the order's status), so nothing stale stays on screen.
+      if (!lost) changed();
     }
   };
   const refusedServe = (error: unknown) =>

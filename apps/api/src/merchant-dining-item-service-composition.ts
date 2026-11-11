@@ -1,4 +1,5 @@
 import {
+  DiningItemServiceChangedError,
   createPostgresDiningItemServiceStore,
   parseDiningItemServiceRecord,
   parseDiningInstant,
@@ -68,10 +69,11 @@ export function createMerchantDiningItemServiceComposition(options: {
               entry.orderItemReference === candidate.orderItemReference &&
               entry.orderBatchReference === candidate.orderBatchReference,
           );
+          if (!current) throw new Error("DINING_ITEM_SERVICE_UNAVAILABLE");
+          // M147: the Order or the dish moved on (cancelled, remade) since the screen read it.
+          if (current.orderVersion !== candidate.expectedOrderVersion || item?.phase !== "Ready")
+            throw new DiningItemServiceChangedError();
           if (
-            !current ||
-            current.orderVersion !== candidate.expectedOrderVersion ||
-            item?.phase !== "Ready" ||
             (await options.validateSource(tx as ConsumerTransaction, candidate, current)) !== true
           )
             throw new Error("DINING_ITEM_SERVICE_UNAVAILABLE");

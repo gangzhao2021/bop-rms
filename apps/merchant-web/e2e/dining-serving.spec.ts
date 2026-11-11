@@ -294,3 +294,148 @@ test("@production WP-2423 (2026-10-18): a dish the kitchen is remaking says so a
       .map((v) => v.id),
   ).toEqual([]);
 });
+
+test("@production M147: a dish already served on another screen says so and rereads the order", async ({
+  page,
+}) => {
+  const id = (n: number) => "01909968-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+  const scope = {
+    brandLabel: "Synthetic Brand",
+    storeLabel: "Synthetic Store",
+    storeReference: id(99),
+  };
+  const headers = { "cache-control": "no-store" };
+  await page.route("**/merchant/session", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        authenticated: true,
+        csrf: "a".repeat(43),
+        workspace: {
+          screenId: "HOME-OVERVIEW",
+          selectedScope: scope,
+          authorizedStores: [scope],
+          businessDate: "2026-09-14",
+          storeStatus: "Open",
+          freshness: "Current",
+          dashboardAvailability: "UnavailableUntilWP1905",
+          navigation: [
+            {
+              screenId: "OPS-ORDER-QUEUE",
+              label: "Orders",
+              href: "/operations/orders",
+              permission: "ordering.operate",
+            },
+          ],
+        },
+      },
+    }),
+  );
+  // Another screen served the dish after this one read it.
+  let servedElsewhere = false;
+  await page.route("**/merchant/orders", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        items: [
+          {
+            orderReference: id(1),
+            orderNumber: "ORD-1",
+            orderType: "DineIn",
+            sourceChannel: "Web",
+            submittedAt: "2026-09-14T00:00:00.000Z",
+            observedAt: "2026-09-14T00:01:00.000Z",
+            initialBatchReference: id(90),
+            batches: [
+              {
+                orderBatchReference: id(90),
+                sequence: 1,
+                acceptanceStatus: "Accepted",
+                canRequestAcceptance: false,
+                canCancel: false,
+                staffCancellation: null,
+                canCancelItems: false,
+              },
+            ],
+            canRequestAcceptance: false,
+            currentPhase: servedElsewhere ? "Fulfilled" : "Ready",
+            currentVersion: 2,
+            unfulfillable: null,
+            pickupNotCollected: false,
+            acceptBy: null,
+            awaitingPayment: false,
+          },
+        ],
+        nextAfterOrderReference: null,
+      },
+    }),
+  );
+  await page.route("**/merchant/dining/order-progress", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        orderReference: id(1),
+        orderVersion: 2,
+        sessionVersion: 2,
+        diningSessionReference: id(55),
+        sessionPhase: "Active",
+        tableAssignmentVersion: 3,
+        closureStatus: "Open",
+        closureVersion: 0,
+        currentOrderVersion: 4,
+        tableLabel: "T1",
+        phase: servedElsewhere ? "Fulfilled" : "Ready",
+        observedAt: "2026-09-14T00:01:00.000Z",
+        items: [
+          {
+            orderItemReference: id(3),
+            orderBatchReference: id(90),
+            displayName: "Meal",
+            batchSequence: 1,
+            itemOrdinal: 1,
+            phase: servedElsewhere ? "Fulfilled" : "Ready",
+            orderedQuantity: 2,
+            deliveredQuantity: servedElsewhere ? 2 : 0,
+            remainingQuantity: servedElsewhere ? 0 : 2,
+            itemServiceVersion: servedElsewhere ? 1 : 0,
+          },
+        ],
+      },
+    }),
+  );
+  let serves = 0;
+  await page.route("**/merchant/dining/serve", (route) => {
+    serves += 1;
+    servedElsewhere = true;
+    return route.fulfill({ status: 409, headers, json: { error: "changed" } });
+  });
+  for (const width of [390, 1024, 1440]) {
+    servedElsewhere = false;
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto("/operations/orders");
+    const round = page.getByRole("region", { name: "Round 1", exact: true });
+    await expect(round.getByText("Served 0/2")).toBeVisible();
+    await round.getByRole("button", { name: "Mark 2 × Meal served", exact: true }).click();
+    // Not "could not confirm" and no "Try again": the list and the order's status are read again.
+    await expect(
+      page.getByText(
+        "Already served on another screen, or the dish changed. Updated, check it again.",
+      ),
+    ).toBeVisible();
+    await expect(
+      page.getByText("We could not confirm it was recorded.", { exact: false }),
+    ).toHaveCount(0);
+    await expect(round.getByText("Served 2/2")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Try again" })).toHaveCount(0);
+    await expect(page.locator(".order-workbench-phase")).toHaveText("Served", { timeout: 5_000 });
+    const axe = await new AxeBuilder({ page })
+      .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
+      .analyze();
+    expect(
+      axe.violations
+        .filter((v) => v.impact === "serious" || v.impact === "critical")
+        .map((v) => v.id),
+    ).toEqual([]);
+  }
+  expect(serves).toBe(3);
+});

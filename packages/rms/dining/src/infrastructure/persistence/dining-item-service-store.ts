@@ -16,8 +16,23 @@ export class DiningItemServiceStoreError extends Error {
     this.name = "DiningItemServiceStoreError";
   }
 }
+/**
+ * M147: the dish was served (or the table or party changed) on another screen after this screen
+ * read it. Read under the item's lock, so it is certain: nothing was written, and the screen reads
+ * again (409), never "could not confirm" (503).
+ */
+export class DiningItemServiceChangedError extends Error {
+  readonly code = "DINING_ITEM_SERVICE_CHANGED";
+  constructor() {
+    super("dining item service changed");
+    this.name = "DiningItemServiceChangedError";
+  }
+}
 const fail = (): never => {
   throw new DiningItemServiceStoreError();
+};
+const changed = (): never => {
+  throw new DiningItemServiceChangedError();
 };
 async function rows(tx: DiningTableTransaction, sql: string, values: readonly unknown[]) {
   const result = (await tx.query(sql, values)) as { rows?: Record<string, unknown>[] };
@@ -99,12 +114,16 @@ export function createPostgresDiningItemServiceStore(options: {
           table.brandReference !== scope.brandReference ||
           table.storeReference !== scope.storeReference ||
           table.tableReference !== record.tableReference ||
-          table.activeDiningSessionReference !== record.diningSessionReference ||
           table.lifecycle !== "Published" ||
-          table.operationalState !== "Available" ||
           table.observedAt > record.servedAt
         )
           return fail();
+        // The party moved, merged or left this table since the screen read it.
+        if (
+          table.activeDiningSessionReference !== record.diningSessionReference ||
+          table.operationalState !== "Available"
+        )
+          return changed();
         const sessions = await rows(
           tx,
           "SELECT session_snapshot FROM rms_dining.dining_session WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND session_id=$4 FOR UPDATE",
@@ -121,14 +140,17 @@ export function createPostgresDiningItemServiceStore(options: {
           session.diningSessionReference !== record.diningSessionReference ||
           session.brandReference !== scope.brandReference ||
           session.storeReference !== scope.storeReference ||
+          session.startedAt > record.servedAt
+        )
+          return fail();
+        if (
           session.tableReference !== record.tableReference ||
           session.tableAssignmentVersion !== record.tableAssignmentVersion ||
           session.version !== record.sessionVersion ||
           // A table checking out (Closing) is still served; a closed one is not.
-          (session.phase !== "Active" && session.phase !== "Closing") ||
-          session.startedAt > record.servedAt
+          (session.phase !== "Active" && session.phase !== "Closing")
         )
-          return fail();
+          return changed();
         await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
           "DiningItemService:" + key + ":" + record.orderItemReference,
         ]);
@@ -142,7 +164,18 @@ export function createPostgresDiningItemServiceStore(options: {
             record.orderItemReference,
           ],
         );
+        // M147: another screen served this dish since this screen read it (its serving version
+        // moved on), or what is left to serve is now less than this tap asks for.
+        let latest = 0;
+        let servedQuantity = 0;
+        for (const row of history) {
+          const fact = parseDiningItemServiceRecord(row.record_json);
+          latest = Math.max(latest, fact.itemServiceVersion);
+          servedQuantity += fact.quantity;
+        }
+        if (latest !== record.expectedItemServiceVersion) return changed();
         const quantities = await options.validateCurrent(tx, record);
+        if (servedQuantity + record.quantity > quantities.readyQuantity) return changed();
         validateDiningItemServiceAppend({
           record,
           history: history.map((row) => row.record_json),
@@ -202,7 +235,8 @@ export function createPostgresDiningItemServiceStore(options: {
           return fail();
         }
         return Object.freeze({ status: "Created" as const, record });
-      } catch {
+      } catch (error) {
+        if (error instanceof DiningItemServiceChangedError) throw error;
         return fail();
       }
     },

@@ -1460,8 +1460,9 @@ it("after staff cancel one line of a dine-in round, the kitchen completes the re
         ),
         ["AlreadyServed"],
       );
+      // M147: "changed, read again" (409), never "could not confirm" (503).
       await assert.rejects(serve(serveCommand(ready.currentOrderVersion)), {
-        code: "DINING_ITEM_SERVICE_UNAVAILABLE",
+        message: "DINING_SERVE_COMMAND_CHANGED",
       });
       assert.equal(await serviceRecords(), 1);
       const delivered = await progress();

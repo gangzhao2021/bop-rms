@@ -29,7 +29,10 @@ import { createMerchantDiningClosingCommand } from "../../../apps/api/src/mercha
 import { createMerchantDiningOrderCloseCommand } from "../../../apps/api/src/merchant-dining-order-close-command.ts";
 import { createMerchantGuestTableStartOff } from "../../../apps/api/src/merchant-dining-guest-table-start.ts";
 import { createMerchantDiningOrderProgress } from "../../../apps/api/src/merchant-dining-order-progress.ts";
-import { createMerchantDiningServeCommand } from "../../../apps/api/src/merchant-dining-serve-command.ts";
+import {
+  createMerchantDiningServeCommand,
+  diningServeChangedCode,
+} from "../../../apps/api/src/merchant-dining-serve-command.ts";
 import { createMerchantDiningTables } from "../../../apps/api/src/merchant-dining-tables.ts";
 import { createMerchantDiningTableClosePlan } from "../../../apps/api/src/merchant-dining-table-close-plan.ts";
 import { kdsOperatorProfileAllows } from "../../../apps/api/src/merchant-kds-operator-profile.ts";
@@ -553,6 +556,26 @@ function staffClose({ manager, persistence, ownerScope, seeded }) {
           expectedTableAssignmentVersion: ready.tableAssignmentVersion,
         },
       });
+    // M147: a second screen still showing the dish as ready serves it again. It was served on the
+    // first screen, so the answer is "changed, read again" (409), never "could not confirm" (503).
+    const [first] = ready.items;
+    if (first !== undefined)
+      await assert.rejects(
+        serve({
+          ...as,
+          command: {
+            operationReference: fresh(),
+            orderReference,
+            orderItemReference: String(first.orderItemReference),
+            quantity: first.remainingQuantity,
+            expectedOrderVersion: ready.currentOrderVersion,
+            expectedItemServiceVersion: first.itemServiceVersion,
+            expectedSessionVersion: ready.sessionVersion,
+            expectedTableAssignmentVersion: ready.tableAssignmentVersion,
+          },
+        }),
+        (error) => error instanceof Error && error.message === diningServeChangedCode,
+      );
     const served = await progress({ ...as, query: { orderReference } });
     const begun = await closeTable({
       ...as,

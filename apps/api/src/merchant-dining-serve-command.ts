@@ -4,6 +4,7 @@ import type { AppendAuditRecordInput } from "@bop/audit";
 import { readClosedRecord } from "@bop/identity";
 import { createPostgresMerchantOrderIndex, parseOrderingReference } from "@rms/ordering";
 import {
+  DiningItemServiceChangedError,
   createPostgresDiningItemServiceOperationReader,
   parseDiningItemServiceRecord,
 } from "@rms/dining";
@@ -248,12 +249,18 @@ export function createMerchantDiningServeCommand(options: {
               sourceChannel: "MERCHANT_WEB",
               dataClassification: "Restricted",
             }),
-          }).commit({
-            transaction: businessTransaction,
-            record,
-            guestSessionReference: selected.guestSessionReference,
-            orderDiningSessionReference: selected.diningSessionReference,
-          });
+          })
+            .commit({
+              transaction: businessTransaction,
+              record,
+              guestSessionReference: selected.guestSessionReference,
+              orderDiningSessionReference: selected.diningSessionReference,
+            })
+            .catch((error: unknown) => {
+              // M147: served (or changed) on another screen; certain, read under the item lock.
+              if (error instanceof DiningItemServiceChangedError) return stale();
+              throw error;
+            });
           return Object.freeze({
             status: result.status,
             itemServiceVersion: result.record.itemServiceVersion,
