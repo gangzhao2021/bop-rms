@@ -23,6 +23,22 @@ export type TableCartChange =
       readonly removed: readonly TableCartDish[];
       /** Dishes still there with a smaller quantity: `quantity` is the new one. Increases are in `added`. */
       readonly reduced: readonly TableCartDish[];
+      /**
+       * v15 batch 7: of `removed`, the dishes staff took out (the cart's own record of staff
+       * removals); absent when none. Never said to be done by "someone at your table".
+       */
+      readonly byStaff?: readonly TableCartDish[];
+    }
+  | {
+      /**
+       * v15 batch 7 (DEC-DINING-CHECKOUT-SCOPE 15): this phone had chosen which dishes it pays for
+       * this round, and the cart changed before it started paying (staff took a dish out, or the
+       * others' dishes came back after the reservation ended). Its choice is over: it chooses
+       * again, never checks out the whole cart on the old choice.
+       */
+      readonly kind: "choiceEnded";
+      /** Dishes staff took out meanwhile (empty when it was not staff). */
+      readonly byStaff: readonly TableCartDish[];
     }
   | {
       readonly kind: "sent";
@@ -64,6 +80,40 @@ export function tableCartChange(loaded: CartView, current: CartView | null): Tab
         cartHasDishes: (current?.cart.items.length ?? 0) > 0,
       });
   }
+  // v15 batch 7: the dishes staff took out since this phone loaded the cart, by the cart's own
+  // record of staff removals (matched to the removed lines by name).
+  const knownRemovals = new Set(
+    (loaded.cart.staffRemoved ?? []).map((entry) => entry.removedAt + "|" + entry.quantity),
+  );
+  const staffNames = (current?.cart.staffRemoved ?? [])
+    .filter((entry) => !knownRemovals.has(entry.removedAt + "|" + entry.quantity))
+    .map((entry) => new Set(Object.values(entry.names)));
+  const byStaffOf = (dishes: readonly TableCartDish[]) =>
+    dishes.filter((dish) => {
+      const index = staffNames.findIndex((names) => names.has(dish.displayName));
+      if (index < 0) return false;
+      staffNames.splice(index, 1);
+      return true;
+    });
+  if (
+    loaded.cart.tablePay?.payer?.thisPhone === true &&
+    current !== null &&
+    (current.cart.tablePay?.payer ?? null) === null
+  ) {
+    const gone = loaded.cart.items
+      .filter((item) => !now.has(item.cartItemReference))
+      .map((item) => ({ displayName: item.displayName, quantity: item.quantity }));
+    const lower = loaded.cart.items.flatMap((item) => {
+      const left = now.get(item.cartItemReference)?.quantity;
+      return left !== undefined && left < item.quantity
+        ? [{ displayName: item.displayName, quantity: item.quantity - left }]
+        : [];
+    });
+    return Object.freeze({
+      kind: "choiceEnded",
+      byStaff: Object.freeze(byStaffOf([...gone, ...lower]).map((dish) => Object.freeze(dish))),
+    });
+  }
   const before = new Map(loaded.cart.items.map((item) => [item.cartItemReference, item.quantity]));
   const added = (current?.cart.items ?? [])
     .map((item) => ({
@@ -83,10 +133,12 @@ export function tableCartChange(loaded: CartView, current: CartView | null): Tab
       return was !== undefined && item.quantity < was;
     })
     .map((item) => Object.freeze({ displayName: item.displayName, quantity: item.quantity }));
+  const byStaff = byStaffOf(removed);
   return Object.freeze({
     kind: "changed",
     added: Object.freeze(added),
-    removed: Object.freeze(removed),
+    removed: Object.freeze(removed.filter((dish) => !byStaff.includes(dish))),
     reduced: Object.freeze(reduced),
+    ...(byStaff.length === 0 ? {} : { byStaff: Object.freeze(byStaff) }),
   });
 }

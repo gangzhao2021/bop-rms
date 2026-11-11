@@ -920,6 +920,7 @@ describe("WP-2423 M35: the guests' unsent lines on the staff round screen", () =
     cartReference: id(70),
     cartVersion: 4,
     guestPaying: false,
+    guestChoosing: null,
     lines: lines.map((line, index) => ({
       cartItemReference: id(80 + index),
       sellableReference: id(5),

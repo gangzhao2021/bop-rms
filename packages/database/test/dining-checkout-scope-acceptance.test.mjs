@@ -10,6 +10,7 @@ import {
   extendDiningCheckoutScope,
   readDiningCheckoutScopeState,
   readForeignDiningCheckoutScope,
+  removeStaffDiningCartLine,
   returnDiningWaitingLines,
 } from "../../rms/ordering/src/index.ts";
 import { createCustomerCartTablePay } from "../../../apps/api/src/customer-cart-table-pay.ts";
@@ -859,6 +860,191 @@ it("WP-2423 (shared-table-checkout): A picks dishes, keeps them longer, and ever
         )
       ).rows[0];
       assert.equal(totals.waiting, totals.returned);
+    } finally {
+      await admin.end();
+    }
+  });
+});
+
+/**
+ * v15 batch 7 table-pay-by-dish (DEC-DINING-CHECKOUT-SCOPE 15), as the restricted pilot API role:
+ * A chose "only what I added" and has not started paying. Staff see that A is choosing (the
+ * scope live on the cart version they read, A as chooser) and may still take A's dish out (the
+ * guest asked): that is the cart's next version, so A's choice is no longer live, A's phone reads
+ * no payer (it asks A to choose again, never quotes the whole table on A's old choice) and B's
+ * dish comes back exactly once, resolved as CartChanged.
+ */
+it("v15 batch 7: staff take a dish out while A is choosing; A's choice ends and B's dish comes back once", async () => {
+  await withIsolatedDatabase({ caseId: "wp2423_scope_staff" }, async (context) => {
+    const admin = new Client(context.clientConfig);
+    await admin.connect();
+    const api = "wp2423_scopes_" + context.runId;
+    try {
+      await admin.query(
+        "CREATE ROLE " + api + " NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE",
+      );
+      await grantPilotApiAcl(admin, api);
+      const inTransaction = async (action) => {
+        const client = new Client(context.clientConfig);
+        await client.connect();
+        try {
+          await client.query("BEGIN");
+          await client.query("SET LOCAL ROLE " + api);
+          const value = await action({ query: (sql, values) => client.query(sql, [...values]) });
+          await client.query("COMMIT");
+          return value;
+        } catch (error) {
+          await client.query("ROLLBACK");
+          throw error;
+        } finally {
+          await client.end();
+        }
+      };
+      const { f, id, lineA, lineB, phoneA, phoneB, seeded } = table("01902540", { agoMs: 3000 });
+      await seedSubmissionCart(admin, seeded);
+      const scope = f.scope;
+      const cartReference = String(f.cart.cartReference);
+      let n = 0x900;
+      const next = () => id(++n);
+      const audit = (actionCode, when) => ({
+        auditId: next(),
+        brandId: scope.brandReference,
+        storeId: scope.storeReference,
+        actor: { type: "System" },
+        actionCode,
+        targetType: "OrderingCart",
+        targetId: cartReference,
+        reasonCode: "AUTHORIZED_CART_MUTATION",
+        correlationId: next(),
+        occurredAt: when,
+        sourceChannel: "CUSTOMER_PWA",
+        dataClassification: "Restricted",
+        retentionPolicyCode: "AUDIT_DEFAULT",
+        retentionPolicyVersion: 1,
+      });
+      const chosenAt = String(f.cart.updatedAt);
+      const chosen = await inTransaction((tx) =>
+        chooseDiningCheckoutScope(tx, scope, {
+          operationReference: id(1),
+          cartReference,
+          expectedCartVersion: seeded.cart.aggregateVersion,
+          choice: "Mine",
+          lines: [],
+          actor: phoneA,
+          observedAt: chosenAt,
+          hashIntent,
+          newReference: next,
+          audit: audit("ORDERING_CART_CHECKOUT_SCOPE", chosenAt),
+          heldByOther: async () => null,
+        }),
+      );
+      assert.equal(chosen.status, "Chosen");
+      // What the staff table panel reads: A is choosing on exactly the version staff see.
+      const seen = await inTransaction((tx) =>
+        readDiningCheckoutScopeState(tx, scope, {
+          diningSessionReference: phoneA.diningSessionReference,
+          observedAt: later(chosenAt, 500),
+        }),
+      );
+      assert.equal(seen.live?.chooserParticipantReference, phoneA.participantReference);
+      assert.equal(seen.live?.cartVersion, f.cart.aggregateVersion);
+      assert.equal(seen.cartVersion, f.cart.aggregateVersion);
+      // Staff take A's dish out because A asked: recorded, the cart's next version.
+      const staff = id(0x501);
+      const removedAt = later(chosenAt, 1000);
+      const removed = await inTransaction((tx) =>
+        removeStaffDiningCartLine(tx, scope, {
+          operationReference: id(2),
+          diningSessionReference: phoneA.diningSessionReference,
+          cartReference,
+          cartItemReference: String(lineA.cartItemReference),
+          expectedCartVersion: f.cart.aggregateVersion,
+          reason: "GuestAsked",
+          actorReference: staff,
+          observedAt: removedAt,
+          hashIntent,
+          checkoutHeld: async () => false,
+          audit: {
+            auditId: next(),
+            brandId: scope.brandReference,
+            storeId: scope.storeReference,
+            actor: { type: "User", reference: staff },
+            actionCode: "ORDERING_CART_ITEM_REMOVE_BY_STAFF",
+            targetType: "OrderingCart",
+            targetId: cartReference,
+            reasonCode: "STAFF_CART_GUEST_ASKED",
+            correlationId: id(2),
+            occurredAt: removedAt,
+            sourceChannel: "API",
+            dataClassification: "Internal",
+            retentionPolicyCode: "AUDIT_DEFAULT",
+            retentionPolicyVersion: 1,
+          },
+        }),
+      );
+      assert.ok(removed);
+      // A's choice is no longer live: A's phone shows no payer and asks A to choose again.
+      const after = await inTransaction((tx) =>
+        readDiningCheckoutScopeState(tx, scope, {
+          diningSessionReference: phoneA.diningSessionReference,
+          observedAt: later(removedAt, 500),
+        }),
+      );
+      assert.equal(after.live, null);
+      assert.equal(after.cartVersion, f.cart.aggregateVersion + 1);
+      const tenantScope = { tenantReference: id(0xeee), ...scope };
+      const tablePay = createCustomerCartTablePay({ run: inTransaction }, tenantScope);
+      const onA = await tablePay.read({
+        diningSessionReference: phoneA.diningSessionReference,
+        cartReference,
+        cartVersion: f.cart.aggregateVersion + 1,
+        participantReference: phoneA.participantReference,
+        guestSessionReference: phoneA.guestSessionReference,
+        observedAt: later(removedAt, 500),
+      });
+      assert.equal(onA.payer, null);
+      assert.equal(onA.returnable, true);
+      // B's dish comes back once, resolved because the cart changed.
+      const back = await inTransaction((tx) =>
+        returnDiningWaitingLines(tx, scope, {
+          operationReference: id(3),
+          action: "Return",
+          actor: phoneB,
+          observedAt: later(removedAt, 1000),
+          newReference: next,
+          audit: () => audit("ORDERING_CART_WAITING_RETURN", later(removedAt, 1000)),
+          heldByOther: async () => null,
+        }),
+      );
+      assert.equal(back.status, "Returned");
+      const cart = await createPostgresCartQueryStore({ run: inTransaction }, scope).load(
+        cartReference,
+      );
+      assert.deepEqual(
+        cart.items.map((item) => [item.quantity, item.addedByParticipantReference]),
+        [[lineB.quantity, phoneB.participantReference]],
+      );
+      assert.deepEqual(
+        (
+          await admin.query(
+            "SELECT reason_code FROM rms_ordering.dining_cart_waiting_line_resolution WHERE cart_id=$1",
+            [cartReference],
+          )
+        ).rows,
+        [{ reason_code: "CartChanged" }],
+      );
+      const again = await inTransaction((tx) =>
+        returnDiningWaitingLines(tx, scope, {
+          operationReference: id(4),
+          action: "Return",
+          actor: phoneB,
+          observedAt: later(removedAt, 2000),
+          newReference: next,
+          audit: () => audit("ORDERING_CART_WAITING_RETURN", later(removedAt, 2000)),
+          heldByOther: async () => null,
+        }),
+      );
+      assert.notEqual(again.status, "Returned");
     } finally {
       await admin.end();
     }

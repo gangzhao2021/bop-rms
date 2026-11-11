@@ -36,6 +36,11 @@ export interface TableCart {
   readonly cartReference: string;
   readonly cartVersion: number;
   readonly guestPaying: boolean;
+  /**
+   * v15 batch 7: a phone chose which of these dishes it pays and has not started paying (until
+   * when the others' dishes wait). Taking a dish out ends that choice; the phone chooses again.
+   */
+  readonly guestChoosing: null | { readonly phoneNumber: number | null; readonly until: string };
   readonly lines: readonly TableCartLine[];
 }
 
@@ -59,7 +64,28 @@ const count = (value: unknown, max: number) =>
 export function parseTableCart(value: unknown): TableCart | null {
   const raw = exact(value, ["cart"]);
   if (raw.cart === null) return null;
-  const cart = exact(raw.cart, ["cartReference", "cartVersion", "guestPaying", "lines"]);
+  const withChoosing =
+    raw.cart !== null && typeof raw.cart === "object" && Object.hasOwn(raw.cart, "guestChoosing");
+  const cart = exact(raw.cart, [
+    "cartReference",
+    "cartVersion",
+    "guestPaying",
+    ...(withChoosing ? ["guestChoosing"] : []),
+    "lines",
+  ]);
+  let guestChoosing: TableCart["guestChoosing"] = null;
+  if (withChoosing && cart.guestChoosing !== null) {
+    const choosing = exact(cart.guestChoosing, ["phoneNumber", "until"]);
+    if (
+      typeof choosing.until !== "string" ||
+      !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/u.test(choosing.until)
+    )
+      return fail();
+    guestChoosing = Object.freeze({
+      phoneNumber: choosing.phoneNumber === null ? null : count(choosing.phoneNumber, 200),
+      until: choosing.until,
+    });
+  }
   if (
     typeof cart.guestPaying !== "boolean" ||
     !Array.isArray(cart.lines) ||
@@ -109,6 +135,7 @@ export function parseTableCart(value: unknown): TableCart | null {
     cartReference: ref(cart.cartReference),
     cartVersion: count(cart.cartVersion, Number.MAX_SAFE_INTEGER),
     guestPaying: cart.guestPaying,
+    guestChoosing,
     lines: Object.freeze(lines),
   });
 }

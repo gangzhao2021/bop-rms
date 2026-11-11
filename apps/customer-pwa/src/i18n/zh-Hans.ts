@@ -31,6 +31,12 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Add to your order": "加入订单",
   "Someone at your table changed the cart.": "同桌有人改了购物车。",
   "Someone at your table changed the cart: {changes}.": "同桌有人改了购物车：{changes}。",
+  "Staff removed {dishes} from the cart.": "店员已从购物车删除{dishes}。",
+  "Choose again": "重新选择",
+  "The cart changed, so the dishes you chose to pay for are no longer set aside. Nothing was charged. Choose again what you pay for.":
+    "购物车变了，你选要付的菜已不再保留。没有扣款。请重新选择要付哪些菜。",
+  "Staff removed {dishes} from the cart, so the dishes you chose to pay for are no longer set aside. Nothing was charged. Choose again what you pay for.":
+    "店员已从购物车删除{dishes}，你选要付的菜已不再保留。没有扣款。请重新选择要付哪些菜。",
   "added {dishes}": "加了 {dishes}",
   "removed {dishes}": "删了 {dishes}",
   "{dish} now ×{quantity}": "{dish} 改为 ×{quantity}",

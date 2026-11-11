@@ -88,6 +88,15 @@ interface Table {
     lines: number[];
     paymentState?: "AwaitingPayment" | "Paid" | "PayLater" | "Cancelled" | "Returned";
   }[];
+  /** v15 batch 7: a phone's choice of what it pays for this round (absent: not told). */
+  payer?: {
+    thisPhone: boolean;
+    choice: "Mine" | "Chosen";
+    expiresAt: string;
+    reserved: boolean;
+  } | null;
+  /** v15 batch 7: dishes staff took out lately (the cart's own record). */
+  staffRemoved?: { removedAt: string; quantity: number; names: Record<string, string> }[];
 }
 interface Seen {
   quotes: number;
@@ -156,6 +165,17 @@ async function stubTable(page: Page, table: Table) {
             cartItemReferences: round.lines.map(id),
             ...(round.paymentState === undefined ? {} : { paymentState: round.paymentState }),
           })),
+          ...(table.payer === undefined
+            ? {}
+            : {
+                tablePay: {
+                  defaultChoice: "WholeTable",
+                  payer: table.payer,
+                  waiting: [],
+                  returnable: table.payer === null,
+                },
+              }),
+          ...(table.staffRemoved === undefined ? {} : { staffRemoved: table.staffRemoved }),
         },
       },
     });
@@ -484,3 +504,74 @@ test("@production M38: the phone paying for its round stops, and the dishes are 
   );
   await page.screenshot({ path: "test-results/round-withdraw-returned.png", fullPage: true });
 });
+
+// v15 batch 7 table-pay-by-dish (DEC-DINING-CHECKOUT-SCOPE 15): this phone chose to pay only its
+// own dishes and is on checkout; staff take one of them out. The choice is over: the phone says
+// staff did it, that nothing was charged, and sends the guest back to choose again. It never
+// offers the whole table's new total on the old choice, nor calls the dishes that came back
+// "added by someone at your table".
+for (const screen of [
+  { width: 1440, height: 900, touch: false },
+  { width: 1024, height: 768, touch: false },
+  { width: 390, height: 844, touch: true },
+]) {
+  test.describe("@production A pay choice ended by staff " + screen.width, () => {
+    test.use({
+      viewport: { width: screen.width, height: screen.height },
+      hasTouch: screen.touch,
+      isMobile: screen.touch,
+      serviceWorkers: "block",
+    });
+    test("staff take a dish out while this phone chose its dishes: choose again, nothing charged", async ({
+      page,
+    }, info) => {
+      const failures: string[] = [];
+      page.on("pageerror", () => failures.push("page error"));
+      const table: Table = {
+        version: 3,
+        items: [mine()],
+        rounds: [],
+        payer: {
+          thisPhone: true,
+          choice: "Mine",
+          expiresAt: new Date(Date.now() + 240_000).toISOString(),
+          reserved: true,
+        },
+      };
+      await stubTable(page, table);
+      await enterTable(page, "/checkout");
+      await page.getByRole("button", { name: "No tip", exact: true }).click();
+      await expect(
+        page.getByRole("button", { name: /Continue to payment · \$22\.60/u }),
+      ).toBeEnabled();
+      table.version = 5;
+      table.items = [{ reference: 6, name: "Synthetic sesame soup", quantity: 1, other: true }];
+      table.payer = null;
+      table.staffRemoved = [
+        {
+          removedAt: new Date().toISOString().replace(/\.\d{3}Z$/u, ".000Z"),
+          quantity: 2,
+          names: { "en-CA": "Synthetic noodles" },
+        },
+      ];
+      const ended = page.getByRole("alert").filter({
+        hasText:
+          "Staff removed Synthetic noodles ×2 from the cart, so the dishes you chose to pay for are no longer set aside. Nothing was charged. Choose again what you pay for.",
+      });
+      await expect(ended).toBeVisible({ timeout: 6_000 });
+      await expect(ended).toBeInViewport();
+      await expect(page.getByText("Someone at your table changed the cart")).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "Check out with the new total" })).toHaveCount(
+        0,
+      );
+      await expect(page.getByRole("button", { name: /Continue to payment/u })).toHaveCount(0);
+      const again = page.getByRole("link", { name: "Choose again" });
+      await expect(again).toBeInViewport();
+      await page.screenshot({ path: info.outputPath(`choice-ended-${screen.width}.png`) });
+      await again.click();
+      await expect(page).toHaveURL(/\/cart$/u);
+      await expectNoInternalText(page);
+      expect(failures).toEqual([]);
+    });
+  });
+}

@@ -33,7 +33,10 @@ afterEach(() => {
   document.body.innerHTML = "";
 });
 
-function server(answers: ((body: Record<string, unknown>) => Response)[] = []) {
+function server(
+  answers: ((body: Record<string, unknown>) => Response)[] = [],
+  choosing: null | { phoneNumber: number | null; until: string } = null,
+) {
   let version = 4;
   let lines = [line(1, 2, true), line(2, null)];
   const bodies: Record<string, unknown>[] = [];
@@ -47,7 +50,13 @@ function server(answers: ((body: Record<string, unknown>) => Response)[] = []) {
       version += 1;
     }
     return json({
-      cart: { cartReference: id(9), cartVersion: version, guestPaying: false, lines },
+      cart: {
+        cartReference: id(9),
+        cartVersion: version,
+        guestPaying: false,
+        ...(choosing === null ? {} : { guestChoosing: version === 4 ? choosing : null }),
+        lines,
+      },
     });
   });
   return { fetcher, bodies };
@@ -129,5 +138,36 @@ describe("Table cart: staff see the unsent dishes and remove one with a reason",
     const { container } = await mount(panel(fetcher));
     await settle();
     expect(container.textContent).toBe("");
+  });
+});
+
+describe("v15 batch 7: a phone chose what it pays and hasn't paid yet", () => {
+  it("says which phone is choosing and that taking a dish out asks it to choose again", async () => {
+    const { fetcher, bodies } = server([], { phoneNumber: 2, until: "2026-11-10T20:05:00.000Z" });
+    const { container } = await mount(panel(fetcher));
+    await settle();
+    expect(container.textContent).toMatch(
+      /Phone 2 is choosing which of these dishes to pay, until .+\. Taking a dish out ends their choice: their phone asks them to choose again\./u,
+    );
+    // Staff can still take a dish out (the guest asked, or the kitchen can't make it).
+    await click(buttonNamed(container, "Remove from cart"));
+    await click(buttonNamed(container, "Guest asked"));
+    await settle();
+    expect(bodies.at(-1)).toMatchObject({ action: "Remove", reason: "GuestAsked" });
+    expect(container.textContent).not.toContain("is choosing which of these dishes");
+  });
+
+  it("reads a cart from a server that does not say, and refuses a malformed choice", async () => {
+    const { parseTableCart } = await import("./table-cart-client.js");
+    const base = { cartReference: id(9), cartVersion: 4, guestPaying: false, lines: [] };
+    expect(parseTableCart({ cart: base })?.guestChoosing).toBeNull();
+    expect(
+      parseTableCart({
+        cart: { ...base, guestChoosing: { phoneNumber: null, until: "2026-11-10T20:05:00.000Z" } },
+      })?.guestChoosing,
+    ).toEqual({ phoneNumber: null, until: "2026-11-10T20:05:00.000Z" });
+    expect(() =>
+      parseTableCart({ cart: { ...base, guestChoosing: { phoneNumber: 2, until: "soon" } } }),
+    ).toThrow();
   });
 });

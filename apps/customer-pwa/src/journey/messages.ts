@@ -881,6 +881,25 @@ export const checkoutText = Object.freeze({
     changes === ""
       ? t("Someone at your table changed the cart.")
       : t("Someone at your table changed the cart: {changes}.", { changes }),
+  /** v15 batch 7: dishes staff took out, never put down to someone at the table. */
+  tableCartStaffRemoved: (dishes: readonly { displayName: string; quantity: number }[]) =>
+    t("Staff removed {dishes} from the cart.", { dishes: tableCartAddedDishes(dishes) }),
+  /**
+   * v15 batch 7 (DEC-DINING-CHECKOUT-SCOPE 15): this phone's choice of dishes to pay ended before
+   * it paid; nothing was charged, and it chooses again.
+   */
+  tableChoiceEnded: (byStaff: readonly { displayName: string; quantity: number }[]) =>
+    byStaff.length === 0
+      ? t(
+          "The cart changed, so the dishes you chose to pay for are no longer set aside. Nothing was charged. Choose again what you pay for.",
+        )
+      : t(
+          "Staff removed {dishes} from the cart, so the dishes you chose to pay for are no longer set aside. Nothing was charged. Choose again what you pay for.",
+          { dishes: tableCartAddedDishes(byStaff) },
+        ),
+  get chooseAgain() {
+    return t("Choose again");
+  },
   get checkOutWithNewTotal() {
     return t("Check out with the new total");
   },

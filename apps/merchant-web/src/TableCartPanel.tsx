@@ -1,6 +1,7 @@
 import { contentName, t } from "./i18n/i18n.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { serviceOperationReference } from "./service-control-client.js";
+import { storeClockTime } from "./staff-pin-client.js";
 import {
   createTableCartClient,
   TableCartError,
@@ -111,6 +112,23 @@ export function TableCartPanel({
       {cart.guestPaying ? (
         <p className="table-phones__mode" role="note">
           {t("A guest is paying for these dishes now.")}
+        </p>
+      ) : cart.guestChoosing !== null ? (
+        // v15 batch 7: a phone chose what it pays and hasn't paid yet. Staff may still take a
+        // dish out; the phone is then asked to choose again, never charged for more.
+        <p className="table-phones__mode" role="note">
+          {cart.guestChoosing.phoneNumber === null
+            ? t(
+                "A guest is choosing which of these dishes to pay, until {time}. Taking a dish out ends their choice: their phone asks them to choose again.",
+                { time: storeClockTime(cart.guestChoosing.until, undefined) },
+              )
+            : t(
+                "Phone {number} is choosing which of these dishes to pay, until {time}. Taking a dish out ends their choice: their phone asks them to choose again.",
+                {
+                  number: String(cart.guestChoosing.phoneNumber),
+                  time: storeClockTime(cart.guestChoosing.until, undefined),
+                },
+              )}
         </p>
       ) : null}
       <ul className="table-phones__list">

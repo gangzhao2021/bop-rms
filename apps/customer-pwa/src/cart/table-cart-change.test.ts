@@ -221,3 +221,84 @@ describe("WP-2423 same-table-ordering: what happened at the table while this pho
     expect(cartText.line.roundSentByThisPhone(3, "PaidNotMade", false)).not.toMatch(/wasn’t paid/u);
   });
 });
+
+describe("v15 batch 7 table-pay-by-dish: staff take a dish out while this phone chose what it pays", () => {
+  const tea = line(10, "Lemon tea");
+  const cucumber = line(20, "Smashed cucumber");
+  const payer = (thisPhone: boolean) =>
+    ({
+      defaultChoice: "WholeTable",
+      payer: {
+        thisPhone,
+        choice: "Mine",
+        expiresAt: "2026-11-10T20:05:00.000Z",
+        reserved: true,
+      },
+      waiting: [],
+      returnable: false,
+    }) as const;
+  const removedByStaff = {
+    removedAt: "2026-11-10T20:01:00.000Z",
+    quantity: 1,
+    names: { "en-CA": "Lemon tea" },
+  };
+  const withPay = (cart: CartView, tablePay: CartView["cart"]["tablePay"], staff = false) =>
+    ({
+      ...cart,
+      cart: {
+        ...cart.cart,
+        ...(tablePay === undefined ? {} : { tablePay }),
+        ...(staff ? { staffRemoved: [removedByStaff] } : {}),
+      },
+    }) as CartView;
+  const noPayer = {
+    defaultChoice: "WholeTable",
+    payer: null,
+    waiting: [],
+    returnable: true,
+  } as const;
+
+  it("ends this phone's choice and names staff, never 'someone added' the dishes that came back", () => {
+    const change = tableCartChange(
+      withPay(view(5, [tea]), payer(true)),
+      withPay(view(7, [cucumber]), noPayer, true),
+    );
+    expect(change).toEqual({
+      kind: "choiceEnded",
+      byStaff: [{ displayName: "Lemon tea", quantity: 1 }],
+    });
+    if (change.kind !== "choiceEnded") throw new Error("expected choiceEnded");
+    const said = checkoutText.tableChoiceEnded(change.byStaff);
+    expect(said).toContain("Staff removed Lemon tea ×1");
+    expect(said).toContain("Nothing was charged. Choose again what you pay for.");
+    expect(said).not.toContain("Someone at your table");
+    expect(said).not.toContain("added");
+  });
+
+  it("ends the choice without blaming staff when the others' dishes came back on their own", () => {
+    expect(
+      tableCartChange(
+        withPay(view(5, [tea]), payer(true)),
+        withPay(view(6, [tea, cucumber]), noPayer),
+      ),
+    ).toEqual({ kind: "choiceEnded", byStaff: [] });
+    expect(checkoutText.tableChoiceEnded([])).toContain("The cart changed");
+  });
+
+  it("another phone's checkout says staff removed the dish, not someone at the table", () => {
+    const change = tableCartChange(
+      withPay(view(5, [tea, cucumber]), noPayer),
+      withPay(view(6, [cucumber]), noPayer, true),
+    );
+    expect(change).toEqual({
+      kind: "changed",
+      added: [],
+      removed: [],
+      reduced: [],
+      byStaff: [{ displayName: "Lemon tea", quantity: 1 }],
+    });
+    expect(checkoutText.tableCartStaffRemoved([{ displayName: "Lemon tea", quantity: 1 }])).toBe(
+      "Staff removed Lemon tea ×1 from the cart.",
+    );
+  });
+});

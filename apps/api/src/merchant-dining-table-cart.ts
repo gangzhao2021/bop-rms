@@ -4,6 +4,7 @@ import { listStoreMenuSellableNames } from "@rms/catalog";
 import { createPostgresDiningCheckoutHoldSource, parseDiningReference } from "@rms/dining";
 import {
   CartError,
+  readDiningCheckoutScopeState,
   readStaffDiningCart,
   removeStaffDiningCartLine,
   type StaffCartRemovalReason,
@@ -125,6 +126,13 @@ export interface MerchantDiningTableCartView {
     readonly cartVersion: number;
     /** A guest is paying for exactly this cart now: nothing can be taken out until they finish. */
     readonly guestPaying: boolean;
+    /**
+     * v15 batch 7 (DEC-DINING-CHECKOUT-SCOPE 15): at a table that pays per round, a phone chose
+     * which of these dishes it pays and has not started paying ("Phone N", null when its phone
+     * number is unknown; until when the others' dishes wait for it). Staff may still take a dish
+     * out: that ends the choice and the phone is asked to choose again, never charged for more.
+     */
+    readonly guestChoosing: null | { readonly phoneNumber: number | null; readonly until: string };
     readonly lines: readonly MerchantDiningTableCartLine[];
   };
 }
@@ -275,11 +283,31 @@ export function createMerchantDiningTableCart(options: {
             [scope.brandReference, scope.storeReference],
           );
           const paying = await guestPaying(cart.cartReference, cart.cartVersion);
+          const choice = (
+            await readDiningCheckoutScopeState(cartTx, owner, {
+              diningSessionReference: session,
+              observedAt,
+            })
+          ).live;
+          const chooser =
+            choice === null || choice.cartReference !== cart.cartReference
+              ? undefined
+              : phoneOf.get(choice.chooserParticipantReference);
           return Object.freeze({
             cart: Object.freeze({
               cartReference: cart.cartReference,
               cartVersion: cart.cartVersion,
               guestPaying: paying,
+              guestChoosing:
+                paying ||
+                choice === null ||
+                choice.cartReference !== cart.cartReference ||
+                choice.cartVersion !== cart.cartVersion
+                  ? null
+                  : Object.freeze({
+                      phoneNumber: chooser?.phoneNumber ?? null,
+                      until: choice.expiresAt,
+                    }),
               lines: Object.freeze(
                 cart.lines.map((line) => {
                   const phone =
