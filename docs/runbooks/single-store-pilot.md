@@ -1125,7 +1125,10 @@ Do these in order, before resuming online ordering.
      passes, it stays on `Sent, not paid yet` (已发送、未付款) and on Home ("Paper orders whose
      payment isn't recorded"). Enter the slip again as a new paper order, then a manager or the
      Owner taps `Link the re-entered order` (关联重新录入的订单) on the old one and picks the new
-     order; the old one closes as "Entered again from its paper slip" and the sale counts once;
+     order. The dialog shows the paper order's dishes amount and each new paper order's (from any
+     business day, even one already made and handed over); one whose dishes come to less cannot be
+     picked, so enter the whole slip again. The old one then shows on Orders as "Closed by staff ·
+     entered again as order N, which carries its sale" and the sale counts once;
    - write the order number on the paper slip ("entered as order no.").
    - Pressing `Send order` again with the same screen never creates a second order; if the screen
      reports that it did not go through, nothing was charged and it can be sent again.
