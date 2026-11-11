@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { URL } from "node:url";
 import pg from "pg";
 import { it } from "vitest";
 import { listStoreMenuSellableNames } from "../../rms/catalog/src/index.ts";
@@ -144,7 +145,7 @@ it("a guest's cart dish on two current menus keeps the Chinese name the newer me
       assert.equal(names.has(id(12)), false);
       assert.equal(after.rows[0].store, store);
     } finally {
-      await admin.query("ROLLBACK").catch(() => {});
+      await admin.query("ROLLBACK").catch(() => undefined);
       await admin.end();
     }
   });
