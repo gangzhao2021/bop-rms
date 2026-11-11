@@ -94,6 +94,9 @@ export async function exerciseCounterCardMachinePayment({
   // DEC-DINE-IN-PAY-LATER: the order queue reads which rounds were sent unpaid (pilot ACL: api
   // SELECT on order_pay_later_confirmation, docs/spec/pilot-acl-additions.json).
   await admin.query("GRANT SELECT ON rms_ordering.order_pay_later_confirmation TO " + role);
+  // DEC-TAX-WHOLE-RECEIPT (merged bills): an Order's tax-rounding share first asks whether it was
+  // merged into another table's bill (pilot ACL: api SELECT on order_merge, DEC-DINING-TABLE-MERGE).
+  await admin.query("GRANT SELECT ON rms_ordering.order_merge TO " + role);
   await admin.query(
     "GRANT SELECT ON rms_ordering.order_acceptance_record,rms_ordering.order_acceptance_hold,rms_ordering.order_acceptance_hold_resolution,rms_ordering.order_termination_record,rms_ordering.order_fulfillment_completion_record,rms_ordering.order_item_staff_cancellation,rms_ordering.order_staff_cancellation,rms_ordering.order_batch_checkout_cancellation TO " +
       role,
