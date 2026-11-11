@@ -1,3 +1,7 @@
+import {
+  orderLinesUnavailableNow,
+  type LineUnavailableNow,
+} from "./merchant-order-sold-out-now.js";
 import { listAlcoholSkus } from "@rms/catalog";
 import { staffNameLocales } from "./staff-content-locale.js";
 import type { ConsumerTransaction } from "@bop/eventing";
@@ -304,6 +308,45 @@ export function createPersistentMerchantOrderQueue(options: {
                   { brandReference: String(resolved.context.brand.brandReference) },
                   lines.items.map((line) => line.sellableReference),
                 );
+          // WP-2423 (M23): orders not accepted yet that hold a dish (or a choice) sold out or off the
+          // menu here since the guest ordered: the row and each line say so before staff accept.
+          // An advisory read: if it fails, the list loads without the mark (savepoint), never as
+          // a refusal.
+          const soldOutNow = new Map<string, ReadonlyMap<string, LineUnavailableNow>>();
+          const awaitingNow = result.items
+            .filter((item) => item.currentPhase === "Submitted")
+            .slice(0, 20);
+          if (awaitingNow.length > 0) {
+            const brandAndStore = {
+              brandReference: String(resolved.context.brand.brandReference),
+              storeReference: String(resolved.store.storeReference),
+            };
+            const at = new Date(Date.parse(String(source.now()))).toISOString();
+            await businessTransaction.query("SAVEPOINT order_sold_out_now", []);
+            try {
+              for (const item of awaitingNow) {
+                const orderLines =
+                  lines !== null && only?.orderReference === item.orderReference
+                    ? lines
+                    : await loadMerchantOrderLines(
+                        businessTransaction,
+                        brandAndStore,
+                        item.orderReference,
+                        staffNameLocales(options.locale ?? "en-CA"),
+                      );
+                const marked = await orderLinesUnavailableNow(businessTransaction, brandAndStore, {
+                  orderType: item.orderType,
+                  at,
+                  lines: orderLines?.items ?? [],
+                });
+                if (marked.size > 0) soldOutNow.set(item.orderReference, marked);
+              }
+              await businessTransaction.query("RELEASE SAVEPOINT order_sold_out_now", []);
+            } catch {
+              await businessTransaction.query("ROLLBACK TO SAVEPOINT order_sold_out_now", []);
+              soldOutNow.clear();
+            }
+          }
           // WP-2423: a paid Order that can no longer be fulfilled (for example not accepted before its
           // capacity expired) is refunded by Payment; it is shown as such and never offered for acceptance.
           const unfulfillable =
@@ -1463,9 +1506,14 @@ export function createPersistentMerchantOrderQueue(options: {
                   items: Object.freeze(
                     lines.items.map(({ sellableReference, ...line }) => {
                       const cancelled = itemCancellations.get(line.orderItemReference) ?? null;
+                      const unavailableNow = soldOutNow
+                        .get(only.orderReference)
+                        ?.get(line.orderItemReference);
                       return Object.freeze({
                         ...line,
                         ...(alcoholSkus.has(sellableReference) ? { ageCheck: true } : {}),
+                        // WP-2423 (M23): sold out or off the menu here since it was ordered.
+                        ...(unavailableNow === undefined ? {} : { unavailableNow }),
                         // The detail shows each option by name (v15 2026-10-29: the choice
                         // reference added for combos made every order with options unreadable).
                         options: Object.freeze(
@@ -1920,6 +1968,8 @@ export function createPersistentMerchantOrderQueue(options: {
                     payments.awaitingAcceptance.has(item.initialBatchReference) &&
                     item.currentPhase === "Submitted" &&
                     item.currentVersion === 1,
+                  // WP-2423 (M23): a dish in it sold out or came off the menu since it was ordered.
+                  ...(soldOutNow.has(item.orderReference) ? { soldOutNow: true as const } : {}),
                   // DEC-DINE-IN-PAY-LATER: on the table's bill (owed), or what the table paid.
                   tableBill: tableBills.get(item.orderReference) ?? null,
                   ...(item.diningSessionReference !== null &&

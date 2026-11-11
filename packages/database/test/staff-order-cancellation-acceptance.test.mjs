@@ -2406,6 +2406,47 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
       assert.equal(Number((await stock()).reserved), stockBeforeAccepted - 1);
       assert.deepEqual((await closePlan(acceptedCard)).rounds, []);
 
+      // WP-2423 (M23): the paid pickup still waiting for acceptance holds a dish this Store does
+      // not offer now (no rule offers this synthetic dish here): the Orders row and its line say
+      // so before anyone accepts it, and reading it refunds or cancels nothing.
+      const soldOutReader = await seedMerchantAcceptanceSession({
+        admin,
+        runner: transactions({ guc: false }),
+        scope: { tenantReference: tenant, brandReference: brand, storeReference: store },
+        actor: id(99011),
+        at: new Date().toISOString(),
+        extraPermissions: [],
+        referencePrefix: "01a7e110",
+        sessionReferencePrefix: "01a7e111",
+      });
+      const cancellationsBefore = (
+        await admin.query("SELECT count(*)::int n FROM rms_ordering.order_staff_cancellation")
+      ).rows[0].n;
+      const waitingView = await createPersistentMerchantOrderQueue({
+        persistence: {
+          ...soldOutReader.persistence,
+          transactions: transactions({ guc: false }),
+          now: () => new Date(Math.floor(Date.now())).toISOString(),
+        },
+        quoteVersion: 1,
+        acceptanceConfigured: true,
+      })({
+        sessionCookie: soldOutReader.sessionCookie,
+        afterOrderReference: null,
+        orderReference: waitingPickup.order,
+      });
+      assert.equal(waitingView.items[0].currentPhase, "Submitted");
+      assert.equal(waitingView.items[0].soldOutNow, true);
+      assert.deepEqual(
+        waitingView.lines.items.map((line) => line.unavailableNow),
+        ["Hidden"],
+      );
+      assert.equal(
+        (await admin.query("SELECT count(*)::int n FROM rms_ordering.order_staff_cancellation"))
+          .rows[0].n,
+        cancellationsBefore,
+      );
+
       // v15 2026-11-01: a Store that can't make a paid pickup order refuses it and refunds it
       // without accepting it first. "Guests left" is a table's reason, never a pickup's.
       await assert.rejects(cancel(waitingPickup, 0, { reasonCode: "GUEST_LEFT" }), {

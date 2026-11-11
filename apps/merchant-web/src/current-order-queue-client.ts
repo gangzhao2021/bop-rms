@@ -577,7 +577,11 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
     // DEC-DINE-IN-PAY-LATER: a pay-later table's bill (absent from an older server).
     const withTableBill =
       value !== null && typeof value === "object" && Object.hasOwn(value, "tableBill");
+    // WP-2423 (M23): a dish in it sold out or came off the menu since it was ordered (only then).
+    const withSoldOutNow =
+      value !== null && typeof value === "object" && Object.hasOwn(value, "soldOutNow");
     const item = exact(value, [
+      ...(withSoldOutNow ? ["soldOutNow"] : []),
       ...(withSummary ? ["summary"] : []),
       ...(withTableBill ? ["tableBill"] : []),
       ...(withCapabilities ? ["canRecordCardMachinePayment", "canViewPayments"] : []),
@@ -1111,6 +1115,11 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
           ? null
           : reference(item.diningSessionReference),
       ...(withGuestStart && item.startedByGuest === true ? { startedByGuest: true as const } : {}),
+      ...(withSoldOutNow
+        ? item.soldOutNow === true
+          ? { soldOutNow: true as const }
+          : fail()
+        : {}),
       submittedAt,
       observedAt,
       initialBatchReference: reference(item.initialBatchReference),
@@ -1535,8 +1544,12 @@ export function parseCurrentOrderDetail(value: unknown, orderReference: string) 
     // WP-2423 DEC-ALCOHOL: a line that contains alcohol says so (absent otherwise).
     const ageCheck =
       value !== null && typeof value === "object" && Object.hasOwn(value, "ageCheck");
+    // WP-2423 (M23): sold out or off the menu here since it was ordered (absent otherwise).
+    const withUnavailable =
+      value !== null && typeof value === "object" && Object.hasOwn(value, "unavailableNow");
     const item = exact(value, [
       ...(ageCheck ? ["ageCheck"] : []),
+      ...(withUnavailable ? ["unavailableNow"] : []),
       "orderItemReference",
       "orderBatchReference",
       "name",
@@ -1590,6 +1603,11 @@ export function parseCurrentOrderDetail(value: unknown, orderReference: string) 
       quantity: item.quantity,
       customerNote: item.customerNote === null ? null : text(item.customerNote, 2000),
       ageCheck: item.ageCheck === true,
+      ...(withUnavailable
+        ? ["SoldOut", "Hidden", "ChoiceSoldOut"].includes(String(item.unavailableNow))
+          ? { unavailableNow: item.unavailableNow as "SoldOut" | "Hidden" | "ChoiceSoldOut" }
+          : fail()
+        : {}),
       unitPrice: money(item.unitPrice),
       subtotal: money(item.subtotal),
       discount: money(item.discount),

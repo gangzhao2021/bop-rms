@@ -1,4 +1,4 @@
-import { systemText, displayLocale, t, saidTable } from "./i18n/i18n.js";
+import { systemText, displayLocale, listSeparator, t, saidTable } from "./i18n/i18n.js";
 import { formatContactPhone } from "./contact-phone.js";
 import { AutomaticRefundLateNotice, KitchenReleaseNotice } from "./KitchenReleaseNotice.js";
 import { useRoundPhones, WithRoundPhones } from "./TablePhones.js";
@@ -263,6 +263,15 @@ export interface OrderLineRounds {
   readonly phones?: ReadonlyMap<string, number | null> | undefined;
 }
 /** WP-2423 OPS-ORDER-DETAIL: what was ordered — items with options and notes, and the totals. */
+/** WP-2423 (M23): why a line can't be made as ordered now, in staff words. */
+export function soldOutNowText(reason: "SoldOut" | "Hidden" | "ChoiceSoldOut"): string {
+  return reason === "SoldOut"
+    ? t("Sold out now")
+    : reason === "Hidden"
+      ? t("Off the menu now")
+      : t("A choice is sold out now");
+}
+
 export function CurrentOrderLines({
   lines,
   refundCheck,
@@ -371,6 +380,12 @@ export function CurrentOrderLines({
             {t("Alcohol: check ID if the guest looks under 19")}
           </span>
         ) : null}
+        {item.unavailableNow !== undefined ? (
+          // WP-2423 (M23): sold out or off the menu here since the guest ordered it.
+          <span className="order-line-sold-out" data-tier="warning">
+            {soldOutNowText(item.unavailableNow)}
+          </span>
+        ) : null}
         {item.customerNote !== null ? (
           <span className="order-line-note">
             {t("Note: {customerNote}", { customerNote: item.customerNote })}
@@ -428,8 +443,18 @@ export function CurrentOrderLines({
       )}
     </li>
   );
+  const soldOutDishes = lines.items.filter((item) => item.unavailableNow !== undefined);
   return (
     <section className="order-lines" aria-label={t("Items ordered")}>
+      {soldOutDishes.length > 0 ? (
+        // WP-2423 (M23): the guest paid first; staff decide. Nothing is refunded by itself.
+        <p className="order-sold-out-guidance" role="note">
+          {t(
+            "This guest ordered before {dish} sold out. Offer a swap, or cancel that dish with a refund (reason: sold out).",
+            { dish: soldOutDishes.map((item) => item.name).join(listSeparator()) },
+          )}
+        </p>
+      ) : null}
       {rounds === undefined ? (
         <>
           <h3>{t("Items")}</h3>
@@ -1713,6 +1738,12 @@ function OrderStatusNotes({
       {counterAwaitingCardMachine(order, now ?? Date.now()) && order.counter?.payBy ? (
         <span className="order-accept-by" data-tier={counterPayByTier(order.counter.payBy, now)}>
           {counterPayByText(order.counter.payBy, timeZone, now)}
+        </span>
+      ) : null}
+      {order.soldOutNow === true ? (
+        // WP-2423 (M23): a dish in it sold out or came off the menu since it was ordered.
+        <span className="order-counter-outage" data-tier="warning">
+          {t("Has a dish sold out now")}
         </span>
       ) : null}
       {order.heldStock !== null ? (
