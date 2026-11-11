@@ -539,13 +539,15 @@ it.each([false, true])(
           assert.equal(wireItem.pricing.optionPrices[0].chargedQuantity, "4");
           assert.deepEqual(decodeConfiguredOrderItemSnapshot(wireItem), transactionItems[0]);
           // Owner #26 (DEC-PRICE-HOLD): another tap prices the same Cart version while its Quote is
-          // held: the confirmed Quote is answered again, nothing is priced, attached or audited.
+          // held: the confirmed Quote is answered again, nothing is recorded, attached or audited.
+          // WP-2423 batch 8 (DEC-PRICE-HOLD §2, 6d781342): today's price is worked out once, never
+          // recorded, so a cut made inside the hold is passed on; at the same price it is held.
           const heldCalls = candidateCalls;
           const heldCounts = await counts();
           const held = await service.attach({ ...command, operationReference: id(909) });
           assert.equal(held.status, "Held");
           assert.deepEqual(held.attachment, original);
-          assert.equal(candidateCalls, heldCalls);
+          assert.equal(candidateCalls, heldCalls + 1);
           assert.deepEqual(await counts(), heldCounts);
           // The steps below each price the Cart anew (as after a hold or a changed dish).
           answerHeldQuote = false;
