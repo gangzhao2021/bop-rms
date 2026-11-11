@@ -68,6 +68,7 @@ export interface CartRecentRound {
  * pay-later: its send is not confirmed yet); WaitingForStaff is a guest round held for staff.
  * Cancelled was closed by the payment window (nobody on staff touched it); StaffDeclined was
  * cancelled by staff before it was sent; StaffCancelled was cancelled by staff after it was sent.
+ * PaidNotMade was charged but nothing in it could be made, so the payment is being refunded.
  */
 export type CartRoundPaymentState =
   | "AwaitingPayment"
@@ -76,7 +77,8 @@ export type CartRoundPaymentState =
   | "PayLater"
   | "Cancelled"
   | "StaffDeclined"
-  | "StaffCancelled";
+  | "StaffCancelled"
+  | "PaidNotMade";
 
 /** WP-2423 M03: an order the guest already placed from this cart (its store number for display). */
 export interface CartPlacedOrder {

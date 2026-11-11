@@ -664,6 +664,38 @@ it("WP-2423 M38: a table's rounds are newest first, each in its own state, and a
         [3, "Cancelled"],
         [2, "PayLater"],
       ]);
+      // Round 7: the payment window closed it as the guest's payment arrived, so it was paid with
+      // nothing it could still make. The guest was charged: PaidNotMade, never "wasn't paid".
+      const r7 = await round(7, 11);
+      await withoutTriggers(async () => {
+        await unpaidCancellation(r7, 7, "CHECKOUT_DEADLINE_REACHED");
+        await insert("order_payment_disposition_record", {
+          ...scope,
+          disposition_id: x(1800),
+          order_id: first.order,
+          order_batch_id: r7.batch,
+          submission_id: r7.submission,
+          payment_transaction_id: x(1801),
+          payment_intent_id: x(1802),
+          payment_attempt_id: x(1803),
+          payment_event_id: x(1804),
+          source_checkpoint: x(1805),
+          correlation_id: x(1806),
+          source_version: 1,
+          source_digest: digest("a"),
+          evaluated_at: minutes(r7.minute + 1),
+          disposition: "PaidWithoutFulfillableOrder",
+          reason: "SubmissionCancelled",
+          kitchen_release_disposition: "Blocked",
+        });
+      });
+      assert.deepEqual(await states(minutes(16)), [
+        [7, "PaidNotMade"],
+        [6, "StaffCancelled"],
+        [5, "StaffCancelled"],
+        [4, "StaffDeclined"],
+        [3, "Cancelled"],
+      ]);
       // With another Store selected nothing is listed.
       assert.deepEqual(
         await createPostgresCartOrderLookup(runner, {

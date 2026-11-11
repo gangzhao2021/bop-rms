@@ -151,8 +151,20 @@ function roundWaitingForStaff(round: number, byThisPhone: boolean): string {
 function roundNotOrdered(
   round: number,
   payLater: boolean,
-  paymentState: "Cancelled" | "StaffDeclined" | "StaffCancelled",
+  paymentState: "Cancelled" | "StaffDeclined" | "StaffCancelled" | "PaidNotMade",
+  byThisPhone: boolean,
 ): string {
+  // WP-2423: the guest was charged, so never "wasn't paid": the payment is being refunded.
+  if (paymentState === "PaidNotMade")
+    return byThisPhone
+      ? t(
+          "Round {round} was paid but couldn’t be made, so your payment is being refunded to your original payment method. Ask staff if you have questions.",
+          { round: String(round) },
+        )
+      : t(
+          "Round {round} from someone at your table was paid but couldn’t be made. Their payment is being refunded.",
+          { round: String(round) },
+        );
   if (paymentState === "StaffDeclined")
     return t(
       "Staff didn’t send round {round} to the kitchen. Add the dishes again to order them, or ask staff.",
@@ -184,9 +196,10 @@ function roundStillOpen(
   if (
     paymentState === "Cancelled" ||
     paymentState === "StaffDeclined" ||
-    paymentState === "StaffCancelled"
+    paymentState === "StaffCancelled" ||
+    paymentState === "PaidNotMade"
   )
-    return roundNotOrdered(round, payLater, paymentState);
+    return roundNotOrdered(round, payLater, paymentState, byThisPhone);
   return null;
 }
 

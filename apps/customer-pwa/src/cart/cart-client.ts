@@ -210,7 +210,8 @@ function recentRounds(value: unknown): readonly CartRecentRound[] {
         paymentState !== "PayLater" &&
         paymentState !== "Cancelled" &&
         paymentState !== "StaffDeclined" &&
-        paymentState !== "StaffCancelled"
+        paymentState !== "StaffCancelled" &&
+        paymentState !== "PaidNotMade"
       )
         throw new CartClientError("cart_service_unavailable");
       return Object.freeze({

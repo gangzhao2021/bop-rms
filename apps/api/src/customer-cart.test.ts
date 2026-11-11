@@ -376,7 +376,12 @@ describe("WP-1205 Customer Cart HTTP contract", () => {
     expect(response.status).toBe(200);
     expect(((await response.json()) as CustomerCartView).cart.recentRounds).toEqual(recentRounds);
     // M38: who cancelled a round is passed on, so guests read "staff" only when staff did it.
-    for (const paymentState of ["Cancelled", "StaffDeclined", "StaffCancelled"] as const) {
+    for (const paymentState of [
+      "Cancelled",
+      "StaffDeclined",
+      "StaffCancelled",
+      "PaidNotMade",
+    ] as const) {
       const rounds = [{ ...recentRounds[0], paymentState }];
       port.result = {
         status: "Found",

@@ -1791,4 +1791,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Dishes you don’t choose stay for the others at your table. Amounts include tax.":
     "没选的菜留给同桌其他人付。金额含税。",
   "Chosen: {amount}": "已选：{amount}",
+  "Round {round} was paid but couldn’t be made, so your payment is being refunded to your original payment method. Ask staff if you have questions.":
+    "第 {round} 轮已付款，但做不了，款项正在原路退回。有问题请问店员。",
+  "Round {round} from someone at your table was paid but couldn’t be made. Their payment is being refunded.":
+    "同桌有人付款的第 {round} 轮做不了，款项正在退回。",
 });

@@ -573,7 +573,9 @@ export async function readLatestCartOrder(
  * WP-2423 M38: with where its payment stands, from Ordering's own records — StaffDeclined (staff
  * cancelled it before it was sent: STAFF_CANCELLED_UNPAID, which is also how a round held for staff
  * is declined), Cancelled (closed by the payment window — deadline, payment not started or not
- * completed — or paid with nothing it could still make: nobody on staff touched it),
+ * completed: nobody on staff touched it), PaidNotMade (charged, but with nothing it could still
+ * make — closed by the window as the payment arrived, or cancelled meanwhile — so the payment
+ * is being refunded; checked first, since the guest was charged whatever else happened),
  * StaffCancelled (staff cancelled it after it was sent: the whole round, or every one of its
  * dishes taken off), PayLater (sent to the
  * kitchen to be paid at the end), Paid, WaitingForStaff (a guest round held for staff that no one
@@ -590,7 +592,8 @@ export type RecentCartRoundPaymentState =
   | "PayLater"
   | "Cancelled"
   | "StaffDeclined"
-  | "StaffCancelled";
+  | "StaffCancelled"
+  | "PaidNotMade";
 const recentCartRoundPaymentStates: readonly RecentCartRoundPaymentState[] = Object.freeze([
   "AwaitingPayment",
   "WaitingForStaff",
@@ -599,6 +602,7 @@ const recentCartRoundPaymentStates: readonly RecentCartRoundPaymentState[] = Obj
   "Cancelled",
   "StaffDeclined",
   "StaffCancelled",
+  "PaidNotMade",
 ]);
 export interface RecentCartRound {
   readonly roundNumber: number;
@@ -636,6 +640,9 @@ export async function readRecentCartRounds(
            AND i.order_batch_id=r.order_batch_id), '{}') AS "cartItemReferences",
        r.payment_state AS "paymentState"
      FROM (SELECT q.*, CASE
+             WHEN EXISTS (SELECT 1 FROM rms_ordering.order_payment_disposition_record x
+               WHERE x.brand_id=$1 AND x.store_id=$2 AND x.order_batch_id=q.order_batch_id
+                 AND x.disposition='PaidWithoutFulfillableOrder') THEN 'PaidNotMade'
              WHEN EXISTS (SELECT 1 FROM rms_ordering.order_batch_checkout_cancellation x
                WHERE x.brand_id=$1 AND x.store_id=$2 AND x.order_batch_id=q.order_batch_id
                  AND x.reason_code='STAFF_CANCELLED_UNPAID') THEN 'StaffDeclined'
@@ -653,9 +660,6 @@ export async function readRecentCartRounds(
              WHEN EXISTS (SELECT 1 FROM rms_ordering.order_pay_later_confirmation x
                WHERE x.brand_id=$1 AND x.store_id=$2 AND x.order_batch_id=q.order_batch_id)
                THEN 'PayLater'
-             WHEN EXISTS (SELECT 1 FROM rms_ordering.order_payment_disposition_record x
-               WHERE x.brand_id=$1 AND x.store_id=$2 AND x.order_batch_id=q.order_batch_id
-                 AND x.disposition='PaidWithoutFulfillableOrder') THEN 'Cancelled'
              WHEN EXISTS (SELECT 1 FROM rms_ordering.order_payment_acceptance_wait x
                WHERE x.brand_id=$1 AND x.store_id=$2 AND x.order_batch_id=q.order_batch_id)
                OR EXISTS (SELECT 1 FROM rms_ordering.order_payment_disposition_record x

@@ -290,7 +290,12 @@ describe("safe shared Dining Cart display", () => {
     });
     expect((await unknownState.read(request))?.cart).not.toHaveProperty("recentRounds");
     // M38: who cancelled a round is passed on, so guests read "staff" only when staff did it.
-    for (const paymentState of ["Cancelled", "StaffDeclined", "StaffCancelled"] as const) {
+    for (const paymentState of [
+      "Cancelled",
+      "StaffDeclined",
+      "StaffCancelled",
+      "PaidNotMade",
+    ] as const) {
       const cancelled = createCustomerDiningCartViewQuery({
         reads: { read: base.read },
         stores: { getPublicStore: async () => profile() },

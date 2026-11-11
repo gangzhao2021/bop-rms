@@ -422,7 +422,12 @@ it("WP-2423: carries the wait while another guest at the table is checking out",
 });
 
 it("WP-2423 M38: reads who cancelled a table round, so staff are named only when they did it", async () => {
-  for (const paymentState of ["Cancelled", "StaffDeclined", "StaffCancelled"] as const) {
+  for (const paymentState of [
+    "Cancelled",
+    "StaffDeclined",
+    "StaffCancelled",
+    "PaidNotMade",
+  ] as const) {
     const view = cart();
     const table = {
       ...view,

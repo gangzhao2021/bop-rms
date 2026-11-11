@@ -211,4 +211,13 @@ describe("WP-2423 same-table-ordering: what happened at the table while this pho
         "Staff cancelled round 3. Ask staff if you still want these dishes.",
       );
   });
+  it("a round paid but with nothing it could make is never 'wasn't paid': its payment is refunded", () => {
+    expect(checkoutText.tableCartSent(3, true, false, "PaidNotMade")).toBe(
+      "Round 3 was paid but couldn’t be made, so your payment is being refunded to your original payment method. Ask staff if you have questions.",
+    );
+    expect(cartText.line.roundSentByTable(3, "PaidNotMade", false)).toBe(
+      "Round 3 from someone at your table was paid but couldn’t be made. Their payment is being refunded.",
+    );
+    expect(cartText.line.roundSentByThisPhone(3, "PaidNotMade", false)).not.toMatch(/wasn’t paid/u);
+  });
 });

@@ -125,7 +125,9 @@ export type CustomerCartRoundPaymentState =
   | "PayLater"
   | "Cancelled"
   | "StaffDeclined"
-  | "StaffCancelled";
+  | "StaffCancelled"
+  /** WP-2423: charged, but nothing in it could be made; the payment is being refunded. */
+  | "PaidNotMade";
 const roundPaymentStates: ReadonlySet<string> = new Set([
   "AwaitingPayment",
   "WaitingForStaff",
@@ -134,6 +136,7 @@ const roundPaymentStates: ReadonlySet<string> = new Set([
   "Cancelled",
   "StaffDeclined",
   "StaffCancelled",
+  "PaidNotMade",
 ]);
 /** WP-2423 (same-table-ordering): Ordering's own rounds sent from a table Cart. */
 export interface CustomerCartRecentRoundsPort {
