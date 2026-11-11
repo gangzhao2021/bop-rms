@@ -20,12 +20,16 @@ import { createInternalOrderCompletion } from "./pilot-order-completion.mjs";
 import { createInternalOrderConfirmation } from "./pilot-order-confirmation.mjs";
 import { createInternalPickupProof } from "./pilot-pickup-proof.mjs";
 import { createInternalReceipt } from "./pilot-receipt.mjs";
-import { refreshInternalReceiptObservations } from "./pilot-receipt-observations.mjs";
+import {
+  refreshInternalOrderReceiptObservations,
+  refreshInternalReceiptObservations,
+} from "./pilot-receipt-observations.mjs";
 // DEC-STRIPE-PILOT-WIRING: the configured Provider (Stripe test mode or the TEST-ONLY simulator).
 import { createPilotPaymentProvider as createInternalSimulatedProvider } from "./pilot-stripe-provider.mjs";
 import { createInternalKitchenQueue } from "./pilot-kitchen-queue.mjs";
 import { createInternalDiningCheckoutExpiryWorkload } from "./pilot-dining-checkout-expiry.mjs";
 import { createInternalTableOnlineRefundWorkload } from "./pilot-table-online-refund.mjs";
+import { createInternalOrdinaryRefundFollowThroughWorkload } from "./pilot-ordinary-refund-follow-through.mjs";
 import { createInternalGuestTableCloseWorkload } from "./pilot-guest-table-close.mjs";
 import { createInternalCartExpiryWorkload } from "./pilot-cart-expiry.mjs";
 import { createInternalPaidWithoutFulfillableInventoryWorkload } from "./pilot-paid-without-fulfillable-inventory.mjs";
@@ -63,10 +67,12 @@ const factories = {
   createInternalPickupProof,
   createInternalReceipt,
   refreshInternalReceiptObservations,
+  refreshInternalOrderReceiptObservations,
   createInternalSimulatedProvider,
   createInternalKitchenQueue,
   createInternalDiningCheckoutExpiryWorkload,
   createInternalTableOnlineRefundWorkload,
+  createInternalOrdinaryRefundFollowThroughWorkload,
   createInternalGuestTableCloseWorkload,
   createInternalCartExpiryWorkload,
   createInternalPaidWithoutFulfillableInventoryWorkload,
@@ -206,6 +212,30 @@ export function composeConfiguredBusinessWorker({
       createInternalTableOnlineRefundWorkload: (r, observer) =>
         f.createInternalTableOnlineRefundWorkload(r, observer, {
           createSimulatedProvider: provider,
+        }),
+      // WP-2423 M16: sends and confirms ordinary refunds a person prepared (TEST-ONLY simulator).
+      createInternalOrdinaryRefundFollowThroughWorkload: (r, observer) =>
+        f.createInternalOrdinaryRefundFollowThroughWorkload(r, observer, {
+          ...account,
+          loadRoleMapping: async () => (await installation.loadMerchantRuntime()).roleMapping,
+          refreshObservations: (resources, orderReference) =>
+            f.refreshInternalOrderReceiptObservations(resources, orderReference, async () => true, {
+              ...account,
+              createSimulatedProvider: provider,
+            }),
+          provider: Object.fromEntries(
+            ["refundPayment", "lookupRefund"].map((operation) => [
+              operation,
+              async (request) => {
+                const simulator = await provider();
+                try {
+                  return await simulator.adapter[operation](request);
+                } finally {
+                  simulator.close();
+                }
+              },
+            ]),
+          ),
         }),
       // WP-2423 DEC-DINING-GUEST-TABLE-START: the System frees guest-started tables.
       createInternalGuestTableCloseWorkload: (r, observer) =>

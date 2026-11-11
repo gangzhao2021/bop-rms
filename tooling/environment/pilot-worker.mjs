@@ -165,6 +165,16 @@ export async function createInternalWorker(resources, observers = {}, options = 
         observers.pickupCapacitySchedule,
       ),
       createInternalTableOnlineRefundWorkload(resources, observers.tableOnlineRefund),
+      // WP-2423 M16 (DEC-OWNER-DEFAULTS-2026-11-06 item 3): always on; refunds a person prepared
+      // are sent and confirmed even when their page closed or the send after approval failed.
+      ...(dependencies.createInternalOrdinaryRefundFollowThroughWorkload === undefined
+        ? []
+        : [
+            dependencies.createInternalOrdinaryRefundFollowThroughWorkload(
+              resources,
+              observers.ordinaryRefundFollowThrough,
+            ),
+          ]),
       // WP-2423 DEC-DINING-GUEST-TABLE-START: always on, so a started table is never orphaned.
       createInternalGuestTableCloseWorkload(resources, observers.guestTableClose),
       ...(options.cartExpiry === true ? [createInternalCartExpiryWorkload(resources)] : []),

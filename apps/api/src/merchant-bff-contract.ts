@@ -493,7 +493,15 @@ export interface MerchantBffRouterOptions {
   readonly ordinaryRefundItems?: ReturnType<typeof createMerchantOrdinaryRefundItems>;
   readonly ordinaryRefundRequest?: (
     ...args: Parameters<ReturnType<typeof createMerchantOrdinaryRefundRequest>>
-  ) => ReturnType<ReturnType<typeof createMerchantOrdinaryRefundRequest>>;
+  ) => Promise<
+    Awaited<ReturnType<ReturnType<typeof createMerchantOrdinaryRefundRequest>>> & {
+      /** WP-2423 M16: legs the server prepared with the request (absent: none). */
+      readonly prepared?: readonly {
+        readonly paymentAttemptReference: string;
+        readonly operationReference: string;
+      }[];
+    }
+  >;
   readonly taskInbox?: ReturnType<typeof createMerchantTaskInboxRead>;
   readonly pickupQuery?: ReturnType<typeof createMerchantPickupQuery>;
   readonly pickupProof?: ReturnType<typeof createMerchantPickupProof>;

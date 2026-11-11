@@ -22,6 +22,7 @@ function setup(
     attempts?: readonly string[];
     finalState?: string;
     sendAfterRequest?: boolean;
+    prepared?: RefundRunRequest["prepared"];
   } = {},
 ) {
   let next = 100;
@@ -32,6 +33,7 @@ function setup(
     paymentAttemptReferences: options.attempts ?? [id(4)],
     approvalRequired: options.approvalRequired ?? false,
     amountMinor: "1130",
+    ...(options.prepared === undefined ? {} : { prepared: options.prepared }),
   };
   const calls: string[] = [];
   const ports = {
@@ -101,6 +103,18 @@ describe("WP-2423 item 6: one confirmation records, prepares, sends and checks a
     // A finished run does nothing more.
     await expect(run.run(signal())).resolves.toBe(outcome);
     expect(calls).toHaveLength(5);
+  });
+
+  it("WP-2423 M16: a payment the server prepared with the request is only sent, under that operation", async () => {
+    const { run, ports, calls } = setup({
+      attempts: [id(4), id(5)],
+      prepared: [{ paymentAttemptReference: id(4), operationReference: id(60) }],
+    });
+    expect((await run.run(signal())).kind).toBe("Refunded");
+    expect(ports.prepare).toHaveBeenCalledTimes(1);
+    expect(calls.slice(0, 2)).toEqual(["request", "prepare:" + id(5)]);
+    expect(calls).toContain("send:" + id(60));
+    expect(calls).toContain("check:" + id(60));
   });
 
   it("says the refund is waiting for the card provider's answer when it is not confirmed", async () => {

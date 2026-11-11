@@ -22,6 +22,9 @@ export function createOrdinaryRefundWorkload<
   readonly pageSize: number;
   readonly pollIntervalMs: number;
   readonly drainDeadlineMs: number;
+  /** WP-2423 M16: in the pilot worker a failed cycle retries; its health is reported. */
+  readonly supervision?: Parameters<typeof createOutboxWorkload>[0]["supervision"];
+  readonly onSnapshot?: Parameters<typeof createOutboxWorkload>[0]["onSnapshot"];
 }) {
   if (!Number.isInteger(options.pageSize) || options.pageSize < 1 || options.pageSize > 100)
     throw new TypeError("ORDINARY_REFUND_WORKLOAD_CONFIG_INVALID");
@@ -31,6 +34,8 @@ export function createOrdinaryRefundWorkload<
   const workload = createOutboxWorkload({
     pollIntervalMs: options.pollIntervalMs,
     drainDeadlineMs: options.drainDeadlineMs,
+    ...(options.supervision === undefined ? {} : { supervision: options.supervision }),
+    ...(options.onSnapshot === undefined ? {} : { onSnapshot: options.onSnapshot }),
     dispatcher: {
       async runOnce() {
         if (stopping) return 0;

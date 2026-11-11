@@ -93,6 +93,7 @@ import { createMerchantOrdinaryRefundRequest } from "../../../apps/api/src/merch
 import { createMerchantOrdinaryRefundApproval } from "../../../apps/api/src/merchant-ordinary-refund-approval.ts";
 import { createMerchantOrdinaryRefundItems } from "../../../apps/api/src/merchant-ordinary-refund-items.ts";
 import { createMerchantOrdinaryRefundCommand } from "../../../apps/api/src/merchant-ordinary-refund-command.ts";
+import { createOrdinaryRefundFollowThrough } from "../../../tooling/environment/pilot-ordinary-refund-follow-through.mjs";
 import { createMerchantOrdinaryRefundSendCommand } from "../../../apps/api/src/merchant-ordinary-refund-send-command.ts";
 import { createOriginalReceiptIssuance } from "../../../apps/api/src/original-receipt-issuance.ts";
 import { createRefundReceiptIssuance } from "../../../apps/api/src/refund-receipt-issuance.ts";
@@ -3132,6 +3133,144 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
           ?.options.some((option) => option.quantity === 1),
         "the staff app reads the order with its chosen dishes",
       );
+      // ── WP-2423 M16 (DEC-OWNER-DEFAULTS-2026-11-06 item 3): the system sends a refund once it is
+      // approved. Round 3's refund is approved and prepared, but its send never happens (the
+      // approver's page closed, the background send failed). The business worker's follow-through,
+      // with no session, sends it under the restricted API role: the recorded requester, approval
+      // and executor are re-checked through Membership, Permission and MFA, and it is sent once.
+      const refundable3 = (
+        await refundItems({ ...session("manager"), query: { orderReference } })
+      ).items.filter(
+        (item) =>
+          item.orderBatchReference === R3.batch.orderBatchReference && item.unclaimedQuantity > 0,
+      );
+      assert.ok(refundable3.length > 0, "round 3 is refundable");
+      const claimVersion3 = (
+        await refundItems({ ...session("manager"), query: { orderReference } })
+      ).claimVersion;
+      const round3Refund = {
+        orderReference,
+        requestReference: fresh(),
+        operationReference: fresh(),
+        expectedClaimVersion: claimVersion3,
+        reasonCode: "QUALITY_ISSUE",
+        items: refundable3.map((item) => ({
+          orderBatchReference: item.orderBatchReference,
+          orderItemReference: item.orderItemReference,
+          quantity: item.unclaimedQuantity,
+        })),
+      };
+      // Both stepped up minutes ago for round 1's refund (recent MFA lasts 15 minutes).
+      const recorded3 = await request({ ...session("manager"), command: round3Refund });
+      assert.equal(recorded3.status, "Created");
+      const sendsBefore = providerSends;
+      let lostSends = 0;
+      const approveSendLost = createMerchantOrdinaryRefundApproval({
+        persistence,
+        authentication,
+        resolveConfiguration: escalatedConfiguration,
+        prepare,
+        send: async () => {
+          lostSends++;
+          throw new Error("SYNTHETIC_SEND_LOST");
+        },
+        sendInBackground: true,
+        retentionPolicyCode: "FINANCIAL_COMPLIANCE",
+        retentionPolicyVersion: 1,
+      });
+      let leg3 = null;
+      if (recorded3.approvalRequired === true) {
+        const approved3 = await approveSendLost({
+          ...session("owner"),
+          command: {
+            orderReference,
+            requestReference: round3Refund.requestReference,
+            approvalReference: fresh(),
+          },
+        });
+        assert.deepEqual(
+          approved3.payments.map((p) => p.state),
+          ["Sending"],
+        );
+        leg3 = approved3.payments[0].operationReference;
+        await delay(50);
+        assert.equal(lostSends, 1);
+      } else {
+        leg3 = fresh();
+        await prepare({
+          ...session("manager"),
+          command: {
+            orderReference,
+            requestReference: round3Refund.requestReference,
+            paymentAttemptReference: pay3.attempt,
+            operationReference: leg3,
+            auditReference: fresh(),
+            approvalReference: null,
+          },
+        });
+      }
+      assert.equal(providerSends, sendsBefore, "nothing reached the card company yet");
+      const followThrough = createOrdinaryRefundFollowThrough({
+        scope: ownerScope,
+        transactions: transactions(api),
+        now,
+        validUntil: () => time(minutes(600)),
+        reference: fresh,
+        active: () => true,
+        store: {
+          timeZone: storeOptions.timeZone,
+          configurationType: storeOptions.configurationType,
+          purposeCode: storeOptions.purposeCode,
+          requiredLiveGateRequirementCodes: storeOptions.requiredLiveGateRequirementCodes,
+        },
+        providerAccountReference: provider,
+        environment: "Test",
+        provider: {
+          refundPayment: async (input) => {
+            providerSends++;
+            return stripe.refundPayment(input);
+          },
+          lookupRefund: (input) => stripe.lookupRefund(input),
+        },
+        loadRoleMapping: async () => standardRefundRoleMapping,
+        // The journey's receipts read the captures' observations from their capture.
+        receiptFreshAfter: () => paid1At,
+      });
+      const dueSends = (
+        await followThrough.discover({ afterOperationReference: null, limit: 100 })
+      ).candidates.filter((candidate) => candidate.workKind === "Dispatch");
+      assert.deepEqual(
+        dueSends.map((candidate) => candidate.operationReference),
+        [leg3],
+      );
+      const receiptVersions = async () =>
+        (
+          await admin.query(
+            "SELECT count(*)::int AS n FROM rms_ordering.digital_receipt_record WHERE order_id=$1",
+            [orderReference],
+          )
+        ).rows[0].n;
+      const versionsBefore = await receiptVersions();
+      await followThrough.dispatch(dueSends[0]);
+      assert.equal(providerSends, sendsBefore + 1, "sent once by the system");
+      // The guest's receipt gains its refund version, as after a person's Send.
+      assert.equal(await receiptVersions(), versionsBefore + 1);
+      // A second pass finds it sent: only its result is checked, nothing is sent again.
+      const again = (
+        await followThrough.discover({ afterOperationReference: null, limit: 100 })
+      ).candidates.filter((candidate) => candidate.operationReference === leg3);
+      assert.deepEqual(
+        again.map((candidate) => candidate.workKind),
+        ["Reconcile"],
+      );
+      const checked = await followThrough.reconcile(again[0]);
+      assert.equal(checked.status, "AlreadyConfirmed");
+      await followThrough.afterReconcile(again[0], checked);
+      assert.equal(providerSends, sendsBefore + 1);
+      const position3After = await positionOf(pay3);
+      assert.equal(position3After.unsentMinor, 0n);
+      assert.equal(position3After.pendingMinor, 0n);
+      assert.ok(position3After.confirmedMinor > 0n, "the guest's card is refunded");
     } finally {
       vi.unstubAllEnvs();
       signedIn.cookies = new Set();

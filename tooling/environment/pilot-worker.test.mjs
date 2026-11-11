@@ -22,7 +22,7 @@ const workload = () => ({
   completion: new Promise(() => undefined),
 });
 
-async function composeWorker() {
+async function composeWorker(extra = {}) {
   const contexts = [];
   let sequence = 0;
   const resources = {
@@ -71,6 +71,7 @@ async function composeWorker() {
       createInternalPickupCapacityScheduleWorkload: workload,
       createInternalTableOnlineRefundWorkload: workload,
       createInternalGuestTableCloseWorkload: workload,
+      ...extra,
     },
   );
   return { worker, contexts };
@@ -138,4 +139,16 @@ test("WP-2423 M04: the payment-wait health asks for attention while a paid wait 
   expect(paymentWaitHealth({ ...snapshot, state: "idle" }, 2).state).toBe("attention_required");
   // Stopping or failed workloads keep their own state.
   expect(paymentWaitHealth({ ...snapshot, state: "failed" }, 1).state).toBe("failed");
+});
+
+test("WP-2423 M16: the business worker always runs the refund follow-through, with its own health", async () => {
+  setEnvironment("development", undefined);
+  const made = [];
+  await composeWorker({
+    createInternalOrdinaryRefundFollowThroughWorkload: (resources, observer) => {
+      made.push([resources.scope.storeReference, observer]);
+      return workload();
+    },
+  });
+  expect(made).toEqual([[storeReference, undefined]]);
 });

@@ -1,3 +1,4 @@
+import { withServerRefundPreparation } from "../../apps/api/dist/merchant-ordinary-refund-request-preparation.js";
 import { createMerchantStoreOpening } from "../../apps/api/dist/merchant-store-opening.js";
 import {
   createServedStoreTarget,
@@ -1671,7 +1672,9 @@ export async function createInternalMerchant(
           newReference: () => resources.credentials.reference(),
         }),
       ),
-      ordinaryRefundRequest,
+      // WP-2423 M16: a refund needing no approval is prepared with its request (the business
+      // worker sends what is prepared, so a closed page no longer leaves it unsent).
+      ordinaryRefundRequest: withServerRefundPreparation(ordinaryRefundRequest, ordinaryRefund),
       cardMachineOrdinaryRefund,
       ordinaryRefundApproval,
       ordinaryRefundApprovals,

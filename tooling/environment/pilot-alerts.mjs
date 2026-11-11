@@ -31,6 +31,7 @@ const COMPONENT_NAMES = Object.freeze({
   diningCheckoutExpiry: "table checkout expiry",
   tableOnlineRefund: "refunds to guests' cards from table payments",
   guestTableClose: "freeing tables guests started",
+  ordinaryRefundFollowThrough: "sending approved refunds to guests' cards",
   contactRetention: "customer contact deletion",
   webhookEvidenceRetention: "old card payment message deletion",
   pickupCapacitySchedule: "pickup times",

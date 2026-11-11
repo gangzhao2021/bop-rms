@@ -28,6 +28,11 @@ export interface RefundRunRequest {
   readonly operationReference: string;
   readonly paymentAttemptReferences: readonly string[];
   readonly approvalRequired: boolean | null;
+  /** WP-2423 M16: payments the server prepared with the request (their operations are sent). */
+  readonly prepared?: readonly {
+    readonly paymentAttemptReference: string;
+    readonly operationReference: string;
+  }[];
 }
 
 /** One payment's refund leg: its stable command references and how far it got. */
@@ -175,7 +180,14 @@ export function createRefundRun<R extends RefundRunRequest>(options: RefundRunOp
               : options.sendAfterRequest
                 ? null
                 : "RecordedOnly";
-          legs = recorded.paymentAttemptReferences.map((reference) => leg(reference, null, null));
+          legs = recorded.paymentAttemptReferences.map((reference) =>
+            leg(
+              reference,
+              null,
+              recorded.prepared?.find((value) => value.paymentAttemptReference === reference)
+                ?.operationReference ?? null,
+            ),
+          );
         }
         if (stopAfterRequest) return (finished = { kind: stopAfterRequest, request });
         const currentRequest = requestReference,

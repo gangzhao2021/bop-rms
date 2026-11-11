@@ -54,6 +54,13 @@ function resolveRuntimeOptions(options: {
   };
 }
 
+/**
+ * WP-2423 M16 (DEC-OWNER-DEFAULTS-2026-11-06 item 3): the same runtime options for the system's
+ * follow-through sender, which sends a refund a person already prepared (the recorded requester,
+ * executor and any approval are re-checked through their owners at dispatch).
+ */
+export const createMerchantOrdinaryRefundRuntimeOptions = resolveRuntimeOptions;
+
 export function createMerchantOrdinaryRefundOperation(
   options: Parameters<typeof resolveRuntimeOptions>[0],
 ) {

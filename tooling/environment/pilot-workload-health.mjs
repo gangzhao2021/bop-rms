@@ -274,6 +274,7 @@ export function pilotHealthComponents(
       diningCheckoutExpiry: "business-dining-checkout-expiry.health.json",
       tableOnlineRefund: "business-table-online-refund.health.json",
       guestTableClose: "business-guest-table-close.health.json",
+      ordinaryRefundFollowThrough: "business-ordinary-refund-follow-through.health.json",
       contactRetention: "business-contact-retention.health.json",
       webhookEvidenceRetention: "business-webhook-evidence-retention.health.json",
       pickupCapacitySchedule: "business-pickup-capacity-schedule.health.json",
