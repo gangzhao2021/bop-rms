@@ -306,3 +306,40 @@ it("DEC-DINE-IN-PAY-LATER: a paid table's summary carries its tip and cash round
   expect(body.session.summary.tableTip).toEqual({ amountMinor: "64", currencyCode: "CAD" });
   expect(body.session.summary.cashRounding).toEqual({ amountMinor: "-1", currencyCode: "CAD" });
 });
+
+it("M91/M41: sends each dish's progress and says a paid round is still waiting for the store", async () => {
+  const f = await setup();
+  const base = view();
+  const round = base.rounds[0];
+  const ramen = round?.items[0];
+  if (round === undefined || ramen === undefined) throw new Error("fixture");
+  f.read.mockResolvedValueOnce({
+    ...base,
+    rounds: [
+      {
+        ...round,
+        status: "Received",
+        awaitingStore: true,
+        items: [
+          { ...ramen, progress: "Making" },
+          { ...ramen, displayName: "Gyoza", progress: "Ready" },
+          { ...ramen, displayName: "Tea", cancelled: true },
+        ],
+      },
+    ],
+  });
+  const body = (await (await f.send()).json()) as {
+    session: { rounds: (Record<string, unknown> & { items: Record<string, unknown>[] })[] };
+  };
+  const sent = body.session.rounds[0];
+  expect(sent?.awaitingStore).toBe(true);
+  expect(sent?.items[0]).toMatchObject({ displayName: "Ramen", progress: "Making" });
+  expect(sent?.items[1]).toMatchObject({ displayName: "Gyoza", progress: "Ready" });
+  // A dish with no progress (cancelled, or a charge) carries no field, never a guess.
+  expect(sent?.items[2]).not.toHaveProperty("progress");
+  // A round that is not waiting for the store does not carry the field at all.
+  const plain = (await (await f.send()).json()) as {
+    session: { rounds: Record<string, unknown>[] };
+  };
+  expect(plain.session.rounds[0]).not.toHaveProperty("awaitingStore");
+});

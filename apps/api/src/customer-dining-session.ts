@@ -114,6 +114,8 @@ export class CustomerDiningSessionHandler {
             ...(round.waitingReason ? { waitingReason: round.waitingReason } : {}),
             ...(round.tea === true ? { tea: true } : {}),
             ...(round.charge === true ? { charge: true } : {}),
+            // M41: a paid round the store has not accepted yet ("Still waiting? Let staff know").
+            ...(round.awaitingStore === true ? { awaitingStore: true } : {}),
             items: round.items.map((item) => ({
               displayName: item.displayName,
               quantity: item.quantity,
@@ -126,6 +128,8 @@ export class CustomerDiningSessionHandler {
                 : { priceBeforeTax: money(item.priceBeforeTax) }),
               // WP-2423 Q26: only while the kitchen is making this item again (as on pickup).
               ...(item.beingRemade === true ? { beingRemade: true } : {}),
+              // M91: Waiting / Making / Ready / Served; absent for a cancelled dish or a charge.
+              ...(item.progress === undefined ? {} : { progress: item.progress }),
               // WP-2423 item 8 ③ (decision 13): the published menu item and options "Order
               // again" adds to this guest's own cart; public menu references only.
               ...(item.orderAgain === undefined
