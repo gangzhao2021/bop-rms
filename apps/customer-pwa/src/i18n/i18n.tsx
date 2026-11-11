@@ -17,11 +17,18 @@ export const CHINESE_LOCALE = "zh-Hans-CA";
 // the guest's language; LanguageRoot keeps it current afterwards.
 let current: CustomerLanguage = "en";
 
+/**
+ * Fills `{name}` values. A value that already ends with a period ("8:08 a.m.", as Canadian English
+ * writes a time) takes the place of the sentence's own period after it, so a sentence never ends
+ * "a.m.." (WP-2423 store-service-controls, v15 live check).
+ */
 function fill(text: string, values: Readonly<Record<string, string | number>> | undefined) {
   if (values === undefined) return text;
-  return text.replace(/\{([a-zA-Z][a-zA-Z0-9]*)\}/gu, (whole, name: string) =>
-    Object.hasOwn(values, name) ? String(values[name]) : whole,
-  );
+  return text.replace(/\{([a-zA-Z][a-zA-Z0-9]*)\}(\.(?!\.))?/gu, (whole, name: string, stop?: string) => {
+    if (!Object.hasOwn(values, name)) return whole;
+    const value = String(values[name]);
+    return stop !== undefined && !value.endsWith(".") ? value + stop : value;
+  });
 }
 
 // v15 2026-11-01: as on the staff screens, a table the owner named is said as they wrote it.

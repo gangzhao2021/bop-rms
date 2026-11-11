@@ -280,8 +280,9 @@ describe("WP-2423 store-service-controls (v15 M30/M34) the guest's own service",
       />,
     );
     expect(pickup).toContain(
-      `Online pickup ordering is paused until ${formatStoreLocalTime("19:45:00")}.`,
+      endSentence(`Online pickup ordering is paused until ${formatStoreLocalTime("19:45:00")}`),
     );
+    expect(pickup).not.toContain("..");
     expect(pickup).toContain("You can order at the counter");
     expect(pickup).not.toContain("staff");
     const table = renderToStaticMarkup(
@@ -340,6 +341,27 @@ describe("WP-2423 store-service-controls (v15 M30/M34) the guest's own service",
     const table = renderToStaticMarkup(<OrdersStoppedNotice load={loaderOf(closed)} />);
     expect(table).toContain("Ordering from your phone is closed now.");
     expect(table).toContain("A staff member can help you.");
+  });
+  it("M30 live check: a pause sentence ending with a time like 8:08 a.m. has one period", () => {
+    const hours = { ...publishedHours(), pausedUntil: "08:08:00" };
+    const time = formatStoreLocalTime("08:08:00");
+    expect(time).toBe("8:08 a.m.");
+    const pickup = storeServiceNoticeText(hours, "Paused", null, "Pickup");
+    expect(pickup).toEqual({
+      headline: "Online pickup ordering is paused until 8:08 a.m.",
+      detail: "You can order at the counter, or come back after 8:08 a.m.",
+    });
+    expect(storeServiceNoticeText(hours, "Paused", null, "DineIn")?.headline).toBe(
+      "Ordering from your phone is paused until 8:08 a.m.",
+    );
+    // A time without the abbreviation keeps the sentence's own period.
+    const evening = storeServiceNoticeText(
+      { ...hours, pausedUntil: "20:08:00" },
+      "Paused",
+      null,
+      "Pickup",
+    );
+    expect(evening?.headline).toBe("Online pickup ordering is paused until 8:08 p.m.");
   });
   it("M34 review: whenever the cart or checkout holds a new order back, there are words for why", () => {
     const base = publishedHours();

@@ -78,6 +78,14 @@ it("chooses Chinese for a device that prefers Chinese, and asks the menu in Simp
 it("fills values into the English text when English is chosen", () => {
   expect(t("Order {orderNumber}", { orderNumber: "12" })).toBe("Order 12");
   expect(t("Not a known text")).toBe("Not a known text");
+  // A value ending with a period ("8:08 a.m.") stands in for the sentence's own period.
+  expect(t("A staff member saw your request at {time}.", { time: "8:08 a.m." })).toBe(
+    "A staff member saw your request at 8:08 a.m.",
+  );
+  expect(t("A staff member saw your request at {time}.", { time: "20:08" })).toBe(
+    "A staff member saw your request at 20:08.",
+  );
+  expect(t("Wait{dots}...", { dots: "." })).toBe("Wait....");
 });
 
 it("renders the whole page in Chinese once Chinese is chosen, with a switch back to English", () => {
