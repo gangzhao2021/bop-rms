@@ -914,7 +914,7 @@ describe("DEC-PAPER-ORDER-PAID-AT-SEND: a paper order is recorded with its payme
       "That paid-at time is later than now, or more than 3 days ago, by the system's clock. Nothing was sent. Check the time on the paper slip and this device's clock, then send again.",
     );
   });
-  it("never tells staff to charge a paper order, and warns before the system takes it off", () => {
+  it("never tells staff to charge a paper order, warns before its time, and never says it is taken off", () => {
     const payBy = "2026-10-15T16:30:00.000Z";
     const notice = (now: string) =>
       paymentWindowNotice({
@@ -927,12 +927,16 @@ describe("DEC-PAPER-ORDER-PAID-AT-SEND: a paper order is recorded with its payme
     expect(notice("2026-10-15T16:05:00.000Z")).toEqual({
       tier: "warning",
       ended: false,
-      text: "Record this paper order's payment now. Until it is recorded the sale isn't in the day's takings; if it still isn't by 16:30, the system takes the order off and you enter it again.",
+      text: "Record this paper order's payment now. Until it is recorded the sale isn't in the day's takings; if it still isn't by 16:30, it can only be entered again from the paper slip.",
     });
     expect(notice("2026-10-15T16:25:00.000Z")).toMatchObject({ tier: "urgent", ended: false });
     expect(notice(payBy)).toMatchObject({ tier: "urgent", ended: true });
     for (const at of ["2026-10-15T16:05:00.000Z", "2026-10-15T16:25:00.000Z", payBy])
-      expect(notice(at).text).not.toMatch(/released|refund it|charge it on/iu);
+      expect(notice(at).text).not.toMatch(/released|refund it|charge it on|taken? off/iu);
+    // DEC-PAPER-ORDER-NEVER-RELEASED: after its time it stays, to be entered again and linked.
+    expect(notice(payBy).text).toBe(
+      "Its payment wasn't recorded by 16:30. The order stays in the system, but its payment can't be recorded on it now: enter it again from the paper slip as a new paper order, then a manager links the new one to it. Don't charge the guest again.",
+    );
   });
 });
 

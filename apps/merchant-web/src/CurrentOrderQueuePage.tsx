@@ -66,6 +66,7 @@ import {
   counterAwaitingCardMachine,
   counterPayByText,
   counterPayByTier,
+  paperAwaitingReentry,
 } from "./counter-payment.js";
 import {
   businessDateLabel,
@@ -2638,7 +2639,7 @@ function OrderDetailBody({
             ? order.counter.recordedAfterOutage
               ? // DEC-PAPER-ORDER-PAID-AT-SEND: paid during the outage; only its record is missing.
                 t(
-                  "Paid during the outage, but its payment isn't recorded yet: record it below from the paper slip. Don't charge again. If it isn't recorded by {at}, the system takes it off and the paper order is entered again.",
+                  "Paid during the outage, but its payment isn't recorded yet: record it below from the paper slip. Don't charge again. If it isn't recorded by {at}, it can only be entered again from the paper slip.",
                   { at: storeTime(order.counter.payBy ?? "", timeZone) },
                 )
               : order.counter.canCancelUnpaid
@@ -2650,7 +2651,13 @@ function OrderDetailBody({
                     "Not paid yet: take payment on the card machine or in cash, then record it below (or from Counter order). A guest who isn't paying: ask a manager to cancel it; otherwise it is released at {at} and its items go back to stock.",
                     { at: storeTime(order.counter.payBy ?? "", timeZone) },
                   )
-            : t("Not paid.")}
+            : paperAwaitingReentry(order, now ?? Date.now())
+              ? // DEC-PAPER-ORDER-NEVER-RELEASED: kept open until it is entered again.
+                t(
+                  "Paid during the outage; its payment wasn't recorded by {at}. The order stays open: enter it again from the paper slip on Counter order, where a manager links the new order to it. Don't charge again.",
+                  { at: storeTime(order.counter.payBy ?? "", timeZone) },
+                )
+              : t("Not paid.")}
         </p>
       ) : null}
       {order.counter?.recordedAfterOutage ? (

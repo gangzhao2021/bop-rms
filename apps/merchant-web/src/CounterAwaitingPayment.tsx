@@ -5,7 +5,10 @@ import {
   counterAwaitingCardMachine,
   counterPayByText,
   counterPayByTier,
+  paperAwaitingReentry,
+  paymentWindowNotice,
 } from "./counter-payment.js";
+import { PaperReentryAction, paperReentryCandidates } from "./PaperReentryAction.js";
 import {
   createCurrentOrderQueueClient,
   CurrentOrderQueueError,
@@ -88,6 +91,8 @@ export function CounterAwaitingPayment({
 }) {
   const client = useMemo(() => createCurrentOrderQueueClient(fetcher), [fetcher]);
   const [orders, setOrders] = useState<readonly Order[] | null>(null);
+  /** Every order of the read, for the paper orders a re-entered one may be linked to. */
+  const [listed, setListed] = useState<readonly Order[]>([]);
   const [failed, setFailed] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const [reads, setReads] = useState(0);
@@ -204,7 +209,12 @@ export function CounterAwaitingPayment({
       .then((view) => {
         if (controller.signal.aborted) return;
         setNow(Date.now());
-        setOrders(view.items.filter((order) => counterAwaitingCardMachine(order)));
+        setOrders(
+          view.items.filter(
+            (order) => counterAwaitingCardMachine(order) || paperAwaitingReentry(order),
+          ),
+        );
+        setListed(view.items);
         const charging = excluded.current;
         const listed =
           charging == null
@@ -253,11 +263,13 @@ export function CounterAwaitingPayment({
       clearInterval(tick);
     };
   }, [live, read]);
+  // DEC-PAPER-ORDER-NEVER-RELEASED: a paper order past its time stays listed until it is entered
+  // again (it is never released); other orders leave the list at their pay-by time.
   const shown = (orders ?? []).filter(
     (order) =>
       order.orderReference !== excludeOrderReference &&
       order.counter?.payBy != null &&
-      Date.parse(order.counter.payBy) > now,
+      (Date.parse(order.counter.payBy) > now || paperAwaitingReentry(order, now)),
   );
   if (!failed && shown.length === 0) return paidPanel;
   return (
@@ -286,6 +298,54 @@ export function CounterAwaitingPayment({
           {shown.map((order) => {
             const payBy = order.counter?.payBy ?? "";
             const batch = order.batches[0];
+            if (paperAwaitingReentry(order, now))
+              return (
+                <li key={order.orderReference} data-paper-reentry="">
+                  <p className="counter-order__awaiting-title">
+                    <strong>{t("Order {orderNumber}", { orderNumber: order.orderNumber })}</strong>{" "}
+                    <span className="bop-muted">
+                      {t("sent {submittedAt}{value}", {
+                        submittedAt: storeTime(order.submittedAt, timeZone),
+                        value: t(" · paper order"),
+                      })}
+                    </span>
+                  </p>
+                  <p className="order-accept-by" data-tier="urgent" role="alert">
+                    {
+                      paymentWindowNotice({
+                        payBy,
+                        now,
+                        tableMode: false,
+                        timeZone,
+                        paper: true,
+                      }).text
+                    }
+                  </p>
+                  {order.counter?.canCloseAsReentered === true && order.currentVersion !== null ? (
+                    <div className="card-actions">
+                      <p className="bop-muted">
+                        {t(
+                          "Enter it again above as a paper order from its slip, then link the new order here.",
+                        )}
+                      </p>
+                      <PaperReentryAction
+                        order={order}
+                        candidates={paperReentryCandidates(listed, order)}
+                        csrf={csrf}
+                        timeZone={timeZone}
+                        fetcher={fetcher}
+                        onClosed={() => setReads((value) => value + 1)}
+                      />
+                    </div>
+                  ) : (
+                    <p className="bop-muted">
+                      {t(
+                        "Enter it again above as a paper order from its slip; a manager then links the new order here.",
+                      )}
+                    </p>
+                  )}
+                </li>
+              );
             return (
               <li key={order.orderReference}>
                 <p className="counter-order__awaiting-title">

@@ -10,7 +10,10 @@ export function counterCancelReasonText(reason: CounterCancelReason): string {
     ? t("Guest changed their mind")
     : reason === "COUNTER_ENTERED_WRONG"
       ? t("Entered by mistake")
-      : t("Guest left without paying");
+      : reason === "COUNTER_PAPER_REENTERED"
+        ? // DEC-PAPER-ORDER-NEVER-RELEASED: its sale counts as the new paper order.
+          t("Entered again from its paper slip")
+        : t("Guest left without paying");
 }
 
 type State = "Idle" | "Pending" | "Unknown" | "Paid" | "Changed" | "Denied" | "Failed" | "Paper";

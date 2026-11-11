@@ -270,6 +270,8 @@ const counterCancelReasons = [
   "COUNTER_GUEST_CHANGED_MIND",
   "COUNTER_ENTERED_WRONG",
   "COUNTER_GUEST_LEFT_UNPAID",
+  // DEC-PAPER-ORDER-NEVER-RELEASED: a paper order entered again from its slip as a new order.
+  "COUNTER_PAPER_REENTERED",
 ] as const;
 export type CounterCancelReason = (typeof counterCancelReasons)[number];
 function counterCancelled(value: unknown) {
@@ -288,14 +290,18 @@ function parseCounter(value: unknown, sourceChannel: unknown) {
   const withDue = typeof value === "object" && Object.hasOwn(value, "amountDueMinor");
   // WP-2423 M127: absent from an older server (no cancel action then).
   const withCancel = typeof value === "object" && Object.hasOwn(value, "canCancelUnpaid");
+  // DEC-PAPER-ORDER-NEVER-RELEASED: absent from an older server (no close-as-entered-again then).
+  const withReentry = typeof value === "object" && Object.hasOwn(value, "canCloseAsReentered");
   const raw = exact(value, [
     "recordedAfterOutage",
     "paidOnCardMachine",
     ...(withPayBy ? ["payBy"] : []),
     ...(withDue ? ["amountDueMinor"] : []),
     ...(withCancel ? ["canCancelUnpaid", "cancelledBeforePayment"] : []),
+    ...(withReentry ? ["canCloseAsReentered"] : []),
   ]);
   if (withCancel && typeof raw.canCancelUnpaid !== "boolean") return fail();
+  if (withReentry && typeof raw.canCloseAsReentered !== "boolean") return fail();
   if (typeof raw.recordedAfterOutage !== "boolean" || sourceChannel !== "Pos") return fail();
   let paid = null;
   if (raw.paidOnCardMachine !== null) {
@@ -361,6 +367,14 @@ function parseCounter(value: unknown, sourceChannel: unknown) {
     amountDueMinor: due as string | null,
     /** WP-2423 M127: the caller may cancel this unpaid counter order now. */
     canCancelUnpaid: withCancel ? raw.canCancelUnpaid === true && payBy !== null : false,
+    /**
+     * DEC-PAPER-ORDER-NEVER-RELEASED: the caller may close this unpaid paper order as entered
+     * again (once its pay-by time has passed), naming the new paper order.
+     */
+    canCloseAsReentered:
+      withReentry && raw.recordedAfterOutage === true
+        ? raw.canCloseAsReentered === true && payBy !== null
+        : false,
     /** WP-2423 M127: staff cancelled it before payment: why and when (else null). */
     cancelledBeforePayment: withCancel ? counterCancelled(raw.cancelledBeforePayment) : null,
   });

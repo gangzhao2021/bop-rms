@@ -9409,8 +9409,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Paid in cash": "现金付款",
   "These paper orders were paid during the outage, but their payment isn't recorded yet. Record each from its paper slip before its time ends; don't charge again.":
     "这些纸质订单在停电/断网时已经付款，但付款还没录入。请在时间结束前按纸质单逐一录入，不要再收一次。",
-  "Paid during the outage, but its payment isn't recorded yet: record it below from the paper slip. Don't charge again. If it isn't recorded by {at}, the system takes it off and the paper order is entered again.":
-    "停电/断网时已付款，但付款还没录入：请在下方按纸质单录入，不要再收一次。如果 {at} 前没有录入，系统会撤下这单，需要重新录入纸质订单。",
+  "Paid during the outage, but its payment isn't recorded yet: record it below from the paper slip. Don't charge again. If it isn't recorded by {at}, it can only be entered again from the paper slip.":
+    "停电/断网时已付款，但付款还没录入：请在下方按纸质单录入，不要再收一次。如果 {at} 前没有录入，只能按纸质单重新录入。",
   "Not paid yet: take payment on the card machine or in cash, then record it below (or from Counter order). A guest who isn't paying: cancel it below so its items go back to stock.":
     "尚未付款：请用刷卡机或现金收款，然后在下方（或在柜台点单）录入。客人不付款：在下方取消这单，菜品退回库存。",
   "Not paid yet: take payment on the card machine or in cash, then record it below (or from Counter order). A guest who isn't paying: ask a manager to cancel it; otherwise it is released at {at} and its items go back to stock.":
@@ -9434,21 +9434,20 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "总额有变化。请和纸质单核对后再录入付款。",
   "The total is now {totalMinor}. Check it against the paper slip, then record it.":
     "总额现在是 {totalMinor}。请和纸质单核对后再录入。",
-  "This paper order was taken off because its payment wasn't recorded in time. Enter the paper order again from the slip; don't charge the guest again.":
-    "这张纸质订单的付款没有按时录入，已被撤下。请按纸质单重新录入，不要再向客人收款。",
+  "The time to record this paper order's payment has ended, so it can't be recorded on it. Enter it again from the paper slip as a new paper order; a manager then links the new one to it. Don't charge the guest again.":
+    "这张纸质订单的付款录入时间已过，不能再在这单上录入。请按纸质单重新录入为新的纸质订单，再由经理把新订单关联到这单。不要再向客人收款。",
   "The order is in, but its payment from the paper slip isn't recorded yet. Record it again below: the same payment is never counted twice.":
     "订单已录入，但纸质单上的付款还没录入。请在下方再录一次：同一笔付款不会重复计算。",
-  "Its payment wasn't recorded by {at}, so the system took this paper order off. Enter it again from the paper slip; don't charge the guest again.":
-    "{at} 前没有录入付款，系统已撤下这张纸质订单。请按纸质单重新录入，不要再向客人收款。",
-  "{minutes} min left: record this paper order's payment by {at}. Until it is recorded the sale isn't in the day's takings; after {at} the system takes the order off and you enter it again.":
-    "还剩 {minutes} 分钟：请在 {at} 前录入这张纸质订单的付款。录入前这笔销售不计入当天营业额；{at} 后系统会撤下这单，需要重新录入。",
-  "Record this paper order's payment now. Until it is recorded the sale isn't in the day's takings; if it still isn't by {at}, the system takes the order off and you enter it again.":
-    "请现在录入这张纸质订单的付款。录入前这笔销售不计入当天营业额；如果 {at} 前仍未录入，系统会撤下这单，需要重新录入。",
-  "Not recorded by {at} · enter the paper order again": "{at} 前未录入 · 请重新录入纸质订单",
-  "Paid during the outage · record it by {at}, or it is taken off":
-    "停电/断网时已付款 · 请在 {at} 前录入，否则会被撤下",
-  "This paper order's payment is no longer waiting to be recorded (already recorded, or the order was taken off). The list will update.":
-    "这张纸质订单的付款已不需要录入（已经录入，或订单已被撤下）。列表会自动更新。",
+  "Its payment wasn't recorded by {at}. The order stays in the system, but its payment can't be recorded on it now: enter it again from the paper slip as a new paper order, then a manager links the new one to it. Don't charge the guest again.":
+    "{at} 前没有录入付款。这单仍保留在系统里，但已不能在这单上录入付款：请按纸质单重新录入为新的纸质订单，再由经理把新订单关联到这单。不要再向客人收款。",
+  "{minutes} min left: record this paper order's payment by {at}. Until it is recorded the sale isn't in the day's takings; after {at} it can only be entered again from the paper slip.":
+    "还剩 {minutes} 分钟：请在 {at} 前录入这张纸质订单的付款。录入前这笔销售不计入当天营业额；{at} 后只能按纸质单重新录入。",
+  "Record this paper order's payment now. Until it is recorded the sale isn't in the day's takings; if it still isn't by {at}, it can only be entered again from the paper slip.":
+    "请现在录入这张纸质订单的付款。录入前这笔销售不计入当天营业额；如果 {at} 前仍未录入，只能按纸质单重新录入。",
+  "Not recorded by {at} · enter it again from the paper slip": "{at} 前未录入 · 请按纸质单重新录入",
+  "Paid during the outage · record it by {at}": "停电/断网时已付款 · 请在 {at} 前录入",
+  "This paper order's payment is no longer waiting to be recorded (already recorded, or it was entered again). The list will update.":
+    "这张纸质订单的付款已不需要录入（已经录入，或已重新录入）。列表会自动更新。",
   "Paid in cash during the outage: {amount}. Its change was given then.":
     "停电/断网时已收现金：{amount}。找零当时已经给过。",
   "Check the paid-at time on the paper slip, then record it again.":
@@ -9541,4 +9540,36 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "已取消。已退还现金 {amount}。已通知顾客。",
   "Cancelled. Give back {amount} in cash from the drawer, in whole nickels, then record it on the order. The guest is told.":
     "已取消。请从钱箱退还现金 {amount}（按 5 分取整），再在订单上记录。已通知顾客。",
+  "Linking…": "正在关联…",
+  "No answer from the system. Try again: it is never closed twice.":
+    "系统没有回应。请再试一次：不会重复关闭。",
+  "Its payment can still be recorded on it. Record it here instead.":
+    "这单的付款仍可录入，请直接在这单上录入。",
+  "That order isn't a paper order sent after this one with its payment recorded. Choose another.":
+    "所选订单不是在这单之后发送、已录入付款的纸质订单。请另选一单。",
+  "That new order already stands for another paper order. Choose another.":
+    "所选新订单已关联到另一张纸质订单。请另选一单。",
+  "This order changed. The list will update.": "这单已有变化，列表会自动更新。",
+  "Only a manager or the owner links it.": "只有经理或店主可以关联。",
+  "Not linked. Try again.": "没有关联成功，请再试一次。",
+  "Link the re-entered order": "关联重新录入的订单",
+  "Paper order {orderNumber} was entered again": "纸质订单 {orderNumber} 已重新录入",
+  "Choose the new paper order this one was entered again as. This order then closes as entered again, and its sale counts once, as the new order.":
+    "请选择这单重新录入成的新纸质订单。之后这单记为“已重新录入”并关闭，这笔销售只按新订单计算一次。",
+  "No new paper order with its payment recorded yet. Enter this one again from its paper slip as a paper order first, then link it here.":
+    "还没有已录入付款的新纸质订单。请先按纸质单把这单重新录入为纸质订单，再回到这里关联。",
+  "New paper order": "新的纸质订单",
+  "Order {orderNumber} · sent {sentAt} · {amount}": "订单 {orderNumber} · {sentAt} 发送 · {amount}",
+  "Close as entered again": "记为已重新录入",
+  "Enter it again above as a paper order from its slip, then link the new order here.":
+    "请在上方按纸质单重新录入为纸质订单，再在这里关联新订单。",
+  "Enter it again above as a paper order from its slip; a manager then links the new order here.":
+    "请在上方按纸质单重新录入为纸质订单，再由经理在这里关联新订单。",
+  "Entered again from its paper slip": "已按纸质单重新录入",
+  "Paid during the outage; its payment wasn't recorded by {at}. The order stays open: enter it again from the paper slip on Counter order, where a manager links the new order to it. Don't charge again.":
+    "停电/断网时已付款，但 {at} 前没有录入付款。这单仍保留：请在柜台点单按纸质单重新录入，再由经理在那里把新订单关联到这单。不要再收一次。",
+  "Paper orders whose payment isn't recorded": "纸质订单付款还没录入",
+  "{orders} taken during the outage. Record each from its paper slip on Counter order, or enter it again once its time has passed. Until then the sale isn't in the day's takings.":
+    "停电/断网时收款的 {orders}还没录入付款。请在柜台点单按纸质单逐一录入；录入时间已过的，按纸质单重新录入。录入前这些销售不计入当天营业额。",
+  "Go to Counter order": "前往柜台点单",
 });

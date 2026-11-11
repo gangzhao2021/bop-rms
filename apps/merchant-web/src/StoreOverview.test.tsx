@@ -424,6 +424,53 @@ describe("WP-2423 P2 store overview", () => {
       ],
     );
   });
+  it("DEC-PAPER-ORDER-NEVER-RELEASED: Home names paper orders whose payment isn't recorded until they are", () => {
+    const queue = parseCurrentOrderQueue(currentOrderQueueFixture(), null);
+    const [first] = queue.items;
+    if (first === undefined) throw new Error("fixture");
+    const paper = {
+      ...first,
+      currentPhase: "Submitted" as const,
+      counter: {
+        recordedAfterOutage: true,
+        paidOnCardMachine: null,
+        payBy: "2026-10-21T17:20:00.000Z",
+        amountDueMinor: null,
+        canCancelUnpaid: false,
+        canCloseAsReentered: false,
+        cancelledBeforePayment: null,
+      },
+    };
+    const summary = summarizeOrders({ ...queue, items: [paper, ...queue.items.slice(1)] });
+    expect(summary.paperUnrecorded).toBe(1);
+    expect(summarizeOrders(queue).paperUnrecorded).toBeUndefined();
+    // Recorded, or closed as entered again: no longer named.
+    const reentered = {
+      ...paper,
+      counter: {
+        ...paper.counter,
+        cancelledBeforePayment: {
+          reasonCode: "COUNTER_PAPER_REENTERED" as const,
+          cancelledAt: "2026-10-21T17:30:00.000Z",
+        },
+      },
+    };
+    expect(
+      summarizeOrders({ ...queue, items: [reentered, ...queue.items.slice(1)] }).paperUnrecorded,
+    ).toBeUndefined();
+    const items = attentionItems(
+      { ...initialOverviewState, orders: { kind: "Ready", value: summary } },
+      null,
+    );
+    expect(items[0]).toMatchObject({
+      key: "paper-unrecorded",
+      title: "Paper orders whose payment isn't recorded",
+      detail:
+        "1 order taken during the outage. Record each from its paper slip on Counter order, or enter it again once its time has passed. Until then the sale isn't in the day's takings.",
+      tone: "danger",
+      href: "/operations/order-entry",
+    });
+  });
   it("WP-2423 M04: a paid order that did not reach the kitchen comes first among orders", () => {
     const items = attentionItems(
       {

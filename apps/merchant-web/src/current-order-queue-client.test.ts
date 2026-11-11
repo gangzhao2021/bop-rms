@@ -1076,6 +1076,7 @@ it("v15 751dd768 ①: reads what an unsent counter order still has to be charged
     // v15 751dd768: an older server sends no release time.
     payBy: null,
     canCancelUnpaid: false,
+    canCloseAsReentered: false,
     cancelledBeforePayment: null,
   });
   // WP-2423 M127: who may cancel it unpaid, and a cancellation staff made before payment.
@@ -1101,8 +1102,43 @@ it("v15 751dd768 ①: reads what an unsent counter order still has to be charged
       },
     })?.cancelledBeforePayment,
   ).toEqual({ reasonCode: "COUNTER_GUEST_LEFT_UNPAID", cancelledAt: "2026-09-14T00:00:10.000Z" });
+  // DEC-PAPER-ORDER-NEVER-RELEASED: a paper order a manager may close as entered again, and the
+  // reason it then reads with; a live order is never closed that way.
+  const paperRead = read({
+    recordedAfterOutage: true,
+    paidOnCardMachine: null,
+    payBy,
+    canCancelUnpaid: false,
+    cancelledBeforePayment: null,
+    canCloseAsReentered: true,
+  });
+  expect(paperRead?.canCloseAsReentered).toBe(true);
+  expect(
+    read({
+      recordedAfterOutage: false,
+      paidOnCardMachine: null,
+      payBy,
+      canCancelUnpaid: false,
+      cancelledBeforePayment: null,
+      canCloseAsReentered: true,
+    })?.canCloseAsReentered,
+  ).toBe(false);
+  expect(
+    read({
+      recordedAfterOutage: true,
+      paidOnCardMachine: null,
+      payBy: null,
+      canCancelUnpaid: false,
+      cancelledBeforePayment: {
+        reasonCode: "COUNTER_PAPER_REENTERED",
+        cancelledAt: "2026-09-14T00:00:10.000Z",
+      },
+      canCloseAsReentered: false,
+    })?.cancelledBeforePayment?.reasonCode,
+  ).toBe("COUNTER_PAPER_REENTERED");
   for (const bad of [
     { canCancelUnpaid: "yes", cancelledBeforePayment: null },
+    { canCancelUnpaid: false, cancelledBeforePayment: null, canCloseAsReentered: "yes" },
     {
       canCancelUnpaid: false,
       cancelledBeforePayment: { reasonCode: "HID_IT", cancelledAt: payBy },

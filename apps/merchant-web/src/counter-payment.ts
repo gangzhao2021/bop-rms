@@ -88,8 +88,9 @@ export function paperPaymentProblem(error: CounterOrderClientError, inCash = fal
           });
     case "PaymentWindowClosed":
     case "NotPayable":
+      // DEC-PAPER-ORDER-NEVER-RELEASED: the order is kept; only its record must be entered anew.
       return t(
-        "This paper order was taken off because its payment wasn't recorded in time. Enter the paper order again from the slip; don't charge the guest again.",
+        "The time to record this paper order's payment has ended, so it can't be recorded on it. Enter it again from the paper slip as a new paper order; a manager then links the new one to it. Don't charge the guest again.",
       );
     case "Unavailable":
     case "OutcomeUnknown":
@@ -190,8 +191,9 @@ export function paymentWindowNotice(input: {
       return {
         tier: "urgent",
         ended: true,
+        // DEC-PAPER-ORDER-NEVER-RELEASED: never taken off; it waits to be entered again.
         text: t(
-          "Its payment wasn't recorded by {at}, so the system took this paper order off. Enter it again from the paper slip; don't charge the guest again.",
+          "Its payment wasn't recorded by {at}. The order stays in the system, but its payment can't be recorded on it now: enter it again from the paper slip as a new paper order, then a manager links the new one to it. Don't charge the guest again.",
           { at },
         ),
       };
@@ -202,11 +204,11 @@ export function paymentWindowNotice(input: {
       text:
         minutes <= paymentUrgentMinutes
           ? t(
-              "{minutes} min left: record this paper order's payment by {at}. Until it is recorded the sale isn't in the day's takings; after {at} the system takes the order off and you enter it again.",
+              "{minutes} min left: record this paper order's payment by {at}. Until it is recorded the sale isn't in the day's takings; after {at} it can only be entered again from the paper slip.",
               { minutes, at },
             )
           : t(
-              "Record this paper order's payment now. Until it is recorded the sale isn't in the day's takings; if it still isn't by {at}, the system takes the order off and you enter it again.",
+              "Record this paper order's payment now. Until it is recorded the sale isn't in the day's takings; if it still isn't by {at}, it can only be entered again from the paper slip.",
               { at },
             ),
     };
@@ -273,6 +275,26 @@ export function counterAwaitingCardMachine(
     order.batches[0]?.acceptanceStatus === "NotAccepted"
   );
 }
+/**
+ * DEC-PAPER-ORDER-NEVER-RELEASED: a paper order whose payment was not recorded by its pay-by time.
+ * It is never released: it stays listed until it is entered again from the paper slip and a
+ * manager links the new order to it.
+ */
+export function paperAwaitingReentry(
+  order: CurrentOrderQueue["items"][number],
+  now = Date.now(),
+): boolean {
+  return (
+    order.counter !== null &&
+    order.counter.recordedAfterOutage &&
+    order.counter.paidOnCardMachine === null &&
+    order.counter.cancelledBeforePayment === null &&
+    order.counter.payBy !== null &&
+    Date.parse(order.counter.payBy) <= now &&
+    order.currentPhase === "Submitted" &&
+    order.batches[0]?.acceptanceStatus === "NotAccepted"
+  );
+}
 /** The tier of a counter order's pay-by warning: urgent in its last minutes. */
 export function counterPayByTier(payBy: string, now: number | undefined) {
   return paymentWindowNotice({ payBy, now: now ?? Date.now(), tableMode: false }).tier;
@@ -289,8 +311,8 @@ export function counterPayByText(
   const at = storeTime(payBy, timeZone);
   if (paper)
     return left <= 0
-      ? t("Not recorded by {at} · enter the paper order again", { at })
-      : t("Paid during the outage · record it by {at}, or it is taken off", { at });
+      ? t("Not recorded by {at} · enter it again from the paper slip", { at })
+      : t("Paid during the outage · record it by {at}", { at });
   if (left <= 0) return t("Payment time ended at {at} · being released", { at: at });
   const minutes = Math.max(1, Math.ceil(left / 60_000));
   return minutes <= paymentUrgentMinutes

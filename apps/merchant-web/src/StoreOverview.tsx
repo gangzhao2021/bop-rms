@@ -83,6 +83,12 @@ export interface OrdersSummary {
    * ordered (Orders marks them "Has a dish sold out now"). Absent when none.
    */
   readonly soldOutNow?: number;
+  /**
+   * DEC-PAPER-ORDER-NEVER-RELEASED: paper orders (taken during an outage) whose payment is not
+   * recorded yet, so their sale is not in the day's takings until it is (or until they are entered
+   * again). Absent when none.
+   */
+  readonly paperUnrecorded?: number;
   /** Whether any open order is dine-in; a pickup-only Store has nothing to serve at tables. */
   readonly dineIn: boolean;
   /** The first page was full; there are more open orders than counted here. */
@@ -197,6 +203,15 @@ export function summarizeOrders(queue: CurrentOrderQueue, now = Date.now()): Ord
     ).length,
     ...((count) => (count > 0 ? { soldOutNow: count } : {}))(
       open.filter((order) => order.soldOutNow === true).length,
+    ),
+    ...((count) => (count > 0 ? { paperUnrecorded: count } : {}))(
+      queue.items.filter(
+        (order) =>
+          order.currentPhase === "Submitted" &&
+          order.counter?.recordedAfterOutage === true &&
+          order.counter.paidOnCardMachine === null &&
+          order.counter.cancelledBeforePayment === null,
+      ).length,
     ),
     dineIn: dineIn.length > 0,
     more: queue.nextAfterOrderReference !== null,
@@ -552,6 +567,21 @@ export function attentionItems(
         tone: "danger",
         href: "/operations/orders",
         action: t("View orders"),
+      });
+    // DEC-PAPER-ORDER-NEVER-RELEASED: a sale taken on paper is never released, so Home says so
+    // until its payment is recorded or it is entered again.
+    if ((o.paperUnrecorded ?? 0) > 0)
+      items.push({
+        key: "paper-unrecorded",
+        title: t("Paper orders whose payment isn't recorded"),
+        detail: t(
+          "{orders} taken during the outage. Record each from its paper slip on Counter order, or enter it again once its time has passed. Until then the sale isn't in the day's takings.",
+          { orders: countOf(o.paperUnrecorded ?? 0, "order") },
+        ),
+        state: t("Needs you"),
+        tone: "danger",
+        href: "/operations/order-entry",
+        action: t("Go to Counter order"),
       });
     // WP-2423 (M23): first, so staff offer a swap or cancel that dish before accepting.
     if ((o.soldOutNow ?? 0) > 0)

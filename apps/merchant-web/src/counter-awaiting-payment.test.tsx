@@ -190,10 +190,10 @@ it("DEC-PAPER-ORDER-PAID-AT-SEND: a paper order whose payment didn't record is n
   expect(html).not.toContain("take payment on the card machine");
   expect(html).not.toContain("ask a manager to cancel");
   expect(counterPayByText(payBy, "America/Toronto", now, true)).toBe(
-    "Paid during the outage · record it by 13:20, or it is taken off",
+    "Paid during the outage · record it by 13:20",
   );
   expect(counterPayByText(payBy, "America/Toronto", Date.parse(payBy), true)).toBe(
-    "Not recorded by 13:20 · enter the paper order again",
+    "Not recorded by 13:20 · enter it again from the paper slip",
   );
 });
 
@@ -329,4 +329,89 @@ it("DEC-PAPER-ORDER-PAID-AT-SEND: a paper order's refusals and its recorded cash
   });
   expect(notAccepted).toContain("Cash recorded after the outage.");
   expect(notAccepted).not.toContain("change");
+});
+
+it("DEC-PAPER-ORDER-NEVER-RELEASED: a paper order past its time stays open, to be entered again and linked by a manager", async () => {
+  const { paperAwaitingReentry } = await import("./counter-payment.js");
+  const { paperReentryCandidates, paperReentryOutcome } = await import("./PaperReentryAction.js");
+  const after = Date.parse(payBy) + 60_000;
+  const paper = parse(
+    counterItem(
+      {},
+      {
+        recordedAfterOutage: true,
+        canCancelUnpaid: false,
+        cancelledBeforePayment: null,
+        canCloseAsReentered: true,
+      },
+    ),
+  );
+  // Before its time it is recorded on itself; after it, it is never released but waits to be
+  // entered again (a live order past its time is not).
+  expect(paperAwaitingReentry(paper, now)).toBe(false);
+  expect(paperAwaitingReentry(paper, after)).toBe(true);
+  expect(paper.counter?.canCloseAsReentered).toBe(true);
+  expect(paperAwaitingReentry(parse(counterItem()), after)).toBe(false);
+  const html = renderToStaticMarkup(
+    <CurrentOrderQueueRows
+      view={parseCurrentOrderQueue({
+        items: [
+          counterItem(
+            {},
+            {
+              recordedAfterOutage: true,
+              canCancelUnpaid: false,
+              cancelledBeforePayment: null,
+              canCloseAsReentered: true,
+            },
+          ),
+        ],
+        nextAfterOrderReference: null,
+      })}
+      timeZone="America/Toronto"
+      now={after}
+    />,
+  );
+  expect(html).toContain("The order stays open: enter it again from the paper slip");
+  expect(html).not.toMatch(/taken off|released|Not paid\./u);
+  // The new paper orders it may stand for: sent after it, with their payment recorded.
+  const paidPaper = (n: number, submittedAt: string, extra: Record<string, unknown> = {}) =>
+    parse(
+      counterItem(
+        {
+          orderReference: ref(100 + n),
+          orderNumber: String(n),
+          submittedAt,
+          observedAt: "2026-10-21T17:30:00.000Z",
+          awaitingPayment: false,
+        },
+        {
+          recordedAfterOutage: true,
+          payBy: null,
+          canCancelUnpaid: false,
+          cancelledBeforePayment: null,
+          paidOnCardMachine: {
+            amountMinor: "2720",
+            takenAt: "2026-10-21T16:50:00.000Z",
+            recordedAfterOutage: true,
+            refundedMinor: "0",
+          },
+          ...extra,
+        },
+      ),
+    );
+  const newer = paidPaper(9, "2026-10-21T17:25:00.000Z");
+  const newest = paidPaper(10, "2026-10-21T17:26:00.000Z");
+  const earlier = paidPaper(5, "2026-10-21T16:00:00.000Z");
+  expect(
+    paperReentryCandidates([paper, earlier, newer, parse(counterItem()), newest], paper).map(
+      (order) => order.orderNumber,
+    ),
+  ).toEqual(["10", "9"]);
+  expect(paperReentryOutcome(409, "paper_reentry_used")).toBe("Used");
+  expect(paperReentryOutcome(409, "paper_reentry_invalid")).toBe("Invalid");
+  expect(paperReentryOutcome(409, "paper_order_still_recordable")).toBe("Recordable");
+  expect(paperReentryOutcome(403, "order_cancellation_permission_denied")).toBe("Denied");
+  // An outage is never read as no permission.
+  expect(paperReentryOutcome(503, "counter_cancellation_unavailable")).toBe("Unknown");
 });

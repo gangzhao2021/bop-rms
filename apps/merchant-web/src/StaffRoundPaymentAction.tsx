@@ -170,7 +170,7 @@ export function StaffRoundPaymentAction({
             ? recordedAfterOutage
               ? // DEC-PAPER-ORDER-PAID-AT-SEND: a paper order is recorded or taken off, never charged.
                 t(
-                  "This paper order's payment is no longer waiting to be recorded (already recorded, or the order was taken off). The list will update.",
+                  "This paper order's payment is no longer waiting to be recorded (already recorded, or it was entered again). The list will update.",
                 )
               : subject === "order"
                 ? t(
