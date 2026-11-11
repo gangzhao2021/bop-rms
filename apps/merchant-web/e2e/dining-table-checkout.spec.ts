@@ -289,11 +289,63 @@ test("@production DEC-DINE-IN-PAY-LATER: staff start checkout, take cash rounded
     },
   ]);
   // One receipt for the whole table: tip, cash rounding, total, how it was paid and the change.
-  const receipt = checkout.getByLabel("Receipt for table T2");
+  const receipt = checkout.getByLabel("Paid bill for table T2");
   await expect(receipt).toContainText("Cash rounding");
   await expect(receipt).toContainText("$38.45");
   await expect(receipt).toContainText("$11.55");
   await expect(checkout.getByRole("button", { name: "Print paid bill" })).toBeVisible();
+  // v15 batch 7 (M50): printed, the paid bill starts at the top of the page — even from the
+  // scrolled side panel at 1440/1024 — and says the Store, the table, when and every dish; the
+  // Store/table header and dish list are for paper only.
+  await expect(receipt.getByText("Synthetic Store")).toBeHidden();
+  await page.evaluate(() => {
+    (window as unknown as { printed: number }).printed = 0;
+    window.print = () => {
+      (window as unknown as { printed: number }).printed += 1;
+    };
+  });
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await page.evaluate(() => {
+      const aside = document.querySelector(".dining-session-detail");
+      if (aside !== null) aside.scrollTop = aside.scrollHeight;
+      window.scrollTo(0, document.body.scrollHeight);
+    });
+    await checkout.getByRole("button", { name: "Print paid bill" }).click();
+    await page.emulateMedia({ media: "print" });
+    const printed = await page.evaluate(() => {
+      const root = document.querySelector("[data-print-root]");
+      const rect = root?.getBoundingClientRect();
+      return {
+        top: rect === undefined ? null : rect.top + window.scrollY,
+        height: rect?.height ?? 0,
+        text: root instanceof HTMLElement ? root.innerText : "",
+        printing: document.body.getAttribute("data-printing"),
+        bottom: rect === undefined ? 0 : rect.bottom + window.scrollY,
+        pageHeight: document.documentElement.scrollHeight,
+        windowHeight: window.innerHeight,
+      };
+    });
+    expect(printed.printing).toBe("table-bill");
+    expect(printed.top).not.toBeNull();
+    expect(printed.top as number).toBeGreaterThanOrEqual(0);
+    expect(printed.top as number).toBeLessThan(80);
+    expect(printed.height).toBeGreaterThan(100);
+    // Nothing but the bill is laid out: no blank pages after it.
+    expect(printed.pageHeight).toBeLessThanOrEqual(
+      Math.max(printed.windowHeight, printed.bottom + 100),
+    );
+    for (const words of ["Synthetic Store", "Table T2", "Paid ", "1 × Shoyu Ramen", "1 × Gyoza"])
+      expect(printed.text).toContain(words);
+    expect(printed.text).toContain("Total paid");
+    expect(printed.text).not.toContain("Print paid bill");
+    expect(printed.text).not.toContain("Close the table when the guests have left");
+    await page.screenshot({ path: `test-results/dining-table-paid-bill-print-${width}.png` });
+    await page.emulateMedia({ media: "screen" });
+    await page.evaluate(() => window.dispatchEvent(new Event("afterprint")));
+  }
+  expect(await page.evaluate(() => (window as unknown as { printed: number }).printed)).toBe(3);
+  await page.setViewportSize({ width: 1440, height: 900 });
   // A paid table never goes back to ordering: no Cancel checkout.
   await expect(checkout.getByRole("button", { name: "Cancel checkout" })).toHaveCount(0);
   // Paid in full and every dish served: the table can now be closed as usual.
@@ -1058,7 +1110,7 @@ test("@production a table payment the server failed goes again as the same reque
   expect(words).not.toContain("card machine for payment");
   failing = false;
   await pay();
-  await expect(checkout.getByLabel("Receipt for table T2")).toContainText("$33.95");
+  await expect(checkout.getByLabel("Paid bill for table T2")).toContainText("$33.95");
   expect(settles).toHaveLength(2);
   expect(settles[1]?.operationReference).toBe(settles[0]?.operationReference);
 });

@@ -1351,6 +1351,7 @@ export function DiningSessionWorkspace({
               key={selected.tableReference}
               table={selected}
               csrf={csrf}
+              storeLabel={storeLabel}
               timeZone={timeZone}
               now={now}
               code={code?.table === selected.tableReference ? code.value : null}
@@ -1480,6 +1481,7 @@ export function DiningSessionWorkspace({
 function TablePanel({
   table,
   csrf,
+  storeLabel,
   timeZone,
   now,
   code,
@@ -1527,6 +1529,8 @@ function TablePanel({
   readonly onSettled: (message: string) => void;
   readonly table: StaffDiningTable;
   readonly csrf: string;
+  /** The Store's name, printed at the top of a paid bill. */
+  readonly storeLabel: string;
   readonly timeZone: string | undefined;
   readonly now: number;
   readonly code: string | null;
@@ -1710,6 +1714,7 @@ function TablePanel({
           csrf={csrf}
           canStart={canCloseSessions}
           canWriteOff={canWriteOff}
+          storeLabel={storeLabel}
           timeZone={timeZone}
           locked={locked}
           onChanged={onChanged}

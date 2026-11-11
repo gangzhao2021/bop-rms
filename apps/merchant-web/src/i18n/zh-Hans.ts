@@ -6366,7 +6366,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Recorded by someone no longer on staff: {tables}, {amount}":
     "已离职员工登记：{tables}，{amount}",
   "Yes, they left without paying": "确认，客人未付离开",
-  "Receipt for table {table}": "{table} 桌收据",
+  "Paid bill for table {table}": "{table} 号桌已付账单",
+  "Paid {time}": "付款时间 {time}",
   "Cash rounding": "现金取整",
   "Total paid": "实付合计",
   "Paid by": "付款方式",

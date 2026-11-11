@@ -217,7 +217,10 @@ export function TableCheckout({
   onSettled,
   fetcher,
   timeZone,
+  storeLabel,
 }: {
+  /** The Store's name, printed at the top of the paid bill. */
+  readonly storeLabel?: string | undefined;
   /** WP-2423 item 8 ①: may record that the guests left without paying (a manager). */
   readonly canWriteOff?: boolean;
   /** The Store's time zone (a paper payment's time is Store time). */
@@ -748,7 +751,12 @@ export function TableCheckout({
                 onBill={setBill}
                 onProblem={setProblem}
               />
-              <TableReceipt bill={bill} tableLabel={table.stableLabel} />
+              <TableReceipt
+                bill={bill}
+                tableLabel={table.stableLabel}
+                storeLabel={storeLabel}
+                timeZone={timeZone}
+              />
               {bill.split !== null && selected === null && !(byGuests && owed > 0n) ? null : (
                 <>
                   {byGuests ? (
@@ -1162,7 +1170,12 @@ export function TableCheckout({
               ) : null}
             </>
           ) : (
-            <TableReceipt bill={bill} tableLabel={table.stableLabel} />
+            <TableReceipt
+              bill={bill}
+              tableLabel={table.stableLabel}
+              storeLabel={storeLabel}
+              timeZone={timeZone}
+            />
           )}
         </>
       )}
@@ -1201,9 +1214,13 @@ export function TableCheckout({
 function TableReceipt({
   bill,
   tableLabel,
+  storeLabel,
+  timeZone,
 }: {
   readonly bill: TableBill;
   readonly tableLabel: string;
+  readonly storeLabel?: string | undefined;
+  readonly timeZone?: string | undefined;
 }) {
   // Owner 2026-11-03 walkthrough: a split bill has its receipt too, once every part is paid.
   const parts = bill.split?.parts ?? [];
@@ -1228,12 +1245,42 @@ function TableReceipt({
   const subtotal = bill.rounds.reduce((sum, round) => sum + BigInt(round.subtotalMinor), 0n);
   const rounding = BigInt(bill.taxRoundingMinor);
   const tax = bill.rounds.reduce((sum, round) => sum + BigInt(round.taxMinor), 0n) - rounding;
+  // v15 batch 7 (M50): the paper the guests get says where, which table, when, and what they had.
+  const paidAt = payments
+    .map((entry) => entry.paid.recordedAt)
+    .reduce((latest, at) => (at > latest ? at : latest), "");
+  const dishes = bill.rounds.flatMap((round) => round.items);
   return (
     <div
       ref={region}
       className="table-receipt"
-      aria-label={t("Receipt for table {table}", { table: saidTable(tableLabel) })}
+      aria-label={t("Paid bill for table {table}", { table: saidTable(tableLabel) })}
     >
+      <header className="table-receipt__head" data-print-only="">
+        {storeLabel ? <p className="table-receipt__store">{storeLabel}</p> : null}
+        <p>{t("Table {table}", { table: saidTable(tableLabel) })}</p>
+        {paidAt !== "" ? (
+          <p>{t("Paid {time}", { time: storeTime(paidAt, timeZone, true) })}</p>
+        ) : null}
+      </header>
+      <ul className="table-receipt__dishes" data-print-only="">
+        {dishes.map((item) => (
+          <li key={item.orderItemReference}>
+            <span>
+              {item.quantity} × {item.displayName}
+            </span>
+            <span>{cad(item.subtotalMinor)}</span>
+            {item.reduction ? (
+              <span className="table-receipt__reduction">
+                {item.reduction.points === true
+                  ? t("Points used")
+                  : compedText(item.reduction.kind, item.reduction.percent)}{" "}
+                −{cad(item.reduction.amountMinor)}
+              </span>
+            ) : null}
+          </li>
+        ))}
+      </ul>
       <dl className="table-checkout__totals">
         <div>
           <dt>{t("Subtotal")}</dt>
