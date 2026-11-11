@@ -20,7 +20,12 @@ import type {
  * 4. Otherwise the installation's only Store's pickup code (none at several Stores: "scan").
  */
 export type CustomerEntryStartSource =
-  | Readonly<{ kind: "Code"; load: () => Promise<string | undefined> }>
+  | Readonly<{
+      kind: "Code";
+      load: () => Promise<string | undefined>;
+      /** Where the code says it is, when the address shows it (unverified: only compared). */
+      names?: CustomerEntryCodePlace | undefined;
+    }>
   | Readonly<{ kind: "None" }>
   /** Something in the address that is no code: asked to scan, as before. */
   | Readonly<{ kind: "Unusable" }>;
@@ -37,6 +42,49 @@ export interface CustomerStartClientInput {
   readonly pickupCode: (publicStoreReference?: string) => Promise<string | undefined>;
   /** Whether this installation hands out its Stores' pickup codes (absent: it does). */
   readonly pickupOffered?: boolean;
+}
+
+/** The Store a code names (null: not shown) and whether it is a table's. */
+export type CustomerEntryCodePlace = Readonly<{
+  publicStoreReference: string | null;
+  table: boolean;
+}>;
+
+/** Where the code in the address says it is, before it is loaded (undefined: it can't say). */
+export function addressCodePlace(
+  hash: string,
+  scannedCode: string | null,
+): CustomerEntryCodePlace | undefined {
+  if (scannedCode !== null) {
+    const names = codeNames(scannedCode);
+    return names === null
+      ? undefined
+      : Object.freeze({
+          publicStoreReference: names.publicStoreReference,
+          table: names.publicTableReference !== null,
+        });
+  }
+  const pickup =
+    /^#pickup=([0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/u.exec(hash);
+  if (pickup?.[1] !== undefined)
+    return Object.freeze({ publicStoreReference: pickup[1], table: false });
+  // The InternalTest table launcher always opens a table.
+  if (hash.startsWith("#internal-dining="))
+    return Object.freeze({ publicStoreReference: null, table: true });
+  return undefined;
+}
+
+/**
+ * M105 (B.3): the code is another Store's, or a table's, while this phone's visit is a pickup one.
+ * Its order is kept on the phone (the server keeps the visit), so the scanned place opens at once
+ * instead of showing the other Store's order under this Store's code.
+ */
+export function leavesPickupVisit(
+  place: CustomerEntryCodePlace | undefined,
+  restored: CustomerEntryResumedContext | undefined,
+): boolean {
+  if (place === undefined || restored === undefined || restored.channel !== "Pickup") return false;
+  return place.table || place.publicStoreReference !== restored.publicStoreReference;
 }
 
 const missing: CustomerEntryScreenState = Object.freeze({ kind: "Missing" });
@@ -132,6 +180,7 @@ export function createCustomerStartClient(input: CustomerStartClientInput): Cust
       source.kind === "Code" ||
       (restored?.channel === "Pickup" && input.pickupOffered !== false) ||
       restored === undefined,
+    leavesPickupVisit: source.kind === "Code" ? leavesPickupVisit(source.names, restored) : false,
     start() {
       if (settled === null) return run();
       // M116: back from looking at a closed Store's menu, the start page asks that Store again.

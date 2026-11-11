@@ -361,6 +361,18 @@ describe("M105 B.3: an order at another Store stays on this phone", () => {
     );
     expect(html).toContain("Continue to menu");
   });
+  it("a table code, even at the same Store, names the pickup order kept on this phone", () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <EntryContextView
+          onContinue={vi.fn()}
+          state={{ kind: "Established", context }}
+          keptElsewhere={{ ...harbour, publicStoreReference: context.publicStoreReference }}
+        />
+      </MemoryRouter>,
+    );
+    expect(html).toContain("Your order at Harbour Store is kept on this phone.");
+  });
   it("says nothing at the same Store, or with no order elsewhere", () => {
     expect(at({ ...harbour, publicStoreReference: pickup.publicStoreReference })).not.toContain(
       "is kept on this phone",

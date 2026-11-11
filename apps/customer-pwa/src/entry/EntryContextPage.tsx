@@ -96,7 +96,11 @@ export function EntryContextPage({
   storeProfile,
   restoredStore,
 }: EntryContextPageProps) {
-  const [holding, setHolding] = useState(currentOrder !== undefined);
+  // M105 (B.3): another Store's code, or a table's, opens that place at once; the pickup order this
+  // phone has elsewhere is kept and named below the new visit (never shown under this Store's code).
+  const [holding, setHolding] = useState(
+    currentOrder !== undefined && client.leavesPickupVisit !== true,
+  );
   // M105 (B.3): a pickup order at another Store stays on this phone; its own code comes back to it.
   const [keptElsewhere] = useState(() =>
     currentOrder?.orderType === "Pickup" && restoredStore !== undefined ? restoredStore : null,
@@ -116,6 +120,8 @@ export function EntryContextPage({
   const startingNew = useRef(false);
   // WP-2423 DEC-DINING-GUEST-TABLE-START: what the guest answered, so joining needs no second tap.
   const [answered, setAnswered] = useState<CustomerEntryIntent | null>(null);
+  // The kept visit's order was shown and the guest chose to order more there.
+  const [orderingMore, setOrderingMore] = useState<CustomerEntryScreenState | null>(null);
   const clientRef = useRef(client);
   clientRef.current = client;
   const admissionRef = useRef(diningAdmission);
@@ -281,6 +287,26 @@ export function EntryContextPage({
       });
   };
 
+  // M105 (B.3): this Store's code brought back the pickup visit this phone kept, with its order.
+  const keptOrder =
+    state.kind === "Established" && state.currentOrder !== undefined && orderingMore !== state
+      ? state.currentOrder
+      : undefined;
+  if (keptOrder !== undefined && state.kind === "Established")
+    return (
+      <CurrentOrderView
+        order={keptOrder}
+        store={{
+          storeName: state.context.storeDisplayName,
+          brandName: state.context.brandDisplayName,
+          serviceMode: state.context.channel,
+        }}
+        onStartNew={() => {
+          setOrderingMore(state);
+          void navigate("/menu");
+        }}
+      />
+    );
   if (holding && currentOrder)
     return (
       <CurrentOrderView
@@ -547,9 +573,11 @@ export function EntryContextView({
         />
       </section>
       {/* M105 (B.3): a notice, not a block: the order at the other Store is still on this phone. */}
-      {established !== null &&
+      {/* Also at a table of the same Store: the pickup order is not this table's. */}
+      {at !== null &&
       keptElsewhere !== null &&
-      keptElsewhere.publicStoreReference !== established.publicStoreReference ? (
+      (keptElsewhere.publicStoreReference !== at.publicStoreReference ||
+        at.channel !== "Pickup") ? (
         <p className="entry-context entry-kept-elsewhere" role="note">
           {t(
             "Your order at {storeDisplayName} is kept on this phone. Scan {storeDisplayName}’s pickup QR code again to go back to it.",

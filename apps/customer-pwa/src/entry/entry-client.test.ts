@@ -877,6 +877,59 @@ describe("M104/M105: the entry answers that this phone's visit goes on", () => {
       expect(answer).toMatchObject({ kind: "Established", context: { resumed: true } });
     }
   });
+  it("M105 B.3: reads back the kept visit's order and checkout, so this Store's code shows it", async () => {
+    const order = {
+      orderReference: "0190aa21-0000-7000-8000-0000000000c1",
+      orderNumber: "13",
+      orderType: "Pickup",
+    };
+    const urls: string[] = [];
+    const fetch = vi.fn(async (input: RequestInfo | URL) => {
+      urls.push(String(input));
+      return String(input) === "/api/v1/customer/session/csrf"
+        ? response(200, {
+            schemaVersion: 1,
+            csrfToken: "K".repeat(43),
+            menuContext: {
+              publicStoreReference: pickup.publicStoreReference,
+              channel: "Pickup",
+              locale: "en-CA",
+              brandDisplayName: pickup.brandDisplayName,
+              storeDisplayName: pickup.storeDisplayName,
+            },
+            currentOrder: order,
+            checkoutSessionReference: "0190aa21-0000-7000-8000-0000000000e1",
+          })
+        : response(200, { ...pickup, resumed: true });
+    });
+    try {
+      const answer = await client(fetch as unknown as typeof globalThis.fetch).start();
+      expect(answer).toMatchObject({
+        kind: "Established",
+        context: { resumed: true },
+        currentOrder: order,
+      });
+      expect(urls).toEqual(["/bff/customer/entry", "/api/v1/customer/session/csrf"]);
+      expect(getCustomerCsrfCredential()).toBe("K".repeat(43));
+    } finally {
+      setCustomerCsrfCredential(null);
+    }
+  });
+  it("a kept visit whose order can't be read back still goes on, with no order shown", async () => {
+    const fetch = vi.fn(async (input: RequestInfo | URL) =>
+      String(input) === "/api/v1/customer/session/csrf"
+        ? response(503, { code: "CUSTOMER_SESSION_UNAVAILABLE" })
+        : response(200, { ...pickup, resumed: true }),
+    );
+    try {
+      const answer = await client(fetch as unknown as typeof globalThis.fetch).start();
+      expect(answer.kind).toBe("Established");
+      expect(answer).not.toHaveProperty("currentOrder");
+      expect(getCustomerCsrfCredential()).toBe(pickup.csrfToken);
+    } finally {
+      setCustomerCsrfCredential(null);
+    }
+  });
   it("refuses a resumed answer with the wrong status or at a table, and reads a previous visit", async () => {
     expect(
       (await client(async () => response(201, { ...pickup, resumed: true })).start()).kind,

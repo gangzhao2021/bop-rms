@@ -1,5 +1,9 @@
 import { loadInternalEntryToken, loadPickupEntryToken } from "./entry/internal-entry.js";
-import { createCustomerStartClient, type CustomerEntryStartSource } from "./entry/start-client.js";
+import {
+  addressCodePlace,
+  createCustomerStartClient,
+  type CustomerEntryStartSource,
+} from "./entry/start-client.js";
 import type { CustomerEntryResumedContext } from "./entry/types.js";
 import { loadRuntimePaymentConfiguration } from "./payment/payment-runtime-configuration.js";
 import type { MenuJourneyContext } from "./menu/types.js";
@@ -143,14 +147,17 @@ async function start() {
   // Opened at another page (a reload on the menu): the entry page reached from there reads no
   // address, only this browser's waiting scan or its visit.
   const openedAtEntry = entryLocation.pathname === "/";
+  // M105 (B.3): where the code says it is, so another Store's code opens that Store at once.
+  const names = addressCodePlace(hash, scannedCode);
   const source: CustomerEntryStartSource =
     hash === "" || !openedAtEntry
       ? { kind: "None" }
       : scannedCode !== null
-        ? { kind: "Code", load: async () => scannedCode }
+        ? { kind: "Code", load: async () => scannedCode, names }
         : /^#(?:pickup|internal-dining)=/u.test(hash) && entryLocation.search === ""
           ? {
               kind: "Code",
+              names,
               load: () =>
                 internalCodeLoad ??
                 loadInternalEntryToken({

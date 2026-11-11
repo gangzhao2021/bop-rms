@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import { codeNames, createCustomerStartClient, isRestoredVisitCode } from "./start-client.js";
+import {
+  addressCodePlace,
+  codeNames,
+  createCustomerStartClient,
+  isRestoredVisitCode,
+  leavesPickupVisit,
+} from "./start-client.js";
 import type {
   CustomerEntryClient,
   CustomerEntryResumedContext,
@@ -198,5 +204,56 @@ describe("M02 the start page stays at this phone's own Store and table", () => {
     expect(await f.client.start()).toEqual({ kind: "Missing" });
     expect(f.pickupCode).not.toHaveBeenCalled();
     expect(f.forReplay).not.toHaveBeenCalled();
+  });
+});
+
+describe("M105 B.3: another Store's code, or a table's, after a pickup visit", () => {
+  const STORE_C = "0190aa21-0000-7000-8000-00000000000c";
+  const pickupC = code({ publicStoreReference: STORE_C, publicTableReference: null });
+  it("reads where the code in the address says it is", () => {
+    expect(addressCodePlace("", pickupC)).toEqual({ publicStoreReference: STORE_C, table: false });
+    expect(addressCodePlace("", tableT)).toEqual({ publicStoreReference: STORE_B, table: true });
+    expect(addressCodePlace("#pickup=" + STORE_C, null)).toEqual({
+      publicStoreReference: STORE_C,
+      table: false,
+    });
+    expect(addressCodePlace("#internal-dining=table-1", null)).toEqual({
+      publicStoreReference: null,
+      table: true,
+    });
+    expect(addressCodePlace("#pickup=", null)).toBeUndefined();
+    expect(addressCodePlace("", "not-a-code")).toBeUndefined();
+  });
+  it("leaves the restored pickup visit only for another Store or a table", () => {
+    const at = (place: Parameters<typeof leavesPickupVisit>[0]) =>
+      leavesPickupVisit(place, restoredPickup);
+    expect(at({ publicStoreReference: STORE_C, table: false })).toBe(true);
+    // A phone that collected a pickup order scans a table at the same Store.
+    expect(at({ publicStoreReference: STORE_B, table: true })).toBe(true);
+    expect(at({ publicStoreReference: null, table: true })).toBe(true);
+    expect(at({ publicStoreReference: STORE_B, table: false })).toBe(false);
+    expect(at(undefined)).toBe(false);
+    expect(leavesPickupVisit({ publicStoreReference: STORE_C, table: false }, restoredTable)).toBe(
+      false,
+    );
+    expect(leavesPickupVisit({ publicStoreReference: STORE_C, table: false }, undefined)).toBe(
+      false,
+    );
+  });
+  it("the start client says so for the code it was opened with", () => {
+    const names = addressCodePlace("", pickupC);
+    expect(
+      setup({
+        restored: restoredPickup,
+        source: { kind: "Code", load: async () => pickupC, names },
+      }).client.leavesPickupVisit,
+    ).toBe(true);
+    expect(
+      setup({
+        restored: restoredPickup,
+        source: { kind: "Code", load: async () => pickupB, names: addressCodePlace("", pickupB) },
+      }).client.leavesPickupVisit,
+    ).toBe(false);
+    expect(setup({ restored: restoredPickup }).client.leavesPickupVisit).toBe(false);
   });
 });

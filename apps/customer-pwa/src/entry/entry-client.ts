@@ -18,7 +18,7 @@ import {
   setPaymentOperationReference,
   setUnseatedTableScan,
 } from "../session/customer-transaction-context.js";
-import { restoreCustomerSession } from "../session/session-bootstrap.js";
+import { restoreCustomerSession, type CustomerCurrentOrder } from "../session/session-bootstrap.js";
 
 const scanRetryWaitsMs = Object.freeze([
   ...guestReadRetryWaitsMs,
@@ -670,6 +670,23 @@ export function createCustomerEntryClient(
         if ((status === 200) !== (context.resumed === true)) throw new Error("entry unavailable");
         if (!online() || !current()) throw new Error("entry unavailable");
         if (replay && context.resumed !== true) setPaymentOperationReference(null);
+        // M105 (B.3): a pickup visit this phone kept at another Store went on. Its order (and its
+        // checkout) is read back as a reload reads it, so this Store's code shows that order;
+        // when it can't be read, the visit still goes on with the token the entry gave.
+        if (context.resumed === true) {
+          let order: CustomerCurrentOrder | undefined;
+          setCustomerCsrfCredential(null);
+          const read = await restoreCustomerSession(fetcher, undefined, (found) => {
+            order = found;
+          }).catch(() => false);
+          if (!online()) throw new Error("entry unavailable");
+          if (!read) setCustomerCsrfCredential(context.csrfToken);
+          return Object.freeze({
+            kind: "Established",
+            context,
+            ...(read && order !== undefined ? { currentOrder: order } : {}),
+          });
+        }
         setCustomerCsrfCredential(context.csrfToken);
         return Object.freeze({ kind: "Established", context });
       }

@@ -1,3 +1,5 @@
+import type { CustomerCurrentOrder } from "../session/session-bootstrap.js";
+
 export type CustomerEntryOperatingState = "Open" | "Closed" | "TemporarilyClosed";
 export type CustomerEntryServiceMode = "DineIn" | "Pickup" | "Delivery";
 
@@ -102,7 +104,15 @@ export type CustomerEntryScreenState =
   | Readonly<{ kind: "RateLimited"; retryAfterSeconds: number }>
   | Readonly<{ kind: "Offline" }>
   | Readonly<{ kind: "CommandFailed" }>
-  | Readonly<{ kind: "Established"; context: CustomerEntryEstablishedContext }>
+  | Readonly<{
+      kind: "Established";
+      context: CustomerEntryEstablishedContext;
+      /**
+       * M105 (B.3): a pickup visit this phone kept went on, and it has an order: the start page
+       * shows that order, as a scan of this Store's code always does.
+       */
+      currentOrder?: CustomerCurrentOrder;
+    }>
   /** M02: this browser's own visit, restored; nothing new was started. */
   | Readonly<{ kind: "Resumed"; context: CustomerEntryResumedContext }>;
 
@@ -119,4 +129,9 @@ export interface CustomerEntryClient {
   startNew?(): Promise<CustomerEntryScreenState>;
   /** False: a new order here continues the restored table visit, so none is offered to start. */
   readonly startsNewVisit?: boolean;
+  /**
+   * M105 (B.3): the code in the address is another Store's, or a table's, not the pickup visit
+   * this phone restored. Its order stays on the phone; the scanned place opens at once.
+   */
+  readonly leavesPickupVisit?: boolean;
 }
