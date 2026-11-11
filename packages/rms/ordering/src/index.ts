@@ -152,6 +152,23 @@ export {
   type DiningRoundCartReturn,
   type DiningRoundCartReturnInput,
 } from "./infrastructure/persistence/dining-round-cart-return-store.js";
+export {
+  chooseDiningCheckoutScope,
+  extendDiningCheckoutScope,
+  readDiningCheckoutScopeState,
+  readForeignDiningCheckoutScope,
+  returnDiningWaitingLines,
+  diningCheckoutScopeMinutes,
+  type ChooseDiningCheckoutScopeInput,
+  type ChooseDiningCheckoutScopeResult,
+  type DiningCartWaitingLine,
+  type DiningCheckoutChoice,
+  type DiningCheckoutLiveScope,
+  type DiningCheckoutScopeActor,
+  type DiningCheckoutScopeState,
+  type ReturnDiningWaitingLinesInput,
+  type ReturnDiningWaitingLinesResult,
+} from "./infrastructure/persistence/dining-checkout-scope-store.js";
 
 export * from "./domain/dining-cart-selection.js";
 

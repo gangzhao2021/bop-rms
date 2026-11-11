@@ -6371,6 +6371,78 @@
       "privilege": "INSERT",
       "principal": "api",
       "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); WP-2423 DEC-OWNER-DEFAULTS-2026-11-06 item 2 (M14): the refund role a requester held when the request was recorded, so a cashier's request is listed for a manager at once (append-only)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "dining_checkout_scope",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); WP-2423 shared-table-checkout (a) pay first: the payer chooses the whole table, only what they added or dishes they pick; the dishes not chosen wait and come back (DEC-OWNER-DEFAULTS-2026-11-06 同桌结账, 2000_520)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "dining_checkout_scope",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); WP-2423 shared-table-checkout (a) pay first: the payer chooses the whole table, only what they added or dishes they pick; the dishes not chosen wait and come back (DEC-OWNER-DEFAULTS-2026-11-06 同桌结账, 2000_520)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "dining_checkout_scope_extension",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); WP-2423 shared-table-checkout (a) pay first: the payer chooses the whole table, only what they added or dishes they pick; the dishes not chosen wait and come back (DEC-OWNER-DEFAULTS-2026-11-06 同桌结账, 2000_520)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "dining_checkout_scope_extension",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); WP-2423 shared-table-checkout (a) pay first: the payer chooses the whole table, only what they added or dishes they pick; the dishes not chosen wait and come back (DEC-OWNER-DEFAULTS-2026-11-06 同桌结账, 2000_520)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "dining_cart_waiting_line",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); WP-2423 shared-table-checkout (a) pay first: the payer chooses the whole table, only what they added or dishes they pick; the dishes not chosen wait and come back (DEC-OWNER-DEFAULTS-2026-11-06 同桌结账, 2000_520)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "dining_cart_waiting_line",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); WP-2423 shared-table-checkout (a) pay first: the payer chooses the whole table, only what they added or dishes they pick; the dishes not chosen wait and come back (DEC-OWNER-DEFAULTS-2026-11-06 同桌结账, 2000_520)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "dining_cart_waiting_line_resolution",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); WP-2423 shared-table-checkout (a) pay first: the payer chooses the whole table, only what they added or dishes they pick; the dishes not chosen wait and come back (DEC-OWNER-DEFAULTS-2026-11-06 同桌结账, 2000_520)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "dining_cart_waiting_line_resolution",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); WP-2423 shared-table-checkout (a) pay first: the payer chooses the whole table, only what they added or dishes they pick; the dishes not chosen wait and come back (DEC-OWNER-DEFAULTS-2026-11-06 同桌结账, 2000_520)"
     }
   ]
 }

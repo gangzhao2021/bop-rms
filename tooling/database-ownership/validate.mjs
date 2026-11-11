@@ -3824,6 +3824,21 @@ async function scanUnsupported(root, module, diagnostics) {
             module.manifest.ownedDatabase?.tables?.includes(table),
           ) &&
           moduleRelative === "src/infrastructure/persistence/dining-round-cart-return-store.ts";
+        // WP-2423 shared-table-checkout (a): the paying phone's choice of dishes at a pay-first
+        // table, the dishes set aside for the next round and their return to the cart (2000_520).
+        const acceptedDiningCheckoutScopeAsset =
+          module.packageName === "@rms/ordering" &&
+          module.manifest.ownedDatabase?.schema === "rms_ordering" &&
+          [
+            "cart",
+            "cart_line",
+            "dining_checkout_scope",
+            "dining_checkout_scope_extension",
+            "dining_cart_waiting_line",
+            "dining_cart_waiting_line_resolution",
+            "order_submission_record",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/dining-checkout-scope-store.ts";
         const acceptedCartQuoteAsset =
           module.packageName === "@rms/ordering" &&
           module.manifest.ownedDatabase?.schema === "rms_ordering" &&
@@ -4163,6 +4178,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedCartItemWriterAsset &&
           !acceptedCartStaffLineAsset &&
           !acceptedDiningRoundCartReturnAsset &&
+          !acceptedDiningCheckoutScopeAsset &&
           !acceptedPickupBindingAsset &&
           !acceptedCartLifecycleAsset &&
           !acceptedCartQuoteAsset &&
