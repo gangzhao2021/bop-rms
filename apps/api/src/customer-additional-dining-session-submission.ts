@@ -151,7 +151,11 @@ export function createCustomerAdditionalDiningSessionSubmission(options: {
             snapshot: {
               orderReference: clock.orderReference,
               orderBatchReference: clock.orderBatchReference,
-              snapshotCapturedAt: v.validatedAt,
+              // Owner #26 (DEC-PRICE-HOLD): when the Owner listed since checkout, the dishes are
+              // read as sold at this send (the source's one capture instant), at the held price.
+              snapshotCapturedAt:
+                (loaded.lines[0]?.catalog as { readonly capturedAt?: string } | undefined)
+                  ?.capturedAt ?? v.validatedAt,
               checkoutValidationEvidence: v,
               cart: loaded.cart,
               lines: loaded.lines.map((line) => ({

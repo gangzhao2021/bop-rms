@@ -222,6 +222,9 @@ export async function createInternalAdditionalSubmission(
           value.catalogLines.map((source) => {
             const line = { ...source };
             delete line.validatedAt;
+            // Owner #26 (DEC-PRICE-HOLD): a listing since checkout leaves the same dish (product
+            // version, checked here) at the held price; only the menu version may be newer.
+            delete line.menuVersionReference;
             return line;
           });
         // WP-2423 expected refusals: the menu moved on since checkout (a price, option or name

@@ -814,7 +814,8 @@ function createSnapshots<V extends 1 | 2>(
           catalogSnapshot.sellableReference !== cartItem.sellableReference ||
           catalogSnapshot.sellableReference !== lineEvidence.sellableReference ||
           catalogSnapshot.productVersionReference !== lineEvidence.productVersionReference ||
-          catalogSnapshot.menuVersionReference !== lineEvidence.menuVersionReference ||
+          // Owner #26 (DEC-PRICE-HOLD): a later round sent inside the hold records the dish as the
+          // menu sells it at the send, which may be a later listing than its validation.
           catalogSnapshot.capturedAt !== snapshotCapturedAt ||
           catalogSnapshot.options.length !== cartItem.optionSelections.length ||
           catalogSnapshot.options.some((option) => {

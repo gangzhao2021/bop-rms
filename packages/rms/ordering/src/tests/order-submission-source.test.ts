@@ -106,6 +106,34 @@ it("Owner #26 (DEC-PRICE-HOLD): a listing between checkout start and send still 
   });
   await expect(f.source.load({ evidence: f.evidence } as never)).rejects.toThrow();
 });
+it("Owner #26 (DEC-PRICE-HOLD): a later round validated before a listing is read once more as the menu sells it at the send", async () => {
+  const f = fixture();
+  const listedSince = "01a7ee00-0000-7000-8000-00000000cafe";
+  const sentAt = new Date(Date.parse(f.input.snapshotCapturedAt) + 50).toISOString();
+  // Catalog reads only the menu in force now: as of the validation it cannot be read back.
+  const capture = vi.fn(async (request: unknown): Promise<unknown> => {
+    const { observedAt } = request as { observedAt: string };
+    if (observedAt !== sentAt) throw new Error("the old menu can no longer be read back");
+    return { ...f.input.lines[0]?.catalog, menuVersionReference: listedSince, capturedAt: sentAt };
+  });
+  const source = createOrderSubmissionSource({
+    scope: {
+      brandReference: f.input.cart.brandReference,
+      storeReference: f.input.cart.storeReference,
+    },
+    carts: { load: f.load },
+    pricing: { load: f.pricing },
+    catalog: { capture },
+    clock: { now: () => sentAt },
+    currentMenuVersion: async () => listedSince,
+  });
+  const result = await source.load({ evidence: f.evidence } as never);
+  expect(result.lines[0]?.catalog).toMatchObject({
+    menuVersionReference: listedSince,
+    capturedAt: sentAt,
+  });
+  expect(result.lines[0]?.pricing).toEqual(f.input.lines[0]?.pricing);
+});
 it("denies foreign scope without reading Cart", async () => {
   const f = fixture();
   await expect(

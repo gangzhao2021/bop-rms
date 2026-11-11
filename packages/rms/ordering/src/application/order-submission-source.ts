@@ -138,91 +138,105 @@ function createVersionedOrderSubmissionSource<V extends 1 | 2>(
         });
         const byLine = new Map(prices.map((line) => [line.lineReference, line]));
         if (byLine.size !== cart.items.length) throw new OrderSubmissionSourceError();
-        const lines = await mapInSequence(cart.items, async (item) => {
-          const price = byLine.get(item.cartItemReference);
-          if (
-            !price ||
-            price.sellableReference !== item.sellableReference ||
-            price.quantity !== item.quantity ||
-            price.quoteReference !== evidence.quoteReference ||
-            price.quoteVersion !== evidence.quoteVersion ||
-            price.quoteInputDigest !== evidence.quoteInputDigest ||
-            price.quotedAt > evidence.validatedAt
-          )
-            throw new OrderSubmissionSourceError();
-          const catalog = parseOrderCatalogLineSnapshot(
-            await options.catalog.capture({
-              brandReference: brand as never,
-              storeReference: store as never,
-              sourceChannel: cart.sourceChannel,
-              orderType: cart.orderType,
-              sellableReference: item.sellableReference as never,
-              optionSelections: item.optionSelections as never,
-              observedAt: evidence.validatedAt as never,
-            }),
-          );
-          const validated = expected.get(item.cartItemReference);
-          if (
-            catalog.brandReference !== brand ||
-            catalog.storeReference !== store ||
-            catalog.sellableReference !== item.sellableReference ||
-            // Owner #26 (DEC-PRICE-HOLD): the Owner may list again between checkout start and
-            // send; inside the hold (validUntil, checked by fresh()) the same dish is sent as the
-            // menu sells it now at the confirmed price. The dish itself must not have changed.
-            validated === undefined ||
-            catalog.productVersionReference !== validated.productVersionReference ||
-            catalog.capturedAt !== evidence.validatedAt ||
-            catalog.options.length !== item.optionSelections.length ||
-            catalog.options.some(
-              (option) =>
-                !item.catalogSelectionEvidence?.ruleEvidence.some(
-                  (rule) =>
-                    rule.bindingReference === option.bindingReference &&
-                    rule.optionSetVersionReference === option.optionSetVersionReference,
-                ),
-            ) ||
-            item.optionSelections.some(
-              (selected) =>
-                !catalog.options.some(
-                  (option) =>
-                    option.optionReference === selected.optionReference &&
-                    option.quantity === selected.quantity,
-                ),
-            ) ||
-            price.taxComponents.some(
-              (tax) => tax.taxClassificationReference !== catalog.taxClassificationReference,
-            )
-          )
-            throw new OrderSubmissionSourceError();
-          if (price.quoteVersion === 2) {
+        const captureAll = (capturedAt: string) =>
+          mapInSequence(cart.items, async (item) => {
+            const price = byLine.get(item.cartItemReference);
             if (
-              catalog.skuReference !== item.sellableReference ||
-              price.optionPrices.length !== catalog.options.length ||
-              price.optionPrices.some((option) => {
-                const selected = catalog.options.find(
-                  (value) =>
-                    value.bindingReference === option.bindingReference &&
-                    value.optionReference === option.optionReference,
-                );
-                return (
-                  selected === undefined ||
-                  selected.quantity !== option.selectedQuantity ||
-                  option.brandReference !== brand ||
-                  option.storeReference !== store ||
-                  option.sellableReference !== item.sellableReference ||
-                  option.orderType !== cart.orderType ||
-                  option.taxClassificationReference !== catalog.taxClassificationReference
-                );
-              })
+              !price ||
+              price.sellableReference !== item.sellableReference ||
+              price.quantity !== item.quantity ||
+              price.quoteReference !== evidence.quoteReference ||
+              price.quoteVersion !== evidence.quoteVersion ||
+              price.quoteInputDigest !== evidence.quoteInputDigest ||
+              price.quotedAt > evidence.validatedAt
             )
               throw new OrderSubmissionSourceError();
-          }
-          return Object.freeze({
-            cartItemReference: item.cartItemReference,
-            catalog,
-            pricing: price,
+            const catalog = parseOrderCatalogLineSnapshot(
+              await options.catalog.capture({
+                brandReference: brand as never,
+                storeReference: store as never,
+                sourceChannel: cart.sourceChannel,
+                orderType: cart.orderType,
+                sellableReference: item.sellableReference as never,
+                optionSelections: item.optionSelections as never,
+                observedAt: capturedAt as never,
+              }),
+            );
+            const validated = expected.get(item.cartItemReference);
+            if (
+              catalog.brandReference !== brand ||
+              catalog.storeReference !== store ||
+              catalog.sellableReference !== item.sellableReference ||
+              // Owner #26 (DEC-PRICE-HOLD): the Owner may list again between checkout start and
+              // send; inside the hold (validUntil, checked by fresh()) the same dish is sent as the
+              // menu sells it now at the confirmed price. The dish itself must not have changed.
+              validated === undefined ||
+              catalog.productVersionReference !== validated.productVersionReference ||
+              catalog.capturedAt !== capturedAt ||
+              catalog.options.length !== item.optionSelections.length ||
+              catalog.options.some(
+                (option) =>
+                  !item.catalogSelectionEvidence?.ruleEvidence.some(
+                    (rule) =>
+                      rule.bindingReference === option.bindingReference &&
+                      rule.optionSetVersionReference === option.optionSetVersionReference,
+                  ),
+              ) ||
+              item.optionSelections.some(
+                (selected) =>
+                  !catalog.options.some(
+                    (option) =>
+                      option.optionReference === selected.optionReference &&
+                      option.quantity === selected.quantity,
+                  ),
+              ) ||
+              price.taxComponents.some(
+                (tax) => tax.taxClassificationReference !== catalog.taxClassificationReference,
+              )
+            )
+              throw new OrderSubmissionSourceError();
+            if (price.quoteVersion === 2) {
+              if (
+                catalog.skuReference !== item.sellableReference ||
+                price.optionPrices.length !== catalog.options.length ||
+                price.optionPrices.some((option) => {
+                  const selected = catalog.options.find(
+                    (value) =>
+                      value.bindingReference === option.bindingReference &&
+                      value.optionReference === option.optionReference,
+                  );
+                  return (
+                    selected === undefined ||
+                    selected.quantity !== option.selectedQuantity ||
+                    option.brandReference !== brand ||
+                    option.storeReference !== store ||
+                    option.sellableReference !== item.sellableReference ||
+                    option.orderType !== cart.orderType ||
+                    option.taxClassificationReference !== catalog.taxClassificationReference
+                  );
+                })
+              )
+                throw new OrderSubmissionSourceError();
+            }
+            return Object.freeze({
+              cartItemReference: item.cartItemReference,
+              catalog,
+              pricing: price,
+            });
           });
-        });
+        // Owner #26 (DEC-PRICE-HOLD): Catalog reads only the menu in force now. A checkout
+        // validated before the Owner listed again (a later round sent inside the hold) cannot be
+        // read back as of its validation; it is read once more, all dishes at this one instant, as
+        // the menu sells them now. The price stays the quote's; the dish must be the same one.
+        let lines;
+        try {
+          lines = await captureAll(evidence.validatedAt);
+        } catch (error) {
+          if (!(await menuMovedOn(options, validatedLines))) throw error;
+          const capturedAt = parseOrderingInstant(options.clock.now());
+          fresh();
+          lines = await captureAll(capturedAt);
+        }
         fresh();
         assertCartLifecycleActive(cart.lifecycle, last);
         return Object.freeze({ cart, lines: Object.freeze(lines) });
