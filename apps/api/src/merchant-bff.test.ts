@@ -3919,7 +3919,22 @@ it("DEC-PAPER-ORDER-PAID-AT-SEND: a paper order records its payment with the sen
     paymentError: "amount_changed",
     paymentTotalMinor: "350",
   });
+  // DEC-PAPER-ORDER-NEVER-RELEASED: a brief failure is recorded by a retry in the same request
+  // (the same payment operation); one that lasts is answered as not recorded yet.
+  const beforeRetry = cardMachinePayment.mock.calls.length;
   cardMachinePayment.mockRejectedValueOnce(new Error("database went away"));
+  const retried = (await (await submit({ ...command, paperPayment: card })).json()) as {
+    payment?: unknown;
+  };
+  expect(retried.payment).toBeDefined();
+  expect(cardMachinePayment.mock.calls.length - beforeRetry).toBe(2);
+  expect(cardMachinePayment.mock.calls.at(-1)?.[0]).toEqual(
+    cardMachinePayment.mock.calls.at(-2)?.[0],
+  );
+  cardMachinePayment
+    .mockRejectedValueOnce(new Error("database went away"))
+    .mockRejectedValueOnce(new Error("database went away"))
+    .mockRejectedValueOnce(new Error("database went away"));
   const failedPayment = await submit({ ...command, paperPayment: card });
   expect(failedPayment.status).toBe(200);
   expect(await failedPayment.json()).toEqual({
