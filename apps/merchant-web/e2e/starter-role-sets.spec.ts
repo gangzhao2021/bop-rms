@@ -198,6 +198,10 @@ function teaShop(options: { readonly setsDown?: boolean } = {}) {
   return {
     applies,
     commands,
+    /** Someone else changes a role meanwhile: its version moves on without this page knowing. */
+    changeMeanwhile(reference: string) {
+      (find(reference) as Role).version += 1;
+    },
     async install(page: Page) {
       await page.route("**/merchant/organization/roles/starter-sets", (route: Route) =>
         options.setsDown === true
@@ -341,6 +345,48 @@ test("@production a tea shop owner starts from the tea shop roles on Roles, appr
   await expect(offer.getByText("Start from the roles of another kind of shop")).toBeVisible();
   await expect(offer.getByRole("group", { name: "What kind of shop is this?" })).toBeHidden();
   await checkScreen(page, "roles-tea-done");
+});
+
+test("@production a role changed meanwhile makes the approve step read the roles again, and the next press goes through", async ({
+  page,
+}) => {
+  await session(page);
+  const state = teaShop();
+  await state.install(page);
+  await page.goto("/app/organization/roles");
+  const offer = page.locator("section.starter-roles");
+  await offer.getByLabel("Bubble tea or tea shop").check();
+  await offer.getByRole("button", { name: "Use these roles" }).click();
+  await expect(offer.getByText("Waiting for approval: Counter, Drink maker.")).toBeVisible();
+  await offer.getByRole("button", { name: "Verify to approve on your own" }).click();
+  const dialog = page.getByRole("dialog", { name: "Confirm it is you" });
+  await dialog.getByLabel("Six-digit code").fill("123456");
+  await dialog.getByRole("button", { name: "Verify" }).click();
+  await expect(dialog).toBeHidden();
+  state.changeMeanwhile(counter);
+  await offer.getByLabel("I checked these new roles and approve on my own").check();
+  const approve = offer.getByRole("button", { name: "Approve them on my own and turn them on" });
+  await approve.click();
+  await expect(
+    offer.getByText("Your roles changed meanwhile. Check the list again, then choose."),
+  ).toBeVisible();
+  await expect(approve).toBeEnabled();
+  if (!(await offer.getByLabel("I checked these new roles and approve on my own").isChecked()))
+    await offer.getByLabel("I checked these new roles and approve on my own").check();
+  await approve.click();
+  await expect(
+    offer.getByText("Your new roles are on. Give them to staff on Staff."),
+  ).toBeVisible();
+  // The second press used the version read again, never the one the offer first held.
+  expect(
+    state.commands.map((item) => [item.operation, item.roleReference, item.expectedVersion]),
+  ).toEqual([
+    ["ApproveAlone", counter, 2],
+    ["ApproveAlone", counter, 3],
+    ["Activate", counter, 4],
+    ["ApproveAlone", maker, 2],
+    ["Activate", maker, 3],
+  ]);
 });
 
 test("@production Store setup offers who does what, in Chinese, and links to Roles once started", async ({

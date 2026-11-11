@@ -81,6 +81,18 @@ export function waitingStarterRoles(
     ),
   };
 }
+/**
+ * After a failed approve or turn-on run: only a lost answer keeps the rest to send again as they
+ * were (Try again). Any other failure means the versions this offer holds may be out of date, so
+ * the roles are read again and the next press builds its steps from the fresh versions.
+ */
+export function afterApprovalFailure(
+  code: RoleAdministrationPageErrorCode,
+  rest: readonly RoleCommandRequest[],
+  done: number,
+): { readonly pending: readonly RoleCommandRequest[] | null; readonly reread: boolean } {
+  return code === "Offline" ? { pending: rest, reread: done > 0 } : { pending: null, reread: true };
+}
 function command(
   role: RoleAdministrationItemView,
   operation: "ApproveAlone" | "Activate",
@@ -317,9 +329,11 @@ export function StarterRoleSetOffer({
       setNotice(t("Your new roles are on. Give them to staff on Staff."));
       reload();
     } catch (error) {
-      setPending(requests.slice(done));
-      setFailure(error instanceof RoleAdministrationPageError ? error.code : "Unavailable");
-      if (done > 0) reload();
+      const code = error instanceof RoleAdministrationPageError ? error.code : "Unavailable";
+      const after = afterApprovalFailure(code, requests.slice(done), done);
+      setPending(after.pending);
+      setFailure(code);
+      if (after.reread) reload();
     } finally {
       setBusy(false);
     }

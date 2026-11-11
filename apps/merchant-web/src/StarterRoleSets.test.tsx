@@ -2,7 +2,11 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { afterEach, expect, it, vi } from "vitest";
 import { setLanguageForTest } from "./i18n/i18n.js";
-import { StarterRoleSetOffer, waitingStarterRoles } from "./StarterRoleSets.js";
+import {
+  StarterRoleSetOffer,
+  afterApprovalFailure,
+  waitingStarterRoles,
+} from "./StarterRoleSets.js";
 import {
   roleListFixture,
   starterMakerReference,
@@ -181,4 +185,22 @@ it("parses only a closed reply and posts the apply to its own route", async () =
     new Response(JSON.stringify({ error: "Conflict" }), { status: 409 }),
   );
   await expect(client.applyStarterSet(request)).rejects.toMatchObject({ code: "Conflict" });
+});
+
+it("reads the roles again after an approval run fails other than offline, so the next press is fresh", () => {
+  const rest = [
+    {
+      operation: "Activate" as const,
+      roleReference: starterTeaReference,
+      expectedVersion: 3,
+      operationReference: "018f2195-0000-7000-8000-000000000098",
+      reasonCode: "ROLE_ACTIVATED",
+      draft: null,
+    },
+  ];
+  for (const code of ["Conflict", "NameTaken", "NeedsReverification", "Unavailable"] as const)
+    expect(afterApprovalFailure(code, rest, 0)).toEqual({ pending: null, reread: true });
+  // A lost answer keeps the same steps for Try again; what did go through is read again.
+  expect(afterApprovalFailure("Offline", rest, 0)).toEqual({ pending: rest, reread: false });
+  expect(afterApprovalFailure("Offline", rest, 1)).toEqual({ pending: rest, reread: true });
 });
