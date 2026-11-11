@@ -168,3 +168,66 @@ describe("WP-2423 item 8 ④ split bill at the Tables checkout", () => {
     expect(html).toContain("Split evenly · 3 parts");
   });
 });
+
+describe("WP-2423 同桌结账: guests paying by dish, staff take the rest", () => {
+  const byGuests = (paidInFull: boolean) => {
+    const value = splitBillFixture();
+    const split = value.split as Record<string, unknown>;
+    const [first, , third] = split.parts as Record<string, unknown>[];
+    // Part 1 failed on a phone and was withdrawn (left out); 2 paid online, 3 being paid.
+    split.mode = "ByGuests";
+    split.paidInFull = paidInFull;
+    split.restMinor = paidInFull ? null : "1301";
+    split.restSubtotalMinor = paidInFull ? null : "1150";
+    split.parts = [
+      {
+        ...first,
+        partNumber: 2,
+        choice: "Chosen",
+        dishes: [{ displayName: "Beef noodle soup", quantity: 1, shared: false }],
+      },
+      {
+        ...third,
+        partNumber: 3,
+        choice: "Mine",
+        dishes: [{ displayName: "Pork dumplings", quantity: 3, shared: false }],
+      },
+    ];
+    split.paidParts = 1;
+    return value;
+  };
+  const render = (value: Record<string, unknown>) =>
+    renderToStaticMarkup(
+      <TableSplitControls
+        bill={parseTableBill(value)}
+        csrf={"a".repeat(43)}
+        client={createTableCheckoutClient()}
+        disabled={false}
+        selectedPart={null}
+        onSelectPart={() => undefined}
+        onBill={() => undefined}
+        onProblem={() => undefined}
+      />,
+    );
+
+  it("reads parts whose numbers skip a withdrawn one, and what is left to take", () => {
+    const bill = parseTableBill(byGuests(false));
+    expect(bill.split?.parts.map((part) => part.partNumber)).toEqual([2, 3]);
+    expect([bill.split?.paidInFull, bill.split?.restMinor]).toEqual([false, "1301"]);
+    const backwards = byGuests(false);
+    (backwards.split as { parts: unknown[] }).parts.reverse();
+    expect(() => parseTableBill(backwards)).toThrow();
+  });
+
+  it("lists what each guest paid or is paying by dish, and the rest for the counter", () => {
+    const html = render(byGuests(false));
+    expect(html).toContain("Guests paying by dish");
+    expect(html).toContain("Beef noodle soup");
+    expect(html).toContain("3 × Pork dumplings");
+    expect(html).toContain("A guest is paying on their phone");
+    expect(html).toContain("Not chosen yet · $13.01. Take it at the counter below.");
+    // No split controls once guests started paying by dish.
+    expect(html).not.toContain("Split evenly");
+    expect(render(byGuests(true))).toContain("Every dish is paid.");
+  });
+});

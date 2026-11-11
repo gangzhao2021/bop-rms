@@ -79,7 +79,7 @@ export function TableSplitControls({
   const offersByRounds =
     split?.mode === "ByRounds" || new Set(defaultRoundParts(bill).values()).size >= 2;
   const [mode, setMode] = useState<"Whole" | "Even" | "ByRounds" | "ByItems">(
-    split?.mode ?? "Whole",
+    split === null || split.mode === "ByGuests" ? "Whole" : split.mode,
   );
   const owingUnits = bill.rounds
     .filter((round) => round.totalMinor !== "0")
@@ -187,6 +187,57 @@ export function TableSplitControls({
     partCount >= 2 &&
     Array.from({ length: partCount }, (_, index) => index + 1).every((part) =>
       owing.some((round) => (partOf.get(round.roundNumber) ?? 1) === part),
+    );
+  // WP-2423 同桌结账: guests paying by dish on their phones — what each paid or is paying, and the
+  // rest staff take at the counter (below, as the table's payment).
+  if (split !== null && split.mode === "ByGuests" && split.parts.length > 0)
+    return (
+      <section className="table-split" aria-labelledby="table-split-title">
+        <h4 id="table-split-title">{t("Guests paying by dish")}</h4>
+        <ol className="table-split__parts" aria-label={t("Payments by dish")}>
+          {split.parts.map((part) => (
+            <li key={part.partNumber}>
+              <div>
+                <strong>{cad(part.amountMinor)}</strong>
+                <span
+                  className="table-split__status"
+                  data-tone={part.payment !== null ? "done" : part.guestPaying ? "waiting" : "open"}
+                >
+                  {part.payment !== null
+                    ? t("Paid {amount} · {method}", {
+                        amount: cad(part.payment.totalMinor),
+                        method: partMethodText(part.payment.method),
+                      })
+                    : part.guestPaying
+                      ? t("A guest is paying on their phone")
+                      : t("To collect")}
+                </span>
+                <span className="table-split__dishes">
+                  {part.dishes
+                    .map(
+                      (dish) => (dish.quantity > 1 ? `${dish.quantity} × ` : "") + dish.displayName,
+                    )
+                    .join(", ")}
+                </span>
+              </div>
+            </li>
+          ))}
+        </ol>
+        <p className="table-split__progress">
+          {split.paidInFull
+            ? t("Every dish is paid.")
+            : split.restMinor === null
+              ? t("Every dish is chosen; waiting for the guests' payments to finish.")
+              : t("Not chosen yet · {amount}. Take it at the counter below.", {
+                  amount: cad(split.restMinor),
+                })}
+        </p>
+        <p className="table-split__hint">
+          {t(
+            "Each dish is paid once. If a guest's card fails, their dishes come back here. If the network is down, take the rest as usual and record it later.",
+          )}
+        </p>
+      </section>
     );
   return (
     <section className="table-split" aria-labelledby="table-split-title">

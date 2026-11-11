@@ -160,10 +160,18 @@ export interface TableSplitPart {
     readonly recordedAfterOutage: boolean;
   };
   readonly guestPaying: boolean;
+  /** By dish: staff took this part at the counter (otherwise a guest on a phone). */
+  readonly byStaff: boolean;
 }
 export interface TableSplit {
-  readonly mode: "Even" | "ByRounds" | "ByItems";
+  /** ByGuests (WP-2423 同桌结账): guests pay by dish on their phones; staff take the rest. */
+  readonly mode: "Even" | "ByRounds" | "ByItems" | "ByGuests";
   readonly stale: boolean;
+  /** Every part paid (by dish: the parts cover the whole bill). */
+  readonly paidInFull: boolean;
+  /** By dish: what the dishes nobody pays for yet come to, and before tax (null: none). */
+  readonly restMinor: string | null;
+  readonly restSubtotalMinor: string | null;
   /** By dish: which part each unit of each dish went to (null: all the parts share it). */
   readonly dishChoices: readonly {
     readonly orderItemReference: string;
@@ -316,19 +324,33 @@ export function parseTableBill(value: unknown): TableBill {
 function splitOf(value: unknown): TableSplit | null {
   if (value === undefined || value === null) return null;
   const raw = value as Record<string, unknown>;
+  const byGuests = raw.mode === "ByGuests";
   if (
-    (raw.mode !== "Even" && raw.mode !== "ByRounds" && raw.mode !== "ByItems") ||
+    (raw.mode !== "Even" &&
+      raw.mode !== "ByRounds" &&
+      raw.mode !== "ByItems" &&
+      raw.mode !== "ByGuests") ||
     typeof raw.stale !== "boolean" ||
     !Array.isArray(raw.dishChoices) ||
     !Array.isArray(raw.parts) ||
-    raw.parts.length < 2 ||
-    raw.parts.length > 20 ||
+    // Guests paying by dish add a part each time one pays (a failed one is left out).
+    raw.parts.length < (byGuests ? 0 : 2) ||
+    raw.parts.length > (byGuests ? 100 : 20) ||
     !Number.isSafeInteger(raw.paidParts)
   )
     return invalid();
+  const optionalAmount = (entry: unknown) =>
+    entry === undefined || entry === null ? null : amount(entry);
+  let previous = 0;
   return Object.freeze({
     mode: raw.mode,
     stale: raw.stale,
+    paidInFull:
+      typeof raw.paidInFull === "boolean"
+        ? raw.paidInFull
+        : raw.parts.length > 0 && raw.paidParts === raw.parts.length,
+    restMinor: optionalAmount(raw.restMinor),
+    restSubtotalMinor: optionalAmount(raw.restSubtotalMinor),
     dishChoices: Object.freeze(
       raw.dishChoices.map((value: unknown) => {
         const choice = value as Record<string, unknown>;
@@ -351,8 +373,11 @@ function splitOf(value: unknown): TableSplit | null {
     parts: Object.freeze(
       raw.parts.map((value: unknown, index: number) => {
         const part = value as Record<string, unknown>;
+        const numbered = byGuests
+          ? Number.isSafeInteger(part.partNumber) && Number(part.partNumber) > previous
+          : part.partNumber === index + 1;
         if (
-          part.partNumber !== index + 1 ||
+          !numbered ||
           !Array.isArray(part.roundNumbers) ||
           !Array.isArray(part.dishes) ||
           typeof part.guestPaying !== "boolean"
@@ -360,7 +385,8 @@ function splitOf(value: unknown): TableSplit | null {
           return invalid();
         const payment = part.payment as Record<string, unknown> | null;
         return Object.freeze({
-          partNumber: index + 1,
+          partNumber: (previous = Number(part.partNumber)),
+          byStaff: part.byStaff === true,
           amountMinor: amount(part.amountMinor),
           subtotalMinor: amount(part.subtotalMinor),
           taxMinor: amount(part.taxMinor),

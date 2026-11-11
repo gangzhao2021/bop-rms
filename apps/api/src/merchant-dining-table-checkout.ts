@@ -306,6 +306,8 @@ export interface DiningTableBill {
      * "the rest" (null when every dish is in a part).
      */
     readonly restMinor?: string | null;
+    /** ByGuests: "the rest" before tax (a percentage tip at the counter is on it). */
+    readonly restSubtotalMinor?: string | null;
   };
   /**
    * WP-2423 同桌结账 (DEC-OWNER-DEFAULTS-2026-11-06): the dishes still to pay, by dish, for guests
@@ -1093,14 +1095,20 @@ export async function readDiningTableBill(
   // WP-2423 同桌结账: what "the rest" comes to for staff at the counter.
   if (split !== null && split.mode === "ByGuests") {
     const free = diningTableFreeUnits(result, null);
-    let restMinor: string | null = null;
+    let restMinor: string | null = null,
+      restSubtotalMinor: string | null = null;
     if (free.length > 0)
       try {
-        restMinor = diningTableGuestPart(result, free).part.amountMinor.toString();
+        const rest = diningTableGuestPart(result, free).part;
+        restMinor = rest.amountMinor.toString();
+        restSubtotalMinor = rest.subtotalMinor.toString();
       } catch {
         restMinor = null;
       }
-    return Object.freeze({ ...result, split: Object.freeze({ ...split, restMinor }) });
+    return Object.freeze({
+      ...result,
+      split: Object.freeze({ ...split, restMinor, restSubtotalMinor }),
+    });
   }
   return Object.freeze(result);
 }

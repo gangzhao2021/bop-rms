@@ -764,6 +764,165 @@ test("@production split bill: staff collect one part in cash while the others ar
   await expectNoInternalText(page, ["Temporarily unavailable"]);
 });
 
+/**
+ * WP-2423 同桌结账 (DEC-OWNER-DEFAULTS-2026-11-06): guests pay by dish on their phones — one paid
+ * the noodles online, another is paying the dumplings — and staff take the dishes nobody chose at
+ * the counter: the rest's own amount, the browser sending no part (the server appends it).
+ */
+test("@production guests paying by dish: staff see each guest's dishes and take the rest", async ({
+  page,
+}) => {
+  const state: { phase: "Active" | "Closing"; version: number } = {
+    phase: "Closing",
+    version: 7,
+  };
+  await floor(page, state, { canWriteOff: true });
+  await page.route("**/merchant/dining/table-close-plan", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        orderReference: id(3),
+        diningSessionReference: id(2),
+        orderVersion: 4,
+        observedAt: "2026-10-15T19:00:00.000Z",
+        rounds: [],
+        closeBlockers: [],
+        totals: { onlineMinor: "0", cardMachineMinor: "0" },
+      },
+    }),
+  );
+  const { splitBillFixture } = await import("../src/table-split.fixtures.js");
+  const base: Record<string, unknown> = {
+    ...splitBillFixture(),
+    diningSessionReference: id(2),
+    orderReference: id(3),
+  };
+  const fixtureParts = (base.split as { parts: Record<string, unknown>[] }).parts;
+  const byDish = (restPaid: boolean) =>
+    structuredClone({
+      ...base,
+      owed: restPaid
+        ? { subtotalMinor: "0", taxMinor: "0", totalMinor: "0" }
+        : { subtotalMinor: "1900", taxMinor: "248", totalMinor: "2148" },
+      split: {
+        ...(base.split as Record<string, unknown>),
+        mode: "ByGuests",
+        stale: false,
+        dishChoices: [],
+        paidInFull: restPaid,
+        paidParts: restPaid ? 3 : 1,
+        remainingMinor: restPaid ? "0" : "2148",
+        restMinor: restPaid ? null : "1131",
+        restSubtotalMinor: restPaid ? null : "1000",
+        parts: [
+          {
+            ...fixtureParts[0],
+            partNumber: 2,
+            amountMinor: "1356",
+            subtotalMinor: "1200",
+            taxMinor: "156",
+            dishes: [{ displayName: "Beef noodle soup", quantity: 1, shared: false }],
+            payment: {
+              ...(fixtureParts[0]?.payment as object),
+              method: "Online",
+              totalMinor: "1356",
+            },
+            guestPaying: false,
+            choice: "Mine",
+          },
+          {
+            ...fixtureParts[2],
+            partNumber: 3,
+            amountMinor: "1017",
+            subtotalMinor: "900",
+            taxMinor: "117",
+            dishes: [{ displayName: "Pork dumplings", quantity: 3, shared: false }],
+            payment: restPaid
+              ? { ...(fixtureParts[0]?.payment as object), method: "Online", totalMinor: "1017" }
+              : null,
+            guestPaying: !restPaid,
+            choice: "Chosen",
+          },
+          ...(restPaid
+            ? [
+                {
+                  ...fixtureParts[1],
+                  partNumber: 4,
+                  amountMinor: "1131",
+                  subtotalMinor: "1000",
+                  taxMinor: "131",
+                  dishes: [{ displayName: "Jasmine tea", quantity: 2, shared: false }],
+                  payment: {
+                    method: "Cash",
+                    tipMinor: "0",
+                    roundingMinor: "-1",
+                    totalMinor: "1130",
+                    tenderedMinor: "2000",
+                    changeMinor: "870",
+                    recordedAt: "2026-10-29T00:50:00.000Z",
+                    recordedAfterOutage: false,
+                  },
+                  guestPaying: false,
+                  choice: "Rest",
+                  byStaff: true,
+                },
+              ]
+            : []),
+        ],
+      },
+    });
+  await page.route("**/merchant/dining/table-bill", (route) =>
+    route.fulfill({ headers, json: byDish(false) }),
+  );
+  const sent: Record<string, unknown>[] = [];
+  await page.route("**/merchant/dining/table-settle", (route) => {
+    sent.push(route.request().postDataJSON() as Record<string, unknown>);
+    return route.fulfill({ headers, json: { status: "Recorded", bill: byDish(true) } });
+  });
+  await page.goto("/operations/dining");
+  await page.getByRole("button", { name: "Select T2", exact: true }).click();
+  const checkout = page.getByRole("region", { name: "Checkout" });
+  const parts = checkout.getByRole("list", { name: "Payments by dish" });
+  await expect(checkout.getByRole("heading", { name: "Guests paying by dish" })).toBeVisible();
+  await expect(parts).toContainText("Beef noodle soup");
+  await expect(parts).toContainText("Paid $13.56");
+  await expect(parts).toContainText("3 × Pork dumplings");
+  await expect(parts).toContainText("A guest is paying on their phone");
+  await expect(checkout).toContainText("Not chosen yet · $11.31. Take it at the counter below.");
+  await expect(
+    checkout.getByRole("heading", { name: "Take the rest at the counter" }),
+  ).toBeVisible();
+  await expect(checkout).toContainText("The rest with tax$11.31");
+  // Guests are paying: checkout can't go back to ordering.
+  await expect(checkout.getByRole("button", { name: "Cancel checkout" })).toHaveCount(0);
+  await checkout.getByRole("radio", { name: "No tip" }).check();
+  await checkout.getByRole("radio", { name: "Cash" }).check();
+  await checkout.getByRole("textbox", { name: "Cash received" }).fill("20");
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await checkout.screenshot({ path: `test-results/pay-by-dish-staff-${width}.png` });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  // The rest's own cash total, rounded to 5 cents: $11.31 → $11.30.
+  await checkout.getByRole("button", { name: "Cash received · $11.30" }).click();
+  const confirm = checkout.getByRole("alertdialog", { name: "Confirm the payment" });
+  await confirm.getByRole("button", { name: "Confirm $11.30 cash received" }).click();
+  await expect(checkout.getByText("Every dish is paid.")).toBeVisible();
+  expect(sent).toHaveLength(1);
+  expect(sent[0]).toMatchObject({
+    diningSessionReference: id(2),
+    method: "Cash",
+    tip: { kind: "None" },
+    tenderedMinor: "2000",
+    owedMinor: "1131",
+  });
+  expect(sent[0]).not.toHaveProperty("partNumber");
+  await expectNoInternalText(page, ["Temporarily unavailable"]);
+});
+
 test("@production DEC-TAX-WHOLE-RECEIPT: the bill shows its tax rounding on its own line", async ({
   page,
 }) => {

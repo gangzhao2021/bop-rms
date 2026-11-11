@@ -6783,6 +6783,19 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "A manager changes this.": "由店长修改。",
   "When guests at one table pay on their phones, start with": "同桌客人用手机付款时，默认：",
   "The whole table": "付全桌",
+  "Guests paying by dish": "客人手机按菜付",
+  "Payments by dish": "按菜付的款",
+  "Every dish is paid.": "每道菜都已付清。",
+  "Every dish is chosen; waiting for the guests' payments to finish.":
+    "每道菜都有人选了，等客人付款完成。",
+  "Not chosen yet · {amount}. Take it at the counter below.":
+    "还没人选 · {amount}。可以在下面收银处收。",
+  "Each dish is paid once. If a guest's card fails, their dishes come back here. If the network is down, take the rest as usual and record it later.":
+    "每道菜只付一次。客人刷卡失败，那几道菜会回到这里。断网时照常收剩下的，之后再补录。",
+  "Take the rest at the counter": "在收银处收剩下的",
+  "The rest with tax": "剩下的（含税）",
+  "Record that the guests at table {table} left without paying the dishes still unpaid ({amount})? What guests already paid stays paid. It is recorded under your name and stays in the reports as written off.":
+    "记录 {table} 桌客人没付剩下的菜（{amount}）就走了？客人已付的照旧算已付。会记在你名下，并作为坏账留在报表里。",
   "What each guest added": "各付各加的菜",
   "Guests can always choose the other, or pick the dishes they pay for.":
     "客人随时可以改选另一种，或自己选要付的菜。",

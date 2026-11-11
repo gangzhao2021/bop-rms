@@ -293,9 +293,7 @@ export function TableCheckout({
   }, [client, csrf, sessionReference, session.phase, session.version, reload]);
 
   // S4: while a guest pays on their phone, the bill is read again until it ends.
-  const paidNow =
-    bill?.settlement != null ||
-    (bill?.split != null && bill.split.parts.every((entry) => entry.payment !== null));
+  const paidNow = bill?.settlement != null || (bill?.split != null && bill.split.paidInFull);
   // Owner 2026-11-03 walkthrough: a guest can start or finish paying (a part too) at any moment,
   // so an open bill keeps being read while the table checks out.
   useEffect(() => {
@@ -317,7 +315,11 @@ export function TableCheckout({
     guestPaid.current = !paidNow && bill !== null;
   }, [paidNow, bill, onChanged]);
 
-  const selected = bill?.split?.parts.find((entry) => entry.partNumber === part) ?? null;
+  // WP-2423 同桌结账: guests paying by dish; staff take the rest at the counter (no part chosen).
+  const byGuests = bill?.split?.mode === "ByGuests";
+  const selected = byGuests
+    ? null
+    : (bill?.split?.parts.find((entry) => entry.partNumber === part) ?? null);
   // WP-2423 (v15 fabf0261): when the last round this payment covers was sent in the system (rounds
   // taken on paper aside). A paper paid-at a little before it is warned about (a card machine's
   // clock drifts, a written time is approximate); the server refuses one well before it.
@@ -350,10 +352,18 @@ export function TableCheckout({
   // A part's own share before tax (its tip) and its amount; otherwise what the table owes.
   const subtotal = selected
     ? BigInt(selected.subtotalMinor)
-    : bill
-      ? BigInt(bill.owed.subtotalMinor)
-      : 0n;
-  const owed = selected ? BigInt(selected.amountMinor) : bill ? BigInt(bill.owed.totalMinor) : 0n;
+    : byGuests
+      ? BigInt(bill?.split?.restSubtotalMinor ?? "0")
+      : bill
+        ? BigInt(bill.owed.subtotalMinor)
+        : 0n;
+  const owed = selected
+    ? BigInt(selected.amountMinor)
+    : byGuests
+      ? BigInt(bill?.split?.restMinor ?? "0")
+      : bill
+        ? BigInt(bill.owed.totalMinor)
+        : 0n;
   // WP-2423 item 8 ⑦ (Owner decision 11): the Store's own percentages; with tips off, staff are
   // asked nothing and no tip is taken. A percentage the Store no longer offers is chosen again.
   const tipOptions =
@@ -382,6 +392,7 @@ export function TableCheckout({
     // WP-2423 item 8 ⑤ D4: rounds waiting for staff OK are decided before any payment.
     bill.waitingRounds.length === 0 &&
     (bill.split === null ||
+      byGuests ||
       (selected !== null && selected.payment === null && !selected.guestPaying)) &&
     owed > 0n &&
     due !== null &&
@@ -528,7 +539,7 @@ export function TableCheckout({
         tenderedMinor: method === "Cash" ? String(receivedMinor) : null,
         slipReference: method === "CardMachine" && slip.trim() !== "" ? slip.trim() : null,
         takenAt: paper ? paperInstant : null,
-        partNumber: bill.split === null ? null : part,
+        partNumber: bill.split === null || byGuests ? null : part,
         // What staff saw and charged: refused if the bill changed meanwhile.
         owedMinor: owed.toString(),
       });
@@ -629,7 +640,7 @@ export function TableCheckout({
       <h3 id="table-checkout-title">
         {bill?.writeOff
           ? t("Written off")
-          : bill?.settlement || (bill?.split && bill.split.paidParts === bill.split.parts.length)
+          : bill?.settlement || (bill?.split && bill.split.paidInFull)
             ? t("Paid")
             : t("Checkout")}
       </h3>
@@ -738,8 +749,13 @@ export function TableCheckout({
                 onProblem={setProblem}
               />
               <TableReceipt bill={bill} tableLabel={table.stableLabel} />
-              {bill.split !== null && selected === null ? null : (
+              {bill.split !== null && selected === null && !(byGuests && owed > 0n) ? null : (
                 <>
+                  {byGuests ? (
+                    <h4 className="table-checkout__part-title">
+                      {t("Take the rest at the counter")}
+                    </h4>
+                  ) : null}
                   {selected ? (
                     <h4 className="table-checkout__part-title">
                       {t("Collect part {number} of {count}", {
@@ -756,7 +772,9 @@ export function TableCheckout({
                         {cad(
                           selected
                             ? (BigInt(selected.amountMinor) - BigInt(selected.taxMinor)).toString()
-                            : bill.owed.subtotalMinor,
+                            : byGuests
+                              ? subtotal.toString()
+                              : bill.owed.subtotalMinor,
                         )}
                       </dd>
                     </div>
@@ -766,20 +784,36 @@ export function TableCheckout({
                         {cad(
                           selected
                             ? selected.taxMinor
-                            : (BigInt(bill.owed.taxMinor) - owedTaxRounding(bill)).toString(),
+                            : byGuests
+                              ? (owed - subtotal).toString()
+                              : (BigInt(bill.owed.taxMinor) - owedTaxRounding(bill)).toString(),
                         )}
                       </dd>
                     </div>
                     {/* WP-2423 DEC-TAX-WHOLE-RECEIPT: the bill's tax is rounded once. */}
-                    {selected === null && owedTaxRounding(bill) !== 0n ? (
+                    {selected === null && !byGuests && owedTaxRounding(bill) !== 0n ? (
                       <div>
                         <dt>{t("Tax rounding")}</dt>
                         <dd>{cad(owedTaxRounding(bill).toString())}</dd>
                       </div>
                     ) : null}
                     <div>
-                      <dt>{selected ? t("This part with tax") : t("Total with tax")}</dt>
-                      <dd>{cad(selected ? selected.amountMinor : bill.owed.totalMinor)}</dd>
+                      <dt>
+                        {selected
+                          ? t("This part with tax")
+                          : byGuests
+                            ? t("The rest with tax")
+                            : t("Total with tax")}
+                      </dt>
+                      <dd>
+                        {cad(
+                          selected
+                            ? selected.amountMinor
+                            : byGuests
+                              ? owed.toString()
+                              : bill.owed.totalMinor,
+                        )}
+                      </dd>
                     </div>
                   </dl>
                   {!bill.consistent ? (
@@ -1069,8 +1103,7 @@ export function TableCheckout({
                   {t("Guests left without paying? A manager or the owner records it here.")}
                 </p>
               ) : null}
-              {canWriteOff &&
-              (bill.split === null || bill.split.paidParts < bill.split.parts.length) ? (
+              {canWriteOff && (bill.split === null || !bill.split.paidInFull) ? (
                 leaving ? (
                   <div
                     role="group"
@@ -1078,22 +1111,30 @@ export function TableCheckout({
                     className="table-checkout__leaving"
                   >
                     <p>
-                      {bill.split !== null && bill.split.paidParts > 0
+                      {bill.split?.mode === "ByGuests" && bill.split.paidParts > 0
                         ? t(
-                            "Record that the guests at table {table} left without paying the {count} parts still unpaid ({amount})? The parts already paid stay paid. It is recorded under your name and stays in the reports as written off.",
+                            "Record that the guests at table {table} left without paying the dishes still unpaid ({amount})? What guests already paid stays paid. It is recorded under your name and stays in the reports as written off.",
                             {
                               table: saidTable(table.stableLabel),
-                              count: String(bill.split.parts.length - bill.split.paidParts),
                               amount: cad(bill.owed.totalMinor),
                             },
                           )
-                        : t(
-                            "Record that the guests at table {table} left without paying {amount}? It is recorded under your name and stays in the reports as written off.",
-                            {
-                              table: saidTable(table.stableLabel),
-                              amount: cad(bill.owed.totalMinor),
-                            },
-                          )}
+                        : bill.split !== null && bill.split.paidParts > 0
+                          ? t(
+                              "Record that the guests at table {table} left without paying the {count} parts still unpaid ({amount})? The parts already paid stay paid. It is recorded under your name and stays in the reports as written off.",
+                              {
+                                table: saidTable(table.stableLabel),
+                                count: String(bill.split.parts.length - bill.split.paidParts),
+                                amount: cad(bill.owed.totalMinor),
+                              },
+                            )
+                          : t(
+                              "Record that the guests at table {table} left without paying {amount}? It is recorded under your name and stays in the reports as written off.",
+                              {
+                                table: saidTable(table.stableLabel),
+                                amount: cad(bill.owed.totalMinor),
+                              },
+                            )}
                     </p>
                     <button
                       type="button"
@@ -1133,7 +1174,10 @@ export function TableCheckout({
       // v15 2026-10-28: a split table that paid (or is paying) a part can't go back either; the
       // server refuses it too.
       (bill.split === null ||
-        (bill.split.paidParts === 0 && !bill.split.parts.some((part) => part.guestPaying))) ? (
+        (bill.split.paidParts === 0 &&
+          !bill.split.parts.some((part) => part.guestPaying) &&
+          // WP-2423 同桌结账: guests who chose dishes are paying for them; the server refuses too.
+          !(bill.split.mode === "ByGuests" && bill.split.parts.length > 0))) ? (
         // DEC-DINE-IN-PAY-LATER (rule 3): the guests want to order more — back to ordering.
         <p className="table-checkout__cancel">
           <button type="button" disabled={busy || locked} onClick={() => void cancelCheckout()}>
@@ -1170,7 +1214,7 @@ function TableReceipt({
   }[] =
     bill.settlement !== null
       ? [{ part: null, paid: bill.settlement }]
-      : parts.every((entry) => entry.payment !== null) && parts.length > 0
+      : bill.split?.paidInFull === true && parts.every((entry) => entry.payment !== null)
         ? parts.map((entry) => ({
             part: entry.partNumber,
             paid: entry.payment as NonNullable<typeof entry.payment>,
