@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { planDiningTableSettlement } from "../domain/dining-table-settlement.js";
-import { splitDiningTableBill, type DiningTableSplitRound } from "../domain/dining-table-split.js";
+import {
+  chooseDiningTableGuestPart,
+  splitDiningTableBill,
+  type DiningTableSplitRound,
+} from "../domain/dining-table-split.js";
 
 const ref = (n: number) => "018f9a00-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 // Table 8 of the Figma sample: round 1 $48.50 + 13% = $54.81 (rounded per item), round 2 $35.50 + 13%.
@@ -213,5 +217,135 @@ describe("WP-2423 by-dish split", () => {
       expect(sum(slices.map((slice) => slice.subtotalMinor))).toBe(original.subtotalMinor);
       expect(sum(slices.map((slice) => slice.taxMinor))).toBe(original.taxMinor);
     }
+  });
+});
+
+describe("WP-2423 同桌结账: guests pay by dish as they go", () => {
+  // Round 1: dumplings ×3 ($9.00 + 13% = $10.17 → $3.39 each) and tea ×1 ($2.50 + $0.33);
+  // round 2: noodles ×1 ($12.00 + $1.56). The bill's tax rounding gave round 1 one cent more.
+  const dumplings = {
+    orderBatchReference: ref(1),
+    orderItemReference: ref(11),
+    quantity: 3,
+    subtotalMinor: 900n,
+    taxMinor: 117n,
+    totalMinor: 1017n,
+  };
+  const tea = {
+    orderBatchReference: ref(1),
+    orderItemReference: ref(12),
+    quantity: 1,
+    subtotalMinor: 250n,
+    taxMinor: 33n,
+    totalMinor: 283n,
+  };
+  const noodles = {
+    orderBatchReference: ref(2),
+    orderItemReference: ref(21),
+    quantity: 1,
+    subtotalMinor: 1200n,
+    taxMinor: 156n,
+    totalMinor: 1356n,
+  };
+  const rounds = [round(1, 1301n, 1150n, 151n), round(2, 1356n, 1200n, 156n)];
+  const dishes = [dumplings, tea, noodles];
+  const unit = (item: number, n: number) => ({ orderItemReference: ref(item), unit: n });
+  const as = (choice: ReturnType<typeof chooseDiningTableGuestPart>) => ({
+    units: choice.units,
+    slices: choice.part.slices,
+  });
+
+  it("a part pays its units; the part taking a round's last unit takes the rest of the round", () => {
+    // Phone A: one dumpling and the noodles.
+    const a = chooseDiningTableGuestPart({
+      rounds,
+      dishes,
+      others: [],
+      chosen: [unit(11, 1), unit(21, 1)],
+      partNumber: 1,
+    });
+    expect(a.part.slices.map((slice) => [slice.sequence, slice.roundMinor])).toEqual([
+      [1, 339n],
+      [2, 1356n],
+    ]);
+    expect(a.completesBill).toBe(false);
+    // Phone B: the other two dumplings.
+    const b = chooseDiningTableGuestPart({
+      rounds,
+      dishes,
+      others: [a].map(as),
+      chosen: [unit(11, 2), unit(11, 3)],
+      partNumber: 2,
+    });
+    expect(b.part.amountMinor).toBe(678n);
+    expect(b.completesBill).toBe(false);
+    // The rest (the tea) is the last of round 1: its price and the cent of tax rounding.
+    const rest = chooseDiningTableGuestPart({
+      rounds,
+      dishes,
+      others: [a, b].map(as),
+      chosen: [unit(12, 1)],
+      partNumber: 3,
+    });
+    expect(rest.part.amountMinor).toBe(284n);
+    expect(rest.part.taxMinor).toBe(151n - 39n - 78n);
+    expect(rest.completesBill).toBe(true);
+    // Every round's slices add up to the round to the cent; the parts to the bill.
+    for (const original of rounds) {
+      const slices = [a, b, rest].flatMap((part) =>
+        part.part.slices.filter((s) => s.orderBatchReference === original.orderBatchReference),
+      );
+      expect(sum(slices.map((s) => s.roundMinor))).toBe(original.roundMinor);
+      expect(sum(slices.map((s) => s.subtotalMinor))).toBe(original.subtotalMinor);
+      expect(sum(slices.map((s) => s.taxMinor))).toBe(original.taxMinor);
+    }
+    expect(sum([a, b, rest].map((part) => part.part.amountMinor))).toBe(2657n);
+  });
+
+  it("a dish already in a part, nothing chosen, a comped dish or one not on the bill: refused", () => {
+    const a = chooseDiningTableGuestPart({
+      rounds,
+      dishes,
+      others: [],
+      chosen: [unit(21, 1)],
+      partNumber: 1,
+    });
+    const again = (chosen: { orderItemReference: string; unit: number }[], list = dishes) =>
+      chooseDiningTableGuestPart({
+        rounds,
+        dishes: list,
+        others: [a].map(as),
+        chosen,
+        partNumber: 2,
+      });
+    expect(() => again([unit(21, 1)])).toThrow();
+    expect(() => again([])).toThrow();
+    expect(() => again([unit(99, 1)])).toThrow();
+    expect(() => again([unit(11, 4)])).toThrow();
+    // Tea comped: worth nothing, never chosen; the dumplings are then the last of round 1.
+    const comped = [
+      dumplings,
+      { ...tea, subtotalMinor: 0n, taxMinor: 0n, totalMinor: 0n },
+      noodles,
+    ];
+    const compedRounds = [round(1, 1018n, 900n, 118n), round(2, 1356n, 1200n, 156n)];
+    expect(() =>
+      chooseDiningTableGuestPart({
+        rounds: compedRounds,
+        dishes: comped,
+        others: [a].map(as),
+        chosen: [unit(12, 1)],
+        partNumber: 2,
+      }),
+    ).toThrow();
+    const last = chooseDiningTableGuestPart({
+      rounds: compedRounds,
+      dishes: comped,
+      others: [a].map(as),
+      chosen: [unit(11, 1), unit(11, 2), unit(11, 3)],
+      partNumber: 2,
+    });
+    expect(last.part.amountMinor).toBe(1018n);
+    expect(last.completesBill).toBe(true);
   });
 });

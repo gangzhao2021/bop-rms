@@ -674,6 +674,112 @@ export async function changeDiningRoundHoldSetting(
 }
 
 /**
+ * WP-2423 同桌结账 (DEC-OWNER-DEFAULTS-2026-11-06 "默认付全桌吧"; 门店可在设置里改默认): what a
+ * guest paying on their phone at a shared table starts with — the whole table (the default, also
+ * while never changed) or only what they added. Guests can always choose the other.
+ */
+export type DiningCheckoutDefaultScope = "WholeTable" | "OwnDishes";
+export interface DiningCheckoutScopeSetting {
+  /** 0: never changed (the whole table). */
+  readonly version: number;
+  readonly defaultScope: DiningCheckoutDefaultScope;
+  readonly changedAt: string | null;
+}
+
+/** The Store's current setting, in the caller's transaction. */
+export async function loadDiningCheckoutScopeSetting(
+  tx: DiningTableTransaction,
+  scopeInput: DiningTableStoreScope,
+): Promise<DiningCheckoutScopeSetting> {
+  const brand = parseDiningReference(scopeInput.brandReference);
+  const store = parseDiningReference(scopeInput.storeReference);
+  await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+    brand,
+    store,
+  ]);
+  const found = rows(
+    await tx.query(
+      "SELECT version,default_scope,to_char(occurred_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') AS occurred_at FROM rms_dining.dining_checkout_scope_setting WHERE brand_id=$1 AND store_id=$2 ORDER BY version DESC LIMIT 1",
+      [brand, store],
+    ),
+  )[0];
+  if (found === undefined)
+    return Object.freeze({ version: 0, defaultScope: "WholeTable", changedAt: null });
+  const version = Number(found.version);
+  if (
+    !Number.isSafeInteger(version) ||
+    version < 1 ||
+    (found.default_scope !== "WholeTable" && found.default_scope !== "OwnDishes")
+  )
+    return fail();
+  return Object.freeze({
+    version,
+    defaultScope: found.default_scope,
+    changedAt: parseDiningInstant(found.occurred_at),
+  });
+}
+
+/**
+ * A manager changes the setting: the next version, with who and when. `expectedVersion` is the
+ * version they saw (another change in between is a conflict); the same operation again returns.
+ */
+export async function changeDiningCheckoutScopeSetting(
+  tx: DiningTableTransaction,
+  scopeInput: DiningTableStoreScope,
+  input: {
+    readonly operationReference: string;
+    readonly expectedVersion: number;
+    readonly defaultScope: DiningCheckoutDefaultScope;
+    readonly actorReference: string;
+    readonly observedAt: string;
+  },
+): Promise<DiningCheckoutScopeSetting> {
+  const tenant = parseDiningReference(scopeInput.tenantReference);
+  const brand = parseDiningReference(scopeInput.brandReference);
+  const store = parseDiningReference(scopeInput.storeReference);
+  const operation = parseDiningReference(input.operationReference);
+  if (input.defaultScope !== "WholeTable" && input.defaultScope !== "OwnDishes") return fail();
+  await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+    brand,
+    store,
+  ]);
+  await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+    `DiningCheckoutScopeSetting:${brand}:${store}`,
+  ]);
+  const prior = rows(
+    await tx.query(
+      "SELECT default_scope FROM rms_dining.dining_checkout_scope_setting WHERE brand_id=$1 AND store_id=$2 AND operation_id=$3",
+      [brand, store, operation],
+    ),
+  )[0];
+  if (prior !== undefined) {
+    if (prior.default_scope !== input.defaultScope)
+      throw new DiningSessionError("DINING_SESSION_IDEMPOTENCY_CONFLICT");
+    return loadDiningCheckoutScopeSetting(tx, scopeInput);
+  }
+  const current = await loadDiningCheckoutScopeSetting(tx, scopeInput);
+  if (current.version !== input.expectedVersion)
+    throw new DiningSessionError("DINING_SESSION_IDEMPOTENCY_CONFLICT");
+  if (current.defaultScope === input.defaultScope) return current;
+  changed(
+    await tx.query(
+      "INSERT INTO rms_dining.dining_checkout_scope_setting (tenant_id,brand_id,store_id,version,operation_id,default_scope,actor_id,occurred_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
+      [
+        tenant,
+        brand,
+        store,
+        current.version + 1,
+        operation,
+        input.defaultScope,
+        parseDiningReference(input.actorReference),
+        parseDiningInstant(input.observedAt),
+      ],
+    ),
+  );
+  return loadDiningCheckoutScopeSetting(tx, scopeInput);
+}
+
+/**
  * WP-2423 item 8 ⑦ DEC-STORE-FEATURES (Owner 2026-10-28 decision 4): the Store's dine-in service
  * switches. Guests call staff from their phone; servers chase a dish with the kitchen. Both are
  * off until the owner turns them on.

@@ -8,6 +8,8 @@ import type {
   DiningTableSplit,
   DiningTableSplitDishChoice,
   DiningTableSplitMode,
+  DiningTableSplitPart,
+  DiningTableSplitUnit,
 } from "../../domain/dining-table-split.js";
 import { parsePaymentReference } from "../../application/payment-provider-adapter.js";
 import { parsePaymentInstant } from "../../application/payment-intent-creation.js";
@@ -145,7 +147,7 @@ export interface DiningTableSplitPartReference {
 const partFrom = (plan: unknown, number: unknown): DiningTableSplitPartReference | null => {
   if (plan === null && number === null) return null;
   const partNumber = Number(number);
-  if (!Number.isSafeInteger(partNumber) || partNumber < 1 || partNumber > 20) return fail();
+  if (!Number.isSafeInteger(partNumber) || partNumber < 1 || partNumber > 100) return fail();
   return Object.freeze({ splitPlanReference: ref(plan), partNumber });
 };
 
@@ -176,6 +178,71 @@ export interface DiningTableSplitPlanRecord {
   }[];
   /** ByItems: which part each unit of each dish goes to (null: all the parts share it). */
   readonly dishChoices: readonly DiningTableSplitDishChoice[];
+  /**
+   * WP-2423 同桌结账, ByGuests only: who chose each part (in part order), the units it pays for,
+   * whether it took the last of the bill, and whether it was withdrawn (its phone payment failed or
+   * was cancelled: its dishes are unpaid again).
+   */
+  readonly guestParts: readonly DiningTableGuestPartRecord[];
+}
+export interface DiningTableGuestPartRecord {
+  readonly partNumber: number;
+  readonly operationReference: string;
+  readonly intentDigest: string;
+  readonly choice: "Mine" | "Chosen" | "Rest";
+  readonly actorType: "Guest" | "Staff";
+  readonly guestSessionReference: string | null;
+  readonly actorReference: string | null;
+  readonly completesBill: boolean;
+  readonly recordedAt: string;
+  readonly units: readonly DiningTableSplitUnit[];
+  readonly withdrawn: null | {
+    readonly reason: "PaymentFailed" | "PaymentCancelled";
+    readonly lastPartNumber: number;
+    readonly recordedAt: string;
+  };
+}
+/** WP-2423 同桌结账: the parts of a ByGuests plan still standing (paid or being paid). */
+export function diningTableStandingGuestParts(plan: DiningTableSplitPlanRecord) {
+  const standing = new Set(
+    plan.guestParts.filter((part) => part.withdrawn === null).map((part) => part.partNumber),
+  );
+  return plan.parts.filter((part) => standing.has(part.partNumber));
+}
+/**
+ * WP-2423 item 8 ④ and 同桌结账: whether a split plan is paid in full by these settlements — every
+ * part paid; for guests paying by dish, also a part still standing took the last of the bill (no
+ * earlier part gave its dishes back after it) and every part still standing is paid. The same rule
+ * as the database's (2000_524 rms_payment.dining_table_by_guests_paid).
+ */
+export function diningTableSplitPaidInFull(
+  plan: DiningTableSplitPlanRecord,
+  settlements: readonly { readonly part: DiningTableSplitPartReference | null }[],
+): boolean {
+  if (plan.mode === "Whole") return false;
+  const paid = (partNumber: number) =>
+    settlements.some(
+      (settlement) =>
+        settlement.part?.splitPlanReference === plan.splitPlanReference &&
+        settlement.part.partNumber === partNumber,
+    );
+  if (plan.mode !== "ByGuests") return plan.parts.every((part) => paid(part.partNumber));
+  const withdrawals = plan.guestParts.flatMap((part) =>
+    part.withdrawn === null ? [] : [{ partNumber: part.partNumber, ...part.withdrawn }],
+  );
+  const completing = plan.guestParts.some(
+    (part) =>
+      part.completesBill &&
+      part.withdrawn === null &&
+      !withdrawals.some(
+        (withdrawal) =>
+          withdrawal.partNumber < part.partNumber && withdrawal.lastPartNumber >= part.partNumber,
+      ),
+  );
+  return (
+    completing &&
+    plan.guestParts.filter((part) => part.withdrawn === null).every((part) => paid(part.partNumber))
+  );
 }
 const splitPlanSelect = `SELECT p.split_plan_id::text AS plan,p.tenant_id::text AS tenant,p.operation_id::text AS operation,
  p.intent_digest,p.dining_session_id::text AS session,p.order_id::text AS "order",p.plan_version,p.mode,
@@ -190,24 +257,49 @@ const splitPlanSelect = `SELECT p.split_plan_id::text AS plan,p.tenant_id::text 
    WHERE x.split_plan_id=p.split_plan_id AND x.brand_id=p.brand_id AND x.store_id=p.store_id) AS parts,
  (SELECT coalesce(jsonb_agg(jsonb_build_object('item',i.order_item_id,'unit',i.unit_number,'part',i.part_number)
    ORDER BY i.order_item_id,i.unit_number),'[]'::jsonb) FROM rms_payment.dining_table_split_part_item i
-   WHERE i.split_plan_id=p.split_plan_id AND i.brand_id=p.brand_id AND i.store_id=p.store_id) AS dish_choices
+   WHERE i.split_plan_id=p.split_plan_id AND i.brand_id=p.brand_id AND i.store_id=p.store_id) AS dish_choices,
+ (SELECT coalesce(jsonb_agg(jsonb_build_object('part',a.part_number,'operation',a.operation_id,
+   'digest',a.intent_digest,'choice',a.choice,'actorType',a.actor_type,'actor',a.actor_id,
+   'guest',a.guest_session_id,'completes',a.completes_bill,'at',${instant("a.recorded_at")},
+   'units',(SELECT coalesce(jsonb_agg(jsonb_build_object('item',u.order_item_id,'unit',u.unit_number)
+     ORDER BY u.order_item_id,u.unit_number),'[]'::jsonb) FROM rms_payment.dining_table_split_part_unit u
+     WHERE u.split_plan_id=a.split_plan_id AND u.part_number=a.part_number AND u.brand_id=a.brand_id
+     AND u.store_id=a.store_id),
+   'withdrawn',(SELECT jsonb_build_object('reason',w.reason,'last',w.last_part_number,
+     'at',${instant("w.recorded_at")}) FROM rms_payment.dining_table_split_part_withdrawal w
+     WHERE w.split_plan_id=a.split_plan_id AND w.part_number=a.part_number AND w.brand_id=a.brand_id
+     AND w.store_id=a.store_id)) ORDER BY a.part_number),'[]'::jsonb)
+   FROM rms_payment.dining_table_split_part_append a
+   WHERE a.split_plan_id=p.split_plan_id AND a.brand_id=p.brand_id AND a.store_id=p.store_id) AS guest_parts
  FROM rms_payment.dining_table_split_plan p WHERE p.brand_id=$1 AND p.store_id=$2`;
 function splitPlanFrom(row: Record<string, unknown>): DiningTableSplitPlanRecord {
   const mode =
-    row.mode === "Whole" || row.mode === "Even" || row.mode === "ByRounds" || row.mode === "ByItems"
+    row.mode === "Whole" ||
+    row.mode === "Even" ||
+    row.mode === "ByRounds" ||
+    row.mode === "ByItems" ||
+    row.mode === "ByGuests"
       ? row.mode
       : fail();
   const version = Number(row.plan_version);
   const parts = row.parts;
   const dishChoices = row.dish_choices;
+  const guestParts = row.guest_parts;
   if (
     !Number.isSafeInteger(version) ||
     version < 1 ||
     !Array.isArray(parts) ||
-    !Array.isArray(dishChoices)
+    !Array.isArray(dishChoices) ||
+    !Array.isArray(guestParts)
   )
     return fail();
-  if (parts.length !== Number(row.part_count)) return fail();
+  // A ByGuests plan's parts are appended as guests choose (its part count stays 0).
+  if (
+    mode === "ByGuests"
+      ? guestParts.length !== parts.length
+      : parts.length !== Number(row.part_count)
+  )
+    return fail();
   return Object.freeze({
     splitPlanReference: ref(row.plan),
     operationReference: ref(row.operation),
@@ -251,6 +343,43 @@ function splitPlanFrom(row: Record<string, unknown>): DiningTableSplitPlanRecord
           partNumber: choice.part === null ? null : Number(choice.part),
         }),
       ),
+    ),
+    guestParts: Object.freeze(
+      guestParts.map((part: Record<string, unknown>) => {
+        const withdrawn = part.withdrawn as Record<string, unknown> | null;
+        if (!Array.isArray(part.units)) return fail();
+        return Object.freeze({
+          partNumber: Number(part.part),
+          operationReference: ref(part.operation),
+          intentDigest: String(part.digest),
+          choice:
+            part.choice === "Mine" || part.choice === "Chosen" || part.choice === "Rest"
+              ? part.choice
+              : fail(),
+          actorType:
+            part.actorType === "Guest" || part.actorType === "Staff" ? part.actorType : fail(),
+          guestSessionReference: part.guest === null ? null : ref(part.guest),
+          actorReference: part.actor === null ? null : ref(part.actor),
+          completesBill: part.completes === true,
+          recordedAt: String(parsePaymentInstant(part.at)),
+          units: Object.freeze(
+            part.units.map((unit: Record<string, unknown>) =>
+              Object.freeze({ orderItemReference: ref(unit.item), unit: Number(unit.unit) }),
+            ),
+          ),
+          withdrawn:
+            withdrawn === null || withdrawn === undefined
+              ? null
+              : Object.freeze({
+                  reason:
+                    withdrawn.reason === "PaymentFailed" || withdrawn.reason === "PaymentCancelled"
+                      ? withdrawn.reason
+                      : fail(),
+                  lastPartNumber: Number(withdrawn.last),
+                  recordedAt: String(parsePaymentInstant(withdrawn.at)),
+                }),
+        });
+      }),
     ),
   });
 }
@@ -1345,6 +1474,200 @@ export function createPostgresDiningTableSettlementStore(options: {
     },
 
     /**
+     * WP-2423 同桌结账 (DEC-OWNER-DEFAULTS-2026-11-06): appends one part to the table's "ByGuests"
+     * plan — the dishes a guest pays on their phone ("only what I added", "choose dishes", "the
+     * rest") or staff take at the counter — with its units, slices and who chose it. The plan is
+     * created first when the table has none (refused by the database once anything was paid
+     * another way). The part's amounts come from chooseDiningTableGuestPart over the bill as it
+     * stands, read under the Order's lock taken here. A retry of the same operation and intent
+     * returns the same part.
+     */
+    async appendGuestSplitPart(
+      tx: AuditTransaction,
+      input: {
+        /** Null: the current plan is already this table's ByGuests plan. */
+        readonly createPlan: null | { readonly billMinor: bigint };
+        readonly splitPlanReference: string;
+        readonly operationReference: string;
+        readonly intentDigest: string;
+        readonly diningSessionReference: string;
+        readonly orderReference: string;
+        readonly part: DiningTableSplitPart;
+        readonly units: readonly DiningTableSplitUnit[];
+        readonly completesBill: boolean;
+        readonly choice: "Mine" | "Chosen" | "Rest";
+        readonly actor:
+          | { readonly type: "Guest"; readonly guestSessionReference: string }
+          | { readonly type: "Staff"; readonly reference: string };
+        readonly roundOrders?: ReadonlyMap<string, string>;
+        readonly recordedAt: string;
+        readonly auditReference: string;
+        readonly correlationReference: string;
+      },
+    ) {
+      const order = ref(input.orderReference);
+      await allowed(tx, order);
+      if (!/^sha256:[0-9a-f]{64}$/u.test(input.intentDigest)) return fail();
+      const part = input.part;
+      if (
+        !Number.isSafeInteger(part.partNumber) ||
+        part.partNumber < 1 ||
+        part.partNumber > 100 ||
+        part.slices.length < 1 ||
+        input.units.length < 1 ||
+        input.units.length > 1000
+      )
+        return fail();
+      await context(tx);
+      await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+        "DiningTablePaidOrWrittenOff:" + brand + ":" + store + ":" + order,
+      ]);
+      const [prior] = rows(
+        await tx.query(
+          'SELECT split_plan_id::text AS plan,part_number,intent_digest,order_id::text AS "order" FROM rms_payment.dining_table_split_part_append WHERE brand_id=$1 AND store_id=$2 AND operation_id=$3',
+          [brand, store, ref(input.operationReference)],
+        ),
+      );
+      if (prior !== undefined) {
+        if (prior.intent_digest !== input.intentDigest || ref(prior.order) !== order)
+          return fail("DINING_TABLE_SETTLEMENT_IDEMPOTENCY_CONFLICT");
+        return Object.freeze({
+          status: "AlreadyRecorded" as const,
+          part: Object.freeze({
+            splitPlanReference: ref(prior.plan),
+            partNumber: Number(prior.part_number),
+          }),
+        });
+      }
+      const plan = ref(input.splitPlanReference);
+      const recordedAt = String(parsePaymentInstant(input.recordedAt));
+      const actorReference =
+        input.actor.type === "Guest"
+          ? ref(input.actor.guestSessionReference)
+          : ref(input.actor.reference);
+      if (input.createPlan !== null) {
+        if ((await settlements(tx, "s.order_id=$3", [order])).length > 0)
+          return fail("DINING_TABLE_SETTLEMENT_ALREADY_PAID");
+        const versions = rows(
+          await tx.query(
+            "SELECT coalesce(max(plan_version),0) AS version FROM rms_payment.dining_table_split_plan WHERE brand_id=$1 AND store_id=$2 AND order_id=$3",
+            [brand, store, order],
+          ),
+        );
+        await tx.query(
+          `INSERT INTO rms_payment.dining_table_split_plan (split_plan_id,tenant_id,brand_id,store_id,operation_id,
+ intent_digest,dining_session_id,order_id,plan_version,mode,part_count,bill_minor,currency_code,recorded_at,actor_id,audit_id)
+ VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'ByGuests',0,$10,'CAD',$11,$12,$13)`,
+          [
+            plan,
+            tenant,
+            brand,
+            store,
+            ref(input.operationReference),
+            input.intentDigest,
+            ref(input.diningSessionReference),
+            order,
+            Number(versions[0]?.version ?? 0) + 1,
+            minor(String(input.createPlan.billMinor), 1n).toString(),
+            recordedAt,
+            actorReference,
+            ref(input.auditReference),
+          ],
+        );
+      }
+      await tx.query(
+        `INSERT INTO rms_payment.dining_table_split_part (split_plan_id,brand_id,store_id,order_id,part_number,
+ amount_minor,subtotal_minor,tax_minor) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+        [
+          plan,
+          brand,
+          store,
+          order,
+          part.partNumber,
+          minor(String(part.amountMinor), 1n).toString(),
+          minor(String(part.subtotalMinor)).toString(),
+          minor(String(part.taxMinor)).toString(),
+        ],
+      );
+      for (const slice of part.slices)
+        await tx.query(
+          `INSERT INTO rms_payment.dining_table_split_part_round (split_plan_id,part_number,brand_id,store_id,
+ order_id,order_batch_id,round_minor,subtotal_minor,tax_minor) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+          [
+            plan,
+            part.partNumber,
+            brand,
+            store,
+            ref(input.roundOrders?.get(slice.orderBatchReference) ?? order),
+            ref(slice.orderBatchReference),
+            slice.roundMinor.toString(),
+            slice.subtotalMinor.toString(),
+            slice.taxMinor.toString(),
+          ],
+        );
+      for (const unit of input.units)
+        await tx.query(
+          `INSERT INTO rms_payment.dining_table_split_part_unit (split_plan_id,part_number,brand_id,store_id,
+ order_item_id,unit_number) VALUES ($1,$2,$3,$4,$5,$6)`,
+          [plan, part.partNumber, brand, store, ref(unit.orderItemReference), unit.unit],
+        );
+      await tx.query(
+        `INSERT INTO rms_payment.dining_table_split_part_append (split_plan_id,part_number,tenant_id,brand_id,store_id,
+ order_id,operation_id,intent_digest,choice,actor_type,actor_id,guest_session_id,completes_bill,recorded_at,audit_id)
+ VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+        [
+          plan,
+          part.partNumber,
+          tenant,
+          brand,
+          store,
+          order,
+          ref(input.operationReference),
+          input.intentDigest,
+          input.choice,
+          input.actor.type,
+          input.actor.type === "Staff" ? actorReference : null,
+          input.actor.type === "Guest" ? actorReference : null,
+          input.completesBill,
+          recordedAt,
+          ref(input.auditReference),
+        ],
+      );
+      await appendAuditRecordInTransaction(tx, {
+        auditId: ref(input.auditReference),
+        brandId: brand,
+        storeId: store,
+        actor:
+          input.actor.type === "Staff"
+            ? { type: "User", reference: actorReference }
+            : { type: "System" },
+        actionCode: "PAYMENT_DINING_TABLE_SPLIT_PART_CHOSEN",
+        targetType: "Order",
+        targetId: order,
+        afterSummary: {
+          mode: "ByGuests",
+          partNumber: part.partNumber,
+          choice: input.choice,
+          amountMinor: part.amountMinor.toString(),
+          units: input.units.length,
+          completesBill: input.completesBill,
+          planCreated: input.createPlan !== null,
+        },
+        reasonCode: input.actor.type === "Staff" ? "STAFF_TAKES_REST" : "GUEST_PAYS_BY_DISH",
+        correlationId: ref(input.correlationReference),
+        occurredAt: recordedAt,
+        sourceChannel: input.actor.type === "Staff" ? "MERCHANT_WEB" : "CUSTOMER_PWA",
+        dataClassification: "Restricted",
+        retentionPolicyCode: "FINANCIAL_COMPLIANCE",
+        retentionPolicyVersion: 1,
+      });
+      return Object.freeze({
+        status: "Recorded" as const,
+        part: Object.freeze({ splitPlanReference: plan, partNumber: part.partNumber }),
+      });
+    },
+
+    /**
      * Records one table payment, split by round. A retry with the same operation and intent returns
      * the same settlement; a second payment for the Order is refused.
      */
@@ -1702,6 +2025,33 @@ export function createPostgresDiningTableSettlementStore(options: {
         retentionPolicyCode: "FINANCIAL_COMPLIANCE",
         retentionPolicyVersion: 1,
       });
+      // WP-2423 同桌结账: a part guests chose by dish whose payment failed or was cancelled is
+      // withdrawn in the same transaction, so its dishes are unpaid again (never deleted).
+      if (input.status !== "Captured" && current.part !== null) {
+        const [planRow] = rows(
+          await tx.query(
+            "SELECT mode,(SELECT max(x.part_number) FROM rms_payment.dining_table_split_part x WHERE x.split_plan_id=p.split_plan_id) AS last FROM rms_payment.dining_table_split_plan p WHERE p.brand_id=$1 AND p.store_id=$2 AND p.split_plan_id=$3",
+            [brand, store, ref(current.part.splitPlanReference)],
+          ),
+        );
+        if (planRow?.mode === "ByGuests")
+          await tx.query(
+            `INSERT INTO rms_payment.dining_table_split_part_withdrawal (split_plan_id,part_number,brand_id,store_id,
+ order_id,reason,online_payment_id,last_part_number,recorded_at,audit_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+            [
+              ref(current.part.splitPlanReference),
+              current.part.partNumber,
+              brand,
+              store,
+              order,
+              input.status === "Failed" ? "PaymentFailed" : "PaymentCancelled",
+              ref(input.onlinePaymentReference),
+              Number(planRow.last),
+              recordedAt,
+              ref(input.auditReference),
+            ],
+          );
+      }
       const [saved] = rows(
         await tx.query(`${onlinePaymentSelect} AND p.online_payment_id=$3`, [
           brand,

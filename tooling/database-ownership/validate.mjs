@@ -2458,6 +2458,10 @@ async function scanUnsupported(root, module, diagnostics) {
               "dining_table_split_part",
               "dining_table_split_part_round",
               "dining_table_split_part_item",
+              // WP-2423 同桌结账: guests paying by dish (parts appended, their units, withdrawals).
+              "dining_table_split_part_append",
+              "dining_table_split_part_unit",
+              "dining_table_split_part_withdrawal",
             ],
           },
           // WP-2423 Q14: payments and refunds behind the Store sales reports (read only).
@@ -2974,6 +2978,8 @@ async function scanUnsupported(root, module, diagnostics) {
             "dining_qr_join_control",
             "dining_participant_removal",
             "dining_round_hold_setting",
+            // WP-2423 同桌结账: what guests paying on their phones start with (Store setting).
+            "dining_checkout_scope_setting",
           ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
           moduleRelative === "src/infrastructure/persistence/dining-qr-join-store.ts";
         // WP-2423 DEC-DINING-GUEST-TABLE-START: exact scoped guest start store.

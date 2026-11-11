@@ -44,6 +44,30 @@ const databaseAccessManifestInput = {
       piiClassification: ["indirect_identifier", "payment"],
     },
     {
+      table: "dining_table_split_part_append",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/payment" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "financial-compliance",
+      piiClassification: ["indirect_identifier", "payment"],
+    },
+    {
+      table: "dining_table_split_part_unit",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/payment" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "financial-compliance",
+      piiClassification: ["indirect_identifier", "payment"],
+    },
+    {
+      table: "dining_table_split_part_withdrawal",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/payment" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "financial-compliance",
+      piiClassification: ["indirect_identifier", "payment"],
+    },
+    {
       table: "dining_table_online_payment",
       classification: "append-only-record",
       writeOwner: { kind: "module", id: "@rms/payment" },
@@ -515,6 +539,66 @@ const databaseAccessManifestInput = {
       readPattern: null,
       mechanism: "repository",
       target: { schema: "rms_payment", table: "dining_table_split_part_item" },
+      principal: { kind: "module", id: "@rms/payment" },
+      source:
+        "packages/rms/payment/src/infrastructure/persistence/dining-table-settlement-store.ts",
+    },
+    {
+      id: "dining-table-settlement.read.dining_table_split_part_append",
+      operation: "read",
+      readPattern: "owner-repository",
+      mechanism: "repository",
+      target: { schema: "rms_payment", table: "dining_table_split_part_append" },
+      principal: { kind: "module", id: "@rms/payment" },
+      source:
+        "packages/rms/payment/src/infrastructure/persistence/dining-table-settlement-store.ts",
+    },
+    {
+      id: "dining-table-settlement.write.dining_table_split_part_append",
+      operation: "write",
+      readPattern: null,
+      mechanism: "repository",
+      target: { schema: "rms_payment", table: "dining_table_split_part_append" },
+      principal: { kind: "module", id: "@rms/payment" },
+      source:
+        "packages/rms/payment/src/infrastructure/persistence/dining-table-settlement-store.ts",
+    },
+    {
+      id: "dining-table-settlement.read.dining_table_split_part_unit",
+      operation: "read",
+      readPattern: "owner-repository",
+      mechanism: "repository",
+      target: { schema: "rms_payment", table: "dining_table_split_part_unit" },
+      principal: { kind: "module", id: "@rms/payment" },
+      source:
+        "packages/rms/payment/src/infrastructure/persistence/dining-table-settlement-store.ts",
+    },
+    {
+      id: "dining-table-settlement.write.dining_table_split_part_unit",
+      operation: "write",
+      readPattern: null,
+      mechanism: "repository",
+      target: { schema: "rms_payment", table: "dining_table_split_part_unit" },
+      principal: { kind: "module", id: "@rms/payment" },
+      source:
+        "packages/rms/payment/src/infrastructure/persistence/dining-table-settlement-store.ts",
+    },
+    {
+      id: "dining-table-settlement.read.dining_table_split_part_withdrawal",
+      operation: "read",
+      readPattern: "owner-repository",
+      mechanism: "repository",
+      target: { schema: "rms_payment", table: "dining_table_split_part_withdrawal" },
+      principal: { kind: "module", id: "@rms/payment" },
+      source:
+        "packages/rms/payment/src/infrastructure/persistence/dining-table-settlement-store.ts",
+    },
+    {
+      id: "dining-table-settlement.write.dining_table_split_part_withdrawal",
+      operation: "write",
+      readPattern: null,
+      mechanism: "repository",
+      target: { schema: "rms_payment", table: "dining_table_split_part_withdrawal" },
       principal: { kind: "module", id: "@rms/payment" },
       source:
         "packages/rms/payment/src/infrastructure/persistence/dining-table-settlement-store.ts",
