@@ -906,9 +906,12 @@ describe("Figma v1 (2026-10-25): Home lists what needs attention now", () => {
   it("M109: a Store taking pickup orders with no phone asks the owner for it, with the link", () => {
     const href = "/app/organization/stores/s/setup#store-public-profile";
     const items = attentionItems(state, null, null, null, { kind: "Hidden" }, null, href);
-    expect(items[0]).toMatchObject({
-      key: "store-phone",
+    // A setup step listed after the guests in front of staff, not an error.
+    expect(items.find((item) => item.key === "store-phone")).toMatchObject({
       title: "Add the store's phone number",
+      state: "Setup step",
+      tone: "warning",
+      backlog: true,
       href,
       action: "Add phone number",
     });

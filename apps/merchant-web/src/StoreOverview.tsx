@@ -468,16 +468,18 @@ export function attentionItems(
       href: kitchenSetupHref,
       action: t("Set up the kitchen"),
     });
-  // M109: pickup keeps taking orders (no silent switch-off); the owner is asked for the phone.
+  // M109 (DEC-STORE-PHONE-BEFORE-PICKUP): pickup keeps taking orders (no silent switch-off); the
+  // owner is asked for the phone as a setup step, after the guests in front of them.
   if (storePhoneHref !== null)
     items.push({
       key: "store-phone",
       title: t("Add the store's phone number"),
       detail: t("So pickup guests can reach you about allergies or their order."),
-      state: t("To check"),
+      state: t("Setup step"),
       tone: "warning",
       href: storePhoneHref,
       action: t("Add phone number"),
+      backlog: true,
     });
   if (unread.length > 0)
     items.push({
