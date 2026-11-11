@@ -83,9 +83,9 @@ export async function loadStoreKitchenStatement(
 ): Promise<StoreKitchenStatement | null> {
   await selectStore(tx, scope);
   const row = (
-    await tx.query<{ codes: unknown; equipment: unknown; recorded_at: string }>(
+    await tx.query<{ codes: unknown; equipment: unknown; recorded_text: string }>(
       `SELECT handled_allergen_codes codes,shared_equipment equipment,
-         to_char(recorded_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') recorded_at
+         to_char(recorded_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') recorded_text
        FROM rms_store.store_kitchen_allergen_statement WHERE brand_id=$1 AND store_id=$2
        ORDER BY recorded_at DESC,statement_id DESC LIMIT 1`,
       [scope.brandReference, scope.storeReference],
@@ -97,7 +97,7 @@ export async function loadStoreKitchenStatement(
       handledAllergenCodes: row.codes,
       sharedEquipment: row.equipment,
     }),
-    recordedAt: row.recorded_at,
+    recordedAt: row.recorded_text,
   });
 }
 

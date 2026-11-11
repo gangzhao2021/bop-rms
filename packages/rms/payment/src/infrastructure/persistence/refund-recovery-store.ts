@@ -54,7 +54,7 @@ interface Scope {
 }
 const ref = (value: unknown) => String(parsePaymentReference(value));
 const selection =
-  "recovery_id::text AS recovery,operation_id::text AS operation,order_id::text AS order_ref,method,slip_reference AS slip,amount_minor::text AS amount,currency_code AS currency,reason_code AS reason,actor_id::text AS actor,to_char(business_date,'YYYY-MM-DD') AS business_date,to_char(recorded_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') AS recorded_at";
+  "recovery_id::text AS recovery,operation_id::text AS operation,order_id::text AS order_ref,method,slip_reference AS slip,amount_minor::text AS amount,currency_code AS currency,reason_code AS reason,actor_id::text AS actor,to_char(business_date,'YYYY-MM-DD') AS business_date,to_char(recorded_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') AS recorded_text";
 function bind(row: Record<string, unknown>): RefundRecovery {
   if (
     !refundRecoveryMethods.includes(row.method as never) ||
@@ -78,7 +78,7 @@ function bind(row: Record<string, unknown>): RefundRecovery {
     reasonCode: row.reason as RefundRecoveryReason,
     actorReference: ref(row.actor),
     businessDate: row.business_date,
-    recordedAt: String(parsePaymentInstant(row.recorded_at)),
+    recordedAt: String(parsePaymentInstant(row.recorded_text)),
   });
 }
 async function setScope(tx: ConsumerTransaction, scope: Scope) {
