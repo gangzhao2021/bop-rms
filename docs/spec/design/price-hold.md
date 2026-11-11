@@ -20,11 +20,17 @@
 6. **记录**：订单项的菜品快照是现在卖的这道菜（当前菜单版本），价格快照是确认的报价；都是追加写入，不改任何已有记录，不隐藏任何销售。
 7. **故障不是拒绝**：读不到保留中的报价是服务暂不可用（客人重试），不当成无权限，也不悄悄按新价报。
 
-8. **结账开始后、送单前又上架一次**（相隔几秒）：送单回答“请重新核价”（订单未建、未扣款）；页面再核价时拿到的仍是同一张保留中的报价、同一总价，客人再点一次即按确认价送出。多一步操作，但价格不变。
+8. **结账开始后、送单（或付款）前又上架一次**（相隔几秒，客人已点“下单”或“付款”）：保留期内照常送出，按确认价建单，不打断客人、不要求重新核价；只有菜本身改了、卖不了或保留期已过才重新报价（2026-11-11 复核修正：原先这里回答“请重新核价”，与 M165“保留期内照收”不符）。
+9. **保留期正好在读回时结束**：再报价的读回途中保留期到点，这次请求按现价报价，回答和任何新报价一样（列出改价的菜），不当成服务暂不可用。
+
+## 与原要求的差异（交付时须写明）
+
+- 第 4 项：Owner 规则写“客人再确认一次”。本决定只对**涨价**要求勾选确认；**降价**直接列出原价和新价，付款即确认，不多加一步。这是按真实门店定的（降价不让客人多付，多一步只会让客人犹豫或放弃），但比原要求窄，交付报告须单列，不算“全部照要求做完”。
 
 ## 实现位置
 
 - 栅栏放行（只放行菜单版本，产品版本、选项、规则、税类仍须一致；时间由报价有效期约束）：`checkout-validation-service.ts`、`configured-cart-quote-binding.ts`、`order-submission-source.ts`、`order-pricing-source.ts`、`configured-order-pricing-source.ts`、`apps/api/src/customer-submission-inventory-source.ts`（配方按产品版本取）。
+- 结账后又上架的送单（后付桌的后续一轮，结账凭证早于上架）：目录只能读现在的菜单，`order-submission-source.ts` 先按结账时刻读，读不回且菜单已换时，按送单这一刻把所有菜再读一次（同一时刻），订单项记现在卖的菜、确认的价；`order-item-snapshot.ts` 不再要求订单项菜单版本等于结账时的版本；`customer-additional-dining-session-submission.ts` 用这次读取的时刻作订单项快照时间；试点送单前的最后核对 `tooling/environment/pilot-additional-submission.mjs` 不比菜单版本（仍比产品版本）。
 - 保留期内再报价返回原报价：`configured-cart-quote-service.ts`（`repository.loadLatest`）、`customer-configured-quote-composition.ts`、`customer-quote-composition.ts`（`Held`）。
 - 文案：`apps/customer-pwa/src/journey/messages.ts`、`zh-Hans.ts`、`CartPage.tsx`、`CheckoutPage.tsx`。
-- 验收：`packages/database/test/price-hold-acceptance.test.mjs`（受限角色：保留期内改价、保留期后改价、重放）。
+- 验收：`packages/database/test/price-hold-acceptance.test.mjs`（受限角色：后付桌保留期内改价、保留期后改价、重放；先付桌结账后、付款前改价上架，订单和应付金额按确认价到分）；`listing-crosses-open-cart-acceptance.test.mjs`（结账开始后、送单前上架，直接送出、只送一次）。
