@@ -207,6 +207,8 @@ export function createPostgresRefundRecoveryStore(options: {
         existing.orderReference !== orderReference ||
         existing.amountMinor !== input.amountMinor ||
         existing.method !== input.method ||
+        existing.reasonCode !== input.reasonCode ||
+        existing.slipReference !== input.slipReference ||
         existing.actorReference !== ref(input.actorReference)
       )
         return fail("REFUND_RECOVERY_CONFLICT");

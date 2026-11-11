@@ -3313,6 +3313,17 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
         (await recover({ ...session("manager"), command: takeBack })).status,
         "AlreadyRecorded",
       );
+      // The same attempt with other details (amount, method, reason or slip) is a conflict,
+      // never answered as the record it is not.
+      for (const changed of [
+        { amountMinor: "400" },
+        { reasonCode: "OTHER" },
+        { method: "CardMachine", slipReference: "A1" },
+      ])
+        await assert.rejects(
+          recover({ ...session("manager"), command: { ...takeBack, ...changed } }),
+          { code: "REFUND_RECOVERY_CONFLICT" },
+        );
       // The owner here may not record it (no payment.refund.recover); nothing more is written.
       await assert.rejects(
         recover({ ...session("owner"), command: { ...takeBack, operationReference: fresh() } }),

@@ -18,6 +18,8 @@ export class OrdinaryRefundClientError extends Error {
       | "OrderNotAccepted"
       /** WP-2423 M163: more than the order's refunds (less what was taken back) is refused. */
       | "RecoveryAboveRefunded"
+      /** WP-2423 M163: this attempt was already recorded with other details (nothing more is). */
+      | "RecoveryConflict"
       | "Unavailable"
       | "OutcomeUnknown"
       | "NotFound",
@@ -355,7 +357,9 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
                 ? "OrderNotAccepted"
                 : error === "recovery_above_refunded"
                   ? "RecoveryAboveRefunded"
-                  : "Conflict",
+                  : error === "recovery_conflict"
+                    ? "RecoveryConflict"
+                    : "Conflict",
           );
         if (error === "retry_later") throw new RetryLater();
         return fail();
@@ -404,6 +408,7 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
             error.code === "Conflict" ||
             error.code === "OrderNotAccepted" ||
             error.code === "RecoveryAboveRefunded" ||
+            error.code === "RecoveryConflict" ||
             (!mutation && error.code === "Changed"))
         )
           throw error;

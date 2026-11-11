@@ -280,6 +280,11 @@ export function installMerchantRefundRoutes(
             .json({ error: "recovery_above_refunded" });
           return;
         }
+        // WP-2423 M163: the same attempt was already recorded with other details.
+        if (failureNamed(error, "REFUND_RECOVERY_CONFLICT")) {
+          response.status(409).set("Cache-Control", NO_STORE).json({ error: "recovery_conflict" });
+          return;
+        }
         failed(response, error);
       });
   });
