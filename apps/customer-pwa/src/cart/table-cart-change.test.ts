@@ -280,6 +280,20 @@ describe("v15 batch 7 table-pay-by-dish: staff take a dish out while this phone 
     expect(said).not.toContain("added");
   });
 
+  it("ends this phone's choice when another phone chose before this one read again", () => {
+    // Phone B chose what it pays before phone A's next read: A's choice ended all the same, and
+    // A is never told someone added the dishes that came back or offered a checkout the server
+    // refuses while B's choice holds.
+    const change = tableCartChange(
+      withPay(view(5, [tea]), payer(true)),
+      withPay(view(7, [cucumber]), payer(false), true),
+    );
+    expect(change).toEqual({
+      kind: "choiceEnded",
+      byStaff: [{ displayName: "Lemon tea", quantity: 1 }],
+    });
+  });
+
   it("ends the choice without blaming staff when the others' dishes came back on their own", () => {
     expect(
       tableCartChange(

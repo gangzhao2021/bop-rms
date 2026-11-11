@@ -98,7 +98,8 @@ export function tableCartChange(loaded: CartView, current: CartView | null): Tab
   if (
     loaded.cart.tablePay?.payer?.thisPhone === true &&
     current !== null &&
-    (current.cart.tablePay?.payer ?? null) === null
+    // Ended whether nobody holds the choice now or another phone chose before this one read again.
+    current.cart.tablePay?.payer?.thisPhone !== true
   ) {
     const gone = loaded.cart.items
       .filter((item) => !now.has(item.cartItemReference))
