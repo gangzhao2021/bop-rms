@@ -357,6 +357,8 @@ it("nothing left to refund: Can't make it and the System close still end it, and
         paidMinor: total.toString(),
         refundMinor: "0",
         currencyCode: "CAD",
+        // WP-2423 batch 8 (counter cash, 16d3c8a8): taken on the card machine, not in cash.
+        paidInCash: false,
       });
       assert.equal((await preview(partly)).refundMinor, (total - 500n).toString());
       // Offered, because the ticket stays live and the stock reserved until someone ends it.

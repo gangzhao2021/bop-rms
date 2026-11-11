@@ -1473,6 +1473,8 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
         paidMinor: String(pickup.batches[0].totalMinor),
         refundMinor: String(pickup.batches[0].totalMinor),
         currencyCode: "CAD",
+        // WP-2423 batch 8 (counter cash, 16d3c8a8): the preview says whether it was paid in cash.
+        paidInCash: false,
       });
       await assert.rejects(cancel(pickup, 0, { reasonCode: "GUEST_LEFT" }), {
         code: "ORDER_CANCELLATION_INPUT_INVALID",
@@ -2387,6 +2389,8 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
         paidMinor: String(acceptedCard.batches[0].totalMinor),
         refundMinor: "0",
         currencyCode: "CAD",
+        // WP-2423 batch 8 (counter cash, 16d3c8a8): taken on the card machine, not in cash.
+        paidInCash: false,
       });
       const stockBeforeAccepted = Number((await stock()).reserved);
       const acceptedResult = await cancel(acceptedCard, 0, { reasonCode: "GUEST_LEFT" });
