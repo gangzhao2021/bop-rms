@@ -18,6 +18,7 @@ import {
 import { createMerchantDiningTableQr } from "../../../apps/api/dist/merchant-dining-table-qr.js";
 import { createConfiguredDiningQrContext } from "../../../apps/api/dist/configured-dining-qr-context.js";
 import { RetiredTableQrError } from "../../../apps/api/dist/persistent-customer-entry.js";
+import { createTableQrClient } from "../../../apps/merchant-web/src/table-qr-client.ts";
 import { createIssuedDiningEntries } from "../../../tooling/environment/pilot-dining-issued-entry.mjs";
 import { renderPilotAclSql } from "../../../tooling/environment/pilot-acl-render.mjs";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
@@ -332,7 +333,29 @@ it("WP-2423 Q11: staff issue, print, replace and turn off one table's code; old 
       const created = await command("Issue", row, first);
       assert.equal(created.status, "Applied");
       assert.equal(created.item.codeState, "Active");
-      assert.equal((await command("Issue", row, first)).status, "AlreadyApplied");
+      // v15 batch 7 review: the Table QR codes page's own client reads this reply as the BFF sends
+      // it (the port's result as JSON), so the row says Ready to print without a reload.
+      const replied = async (reply) =>
+        createTableQrClient("a".repeat(43), async (path, init) => {
+          assert.equal(path, "/merchant/dining/table-qr/command");
+          assert.deepEqual(JSON.parse(String(init.body)), {
+            action: "Issue",
+            tableReference: row.tableReference,
+            expectedAggregateVersion: row.aggregateVersion,
+            operationReference: first,
+          });
+          return new globalThis.Response(JSON.stringify(reply), {
+            headers: { "content-type": "application/json; charset=utf-8" },
+          });
+        }).command({ action: "Issue", table: row, operationReference: first });
+      const shown = await replied(created);
+      assert.equal(shown.codeState, "Active");
+      assert.equal(shown.tableReference, row.tableReference);
+      assert.ok(shown.issuedAt !== null && shown.validUntil !== null);
+      assert.ok(shown.aggregateVersion > row.aggregateVersion);
+      const again = await command("Issue", row, first);
+      assert.equal(again.status, "AlreadyApplied");
+      assert.deepEqual(await replied(again), shown);
       let codes = (await issueRows()).rows;
       assert.equal(codes.length, 1);
       assert.equal(codes[0].qr_version, 1);
