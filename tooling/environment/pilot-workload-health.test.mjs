@@ -9,7 +9,14 @@ import {
   createPilotWorkloadHealthObserver,
   pilotHealthComponents,
   readHostedStoreHealth,
+  readHostedStoreLiveness,
+  parseHostedLiveness,
+  createHostedLivenessWriter,
+  HOSTED_LIVENESS_FILE,
+  HOSTED_WORKER_SERVICES,
+  PILOT_WORKLOAD_HEALTH_STALE_MS,
 } from "./pilot-workload-health.mjs";
+import { storeWorkerServices } from "./pilot-recovery-sweep.mjs";
 const identity = { pid: 123, started: "456" };
 const at = "2026-09-20T12:00:00.000Z";
 const snapshot = {
@@ -118,6 +125,7 @@ it("keeps business loop reports separate and refuses arbitrary file targets", ()
       diningCheckoutExpiry: "business-dining-checkout-expiry.health.json",
       tableOnlineRefund: "business-table-online-refund.health.json",
       guestTableClose: "business-guest-table-close.health.json",
+      ordinaryRefundFollowThrough: "business-ordinary-refund-follow-through.health.json",
       contactRetention: "business-contact-retention.health.json",
       webhookEvidenceRetention: "business-webhook-evidence-retention.health.json",
       pickupCapacitySchedule: "business-pickup-capacity-schedule.health.json",
@@ -381,4 +389,187 @@ it("reads a Store's dining-exception worker with its member points workload, and
   });
   files["/s/dining-exception-member-points.health.json"] = JSON.stringify(record("running", 0));
   expect(await readHostedStoreHealth("/s", "dining-exception-worker", 77, read)).toEqual({});
+});
+
+// DEC-WORKER-HEALTH-TRUTH: every health file a business worker writes is one the observer accepts;
+// before, the refund follow-through's was refused and the whole worker refused to start.
+it("accepts every business-worker health file it is asked to write", () => {
+  const directory = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "pilot-allow-")));
+  fs.chmodSync(directory, 0o700);
+  try {
+    const all = pilotHealthComponents("business-worker", {
+      requireBatchCancellation: true,
+      requireCompensation: true,
+    });
+    for (const file of Object.values(all)) {
+      const component = file.replace(/\.health\.json$/u, "");
+      let refused = null;
+      try {
+        createPilotWorkloadHealthObserver(directory, component);
+      } catch (error) {
+        // Off Linux the observer stops at /proc; the closed list must still have let it through.
+        refused = error.message;
+      }
+      expect(refused, component).not.toBe("PILOT_WORKLOAD_HEALTH_UNAVAILABLE");
+    }
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+// DEC-WORKER-HEALTH-TRUTH: a report nobody has refreshed for 10 minutes is no heartbeat.
+it("a health report with no heartbeat for 10 minutes needs a person", () => {
+  const idle = { ...value, snapshot: { ...snapshot, cycleInFlight: false } };
+  const now = Date.parse(at);
+  expect(PILOT_WORKLOAD_HEALTH_STALE_MS).toBe(10 * 60_000);
+  expect(parsePilotWorkloadHealth(idle, identity, now + 9 * 60_000).attention).toBe(false);
+  expect(parsePilotWorkloadHealth(idle, identity, now + 10 * 60_000).attention).toBe(true);
+});
+
+const statOf = (pid, started) =>
+  pid + " (node) S " + Array.from({ length: 19 }, (_, i) => (i === 18 ? started : "0")).join(" ");
+const reader = (files) => async (file) => {
+  if (!Object.hasOwn(files, file)) throw Object.assign(new Error("absent"), { code: "ENOENT" });
+  return files[file];
+};
+const fresh = (pid, started, state = "running", observedAt = new Date().toISOString()) =>
+  JSON.stringify({
+    pid,
+    started,
+    observedAt,
+    snapshot: {
+      state,
+      cycleInFlight: false,
+      completedCycles: 1,
+      lastCycleStartedAt: observedAt,
+      lastCycleCompletedAt: observedAt,
+    },
+  });
+
+// DEC-WORKER-HEALTH-TRUTH (v15 bc7e2965): a Store's worker whose health files are missing, from an
+// earlier process, or unreadable is no running worker: each such part is named, never "running".
+it("names each part of a Store's worker without a current health file", async () => {
+  const files = {
+    "/proc/77/stat": statOf(77, "900"),
+    "/s/dining-exception-worker.health.json": fresh(77, "900"),
+  };
+  // The points sweep wrote nothing in this process.
+  expect(await readHostedStoreHealth("/s", "dining-exception-worker", 77, reader(files))).toEqual({
+    attention: ["memberPoints"],
+  });
+  // Left by the process before (another start instant).
+  files["/s/dining-exception-member-points.health.json"] = fresh(77, "100");
+  expect(await readHostedStoreHealth("/s", "dining-exception-worker", 77, reader(files))).toEqual({
+    attention: ["memberPoints"],
+  });
+  files["/s/dining-exception-member-points.health.json"] = "{not json";
+  expect(await readHostedStoreHealth("/s", "dining-exception-worker", 77, reader(files))).toEqual({
+    attention: ["memberPoints"],
+  });
+  files["/s/dining-exception-member-points.health.json"] = fresh(77, "900");
+  expect(await readHostedStoreHealth("/s", "dining-exception-worker", 77, reader(files))).toEqual(
+    {},
+  );
+  // The process itself cannot be read: nothing of it can be vouched for.
+  delete files["/proc/77/stat"];
+  expect(await readHostedStoreHealth("/s", "dining-exception-worker", 77, reader(files))).toEqual({
+    attention: ["diningException", "memberPoints"],
+  });
+});
+
+it("a business worker's parts that depend on the Store's settings may be absent", async () => {
+  const files = { "/proc/5/stat": statOf(5, "9") };
+  for (const [component, file] of Object.entries(pilotHealthComponents("business-worker")))
+    if (component !== "events") files["/s/" + file] = fresh(5, "9");
+  expect(await readHostedStoreHealth("/s", "business-worker", 5, reader(files))).toEqual({
+    attention: ["events"],
+  });
+});
+
+const livenessRecord = (overrides = {}) => ({
+  pid: 42,
+  started: "700",
+  observedAt: new Date(Date.parse(at)).toISOString(),
+  services: {
+    "business-worker": { state: "running", since: "2026-09-20T11:00:00.000Z" },
+    "dining-exception-worker": { state: "down", since: "2026-09-20T11:30:00.000Z" },
+    "daily-settlement-worker": { state: "starting", since: "2026-09-20T11:00:00.000Z" },
+  },
+  ...overrides,
+});
+
+it("reads which of a Store's workers the shared process has really started", () => {
+  expect([...HOSTED_WORKER_SERVICES]).toEqual([...storeWorkerServices]);
+  const now = Date.parse(at) + 60_000;
+  expect(parseHostedLiveness(livenessRecord(), { pid: 42, started: "700" }, now)).toEqual({
+    "business-worker": { state: "running", sinceMs: Date.parse("2026-09-20T11:00:00.000Z") },
+    "dining-exception-worker": { state: "down", sinceMs: Date.parse("2026-09-20T11:30:00.000Z") },
+    "daily-settlement-worker": {
+      state: "starting",
+      sinceMs: Date.parse("2026-09-20T11:00:00.000Z"),
+    },
+  });
+  for (const [change, when] of [
+    [{ pid: 43 }, now],
+    [{ started: "701" }, now],
+    // No heartbeat for two minutes: the process is not saying anything.
+    [{}, Date.parse(at) + 2 * 60_000],
+    [{ services: { api: { state: "running", since: at } } }, now],
+    [{ services: { "business-worker": { state: "fine", since: at } } }, now],
+    [{ services: { "business-worker": { state: "running", since: at, note: "x" } } }, now],
+    [{ extra: 1 }, now],
+  ])
+    expect(() =>
+      parseHostedLiveness(livenessRecord(change), { pid: 42, started: "700" }, when),
+    ).toThrow();
+});
+
+it("a missing liveness file is no word yet; a foreign, stale or broken one is unreadable", async () => {
+  const now = Date.parse(at) + 1000;
+  const files = { "/proc/42/stat": statOf(42, "700") };
+  expect(await readHostedStoreLiveness("/s", 42, reader(files), now)).toBeNull();
+  files["/s/" + HOSTED_LIVENESS_FILE] = JSON.stringify(livenessRecord());
+  expect((await readHostedStoreLiveness("/s", 42, reader(files), now))["business-worker"]).toEqual({
+    state: "running",
+    sinceMs: Date.parse("2026-09-20T11:00:00.000Z"),
+  });
+  files["/proc/42/stat"] = statOf(42, "999");
+  expect(await readHostedStoreLiveness("/s", 42, reader(files), now)).toBe("unavailable");
+  files["/proc/42/stat"] = statOf(42, "700");
+  files["/s/" + HOSTED_LIVENESS_FILE] = "{";
+  expect(await readHostedStoreLiveness("/s", 42, reader(files), now)).toBe("unavailable");
+});
+
+it("writes a Store's liveness privately and atomically, and never throws", () => {
+  const directory = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "pilot-liveness-")));
+  fs.chmodSync(directory, 0o700);
+  const lines = [];
+  try {
+    const write = createHostedLivenessWriter(directory, {
+      identity: () => ({ pid: process.pid, started: "123" }),
+      report: (line) => lines.push(line),
+      now: () => Date.parse(at),
+    });
+    write({ "kitchen-queue-worker": { state: "running", since: at } });
+    const file = path.join(directory, HOSTED_LIVENESS_FILE);
+    expect(fs.statSync(file).mode & 0o777).toBe(0o600);
+    expect(
+      parseHostedLiveness(
+        JSON.parse(fs.readFileSync(file, "utf8")),
+        { pid: process.pid, started: "123" },
+        Date.parse(at),
+      ),
+    ).toEqual({ "kitchen-queue-worker": { state: "running", sinceMs: Date.parse(at) } });
+    expect(fs.readdirSync(directory)).toEqual([HOSTED_LIVENESS_FILE]);
+    // A directory that is not the Store's own private one: reported once, nothing thrown.
+    const broken = createHostedLivenessWriter(path.join(directory, "missing"), {
+      identity: () => ({ pid: process.pid, started: "123" }),
+      report: (line) => lines.push(line),
+    });
+    broken({});
+    broken({});
+    expect(lines).toEqual(["PILOT_HOSTED_LIVENESS_WRITE_UNAVAILABLE\n"]);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
 });

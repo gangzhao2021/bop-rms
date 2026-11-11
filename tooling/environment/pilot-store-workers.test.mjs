@@ -43,8 +43,25 @@ const options = (services, overrides = {}) => ({
   services,
   wait: quick,
   report: vi.fn(),
+  liveness: () => () => undefined,
   ...overrides,
 });
+/** What each Store's liveness file last said, and every write. */
+const livenessRecorder = () => {
+  const latest = {},
+    writes = [],
+    history = [];
+  return {
+    latest,
+    writes,
+    history,
+    liveness: (directory) => (services) => {
+      latest[directory] = services;
+      writes.push(directory);
+      history.push({ directory, services });
+    },
+  };
+};
 
 it("runs each Store's workers from that Store's directory and stops them all", async () => {
   const log = [],
@@ -178,4 +195,91 @@ it("hosts a Store's dining-exception worker, its recovery and its points sweep, 
   expect(health.map((entry) => entry.component)).toContain("dining-exception-member-points");
   await host.stop();
   expect(close).toHaveBeenCalledOnce();
+});
+
+// DEC-WORKER-HEALTH-TRUTH (v15 bc7e2965): six Stores' dining-exception workers refused to start for
+// about 5 hours while everything read as running. The shared process now says, per Store, which of
+// its workers has really started.
+it("a Store worker that refuses to start is down until a start succeeds, and down again when it ends", async () => {
+  const recorder = livenessRecorder();
+  let clock = Date.parse("2026-11-11T10:00:00.000Z");
+  let refusals = 3;
+  const made = [];
+  const host = createStoreWorkersWorkload(
+    options(
+      {
+        "dining-exception-worker": async ({ startRuntime }) => {
+          clock += 1000;
+          if (refusals > 0) {
+            refusals -= 1;
+            // As the real worker does: its start fails, it reports and returns with no workload.
+            process.exitCode = 1;
+            return;
+          }
+          const one = workload([], "dining");
+          made.push(one);
+          await startRuntime({ workload: one });
+        },
+        "kitchen-queue-worker": async ({ startRuntime }) => {
+          await startRuntime({ workload: workload([], "kitchen") });
+        },
+      },
+      { stores: ["stores/a"], liveness: recorder.liveness, now: () => clock },
+    ),
+  );
+  const dining = () => recorder.latest["/install/stores/a"]?.["dining-exception-worker"];
+  await host.start();
+  await settle(() => dining()?.state === "down");
+  const downSince = dining().since;
+  // Retried: still down, since the first failure (not reset by each new attempt).
+  await settle(() => refusals === 0);
+  expect(dining().state === "down" || dining().state === "running").toBe(true);
+  await settle(() => dining()?.state === "running");
+  expect(downSince).toBe("2026-11-11T10:00:01.000Z");
+  expect(recorder.latest["/install/stores/a"]["kitchen-queue-worker"].state).toBe("running");
+  // The worker ends by itself: down, not running, until its restart has started.
+  const seen = recorder.history.length;
+  made[0].end("failed");
+  await settle(() => made.length === 2 && dining()?.state === "running");
+  expect(
+    recorder.history
+      .slice(seen)
+      .map(({ services }) => services["dining-exception-worker"].state)
+      .filter((state, i, all) => state !== all[i - 1]),
+  ).toEqual(["down", "running"]);
+  await host.stop();
+});
+
+it("every Store's liveness is written at start, before any worker has started, and kept fresh", async () => {
+  const recorder = livenessRecorder();
+  let beat = null;
+  const host = createStoreWorkersWorkload(
+    options(
+      {
+        "business-worker": async () => new Promise(() => undefined),
+      },
+      {
+        liveness: recorder.liveness,
+        repeat: (task, ms) => {
+          beat = { task, ms };
+          return () => {
+            beat = null;
+          };
+        },
+      },
+    ),
+  );
+  await host.start();
+  expect(recorder.latest).toEqual({
+    "/install/stores/a": { "business-worker": { state: "starting", since: expect.any(String) } },
+    "/install/stores/b": { "business-worker": { state: "starting", since: expect.any(String) } },
+  });
+  expect(beat.ms).toBe(30_000);
+  const before = recorder.writes.length;
+  beat.task();
+  expect(recorder.writes.length).toBe(before + 2);
+  const stopping = host.stop();
+  // Stopping clears the heartbeat; nothing claims a stopped worker is running.
+  expect(beat).toBeNull();
+  await Promise.race([stopping, new Promise((r) => setTimeout(r, 20))]);
 });

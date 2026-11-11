@@ -9,7 +9,7 @@ import {
   createPilotRecoverySweep,
   storeWorkerServices,
 } from "./pilot-recovery-sweep.mjs";
-import { readHostedStoreHealth } from "./pilot-workload-health.mjs";
+import { readHostedStoreHealth, readHostedStoreLiveness } from "./pilot-workload-health.mjs";
 import { loadServedStoreDirectories } from "./pilot-served-stores.mjs";
 import { admitConfiguredStores } from "./pilot-admitted-stores.mjs";
 import { parsePilotRuntimeDirectory } from "./pilot-service.mjs";
@@ -109,7 +109,8 @@ export function createPilotAttentionReporter(write = (line) => process.stderr.wr
   return (snapshot) => {
     const needs = snapshot.services
       .flatMap((entry) => [
-        ...(entry.state === "attention_required" ? [entry.service] : []),
+        // DEC-WORKER-HEALTH-TRUTH: a Store's worker that is not running needs a person too.
+        ...(entry.state === "attention_required" || entry.state === "down" ? [entry.service] : []),
         ...(entry.attention ?? []).map((component) => entry.service + ":" + component),
       ])
       .sort();
@@ -151,7 +152,10 @@ export function createPilotSupervisorHealthWriter(
     }
   };
 }
-/** WP-2423: how long a Store service may run in the shared process before writing any health. */
+/**
+ * WP-2423: how long a Store service may take to start in the shared process (from the process's own
+ * word, or from when the process was first seen if it has said nothing) before it is not running.
+ */
 export const HOSTED_STORE_STARTING_MS = 5 * 60_000;
 /**
  * DEC-BRAND-MULTI-STORE-ONE-INSTALLATION: the installation's own services, then each other Store's
@@ -159,12 +163,19 @@ export const HOSTED_STORE_STARTING_MS = 5 * 60_000;
  * reported on their own, so one Store's failing worker never stops another's. Every Store's
  * day-end settlement worker runs, waiting by itself until the Store's first business day has
  * closed. Reported as `stores/<name>:<service>`.
+ *
+ * DEC-WORKER-HEALTH-TRUTH (v15 bc7e2965): a Store's worker is `running` only when the shared
+ * process says it started it (`store-workers.liveness.json`, its own identity, a heartbeat of the
+ * last two minutes) and every part of it has a current health report (missing, earlier or stale
+ * parts are named in `attention`). One the process says is down, or that has not started 5 minutes
+ * on, is `down`; a process that says nothing about it counts as not started.
  */
 export function createPilotInstallationSweep({
   runtimeDirectory,
   createSweep = createPilotRecoverySweep,
   root = () => process.cwd(),
   readHealth = readHostedStoreHealth,
+  readLiveness = readHostedStoreLiveness,
   listStores = async () =>
     loadServedStoreDirectories(path.join(await fs.realpath(process.cwd()), runtimeDirectory)),
   // WP-2423 (2026-11-02): which of them fit the database role's connections (a refused Store is
@@ -173,10 +184,9 @@ export function createPilotInstallationSweep({
   now = () => Date.now(),
   startingMs = HOSTED_STORE_STARTING_MS,
 }) {
-  // WP-2423 (settlement-coverage): a Store service that has written no health is "starting" for a
-  // few minutes after the shared process is first seen, then needs a person: a worker that never
-  // starts, or never reports, is never dropped from the report.
-  const missingSince = new Map();
+  // When the shared process (by pid) was first seen without a word about a Store's worker: never
+  // dropped from the report, and never running on that silence.
+  const unconfirmedSince = new Map();
   // DEC-MULTI-MERCHANT-ONE-INSTALLATION A5: the Stores after the first run in one process; each is
   // still reported on its own, from its own health files. The Store list is read once per run.
   let prepared = null;
@@ -207,23 +217,41 @@ export function createPilotInstallationSweep({
           services.push({ service: relative, state: host?.state ?? "unavailable" });
           continue;
         }
+        const directory = path.join(root(), runtimeDirectory, relative);
+        const liveness = await readLiveness(directory, host.pid);
         for (const service of storeWorkerServices) {
-          const directory = path.join(root(), runtimeDirectory, relative);
-          const health = await readHealth(directory, service, host.pid);
           const name = relative + ":" + service;
-          if (health !== null) {
-            missingSince.delete(name);
-            services.push({ service: name, state: "running", ...health });
+          const said =
+            liveness === null || liveness === "unavailable" ? undefined : liveness[service];
+          if (said?.state === "running") {
+            unconfirmedSince.delete(name);
+            services.push({
+              service: name,
+              state: "running",
+              ...(await readHealth(directory, service, host.pid)),
+            });
             continue;
           }
-          const seen = missingSince.get(name);
-          const since = seen?.pid === host.pid ? seen.since : now();
-          missingSince.set(name, { pid: host.pid, since });
-          services.push(
-            now() - since < startingMs
-              ? { service: name, state: "starting" }
-              : { service: name, state: "attention_required", health: "missing" },
-          );
+          if (said?.state === "down") {
+            unconfirmedSince.delete(name);
+            services.push({ service: name, state: "down" });
+            continue;
+          }
+          let since;
+          if (said?.state === "starting") {
+            unconfirmedSince.delete(name);
+            since = said.sinceMs;
+          } else {
+            const seen = unconfirmedSince.get(name);
+            since = seen?.pid === host.pid ? seen.since : now();
+            unconfirmedSince.set(name, { pid: host.pid, since });
+          }
+          const word = said === undefined ? { liveness: "unconfirmed" } : {};
+          services.push({
+            service: name,
+            state: now() - since < startingMs ? "starting" : "down",
+            ...word,
+          });
         }
       }
       for (const relative of refused)

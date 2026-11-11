@@ -14,6 +14,10 @@ import { startPilotReconciliationWorker } from "./pilot-reconciliation-worker.mj
 import { parsePilotRuntimeDirectory } from "./pilot-service.mjs";
 import { reportUnexpected } from "./pilot-unexpected.mjs";
 import { startPilotBusinessWorker, startPilotKitchenWorker } from "./pilot-worker-entry.mjs";
+import {
+  HOSTED_LIVENESS_HEARTBEAT_MS,
+  createHostedLivenessWriter,
+} from "./pilot-workload-health.mjs";
 
 /**
  * DEC-MULTI-MERCHANT-ONE-INSTALLATION A5: the workers of every Store after the installation's first,
@@ -53,6 +57,18 @@ const starters = Object.freeze({
     startConfiguredDiningExceptionWorker({ directory, startRuntime }),
 });
 
+const every = (task, ms) => {
+  const timer = globalThis.setInterval(task, ms);
+  timer.unref?.();
+  return () => globalThis.clearInterval(timer);
+};
+/**
+ * DEC-WORKER-HEALTH-TRUTH (v15 bc7e2965): each Store's workers as this process really has them,
+ * in that Store's `store-workers.liveness.json`: `starting` until a first start, `running` once its
+ * start succeeded and until it ends, `down` while its start failed or after it ended (since the
+ * first failure, through the retries). Written on every change and every 30 s, so the supervisor
+ * never reads a worker that refused to start as running.
+ */
 export function createStoreWorkersWorkload({
   directory,
   stores,
@@ -61,9 +77,31 @@ export function createStoreWorkersWorkload({
   report = reportUnexpected,
   restartMs = RESTART_MS,
   staggerMs = STAGGER_MS,
+  liveness = (storeDirectory) => createHostedLivenessWriter(storeDirectory),
+  heartbeatMs = HOSTED_LIVENESS_HEARTBEAT_MS,
+  repeat = every,
+  now = Date.now,
 }) {
   const stopping = new globalThis.AbortController();
   const running = new Set();
+  const states = new Map(
+    stores.map((relative) => [
+      relative,
+      { write: liveness(path.join(directory, relative)), services: {} },
+    ]),
+  );
+  const publish = (relative) => {
+    const store = states.get(relative);
+    store.write({ ...store.services });
+  };
+  const mark = (relative, service, state) => {
+    if (stopping.signal.aborted) return;
+    const store = states.get(relative);
+    if (store.services[service]?.state === state) return;
+    store.services[service] = { state, since: new Date(now()).toISOString() };
+    publish(relative);
+  };
+  let stopHeartbeat = () => undefined;
   const pause = (ms) => wait(ms, undefined, { signal: stopping.signal }).catch(() => undefined);
   let finished;
   const completion = new Promise((resolve) => {
@@ -88,6 +126,7 @@ export function createStoreWorkersWorkload({
       }
       process.exitCode = exitCode;
       if (workload === null) {
+        mark(relative, service, "down");
         report("STORE_WORKLOAD_START_UNAVAILABLE", Error("STORE_WORKLOAD_NOT_STARTED"), details);
         await pause(restartMs);
         continue;
@@ -95,6 +134,7 @@ export function createStoreWorkersWorkload({
       running.add(workload);
       try {
         await workload.start();
+        mark(relative, service, "running");
         await Promise.race([
           ...(workload.completion === undefined ? [] : [workload.completion]),
           new Promise((resolve) => stopping.signal.addEventListener("abort", resolve)),
@@ -103,6 +143,7 @@ export function createStoreWorkersWorkload({
         report("STORE_WORKLOAD_FAILED", error, details);
       }
       running.delete(workload);
+      mark(relative, service, "down");
       await workload.stop().catch((error) => report("STORE_WORKLOAD_FAILED", error, details));
       if (stopping.signal.aborted) break;
       report("STORE_WORKLOAD_FAILED", Error("STORE_WORKLOAD_ENDED"), details);
@@ -113,6 +154,15 @@ export function createStoreWorkersWorkload({
   return Object.freeze({
     completion,
     async start() {
+      const at = new Date(now()).toISOString();
+      for (const [relative, store] of states) {
+        for (const service of Object.keys(services))
+          store.services[service] = { state: "starting", since: at };
+        publish(relative);
+      }
+      stopHeartbeat = repeat(() => {
+        if (!stopping.signal.aborted) for (const relative of states.keys()) publish(relative);
+      }, heartbeatMs);
       let order = 0;
       for (const relative of stores)
         for (const [service, start] of Object.entries(services)) {
@@ -126,6 +176,7 @@ export function createStoreWorkersWorkload({
     },
     async stop() {
       stopping.abort();
+      stopHeartbeat();
       await Promise.allSettled(tasks);
       finished("stopped");
     },

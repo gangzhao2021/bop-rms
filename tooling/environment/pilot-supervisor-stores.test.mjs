@@ -33,9 +33,15 @@ it("DEC-MULTI-MERCHANT-ONE-INSTALLATION A5: the other Stores run in one process,
     root: () => "/app",
     listStores: async () => ["stores/demo-2", "stores/demo-3"],
     admit: async (relatives) => ({ admitted: relatives, refused: [] }),
+    readLiveness: async () => ({
+      "business-worker": { state: "running", sinceMs: 0 },
+      "kitchen-queue-worker": { state: "running", sinceMs: 0 },
+      "reconciliation-worker": { state: "running", sinceMs: 0 },
+      "daily-settlement-worker": { state: "starting", sinceMs: Date.now() },
+      "dining-exception-worker": { state: "running", sinceMs: 0 },
+    }),
     readHealth: async (directory, service, pid) => {
       read.push(pid);
-      if (service === "daily-settlement-worker") return null;
       return directory.endsWith("demo-3") && service === "business-worker"
         ? { attention: ["events"] }
         : {};
@@ -47,7 +53,7 @@ it("DEC-MULTI-MERCHANT-ONE-INSTALLATION A5: the other Stores run in one process,
   expect(created[0].services).toContain("store-workers");
   expect(created[0].services).toContain("api");
   expect(new Set(read)).toEqual(new Set([42]));
-  // Each Store on its own; one Store needing a person never hides another. A service with no health
+  // Each Store on its own; one Store needing a person never hides another. A service not started
   // yet is listed as starting, never dropped.
   expect(services).toContainEqual({ service: "stores/demo-2:business-worker", state: "running" });
   expect(services).toContainEqual({
@@ -115,7 +121,8 @@ it("v15 2026-10-31: the sweep starts a Store's worker with no window open and no
           createPilotRecoverySweep({ ...options, service, workloadHealth: null }),
         listStores: async () => ["stores/demo-2"],
         admit: async (relatives) => ({ admitted: relatives, refused: [] }),
-        readHealth: async () => null,
+        readLiveness: async () => null,
+        readHealth: async () => ({}),
       }).sweep();
     await sweep();
     expect(started).toContain(directory + ":store-workers");
@@ -139,6 +146,16 @@ it("WP-2423: a Store over the connection budget is reported, and its workers are
     },
     listStores: async () => ["stores/demo-2", "stores/demo-3"],
     admit: async () => ({ admitted: ["stores/demo-2"], refused: ["stores/demo-3"] }),
+    readLiveness: async () =>
+      Object.fromEntries(
+        [
+          "business-worker",
+          "kitchen-queue-worker",
+          "reconciliation-worker",
+          "daily-settlement-worker",
+          "dining-exception-worker",
+        ].map((service) => [service, { state: "running", sinceMs: 0 }]),
+      ),
     readHealth: async () => ({}),
   });
   const services = await sweep.sweep();
@@ -147,45 +164,102 @@ it("WP-2423: a Store over the connection budget is reported, and its workers are
   expect(services).toContainEqual({ service: "stores/demo-3", state: "attention_required" });
 });
 
-// WP-2423 (settlement-coverage): a Store worker that never starts, or never writes health, is
-// "starting" for 5 minutes after the shared process is first seen, then needs a person.
-it("a Store service with no health is starting for 5 minutes, then needs a person", async () => {
-  let clock = 0,
-    pid = 42,
-    written = false;
-  const sweep = createPilotInstallationSweep({
+// WP-2423 (settlement-coverage), DEC-WORKER-HEALTH-TRUTH: a Store worker the shared process says
+// nothing about is starting for 5 minutes after the process is first seen, then not running.
+// Healthy-looking health files never make it running (v15 bc7e2965: files left by the process
+// before read as running while six Stores' dining-exception workers refused to start).
+const hostedSweep = ({ liveness, health = async () => ({}), clock, pid = () => 42 }) =>
+  createPilotInstallationSweep({
     runtimeDirectory: ".local/pilot-v15",
     createSweep: () => ({
-      sweep: async () => [{ service: "store-workers", state: "running", pid }],
+      sweep: async () => [{ service: "store-workers", state: "running", pid: pid() }],
     }),
     root: () => "/app",
     listStores: async () => ["stores/tea"],
     admit: async (relatives) => ({ admitted: relatives, refused: [] }),
-    now: () => clock,
-    readHealth: async (_directory, service) =>
-      service === "daily-settlement-worker" && !written ? null : {},
+    now: () => clock(),
+    readLiveness: liveness,
+    readHealth: health,
   });
-  const settlement = async () =>
-    (await sweep.sweep({})).find((entry) => entry.service === "stores/tea:daily-settlement-worker");
+const entryOf = async (sweep, service) =>
+  (await sweep.sweep({})).find((entry) => entry.service === "stores/tea:" + service);
+
+it("a Store service the shared process says nothing about is starting for 5 minutes, then down", async () => {
+  let clock = 0,
+    pid = 42,
+    said = null;
+  const sweep = hostedSweep({
+    liveness: async () => said,
+    // Its health files look fine: that alone never makes it running.
+    health: async () => ({}),
+    clock: () => clock,
+    pid: () => pid,
+  });
+  const settlement = () => entryOf(sweep, "daily-settlement-worker");
   expect(await settlement()).toEqual({
     service: "stores/tea:daily-settlement-worker",
     state: "starting",
+    liveness: "unconfirmed",
   });
   clock = 4 * 60_000;
   expect((await settlement()).state).toBe("starting");
   clock = 5 * 60_000;
   expect(await settlement()).toEqual({
     service: "stores/tea:daily-settlement-worker",
-    state: "attention_required",
-    health: "missing",
+    state: "down",
+    liveness: "unconfirmed",
   });
+  // Unreadable (foreign, stale or broken) is no better than nothing.
+  said = "unavailable";
+  expect((await settlement()).state).toBe("down");
   // A restarted shared process starts its own count again.
   pid = 43;
   expect((await settlement()).state).toBe("starting");
-  written = true;
-  expect((await settlement()).state).toBe("running");
-  // A one-sweep gap later shows as starting, not dropped.
-  written = false;
-  clock = 20 * 60_000;
-  expect((await settlement()).state).toBe("starting");
+  said = { "daily-settlement-worker": { state: "running", sinceMs: clock } };
+  expect(await settlement()).toEqual({
+    service: "stores/tea:daily-settlement-worker",
+    state: "running",
+  });
+});
+
+it("v15 bc7e2965: a Store worker the shared process says is down is down, whatever its health files say", async () => {
+  const sweep = hostedSweep({
+    liveness: async () => ({
+      "dining-exception-worker": { state: "down", sinceMs: 0 },
+      "business-worker": { state: "running", sinceMs: 0 },
+    }),
+    health: async () => ({}),
+    clock: () => 60_000,
+  });
+  const services = await sweep.sweep({});
+  expect(services).toContainEqual({ service: "stores/tea:dining-exception-worker", state: "down" });
+  expect(services).toContainEqual({ service: "stores/tea:business-worker", state: "running" });
+});
+
+it("a Store worker still not started 5 minutes after the process began starting it is down", async () => {
+  let clock = 60_000;
+  const sweep = hostedSweep({
+    liveness: async () => ({ "kitchen-queue-worker": { state: "starting", sinceMs: 0 } }),
+    clock: () => clock,
+  });
+  expect((await entryOf(sweep, "kitchen-queue-worker")).state).toBe("starting");
+  clock = 5 * 60_000;
+  expect(await entryOf(sweep, "kitchen-queue-worker")).toEqual({
+    service: "stores/tea:kitchen-queue-worker",
+    state: "down",
+  });
+});
+
+it("a running Store worker with a part that has no current health names that part", async () => {
+  const sweep = hostedSweep({
+    liveness: async () => ({ "dining-exception-worker": { state: "running", sinceMs: 0 } }),
+    health: async (_directory, service) =>
+      service === "dining-exception-worker" ? { attention: ["memberPoints"] } : {},
+    clock: () => 0,
+  });
+  expect(await entryOf(sweep, "dining-exception-worker")).toEqual({
+    service: "stores/tea:dining-exception-worker",
+    state: "running",
+    attention: ["memberPoints"],
+  });
 });

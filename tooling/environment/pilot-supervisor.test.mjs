@@ -155,6 +155,26 @@ it("writes one alert line when the services or workloads needing a person change
     },
   ]);
 });
+// DEC-WORKER-HEALTH-TRUTH: a Store worker that is not running is in the alert line too.
+it("names a Store worker that is down in the alert line", async () => {
+  const { createPilotAttentionReporter } = await import("./pilot-supervisor.mjs");
+  const lines = [];
+  createPilotAttentionReporter((line) => lines.push(JSON.parse(line)))({
+    observedAt: "2026-11-11T03:00:00.000Z",
+    services: [
+      { service: "stores/tea:dining-exception-worker", state: "down" },
+      { service: "stores/tea:business-worker", state: "running" },
+    ],
+  });
+  expect(lines).toEqual([
+    {
+      level: 50,
+      time: "2026-11-11T03:00:00.000Z",
+      event: "pilot_attention_required",
+      attention: ["stores/tea:dining-exception-worker"],
+    },
+  ]);
+});
 it("reads optional business workload health from the installed worker configuration", async () => {
   const { createPilotWorkloadHealthOptions } = await import("./pilot-supervisor.mjs");
   const read = vi.fn(async (file) => {
