@@ -33,8 +33,13 @@ import { createBrowserCustomerCartClient, type CustomerCartClient } from "../car
 import { startTableCartPoll } from "../cart/table-cart-poll.js";
 import { tableCartChange, type TableCartChange } from "../cart/table-cart-change.js";
 import { formatCartMoney } from "../cart/format-money.js";
-import { checkoutInProgressMessage, orderProcessingMessage } from "../cart/types.js";
+import {
+  checkoutInProgressMessage,
+  orderProcessingMessage,
+  type CartTablePay,
+} from "../cart/types.js";
 import { describeConfiguration } from "../cart/CartPage.js";
+import { ScopeExpiryWarning } from "../cart/TablePayChoice.js";
 import { checkoutItemRefusalMessage } from "./item-refusal-message.js";
 import { checkoutSessionAlert } from "./session-message.js";
 import { storeServiceNoticeText, useStoreService } from "../store/StoreIdentity.js";
@@ -147,6 +152,9 @@ export function CheckoutPage({
   const [continueRequested, setContinueRequested] = useState(false);
   // WP-2423 (same-table-ordering): what another phone at the table did to this cart meanwhile.
   const [tableChange, setTableChange] = useState<TableCartChange | null>(null);
+  // WP-2423 shared-table-checkout (a): this phone chose this round's dishes; until when the others
+  // wait for theirs, as last read.
+  const [readPayer, setReadPayer] = useState<CartTablePay["payer"] | undefined>(undefined);
   const [tableCartReader] = useState(() => cartClient ?? createBrowserCustomerCartClient());
   const [sendClientValue] = useState(() => sendClient ?? createSessionPaymentClient());
   const [sendState, setSendState] = useState<
@@ -279,6 +287,7 @@ export function CheckoutPage({
     if (loaded === null || loaded.cart.orderType !== "DineIn") return true;
     const current = await tableCartReader.loadCurrent();
     if (loadedCart.current !== loaded) return true;
+    setReadPayer(current?.cart.tablePay?.payer ?? null);
     const change = tableCartChange(loaded, current);
     setTableChange(change.kind === "unchanged" ? null : change);
     return true;
@@ -605,6 +614,16 @@ export function CheckoutPage({
           <li>{checkoutText.progressDone}</li>
         </ol>
       )}
+      {(() => {
+        const payer = readPayer === undefined ? (cart?.cart.tablePay?.payer ?? null) : readPayer;
+        return payer?.thisPhone === true && sessionState.status === "idle" ? (
+          <ScopeExpiryWarning
+            payer={payer}
+            onBack={() => void navigate("/cart", { replace: true })}
+            onEnded={() => void checkTable.current().catch(() => false)}
+          />
+        ) : null;
+      })()}
       {state.status === "loading" ? (
         <section role="status">
           <h2>{checkoutText.loadingHeading}</h2>

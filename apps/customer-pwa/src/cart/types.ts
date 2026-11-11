@@ -40,7 +40,38 @@ export interface CartView {
      * 15 minutes, newest first; absent when unknown.
      */
     readonly staffRemoved?: readonly CartStaffRemoval[];
+    /**
+     * WP-2423 shared-table-checkout (a): at a table that pays per round, which dishes the payer
+     * starts with, whether a phone is paying for dishes it chose, and the dishes waiting for the
+     * next round; absent when unknown (a pickup cart, an older server).
+     */
+    readonly tablePay?: CartTablePay;
   };
+}
+
+/** WP-2423 shared-table-checkout (a): who pays which dishes of this round, without names. */
+export interface CartTablePay {
+  /** The Store's choice of what the payer starts with. */
+  readonly defaultChoice: "WholeTable" | "OwnDishes";
+  /** A phone is paying for dishes it chose: this one, or someone at the table. */
+  readonly payer: null | {
+    readonly thisPhone: boolean;
+    readonly choice: "Mine" | "Chosen";
+    /** When the others may take their dishes back unless the payer keeps them longer. */
+    readonly expiresAt: string;
+    readonly reserved: boolean;
+  };
+  /** Dishes waiting for the next round. */
+  readonly waiting: readonly {
+    readonly waitingLineReference: string;
+    readonly quantity: number;
+    readonly names: Readonly<Record<string, string>>;
+    readonly withOptions: boolean;
+    /** This phone added it. */
+    readonly mine: boolean;
+  }[];
+  /** Nobody is paying for them now: this phone gives them back to the cart. */
+  readonly returnable: boolean;
 }
 
 /** WP-2423 shared-table-checkout (c): a dish staff took out of the table's cart. */

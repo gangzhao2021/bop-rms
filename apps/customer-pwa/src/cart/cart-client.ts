@@ -6,6 +6,7 @@ import {
   type CartPlacedOrder,
   type CartRecentRound,
   type CartStaffRemoval,
+  type CartTablePay,
   type CartView,
 } from "./types.js";
 import {
@@ -167,7 +168,64 @@ function view(value: unknown): CartView {
       })(),
       ...(cart.recentRounds === undefined ? {} : { recentRounds: recentRounds(cart.recentRounds) }),
       ...(cart.staffRemoved === undefined ? {} : { staffRemoved: staffRemoved(cart.staffRemoved) }),
+      ...(cart.tablePay === undefined ? {} : { tablePay: tablePay(cart.tablePay) }),
     }),
+  });
+}
+
+/** WP-2423 shared-table-checkout (a): who pays which dishes of the round, and what waits. */
+function tablePay(value: unknown): CartTablePay {
+  const raw = record(value);
+  const unavailable = (): never => {
+    throw new CartClientError("cart_service_unavailable");
+  };
+  if (
+    (raw.defaultChoice !== "WholeTable" && raw.defaultChoice !== "OwnDishes") ||
+    typeof raw.returnable !== "boolean" ||
+    !Array.isArray(raw.waiting) ||
+    raw.waiting.length > 100
+  )
+    return unavailable();
+  let payer: CartTablePay["payer"] = null;
+  if (raw.payer !== null) {
+    const found = record(raw.payer);
+    if (
+      typeof found.thisPhone !== "boolean" ||
+      typeof found.reserved !== "boolean" ||
+      (found.choice !== "Mine" && found.choice !== "Chosen")
+    )
+      return unavailable();
+    payer = Object.freeze({
+      thisPhone: found.thisPhone,
+      choice: found.choice,
+      expiresAt: string(found.expiresAt, canonicalInstant),
+      reserved: found.reserved,
+    });
+  }
+  return Object.freeze({
+    defaultChoice: raw.defaultChoice,
+    payer,
+    waiting: Object.freeze(
+      raw.waiting.map((candidate: unknown) => {
+        const line = record(candidate);
+        if (typeof line.withOptions !== "boolean" || typeof line.mine !== "boolean")
+          return unavailable();
+        return Object.freeze({
+          waitingLineReference: string(line.waitingLineReference, uuidV7),
+          quantity: integer(line.quantity),
+          names: Object.freeze(
+            Object.fromEntries(
+              Object.entries(record(line.names)).map(
+                ([locale, name]) => [locale, string(name)] as const,
+              ),
+            ),
+          ),
+          withOptions: line.withOptions,
+          mine: line.mine,
+        });
+      }),
+    ),
+    returnable: raw.returnable,
   });
 }
 

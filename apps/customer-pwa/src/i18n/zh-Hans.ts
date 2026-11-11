@@ -1812,4 +1812,35 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "这一轮现在不能取消。需要帮助请问店员。",
   "We couldn’t reach the store. Try again; nothing is done twice.":
     "暂时连不上店里。请再试一次，不会重复操作。",
+  // WP-2423 shared-table-checkout (a): pay first, the payer chooses this round's dishes.
+  "Someone at your table is paying for their dishes. Yours are kept and come back here when they finish.":
+    "同桌有人正在为自己的菜付款。你的菜会保留，付完后回到这里。",
+  "Someone at your table is paying for their dishes. Wait until they finish.":
+    "同桌有人正在为自己的菜付款，请等他们付完。",
+  "Next round": "下一轮",
+  "Putting these dishes back in the cart…": "正在把这些菜放回购物车…",
+  "These dishes come back to the cart when the payment is done.": "付完后这些菜会回到购物车。",
+  "options chosen": "已选规格",
+  "There is nothing of yours in the cart to pay for.": "购物车里没有你加的菜。",
+  "Someone at your table is paying now. Try again in {seconds} seconds.":
+    "同桌有人正在付款，请 {seconds} 秒后再试。",
+  "The cart just changed. Check the dishes and choose again.": "购物车刚刚有变化，请看一下再选。",
+  "We couldn't reach the store. Try again; nothing was charged.":
+    "暂时连不上店里，请再试一次；没有扣款。",
+  "The whole table ({count} dishes)": "付全桌（{count} 道菜）",
+  "Only what I added ({count})": "只付我加的（{count} 道）",
+  "{count} in the cart": "购物车里有 {count} 份",
+  "Tax shows on the next step.": "含税金额在下一步显示。",
+  "Dishes you don't choose stay for the others at your table. Tax shows on the next step.":
+    "没选的菜留给同桌其他人付。含税金额在下一步显示。",
+  "One moment…": "请稍等…",
+  "Continue to pay": "去付款",
+  "You're paying for the dishes in this cart": "你正在为购物车里的这些菜付款",
+  "The others' dishes wait for the next round.": "其他人的菜留到下一轮。",
+  "Back to cart (your choice is cancelled; nothing was charged)": "返回购物车（不付了，没有扣款）",
+  "The dishes you chose are kept for {seconds} more seconds.": "你选的菜还保留 {seconds} 秒。",
+  "The dishes you chose are no longer kept: the others at your table can take theirs back.":
+    "你选的菜已不再保留，同桌其他人可以拿回他们的菜。",
+  "Back to cart": "返回购物车",
+  "Someone at your table is paying": "同桌有人正在付款",
 });

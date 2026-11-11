@@ -26,6 +26,13 @@ import {
 } from "./types.js";
 import { formatCartMoney } from "./format-money.js";
 import {
+  OtherPayerWaits,
+  PayerChoiceBanner,
+  TablePayChooser,
+  TableWaitingDishes,
+  useWaitingReturn,
+} from "./TablePayChoice.js";
+import {
   cartItemShortMessage,
   checkoutItemRefusalMessage,
 } from "../checkout/item-refusal-message.js";
@@ -967,6 +974,8 @@ function CartContent({
               readOnly={
                 readOnly ||
                 held ||
+                // WP-2423 shared-table-checkout (a): a phone is paying for dishes it chose.
+                (cart.cart.tablePay?.payer ?? null) !== null ||
                 state.status === "command-failed" ||
                 terminal ||
                 cart.cart.warnings.includes("PROJECTION_STALE")
@@ -1069,6 +1078,17 @@ function CartContent({
               {cartText.line.removeUnavailableBeforeCheckout}
             </p>
           </div>
+        ) : cart.cart.tablePay?.payer?.thisPhone === true ? (
+          // WP-2423 shared-table-checkout (a): this phone chose this round's dishes.
+          <PayerChoiceBanner onCancelled={() => void controller.refresh()} />
+        ) : cart.cart.tablePay?.payer != null ? (
+          <OtherPayerWaits />
+        ) : cart.cart.tablePay !== undefined && othersItems > 0 ? (
+          <TablePayChooser
+            cart={cart}
+            prices={prices}
+            onChanged={() => void controller.refresh()}
+          />
         ) : (
           <Link className="cart-checkout-link" to="/checkout">
             {cartText.checkout}
@@ -1204,6 +1224,9 @@ export function CartPage({
     return () => window.clearTimeout(timer);
   }, []);
   const timing = useTablePaymentTiming(cart?.orderType === "DineIn", diningClient);
+  // WP-2423 shared-table-checkout (a): dishes that waited for another phone's round come back to
+  // the cart as soon as nobody pays for them.
+  useWaitingReturn("cart" in state ? state.cart : null, () => void controller.refresh());
   // WP-2423 (guest-cart-503): an open table cart re-reads while it is on screen, so it learns
   // within one interval that staff started checkout, or that another phone changed it. Never
   // while a change or a round is on its way; one read per interval per visible phone.
@@ -1339,6 +1362,9 @@ export function CartPage({
             cartHoldsMore={lastOrder.cartRead && (cart?.items.length ?? 0) > 0}
           />
         )}
+        {cart?.tablePay !== undefined && timing !== "PayLater" ? (
+          <TableWaitingDishes tablePay={cart.tablePay} />
+        ) : null}
         <CartContent
           state={state}
           controller={controller}
