@@ -165,6 +165,11 @@ export interface CustomerDiningSessionFacts {
      */
     readonly splitParts?: CustomerSplitParts | null;
     readonly unpaidCancellations: ReadonlySet<string>;
+    /**
+     * v15 batch-5: of those, the rounds the guest paying for them stopped before paying ("Don't
+     * pay. Put the dishes back"); their dishes went back to the table's cart.
+     */
+    readonly guestStoppedRounds?: ReadonlySet<string>;
     /** WP-2423 item 8 ⑦ 4b-3: the order items that are the table's per-head tea (still charged). */
     readonly teaItems?: ReadonlySet<string>;
     /** v15 2026-10-29: every order item that is the per-head tea, taken off or not. */
@@ -269,6 +274,11 @@ export interface CustomerDiningSessionView {
     readonly storeCancellationReason: DiningStoreCancellationReason | null;
     /** WP-2423 item 8 ⑤: why the round waits for staff (with status WaitingForStaff). */
     readonly waitingReason?: OrderRoundHoldReason | null;
+    /**
+     * v15 batch-5: present (true) for a round cancelled unpaid because the guest paying for it
+     * stopped before paying; its dishes went back to the table's cart.
+     */
+    readonly stoppedBeforePaying?: true;
     /** v15 2026-10-29: present (true) when the round is only the per-head tea staff added. */
     readonly tea?: true;
     /** WP-2423 item 8b: present (true) when every item of the round is a charge, not a dish. */
@@ -631,6 +641,9 @@ export function composeCustomerDiningSession(
       cancelsAt,
       storeCancellationReason: reason,
       waitingReason: waiting,
+      ...(unpaidCancelled && order.guestStoppedRounds?.has(reference) === true
+        ? { stoppedBeforePaying: true as const }
+        : {}),
       ...(batch.items.every((item) => order.teaLines?.has(item.orderItemReference) === true)
         ? { tea: true as const }
         : {}),
@@ -1047,10 +1060,14 @@ function postgresDependencies(
         ]))
           paymentDeadlines.set(entry.orderBatchReference, entry.paymentDeadline);
         const unpaidCancellations = new Set<string>();
+        const guestStoppedRounds = new Set<string>();
         for (const entry of await listStoreUnpaidBatchCancellations(transaction, scope, [
           orderReference,
-        ]))
+        ])) {
           unpaidCancellations.add(entry.orderBatchReference);
+          if (entry.reasonCode === "GUEST_CANCELLED_UNPAID")
+            guestStoppedRounds.add(entry.orderBatchReference);
+        }
         // WP-2423 Q7 slice 2: rounds staff entered for the table, paid on the Store's card machine.
         const staffRounds = new Set(
           (
@@ -1369,6 +1386,7 @@ function postgresDependencies(
                   ),
                 },
           unpaidCancellations,
+          guestStoppedRounds,
           staffCancellations,
           itemCancellations,
           remakes,
@@ -1489,6 +1507,7 @@ export function mergeBillOrderFacts(
     ...(teaLines.size === 0 ? {} : { teaLines }),
     ...(chargeLines.size === 0 ? {} : { chargeLines }),
     unpaidCancellations: sets((facts) => facts.unpaidCancellations),
+    guestStoppedRounds: sets((facts) => facts.guestStoppedRounds ?? new Set<string>()),
     staffCancellations: maps((facts) => facts.staffCancellations),
     itemCancellations: all.flatMap((facts) => facts.itemCancellations),
     remakes: sets((facts) => facts.remakes),

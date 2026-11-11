@@ -57,6 +57,11 @@ export interface DiningRound {
   readonly charge?: true;
   /** M41: a paid round the store has not accepted yet (absent: not). */
   readonly awaitingStore?: true;
+  /**
+   * v15 batch-5: present (true) for a round cancelled unpaid because the guest paying for it
+   * stopped before paying; its dishes went back to the table's cart.
+   */
+  readonly stoppedBeforePaying?: true;
   readonly items: readonly {
     readonly displayName: string;
     readonly quantity: number;
@@ -310,7 +315,10 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
     const charge = value !== null && typeof value === "object" && Object.hasOwn(value, "charge");
     const awaitingStore =
       value !== null && typeof value === "object" && Object.hasOwn(value, "awaitingStore");
+    const stopped =
+      value !== null && typeof value === "object" && Object.hasOwn(value, "stoppedBeforePaying");
     const round = record(value, [
+      ...(stopped ? ["stoppedBeforePaying"] : []),
       ...(priced ? ["subtotal", "tax"] : []),
       ...(awaitingStore ? ["awaitingStore"] : []),
       ...(waiting ? ["waitingReason"] : []),
@@ -418,6 +426,14 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
       ...(charge ? { charge: round.charge === true ? (true as const) : invalid() } : {}),
       ...(awaitingStore
         ? { awaitingStore: round.awaitingStore === true ? (true as const) : invalid() }
+        : {}),
+      ...(stopped
+        ? {
+            stoppedBeforePaying:
+              round.stoppedBeforePaying === true && round.status === "NotPaidCancelled"
+                ? (true as const)
+                : invalid(),
+          }
         : {}),
       items,
       ...(breakdown === null ? {} : breakdown),

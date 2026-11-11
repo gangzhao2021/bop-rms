@@ -12,6 +12,7 @@ import { Link, useLocation, useNavigate } from "react-router";
 import { CustomerPage, PageHeading, type CustomerStoreContext } from "../journey/CustomerPage.js";
 import { endSentence, formatClockTime, formatMoney } from "../journey/format.js";
 import { staffCancellationReasonText } from "../order-status/OrderStatusPage.js";
+import { orderStatusText } from "../journey/messages.js";
 import {
   createHttpDiningSessionClient,
   DiningSessionClientError,
@@ -202,7 +203,13 @@ function RoundNote({ round }: { readonly round: DiningRound }) {
       </p>
     );
   if (round.status === "NotPaidCancelled")
-    return <p>{t("This round never went to the kitchen. No one was charged for it.")}</p>;
+    return (
+      <p>
+        {round.stoppedBeforePaying === true
+          ? orderStatusText.roundWithdrawnUnpaid
+          : t("This round never went to the kitchen. No one was charged for it.")}
+      </p>
+    );
   // WP-2423 item 8 ⑤ decisions 5–6: the round waits for staff before the kitchen, and why.
   if (round.status === "WaitingForStaff")
     return (
@@ -354,6 +361,8 @@ function RoundCard({
 }) {
   const headingId = `dining-round-${round.roundNumber}`;
   const charge = staffCharge(round);
+  // v15 batch-5: cancelled before anyone paid, so nothing is owed for it: no tax, no total.
+  const notCharged = round.status === "NotPaidCancelled";
   return (
     <article className="order-status__card order-status__batch" aria-labelledby={headingId}>
       <h3 id={headingId}>
@@ -431,7 +440,13 @@ function RoundCard({
         ))}
       </ul>
       {/* WP-2423 D5: like the receipt — items before tax, then subtotal, tax and total. */}
-      {round.subtotal !== undefined && round.tax !== undefined ? (
+      {/* v15 batch-5: a round cancelled before anyone paid has no tax or total: none is owed. */}
+      {notCharged ? (
+        <p className="order-status__total">
+          <span>{t("Round total")}</span>
+          <span>{t("Not charged")}</span>
+        </p>
+      ) : round.subtotal !== undefined && round.tax !== undefined ? (
         <dl className="order-status__money">
           <div>
             <dt>{t("Subtotal")}</dt>
@@ -449,12 +464,14 @@ function RoundCard({
           </div>
         </dl>
       ) : null}
-      <p className="order-status__total">
-        <span>
-          {round.subtotal === undefined ? t("Round total including tax") : t("Round total")}
-        </span>
-        <span>{money(round.itemsTotal)}</span>
-      </p>
+      {notCharged ? null : (
+        <p className="order-status__total">
+          <span>
+            {round.subtotal === undefined ? t("Round total including tax") : t("Round total")}
+          </span>
+          <span>{money(round.itemsTotal)}</span>
+        </p>
+      )}
     </article>
   );
 }

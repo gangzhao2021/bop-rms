@@ -789,6 +789,40 @@ describe("CUST-DINE-IN-SESSION item prices before tax (WP-2423 D5)", () => {
     expect(html).toContain("Cancelled — not paid");
     expect(html).toContain("No one was charged for it.");
   });
+
+  it("v15 batch-5: a round stopped before anyone paid shows no tax or total, and says its dishes went back", () => {
+    const html = render({
+      status: "ready",
+      refreshing: false,
+      view: view({
+        rounds: [
+          round({
+            status: "NotPaidCancelled",
+            payment: "NotCharged",
+            stoppedBeforePaying: true,
+            subtotal: cad("1178"),
+            tax: cad("153"),
+            itemsTotal: cad("1331"),
+          }),
+          round({
+            roundNumber: 2,
+            status: "NotPaidCancelled",
+            payment: "NotCharged",
+            subtotal: cad("1178"),
+            tax: cad("153"),
+            itemsTotal: cad("1331"),
+          }),
+        ],
+      }),
+    });
+    expect(html).toContain(
+      "This round was stopped before anyone paid, and its dishes went back to your table’s cart. Nobody was charged for it.",
+    );
+    expect(html).toContain("This round never went to the kitchen. No one was charged for it.");
+    expect(html).not.toContain("$1.53");
+    expect(html).not.toContain("$13.31");
+    expect(html.match(/Not charged/gu)?.length).toBeGreaterThanOrEqual(2);
+  });
 });
 
 it("WP-2423 D5: a round from another day shows its date, today's only its time", () => {

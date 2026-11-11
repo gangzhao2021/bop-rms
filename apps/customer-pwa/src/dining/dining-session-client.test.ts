@@ -304,6 +304,20 @@ describe("WP-2423 item 8 ⑤ a round waiting for staff", () => {
   });
 });
 
+describe("v15 batch-5: a round stopped before anyone paid", () => {
+  it("decodes it only on a round cancelled unpaid", () => {
+    const p = payload();
+    Object.assign(firstRound(p), {
+      status: "NotPaidCancelled",
+      payment: "NotCharged",
+      stoppedBeforePaying: true,
+    });
+    expect(parseDiningSessionView(p).rounds[0]?.stoppedBeforePaying).toBe(true);
+    Object.assign(firstRound(p), { status: "Preparing", payment: "Paid" });
+    expect(() => parseDiningSessionView(p)).toThrow(DiningSessionClientError);
+  });
+});
+
 describe("DEC-DINING-GUEST-TABLE-START: the table view", () => {
   const session = (changes: object) => ({
     schemaVersion: 1,

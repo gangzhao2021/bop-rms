@@ -79,6 +79,28 @@ async function setup(enabled = true) {
   };
 }
 
+it("v15 batch-5: a round its payer stopped before paying is sent as such, others are not", async () => {
+  const f = await setup();
+  const base = view();
+  const stopped = {
+    ...(base.rounds[0] as CustomerDiningSessionView["rounds"][number]),
+    status: "NotPaidCancelled" as const,
+    payment: "NotCharged" as const,
+  };
+  f.read.mockResolvedValue({
+    ...base,
+    rounds: [
+      { ...stopped, stoppedBeforePaying: true as const },
+      { ...stopped, roundNumber: 2 },
+    ],
+  });
+  const body = (await (await f.send()).json()) as {
+    session: { rounds: Record<string, unknown>[] };
+  };
+  expect(body.session.rounds[0]?.stoppedBeforePaying).toBe(true);
+  expect(body.session.rounds[1]).not.toHaveProperty("stoppedBeforePaying");
+});
+
 it("WP-2423 Q8: returns the guest's own table view with money as strings and no-store", async () => {
   const f = await setup();
   const response = await f.send();

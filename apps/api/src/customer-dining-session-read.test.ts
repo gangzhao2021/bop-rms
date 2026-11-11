@@ -399,6 +399,25 @@ describe("WP-2423 Q8 composeCustomerDiningSession", () => {
     expect(view.rounds[1]?.cancelsAt).toBe("2026-10-13T18:40:00.000Z");
     expect(view.rounds[2]?.cancelsAt).toBeNull();
     expect(view.rounds[3]?.items.map((entry) => entry.cancelled)).toEqual([true, false]);
+    // Cancelled when its payment failed: not stopped by its payer.
+    expect(view.rounds[2]).not.toHaveProperty("stoppedBeforePaying");
+    // v15 batch-5: the same round, stopped by the guest paying for it, says so.
+    const stopped = composeCustomerDiningSession(
+      facts({
+        batches: [
+          { orderBatchReference: id(50), submittedAt: at, items: [item(51, "Soda", 1, 250n)] },
+        ],
+        authorship: new Map([[id(50), true]]),
+        delivery: new Map([[id(51), { phase: "Cancelled", deliveredQuantity: 0 }]]),
+        unpaidCancellations: new Set([id(50)]),
+        guestStoppedRounds: new Set([id(50)]),
+      }),
+    );
+    expect(stopped.rounds[0]).toMatchObject({
+      status: "NotPaidCancelled",
+      payment: "NotCharged",
+      stoppedBeforePaying: true,
+    });
     expect(view.summary).toEqual({
       paid: cad(4128n),
       refunded: cad(3450n),

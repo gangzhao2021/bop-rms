@@ -112,6 +112,7 @@ export class CustomerDiningSessionHandler {
             cancelsAt: round.cancelsAt,
             storeCancellationReason: round.storeCancellationReason,
             ...(round.waitingReason ? { waitingReason: round.waitingReason } : {}),
+            ...(round.stoppedBeforePaying === true ? { stoppedBeforePaying: true } : {}),
             ...(round.tea === true ? { tea: true } : {}),
             ...(round.charge === true ? { charge: true } : {}),
             // M41: a paid round the store has not accepted yet ("Still waiting? Let staff know").
