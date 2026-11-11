@@ -4,6 +4,7 @@ import {
   CustomerDiningCheckoutScopeError,
   CustomerDiningCheckoutScopeHandler,
   customerDiningCheckoutScopeRoute,
+  assertTablePaysPerRound,
   diningCheckoutHoldReaders,
   parseCustomerDiningCheckoutScopeCommand,
   type createCustomerDiningCheckoutScope,
@@ -210,5 +211,35 @@ describe("WP-2423 shared-table-checkout (a): the payer at a pay-first table choo
     expect(await readers.heldByOther(id(1), 5)).toBeNull();
     expect(await readers.heldByAnyone(id(1), 5)).toBe("2026-08-02T16:10:00.000Z");
     expect(asked).toEqual([payer, id(99)]);
+  });
+
+  it("choosing dishes is only for a table that pays each round; a pay-at-end table is refused as 409", async () => {
+    const timings = (timing: string | undefined) => ({
+      loadSessionTimings: async (_tx: never, sessions: readonly string[]) =>
+        new Map(timing === undefined ? [] : sessions.map((session) => [session, timing])),
+    });
+    await expect(assertTablePaysPerRound(timings("PayFirst"), {}, id(8))).resolves.toBeUndefined();
+    await expect(assertTablePaysPerRound(timings("PayLater"), {}, id(8))).rejects.toMatchObject({
+      code: "PayLater",
+    });
+    await expect(assertTablePaysPerRound(timings(undefined), {}, id(8))).rejects.toMatchObject({
+      code: "Unavailable",
+    });
+    const server = await serve(async () => {
+      throw new CustomerDiningCheckoutScopeError("PayLater");
+    });
+    try {
+      const refused = await server.post({
+        action: "Choose",
+        cartReference: id(1),
+        expectedCartVersion: 4,
+        choice: "Mine",
+        lines: [],
+      });
+      expect(refused.status).toBe(409);
+      expect(await refused.json()).toMatchObject({ error: { code: "table_pays_at_end" } });
+    } finally {
+      await server.close();
+    }
   });
 });

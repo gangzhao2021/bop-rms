@@ -11,7 +11,10 @@ import {
   type GuestSession,
   type GuestSessionServiceOptions,
 } from "@bop/identity";
-import { createPostgresDiningCheckoutHoldSource } from "@rms/dining";
+import {
+  createPostgresDiningCheckoutHoldSource,
+  createPostgresDiningPaymentTimingStore,
+} from "@rms/dining";
 import {
   CartCheckoutInProgressError,
   CartError,
@@ -57,7 +60,8 @@ export type CustomerDiningCheckoutScopeResult =
 
 export class CustomerDiningCheckoutScopeError extends Error {
   constructor(
-    readonly code: "NotJoined" | "Invalid" | "Changed" | "Unavailable" | "Held",
+    /** PayLater: the table pays at the end, where every round is the whole cart. */
+    readonly code: "NotJoined" | "Invalid" | "Changed" | "Unavailable" | "Held" | "PayLater",
     readonly heldUntil: string | null = null,
   ) {
     super("dining checkout scope " + code);
@@ -203,6 +207,27 @@ export function diningCheckoutHoldReaders(
   });
 }
 
+/**
+ * Choosing this round's dishes is for a table that pays each round before it goes to the kitchen
+ * (Dining's payment timing). At a table that pays at the end, splitting is the bill's own by-dish
+ * payment, never a cart split: refused, whatever the client shows.
+ */
+export async function assertTablePaysPerRound(
+  timings: {
+    loadSessionTimings(
+      transaction: never,
+      sessions: readonly string[],
+    ): Promise<ReadonlyMap<string, string>>;
+  },
+  transaction: unknown,
+  diningSessionReference: string,
+): Promise<void> {
+  const found = await timings.loadSessionTimings(transaction as never, [diningSessionReference]);
+  const timing = found.get(diningSessionReference);
+  if (timing === "PayLater") throw new CustomerDiningCheckoutScopeError("PayLater");
+  if (timing !== "PayFirst") throw new CustomerDiningCheckoutScopeError("Unavailable");
+}
+
 const hashIntent = (value: string) => "sha256:" + createHash("sha256").update(value).digest("hex");
 
 export function createCustomerDiningCheckoutScope(options: CustomerDiningCheckoutScopeOptions) {
@@ -283,7 +308,16 @@ export function createCustomerDiningCheckoutScope(options: CustomerDiningCheckou
             retentionPolicyVersion: 1,
           });
           const tx = transaction as never;
-          if (command.action === "Choose")
+          if (command.action === "Choose") {
+            await assertTablePaysPerRound(
+              createPostgresDiningPaymentTimingStore({
+                scope,
+                hashIntent: (value) => createHash("sha256").update(value).digest("hex"),
+                equals: (a, b) => a === b,
+              }),
+              transaction,
+              actor.diningSessionReference,
+            );
             return chooseDiningCheckoutScope(tx, owner, {
               operationReference,
               cartReference: command.cartReference,
@@ -297,6 +331,7 @@ export function createCustomerDiningCheckoutScope(options: CustomerDiningCheckou
               audit: audit("ORDERING_CART_CHECKOUT_SCOPE", command.cartReference),
               heldByOther: (version) => heldByOther(command.cartReference, version),
             });
+          }
           if (command.action === "Extend")
             return extendDiningCheckoutScope(tx, owner, { operationReference, actor, observedAt });
           return returnDiningWaitingLines(tx, owner, {
@@ -422,6 +457,8 @@ export class CustomerDiningCheckoutScopeHandler {
             checkoutHoldRetrySeconds(known.heldUntil ?? this.#now(), this.#now()),
           );
         if (known?.code === "Changed") return fail(response, 409, "cart_version_conflict");
+        // The phone shows the table's own way of paying once it reads the cart again.
+        if (known?.code === "PayLater") return fail(response, 409, "table_pays_at_end");
         if (known?.code === "NotJoined") return fail(response, 404, "dining_not_joined");
         if (known?.code === "Invalid") return fail(response, 400, "checkout_scope_request_invalid");
         fail(response, 503, "cart_service_unavailable");
