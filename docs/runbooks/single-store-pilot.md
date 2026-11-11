@@ -1019,6 +1019,12 @@ never goes to the kitchen`; save, and press `List it`. Do not hide it: guests ne
   it is on the bill. Cancel only a round the guests did not get. Then record the payment after the
   outage; the amount recorded must equal the bill after those decisions. Checkout refuses any
   payment, including one entered after an outage, while a round still waits, and says so.
+- **Guests paying by dish** (WP-2423 同桌结账, added 2026-11-10): what guests already paid on their
+  phones stays paid. During an outage take each guest's dishes on the card machine or in cash and
+  write on the incident sheet which dishes each payment was for; when screens come back the
+  dishes not yet paid show under `Not chosen yet` on `Tables` — record what was taken there as the
+  rest (paper payment), so each dish is paid once. A guest whose card failed gets their dishes back
+  under `Not chosen yet` by itself.
 - **A tablet fails**: carry on from another store tablet or a phone signed in to the merchant
   workspace (PIN switch on shared tablets); nothing is stored only on the failed device.
 
