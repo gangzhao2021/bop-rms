@@ -115,6 +115,40 @@ const STORE_ATTENTION_STEPS = Object.freeze([
   ],
 ]);
 const named = (p, field) => (p[field] ?? []).length > 0;
+/** DEC-WORKER-HEALTH-TRUTH: what is late while a Store's job is not running, in its staff's words. */
+const NOT_RUNNING_WORK = Object.freeze({
+  "business-worker": "order updates and refunds",
+  "kitchen-queue-worker": "kitchen board updates",
+  "reconciliation-worker": "payment checks",
+  "daily-settlement-worker": "day-end settlement",
+  "dining-exception-worker": "points and table exceptions",
+});
+/** What staff do meanwhile, one sentence per kind of job (the merchant app holds each in Chinese). */
+const NOT_RUNNING_STEPS = Object.freeze({
+  "business-worker":
+    "Watch Orders for stuck orders; never take a second payment from a guest who says they paid.",
+  "kitchen-queue-worker": "Check new orders in Orders and call them to the kitchen.",
+  "dining-exception-worker":
+    "Before closing a table, check nothing is unpaid or unserved. Points arrive later.",
+  "reconciliation-worker": "Payment checks and settlement catch up later.",
+  "daily-settlement-worker": "Payment checks and settlement catch up later.",
+});
+/** The jobs whose stop holds up orders or the kitchen: urgent on the Store's Home. */
+const NOT_RUNNING_URGENT = new Set(["business-worker", "kitchen-queue-worker"]);
+const knownJobs = (services) =>
+  Object.keys(NOT_RUNNING_WORK).filter((service) => (services ?? []).includes(service));
+const andList = (items) =>
+  items.length <= 1 ? (items[0] ?? "") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`;
+const lateWork = (services) => {
+  const known = knownJobs(services).map((service) => NOT_RUNNING_WORK[service]);
+  return andList(known.length === 0 ? ["some background work"] : known);
+};
+const notRunningSteps = (services) =>
+  [
+    "Keep serving.",
+    ...new Set(knownJobs(services).map((service) => NOT_RUNNING_STEPS[service])),
+    "BOP support is restarting them.",
+  ].join(" ");
 
 /**
  * WP-2423 item 9: what an order Workflow the resolver refuses stops on the floor. A refusal stops that
@@ -320,6 +354,21 @@ export const ALERT_CATALOG = Object.freeze({
     merchantAction: () =>
       "Some background work has stopped. Check Orders and Exceptions for waiting work; BOP support has to restart it.",
     runbook: "alert-service-attention",
+  },
+  // DEC-WORKER-HEALTH-TRUTH (v15 bc7e2965): a Store's background job that the shared process has not
+  // started, or that has stopped. Not "kept failing": it is not running at all, so the row says
+  // what is late and what staff do meanwhile. Raised once it has held a minute (one failed start
+  // that the 30-second retry fixes is no row); urgent when orders or the kitchen board wait on it.
+  "service.not_running": {
+    severity: "warning",
+    raiseAfterMs: MINUTE,
+    title: () => "Some background jobs are not running",
+    summary: (p) =>
+      `Some background jobs for this Store are not running: ${lateWork(p.services)} may be late. Support has been told.`,
+    action: () =>
+      "BOP support: find out why the named jobs did not start or stopped (the Store's background work names the start failure), fix it and restart them. The Store keeps serving and checks by hand meanwhile.",
+    merchantAction: (p) => notRunningSteps(p.services),
+    runbook: "alert-service-not-running",
   },
   // On a Store's board when only its clean-up chores keep failing. BOP's alone: the merchant can do
   // nothing about it and no order, guest or payment is affected, so it is not on their Home.
@@ -855,7 +904,8 @@ export function evaluateAlertConditions(observations, thresholds = DEFAULT_THRES
     // the installation's own alerts. The process the Stores share stays (`store-workers`).
     const own =
       observations.stores === undefined
-        ? supervisor.attention
+        ? // DEC-WORKER-HEALTH-TRUTH: with no Store boards, a Store's job not running is named here.
+          [...supervisor.attention, ...(supervisor.notRunning ?? [])]
         : supervisor.attention.filter((entry) => !String(entry).startsWith("stores/"));
     if (own.length > 0) raise("service.attention", { services: [...own].sort() });
   }
@@ -955,7 +1005,7 @@ export function uncheckedAlertKeys(observations) {
 
 /** A raised alert stays while the read behind it cannot run: no read is not an all-clear. */
 const HELD_WHILE_UNREADABLE = Object.freeze({
-  supervisor: ["service.attention", "service.chores"],
+  supervisor: ["service.attention", "service.chores", "service.not_running"],
   business: [
     "payment.updates",
     "updates.retrying",
@@ -1000,6 +1050,17 @@ function storeAttention(attention, store) {
   const sharedHost = shared && services.size === 0;
   if (shared || whole) services.add(STORE_BACKGROUND);
   return services.size === 0 ? null : { services: [...services].sort(), sharedHost };
+}
+/** DEC-WORKER-HEALTH-TRUTH: this Store's workers the supervisor reports as not running. */
+function storeNotRunning(notRunning, store) {
+  const own = `stores/${store}:`;
+  return [
+    ...new Set(
+      notRunning
+        .filter((entry) => typeof entry === "string" && entry.startsWith(own))
+        .map((entry) => entry.slice(own.length)),
+    ),
+  ].sort();
 }
 /**
  * Clean-up chores no guest, cook or server notices while they fail, and the owner cannot fix. When
@@ -1053,6 +1114,13 @@ export function evaluateStoreConditions(observations, thresholds = DEFAULT_THRES
     const attention = storeAttention(supervisor.attention, observations.store);
     if (attention !== null)
       raise(onlyChores(attention.services) ? "service.chores" : "service.attention", attention);
+    const down = storeNotRunning(supervisor.notRunning ?? [], observations.store);
+    if (down.length > 0)
+      raise(
+        "service.not_running",
+        { services: down },
+        down.some((service) => NOT_RUNNING_URGENT.has(service)) ? "critical" : "warning",
+      );
   }
   const business = observations.business;
   evaluateBusinessConditions(business, {
@@ -1086,6 +1154,7 @@ export function evaluateStoreConditions(observations, thresholds = DEFAULT_THRES
 const STORE_OUTBOUND_KEYS = new Set([
   "service.attention",
   "service.chores",
+  "service.not_running",
   "payment.updates",
   "updates.retrying",
   "receipts.template",
@@ -1171,6 +1240,7 @@ export const PLANNED_MAINTENANCE_HELD_KEYS = Object.freeze([
   "supervisor.silent",
   "service.attention",
   "service.chores",
+  "service.not_running",
 ]);
 
 export function advanceAlertState(

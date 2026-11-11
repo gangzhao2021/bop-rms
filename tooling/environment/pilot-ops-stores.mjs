@@ -260,7 +260,12 @@ export function createStoreMonitors({
         if (now - (monitor.lastWrittenAt ?? monitor.firstSeenAt) > STORE_BOARD_STALE_MS)
           summary.unchecked.push(name);
         if (monitor.raised.has("monitor.source")) summary.checksFailing.push(name);
-        if (monitor.raised.has("service.attention") || monitor.raised.has("service.chores"))
+        if (
+          monitor.raised.has("service.attention") ||
+          monitor.raised.has("service.chores") ||
+          // DEC-WORKER-HEALTH-TRUTH: a job of the Store that is not running.
+          monitor.raised.has("service.not_running")
+        )
           summary.background.push(name);
         if (monitor.raised.has("settlement.not_run")) summary.settlementNotRun.push(name);
         if (monitor.raised.has("installation.validity")) summary.setupEnding.push(name);

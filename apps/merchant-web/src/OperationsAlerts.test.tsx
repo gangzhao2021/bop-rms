@@ -19,6 +19,7 @@ const { renderAlert } = (await import(/* @vite-ignore */ catalogFile)) as {
   readonly renderAlert: (
     key: string,
     params: unknown,
+    options?: { readonly audience: "Installation" | "Merchant" },
   ) => {
     readonly title: string;
     readonly summary: string;
@@ -152,6 +153,51 @@ describe("WP-2423 Q13 store system alerts on the Home", () => {
       expect(chinese).toContain("未付款的轮次取消不了");
       expect(chinese).toContain("暂时不能开启自取");
       expect(chinese).toContain("重试没有用");
+    } finally {
+      setLanguageForTest("en");
+    }
+  });
+  // DEC-WORKER-HEALTH-TRUTH (v15 bc7e2965): six Stores' Home said all was well while their table
+  // exception and points jobs had not started for about 5 hours.
+  it("a background job that is not running is a row saying what is late and what to do, never all good", () => {
+    const { title, summary, action } = renderAlert(
+      "service.not_running",
+      { services: ["dining-exception-worker"] },
+      { audience: "Merchant" },
+    );
+    const read = {
+      kind: "Ready",
+      value: parseOperationsAlertView(
+        view({
+          audience: "Merchant",
+          active: [
+            {
+              key: "service.not_running",
+              severity: "warning",
+              title,
+              summary,
+              action,
+              raisedAt: "2026-10-15T11:56:00.000Z",
+            },
+          ],
+        }),
+      ),
+    } as const;
+    const html = rows(read);
+    expect(html).toContain("Some background jobs are not running");
+    expect(html).toContain(
+      "Some background jobs for this Store are not running: points and table exceptions may be late. Support has been told.",
+    );
+    expect(html).toContain("Before closing a table, check nothing is unpaid or unserved.");
+    expect(html).not.toMatch(/dining-exception|worker|stores\//u);
+    expect(line(read)).not.toContain("all good");
+    expect(line(read)).toContain("Store system: needs attention");
+    setLanguageForTest("zh-Hans");
+    try {
+      const chinese = rows(read);
+      expect(chinese).toContain("部分后台任务没有在运行");
+      expect(chinese).toContain("积分和桌台异常可能会延迟");
+      expect(chinese).toContain("结束一桌前，先确认没有未付款或未上的菜。");
     } finally {
       setLanguageForTest("en");
     }

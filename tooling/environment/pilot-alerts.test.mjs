@@ -16,6 +16,8 @@ import {
   uncheckedAlertKeys,
   rootOutboundNotifications,
   storeOutboundNotifications,
+  STORE_RAISE_AFTER_MS,
+  PLANNED_MAINTENANCE_HELD_KEYS,
 } from "./pilot-alerts.mjs";
 import { buildWebhookRequest } from "./pilot-alert-channels.mjs";
 
@@ -1226,6 +1228,114 @@ describe("a Store's own conditions", () => {
     for (const minute of [8, 9, 10]) at(minute, (now) => store({ now }));
     expect(at(11, (now) => store({ now }))).not.toHaveProperty("checksIncompleteSince");
   });
+  // DEC-WORKER-HEALTH-TRUTH (v15 bc7e2965): six Stores' dining-exception workers refused to start
+  // for about 5 hours while their Home said all was well.
+  it("a Store job that is not running is on its Home within a minute, in its staff's words", () => {
+    const down = (now, services = ["stores/tea:dining-exception-worker"]) =>
+      store({
+        now,
+        supervisor: {
+          maintenance: false,
+          reportAgeMs: 0,
+          attention: [],
+          notRunning: [...services, "stores/other:business-worker"],
+        },
+      });
+    const conditions = evaluateStoreConditions(down(T0));
+    expect(keys(conditions)).toEqual(["service.not_running"]);
+    expect(conditions.get("service.not_running")).toEqual({
+      severity: "warning",
+      params: { services: ["dining-exception-worker"] },
+    });
+    let state = emptyAlertState();
+    const board = (minute, observations) => {
+      const now = T0 + minute * MIN;
+      const advanced = advanceAlertState(
+        state,
+        evaluateStoreConditions(observations(now)),
+        now,
+        undefined,
+        { raiseAfterMs: STORE_RAISE_AFTER_MS },
+      );
+      state = advanced.state;
+      return {
+        notifications: advanced.notifications,
+        ...buildAlertBoard(state, {
+          observedAt: new Date(now).toISOString(),
+          channels: { email: false, webhooks: 0, heartbeat: false },
+          backup: null,
+          audience: "Merchant",
+        }),
+      };
+    };
+    // One failed start fixed by the next try is no row.
+    expect(board(0, down).active).toEqual([]);
+    board(0.5, (now) => store({ now }));
+    expect(board(1, down).active).toEqual([]);
+    // Held a minute: on the Home, and sent to BOP support.
+    const raised = board(2, down);
+    expect(raised.active).toEqual([
+      expect.objectContaining({
+        key: "service.not_running",
+        severity: "warning",
+        title: "Some background jobs are not running",
+        summary:
+          "Some background jobs for this Store are not running: points and table exceptions may be late. Support has been told.",
+        action:
+          "Keep serving. Before closing a table, check nothing is unpaid or unserved. Points arrive later. BOP support is restarting them.",
+      }),
+    ]);
+    expect(storeOutboundNotifications(raised.notifications, "tea")).toEqual([
+      expect.objectContaining({ kind: "raised", key: "service.not_running", store: "tea" }),
+    ]);
+    // Orders or the kitchen board waiting on it is urgent.
+    expect(
+      evaluateStoreConditions(
+        down(T0, ["stores/tea:kitchen-queue-worker", "stores/tea:dining-exception-worker"]),
+      ).get("service.not_running"),
+    ).toEqual({
+      severity: "critical",
+      params: { services: ["dining-exception-worker", "kitchen-queue-worker"] },
+    });
+  });
+  it("a not-running row stays while the supervisor's report cannot be read, and waits out a planned update", () => {
+    const raisedBefore = {
+      alerts: {
+        "service.not_running": {
+          raisedAt: new Date(T0).toISOString(),
+          severity: "warning",
+          params: { services: ["dining-exception-worker"] },
+        },
+      },
+    };
+    const quiet = evaluateStoreConditions(
+      store({ supervisor: "unreadable", previous: raisedBefore }),
+    );
+    expect(quiet.get("service.not_running")?.params).toEqual({
+      services: ["dining-exception-worker"],
+    });
+    expect(PLANNED_MAINTENANCE_HELD_KEYS).toContain("service.not_running");
+  });
+  it("every wording of a not-running row fits the Home and says what is late", () => {
+    const all = [
+      "business-worker",
+      "kitchen-queue-worker",
+      "reconciliation-worker",
+      "daily-settlement-worker",
+      "dining-exception-worker",
+    ];
+    const text = renderAlert("service.not_running", { services: all }, { audience: "Merchant" });
+    expect(text.summary).toBe(
+      "Some background jobs for this Store are not running: order updates and refunds, kitchen board updates, payment checks, day-end settlement and points and table exceptions may be late. Support has been told.",
+    );
+    expect(text.action.length).toBeLessThanOrEqual(400);
+    expect(text.action).toContain("never take a second payment");
+    expect(renderAlert("service.not_running", { services: ["unknown"] }).summary).toContain(
+      "some background work may be late",
+    );
+    // BOP's own message names what to do about it, not the restaurant's steps.
+    expect(renderAlert("service.not_running", { services: all }).action).toMatch(/^BOP support:/u);
+  });
   it("raises nothing about the installation: no backup, certificate, disk or channel", () => {
     expect(keys(evaluateStoreConditions(store()))).toEqual([]);
     // The same observations that the root would raise on.
@@ -1537,6 +1647,7 @@ describe("a Store's own conditions", () => {
       "supervisor.silent": { sent: false, stays: false },
       "service.attention": { sent: true, stays: true },
       "service.chores": { sent: true, stays: true },
+      "service.not_running": { sent: true, stays: true },
       "payment.updates": { sent: true, stays: true },
       "updates.retrying": { sent: true, stays: true },
       "receipts.template": { sent: true, stays: true },

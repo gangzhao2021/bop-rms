@@ -43,6 +43,25 @@ const VARIANTS: Readonly<Record<string, readonly unknown[]>> = {
     { services: ["store-background"] },
     { services: ["store-workers"] },
   ],
+  // DEC-WORKER-HEALTH-TRUTH: each kind of job alone, several, all, and one the catalog does not name.
+  "service.not_running": [
+    { services: ["dining-exception-worker"] },
+    { services: ["business-worker"] },
+    { services: ["kitchen-queue-worker"] },
+    { services: ["reconciliation-worker"] },
+    { services: ["daily-settlement-worker"] },
+    { services: ["dining-exception-worker", "kitchen-queue-worker"] },
+    {
+      services: [
+        "business-worker",
+        "kitchen-queue-worker",
+        "reconciliation-worker",
+        "daily-settlement-worker",
+        "dining-exception-worker",
+      ],
+    },
+    { services: ["unknown"] },
+  ],
   "service.chores": [
     { services: ["business-worker:contactRetention"] },
     { services: ["business-worker:contactRetention", "business-worker:webhookEvidenceRetention"] },
@@ -193,6 +212,30 @@ const english = (text: string) =>
 afterEach(() => setLanguageForTest("en"));
 
 describe("Owner 2026-11-03: system alerts in the store's language", () => {
+  it("v15 bc7e2965: says in Chinese which background jobs are late and what staff do", () => {
+    setLanguageForTest("zh-Hans");
+    const text = renderAlert(
+      "service.not_running",
+      { services: ["dining-exception-worker"] },
+      { audience: "Merchant" },
+    );
+    expect(alertTitle(text.title)).toBe("部分后台任务没有在运行");
+    expect(alertSummary(text.summary)).toBe(
+      "本店部分后台任务没有在运行：积分和桌台异常可能会延迟。已通知 BOP 支持。",
+    );
+    expect(alertAction(text.action)).toBe(
+      "照常营业。结束一桌前，先确认没有未付款或未上的菜。积分稍后到账。BOP 支持正在重启这些任务。",
+    );
+    const two = renderAlert(
+      "service.not_running",
+      { services: ["business-worker", "dining-exception-worker"] },
+      { audience: "Merchant" },
+    );
+    expect(alertSummary(two.summary)).toBe(
+      "本店部分后台任务没有在运行：订单更新和退款、积分和桌台异常可能会延迟。已通知 BOP 支持。",
+    );
+    expect(alertAction(two.action)).toContain("客人说已付款的，不要再收一次。");
+  });
   it("covers every alert of the monitor's catalog", () => {
     expect(Object.keys(VARIANTS).sort()).toEqual([...ALERT_KEYS].sort());
   });

@@ -6185,6 +6185,24 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Background services are not being watched": "后台服务无人监控",
   "A background service needs a person": "有后台服务需要人工处理",
   "A clean-up task keeps failing": "有清理任务一直出错",
+  "Some background jobs are not running": "部分后台任务没有在运行",
+  "Some background jobs for this Store are not running: {work} may be late. Support has been told.":
+    "本店部分后台任务没有在运行：{work}可能会延迟。已通知 BOP 支持。",
+  "order updates and refunds": "订单更新和退款",
+  "kitchen board updates": "后厨看板更新",
+  "points and table exceptions": "积分和桌台异常",
+  "some background work": "部分后台工作",
+  "Keep serving.": "照常营业。",
+  "Watch Orders for stuck orders; never take a second payment from a guest who says they paid.":
+    "留意“订单”页里卡住的订单；客人说已付款的，不要再收一次。",
+  "Check new orders in Orders and call them to the kitchen.":
+    "在“订单”页查看新订单，并口头通知后厨。",
+  "Before closing a table, check nothing is unpaid or unserved. Points arrive later.":
+    "结束一桌前，先确认没有未付款或未上的菜。积分稍后到账。",
+  "Payment checks and settlement catch up later.": "付款核对和日结稍后会自动补上。",
+  "BOP support is restarting them.": "BOP 支持正在重启这些任务。",
+  "BOP support: find out why the named jobs did not start or stopped (the Store's background work names the start failure), fix it and restart them. The Store keeps serving and checks by hand meanwhile.":
+    "BOP 支持：查明列出的任务为什么没有启动或已停止（该店后台工作会写出启动失败的原因），修好后重启。在此期间门店照常营业，手工核对。",
   "Order or payment updates are stuck": "订单或付款更新卡住了",
   "Some order updates are being retried": "部分订单更新正在重试",
   "Orders from earlier days are still holding stock": "较早营业日的订单仍占用库存",

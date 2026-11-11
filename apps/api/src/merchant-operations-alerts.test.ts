@@ -249,6 +249,8 @@ describe("a merchant's projection of its own board", () => {
     // WP-2423 (settlement-coverage): a closed day not compared with the provider is the merchant's
     // to know, so the Home never says all is good while it is so.
     expect(view.active.map((item) => item.key)).toContain("settlement.not_run");
+    // DEC-WORKER-HEALTH-TRUTH: nor while one of the Store's background jobs is not running.
+    expect(view.active.map((item) => item.key)).toContain("service.not_running");
     expect(view.recentlyCleared.map((item) => item.key)).toEqual(["payment.updates"]);
     expect(view.outbound).toEqual({ email: false, webhooks: 0, heartbeat: false });
     expect(view.lastSuccessfulBackupAt).toBe(null);
@@ -266,6 +268,8 @@ describe("a merchant's projection of its own board", () => {
       "entry.customer",
       "entry.merchant",
       "service.attention",
+      // DEC-WORKER-HEALTH-TRUTH: a job of the Store not running; the Home never says all good.
+      "service.not_running",
       "payment.updates",
       "updates.retrying",
       "receipts.template",

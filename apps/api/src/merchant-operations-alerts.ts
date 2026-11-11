@@ -19,6 +19,7 @@ export const operationsAlertKeys = Object.freeze([
   "supervisor.silent",
   "service.attention",
   "service.chores",
+  "service.not_running",
   "payment.updates",
   "updates.retrying",
   "receipts.template",
@@ -60,6 +61,8 @@ export const merchantOperationsAlertKeys: ReadonlySet<OperationsAlertKey> = new 
   "entry.customer",
   "entry.merchant",
   "service.attention",
+  // DEC-WORKER-HEALTH-TRUTH: a background job of the Store that is not running; staff check by hand.
+  "service.not_running",
   "payment.updates",
   "updates.retrying",
   "receipts.template",

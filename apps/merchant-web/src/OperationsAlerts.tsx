@@ -92,6 +92,7 @@ export function alertTitle(title: string): string {
     "Background services are not being watched": t("Background services are not being watched"),
     "A background service needs a person": t("A background service needs a person"),
     "A clean-up task keeps failing": t("A clean-up task keeps failing"),
+    "Some background jobs are not running": t("Some background jobs are not running"),
     "Order or payment updates are stuck": t("Order or payment updates are stuck"),
     "Some order updates are being retried": t("Some order updates are being retried"),
     "Orders from earlier days are still holding stock": t(

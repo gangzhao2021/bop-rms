@@ -402,6 +402,8 @@ describe("WP-2423 Q13 observations", () => {
         { service: "api", state: "running", pid: 10 },
         { service: "business-worker", state: "running", pid: 11, attention: ["paymentWait"] },
         { service: "kitchen-queue-worker", state: "attention_required" },
+        // DEC-WORKER-HEALTH-TRUTH: a Store's worker that is not running, by name.
+        { service: "stores/tea:dining-exception-worker", state: "down", liveness: "unconfirmed" },
       ],
     });
     expect(writes).toEqual([".local/pilot-test/supervisor.health.json"]);
@@ -411,6 +413,7 @@ describe("WP-2423 Q13 observations", () => {
       maintenance: false,
       reportAgeMs: 30_000,
       attention: ["business-worker:paymentWait", "kitchen-queue-worker"],
+      notRunning: ["stores/tea:dining-exception-worker"],
     });
     await fs.writeFile(path.join(dir, "maintenance.lock"), "");
     expect((await observeSupervisor(dir, T0)).maintenance).toBe(true);

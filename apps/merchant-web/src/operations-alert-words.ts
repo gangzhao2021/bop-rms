@@ -158,6 +158,11 @@ export function alertAction(english: string): string {
       t(
         "Call BOP support now. Keep taking orders on your own POS or on paper, and take payment on the card machine.",
       ),
+    // DEC-WORKER-HEALTH-TRUTH: BOP's own step for a Store's job that is not running.
+    "BOP support: find out why the named jobs did not start or stopped (the Store's background work names the start failure), fix it and restart them. The Store keeps serving and checks by hand meanwhile.":
+      t(
+        "BOP support: find out why the named jobs did not start or stopped (the Store's background work names the start failure), fix it and restart them. The Store keeps serving and checks by hand meanwhile.",
+      ),
     // What only BOP can act on.
     "BOP support: record this Store's first closed business day so its day-end settlement starts.":
       t(
@@ -166,7 +171,47 @@ export function alertAction(english: string): string {
   };
   return Object.hasOwn(words, english)
     ? (words[english] as string)
-    : (storesAttentionAction(english) ?? english);
+    : (notRunningAction(english) ?? storesAttentionAction(english) ?? english);
+}
+
+/**
+ * DEC-WORKER-HEALTH-TRUTH: what staff do while a background job of their Store is not running, one
+ * sentence for each kind of job the row names (pilot-alerts `NOT_RUNNING_STEPS`), in their order.
+ */
+function notRunningAction(english: string): string | null {
+  const first = "Keep serving. ",
+    last = " BOP support is restarting them.";
+  if (!english.startsWith(first) || !english.endsWith(last)) return null;
+  const steps: readonly (readonly [string, string])[] = [
+    [
+      "Watch Orders for stuck orders; never take a second payment from a guest who says they paid.",
+      t(
+        "Watch Orders for stuck orders; never take a second payment from a guest who says they paid.",
+      ),
+    ],
+    [
+      "Check new orders in Orders and call them to the kitchen.",
+      t("Check new orders in Orders and call them to the kitchen."),
+    ],
+    [
+      "Before closing a table, check nothing is unpaid or unserved. Points arrive later.",
+      t("Before closing a table, check nothing is unpaid or unserved. Points arrive later."),
+    ],
+    [
+      "Payment checks and settlement catch up later.",
+      t("Payment checks and settlement catch up later."),
+    ],
+  ];
+  let rest = english.slice(first.length, english.length - last.length);
+  const said = [t("Keep serving.")];
+  while (rest.length > 0) {
+    const step = steps.find(([words]) => rest === words || rest.startsWith(words + " "));
+    if (step === undefined) return null;
+    said.push(step[1]);
+    rest = rest.slice(step[0].length).trimStart();
+  }
+  said.push(t("BOP support is restarting them."));
+  return said.join("");
 }
 
 /** The other Stores' row says one step for each cause it names, whichever apply. */
@@ -276,6 +321,32 @@ function serviceName(english: string): string {
   return t("{name} ({part})", { name: lookup(words, name), part: lookup(parts, part) });
 }
 
+/** The work the not-running row says may be late (pilot-alerts `NOT_RUNNING_WORK`). */
+function lateWork(english: string): string {
+  const words: Readonly<Record<string, string>> = {
+    "order updates and refunds": t("order updates and refunds"),
+    "kitchen board updates": t("kitchen board updates"),
+    "payment checks": t("payment checks"),
+    "day-end settlement": t("day-end settlement"),
+    "points and table exceptions": t("points and table exceptions"),
+    "some background work": t("some background work"),
+  };
+  const items: string[] = [];
+  let rest = english;
+  // The catalog joins them with ", " and a last " and ", and some names hold " and " themselves.
+  while (rest.length > 0) {
+    const name = Object.keys(words)
+      .filter(
+        (item) => rest === item || rest.startsWith(item + ", ") || rest.startsWith(item + " and "),
+      )
+      .sort((a, b) => b.length - a.length)[0];
+    if (name === undefined) return english;
+    items.push(words[name] as string);
+    rest = rest.slice(name.length).replace(/^(, | and )/u, "");
+  }
+  return items.join(listSeparator());
+}
+
 function serviceList(english: string): string {
   const more = english.endsWith(" and more");
   const names = (more ? english.slice(0, -" and more".length) : english)
@@ -372,6 +443,15 @@ const SUMMARY_RULES: readonly (readonly [RegExp, (match: Match) => string])[] = 
       t(
         "The part of the system that watches background work last reported {duration} ago. Background work (kitchen updates, payment checks, refunds) may have stopped.",
         { duration: duration(m[1] as string) },
+      ),
+  ],
+  // DEC-WORKER-HEALTH-TRUTH: what is late while a background job of the Store is not running.
+  [
+    /^Some background jobs for this Store are not running: (.+) may be late\. Support has been told\.$/u,
+    (m) =>
+      t(
+        "Some background jobs for this Store are not running: {work} may be late. Support has been told.",
+        { work: lateWork(m[1] as string) },
       ),
   ],
   [

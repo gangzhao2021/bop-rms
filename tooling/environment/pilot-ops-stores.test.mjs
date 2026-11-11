@@ -714,6 +714,29 @@ describe("what the installation shares with every Store", () => {
       "Background work has kept failing and will not fix itself.",
     );
   });
+  // DEC-WORKER-HEALTH-TRUTH (v15 bc7e2965): a Store's job that is not running reaches its Home, BOP
+  // support's channels and the root board's list of Stores needing support.
+  it("a Store job that is not running is on that Store's board, sent to BOP and named at the root", async () => {
+    const facts = { tea: fact(), hotpot: fact() };
+    const { directory, cycle, monitors } = await monitorsFor(facts);
+    const supervisor = {
+      ...healthySupervisor,
+      notRunning: ["stores/hotpot:dining-exception-worker"],
+    };
+    await cycle(0, { supervisor });
+    expect((await boardOf(directory, "hotpot")).active).toEqual([]);
+    await cycle(1, { supervisor });
+    const hotpot = await boardOf(directory, "hotpot");
+    expect(keysOf(hotpot)).toEqual(["service.not_running"]);
+    expect(hotpot.active[0].summary).toBe(
+      "Some background jobs for this Store are not running: points and table exceptions may be late. Support has been told.",
+    );
+    expect((await boardOf(directory, "tea")).active).toEqual([]);
+    expect(monitors.pending()).toEqual([
+      expect.objectContaining({ key: "service.not_running", kind: "raised", store: "hotpot" }),
+    ]);
+    expect(monitors.summary(T0 + 1 * MIN).background).toEqual(["hotpot"]);
+  });
   it("the shared worker process needing a person shows on every board, and BOP hears it once", async () => {
     const facts = { tea: fact(), hotpot: fact() };
     const { directory, cycle, monitors } = await monitorsFor(facts);

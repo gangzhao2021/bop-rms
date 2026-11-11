@@ -107,12 +107,15 @@ export async function observeProbes(
   };
 }
 
-/** The supervisor's last sweep: services needing a person and how old the report is. */
+/**
+ * The supervisor's last sweep: services needing a person, the Store workers that are not running
+ * (DEC-WORKER-HEALTH-TRUTH: `down`, names only) and how old the report is.
+ */
 export async function observeSupervisor(runtimeDirectory, now, read = readPrivateJson) {
   try {
     try {
       await fs.lstat(path.join(runtimeDirectory, "maintenance.lock"));
-      return { maintenance: true, reportAgeMs: 0, attention: [] };
+      return { maintenance: true, reportAgeMs: 0, attention: [], notRunning: [] };
     } catch (error) {
       if (error.code !== "ENOENT") throw error;
     }
@@ -129,7 +132,16 @@ export async function observeSupervisor(runtimeDirectory, now, read = readPrivat
           : []),
       ])
       .sort();
-    return { maintenance: false, reportAgeMs: Math.max(0, now - observed), attention };
+    const notRunning = health.services
+      .filter((entry) => entry.state === "down")
+      .map((entry) => String(entry.service))
+      .sort();
+    return {
+      maintenance: false,
+      reportAgeMs: Math.max(0, now - observed),
+      attention,
+      notRunning,
+    };
   } catch {
     return "unreadable";
   }
