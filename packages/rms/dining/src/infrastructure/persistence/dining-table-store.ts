@@ -393,7 +393,7 @@ export function createPostgresDiningPublicTableReader(options: {
           "SELECT set_config('bop.brand_id',$1,true), set_config('bop.store_id',$2,true)",
           [scope.brandReference, scope.storeReference],
         );
-        // WP-2423 M68 lock order (docs/spec/design/dining-table-lock-order.md): this read runs in
+        // WP-2423 M68 lock order (docs/spec/design/database-resilience.md): this read runs in
         // the guest's own transaction before the command takes `DiningTable:<table>`. A row lock
         // here (it was FOR SHARE) made the order row-then-advisory while every table command goes
         // advisory-then-row: two guests calling staff together, or a guest acting while staff

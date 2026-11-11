@@ -31,7 +31,7 @@ const tableReferences = {
   equals: (a, b) => a === b,
 };
 
-// WP-2423 M68 (c) DEC-DINING-TABLE-LOCK-ORDER: every Dining command and the guest's table read
+// WP-2423 M68 (c) DEC-DATABASE-RESILIENCE: every Dining command and the guest's table read
 // run as a restricted NOBYPASSRLS role holding exactly the rendered pilot api grants (table setup
 // as a separate staff role, as in dining-staff-call); the owner client only reads counts and locks.
 it("two guests calling staff at one table at once never deadlock: one call, one already asked", async () => {

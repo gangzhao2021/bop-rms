@@ -2,7 +2,7 @@ import type { Pool, PoolClient } from "pg";
 import { TenantContextDatabaseError, tenantContextDatabaseDiagnostic } from "./tenant-context.js";
 
 /**
- * WP-2423 M68 (a), DEC-DATABASE-ACQUIRE-RETRY (docs/spec/design/database-resilience.md): a request
+ * WP-2423 M68 (a), DEC-DATABASE-RESILIENCE (docs/spec/design/database-resilience.md): a request
  * that finds no database connection for a moment (every pooled connection busy, the role's
  * connection limit reached, the database restarting) tries again a few times with jitter before
  * the guest or staff member is told the system is busy. Every attempt stays inside the one
