@@ -1686,3 +1686,133 @@ for (const variant of ["off the first page", "no Orders access"] as const)
       await expect(charge.getByRole("button", { name: "Cancel order" })).toHaveCount(0);
     }
   });
+
+// DEC-PAPER-ORDER-NEVER-RELEASED: a paper order whose payment wasn't recorded by its time is never
+// released: it stays on the counter's "Sent, not paid yet" list (and Home) saying it is kept and
+// must be entered again from the slip; a manager then links the new paper order (whose payment is
+// recorded) and the old one closes as entered again. Front of house is told a manager links it.
+test("@production a paper order past its time stays listed until a manager links the re-entered order, at 1440, 1024 and 390", async ({
+  page,
+}) => {
+  await signIn(page);
+  const ended = new Date(Date.now() - 5 * 60_000).toISOString();
+  let linked: Record<string, unknown> | null = null;
+  let manager = true;
+  const stale = () => {
+    const row = unpaidCounterRow({
+      orderNumber: "31",
+      payBy: ended,
+      recordedAfterOutage: true,
+      canCancelUnpaid: false,
+      amountDueMinor: null,
+    });
+    return {
+      ...row,
+      submittedAt: new Date(Date.now() - 40 * 60_000).toISOString(),
+      counter: { ...row.counter, canCloseAsReentered: manager },
+    };
+  };
+  const reentered = {
+    ...unpaidCounterRow({
+      orderNumber: "34",
+      payBy: ended,
+      recordedAfterOutage: true,
+      canCancelUnpaid: false,
+      amountDueMinor: null,
+    }),
+    orderReference: id(80),
+    initialBatchReference: id(81),
+    batches: [
+      {
+        orderBatchReference: id(81),
+        sequence: 1,
+        acceptanceStatus: "Accepted",
+        canRequestAcceptance: false,
+        canCancel: false,
+        staffCancellation: null,
+        canCancelItems: false,
+      },
+    ],
+    awaitingPayment: false,
+    currentPhase: "Accepted",
+    currentVersion: 2,
+    counter: {
+      recordedAfterOutage: true,
+      paidOnCardMachine: {
+        amountMinor: "1135",
+        takenAt: new Date(Date.now() - 50 * 60_000).toISOString(),
+        recordedAfterOutage: true,
+        refundedMinor: "0",
+      },
+      payBy: null,
+      amountDueMinor: null,
+      canCancelUnpaid: false,
+      canCloseAsReentered: false,
+      cancelledBeforePayment: null,
+    },
+  };
+  await page.route("**/merchant/counter/menu", (route) => route.fulfill({ headers, json: menu }));
+  await page.route("**/merchant/orders", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        items: linked === null ? [reentered, stale()] : [reentered],
+        nextAfterOrderReference: null,
+      },
+    }),
+  );
+  await page.route("**/merchant/counter/orders/cancel-unpaid", (route) => {
+    linked = route.request().postDataJSON() as Record<string, unknown>;
+    return route.fulfill({
+      headers,
+      json: { status: "Cancelled", cancelledAt: new Date().toISOString() },
+    });
+  });
+  for (const [width, height] of [
+    [1440, 900],
+    [1024, 768],
+    [390, 844],
+  ] as const) {
+    linked = null;
+    manager = true;
+    await page.setViewportSize({ width, height });
+    await page.goto("/operations/order-entry");
+    const list = page.getByRole("region", { name: "Sent, not paid yet" });
+    const row = list.getByRole("listitem").filter({ hasText: "Order 31" });
+    await expect(row).toContainText("The order stays in the system");
+    await expect(row).toContainText("enter it again from the paper slip as a new paper order");
+    await expect(row).not.toContainText(/taken off|released|Take payment/u);
+    // It can no longer be recorded on itself: no record button, only the link to the new order.
+    await expect(row.getByRole("button", { name: "Record the paper order's payment" })).toHaveCount(
+      0,
+    );
+    await row.getByRole("button", { name: "Link the re-entered order" }).click();
+    const dialog = page.getByRole("dialog", { name: "Paper order 31 was entered again" });
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole("radio", { name: /^Order 34 · sent .* · \$11\.35$/u }).check();
+    await dialog.getByRole("button", { name: "Close as entered again" }).click();
+    await expect(dialog).toBeHidden();
+    expect(linked).toMatchObject({
+      orderReference: id(70),
+      orderBatchReference: id(71),
+      expectedOrderVersion: 1,
+      reasonCode: "COUNTER_PAPER_REENTERED",
+      reenteredOrderReference: id(80),
+    });
+    await expect(list.getByRole("listitem").filter({ hasText: "Order 31" })).toHaveCount(0);
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      `no horizontal overflow at ${width}`,
+    ).toBe(true);
+    // Front of house sees it kept and is told a manager links the new order.
+    linked = null;
+    manager = false;
+    await page.reload();
+    const kept = page
+      .getByRole("region", { name: "Sent, not paid yet" })
+      .getByRole("listitem")
+      .filter({ hasText: "Order 31" });
+    await expect(kept).toContainText("a manager then links the new order here");
+    await expect(kept.getByRole("button", { name: "Link the re-entered order" })).toHaveCount(0);
+  }
+});

@@ -528,6 +528,8 @@ const earlierCounterPickup = {
     amountDueMinor: null,
     // WP-2423 M127: paid, so not cancellable unpaid; never cancelled before payment.
     canCancelUnpaid: false,
+    // DEC-PAPER-ORDER-NEVER-RELEASED: only an unpaid paper order past its time is closed so.
+    canCloseAsReentered: false,
     cancelledBeforePayment: null,
   },
   paidOnline: null,

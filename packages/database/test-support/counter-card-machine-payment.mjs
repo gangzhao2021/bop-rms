@@ -608,6 +608,8 @@ export async function exerciseCounterCardMachinePayment({
           amountDueMinor: null,
           // WP-2423 M127: paid, so it can't be cancelled unpaid; it never was.
           canCancelUnpaid: false,
+          // DEC-PAPER-ORDER-NEVER-RELEASED: paid, so never closed as entered again.
+          canCloseAsReentered: false,
           cancelledBeforePayment: null,
         });
       },
