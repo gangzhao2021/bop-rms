@@ -354,3 +354,31 @@ test("@production v15: the kitchen search answers for today's order only, and sa
   await findOrder(page, "2");
   await expect(page.getByText(/is not accepted yet/u)).toHaveCount(0);
 });
+
+for (const width of [390, 1024, 1440])
+  test(`@production merchant-outage-recovery M120: a ticket's wait counts from when the order was placed, at ${width}`, async ({
+    page,
+  }) => {
+    // Live v15 2026-11-10: order 7 was placed 13 minutes ago and accepted 2 minutes ago; the board
+    // read "2 min". A drink with alcohol keeps its ID check.
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await board(page, false, {
+      items: [
+        item(0x30, {
+          localizedDisplayNames: { "en-CA": "Tsingtao beer" },
+          orderLabel: { orderNumber: "7", orderType: "Pickup", tableLabel: null },
+          workItemCreatedAt: "2026-10-14T17:58:00.000Z",
+          placedAt: "2026-10-14T17:47:00.000Z",
+          checkId: true,
+        }),
+      ],
+    });
+    await page.goto("/operations/kitchen");
+    const ticket = page.locator(".kitchen-ticket").filter({ hasText: "Tsingtao beer" });
+    await expect(ticket.locator(".kitchen-ticket__timer")).toHaveText("13 min");
+    await expect(ticket).toContainText("Check ID (19+)");
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.screenshot({ path: `test-results/kitchen-placed-wait-${width}.png` });
+  });
