@@ -18,6 +18,7 @@ import {
   parseOrderingReference,
   StaffDiningRoundEntryError,
   CartError,
+  listStoreDiningBatchPaymentDeadlines,
   readStaffDiningCart,
   removeStaffDiningCartLines,
   type StaffCartRemovalReason,
@@ -882,6 +883,19 @@ export function createMerchantStaffDiningRound(options: {
           : null;
         if (current.additional && execution === null) return fail("STAFF_ROUND_NOT_FINISHED");
         const p = current.preparation;
+        // v15 batch-5: the time staff are told is the one the round is cancelled at (Ordering's
+        // payment window of the round), never a later minute read from the payment clock.
+        const windowEnd = (
+          await listStoreDiningBatchPaymentDeadlines(tx as never, scope.selected, [
+            String(batch.orderReference),
+          ])
+        ).find(
+          (entry) => entry.orderBatchReference === String(batch.orderBatchReference),
+        )?.paymentDeadline;
+        const payBy =
+          windowEnd !== undefined && Date.parse(windowEnd) < Date.parse(String(p.capacityExpiresAt))
+            ? windowEnd
+            : String(p.capacityExpiresAt);
         return Object.freeze({
           status,
           orderReference: String(batch.orderReference),
@@ -892,7 +906,7 @@ export function createMerchantStaffDiningRound(options: {
           orderMinor: p.orderAllocation.amountMinor.toString(),
           tipMinor: p.tip.amountMinor.toString(),
           totalMinor: p.total.amountMinor.toString(),
-          payBy: String(p.capacityExpiresAt),
+          payBy,
           payLater: false,
           recordedAfterOutage: entry.recordedAfterOutage,
         });

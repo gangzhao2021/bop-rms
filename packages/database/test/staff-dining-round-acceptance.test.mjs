@@ -1577,6 +1577,16 @@ it("the real staff round command takes a round from table entry to the card mach
         ["Placed", false, false, "1469", "195", "1664", "T01"],
       );
       assert.ok(Date.parse(first.payBy) > Date.now(), "the card machine has a deadline");
+      // v15 batch-5: staff are told the minute the round is really cancelled at, the one Tables
+      // and Orders show (its payment window), never a later one from the payment clock.
+      const windowEnd = (
+        await rows(
+          `SELECT to_char((l.created_at+interval '30 minutes') AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS at
+           FROM rms_ordering.order_capacity_link l WHERE l.order_batch_id=$1 AND l.link_json->>'owner'='Dining'`,
+          [first.orderBatchReference],
+        )
+      )[0].at;
+      assert.equal(first.payBy, windowEnd);
       assert.deepEqual(
         await rows(
           "SELECT quantity,transaction_snapshot_json->'catalog'->>'sellableReference' AS sku,transaction_snapshot_json->>'customerNote' AS customer_note FROM rms_ordering.order_item WHERE order_batch_id=$1",
