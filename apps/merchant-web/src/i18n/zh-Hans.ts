@@ -327,7 +327,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   " · {readyToServe} ready to serve": " · {readyToServe} 项可上桌",
   " · {refunded} refunded": " · 已退款 {refunded}",
   " · {toRefund} to refund on the card machine": " · 需在刷卡机上退款 {toRefund}",
-  " · {value} by {reviewedBy} ({reasonCode})": " · {value}，由 {reviewedBy}（{reasonCode}）",
   " – now": " – 现在",
   " — Brand, all Stores": " — 品牌，所有门店",
   " — required": " — 必填",
@@ -357,7 +356,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   ". It can no longer be approved or published. {value}": "。它不能再被批准或发布。{value}",
   ". Nothing was refunded and the request no longer counts toward this order; {value} can see why.":
     "。没有退款，且这项申请不再计入这笔订单；{value}可以看到原因。",
-  ". The reason recorded is “Guests left”.": '。记录的原因为"顾客已离开"。',
   ". When it was recorded, no order or payment of this store matched it. This record alone does not show whether it has since been refunded.":
     "。记录时，本店没有任何订单或付款与它对应。仅凭这条记录无法看出之后是否已退款。",
   "1 character left": "还剩 1 个字符",
@@ -1402,7 +1400,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Closed days match the day-end settlement. Today is checked against it when the day closes.":
     "已关闭的营业日与日结一致。今天会在营业日结束时与日结核对。",
   "Closing order…": "正在关闭订单…",
-  "Closing out": "结束轮次",
   "Closing out the rounds…": "正在结束各轮次…",
   "Closing the table…": "正在关台…",
   "Closing the ticket does not refund or cancel the order. If the guest paid and did not get their food, cancel or refund":
@@ -9457,4 +9454,20 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "这些选项还没回答是否会加过敏原：{choices}。在你逐一回答“加过敏原吗？”之前，顾客会被提醒先问店员。",
   "What you typed here is not saved yet. Switching the language reloads the page and loses it. Switch anyway?":
     "这里填写的内容还没保存。切换语言会重新加载页面，内容会丢失。仍要切换吗？",
+  "Table ordering": "堂食点单",
+  "Delivery ordering": "外送点单",
+  "Table and pickup ordering": "堂食和自取点单",
+  "Table and delivery ordering": "堂食和外送点单",
+  "Pickup and delivery ordering": "自取和外送点单",
+  "{services} paused until {time} · {open} still open": "{services}已暂停，到 {time} · {open}照常",
+  "{services} starts again at {time} (in {minutes} min). {open} is still open.":
+    "{services}将于 {time} 恢复（还有 {minutes} 分钟）。{open}照常。",
+  "Closing out {rounds} refunds {online} to the guest online{value}{value2}.":
+    "结束{rounds}将在线向顾客退款 {online}{value}{value2}。",
+  "Closing out {rounds} leaves {machine} to refund on the card machine.":
+    "结束{rounds}后，还需在刷卡机上退款 {machine}。",
+  "Closing out {rounds} {refunds}.": "结束{rounds}{refunds}。",
+  "{what} The reason recorded is “Guests left”.": "{what}记录的原因为“顾客已离开”。",
+  " · voided by {reviewedBy} ({reasonCode})": " · 已由 {reviewedBy} 作废（{reasonCode}）",
+  " · reviewed by {reviewedBy} ({reasonCode})": " · 已由 {reviewedBy} 审核（{reasonCode}）",
 });

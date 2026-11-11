@@ -4067,6 +4067,21 @@ export function CurrentOrderQueuePage({
             visibleOrderReferences={visibleOrderReferences}
             before={
               <>
+                {/* WP-2423 store-service-controls (v15 M30 live check): the Store's pause and its
+                    5-minute warning come first, above the earlier days' orders that need
+                    attention, so staff see on the first screen that guests can't order. */}
+                {single ? null : (
+                  <>
+                    <PaidOrderSwitchLine csrf={csrf} {...(fetcher ? { fetcher } : {})} />
+                    {pauseStoreReference === undefined ? null : (
+                      <PauseOrderingControl
+                        csrf={csrf}
+                        storeReference={pauseStoreReference}
+                        fetcher={fetcher}
+                      />
+                    )}
+                  </>
+                )}
                 {released !== null ? (
                   <p className="order-queue-released" role="status">
                     {released}
@@ -4133,18 +4148,6 @@ export function CurrentOrderQueuePage({
                     onOpen={openOrder}
                     onShowHeld={() => setPhaseFilter("OutageHeld")}
                   />
-                )}
-                {single ? null : (
-                  <>
-                    <PaidOrderSwitchLine csrf={csrf} {...(fetcher ? { fetcher } : {})} />
-                    {pauseStoreReference === undefined ? null : (
-                      <PauseOrderingControl
-                        csrf={csrf}
-                        storeReference={pauseStoreReference}
-                        fetcher={fetcher}
-                      />
-                    )}
-                  </>
                 )}
                 {single ? null : (
                   <div className="order-toolbar">

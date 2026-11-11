@@ -54,8 +54,73 @@ export function pauseChain(
     : modeOrder.filter((mode) => covered.some((pause) => pause.serviceModes?.includes(mode)));
   return { until: new Date(until).toISOString(), pauses: covered, serviceModes };
 }
+type ServiceMode = (typeof modeOrder)[number];
+/** One or two services' ordering, as one phrase in staff words ("Pickup ordering"). */
+function servicesPhrase(modes: readonly ServiceMode[]): string {
+  const key = modes.join("+");
+  switch (key) {
+    case "DineIn":
+      return t("Table ordering");
+    case "Pickup":
+      return t("Pickup ordering");
+    case "Delivery":
+      return t("Delivery ordering");
+    case "DineIn+Pickup":
+      return t("Table and pickup ordering");
+    case "DineIn+Delivery":
+      return t("Table and delivery ordering");
+    default:
+      return t("Pickup and delivery ordering");
+  }
+}
+/**
+ * WP-2423 store-service-controls (v15 M30 live check): a pause of some services only names them
+ * and the services still open, so staff can tell table ordering is still open while pickup is
+ * paused. Null when the pause stops every service the Store offers (the control then says
+ * "Ordering paused").
+ */
+export function pausedServices(
+  modes: readonly string[] | null,
+  enabled: readonly string[],
+): { readonly paused: string; readonly open: string | null } | null {
+  if (modes === null) return null;
+  const offered = modeOrder.filter((mode) => enabled.includes(mode));
+  const paused = modeOrder.filter((mode) => modes.includes(mode));
+  const open = offered.filter((mode) => !paused.includes(mode));
+  if (paused.length === 0 || open.length === 0) return null;
+  return { paused: servicesPhrase(paused), open: servicesPhrase(open) };
+}
+
 /** Re-read this often, so a pause that ended, or one set on another screen, shows as it is. */
 export const pauseOrderingReadMs = 30_000;
+
+/** The pause line: until when, or (in the last 5 minutes) when ordering starts again. */
+export function pauseLineText(
+  until: string,
+  services: ReturnType<typeof pausedServices>,
+  timeZone: string,
+  now: number,
+  ending: boolean,
+): string {
+  const time = storeTime(until, timeZone);
+  const minutes = Math.max(1, Math.ceil((Date.parse(until) - now) / 60_000));
+  if (services === null)
+    return ending
+      ? t("Online ordering starts again at {time} (in {minutes} min).", { time, minutes })
+      : t("Ordering paused until {time}", { time });
+  return ending
+    ? t("{services} starts again at {time} (in {minutes} min). {open} is still open.", {
+        services: services.paused,
+        open: services.open,
+        time,
+        minutes,
+      })
+    : t("{services} paused until {time} · {open} still open", {
+        services: services.paused,
+        open: services.open,
+        time,
+      });
+}
 
 /**
  * WP-2423 DEC-PAID-ORDER-AUTO-ACCEPT: the busy-night brake where staff work (Home, Orders, Pickup
@@ -149,14 +214,13 @@ export function PauseOrderingControl({
       {paused !== undefined ? (
         <>
           <span role={ending ? "alert" : undefined}>
-            {ending
-              ? t("Online ordering starts again at {time} (in {minutes} min).", {
-                  time: storeTime(paused.until, view.timeZone),
-                  minutes: Math.max(1, Math.ceil((Date.parse(paused.until) - now) / 60_000)),
-                })
-              : t("Ordering paused until {time}", {
-                  time: storeTime(paused.until, view.timeZone),
-                })}
+            {pauseLineText(
+              paused.until,
+              pausedServices(paused.serviceModes, view.enabledServiceModes),
+              view.timeZone,
+              now,
+              ending,
+            )}
           </span>{" "}
           {ending && extended !== null ? (
             <button
