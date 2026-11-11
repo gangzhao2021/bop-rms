@@ -1215,6 +1215,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "contains {value1}": "含有 {value1}",
   "handles your contact details:": "对你联系方式的处理：",
   "isn’t taking orders right now": "现在不接单",
+  "{storeDisplayName} isn’t taking orders right now": "{storeDisplayName}现在不接单",
   "may contain {value1}": "可能含有 {value1}",
   "no allergens listed. Ask staff if you have an allergy.": "未标注过敏原。如有过敏请询问店员。",
   of: "/",

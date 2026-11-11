@@ -1,3 +1,4 @@
+import { ClosedStoreNotice } from "./ClosedStoreNotice.js";
 import { clauseSeparator, listSeparator, sentenceEnd, t } from "../i18n/i18n.js";
 import {
   activeMenuOptionRules,
@@ -70,14 +71,12 @@ import {
   useStoreService,
 } from "../store/StoreIdentity.js";
 import { takesNewOrders } from "../store/store-service.js";
-import { nextOpeningText } from "../store/store-hours-text.js";
 import { TableOrderedProvider, useTableOrderedCount } from "../dining/table-ordered.js";
 import type { DiningSessionClient } from "../dining/dining-session-client.js";
 import { cartLinePrices, cartLinesSubtotal } from "./menu-line-prices.js";
 import type {
   CustomerMenuClient,
   MenuAllergenItem,
-  MenuClosedStore,
   MenuJourneyContext,
   MenuLoadResult,
   MenuOptionRule,
@@ -268,31 +267,6 @@ function optionPriceText(price: MenuOptionRule["options"][number]["price"]): str
   if (/^0+(\.0+)?$/u.test(price.amount)) return null;
   const amount = formatDecimalMoney(price.amount, price.currency);
   return amount === null ? t("Priced at checkout") : `+ ${amount}`;
-}
-
-/** M116: "Closed now · opens tomorrow at 11:00 a.m.", and a way to ask again. */
-function ClosedStoreNotice({ closed }: { readonly closed: MenuClosedStore }) {
-  return (
-    <>
-      <p className="menu-closed-notice__line">
-        {closed.paused
-          ? t("Ordering is paused for a short while")
-          : closed.nextOpening === null
-            ? t("Closed now")
-            : t("Closed now") +
-              " · " +
-              nextOpeningText(closed.nextOpening, closed.localDate, "Line")}
-      </p>
-      <p>
-        {closed.paused
-          ? t("You can look at the menu. You can order once ordering starts again.")
-          : t("You can look at the menu. You can order once the store opens.")}
-      </p>
-      <Link className="menu-action" to="/">
-        {t("Check again")}
-      </Link>
-    </>
-  );
 }
 
 export function MenuBrowsePage({

@@ -1,8 +1,10 @@
 import { AlreadyOrdered } from "../checkout/AlreadyOrdered.js";
+import { ClosedStoreNotice } from "../menu/ClosedStoreNotice.js";
 import {
   CHINESE_LOCALE,
   currentLanguage,
   listSeparator,
+  t,
   useReloadOnLanguageChange,
 } from "../i18n/i18n.js";
 import {
@@ -1158,7 +1160,36 @@ const aboutThisCart = (round: SendRoundState) =>
 const cartVersionOf = (state: CartState) =>
   "cart" in state && state.cart !== null ? state.cart.cart.version : null;
 
-export function CartPage({
+type CartPageProps = Parameters<typeof OpenCartPage>[0];
+
+/**
+ * M116: a guest only looking at a closed (or paused) Store's menu has no visit and no cart there,
+ * so the cart says the Store isn't taking orders and when it opens, instead of reading a cart
+ * that doesn't exist and calling that a failure.
+ */
+export function CartPage(props: CartPageProps) {
+  const closed = props.controller === undefined ? props.menuContext?.closed : undefined;
+  if (closed !== undefined && props.menuContext !== undefined)
+    return (
+      <CustomerPage step="cart" store={props.store} className="cart-page" browseOnly>
+        <PageHeading title={t("Your cart")} />
+        <section className="menu-readonly-boundary menu-closed-notice" role="status">
+          <h2>
+            {t("{storeDisplayName} isn’t taking orders right now", {
+              storeDisplayName: props.menuContext.storeDisplayName,
+            })}
+          </h2>
+          <ClosedStoreNotice closed={closed} />
+          <Link className="cart-primary-link" to="/menu">
+            {t("Back to menu")}
+          </Link>
+        </section>
+      </CustomerPage>
+    );
+  return <OpenCartPage {...props} />;
+}
+
+function OpenCartPage({
   controller: provided,
   store,
   now = Date.now,

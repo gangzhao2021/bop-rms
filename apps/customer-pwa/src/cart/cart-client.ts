@@ -430,6 +430,17 @@ function parseCurrent(response: Response, payload: unknown): CartView | null {
     (payload as { cart?: unknown }).cart === null
   )
     return null;
+  // M116: at an installation of several Stores, a phone with no visit at any of them (it only
+  // looked at a closed Store's menu, or never scanned) is answered by no Store: it has no cart.
+  // A Store that can't be read answers 503 instead, which stays "couldn't load your cart".
+  if (
+    response.status === 404 &&
+    typeof payload === "object" &&
+    payload !== null &&
+    Object.keys(payload).length === 1 &&
+    (payload as { code?: unknown }).code === "CUSTOMER_STORE_NOT_FOUND"
+  )
+    return null;
   return parse(response, payload);
 }
 

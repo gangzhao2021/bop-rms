@@ -1083,3 +1083,36 @@ describe("WP-2423 item 6: a table that pays at the end", () => {
     expect(error).not.toMatch(/付款|结账/u);
   });
 });
+
+describe("M116: the cart while only looking at a closed Store's menu", () => {
+  it("says the Store isn't taking orders and when it opens, reads no cart and claims none is kept", () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <CartPage
+          store={{ storeName: "Lane Dessert", brandName: "Lane Brand", serviceMode: "Pickup" }}
+          menuContext={{
+            publicStoreReference: id(9),
+            channel: "Pickup",
+            locale: "en-CA",
+            brandDisplayName: "Lane Brand",
+            storeDisplayName: "Lane Dessert",
+            closed: {
+              paused: false,
+              nextOpening: { localDate: "2026-11-11", startLocalTime: "12:00:00" },
+              localDate: "2026-11-11",
+            },
+          }}
+        />
+      </MemoryRouter>,
+    );
+    expect(html).toContain("Lane Dessert isn’t taking orders right now");
+    expect(html).toContain("Closed now · opens today at 12:00 p.m.");
+    expect(html).toContain('href="/menu"');
+    expect(html).toContain("Check again");
+    expect(html).not.toContain("couldn’t load your cart");
+    expect(html).not.toContain("Your cart is kept");
+    expect(html).not.toContain("Couldn’t update your cart");
+    // No visit, so the journey offers no cart to go to.
+    expect(html).not.toContain('href="/cart"');
+  });
+});

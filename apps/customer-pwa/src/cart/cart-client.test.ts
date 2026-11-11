@@ -148,6 +148,23 @@ describe("Customer Cart browser client", () => {
     ).rejects.toMatchObject({ code: "cart_restore_not_available" });
   });
 
+  it("M116: a phone no Store has a visit for has no Cart; a Store that can't be read is a retry", async () => {
+    const answer = (status: number, body: unknown) =>
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => new Response(JSON.stringify(body), { status })),
+      );
+    answer(404, { code: "CUSTOMER_STORE_NOT_FOUND" });
+    expect(await createBrowserCustomerCartClient().loadCurrent()).toBeNull();
+    answer(503, { code: "CUSTOMER_STORE_UNAVAILABLE" });
+    await expect(createBrowserCustomerCartClient().loadCurrent()).rejects.toMatchObject({
+      code: "cart_service_unavailable",
+    });
+    answer(404, { code: "CUSTOMER_STORE_NOT_FOUND", extra: true });
+    await expect(createBrowserCustomerCartClient().loadCurrent()).rejects.toMatchObject({
+      code: "cart_service_unavailable",
+    });
+  });
   it("WP-2423: reads an explicit empty current Cart, and an older server's 404, as no Cart", async () => {
     vi.stubGlobal(
       "fetch",
