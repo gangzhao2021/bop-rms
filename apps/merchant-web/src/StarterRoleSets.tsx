@@ -84,7 +84,9 @@ export function waitingStarterRoles(
 /**
  * Where the Store's starter roles stand for Store setup's "Who does what": the step is done only
  * when no starter role is still off (v15 2026-11-11: it said "set up" while every starter role
- * waited for approval or had been withdrawn). Removed ones were the owner's choice.
+ * waited for approval or had been withdrawn). Removed ones were the owner's choice, unless every
+ * one was removed: then no role for this kind of shop is in use, and the step is not done (v15
+ * 2026-11-11 b10: it still said "set up").
  */
 export function starterRolesProgress(
   sets: StarterRoleSetsView,
@@ -95,6 +97,8 @@ export function starterRolesProgress(
   readonly waiting: readonly RoleAdministrationItemView[];
   /** Not approved, withdrawn, or never sent: nobody can be given them until they are sent again. */
   readonly notSent: readonly RoleAdministrationItemView[];
+  /** Every starter role here was removed (none in use, none waiting): listed by name. */
+  readonly allRemoved: readonly RoleAdministrationItemView[];
 } {
   const starter = new Set(
     sets.sets.flatMap((set) => set.roles.flatMap((role) => role.roleReference ?? [])),
@@ -105,10 +109,13 @@ export function starterRolesProgress(
     (role) => role.change?.status === "InReview" || role.change?.status === "Approved",
   );
   const notSent = off.filter((role) => !waiting.includes(role));
+  const allRemoved =
+    ours.length > 0 && ours.every((role) => role.state === "Removed") ? ours : [];
   return {
-    done: off.length === 0,
+    done: off.length === 0 && allRemoved.length === 0,
     waiting,
     notSent,
+    allRemoved,
   };
 }
 /**
@@ -248,7 +255,9 @@ export function StarterRoleSetOffer({
   );
   const [generation, setGeneration] = useState(0);
   const [storeType, setStoreType] = useState<StarterStoreType | null>(initial?.storeType ?? null);
-  const [putAway, setPutAway] = useState(true);
+  // v15 2026-11-11 b10: removing the presets this kind of shop doesn't use is the owner's own
+  // choice, never the default (an owner sending roles again lost three presets in use).
+  const [putAway, setPutAway] = useState(false);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<RoleAdministrationPageErrorCode | null>(null);
   const [notice, setNotice] = useState("");
@@ -393,7 +402,9 @@ export function StarterRoleSetOffer({
     );
   const several = (waiting?.mine.length ?? 0) > 1;
   const progress = read.kind === "Found" ? starterRolesProgress(read.sets, read.roles) : null;
-  const offCount = progress === null ? 0 : progress.waiting.length + progress.notSent.length;
+  const offCount = progress === null
+      ? 0
+      : progress.waiting.length + progress.notSent.length + progress.allRemoved.length;
   // Roles the approval block above already names, so they are not listed twice.
   const shownAbove = new Set(
     [...(waiting?.mine ?? []), ...(waiting?.turnOn ?? [])].map((role) => role.roleReference),
@@ -546,6 +557,22 @@ export function StarterRoleSetOffer({
                   ),
                 })}
               </p>
+            ) : null}
+            {progress.allRemoved.length > 0 ? (
+              <>
+                <p>
+                  {progress.allRemoved.length > 1
+                    ? t(
+                        "{list} were removed, so no role for your kind of shop is in use. Bring them back on Roles, or start from the roles of another kind of shop.",
+                        { list: names(progress.allRemoved) },
+                      )
+                    : t(
+                        "{list} was removed, so no role for your kind of shop is in use. Bring it back on Roles, or start from the roles of another kind of shop.",
+                        { list: names(progress.allRemoved) },
+                      )}
+                </p>
+                {offer}
+              </>
             ) : null}
             {progress.notSent.length > 0 ? (
               <>

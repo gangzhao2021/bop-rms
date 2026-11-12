@@ -276,3 +276,43 @@ it("names the button it points to, and a counter shop's kind matches its Counter
   expect(html).not.toContain("没有桌边服务");
   expect(html).toContain("安排先付款的桌位");
 });
+
+it("leaves the roles this kind of shop doesn't use in place unless the owner ticks the box", () => {
+  // v15 2026-11-11 b10: the box was ticked already, so Use these roles removed presets in use.
+  const html = render({ storeType: "TeaShop" });
+  const box = /<label class="starter-roles__put-away"><input type="checkbox"([^>]*)\/?>/u.exec(html);
+  expect(box).not.toBeNull();
+  expect(box?.[1] ?? "").not.toContain("checked");
+});
+
+it("Store setup says no role for the kind of shop is in use once every starter role was removed", () => {
+  const removed = (role: (typeof starterStartedRolesFixture.roles)[number]) =>
+    role.roleReference === starterTeaReference || role.roleReference === starterMakerReference
+      ? { ...role, state: "Removed", change: null, operations: [] }
+      : role;
+  const roles = {
+    ...starterStartedRolesFixture,
+    roles: starterStartedRolesFixture.roles.map(removed),
+  };
+  const html = render({ sets: starterStartedSetsFixture, roles });
+  expect(html).not.toContain("Your roles are set up for your kind of shop.");
+  expect(html).toContain(
+    "Counter, Drink maker were removed, so no role for your kind of shop is in use. Bring them back on Roles, or start from the roles of another kind of shop.",
+  );
+  expect(html).toContain("What kind of shop is this?");
+  noInternals(html);
+  // One of them still in use: the owner removed the other on purpose, and the step is done.
+  const one = {
+    ...roles,
+    roles: roles.roles.map((role) =>
+      role.roleReference === starterTeaReference ? { ...role, state: "InUse" } : role,
+    ),
+  };
+  expect(render({ sets: starterStartedSetsFixture, roles: one })).toContain(
+    "Your roles are set up for your kind of shop.",
+  );
+  setLanguageForTest("zh-Hans");
+  expect(render({ sets: starterStartedSetsFixture, roles })).toContain(
+    "都已移除，所以现在没有在用的店型角色。",
+  );
+});

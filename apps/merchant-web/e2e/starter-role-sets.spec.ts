@@ -326,7 +326,9 @@ test("@production a tea shop owner starts from the tea shop roles on Roles, appr
   await expect(offer.getByText("Keeps: Store Manager.")).toBeVisible();
   await expect(offer.getByText("Front of House stays: 1 staff hold it.")).toBeVisible();
   const removeKitchen = offer.getByLabel(/doesn't use: Kitchen\./u);
-  await expect(removeKitchen).toBeChecked();
+  // v15 2026-11-11 b10: removing unused presets is the owner's own tick, never the default.
+  await expect(removeKitchen).not.toBeChecked();
+  await removeKitchen.check();
   await checkScreen(page, "roles-tea-preview");
   await offer.getByRole("button", { name: "Use these roles" }).click();
   await expect(offer.getByText("Added 2 roles. Each is on once it is approved.")).toBeVisible();

@@ -9350,6 +9350,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "{list}没有获批，或已撤回。重新选择店型，即可再次送审。",
   "{list} wasn't approved, or was withdrawn. Choose your kind of shop again to send it for approval again.":
     "{list}没有获批，或已撤回。重新选择店型，即可再次送审。",
+  "{list} were removed, so no role for your kind of shop is in use. Bring them back on Roles, or start from the roles of another kind of shop.":
+    "{list}都已移除，所以现在没有在用的店型角色。可以到“角色”里恢复使用，或按另一种店型添加角色。",
+  "{list} was removed, so no role for your kind of shop is in use. Bring it back on Roles, or start from the roles of another kind of shop.":
+    "{list}已移除，所以现在没有在用的店型角色。可以到“角色”里恢复使用，或按另一种店型添加角色。",
   "See them on Roles": "到“角色”里查看",
   "See it on Roles": "到“角色”里查看",
   "Not done yet: nobody can be given this role until it is on.":
