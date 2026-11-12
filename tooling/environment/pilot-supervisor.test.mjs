@@ -156,7 +156,7 @@ it("writes one alert line when the services or workloads needing a person change
   ]);
 });
 // v15 2026-11-12: a healthy part whose report was late for one sweep raised a level-50 alert.
-it("names a stale part only when two sweeps in a row find it, and a down service at once", async () => {
+it("names a stale part only when a second sweep finds it, and a down service at once", async () => {
   const { createPilotAttentionConfirmation, createPilotAttentionReporter } =
     await import("./pilot-supervisor.mjs");
   const lines = [];
@@ -181,7 +181,9 @@ it("names a stale part only when two sweeps in a row find it, and a down service
     events(["batchCancellation"]),
     { service: "stores/demo-3:dining-exception-worker", state: "down" },
   ]);
+  // Back: the down service clears at once; the part one sweep later, when it reported twice.
   sweep("2026-11-12T00:32:08.700Z", [events()]);
+  sweep("2026-11-12T00:32:13.700Z", [events()]);
   expect(lines).toEqual([
     {
       level: 50,
@@ -193,12 +195,54 @@ it("names a stale part only when two sweeps in a row find it, and a down service
       ],
     },
     {
-      level: 30,
+      level: 50,
       time: "2026-11-12T00:32:08.700Z",
+      event: "pilot_attention_required",
+      attention: ["stores/demo-2:business-worker:batchCancellation"],
+    },
+    {
+      level: 30,
+      time: "2026-11-12T00:32:13.700Z",
       event: "pilot_attention_cleared",
       attention: [],
     },
   ]);
+});
+// b10 review: a part that misses every other sweep never met "two in a row" and was never named.
+it("names a part that misses every other sweep and keeps it named while it keeps missing", async () => {
+  const { createPilotAttentionConfirmation, createPilotAttentionReporter } =
+    await import("./pilot-supervisor.mjs");
+  const lines = [];
+  const confirm = createPilotAttentionConfirmation();
+  const report = createPilotAttentionReporter((line) => lines.push(JSON.parse(line)));
+  const events = (attention) => ({
+    service: "stores/demo-2:business-worker",
+    state: "running",
+    pid: 7,
+    ...(attention === undefined ? {} : { attention }),
+  });
+  const seen = [];
+  for (const [index, missing] of [true, false, true, false, true, false, false, false].entries()) {
+    const confirmed = confirm({
+      observedAt: new Date(Date.UTC(2026, 10, 12, 1, 0, index * 5)).toISOString(),
+      services: [events(missing ? ["events"] : undefined)],
+    });
+    seen.push(confirmed.services[0].attention ?? []);
+    report(confirmed);
+  }
+  expect(seen).toEqual([[], [], ["events"], ["events"], ["events"], ["events"], [], []]);
+  expect(lines.map(({ event, time }) => [event, time])).toEqual([
+    ["pilot_attention_required", "2026-11-12T01:00:10.000Z"],
+    ["pilot_attention_cleared", "2026-11-12T01:00:30.000Z"],
+  ]);
+  // Two one-off late reports more than four sweeps apart are never named.
+  const quiet = createPilotAttentionConfirmation();
+  const named = [true, false, false, false, false, true, false].map(
+    (missing) =>
+      quiet({ observedAt: "x", services: [events(missing ? ["events"] : undefined)] }).services[0]
+        .attention ?? [],
+  );
+  expect(named.flat()).toEqual([]);
 });
 // DEC-WORKER-HEALTH-TRUTH: a Store worker that is not running is in the alert line too.
 it("names a Store worker that is down in the alert line", async () => {

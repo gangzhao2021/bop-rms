@@ -120,8 +120,11 @@ ignore these alerts.
 
 **Decision.**
 
-- A part of a running worker is named only when two sweeps in a row (5 s apart) find it missing or
-  stale.
+- A part of a running worker is named only when it was missing or stale in at least two of the
+  last four sweeps (20 s), counting this sweep or the one before. One late report is never named.
+  A part that misses every other sweep is a real degradation: it is named on its second miss and
+  stays named while it keeps missing. A part that comes back is cleared once two sweeps in a row
+  find it reporting.
 - The alert line and the operations monitor's file both use the confirmed list. The supervisor's
   full snapshot line still shows the raw state.
 - A whole service that is down, not started or refused is named at once, as before. A part that

@@ -129,26 +129,47 @@ export function createPilotAttentionReporter(write = (line) => process.stderr.wr
 }
 /**
  * WP-2423 (guest-table-open-and-busy-reads, v15 2026-11-12): a part of a running worker is named
- * as needing a person only when two sweeps in a row (5 s apart) find its health report missing or
- * stale. A healthy part whose report was written a moment late (the host busy, an image being
- * built) raised a level-50 pilot_attention_required that cleared on the next sweep, so staff and
- * the operations monitor learned to ignore it. A part that really stopped reporting is named on
- * the second sweep, 5 s later; a whole service that is down or refused is named at once, as before.
+ * as needing a person only when its health report was missing or stale in at least two of the last
+ * four sweeps (20 s), and in this sweep or the one before. A healthy part whose report was written
+ * a moment late once (the host busy, an image being built) raised a level-50
+ * pilot_attention_required that cleared on the next sweep, so staff and the operations monitor
+ * learned to ignore it. A part that really stopped reporting is named on the second sweep, 5 s
+ * later. A part that misses every other sweep is a real degradation: it is named on its second
+ * miss and stays named while it keeps missing (b10 review: strictly consecutive sweeps never named
+ * it). A whole service that is down or refused is named at once, as before.
  */
+export const pilotAttentionWindowSweeps = 4;
 export function createPilotAttentionConfirmation() {
-  let seen = new Map();
+  /** Per service and part: whether each of the last sweeps found it missing (oldest first). */
+  let history = new Map();
   return (snapshot) => {
     const next = new Map();
     const services = snapshot.services.map((entry) => {
-      if (!Array.isArray(entry.attention)) return entry;
-      const before = seen.get(entry.service) ?? [];
-      next.set(entry.service, entry.attention);
-      const confirmed = entry.attention.filter((component) => before.includes(component));
+      const now = Array.isArray(entry.attention) ? entry.attention : [];
+      const before = history.get(entry.service) ?? new Map();
+      const parts = new Map();
+      for (const component of new Set([...before.keys(), ...now])) {
+        const misses = [...(before.get(component) ?? []), now.includes(component)].slice(
+          -pilotAttentionWindowSweeps,
+        );
+        if (misses.includes(true)) parts.set(component, misses);
+      }
+      next.set(entry.service, parts);
+      // Only a running worker's parts are confirmed here; any other entry is reported as it is.
+      if (!Array.isArray(entry.attention) && entry.state !== "running") return entry;
+      const confirmed = [...parts]
+        .filter(
+          ([, misses]) =>
+            misses.filter(Boolean).length >= 2 &&
+            (misses.at(-1) === true || misses.at(-2) === true),
+        )
+        .map(([component]) => component)
+        .sort();
       const { attention, ...rest } = entry;
       void attention;
       return confirmed.length === 0 ? rest : { ...rest, attention: confirmed };
     });
-    seen = next;
+    history = next;
     return { ...snapshot, services };
   };
 }
