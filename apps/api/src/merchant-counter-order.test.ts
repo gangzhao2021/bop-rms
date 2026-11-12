@@ -388,6 +388,16 @@ describe("counter order command — WP-2423 Q7", () => {
     expect(first.paid).toBeUndefined();
     // While it waits for its payment it is not paid.
     expect((await send()).paid).toBeUndefined();
+    // Paid, though its window still reads open (not yet accepted): read as paid.
+    state.paid = {
+      preparation: {
+        orderAllocation: { amountMinor: 1130n },
+        tip: { amountMinor: 150n },
+        total: { amountMinor: 1280n },
+        capacityExpiresAt: "2026-10-13T18:30:00.000Z",
+      },
+    };
+    expect(await send()).toMatchObject({ status: "AlreadyPlaced", totalMinor: "1280", paid: true });
     state.waitsForPayment = false;
     state.paid = {
       preparation: {

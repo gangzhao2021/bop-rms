@@ -568,6 +568,25 @@ describe("staff dine-in round command — WP-2423 Q7 slice 2", () => {
     expect(pipeline.openTable).toHaveBeenCalledTimes(1);
   });
 
+  // DEC-PAPER-SEND-IDEMPOTENT: a round's payment clock stays open once it is paid, so a round sent
+  // again while its preparation is still read is marked paid from its payment record.
+  it("marks a round sent again paid when its payment is recorded, though its clock is open", async () => {
+    const { send } = setup({ at: "2026-10-15T18:00:00.000Z" });
+    state.paid = {
+      preparation: {
+        orderAllocation: { amountMinor: 2260n },
+        tip: { amountMinor: 300n },
+        total: { amountMinor: 2560n },
+        capacityExpiresAt: "2026-10-15T18:30:00.000Z",
+      },
+    };
+    // A first send is never "paid", whatever the record says.
+    expect((await send()).paid).toBeUndefined();
+    expect(await send()).toMatchObject({ status: "AlreadyPlaced", totalMinor: "2560", paid: true });
+    state.paid = null;
+    expect((await send()).paid).toBeUndefined();
+  });
+
   it("refuses without the staff ordering or table permission", async () => {
     const { send, pipeline } = setup();
     state.allowed = false;

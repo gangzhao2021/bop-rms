@@ -464,10 +464,11 @@ export async function exerciseCounterCardMachinePayment({
   await assert.rejects(command(payInput({ operationReference: id(2), takenAt: null })), {
     code: "CARD_MACHINE_ALREADY_PAID",
   });
-  // The same send sent again right after its payment is the same order.
+  // The same send sent again right after its payment is the same order, read as paid from its
+  // payment record (DEC-PAPER-SEND-IDEMPOTENT: never "charge" it again).
   assert.deepEqual(
     { ...(await placeOrder({ ...auth, command: sentCommand })) },
-    { status: "AlreadyPlaced", ...sameOrder },
+    { status: "AlreadyPlaced", ...sameOrder, paid: true },
   );
   assert.deepEqual(await counts(), {
     payments: before.payments + 1,
@@ -677,7 +678,7 @@ export async function exerciseCounterCardMachinePayment({
     // the one recorded, and one sent with a corrected slip or time is answered as already
     // recorded. Sent with other dishes, the order placed is named.
     const replayed = await placeOrder({ ...auth, command: sentCommand });
-    assert.deepEqual({ ...replayed }, { status: "AlreadyPlaced", ...sameOrder });
+    assert.deepEqual({ ...replayed }, { status: "AlreadyPlaced", ...sameOrder, paid: true });
     const replayedPayment = {
       tender: paperTender,
       slipReference: paperCash ? null : "AUTH 482913",

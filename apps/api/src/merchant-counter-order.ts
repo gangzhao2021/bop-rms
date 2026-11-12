@@ -657,7 +657,23 @@ export function createMerchantCounterOrder(options: {
               recordedAfterOutage: entry.recordedAfterOutage,
             }),
           }) as const;
-        if (current !== null) return answer(current.preparation, current);
+        // The order's card-machine (or paper) payment record. Cash is in this store too: a counter
+        // cash payment (live or paper, with its tenderedMinor) is a card-machine payment record,
+        // so "no payment record" below never misses an order paid in cash.
+        const paymentRecord = () =>
+          createPostgresCardMachinePaymentStore({
+            scope: scope.selected,
+            authorize: async (_tx, value) =>
+              value.orderReference === String(order.orderReference) && (await guard()),
+          }).loadByBatch(tx, String(order.orderReference), String(order.orderBatchReference));
+        // Its payment window can still read open once it is paid (until it is accepted): an order
+        // sent again is read as paid from its payment record, so staff never charge it twice.
+        if (current !== null)
+          return answer(
+            current.preparation,
+            current,
+            status === "AlreadyPlaced" && (await paymentRecord()) !== null,
+          );
         const placed = await readCounterOrderPlaced(
           tx,
           { scope: scope.selected, authorize: guard },
@@ -665,14 +681,8 @@ export function createMerchantCounterOrder(options: {
         );
         // Paid already (a paper order's payment goes with its send, or someone charged it from
         // Orders): the same order, at the amounts its payment record holds, so a lost answer is
-        // recovered and never sold or charged twice. Cash is in this store too: a counter cash
-        // payment (live or paper, with its tenderedMinor) is a card-machine payment record, so
-        // "no payment record" below never misses an order paid in cash.
-        const paid = await createPostgresCardMachinePaymentStore({
-          scope: scope.selected,
-          authorize: async (_tx, value) =>
-            value.orderReference === String(order.orderReference) && (await guard()),
-        }).loadByBatch(tx, String(order.orderReference), String(order.orderBatchReference));
+        // recovered and never sold or charged twice.
+        const paid = await paymentRecord();
         if (paid !== null && placed !== null) return answer(paid.preparation, placed, true);
         return { kind: "placed", orderNumber: placed?.orderNumber ?? null } as const;
       });

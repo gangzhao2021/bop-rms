@@ -885,15 +885,19 @@ export function createMerchantStaffDiningRound(options: {
             tipSelectionReference: String(entry.tipSelectionReference),
           },
         );
-        if (current === null) {
-          // DEC-PAPER-SEND-IDEMPOTENT: paid already (a paper round the table pays now is paid with
-          // its send): the same round at the amounts its payment record holds, so a lost answer
-          // is recovered and the round is never sent and paid twice.
-          const paid = await createPostgresCardMachinePaymentStore({
+        // DEC-PAPER-SEND-IDEMPOTENT: the round's card-machine (or paper) payment record, read only
+        // for a round sent again (a first send has none). Cash is not taken for a table round here.
+        const paymentRecord = () =>
+          createPostgresCardMachinePaymentStore({
             scope: scope.selected,
             authorize: async (_tx, value) =>
               value.orderReference === String(batch.orderReference) && (await allowed()),
           }).loadByBatch(tx, String(batch.orderReference), String(batch.orderBatchReference));
+        if (current === null) {
+          // Paid already (a paper round the table pays now is paid with its send): the same round
+          // at the amounts its payment record holds, so a lost answer is recovered and the round
+          // is never sent and paid twice.
+          const paid = await paymentRecord();
           if (paid === null) {
             // The round exists but neither waits for payment nor was paid: its time to pay ended
             // and it was taken off. Named when sent again (after the still-sending window).
@@ -947,7 +951,11 @@ export function createMerchantStaffDiningRound(options: {
           windowEnd !== undefined && Date.parse(windowEnd) < Date.parse(String(p.capacityExpiresAt))
             ? windowEnd
             : String(p.capacityExpiresAt);
+        // A round's payment clock stays open once it is paid: a round sent again is read as paid
+        // from its payment record, so staff are never asked to charge it a second time.
+        const paidAlready = status === "AlreadyPlaced" && (await paymentRecord()) !== null;
         return Object.freeze({
+          ...(paidAlready ? { paid: true as const } : {}),
           status,
           orderReference: String(batch.orderReference),
           orderBatchReference: String(batch.orderBatchReference),
