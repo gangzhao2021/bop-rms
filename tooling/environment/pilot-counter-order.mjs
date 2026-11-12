@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { withVerifiedChecks } from "../../packages/database/dist/request-check-memo.js";
 import {
   GuestSessionService,
   createPostgresGuestSessionEntryStore,
@@ -81,6 +82,13 @@ const newGuestsPausedReader = (transactions, scope) => () =>
   transactions.run(
     async (tx) => (await readBrandGuestIntake(tx, scope.brandReference)).state === "Paused",
   );
+
+/**
+ * WP-2423 M35 (DEC-STAFF-ROUND-SPEED, third step): one staff round is one request whose owner
+ * checks of its table guest are answered from the check it already made, up to each write fence
+ * (packages/database request-check-memo).
+ */
+const verifiedChecksOnce = (command) => (input) => withVerifiedChecks(() => command(input));
 
 export async function createInternalCounterOrder(
   resources,
@@ -623,16 +631,18 @@ async function createInternalStaffDiningRound(
     details,
     // WP-2423 item 8 ⑤: staff send a guest round that waited for them to the kitchen.
     payLater,
-    command: createMerchantStaffDiningRound({
-      persistence,
-      authentication,
-      pipeline,
-      nextReference: reference,
-      onUnexpected: (error) => reportUnexpected("INTERNAL_STAFF_DINING_ROUND_UNAVAILABLE", error),
-      // DEC-DINE-IN-PAY-LATER: rounds of a table opened pay later go to the kitchen unpaid, through
-      // the dining workflow's Accept for the System (only this pilot Store).
-      payLater,
-    }),
+    command: verifiedChecksOnce(
+      createMerchantStaffDiningRound({
+        persistence,
+        authentication,
+        pipeline,
+        nextReference: reference,
+        onUnexpected: (error) => reportUnexpected("INTERNAL_STAFF_DINING_ROUND_UNAVAILABLE", error),
+        // DEC-DINE-IN-PAY-LATER: rounds of a table opened pay later go to the kitchen unpaid, through
+        // the dining workflow's Accept for the System (only this pilot Store).
+        payLater,
+      }),
+    ),
     /** The online payment admission of the round's kind, under this staff member's authority. */
     admission: ({ selected, preparation, kind, authorize }) => {
       void preparation;
