@@ -236,6 +236,14 @@ export function StoreFeaturesPage({
     phone?: boolean;
   } | null>(null);
   const [refresh, setRefresh] = useState(0);
+  // v15 2026-11-11 b10: a Save at the bottom edge of the screen left its answer's first line in
+  // view and the rest (the way to add the phone) below the fold; the answer is brought fully into
+  // view, moving the page no more than it must.
+  const messageLine = useRef<HTMLParagraphElement | null>(null);
+  useEffect(() => {
+    if (message === null) return;
+    messageLine.current?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+  }, [message]);
   // Turning guests' pickup off is asked once more (what staff do with pickups still waiting).
   const [confirming, setConfirming] = useState<null | "Template" | "Save">(null);
   // One reference per intended change, kept until it is answered (a retry is recorded once).
@@ -440,7 +448,7 @@ export function StoreFeaturesPage({
   };
   const said = (at: SavedPart) =>
     message === null || message.at !== at ? null : (
-      <p role={message.tone} className="store-features__message">
+      <p role={message.tone} className="store-features__message" ref={messageLine}>
         {message.text}
         {message.phone === true ? (
           <>

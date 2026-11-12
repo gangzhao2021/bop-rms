@@ -153,6 +153,8 @@ test("@production turning pickup on without the store's phone is refused and say
     await page.reload();
     await pickup.check();
     const save = page.getByRole("button", { name: "Save", exact: true });
+    // v15 2026-11-11 b10: Save at the very bottom of the screen, as the owner found it live.
+    await save.evaluate((element) => element.scrollIntoView({ block: "end" }));
     await save.click();
     const refusal = page.getByRole("alert");
     await expect(refusal).toContainText(
@@ -160,7 +162,8 @@ test("@production turning pickup on without the store's phone is refused and say
     );
     // v15 batch 8: the refusal is right under the Save that was tapped, in view without
     // scrolling, and the box shows pickup still off (nothing was saved), with the way to the phone.
-    await expect(refusal).toBeInViewport();
+    // Every line of it, the way to add the phone included, not only its first line.
+    await expect(refusal).toBeInViewport({ ratio: 1 });
     const saveBox = await save.boundingBox();
     const refusalBox = await refusal.boundingBox();
     expect(
