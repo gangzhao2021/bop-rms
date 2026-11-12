@@ -273,6 +273,44 @@ describe("customer entry browser boundary", () => {
     setUnseatedTableScan(false);
   });
 
+  it("reads which table a not-open code is for, as printed on its card", async () => {
+    const body = {
+      schemaVersion: 1,
+      code: "entry_table_not_open",
+      messageKey: "customer.entry.table_not_open",
+      recovery: { action: "AskStaff", storeSelection: "Hidden" },
+      store: {
+        brandDisplayName: "TEST Brand",
+        storeDisplayName: "TEST Noodle House",
+        publicStoreReference: "018f2a1b-7c3d-7a4e-8b5c-1234567890ab",
+        locale: "en-CA",
+      },
+      table: { label: "PH 1 (TEST)" },
+    };
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(response(409, body))
+      .mockResolvedValueOnce(response(409, { ...body, table: { label: "<b>1</b>" } }));
+    const start = () =>
+      createCustomerEntryClient({
+        fetch,
+        hash: "#qr=aaa.bbb.ccc",
+        pathname: "/",
+        search: "",
+        replaceState: vi.fn(),
+        online: () => true,
+      }).start();
+    await expect(start()).resolves.toMatchObject({
+      kind: "TableNotOpen",
+      tableLabel: "PH 1 (TEST)",
+    });
+    // A name it can't show safely is left out; the answer stays "not open yet".
+    const unsafe = await start();
+    expect(unsafe).toMatchObject({ kind: "TableNotOpen" });
+    expect(Object.hasOwn(unsafe, "tableLabel")).toBe(false);
+    setUnseatedTableScan(false);
+  });
+
   it("WP-2423 Q4: reads a closed or paused Store with today's hours", async () => {
     const body = (operatingState: string) => ({
       schemaVersion: 1,

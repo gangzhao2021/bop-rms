@@ -518,6 +518,26 @@ describe("WP-1004 Customer-entry contract", () => {
     expect((await post(await listen(customerEntry(port)))).status).toBe(503);
   });
 
+  it("names the scanned table, as printed on its card, when it isn't open yet", async () => {
+    const port = new MutablePort();
+    port.result = {
+      status: "TableNotOpen",
+      brandDisplayName: "BOP Kitchen",
+      storeDisplayName: "Synthetic Market Store",
+      publicStoreReference: STORE_REFERENCE,
+      locale: "en-CA",
+      tableLabel: "PH 1 (TEST)",
+    };
+    const response = await post(await listen(customerEntry(port)));
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({
+      code: "entry_table_not_open",
+      table: { label: "PH 1 (TEST)" },
+    });
+    port.result = { ...(port.result as object), tableLabel: "<b>4</b>" };
+    expect((await post(await listen(customerEntry(port)))).status).toBe(503);
+  });
+
   it.each([
     ["TableMayStart", "entry_table_may_start", "customer.entry.table_may_start", "StartTable"],
     [

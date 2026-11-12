@@ -73,6 +73,35 @@ describe("DEC-DINING-GUEST-TABLE-START: a table guests start themselves", () => 
   });
 });
 
+describe("WP-2423 guest-table-open-and-busy-reads: which table a not-open code is for", () => {
+  const table = {
+    publicStoreReference: context.publicStoreReference,
+    channel: "DineIn" as const,
+    locale: "en-CA",
+    brandDisplayName: context.brandDisplayName,
+    storeDisplayName: context.storeDisplayName,
+  };
+  it("names the table on the card, and what to do when it isn't the guest's own", () => {
+    const html = render({ kind: "TableNotOpen", context: table, tableLabel: "3" });
+    expect(html).toContain(`Table 3 at ${context.storeDisplayName} isn’t open yet`);
+    expect(html).toContain(
+      "Not sitting at table 3? Tell staff, so they can give you this table’s code.",
+    );
+    // A table the owner named is said as written, never "Table Patio".
+    const named = render({ kind: "TableNotOpen", context: table, tableLabel: "PH 1 (TEST)" });
+    expect(named).toContain(`PH 1 (TEST) at ${context.storeDisplayName} isn’t open yet`);
+    expect(named).not.toContain("Table PH 1");
+  });
+  it("has the Chinese wording for both lines", () => {
+    expect(zh["Table {table} at {storeDisplayName} isn’t open yet"]).toBe(
+      "{storeDisplayName} 的桌号 {table} 还没开台",
+    );
+    expect(
+      zh["Not sitting at table {table}? Tell staff, so they can give you this table’s code."],
+    ).toBe("您坐的不是桌号 {table}？请告诉店员，换成您这桌的二维码。");
+  });
+});
+
 describe("CUST-ENTRY-CONTEXT", () => {
   it("a table no party is seated at says so, keeps the menu, and starts no visit", () => {
     const notOpen: CustomerEntryScreenState = {

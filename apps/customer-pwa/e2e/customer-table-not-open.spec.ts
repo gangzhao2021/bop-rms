@@ -11,7 +11,7 @@ test.beforeEach(({ context }) => routeStorefrontReads(context));
 const cartWrites: string[] = [];
 const id = (n: number) => `018f8a00-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 
-async function scanNotOpenTable(page: Page, entries: string[] = []) {
+async function scanNotOpenTable(page: Page, entries: string[] = [], tableLabel?: string) {
   const at = new Date().toISOString();
   // No party is seated: the scan starts no visit (no cookie) and gives the menu's public context.
   await page.route("**/bff/customer/entry", (route) => {
@@ -30,6 +30,7 @@ async function scanNotOpenTable(page: Page, entries: string[] = []) {
           publicStoreReference: id(4),
           locale: "en-CA",
         },
+        ...(tableLabel === undefined ? {} : { table: { label: tableLabel } }),
       },
     });
   });
@@ -155,6 +156,37 @@ test.describe("@production CUST-ENTRY table not open", () => {
     await expectNoInternalText(page);
     await page.screenshot({ path: "test-results/customer-not-seated-add-390.png", fullPage: true });
   });
+
+  // WP-2423 guest-table-open-and-busy-reads: a code card left on the wrong table shows at once.
+  for (const width of [390, 1024, 1440])
+    test(`names the table the code is for, and what to do if it isn't the guest's own (${width})`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await scanNotOpenTable(page, [], "PH 1 (TEST)");
+      const main = page.getByRole("main");
+      await expect(
+        main.getByRole("heading", { name: "PH 1 (TEST) at Synthetic Noodle Bar isn’t open yet" }),
+      ).toBeVisible();
+      await expect(main).toContainText(
+        "Not sitting at PH 1 (TEST)? Tell staff, so they can give you this table’s code.",
+      );
+      await expectNoInternalText(page);
+      await page.screenshot({
+        path: `test-results/customer-table-not-open-named-${width}.png`,
+        fullPage: true,
+      });
+      await page.getByRole("button", { name: "切换到中文" }).click();
+      await expect(
+        main.getByRole("heading", { name: "Synthetic Noodle Bar 的PH 1 (TEST) 还没开台" }),
+      ).toBeVisible();
+      await expect(main).toContainText("您坐的不是PH 1 (TEST)？请告诉店员，换成您这桌的二维码。");
+      await page.screenshot({
+        path: `test-results/customer-table-not-open-named-zh-${width}.png`,
+        fullPage: true,
+      });
+      await page.getByRole("button", { name: "English" }).click();
+    });
 
   test("a guest whose table was just settled scans it again: thanked with the receipt, before and after", async ({
     page,

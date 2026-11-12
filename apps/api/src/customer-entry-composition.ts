@@ -99,6 +99,15 @@ export interface CustomerEntryTableReader {
     readonly tableReference: string;
     readonly at: string;
   }): Promise<"MayStart" | "BeingCleaned" | "No">;
+  /**
+   * WP-2423 (guest-table-open-and-busy-reads): the table's printed name, said on "this table isn't
+   * open yet" so a code card on the wrong table shows. Absent, null or failed: the table unnamed.
+   */
+  label?(input: {
+    readonly brandReference: string;
+    readonly storeReference: string;
+    readonly tableReference: string;
+  }): Promise<string | null>;
   /** At an open table a guest started: whether this phone is asked if it is with those guests. */
   asksNewParty?(input: {
     readonly brandReference: string;
@@ -458,8 +467,17 @@ export function createCustomerEntryComposition(
           ).catch(() => "No" as const);
           if (offer === "BeingCleaned")
             return Object.freeze({ status: "TableBeingCleaned" as const, ...publicContext });
-          if (offer === "No")
-            return Object.freeze({ status: "TableNotOpen" as const, ...publicContext });
+          if (offer === "No") {
+            const tableLabel = await (
+              options.table?.label?.({ ...scope, tableReference: String(tableReference) }) ??
+              Promise.resolve(null)
+            ).catch(() => null);
+            return Object.freeze({
+              status: "TableNotOpen" as const,
+              ...publicContext,
+              ...(typeof tableLabel === "string" ? { tableLabel } : {}),
+            });
+          }
           if (input.intent !== "Start" && input.intent !== "NewParty")
             return Object.freeze({ status: "TableMayStart" as const, ...publicContext });
         } else if (

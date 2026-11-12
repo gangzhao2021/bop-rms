@@ -382,7 +382,25 @@ function parseError(
       ? tableAnswers[String((value as { code?: unknown }).code)]
       : undefined;
   if (tableAnswer !== undefined) {
-    const raw = exact(value, ["schemaVersion", "code", "messageKey", "recovery", "store"]);
+    // The scanned table's name comes only with "not open yet" (and may be left out).
+    const named = tableAnswer.kind === "TableNotOpen" && Object.hasOwn(value as object, "table");
+    const raw = exact(value, [
+      "schemaVersion",
+      "code",
+      "messageKey",
+      "recovery",
+      "store",
+      ...(named ? ["table"] : []),
+    ]);
+    const table = named ? exact(raw.table, ["label"]) : null;
+    // A name this page can't show safely is left out: the guest still learns the table isn't open.
+    const tableLabel = (() => {
+      try {
+        return table === null ? null : publicLabel(table.label);
+      } catch {
+        return null;
+      }
+    })();
     const store = exact(raw.store, [
       "brandDisplayName",
       "storeDisplayName",
@@ -406,6 +424,7 @@ function parseError(
         brandDisplayName: publicLabel(store.brandDisplayName),
         storeDisplayName: publicLabel(store.storeDisplayName),
       }),
+      ...(tableLabel === null ? {} : { tableLabel }),
     });
   }
   // WP-2423 item 8 ⑦ 1b: the Store takes dine-in orders only.

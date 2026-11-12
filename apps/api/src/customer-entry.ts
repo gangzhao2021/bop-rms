@@ -162,6 +162,11 @@ export interface CustomerEntryTableNotOpen {
   readonly storeDisplayName: string;
   readonly publicStoreReference: string;
   readonly locale: string;
+  /**
+   * WP-2423 (guest-table-open-and-busy-reads): the scanned table's printed name, so a guest holding
+   * another table's card sees which table it is for and staff can put it right.
+   */
+  readonly tableLabel?: string;
 }
 
 /**
@@ -733,6 +738,9 @@ function parsePortResult(
       "storeDisplayName",
       "publicStoreReference",
       "locale",
+      ...(status === "TableNotOpen" && Object.hasOwn(value as object, "tableLabel")
+        ? ["tableLabel"]
+        : []),
     ]);
     const label = (text: unknown) =>
       typeof text === "string" &&
@@ -750,6 +758,7 @@ function parsePortResult(
       storeDisplayName: label(raw.storeDisplayName),
       publicStoreReference: parseUuidV7(raw.publicStoreReference),
       locale: raw.locale,
+      ...(raw.tableLabel === undefined ? {} : { tableLabel: label(raw.tableLabel) }),
     });
   }
   if (status === "ServiceNotOffered") {
@@ -1095,6 +1104,10 @@ export class CustomerEntryHandler {
               publicStoreReference: result.publicStoreReference,
               locale: result.locale,
             },
+            // The table's printed name, so a card on the wrong table shows (never an id).
+            ...("tableLabel" in result && result.tableLabel !== undefined
+              ? { table: { label: result.tableLabel } }
+              : {}),
           });
           return;
         }

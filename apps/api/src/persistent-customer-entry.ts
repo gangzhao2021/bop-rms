@@ -4,6 +4,7 @@ import {
   loadDiningGuestStartedSessionAtTable,
   loadDiningGuestTableOffer,
   loadDiningTableOpen,
+  loadDiningTablePublicLabel,
 } from "@rms/dining";
 import {
   createCustomerEntryComposition,
@@ -157,6 +158,8 @@ export function createPersistentCustomerEntryComposition(
           table: {
             isOpen: (where) =>
               readOnly(() => loadDiningTableOpen(tx as never, scope, where.tableReference)),
+            label: (where) =>
+              readOnly(() => loadDiningTablePublicLabel(tx as never, scope, where.tableReference)),
             guestStart: (where) =>
               readOnly(async () =>
                 guestStartOffer(

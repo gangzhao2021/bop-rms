@@ -92,6 +92,11 @@ export type CustomerEntryScreenState =
   | Readonly<{
       kind: "TableNotOpen";
       context: CustomerEntryPublicContext;
+      /**
+       * WP-2423 (guest-table-open-and-busy-reads): the scanned table's printed name, so a guest
+       * holding another table's card sees which table it is for. Absent when it couldn't be read.
+       */
+      tableLabel?: string;
     }>
   /**
    * WP-2423 DEC-DINING-GUEST-TABLE-START: no visit was started; this free table can be started, it

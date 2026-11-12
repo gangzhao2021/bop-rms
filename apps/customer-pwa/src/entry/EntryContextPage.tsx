@@ -962,15 +962,31 @@ function EntryState({
       <div>
         {settled === null ? (
           <>
-            {/* WP-2423 live minor 27: which restaurant's table, as the entry answer names it. */}
+            {/* WP-2423 live minor 27: which restaurant's table, as the entry answer names it; and
+                which table (guest-table-open-and-busy-reads), so a card on the wrong table shows. */}
             <StateHeading headingRef={headingRef}>
-              {t("This table at {storeDisplayName} isn’t open yet", {
-                storeDisplayName: state.context.storeDisplayName,
-              })}
+              {state.tableLabel === undefined
+                ? t("This table at {storeDisplayName} isn’t open yet", {
+                    storeDisplayName: state.context.storeDisplayName,
+                  })
+                : t("Table {table} at {storeDisplayName} isn’t open yet", {
+                    table: saidTable(state.tableLabel),
+                    storeDisplayName: state.context.storeDisplayName,
+                  })}
             </StateHeading>
             <p className="entry-context">
               {t("Ask staff to seat you. This page continues by itself once the table is open.")}
             </p>
+            {state.tableLabel === undefined ? null : (
+              <p className="entry-context">
+                {t(
+                  "Not sitting at table {table}? Tell staff, so they can give you this table’s code.",
+                  {
+                    table: saidTable(state.tableLabel),
+                  },
+                )}
+              </p>
+            )}
           </>
         ) : (
           <>

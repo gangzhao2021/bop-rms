@@ -591,6 +591,33 @@ export async function loadDiningTableOpen(
 }
 
 /**
+ * WP-2423 (guest-table-open-and-busy-reads): the name staff gave this published table, as printed
+ * on its code card, for a guest whose scanned table isn't open yet ("Table 4 isn't open yet"). A
+ * card left on the wrong table then shows at once. Null for a table not published here.
+ */
+export async function loadDiningTablePublicLabel(
+  transaction: DiningTableTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  tableReference: string,
+): Promise<string | null> {
+  const brand = reference(scope.brandReference),
+    store = reference(scope.storeReference),
+    table = reference(tableReference);
+  await transaction.query(
+    "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+    [brand, store],
+  );
+  const result = (await transaction.query(
+    "SELECT table_snapshot->>'stableLabel' AS label FROM rms_dining.dining_table WHERE brand_id=$1 AND store_id=$2 AND table_id=$3 AND table_snapshot->>'lifecycle'='Published'",
+    [brand, store, table],
+  )) as { rows?: unknown } | null;
+  const found = result?.rows;
+  if (!Array.isArray(found) || found.length > 1) throw new Error("DINING_TABLE_UNAVAILABLE");
+  const row = found[0] as { label?: unknown } | undefined;
+  return row === undefined ? null : tableLabel(row.label);
+}
+
+/**
  * WP-2423 item 8 ⑧: when staff moved this participant's party after the participant joined it, the
  * table the party sits at now and the table of its latest move. Since table-move-payment
  * (2026-11-06) the phone follows the party; this tells the guest where it sits ("moved from B to

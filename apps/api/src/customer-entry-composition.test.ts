@@ -532,6 +532,27 @@ describe("DEC-DINING-GUEST-TABLE-START: a scan at a Store where guests start tab
     expect(result.status).toBe("TableNotOpen");
     noVisit(f);
   });
+  it("says which table the scanned code is for when that table isn't open, and unnamed if unread", async () => {
+    const f = fixture();
+    const named = await createCustomerEntryComposition({
+      ...f.options,
+      table: table({
+        guestStart: vi.fn(async () => "No" as const),
+        label: vi.fn(async () => "Table 3"),
+      }),
+    }).establish(f.input());
+    expect(named).toMatchObject({ status: "TableNotOpen", tableLabel: "Table 3" });
+    const unread = await createCustomerEntryComposition({
+      ...f.options,
+      table: table({
+        guestStart: vi.fn(async () => "No" as const),
+        label: vi.fn(async () => Promise.reject(new Error("read"))),
+      }),
+    }).establish(f.input());
+    expect(unread.status).toBe("TableNotOpen");
+    expect(Object.hasOwn(unread, "tableLabel")).toBe(false);
+    noVisit(f);
+  });
   it("an open table a new phone may be a new party at asks once, with no visit yet; the answer goes on", async () => {
     const asked = table({
       isOpen: vi.fn(async () => true),
