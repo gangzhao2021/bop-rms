@@ -572,15 +572,17 @@ describe("CUST-DINE-IN-SESSION (WP-2423 Q8)", () => {
       expect(cash).toContain(text);
     expect(cash).not.toContain("Tip");
     expect(cash).not.toContain("Rounding (tax worked out on the whole bill)");
-    // WP-2423 DEC-TAX-WHOLE-RECEIPT: the bill's tax rounding on its own line.
+    // WP-2423 DEC-TAX-WHOLE-RECEIPT (v15 batch 9): a receipt has one tax figure, the bill's tax
+    // worked out once over the whole bill ($2.15 charged by the rounds, 1¢ less on the bill), as
+    // the staff's paid bill prints it; no separate rounding line.
     const rounded = receipt([{ partNumber: null, method: "Cash", totalMinor: "1864" }], {
       taxRoundingMinor: "-1",
       ordersTotalMinor: "1864",
       paidMinor: "1865",
     });
-    // M67: guests are told what the rounding is, not a bare "Tax rounding".
-    expect(rounded).toContain("Rounding (tax worked out on the whole bill)");
-    expect(rounded).toContain("-$0.01");
+    expect(rounded).toContain("$2.14");
+    expect(rounded).not.toContain("$2.15");
+    expect(rounded).not.toContain("Rounding (tax worked out on the whole bill)");
     const split = receipt(
       [
         { partNumber: 1, method: "Online", totalMinor: "1100" },

@@ -873,7 +873,9 @@ test.describe("@production CUST-DINE-IN-SESSION table view", () => {
     await expect(card).toContainText("Part 1 paid byCard at the table · $3.22");
     await expect(card).toContainText("Part 2 paid byCard on a guest’s phone · $2.55");
     await expect(card).toContainText("Tip$0.68");
-    // WP-2423 DEC-TAX-WHOLE-RECEIPT: the bill's tax rounding on its own line.
+    // WP-2423 DEC-TAX-WHOLE-RECEIPT (v15 batch 9): one tax figure, the bill's tax worked out once
+    // (the rounds' tax less the cent), with no separate rounding line.
+    await expect(card).toContainText("Tax$0.59");
     receipt = {
       status: 200,
       json: {
@@ -885,7 +887,9 @@ test.describe("@production CUST-DINE-IN-SESSION table view", () => {
       },
     };
     await page.reload();
-    await expect(card).toContainText("Rounding (tax worked out on the whole bill)-$0.01");
+    await expect(card).not.toContainText("Rounding (tax worked out on the whole bill)");
+    // The rounds were charged $0.59 of tax; the bill's tax is $0.58.
+    await expect(card).toContainText("Tax$0.58");
     await page.screenshot({
       path: "test-results/customer-dining-settled-split-390.png",
       fullPage: true,

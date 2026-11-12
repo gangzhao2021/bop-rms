@@ -213,16 +213,12 @@ export function SettledTableReceiptView({ receipt }: { readonly receipt: Settled
           <dt>{t("Subtotal before tax")}</dt>
           <dd>{money(receipt.subtotalMinor)}</dd>
         </div>
+        {/* v15 batch 9 (DEC-TAX-WHOLE-RECEIPT): one receipt, one tax figure — the bill's tax
+            worked out once over the whole bill (as the staff's paid bill prints it). */}
         <div>
           <dt>{t("Tax")}</dt>
-          <dd>{money(receipt.taxMinor)}</dd>
+          <dd>{money((BigInt(receipt.taxMinor) + BigInt(receipt.taxRoundingMinor)).toString())}</dd>
         </div>
-        {receipt.taxRoundingMinor !== "0" ? (
-          <div>
-            <dt>{t("Rounding (tax worked out on the whole bill)")}</dt>
-            <dd>{money(receipt.taxRoundingMinor)}</dd>
-          </div>
-        ) : null}
         {receipt.pointsUsedMinor !== "0" ? (
           <div>
             <dt>{t("Points used (already taken off)")}</dt>

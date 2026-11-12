@@ -1281,8 +1281,10 @@ function TableReceipt({
     payments.reduce((sum, entry) => sum + BigInt(pick(entry.paid)), 0n);
   const cashRounding = add((paid) => paid.roundingMinor);
   const subtotal = bill.rounds.reduce((sum, round) => sum + BigInt(round.subtotalMinor), 0n);
-  const rounding = BigInt(bill.taxRoundingMinor);
-  const tax = bill.rounds.reduce((sum, round) => sum + BigInt(round.taxMinor), 0n) - rounding;
+  // v15 batch 9 (DEC-TAX-WHOLE-RECEIPT): the paper is one receipt, so its tax is the bill's tax,
+  // worked out once over the whole bill (each round's tax holds its share of the rounding): $2.93
+  // on $22.50 at 13%, never "Tax $2.92" and a separate "Tax rounding $0.01".
+  const tax = bill.rounds.reduce((sum, round) => sum + BigInt(round.taxMinor), 0n);
   // v15 batch 7 (M50): the paper the guests get says where, which table, when, and what they had.
   const paidAt = payments
     .map((entry) => entry.paid.recordedAt)
@@ -1330,12 +1332,6 @@ function TableReceipt({
           <dt>{t("Tax")}</dt>
           <dd>{cad(tax)}</dd>
         </div>
-        {rounding !== 0n ? (
-          <div>
-            <dt>{t("Tax rounding")}</dt>
-            <dd>{cad(rounding)}</dd>
-          </div>
-        ) : null}
         <div>
           <dt>{t("Tip")}</dt>
           <dd>{cad(add((paid) => paid.tipMinor))}</dd>

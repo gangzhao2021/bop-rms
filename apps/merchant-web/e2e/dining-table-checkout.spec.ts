@@ -489,6 +489,124 @@ test("@production the printed paid bill adds up: each dish less its comp or disc
   await page.emulateMedia({ media: "screen" });
 });
 
+test("@production the paid bill states one tax, the bill's own: $2.93 on $22.50, no separate rounding", async ({
+  page,
+}) => {
+  const state: { phase: "Active" | "Closing"; version: number } = {
+    phase: "Closing",
+    version: 7,
+  };
+  await floor(page, state);
+  await page.route("**/merchant/dining/table-close-plan", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        orderReference: id(3),
+        diningSessionReference: id(2),
+        orderVersion: 4,
+        observedAt: "2026-10-15T19:00:00.000Z",
+        rounds: [],
+        closeBlockers: [],
+        totals: { onlineMinor: "0", cardMachineMinor: "0" },
+      },
+    }),
+  );
+  // v15 batch 9 live finding (P7 C): 2 × $12.50, then 1 × $12.50, at a 13 % TEST tax. The second
+  // round was comped; 10 % came off the first ($2.50 and $0.33 of its tax). The rounds were then
+  // charged $2.92 of tax, and the bill's tax is round(22.50 × 13 %) = $2.93: the round's tax holds
+  // that cent (its share of the bill's tax rounding).
+  const bill = unpaidBill("Closing", 7);
+  await page.route("**/merchant/dining/table-bill", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        ...bill,
+        rounds: [
+          {
+            ...bill.rounds[0],
+            items: [
+              {
+                orderItemReference: id(911),
+                quantity: 2,
+                displayName: "Synthetic noodles",
+                subtotalMinor: "2500",
+                totalMinor: "2542",
+                reduction: { kind: "Percent", percent: 10, amountMinor: "283", netMinor: "250" },
+              },
+            ],
+            subtotalMinor: "2250",
+            taxMinor: "293",
+            totalMinor: "2543",
+            taxRoundingMinor: "1",
+            paid: true,
+          },
+          {
+            ...bill.rounds[1],
+            items: [
+              {
+                orderItemReference: id(912),
+                quantity: 1,
+                displayName: "Synthetic noodles",
+                subtotalMinor: "1250",
+                totalMinor: "0",
+                reduction: { kind: "Comp", percent: null, amountMinor: "1413", netMinor: "1250" },
+              },
+            ],
+            subtotalMinor: "0",
+            taxMinor: "0",
+            totalMinor: "0",
+            taxRoundingMinor: "0",
+            paid: true,
+          },
+        ],
+        taxRoundingMinor: "1",
+        owed: { subtotalMinor: "0", taxMinor: "0", totalMinor: "0" },
+        tips: { enabled: false, tierPercents: [12, 18, 20] },
+        settlement: {
+          method: "CardMachine",
+          roundsMinor: "2543",
+          tipMinor: "0",
+          roundingMinor: "0",
+          totalMinor: "2543",
+          tenderedMinor: null,
+          changeMinor: null,
+          recordedAt: "2026-10-15T19:05:00.000Z",
+          recordedAfterOutage: false,
+        },
+      },
+    }),
+  );
+  await page.goto("/operations/dining");
+  await page.getByRole("button", { name: "Select T2", exact: true }).click();
+  const checkout = page.getByRole("region", { name: "Checkout" });
+  const receipt = checkout.getByLabel("Paid bill for table T2");
+  await expect(receipt).toContainText("Subtotal$22.50");
+  await expect(receipt).toContainText("Tax$2.93");
+  await expect(receipt).not.toContainText("Tax rounding");
+  await expect(receipt).toContainText("Total paid$25.43");
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await expect(receipt).toContainText("Tax$2.93");
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.screenshot({ path: `test-results/paid-bill-one-tax-${width}.png`, fullPage: true });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.evaluate(() => {
+    window.print = () => undefined;
+  });
+  await checkout.getByRole("button", { name: "Print paid bill" }).click();
+  await page.emulateMedia({ media: "print" });
+  const paper = await page.evaluate(
+    () => (document.querySelector("[data-print-root]") as HTMLElement | null)?.innerText ?? "",
+  );
+  expect(paper).toContain("$2.93");
+  expect(paper).not.toContain("$2.92");
+  expect(paper).not.toContain("Tax rounding");
+  await page.emulateMedia({ media: "screen" });
+});
+
 test("@production DEC-DINE-IN-PAY-LATER: a table the guests left without paying shows it was written off and offers no payment", async ({
   page,
 }) => {
