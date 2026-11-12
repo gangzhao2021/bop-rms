@@ -15,7 +15,9 @@ const d = vi.hoisted(() => ({
   ordinary: vi.fn(),
   whole: vi.fn(async (): Promise<unknown> => null),
   // b10: what an order paid only in cash can still take back (the payment owner's read).
-  allowance: vi.fn(async () => ({ cashOnly: true, leftMinor: 0n })),
+  allowance: vi.fn<
+    (...args: unknown[]) => Promise<{ readonly cashOnly: boolean; readonly leftMinor: bigint }>
+  >(async () => ({ cashOnly: true, leftMinor: 0n })),
 }));
 vi.mock("./merchant-card-machine-refund.js", () => ({
   cardMachineWholeRefundSource: d.whole,
@@ -57,7 +59,9 @@ vi.mock("./merchant-refund-recovery.js", async (original) => ({
   readOrderRefundRecoveries: async () => [],
 }));
 vi.mock("./merchant-round-business-date.js", () => ({
-  withOptionalRead: async (_tx: unknown, work: () => Promise<unknown>) => work(),
+  // As the real one: a read that fails answers its fallback.
+  withOptionalRead: async (_tx: unknown, work: () => Promise<unknown>, fallback: unknown) =>
+    work().catch(() => fallback),
 }));
 const id = (n: number) => "01909974-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 type Options = Parameters<typeof createMerchantRefundPaymentContext>[0];
@@ -140,6 +144,7 @@ it("binds actual captured payment and returns distinct confirmed and pending ref
     canRecover: true,
     recoveries: [],
     cashTakeBackLeftMinor: null,
+    recoveryUnreadable: false,
   });
   expect(d.position.mock.calls[0]?.[1]).toEqual({
     orderReference: id(9),
@@ -171,6 +176,7 @@ it.each([null, { ...terminal, outcome: "Failed" }])(
       canRecover: false,
       recoveries: [],
       cashTakeBackLeftMinor: null,
+      recoveryUnreadable: false,
     });
     expect(d.position).not.toHaveBeenCalled();
   },
@@ -310,6 +316,14 @@ describe("a counter cash payment", () => {
     // A table that also took card or online money keeps both ways (no cash-only limit).
     d.allowance.mockResolvedValueOnce({ cashOnly: false, leftMinor: 437n });
     expect(await setup().operation(f.input)).toMatchObject({ cashTakeBackLeftMinor: null });
+    // b10: the allowance could not be read (an outage): nothing is offered, and the page is told
+    // it could not load rather than that there is nothing to take back.
+    d.allowance.mockRejectedValueOnce(new Error("connection lost"));
+    expect(await setup().operation(f.input)).toMatchObject({
+      canRecover: false,
+      recoveryUnreadable: true,
+      cashTakeBackLeftMinor: null,
+    });
   });
   it("$22.43 paid as $22.45 and cancelled: refunded in full, not refused", async () => {
     cash(card(2243n, 2n), [refund("StaffCancellation", 2245n)]);

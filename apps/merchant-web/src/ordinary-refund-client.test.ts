@@ -307,6 +307,7 @@ const context = {
   canRecover: false,
   recoveries: [],
   cashTakeBackLeftMinor: null,
+  recoveryUnreadable: false,
 };
 it("WP-2423 M14: a cashier's context says they request but do not send; an older server's means whoever requests sends", async () => {
   const older: Partial<typeof context> = { ...context };
@@ -428,6 +429,20 @@ it("b10: reads the cash a guest can still hand back, only for a cash payment in 
     cashTakeBackLeftMinor: null,
   });
   for (let n = 0; n < 2; n += 1) await expect(client.context(id(6), csrf)).rejects.toThrow();
+});
+// b10: money taken back that could not be read is an outage, never "nothing to take back".
+it("b10: reads that money taken back could not be loaded, and an older server as loaded", async () => {
+  const older: Partial<typeof context> = { ...context };
+  delete older.recoveryUnreadable;
+  const fetcher = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(response({ ...context, recoveryUnreadable: true }))
+    .mockResolvedValueOnce(response(older))
+    .mockResolvedValueOnce(response({ ...context, recoveryUnreadable: "yes" }));
+  const client = createOrdinaryRefundClient(fetcher);
+  await expect(client.context(id(6), csrf)).resolves.toMatchObject({ recoveryUnreadable: true });
+  await expect(client.context(id(6), csrf)).resolves.toMatchObject({ recoveryUnreadable: false });
+  await expect(client.context(id(6), csrf)).rejects.toThrow();
 });
 it.each([
   { ...context, paymentIntentReference: id(99) },

@@ -438,6 +438,8 @@ export function installMerchantRefundRoutes(
           // b10: an order paid only in cash at the counter: the cash the guest can still hand
           // back (whole nickels), the only way it comes back; null otherwise.
           cashTakeBackLeftMinor: result.cashTakeBackLeftMinor,
+          // b10: money taken back could not be read now (an outage, not "nothing to take back").
+          recoveryUnreadable: result.recoveryUnreadable,
           recoveries: result.recoveries.map((recovery) => ({
             recoveryReference: recovery.recoveryReference,
             method: recovery.method,

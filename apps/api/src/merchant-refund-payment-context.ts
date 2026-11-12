@@ -188,6 +188,9 @@ export function createMerchantRefundPaymentContext(options: {
           canRecover: canRecover && recoveries !== null,
           recoveries: recoveries ?? [],
           cashTakeBackLeftMinor: null as string | null,
+          // b10: who may record it, but the read failed: the page says it could not load, never
+          // that there is nothing to take back.
+          recoveryUnreadable: canRecover && recoveries === null,
         };
       };
       // b10 cash-refund-approvals: an Order paid only in cash at the counter takes back cash
@@ -212,7 +215,7 @@ export function createMerchantRefundPaymentContext(options: {
             ),
           null,
         );
-        if (allowance === null) return { ...facts, canRecover: false };
+        if (allowance === null) return { ...facts, canRecover: false, recoveryUnreadable: true };
         return {
           ...facts,
           cashTakeBackLeftMinor: allowance.cashOnly ? allowance.leftMinor.toString() : null,
@@ -364,6 +367,7 @@ export function createMerchantRefundPaymentContext(options: {
             canRecover: false,
             recoveries: [],
             cashTakeBackLeftMinor: null,
+            recoveryUnreadable: false,
           } as Awaited<ReturnType<typeof recoveryFacts>>),
         });
       }

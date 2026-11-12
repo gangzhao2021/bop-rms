@@ -472,6 +472,8 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
         // b10: an order paid only in cash: the cash the guest can still hand back (absent from an
         // older server: the page falls back to the confirmed refunds).
         const withCashTakeBack = Object.hasOwn(reply, "cashTakeBackLeftMinor");
+        // b10: money taken back could not be read (absent from an older server: read).
+        const withUnreadable = Object.hasOwn(reply, "recoveryUnreadable");
         const data = exact(reply, [
           "paymentIntentReference",
           "paymentAttemptReference",
@@ -491,6 +493,7 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
           ...(withCash ? ["paidInCash"] : []),
           ...(withCashLeft ? ["cashLeftMinor"] : []),
           ...(withCashTakeBack ? ["cashTakeBackLeftMinor"] : []),
+          ...(withUnreadable ? ["recoveryUnreadable"] : []),
         ]);
         // WP-2423 M163: money taken back on the order (absent from an older server: none).
         if (
@@ -527,6 +530,8 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
             BigInt(cashTakeBackLeftMinor) % 5n !== 0n)
         )
           return fail();
+        const recoveryUnreadable = withUnreadable ? data.recoveryUnreadable : false;
+        if (typeof recoveryUnreadable !== "boolean") return fail();
         // WP-2423 M13: why they may not record a request (absent from an older server).
         const requestBlocked = withBlocked ? data.requestBlocked : null;
         if (requestBlocked !== null && requestBlocked !== "SoleOperatorOff") return fail();
@@ -604,6 +609,11 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
            * alone, up to this (whole nickels); null for any other order.
            */
           cashTakeBackLeftMinor: cashTakeBackLeftMinor as string | null,
+          /**
+           * b10: they may record money taken back, but it could not be read now: the page says so
+           * instead of offering nothing.
+           */
+          recoveryUnreadable,
         });
       }, false);
     },

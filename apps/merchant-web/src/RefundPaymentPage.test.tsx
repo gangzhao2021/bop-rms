@@ -55,6 +55,7 @@ const context = {
   canRecover: false,
   recoveries: [] as RefundRecoveryView[],
   cashTakeBackLeftMinor: null as string | null,
+  recoveryUnreadable: false,
 };
 
 it("WP-2423: the payment summary says Paid, never the internal Captured state", () => {

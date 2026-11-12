@@ -34,6 +34,7 @@ const cash = {
   canRecover: true,
   recoveries: [] as RefundRecoveryView[],
   cashTakeBackLeftMinor: "365" as string | null,
+  recoveryUnreadable: false,
 };
 const open = async (context: typeof cash) => {
   const { container } = await mount(
@@ -91,4 +92,28 @@ it("b10: the cash-only form reads in Chinese with no card machine", async () => 
   );
   expect(container.textContent).toContain("这单用现金付款：顾客还回现金，按 5 分取整。");
   expect(container.textContent).not.toContain("刷卡机");
+});
+
+// b10: an outage reads as one: the section says it could not load, in English and Chinese,
+// instead of disappearing as if there were nothing to take back.
+it("b10: money taken back that could not be read says so, with nothing to record", async () => {
+  const shown = async () =>
+    (
+      await mount(
+        <MemoryRouter>
+          <MoneyTakenBack
+            context={{ ...cash, canRecover: false, recoveryUnreadable: true }}
+            csrf="c"
+            onRecorded={() => undefined}
+          />
+        </MemoryRouter>,
+      )
+    ).container;
+  const container = await shown();
+  expect(status(container)).toBe(
+    "Money taken back could not be loaded just now. Refresh the page to try again.",
+  );
+  expect(container.querySelector("button")).toBeNull();
+  setLanguageForTest("zh-Hans");
+  expect(status(await shown())).toBe("已收回的多退款暂时读不到，请刷新本页再试。");
 });

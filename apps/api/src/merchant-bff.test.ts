@@ -4931,6 +4931,7 @@ it("protects refund payment context and preserves unknown amounts", async () => 
     canRecover: false,
     recoveries: [],
     cashTakeBackLeftMinor: null,
+    recoveryUnreadable: false,
   };
   const query = vi.fn<NonNullable<MerchantBffRouterOptions["refundPaymentContext"]>>(async () => ({
     ...data,
@@ -4962,6 +4963,9 @@ it("protects refund payment context and preserves unknown amounts", async () => 
   expect(((await (await send()).json()) as Record<string, unknown>).cashTakeBackLeftMinor).toBe(
     "2245",
   );
+  // b10: money taken back that could not be read is said so, not dropped.
+  query.mockResolvedValueOnce({ ...data, recoveryUnreadable: true } as never);
+  expect(((await (await send()).json()) as Record<string, unknown>).recoveryUnreadable).toBe(true);
   const unconfigured = await serveRefundContext();
   expect(
     (

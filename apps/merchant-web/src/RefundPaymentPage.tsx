@@ -2348,6 +2348,16 @@ export function MoneyTakenBack({
   const taken = context.recoveries.reduce((sum, entry) => sum + BigInt(entry.amountMinor), 0n);
   const left = cashOnly ? BigInt(context.cashTakeBackLeftMinor ?? "0") : refunded - taken;
   const how = cashOnly ? "Cash" : method;
+  // b10: an outage reads as one, never as nothing to take back.
+  if (context.recoveryUnreadable)
+    return (
+      <section aria-labelledby="money-taken-back-heading" className="refund-requests">
+        <h2 id="money-taken-back-heading">{t("Money taken back")}</h2>
+        <p role="status">
+          {t("Money taken back could not be loaded just now. Refresh the page to try again.")}
+        </p>
+      </section>
+    );
   if (context.recoveries.length === 0 && (!context.canRecover || left <= 0n)) return null;
   const submit = async () => {
     const amountMinor = dollarsToMinor(dollars);
