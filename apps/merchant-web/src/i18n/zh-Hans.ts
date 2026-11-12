@@ -5170,6 +5170,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Total after cancelled rounds": "扣除已取消轮次后的合计",
   "Total collected": "收款合计",
   "Total refunded": "已退款合计",
+  "Total after refunds": "退款后合计",
   Totals: "合计",
   "Totals grow until the business day closes; the settlement run happens after that.":
     "营业日结束前合计会持续增加；结算运行在那之后进行。",
@@ -9497,6 +9498,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Not recorded by {at} · enter it again from the paper slip": "{at} 前未录入 · 请按纸质单重新录入",
   "Paid during the outage · record it by {at}": "停电/断网时已付款 · 请在 {at} 前录入",
   "Paid on paper · payment not recorded": "纸单已付款 · 付款还没录入",
+  "Paid on paper · entered again": "纸单已付款 · 已重新录入",
+  "Paid on paper during the outage. Its sale is on order {orderNumber}; don't charge again.":
+    "断网期间已按纸单付款。这笔销售记在订单 {orderNumber} 上，不要再收款。",
   "Payment not recorded": "付款未录入",
   "Record paper payment": "录入纸单付款",
   "Order {number} is already paid; its payment is recorded. Don't charge the guest again; Orders shows it.":

@@ -379,6 +379,10 @@ export function CurrentOrderLines({
     lines,
     lines.items.filter((item) => removedLine(item) || unpaidLine(item) || waitingLine(item)),
   );
+  // v15 2026-11-11 b10: with every round cancelled and refunded, the Total above still reads as
+  // the money charged; what the order comes to after its refunds is said under them, so staff
+  // never read a refunded total as money owed. Only when every refund's amount is known.
+  const afterRefunds = totalAfterRefunds(orderTotalWithTip(shown), refunds);
   // One "Check refund" per pending cancellation, on its first line.
   const checkReferences = new Set<string>();
   const checkLines = new Map<string, string>();
@@ -686,8 +690,34 @@ export function CurrentOrderLines({
           ))}
         </dl>
       ) : null}
+      {afterRefunds !== null ? (
+        <dl className="order-lines-totals">
+          <div>
+            <dt>{t("Total after refunds")}</dt>
+            <dd>{orderMoney(afterRefunds)}</dd>
+          </div>
+        </dl>
+      ) : null}
     </section>
   );
+}
+
+/**
+ * v15 2026-11-11 b10: the order's total less what was refunded on it, from orderRefundRows (one
+ * row is that refund; several end with their "Total refunded"). Null while a refund's amount is not
+ * known, or when the refunds do not come out of this total (never a negative figure).
+ */
+export function totalAfterRefunds(
+  total: { readonly amountMinor: string; readonly currencyCode: string },
+  refunds: readonly OrderRefundRow[],
+): { readonly amountMinor: string; readonly currencyCode: string } | null {
+  if (refunds.length === 0 || refunds.some((row) => row.amount === null)) return null;
+  const refunded = refunds[refunds.length - 1]?.amount;
+  if (refunded == null || refunded.currencyCode !== total.currencyCode) return null;
+  const left = BigInt(total.amountMinor) - BigInt(refunded.amountMinor);
+  return left < 0n
+    ? null
+    : Object.freeze({ amountMinor: left.toString(), currencyCode: total.currencyCode });
 }
 
 /** v15 batch 9 (DEC-TAX-WHOLE-RECEIPT): see billRoundingApart. */
@@ -1371,7 +1401,7 @@ export function orderStatusTone(
   }
   if (order.awaitingPayment || order.currentPhase === null) return "warning";
   // Owner 2026-10-25: finished and cancelled orders no longer share one grey tag.
-  if (order.currentPhase === "Fulfilled") return "done";
+  if (order.currentPhase === "Fulfilled" || reenteredAs(order) !== null) return "done";
   if (order.currentPhase === "Cancelled" || order.currentPhase === "Rejected") return "cancelled";
   // Read from the phases, not the shown words, so it holds in every language (a dish being remade
   // is not ready).
@@ -1429,6 +1459,14 @@ export function orderAmountRefunded(
  * WP-2423 (v15 751dd768): an order cancelled with no payment recorded (for example a table whose
  * rounds were never paid, or a counter order released unpaid); its row says so instead of a dash.
  */
+/**
+ * v15 2026-11-11 b10 (DEC-PAPER-ORDER-NEVER-RELEASED): a paper order paid during the outage and
+ * entered again: the new order's number, which carries its sale. Its badge and note say so, never
+ * "Cancelled" or "Not paid" (the guest paid; the sale is on the new order).
+ */
+export function reenteredAs(order: QueuedOrder): string | null {
+  return order.counter?.cancelledBeforePayment?.reenteredOrderNumber ?? null;
+}
 export function cancelledUnpaid(order: QueuedOrder): boolean {
   return (
     order.currentPhase === "Cancelled" &&
@@ -2053,13 +2091,15 @@ function OrderPhase({
           : t("Awaiting payment")
         : order.pickupNotCollected
           ? t("Not collected")
-          : order.unfulfillable !== null
-            ? cardMachineOwed(order) !== null
-              ? order.counter?.paidOnCardMachine?.cash != null
-                ? t("Expired · give back cash")
-                : t("Expired · refund on card machine")
-              : t("Expired · refunded")
-            : orderPhaseLabel(order)}
+          : reenteredAs(order) !== null
+            ? t("Paid on paper · entered again")
+            : order.unfulfillable !== null
+              ? cardMachineOwed(order) !== null
+                ? order.counter?.paidOnCardMachine?.cash != null
+                  ? t("Expired · give back cash")
+                  : t("Expired · refund on card machine")
+                : t("Expired · refunded")
+              : orderPhaseLabel(order)}
     </span>
   );
 }
@@ -2775,7 +2815,12 @@ function OrderDetailBody({
                   "Paid during the outage; its payment wasn't recorded by {at}. The order stays open: enter it again from the paper slip on Counter order, where a manager links the new order to it. Don't charge again.",
                   { at: storeTime(order.counter.payBy ?? "", timeZone) },
                 )
-              : t("Not paid.")}
+              : reenteredAs(order) !== null
+                ? t(
+                    "Paid on paper during the outage. Its sale is on order {orderNumber}; don't charge again.",
+                    { orderNumber: reenteredAs(order) ?? "" },
+                  )
+                : t("Not paid.")}
         </p>
       ) : null}
       {order.counter?.recordedAfterOutage ? (

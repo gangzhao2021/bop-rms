@@ -277,6 +277,13 @@ it("DEC-PAPER-ORDER-NEVER-RELEASED: a paper order closed as entered again names 
   expect(html).toContain("Closed by staff · entered again as order 34, which carries its sale");
   // It was paid on paper: never "cancelled before payment".
   expect(html).not.toContain("Cancelled before payment");
+  // v15 2026-11-11 b10: nor a "Cancelled" badge or "Not paid." beside it: the guest paid.
+  expect(html).toContain("Paid on paper · entered again");
+  expect(html).not.toMatch(/>Cancelled</u);
+  expect(html).not.toContain("Not paid.");
+  expect(html).toContain(
+    "Paid on paper during the outage. Its sale is on order 34; don&#x27;t charge again.",
+  );
   // The order number is only for that reason, and only digits.
   for (const wrong of [
     { reasonCode: "COUNTER_GUEST_LEFT_UNPAID", reenteredOrderNumber: "34" },

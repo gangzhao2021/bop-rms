@@ -33,6 +33,7 @@ import {
   waitingForStaffBatches,
   unpaidCancelledTotal,
   orderRefundRows,
+  totalAfterRefunds,
   orderAgeText,
   orderAmountTaken,
   orderStatusTone,
@@ -1347,6 +1348,40 @@ it("46940b76 L2: lists every refund on the order so they add up to what was refu
   expect(html).toMatch(/Cancelled items refund<\/dt><dd>−\$6\.08<\/dd>/u);
   expect(html).toMatch(/Order cancellation refund<\/dt><dd>−\$11\.77<\/dd>/u);
   expect(html).toMatch(/Total refunded<\/dt><dd>−\$17\.85<\/dd>/u);
+  // Everything paid ($15.76 and the $2.09 tip) was refunded: nothing is left.
+  expect(html).toMatch(/<dt>Total after refunds<\/dt><dd>\$0\.00<\/dd>/u);
+});
+
+it("v15 2026-11-11 b10: with every paid round cancelled and refunded, the panel says the total after refunds", () => {
+  const money = (amountMinor: string) => ({ amountMinor, currencyCode: "CAD" });
+  const lines = {
+    ...parseCurrentOrderDetailFixtureLines(),
+    totals: {
+      ...parseCurrentOrderDetailFixtureLines().totals,
+      subtotal: money("4164"),
+      tax: money("540"),
+      total: money("4704"),
+      tip: null,
+    },
+  } as Parameters<typeof CurrentOrderLines>[0]["lines"];
+  const refunds = [7, 8, 9].map((round) => ({
+    label: `Round ${round} cancellation refund`,
+    amount: money("1568"),
+  }));
+  const rows = [...refunds, { label: "Total refunded", amount: money("4704") }];
+  const html = renderToStaticMarkup(<CurrentOrderLines lines={lines} refundRows={rows} />);
+  expect(html).toMatch(/<dt>Total<\/dt><dd>\$47\.04<\/dd>/u);
+  expect(html).toMatch(/Total refunded<\/dt><dd>−\$47\.04<\/dd>/u);
+  expect(html).toMatch(/<dt>Total after refunds<\/dt><dd>\$0\.00<\/dd>/u);
+  // Part refunded: what the order still comes to.
+  expect(totalAfterRefunds(money("4704"), [refunds[0] as (typeof rows)[number]])).toEqual(
+    money("3136"),
+  );
+  // A refund whose amount is not known yet: nothing is worked out.
+  expect(
+    totalAfterRefunds(money("4704"), [{ label: "Round 7 cancellation refund", amount: null }]),
+  ).toBeNull();
+  expect(totalAfterRefunds(money("4704"), [])).toBeNull();
 });
 function parseCurrentOrderDetailFixtureLines() {
   const money = (amountMinor: string) => ({ amountMinor, currencyCode: "CAD" });
