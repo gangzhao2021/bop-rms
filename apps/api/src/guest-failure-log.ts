@@ -13,6 +13,8 @@ export function logGuestFailure(
   event: string,
   error: unknown,
   write: (line: string) => void = (line) => process.stderr.write(line),
+  /** 50: the guest was told it failed; 40: a failure the guest never saw (read again and worked). */
+  level: 40 | 50 = 50,
 ): void {
   try {
     const causes: string[] = [];
@@ -24,7 +26,7 @@ export function logGuestFailure(
       causes.push(codeOf(at));
     write(
       JSON.stringify({
-        level: 50,
+        level,
         time: new Date().toISOString(),
         event,
         code: codeOf(error),

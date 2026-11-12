@@ -106,7 +106,11 @@ never renew the visit (§3).
 - There is no second read when the database had no connection to give, because that would add to a
   rush.
 - There is no second read when less than 3 s of the read's answer time is left.
-- Only a read that fails twice writes the level-50 line.
+- There is no second read for a refusal such as `CART_INPUT_INVALID`, which answers the same every
+  time. Only `CART_DEPENDENCY_UNAVAILABLE` or a database fault under it is read again.
+- Only a read that fails twice writes the level-50 line. The first failure is still written, at
+  level 40 as `CUSTOMER_CART_READ_RETRIED`, with its cause codes only. Live runs can then find out
+  what the first read met, even when the second read worked.
 
 ## 6. Transient level-50 pilot_attention_required for healthy worker parts
 

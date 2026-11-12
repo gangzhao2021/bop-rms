@@ -67,6 +67,20 @@ function noConnection(error: unknown): boolean {
   return false;
 }
 /**
+ * Only a passing fault is worth a second read: the read's own "couldn't reach what it needs"
+ * (CART_DEPENDENCY_UNAVAILABLE) or a database fault under it. A refusal such as CART_INPUT_INVALID
+ * answers the same every time, so a second read would only make the phone wait.
+ */
+function passingFault(error: unknown): boolean {
+  if (readCartError(error)?.code === "CART_DEPENDENCY_UNAVAILABLE") return true;
+  if (readCartError(error) !== null) return false;
+  const code = own(error, "code");
+  return (
+    own(error, "dependencyFailure") === true ||
+    (typeof code === "string" && code.startsWith("TENANT_DATABASE_"))
+  );
+}
+/**
  * WP-2423 (guest-table-open-and-busy-reads, v15 2026-11-12): a cart read that met staff moving or
  * merging the guest's own table (or the phone's own add committing at that moment) can find the
  * records mid-change and fail once, though nothing is wrong: the phone's next read worked, but each
@@ -102,9 +116,13 @@ export function createCustomerCartReadPort(
         const left = timeLeftMs();
         if (
           attempt === 0 &&
+          passingFault(error) &&
           !noConnection(error) &&
           (left === undefined || left >= cartReadAgainNeedsMs)
         ) {
+          // b10 review: what the first read met is still unknown; its cause codes are kept at a
+          // lower level, so live runs can pin it down though the second read may hide it.
+          logGuestFailure("CUSTOMER_CART_READ_RETRIED", error, undefined, 40);
           await pause(cartReadAgainAfterMs);
           continue;
         }

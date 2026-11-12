@@ -111,7 +111,8 @@ describe("Customer Cart read bridge", () => {
       expect(await moved.getCurrentCart(input)).toEqual({ status: "Found", view });
       expect(read).toHaveBeenCalledTimes(2);
       expect(pauses).toEqual([200]);
-      expect(write).not.toHaveBeenCalled();
+      // The guest never saw it, but the first failure is still on record (level 40, below).
+      expect(write).toHaveBeenCalledOnce();
       // No connection to be had: reading again would only add to the rush.
       const busy = Object.assign(new CartError("CART_DEPENDENCY_UNAVAILABLE"), {
         cause: Object.assign(new Error("acquire"), { code: "TENANT_DATABASE_ACQUIRE_FAILED" }),
@@ -136,7 +137,34 @@ describe("Customer Cart read bridge", () => {
         await createCustomerCartReadPort({ read: twice }, { pause }).getCurrentCart(input),
       ).toEqual({ status: "Unavailable" });
       expect(twice).toHaveBeenCalledTimes(2);
-      expect(write).toHaveBeenCalledTimes(3);
+      // A refusal answers the same every time: no second read.
+      const refused = vi.fn().mockRejectedValue(new CartError("CART_INPUT_INVALID"));
+      expect(
+        await createCustomerCartReadPort({ read: refused }, { pause }).getCurrentCart(input),
+      ).toEqual({ status: "Unavailable" });
+      expect(refused).toHaveBeenCalledOnce();
+      expect(pauses).toEqual([200, 200]);
+      // The swallowed first failure is kept at level 40 with its cause codes only.
+      const lines = write.mock.calls.map(([line]) => JSON.parse(String(line)) as object);
+      expect(lines).toEqual([
+        expect.objectContaining({
+          level: 40,
+          event: "CUSTOMER_CART_READ_RETRIED",
+          code: "CART_DEPENDENCY_UNAVAILABLE",
+          causes: ["GUEST_SESSION_UNAVAILABLE"],
+        }),
+        expect.objectContaining({ level: 50, event: "CUSTOMER_CART_READ_UNAVAILABLE" }),
+        expect.objectContaining({ level: 50, event: "CUSTOMER_CART_READ_UNAVAILABLE" }),
+        expect.objectContaining({ level: 40, event: "CUSTOMER_CART_READ_RETRIED" }),
+        expect.objectContaining({ level: 50, event: "CUSTOMER_CART_READ_UNAVAILABLE" }),
+        expect.objectContaining({
+          level: 50,
+          event: "CUSTOMER_CART_READ_UNAVAILABLE",
+          code: "CART_INPUT_INVALID",
+        }),
+      ]);
+      for (const [line] of write.mock.calls)
+        expect(String(line)).not.toMatch(/sessionCredential|cartReference/u);
     } finally {
       write.mockRestore();
     }
