@@ -5271,11 +5271,43 @@ async function journey(journeyEnding) {
               .reduce((sum, item) => sum + item.pricing.total.amountMinor, 0n)
               .toString(),
           });
+          // v15 batch 9 review: staff split the bill, then a manager comps everything during
+          // checkout and staff cancel it. With $0 owed, cancelling records no "pay whole" plan,
+          // but the split belonged to that checkout: the next one starts from the whole bill,
+          // never the old parts with "the bill changed, split it again".
+          const splitFirst = await createMerchantDiningTableSplit({
+            persistence: persistenceOf(server),
+            authentication: server.authentication,
+            nextReference: fresh,
+          })({
+            ...as(server),
+            command: {
+              operationReference: fresh(),
+              diningSessionReference: sessionReference,
+              mode: "Even",
+              people: 2,
+              rounds: null,
+            },
+          });
+          assert.equal(splitFirst.status, "Recorded");
+          assert.equal(splitFirst.bill.split.parts.length, 2);
           const comped = await comp(manager, {
             orderItemReferences: items1.map((item) => String(item.orderItemReference)),
           });
           assert.equal(comped.status, "Recorded");
+          assert.equal((await bill()).split.stale, true);
+          assert.equal((await closing(server, "Cancel")).phase, "Active");
+          assert.deepEqual(
+            await rows(
+              "SELECT mode FROM rms_payment.dining_table_split_plan WHERE order_id=$1 ORDER BY plan_version",
+              [orderReference],
+            ),
+            [{ mode: "Even" }],
+          );
+          assert.equal((await bill()).split, null);
+          assert.equal((await closing(server, "Begin")).phase, "Closing");
           const owedNow = await bill();
+          assert.equal(owedNow.split, null);
           assert.equal(owedNow.consistent, true);
           assert.equal(owedNow.owed.totalMinor, "0");
           // Nothing to pay: a payment is refused, and nothing stops the table from closing.

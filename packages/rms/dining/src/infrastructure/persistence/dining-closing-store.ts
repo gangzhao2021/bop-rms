@@ -306,3 +306,47 @@ export function createPostgresDiningClosingStore(
     },
   });
 }
+
+/**
+ * v15 batch 9: when this table's checkout last started or was cancelled (the later of its latest
+ * Begin and Cancel), or null if it never started. A split belongs to the checkout it was planned
+ * in, so a split planned before this instant and never paid is not the bill's (Payment's bill
+ * read). Caller authorizes the Store and owns the transaction.
+ */
+export async function readDiningCheckoutLastStartOrCancel(
+  transaction: DiningTableTransaction,
+  scope: {
+    readonly tenantReference: string;
+    readonly brandReference: string;
+    readonly storeReference: string;
+  },
+  sessionReference: string,
+): Promise<string | null> {
+  const tenant = reference(scope.tenantReference),
+    brand = reference(scope.brandReference),
+    store = reference(scope.storeReference),
+    session = reference(sessionReference);
+  let found: readonly unknown[];
+  try {
+    await transaction.query(
+      "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+      [brand, store],
+    );
+    found = rows(
+      await transaction.query(
+        "SELECT max(requested_at) AS at FROM rms_dining.dining_closing_operation WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND session_id=$4 AND action IN ('Begin','Cancel')",
+        [tenant, brand, store, session],
+      ),
+    );
+  } catch {
+    return unavailable();
+  }
+  const [row] = found;
+  const at = row === undefined ? null : closed(row, ["at"]).at;
+  if (at === null || at === undefined) return null;
+  try {
+    return parseDiningInstant(at);
+  } catch {
+    return unavailable();
+  }
+}

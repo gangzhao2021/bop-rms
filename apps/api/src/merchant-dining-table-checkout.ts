@@ -8,6 +8,7 @@ import {
   createPostgresDiningPaymentTimingStore,
   createPostgresDiningSessionReadStore,
   listDiningSessionTableLabels,
+  readDiningCheckoutLastStartOrCancel,
   parseDiningReference,
   listDiningSessionsMergedIn,
   listDiningSessionMergesInto,
@@ -510,7 +511,21 @@ export async function readDiningTableBill(
   // The whole-table payment, if the table paid at once.
   const settlement = settlements.find((entry) => entry.part === null) ?? null;
   const [latestPlan] = await payments.listSplitPlans(tx, [orderReference]);
-  const plan = latestPlan !== undefined && latestPlan.mode !== "Whole" ? latestPlan : null;
+  // v15 batch 9: a split belongs to the checkout it was planned in. One planned before this
+  // table's checkout last started or was cancelled, with nothing paid or started on a phone for
+  // it, is not the bill's: the checkout starts from the whole bill (also where cancelling recorded
+  // no "pay whole" plan, as for a bill comped to $0), never old parts and "split it again".
+  const planStands = async (candidate: NonNullable<typeof latestPlan>) => {
+    const reference = candidate.splitPlanReference;
+    if (settlements.some((entry) => entry.part?.splitPlanReference === reference)) return true;
+    if (onlinePayments.some((entry) => entry.part?.splitPlanReference === reference)) return true;
+    const boundary = await readDiningCheckoutLastStartOrCancel(tx as never, scope, session);
+    return boundary === null || Date.parse(candidate.recordedAt) >= Date.parse(boundary);
+  };
+  const plan =
+    latestPlan !== undefined && latestPlan.mode !== "Whole" && (await planStands(latestPlan))
+      ? latestPlan
+      : null;
   const partPayments = new Map(
     settlements
       .filter(
