@@ -55,10 +55,15 @@ logged, and the phone dropped its cart credential.
 - A check that could not run is a passing fault: the guest gets 503 + Retry-After and keeps the cart.
 - Only what the records say is an answer. A code that doesn't fit the phone stays "scan again".
 
-A second cause of 401 was also fixed. When a phone sends its cart read and its next Add at the same
-moment, the slower request's renewal found the visit already renewed, and it treated the visit as
-ended. Now the visit as it stands answers, provided it is the same visit and still usable. A visit
-that was really ended meanwhile is still treated as ended.
+This is the whole fix for the cart's 401 in a rush (`a27ace15`). Cart reads and cart commands
+check the visit without renewing it, so no renewal race can reach them.
+
+**A related entry fix (not a cart 401 cause).** A renewal happens only when a guest opens the table
+link (the guest entry request). When the same phone opened the link twice at once, for example a
+double tap or a reload while the first answer was still coming, the slower renewal found the visit
+already renewed and did not go on with it. Now the visit as it stands answers, provided it is the
+same visit and still usable (`7e6b75c3`; its commit subject wrongly names the cart read and the
+next Add). A visit that was really ended meanwhile is still treated as ended.
 
 ## 4. Busy answers took 17–23 s, past the 15 s clients wait
 
@@ -91,8 +96,8 @@ and then answers busy. That leaves 3 s for the answer to reach the phone or scre
 ## 5. The guest's cart read showed 503 while staff moved or merged the guest's table
 
 Adds kept working. Only the cart read failed, once in each move, and it worked again on the next
-read. The read met the records mid-change: either the phone's own concurrent renewal (§3) or the
-moved table's facts.
+read. What the read met mid-change is not yet known. It is not a renewal race, because cart reads
+never renew the visit (§3).
 
 **Decision.**
 
