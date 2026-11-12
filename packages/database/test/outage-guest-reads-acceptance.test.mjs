@@ -225,6 +225,43 @@ it("an outage of the Store's records never reads as an ended guest session, and 
         });
         assert.equal(remainingRequestAcquireBudgetMs(), undefined);
       });
+
+      // 5. (guest-table-open-and-busy-reads) A read does all its work within its answer time: a
+      // statement that would run past it is cut where the time ends (PostgreSQL's own limit,
+      // narrowed under the api role), and once it is spent no statement is sent at all, so the
+      // phone hears "busy" inside the 15 s it waits. Before, the statement ran its full 5 s.
+      await runWithRequestAcquireBudget(
+        3000,
+        async () => {
+          const startedRead = Date.now();
+          await assert.rejects(
+            runner.run(async (tx) => {
+              await tx.query("SELECT 1", []);
+              await tx.query("SELECT pg_sleep(4)", []);
+            }),
+            (error) => {
+              assert.equal(error.code, "TENANT_DATABASE_TRANSACTION_FAILED");
+              assert.equal(error.diagnostic?.sqlState, "57014");
+              return true;
+            },
+          );
+          const cut = Date.now() - startedRead;
+          assert.ok(cut < 2500, "the read worked " + cut + " ms past a 1.5 s answer time");
+          // The answer time is spent: no connection is taken, nothing is sent.
+          await assert.rejects(
+            runner.run((tx) => tx.query("SELECT 1", [])),
+            (error) => {
+              assert.equal(error.code, "TENANT_DATABASE_ACQUIRE_FAILED");
+              return true;
+            },
+          );
+        },
+        { answerWithinMs: 1500 },
+      );
+      // A command has no answer time: the same statement runs to its end.
+      await runWithRequestAcquireBudget(3000, () =>
+        runner.run((tx) => tx.query("SELECT pg_sleep(2)", [])),
+      );
     } finally {
       held?.release();
       await pool.end().catch(() => undefined);
