@@ -684,10 +684,12 @@
 .orders-page .order-panel__facts dd {
   margin: 0;
 }
-.orders-page .order-panel__page-link {
-  justify-self: start;
-  font-size: 14px;
-  font-weight: 500;
+/* v15 batch 9: the opened order's own page is reached from the panel's head, under the title, where
+   the sticky next step at the panel's foot never covers it. */
+.orders-page .order-panel__head .order-panel__page-link {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 4px;
 }
 
 /* Paging. */
@@ -1406,7 +1408,7 @@
 }
 
 /* Live check 2026-10-26: the opened order reads as a few groups, 24px apart — who and what,
-   Payment with its links, Record with the full page — then the next step. */
+   Payment with its links, Record — then the next step (the full page is in the head, v15 batch 9). */
 .orders-page .order-workbench-detail > * {
   order: 4;
 }
@@ -1432,10 +1434,6 @@
 }
 .orders-page .order-workbench-detail > .order-panel__section:has(.order-panel__facts) {
   order: 8;
-}
-.orders-page .order-workbench-detail > .order-panel__page-link {
-  order: 9;
-  margin-top: calc(-1 * var(--bop-space-4));
 }
 .orders-page .order-workbench-detail > .order-panel__next {
   order: 10;
@@ -1478,9 +1476,7 @@
 .orders-page .order-workbench-detail :is(.order-panel__section, .order-round, .order-lines) h3 {
   margin: 0 0 8px;
 }
-.orders-page
-  .order-workbench-detail
-  > :is(.order-payment-links, .order-refund-howto, .order-panel__page-link) {
+.orders-page .order-workbench-detail > :is(.order-payment-links, .order-refund-howto) {
   margin-top: -16px;
 }
 

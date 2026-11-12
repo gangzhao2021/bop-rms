@@ -127,7 +127,9 @@ test("@production a manager discounts a started dish from the Tables page; only 
     canRequestAcceptance: false,
     // The table's bill (Payment's figure): 22.60, then 1.70 off and the bill's tax rounded once
     // (DEC-TAX-WHOLE-RECEIPT: 18.50 × 13% = 2.405 → 2.41, the rounds charged 2.40): 20.91.
-    tableBill: { totalMinor: discounted ? "2091" : "2260", paid: null },
+    // v15 batch 9: on the order's detail, that rounding is said under the comps (its Total stays
+    // as ordered); the order list has no detail, so no rounding.
+    tableBill: discounted ? { totalMinor: "2091", paid: null } : { totalMinor: "2260", paid: null },
     currentPhase: "InProgress",
     currentVersion: 3,
     unfulfillable: null,
@@ -144,7 +146,9 @@ test("@production a manager discounts a started dish from the Tables page; only 
       json: {
         screenId: "OPS-ORDER-DETAIL",
         pickupContact: null,
-        order: order(),
+        order: discounted
+          ? { ...order(), tableBill: { totalMinor: "2091", paid: null, taxRoundingMinor: "1" } }
+          : order(),
         lines: {
           items: [line(1, "Synthetic mapo tofu"), line(2, "Synthetic boiled fish")],
           totals: {
@@ -152,9 +156,10 @@ test("@production a manager discounts a started dish from the Tables page; only 
             discount: money("0"),
             tax: money("260"),
             fee: money("0"),
-            // The Order's share of the bill's tax rounding is in its total (before comps).
-            taxRounding: money(discounted ? "1" : "0"),
-            total: money(discounted ? "2261" : "2260"),
+            // v15 batch 9: an Order with comps keeps its Total as ordered; the bill's rounding,
+            // worked out after the comps, is under them (tableBill.taxRoundingMinor).
+            taxRounding: money("0"),
+            total: money("2260"),
           },
         },
       },
@@ -243,10 +248,28 @@ test("@production a manager discounts a started dish from the Tables page; only 
   await expect(details.getByRole("list", { name: "Comps and discounts" })).toContainText(
     "Whole bill to pay after comps$20.91",
   );
-  // DEC-TAX-WHOLE-RECEIPT: the table's order shows the bill's tax rounding on its own line, and
-  // its Total less the comp is what is left to pay (the figure checkout takes).
+  // v15 batch 9 (DEC-TAX-WHOLE-RECEIPT): the order's Total stays what was ordered ($22.60, as
+  // the guest's "Total ordered"); the cent the bill's tax rounds by after the discount is listed
+  // under the comps, so ordered − taken off + rounding = to pay: 22.60 − 1.70 + 0.01 = 20.91.
   const tableOrder = details.getByRole("region", { name: "This table's order" });
-  await expect(tableOrder).toContainText("Tax rounding$0.01");
-  await expect(tableOrder).toContainText("Total$22.61");
+  const comps = details.getByRole("list", { name: "Comps and discounts" });
+  await expect(comps.getByRole("listitem")).toHaveText([
+    "Synthetic boiled fish · 15% off−$1.70",
+    "Tax rounding$0.01",
+    "Whole bill to pay after comps$20.91",
+  ]);
+  await expect(tableOrder.locator(".order-lines-totals").first()).toContainText("Total$22.60");
+  await expect(tableOrder.locator(".order-lines-totals").first()).not.toContainText("Tax rounding");
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await expect(comps).toBeVisible();
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.screenshot({
+      path: `test-results/dining-item-comp-rounding-${width}.png`,
+      fullPage: true,
+    });
+  }
   await expectNoInternalText(page, ["Temporarily unavailable"]);
 });

@@ -1007,6 +1007,19 @@ function CompRecordsNote({
           </span>
         </li>
       ))}
+      {/* v15 batch 9 (DEC-TAX-WHOLE-RECEIPT): the bill's tax is worked out once after the comps;
+          the cent it rounds by is listed here, so the order's Total stays as ordered. */}
+      {detail.order.tableBill?.taxRoundingMinor !== undefined ? (
+        <li>
+          <span>{t("Tax rounding")}</span>{" "}
+          <span>
+            {orderMoney({
+              amountMinor: detail.order.tableBill.taxRoundingMinor,
+              currencyCode: "CAD",
+            })}
+          </span>
+        </li>
+      ) : null}
     </ul>
   );
 }
@@ -2391,9 +2404,11 @@ function OrderDetailBody({
   record = null,
   detail,
   action,
+  pageLink,
 }: {
   readonly order: QueuedOrder;
   readonly single: boolean;
+  readonly pageLink?: ((order: QueuedOrder) => React.ReactNode) | undefined;
   readonly headingId: string;
   readonly onClose?: (() => void) | undefined;
   readonly now?: number | undefined;
@@ -2635,6 +2650,7 @@ function OrderDetailBody({
                 {orderWhen(order.submittedAt, timeZone, today)}
               </time>
             </p>
+            {pageLink?.(order)}
           </div>
           <button type="button" className="order-panel__close" onClick={onClose}>
             <span aria-hidden="true">×</span>
@@ -2826,6 +2842,7 @@ export function CurrentOrderQueueRows({
   view,
   visibleOrderReferences,
   action,
+  pageLink,
   detail,
   timeZone,
   now,
@@ -2874,6 +2891,11 @@ export function CurrentOrderQueueRows({
     order: CurrentOrderQueue["items"][number],
     batch: CurrentOrderQueue["items"][number]["batches"][number],
   ) => React.ReactNode;
+  /**
+   * v15 batch 9: the opened order's way to its own page, in the panel's head under the title, so
+   * the sticky next step at the panel's foot never covers it.
+   */
+  readonly pageLink?: (order: CurrentOrderQueue["items"][number]) => React.ReactNode;
   /** Orders v2: what sits above and below the list in its column (notices, filters, paging). */
   readonly before?: React.ReactNode;
   readonly after?: React.ReactNode;
@@ -3149,6 +3171,7 @@ export function CurrentOrderQueueRows({
             record={records?.get(selected.orderReference) ?? null}
             detail={detail}
             action={action}
+            pageLink={pageLink}
           />
         </aside>
       )}
@@ -4144,6 +4167,15 @@ export function CurrentOrderQueuePage({
         {state.kind === "Ready" ? (
           <CurrentOrderQueueRows
             single={single}
+            pageLink={(order) => (
+              <Link
+                className="order-panel__page-link"
+                to={`/operations/orders/${order.orderReference}`}
+                state={{ ordersListSearch: listSearch }}
+              >
+                {t("Open full page")}
+              </Link>
+            )}
             view={sortedView ?? state.view}
             fresh={fresh}
             timeZone={timeZone}
@@ -4542,13 +4574,6 @@ export function CurrentOrderQueuePage({
                           onChecked: () => reload(after),
                         }}
                       />
-                      <Link
-                        className="order-panel__page-link"
-                        to={`/operations/orders/${order.orderReference}`}
-                        state={{ ordersListSearch: listSearch }}
-                      >
-                        {t("Open full page")}
-                      </Link>
                     </>
                   ) : null
                 }

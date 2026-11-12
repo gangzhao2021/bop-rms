@@ -2378,13 +2378,22 @@ async function journey(journeyEnding) {
             },
           });
           const mergedBill = await bill();
-          // The rounding is real here, and the bill's own allocation would put it on T-M's round.
+          // The rounding is real here. v15 batch 9 (rule version 2): it is on the host's rounds
+          // (the Order holding the bill), never on T-M's, so T-M's round — and any part made of it —
+          // is what T-M's Order says it ordered (version 1 put it on T-M's round).
           assert.notEqual(mergedBill.taxRoundingMinor, "0");
-          assert.notEqual(
+          assert.equal(
             mergedBill.rounds
               .filter((round) => round.orderReference === mOrder)
               .reduce((sum, round) => sum + BigInt(round.taxRoundingMinor), 0n),
             0n,
+          );
+          assert.equal(
+            mergedBill.rounds
+              .filter((round) => round.orderReference === orderReference)
+              .reduce((sum, round) => sum + BigInt(round.taxRoundingMinor), 0n)
+              .toString(),
+            mergedBill.taxRoundingMinor,
           );
           const details = [];
           for (const reference of [orderReference, mOrder])
@@ -2448,6 +2457,68 @@ async function journey(journeyEnding) {
           // ── The table checks out and splits "each pays own rounds": T-M's phone pays its own
           // round on the phone (the guests' real payment entry), staff take the rest in cash.
           assert.equal((await closing(server, "Begin")).phase, "Closing");
+          // v15 batch 9: a split belongs to its checkout. Split, then Cancel checkout (the guests
+          // want more): the split ends with it — recorded as a new "pay whole" plan under the
+          // staff member's name with its reason, the split kept on record — and the next
+          // checkout starts from the whole bill, never the old parts and "to go".
+          const early = await bill();
+          const earlyPhones = [...new Set(early.rounds.map((round) => round.orderedBy ?? 0))].sort(
+            (a, b) => a - b,
+          );
+          const earlySplit = await createMerchantDiningTableSplit({
+            persistence: persistenceOf(server),
+            authentication: server.authentication,
+            nextReference: fresh,
+          })({
+            ...as(server),
+            command: {
+              operationReference: fresh(),
+              diningSessionReference: sessionReference,
+              mode: "ByRounds",
+              people: null,
+              rounds: early.rounds.map((round) => ({
+                roundNumber: round.roundNumber,
+                partNumber: earlyPhones.indexOf(round.orderedBy ?? 0) + 1,
+              })),
+            },
+          });
+          assert.equal(earlySplit.status, "Recorded");
+          assert.ok(earlySplit.bill.split.parts.length >= 2);
+          assert.equal((await closing(server, "Cancel")).phase, "Active");
+          const afterCancel = await bill();
+          assert.equal(afterCancel.split, null);
+          assert.equal(afterCancel.consistent, true);
+          assert.deepEqual(
+            await rows(
+              "SELECT mode,part_count::int parts,bill_minor::text bill,actor_id::text actor FROM rms_payment.dining_table_split_plan WHERE order_id=$1 ORDER BY plan_version",
+              [orderReference],
+            ),
+            [
+              {
+                mode: "ByRounds",
+                parts: earlySplit.bill.split.parts.length,
+                bill: early.owed.totalMinor,
+                actor: id(0x700),
+              },
+              {
+                mode: "Whole",
+                parts: 0,
+                bill: early.owed.totalMinor,
+                actor: id(0x700),
+              },
+            ],
+          );
+          assert.deepEqual(
+            await rows(
+              "SELECT reason_code FROM platform_audit.audit_record WHERE action_code='PAYMENT_DINING_TABLE_SPLIT_PLANNED' AND target_id=$1 ORDER BY occurred_at,reason_code",
+              [orderReference],
+            ),
+            [{ reason_code: "SPLIT_BILL" }, { reason_code: "CHECKOUT_CANCELLED" }],
+          );
+          assert.equal((await closing(server, "Begin")).phase, "Closing");
+          const restarted = await bill();
+          assert.equal(restarted.split, null);
+          assert.equal(restarted.owed.totalMinor, early.owed.totalMinor);
           // WP-2423 (v15 fabf0261): a merged bill's rounds come from both Orders, and the last
           // round sent in the system may be the merged table's. TEST-only seed of time: the host's
           // second round was sent a second after its first, 38 minutes ago (append-only; moved
@@ -2519,6 +2590,24 @@ async function journey(journeyEnding) {
             part.roundNumbers.includes(mRoundNumber),
           );
           assert.deepEqual(mPart.roundNumbers, [mRoundNumber]);
+          // v15 batch 9 (original finding L5): T-M's part is what T-M's Order (Orders, Tables)
+          // says it owes — its dishes less the discount on them — and the host's part holds the
+          // bill's tax rounding, as the host's Order does: one figure per table everywhere.
+          const mComps = mergedBill.rounds
+            .filter((round) => round.orderReference === mOrder)
+            .flatMap((round) => round.items)
+            .reduce((sum, item) => sum + BigInt(item.reduction?.amountMinor ?? "0"), 0n);
+          assert.equal(
+            mPart.amountMinor,
+            (BigInt(details[1].lines.totals.total.amountMinor) - mComps).toString(),
+          );
+          assert.equal(
+            split.bill.split.parts
+              .filter((part) => part.partNumber !== mPart.partNumber)
+              .reduce((sum, part) => sum + BigInt(part.amountMinor), 0n)
+              .toString(),
+            details[0].lines.totals.total.amountMinor,
+          );
           const intents = new Map();
           const answer = (request, intent) => ({
             kind: "Snapshot",
@@ -2596,6 +2685,13 @@ async function journey(journeyEnding) {
             [paid.split.paidParts, paid.split.remainingMinor],
             [split.bill.split.parts.length, "0"],
           );
+          // The bill's tax rounding as recorded before the payments: rule version 2, every line on
+          // the host's Order (append-only; the reports and receipts read this version).
+          const recordedRounding = await rows(
+            "SELECT DISTINCT a.rule_version::int v,l.order_id::text o FROM rms_ordering.order_tax_rounding_adjustment a JOIN rms_ordering.order_tax_rounding_adjustment_line l ON l.adjustment_id=a.adjustment_id WHERE a.bill_order_id=$1 AND a.version=(SELECT max(version) FROM rms_ordering.order_tax_rounding_adjustment WHERE bill_order_id=$1)",
+            [orderReference],
+          );
+          assert.deepEqual(recordedRounding, [{ v: 2, o: orderReference }]);
           // Each payment line keeps its round's own Order.
           assert.deepEqual(
             (
@@ -4511,7 +4607,7 @@ async function journey(journeyEnding) {
           assert.equal(BigInt(one.taxRoundingMinor), afterOne.tax - afterOne.charged);
           assert.equal(one.consistent, true);
           assert.deepEqual(await recorded(), []);
-          // Planning the split records it (system rule, version 1) when there is something to round.
+          // Planning the split records it (system rule, version 2) when there is something to round.
           const firstSplit = await splitInTwo();
           assert.equal(firstSplit.status, "Recorded");
           const v1 = await recorded();
@@ -4531,8 +4627,10 @@ async function journey(journeyEnding) {
           const resplit = await splitInTwo();
           assert.equal(resplit.status, "Recorded");
           // The Order's detail (the table panel and Orders) reads its share of the bill's tax
-          // rounding, and its Total less the comps (listed apart, "To pay after comps") is what
-          // checkout asks for — before payment (as checkout reads it now) and after.
+          // rounding. v15 batch 9: with comps, that rounding is worked out after them, so the
+          // Order's Total stays as ordered and the rounding is said under the comps; Total less
+          // the comps plus that rounding ("To pay after comps") is what checkout asks for —
+          // before payment (as checkout reads it now) and after.
           const detailAgreesWithCheckout = async (expectedOwedMinor) => {
             const detail = await createPersistentMerchantOrderQueue({
               persistence: persistenceOf(server),
@@ -4543,9 +4641,16 @@ async function journey(journeyEnding) {
               .flatMap((batch) => batch.compedItems)
               .reduce((sum, item) => sum + BigInt(item.amountMinor), 0n);
             assert.ok(comps > 0n);
-            assert.equal(detail.lines.totals.taxRounding.amountMinor, "1");
+            assert.equal(detail.lines.totals.taxRounding.amountMinor, "0");
             assert.equal(
-              (BigInt(detail.lines.totals.total.amountMinor) - comps).toString(),
+              detail.lines.totals.total.amountMinor,
+              detail.lines.items
+                .reduce((sum, line) => sum + BigInt(line.total.amountMinor), 0n)
+                .toString(),
+            );
+            assert.equal(detail.items[0].tableBill.taxRoundingMinor, "1");
+            assert.equal(
+              (BigInt(detail.lines.totals.total.amountMinor) - comps + 1n).toString(),
               expectedOwedMinor,
             );
             return detail;
@@ -4556,7 +4661,7 @@ async function journey(journeyEnding) {
           const last = versions.at(-1);
           assert.deepEqual(
             [last.version, last.supersedes, last.rule_code, last.rule_version, last.total],
-            [versions.length, versions.length > 1, "DEC_TAX_WHOLE_RECEIPT", 1, "1"],
+            [versions.length, versions.length > 1, "DEC_TAX_WHOLE_RECEIPT", 2, "1"],
           );
           assert.equal(last.lines.length, 1);
           // The bill charges exactly the whole bill's tax: the rounds' tax (with the rounding)
@@ -4874,8 +4979,13 @@ async function journey(journeyEnding) {
             .flatMap((batch) => batch.compedItems)
             .reduce((sum, item) => sum + BigInt(item.amountMinor), 0n);
           assert.equal(detail.items[0].tableBill.totalMinor, owed);
-          assert.equal(detail.lines.totals.taxRounding.amountMinor, "1");
-          assert.equal((BigInt(detail.lines.totals.total.amountMinor) - comps).toString(), owed);
+          // v15 batch 9: the Total stays as ordered; the rounding (after the comps) is under them.
+          assert.equal(detail.lines.totals.taxRounding.amountMinor, "0");
+          assert.equal(detail.items[0].tableBill.taxRoundingMinor, "1");
+          assert.equal(
+            (BigInt(detail.lines.totals.total.amountMinor) - comps + 1n).toString(),
+            owed,
+          );
           // The guest's own phone bill too.
           await pageFacts();
           // Paid on the card machine: it records the rounding (version 1, 1¢) and takes exactly it.
@@ -4904,9 +5014,10 @@ async function journey(journeyEnding) {
             quoteVersion: 1,
             acceptanceConfigured: true,
           })({ sessionCookie: server.sessionCookie, afterOrderReference: null, orderReference });
-          assert.equal(paidDetail.lines.totals.taxRounding.amountMinor, "1");
+          assert.equal(paidDetail.lines.totals.taxRounding.amountMinor, "0");
+          assert.equal(paidDetail.items[0].tableBill.taxRoundingMinor, "1");
           assert.equal(
-            (BigInt(paidDetail.lines.totals.total.amountMinor) - comps).toString(),
+            (BigInt(paidDetail.lines.totals.total.amountMinor) - comps + 1n).toString(),
             owed,
           );
         }

@@ -202,6 +202,16 @@ export function TableOrderRounds({
                 <span>−{orderMoney({ amountMinor: comp.amountMinor, currencyCode: "CAD" })}</span>
               </li>
             ))}
+            {/* v15 batch 9 (DEC-TAX-WHOLE-RECEIPT): the tax is worked out once on the bill after
+                the comps; the cent it rounds by is here, so the order's Total stays as ordered. */}
+            {bill?.taxRoundingMinor !== undefined ? (
+              <li className="table-order-rounds__rounding">
+                <span>{t("Tax rounding")}</span>
+                <span>
+                  {orderMoney({ amountMinor: bill.taxRoundingMinor, currencyCode: "CAD" })}
+                </span>
+              </li>
+            ) : null}
             {/* v15 batch 7: this is the whole table's bill (every round, and the tables merged
                 into it), never one round's; a table merged away pays on the other table's bill. */}
             {bill !== null && bill.paid === null && bill.mergedInto === undefined ? (

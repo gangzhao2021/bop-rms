@@ -678,6 +678,12 @@ export function createPersistentMerchantOrderQueue(options: {
               /** Owner 2026-11-04 walkthrough: the guests left; the amount written off. */
               writtenOffMinor?: string;
               /**
+               * v15 batch 9 (DEC-TAX-WHOLE-RECEIPT): on the detail of an Order with comps, the
+               * bill's tax rounding worked out after them (its Total leaves it out; the bill to pay
+               * or paid has it).
+               */
+              taxRoundingMinor?: string;
+              /**
                * v15 M176: this table was merged into another; its dishes are on that table's bill
                * (and in its amount), paid there or still to be.
                */
@@ -1424,6 +1430,7 @@ export function createPersistentMerchantOrderQueue(options: {
                           };
                         }),
                     })),
+                    { carrierOrderReference: order },
                   ).lines.reduce((sum, line) => sum + line.amountMinor, 0n);
                 tableBills.set(order, {
                   totalMinor: owed.toString(),
@@ -1533,7 +1540,10 @@ export function createPersistentMerchantOrderQueue(options: {
           // WP-2423 DEC-TAX-WHOLE-RECEIPT: a pay-at-end table's tax is rounded once over its bill;
           // this Order's share of that rounding is part of its total (as checkout charges it). The
           // lines' total is before comps, so Total less the comps is what checkout asks for.
-          const taxRoundingMinor =
+          // v15 batch 9: an Order with comps or discounts has its rounding worked out after them,
+          // so it is not part of what was ordered: Total stays as ordered, and the rounding is
+          // shown under the comps, before the bill to pay (as the guest's page shows it).
+          const roundingShareMinor =
             lines === null || only === undefined || scoped === null || tenantReference === null
               ? 0n
               : await readOrderTaxRoundingShare(
@@ -1545,6 +1555,13 @@ export function createPersistentMerchantOrderQueue(options: {
                     authorize: async () => stillAllowed(),
                   },
                 );
+          const comps =
+            only !== undefined &&
+            only.batches.some(
+              (batch) => (comped.get(String(batch.orderBatchReference)) ?? []).length > 0,
+            );
+          const taxRoundingMinor = comps ? 0n : roundingShareMinor;
+          const roundingAfterComps = comps ? roundingShareMinor : 0n;
           const detailLines =
             lines === null || only === undefined
               ? lines
@@ -2096,7 +2113,13 @@ export function createPersistentMerchantOrderQueue(options: {
                   // WP-2423 (M23): a dish in it sold out or came off the menu since it was ordered.
                   ...(soldOutNow.has(item.orderReference) ? { soldOutNow: true as const } : {}),
                   // DEC-DINE-IN-PAY-LATER: on the table's bill (owed), or what the table paid.
-                  tableBill: tableBills.get(item.orderReference) ?? null,
+                  tableBill: ((bill) =>
+                    bill !== undefined &&
+                    roundingAfterComps !== 0n &&
+                    item.orderReference === only?.orderReference &&
+                    bill.mergedInto === undefined
+                      ? { ...bill, taxRoundingMinor: roundingAfterComps.toString() }
+                      : (bill ?? null))(tableBills.get(item.orderReference)),
                   ...(item.diningSessionReference !== null &&
                   guestStartedSessions.has(item.diningSessionReference)
                     ? { startedByGuest: true as const }
