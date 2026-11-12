@@ -169,7 +169,7 @@ test.describe("@production CUST-ENTRY table not open", () => {
         main.getByRole("heading", { name: "PH 1 (TEST) at Synthetic Noodle Bar isn’t open yet" }),
       ).toBeVisible();
       await expect(main).toContainText(
-        "Not sitting at PH 1 (TEST)? Tell staff, so they can give you this table’s code.",
+        "Not sitting at PH 1 (TEST)? Tell staff, so they can give you the code for your table.",
       );
       await expectNoInternalText(page);
       await page.screenshot({

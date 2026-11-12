@@ -85,7 +85,7 @@ describe("WP-2423 guest-table-open-and-busy-reads: which table a not-open code i
     const html = render({ kind: "TableNotOpen", context: table, tableLabel: "3" });
     expect(html).toContain(`Table 3 at ${context.storeDisplayName} isn’t open yet`);
     expect(html).toContain(
-      "Not sitting at table 3? Tell staff, so they can give you this table’s code.",
+      "Not sitting at table 3? Tell staff, so they can give you the code for your table.",
     );
     // A table the owner named is said as written, never "Table Patio".
     const named = render({ kind: "TableNotOpen", context: table, tableLabel: "PH 1 (TEST)" });
@@ -97,7 +97,7 @@ describe("WP-2423 guest-table-open-and-busy-reads: which table a not-open code i
       "{storeDisplayName} 的桌号 {table} 还没开台",
     );
     expect(
-      zh["Not sitting at table {table}? Tell staff, so they can give you this table’s code."],
+      zh["Not sitting at table {table}? Tell staff, so they can give you the code for your table."],
     ).toBe("您坐的不是桌号 {table}？请告诉店员，换成您这桌的二维码。");
   });
 });

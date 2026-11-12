@@ -27,7 +27,7 @@ card was the wrong one.
   the Dining table under the pilot API role, and no new grant is needed. Only a Published table's
   name is sent, and never an id.
 - The page now says "Table 3 at <Store> isn't open yet" (zh-Hans: "<Store> 的桌号 3 还没开台").
-  It adds "Not sitting at table 3? Tell staff, so they can give you this table's code." (zh-Hans:
+  It adds "Not sitting at table 3? Tell staff, so they can give you the code for your table." (zh-Hans:
   "您坐的不是桌号 3？请告诉店员，换成您这桌的二维码。").
 - A table name that can't be read, or can't be shown safely, is left out. The answer stays "not open
   yet" as before. Phones keep checking again by themselves, as before.

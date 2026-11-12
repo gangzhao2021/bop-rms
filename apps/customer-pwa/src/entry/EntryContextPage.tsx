@@ -980,7 +980,7 @@ function EntryState({
             {state.tableLabel === undefined ? null : (
               <p className="entry-context">
                 {t(
-                  "Not sitting at table {table}? Tell staff, so they can give you this table’s code.",
+                  "Not sitting at table {table}? Tell staff, so they can give you the code for your table.",
                   {
                     table: saidTable(state.tableLabel),
                   },

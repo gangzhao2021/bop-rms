@@ -383,7 +383,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "This table at {storeDisplayName} isn’t open yet": "{storeDisplayName} 的这桌还没开台",
   "Table {table} at {storeDisplayName} isn’t open yet":
     "{storeDisplayName} 的桌号 {table} 还没开台",
-  "Not sitting at table {table}? Tell staff, so they can give you this table’s code.":
+  "Not sitting at table {table}? Tell staff, so they can give you the code for your table.":
     "您坐的不是桌号 {table}？请告诉店员，换成您这桌的二维码。",
   "Ask staff to seat you. This page continues by itself once the table is open.":
     "请让店员带位，开台后这里会自动继续。",
