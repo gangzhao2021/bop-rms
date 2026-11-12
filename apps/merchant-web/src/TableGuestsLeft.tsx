@@ -323,6 +323,12 @@ export function TableGuestsLeft({
   const [confirmed, setConfirmed] = useState(false);
   const [run, setRun] = useState<Run>(null);
   const [previews, setPreviews] = useState<ReadonlyMap<string, string | null>>(new Map());
+  /**
+   * v15 staff-round-speed: how far the close-out has got (rounds closed out of those it started
+   * with). The rounds are closed out one at a time, so staff see each one go, and leaving the
+   * page meanwhile is warned against: a page closed mid-way stops the rest.
+   */
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const operations = useRef(new Map<string, string>());
   const onPlanRef = useRef(onPlan);
   onPlanRef.current = onPlan;
@@ -358,6 +364,17 @@ export function TableGuestsLeft({
       });
     return () => controller.abort();
   }, [orderReference, diningSessionReference, csrf, fetcher, attempt, reload]);
+  // v15 staff-round-speed: closing the page mid-way would stop the rounds not yet closed out.
+  const running = run === "Running";
+  useEffect(() => {
+    if (!running) return;
+    const warn = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [running]);
 
   if (load.kind === "Loading")
     return <p role="status">{t("Checking which rounds are still open…")}</p>;
@@ -414,6 +431,9 @@ export function TableGuestsLeft({
     setRun("Running");
     const client = createTableClosePlanClient(fetcher);
     let current = plan;
+    const total = current.rounds.filter(resolvesOnConfirm).length;
+    let done = 0;
+    setProgress({ done, total });
     // One round at a time, from the plan as it is now (each cancellation moves the Order version).
     for (let step = 0; step < 50; step += 1) {
       const round = current.rounds.find(resolvesOnConfirm);
@@ -426,6 +446,7 @@ export function TableGuestsLeft({
       }
       const outcome = await client.resolve(current, round, operation, csrf);
       if (outcome === "Unknown" || outcome === "FullSignInRequired") {
+        setProgress(null);
         setRun(outcome);
         // Show what is actually still open (rounds closed out before the failure are gone); the
         // same operation is kept for this round, so trying again never repeats it. The table
@@ -435,18 +456,30 @@ export function TableGuestsLeft({
       }
       operations.current.delete(key);
       if (outcome === "Denied" || outcome === "Refused") {
+        setProgress(null);
         setRun(outcome);
         setConfirmed(false);
         setReload((value) => value + 1);
         onResolved();
         return;
       }
+      done += 1;
+      setProgress({ done, total: Math.max(total, done) });
       try {
         current = await client.load({ orderReference, diningSessionReference }, csrf);
+        // The list shows what is still open as each round goes.
+        setLoad({ kind: "Ready", plan: current });
       } catch {
-        break;
+        // v15 staff-round-speed: the table could not be read after a round was closed out, so
+        // whether the rest went is unknown: said so, and Try again goes on with what is left
+        // (never silently stopping with rounds still open).
+        setProgress(null);
+        setRun("Unknown");
+        setReload((value) => value + 1);
+        return;
       }
     }
+    setProgress(null);
     setRun(null);
     setConfirmed(false);
     setReload((value) => value + 1);
@@ -503,12 +536,27 @@ export function TableGuestsLeft({
             onClick={() => void confirm()}
           >
             {run === "Running"
-              ? t("Closing out the rounds…")
+              ? progress !== null && progress.total > 1
+                ? t("Closing out round {current} of {total}…", {
+                    current: String(Math.min(progress.done + 1, progress.total)),
+                    total: String(progress.total),
+                  })
+                : t("Closing out the rounds…")
               : run === "Unknown" || run === "FullSignInRequired"
                 ? t("Try again")
                 : closeOutButtonText(actionable)}
           </button>
         </>
+      ) : null}
+      {run === "Running" ? (
+        <p role="status">
+          {progress !== null && progress.done > 0
+            ? t(
+                "{done} of {total} rounds closed out. Stay on this page until every round is closed out.",
+                { done: String(progress.done), total: String(progress.total) },
+              )
+            : t("Stay on this page until every round is closed out.")}
+        </p>
       ) : null}
       {run === "FullSignInRequired" ? <FullSignInPrompt csrf={csrf} fetcher={fetcher} /> : null}
       {run === "Unknown" ? (

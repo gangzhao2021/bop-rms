@@ -521,3 +521,107 @@ test("@production v15 2026-11-06: a reply from an older server without the kitch
   await expect(guests.getByText(/may already be making it/u)).toHaveCount(0);
   await expect(page.getByText("Couldn't check the table's open rounds. Try again.")).toHaveCount(0);
 });
+
+test("@production v15 staff-round-speed: closing out 3 rounds shows each go, warns before leaving, and never stops silently", async ({
+  page,
+}) => {
+  await floor(page);
+  let resolved = 0;
+  let planReads = 0;
+  const all = [
+    planRound(21, 1, "NotPaid", null),
+    planRound(22, 2, "NotPaid", null),
+    planRound(23, 3, "NotPaid", null),
+  ];
+  await page.route("**/merchant/dining/order-progress", (route) =>
+    route.fulfill({
+      headers,
+      json:
+        resolved < 3
+          ? progress("Submitted", [
+              progressItem(1, 21, 1, "Submitted"),
+              progressItem(2, 22, 2, "Submitted"),
+              progressItem(3, 23, 3, "Submitted"),
+            ])
+          : progress("Cancelled", [
+              progressItem(1, 21, 1, "Cancelled"),
+              progressItem(2, 22, 2, "Cancelled"),
+              progressItem(3, 23, 3, "Cancelled"),
+            ]),
+    }),
+  );
+  let failReadOnce = false;
+  await page.route("**/merchant/dining/table-close-plan", (route) => {
+    planReads += 1;
+    // The table can't be read once just after a round was closed out.
+    if (failReadOnce) {
+      failReadOnce = false;
+      return route.abort("failed");
+    }
+    return route.fulfill({ headers, json: planReply(all.slice(resolved)) });
+  });
+  let release: (() => void) | null = null;
+  const cancels: Record<string, unknown>[] = [];
+  await page.route("**/merchant/orders/cancel-unpaid-round", async (route) => {
+    const body = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>;
+    cancels.push(body);
+    // The second round's cancellation takes a while: staff see where it stands meanwhile.
+    if (cancels.length === 2) await new Promise<void>((resolve) => (release = resolve));
+    resolved += 1;
+    if (resolved === 2) failReadOnce = true;
+    return route.fulfill({
+      headers,
+      json: {
+        status: "Cancelled",
+        orderReference: id(3),
+        orderBatchReference: body.orderBatchReference,
+      },
+    });
+  });
+
+  await page.goto("/operations/dining");
+  await page.getByRole("button", { name: "Select T2", exact: true }).click();
+  const guests = page
+    .getByRole("region", { name: "Close this table" })
+    .getByRole("region", { name: "Guests have left" });
+  await guests.getByRole("checkbox", { name: "The guests at table T2 have left" }).check();
+  await guests.getByRole("button", { name: "Cancel 3 rounds", exact: true }).click();
+  // Round 1 is gone from the list, round 2 is going, and staff are asked to stay.
+  await expect(guests.getByRole("button", { name: "Closing out round 2 of 3…" })).toBeDisabled();
+  await expect(guests.getByRole("status")).toHaveText(
+    "1 of 3 rounds closed out. Stay on this page until every round is closed out.",
+  );
+  await expect(guests).not.toContainText("Round 1:");
+  expect(
+    await page.evaluate(() => {
+      const event = new Event("beforeunload", { cancelable: true });
+      window.dispatchEvent(event);
+      return event.defaultPrevented;
+    }),
+  ).toBe(true);
+  await expectNoInternalText(page, ["Temporarily unavailable"]);
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+  }
+  (release as (() => void) | null)?.();
+  // The table could not be read after round 2: said so, never a silent stop with round 3 open.
+  await expect(guests.getByRole("alert")).toContainText(
+    "We couldn't confirm every round was closed out",
+  );
+  await expect(guests).toContainText("Round 3:");
+  await guests.getByRole("button", { name: "Try again", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Close table T2", exact: true })).toBeVisible();
+  expect(cancels.map((body) => body.orderBatchReference)).toEqual([id(21), id(22), id(23)]);
+  // Nothing to warn about once every round is closed out.
+  expect(
+    await page.evaluate(() => {
+      const event = new Event("beforeunload", { cancelable: true });
+      window.dispatchEvent(event);
+      return event.defaultPrevented;
+    }),
+  ).toBe(false);
+  expect(planReads).toBeGreaterThan(3);
+});
