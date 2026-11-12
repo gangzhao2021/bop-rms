@@ -15,6 +15,7 @@ import {
   acquireTenantConnection,
   tenantConnectionAcquireBudgetMaxMs,
 } from "./connection-acquire.js";
+import { requestAnswerTimeLeftMs } from "./request-acquire-budget.js";
 
 const retryableSqlStates: ReadonlySet<string> = new Set(["55P03", "40001", "40P01"]);
 function sqlState(error: unknown): string {
@@ -61,6 +62,19 @@ function attachFailureDiagnostic(
 const transactionLimits =
   "SET LOCAL statement_timeout = '5s'; SET LOCAL lock_timeout = '2s'; " +
   "SET LOCAL idle_in_transaction_session_timeout = '5s'";
+/** The statement limit `transactionLimits` sets, in milliseconds. */
+const statementLimitMs = 5000;
+/** A read's statement is never given less than this; less could not finish anyway. */
+const statementLimitFloorMs = 50;
+/** The limit is narrowed again only when it would come down by more than this. */
+const statementLimitStepMs = 250;
+/** A read past the time it may work in all: no statement sent, the read answers busy. */
+const answerTimeSpent = Object.freeze({
+  sqlState: "57014",
+  constraint: null,
+  table: null,
+  closed: false,
+});
 
 export interface DatabaseTransaction {
   query(sql: string, values: readonly unknown[]): Promise<unknown>;
@@ -208,6 +222,8 @@ function transactionState(
   let failureDiagnostic: ReturnType<typeof tenantContextDatabaseDiagnostic> | null = null;
   let concurrent = false;
   let pending = 0;
+  // The statement limit in force (`transactionLimits`, narrowed for a read near its answer time).
+  let statementLimit = statementLimitMs;
   const scopeSettings = (scope: TenantDatabaseScope) => ({
     "bop.brand_id": scope.brandId,
     "bop.store_id": typeof scope.storeId === "string" ? scope.storeId : "",
@@ -242,8 +258,25 @@ function transactionState(
         if (planned.kind === "Answer") return planned.result;
         settings = planned.settings;
       }
+      // WP-2423 (guest-table-open-and-busy-reads): a read bounded by its answer time sends no
+      // statement once that time is spent, and none that may run past it (the limit is narrowed
+      // to what is left; a command has no answer time and keeps the 5 s limit).
+      const answerLeft = requestAnswerTimeLeftMs();
+      if (answerLeft !== undefined && answerLeft <= 0) {
+        failed = true;
+        failureDiagnostic ??= answerTimeSpent;
+        throw new TenantContextDatabaseError("TENANT_DATABASE_TRANSACTION_FAILED", answerTimeSpent);
+      }
+      const narrowedMs =
+        answerLeft !== undefined && answerLeft < statementLimit - statementLimitStepMs
+          ? Math.max(statementLimitFloorMs, Math.floor(answerLeft))
+          : null;
       pending += 1;
       try {
+        if (narrowedMs !== null) {
+          await client.query("SELECT set_config('statement_timeout',$1,true)", [`${narrowedMs}ms`]);
+          statementLimit = narrowedMs;
+        }
         // The scope settings written since the last statement that ran, sent only now.
         if (settings !== null) {
           await client.query(settings.sql, [...settings.values]);

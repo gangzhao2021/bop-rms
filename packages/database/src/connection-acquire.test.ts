@@ -290,3 +290,66 @@ describe("WP-2423 outage-reads-and-retry review: the budget never stops a comman
     ]);
   });
 });
+
+describe("WP-2423 guest-table-open-and-busy-reads: a read answers within its time", () => {
+  it("a read takes no further connection once its whole work time is spent, a command still does", async () => {
+    vi.useFakeTimers();
+    try {
+      const ready = client();
+      // Connections come at once (no waiting), but each step's work takes 4 s.
+      const connect = vi.fn(async () => ready);
+      const reads = async () => {
+        const outcomes: string[] = [];
+        for (let step = 0; step < 4; step++) {
+          outcomes.push(
+            await acquireTenantConnection({ connect }, { budgetMs: 10_000 }).then(
+              () => "connection",
+              (error: { code?: string }) => String(error.code),
+            ),
+          );
+          await vi.advanceTimersByTimeAsync(4_000);
+        }
+        return outcomes;
+      };
+      // Before: only waiting counted, so the read went on working to 16 s, past the 15 s the
+      // phone waits. Now after 12 s in all it answers "busy" at once.
+      expect(await runWithRequestAcquireBudget(10_000, reads, { answerWithinMs: 12_000 })).toEqual([
+        "connection",
+        "connection",
+        "connection",
+        "TENANT_DATABASE_ACQUIRE_FAILED",
+      ]);
+      // A command has no answer time: its work is never cut by the clock.
+      expect(await runWithRequestAcquireBudget(10_000, reads)).toEqual([
+        "connection",
+        "connection",
+        "connection",
+        "connection",
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a read's wait for a connection ends when its answer time does, not after its whole budget", async () => {
+    vi.useFakeTimers();
+    try {
+      const connect = vi.fn(() => new Promise<PoolClient>(() => undefined));
+      const outcome = runWithRequestAcquireBudget(
+        10_000,
+        async () => {
+          await vi.advanceTimersByTimeAsync(9_000);
+          const started = Date.now();
+          await acquireTenantConnection({ connect }, { budgetMs: 10_000 }).catch(() => undefined);
+          return Date.now() - started;
+        },
+        { answerWithinMs: 12_000 },
+      );
+      await vi.advanceTimersByTimeAsync(20_000);
+      // 9 s of work done, 3 s of the read's time left: it waits 3 s, not its 10 s budget.
+      expect(await outcome).toBe(3_000);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

@@ -43,6 +43,8 @@ export {
   acquireTenantConnection,
   isTransientConnectionAcquireFailure,
   remainingRequestAcquireBudgetMs,
+  requestAnswerTimeLeftMs,
+  requestReadAnswerMs,
   runWithRequestAcquireBudget,
   tenantConnectionAcquireBudgetMaxMs,
   tenantConnectionRetryBaseMs,

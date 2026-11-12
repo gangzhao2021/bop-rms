@@ -523,3 +523,62 @@ describe("WP-2423 snapshot reads (v15 2026-10-18, 55P03)", () => {
     expect(sent).toContain("SELECT id FROM t WHERE id=$1 FOR UPDATE");
   });
 });
+
+describe("WP-2423 guest-table-open-and-busy-reads: a read's statements end with its answer time", () => {
+  it("narrows the statement limit to what is left and sends nothing once the time is spent", async () => {
+    vi.useFakeTimers();
+    try {
+      const { runWithRequestAcquireBudget } = await import("./connection-acquire.js");
+      const f = fixture();
+      const outcome = runWithRequestAcquireBudget(
+        10_000,
+        () =>
+          f.runner.run(async (t) => {
+            await t.query("SELECT 'first'", []);
+            vi.advanceTimersByTime(9_000);
+            await t.query("SELECT 'second'", []);
+            vi.advanceTimersByTime(3_500);
+            await t.query("SELECT 'third'", []);
+          }),
+        { answerWithinMs: 12_000 },
+      );
+      const error = await outcome.catch((e: unknown) => e);
+      // Busy (the read answers 503 + Retry-After), and the third statement was never sent.
+      expect(error).toMatchObject({
+        code: "TENANT_DATABASE_TRANSACTION_FAILED",
+        diagnostic: { sqlState: "57014" },
+      });
+      const sent = f.query.mock.calls.map(([sql, values]) => [sql, values]);
+      expect(sent.slice(1, 4)).toEqual([
+        ["SELECT 'first'", []],
+        ["SELECT set_config('statement_timeout',$1,true)", ["3000ms"]],
+        ["SELECT 'second'", []],
+      ]);
+      expect(sent.some(([sql]) => sql === "SELECT 'third'")).toBe(false);
+      expect(sent.at(-1)?.[0]).toBe("ROLLBACK");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("leaves a command's statements their 5 s limit however long it runs", async () => {
+    vi.useFakeTimers();
+    try {
+      const { runWithRequestAcquireBudget } = await import("./connection-acquire.js");
+      const f = fixture();
+      await runWithRequestAcquireBudget(10_000, () =>
+        f.runner.run(async (t) => {
+          await t.query("SELECT 'first'", []);
+          vi.advanceTimersByTime(13_000);
+          await t.query("SELECT 'second'", []);
+        }),
+      );
+      const sent = f.query.mock.calls.map(([sql]) => sql);
+      expect(sent).toContain("SELECT 'second'");
+      expect(sent.at(-1)).toBe("COMMIT");
+      expect(sent.some((sql) => sql.includes("set_config('statement_timeout'"))).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

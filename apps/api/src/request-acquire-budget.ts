@@ -9,12 +9,24 @@ import { AsyncLocalStorage } from "node:async_hooks";
  * process-wide store under the same key, because the API does not depend on that package.
  */
 export const requestAcquireBudgetMs = 10_000;
+/**
+ * WP-2423 (guest-table-open-and-busy-reads, v15 2026-11-12): a read (GET/HEAD) does all its
+ * database work within this time, inside the 15 s phones and staff screens wait, or answers
+ * "busy, try again" (packages/database/src/request-acquire-budget.ts, `answerBy`). A command's
+ * work is never cut by the clock.
+ */
+export const requestReadAnswerMs = 12_000;
+/** The methods whose requests only read, so their work is bounded by `requestReadAnswerMs`. */
+export function isReadRequestMethod(method: string | undefined): boolean {
+  return method === "GET" || method === "HEAD";
+}
 /** The shape packages/database/src/request-acquire-budget.ts keeps and spends (shared store). */
 interface RequestAcquireBudget {
   remainingMs: number;
   readonly startedAt: number;
   ended: boolean;
   committedWrite: boolean;
+  readonly answerBy?: number;
 }
 const requestBudgetKey = Symbol.for("bop.database.request-acquire-budget");
 function requestBudgets(): AsyncLocalStorage<RequestAcquireBudget> {
@@ -32,14 +44,21 @@ export function withRequestAcquireBudget<T>(
   options: {
     readonly response?: { once(event: "finish" | "close", listener: () => void): unknown };
     readonly budgetMs?: number;
+    /** A read's whole work time (`requestReadAnswerMs` for GET/HEAD); none for a command. */
+    readonly answerWithinMs?: number;
   } = {},
 ): T {
   if (requestBudgets().getStore() !== undefined) return work();
+  const startedAt = Date.now();
+  const within = options.answerWithinMs;
   const budget: RequestAcquireBudget = {
     remainingMs: options.budgetMs ?? requestAcquireBudgetMs,
-    startedAt: Date.now(),
+    startedAt,
     ended: false,
     committedWrite: false,
+    ...(within !== undefined && Number.isFinite(within) && within >= 0
+      ? { answerBy: startedAt + within }
+      : {}),
   };
   const end = () => {
     budget.ended = true;

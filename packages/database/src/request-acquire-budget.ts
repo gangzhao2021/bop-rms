@@ -30,7 +30,18 @@ interface RequestAcquireBudget {
   readonly startedAt: number;
   ended: boolean;
   committedWrite: boolean;
+  /**
+   * WP-2423 (guest-table-open-and-busy-reads, v15 2026-11-12): for a read (GET/HEAD), the instant
+   * by which its database work must be done. The waiting budget alone let a burst read wait 10 s
+   * and then work 7-13 s more (cart, menu and staff answers 17-23 s, past the 15 s the clients
+   * wait). Past it no further connection is taken and no further statement is sent, so the read
+   * answers "busy, try again" while the phone or screen still listens. A command has none: its
+   * work is never cut by the clock, only its waiting.
+   */
+  readonly answerBy?: number;
 }
+/** How long a read may work in all before it answers busy (inside the clients' 15 s). */
+export const requestReadAnswerMs = 12_000;
 const requestBudgetKey = Symbol.for("bop.database.request-acquire-budget");
 function requestBudgets(): AsyncLocalStorage<RequestAcquireBudget> {
   const holder = globalThis as { [requestBudgetKey]?: AsyncLocalStorage<RequestAcquireBudget> };
@@ -49,16 +60,41 @@ export function boundingRequestAcquireBudget(): RequestAcquireBudget | undefined
     return undefined;
   return budget;
 }
-/** Runs `work` with every connection acquire in it sharing one waiting budget of `budgetMs`. */
-export function runWithRequestAcquireBudget<T>(budgetMs: number, work: () => T): T {
+/**
+ * Runs `work` with every connection acquire in it sharing one waiting budget of `budgetMs`; a read
+ * also passes `answerWithinMs`, the time its database work may take in all (see `answerBy`).
+ */
+export function runWithRequestAcquireBudget<T>(
+  budgetMs: number,
+  work: () => T,
+  options: { readonly answerWithinMs?: number } = {},
+): T {
   if (!Number.isFinite(budgetMs) || budgetMs < 0) return work();
   const outer = boundingRequestAcquireBudget();
   // A nested request (none today) never gets more than what is left of the outer one.
   if (outer !== undefined && outer.remainingMs <= budgetMs) return work();
+  const startedAt = Date.now();
+  const within = options.answerWithinMs;
   return requestBudgets().run(
-    { remainingMs: budgetMs, startedAt: Date.now(), ended: false, committedWrite: false },
+    {
+      remainingMs: budgetMs,
+      startedAt,
+      ended: false,
+      committedWrite: false,
+      ...(within !== undefined && Number.isFinite(within) && within >= 0
+        ? { answerBy: startedAt + within }
+        : {}),
+    },
     work,
   );
+}
+/**
+ * For a read still bounded by its request: the milliseconds left before it must answer (zero or
+ * less once the time is spent). Undefined for a command, outside a request, or once unbounded.
+ */
+export function requestAnswerTimeLeftMs(): number | undefined {
+  const answerBy = boundingRequestAcquireBudget()?.answerBy;
+  return answerBy === undefined ? undefined : answerBy - Date.now();
 }
 /** What is left of the current request's acquire budget, or undefined when none bounds it. */
 export function remainingRequestAcquireBudgetMs(): number | undefined {

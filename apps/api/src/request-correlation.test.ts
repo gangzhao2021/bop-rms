@@ -1,5 +1,5 @@
 import { createServer, type Server } from "node:http";
-import express, { type Request } from "express";
+import express, { type Request, type RequestHandler } from "express";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   correlationForEventEmittedByCommand,
@@ -260,5 +260,31 @@ describe("v15 2026-10-16: a server error logs its safe cause code", () => {
     expect(customerFailureCode({ code: "lower case", diagnostic: { sqlState: "bad" } })).toBe(
       undefined,
     );
+  });
+});
+
+describe("WP-2423 guest-table-open-and-busy-reads: a read's whole work time", () => {
+  it("gives a GET 12 s to answer in all and a command none, beside the shared waiting budget", async () => {
+    const store = () =>
+      (
+        globalThis as {
+          [key: symbol]: { getStore(): { answerBy?: number; startedAt: number } | undefined };
+        }
+      )[Symbol.for("bop.database.request-acquire-budget")]?.getStore();
+    const app = express();
+    app.use(createRequestCorrelationMiddleware());
+    const seen: Record<string, number | null> = {};
+    const record: RequestHandler = (request, response) => {
+      const budget = store();
+      seen[request.method] =
+        budget?.answerBy === undefined ? null : budget.answerBy - budget.startedAt;
+      response.sendStatus(204);
+    };
+    app.get("/read", record);
+    app.post("/read", record);
+    const base = await listen(app);
+    await fetch(`${base}/read`);
+    await fetch(`${base}/read`, { method: "POST" });
+    expect(seen).toEqual({ GET: 12_000, POST: null });
   });
 });

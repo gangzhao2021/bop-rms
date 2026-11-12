@@ -8,7 +8,11 @@ import {
 import type { CoreTelemetry } from "@bop-rms/observability";
 import type { Request, RequestHandler } from "express";
 import { v7 as uuidV7 } from "uuid";
-import { withRequestAcquireBudget } from "./request-acquire-budget.js";
+import {
+  isReadRequestMethod,
+  requestReadAnswerMs,
+  withRequestAcquireBudget,
+} from "./request-acquire-budget.js";
 
 const requestContextKey = Symbol("bop.request-correlation");
 const requestErrorCodeKey = Symbol("bop.request-error-code");
@@ -215,7 +219,11 @@ export function createRequestCorrelationMiddleware({
         if (telemetryOperation === undefined) next();
         else telemetryOperation.run(next);
       },
-      { response },
+      {
+        response,
+        // A read answers within its time or says busy; a command's work is never cut short.
+        ...(isReadRequestMethod(request.method) ? { answerWithinMs: requestReadAnswerMs } : {}),
+      },
     );
   };
 }

@@ -1,5 +1,5 @@
 import type { Pool, PoolClient } from "pg";
-import { boundingRequestAcquireBudget } from "./request-acquire-budget.js";
+import { boundingRequestAcquireBudget, requestAnswerTimeLeftMs } from "./request-acquire-budget.js";
 import { TenantContextDatabaseError, tenantContextDatabaseDiagnostic } from "./tenant-context.js";
 
 /**
@@ -74,6 +74,8 @@ export {
   endRequestAcquireBudget,
   noteRequestCommittedWrite,
   remainingRequestAcquireBudgetMs,
+  requestAnswerTimeLeftMs,
+  requestReadAnswerMs,
   requestAcquireBudgetWatchesWrites,
   runWithRequestAcquireBudget,
 } from "./request-acquire-budget.js";
@@ -98,15 +100,20 @@ export async function acquireTenantConnection(
     policy.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const random = policy.random ?? Math.random;
   const request = boundingRequestAcquireBudget();
+  // A read past the time it may work in all, like one that waited all it may: busy, try again.
+  const answerLeft = request === undefined ? undefined : requestAnswerTimeLeftMs();
   // The request has already waited all it may: busy, try again (nothing has been sent).
-  if (request !== undefined && request.remainingMs <= 0)
+  if (request !== undefined && (request.remainingMs <= 0 || (answerLeft ?? 1) <= 0))
     throw new TenantContextDatabaseError(
       "TENANT_DATABASE_ACQUIRE_FAILED",
       Object.freeze({ sqlState: "08006", constraint: null, table: null, closed: false }),
     );
   const startedAt = now();
   const deadline =
-    startedAt + (request === undefined ? budget : Math.min(budget, request.remainingMs));
+    startedAt +
+    (request === undefined
+      ? budget
+      : Math.min(budget, request.remainingMs, answerLeft ?? Number.POSITIVE_INFINITY));
   try {
     return await acquireUntil(pool, deadline, retries, now, sleep, random);
   } finally {
