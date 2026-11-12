@@ -16,6 +16,7 @@ import {
   listStoreDiningSessionOrders,
 } from "@rms/ordering";
 import { createPostgresDiningTableSettlementStore } from "@rms/payment";
+import { readDiningTableBill } from "./merchant-dining-table-checkout.js";
 import {
   createDiningSettledSessionEvidence,
   createDiningSessionClosingEvidence,
@@ -64,6 +65,8 @@ export async function runDiningSessionClosing(input: {
   readonly observedAt: string;
   readonly providerAccountReference: string;
   readonly environment: "Test" | "Live";
+  /** Who cancels checkout (staff): the split that ends with it is recorded under their name. */
+  readonly actorReference?: string;
   guard(): Promise<boolean>;
   newReference(): string;
   authority(
@@ -250,11 +253,62 @@ export async function runDiningSessionClosing(input: {
     expectedSessionVersion: command.expectedSessionVersion,
     requestedAt: observedAt,
   };
+  const endSplit = async () => {
+    // v15 batch 9: a split belongs to the checkout it was made in. Back to ordering, the guests
+    // may order more or have a dish comped, so the next checkout starts from the whole bill and
+    // staff split it again if the guests want: the table's plan is "pay whole" again (a new,
+    // attributed plan version; the split stays on record). Never "the bill changed, split it
+    // again" with old parts and "to go" at the start of a new checkout.
+    const owner = { brandReference: scope.brandReference, storeReference: scope.storeReference };
+    const order = (
+      await listStoreDiningSessionOrders(tx, owner, [String(command.diningSessionReference)])
+    ).get(String(command.diningSessionReference));
+    if (order === undefined) return;
+    const payments = createPostgresDiningTableSettlementStore({
+      scope: { ...scope, tenantReference: String(scope.tenantReference) },
+      authorize: async (_tx, value) => value.orderReference === order && (await guard()),
+    });
+    const [plan] = await payments.listSplitPlans(tx, [order]);
+    if (plan === undefined || plan.mode === "Whole") return;
+    if (input.actorReference === undefined) return fail();
+    const bill = await readDiningTableBill(tx, scope, {
+      diningSessionReference: String(command.diningSessionReference),
+      observedAt,
+      authorize: guard,
+    });
+    const billMinor = bill.rounds.reduce((sum, round) => sum + BigInt(round.totalMinor), 0n);
+    // A bill with nothing owed has no split to pay (checkout of it takes no payment).
+    if (billMinor <= 0n) return;
+    await payments.recordSplitPlan(tx, {
+      splitPlanReference: input.newReference(),
+      operationReference: input.newReference(),
+      intentDigest:
+        "sha256:" +
+        createHash("sha256")
+          .update(
+            JSON.stringify([
+              "CHECKOUT_CANCELLED",
+              command.operationReference,
+              plan.splitPlanReference,
+            ]),
+          )
+          .digest("hex"),
+      diningSessionReference: String(command.diningSessionReference),
+      orderReference: order,
+      split: { mode: "Whole", billMinor },
+      recordedAt: observedAt,
+      actorReference: input.actorReference,
+      auditReference: input.newReference(),
+      correlationReference: command.operationReference,
+      reasonCode: "CHECKOUT_CANCELLED",
+    });
+  };
   const result = await (command.action === "Begin"
     ? service.begin(request)
     : command.action === "Cancel"
       ? service.cancel(request)
       : service.finalize(request));
+  if (command.action === "Cancel" && result.status === "Applied") await endSplit();
   if (command.action === "Finalize") await input.release(session, result.session.version);
   return Object.freeze({
     status: result.status,

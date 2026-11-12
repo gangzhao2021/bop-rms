@@ -164,6 +164,7 @@ export function createMerchantDiningClosingCommand(options: {
         observedAt,
         providerAccountReference: options.providerAccountReference,
         environment: options.environment,
+        actorReference: String(current.actorReference),
         guard,
         newReference: options.newReference,
         release: async (session, version) => {

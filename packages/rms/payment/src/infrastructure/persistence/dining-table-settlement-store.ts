@@ -1344,11 +1344,17 @@ export function createPostgresDiningTableSettlementStore(options: {
         readonly actorReference: string;
         readonly auditReference: string;
         readonly correlationReference: string;
+        /**
+         * v15 batch 9: why the table is paid whole again, on the audit (absent: staff chose
+         * "All together"). CHECKOUT_CANCELLED: checkout was cancelled, so the split ended with it.
+         */
+        readonly reasonCode?: "CHECKOUT_CANCELLED";
       },
     ) {
       const order = ref(input.orderReference);
       await allowed(tx, order);
       if (!/^sha256:[0-9a-f]{64}$/u.test(input.intentDigest)) return fail();
+      if (input.reasonCode !== undefined && input.split.mode !== "Whole") return fail();
       const bill = minor(String(input.split.billMinor), 1n);
       const parts = input.split.mode === "Whole" ? [] : input.split.parts;
       if (input.split.mode !== "Whole" && (parts.length < 2 || parts.length > 20)) return fail();
@@ -1458,7 +1464,8 @@ export function createPostgresDiningTableSettlementStore(options: {
           billMinor: bill.toString(),
           planVersion: version,
         },
-        reasonCode: input.split.mode === "Whole" ? "PAY_WHOLE_TABLE" : "SPLIT_BILL",
+        reasonCode:
+          input.reasonCode ?? (input.split.mode === "Whole" ? "PAY_WHOLE_TABLE" : "SPLIT_BILL"),
         correlationId: ref(input.correlationReference),
         occurredAt: recordedAt,
         sourceChannel: "MERCHANT_WEB",
