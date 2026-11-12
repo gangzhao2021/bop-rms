@@ -1802,7 +1802,9 @@ it("the real staff round command takes a round from table entry to the card mach
 
       // The paper round was paid on paper during the outage, before it was entered: recorded at
       // that time, as recorded after the outage.
+      const paperPayOperation = reference();
       const paidLater = await pay({
+        operationReference: paperPayOperation,
         orderBatchReference: second.orderBatchReference,
         expectedTotalMinor: second.totalMinor,
         takenAt: earlier,
@@ -1812,8 +1814,28 @@ it("the real staff round command takes a round from table entry to the card mach
         ["Recorded", "735", "RecordedAfterOutage", earlier],
       );
       // DEC-PAPER-SEND-IDEMPOTENT (v15 batch-9 L5): the paper round's send is sent again after a
-      // lost answer, once its payment is recorded: the same round comes back at the amounts its
-      // payment record holds (never "didn't go through"), and nothing new is ordered.
+      // lost answer, once its payment is recorded and the server accepted it with that record
+      // (as the pilot does, WP-2423 D1; the round then no longer waits for payment): the same
+      // round comes back from its payment record, read under this restricted role, at the amounts
+      // it holds and marked paid (never "didn't go through"), and nothing new is ordered.
+      const acceptedWithPayment = await withPaidBatchAcceptance(cardMachinePayment, {
+        accept: await store.acceptanceFor(server),
+        nextReference: reference,
+      })({
+        ...as(server),
+        command: {
+          operationReference: paperPayOperation,
+          orderReference: first.orderReference,
+          orderBatchReference: second.orderBatchReference,
+          expectedTotalMinor: second.totalMinor,
+          slipReference: "AUTH 771204",
+          takenAt: earlier,
+        },
+      });
+      assert.deepEqual(
+        [acceptedWithPayment.status, acceptedWithPayment.acceptance],
+        ["AlreadyRecorded", "Accepted"],
+      );
       const beforeReplay = await counts();
       const replayed = await send(server, {
         operationReference: secondOperation,
@@ -1829,6 +1851,7 @@ it("the real staff round command takes a round from table entry to the card mach
           replayed.totalMinor,
           replayed.payLater,
           replayed.recordedAfterOutage,
+          replayed.paid,
         ],
         [
           "AlreadyPlaced",
@@ -1837,6 +1860,7 @@ it("the real staff round command takes a round from table entry to the card mach
           second.orderNumber,
           "735",
           false,
+          true,
           true,
         ],
       );

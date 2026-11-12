@@ -29,6 +29,7 @@ import { createMerchantProducts } from "../../../apps/api/src/merchant-products.
 import { createMerchantDiningTableQr } from "../../../apps/api/dist/merchant-dining-table-qr.js";
 import { createInternalCredentialLoaders } from "../../../tooling/environment/pilot-credentials.mjs";
 import { createInternalCounterOrder } from "../../../tooling/environment/pilot-counter-order.mjs";
+import { createInternalMerchantAcceptance } from "../../../tooling/environment/pilot-merchant-acceptance.mjs";
 import { composeCustomerDependencies } from "../../../tooling/environment/pilot-customer-composition.mjs";
 import { createInternalCustomerEntry } from "../../../tooling/environment/pilot-customer-entry.mjs";
 import { createInternalDiningCredentialLoaders } from "../../../tooling/environment/pilot-dining-credentials.mjs";
@@ -468,10 +469,23 @@ export async function prepareRealStaffRoundStore({
     return counter;
   };
 
+  /**
+   * The pilot's merchant acceptance for this staff member (WP-2423 D1: the server accepts a round
+   * paid on the card machine with its payment record), as the pilot composes it.
+   */
+  const acceptanceFor = (who) =>
+    createInternalMerchantAcceptance(resources, persistenceOf(who), who.authentication, {
+      loadPickupWorkflow: () => installation.loadWorkflow("Pickup"),
+      loadDiningWorkflow: () => installation.loadWorkflow("DineIn"),
+      expectedDatabaseName: database,
+      providerAccountReference: config.providerAccountReference,
+    });
+
   return {
     ...dishes,
     scope,
     ownerScope,
+    acceptanceFor,
     tenantReference,
     tableReference: table.tableReference,
     stock,
