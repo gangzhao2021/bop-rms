@@ -76,8 +76,17 @@ and then answers busy. That leaves 3 s for the answer to reach the phone or scre
 - **A command (POST/PUT/PATCH/DELETE) has no answer time.** As before, only its waiting is bounded,
   and only until its first committed write. The clock never cuts its work, so it never stops half
   done.
-- Staff list reads that take longer than 12 s already fail the 15 s client budget. This makes them
-  say "busy" instead of running on after the screen gave up.
+- Staff list reads wait 15 s on their screens, like phones, so 12 s fits them too. A read that
+  takes longer used to run on after the screen gave up. Now it says "busy" while the screen still
+  listens.
+- **Some staff screens wait longer, and their reads get their own time.** Reports, Tonight and the
+  CSV export wait 30 s, because a month reads every payment and refund in it. The single-person
+  approval, step-up and refund approval screens wait 20 s. These reads get their screen's wait less
+  the same 3 s: 27 s for `/merchant/reports` and everything under it, and 17 s for
+  `/merchant/organization/sole-operator`, `/merchant/identity/step-up` and
+  `/merchant/payments/refunds/approvals` (`requestReadAnswerWithinMs`). Without this, a long report
+  on a quiet database would always answer busy, and every retry would fail the same way. A screen
+  that changes its wait must change this list too.
 
 ## 5. The guest's cart read showed 503 while staff moved or merged the guest's table
 

@@ -24,8 +24,7 @@ import {
 } from "../../apps/api/dist/merchant-store-routing.js";
 import { staffContentLocaleMiddleware } from "../../apps/api/dist/staff-content-locale.js";
 import {
-  isReadRequestMethod,
-  requestReadAnswerMs,
+  requestReadAnswerWithinMs,
   withRequestAcquireBudget,
 } from "../../apps/api/dist/request-acquire-budget.js";
 import { createPilotProductImages } from "../../apps/api/dist/product-image-route.js";
@@ -261,11 +260,12 @@ export async function startInternalCustomerServer({
   app.disable("x-powered-by");
   // WP-2423 (outage-reads-and-retry): staff and guest requests answered here share one
   // connection waiting budget per request, so a rush answers "busy, try again" within 15 s.
-  // A read also does all its work within 12 s or says busy (guest-table-open-and-busy-reads).
+  // A read also does all its work within 12 s, or its screen's longer wait less 3 s for the
+  // reports and approval reads, or says busy (guest-table-open-and-busy-reads).
   app.use((req, res, next) =>
     withRequestAcquireBudget(next, {
       response: res,
-      ...(isReadRequestMethod(req.method) ? { answerWithinMs: requestReadAnswerMs } : {}),
+      answerWithinMs: requestReadAnswerWithinMs(req.method, req.originalUrl ?? req.url),
     }),
   );
   app.use((req, res, next) => {

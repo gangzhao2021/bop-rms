@@ -288,4 +288,47 @@ describe("WP-2423 guest-table-open-and-busy-reads: a read's whole work time", ()
     await fetch(`${base}/read`, { method: "POST" });
     expect(seen).toEqual({ GET: 12_000, POST: null });
   });
+
+  it("gives the staff reads whose screens wait longer their own wait less 3 s, never 12 s", async () => {
+    const store = () =>
+      (
+        globalThis as Record<
+          symbol,
+          { getStore(): { answerBy?: number; startedAt: number } | undefined }
+        >
+      )[Symbol.for("bop.database.request-acquire-budget")]?.getStore();
+    const app = express();
+    app.use(createRequestCorrelationMiddleware());
+    const seen: Record<string, number | null> = {};
+    app.use((request, response) => {
+      const budget = store();
+      seen[request.method + " " + request.path] =
+        budget?.answerBy === undefined ? null : budget.answerBy - budget.startedAt;
+      response.sendStatus(204);
+    });
+    const base = await listen(app);
+    for (const path of [
+      "/merchant/reports?from=2026-10-01&to=2026-10-31",
+      "/merchant/reports/tonight",
+      "/merchant/reports/export?report=sales&from=2026-10-01&to=2026-10-31",
+      "/merchant/organization/sole-operator",
+      "/merchant/identity/step-up",
+      "/merchant/payments/refunds/approvals",
+      "/merchant/reportsx",
+      "/bff/customer/cart",
+    ])
+      await fetch(base + path);
+    await fetch(base + "/merchant/reports/export", { method: "POST" });
+    expect(seen).toEqual({
+      "GET /merchant/reports": 27_000,
+      "GET /merchant/reports/tonight": 27_000,
+      "GET /merchant/reports/export": 27_000,
+      "GET /merchant/organization/sole-operator": 17_000,
+      "GET /merchant/identity/step-up": 17_000,
+      "GET /merchant/payments/refunds/approvals": 17_000,
+      "GET /merchant/reportsx": 12_000,
+      "GET /bff/customer/cart": 12_000,
+      "POST /merchant/reports/export": null,
+    });
+  });
 });

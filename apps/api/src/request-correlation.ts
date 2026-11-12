@@ -9,8 +9,7 @@ import type { CoreTelemetry } from "@bop-rms/observability";
 import type { Request, RequestHandler } from "express";
 import { v7 as uuidV7 } from "uuid";
 import {
-  isReadRequestMethod,
-  requestReadAnswerMs,
+  requestReadAnswerWithinMs,
   withRequestAcquireBudget,
 } from "./request-acquire-budget.js";
 
@@ -222,7 +221,10 @@ export function createRequestCorrelationMiddleware({
       {
         response,
         // A read answers within its time or says busy; a command's work is never cut short.
-        ...(isReadRequestMethod(request.method) ? { answerWithinMs: requestReadAnswerMs } : {}),
+        answerWithinMs: requestReadAnswerWithinMs(
+          request.method,
+          request.originalUrl ?? request.url,
+        ),
       },
     );
   };

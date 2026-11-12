@@ -20,6 +20,34 @@ export const requestReadAnswerMs = 12_000;
 export function isReadRequestMethod(method: string | undefined): boolean {
   return method === "GET" || method === "HEAD";
 }
+/**
+ * Staff reads whose screens wait longer than 15 s, each given its screen's wait less the same 3 s
+ * for the answer to arrive (b10 review). A month of reports or its CSV export reads every payment
+ * and refund in the period: apps/merchant-web/src/store-reports-client.ts waits 30 s, and the
+ * sole-operator, step-up and refund-approval screens wait 20 s. Cutting them at 12 s would make a
+ * long period answer busy on a quiet database, and every retry the same.
+ */
+const longerReadAnswers: readonly { readonly path: string; readonly prefix: boolean; readonly ms: number }[] =
+  Object.freeze([
+    { path: "/merchant/reports", prefix: true, ms: 27_000 },
+    { path: "/merchant/organization/sole-operator", prefix: false, ms: 17_000 },
+    { path: "/merchant/identity/step-up", prefix: false, ms: 17_000 },
+    { path: "/merchant/payments/refunds/approvals", prefix: false, ms: 17_000 },
+  ]);
+/**
+ * A request's whole work time: undefined for a command (its work is never cut by the clock), the
+ * screen's own longer time for the staff reads above, and `requestReadAnswerMs` for every other read.
+ */
+export function requestReadAnswerWithinMs(
+  method: string | undefined,
+  url: string | undefined,
+): number | undefined {
+  if (!isReadRequestMethod(method)) return undefined;
+  const path = (url ?? "").split(/[?#]/u, 1)[0] ?? "";
+  for (const entry of longerReadAnswers)
+    if (path === entry.path || (entry.prefix && path.startsWith(entry.path + "/"))) return entry.ms;
+  return requestReadAnswerMs;
+}
 /** The shape packages/database/src/request-acquire-budget.ts keeps and spends (shared store). */
 interface RequestAcquireBudget {
   remainingMs: number;
@@ -45,7 +73,7 @@ export function withRequestAcquireBudget<T>(
     readonly response?: { once(event: "finish" | "close", listener: () => void): unknown };
     readonly budgetMs?: number;
     /** A read's whole work time (`requestReadAnswerMs` for GET/HEAD); none for a command. */
-    readonly answerWithinMs?: number;
+    readonly answerWithinMs?: number | undefined;
   } = {},
 ): T {
   if (requestBudgets().getStore() !== undefined) return work();
