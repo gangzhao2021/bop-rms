@@ -176,10 +176,17 @@ export function staffRoundPaymentNotice(
   if (remainingMs <= 0)
     return {
       tier: "urgent",
-      text: t(
-        "{rounds} entered by staff wasn't paid by {at} and is being cancelled; it won't go to the kitchen. If the card machine was charged, refund it on the machine.",
-        { rounds: rounds, at: at },
-      ),
+      // v15 2026-11-12: whole sentences per count ("9 rounds ... weren't paid", never "wasn't").
+      text:
+        count === 1
+          ? t(
+              "{rounds} entered by staff wasn't paid by {at} and is being cancelled; it won't go to the kitchen. If the card machine was charged, refund it on the machine.",
+              { rounds: rounds, at: at },
+            )
+          : t(
+              "{count} rounds entered by staff weren't paid by {at} and are being cancelled; they won't go to the kitchen. If the card machine was charged, refund it on the machine.",
+              { count: String(count), at },
+            ),
     };
   const minutes = Math.max(1, Math.ceil(remainingMs / 60_000));
   return minutes <= staffRoundUrgentMinutes
@@ -243,8 +250,10 @@ export function guestRoundPaymentNotice(
         {
           value:
             unconfirmed.length === 1
-              ? `Round ${String(firstUnconfirmed.roundNumber)}`
-              : `Rounds ${unconfirmed.map((round) => String(round.roundNumber)).join(", ")}`,
+              ? t("Round {roundNumber}", { roundNumber: String(firstUnconfirmed.roundNumber) })
+              : t("Rounds {value}", {
+                  value: unconfirmed.map((round) => String(round.roundNumber)).join(", "),
+                }),
           payBy: storeTime(firstUnconfirmed.payBy, timeZone),
         },
       ),
@@ -252,10 +261,16 @@ export function guestRoundPaymentNotice(
   if (remainingMs <= 0)
     return {
       tier: "urgent",
-      text: t(
-        "{names} wasn't paid by {at} and is being cancelled; it won't go to the kitchen and nobody is charged.",
-        { names: names, at: at },
-      ),
+      text:
+        rounds.length === 1
+          ? t(
+              "{names} wasn't paid by {at} and is being cancelled; it won't go to the kitchen and nobody is charged.",
+              { names: names, at: at },
+            )
+          : t(
+              "{names} weren't paid by {at} and are being cancelled; they won't go to the kitchen and nobody is charged.",
+              { names: names, at: at },
+            ),
     };
   const minutes = Math.max(1, Math.ceil(remainingMs / 60_000));
   const verb = rounds.length === 1 ? "isn't" : "aren't";

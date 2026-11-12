@@ -5822,6 +5822,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{count} refund{value} · {amountMinor} approved by the owner without a second person (sole operator) this business day. Review them against the orders.":
     "本营业日有 {count} 笔退款 · {amountMinor} 由店主在没有第二人的情况下批准（独立经营者）。请对照订单核查。",
   "{count} rounds": "{count} 轮",
+  "{count} rounds entered by staff weren't paid by {at} and are being cancelled; they won't go to the kitchen. If the card machine was charged, refund it on the machine.":
+    "员工录入的 {count} 轮未在 {at} 前付款，正在取消；不会发送到后厨。如果刷卡机已收款，请在刷卡机上退款。",
   "{count} rounds entered by staff still wait for card-machine payment. Record the payment on the Orders page, or cancel the rounds there.":
     "员工录入的 {count} 轮仍在等待刷卡机付款。请在订单页记录付款，或在那里取消这些轮次。",
   "{count} tickets from earlier days have number or table “{search}”":
@@ -5922,6 +5924,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{missing} of {length} active ingredients need a declaration.":
     "{length} 种在用配料中有 {missing} 种需要申报。",
   "{names} wasn't paid by {at} and is being cancelled; it won't go to the kitchen and nobody is charged.":
+    "{names}未在 {at} 前付款，正在取消；不会发送到后厨，也不会向任何人收费。",
+  "{names} weren't paid by {at} and are being cancelled; they won't go to the kitchen and nobody is charged.":
     "{names}未在 {at} 前付款，正在取消；不会发送到后厨，也不会向任何人收费。",
   "{names} {verb} paid yet. The guest pays on their phone (their table page has a pay button); unpaid at {at}, it is cancelled and nobody is charged. If their phone can't start the payment, cancel this round, take the order for the table and charge it on the card machine.":
     "{names}尚未付款。顾客在手机上付款（其桌台页面有付款按钮）；到 {at} 仍未付款会被取消，不会向任何人收费。如果顾客手机无法开始付款，请取消这一轮，为桌台点单并用刷卡机收款。",
