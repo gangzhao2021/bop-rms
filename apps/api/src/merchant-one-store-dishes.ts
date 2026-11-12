@@ -616,7 +616,11 @@ export function createMerchantOneStoreDishes(options: {
         });
   };
   const loadMenu = async (session: Session, menuReference: string) =>
-    (await options.menus.query({ ...session, menuReference })) as unknown as MenuBuilder;
+    (await options.menus.query({
+      ...session,
+      menuReference,
+      withListingReview: false,
+    })) as unknown as MenuBuilder;
   /** Opens the menu's draft when it was listed (the listed one stays for guests). */
   const editableMenu = async (session: Session, menuReference: string, step: string) => {
     let menu = await loadMenu(session, menuReference);

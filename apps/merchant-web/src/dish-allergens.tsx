@@ -24,10 +24,17 @@ export function allergenSummary(dish: MenuDish, choices: readonly AllergenChoice
     : summary;
 }
 function declaredSummary(dish: MenuDish, choices: readonly AllergenChoice[]): string {
-  if (dish.allergens.source === "Recipe") return t("Allergens from its recipe");
-  if (dish.allergens.source === "None") return t("Allergens not declared");
-  if (dish.allergens.noIngredients === true) return t("A charge, no stock ingredients");
-  const { contains, may } = declaredNames(dish.allergens.declared, choices);
+  return allergensText(dish.allergens, choices);
+}
+/** A dish's allergens in words, as its row says them (without the "changed since" note). */
+export function allergensText(
+  allergens: MenuDish["allergens"],
+  choices: readonly AllergenChoice[],
+): string {
+  if (allergens.source === "Recipe") return t("Allergens from its recipe");
+  if (allergens.source === "None") return t("Allergens not declared");
+  if (allergens.noIngredients === true) return t("A charge, no stock ingredients");
+  const { contains, may } = declaredNames(allergens.declared, choices);
   if (contains === "" && may === "") return t("No allergens");
   return [
     contains ? t("Contains {list}", { list: contains }) : "",

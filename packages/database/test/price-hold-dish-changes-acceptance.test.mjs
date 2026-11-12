@@ -172,7 +172,33 @@ it(
           assert.equal(confirmed.status, "Quoted");
           assert.equal(BigInt(confirmed.subtotalMinor), 1300n);
           await saveDetails(first, confirmed.quoteReference);
-          await rename("Hot and sour soup, house style (TEST)", "招牌酸辣汤");
+          await owner.saveDish(
+            "Hot and sour soup, house style (TEST)",
+            "招牌酸辣汤",
+            "650",
+            soup.productReference,
+            null,
+          );
+          // WP-2423 M72 (v15 2026-11-11 b10): the Owner's "What goes live" names the rename, each
+          // language before and now, read under the restricted pilot role before "List it".
+          const review = await owner.review();
+          const soupRenames =
+            review.dishRenames?.find((dish) => dish.skuReference === soup.skuReference)?.renamed ??
+            [];
+          assert.deepEqual(
+            soupRenames.map((name) => [name.locale.slice(0, 2), name.from, name.to]).sort(),
+            [
+              ["en", "Hot and sour soup (TEST)", "Hot and sour soup, house style (TEST)"],
+              ["zh", "酸辣汤", "招牌酸辣汤"],
+            ],
+            "the review names the rename: " + JSON.stringify(review.dishRenames),
+          );
+          await owner.listAll();
+          assert.deepEqual(
+            (await owner.review()).dishRenames ?? [],
+            [],
+            "listed: nothing is waiting to go live",
+          );
           assert.equal(await versions(), versionsBefore, "renamed in place, same product version");
           const stale = await first.start(confirmed.quoteReference);
           assert.equal(stale.status, "RequoteRequired", "the held quote does not start checkout");
@@ -390,6 +416,22 @@ it(
             "650",
             wonton.productReference,
             declared("CrossContactPossible"),
+          );
+          // WP-2423 M72 (v15 2026-11-11 b10): the Owner's "What goes live" reads the soup's
+          // allergens as changed (not only "No price changes"), and no rename for it.
+          const review = await owner.review();
+          const soupAllergens = (review.sellables ?? []).find(
+            (sku) => sku.skuReference === wonton.skuReference,
+          )?.allergens;
+          assert.equal(
+            soupAllergens?.changedByRecipe,
+            true,
+            "the review names the allergen change: " + JSON.stringify(soupAllergens),
+          );
+          assert.deepEqual(
+            (review.dishRenames ?? []).filter((dish) => dish.skuReference === wonton.skuReference),
+            [],
+            "same names: no rename is listed",
           );
           await owner.listAll();
           assert.ok(

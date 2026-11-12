@@ -851,6 +851,8 @@ async function listRealMenu({
         hooks,
         saveDish,
         listAll,
+        /** WP-2423 M72: the menu page as the Owner reads it before "List it" (its review). */
+        review: () => menus.query({ ...session, menuReference }),
         /** The Owner's choice groups (option sets), through the same commands. */
         optionSets,
         /** The Owner's option recipes (what a choice changes), through the same commands. */

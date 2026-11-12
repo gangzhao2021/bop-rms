@@ -14,6 +14,8 @@ import {
   createPostgresMenuDraftSource,
   createPostgresMenuDraftStore,
   createPostgresMenuReviewContentStore,
+  createPostgresMenuReviewProductSource,
+  dishRenames,
   createPostgresPublishedMenuConsumerService,
   currentAllergenRegistry,
   availabilityPermission,
@@ -1371,6 +1373,82 @@ export function createMerchantMenus(options: {
     };
   };
 
+  /**
+   * WP-2423 M72 (v15 2026-11-11 b10): each dish on the menu whose name guests see differently once
+   * this is listed — the names in the listed menu (its review snapshot) against the dish's names
+   * now, with this menu's own name for it — so the owner's review says what goes live beyond prices.
+   * [] when the menu was never listed (everything is new); null when it could not be compared now
+   * (the review says so, never "no changes").
+   */
+  const dishRenamesSinceListed = async (
+    tx: unknown,
+    s: Scope,
+    summary: Awaited<ReturnType<typeof listBrandMenus>>[number],
+    aggregate: MenuAggregate,
+  ): Promise<
+    | readonly {
+        readonly skuReference: string;
+        readonly renamed: readonly { locale: string; from: string; to: string }[];
+      }[]
+    | null
+  > => {
+    const release = summary.latestRelease;
+    if (release === null || release.menuVersionReference === summary.currentVersionReference)
+      return [];
+    const at = options.persistence.now();
+    await ptx(tx).query("SAVEPOINT menu_listing_renames", []);
+    try {
+      const released = await createPostgresMenuReviewContentStore({
+        brandReference: s.owner.brandReference,
+        menuReference: summary.menuReference,
+        authorize: async () => true,
+      }).read(ptx(tx), release.menuVersionReference, release.snapshotDigest, at);
+      if (released === null) throw new Error("MENU_RELEASE_UNREADABLE");
+      const before = new Map<string, Readonly<Record<string, string>>>();
+      for (const section of released.content.sections)
+        for (const item of section.sellables)
+          before.set(String(item.sellableReference), item.localizedNames);
+      const placements = aggregate.draft.sections.flatMap((section) => section.placements);
+      const skus = [
+        ...new Set(
+          placements
+            .map((placement) => String(placement.sellableReference))
+            .filter((sku) => before.has(sku)),
+        ),
+      ];
+      const products =
+        skus.length === 0
+          ? []
+          : await createPostgresMenuReviewProductSource({
+              brandReference: s.owner.brandReference,
+              authorize: async () => true,
+            })(ptx(tx), { sellableReferences: skus, observedAt: at });
+      const now = new Map(products.map((product) => [String(product.sellableReference), product]));
+      const found: {
+        skuReference: string;
+        renamed: { locale: string; from: string; to: string }[];
+      }[] = [];
+      for (const sku of skus) {
+        const product = now.get(sku);
+        const placement = placements.find((value) => String(value.sellableReference) === sku);
+        if (product === undefined || placement === undefined)
+          throw new Error("MENU_DISH_UNREADABLE");
+        const renamed = dishRenames(
+          JSON.stringify(before.get(sku) ?? {}),
+          JSON.stringify({ ...product.localizedNames, ...placement.localizedNameOverrides }),
+        );
+        if (renamed.length > 0) found.push({ skuReference: sku, renamed: [...renamed] });
+      }
+      await ptx(tx).query("RELEASE SAVEPOINT menu_listing_renames", []);
+      await brandScope(tx, s.owner.brandReference);
+      return found;
+    } catch {
+      await ptx(tx).query("ROLLBACK TO SAVEPOINT menu_listing_renames", []);
+      await brandScope(tx, s.owner.brandReference);
+      return null;
+    }
+  };
+
   const menuView = (aggregate: MenuAggregate) => ({
     menuReference: aggregate.menuReference,
     internalCode: aggregate.internalCode,
@@ -1441,6 +1519,8 @@ export function createMerchantMenus(options: {
     sessionCookie: unknown;
     csrf: unknown;
     menuReference: string | null;
+    /** M72: false for a command's own read (no review shown), so a listing is not slowed. */
+    withListingReview?: boolean;
   }) => {
     const current = await session(input);
     return retryTransactionConflict(() =>
@@ -1554,6 +1634,10 @@ export function createMerchantMenus(options: {
               brandStores.length > 1,
             )),
             customerView,
+            // WP-2423 M72: what guests will read differently by name once this is listed.
+            ...(input.withListingReview === false
+              ? {}
+              : { dishRenames: await dishRenamesSinceListed(tx, s, summary, loaded.aggregate) }),
             allergenRegistry: (await currentAllergenRegistry(ptx(tx) as never, s.owner)) !== null,
           };
         }),

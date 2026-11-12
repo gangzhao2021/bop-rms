@@ -680,6 +680,21 @@ export interface MenuBuilderView extends MenuViewBase {
   readonly stores?: { readonly severalStores: boolean; readonly servesHere: boolean };
   /** WP-2423 M71: the menu's own price draft (null or absent: none waiting). */
   readonly priceDraft?: MenuPriceDraft | null;
+  /**
+   * WP-2423 M72 (v15 2026-11-11 b10): each dish on the menu whose name guests read differently
+   * once listed, language by language ([]: none, or never listed). null: not compared just now.
+   * Absent from older views.
+   */
+  readonly dishRenames?:
+    | readonly {
+        readonly skuReference: string;
+        readonly renamed: readonly {
+          readonly locale: string;
+          readonly from: string;
+          readonly to: string;
+        }[];
+      }[]
+    | null;
   /** WP-2423 M71: price changes started on the Prices page: never listed from here. */
   readonly priceChangesOnPricesPage?: number;
   /** WP-2423 (v15 batch 5): the choice prices "List it" puts live (absent in older views). */

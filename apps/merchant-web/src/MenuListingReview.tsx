@@ -1,7 +1,54 @@
-import { t } from "./i18n/i18n.js";
+import { currentLanguage, t } from "./i18n/i18n.js";
 import { Link } from "react-router";
 import type { MenuBuilderView } from "./store-menu-pages.js";
 import { minorToDollars } from "./store-price-pages.js";
+import { allergensText } from "./dish-allergens.js";
+
+/** Whether a menu language is the one this person reads the page in. */
+const readsIn = (locale: string) =>
+  currentLanguage() === "zh-Hans" ? /^zh\b/u.test(locale) : !/^zh\b/u.test(locale);
+const languageName = (locale: string) =>
+  /^zh\b/u.test(locale)
+    ? t("Chinese")
+    : /^en\b/u.test(locale)
+      ? t("English")
+      : t("another language");
+
+/**
+ * WP-2423 M72 (v15 2026-11-11 b10): one line per renamed dish — the name in this person's language
+ * before → now, else the other language's name before → now with the dish as named here.
+ */
+export function renameLines(
+  renames: NonNullable<MenuBuilderView["dishRenames"]>,
+  dishName: (skuReference: string) => string,
+): readonly string[] {
+  const lines = renames.flatMap((dish) =>
+    dish.renamed.map((name) =>
+      readsIn(name.locale) && name.from !== "" && name.to !== ""
+        ? t("Renamed: {from} → {to}", { from: name.from, to: name.to })
+        : name.from === ""
+          ? t("{dish}: {language} name added: {to}", {
+              dish: dishName(dish.skuReference),
+              language: languageName(name.locale),
+              to: name.to,
+            })
+          : name.to === ""
+            ? t("{dish}: {language} name taken off ({from})", {
+                dish: dishName(dish.skuReference),
+                language: languageName(name.locale),
+                from: name.from,
+              })
+            : t("{dish}: {language} name {from} → {to}", {
+                dish: dishName(dish.skuReference),
+                language: languageName(name.locale),
+                from: name.from,
+                to: name.to,
+              }),
+    ),
+  );
+  // Sizes of one dish share its name: said once.
+  return [...new Set(lines)];
+}
 
 const money = (minor: string | null) => (minor === null ? null : "$" + minorToDollars(minor));
 
@@ -30,6 +77,10 @@ export function MenuListingReview({
     | "pricePowers"
     | "choicePriceChanges"
     | "otherStores"
+    | "dishRenames"
+    | "latestRelease"
+    | "menu"
+    | "allergenChoices"
   >;
   /** Names of dishes on the menu whose allergens are not answered. */
   readonly undeclared: readonly string[];
@@ -61,6 +112,32 @@ export function MenuListingReview({
   // Allergens are named here, and the server's own check refuses the listing until they are
   // answered (a recipe at this Store answers them although this page cannot always tell).
   const blocked = moved;
+  // WP-2423 M72: names and allergens guests read differently once listed, by dish on this menu.
+  const onMenu = new Set(
+    view.menu.sections.flatMap((section) => section.items.map((item) => item.skuReference)),
+  );
+  const renames =
+    view.dishRenames === undefined || view.dishRenames === null
+      ? []
+      : renameLines(
+          view.dishRenames.filter((dish) => onMenu.has(dish.skuReference)),
+          nameOf,
+        );
+  const allergenLines = [
+    ...new Set(
+      view.sellables
+        .filter((sku) => onMenu.has(sku.skuReference) && sku.allergens?.changedByRecipe === true)
+        .map((sku) =>
+          t("{dish}: allergens changed · {allergens}", {
+            dish: sku.productName,
+            allergens: allergensText(
+              sku.allergens ?? { source: "None", declared: [] },
+              view.allergenChoices ?? [],
+            ),
+          }),
+        ),
+    ),
+  ];
   return (
     <section className="one-menu__pending one-menu__review" aria-labelledby="listing-review">
       <h2 id="listing-review">{t("What goes live")}</h2>
@@ -86,6 +163,28 @@ export function MenuListingReview({
           ))
         )}
       </ul>
+      {view.latestRelease === null ? null : (
+        <>
+          <h3>{t("Names and allergens")}</h3>
+          <ul>
+            {renames.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+            {allergenLines.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+            {view.dishRenames === null ? (
+              <li>
+                {t(
+                  "Name changes could not be checked just now. The names go live as they are on this page.",
+                )}
+              </li>
+            ) : renames.length === 0 && allergenLines.length === 0 ? (
+              <li>{t("No name or allergen changes.")}</li>
+            ) : null}
+          </ul>
+        </>
+      )}
       {choices.length > 0 ? (
         <>
           <h3>{t("Extra prices")}</h3>

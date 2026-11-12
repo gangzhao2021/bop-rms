@@ -1772,6 +1772,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Ends next day": "次日结束",
   "Ends on the following day": "次日结束",
   English: "英语",
+  Chinese: "中文",
   "Enter a 10-digit phone number, for example (416) 555-0100.":
     "请输入 10 位电话号码，例如 (416) 555-0100。",
   "Enter a Canadian postal code, for example K1A 0B1.": "请输入加拿大邮政编码，例如 K1A 0B1。",
@@ -9015,6 +9016,16 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "The menu as it is on this page: dishes, sections, photos and descriptions.":
     "本页上的菜单：菜品、分区、图片和描述。",
   "No price changes.": "价格没有变动。",
+  "Names and allergens": "菜名和过敏原",
+  "Renamed: {from} → {to}": "改名：{from} → {to}",
+  "{dish}: {language} name added: {to}": "{dish}：新增{language}名称：{to}",
+  "{dish}: {language} name taken off ({from})": "{dish}：去掉了{language}名称（{from}）",
+  "{dish}: {language} name {from} → {to}": "{dish}：{language}名称 {from} → {to}",
+  "{dish}: allergens changed · {allergens}": "{dish}：过敏原有改动 · {allergens}",
+  "Name changes could not be checked just now. The names go live as they are on this page.":
+    "暂时无法核对菜名改动。上架后菜名按本页显示的生效。",
+  "No name or allergen changes.": "菜名和过敏原没有变动。",
+  "another language": "其他语言",
   "{dish}: {to} (new)": "{dish}：{to}（新）",
   "{dish}: {from} → {to}": "{dish}：{from} → {to}",
   "(every Store)": "（所有门店）",
