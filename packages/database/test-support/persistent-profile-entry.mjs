@@ -823,6 +823,8 @@ export async function exercisePersistentProfileEntry({
     const notOpenBody = await notOpen.json();
     assert.equal(notOpenBody.code, "entry_table_not_open");
     assert.equal(notOpenBody.store.publicStoreReference, f.payload.publicStoreReference);
+    // guest-table-open-and-busy-reads: the table's printed name, read under the pilot api role.
+    assert.deepEqual(notOpenBody.table, { label: "T01" });
     assert.equal(Object.hasOwn(notOpenBody, "csrfToken"), false);
     assert.deepEqual(await count(), saved);
     const diningContextOptions = {
