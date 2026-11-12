@@ -1679,8 +1679,13 @@ it("the real staff round command takes a round from table entry to the card mach
 
       // A later round of the table's Order, a paper round taken during an outage.
       // M35: a later round of an open table.
+      const secondOperation = reference();
       const second = await withinRoundBudget("staff round (later round)", roundBudget, () =>
-        send(server, { lines: [line(1)], recordedAfterOutage: true }),
+        send(server, {
+          operationReference: secondOperation,
+          lines: [line(1)],
+          recordedAfterOutage: true,
+        }),
       );
       assert.deepEqual(
         [second.status, second.orderReference, second.recordedAfterOutage, second.totalMinor],
@@ -1806,6 +1811,36 @@ it("the real staff round command takes a round from table entry to the card mach
         [paidLater.status, paidLater.amountMinor, paidLater.recordingReason, paidLater.takenAt],
         ["Recorded", "735", "RecordedAfterOutage", earlier],
       );
+      // DEC-PAPER-SEND-IDEMPOTENT (v15 batch-9 L5): the paper round's send is sent again after a
+      // lost answer, once its payment is recorded: the same round comes back at the amounts its
+      // payment record holds (never "didn't go through"), and nothing new is ordered.
+      const beforeReplay = await counts();
+      const replayed = await send(server, {
+        operationReference: secondOperation,
+        lines: [line(1)],
+        recordedAfterOutage: true,
+      });
+      assert.deepEqual(
+        [
+          replayed.status,
+          replayed.orderReference,
+          replayed.orderBatchReference,
+          replayed.orderNumber,
+          replayed.totalMinor,
+          replayed.payLater,
+          replayed.recordedAfterOutage,
+        ],
+        [
+          "AlreadyPlaced",
+          first.orderReference,
+          second.orderBatchReference,
+          second.orderNumber,
+          "735",
+          false,
+          true,
+        ],
+      );
+      assert.deepEqual(await counts(), beforeReplay);
 
       assert.deepEqual(
         await rows(

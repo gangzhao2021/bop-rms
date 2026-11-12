@@ -1130,8 +1130,17 @@ Do these in order, before resuming online ordering.
      picked, so enter the whole slip again. The old one then shows on Orders as "Closed by staff ·
      entered again as order N, which carries its sale" and the sale counts once;
    - write the order number on the paper slip ("entered as order no.").
-   - Pressing `Send order` again with the same screen never creates a second order; if the screen
-     reports that it did not go through, nothing was charged and it can be sent again.
+   - Pressing `Send order` again with the same screen never creates a second order. If the screen
+     says there was no answer, or that the order is still being sent, send it again on the same
+     screen (`Send and record paper order`), even after correcting the paid-at or a dish: the order
+     already recorded comes back ("Order N paid", or "already recorded and in the day's
+     takings"), never a second sale. "Already ordered as order N" (已下单，订单 N) means the first send placed it:
+     open it in `Orders` and do not enter the slip again. Only "didn't go through and nothing was
+     charged" means nothing was recorded
+     ([DEC-PAPER-SEND-IDEMPOTENT](../spec/design/paper-send-idempotent.md));
+   - after reloading the page (or on another tablet) the screen no longer knows the earlier send:
+     look for the slip's order in `Orders` (time and amount, "Recorded after outage") before
+     entering it again.
 5. **Enter paper dine-in rounds** on their table, one per paid slip, in slip time order
    ([DEC-STAFF-DINE-IN-ROUND](../spec/design/staff-dine-in-round.md)). Do this before closing the
    table (step 8): the round joins that table's order, so the card-machine payment, tax, tip, sales
