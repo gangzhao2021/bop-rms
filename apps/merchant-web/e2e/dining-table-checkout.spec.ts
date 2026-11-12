@@ -1653,11 +1653,16 @@ for (const width of [390, 1024, 1440])
         },
       }),
     );
+    // The Tables list reads a table checking out from its own bill too (v15 batch 8), on the same
+    // route and often first, so counting requests never says which read is the panel's. Instead
+    // every bill read sent while the connection is down never answers, as when the Wi-Fi drops.
+    let down = true;
     let reads = 0;
+    let answered = 0;
     await page.route("**/merchant/dining/table-bill", async (route) => {
       reads += 1;
-      // The first read never answers.
-      if (reads === 1) return;
+      if (down) return;
+      answered += 1;
       await route.fulfill({
         headers,
         json: {
@@ -1672,19 +1677,22 @@ for (const width of [390, 1024, 1440])
     await page.getByRole("button", { name: "Select T2", exact: true }).click();
     const checkout = page.getByRole("region", { name: "Checkout" });
     await expect(checkout.getByText("Reading the bill…")).toBeVisible();
-    await expect.poll(() => reads).toBe(1);
-    // Ticks before the ceiling never start a second read while the first is open.
+    await expect.poll(() => reads).toBeGreaterThanOrEqual(1);
+    // Before the ceiling the open read is waited for: staff still see it reading, not given up.
     await page.clock.runFor(20_000);
-    expect(reads).toBe(1);
+    await expect(checkout.getByText("Reading the bill…")).toBeVisible();
+    await expect(checkout.getByText("couldn't be read just now", { exact: false })).toHaveCount(0);
     await page.clock.runFor(5_500);
     await expect(
       checkout.getByText("The bill couldn't be read just now. Trying again by itself."),
     ).toBeVisible();
-    await page.clock.runFor(5_000);
+    // The re-read sent as the first was given up is lost too (still down): it is given up in turn,
+    // and once the connection is back the read after it shows the bill.
+    down = false;
+    await page.clock.runFor(25_000);
     await expect(checkout.getByText("Round 1")).toBeVisible();
     await expect(checkout.getByText("couldn't be read just now", { exact: false })).toHaveCount(0);
-    // The periodic re-read carries on after it.
-    expect(reads).toBeGreaterThanOrEqual(2);
+    expect(answered).toBeGreaterThanOrEqual(1);
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);
