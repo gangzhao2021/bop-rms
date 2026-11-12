@@ -747,6 +747,47 @@ describe("M104/M105: a rescan goes on with this phone's visit", () => {
     expect(f.create).toHaveBeenCalledTimes(2);
   });
 
+  it("b9: a table code after an ended pickup visit here says nothing about an earlier cart here", async () => {
+    const f = fixture();
+    const table = {
+      channel: f.context.channel,
+      payloadTable: f.payload.publicTableReference,
+      contextTable: f.context.publicTableReference,
+      tableReference: f.context.tableReference,
+      tableLifecycle: f.context.tableLifecycle,
+      assignmentState: f.context.assignmentState,
+    };
+    pickup(f);
+    const visit = await first(f);
+    const [key, record] = [...f.records.entries()][0] as [string, never];
+    const old = record as { session: Record<string, unknown> };
+    const createdAt = new Date(Date.parse(now) - 5 * 3_600_000).toISOString();
+    f.records.set(key, {
+      ...old,
+      session: {
+        ...old.session,
+        createdAt,
+        lastSeenAt: createdAt,
+        idleExpiresAt: new Date(Date.parse(createdAt) + 4 * 3_600_000).toISOString(),
+        absoluteExpiresAt: new Date(Date.parse(createdAt) + 24 * 3_600_000).toISOString(),
+      },
+    } as never);
+    f.payload.channel = f.context.channel = table.channel;
+    f.payload.publicTableReference = table.payloadTable;
+    f.context.publicTableReference = table.contextTable;
+    f.context.tableReference = table.tableReference;
+    f.context.tableLifecycle = table.tableLifecycle;
+    f.context.assignmentState = table.assignmentState;
+    const result = await again(f, [{ source: "Current", credential: visit.sessionCredential }]);
+    // The pickup order is not this table's cart; it stays on the phone for its own code.
+    expect(result).toMatchObject({
+      status: "Established",
+      channel: "DineIn",
+      earlierCredentials: [visit.sessionCredential],
+    });
+    expect(result).not.toHaveProperty("previousVisit");
+  });
+
   it("keeps a table visit here, and a visit this Store can't see, when a pickup code starts a new one", async () => {
     const f = fixture();
     const table = await first(f);

@@ -525,7 +525,10 @@ export function createCustomerEntryComposition(
           current.result.status === "Ended" &&
           sameScope(current.result.session) &&
           String(current.result.session.publicStoreReference) ===
-            String(qr.context.publicStoreReference);
+            String(qr.context.publicStoreReference) &&
+          // WP-2423 (b9): only an earlier visit of the same kind is "your earlier cart here": a
+          // pickup order is never a table's cart (it stays on the phone under its own code).
+          current.result.session.channel === qr.context.channel;
         const contextExpiresAt = new Date(
           Math.min(
             Date.parse(qr.context.expiresAt),
