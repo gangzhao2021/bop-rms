@@ -43,6 +43,11 @@ export interface CheckoutQuote {
     readonly quantity: number;
     readonly subtotal: CartMoney;
     readonly changes: readonly ("Name" | "Allergens")[];
+    /**
+     * v15 2026-11-11 b10: each menu language whose name of the dish changed, before and now
+     * (absent from an older server, or when not known).
+     */
+    readonly renamed?: readonly DishRename[];
   }[];
   /**
    * The Store could not work out now whether a dish changed since it was added (a passing outage).
@@ -94,3 +99,10 @@ export type CheckoutState =
       retryAfterSeconds: number | null;
       canRetry: boolean;
     }>;
+
+/** v15 2026-11-11 b10: a dish's name in one menu language, before and now. */
+export interface DishRename {
+  readonly locale: string;
+  readonly from: string;
+  readonly to: string;
+}

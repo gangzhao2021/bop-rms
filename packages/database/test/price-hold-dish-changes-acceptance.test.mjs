@@ -193,6 +193,21 @@ it(
             [["1300", 2, ["Name"]]],
             "renamed since added: the page names it (after a reload too)",
           );
+          // v15 2026-11-11 b10: and which language's name changed, from what to what.
+          const renamed = reloaded.sinceAdded?.[0]?.renamed ?? [];
+          assert.ok(
+            renamed.some(
+              (name) =>
+                name.locale.startsWith("en") &&
+                name.from === "Hot and sour soup (TEST)" &&
+                name.to === "Hot and sour soup, house style (TEST)",
+            ),
+            "the English name before and now",
+          );
+          assert.ok(
+            renamed.some((name) => name.locale.startsWith("zh") && name.to === "招牌酸辣汤"),
+            "the Chinese name now",
+          );
           await saveDetails(first, reloaded.quoteReference);
           const started = await first.start(reloaded.quoteReference);
           assert.equal(started.status, "Started");

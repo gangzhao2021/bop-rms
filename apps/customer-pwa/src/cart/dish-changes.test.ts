@@ -14,6 +14,12 @@ import {
 } from "./seen-prices.js";
 import type { MenuView } from "../menu/types.js";
 import type { CartItemView } from "./types.js";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { LanguageRoot } from "../i18n/i18n.js";
+
+const setLanguageForTest = (language: "en" | "zh-Hans") =>
+  renderToStaticMarkup(createElement(LanguageRoot, { initial: language, children: () => null }));
 
 const id = (n: number) => "018f7a10-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 const cart = id(1);
@@ -51,7 +57,10 @@ const first = (amountMinor: string, changes: readonly ("Name" | "Allergens")[] =
     },
   ],
 });
-afterEach(clearSeenPrices);
+afterEach(() => {
+  clearSeenPrices();
+  setLanguageForTest("en");
+});
 
 it("price-hold-dish-changes (DEC-PRICE-HOLD §3): the Store's renamed dish and allergens now are named in plain words", () => {
   const changes = quoteDishChanges(
@@ -103,4 +112,41 @@ it("price-hold-dish-changes (v15 batch 6): the Store's first price for a line is
       { cartItemReference: id(2), quantity: 2, amountMinor: 2550n, currency: "CAD" },
     ]),
   ).toEqual([]);
+});
+
+it("v15 2026-11-11 b10: a rename says what the name was and is, or which other language's name changed", () => {
+  const change = {
+    cartItemReference: id(2),
+    dish: "Beef noodles",
+    name: true,
+    allergens: false,
+    allergensNow: null,
+  };
+  // Only the Chinese name changed: the English reader is told so, never the same name twice.
+  const zhOnly = {
+    ...change,
+    renamed: [{ locale: "zh-Hans-CA", from: "牛肉面", to: "红烧牛肉面" }],
+  };
+  expect(dishChangeText(zhOnly)).toBe(
+    "Beef noodles: its Chinese name changed from 牛肉面 to 红烧牛肉面. The name you see here is the same.",
+  );
+  // The English name changed: before and now.
+  expect(
+    dishChangeText({
+      ...change,
+      dish: "Braised beef noodles",
+      renamed: [{ locale: "en-CA", from: "Beef noodles", to: "Braised beef noodles" }],
+    }),
+  ).toBe("Beef noodles is now called Braised beef noodles.");
+  // An older server: the plain sentence.
+  expect(dishChangeText(change)).toBe("Beef noodles was renamed since you added it.");
+  setLanguageForTest("zh-Hans");
+  expect(dishChangeText({ ...zhOnly, dish: "红烧牛肉面" })).toBe("牛肉面现在叫红烧牛肉面。");
+  expect(
+    dishChangeText({
+      ...change,
+      dish: "牛肉面",
+      renamed: [{ locale: "en-CA", from: "Beef noodles", to: "Braised beef noodles" }],
+    }),
+  ).toBe("牛肉面的英文名称从Beef noodles改为Braised beef noodles。你看到的名称没有变。");
 });

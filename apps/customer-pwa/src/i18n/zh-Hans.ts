@@ -1783,6 +1783,15 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "暂时无法确认菜品在你加入购物车后是否有改动，所以没有下单，也没有扣款。请再试一次，或问店员。",
   "Changed since you added it:": "加入购物车后有改动：",
   "{dish} was renamed since you added it.": "{dish}在你加入购物车后改了名。",
+  "{from} is now called {to}.": "{from}现在叫{to}。",
+  "{dish} now has another name on the menu: {to}.": "{dish}在菜单上多了一个名称：{to}。",
+  "{dish} now has a {language} name: {to}.": "{dish}现在有{language}名称：{to}。",
+  "{dish} was renamed on the menu from {from} to {to}.": "{dish}在菜单上的名称从{from}改为{to}。",
+  "{dish}: its {language} name changed from {from} to {to}.":
+    "{dish}的{language}名称从{from}改为{to}。",
+  "The name you see here is the same.": "你看到的名称没有变。",
+  Chinese: "中文",
+  English: "英文",
   "{dish} allergens changed since you added it. Ask staff before you order.":
     "{dish}的过敏原在你加入购物车后有改动。点单前请先问店员。",
   "{dish} allergens now: {allergens}.": "{dish}现在的过敏原：{allergens}。",

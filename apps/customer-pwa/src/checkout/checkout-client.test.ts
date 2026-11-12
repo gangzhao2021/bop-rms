@@ -178,6 +178,12 @@ describe("WP-1703 Checkout transport", () => {
         },
       ],
     });
+    // v15 2026-11-11 b10: which language's name changed, from what to what.
+    const renamed = [{ locale: "zh-Hans-CA", from: "牛肉面", to: "红烧牛肉面" }];
+    vi.stubGlobal("fetch", answer([{ ...line, changes: ["Name"], renamed }]));
+    await expect(client.quote(cart, id(9))).resolves.toMatchObject({
+      sinceAdded: [{ cartItemReference: id(2), changes: ["Name"], renamed }],
+    });
     // Not worked out now: kept apart from "nothing changed".
     vi.stubGlobal("fetch", answer(null));
     const unknown = await client.quote(cart, id(9));
@@ -188,6 +194,20 @@ describe("WP-1703 Checkout transport", () => {
       [{ ...line, changes: ["Price"] }],
       [{ ...line, changes: ["Name", "Name"] }],
       [{ ...line, changes: [], note: "private" }],
+      // A rename only on a renamed line, each language once, never the same name twice.
+      [{ ...line, changes: ["Allergens"], renamed: [{ locale: "en-CA", from: "A", to: "B" }] }],
+      [{ ...line, changes: ["Name"], renamed: [] }],
+      [{ ...line, changes: ["Name"], renamed: [{ locale: "en-CA", from: "A", to: "A" }] }],
+      [
+        {
+          ...line,
+          changes: ["Name"],
+          renamed: [
+            { locale: "en-CA", from: "A", to: "B" },
+            { locale: "en-CA", from: "A", to: "C" },
+          ],
+        },
+      ],
       [{ ...line, subtotal: { amountMinor: "90", currency: "USD" }, changes: [] }],
     ]) {
       vi.stubGlobal("fetch", answer(wrong));

@@ -386,15 +386,18 @@ export function createCustomerConfiguredQuoteHttpComposition(
         });
       }
       if (lines.length === 0) return [];
-      const changes = await catalog.dishChanges(keys);
-      return lines.map((line, index) => ({
-        ...line,
+      const details = await catalog.dishChangeDetails(keys);
+      return lines.map((line, index) => {
+        const detail = details[index];
         // Another product version is another dish: shown again in full.
-        changes:
-          sameProduct[index] === true
-            ? (changes[index] ?? ["Name", "Allergens"])
-            : (["Name", "Allergens"] as const),
-      }));
+        const same = sameProduct[index] === true && detail !== undefined;
+        return {
+          ...line,
+          changes: same ? detail.changes : (["Name", "Allergens"] as const),
+          // v15 2026-11-11 b10: which language's name changed, from what to what.
+          ...(same && detail.renamed.length > 0 ? { renamed: detail.renamed } : {}),
+        };
+      });
     },
   });
 }

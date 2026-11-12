@@ -1,7 +1,7 @@
-import { t } from "../i18n/i18n.js";
+import { currentLanguage, t } from "../i18n/i18n.js";
 import { allergensForChoice, compactAllergenLine } from "../menu/menu-families.js";
 import type { MenuView } from "../menu/types.js";
-import type { CheckoutQuote } from "../checkout/types.js";
+import type { CheckoutQuote, DishRename } from "../checkout/types.js";
 import type { CartItemView } from "./types.js";
 import { recordStoreFirstPrices, type PricedLine } from "./seen-prices.js";
 
@@ -18,6 +18,8 @@ export interface DishChange {
   readonly allergens: boolean;
   /** The dish's allergen line as the menu states it now; null while the menu cannot say. */
   readonly allergensNow: string | null;
+  /** v15 2026-11-11 b10: each language whose name changed, before and now (none: not known). */
+  readonly renamed?: readonly DishRename[];
 }
 
 /**
@@ -59,6 +61,7 @@ export function quoteDishChanges(
         dish: item.displayName,
         name: line.changes.includes("Name"),
         allergens: line.changes.includes("Allergens"),
+        ...(line.renamed === undefined ? {} : { renamed: line.renamed }),
         allergensNow: lineAllergenLine(
           menu,
           item.sellableReference,
@@ -86,10 +89,57 @@ export function recordFirstPricedLines(
   if (lines.length > 0) recordStoreFirstPrices(cartReference, lines);
 }
 
+/** Whether a menu language is the one the guest reads the menu in. */
+const readsIn = (locale: string) =>
+  currentLanguage() === "zh-Hans" ? /^zh\b/u.test(locale) : !/^zh\b/u.test(locale);
+const languageName = (locale: string) =>
+  /^zh\b/u.test(locale) ? t("Chinese") : /^en\b/u.test(locale) ? t("English") : null;
+
+/**
+ * v15 2026-11-11 b10: what the rename was, in words the guest can check — the name in their own
+ * language before and now, or, when only another language's name changed, that name before and
+ * now and that the name they read is the same.
+ */
+function renameText(change: DishChange): string {
+  const renamed = change.renamed ?? [];
+  const own = renamed.find((name) => readsIn(name.locale) && name.from !== "" && name.to !== "");
+  if (own !== undefined) return t("{from} is now called {to}.", { from: own.from, to: own.to });
+  const other = renamed.find((name) => !readsIn(name.locale) && name.to !== "");
+  if (other === undefined)
+    return t("{dish} was renamed since you added it.", { dish: change.dish });
+  const language = languageName(other.locale);
+  const sentence =
+    other.from === ""
+      ? language === null
+        ? t("{dish} now has another name on the menu: {to}.", { dish: change.dish, to: other.to })
+        : t("{dish} now has a {language} name: {to}.", {
+            dish: change.dish,
+            language,
+            to: other.to,
+          })
+      : language === null
+        ? t("{dish} was renamed on the menu from {from} to {to}.", {
+            dish: change.dish,
+            from: other.from,
+            to: other.to,
+          })
+        : t("{dish}: its {language} name changed from {from} to {to}.", {
+            dish: change.dish,
+            language,
+            from: other.from,
+            to: other.to,
+          });
+  return (
+    sentence +
+    (currentLanguage() === "zh-Hans" ? "" : " ") +
+    t("The name you see here is the same.")
+  );
+}
+
 /** One plain sentence per changed dish: renamed, and its allergens as they are now. */
 export function dishChangeText(change: DishChange): string {
   return [
-    change.name ? t("{dish} was renamed since you added it.", { dish: change.dish }) : null,
+    change.name ? renameText(change) : null,
     !change.allergens
       ? null
       : change.allergensNow === null

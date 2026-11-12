@@ -33,6 +33,15 @@ export interface QuoteLineSinceAdded {
   readonly quantity: number;
   readonly subtotal: PriceQuoteSnapshot["subtotal"];
   readonly changes: readonly ("Name" | "Allergens")[];
+  /**
+   * v15 2026-11-11 b10: each menu language whose name of the dish changed, before and now (absent:
+   * not known, or no name changed), so a guest reading another language sees what changed.
+   */
+  readonly renamed?: readonly {
+    readonly locale: string;
+    readonly from: string;
+    readonly to: string;
+  }[];
 }
 
 /** WP-2423 item 8 ⑦ (Owner decision 11): the tips the Store offers, worked out on the subtotal. */
@@ -246,6 +255,15 @@ function publicQuote(
                 quantity: line.quantity,
                 subtotal: money(line.subtotal),
                 changes: [...line.changes],
+                ...(line.renamed === undefined || line.renamed.length === 0
+                  ? {}
+                  : {
+                      renamed: line.renamed.map((name) => ({
+                        locale: name.locale,
+                        from: name.from,
+                        to: name.to,
+                      })),
+                    }),
               })),
             }),
       priceChange:

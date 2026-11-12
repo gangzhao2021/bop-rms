@@ -21,6 +21,11 @@ interface Dish {
   priceDollars: string;
   /** Allergen names the dish may contain. */
   mayContain: string[];
+  /**
+   * v15 2026-11-11 b10: the dish's Chinese name. When set, the Store says which language's name
+   * changed (as v15 does); without it the stub answers as an older server.
+   */
+  nameZh?: string;
 }
 
 function menu(dish: Dish) {
@@ -213,8 +218,17 @@ async function stubTable(page: Page, timing: "PayLater" | "PayFirst", dish: Dish
     // As the Store: the first quote for the line is its record of what the guest was first shown;
     // every later quote says it, and whether the dish is shown differently now.
     first ??= { subtotal, dish: { ...table.dish, mayContain: [...table.dish.mayContain] } };
+    const zhChanged = table.dish.nameZh !== undefined && first.dish.nameZh !== table.dish.nameZh;
+    const renamed = [
+      ...(table.dish.nameZh !== undefined && first.dish.name !== table.dish.name
+        ? [{ locale: "en-CA", from: first.dish.name, to: table.dish.name }]
+        : []),
+      ...(zhChanged
+        ? [{ locale: "zh-Hans-CA", from: first.dish.nameZh ?? "", to: table.dish.nameZh ?? "" }]
+        : []),
+    ];
     const changes = [
-      ...(first.dish.name === table.dish.name ? [] : ["Name"]),
+      ...(first.dish.name === table.dish.name && !zhChanged ? [] : ["Name"]),
       ...(first.dish.mayContain.join() === table.dish.mayContain.join() ? [] : ["Allergens"]),
     ];
     const key = JSON.stringify([String(subtotal), table.dish]);
@@ -253,6 +267,7 @@ async function stubTable(page: Page, timing: "PayLater" | "PayFirst", dish: Dish
                     quantity: 2,
                     subtotal: { amountMinor: String(first.subtotal), currency: "CAD" },
                     changes,
+                    ...(renamed.length === 0 ? {} : { renamed }),
                   },
                 ],
               }),
@@ -565,6 +580,36 @@ for (const screen of [
       await expect(why).toHaveCount(0);
       await noSideScroll(page);
       await expectNoInternalText(page);
+      expect(failures).toEqual([]);
+    });
+
+    test("v15 b10: a dish whose Chinese name alone changed says so to an English reader, never the same name twice", async ({
+      page,
+    }) => {
+      const failures: string[] = [];
+      page.on("pageerror", () => failures.push("page error"));
+      const table = await stubTable(page, "PayFirst", { ...noodles(), nameZh: "拉面" });
+      await openAtTable(page, "/checkout");
+      const main = page.getByRole("main");
+      await expect(main.getByText(/Your price is kept for/u)).toBeVisible();
+      table.dish = { ...noodles(), nameZh: "招牌拉面" };
+      await openAtTable(page, "/checkout");
+      await expect(main.getByText("Changed since you added it:")).toBeVisible();
+      await expect(
+        main.getByText(
+          "Synthetic noodles: its Chinese name changed from 拉面 to 招牌拉面. The name you see here is the same.",
+        ),
+      ).toBeVisible();
+      await expect(main.getByText("Synthetic noodles was renamed since you added it.")).toHaveCount(
+        0,
+      );
+      await main.getByRole("button", { name: "No tip", exact: true }).click();
+      const pay = main.getByRole("button", { name: /Continue to payment/u });
+      await expect(pay).toBeDisabled();
+      await expect(main.getByText("Tick the box above to continue to payment.")).toBeVisible();
+      await main.getByRole("checkbox", { name: "I have read these changes" }).check();
+      await expect(pay).toBeEnabled();
+      await noSideScroll(page);
       expect(failures).toEqual([]);
     });
 

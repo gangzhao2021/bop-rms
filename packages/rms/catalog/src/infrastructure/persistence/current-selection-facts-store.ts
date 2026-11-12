@@ -1,6 +1,7 @@
 import { parsePublishingDigest } from "@bop/publishing";
 import type {
   CatalogDishChange,
+  CatalogDishChangeDetail,
   CatalogDishChangeKey,
   ValidateCatalogSelectionInput,
 } from "../../contracts/selection-validation.js";
@@ -27,6 +28,7 @@ import { createPostgresCurrentMenuReleaseStore } from "./current-menu-release-st
 import {
   createPostgresPublishedMenuQueryStore,
   listPublishedDishChanges,
+  listPublishedDishChangeDetails,
 } from "./published-menu-query-store.js";
 import { createPostgresCurrentSkuStore } from "./current-sku-store.js";
 import {
@@ -386,6 +388,24 @@ export function createPostgresCatalogOrderSnapshotSource(
           return keys.map(() => Object.freeze([]));
         return await runner.run((tx) =>
           listPublishedDishChanges(tx as never, ownerScope, structuredClone(keys)),
+        );
+      } catch {
+        throw new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE");
+      }
+    },
+    /**
+     * v15 2026-11-11 b10: as `dishChanges`, with each language's name before and now where the
+     * name changed, so the guest is told which name changed.
+     */
+    async dishChangeDetails(
+      keys: readonly CatalogDishChangeKey[],
+    ): Promise<readonly CatalogDishChangeDetail[]> {
+      try {
+        if (!Array.isArray(keys)) throw new Error("invalid keys");
+        if (keys.every((key) => key.fromMenuVersionReference === key.toMenuVersionReference))
+          return keys.map(() => Object.freeze({ changes: [], renamed: [] }));
+        return await runner.run((tx) =>
+          listPublishedDishChangeDetails(tx as never, ownerScope, structuredClone(keys)),
         );
       } catch {
         throw new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE");

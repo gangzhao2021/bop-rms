@@ -70,3 +70,18 @@ export interface CatalogDishChangeKey {
  * answered as both, so it is never held unchecked.
  */
 export type CatalogDishChange = "Name" | "Allergens";
+/**
+ * v15 2026-11-11 b10: a dish's name in one menu language before and now, for each language whose
+ * name changed, so a guest reading another language is told what changed (only the Chinese name,
+ * say) instead of seeing the same name twice.
+ */
+export interface CatalogDishRename {
+  readonly locale: string;
+  readonly from: string;
+  readonly to: string;
+}
+/** What changed about one dish, and how its names changed (empty when the names are the same). */
+export interface CatalogDishChangeDetail {
+  readonly changes: readonly CatalogDishChange[];
+  readonly renamed: readonly CatalogDishRename[];
+}

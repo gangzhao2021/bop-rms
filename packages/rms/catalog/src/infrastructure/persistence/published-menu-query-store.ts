@@ -30,6 +30,8 @@ import {
 } from "../../domain/allergen-provenance.js";
 import type {
   CatalogDishChange,
+  CatalogDishChangeDetail,
+  CatalogDishRename,
   CatalogDishChangeKey,
 } from "../../contracts/selection-validation.js";
 
@@ -668,6 +670,40 @@ export async function listPublishedDishChanges(
   scope: { readonly brandReference: string; readonly storeReference: string },
   keys: readonly CatalogDishChangeKey[],
 ): Promise<readonly (readonly CatalogDishChange[])[]> {
+  return (await listPublishedDishChangeDetails(transaction, scope, keys)).map(
+    (detail) => detail.changes,
+  );
+}
+/**
+ * The names of a dish, language by language, whose text differs between the two menus (each
+ * language either menu names; a language one menu lacks reads as "" there).
+ */
+export function dishRenames(before: string, after: string): readonly CatalogDishRename[] {
+  const parse = (value: string): Record<string, string> => {
+    const parsed = JSON.parse(value) as unknown;
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    return Object.fromEntries(
+      Object.entries(parsed as Record<string, unknown>).filter(
+        (entry): entry is [string, string] => typeof entry[1] === "string",
+      ),
+    );
+  };
+  const from = parse(before),
+    to = parse(after);
+  return Object.freeze(
+    [...new Set([...Object.keys(from), ...Object.keys(to)])]
+      .sort()
+      .filter((locale) => (from[locale] ?? "") !== (to[locale] ?? ""))
+      .map((locale) => Object.freeze({ locale, from: from[locale] ?? "", to: to[locale] ?? "" })),
+  );
+}
+/** As `listPublishedDishChanges`, with each changed language's name before and now. */
+export async function listPublishedDishChangeDetails(
+  transaction: ConsumerTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  keys: readonly CatalogDishChangeKey[],
+): Promise<readonly CatalogDishChangeDetail[]> {
+  const none = Object.freeze({ changes: Object.freeze([]), renamed: Object.freeze([]) });
   if (!Array.isArray(keys) || keys.length > 200) throw new CatalogError("CATALOG_INPUT_INVALID");
   const parsed = keys.map((key) => ({
     sellable: parseCatalogReference(key.sellableReference),
@@ -676,7 +712,7 @@ export async function listPublishedDishChanges(
     to: parseCatalogReference(key.toMenuVersionReference),
   }));
   const moved = parsed.filter((key) => key.from !== key.to);
-  if (moved.length === 0) return parsed.map(() => Object.freeze([]));
+  if (moved.length === 0) return parsed.map(() => none);
   const brand = parseCatalogReference(scope.brandReference),
     store = parseCatalogReference(scope.storeReference);
   await transaction.query(
@@ -715,16 +751,25 @@ export async function listPublishedDishChanges(
         ? { name: [...names][0], disclosure: [...disclosures][0] }
         : null;
     };
-    return parsed.map((key) => {
-      if (key.from === key.to) return Object.freeze([]);
+    return parsed.map((key): CatalogDishChangeDetail => {
+      if (key.from === key.to) return none;
       const before = facts(key.from, key.sellable, key.productVersion);
       const after = facts(key.to, key.sellable, key.productVersion);
       if (before === null || after === null)
-        return Object.freeze(["Name", "Allergens"] as CatalogDishChange[]);
+        return Object.freeze({
+          changes: Object.freeze(["Name", "Allergens"] as CatalogDishChange[]),
+          renamed: Object.freeze([]),
+        });
       const changes: CatalogDishChange[] = [];
       if (before.name !== after.name) changes.push("Name");
       if (before.disclosure !== after.disclosure) changes.push("Allergens");
-      return Object.freeze(changes);
+      return Object.freeze({
+        changes: Object.freeze(changes),
+        renamed:
+          before.name === after.name
+            ? Object.freeze([])
+            : dishRenames(String(before.name), String(after.name)),
+      });
     });
   } finally {
     await transaction.query(

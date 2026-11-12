@@ -225,6 +225,35 @@ describe("WP-1103/1104 Customer Quote API", () => {
     expect(unknown.quote.sinceAdded).toBeNull();
   });
 
+  it("v15 2026-11-11 b10: says which language's name of a renamed dish changed, from what to what", async () => {
+    const service = new Port();
+    service.result = {
+      status: "Current",
+      quote: quote(),
+      sinceAdded: [
+        {
+          cartItemReference: id(6),
+          quantity: 1,
+          subtotal: { amountMinor: 950n, currencyCode: "CAD" } as never,
+          changes: ["Name"],
+          renamed: [{ locale: "zh-Hans-CA", from: "牛肉面", to: "红烧牛肉面" }],
+        },
+      ],
+    };
+    const body = (await (await post(await listen(service))).json()) as {
+      quote: { sinceAdded?: unknown };
+    };
+    expect(body.quote.sinceAdded).toEqual([
+      {
+        cartItemReference: id(6),
+        quantity: 1,
+        subtotal: { amountMinor: "950", currency: "CAD" },
+        changes: ["Name"],
+        renamed: [{ locale: "zh-Hans-CA", from: "牛肉面", to: "红烧牛肉面" }],
+      },
+    ]);
+  });
+
   it("returns a replacement Quote with an explicit price-increase decision", async () => {
     const service = new Port();
     service.result = { status: "Requoted", requote: requote() };

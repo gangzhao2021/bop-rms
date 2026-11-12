@@ -6,7 +6,7 @@ import {
   getCustomerCsrfCredential,
   setParticipationEnded,
 } from "../session/customer-transaction-context.js";
-import type { CheckoutQuote, CheckoutState } from "./types.js";
+import type { CheckoutQuote, CheckoutState, DishRename } from "./types.js";
 
 const uuidV7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const instant = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
@@ -172,7 +172,15 @@ function sinceAddedLines(
   const seen = new Set<string>();
   return Object.freeze(
     value.map((entry: unknown) => {
-      const line = exact(entry, ["cartItemReference", "quantity", "subtotal", "changes"]);
+      const withRenamed =
+        entry !== null && typeof entry === "object" && Object.hasOwn(entry, "renamed");
+      const line = exact(entry, [
+        "cartItemReference",
+        "quantity",
+        "subtotal",
+        "changes",
+        ...(withRenamed ? ["renamed"] : []),
+      ]);
       const cartItemReference = text(line.cartItemReference, uuidV7);
       const subtotal = money(line.subtotal);
       const changes = line.changes;
@@ -187,12 +195,32 @@ function sinceAddedLines(
       )
         throw new Error("invalid");
       seen.add(cartItemReference);
+      const renamed = withRenamed ? dishRenames(line.renamed, changes.includes("Name")) : [];
       return Object.freeze({
         cartItemReference,
         quantity: integer(line.quantity),
         subtotal,
         changes: Object.freeze([...changes]) as readonly ("Name" | "Allergens")[],
+        ...(renamed.length === 0 ? {} : { renamed }),
       });
+    }),
+  );
+}
+/** v15 2026-11-11 b10: each renamed language once, only on a line whose name changed. */
+function dishRenames(value: unknown, renamedLine: boolean): readonly DishRename[] {
+  if (!Array.isArray(value) || value.length === 0 || value.length > 20 || !renamedLine)
+    throw new Error("invalid");
+  const locales = new Set<string>();
+  return Object.freeze(
+    value.map((entry: unknown) => {
+      const name = exact(entry, ["locale", "from", "to"]);
+      const locale = text(name.locale, /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8}){0,3}$/u);
+      const from = typeof name.from === "string" && name.from.length <= 200 ? name.from : null;
+      const to = typeof name.to === "string" && name.to.length <= 200 ? name.to : null;
+      if (from === null || to === null || from === to || locales.has(locale))
+        throw new Error("invalid");
+      locales.add(locale);
+      return Object.freeze({ locale, from, to });
     }),
   );
 }
