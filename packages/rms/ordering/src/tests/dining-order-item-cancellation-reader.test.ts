@@ -1,12 +1,27 @@
 import { expect, it, vi } from "vitest";
 import type { ConsumerTransaction } from "@bop/eventing";
 import { createPostgresDiningOrderItemStateReader } from "../infrastructure/persistence/dining-order-item-state-reader.js";
-const mocks = vi.hoisted(() => ({ current: vi.fn(), acceptance: vi.fn() }));
+const mocks = vi.hoisted(() => ({ current: vi.fn(), acceptance: vi.fn(), byOrder: vi.fn() }));
 vi.mock("../infrastructure/persistence/order-termination-store.js", () => ({
   createPostgresDiningOrderPreparationSource: () => ({ resolveCurrent: mocks.current }),
 }));
 vi.mock("../infrastructure/persistence/order-acceptance-store.js", () => ({
-  createPostgresOrderAcceptanceReader: () => ({ loadByBatch: mocks.acceptance }),
+  // WP-2423 M35: one read for every round of the Order, answered here round by round.
+  createPostgresOrderAcceptanceReader: () => ({
+    loadByOrder: async (input: {
+      transaction: unknown;
+      orderReference: string;
+      orderBatchReferences: readonly string[];
+    }) => {
+      mocks.byOrder(input);
+      const found = new Map<string, unknown>();
+      for (const orderBatchReference of input.orderBatchReferences) {
+        const record = await mocks.acceptance({ ...input, orderBatchReference });
+        if (record !== null) found.set(orderBatchReference, record);
+      }
+      return found;
+    },
+  }),
 }));
 const id = (n: number) => `0190ee34-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 function fixture() {
@@ -83,6 +98,7 @@ function readerFixture() {
     .mockReset()
     .mockResolvedValue({ ...scope, orderReference: f.record.orderReference, orderVersion: 8 });
   mocks.acceptance.mockReset().mockResolvedValue(null);
+  mocks.byOrder.mockReset();
   let cancellation: unknown = f.record;
   const rows = [
     {
@@ -255,4 +271,16 @@ it("refuses a Batch with both a checkout and a staff cancellation", async () => 
   const f = staffFixture();
   f.setCancellation(f.f.record);
   await expect(f.reader.load(f.input)).rejects.toThrow("ORDER_ITEM_STATE_UNAVAILABLE");
+});
+
+it("WP-2423 M35: reads every round's acceptance once for the whole Order", async () => {
+  const { input, reader, setCancellation } = readerFixture();
+  setCancellation(null);
+  const state = await reader.load(input);
+  expect(state?.batches).toHaveLength(2);
+  expect(mocks.byOrder).toHaveBeenCalledTimes(1);
+  expect(mocks.byOrder.mock.calls[0]?.[0]).toMatchObject({
+    orderReference: input.orderReference,
+    orderBatchReferences: [id(19), id(5)],
+  });
 });

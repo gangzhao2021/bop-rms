@@ -197,12 +197,14 @@ export function createPostgresDiningOrderItemStateReader(options: Options) {
         throw new Error("ORDER_ITEM_STATE_UNAVAILABLE");
       const batchStates = [];
       const items = [];
+      // WP-2423 M35: every round's acceptance in one read, whatever the number of rounds.
+      const acceptances = await acceptanceReader.loadByOrder({
+        transaction: input.transaction,
+        orderReference: state.orderReference,
+        orderBatchReferences: [...batches.keys()],
+      });
       for (const [orderBatchReference, members] of batches) {
-        const acceptance = await acceptanceReader.loadByBatch({
-          transaction: input.transaction,
-          orderReference: state.orderReference,
-          orderBatchReference,
-        });
+        const acceptance = acceptances.get(orderBatchReference) ?? null;
         const cancellation = cancellations.get(orderBatchReference) ?? null;
         const staffCancellation = staffCancellations.get(orderBatchReference) ?? null;
         if (acceptance && cancellation) throw new Error("ORDER_ITEM_STATE_UNAVAILABLE");

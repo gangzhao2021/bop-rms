@@ -111,6 +111,67 @@ export function createPostgresOrderAcceptanceReader(options: {
         return fail(true);
       return record;
     },
+    /**
+     * WP-2423 M35: every Batch's acceptance of one Order in one read (authorized once, under the
+     * same Order lock), so a reader of a table's rounds costs the same however many rounds the
+     * table already has. The same records and checks as `loadByBatch`, one per Batch at most.
+     */
+    async loadByOrder(input: {
+      transaction: ConsumerTransaction;
+      orderReference: string;
+      orderBatchReferences: readonly string[];
+    }): Promise<ReadonlyMap<string, OrderAcceptanceRecord>> {
+      const order = parseOrderingReference(input.orderReference);
+      const wanted = input.orderBatchReferences.map((value) => parseOrderingReference(value));
+      if (new Set(wanted).size !== wanted.length) return fail();
+      const found = new Map<string, OrderAcceptanceRecord>();
+      if (wanted.length === 0) return found;
+      const tx = input.transaction;
+      await tx.query(
+        "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+        [brand, store],
+      );
+      for (const batch of wanted)
+        if (
+          (await options.authorize(
+            tx,
+            Object.freeze({
+              brandReference: brand,
+              storeReference: store,
+              orderReference: order,
+              orderBatchReference: batch,
+            }),
+          )) !== true
+        )
+          return fail();
+      await lockOrder(tx, brand, store, order);
+      const result = await tx.query(
+        "SELECT " +
+          selection +
+          " FROM rms_ordering.order_acceptance_record " +
+          "WHERE brand_id=$1 AND store_id=$2 AND order_id=$3 AND order_batch_id=ANY($4::uuid[]) " +
+          "ORDER BY order_batch_id,acceptance_id LIMIT 10001",
+        [brand, store, order, wanted],
+      );
+      if (result.rows.length > wanted.length) return fail(true);
+      for (const row of result.rows) {
+        const record = parseOrderAcceptanceRecord({
+          ...row,
+          acceptedAt:
+            row?.acceptedAt instanceof Date ? row.acceptedAt.toISOString() : row?.acceptedAt,
+        });
+        if (
+          record.brandReference !== brand ||
+          record.storeReference !== store ||
+          record.orderReference !== order ||
+          !wanted.includes(record.orderBatchReference) ||
+          found.has(record.orderBatchReference)
+        )
+          return fail(true);
+        found.set(record.orderBatchReference, record);
+      }
+      return found;
+    },
   });
 }
 
