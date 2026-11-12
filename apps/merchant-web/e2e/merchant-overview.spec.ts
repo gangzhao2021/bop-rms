@@ -120,11 +120,20 @@ test("@production Merchant Overview uses the authorized workspace snapshot at de
         // WP-2423: the table's Order is not Ready as a whole (another round is still being made),
         // but one item waits at the pass: the server's count, as on the Tables page, is used.
         items: [
+          // b9: an order the guest has not paid yet, with a dish sold out since: never counted as
+          // waiting to be accepted.
+          ((unpaid) => ({
+            ...unpaid,
+            awaitingPayment: true,
+            canRequestAcceptance: false,
+            batches: unpaid.batches.map((batch) => ({ ...batch, canRequestAcceptance: false })),
+            soldOutNow: "SoldOut",
+          }))(order(5, "Submitted", 1)),
           // WP-2423 (3cd0f8dd M7): a table whose order is all served, still open.
           { ...order(4, "Accepted", 4, "DineIn"), currentPhase: "Fulfilled" },
           { ...order(3, "Accepted", 3, "DineIn"), readyToServeItemCount: 1 },
           // b7 (M23): staff marked a dish in it sold out after the guest ordered.
-          { ...order(2, "Submitted", 1), soldOutNow: true },
+          { ...order(2, "Submitted", 1), soldOutNow: "Hidden" },
           order(1, "Accepted", 2),
         ],
         nextAfterOrderReference: moreOrders ? id(1) : null,
@@ -300,7 +309,7 @@ test("@production Merchant Overview uses the authorized workspace snapshot at de
   ).toBeVisible();
   await expect(
     needs.getByText(
-      "1 order waiting to be accepted. Open each on Orders: offer the guest a swap, or cancel that dish with a refund.",
+      "1 order waiting to be accepted and 1 order not paid yet. Open each on Orders: offer the guest a swap, or cancel that dish (with a refund if it was paid).",
     ),
   ).toBeVisible();
   await expect(needs.getByText("1 ready to serve")).toBeVisible();
@@ -348,12 +357,13 @@ test("@production Merchant Overview uses the authorized workspace snapshot at de
   // 2026-10-21 live check ("Open orders 3+" was unclear): the whole list was read, so the exact
   // count; once only the most recent orders were read, a lower bound said in words.
   const openOrders = now.locator("li").filter({ hasText: "Open orders" });
-  await expect(openOrders.locator(".overview-count__value")).toHaveText("3");
+  // b9: the unpaid order is open too.
+  await expect(openOrders.locator(".overview-count__value")).toHaveText("4");
   moreOrders = true;
   await now.getByRole("button", { name: "Refresh" }).click();
-  await expect(openOrders.locator(".overview-count__value")).toHaveText("At least 3");
+  await expect(openOrders.locator(".overview-count__value")).toHaveText("At least 4");
   await expect(openOrders).toContainText("Counted from the most recent orders only");
-  await expect(checklist.getByText("At least 3 left")).toBeVisible();
+  await expect(checklist.getByText("At least 4 left")).toBeVisible();
   await expect(page.locator("main")).not.toContainText("3+");
 
   for (const width of [1440, 1024, 390, 320]) {

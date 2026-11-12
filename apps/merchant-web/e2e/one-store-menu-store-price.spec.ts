@@ -311,6 +311,99 @@ test("@production a price saved only at this Store says guests pay it now, and a
   await expectNoInternalText(page);
 });
 
+test("@production b9: what saving a dish far down a long menu did is said at that dish, in view", async ({
+  page,
+}) => {
+  let own: string | null = null;
+  // Thirty dishes before it, so the dish is far below the top of the page at every width.
+  const many = Array.from({ length: 30 }, (_, index) => 400 + index);
+  const longMenu = () => {
+    const read = view(true, own);
+    return {
+      ...read,
+      menu: {
+        ...read.menu,
+        sections: [
+          {
+            sectionReference: id(11),
+            code: "DIM",
+            name: "Dim sum (TEST)",
+            nameZh: "点心",
+            items: many.map((n) => ({
+              placementReference: id(200 + n),
+              skuReference: id(n),
+              featured: false,
+            })),
+          },
+          ...read.menu.sections,
+        ],
+      },
+      sellables: [
+        ...many.map((n) => sellable(n, "Dumpling " + String(n) + " (TEST)", "饺子", "688")),
+        ...read.sellables,
+      ],
+    };
+  };
+  await routes(page, longMenu);
+  await page.route("**/merchant/commerce/availability/query", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        screenId: "CAT-AVAILABILITY",
+        sourceAsOf: at,
+        viewer: id(50),
+        timeZone: scope.timeZone,
+        permissions: { mayOffer: true, mayMarkSoldOut: true, mayMarkUntilBack: true },
+        items: [...many, 30, 32].map((n) => ({
+          skuReference: id(n),
+          skuCode: "SKU_" + n,
+          productName: "x",
+          sizeName: "x",
+          status: "Available",
+          soldOutUntil: null,
+        })),
+      },
+    }),
+  );
+  await page.route("**/merchant/commerce/one-store-dishes/command", (route) => {
+    const body = route.request().postDataJSON() as Record<string, unknown>;
+    own = String(body.priceMinor);
+    return route.fulfill({
+      headers,
+      json: {
+        status: "Saved",
+        productReference: body.productReference,
+        choicesWaiting: false,
+        price: { brandPriceMinor: "1288", pendingBrandPriceMinor: null, storePriceMinor: own },
+        listingNeeded: false,
+      },
+    });
+  });
+  const prices = { 1440: "13.10", 1024: "13.20", 390: "13.30" } as const;
+  for (const width of [1440, 1024, 390] as const) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await page.goto("/app/commerce/menus");
+    await page.getByRole("button", { name: "Edit Dan dan noodles (TEST) 担担面" }).click();
+    const editor = page.getByRole("form", { name: "Dan dan noodles (TEST) 担担面" });
+    await editor.getByLabel("Price here ($)").fill(prices[width]);
+    await editor.getByLabel("Only at this Store — changes now").check();
+    await editor.getByRole("button", { name: "Save dish" }).click();
+    const row = page.locator(".one-menu__dish").filter({ hasText: "Dan dan noodles (TEST)" });
+    const note = row.getByRole("status");
+    await expect(note).toHaveText(
+      "Dan dan noodles (TEST): guests at this Store pay $" +
+        prices[width] +
+        " from now. Nothing else changed, so there is nothing to list.",
+    );
+    await expect(note).toBeInViewport();
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.screenshot({ path: "test-results/b9-save-note-" + String(width) + ".png" });
+  }
+  await expectNoInternalText(page);
+});
+
 test("@production What goes live names each extra price and the dishes the other Store does not sell yet", async ({
   page,
 }) => {
