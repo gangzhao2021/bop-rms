@@ -788,7 +788,9 @@ describe("optional local Cart runtime", () => {
     expect(denied.status).toBe(503);
     expect(denied.headers.get("cache-control")).toContain("no-store");
     expect(await denied.text()).not.toContain("synthetic database unavailable");
-    expect(run).toHaveBeenCalledOnce();
+    // guest-table-open-and-busy-reads: a passing fault that isn't "no connection" is read once
+    // more, 200 ms later, before the phone is told busy; never a third time.
+    expect(run).toHaveBeenCalledTimes(2);
     expect(cartRun).not.toHaveBeenCalled();
     expect(f.options.admission.consume).not.toHaveBeenCalled();
     expect(f.options.profile.resolution.resolve).not.toHaveBeenCalled();
