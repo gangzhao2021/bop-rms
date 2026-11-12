@@ -127,6 +127,31 @@ export function createPilotAttentionReporter(write = (line) => process.stderr.wr
     );
   };
 }
+/**
+ * WP-2423 (guest-table-open-and-busy-reads, v15 2026-11-12): a part of a running worker is named
+ * as needing a person only when two sweeps in a row (5 s apart) find its health report missing or
+ * stale. A healthy part whose report was written a moment late (the host busy, an image being
+ * built) raised a level-50 pilot_attention_required that cleared on the next sweep, so staff and
+ * the operations monitor learned to ignore it. A part that really stopped reporting is named on
+ * the second sweep, 5 s later; a whole service that is down or refused is named at once, as before.
+ */
+export function createPilotAttentionConfirmation() {
+  let seen = new Map();
+  return (snapshot) => {
+    const next = new Map();
+    const services = snapshot.services.map((entry) => {
+      if (!Array.isArray(entry.attention)) return entry;
+      const before = seen.get(entry.service) ?? [];
+      next.set(entry.service, entry.attention);
+      const confirmed = entry.attention.filter((component) => before.includes(component));
+      const { attention, ...rest } = entry;
+      void attention;
+      return confirmed.length === 0 ? rest : { ...rest, attention: confirmed };
+    });
+    seen = next;
+    return { ...snapshot, services };
+  };
+}
 /** WP-2423 Q13: the latest sweep as a private file, so the separate operations monitor can alert
  * on services needing a person and notice when the supervisor itself stops (names and states only). */
 export function createPilotSupervisorHealthWriter(
@@ -352,10 +377,13 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       observe: (() => {
         const report = createPilotAttentionReporter();
         const health = createPilotSupervisorHealthWriter(process.argv[2]);
+        const confirm = createPilotAttentionConfirmation();
         return async (snapshot) => {
           console.log(JSON.stringify(snapshot));
-          report(snapshot);
-          await health(snapshot);
+          // The alert line and the monitor's file name a stale part only once it is confirmed.
+          const confirmed = confirm(snapshot);
+          report(confirmed);
+          await health(confirmed);
         };
       })(),
     });

@@ -155,6 +155,51 @@ it("writes one alert line when the services or workloads needing a person change
     },
   ]);
 });
+// v15 2026-11-12: a healthy part whose report was late for one sweep raised a level-50 alert.
+it("names a stale part only when two sweeps in a row find it, and a down service at once", async () => {
+  const { createPilotAttentionConfirmation, createPilotAttentionReporter } =
+    await import("./pilot-supervisor.mjs");
+  const lines = [];
+  const confirm = createPilotAttentionConfirmation();
+  const report = createPilotAttentionReporter((line) => lines.push(JSON.parse(line)));
+  const sweep = (at, services) => report(confirm({ observedAt: at, services }));
+  const events = (attention) => ({
+    service: "stores/demo-2:business-worker",
+    state: "running",
+    pid: 7,
+    ...(attention === undefined ? {} : { attention }),
+  });
+  // One late report: no alert at all.
+  sweep("2026-11-12T00:00:53.500Z", [events()]);
+  sweep("2026-11-12T00:00:58.500Z", [events(["events"])]);
+  sweep("2026-11-12T00:01:03.500Z", [events()]);
+  expect(lines).toEqual([]);
+  // A part that stopped reporting: named on the second sweep; a down service at once.
+  sweep("2026-11-12T00:31:58.700Z", [events(["batchCancellation"])]);
+  expect(lines).toEqual([]);
+  sweep("2026-11-12T00:32:03.700Z", [
+    events(["batchCancellation"]),
+    { service: "stores/demo-3:dining-exception-worker", state: "down" },
+  ]);
+  sweep("2026-11-12T00:32:08.700Z", [events()]);
+  expect(lines).toEqual([
+    {
+      level: 50,
+      time: "2026-11-12T00:32:03.700Z",
+      event: "pilot_attention_required",
+      attention: [
+        "stores/demo-2:business-worker:batchCancellation",
+        "stores/demo-3:dining-exception-worker",
+      ],
+    },
+    {
+      level: 30,
+      time: "2026-11-12T00:32:08.700Z",
+      event: "pilot_attention_cleared",
+      attention: [],
+    },
+  ]);
+});
 // DEC-WORKER-HEALTH-TRUTH: a Store worker that is not running is in the alert line too.
 it("names a Store worker that is down in the alert line", async () => {
   const { createPilotAttentionReporter } = await import("./pilot-supervisor.mjs");
