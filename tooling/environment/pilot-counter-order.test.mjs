@@ -1,5 +1,6 @@
 import nodeConsole from "node:console";
 import { beforeEach, expect, it, vi } from "vitest";
+import { currentRequestChecks } from "../../packages/database/dist/request-check-memo.js";
 
 // WP-2423 Q7: the pilot's counter composition. Owner modules are doubles that record what the
 // composition hands them; the counter's own rules (opening rule, entry view, details command)
@@ -109,7 +110,11 @@ vi.mock("../../apps/api/dist/merchant-counter-order.js", async () => {
 vi.mock("../../apps/api/dist/merchant-staff-dining-round.js", () => ({
   createMerchantStaffDiningRound: (options) => {
     seen.commands.staffRound = options;
-    return "staffRound";
+    // M35: the command records whether it ran inside one request's verified checks.
+    return async (input) => ({
+      staffRound: input,
+      verifiedChecks: currentRequestChecks() !== undefined,
+    });
   },
 }));
 vi.mock("../../apps/api/dist/table-guest-pipeline.js", () => ({
@@ -412,7 +417,13 @@ it("composes the staff table round from the dine-in customer path, without the g
       diningClosing,
     },
   );
-  expect(counter.staffDiningRound).toBe("staffRound");
+  // M35 (DEC-STAFF-ROUND-SPEED, third step): each staff round runs as one request whose owner
+  // checks are answered from the check it already made, and only inside its own call.
+  expect(await counter.staffDiningRound("round")).toEqual({
+    staffRound: "round",
+    verifiedChecks: true,
+  });
+  expect(currentRequestChecks()).toBeUndefined();
   // The dine-in checkout without the customer's open gate (the staff rule decides).
   expect(diningCheckout.mock.calls[0]?.[3]).toEqual({ openGate: false });
   const p = seen.tablePipeline;
