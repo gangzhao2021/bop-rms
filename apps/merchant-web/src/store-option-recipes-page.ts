@@ -93,6 +93,16 @@ export interface OptionRecipeView {
     readonly declared: boolean;
     readonly latestUnitCostCents: string | null;
   }[];
+  /**
+   * WP-2423 (b9): the stand-ins holding allergens staff declared on the Menu page (never stock),
+   * with what each declares (absent from an older server).
+   */
+  readonly declaredItems?: readonly {
+    readonly itemReference: string;
+    readonly declared: boolean;
+    readonly contains: readonly string[];
+    readonly mayContain: readonly string[];
+  }[];
   readonly options: readonly OptionRecipeRow[];
 }
 export type OptionRecipeCommand =

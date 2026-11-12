@@ -80,6 +80,27 @@ const blank: OptionRecipeChangeContent = {
   lossPercent: "0",
 };
 
+/**
+ * WP-2423 (b9): what a choice answered on the Menu page does, in staff words: the allergens it
+ * adds (or none), declared by staff and never a unit of stock.
+ */
+export function declaredSummaryText(declared: {
+  readonly declared: boolean;
+  readonly contains: readonly string[];
+  readonly mayContain: readonly string[];
+}): string {
+  if (!declared.declared) return t("Allergens declared by staff on the Menu page: not answered");
+  if (declared.contains.length === 0 && declared.mayContain.length === 0)
+    return t("Adds no allergens (declared by staff on the Menu page; not a stock item)");
+  const list = [
+    ...declared.contains,
+    ...declared.mayContain.map((allergen) => t("may contain {allergen}", { allergen })),
+  ].join(t(", "));
+  return t("Adds {allergens} (declared by staff on the Menu page; not a stock item)", {
+    allergens: list,
+  });
+}
+
 export function StoreOptionRecipesPage({
   client = unavailableOptionRecipeClient,
   csrf,
@@ -134,9 +155,16 @@ export function StoreOptionRecipesPage({
   const amount = (micro: string | null, reference: string | null) =>
     micro === null ? "" : `${microText(micro)} ${unitText(item(reference)?.unitCode)}`;
   const keyOf = (row: OptionRecipeRow) => row.bindingReference + ":" + row.optionReference;
+  // WP-2423 (b9): a choice answered on the Menu page adds a declaration, not stock.
+  const declaredOf = (content: OptionRecipeChangeContent) =>
+    content.kind === "Add" && content.toItemReference !== null
+      ? view.declaredItems?.find((entry) => entry.itemReference === content.toItemReference)
+      : undefined;
   const summary = (content: OptionRecipeChangeContent) => {
     const from = item(content.fromItemReference)?.name ?? "";
     const to = item(content.toItemReference)?.name ?? "";
+    const declared = declaredOf(content);
+    if (declared !== undefined) return declaredSummaryText(declared);
     if (content.kind === "NoChange") return t("No change to the recipe");
     if (content.kind === "Replace") return t("{from} → {to} (same amount)", { from: from, to: to });
     if (content.kind === "Remove") return t("Without {from}", { from: from });
@@ -459,7 +487,9 @@ export function StoreOptionRecipesPage({
                     </td>
                     <td data-label={t("Recipe change")}>
                       {row.change === null ? "—" : summary(row.change.content)}
-                      {row.change !== null && row.change.lines.length > 0 ? (
+                      {row.change !== null &&
+                      row.change.lines.length > 0 &&
+                      declaredOf(row.change.content) === undefined ? (
                         <ul
                           aria-label={t("Result per size for {optionName}", {
                             optionName: row.optionName,

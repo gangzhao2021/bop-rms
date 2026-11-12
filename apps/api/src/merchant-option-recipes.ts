@@ -410,6 +410,12 @@ export function createMerchantOptionRecipes(options: {
             rows.map((row) => row.target),
           );
           const ingredients = await recipeIngredientItems(tx, s, at, { staffDeclared: true });
+          const allergenNames = new Map(
+            (ingredients.registry?.entries ?? []).map((entry) => [
+              entry.allergenReference,
+              name(entry.localizedNames, entry.code),
+            ]),
+          );
           // Who saved and who reviewed each change, by name ("You" for the viewer): Store members
           // first, then the Brand's member directory (a Brand Owner need not be assigned here).
           const directory = tx as unknown as MemberDirectoryTransaction;
@@ -515,6 +521,24 @@ export function createMerchantOptionRecipes(options: {
                 latestUnitCostCents:
                   item.latestUnitCostMinor === null ? null : String(item.latestUnitCostMinor),
               })),
+            // WP-2423 (b9): the stand-ins holding allergens staff declared on the Menu page (never
+            // stock), with what each declares, so a choice answered there reads as a declaration
+            // ("adds no allergens") and never as a unit of stock used.
+            declaredItems: ingredients.items
+              .filter((item) => item.internalCode.startsWith("DECL-") && !item.stockTracked)
+              .map((item) => {
+                const d = ingredients.declarationOf(item);
+                const named = (classification: string) =>
+                  (d?.allergens ?? [])
+                    .filter((a) => a.classification === classification)
+                    .map((a) => allergenNames.get(a.allergenReference) ?? a.allergenReference);
+                return {
+                  itemReference: item.itemReference,
+                  declared: d !== null,
+                  contains: named("Contains"),
+                  mayContain: named("CrossContactPossible"),
+                };
+              }),
             options: options_,
           };
         }),

@@ -66,6 +66,25 @@ it("WP-2423 (M166): a choice's own allergens reach the listed menu for that choi
         standIns.map((row) => row.tracked),
         ["false", "false"],
       );
+      // b9: Option recipes reads each answer as a declaration (never one unit of stock): plain rice
+      // adds no allergens, egg fried rice adds milk.
+      const recipes = await f.optionRecipes.query(f.session);
+      const declaredFor = (option) => {
+        const row = recipes.options.find((candidate) => candidate.optionReference === option);
+        return (recipes.declaredItems ?? []).find(
+          (entry) => entry.itemReference === row?.change?.content?.toItemReference,
+        );
+      };
+      assert.deepEqual(declaredFor(plain), {
+        itemReference: declaredFor(plain)?.itemReference,
+        declared: true,
+        contains: [],
+        mayContain: [],
+      });
+      assert.equal(declaredFor(fried)?.contains.length, 1);
+      assert.ok(
+        recipes.ingredients.every((item) => item.itemReference !== declaredFor(plain)?.itemReference),
+      );
       assert.equal((await f.listAll()).status, "Listed");
       // The guest menu as the server sends it (the real projection and store facts, public form).
       const guestSees = async () => {
