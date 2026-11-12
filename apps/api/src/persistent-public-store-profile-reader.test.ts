@@ -23,6 +23,26 @@ describe("the public store read while the database is busy", () => {
     await expect(reader.getPublicStore(request)).resolves.toEqual({ status: "StoreUnavailable" });
   });
 
+  it("says busy for a connection it could not get in a rush or a statement cut off, never gone", async () => {
+    const failed = (code: string) => Object.assign(new Error(code), { code });
+    const run = vi
+      .fn()
+      .mockRejectedValueOnce(failed("TENANT_DATABASE_ACQUIRE_FAILED"))
+      .mockRejectedValueOnce(failed("TENANT_DATABASE_TRANSACTION_FAILED"))
+      .mockRejectedValueOnce(failed("TENANT_DATABASE_SCOPE_INVALID"));
+    const reader = createPersistentPublicStoreProfileReader({ transactions: { run } } as never);
+    await expect(reader.getPublicStore(request)).resolves.toEqual({
+      status: "StoreUnavailable",
+      busy: true,
+    });
+    await expect(reader.getPublicStore(request)).resolves.toEqual({
+      status: "StoreUnavailable",
+      busy: true,
+    });
+    // A scope this process was never given is no passing fault.
+    await expect(reader.getPublicStore(request)).resolves.toEqual({ status: "StoreUnavailable" });
+  });
+
   it("answers from a recent read for five minutes, then says busy; a closed Store is forgotten", async () => {
     const available = { status: "Available", profile: { name: "TEST" } };
     let now = 0;

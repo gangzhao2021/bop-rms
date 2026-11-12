@@ -151,9 +151,16 @@ export function createPersistentPublicStoreProfileReader(
         else lastAvailable.delete(key);
         return answer;
       } catch (error) {
+        // WP-2423 (guest-table-open-and-busy-reads, v15 2026-11-12): not only a lock conflict. No
+        // free connection within the request's budget in a rush (ACQUIRE_FAILED, after exactly
+        // 10 s), or a statement cut off (TRANSACTION_FAILED), is the database being busy too: the
+        // menu answered 404 "this menu does not exist" for it. Only a scope this process was never
+        // given (SCOPE_INVALID) or a fault that isn't the database's stays "unavailable".
+        const code = (error as { readonly code?: unknown } | null)?.code;
         if (
-          (error as { readonly code?: unknown } | null)?.code ===
-          "TENANT_DATABASE_TRANSACTION_CONFLICT"
+          typeof code === "string" &&
+          code.startsWith("TENANT_DATABASE_") &&
+          code !== "TENANT_DATABASE_SCOPE_INVALID"
         ) {
           const remembered = lastAvailable.get(key);
           if (remembered !== undefined && clock() - remembered.at <= rememberedStoreMs)
