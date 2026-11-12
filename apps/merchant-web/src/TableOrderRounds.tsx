@@ -1,6 +1,7 @@
 import { saidTable, t } from "./i18n/i18n.js";
 import { useEffect, useMemo, useState } from "react";
 import {
+  billRoundingApart,
   CurrentOrderLines,
   failedPaymentBatches,
   orderRefundRows,
@@ -125,6 +126,14 @@ export function TableOrderRounds({
           waitingBatches={waitingForStaffBatches(detail.view)}
           failedPaymentBatches={failedPaymentBatches(detail.view)}
           refundRows={orderRefundRows(detail.order, detail.lines, detail.paymentPosition)}
+          billRounding={billRoundingApart(
+            detail.order,
+            mergedTableLabels.length === 0
+              ? t("Whole bill to pay")
+              : t("Whole bill to pay, with {tables}", {
+                  tables: mergedTableLabels.map((label) => saidTable(label)).join(", "),
+                }),
+          )}
           rounds={{
             batches: detail.order.batches,
             timeZone,

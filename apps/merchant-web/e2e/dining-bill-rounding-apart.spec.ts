@@ -1,0 +1,204 @@
+import { expect, test } from "@playwright/test";
+
+/**
+ * v15 batch 9 review (DEC-TAX-WHOLE-RECEIPT): an Order's Total is what it ordered and never moves
+ * with a comp — on this table or on a table merged into it. Two $12.50 dishes at a 13% TEST tax,
+ * one per table, merged: each round was charged $1.63, the whole bill's tax is $3.25, so the bill
+ * rounds by −$0.01 (rule v2: on the host's Order). The host's Total reads $14.13 with the rounding
+ * listed under it; after a manager comps the merged table's dish the rounding is gone and the
+ * host's Total still reads $14.13 (it read $14.12, then $14.13). Synthetic Store; server mocked.
+ */
+const id = (n: number) => "0190996a-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+const headers = { "cache-control": "no-store" };
+const csrf = "a".repeat(43);
+const money = (amountMinor: string) => ({ amountMinor, currencyCode: "CAD" });
+
+for (const width of [1440, 1024, 390])
+  for (const comped of [false, true])
+    test(`@production the host's Total stays as ordered ${comped ? "after" : "before"} a comp on the merged table (${width})`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+      const scope = {
+        brandLabel: "Synthetic Brand",
+        storeLabel: "Synthetic Store",
+        storeReference: id(99),
+      };
+      await page.route("**/merchant/session", (route) =>
+        route.fulfill({
+          headers,
+          json: {
+            authenticated: true,
+            csrf,
+            workspace: {
+              screenId: "HOME-OVERVIEW",
+              selectedScope: scope,
+              authorizedStores: [scope],
+              businessDate: "2026-11-10",
+              storeStatus: "Open",
+              freshness: "Current",
+              dashboardAvailability: "UnavailableUntilWP1905",
+              navigation: [
+                {
+                  screenId: "DIN-FLOOR-BOARD",
+                  label: "Tables",
+                  href: "/operations/dining",
+                  permission: "dining.operate",
+                },
+              ],
+            },
+          },
+        }),
+      );
+      await page.route("**/merchant/dining/tables", (route) =>
+        route.fulfill({
+          headers,
+          json: {
+            canOperateTables: false,
+            canCloseSessions: true,
+            canTransferHost: false,
+            canCancelUnpaidRounds: true,
+            canWriteOff: true,
+            items: [
+              {
+                tableReference: id(70),
+                stableLabel: "MRS 1",
+                areaCode: "MAIN",
+                capacity: 4,
+                lifecycle: "Published",
+                operationalState: "Available",
+                blockReasonCode: null,
+                aggregateVersion: 2,
+                currentDiningSessionReference: id(71),
+                elapsedMinutes: 30,
+                qrCodeValidUntil: "2027-04-12T13:00:00.000Z",
+                paymentTiming: "PayLater",
+                session: {
+                  phase: "Active",
+                  version: 3,
+                  orderReference: id(1),
+                  paymentStarted: false,
+                  mergedTables: [{ fromTableLabel: "MRS 2", orderReference: id(2) }],
+                },
+                staffRoundsAwaitingPayment: [],
+                guestRoundsAwaitingPayment: [],
+                roundsAwaitingAcceptance: [],
+                staffCall: null,
+              },
+            ],
+            nextAfterTableReference: null,
+          },
+        }),
+      );
+      const line = (order: number, n: number, name: string) => ({
+        orderItemReference: id(200 + n),
+        orderBatchReference: id(50 + order),
+        name,
+        options: [],
+        quantity: 1,
+        customerNote: null,
+        unitPrice: money("1250"),
+        subtotal: money("1250"),
+        discount: money("0"),
+        tax: money("163"),
+        fee: money("0"),
+        total: money("1413"),
+        canCancel: false,
+        cancellation: null,
+      });
+      const order = (n: number) => ({
+        orderReference: id(n),
+        orderNumber: "T-" + n,
+        orderType: "DineIn",
+        sourceChannel: "Qr",
+        submittedAt: "2026-11-10T23:00:00.000Z",
+        observedAt: "2026-11-10T23:40:00.000Z",
+        initialBatchReference: id(50 + n),
+        batches: [
+          {
+            orderBatchReference: id(50 + n),
+            sequence: 1,
+            acceptanceStatus: "Accepted",
+            canRequestAcceptance: false,
+            canCancel: false,
+            staffCancellation: null,
+            canCancelItems: false,
+            unpaidRemovableItems: [],
+            unpaidRemovedItems: [],
+            compableItems: [],
+            // Only the merged table's dish is comped (after the comp).
+            compedItems:
+              comped && n === 2
+                ? [
+                    {
+                      orderItemReference: id(202),
+                      kind: "Comp",
+                      percent: null,
+                      amountMinor: "1413",
+                    },
+                  ]
+                : [],
+          },
+        ],
+        canRequestAcceptance: false,
+        // The host's bill holds both tables; the merged table's bill is on the host's.
+        tableBill:
+          n === 1
+            ? comped
+              ? { totalMinor: "1413", paid: null }
+              : { totalMinor: "2825", paid: null, taxRoundingMinor: "-1" }
+            : { totalMinor: "0", paid: null, mergedInto: { tableLabel: "MRS 1", paid: false } },
+        currentPhase: "InProgress",
+        currentVersion: 3,
+        unfulfillable: null,
+        pickupNotCollected: false,
+        acceptBy: null,
+        awaitingPayment: false,
+      });
+      await page.route("**/merchant/orders/detail*", (route) => {
+        const n = new URL(route.request().url()).searchParams.get("order") === id(2) ? 2 : 1;
+        return route.fulfill({
+          headers,
+          json: {
+            screenId: "OPS-ORDER-DETAIL",
+            pickupContact: null,
+            order: order(n),
+            lines: {
+              items: [line(n, n, n === 1 ? "Synthetic noodles" : "Synthetic dumplings")],
+              totals: {
+                subtotal: money("1250"),
+                discount: money("0"),
+                tax: money("163"),
+                fee: money("0"),
+                taxRounding: money("0"),
+                total: money("1413"),
+              },
+            },
+          },
+        });
+      });
+      await page.goto("/operations/dining");
+      await page.getByRole("button", { name: "Select MRS 1", exact: true }).click();
+      const details = page.getByRole("complementary", { name: "Selected table details" });
+      const host = details.getByRole("region", { name: "This table's order" }).first();
+      const totals = host.locator(".order-lines-totals");
+      await expect(totals.first()).toContainText("Total$14.13");
+      await expect(totals.first()).not.toContainText("Tax rounding");
+      if (comped) {
+        // No rounding left on the bill: nothing under the host's Total.
+        await expect(host).not.toContainText("Tax rounding");
+        await expect(host).not.toContainText("Whole bill to pay");
+      } else {
+        await expect(totals.nth(1)).toContainText("Tax rounding−$0.01");
+        await expect(totals.nth(1)).toContainText("Whole bill to pay, with MRS 2$28.25");
+      }
+      const merged = details.getByRole("region", { name: /^From (table )?MRS 2$/u });
+      await expect(merged.locator(".order-lines-totals").first()).toContainText("Total$14.13");
+      await expect(merged).not.toContainText("Tax rounding");
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true);
+      await page.screenshot({
+        path: `test-results/dining-bill-rounding-apart-${comped ? "after" : "before"}-${width}.png`,
+      });
+    });

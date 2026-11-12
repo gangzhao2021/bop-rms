@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { parseTableBill } from "./table-checkout-client.js";
 import { splitBillFixture } from "./table-split.fixtures.js";
-import { CurrentOrderLines } from "./CurrentOrderQueuePage.js";
+import { billRoundingApart, CurrentOrderLines } from "./CurrentOrderQueuePage.js";
 import { roundAsOrderedMinor } from "./TableCheckout.js";
 import { parseCurrentOrderDetail } from "./current-order-queue-client.js";
 import {
@@ -81,5 +81,90 @@ describe("WP-2423 DEC-TAX-WHOLE-RECEIPT: the Order's detail on Tables and Orders
     rounds[0] = { ...rounds[0], taxMinor: "630", totalMinor: "5480", taxRoundingMinor: "-1" };
     const bill = parseTableBill(value);
     expect(bill.rounds.map(roundAsOrderedMinor)).toEqual(["5481", "4011"]);
+  });
+});
+
+// v15 batch 9 review: three separate $12.50 rounds at 13% are charged $1.63 tax each ($4.89); the
+// whole bill's tax is $4.88, so the bill rounds by −$0.01. The Order's Total is what was ordered
+// ($42.39, the guest's "Total ordered") and never moves with a comp — here or on a table merged
+// into it; the rounding (as checkout takes it now) is always listed apart.
+describe("v15 batch 9: an Order's Total is as ordered, the bill's tax rounding apart", () => {
+  const money = (amountMinor: string) => ({ amountMinor, currencyCode: "CAD" });
+  const lines = {
+    items: [],
+    totals: {
+      subtotal: money("3750"),
+      discount: money("0"),
+      tax: money("489"),
+      fee: money("0"),
+      total: money("4239"),
+      taxRounding: money("0"),
+      tip: null,
+    },
+  };
+  const order = (tableBill: Record<string, unknown>, comped = false) =>
+    ({
+      tableBill,
+      batches: [{ compedItems: comped ? [{ orderItemReference: "x", amountMinor: "1413" }] : [] }],
+    }) as never;
+  it("lists the rounding under the Total and then the whole bill to pay", () => {
+    const html = renderToStaticMarkup(
+      <CurrentOrderLines
+        lines={lines}
+        billRounding={billRoundingApart(
+          order({ totalMinor: "4238", paid: null, taxRoundingMinor: "-1" }),
+        )}
+      />,
+    );
+    expect(html).toContain("<dt>Total</dt><dd>$42.39</dd>");
+    expect(html).toContain("<dt>Tax rounding</dt><dd>−$0.01</dd>");
+    expect(html).toContain("<dt>Whole bill to pay</dt><dd>$42.38</dd>");
+    expect(html.indexOf("Total</dt>")).toBeLessThan(html.indexOf("Tax rounding"));
+  });
+  it("keeps the same Total when a comp changes the rounding (a table merged into it too)", () => {
+    // The host's rounding moved to +$0.01 because a dish on the merged table was comped; the
+    // host's own Order has no comps, so it is said under its Total, which stays $42.39.
+    const html = renderToStaticMarkup(
+      <CurrentOrderLines
+        lines={lines}
+        billRounding={billRoundingApart(
+          order({ totalMinor: "5410", paid: null, taxRoundingMinor: "1" }),
+          "Whole bill to pay, with Table 3",
+        )}
+      />,
+    );
+    expect(html).toContain("<dt>Total</dt><dd>$42.39</dd>");
+    expect(html).toContain("<dt>Tax rounding</dt><dd>$0.01</dd>");
+    expect(html).toContain("<dt>Whole bill to pay, with Table 3</dt><dd>$54.10</dd>");
+  });
+  it("leaves it to the comps list when this Order has comps, and says no amount once paid", () => {
+    expect(
+      billRoundingApart(order({ totalMinor: "2543", paid: null, taxRoundingMinor: "1" }, true)),
+    ).toBeUndefined();
+    expect(billRoundingApart(order({ totalMinor: "4238", paid: null }))).toBeUndefined();
+    expect(
+      billRoundingApart(
+        order({
+          totalMinor: "4238",
+          paid: { amountMinor: "4238", method: "Cash" },
+          taxRoundingMinor: "-1",
+        }),
+      ),
+    ).toEqual({ taxRoundingMinor: "-1", toPay: null });
+    expect(
+      billRoundingApart(
+        order({
+          totalMinor: "0",
+          paid: null,
+          mergedInto: { tableLabel: "Table 3", paid: false },
+          taxRoundingMinor: "-1",
+        }),
+      ),
+    ).toEqual({ taxRoundingMinor: "-1", toPay: null });
+    const paidHtml = renderToStaticMarkup(
+      <CurrentOrderLines lines={lines} billRounding={{ taxRoundingMinor: "-1", toPay: null }} />,
+    );
+    expect(paidHtml).toContain("<dt>Tax rounding</dt><dd>−$0.01</dd>");
+    expect(paidHtml).not.toContain("to pay");
   });
 });

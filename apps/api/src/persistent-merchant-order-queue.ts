@@ -678,9 +678,9 @@ export function createPersistentMerchantOrderQueue(options: {
               /** Owner 2026-11-04 walkthrough: the guests left; the amount written off. */
               writtenOffMinor?: string;
               /**
-               * v15 batch 9 (DEC-TAX-WHOLE-RECEIPT): on the detail of an Order with comps, the
-               * bill's tax rounding worked out after them (its Total leaves it out; the bill to pay
-               * or paid has it).
+               * v15 batch 9 (DEC-TAX-WHOLE-RECEIPT): on an Order's detail, its share of the bill's
+               * tax rounding as checkout takes it (after any comps), signed, never "0". The Order's
+               * Total leaves it out (Total is as ordered); the bill to pay or paid has it.
                */
               taxRoundingMinor?: string;
               /**
@@ -1537,12 +1537,12 @@ export function createPersistentMerchantOrderQueue(options: {
                       only.orderReference,
                     )
                   : 0n) + (cardMachineTips.get(only.orderReference) ?? 0n);
-          // WP-2423 DEC-TAX-WHOLE-RECEIPT: a pay-at-end table's tax is rounded once over its bill;
-          // this Order's share of that rounding is part of its total (as checkout charges it). The
-          // lines' total is before comps, so Total less the comps is what checkout asks for.
-          // v15 batch 9: an Order with comps or discounts has its rounding worked out after them,
-          // so it is not part of what was ordered: Total stays as ordered, and the rounding is
-          // shown under the comps, before the bill to pay (as the guest's page shows it).
+          // WP-2423 DEC-TAX-WHOLE-RECEIPT: a pay-at-end table's tax is rounded once over its bill.
+          // v15 batch 9 (review): the Order's Total is always what was ordered — its lines, the
+          // guest's "Total ordered" and checkout's rounds — and never moves with a comp, on this
+          // table or a table merged into it. This Order's share of the bill's rounding (as checkout
+          // takes it now, after any comps) is always listed apart, as the guest's page lists it:
+          // under the comps when there are any, else under the Total, then the bill to pay.
           const roundingShareMinor =
             lines === null || only === undefined || scoped === null || tenantReference === null
               ? 0n
@@ -1555,13 +1555,6 @@ export function createPersistentMerchantOrderQueue(options: {
                     authorize: async () => stillAllowed(),
                   },
                 );
-          const comps =
-            only !== undefined &&
-            only.batches.some(
-              (batch) => (comped.get(String(batch.orderBatchReference)) ?? []).length > 0,
-            );
-          const taxRoundingMinor = comps ? 0n : roundingShareMinor;
-          const roundingAfterComps = comps ? roundingShareMinor : 0n;
           const detailLines =
             lines === null || only === undefined
               ? lines
@@ -1569,14 +1562,10 @@ export function createPersistentMerchantOrderQueue(options: {
                   ...lines,
                   totals: Object.freeze({
                     ...lines.totals,
+                    // Always 0 on the lines: their Total is as ordered; the rounding is the
+                    // table bill's (tableBill.taxRoundingMinor).
                     taxRounding: Object.freeze({
-                      amountMinor: taxRoundingMinor.toString(),
-                      currencyCode: lines.totals.total.currencyCode,
-                    }),
-                    total: Object.freeze({
-                      amountMinor: (
-                        BigInt(lines.totals.total.amountMinor) + taxRoundingMinor
-                      ).toString(),
+                      amountMinor: "0",
                       currencyCode: lines.totals.total.currencyCode,
                     }),
                     tip: Object.freeze({
@@ -2115,10 +2104,9 @@ export function createPersistentMerchantOrderQueue(options: {
                   // DEC-DINE-IN-PAY-LATER: on the table's bill (owed), or what the table paid.
                   tableBill: ((bill) =>
                     bill !== undefined &&
-                    roundingAfterComps !== 0n &&
-                    item.orderReference === only?.orderReference &&
-                    bill.mergedInto === undefined
-                      ? { ...bill, taxRoundingMinor: roundingAfterComps.toString() }
+                    roundingShareMinor !== 0n &&
+                    item.orderReference === only?.orderReference
+                      ? { ...bill, taxRoundingMinor: roundingShareMinor.toString() }
                       : (bill ?? null))(tableBills.get(item.orderReference)),
                   ...(item.diningSessionReference !== null &&
                   guestStartedSessions.has(item.diningSessionReference)

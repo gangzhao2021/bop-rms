@@ -305,7 +305,14 @@ export function CurrentOrderLines({
   waitingBatches,
   refundRows,
   rounds,
+  billRounding,
 }: {
+  /**
+   * v15 batch 9 (DEC-TAX-WHOLE-RECEIPT): an Order with no comps on a pay-at-end table — its share
+   * of the bill's tax rounding, listed under the Total (which is as ordered), then the bill to pay.
+   * From billRoundingApart; with comps the rounding is listed under them instead.
+   */
+  readonly billRounding?: BillRoundingApart | undefined;
   /**
    * WP-2423 item 8 ⑤: guest rounds waiting for staff OK. Not on the bill until staff send them:
    * listed with their tag, left out of the totals and shown apart under them.
@@ -595,6 +602,36 @@ export function CurrentOrderLines({
           <dd>{orderMoney(orderTotalWithTip(shown))}</dd>
         </div>
       </dl>
+      {billRounding !== undefined ? (
+        <dl
+          className={
+            billRounding.toPay === null
+              ? "order-lines-totals order-lines-cancelled-refund"
+              : "order-lines-totals"
+          }
+        >
+          <div>
+            <dt>{t("Tax rounding")}</dt>
+            <dd>
+              {orderMoney({
+                amountMinor: billRounding.taxRoundingMinor,
+                currencyCode: lines.totals.total.currencyCode,
+              })}
+            </dd>
+          </div>
+          {billRounding.toPay !== null ? (
+            <div>
+              <dt>{billRounding.toPay.label}</dt>
+              <dd>
+                {orderMoney({
+                  amountMinor: billRounding.toPay.amountMinor,
+                  currencyCode: lines.totals.total.currencyCode,
+                })}
+              </dd>
+            </div>
+          ) : null}
+        </dl>
+      ) : null}
       {waitingMinor > 0n ? (
         <dl className="order-lines-totals order-lines-cancelled-refund">
           <div>
@@ -638,6 +675,35 @@ export function CurrentOrderLines({
       ) : null}
     </section>
   );
+}
+
+/** v15 batch 9 (DEC-TAX-WHOLE-RECEIPT): see billRoundingApart. */
+export interface BillRoundingApart {
+  readonly taxRoundingMinor: string;
+  /** The table's whole bill still to pay; null once paid, written off or merged away. */
+  readonly toPay: { readonly label: string; readonly amountMinor: string } | null;
+}
+/**
+ * v15 batch 9 (DEC-TAX-WHOLE-RECEIPT): an Order's Total is always what was ordered, so its share
+ * of the bill's tax rounding (worked out on the whole bill, after any comps, here or on a table
+ * merged into it) is listed apart, as the guest's page lists it. With comps on this Order it is
+ * listed under them (CompRecordsNote, the Tables comps list); otherwise under the Total, followed
+ * by the whole bill to pay. Undefined: no rounding on this Order, or listed under its comps.
+ */
+export function billRoundingApart(
+  order: QueuedOrder,
+  toPayLabel: string = t("Whole bill to pay"),
+): BillRoundingApart | undefined {
+  const bill = order.tableBill;
+  if (bill?.taxRoundingMinor === undefined) return undefined;
+  if (order.batches.some((batch) => batch.compedItems.length > 0)) return undefined;
+  return Object.freeze({
+    taxRoundingMinor: bill.taxRoundingMinor,
+    toPay:
+      bill.paid === null && bill.mergedInto === undefined && bill.writtenOffMinor === undefined
+        ? Object.freeze({ label: toPayLabel, amountMinor: bill.totalMinor })
+        : null,
+  });
 }
 
 export interface OrderRefundRow {
@@ -1007,7 +1073,7 @@ function CompRecordsNote({
           </span>
         </li>
       ))}
-      {/* v15 batch 9 (DEC-TAX-WHOLE-RECEIPT): the bill's tax is worked out once after the comps;
+      {/* v15 batch 9 (DEC-TAX-WHOLE-RECEIPT): the bill's tax is worked out once, after the comps;
           the cent it rounds by is listed here, so the order's Total stays as ordered. */}
       {detail.order.tableBill?.taxRoundingMinor !== undefined ? (
         <li>
@@ -1760,6 +1826,7 @@ function QueuedOrderLines({
           state.detail.lines,
           state.detail.paymentPosition,
         )}
+        billRounding={billRoundingApart(state.detail.order)}
         rounds={
           state.detail.order.orderType === "DineIn"
             ? { batches: state.detail.order.batches, head: roundHead, timeZone, today, phones }
@@ -4520,6 +4587,7 @@ export function CurrentOrderQueuePage({
                               detail.lines,
                               detail.paymentPosition,
                             )}
+                            billRounding={billRoundingApart(detail.order)}
                             rounds={
                               detail.order.orderType === "DineIn"
                                 ? {

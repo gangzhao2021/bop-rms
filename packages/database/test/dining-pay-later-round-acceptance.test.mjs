@@ -2408,9 +2408,24 @@ async function journey(journeyEnding) {
                 orderReference: reference,
               }),
             );
+          // v15 batch 9 review: an Order's Total is what it ordered and never moves with a comp,
+          // here or on a table merged into it. The comp was on T-M's dish only, yet it gave the
+          // bill a rounding on the host's rounds: the host's Total is still what it was before the
+          // comp (it read lines + that rounding), and the rounding is listed apart, on its bill.
+          assert.notEqual(mergedBill.taxRoundingMinor, "0");
           assert.deepEqual(
             details.map((detail) => detail.lines.totals.taxRounding.amountMinor),
-            [mergedBill.taxRoundingMinor, "0"],
+            ["0", "0"],
+          );
+          assert.equal(
+            details[0].lines.totals.total.amountMinor,
+            queued.lines.totals.total.amountMinor,
+          );
+          assert.equal(
+            details[0].lines.totals.total.amountMinor,
+            details[0].lines.items
+              .reduce((sum, line) => sum + BigInt(line.total.amountMinor), 0n)
+              .toString(),
           );
           // v15 batch 7 review: the figure under the comps on the host table ("Whole bill to pay
           // after comps") is the whole merged bill less the comp, as checkout takes it: it drops
@@ -2427,6 +2442,7 @@ async function journey(journeyEnding) {
           assert.deepEqual(details[0].items[0].tableBill, {
             totalMinor: mergedBill.owed.totalMinor,
             paid: null,
+            taxRoundingMinor: mergedBill.taxRoundingMinor,
           });
           assert.deepEqual(details[1].items[0].tableBill, {
             totalMinor: "0",
@@ -2440,7 +2456,8 @@ async function journey(journeyEnding) {
               .reduce((sum, line) => sum + BigInt(line.total.amountMinor), 0n)
               .toString(),
           );
-          // An Order's Total is before its comps (shown apart), so the comps come off the sum.
+          // An Order's Total is before its comps and the bill's rounding (both shown apart): the
+          // Totals less the comps plus the rounding are what checkout takes.
           const compsMinor = mergedBill.rounds
             .flatMap((round) => round.items)
             .reduce((sum, item) => sum + BigInt(item.reduction?.amountMinor ?? "0"), 0n);
@@ -2449,7 +2466,9 @@ async function journey(journeyEnding) {
               details.reduce(
                 (sum, detail) => sum + BigInt(detail.lines.totals.total.amountMinor),
                 0n,
-              ) - compsMinor
+              ) -
+              compsMinor +
+              BigInt(details[0].items[0].tableBill.taxRoundingMinor)
             ).toString(),
             mergedBill.owed.totalMinor,
           );
@@ -2606,7 +2625,10 @@ async function journey(journeyEnding) {
               .filter((part) => part.partNumber !== mPart.partNumber)
               .reduce((sum, part) => sum + BigInt(part.amountMinor), 0n)
               .toString(),
-            details[0].lines.totals.total.amountMinor,
+            (
+              BigInt(details[0].lines.totals.total.amountMinor) +
+              BigInt(details[0].items[0].tableBill.taxRoundingMinor)
+            ).toString(),
           );
           const intents = new Map();
           const answer = (request, intent) => ({

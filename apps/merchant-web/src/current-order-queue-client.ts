@@ -13,9 +13,9 @@ const ref = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12
 const minorAmount = /^(0|[1-9][0-9]{0,17})$/u;
 type TableBill = NonNullable<ReturnType<typeof parseTableBillBody>> & {
   /**
-   * v15 batch 9 (DEC-TAX-WHOLE-RECEIPT): on the detail of an Order with comps or discounts, the
-   * bill's tax rounding worked out after them, signed and never "0" (absent: none, or not such a
-   * detail). The Order's Total leaves it out; the bill to pay (or paid) has it.
+   * v15 batch 9 (DEC-TAX-WHOLE-RECEIPT): on an Order's detail, its share of the bill's tax
+   * rounding as checkout takes it (after any comps), signed and never "0" (absent: none, or not a
+   * detail). The Order's Total is as ordered and leaves it out; the bill to pay (or paid) has it.
    */
   readonly taxRoundingMinor?: string;
 };
@@ -23,11 +23,7 @@ function parseTableBill(value: unknown, orderType: unknown): TableBill | null {
   if (value === null || typeof value !== "object" || !Object.hasOwn(value, "taxRoundingMinor"))
     return parseTableBillBody(value, orderType);
   const { taxRoundingMinor, ...rest } = value as Record<string, unknown>;
-  if (
-    typeof taxRoundingMinor !== "string" ||
-    !/^-?[1-9][0-9]{0,5}$/u.test(taxRoundingMinor) ||
-    Object.hasOwn(rest, "mergedInto")
-  )
+  if (typeof taxRoundingMinor !== "string" || !/^-?[1-9][0-9]{0,5}$/u.test(taxRoundingMinor))
     return fail();
   const body = parseTableBillBody(rest, orderType);
   return body === null ? fail() : Object.freeze({ ...body, taxRoundingMinor });
