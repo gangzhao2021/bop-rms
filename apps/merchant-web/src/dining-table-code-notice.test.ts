@@ -85,6 +85,14 @@ it("WP-2423 item 5: warns before a staff round's payment time ends, urgently in 
   expect(staffRoundPaymentNotice(two, now, "America/Toronto")?.text).toMatch(
     /^2 rounds entered by staff are waiting/u,
   );
+  // v15 2026-11-12: nine rounds past their time read as a plural sentence.
+  const nine = {
+    ...waiting,
+    staffRoundsAwaitingPayment: Array.from({ length: 9 }, () => ({ payBy })),
+  };
+  expect(staffRoundPaymentNotice(nine, Date.parse(payBy), "America/Toronto")?.text).toBe(
+    "9 rounds entered by staff weren't paid by 08:30 and are being cancelled; they won't go to the kitchen. If the card machine was charged, refund it on the machine.",
+  );
   // v15 batch 8: in Chinese every word is Chinese (no "awaits", "the round" or "it is").
   setLanguageForTest("zh-Hans");
   try {
@@ -93,6 +101,8 @@ it("WP-2423 item 5: warns before a staff round's payment time ends, urgently in 
       [waiting, Date.parse(payBy) - 4 * 60_000 - 1],
       [two, now],
       [two, Date.parse(payBy) - 4 * 60_000 - 1],
+      [nine, Date.parse(payBy)],
+      [waiting, Date.parse(payBy)],
     ] as const) {
       const text = staffRoundPaymentNotice(notice, at, "America/Toronto")?.text ?? "";
       expect(text).toMatch(/[\u4e00-\u9fff]/u);

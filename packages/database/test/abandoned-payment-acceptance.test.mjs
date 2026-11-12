@@ -35,6 +35,7 @@ import {
   transitionInventoryItem,
 } from "../../rms/inventory/src/index.ts";
 import { seedJourneyPayment } from "../test-support/dine-in-journey-seed.mjs";
+import { createTenantTransactionRunner } from "../src/index.ts";
 
 const { Client } = pg;
 const id = (n) => "01a1ab00-0000-7000-8000-" + n.toString(16).padStart(12, "0");
@@ -73,6 +74,7 @@ it("lets a guest finish an abandoned payment, staff cancel an unpaid round, and 
     assert.match(role, /^wp2423_abp_[a-f0-9]+$/u);
     vi.stubEnv("NODE_ENV", "development");
     vi.stubEnv("BOP_PILOT_ENVIRONMENT", undefined);
+    const pools = [];
     try {
       for (const name of [role, worker])
         await admin.query(
@@ -1053,18 +1055,42 @@ it("lets a guest finish an abandoned payment, staff cancel an unpaid round, and 
         ).find((candidate) => candidate.orderBatchReference === lateRound.refs.batch);
       const recorded = await recorder.record(await lateCandidate());
       assert.equal(recorded.record.status, "AwaitingPaymentResolution");
-      const dispatcher = await createInternalBatchCancellationDispatcher(resources, {
-        loadWorkflow: async () => ({
-          environment: "InternalTest",
-          database: context.clientConfig.database,
-          scope,
-          definition: release.plan.published,
-        }),
-        expectedDatabaseName: context.clientConfig.database,
-        systemActorReference: systemActor,
-        providerAccountReference: provider,
-        createSimulatedProvider: simulatedProvider,
+      // The System's sweep runs on the pilot worker's own transaction runner (its pool, its
+      // statement memo), as the restricted role: v15 2026-11-12, a scope restore that runner
+      // deferred past the sweep's last statement left COMMIT's deferred binding check blind.
+      const pilotPool = new pg.Pool({
+        ...context.clientConfig,
+        max: 2,
+        connectionTimeoutMillis: 5000,
+        query_timeout: 10_000,
       });
+      pools.push(pilotPool);
+      const pilotTransactions = createTenantTransactionRunner(
+        {
+          options: pilotPool.options,
+          async connect() {
+            const client = await pilotPool.connect();
+            await client.query("SET ROLE " + role);
+            return client;
+          },
+        },
+        { brandId: brand, storeId: store },
+      );
+      const dispatcher = await createInternalBatchCancellationDispatcher(
+        { ...resources, transactions: pilotTransactions },
+        {
+          loadWorkflow: async () => ({
+            environment: "InternalTest",
+            database: context.clientConfig.database,
+            scope,
+            definition: release.plan.published,
+          }),
+          expectedDatabaseName: context.clientConfig.database,
+          systemActorReference: systemActor,
+          providerAccountReference: provider,
+          createSimulatedProvider: simulatedProvider,
+        },
+      );
       const beforeLate = await counts();
       assert.equal(await dispatcher.runOnce(), 0);
       assert.deepEqual(await terminal(pay.late), [{ outcome: "Succeeded", reason: null }]);
@@ -1323,6 +1349,7 @@ it("lets a guest finish an abandoned payment, staff cancel an unpaid round, and 
       assert.equal(await heldCancellations(), 1);
     } finally {
       vi.unstubAllEnvs();
+      for (const pool of pools) await pool.end();
       for (const name of [role, worker]) {
         await admin.query("DROP OWNED BY " + name);
         await admin.query("DROP ROLE " + name);

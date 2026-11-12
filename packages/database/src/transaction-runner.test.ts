@@ -306,10 +306,15 @@ describe("WP-2423 repeated scope settings and held locks", () => {
       expect(f.query.mock.calls.at(-2)?.[1]).toEqual([store]);
       await transaction.query("ROLLBACK TO SAVEPOINT s", []);
       await transaction.query(lockSql, ["k"]);
-      // Written last, with nothing after it: never sent.
+      // Written last, with nothing after it: not sent yet (the ROLLBACK TO forgot what is held).
       await transaction.query(scopeSql, [scope.brandId, store]);
       expect(sent()).toHaveLength(4);
     });
+    // v15 2026-11-12: sent before COMMIT, so deferred triggers run under the scope written last.
+    expect(sent().slice(4, 6)).toEqual([
+      "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+      "COMMIT",
+    ]);
     await f.runner.run(async (transaction) => {
       await transaction.query(lockSql, ["k"]);
     });
@@ -340,6 +345,76 @@ describe("WP-2423 repeated scope settings and held locks", () => {
     });
     expect(reads()).toBe(4);
     expect(f.query.mock.calls.some(([sql]) => sql.includes("bop:stable-read"))).toBe(false);
+  });
+});
+
+describe("v15 2026-11-12 scope restored last before COMMIT (unbound batch cancellation revision)", () => {
+  const store = "018f3f7a-8b1c-7a11-8d01-000000000042";
+  const storeSql = "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)";
+  const calls = (f: ReturnType<typeof fixture>) =>
+    f.query.mock.calls.map(([sql, values]) => [sql, values ?? null]);
+  it("sends a Store scope restored after a Brand-level read before COMMIT, never after it", async () => {
+    const f = fixture();
+    const storeRunner = createTenantTransactionRunner(f.pool, { ...scope, storeId: store });
+    await storeRunner.run(async (transaction) => {
+      await transaction.query("INSERT INTO rms_ordering.order_revision VALUES ($1)", ["r"]);
+      // An owner reads Brand-level facts, then restores the Store scope as its last statement.
+      await transaction.query(storeSql, [scope.brandId, ""]);
+      await transaction.query("SELECT release FROM bop_publishing.x", []);
+      await transaction.query(storeSql, [scope.brandId, store]);
+    });
+    expect(calls(f).slice(1)).toEqual([
+      ["INSERT INTO rms_ordering.order_revision VALUES ($1)", ["r"]],
+      ["SELECT set_config('bop.store_id',$1,true)", [""]],
+      ["SELECT release FROM bop_publishing.x", []],
+      ["SELECT set_config('bop.store_id',$1,true)", [store]],
+      ["COMMIT", null],
+    ]);
+  });
+  it("sends nothing more when the scope written last is the one held, or for a snapshot read", async () => {
+    const f = fixture();
+    await f.runner.run(async (transaction) => {
+      await transaction.query(storeSql, [scope.brandId, store]);
+      await transaction.query("SELECT a", []);
+      await transaction.query(storeSql, [scope.brandId, store]);
+    });
+    await f.runner.runSnapshot(async (transaction) => {
+      await transaction.query(storeSql, [scope.brandId, store]);
+    });
+    expect(f.query.mock.calls.filter(([sql]) => sql.startsWith("SELECT set_config"))).toHaveLength(
+      1,
+    );
+  });
+  it("a failed scope restore before COMMIT rolls back and keeps its SQLSTATE", async () => {
+    const f = fixture();
+    f.query.mockImplementation(async (sql: string) => {
+      if (sql === "SELECT set_config('bop.store_id',$1,true)")
+        throw Object.assign(new Error("private"), { code: "57014" });
+      return { rows: [] };
+    });
+    const storeRunner = createTenantTransactionRunner(f.pool, { ...scope, storeId: store });
+    await expect(
+      storeRunner.run(async (transaction) => {
+        await transaction.query(storeSql, [scope.brandId, ""]);
+        return "never";
+      }),
+    ).rejects.toMatchObject({
+      code: "TENANT_DATABASE_TRANSACTION_FAILED",
+      diagnostic: { sqlState: "57014" },
+    });
+    expect(f.query.mock.calls.map(([sql]) => sql)).toContain("ROLLBACK");
+    expect(f.query.mock.calls.map(([sql]) => sql)).not.toContain("COMMIT");
+  });
+  it("runTogether sends the scope the work wrote last before its one COMMIT", async () => {
+    const f = fixture();
+    await runTogether(async () => {
+      await f.runner.run((t) => t.query("SELECT a", []));
+      await f.runner.run((t) => t.query(storeSql, [scope.brandId, store]));
+    });
+    expect(calls(f).slice(-2)).toEqual([
+      ["SELECT set_config('bop.store_id',$1,true)", [store]],
+      ["COMMIT", null],
+    ]);
   });
 });
 

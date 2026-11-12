@@ -118,7 +118,9 @@ export function createTenantTransactionRunner(
       async (client) => {
         const state = transactionState(client, mode, fixedScope);
         try {
-          return state.settle(await action(state.transaction));
+          const value = await action(state.transaction);
+          await state.beforeCommit();
+          return state.settle(value);
         } catch (error) {
           return state.report(error);
         } finally {
@@ -152,6 +154,7 @@ export function createTenantTransactionRunner(
           opened();
           try {
             await shared.done;
+            await state.beforeCommit();
             return state.settle(undefined);
           } catch (error) {
             return state.report(error);
@@ -178,6 +181,14 @@ interface TransactionState {
   readonly transaction: DatabaseTransaction;
   /** The scope the next statements run under (a joined run of another runner's scope). */
   useScope(scope: TenantDatabaseScope): void;
+  /**
+   * v15 2026-11-12: sends the scope settings the caller wrote after the last statement that ran,
+   * before COMMIT. A deferred constraint trigger (such as the batch cancellation's revision
+   * binding, 1300_036) runs at COMMIT under the scope the transaction then holds, and reads
+   * row-level secured tables under it: an owner that left a Brand-level read and restored its
+   * Store scope last must not have that check run under the Brand-level scope.
+   */
+  beforeCommit(): Promise<void>;
   /** The action's result, unless a statement of the transaction failed or is still running. */
   settle<T>(result: T): T;
   /** The action's error, as the runner reports a failed transaction. */
@@ -266,6 +277,25 @@ function transactionState(
   return Object.freeze<TransactionState>({
     transaction,
     useScope: (scope) => memo.useScope(scopeSettings(scope)),
+    async beforeCommit() {
+      // A read-only snapshot fires no trigger; a failed or busy transaction is settled as such.
+      if (mode !== "ReadWrite" || !active || failed || pending !== 0) return;
+      const settings = memo.pending();
+      if (settings === null) return;
+      pending += 1;
+      try {
+        await client.query(settings.sql, [...settings.values]);
+        memo.observe(settings.sql, settings.values);
+      } catch (error) {
+        memo.forget();
+        failed = true;
+        const diagnostic = tenantContextDatabaseDiagnostic(error);
+        failureDiagnostic ??= diagnostic;
+        throw new TenantContextDatabaseError("TENANT_DATABASE_TRANSACTION_FAILED", diagnostic);
+      } finally {
+        pending -= 1;
+      }
+    },
     settle<T>(result: T): T {
       if (failed || pending !== 0)
         throw new TenantContextDatabaseError(
