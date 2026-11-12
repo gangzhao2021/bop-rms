@@ -94,7 +94,8 @@ function orderQueueRow(item: MerchantOrderQueueItem) {
     // DEC-DINING-GUEST-TABLE-START: a guest started this table (sent only then).
     ...(item.startedByGuest === true ? { startedByGuest: true as const } : {}),
     // WP-2423 (M23): a dish in it sold out or came off the menu since it was ordered (only then).
-    ...(item.soldOutNow === true ? { soldOutNow: true as const } : {}),
+    // b9: which reason the marked lines share (SoldOut, Hidden, ChoiceSoldOut) or Several.
+    ...(item.soldOutNow === undefined ? {} : { soldOutNow: item.soldOutNow }),
     sourceChannel: item.sourceChannel,
     // WP-2423 Q21: the Store business day the Order belongs to (order numbers restart daily).
     businessDate: item.businessDate,

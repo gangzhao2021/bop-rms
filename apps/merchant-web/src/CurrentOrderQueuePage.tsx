@@ -294,6 +294,19 @@ export function soldOutNowText(reason: "SoldOut" | "Hidden" | "ChoiceSoldOut"): 
       : t("A choice is sold out now");
 }
 
+/** WP-2423 (b9): the row's tag says what the order's lines say (hidden is not sold out). */
+export function orderSoldOutNowText(
+  kind: "SoldOut" | "Hidden" | "ChoiceSoldOut" | "Several",
+): string {
+  return kind === "SoldOut"
+    ? t("Has a dish sold out now")
+    : kind === "Hidden"
+      ? t("Has a dish off the menu now")
+      : kind === "ChoiceSoldOut"
+        ? t("Has a choice sold out now")
+        : t("Has dishes sold out or off the menu now");
+}
+
 export function CurrentOrderLines({
   lines,
   refundCheck,
@@ -2075,10 +2088,10 @@ function OrderStatusNotes({
           {counterPayByText(order.counter.payBy, timeZone, now, order.counter.recordedAfterOutage)}
         </span>
       ) : null}
-      {order.soldOutNow === true ? (
+      {order.soldOutNow !== undefined ? (
         // WP-2423 (M23): a dish in it sold out or came off the menu since it was ordered.
         <span className="order-counter-outage" data-tier="warning">
-          {t("Has a dish sold out now")}
+          {orderSoldOutNowText(order.soldOutNow)}
         </span>
       ) : null}
       {order.heldStock !== null ? (

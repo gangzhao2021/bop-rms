@@ -9217,7 +9217,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Sold out now": "现在已售罄",
   "Off the menu now": "现在已下架",
   "A choice is sold out now": "所选的一项现在已售罄",
+  "Has a choice sold out now": "含现在已售罄的选项",
+  "Has a dish off the menu now": "含现在已下架的菜",
   "Has a dish sold out now": "含现在已售罄的菜",
+  "Has dishes sold out or off the menu now": "含现在已售罄或已下架的菜",
   "This guest ordered before {dish} sold out. Offer a swap, or cancel that dish with a refund (reason: sold out).":
     "这位客人在 {dish} 售罄前已下单。可以请客人换一道，或取消这道菜并退款（原因：售罄）。",
   "Check ID (19+)": "查证件（19 岁以上）",
@@ -9492,6 +9495,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Orders with a dish sold out since it was ordered": "有菜在下单后售罄的订单",
   "Orders with a dish sold out or taken off the menu since it was ordered":
     "有菜在下单后售罄或下架的订单",
+  "{orders} not paid yet. Open each on Orders: tell the guest before they pay, or offer a swap.":
+    "{orders}尚未付款。在订单页逐一打开：在客人付款前告诉客人，或请客人换一道。",
+  "{orders} waiting to be accepted and {unpaid} not paid yet. Open each on Orders: offer the guest a swap, or cancel that dish (with a refund if it was paid).":
+    "{orders}等待接单，{unpaid}尚未付款。在订单页逐一打开：请客人换一道，或取消这道菜（已付款的会退款）。",
   "{orders} waiting to be accepted. Open each on Orders: offer the guest a swap, or cancel that dish with a refund.":
     "{orders}等待接单。在订单页逐一打开：请客人换一道，或取消这道菜并退款。",
   "{item} saved. Guests and the kitchen already see what its choices add; the rest shows when the menu is listed.":

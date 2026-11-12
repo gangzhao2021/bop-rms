@@ -12,6 +12,18 @@ import { itemAvailability } from "./merchant-availability.js";
  */
 export type LineUnavailableNow = "SoldOut" | "Hidden" | "ChoiceSoldOut";
 
+/**
+ * WP-2423 (b9): what an order's row says about its marked lines — the one reason they share, or
+ * Several when they differ — so a hidden dish never reads as "sold out" on Orders.
+ */
+export function soldOutNowKind(
+  marked: ReadonlyMap<string, LineUnavailableNow>,
+): LineUnavailableNow | "Several" {
+  const kinds = new Set(marked.values());
+  const [only] = kinds;
+  return kinds.size === 1 && only !== undefined ? only : "Several";
+}
+
 interface Tx {
   query(sql: string, values: readonly unknown[]): Promise<unknown>;
 }

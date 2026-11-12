@@ -1240,10 +1240,16 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
           ? null
           : reference(item.diningSessionReference),
       ...(withGuestStart && item.startedByGuest === true ? { startedByGuest: true as const } : {}),
+      // b9: the reason its marked lines share, or Several (an older server sent only true).
       ...(withSoldOutNow
         ? item.soldOutNow === true
-          ? { soldOutNow: true as const }
-          : fail()
+          ? { soldOutNow: "Several" as const }
+          : item.soldOutNow === "SoldOut" ||
+              item.soldOutNow === "Hidden" ||
+              item.soldOutNow === "ChoiceSoldOut" ||
+              item.soldOutNow === "Several"
+            ? { soldOutNow: item.soldOutNow as "SoldOut" | "Hidden" | "ChoiceSoldOut" | "Several" }
+            : fail()
         : {}),
       submittedAt,
       observedAt,

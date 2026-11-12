@@ -404,7 +404,7 @@ describe("WP-2423 P2 store overview", () => {
     const marked = {
       ...queue,
       items: queue.items.map((order) =>
-        isAwaitingAcceptance(order) ? { ...order, soldOutNow: true as const } : order,
+        isAwaitingAcceptance(order) ? { ...order, soldOutNow: "SoldOut" as const } : order,
       ),
     };
     const summary = summarizeOrders(marked);
@@ -425,6 +425,27 @@ describe("WP-2423 P2 store overview", () => {
         ["orders", "Orders waiting to be accepted", expect.any(String), "warning"],
       ],
     );
+  });
+  it("WP-2423 (b9): an unpaid order with a sold-out dish is never counted as waiting to be accepted", () => {
+    const queue = parseCurrentOrderQueue(currentOrderQueueFixture(), null);
+    const [first] = queue.items;
+    if (first === undefined) throw new Error("fixture");
+    const accepted = { ...first, currentPhase: "Submitted" as const, soldOutNow: "Hidden" as const };
+    const unpaid = { ...accepted, orderReference: "unpaid", awaitingPayment: true };
+    const both = summarizeOrders({ ...queue, items: [accepted, unpaid] });
+    expect([both.soldOutNow, both.soldOutNowUnpaid]).toEqual([1, 1]);
+    const onlyUnpaid = summarizeOrders({ ...queue, items: [unpaid] });
+    expect([onlyUnpaid.soldOutNow, onlyUnpaid.soldOutNowUnpaid]).toEqual([undefined, 1]);
+    const detail = (summary: typeof both) =>
+      attentionItems({ ...initialOverviewState, orders: { kind: "Ready", value: summary } }, null)
+        .filter((item) => item.key === "sold-out-now")
+        .map((item) => item.detail);
+    expect(detail(onlyUnpaid)).toEqual([
+      "1 order not paid yet. Open each on Orders: tell the guest before they pay, or offer a swap.",
+    ]);
+    expect(detail(both)).toEqual([
+      "1 order waiting to be accepted and 1 order not paid yet. Open each on Orders: offer the guest a swap, or cancel that dish (with a refund if it was paid).",
+    ]);
   });
   it("DEC-PAPER-ORDER-NEVER-RELEASED: Home names paper orders whose payment isn't recorded until they are", () => {
     const queue = parseCurrentOrderQueue(currentOrderQueueFixture(), null);

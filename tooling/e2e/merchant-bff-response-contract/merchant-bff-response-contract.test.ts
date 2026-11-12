@@ -407,7 +407,7 @@ const dineIn = {
     },
   ],
   // WP-2423 (M23): sent only when a dish sold out since it was ordered; the type wants it.
-  soldOutNow: true as const,
+  soldOutNow: "SoldOut" as const,
 } satisfies QueueItem;
 const heldPickup = {
   orderReference: id(0x902),
@@ -489,7 +489,7 @@ const heldPickup = {
     },
   ],
   // WP-2423 (M23): sent only when a dish sold out since it was ordered; the type wants it.
-  soldOutNow: true as const,
+  soldOutNow: "SoldOut" as const,
 } satisfies QueueItem;
 const earlierCounterPickup = {
   orderReference: id(0x801),
@@ -584,7 +584,7 @@ const earlierCounterPickup = {
     },
   ],
   // WP-2423 (M23): sent only when a dish sold out since it was ordered; the type wants it.
-  soldOutNow: true as const,
+  soldOutNow: "SoldOut" as const,
 } satisfies QueueItem;
 // DEC-PAID-ORDER-AUTO-ACCEPT: sent only at a Store that uses it; the type wants it always.
 const paidOrderWatch = {

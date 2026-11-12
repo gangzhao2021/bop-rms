@@ -84,6 +84,11 @@ export interface OrdersSummary {
    */
   readonly soldOutNow?: number;
   /**
+   * WP-2423 (b9): the same, for orders the guest has not paid yet (not waiting to be accepted, so
+   * Home never counts them as such). Absent when none.
+   */
+  readonly soldOutNowUnpaid?: number;
+  /**
    * DEC-PAPER-ORDER-NEVER-RELEASED: paper orders (taken during an outage) whose payment is not
    * recorded yet, so their sale is not in the day's takings until it is (or until they are entered
    * again). Absent when none.
@@ -175,6 +180,26 @@ export interface ExceptionsSummary {
 /** WP-2423 Q1: the home page re-reads its summaries this often. */
 export const OVERVIEW_REFRESH_MS = 30_000;
 const openPhases = new Set(["Submitted", "Accepted", "InProgress", "Ready"]);
+/**
+ * WP-2423 (b9): Home's sold-out row counts orders waiting to be accepted and unpaid ones apart —
+ * an unpaid order is not waiting to be accepted, and nothing is refunded for it.
+ */
+export function soldOutNowDetail(awaiting: number, unpaid: number): string {
+  if (unpaid === 0)
+    return t(
+      "{orders} waiting to be accepted. Open each on Orders: offer the guest a swap, or cancel that dish with a refund.",
+      { orders: countOf(awaiting, "order") },
+    );
+  if (awaiting === 0)
+    return t(
+      "{orders} not paid yet. Open each on Orders: tell the guest before they pay, or offer a swap.",
+      { orders: countOf(unpaid, "order") },
+    );
+  return t(
+    "{orders} waiting to be accepted and {unpaid} not paid yet. Open each on Orders: offer the guest a swap, or cancel that dish (with a refund if it was paid).",
+    { orders: countOf(awaiting, "order"), unpaid: countOf(unpaid, "order") },
+  );
+}
 export function summarizeOrders(queue: CurrentOrderQueue, now = Date.now()): OrdersSummary {
   // Owner 2026-11-04 walkthrough: a pickup closed as not collected keeps its phase but is finished.
   const open = queue.items.filter(
@@ -201,8 +226,12 @@ export function summarizeOrders(queue: CurrentOrderQueue, now = Date.now()): Ord
           ? order.currentPhase === "Ready"
           : order.readyToServeItemCount > 0),
     ).length,
+    // b9: an order still waiting for its payment is said apart, never as waiting to be accepted.
     ...((count) => (count > 0 ? { soldOutNow: count } : {}))(
-      open.filter((order) => order.soldOutNow === true).length,
+      open.filter((order) => order.soldOutNow !== undefined && !order.awaitingPayment).length,
+    ),
+    ...((count) => (count > 0 ? { soldOutNowUnpaid: count } : {}))(
+      open.filter((order) => order.soldOutNow !== undefined && order.awaitingPayment).length,
     ),
     ...((count) => (count > 0 ? { paperUnrecorded: count } : {}))(
       queue.items.filter(
@@ -584,14 +613,11 @@ export function attentionItems(
         action: t("Go to Counter order"),
       });
     // WP-2423 (M23): first, so staff offer a swap or cancel that dish before accepting.
-    if ((o.soldOutNow ?? 0) > 0)
+    if ((o.soldOutNow ?? 0) + (o.soldOutNowUnpaid ?? 0) > 0)
       items.push({
         key: "sold-out-now",
         title: t("Orders with a dish sold out or taken off the menu since it was ordered"),
-        detail: t(
-          "{orders} waiting to be accepted. Open each on Orders: offer the guest a swap, or cancel that dish with a refund.",
-          { orders: countOf(o.soldOutNow ?? 0, "order") },
-        ),
+        detail: soldOutNowDetail(o.soldOutNow ?? 0, o.soldOutNowUnpaid ?? 0),
         state: t("Needs you"),
         tone: "danger",
         href: "/operations/orders",

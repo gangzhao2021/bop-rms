@@ -2440,7 +2440,8 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
         orderReference: waitingPickup.order,
       });
       assert.equal(waitingView.items[0].currentPhase, "Submitted");
-      assert.equal(waitingView.items[0].soldOutNow, true);
+      // b9: the row says the reason its lines share (a hidden dish is not "sold out").
+      assert.equal(waitingView.items[0].soldOutNow, "Hidden");
       assert.deepEqual(
         waitingView.lines.items.map((line) => line.unavailableNow),
         ["Hidden"],

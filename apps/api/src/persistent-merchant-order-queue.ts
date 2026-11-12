@@ -1,6 +1,7 @@
 import {
   orderLinesUnavailableNow,
   type LineUnavailableNow,
+  soldOutNowKind,
 } from "./merchant-order-sold-out-now.js";
 import { listAlcoholSkus } from "@rms/catalog";
 import { staffNameLocales } from "./staff-content-locale.js";
@@ -2099,8 +2100,11 @@ export function createPersistentMerchantOrderQueue(options: {
                     payments.awaitingAcceptance.has(item.initialBatchReference) &&
                     item.currentPhase === "Submitted" &&
                     item.currentVersion === 1,
-                  // WP-2423 (M23): a dish in it sold out or came off the menu since it was ordered.
-                  ...(soldOutNow.has(item.orderReference) ? { soldOutNow: true as const } : {}),
+                  // WP-2423 (M23): a dish in it sold out or came off the menu since it was ordered;
+                  // b9: which of the two (or a choice), so the row says what the lines say.
+                  ...((marked) => (marked === undefined ? {} : { soldOutNow: soldOutNowKind(marked) }))(
+                    soldOutNow.get(item.orderReference),
+                  ),
                   // DEC-DINE-IN-PAY-LATER: on the table's bill (owed), or what the table paid.
                   tableBill: ((bill) =>
                     bill !== undefined &&
