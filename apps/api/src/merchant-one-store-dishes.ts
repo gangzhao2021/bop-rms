@@ -1185,9 +1185,10 @@ export function createMerchantOneStoreDishes(options: {
       }
     }
     // Choices now in use that add an allergen reach guests and the kitchen on the listed menu.
-    const allergensShownNow = !choicesWaiting && choiceAdds.size > 0;
     // b7: and a choice now answered "adds none": guests stop being asked to check about it.
-    if (allergensShownNow || (!choicesWaiting && answeredNone))
+    // b9: either reaches guests at once, so staff are told so (never "when the menu is listed").
+    const allergensShownNow = !choicesWaiting && (choiceAdds.size > 0 || answeredNone);
+    if (allergensShownNow)
       await options.dishAllergens.recordChoiceAllergenChange({
         ...session,
         operationReference: body.operationReference,

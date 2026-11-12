@@ -194,7 +194,7 @@ it("WP-2423 (M166): a choice's own allergens reach the listed menu for that choi
       }
       // b7: still unlisted again, staff answer that egg fried rice adds nothing after all. The
       // answer reaches guests at once: no milk, and the choice reads as answered (not "ask staff").
-      await f.saveDish({
+      const removed = await f.saveDish({
         productReference: dish.productReference,
         name: "Curry chicken (TEST)",
         nameZh: "咖喱鸡",
@@ -211,6 +211,8 @@ it("WP-2423 (M166): a choice's own allergens reach the listed menu for that choi
         )
       ).rows;
       assert.equal(none.length, changes.length + 1);
+      // b9: so the save says guests already see it, never "when the menu is listed".
+      assert.equal(removed.allergensShownNow, true);
       assert.deepEqual(none[0]?.choices?.options?.[fried.slice(-12)], []);
       const answered = await guestSees();
       assert.ok(!codes(answered.items).includes("MILK"));
