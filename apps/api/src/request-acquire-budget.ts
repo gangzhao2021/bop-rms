@@ -67,3 +67,13 @@ export function withRequestAcquireBudget<T>(
   options.response?.once("close", end);
   return requestBudgets().run(budget, work);
 }
+
+/**
+ * For a read still bounded by its request: the milliseconds left before it must answer; undefined
+ * for a command, outside a request, or once its answer was sent.
+ */
+export function requestAnswerTimeLeftMs(): number | undefined {
+  const budget = requestBudgets().getStore();
+  if (budget === undefined || budget.ended || budget.answerBy === undefined) return undefined;
+  return budget.answerBy - Date.now();
+}

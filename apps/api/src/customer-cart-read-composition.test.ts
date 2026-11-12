@@ -98,6 +98,49 @@ describe("Customer Cart read bridge", () => {
       write.mockRestore();
     }
   });
+  it("reads once more after a passing fault (staff moving the table), never in a rush or late", async () => {
+    const write = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    try {
+      const midChange = Object.assign(new CartError("CART_DEPENDENCY_UNAVAILABLE"), {
+        cause: Object.assign(new Error("GUEST_SESSION_UNAVAILABLE"), { dependencyFailure: true }),
+      });
+      const pauses: number[] = [];
+      const pause = async (ms: number) => void pauses.push(ms);
+      const read = vi.fn().mockRejectedValueOnce(midChange).mockResolvedValueOnce(view);
+      const moved = createCustomerCartReadPort({ read }, { pause, timeLeftMs: () => 9_000 });
+      expect(await moved.getCurrentCart(input)).toEqual({ status: "Found", view });
+      expect(read).toHaveBeenCalledTimes(2);
+      expect(pauses).toEqual([200]);
+      expect(write).not.toHaveBeenCalled();
+      // No connection to be had: reading again would only add to the rush.
+      const busy = Object.assign(new CartError("CART_DEPENDENCY_UNAVAILABLE"), {
+        cause: Object.assign(new Error("acquire"), { code: "TENANT_DATABASE_ACQUIRE_FAILED" }),
+      });
+      const rush = vi.fn().mockRejectedValue(busy);
+      expect(
+        await createCustomerCartReadPort({ read: rush }, { pause }).getCurrentCart(input),
+      ).toEqual({ status: "Unavailable" });
+      expect(rush).toHaveBeenCalledOnce();
+      // Too little of the read's time left to answer after another read.
+      const late = vi.fn().mockRejectedValue(midChange);
+      expect(
+        await createCustomerCartReadPort(
+          { read: late },
+          { pause, timeLeftMs: () => 2_000 },
+        ).getCurrentCart(input),
+      ).toEqual({ status: "Unavailable" });
+      expect(late).toHaveBeenCalledOnce();
+      // Twice in a row: told busy, once logged.
+      const twice = vi.fn().mockRejectedValue(midChange);
+      expect(
+        await createCustomerCartReadPort({ read: twice }, { pause }).getCurrentCart(input),
+      ).toEqual({ status: "Unavailable" });
+      expect(twice).toHaveBeenCalledTimes(2);
+      expect(write).toHaveBeenCalledTimes(3);
+    } finally {
+      write.mockRestore();
+    }
+  });
   it("M126 I.2: a phone whose place at the table ended reads why, plain or as a cause", async () => {
     for (const error of [
       new CartParticipationEndedError("TableClosed"),
