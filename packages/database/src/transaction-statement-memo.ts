@@ -103,6 +103,12 @@ export interface TransactionStatementMemo {
   observe(sql: string, values: readonly unknown[], result?: unknown, stable?: boolean): void;
   /** The scope settings the next statements run under (sent with the next one that runs). */
   useScope(scope: Readonly<Record<string, string>>): void;
+  /**
+   * The scope settings written but not yet sent (null when the transaction holds them all). The
+   * runner sends them before COMMIT: deferred constraint triggers run at COMMIT under the scope
+   * the transaction then holds, which must be the one its caller wrote last.
+   */
+  pending(): { readonly sql: string; readonly values: readonly string[] } | null;
   /** Forgets everything (a failed statement, or anything the memo cannot reason about). */
   forget(): void;
 }
@@ -328,6 +334,7 @@ export function createTransactionStatementMemo(
       for (const [name, value] of Object.entries(scope))
         if (scopeSettings.has(name) && typeof value === "string") wanted.set(name, value);
     },
+    pending: pendingSettings,
     forget,
   });
 }
