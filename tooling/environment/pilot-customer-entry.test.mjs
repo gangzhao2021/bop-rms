@@ -96,31 +96,41 @@ it("runs one binding check in one transaction lent to every owner read", async (
   expect(seen.composed.length).toBe(2);
 });
 
-it("answers Unavailable when the check or its transaction fails", async () => {
+it("answers Unavailable only for what the records say, never for a check that couldn't run", async () => {
   const entry = await createInternalCustomerEntry(resources, owners);
-  seen.answer = new Error("owner read failed");
+  seen.answer = "Unavailable";
+  expect(await entry.entry.session.binding.validate({ channel: "DineIn" }, "t")).toBe(
+    "Unavailable",
+  );
+  // A registration that can't fit the phone's code stays an answer (the phone scans again).
+  seen.answer = new Error("DINING_QR_REGISTRATION_INVALID");
   expect(await entry.entry.session.binding.validate({ channel: "DineIn" }, "t")).toBe(
     "Unavailable",
   );
   seen.answer = "Current";
+  // v15 2026-11-12: no free connection within the request's budget (a rush) is a passing fault,
+  // thrown as one, so the guest is told "busy, try again" and keeps the cart.
+  const busy = Object.assign(new Error("TENANT_DATABASE_ACQUIRE_FAILED"), {
+    code: "TENANT_DATABASE_ACQUIRE_FAILED",
+    diagnostic: { sqlState: "08006" },
+  });
   const failing = await createInternalCustomerEntry(
     {
       ...resources,
       transactions: {
         run: async () => {
-          throw new Error("TENANT_DATABASE_TRANSACTION_FAILED");
+          throw busy;
         },
       },
     },
     owners,
   );
-  expect(await failing.entry.session.binding.validate({ channel: "DineIn" }, "t")).toBe(
-    "Unavailable",
+  const thrown = await failing.entry.session.binding.validate({ channel: "DineIn" }, "t").then(
+    () => null,
+    (error) => error,
   );
-  seen.answer = "Unavailable";
-  expect(await entry.entry.session.binding.validate({ channel: "DineIn" }, "t")).toBe(
-    "Unavailable",
-  );
+  expect(thrown?.dependencyFailure).toBe(true);
+  expect(thrown?.cause).toBe(busy);
 });
 
 it("lends a caller's transaction through the same binding (no nested transaction)", async () => {

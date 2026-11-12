@@ -3,6 +3,10 @@ import console from "node:console";
 import { createInternalDiningBinding } from "./pilot-dining-binding.mjs";
 import { createInternalDiningJoinRequestContext } from "./pilot-dining-join.mjs";
 import { createCustomerDiningSessionBinding } from "../../apps/api/dist/customer-dining-binding-composition.js";
+import {
+  guestBindingReadFailure,
+  isGuestBindingPermanentRefusal,
+} from "../../apps/api/dist/guest-binding-dependency.js";
 import { createDiningGuestTableClose } from "../../apps/api/dist/dining-guest-table-close.js";
 import {
   createPostgresDiningGuestBindingStore,
@@ -52,7 +56,15 @@ export async function createInternalCustomerEntry(
    * WP-2423 item 4: every read of one Guest Session binding check (the table code issue, the
    * QR/table context for each purpose, the Dining participation) runs in one transaction instead
    * of one each (five for a seated guest). The same owner reads and checks run in the same order;
-   * they now see one consistent set of facts. Any failure still answers "Unavailable".
+   * they now see one consistent set of facts. What the records say (not this Store, the phone
+   * left the table) is the policy's own answer "Unavailable".
+   *
+   * WP-2423 (guest-table-open-and-busy-reads, v15 2026-11-12): the check's own transaction that
+   * can't be had or finished (no free connection within the request's budget in a rush, a commit
+   * cut off) says nothing about the phone. It was answered "Unavailable" here, so a busy cart read
+   * told the guest their visit had ended (401 cart_session_expired after exactly 10 s, nothing
+   * logged) and the phone dropped its cart credential. It is now thrown as a passing fault, so the
+   * phone is told "busy, try again" (503 + Retry-After) and keeps its cart.
    */
   const binding = (runner) =>
     Object.freeze({
@@ -61,8 +73,9 @@ export async function createInternalCustomerEntry(
           return await runner.run((tx) =>
             compose({ run: (work) => work(tx) }).validate(session, at),
           );
-        } catch {
-          return "Unavailable";
+        } catch (error) {
+          if (isGuestBindingPermanentRefusal(error)) return "Unavailable";
+          throw guestBindingReadFailure(error);
         }
       },
     });
