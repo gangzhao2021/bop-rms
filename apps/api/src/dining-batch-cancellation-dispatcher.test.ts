@@ -211,3 +211,26 @@ it("WP-2423 abandoned payment: asks Payment to resolve a started payment, outsid
     expect.objectContaining({ orderBatchReference: unresolved.orderBatchReference }),
   );
 });
+it("WP-2423 hotfix review: a round whose cancellation keeps failing no longer stops the rest of its page", async () => {
+  const f = fixture();
+  const stuck = expiry(20),
+    next = expiry(40);
+  f.discover
+    .mockResolvedValueOnce([stuck, next])
+    .mockResolvedValueOnce([])
+    .mockResolvedValueOnce([stuck]);
+  f.cancel.mockImplementation(async ({ expiry: e }) => {
+    if (e.recordReference === stuck.recordReference)
+      throw Object.assign(new Error("UNAVAILABLE"), { code: "BATCH_CANCELLATION_UNAVAILABLE" });
+    return receipt(e);
+  });
+  // The failure is still reported (the worker logs it and retries), after the rest is done.
+  await expect(f.dispatcher.runOnce()).rejects.toMatchObject({
+    code: "BATCH_CANCELLATION_UNAVAILABLE",
+  });
+  expect(f.cancel.mock.calls.map(([input]) => input.operationReference)).toEqual([id(20), id(40)]);
+  // The page is passed, and the failing round is tried again on the next pass from the start.
+  expect(await f.dispatcher.runOnce()).toBe(0);
+  await expect(f.dispatcher.runOnce()).rejects.toThrow();
+  expect(f.discover.mock.calls.map(([, query]) => query.after)).toEqual([null, id(40), null]);
+});

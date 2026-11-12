@@ -69,45 +69,59 @@ export function createDiningBatchCancellationDispatcher(options: {
       batches.add(expiry.orderBatchReference);
     }
     let processed = 0;
+    // WP-2423 (hotfix review): one round whose cancellation fails (its records unreadable, a
+    // refusal) no longer stops the rest of its page every cycle: the others are cancelled, the
+    // page is passed, and the first failure is reported once the page is done (the worker logs it
+    // and retries; the failing round comes round again with the next pass from the start).
+    let firstFailure: { readonly error: unknown } | null = null;
     for (const expiry of page) {
       if (stopping) break;
       if (parseOrderingInstant(options.now()) < at) return fail();
-      const operationReference = expiry.recordReference;
-      const outcome = await options.cancel({ operationReference, expiry });
-      // WP-2423: a round still unresolved at its deadline whose payment was started (online or on
-      // the card machine) is not cancelled here; Payment first resolves the online attempt with the
-      // Provider, then the round is decided on its next (failed or paid) expiry evidence.
-      if (
-        expiry.status === "AwaitingPaymentResolution" &&
-        (outcome as { status?: unknown } | null)?.status === "NotEligible"
-      ) {
-        readClosedRecord(outcome, ["status", "reason"]);
-        // A failure here leaves the round waiting; the next cycle asks the Provider again.
-        if (options.resolveStartedPayment)
-          await options.resolveStartedPayment(expiry).catch(() => undefined);
-        continue;
+      try {
+        if (await cancelOne(expiry)) processed++;
+      } catch (error) {
+        firstFailure ??= { error };
       }
-      const result = readClosedRecord(outcome, ["status", "record"]);
-      if (result.status !== "Created" && result.status !== "Existing") return fail();
-      const record = parseOrderBatchCheckoutCancellation(result.record);
-      if (
-        !sameScope(record) ||
-        record.operationReference !== operationReference ||
-        record.orderReference !== expiry.orderReference ||
-        record.orderBatchReference !== expiry.orderBatchReference ||
-        record.submissionReference !== expiry.submissionReference ||
-        record.paymentOperationReference !== expiry.paymentOperationReference ||
-        record.expiryRecordReference !== expiry.recordReference ||
-        record.expiryEvidenceDigest !== expiry.evidenceDigest ||
-        record.cancelledAt < expiry.observedAt ||
-        record.cancelledAt > parseOrderingInstant(options.now())
-      )
-        return fail();
-      processed++;
     }
     if (!stopping)
       cursor = page.length === options.pageSize ? (page.at(-1)?.recordReference ?? null) : null;
+    if (firstFailure !== null) throw firstFailure.error;
     return processed;
+  }
+  /** Cancels one round past its deadline: true when it is cancelled (now or already). */
+  async function cancelOne(expiry: Expiry): Promise<boolean> {
+    const operationReference = expiry.recordReference;
+    const outcome = await options.cancel({ operationReference, expiry });
+    // WP-2423: a round still unresolved at its deadline whose payment was started (online or on
+    // the card machine) is not cancelled here; Payment first resolves the online attempt with the
+    // Provider, then the round is decided on its next (failed or paid) expiry evidence.
+    if (
+      expiry.status === "AwaitingPaymentResolution" &&
+      (outcome as { status?: unknown } | null)?.status === "NotEligible"
+    ) {
+      readClosedRecord(outcome, ["status", "reason"]);
+      // A failure here leaves the round waiting; the next cycle asks the Provider again.
+      if (options.resolveStartedPayment)
+        await options.resolveStartedPayment(expiry).catch(() => undefined);
+      return false;
+    }
+    const result = readClosedRecord(outcome, ["status", "record"]);
+    if (result.status !== "Created" && result.status !== "Existing") return fail();
+    const record = parseOrderBatchCheckoutCancellation(result.record);
+    if (
+      !sameScope(record) ||
+      record.operationReference !== operationReference ||
+      record.orderReference !== expiry.orderReference ||
+      record.orderBatchReference !== expiry.orderBatchReference ||
+      record.submissionReference !== expiry.submissionReference ||
+      record.paymentOperationReference !== expiry.paymentOperationReference ||
+      record.expiryRecordReference !== expiry.recordReference ||
+      record.expiryEvidenceDigest !== expiry.evidenceDigest ||
+      record.cancelledAt < expiry.observedAt ||
+      record.cancelledAt > parseOrderingInstant(options.now())
+    )
+      return fail();
+    return true;
   }
   return Object.freeze({
     runOnce(): Promise<number> {
