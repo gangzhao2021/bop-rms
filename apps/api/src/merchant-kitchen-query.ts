@@ -616,8 +616,7 @@ async function kitchenAllergens(
             status: "Declared" as const,
             // b9: also when staff answered every chosen choice since listing (the dish's listed
             // list with those answers names everything they add).
-            forChoices:
-              forChoice !== null || sellableAllergenChangeAnswersChoices(change, chosen),
+            forChoices: forChoice !== null || sellableAllergenChangeAnswersChoices(change, chosen),
             items: Object.freeze(merged.items),
             ...(merged.changed ? { changedSinceListed: true as const } : {}),
           }),

@@ -430,7 +430,11 @@ describe("WP-2423 P2 store overview", () => {
     const queue = parseCurrentOrderQueue(currentOrderQueueFixture(), null);
     const [first] = queue.items;
     if (first === undefined) throw new Error("fixture");
-    const accepted = { ...first, currentPhase: "Submitted" as const, soldOutNow: "Hidden" as const };
+    const accepted = {
+      ...first,
+      currentPhase: "Submitted" as const,
+      soldOutNow: "Hidden" as const,
+    };
     const unpaid = { ...accepted, orderReference: "unpaid", awaitingPayment: true };
     const both = summarizeOrders({ ...queue, items: [accepted, unpaid] });
     expect([both.soldOutNow, both.soldOutNowUnpaid]).toEqual([1, 1]);

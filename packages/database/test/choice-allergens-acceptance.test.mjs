@@ -83,7 +83,9 @@ it("WP-2423 (M166): a choice's own allergens reach the listed menu for that choi
       });
       assert.equal(declaredFor(fried)?.contains.length, 1);
       assert.ok(
-        recipes.ingredients.every((item) => item.itemReference !== declaredFor(plain)?.itemReference),
+        recipes.ingredients.every(
+          (item) => item.itemReference !== declaredFor(plain)?.itemReference,
+        ),
       );
       assert.equal((await f.listAll()).status, "Listed");
       // The guest menu as the server sends it (the real projection and store facts, public form).

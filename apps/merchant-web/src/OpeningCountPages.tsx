@@ -182,9 +182,7 @@ function Editor({
     setLines((current) => current.map((line, i) => (i === index ? { ...line, ...patch } : line)));
   return (
     <section className="detail-section">
-      <h3>
-        {openingCountHeading(selected.lifecycle)}
-      </h3>
+      <h3>{openingCountHeading(selected.lifecycle)}</h3>
       <table>
         <thead>
           <tr>

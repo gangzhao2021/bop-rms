@@ -84,7 +84,9 @@ describe("WP-2423 (b9): a choice answered on the Menu page reads as a declaratio
   it("names what a choice adds, in English and Chinese", () => {
     expect(
       declaredSummaryText({ declared: true, contains: ["Mustard"], mayContain: ["Sesame"] }),
-    ).toBe("Adds Mustard, may contain Sesame (declared by staff on the Menu page; not a stock item)");
+    ).toBe(
+      "Adds Mustard, may contain Sesame (declared by staff on the Menu page; not a stock item)",
+    );
     setLanguageForTest("zh-Hans");
     try {
       expect(declaredSummaryText({ declared: true, contains: [], mayContain: [] })).toBe(

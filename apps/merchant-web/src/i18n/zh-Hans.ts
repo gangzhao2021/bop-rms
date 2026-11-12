@@ -9212,7 +9212,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Table {table}: no allergies marked.": "{table} 号桌：没有标过敏。",
   "Table {table}: kitchen tickets will show {list}.": "{table} 号桌：后厨单会显示 {list}。",
   "Allergens declared by staff (not a stock item)": "员工申报的过敏原（不是库存品）",
-  "Allergens declared by staff on the Menu page: not answered": "员工在菜单页申报的过敏原：尚未回答",
+  "Allergens declared by staff on the Menu page: not answered":
+    "员工在菜单页申报的过敏原：尚未回答",
   "Adds no allergens (declared by staff on the Menu page; not a stock item)":
     "不增加过敏原（员工在菜单页申报；不是库存品）",
   "Adds {allergens} (declared by staff on the Menu page; not a stock item)":

@@ -672,5 +672,7 @@ it("WP-2423 (b9): what a dish save did is said at that dish, not at the top of t
   expect(row?.querySelector('[role="status"]')?.textContent).toBe(
     "Dan dan noodles (TEST): guests at this Store pay $13.50 from now. Nothing else changed, so there is nothing to list.",
   );
-  expect(container.querySelectorAll(".one-menu > .one-menu__message, .one-menu__message")).toHaveLength(1);
+  expect(
+    container.querySelectorAll(".one-menu > .one-menu__message, .one-menu__message"),
+  ).toHaveLength(1);
 });
