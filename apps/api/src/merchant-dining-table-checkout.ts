@@ -583,6 +583,8 @@ export async function readDiningTableBill(
             };
           }),
       })),
+      // Rule version 2: a merged bill's rounding is on the rounds of the Order holding it.
+      { carrierOrderReference: orderReference },
     );
     if (input.recordTaxRounding !== undefined)
       recordedRounding = await recordBillTaxRounding(tx, owner, {
@@ -1230,11 +1232,11 @@ export async function readOrderTaxRoundingShare(
   const owner = { brandReference: scope.brandReference, storeReference: scope.storeReference };
   const allowed = async () => (await input.authorize()) === true;
   const order = input.orderReference;
-  // v15 batch 7 (DEC-TAX-WHOLE-RECEIPT, merged bills): the bill's tax rounding is one line of the
-  // bill, so it belongs to the Order that holds the bill. A table merged into another keeps what it
-  // ordered (no share of a rounding worked out over someone else's bill); the host's Order carries
-  // the whole bill's rounding, so the Orders still add up to what the bill is paid.
-  if ((await listOrderMergedInto(tx, owner, [order])).has(order)) return 0n;
+  // v15 batch 9 (DEC-TAX-WHOLE-RECEIPT rule version 2): the share is this Order's rounds' lines of
+  // the bill's rounding, as checkout, the split parts and the recorded version hold them. A merged
+  // bill puts its rounding on the rounds of the Order holding it, so the merged table's Order keeps
+  // what it ordered and the host's carries the bill's rounding (a bill recorded under version 1
+  // keeps the lines it was paid with). One source for every place that shows it.
   const rounds = await createPostgresOrderPayLaterConfirmationStore({
     ...owner,
     quoteVersion: 2,
@@ -1251,19 +1253,38 @@ export async function readOrderTaxRoundingShare(
     (await payments.listByOrders(tx, [order])).length > 0 ||
     (await payments.listOnlinePaymentsByOrders(tx, [order])).some(onlinePaymentHoldsBill) ||
     (await payments.listWriteOffsByOrders(tx, [order])).length > 0;
-  if (anyPayment)
-    return ((await loadBillTaxRounding(tx, owner, order))?.lines ?? []).reduce(
-      (sum, line) => sum + line.amountMinor,
-      0n,
-    );
-  const session = (await listOrderDiningSessions(tx, owner, [order])).get(order);
+  // An Order merged into another table's bill: that bill is the one recorded and read.
+  const holder = (await listOrderMergedInto(tx, owner, [order])).get(order) ?? order;
+  if (anyPayment || holder !== order) {
+    const holderPaid =
+      holder === order
+        ? anyPayment
+        : await (async () => {
+            const there = createPostgresDiningTableSettlementStore({
+              scope,
+              authorize: async (_tx, value) => value.orderReference === holder && (await allowed()),
+            });
+            return (
+              (await there.listByOrders(tx, [holder])).length > 0 ||
+              (await there.listOnlinePaymentsByOrders(tx, [holder])).some(onlinePaymentHoldsBill) ||
+              (await there.listWriteOffsByOrders(tx, [holder])).length > 0
+            );
+          })();
+    if (holderPaid)
+      return ((await loadBillTaxRounding(tx, owner, holder))?.lines ?? [])
+        .filter((line) => line.orderReference === order)
+        .reduce((sum, line) => sum + line.amountMinor, 0n);
+  }
+  const session = (await listOrderDiningSessions(tx, owner, [holder])).get(holder);
   if (session === undefined) return fail("TABLE_CHECKOUT_UNAVAILABLE");
   const bill = await readDiningTableBill(tx, scope, {
     diningSessionReference: session,
     observedAt: input.observedAt,
     authorize: allowed,
   });
-  return BigInt(bill.taxRoundingMinor);
+  return bill.rounds
+    .filter((round) => round.orderReference === order)
+    .reduce((sum, round) => sum + BigInt(round.taxRoundingMinor), 0n);
 }
 
 export const publicBill = (

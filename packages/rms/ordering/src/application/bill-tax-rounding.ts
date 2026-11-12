@@ -12,7 +12,14 @@ import { roundRational, taxRateRatio, type RoundingMode } from "@rms/pricing";
  * tax per tax type is its frozen tax less the comp's tax, shared across tax types by largest
  * remainder. A compound tax's basis includes the dish's charged earlier tax.
  */
-export const billTaxRoundingRule = Object.freeze({ code: "DEC_TAX_WHOLE_RECEIPT", version: 1 });
+export const billTaxRoundingRule = Object.freeze({ code: "DEC_TAX_WHOLE_RECEIPT", version: 2 });
+/*
+ * Rule version 2 (v15 batch 9, docs/spec/design/tax-whole-receipt.md "并桌"): a bill holding the
+ * Orders of tables merged into it puts its whole tax rounding on the rounds of the Order that holds
+ * the bill (the carrier), shared among them by largest remainder; a merged table's rounds keep what
+ * they ordered. Version 1 shared it over every round of the bill, so a merged table's part could
+ * differ by a cent from what its Order said it ordered. A bill of one Order allocates as before.
+ */
 
 export interface BillTaxRoundingItem {
   readonly orderItemReference: string;
@@ -77,7 +84,16 @@ const fail = (): never => {
   throw new Error("BILL_TAX_ROUNDING_INVALID");
 };
 
-export function computeBillTaxRounding(rounds: readonly BillTaxRoundingRound[]): BillTaxRounding {
+export function computeBillTaxRounding(
+  rounds: readonly BillTaxRoundingRound[],
+  options: {
+    /**
+     * The Order that holds the bill: its rounds carry the whole rounding. When it has no round
+     * with a tax type, that tax type's rounding is shared over every round (absent: every round).
+     */
+    readonly carrierOrderReference?: string;
+  } = {},
+): BillTaxRounding {
   // Per tax type (and its rounding mode): each round's exact tax and charged tax.
   interface Group {
     readonly mode: RoundingMode;
@@ -156,10 +172,40 @@ export function computeBillTaxRounding(rounds: readonly BillTaxRoundingRound[]):
       group.denominator,
       group.mode,
     );
-    const shares = allocate(whole, scaled);
+    const charged = indexes.map(
+      (index) => (group.perRound.get(index) as { charged: bigint }).charged,
+    );
+    const carries = indexes.map(
+      (index) =>
+        options.carrierOrderReference === undefined ||
+        (rounds[index] as BillTaxRoundingRound).orderReference === options.carrierOrderReference,
+    );
+    // The rounds that do not carry are charged what they were; the carrier's rounds take the rest
+    // of the whole-bill tax, by largest remainder of their exact shares.
+    const sharesOver = (carried: readonly boolean[]) => {
+      const left =
+        whole -
+        charged.reduce((sum, value, position) => (carried[position] ? sum : sum + value), 0n);
+      const carrierShares = allocate(
+        left,
+        scaled.filter((_, position) => carried[position]),
+      );
+      let next = 0;
+      return indexes.map((_, position) =>
+        carried[position] ? (carrierShares[next++] ?? 0n) : (charged[position] ?? 0n),
+      );
+    };
+    const everyRound = indexes.map(() => true);
+    const onCarrier = sharesOver(carries);
+    // A carrier with nothing taxable at this tax type, or too little to take the rounding without
+    // its tax going below nothing, can't carry it: it is shared over every round (rule version 1).
+    const shares =
+      carries.some((carries, position) => carries && (scaled[position] ?? 0n) > 0n) &&
+      onCarrier.every((share) => share >= 0n)
+        ? onCarrier
+        : sharesOver(everyRound);
     indexes.forEach((index, position) => {
-      const entry = group.perRound.get(index) as { charged: bigint };
-      const amount = (shares[position] ?? 0n) - entry.charged;
+      const amount = (shares[position] ?? 0n) - (charged[position] ?? 0n);
       if (amount === 0n) return;
       const round = rounds[index] as BillTaxRoundingRound;
       lines.push(
@@ -178,6 +224,7 @@ export function computeBillTaxRounding(rounds: readonly BillTaxRoundingRound[]):
       .update(
         JSON.stringify([
           billTaxRoundingRule,
+          options.carrierOrderReference ?? null,
           rounds.map((round) => [
             round.orderReference,
             round.orderBatchReference,

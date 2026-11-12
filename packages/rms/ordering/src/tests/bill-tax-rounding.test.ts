@@ -28,7 +28,10 @@ const round = (
 
 describe("WP-2423 DEC-TAX-WHOLE-RECEIPT: the bill's tax rounding", () => {
   // The value the code gave in src/domain before it moved to src/application (full regression
-  // 2026-11-02): amounts and the digest kept on the receipt must never change with a move.
+  // 2026-11-02): amounts and the digest kept on the receipt must never change with a move. Rule
+  // version 2 (v15 batch 9: a merged bill's rounding on the Order holding it) changed the basis
+  // (it names the rule and the carrier); version 1 gave sha256:f860907f…be457ae. The amounts of a
+  // bill with no carrier named are those of version 1.
   it("gives the recorded result for two taxes, a compound and a comp", () => {
     const tax = (code: string, rate: string, order: number, taxAmountMinor: bigint) => ({
       taxComponentCode: code,
@@ -87,7 +90,7 @@ describe("WP-2423 DEC-TAX-WHOLE-RECEIPT: the bill's tax rounding", () => {
           amountMinor: -4n,
         },
       ],
-      basisDigest: "sha256:f860907f15c5cdfd693a75f84b2782d677283d269f34c5375158c7034be457ae",
+      basisDigest: "sha256:4230790695bcf863b1cc04c993600e6b41b70863607168203ba1c0df49163847",
     });
   });
 
@@ -154,5 +157,78 @@ describe("WP-2423 DEC-TAX-WHOLE-RECEIPT: the bill's tax rounding", () => {
         result.totalMinor,
       );
     }
+  });
+  // v15 batch 9 (original finding L5): table B merged into table A, one $12.50 dish each at 13%
+  // HST. Each round was charged $1.63; the whole bill's tax is $3.25, so $0.01 comes off. Version 1
+  // put it on B's round (B's part $14.12 while B's Order said $14.13); it is on A's round now.
+  const merged = (order: number, n: number, netMinor: bigint, taxMinor: bigint) => ({
+    ...round(n, netMinor, taxMinor),
+    orderReference: id(order),
+  });
+  it("puts a merged bill's rounding on the rounds of the Order holding the bill", () => {
+    const rounds = [merged(1, 1, 1250n, 163n), merged(2, 2, 1250n, 163n)];
+    const v1 = computeBillTaxRounding(rounds);
+    expect(v1.lines.map((line) => [line.orderReference, line.amountMinor])).toEqual([[id(2), -1n]]);
+    for (const order of [1, 2]) {
+      const result = computeBillTaxRounding(rounds, { carrierOrderReference: id(order) });
+      expect(result.totalMinor).toBe(-1n);
+      expect(result.lines.map((line) => [line.orderReference, line.amountMinor])).toEqual([
+        [id(order), -1n],
+      ]);
+      // Which Order carries it is part of the basis: a new holder records a new version.
+      expect(result.basisDigest).not.toBe(v1.basisDigest);
+    }
+  });
+
+  it("shares a merged bill's rounding over the holder's own rounds by largest remainder", () => {
+    // A: two rounds of $1.05 (14¢ each); B: one $1.05 round. Whole: 40.95 → 41¢, charged 42¢.
+    const rounds = [merged(1, 1, 105n, 14n), merged(2, 2, 105n, 14n), merged(1, 3, 105n, 14n)];
+    const result = computeBillTaxRounding(rounds, { carrierOrderReference: id(1) });
+    expect(result.totalMinor).toBe(-1n);
+    expect(result.lines.every((line) => line.orderReference === id(1))).toBe(true);
+    expect(result.lines.reduce((sum, line) => sum + line.amountMinor, 0n)).toBe(-1n);
+  });
+
+  it("shares it over every round when the holder can't carry it without negative tax", () => {
+    // A ordered a 1¢ dish (no tax charged); B three $1.05 rounds. Whole: 3.16 × 13% = 41¢,
+    // charged 42¢: A's round would be taxed −1¢, so the rounding is shared over the bill.
+    const rounds = [
+      merged(1, 1, 1n, 0n),
+      merged(2, 2, 105n, 14n),
+      merged(2, 3, 105n, 14n),
+      merged(2, 4, 105n, 14n),
+    ];
+    const result = computeBillTaxRounding(rounds, { carrierOrderReference: id(1) });
+    expect(result.totalMinor).toBe(-1n);
+    expect(result.lines.map((line) => line.orderReference)).toEqual([id(2)]);
+    // A holder with no round on the bill: shared over every round too.
+    expect(
+      computeBillTaxRounding(rounds.slice(1), { carrierOrderReference: id(1) }).totalMinor,
+    ).toBe(-1n);
+  });
+
+  it("charges the whole-bill tax exactly whoever holds the bill", () => {
+    const prices = [105n, 299n, 1n, 1349n, 875n, 33n, 450n];
+    for (let size = 1; size <= prices.length; size++)
+      for (const holder of [1, 2]) {
+        const rounds = prices
+          .slice(0, size)
+          .map((net, index) => merged((index % 2) + 1, index + 1, net, (net * 13n + 50n) / 100n));
+        const charged = rounds.reduce(
+          (sum, r) => sum + (r.items[0]?.taxComponents[0]?.taxAmountMinor ?? 0n),
+          0n,
+        );
+        const taxable = rounds.reduce((sum, r) => sum + (r.items[0]?.netMinor ?? 0n), 0n);
+        const result = computeBillTaxRounding(rounds, { carrierOrderReference: id(holder) });
+        expect(charged + result.totalMinor).toBe((taxable * 13n + 50n) / 100n);
+        // No round's tax goes below nothing.
+        for (const r of rounds)
+          expect(
+            (r.items[0]?.taxComponents[0]?.taxAmountMinor ?? 0n) +
+              result.lines
+                .filter((line) => line.orderBatchReference === r.orderBatchReference)
+                .reduce((sum, line) => sum + line.amountMinor, 0n),
+          ).toBeGreaterThanOrEqual(0n);
+      }
   });
 });
