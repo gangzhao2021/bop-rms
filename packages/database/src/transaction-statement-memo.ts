@@ -111,6 +111,38 @@ export interface TransactionStatementMemo {
   pending(): { readonly sql: string; readonly values: readonly string[] } | null;
   /** Forgets everything (a failed statement, or anything the memo cannot reason about). */
   forget(): void;
+  /**
+   * WP-2423 M35 (third step): the scope settings the next statement runs under (written last, or
+   * held), in a fixed order; a name never set is null.
+   */
+  scope(): readonly (readonly [string, string | null])[];
+}
+
+/**
+ * WP-2423 M35 (third step): what one statement does to a transaction. "Read": a plain read, or an
+ * owner's stable read with or without a row lock; "Lock": an advisory or table lock, or a
+ * row-locking read that is not an owner's stable read; "Write": anything else that may change
+ * data, a setting or a lock (an owner function call, INSERT/UPDATE/DELETE, SET...); "Settings": a
+ * pure scope setting.
+ */
+export function statementKind(
+  sql: string,
+  values: readonly unknown[],
+  stable = false,
+): "Read" | "Lock" | "Write" | "Settings" {
+  if (typeof sql !== "string" || !Array.isArray(values)) return "Write";
+  const remembered = classify(sql, values);
+  if (remembered?.kind === "settings") return "Settings";
+  if (remembered?.kind === "lock") return "Lock";
+  const text = sql.trim();
+  if (mayUndo(text)) return "Write";
+  if (!mayChange(text)) return "Read";
+  if (!mayChange(text.replace(rowLockingClause, ""))) return stable ? "Read" : "Lock";
+  return /^(?:\s+|--[^\n]*(?:\n|$)|\/\*[\s\S]*?\*\/)*SELECT\s+pg_(?:try_)?advisory\w*\s*\(/iu.test(
+    text,
+  )
+    ? "Lock"
+    : "Write";
 }
 
 function settingPairs(
@@ -336,5 +368,11 @@ export function createTransactionStatementMemo(
     },
     pending: pendingSettings,
     forget,
+    scope: () =>
+      Object.freeze(
+        [...scopeSettings].map((name): readonly [string, string | null] =>
+          Object.freeze([name, wanted.get(name) ?? settings.get(name) ?? null] as const),
+        ),
+      ),
   });
 }

@@ -9,7 +9,9 @@ import {
 import {
   createTransactionStatementMemo,
   stableReadStatement,
+  statementKind,
 } from "./transaction-statement-memo.js";
+import { currentRequestChecks, type RequestCheckMemo } from "./request-check-memo.js";
 import { snapshotReadStatement } from "./snapshot-read.js";
 import {
   acquireTenantConnection,
@@ -125,6 +127,13 @@ export function createTenantTransactionRunner(
   const run = <T>(
     mode: "ReadWrite" | "Snapshot",
     action: (transaction: DatabaseTransaction) => Promise<T>,
+  ): Promise<T> => {
+    const checks = mode === "ReadWrite" ? currentRequestChecks() : undefined;
+    return checks === undefined ? runNow(mode, action) : runWhenNeeded(checks, action);
+  };
+  const runNow = <T>(
+    mode: "ReadWrite" | "Snapshot",
+    action: (transaction: DatabaseTransaction) => Promise<T>,
   ): Promise<T> =>
     withTenantContextTransaction(
       connections,
@@ -145,6 +154,39 @@ export function createTenantTransactionRunner(
       // The three limits go with BEGIN (one round trip; a parameterless simple query).
       transactionLimits,
     );
+  /**
+   * WP-2423 M35 (third step): inside one request's verified checks a transaction begins only when
+   * its first statement must reach the database; a check answered in full from the request's
+   * earlier check (request-check-memo) takes no connection and sends nothing. Once begun it is an
+   * ordinary transaction: limits and scope with BEGIN, COMMIT once the action ends, ROLLBACK when
+   * it fails.
+   */
+  const runWhenNeeded = async <T>(
+    checks: RequestCheckMemo,
+    action: (transaction: DatabaseTransaction) => Promise<T>,
+  ): Promise<T> => {
+    const opening = openWhenNeeded(connections, fixedScope);
+    const state = transactionState(opening.client, "ReadWrite", fixedScope, checks);
+    let value: T;
+    try {
+      value = await action(state.transaction);
+      await state.beforeCommit();
+      value = state.settle(value);
+    } catch (error) {
+      let reported: unknown = error;
+      try {
+        state.report(error);
+      } catch (thrown) {
+        reported = thrown;
+      }
+      state.close();
+      await opening.finish({ error: reported });
+      throw reported;
+    }
+    state.close();
+    await opening.finish();
+    return value;
+  };
   const execute = <T>(
     mode: "ReadWrite" | "Snapshot",
     action: (transaction: DatabaseTransaction) => Promise<T>,
@@ -152,7 +194,39 @@ export function createTenantTransactionRunner(
     const shared = mode === "ReadWrite" ? together.getStore() : undefined;
     if (shared === undefined || shared.closed || (shared.pool !== null && shared.pool !== pool))
       return run(mode, action);
-    return shared.join(pool, fixedScope, () => openShared(shared), action);
+    const checks = currentRequestChecks();
+    return shared.join(
+      pool,
+      fixedScope,
+      () => (checks === undefined ? openShared(shared) : openSharedWhenNeeded(shared, checks)),
+      action,
+    );
+  };
+  /** As openShared, begun only with its first statement that must reach the database. */
+  const openSharedWhenNeeded = (shared: TogetherSlot, checks: RequestCheckMemo): Promise<void> => {
+    const opening = openWhenNeeded(connections, fixedScope);
+    const state = transactionState(opening.client, "ReadWrite", fixedScope, checks);
+    shared.state = state;
+    shared.finished = (async () => {
+      let failure: { readonly error: unknown } | undefined;
+      try {
+        await shared.done;
+        shared.beforeCommit();
+        await state.beforeCommit();
+        state.settle(undefined);
+      } catch (error) {
+        try {
+          state.report(error);
+        } catch (reported) {
+          failure = { error: reported };
+        }
+      }
+      state.close();
+      await opening.finish(failure);
+      if (failure !== undefined) throw failure.error;
+    })();
+    shared.finished.catch(() => undefined);
+    return Promise.resolve();
   };
   /** The one transaction of a `runTogether` call, begun by its first run on this pool. */
   const openShared = (shared: TogetherSlot): Promise<void> =>
@@ -168,6 +242,7 @@ export function createTenantTransactionRunner(
           opened();
           try {
             await shared.done;
+            shared.beforeCommit();
             await state.beforeCommit();
             return state.settle(undefined);
           } catch (error) {
@@ -195,6 +270,14 @@ interface TransactionState {
   readonly transaction: DatabaseTransaction;
   /** The scope the next statements run under (a joined run of another runner's scope). */
   useScope(scope: TenantDatabaseScope): void;
+  /** How many statements that may write this transaction has sent. */
+  writes(): number;
+  /** The scope settings written last (sent with the next statement, or before COMMIT). */
+  scope(): readonly (readonly [string, string | null])[];
+  /** The scope settings to hold before COMMIT, written as the caller's last. */
+  restoreScope(scope: readonly (readonly [string, string | null])[]): void;
+  /** While true, a statement that may write is refused and fails the transaction. */
+  refuseWrites(refuse: boolean): void;
   /**
    * v15 2026-11-12: sends the scope settings the caller wrote after the last statement that ran,
    * before COMMIT. A deferred constraint trigger (such as the batch cancellation's revision
@@ -210,10 +293,71 @@ interface TransactionState {
   close(): void;
 }
 
+/**
+ * WP-2423 M35 (third step): a client whose transaction begins (connection, BEGIN with its limits
+ * and scope) with its first statement. `finish` commits a begun transaction (or rolls it back with
+ * the given error) and waits for that; with nothing begun it does nothing.
+ */
+function openWhenNeeded(
+  connections: Pick<Pool, "connect">,
+  scope: TenantDatabaseScope,
+): {
+  readonly client: { query(sql: string, values?: unknown[]): Promise<unknown> };
+  finish(failure?: { readonly error: unknown }): Promise<void>;
+} {
+  let begun: Promise<{ query(sql: string, values?: unknown[]): Promise<unknown> }> | null = null;
+  let finished: Promise<unknown> | null = null;
+  let end: (failure?: { readonly error: unknown }) => void = () => undefined;
+  const done = new Promise<void>((resolve, reject) => {
+    end = (failure) => (failure === undefined ? resolve() : reject(failure.error));
+  });
+  done.catch(() => undefined);
+  const begin = () =>
+    new Promise<{ query(sql: string, values?: unknown[]): Promise<unknown> }>(
+      (opened, failedToOpen) => {
+        let started = false;
+        finished = withTenantContextTransaction(
+          connections,
+          scope,
+          async (client) => {
+            started = true;
+            opened(client);
+            await done;
+          },
+          "ReadWrite",
+          transactionLimits,
+        ).catch((error: unknown) => {
+          if (!started) failedToOpen(error);
+          throw error;
+        });
+        finished.catch(() => undefined);
+      },
+    );
+  return Object.freeze({
+    client: Object.freeze({
+      async query(sql: string, values?: unknown[]) {
+        begun ??= begin();
+        return (await begun).query(sql, values);
+      },
+    }),
+    async finish(failure?: { readonly error: unknown }) {
+      end(failure);
+      if (finished === null) return;
+      try {
+        await finished;
+      } catch (error) {
+        // The action's own failure is the answer; a commit failure only when it succeeded.
+        if (failure === undefined) throw error;
+      }
+    },
+  });
+}
+
 function transactionState(
   client: { query(sql: string, values?: unknown[]): Promise<unknown> },
   mode: "ReadWrite" | "Snapshot",
   fixedScope: TenantDatabaseScope,
+  checks: RequestCheckMemo | undefined = mode === "ReadWrite" ? currentRequestChecks() : undefined,
 ): TransactionState {
   let active = true;
   let failed = false;
@@ -231,6 +375,56 @@ function transactionState(
   // The scope settings withTenantContextTransaction installed before this callback; repeats
   // of them, and of locks this transaction already holds, are answered without a round trip.
   const memo = createTransactionStatementMemo(scopeSettings(fixedScope));
+  // WP-2423 M35 (third step, request-check-memo): until the transaction's first statement that
+  // may write or lock (`fenced`), an owner's stable read may be answered from this request's
+  // earlier check (`borrowed`); before that statement each borrowed read is sent again for real.
+  let fenced = mode !== "ReadWrite" || checks === undefined;
+  let writes = 0;
+  let writesRefused = false;
+  let openFailure: unknown = null;
+  const borrowed: {
+    readonly key: string;
+    readonly sql: string;
+    readonly values: readonly unknown[];
+    readonly scope: readonly (readonly [string, string | null])[];
+    readonly rows: string;
+  }[] = [];
+  const plain = (value: unknown) =>
+    value === null || ["string", "number", "boolean"].includes(typeof value);
+  const checkKey = (
+    sql: string,
+    values: readonly unknown[],
+    scope: readonly (readonly [string, string | null])[],
+  ) =>
+    values.every(plain)
+      ? JSON.stringify([scope.map(([, value]) => value), sql.trim(), values])
+      : null;
+  const rowsOf = (result: unknown) => JSON.stringify((result as { rows?: unknown } | null)?.rows);
+  /** Sends every borrowed read again under its own scope; any change fails the transaction. */
+  const materialize = async () => {
+    const restore = memo.scope();
+    for (const read of borrowed.splice(0)) {
+      memo.useScope(
+        Object.fromEntries(read.scope.filter((pair): pair is [string, string] => pair[1] !== null)),
+      );
+      const settings = memo.pending();
+      if (settings !== null) {
+        await client.query(settings.sql, [...settings.values]);
+        memo.observe(settings.sql, settings.values);
+      }
+      const result = await client.query(read.sql, [...read.values]);
+      memo.observe(read.sql, read.values, result, true);
+      checks?.record(read.key, read.sql, result);
+      if (rowsOf(result) !== read.rows) {
+        // Changed since this request's check: decided again on what is current now.
+        conflicted = true;
+        throw Object.assign(new Error("verified check changed"), { code: "40001" });
+      }
+    }
+    memo.useScope(
+      Object.fromEntries(restore.filter((pair): pair is [string, string] => pair[1] !== null)),
+    );
+  };
   const transaction = Object.freeze<DatabaseTransaction>({
     async query(sql: string, values: readonly unknown[]) {
       if (!active)
@@ -253,10 +447,31 @@ function transactionState(
         statement = planned.sql;
       }
       let settings: { readonly sql: string; readonly values: readonly string[] } | null = null;
+      let kind: ReturnType<typeof statementKind> | null = null;
+      let recordAs: string | null = null;
       if (pending === 0) {
         const planned = memo.plan(statement, values, marked.stable);
         if (planned.kind === "Answer") return planned.result;
         settings = planned.settings;
+        kind = statementKind(statement, values, marked.stable);
+        if (kind === "Write" && writesRefused) {
+          // runTogether: another runner's scope already wrote in this one transaction.
+          failed = true;
+          throw new TenantContextDatabaseError("TENANT_DATABASE_TRANSACTION_FAILED");
+        }
+        if (checks !== undefined) {
+          if (!fenced && kind === "Read" && marked.stable) {
+            const scope = memo.scope();
+            const key = checkKey(statement, values, scope);
+            const answered = key === null ? null : checks.answer(key);
+            if (key !== null && answered !== null) {
+              borrowed.push({ key, sql: statement, values, scope, rows: rowsOf(answered) });
+              memo.observe(statement, values, answered, true);
+              return answered;
+            }
+            recordAs = key;
+          }
+        }
       }
       // WP-2423 (guest-table-open-and-busy-reads): a read bounded by its answer time sends no
       // statement once that time is spent, and none that may run past it (the limit is narrowed
@@ -277,6 +492,21 @@ function transactionState(
           await client.query("SELECT set_config('statement_timeout',$1,true)", [`${narrowedMs}ms`]);
           statementLimit = narrowedMs;
         }
+        if (kind === "Lock" || kind === "Write") {
+          // The write fence: borrowed reads are sent again for real before it.
+          if (!fenced) {
+            fenced = true;
+            if (borrowed.length > 0) {
+              await materialize();
+              settings = memo.pending();
+            }
+          }
+          // The request never answers what this statement may have changed.
+          if (kind === "Write") {
+            writes += 1;
+            checks?.wrote(statement);
+          }
+        }
         // The scope settings written since the last statement that ran, sent only now.
         if (settings !== null) {
           await client.query(settings.sql, [...settings.values]);
@@ -284,10 +514,16 @@ function transactionState(
         }
         const result = await client.query(statement, [...values]);
         memo.observe(statement, values, result, marked.stable);
+        if (recordAs !== null && !fenced) checks?.record(recordAs, statement, result);
         return result;
       } catch (error) {
         memo.forget();
         failed = true;
+        // A transaction that could not begin keeps the runner's own error (acquire, setup).
+        if (error instanceof TenantContextDatabaseError) {
+          openFailure ??= error;
+          throw error;
+        }
         // Lock timeout, serialization failure and deadlock leave nothing committed; the
         // caller may rerun the whole idempotent transaction. No SQL detail is exposed.
         const diagnostic = tenantContextDatabaseDiagnostic(error);
@@ -310,6 +546,15 @@ function transactionState(
   return Object.freeze<TransactionState>({
     transaction,
     useScope: (scope) => memo.useScope(scopeSettings(scope)),
+    writes: () => writes,
+    scope: () => memo.scope(),
+    restoreScope: (scope) =>
+      memo.useScope(
+        Object.fromEntries(scope.filter((pair): pair is [string, string] => pair[1] !== null)),
+      ),
+    refuseWrites: (refuse) => {
+      writesRefused = refuse;
+    },
     async beforeCommit() {
       // A read-only snapshot fires no trigger; a failed or busy transaction is settled as such.
       if (mode !== "ReadWrite" || !active || failed || pending !== 0) return;
@@ -330,6 +575,7 @@ function transactionState(
       }
     },
     settle<T>(result: T): T {
+      if (openFailure !== null) throw openFailure;
       if (failed || pending !== 0)
         throw new TenantContextDatabaseError(
           concurrent
@@ -343,6 +589,7 @@ function transactionState(
       return result;
     },
     report(error: unknown): never {
+      if (openFailure !== null) throw openFailure;
       // Whatever the action made of it, a conflicted transaction is reported as retryable,
       // and concurrent use of the transaction as the programming error it is.
       if (concurrent)
@@ -373,6 +620,14 @@ function transactionState(
 interface TogetherSlot {
   pool: object | null;
   state: TransactionState | null;
+  /**
+   * v15 hotfix review: the runner scope whose run wrote, and the scope that run wrote last.
+   * Deferred constraint triggers run at the one COMMIT under the scope then held, so it is the
+   * writer's; a run under another runner's scope may read but never write too.
+   */
+  writer: { readonly key: string; scope: readonly (readonly [string, string | null])[] } | null;
+  /** Restores the writer's scope as the last written, just before COMMIT. */
+  beforeCommit(): void;
   opening: Promise<void> | null;
   finished: Promise<unknown> | null;
   closed: boolean;
@@ -416,6 +671,10 @@ export async function runTogether<T>(work: () => Promise<T>): Promise<T> {
   const slot: TogetherSlot = {
     pool: null,
     state: null,
+    writer: null,
+    beforeCommit() {
+      if (slot.writer !== null) slot.state?.restoreScope(slot.writer.scope);
+    },
     opening: null,
     finished: null,
     closed: false,
@@ -432,10 +691,19 @@ export async function runTogether<T>(work: () => Promise<T>): Promise<T> {
       if (state === null || slot.closed)
         throw new TenantContextDatabaseError("TENANT_DATABASE_TRANSACTION_FAILED");
       state.useScope(scope);
+      const key = JSON.stringify([scope.brandId, scope.storeId ?? null]);
+      const before = state.writes();
+      state.refuseWrites(slot.writer !== null && slot.writer.key !== key);
       try {
         return state.settle(await action(state.transaction));
       } catch (error) {
         return state.report(error);
+      } finally {
+        state.refuseWrites(false);
+        if (state.writes() > before) {
+          if (slot.writer === null) slot.writer = { key, scope: state.scope() };
+          else slot.writer.scope = state.scope();
+        }
       }
     },
   };

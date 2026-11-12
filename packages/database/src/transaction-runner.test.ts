@@ -6,6 +6,7 @@ import {
   runTogether,
   type DatabaseTransaction,
 } from "./transaction-runner.js";
+import { withVerifiedChecks } from "./request-check-memo.js";
 
 const scope = { brandId: "018f3f7a-8b1c-7a11-8d01-000000000041" };
 // WP-2423 item 4 and M35: BEGIN, the three limits and the (validated) scope in one round trip.
@@ -480,6 +481,181 @@ describe("WP-2423 M35 runTogether (DEC-STAFF-ROUND-SPEED)", () => {
     const h = fixture();
     expect(await runTogether(async () => 1)).toBe(1);
     expect(h.connect).not.toHaveBeenCalled();
+  });
+});
+
+describe("v15 hotfix review: runTogether's one COMMIT holds the scope of the run that wrote", () => {
+  const storeA = "018f3f7a-8b1c-7a11-8d01-000000000042";
+  const storeB = "018f3f7a-8b1c-7a11-8d01-000000000043";
+  const sent = (f: ReturnType<typeof fixture>) =>
+    f.query.mock.calls.map(([sql, values]) => [sql, values ?? null]);
+  it("restores the writer's Store scope before COMMIT after a later run read under another", async () => {
+    const f = fixture();
+    const a = createTenantTransactionRunner(f.pool, { ...scope, storeId: storeA });
+    const b = createTenantTransactionRunner(f.pool, { ...scope, storeId: storeB });
+    await runTogether(async () => {
+      await a.run((t) => t.query("INSERT INTO rms_ordering.x VALUES ($1)", ["r"]));
+      await b.run((t) => t.query("SELECT b", []));
+    });
+    // Before: COMMIT ran the deferred checks of A's row under Store B.
+    expect(sent(f).slice(-2)).toEqual([
+      ["SELECT set_config('bop.store_id',$1,true)", [storeA]],
+      ["COMMIT", null],
+    ]);
+  });
+  it("refuses a write under another runner's scope once one wrote, and commits nothing", async () => {
+    const f = fixture();
+    const a = createTenantTransactionRunner(f.pool, { ...scope, storeId: storeA });
+    const b = createTenantTransactionRunner(f.pool, { ...scope, storeId: storeB });
+    const error = await runTogether(async () => {
+      await a.run((t) => t.query("INSERT INTO rms_ordering.x VALUES ($1)", ["r"]));
+      await b.run((t) => t.query("INSERT INTO rms_ordering.x VALUES ($1)", ["s"]));
+    }).catch((e: unknown) => e);
+    expect(error).toMatchObject({ code: "TENANT_DATABASE_TRANSACTION_FAILED" });
+    const statements = f.query.mock.calls.map(([sql]) => sql);
+    expect(statements.filter((sql) => sql.startsWith("INSERT"))).toHaveLength(1);
+    expect(statements).not.toContain("COMMIT");
+    expect(statements.at(-1)).toBe("ROLLBACK");
+  });
+  it("lets the same scope write again in a later run", async () => {
+    const f = fixture();
+    const a = createTenantTransactionRunner(f.pool, { ...scope, storeId: storeA });
+    await runTogether(async () => {
+      await a.run((t) => t.query("INSERT INTO rms_ordering.x VALUES ($1)", ["r"]));
+      await f.runner.run((t) => t.query("SELECT b", []));
+      await a.run((t) => t.query("INSERT INTO rms_ordering.x VALUES ($1)", ["s"]));
+    });
+    expect(sent(f).at(-1)).toEqual(["COMMIT", null]);
+    expect(f.query.mock.calls.filter(([sql]) => sql.startsWith("INSERT"))).toHaveLength(2);
+  });
+});
+
+describe("WP-2423 M35 third step: one request's verified checks (request-check-memo)", () => {
+  const store = "018f3f7a-8b1c-7a11-8d01-000000000042";
+  const check = "-- bop:stable-read\nSELECT * FROM rms_dining.dining_table WHERE table_id=$1";
+  const identity = "-- bop:stable-read\nSELECT * FROM bop_identity.guest_session WHERE id=$1";
+  function rowsFixture() {
+    const f = fixture();
+    const rows = new Map<string, unknown[]>();
+    f.query.mockImplementation(async (sql: string) => ({ rows: rows.get(sql) ?? [] }));
+    return { ...f, rows };
+  }
+  const read = (t: DatabaseTransaction, sql = check) => t.query(sql, ["t1"]);
+  const statements = (f: ReturnType<typeof fixture>) => f.query.mock.calls.map(([sql]) => sql);
+  it("answers a check this request already made, and a run answered in full takes no connection", async () => {
+    const f = rowsFixture();
+    f.rows.set(check.slice(19), [{ table: 1 }]);
+    const runner = createTenantTransactionRunner(f.pool, { ...scope, storeId: store });
+    const answers = await withVerifiedChecks(async () => [
+      await runner.run(read),
+      await runner.run(read),
+    ]);
+    expect(answers.map((a) => (a as { rows: unknown[] }).rows)).toEqual([
+      [{ table: 1 }],
+      [{ table: 1 }],
+    ]);
+    expect(f.connect).toHaveBeenCalledTimes(1);
+    expect(statements(f).filter((sql) => sql.includes("dining_table"))).toHaveLength(1);
+    // Never across requests, and never outside one.
+    await withVerifiedChecks(() => runner.run(read));
+    await runner.run(read);
+    expect(f.connect).toHaveBeenCalledTimes(3);
+  });
+  it("sends every borrowed read again before the first write, and a change fails it as a retryable conflict", async () => {
+    const f = rowsFixture();
+    const plainCheck = check.slice(19);
+    f.rows.set(plainCheck, [{ version: 1 }]);
+    const runner = createTenantTransactionRunner(f.pool, { ...scope, storeId: store });
+    const write = async (t: DatabaseTransaction) => {
+      const seen = await read(t);
+      await t.query("INSERT INTO rms_ordering.order_batch VALUES ($1)", ["b"]);
+      return seen;
+    };
+    await withVerifiedChecks(async () => {
+      await runner.run(read);
+      // Someone closed the table since this request checked it.
+      f.rows.set(plainCheck, [{ version: 2 }]);
+      const error = await runner.run(write).catch((e: unknown) => e);
+      expect(error).toMatchObject({ code: "TENANT_DATABASE_TRANSACTION_CONFLICT" });
+      expect(isRetryableTransactionConflict(error)).toBe(true);
+      expect(statements(f)).not.toContain("INSERT INTO rms_ordering.order_batch VALUES ($1)");
+      expect(statements(f).at(-1)).toBe("ROLLBACK");
+      // Done again, it decides on what is current: the read is sent before the write.
+      const again = (await runner.run(write)) as { rows: unknown[] };
+      expect(again.rows).toEqual([{ version: 2 }]);
+    });
+    const last = statements(f);
+    expect(last.slice(-3)).toEqual([
+      plainCheck,
+      "INSERT INTO rms_ordering.order_batch VALUES ($1)",
+      "COMMIT",
+    ]);
+  });
+  it("a lock is a fence too: the borrowed read is sent again before it, under its own scope", async () => {
+    const f = rowsFixture();
+    const runner = createTenantTransactionRunner(f.pool, { ...scope, storeId: store });
+    const storeSql = "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)";
+    await withVerifiedChecks(async () => {
+      await runner.run(read);
+      await runner.run(async (t) => {
+        await read(t);
+        await t.query(storeSql, [scope.brandId, ""]);
+        await t.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", ["k"]);
+      });
+    });
+    const calls = f.query.mock.calls.map(([sql, values]) => [sql, values ?? null]);
+    expect(calls.slice(-5)).toEqual([
+      [setup.replace("'', true)", `'${store}', true)`), null],
+      [check.slice(19), ["t1"]],
+      ["SELECT set_config('bop.store_id',$1,true)", [""]],
+      ["SELECT pg_advisory_xact_lock(hashtextextended($1,0))", ["k"]],
+      ["COMMIT", null],
+    ]);
+  });
+  it("forgets what this request wrote: the schemas a write names, everything when it names none", async () => {
+    const f = rowsFixture();
+    const runner = createTenantTransactionRunner(f.pool, { ...scope, storeId: store });
+    const sentOf = (sql: string) => statements(f).filter((s) => s === sql.slice(19)).length;
+    await withVerifiedChecks(async () => {
+      await runner.run(async (t) => {
+        await read(t, check);
+        await read(t, identity);
+      });
+      await runner.run((t) => t.query("UPDATE rms_dining.dining_table SET v=v+1", []));
+      await runner.run(async (t) => {
+        await read(t, check);
+        await read(t, identity);
+      });
+      expect([sentOf(check), sentOf(identity)]).toEqual([2, 1]);
+      await runner.run((t) => t.query("UPDATE something SET v=1", []));
+      await runner.run((t) => read(t, identity));
+      expect(sentOf(identity)).toBe(2);
+    });
+  });
+  it("never answers a snapshot read, or a read after the transaction's own write", async () => {
+    const f = rowsFixture();
+    const runner = createTenantTransactionRunner(f.pool, { ...scope, storeId: store });
+    await withVerifiedChecks(async () => {
+      await runner.run(read);
+      await runner.runSnapshot(read);
+      await runner.run(async (t) => {
+        await t.query("INSERT INTO rms_ordering.x VALUES ($1)", ["x"]);
+        await read(t);
+      });
+    });
+    expect(statements(f).filter((sql) => sql === check.slice(19))).toHaveLength(3);
+  });
+  it("a run that could not begin fails with the runner's own error, whatever the action made of it", async () => {
+    const f = fixture();
+    const acquire = Object.assign(new Error("busy"), { code: "ECONNREFUSED" });
+    f.connect.mockRejectedValue(acquire);
+    const error = await withVerifiedChecks(() =>
+      f.runner.run(async (t) => {
+        await t.query("SELECT 1", []).catch(() => undefined);
+        return "swallowed";
+      }),
+    ).catch((e: unknown) => e);
+    expect(error).toMatchObject({ code: "TENANT_DATABASE_ACQUIRE_FAILED" });
   });
 });
 

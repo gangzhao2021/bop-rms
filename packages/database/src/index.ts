@@ -59,6 +59,7 @@ export {
   type DatabaseTransaction,
   type DatabaseTransactionRunner,
 } from "./transaction-runner.ts";
+export { withVerifiedChecks } from "./request-check-memo.ts";
 export {
   snapshotReadBegin,
   snapshotReadStatement,
