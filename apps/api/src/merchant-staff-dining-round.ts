@@ -44,6 +44,7 @@ import {
   type CounterTipChoice,
 } from "./merchant-counter-order.js";
 import type { DiningPayLaterRound } from "./dining-pay-later-round.js";
+import { createPostgresCardMachinePaymentStore } from "@rms/payment";
 import { readStaffDiningRoundPaymentPreparation } from "./staff-dining-round-payment-preparation.js";
 import { keepingCause, onlyRefusal } from "./merchant-failure.js";
 import { staffContentLocale } from "./staff-content-locale.js";
@@ -867,7 +868,32 @@ export function createMerchantStaffDiningRound(options: {
             tipSelectionReference: String(entry.tipSelectionReference),
           },
         );
-        if (current === null) return fail("STAFF_ROUND_NOT_FINISHED");
+        if (current === null) {
+          // DEC-PAPER-SEND-IDEMPOTENT: paid already (a paper round the table pays now is paid with
+          // its send): the same round at the amounts its payment record holds, so a lost answer
+          // is recovered and the round is never sent and paid twice.
+          const paid = await createPostgresCardMachinePaymentStore({
+            scope: scope.selected,
+            authorize: async (_tx, value) =>
+              value.orderReference === String(batch.orderReference) && (await allowed()),
+          }).loadByBatch(tx, String(batch.orderReference), String(batch.orderBatchReference));
+          if (paid === null) return fail("STAFF_ROUND_NOT_FINISHED");
+          const p = paid.preparation;
+          return Object.freeze({
+            status,
+            orderReference: String(batch.orderReference),
+            orderBatchReference: String(batch.orderBatchReference),
+            orderNumber: batch.orderNumber,
+            orderVersion: batch.orderVersion,
+            tableLabel: labels.get(String(entry.diningSessionReference)) ?? null,
+            orderMinor: p.orderAllocation.amountMinor.toString(),
+            tipMinor: p.tip.amountMinor.toString(),
+            totalMinor: p.total.amountMinor.toString(),
+            payBy: String(p.capacityExpiresAt),
+            payLater: false,
+            recordedAfterOutage: entry.recordedAfterOutage,
+          });
+        }
         // WP-2423 D1: a later round's table Order is at the version its other rounds moved it to
         // (the Order header keeps the first round's version).
         const execution = current.additional

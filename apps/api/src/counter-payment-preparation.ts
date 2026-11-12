@@ -97,3 +97,38 @@ export async function readCounterPaymentPreparation(
     paymentOperationReference: String(capacity.paymentOperationReference),
   });
 }
+
+/**
+ * DEC-PAPER-SEND-IDEMPOTENT: the Store's number and version of a placed counter pickup Order, from
+ * Ordering's records alone, whether or not it still waits for payment (a paid, accepted or closed
+ * Order keeps its number). Null when no Order was placed for the submission.
+ */
+export async function readCounterOrderPlaced(
+  transaction: ConsumerTransaction,
+  options: {
+    scope: { brandReference: string; storeReference: string };
+    authorize(): Promise<boolean>;
+  },
+  submissionReference: string,
+): Promise<{ readonly orderNumber: string; readonly orderVersion: number } | null> {
+  const owners = {
+    brandReference: String(parseOrderingReference(options.scope.brandReference)),
+    storeReference: String(parseOrderingReference(options.scope.storeReference)),
+  };
+  if (!(await options.authorize())) return null;
+  const runner = {
+    run: async <T>(work: (tx: ConsumerTransaction) => Promise<T>) => work(transaction),
+  };
+  const quoteVersion =
+    (await readOrderCreationQuoteVersion(transaction, owners, submissionReference)) ?? 2;
+  const order = await createPostgresOrderCreationQueryStore(
+    runner,
+    owners,
+    quoteVersion,
+  ).withCurrentSubmission(submissionReference, async (_, record) => record);
+  if (order === null) return null;
+  return Object.freeze({
+    orderNumber: String(order.orderNumberAllocation.orderNumber),
+    orderVersion: order.order.aggregateVersion,
+  });
+}

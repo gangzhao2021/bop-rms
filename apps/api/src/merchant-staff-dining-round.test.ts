@@ -19,6 +19,10 @@ const state = vi.hoisted(() => ({
   },
   staffRemovals: [] as Record<string, unknown>[],
   staffRemovalError: null as null | Error,
+  // DEC-PAPER-SEND-IDEMPOTENT: whether the round still waits for its payment, and its card
+  // machine (or paper) payment record once paid.
+  waitsForPayment: true,
+  paid: null as Record<string, unknown> | null,
   /** What the table's cart does with a staff removal (the shared-cart double below). */
   onStaffRemoval: null as
     | null
@@ -61,17 +65,24 @@ vi.mock("./merchant-store-scope.js", () => ({
       ),
   }),
 }));
+vi.mock("@rms/payment", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@rms/payment")>()),
+  createPostgresCardMachinePaymentStore: () => ({ loadByBatch: async () => state.paid }),
+}));
 vi.mock("./staff-dining-round-payment-preparation.js", () => ({
-  readStaffDiningRoundPaymentPreparation: async () => ({
-    preparation: {
-      orderAllocation: { amountMinor: 2260n },
-      tip: { amountMinor: 300n },
-      total: { amountMinor: 2560n },
-      capacityExpiresAt: "2026-10-15T18:30:00.000Z",
-    },
-    paymentOperationReference: "0198a7c0-0000-7000-8000-000000000099",
-    additional: true,
-  }),
+  readStaffDiningRoundPaymentPreparation: async () =>
+    state.waitsForPayment
+      ? {
+          preparation: {
+            orderAllocation: { amountMinor: 2260n },
+            tip: { amountMinor: 300n },
+            total: { amountMinor: 2560n },
+            capacityExpiresAt: "2026-10-15T18:30:00.000Z",
+          },
+          paymentOperationReference: "0198a7c0-0000-7000-8000-000000000099",
+          additional: true,
+        }
+      : null,
 }));
 vi.mock("@rms/dining", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@rms/dining")>();
@@ -322,6 +333,8 @@ describe("staff dine-in round command — WP-2423 Q7 slice 2", () => {
     state.staffRemovals = [];
     state.staffRemovalError = null;
     state.onStaffRemoval = null;
+    state.waitsForPayment = true;
+    state.paid = null;
   });
 
   it("WP-2423 item 8 ⑦: a staff round takes only a tip the Store offers; with tips off, none", async () => {
@@ -511,6 +524,38 @@ describe("staff dine-in round command — WP-2423 Q7 slice 2", () => {
     await expect(send({ tip: { kind: "None" } })).rejects.toMatchObject({
       code: "STAFF_ROUND_IDEMPOTENCY_CONFLICT",
     });
+  });
+
+  // DEC-PAPER-SEND-IDEMPOTENT (v15 batch-9 L5): a paper round the table pays now is paid with its
+  // send; when the answer is lost the same send finds it paid and returns it, at any time.
+  it("returns a paid round to the same send with the amounts its payment record holds", async () => {
+    const clock = { at: "2026-10-15T18:00:00.000Z" };
+    const { send, pipeline } = setup(clock);
+    await send({ recordedAfterOutage: true });
+    state.waitsForPayment = false;
+    await expect(send({ recordedAfterOutage: true })).rejects.toMatchObject({
+      code: "STAFF_ROUND_IN_PROGRESS",
+    });
+    state.paid = {
+      preparation: {
+        orderAllocation: { amountMinor: 2260n },
+        tip: { amountMinor: 300n },
+        total: { amountMinor: 2560n },
+        capacityExpiresAt: "2026-10-15T18:30:00.000Z",
+      },
+    };
+    clock.at = "2026-10-15T20:00:00.000Z";
+    expect(await send({ recordedAfterOutage: true })).toMatchObject({
+      status: "AlreadyPlaced",
+      orderBatchReference: id(21),
+      orderMinor: "2260",
+      tipMinor: "300",
+      totalMinor: "2560",
+      payBy: "2026-10-15T18:30:00.000Z",
+      payLater: false,
+      recordedAfterOutage: true,
+    });
+    expect(pipeline.openTable).toHaveBeenCalledTimes(1);
   });
 
   it("refuses without the staff ordering or table permission", async () => {

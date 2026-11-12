@@ -23,7 +23,11 @@ import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
-import { readCounterPaymentPreparation } from "./counter-payment-preparation.js";
+import { createPostgresCardMachinePaymentStore } from "@rms/payment";
+import {
+  readCounterOrderPlaced,
+  readCounterPaymentPreparation,
+} from "./counter-payment-preparation.js";
 import { keepingCause, onlyRefusal } from "./merchant-failure.js";
 
 /**
@@ -493,6 +497,21 @@ export function parseCounterOrderCommand(value: unknown) {
   }
 }
 
+/** What one counter send asks for (its dishes, tip and paper flag): the same send, the same hash. */
+export function counterOrderIntentHash(command: ReturnType<typeof parseCounterOrderCommand>) {
+  return parseOrderingHash(
+    "sha256:" +
+      sha256Hex(
+        canonicalizeRfc8785({
+          kind: "CounterPickupOrder/v1",
+          lines: command.lines,
+          tip: command.tip,
+          recordedAfterOutage: command.recordedAfterOutage,
+        }),
+      ),
+  );
+}
+
 /**
  * WP-2423 Q7 slice 1 (DEC-COUNTER-PAYMENT-RECORD): staff take a pickup order at the counter for a
  * guest without a phone, or enter a paper order taken during an outage. The order runs through the
@@ -523,17 +542,7 @@ export function createMerchantCounterOrder(options: {
   }): Promise<CounterOrderResult> => {
     const session = await options.authentication.authorize(input);
     const command = parseCounterOrderCommand(input.command);
-    const intentHash = parseOrderingHash(
-      "sha256:" +
-        sha256Hex(
-          canonicalizeRfc8785({
-            kind: "CounterPickupOrder/v1",
-            lines: command.lines,
-            tip: command.tip,
-            recordedAfterOutage: command.recordedAfterOutage,
-          }),
-        ),
-    );
+    const intentHash = counterOrderIntentHash(command);
     const denied = () => fail("COUNTER_ORDER_PERMISSION_DENIED");
     /**
      * WP-2423: one authorized run per counter transaction. The caller and `counter order`
@@ -588,14 +597,24 @@ export function createMerchantCounterOrder(options: {
         storeReference: scope.selected.storeReference,
         authorize: guard,
       });
-    /** The finished order of a recorded counter entry, from owner records only. */
+    /**
+     * The order a recorded counter entry placed, from owner records only: while it waits for its
+     * payment, from the payment it waits for; once paid (DEC-PAPER-SEND-IDEMPOTENT: a paper order
+     * is paid with its send), from the payment record. `placed` is the Store's number of an Order
+     * that exists but neither waits for payment nor was paid on the card machine (its time ended,
+     * or it was closed); `none` is an entry that placed no Order.
+     */
     const finished = async (
       status: CounterOrderResult["status"],
       entry: CounterOrderEntryRecord,
-    ): Promise<CounterOrderResult> =>
+    ): Promise<
+      | { readonly kind: "order"; readonly result: CounterOrderResult }
+      | { readonly kind: "placed"; readonly orderNumber: string | null }
+      | { readonly kind: "none" }
+    > =>
       inScope(async (tx, scope, guard) => {
         const order = await entries(scope, guard).loadOrder(tx, String(entry.cartReference));
-        if (order === null) return fail("COUNTER_ORDER_NOT_FINISHED");
+        if (order === null) return { kind: "none" } as const;
         const current = await readCounterPaymentPreparation(
           tx,
           {
@@ -610,50 +629,94 @@ export function createMerchantCounterOrder(options: {
             tipSelectionReference: String(entry.tipSelectionReference),
           },
         );
-        if (current === null) return fail("COUNTER_ORDER_NOT_FINISHED");
-        const p = current.preparation;
-        return Object.freeze({
-          status,
-          orderReference: String(order.orderReference),
-          orderBatchReference: String(order.orderBatchReference),
-          orderNumber: current.orderNumber,
-          orderVersion: current.orderVersion,
-          orderMinor: p.orderAllocation.amountMinor.toString(),
-          tipMinor: p.tip.amountMinor.toString(),
-          totalMinor: p.total.amountMinor.toString(),
-          payBy: String(p.capacityExpiresAt),
-          recordedAfterOutage: entry.recordedAfterOutage,
-        });
+        const answer = (
+          p: Pick<OrderPaymentPreparationEvidence, "orderAllocation" | "tip" | "total"> & {
+            readonly capacityExpiresAt: unknown;
+          },
+          placed: { readonly orderNumber: string; readonly orderVersion: number },
+        ) =>
+          ({
+            kind: "order",
+            result: Object.freeze({
+              status,
+              orderReference: String(order.orderReference),
+              orderBatchReference: String(order.orderBatchReference),
+              orderNumber: placed.orderNumber,
+              orderVersion: placed.orderVersion,
+              orderMinor: p.orderAllocation.amountMinor.toString(),
+              tipMinor: p.tip.amountMinor.toString(),
+              totalMinor: p.total.amountMinor.toString(),
+              payBy: String(p.capacityExpiresAt),
+              recordedAfterOutage: entry.recordedAfterOutage,
+            }),
+          }) as const;
+        if (current !== null) return answer(current.preparation, current);
+        const placed = await readCounterOrderPlaced(
+          tx,
+          { scope: scope.selected, authorize: guard },
+          String(order.submissionReference),
+        );
+        // Paid already (a paper order's payment goes with its send): the same order, at the
+        // amounts its payment record holds, so a lost answer is recovered and never sold twice.
+        const paid = await createPostgresCardMachinePaymentStore({
+          scope: scope.selected,
+          authorize: async (_tx, value) =>
+            value.orderReference === String(order.orderReference) && (await guard()),
+        }).loadByBatch(tx, String(order.orderReference), String(order.orderBatchReference));
+        if (paid !== null && placed !== null) return answer(paid.preparation, placed);
+        return { kind: "placed", orderNumber: placed?.orderNumber ?? null } as const;
       });
+    const stillSending = (record: CounterOrderEntryRecord) =>
+      Date.parse(now()) - Date.parse(String(record.createdAt)) < (options.inProgressMs ?? 120_000);
     /**
      * The same staff command sent before. An attempt that created no Order is either still being
      * sent or failed part way; a failed attempt leaves only what an abandoned customer checkout
      * leaves (its pickup capacity hold and guest session lapse on their own), so staff send the
-     * order again as a new one.
+     * order again as a new one. An Order that exists is never placed again: it is returned while
+     * it waits for payment or once paid, and otherwise named, so staff open it in Orders.
      */
-    const earlier = async (record: CounterOrderEntryRecord) => {
-      try {
-        return await finished("AlreadyPlaced", record);
-      } catch (error) {
-        if (
-          error instanceof CounterOrderError &&
-          error.code === "COUNTER_ORDER_NOT_FINISHED" &&
-          Date.parse(now()) - Date.parse(String(record.createdAt)) <
-            (options.inProgressMs ?? 120_000)
-        )
-          return fail("COUNTER_ORDER_IN_PROGRESS");
-        throw error;
-      }
+    const earlier = async (record: CounterOrderEntryRecord): Promise<CounterOrderResult> => {
+      const found = await finished("AlreadyPlaced", record);
+      if (found.kind === "order") return found.result;
+      if (stillSending(record)) return fail("COUNTER_ORDER_IN_PROGRESS");
+      if (found.kind === "none") return fail("COUNTER_ORDER_NOT_FINISHED");
+      throw new CounterOrderError(
+        "COUNTER_ORDER_ALREADY_ORDERED",
+        null,
+        null,
+        false,
+        found.orderNumber,
+      );
     };
+    /**
+     * DEC-PAPER-SEND-IDEMPOTENT: the same operation sent again with other dishes or tip (staff
+     * changed the order after no answer). When the first send placed an Order it is named and
+     * nothing new is placed or charged; while it may still be running staff wait; an attempt that
+     * placed nothing lets them send the changed order as a new one.
+     */
+    const changedAfterSend = async (record: CounterOrderEntryRecord): Promise<never> => {
+      const found = await finished("AlreadyPlaced", record);
+      if (found.kind !== "none")
+        throw new CounterOrderError(
+          "COUNTER_ORDER_ALREADY_ORDERED",
+          null,
+          null,
+          false,
+          found.kind === "order" ? found.result.orderNumber : found.orderNumber,
+        );
+      return fail(
+        stillSending(record) ? "COUNTER_ORDER_IN_PROGRESS" : "COUNTER_ORDER_NOT_FINISHED",
+      );
+    };
+    let orderMayExist = false;
     try {
       // A retry of the same staff command returns the order it created, never a second one.
       const prior = await inScope(async (tx, scope, guard) => {
         const found = await entries(scope, guard).loadByOperation(tx, command.operationReference);
-        if (
-          found !== null &&
-          (found.intentHash !== intentHash || String(found.actorReference) !== scope.actorReference)
-        )
+        if (found !== null && String(found.actorReference) !== scope.actorReference)
           return fail("COUNTER_ORDER_IDEMPOTENCY_CONFLICT");
+        if (found !== null && found.intentHash !== intentHash)
+          return { changed: true as const, record: found };
         // A new order only while the Store uses counter ordering (a retry returns its order).
         if (found === null && !(await readStoreFeatures(tx, scope.selected, "Refuse")).counterOrder)
           return fail("COUNTER_ORDER_TURNED_OFF");
@@ -666,6 +729,7 @@ export function createMerchantCounterOrder(options: {
         if (refused === "TipChoicesChanged") return fail("COUNTER_ORDER_TIP_CHOICES_CHANGED");
         return found;
       });
+      if (prior !== null && "changed" in prior) return await changedAfterSend(prior.record);
       if (prior !== null) return await earlier(prior);
       if (!command.recordedAfterOutage && (await options.pipeline.newGuestsPaused?.()) === true)
         return fail("COUNTER_ORDER_NEW_GUESTS_PAUSED");
@@ -812,14 +876,22 @@ export function createMerchantCounterOrder(options: {
         return refusedAtCheckout(checkout, cartLines);
       if (checkout.status === "RequoteRequired") return fail("COUNTER_ORDER_NOT_PRICED");
       if (checkout.status !== "Started") return fail("COUNTER_ORDER_STORE_NOT_TAKING_ORDERS");
+      // From the submission on the Order may exist: an unexpected failure is answered as still
+      // being sent, so the same send recovers it instead of placing (and, on paper, recording) a
+      // second sale.
+      orderMayExist = true;
       const preparation = await options.pipeline.preparePayment(credentials, {
         checkoutSessionReference: checkout.checkoutSessionReference,
         selectionReference: tipSelectionReference,
         tip: { amountMinor: tip, currencyCode: "CAD" } as Money,
         recordedAfterOutage: command.recordedAfterOutage,
       });
-      if (preparation.tip.amountMinor !== tip) return fail("COUNTER_ORDER_UNAVAILABLE");
-      return await finished("Placed", entry.record);
+      // The order was submitted with another tip: the same send reads back what it holds.
+      if (preparation.tip.amountMinor !== tip) return fail("COUNTER_ORDER_IN_PROGRESS");
+      const placed = await finished("Placed", entry.record);
+      // Just placed, so it waits for its payment; otherwise the same send, sent again, finds it.
+      if (placed.kind !== "order") return fail("COUNTER_ORDER_IN_PROGRESS");
+      return placed.result;
     } catch (error) {
       if (error instanceof CounterOrderError) throw error;
       if (
@@ -851,14 +923,18 @@ export function createMerchantCounterOrder(options: {
       if (code === "CHECKOUT_REQUOTE_REQUIRED") return fail("COUNTER_ORDER_NOT_PRICED");
       // WP-2423: the pickup time schedule ran out; say so rather than "try again". A counter
       // order is never refused because the hour is full (DEC-COUNTER-WALK-UP-CAPACITY).
-      const covered = await options.pipeline.pickupTimesNow?.().catch(() => true);
+      const covered = orderMayExist
+        ? true
+        : await options.pipeline.pickupTimesNow?.().catch(() => true);
       if (covered === false) return fail("COUNTER_ORDER_NO_PICKUP_TIMES");
       try {
         options.onUnexpected?.(error);
       } catch {
         // Reporting never changes the answer.
       }
-      return keepingCause(() => fail("COUNTER_ORDER_UNAVAILABLE"))(error);
+      return keepingCause(() =>
+        fail(orderMayExist ? "COUNTER_ORDER_IN_PROGRESS" : "COUNTER_ORDER_UNAVAILABLE"),
+      )(error);
     }
   };
 }

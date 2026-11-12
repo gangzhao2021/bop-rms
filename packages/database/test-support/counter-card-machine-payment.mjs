@@ -20,6 +20,11 @@ import {
   createMerchantPaperPaidAtCheck,
 } from "../../../apps/api/src/merchant-card-machine-payment.ts";
 import { recordPaperOrderPayment } from "../../../apps/api/src/merchant-paper-order-payment.ts";
+import {
+  counterOrderIntentHash,
+  createMerchantCounterOrder,
+  parseCounterOrderCommand,
+} from "../../../apps/api/src/merchant-counter-order.ts";
 import { readStoreFirstConfigurationGoverningFrom } from "../../rms/store/src/index.ts";
 import { createMerchantCounterOrderCancellation } from "../../../apps/api/src/merchant-counter-order-cancellation.ts";
 import { createPersistentMerchantOrderQueue } from "../../../apps/api/src/persistent-merchant-order-queue.ts";
@@ -114,10 +119,18 @@ export async function exerciseCounterCardMachinePayment({
     ...ownerScope,
     authorize: async () => true,
   });
+  // DEC-PAPER-SEND-IDEMPOTENT: the send staff made (its dishes, tip and paper flag), so the same
+  // send can be sent again below as the counter page does after a lost answer.
+  const sentCommand = {
+    operationReference: next(),
+    lines: [{ sellableReference: next(), quantity: 1, optionSelections: [] }],
+    tip: { kind: "None" },
+    recordedAfterOutage: pilot === null,
+  };
   const entry = {
     ...ownerScope,
-    operationReference: next(),
-    intentHash: sha("counter order"),
+    operationReference: sentCommand.operationReference,
+    intentHash: counterOrderIntentHash(parseCounterOrderCommand(sentCommand)),
     actorReference: merchant.actorReference,
     guestSessionReference: order.guestSessionReference,
     cartReference: batch.sourceCartReference,
@@ -378,6 +391,38 @@ export async function exerciseCounterCardMachinePayment({
   merchant.allowed = true;
   assert.deepEqual(await counts(), before);
 
+  // DEC-PAPER-SEND-IDEMPOTENT: the same send sent again (the counter page after a lost answer)
+  // returns the order it placed and runs nothing of the guest path again; the command runs as
+  // the restricted role. Before the payment is recorded it is the order waiting for it.
+  const placeOrder = createMerchantCounterOrder({
+    persistence: { transactions: runner, now: () => new Date().toISOString() },
+    authentication: { authorize: async () => ({ sessionReference: merchant.sessionReference }) },
+    pipeline: new Proxy(
+      {},
+      {
+        get: (_target, name) => () => {
+          throw new Error("a send sent again never runs the guest path: " + String(name));
+        },
+      },
+    ),
+    nextReference: next,
+  });
+  const waiting = await placeOrder({ ...auth, command: sentCommand });
+  const sameOrder = {
+    orderReference,
+    orderBatchReference: String(batch.orderBatchReference),
+    orderNumber: waiting.orderNumber,
+    orderVersion: waiting.orderVersion,
+    orderMinor: amounts.orderAllocation.amountMinor.toString(),
+    tipMinor: amounts.tip.amountMinor.toString(),
+    totalMinor: amounts.total.amountMinor.toString(),
+    payBy: waiting.payBy,
+    recordedAfterOutage: true,
+  };
+  assert.deepEqual({ ...waiting }, { status: "AlreadyPlaced", ...sameOrder });
+  assert.match(waiting.orderNumber, /^[1-9][0-9]*$/u);
+  assert.equal(Date.parse(waiting.payBy), Date.parse(String(clock.capacityExpiresAt)));
+
   // The send's own composition: the payment command at the server's total, as paid.
   const answer = await recordPaperOrderPayment(
     command,
@@ -419,6 +464,11 @@ export async function exerciseCounterCardMachinePayment({
   await assert.rejects(command(payInput({ operationReference: id(2), takenAt: null })), {
     code: "CARD_MACHINE_ALREADY_PAID",
   });
+  // The same send sent again right after its payment is the same order.
+  assert.deepEqual(
+    { ...(await placeOrder({ ...auth, command: sentCommand })) },
+    { status: "AlreadyPlaced", ...sameOrder },
+  );
   assert.deepEqual(await counts(), {
     payments: before.payments + 1,
     events: before.events + 1,
@@ -619,6 +669,46 @@ export async function exerciseCounterCardMachinePayment({
         });
       },
     });
+  if (positive) {
+    // DEC-PAPER-SEND-IDEMPOTENT (v15 batch-9 L5): the paper send's answer was lost after its
+    // order and payment were recorded, and the order went on (accepted, in the kitchen). Sent
+    // again, the same order is returned with its number at the amounts recorded (never "didn't
+    // go through", which led staff to record the sale twice); its payment, sent again with it, is
+    // the one recorded, and one sent with a corrected slip or time is answered as already
+    // recorded. Sent with other dishes, the order placed is named.
+    const replayed = await placeOrder({ ...auth, command: sentCommand });
+    assert.deepEqual({ ...replayed }, { status: "AlreadyPlaced", ...sameOrder });
+    const replayedPayment = {
+      tender: paperTender,
+      slipReference: paperCash ? null : "AUTH 482913",
+      takenAt: paperTakenAt,
+    };
+    const again = await recordPaperOrderPayment(command, auth, replayed, {
+      operationReference: id(1),
+      ...replayedPayment,
+    });
+    assert.equal(again.payment?.status, "AlreadyRecorded", JSON.stringify(again));
+    assert.equal(again.payment?.amountMinor, amounts.total.amountMinor.toString());
+    const corrected = await recordPaperOrderPayment(command, auth, replayed, {
+      operationReference: next(),
+      ...replayedPayment,
+      ...(paperCash ? {} : { slipReference: "AUTH 482914" }),
+      takenAt: new Date(Date.parse(paperTakenAt) - 60_000).toISOString(),
+    });
+    assert.deepEqual(corrected, { paymentError: "already_paid" });
+    await assert.rejects(
+      placeOrder({
+        ...auth,
+        command: { ...sentCommand, lines: [{ ...sentCommand.lines[0], quantity: 2 }] },
+      }),
+      { code: "COUNTER_ORDER_ALREADY_ORDERED", orderNumber: waiting.orderNumber },
+    );
+    assert.deepEqual(await counts(), {
+      payments: before.payments + 1,
+      events: before.events + 1,
+      audits: before.audits + 1,
+    });
+  }
   return { payment: saved, event: paymentEvent };
 }
 

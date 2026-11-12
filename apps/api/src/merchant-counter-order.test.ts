@@ -15,6 +15,25 @@ const state = vi.hoisted(() => ({
   counterOrder: true,
   // WP-2423 item 8 ⑦ (Owner decision 11): the Store's tip choices.
   tips: { enabled: true, tierPercents: [10, 15, 18] as readonly number[] },
+  // DEC-PAPER-SEND-IDEMPOTENT: whether the placed order still waits for its payment, its card
+  // machine (or paper) payment record, and its number as Ordering holds it.
+  waitsForPayment: true,
+  paid: null as Record<string, unknown> | null,
+  placed: { orderNumber: "12", orderVersion: 1 } as {
+    orderNumber: string;
+    orderVersion: number;
+  } | null,
+}));
+vi.mock("@rms/payment", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@rms/payment")>()),
+  createPostgresCardMachinePaymentStore: (owner: {
+    authorize(tx: unknown, value: { orderReference: string }): Promise<boolean>;
+  }) => ({
+    loadByBatch: async (_tx: unknown, orderReference: string) => {
+      state.during.push(await owner.authorize({}, { orderReference }));
+      return state.paid;
+    },
+  }),
 }));
 vi.mock("./merchant-store-features.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./merchant-store-features.js")>()),
@@ -34,9 +53,14 @@ vi.mock("./merchant-store-scope.js", () => ({
   }),
 }));
 vi.mock("./counter-payment-preparation.js", () => ({
+  readCounterOrderPlaced: async (_tx: unknown, owner: { authorize(): Promise<boolean> }) => {
+    state.during.push(await owner.authorize());
+    return state.placed;
+  },
   readCounterPaymentPreparation: async (_tx: unknown, owner: { authorize(): Promise<boolean> }) => {
     state.guards.push(owner.authorize);
     state.during.push(await owner.authorize());
+    if (!state.waitsForPayment) return null;
     return {
       preparation: {
         orderAllocation: { amountMinor: 1130n },
@@ -174,6 +198,9 @@ describe("counter order command — WP-2423 Q7", () => {
     state.rolledBack = 0;
     state.counterOrder = true;
     state.tips = { enabled: true, tierPercents: [10, 15, 18] };
+    state.waitsForPayment = true;
+    state.paid = null;
+    state.placed = { orderNumber: "12", orderVersion: 1 };
   });
 
   it("WP-2423 item 8 ⑦: takes only a tip the Store offers; with tips off only no tip, and a retry returns its order", async () => {
@@ -299,8 +326,10 @@ describe("counter order command — WP-2423 Q7", () => {
       code: "ORDER_CREATE_UNAVAILABLE",
     });
     pipeline.preparePayment.mockRejectedValueOnce(failure);
-    await expect(send()).rejects.toMatchObject({ code: "COUNTER_ORDER_UNAVAILABLE" });
-    // The original error reaches the log hook; staff only get "try again".
+    // DEC-PAPER-SEND-IDEMPOTENT: the order may exist once it was submitted, so staff send the
+    // same order again (never a new one that could be a second sale).
+    await expect(send()).rejects.toMatchObject({ code: "COUNTER_ORDER_IN_PROGRESS" });
+    // The original error reaches the log hook.
     expect(onUnexpected).toHaveBeenCalledWith(failure);
     await expect(send()).rejects.toMatchObject({ code: "COUNTER_ORDER_IN_PROGRESS" });
     clock.at = "2026-10-13T18:02:01.000Z";
@@ -308,6 +337,108 @@ describe("counter order command — WP-2423 Q7", () => {
     // A new send is a new order; the failed attempt opened no second guest on retry.
     expect(pipeline.open).toHaveBeenCalledTimes(1);
     expect(await send({ operationReference: id(31) })).toMatchObject({ status: "Placed" });
+  });
+
+  // DEC-PAPER-SEND-IDEMPOTENT (v15 batch-9 L5): a paper order is paid with its send. When the
+  // answer is lost, the same send finds the order paid; it is returned with its number and the
+  // amounts its payment record holds, never "didn't go through" (which led to a second sale).
+  it("returns a paid order to the same send, with its number and amounts, at any time", async () => {
+    const clock = { at: "2026-10-13T18:00:00.000Z" };
+    const { pipeline, send } = setup(clock);
+    const first = await send({ recordedAfterOutage: true, tip: { kind: "None" } });
+    expect(first).toMatchObject({ status: "Placed", orderNumber: "12", totalMinor: "1280" });
+    state.waitsForPayment = false;
+    state.paid = {
+      preparation: {
+        orderAllocation: { amountMinor: 1130n },
+        tip: { amountMinor: 0n },
+        total: { amountMinor: 1130n },
+        capacityExpiresAt: "2026-10-13T18:30:00.000Z",
+      },
+    };
+    state.placed = { orderNumber: "12", orderVersion: 2 };
+    const expected = {
+      status: "AlreadyPlaced",
+      orderReference: id(20),
+      orderBatchReference: id(21),
+      orderNumber: "12",
+      orderVersion: 2,
+      orderMinor: "1130",
+      tipMinor: "0",
+      totalMinor: "1130",
+      payBy: "2026-10-13T18:30:00.000Z",
+      recordedAfterOutage: true,
+    };
+    expect(await send({ recordedAfterOutage: true, tip: { kind: "None" } })).toEqual(expected);
+    clock.at = "2026-10-13T21:00:00.000Z";
+    expect(await send({ recordedAfterOutage: true, tip: { kind: "None" } })).toEqual(expected);
+    // Nothing new was placed for either retry.
+    expect(pipeline.open).toHaveBeenCalledTimes(1);
+    expect(pipeline.preparePayment).toHaveBeenCalledTimes(1);
+  });
+
+  it("names an order that no longer waits for payment and was not paid, instead of placing it again", async () => {
+    const clock = { at: "2026-10-13T18:00:00.000Z" };
+    const { pipeline, send } = setup(clock);
+    await send({ recordedAfterOutage: true, tip: { kind: "None" } });
+    // Its time to record the payment ended (a paper order is kept for re-entry), or it closed.
+    state.waitsForPayment = false;
+    await expect(send({ recordedAfterOutage: true, tip: { kind: "None" } })).rejects.toMatchObject({
+      code: "COUNTER_ORDER_IN_PROGRESS",
+    });
+    clock.at = "2026-10-13T18:40:00.000Z";
+    await expect(send({ recordedAfterOutage: true, tip: { kind: "None" } })).rejects.toMatchObject({
+      code: "COUNTER_ORDER_ALREADY_ORDERED",
+      orderNumber: "12",
+    });
+    expect(pipeline.preparePayment).toHaveBeenCalledTimes(1);
+  });
+
+  it("names the order the first send placed when the same send comes back with other dishes", async () => {
+    const clock = { at: "2026-10-13T18:00:00.000Z" };
+    const { pipeline, send } = setup(clock);
+    await send({ recordedAfterOutage: true, tip: { kind: "None" } });
+    const changed = {
+      recordedAfterOutage: true,
+      tip: { kind: "None" },
+      lines: [{ sellableReference: id(2), quantity: 2, optionSelections: [] }],
+    };
+    await expect(send(changed)).rejects.toMatchObject({
+      code: "COUNTER_ORDER_ALREADY_ORDERED",
+      orderNumber: "12",
+    });
+    // Paid already: the same answer.
+    state.waitsForPayment = false;
+    state.paid = {
+      preparation: {
+        orderAllocation: { amountMinor: 1130n },
+        tip: { amountMinor: 0n },
+        total: { amountMinor: 1130n },
+        capacityExpiresAt: "2026-10-13T18:30:00.000Z",
+      },
+    };
+    await expect(send(changed)).rejects.toMatchObject({
+      code: "COUNTER_ORDER_ALREADY_ORDERED",
+      orderNumber: "12",
+    });
+    expect(pipeline.preparePayment).toHaveBeenCalledTimes(1);
+    // A first send that placed nothing: wait while it may run, then the changed order is new.
+    pipeline.bindCart.mockResolvedValueOnce({
+      credentials: guest,
+      guestSessionReference: id(42),
+      cartReference: id(41),
+      cartVersion: 1,
+    });
+    pipeline.startCheckout.mockRejectedValueOnce(
+      Object.assign(new Error("boom"), { code: "DEPENDENCY_UNAVAILABLE" }),
+    );
+    await expect(send({ operationReference: id(40) })).rejects.toMatchObject({
+      code: "COUNTER_ORDER_UNAVAILABLE",
+    });
+    const other = { operationReference: id(40), tip: { kind: "None" } };
+    await expect(send(other)).rejects.toMatchObject({ code: "COUNTER_ORDER_IN_PROGRESS" });
+    clock.at = "2026-10-13T18:03:00.000Z";
+    await expect(send(other)).rejects.toMatchObject({ code: "COUNTER_ORDER_NOT_FINISHED" });
   });
 
   // WP-2423: a checkout that fails because the pickup time schedule ran out is told to staff as
