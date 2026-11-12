@@ -1138,9 +1138,14 @@ Do these in order, before resuming online ordering.
      open it in `Orders` and do not enter the slip again. Only "didn't go through and nothing was
      charged" means nothing was recorded
      ([DEC-PAPER-SEND-IDEMPOTENT](../spec/design/paper-send-idempotent.md));
-   - after reloading the page (or on another tablet) the screen no longer knows the earlier send:
-     look for the slip's order in `Orders` (time and amount, "Recorded after outage") before
-     entering it again.
+   - after reloading the page on the same tablet, the screen says the last send got no answer
+     ("The last paper order sent from this tablet (time) got no answer…"); enter the same slip and
+     send it there: the order already recorded comes back, never a second sale. On another tablet
+     (or after another staff member signs in) the screen does not know the earlier send: look for
+     the slip's order in `Orders` (time and amount, "Recorded after outage") before entering it
+     again, as the paper form says;
+   - an order that comes back "already paid; don't charge the guest again" was paid meanwhile
+     (from `Orders` or another tablet): do not charge it again.
 5. **Enter paper dine-in rounds** on their table, one per paid slip, in slip time order
    ([DEC-STAFF-DINE-IN-ROUND](../spec/design/staff-dine-in-round.md)). Do this before closing the
    table (step 8): the round joins that table's order, so the card-machine payment, tax, tip, sales
