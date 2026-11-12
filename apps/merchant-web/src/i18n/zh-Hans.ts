@@ -7012,8 +7012,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Sizes of {item}": "{item} 的规格",
   "Back in stock: {item}": "恢复供应：{item}",
   "Sold out today: {item}": "今日售罄：{item}",
-  "Listing… New prices go live first, then the menu. This can take up to a minute. Guests keep ordering throughout.":
-    "正在上架… 新价格先生效，菜单随后生效，最多可能需要一分钟。客人可以一直点单。",
+  "Listing… New prices go live first, then the menu. This usually takes one to two minutes, longer when the system is busy. Guests keep ordering throughout.":
+    "正在上架… 新价格先生效，菜单随后生效，通常需要一到两分钟，系统忙时会更久。客人可以一直点单。",
+  "Taking longer than usual. Nothing needs doing; this page says when it is listed.":
+    "比平时久。不需要做什么，上架完成后这里会显示。",
   "{seconds} s": "{seconds} 秒",
   "A listing is under way or stopped part-way. New prices are already live; guests still see the rest of the menu as it was. If nothing changes in a minute, continue it.":
     "上架正在进行或中途停止。新价格已经生效，菜单的其他部分客人仍看到原来的样子。如果一分钟后仍没有变化，请继续上架。",

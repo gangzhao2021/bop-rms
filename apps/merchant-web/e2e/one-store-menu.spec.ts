@@ -1299,7 +1299,7 @@ test("@production a listing in progress shows as such, also after a reload, unti
   await listIt(page);
   await expect(
     page.getByText(
-      "Listing… New prices go live first, then the menu. This can take up to a minute.",
+      "Listing… New prices go live first, then the menu. This usually takes one to two minutes",
       { exact: false },
     ),
   ).toBeVisible();
@@ -1310,7 +1310,7 @@ test("@production a listing in progress shows as such, also after a reload, unti
   expect(stockCommands.map((command) => command.action)).toEqual(["SoldOut"]);
   await expect(
     page.getByText(
-      "Listing… New prices go live first, then the menu. This can take up to a minute.",
+      "Listing… New prices go live first, then the menu. This usually takes one to two minutes",
       { exact: false },
     ),
   ).toBeVisible();
@@ -1318,7 +1318,7 @@ test("@production a listing in progress shows as such, also after a reload, unti
   await page.reload();
   await expect(
     page.getByText(
-      "Listing… New prices go live first, then the menu. This can take up to a minute.",
+      "Listing… New prices go live first, then the menu. This usually takes one to two minutes",
       { exact: false },
     ),
   ).toBeVisible();

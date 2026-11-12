@@ -101,6 +101,26 @@ const saveOrderOfflineText = t(
   "The network dropped, so the new order wasn't saved. Your arrangement is still here; tap Save order again once you're connected.",
 );
 
+/**
+ * v15 2026-11-11 b10: what a listing in progress says. A busy system took 42–82 s, past the
+ * "up to a minute" this used to promise, so it says what is usual and, past two minutes, that it
+ * is taking longer and nothing needs doing (the listing finishes on the server; this page shows it).
+ */
+export function listingProgressText(seconds: number | null): string {
+  const base = t(
+    "Listing… New prices go live first, then the menu. This usually takes one to two minutes, longer when the system is busy. Guests keep ordering throughout.",
+  );
+  if (seconds === null) return base;
+  const elapsed = t("{seconds} s", { seconds });
+  return seconds < 120
+    ? base + " " + elapsed
+    : base +
+        " " +
+        elapsed +
+        " · " +
+        t("Taking longer than usual. Nothing needs doing; this page says when it is listed.");
+}
+
 export function OneStoreMenuPage({
   menuReference,
   client,
@@ -1171,14 +1191,9 @@ export function OneStoreMenuPage({
       {listingInProgress && !changedOrder ? (
         <div className="one-menu__pending" role="status">
           <p>
-            {t(
-              "Listing… New prices go live first, then the menu. This can take up to a minute. Guests keep ordering throughout.",
-            )}{" "}
-            {listingSince !== null
-              ? t("{seconds} s", {
-                  seconds: Math.max(0, Math.round((clock - listingSince) / 1000)),
-                })
-              : null}
+            {listingProgressText(
+              listingSince === null ? null : Math.max(0, Math.round((clock - listingSince) / 1000)),
+            )}
           </p>
         </div>
       ) : orderPending || changedOrder ? (

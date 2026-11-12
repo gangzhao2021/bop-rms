@@ -2,7 +2,7 @@
 import { act } from "react";
 import { MemoryRouter } from "react-router";
 import { afterEach, expect, it } from "vitest";
-import { OneStoreMenuPage } from "./OneStoreMenuPage.js";
+import { OneStoreMenuPage, listingProgressText } from "./OneStoreMenuPage.js";
 import { createMenuClient } from "./store-menu-pages.js";
 import { createAvailabilityClient } from "./store-availability-page.js";
 import {
@@ -675,4 +675,16 @@ it("WP-2423 (b9): what a dish save did is said at that dish, not at the top of t
   expect(
     container.querySelectorAll(".one-menu > .one-menu__message, .one-menu__message"),
   ).toHaveLength(1);
+});
+
+it("v15 2026-11-11 b10: a listing says what is usual, and past two minutes that it is taking longer", () => {
+  // A busy system took 42–82 s: never promised "up to a minute".
+  expect(listingProgressText(null)).not.toContain("up to a minute");
+  expect(listingProgressText(45)).toBe(
+    "Listing… New prices go live first, then the menu. This usually takes one to two minutes, longer when the system is busy. Guests keep ordering throughout. 45 s",
+  );
+  expect(listingProgressText(119)).not.toContain("Taking longer");
+  expect(listingProgressText(130)).toContain(
+    "130 s · Taking longer than usual. Nothing needs doing; this page says when it is listed.",
+  );
 });
