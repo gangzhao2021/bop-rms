@@ -464,6 +464,60 @@ describe("Guest Session contract", () => {
     });
   });
 
+  it("keeps the visit when the same phone's other request renewed it a moment first", async () => {
+    const { service, store } = fixture();
+    await issue(service);
+    // The phone's add renews the visit between this cart read's check and its own renewal.
+    const touch = store.touchInteractive.bind(store);
+    let raced = false;
+    store.touchInteractive = async (command) => {
+      if (!raced) {
+        raced = true;
+        await touch({
+          ...command,
+          observedAt: "2026-07-29T12:30:01.000Z",
+          idleExpiresAt: "2026-07-29T16:30:01.000Z",
+        });
+      }
+      return touch(command);
+    };
+    const read = await service.resolve({
+      sessionCredential,
+      activity: "Interactive",
+      observedAt: "2026-07-29T12:30:00.000Z",
+    });
+    expect(read).toMatchObject({ version: 2, lastSeenAt: "2026-07-29T12:30:01.000Z" });
+    // A visit that really ended meanwhile is still told it ended.
+    const ended = fixture();
+    await issue(ended.service);
+    const revoke = ended.store.touchInteractive.bind(ended.store);
+    ended.store.touchInteractive = async (command) => {
+      const current = ended.store.records.get(command.selectorHash);
+      if (current !== undefined)
+        ended.store.records.set(
+          command.selectorHash,
+          createGuestSessionRecord({
+            ...current,
+            session: {
+              ...current.session,
+              status: "Revoked",
+              version: current.session.version + 1,
+              revocationReason: "Logout",
+              revokedAt: "2026-07-29T12:30:01.000Z",
+            },
+          }),
+        );
+      return revoke(command);
+    };
+    await expect(
+      ended.service.resolve({
+        sessionCredential,
+        activity: "Interactive",
+        observedAt: "2026-07-29T12:30:00.000Z",
+      }),
+    ).rejects.toMatchObject({ code: "GUEST_SESSION_UNAVAILABLE" });
+  });
+
   it("fails closed when current Store or QR binding validation is unavailable", async () => {
     const { service } = fixture(parseGuestAdmissionEvidence(evidence()), "Unavailable");
     await issue(service);

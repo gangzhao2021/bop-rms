@@ -337,8 +337,22 @@ export class GuestSessionService {
           idleExpiresAt: plus(observedAt, fourHours),
         }),
       );
-      if (touched === null) throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
-      return assertGuestSessionUsable(this.#record(touched).session, observedAt);
+      if (touched !== null)
+        return assertGuestSessionUsable(this.#record(touched).session, observedAt);
+      // WP-2423 (guest-table-open-and-busy-reads): the touch found the session already moved on.
+      // A phone sends its cart read and its next add together (a guest tapping Add every second,
+      // slower answers while staff move the table); the other request renewed the visit first.
+      // That is the same phone in the same visit, never "your visit ended": the session as it
+      // now stands answers, when it is still this visit and usable now.
+      const again = await this.#storeCall(() => this.#store.resolve(selectorHash));
+      if (again === null) throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
+      const current = this.#record(again).session;
+      if (
+        current.sessionReference !== session.sessionReference ||
+        current.version <= session.version
+      )
+        throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
+      return assertGuestSessionUsable(current, observedAt);
     } catch (error) {
       if ((error as { dependencyFailure?: unknown }).dependencyFailure === true) throw error;
       throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
