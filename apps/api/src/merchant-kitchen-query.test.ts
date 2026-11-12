@@ -430,6 +430,92 @@ it("WP-2423 Q3: serves the published menu disclosure per work item and restores 
     items: [{ code: "MILK", name: "Milk", classification: "Contains" }],
   });
 });
+it("WP-2423 (b9): a choice staff answered since listing does not leave the ticket saying choices may add allergens", async () => {
+  const f = setup();
+  const milk = {
+    allergenReference: id(31),
+    code: "MILK",
+    localizedNames: { "en-CA": "Milk" },
+    classification: "Contains",
+  };
+  // Listed before the choices were answered: no per-choice disclosure on the listed menu.
+  const disclosure = {
+    registryVersionReference: id(30),
+    items: [milk],
+    allergenFreeClaim: false,
+    assistanceCode: "ALLERGEN_ASSISTANCE_REQUIRED",
+  };
+  let options: Record<string, unknown[]> = { [id(50).slice(-12)]: [] };
+  f.tx.query.mockImplementation((async (sql: string) =>
+    sql.includes("FROM rms_kitchen.kitchen_work_item")
+      ? {
+          rows: [
+            {
+              work_item: id(5),
+              menu_version: id(20),
+              sku: id(21),
+              product_version: id(22),
+              customer_note: null,
+            },
+          ],
+          rowCount: 1,
+        }
+      : sql.includes("published_menu_projection_sellable")
+        ? {
+            rows: [
+              {
+                menu_version: id(20),
+                sellable: id(21),
+                product_version: id(22),
+                default_locale: "en-CA",
+                disclosure: JSON.stringify(disclosure),
+              },
+            ],
+            rowCount: 1,
+          }
+        : sql.includes("rms_catalog.sellable_allergen_change c")
+          ? {
+              rows: [
+                {
+                  version: id(20),
+                  sku: id(21),
+                  store: null,
+                  cause: "StaffDeclared",
+                  allergens: [milk],
+                  choices: { dish: [milk], options },
+                  recorded_at: "2026-11-10T12:00:00.000Z",
+                },
+              ],
+              rowCount: 1,
+            }
+          : { rows: [], rowCount: 0 }) as never);
+  doubles.list.mockResolvedValue({
+    items: [
+      {
+        workItemReference: id(5),
+        ticketReference: id(7),
+        orderReference: id(6),
+        ticketAggregateVersion: 9007199254740993n,
+        workItemVersion: 2n,
+        selectedOptions: [
+          { optionReference: id(50), quantity: 1, localizedNames: { "en-CA": "Mild" } },
+        ],
+      },
+    ],
+  });
+  type Read = { items: { allergens: unknown }[] };
+  const answered = (await f.operation(f.input)) as Read;
+  // Mild was answered "Adds none": the dish's milk is all this line has, and nothing more to ask.
+  expect(answered.items[0]?.allergens).toEqual({
+    status: "Declared",
+    forChoices: true,
+    items: [{ code: "MILK", name: "Milk", classification: "Contains" }],
+  });
+  // A chosen choice nobody answered keeps the reminder.
+  options = { [id(51).slice(-12)]: [] };
+  const unanswered = (await f.operation(f.input)) as Read;
+  expect(unanswered.items[0]?.allergens).toMatchObject({ forChoices: false });
+});
 it("preserves projection-owned selected modifiers through List and Get", async () => {
   const f = setup();
   const selectedOptions = [

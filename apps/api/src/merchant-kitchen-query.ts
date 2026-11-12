@@ -23,6 +23,7 @@ import {
   sellableAllergenChangeKey,
   withSellableAllergenChange,
   sellableAllergenChangeForChoices,
+  sellableAllergenChangeAnswersChoices,
   type SellableAllergenChange,
   sellableDisclosureKey,
   listAlcoholSkus,
@@ -594,12 +595,12 @@ async function kitchenAllergens(
         }),
       );
       // b7: a choice's staff-answered allergen reaches the ticket only when it was chosen.
+      const change = changes.get(
+        sellableAllergenChangeKey(key.menuVersionReference, key.skuReference),
+      );
       const merged = withSellableAllergenChange(
         listed,
-        sellableAllergenChangeForChoices(
-          changes.get(sellableAllergenChangeKey(key.menuVersionReference, key.skuReference)),
-          chosen,
-        ),
+        sellableAllergenChangeForChoices(change, chosen),
         (allergen) =>
           Object.freeze({
             code: allergen.code,
@@ -613,7 +614,10 @@ async function kitchenAllergens(
           customerNote: key.customerNote,
           allergens: Object.freeze({
             status: "Declared" as const,
-            forChoices: forChoice !== null,
+            // b9: also when staff answered every chosen choice since listing (the dish's listed
+            // list with those answers names everything they add).
+            forChoices:
+              forChoice !== null || sellableAllergenChangeAnswersChoices(change, chosen),
             items: Object.freeze(merged.items),
             ...(merged.changed ? { changedSinceListed: true as const } : {}),
           }),

@@ -73,6 +73,23 @@ export function sellableAllergenChangeForChoices<T extends SellableAllergenChang
 }
 
 /**
+ * WP-2423 (b9): whether staff answered every one of these choices since the menu was listed (an
+ * empty answer is "Adds none"). Then the dish's list with the change says everything these
+ * choices add, so the kitchen is not told "choices may add allergens". Unknown choices (null), an
+ * unresolved change, or one that does not say what each choice adds never count as answered.
+ */
+export function sellableAllergenChangeAnswersChoices(
+  change: SellableAllergenChange | undefined,
+  chosen: readonly string[] | null,
+): boolean {
+  if (change === undefined || change.allergens === null || change.choices === undefined)
+    return false;
+  if (chosen === null) return false;
+  const options = change.choices.options;
+  return chosen.every((option) => Object.hasOwn(options, sellableAllergenChoiceKey(option)));
+}
+
+/**
  * The listed allergens together with the change's: every allergen of either, "Contains" kept over
  * "May contain". `changed` says the change adds an allergen or makes one stronger, so readers
  * say the information was just updated; a change that only removes one changes nothing shown
