@@ -247,6 +247,9 @@ const dineIn = {
   tableBill: {
     totalMinor: "8000",
     writtenOffMinor: "0",
+    // v15 b9 (DEC-TAX-WHOLE-RECEIPT): the Order's share of the bill's tax rounding, signed and never
+    // "0" (the read model names it on one Order's detail only; the browser reads it wherever sent).
+    taxRoundingMinor: "-1",
     // v15 M176: a table merged into another says where its dishes are paid.
     mergedInto: { tableLabel: "T3", paid: true },
     partlyPaid: { remainingMinor: "0", paidParts: 2, partCount: 2 },
@@ -1082,6 +1085,7 @@ describe("merchant BFF responses carry every read-model field the browser parses
     expect(table?.batches[1]?.awaitingAcceptanceSince).toBe(at(14));
     expect(table?.batches[0]?.kitchenRelease).toEqual({ state: "Sending", acceptedAt: at(3) });
     expect(table?.readyToServeItemCount).toBe(2);
+    expect(table?.tableBill?.taxRoundingMinor).toBe("-1");
     expect(view.items.map((item) => item.orderReference)).toEqual([
       earlierCounterPickup.orderReference,
       dineIn.orderReference,
