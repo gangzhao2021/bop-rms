@@ -241,6 +241,21 @@ it("rechecks cancellation authority after verifying original Inventory completio
   expect(f.rolledBack()).toBe(true);
 });
 
+// v15 2026-11-12: a refused COMMIT keeps its database cause for the worker's health log.
+it("keeps the database cause of a refused cancellation as the error's cause", async () => {
+  const f = composition();
+  const refused = Object.assign(new Error("tenant database transaction failed"), {
+    code: "TENANT_DATABASE_TRANSACTION_FAILED",
+    diagnostic: { sqlState: "23514", constraint: null, table: null, closed: false },
+  });
+  mocks.append.mockReset().mockRejectedValue(refused);
+  const error: unknown = await f.service.cancel(f.input).catch((caught: unknown) => caught);
+  expect(error).toBeInstanceOf(Error);
+  expect((error as Error).message).toBe("DINING_BATCH_CANCELLATION_UNAVAILABLE");
+  expect((error as Error).cause).toBe(refused);
+  expect(f.rolledBack()).toBe(true);
+});
+
 // WP-2423 item 5: a round with no payment ever started is cancelled with its own reason.
 function neverPaid() {
   const f = composition();

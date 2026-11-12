@@ -181,8 +181,10 @@ export function createDiningBatchCancellation(
             started,
           });
         });
-      } catch {
-        return unavailable();
+      } catch (error) {
+        // v15 2026-11-12: the worker's health log reads the safe code and SQLSTATE from the cause
+        // (its diagnostic), so a refused COMMIT names its database cause instead of none.
+        throw new Error("DINING_BATCH_CANCELLATION_UNAVAILABLE", { cause: error });
       }
     },
     /**
