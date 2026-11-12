@@ -505,6 +505,11 @@ export function CheckoutPage({
     sessionState.status === "store_closed"
       ? refusedText
       : checkoutSessionAlert(sessionState, state.status === "offline", payLater);
+  // v15 2026-11-11 b10: the box at the top still waits for the guest's tick (a changed dish or a
+  // new price), so the greyed button below says why.
+  const changesUnticked =
+    quote !== null &&
+    (dishesNeedConfirming || (pricesNeedAcceptance && confirmedQuote !== quote.quoteReference));
   const canContinue =
     paymentOpen &&
     !detailsLocked &&
@@ -1218,36 +1223,44 @@ export function CheckoutPage({
               {payLater ? checkoutText.placeOrderAgain : checkoutText.retryCheckout}
             </button>
           ) : (
-            <button
-              type="button"
-              className="checkout-continue__button"
-              disabled={
-                !canContinue ||
-                continueRequested ||
-                sendState === "sending" ||
-                sendState === "items_short"
-              }
-              onClick={() => void requestContinue()}
-            >
-              {quote === null && (state.status === "loading" || state.status === "pending")
-                ? checkoutText.gettingYourTotal
-                : payLater
-                  ? quote
-                    ? checkoutText.placeOrderWithTotal(
-                        formatMoney(quote.total.amountMinor, quote.total.currency),
-                      )
-                    : checkoutText.placeOrder
-                  : asksTip && tipChoice === null
-                    ? checkoutText.chooseTipToContinue
-                    : quote && tipAmount !== null
-                      ? checkoutText.continueToPaymentWithTotal(
-                          formatMoney(
-                            (BigInt(quote.total.amountMinor) + BigInt(tipAmount)).toString(),
-                            quote.total.currency,
-                          ),
+            <>
+              <button
+                type="button"
+                className="checkout-continue__button"
+                aria-describedby={changesUnticked ? "checkout-tick-changes" : undefined}
+                disabled={
+                  !canContinue ||
+                  continueRequested ||
+                  sendState === "sending" ||
+                  sendState === "items_short"
+                }
+                onClick={() => void requestContinue()}
+              >
+                {quote === null && (state.status === "loading" || state.status === "pending")
+                  ? checkoutText.gettingYourTotal
+                  : payLater
+                    ? quote
+                      ? checkoutText.placeOrderWithTotal(
+                          formatMoney(quote.total.amountMinor, quote.total.currency),
                         )
-                      : checkoutText.continueToPayment}
-            </button>
+                      : checkoutText.placeOrder
+                    : asksTip && tipChoice === null
+                      ? checkoutText.chooseTipToContinue
+                      : quote && tipAmount !== null
+                        ? checkoutText.continueToPaymentWithTotal(
+                            formatMoney(
+                              (BigInt(quote.total.amountMinor) + BigInt(tipAmount)).toString(),
+                              quote.total.currency,
+                            ),
+                          )
+                        : checkoutText.continueToPayment}
+              </button>
+              {changesUnticked ? (
+                <p className="checkout-continue__note" id="checkout-tick-changes">
+                  {payLater ? cartText.confirmChangesToOrder : checkoutText.tickChangesToPay}
+                </p>
+              ) : null}
+            </>
           )}
           <p className="checkout-continue__note">
             {payLater

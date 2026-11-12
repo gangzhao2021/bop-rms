@@ -1139,6 +1139,13 @@ export const checkoutText = Object.freeze({
   get continueToPayment() {
     return t("Continue to payment");
   },
+  /**
+   * v15 2026-11-11 b10: a changed dish or a new price waits for the guest's tick at the top of the
+   * page; the button far below says why it can't be pressed yet.
+   */
+  get tickChangesToPay() {
+    return t("Tick the box above to continue to payment.");
+  },
   /** WP-2423 item 8 ⑦: no tip is chosen for the guest, "No tip" included. */
   get chooseTipToContinue() {
     return t("Choose a tip to continue");

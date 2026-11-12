@@ -387,6 +387,10 @@ describe("WP-2423 guest-payment-state: what the guest pays, and until when", () 
     );
     expect(html).toContain("I have read these changes");
     expect(html).toMatch(/<button[^>]*class="checkout-continue__button"[^>]*disabled=""/u);
+    // v15 2026-11-11 b10: the greyed button says why, next to it (the box is far above on a phone).
+    expect(html).toMatch(
+      /aria-describedby="checkout-tick-changes"[^>]*>[^<]*<\/button><p class="checkout-continue__note" id="checkout-tick-changes">Tick the box above to continue to payment\.<\/p>/u,
+    );
     // A first price that differs is listed as a price change (after a reload too).
     const rose = render({
       status: "ready",
@@ -405,12 +409,14 @@ describe("WP-2423 guest-payment-state: what the guest pays, and until when", () 
     });
     expect(rose).toContain("Synthetic tea: $5.49 → $5.99");
     expect(rose).toContain("I accept the new prices");
+    expect(rose).toContain("Tick the box above to continue to payment.");
     expect(rose).not.toContain("I have read these changes");
     // Nothing changed: nothing is asked.
     clearSeenPrices();
     const same = render({ status: "ready", cart, quote: priced("549") });
     expect(same).not.toContain("Changed since you added it:");
     expect(same).not.toContain("I have read these changes");
+    expect(same).not.toContain("Tick the box above");
   });
 
   it("price-hold-dish-changes: a quote that cannot say whether a dish changed is try again, never paid as nothing changed", () => {

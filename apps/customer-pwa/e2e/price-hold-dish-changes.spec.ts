@@ -556,8 +556,13 @@ for (const screen of [
       await main.getByRole("button", { name: "No tip", exact: true }).click();
       const pay = main.getByRole("button", { name: /Continue to payment/u });
       await expect(pay).toBeDisabled();
+      // v15 2026-11-11 b10: the greyed button says why, right under it.
+      const why = main.getByText("Tick the box above to continue to payment.");
+      await expect(why).toBeVisible();
+      await expect(pay).toHaveAttribute("aria-describedby", "checkout-tick-changes");
       await main.getByRole("checkbox", { name: "I have read these changes" }).check();
       await expect(pay).toBeEnabled();
+      await expect(why).toHaveCount(0);
       await noSideScroll(page);
       await expectNoInternalText(page);
       expect(failures).toEqual([]);
