@@ -9453,6 +9453,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "请现在录入这张纸质订单的付款。录入前这笔销售不计入当天营业额；如果 {at} 前仍未录入，只能按纸质单重新录入。",
   "Not recorded by {at} · enter it again from the paper slip": "{at} 前未录入 · 请按纸质单重新录入",
   "Paid during the outage · record it by {at}": "停电/断网时已付款 · 请在 {at} 前录入",
+  "Paid on paper · payment not recorded": "纸单已付款 · 付款还没录入",
+  "Payment not recorded": "付款未录入",
+  "Record paper payment": "录入纸单付款",
   "This paper order's payment is no longer waiting to be recorded (already recorded, or it was entered again). The list will update.":
     "这张纸质订单的付款已不需要录入（已经录入，或已重新录入）。列表会自动更新。",
   "Paid in cash during the outage: {amount}. Its change was given then.":

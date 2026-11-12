@@ -1952,7 +1952,11 @@ function OrderPhase({
     >
       {order.awaitingPayment
         ? order.counter !== null
-          ? t("Awaiting payment at the counter")
+          ? // DEC-PAPER-SEND-IDEMPOTENT (v15 batch-9): a paper order was paid during the outage;
+            // only its record is missing, so it never reads as one to charge.
+            order.counter.recordedAfterOutage
+            ? t("Paid on paper · payment not recorded")
+            : t("Awaiting payment at the counter")
           : t("Awaiting payment")
         : order.pickupNotCollected
           ? t("Not collected")
@@ -1988,7 +1992,7 @@ function OrderStatusNotes({
       {/* WP-2423 (v15 751dd768): warn before a sent counter order is released unpaid. */}
       {counterAwaitingCardMachine(order, now ?? Date.now()) && order.counter?.payBy ? (
         <span className="order-accept-by" data-tier={counterPayByTier(order.counter.payBy, now)}>
-          {counterPayByText(order.counter.payBy, timeZone, now)}
+          {counterPayByText(order.counter.payBy, timeZone, now, order.counter.recordedAfterOutage)}
         </span>
       ) : null}
       {order.soldOutNow === true ? (
@@ -2110,7 +2114,9 @@ export function orderAmountNote(
   // otherwise just not known here.
   if (orderAmountTaken(order) === null)
     return order.awaitingPayment || counterAwaitingCardMachine(order, Date.now())
-      ? t("Not paid")
+      ? order.counter?.recordedAfterOutage
+        ? t("Payment not recorded")
+        : t("Not paid")
       : null;
   const online = onlinePaymentText(order, position);
   const plain = order.paidOnline === null ? "" : t("Paid online ") + orderMoney(order.paidOnline);
@@ -4586,7 +4592,10 @@ export function CurrentOrderQueuePage({
                           className="order-next-fill"
                           onClick={() => openOrder(order)}
                         >
-                          {t("Charge")}
+                          {/* A paper order was paid then: its payment is recorded, never charged. */}
+                          {order.counter?.recordedAfterOutage
+                            ? t("Record paper payment")
+                            : t("Charge")}
                         </button>
                       );
                     // Orders v2: an accepted pickup is handed over on Pickup (the code is checked there).

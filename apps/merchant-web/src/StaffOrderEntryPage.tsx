@@ -768,6 +768,15 @@ export function StaffOrderEntryPage({
   // null until that read answers, so nobody is told to ask a manager before it is known.
   const [placedCancellable, setPlacedCancellable] = useState<boolean | null>(null);
   const placeOperation = useRef<string | null>(null);
+  // DEC-PAPER-SEND-IDEMPOTENT: the last counter send got no answer (or is still being sent), so
+  // it may have placed the order (and, on paper, recorded its sale). Until it is answered, a
+  // change to the order keeps the same operation: the server then names the order it placed
+  // instead of placing a second one.
+  const sendUnanswered = useRef(false);
+  /** A change to what is ordered: a new order intent, unless the last send is unanswered. */
+  const newOrderIntent = () => {
+    if (tableMode || !sendUnanswered.current) placeOperation.current = null;
+  };
   // DEC-PAPER-ORDER-PAID-AT-SEND: the payment operation sent with a paper order (one per order
   // operation and payment as entered), so a retry of either never records it twice.
   const paperOperation = useRef<{ key: string; reference: string } | null>(null);
@@ -900,7 +909,7 @@ export function StaffOrderEntryPage({
         // anything is sent, and a changed ticket is a new order intent.
         const rebound = rebindLines(linesNow.current, value);
         if (rebound.repriced.length > 0 && phaseNow.current === "Building") {
-          placeOperation.current = null;
+          if (tableMode || !sendUnanswered.current) placeOperation.current = null;
           setLines(rebound.lines);
           setRepriced(rebound.repriced);
         } else if (phaseNow.current === "Building") setLines(rebound.lines);
@@ -1001,7 +1010,7 @@ export function StaffOrderEntryPage({
 
   // Any change to what is ordered is a new order intent.
   const changeLines = (next: readonly Line[]) => {
-    placeOperation.current = null;
+    newOrderIntent();
     setRepriced([]);
     setProblem(null);
     setProblemNeedsTableCode(false);
@@ -1191,6 +1200,7 @@ export function StaffOrderEntryPage({
               recordedAfterOutage: paper,
               ...(paperPayment === undefined ? {} : { paperPayment }),
             });
+      sendUnanswered.current = false;
       setPlaced(order);
       setPlacedCancellable(null);
       if (decided !== null) setRemovedNote(guestRemovedNote(removedAtSend));
@@ -1258,8 +1268,9 @@ export function StaffOrderEntryPage({
           : new CounterOrderClientError("Unavailable");
       // An unknown or still-running outcome keeps the same operation (a retry returns the same
       // order); anything else starts over as a new order.
-      if (failure.code !== "OutcomeUnknown" && failure.code !== "InProgress")
-        placeOperation.current = null;
+      const unanswered = failure.code === "OutcomeUnknown" || failure.code === "InProgress";
+      sendUnanswered.current = unanswered;
+      if (!unanswered) placeOperation.current = null;
       setProblem(
         placeErrorText(
           failure,
@@ -1414,6 +1425,7 @@ export function StaffOrderEntryPage({
     setPaidNote(null);
     setRemovedNote(null);
     setPaidAtRefused(false);
+    sendUnanswered.current = false;
     placeOperation.current = null;
     payOperation.current = null;
     paperOperation.current = null;
@@ -1439,6 +1451,7 @@ export function StaffOrderEntryPage({
     setPaidNote(null);
     setRemovedNote(null);
     setPaidAtRefused(false);
+    sendUnanswered.current = false;
     placeOperation.current = null;
     payOperation.current = null;
     paperOperation.current = null;
@@ -2047,7 +2060,7 @@ export function StaffOrderEntryPage({
                       name="counter-tip"
                       checked={tip === value}
                       onChange={() => {
-                        placeOperation.current = null;
+                        newOrderIntent();
                         setTip(value);
                       }}
                     />
@@ -2060,7 +2073,7 @@ export function StaffOrderEntryPage({
                     name="counter-tip"
                     checked={tip === "Custom"}
                     onChange={() => {
-                      placeOperation.current = null;
+                      newOrderIntent();
                       setTip("Custom");
                     }}
                   />
@@ -2074,7 +2087,7 @@ export function StaffOrderEntryPage({
                       value={customTip}
                       aria-invalid={tipChoice() === null}
                       onChange={(event) => {
-                        placeOperation.current = null;
+                        newOrderIntent();
                         setCustomTip(event.currentTarget.value);
                       }}
                     />
@@ -2089,7 +2102,7 @@ export function StaffOrderEntryPage({
                   type="checkbox"
                   checked={paper}
                   onChange={(event) => {
-                    placeOperation.current = null;
+                    newOrderIntent();
                     setPaper(event.currentTarget.checked);
                   }}
                 />
@@ -2106,7 +2119,9 @@ export function StaffOrderEntryPage({
                     aria-invalid={paperInstant === null || paidAtRefused}
                     aria-describedby="counter-paper-hint"
                     onChange={(event) => {
-                      placeOperation.current = null;
+                      // The paid-at is the payment's, not the order's: the same send stays the
+                      // same order (a corrected time is a new payment, answered as already
+                      // recorded when the first one was).
                       setPaidAt(event.currentTarget.value);
                       setPaidAtRefused(false);
                     }}
