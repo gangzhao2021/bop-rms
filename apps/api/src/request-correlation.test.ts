@@ -267,9 +267,10 @@ describe("WP-2423 guest-table-open-and-busy-reads: a read's whole work time", ()
   it("gives a GET 12 s to answer in all and a command none, beside the shared waiting budget", async () => {
     const store = () =>
       (
-        globalThis as {
-          [key: symbol]: { getStore(): { answerBy?: number; startedAt: number } | undefined };
-        }
+        globalThis as Record<
+          symbol,
+          { getStore(): { answerBy?: number; startedAt: number } | undefined }
+        >
       )[Symbol.for("bop.database.request-acquire-budget")]?.getStore();
     const app = express();
     app.use(createRequestCorrelationMiddleware());
