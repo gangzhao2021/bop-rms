@@ -1403,7 +1403,26 @@ export function createMerchantMenus(options: {
         menuReference: summary.menuReference,
         authorize: async () => true,
       }).read(ptx(tx), release.menuVersionReference, release.snapshotDigest, at);
-      if (released === null) throw new Error("MENU_RELEASE_UNREADABLE");
+      // Not readable now: said as "could not be checked", never as no changes.
+      const found = released === null ? null : await compare(released);
+      await ptx(tx).query("RELEASE SAVEPOINT menu_listing_renames", []);
+      await brandScope(tx, s.owner.brandReference);
+      return found;
+    } catch {
+      await ptx(tx).query("ROLLBACK TO SAVEPOINT menu_listing_renames", []);
+      await brandScope(tx, s.owner.brandReference);
+      return null;
+    }
+    async function compare(released: {
+      readonly content: {
+        readonly sections: readonly {
+          readonly sellables: readonly {
+            readonly sellableReference: unknown;
+            readonly localizedNames: Readonly<Record<string, string>>;
+          }[];
+        }[];
+      };
+    }) {
       const before = new Map<string, Readonly<Record<string, string>>>();
       for (const section of released.content.sections)
         for (const item of section.sellables)
@@ -1431,21 +1450,14 @@ export function createMerchantMenus(options: {
       for (const sku of skus) {
         const product = now.get(sku);
         const placement = placements.find((value) => String(value.sellableReference) === sku);
-        if (product === undefined || placement === undefined)
-          throw new Error("MENU_DISH_UNREADABLE");
+        if (product === undefined || placement === undefined) return null;
         const renamed = dishRenames(
           JSON.stringify(before.get(sku) ?? {}),
           JSON.stringify({ ...product.localizedNames, ...placement.localizedNameOverrides }),
         );
         if (renamed.length > 0) found.push({ skuReference: sku, renamed: [...renamed] });
       }
-      await ptx(tx).query("RELEASE SAVEPOINT menu_listing_renames", []);
-      await brandScope(tx, s.owner.brandReference);
       return found;
-    } catch {
-      await ptx(tx).query("ROLLBACK TO SAVEPOINT menu_listing_renames", []);
-      await brandScope(tx, s.owner.brandReference);
-      return null;
     }
   };
 
