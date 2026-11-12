@@ -76,6 +76,12 @@ export function createStaffTableCode(options: {
     // A second staff member may start the table's session at the same moment: read it again once.
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const table = await options.loadTable(input.tableReference);
+      // WP-2423 (v15 staff-round-speed): taken for a party that has since left the table.
+      if (
+        input.expectedDiningSessionReference !== undefined &&
+        table?.activeDiningSessionReference !== input.expectedDiningSessionReference
+      )
+        return Object.freeze({ status: "PartyChanged" as const });
       if (table === null || !table.seatable) return Object.freeze({ status: "TableUnavailable" });
       try {
         if (table.activeDiningSessionReference === null) {

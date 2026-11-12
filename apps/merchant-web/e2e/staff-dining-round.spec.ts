@@ -338,6 +338,8 @@ test("@production staff take an order for a table from the Tables page, charge i
     ],
     tip: { kind: "Percent", percent: 15 },
     recordedAfterOutage: false,
+    // v15 staff-round-speed: the party seated when the first dish went on.
+    expectedDiningSessionReference: id(41),
   });
   await expect(
     page.getByText(
@@ -1469,4 +1471,97 @@ test("@production M35: a cart guests changed just before the send is read again,
       ],
     },
   });
+});
+
+/**
+ * v15 staff-round-speed: the order on this tablet was started while party id(41) sat at T4; that
+ * party left, the table was cleaned and a new party (id(42)) sat down before staff pressed Send.
+ */
+async function partyLeftBeforeSend(page: Page, zh: boolean) {
+  if (zh)
+    await page.addInitScript(() => {
+      window.localStorage.setItem("bop.merchant.language", "zh-Hans");
+    });
+  let party = id(41);
+  await signIn(page);
+  await page.route("**/merchant/dining/tables", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        canOperateTables: false,
+        items: [{ ...table, currentDiningSessionReference: party }],
+        nextAfterTableReference: null,
+      },
+    }),
+  );
+  await page.route("**/merchant/counter/menu**", (route) => route.fulfill({ headers, json: menu }));
+  const rounds: Record<string, unknown>[] = [];
+  await page.route("**/merchant/dining/staff-rounds", (route) => {
+    const body = route.request().postDataJSON() as Record<string, unknown>;
+    rounds.push(body);
+    if (body.expectedDiningSessionReference !== party)
+      return route.fulfill({ status: 409, headers, json: { error: "table_party_changed" } });
+    return route.fulfill({
+      headers,
+      json: {
+        status: "Placed",
+        orderReference: id(20),
+        orderBatchReference: id(21),
+        orderNumber: "8",
+        orderVersion: 1,
+        tableLabel: "T4",
+        orderMinor: "791",
+        tipMinor: "0",
+        totalMinor: "791",
+        payBy: new Date(Date.now() + 30 * 60_000).toISOString(),
+        recordedAfterOutage: false,
+      },
+    });
+  });
+  await page.goto("/operations/order-entry?table=" + tableReference);
+  await page.getByRole("button", { name: zh ? "添加Gyoza" : "Add Gyoza" }).click();
+  party = id(42);
+  await page.getByRole("button", { name: zh ? "发送订单" : "Send order" }).click();
+  return rounds;
+}
+
+test("@production v15 staff-round-speed: an order left on the tablet after its party left is not sent to the next party unasked", async ({
+  page,
+}) => {
+  const rounds = await partyLeftBeforeSend(page, false);
+  await expect(page.getByRole("alert")).toHaveText(
+    "The guests this order was taken for have left Table T4, and the table has been cleared or seated again. Nothing was sent or charged. Check the order with the guests at the table now before sending it for them, or start over.",
+  );
+  expect(rounds).toHaveLength(1);
+  expect(rounds[0]?.expectedDiningSessionReference).toBe(id(41));
+  await expectNoInternalText(page);
+  // Staff checked the order with the guests seated now: sent for them, as a new request.
+  await page.getByRole("button", { name: "Send it for the guests at the table now" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Charge $7.91 on the card machine" }),
+  ).toBeVisible();
+  expect(rounds).toHaveLength(2);
+  expect(rounds[1]?.expectedDiningSessionReference).toBe(id(42));
+  expect(rounds[1]?.operationReference).not.toBe(rounds[0]?.operationReference);
+});
+
+test("@production v15 staff-round-speed: the left-party refusal and its choices read in Chinese at 1440, 1024 and 390", async ({
+  page,
+}) => {
+  await partyLeftBeforeSend(page, true);
+  await expect(page.getByRole("alert")).toHaveText(
+    "这张单点菜时的那桌客人已经离开桌台 T4，这张桌台已清台或换了一桌客人。这张单没有发送，也没有收款。请先和现在这桌客人核对这张单，再替他们发送；或者重新点单。",
+  );
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expect(page.getByRole("button", { name: "替现在这桌客人发送" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "重新点单" })).toBeVisible();
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1),
+    ).toBe(false);
+  }
+  await expectNoInternalText(page);
+  // Start over: the old order is cleared; nothing was sent.
+  await page.getByRole("button", { name: "重新点单" }).click();
+  await expect(page.getByRole("alert")).toHaveCount(0);
 });

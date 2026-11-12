@@ -466,6 +466,12 @@ export function placeErrorText(
         "{value} can't take an order now (marked unavailable, or its session is closing). Check the table on the Tables page.",
         { value: table ?? "This table" },
       );
+    case "TablePartyChanged":
+      // v15 staff-round-speed: an order left on this screen after its party left the table.
+      return t(
+        "The guests this order was taken for have left {value}, and the table has been cleared or seated again. Nothing was sent or charged. Check the order with the guests at the table now before sending it for them, or start over.",
+        { value: table ?? t("this table") },
+      );
     case "TableHasNoQr":
       return t(
         "{value} has no table QR code, so orders can't be taken for it yet. Nothing was sent or charged. {value2}",
@@ -773,6 +779,15 @@ export function StaffOrderEntryPage({
   // WP-2423 M35: the table's dining session (from the Tables list), the guests' unsent lines read
   // from it before staff send, and what staff decided for each (Send unless it can't be sent).
   const [tableSession, setTableSession] = useState<string | null>(null);
+  /**
+   * v15 staff-round-speed: the party this order is being taken for — the table's dining session
+   * when its first dish went on (null: the table was free). Sent with the order, so an order left
+   * on a tablet after its party has gone is never placed on the next party's bill unasked.
+   */
+  const draftParty = useRef<{ readonly session: string | null } | null>(null);
+  const [partyChanged, setPartyChanged] = useState(false);
+  if (lines.length === 0) draftParty.current = null;
+  else if (tableMode && draftParty.current === null) draftParty.current = { session: tableSession };
   const [guestCart, setGuestCart] = useState<TableCart | null>(null);
   const [guestCartFailed, setGuestCartFailed] = useState(false);
   const [guestDecisions, setGuestDecisions] = useState<Readonly<Record<string, GuestLineDecision>>>(
@@ -975,8 +990,9 @@ export function StaffOrderEntryPage({
   // table is known, every 5 s while the screen is in view, and once more when it comes back. A
   // failed read keeps the last list and says so (the send is still checked by the server).
   // A table that was free when this screen opened may have been seated since.
-  const findTableSession = useCallback(async () => {
-    if (tableReference === null) return;
+  /** The table's party now (its dining session; null when free), or undefined when unread. */
+  const findTableSession = useCallback(async (): Promise<string | null | undefined> => {
+    if (tableReference === null) return undefined;
     try {
       const tables = createDiningSessionClient(fetcher);
       let after: string | null = null;
@@ -985,14 +1001,15 @@ export function StaffOrderEntryPage({
         const found = result.items.find((table) => table.tableReference === tableReference);
         if (found !== undefined) {
           setTableSession(found.currentDiningSessionReference);
-          return;
+          return found.currentDiningSessionReference;
         }
-        if (result.next === null) return;
+        if (result.next === null) return undefined;
         after = result.next;
       }
     } catch {
       // Read again with the next send; the server still checks the cart.
     }
+    return undefined;
   }, [csrf, fetcher, tableReference]);
   const readGuestCart = useCallback(() => {
     if (tableSession === null) return;
@@ -1166,6 +1183,8 @@ export function StaffOrderEntryPage({
           }
         : null;
     const removedAtSend = guestRemoved;
+    if (tableMode && lines.length > 0) draftParty.current ??= { session: tableSession };
+    const forParty = draftParty.current?.session ?? null;
     placeOperation.current ??= serviceOperationReference();
     // DEC-PAPER-ORDER-PAID-AT-SEND: a paper order was paid during the outage; its payment goes with
     // it and is recorded with it (a table that pays at the end has nothing to pay now).
@@ -1189,6 +1208,7 @@ export function StaffOrderEntryPage({
     setPhase("Sending");
     setProblem(null);
     setProblemNeedsTableCode(false);
+    setPartyChanged(false);
     setTableCartOffer(null);
     setRemovedNote(null);
     try {
@@ -1208,6 +1228,7 @@ export function StaffOrderEntryPage({
               lines: chosen.map((line, index) => ({ ...line, note: lines[index]?.note ?? null })),
               tip: chosenTip,
               recordedAfterOutage: paper,
+              ...(forParty === null ? {} : { expectedDiningSessionReference: forParty }),
               ...(paperPayment === undefined ? {} : { paperPayment }),
               ...(decided !== null
                 ? { includeTableCart: decided }
@@ -1343,6 +1364,7 @@ export function StaffOrderEntryPage({
         ),
       );
       setProblemNeedsTableCode(failure.code === "TableHasNoQr");
+      setPartyChanged(failure.code === "TablePartyChanged");
       // v15 batch-5 review: the paper paid-at was refused before anything was placed; staff
       // correct it where they typed it.
       if (failure.code === "TakenBeforeRecords" || failure.code === "PaidAtOutOfRange") {
@@ -2303,6 +2325,36 @@ export function StaffOrderEntryPage({
                   void send({ expectedCartVersion: tableCartOffer.cartVersion, removeUnavailable })
                 }
               />
+            ) : null}
+            {problem !== null && ordering && partyChanged ? (
+              <div className="card-actions">
+                <button
+                  type="button"
+                  disabled={!canSend}
+                  onClick={() =>
+                    void (async () => {
+                      // Staff checked the order with the guests seated now: it is theirs.
+                      const now = await findTableSession();
+                      if (now === undefined) {
+                        setProblem(
+                          t(
+                            "Couldn't check who is at the table now. Check the connection and try again. Nothing was sent or charged.",
+                          ),
+                        );
+                        return;
+                      }
+                      draftParty.current = { session: now };
+                      placeOperation.current = null;
+                      await send();
+                    })()
+                  }
+                >
+                  {t("Send it for the guests at the table now")}
+                </button>
+                <button type="button" onClick={startOver}>
+                  {t("Start over")}
+                </button>
+              </div>
             ) : null}
             {problem !== null && ordering && problemNeedsTableCode && tableQrHref !== undefined ? (
               <p>

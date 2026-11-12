@@ -638,6 +638,7 @@ export function installMerchantOrderRoutes(
             STAFF_ROUND_PERMISSION_DENIED: [403, "staff_round_permission_denied"],
             STAFF_ROUND_STORE_NOT_TAKING_ORDERS: [409, "store_not_taking_dine_in_orders"],
             STAFF_ROUND_TABLE_UNAVAILABLE: [409, "table_unavailable"],
+            STAFF_ROUND_TABLE_PARTY_CHANGED: [409, "table_party_changed"],
             STAFF_ROUND_TABLE_QR_MISSING: [409, "table_qr_missing"],
             STAFF_ROUND_NEW_GUESTS_PAUSED: [409, "new_guests_paused"],
             STAFF_ROUND_TABLE_CART_HAS_ITEMS: [409, "table_cart_has_items"],

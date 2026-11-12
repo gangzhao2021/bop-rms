@@ -63,6 +63,12 @@ export const staffDiningRoundErrorCodes = [
   "STAFF_ROUND_PERMISSION_DENIED",
   "STAFF_ROUND_STORE_NOT_TAKING_ORDERS",
   "STAFF_ROUND_TABLE_UNAVAILABLE",
+  /**
+   * WP-2423 (v15 staff-round-speed): the round was taken for the party seated when staff started
+   * it, and that party has left (the table was closed, or another party is seated now). Nothing
+   * is sent; staff check with the guests at the table before sending it for them.
+   */
+  "STAFF_ROUND_TABLE_PARTY_CHANGED",
   "STAFF_ROUND_TABLE_QR_MISSING",
   "STAFF_ROUND_TABLE_CART_HAS_ITEMS",
   "STAFF_ROUND_TABLE_CHECKOUT_IN_PROGRESS",
@@ -212,10 +218,15 @@ export interface StaffTableGuestPipeline extends Pick<
   /**
    * Starts the table's dining session, or issues a fresh one-time table code for its current
    * session, under this staff member's table authority (Dining owner commands).
+   * `expectedDiningSessionReference`: the party the round was taken for; another (or none) is
+   * `PartyChanged`, with nothing started or issued.
    */
   openTable(
     staff: { readonly sessionCookie: unknown; readonly csrf: unknown },
-    input: { readonly tableReference: string },
+    input: {
+      readonly tableReference: string;
+      readonly expectedDiningSessionReference?: string;
+    },
   ): Promise<
     | {
         readonly status: "Opened";
@@ -229,6 +240,7 @@ export interface StaffTableGuestPipeline extends Pick<
     | { readonly status: "TableUnavailable" }
     /** WP-2423 item 13 ②: the table is free and the platform paused new guests. */
     | { readonly status: "NewGuestsPaused" }
+    | { readonly status: "PartyChanged" }
   >;
   /**
    * WP-2423 item 7: closes a dining session this request started when the round failed before
@@ -362,10 +374,19 @@ export function parseStaffDiningRoundCommand(value: unknown): {
    * not sellable now, taken out of the Cart first (the Ordering owner decides at that instant).
    */
   readonly includeTableCart: StaffRoundTableCartChoice | null;
+  /**
+   * WP-2423 (v15 staff-round-speed): the table's dining session (its party) when staff started
+   * taking this round; null when the table was free then (or the screen predates this).
+   */
+  readonly expectedDiningSessionReference: string | null;
 } {
   try {
     const includes =
       value !== null && typeof value === "object" && Object.hasOwn(value, "includeTableCart");
+    const forParty =
+      value !== null &&
+      typeof value === "object" &&
+      Object.hasOwn(value, "expectedDiningSessionReference");
     const raw = readClosedRecord(value, [
       "operationReference",
       "tableReference",
@@ -373,7 +394,12 @@ export function parseStaffDiningRoundCommand(value: unknown): {
       "tip",
       "recordedAfterOutage",
       ...(includes ? ["includeTableCart"] : []),
+      ...(forParty ? ["expectedDiningSessionReference"] : []),
     ]);
+    const expectedDiningSessionReference =
+      !forParty || raw.expectedDiningSessionReference === null
+        ? null
+        : String(parseOrderingReference(raw.expectedDiningSessionReference));
     let includeTableCart: StaffRoundTableCartChoice | null = null;
     if (includes) {
       const has = (key: string) =>
@@ -488,6 +514,7 @@ export function parseStaffDiningRoundCommand(value: unknown): {
       tip: parsed.tip,
       recordedAfterOutage: parsed.recordedAfterOutage,
       includeTableCart,
+      expectedDiningSessionReference,
     });
   } catch (error) {
     if (error instanceof StaffDiningRoundError) throw error;
@@ -593,6 +620,10 @@ export function createMerchantStaffDiningRound(options: {
             command.includeTableCart.removeUnavailable.length === 0
               ? {}
               : { removeUnavailable: [...command.includeTableCart.removeUnavailable].sort() }),
+            // Taken for a party: a different intent from the same round for whoever sits there.
+            ...(command.expectedDiningSessionReference === null
+              ? {}
+              : { forParty: command.expectedDiningSessionReference }),
             // M35: each guest line's decision (in any order: the same decisions).
             ...(command.includeTableCart?.decisions == null
               ? {}
@@ -677,6 +708,12 @@ export function createMerchantStaffDiningRound(options: {
         { hashIntent, equals: (a, b) => a === b },
       ).loadTable(parseDiningReference(command.tableReference));
       const session = table?.activeDiningSessionReference ?? null;
+      // The party the round was taken for has left: refused before anything is touched.
+      if (
+        command.expectedDiningSessionReference !== null &&
+        (session === null ? null : String(session)) !== command.expectedDiningSessionReference
+      )
+        return fail("STAFF_ROUND_TABLE_PARTY_CHANGED");
       if (session === null) return null;
       const current = await readStaffDiningCart(tx as never, owner, String(session), now());
       if (current === null || current.lines.length === 0) return null;
@@ -1060,8 +1097,14 @@ export function createMerchantStaffDiningRound(options: {
       if (stale !== null) throw await tableCartRefusal(stale.items, stale.cartVersion);
       const table = await options.pipeline.openTable(
         { sessionCookie: input.sessionCookie, csrf: input.csrf },
-        { tableReference: command.tableReference },
+        {
+          tableReference: command.tableReference,
+          ...(command.expectedDiningSessionReference === null
+            ? {}
+            : { expectedDiningSessionReference: command.expectedDiningSessionReference }),
+        },
       );
+      if (table.status === "PartyChanged") return fail("STAFF_ROUND_TABLE_PARTY_CHANGED");
       if (table.status === "NewGuestsPaused") return fail("STAFF_ROUND_NEW_GUESTS_PAUSED");
       if (table.status !== "Opened") return fail("STAFF_ROUND_TABLE_UNAVAILABLE");
       if (table.started)

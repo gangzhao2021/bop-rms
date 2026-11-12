@@ -46,6 +46,8 @@ export class CounterOrderClientError extends Error {
       /** The tip percentage is not one the Store offers now (the choices are read again). */
       | "TipChoicesChanged"
       | "TableUnavailable"
+      /** v15 staff-round-speed: the party the round was taken for has left the table. */
+      | "TablePartyChanged"
       | "TableHasNoQr"
       | "TableCartHasItems"
       | "TableCheckoutInProgress"
@@ -746,6 +748,11 @@ export function createCounterOrderClient(csrf: string, fetcher: typeof fetch = f
       readonly lines: readonly TableRoundLine[];
       readonly tip: CounterTip;
       readonly recordedAfterOutage: boolean;
+      /**
+       * v15 staff-round-speed: the party seated when staff started taking this round (the table's
+       * dining session then); the server refuses it once that party has left the table.
+       */
+      readonly expectedDiningSessionReference?: string;
       /** DEC-PAPER-ORDER-PAID-AT-SEND: a paper round the table pays now: how it was paid. */
       readonly paperPayment?: PaperPayment;
       /**
@@ -796,6 +803,7 @@ export function createCounterOrderClient(csrf: string, fetcher: typeof fetch = f
       if (code === "table_checkout_in_progress")
         throw new CounterOrderClientError("TableCheckoutInProgress");
       if (code === "table_unavailable") throw new CounterOrderClientError("TableUnavailable");
+      if (code === "table_party_changed") throw new CounterOrderClientError("TablePartyChanged");
       if (code === "table_qr_missing") throw new CounterOrderClientError("TableHasNoQr");
       if (code === "new_guests_paused") throw new CounterOrderClientError("NewGuestsPaused");
       if (code === "store_not_taking_dine_in_orders")

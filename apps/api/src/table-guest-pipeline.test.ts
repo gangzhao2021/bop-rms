@@ -101,6 +101,37 @@ describe("staff table code", () => {
     });
   });
 
+  it("v15 staff-round-speed: a round taken for a party that has left starts or issues nothing", async () => {
+    const ports = base();
+    // The party staff took it for (id 31) left: the table is free, or another party is seated.
+    for (const now of [null, id(40)]) {
+      ports.loadTable.mockResolvedValueOnce({
+        aggregateVersion: 3,
+        activeDiningSessionReference: now,
+        seatable: true,
+      });
+      expect(
+        await createStaffTableCode(ports)(staff, {
+          tableReference: id(30),
+          expectedDiningSessionReference: id(31),
+        }),
+      ).toEqual({ status: "PartyChanged" });
+    }
+    expect(ports.start).not.toHaveBeenCalled();
+    expect(ports.regenerate).not.toHaveBeenCalled();
+    ports.loadTable.mockResolvedValueOnce({
+      aggregateVersion: 3,
+      activeDiningSessionReference: id(31),
+      seatable: true,
+    });
+    expect(
+      await createStaffTableCode(ports)(staff, {
+        tableReference: id(30),
+        expectedDiningSessionReference: id(31),
+      }),
+    ).toMatchObject({ status: "Opened", diningSessionReference: id(31) });
+  });
+
   it("WP-2423 item 13 ②: seats no free table while new guests are paused; a seated one goes on", async () => {
     const ports = { ...base(), newGuestsPaused: vi.fn(async () => true) };
     expect(await createStaffTableCode(ports)(staff, { tableReference: id(30) })).toEqual({

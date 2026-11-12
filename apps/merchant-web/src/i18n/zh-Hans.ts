@@ -1410,6 +1410,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "已关闭的营业日与日结一致。今天会在营业日结束时与日结核对。",
   "Closing order…": "正在关闭订单…",
   "Closing out the rounds…": "正在结束各轮次…",
+  "Closing out round {current} of {total}…": "正在结束第 {current} 轮，共 {total} 轮…",
+  "{done} of {total} rounds closed out. Stay on this page until every round is closed out.":
+    "已结束 {done} 轮，共 {total} 轮。请留在这一页，等所有轮次都结束。",
+  "Stay on this page until every round is closed out.": "请留在这一页，等所有轮次都结束。",
   "Closing the table…": "正在关台…",
   "Closing the ticket does not refund or cancel the order. If the guest paid and did not get their food, cancel or refund":
     "关闭票据不会退款或取消订单。如果顾客已付款却没拿到餐，请取消或退款",
@@ -5087,6 +5091,13 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "这张桌台还不能关闭。请先结束其未完成的轮次。",
   "This table can't be closed yet:": "这张桌台还不能关闭：",
   "This table can't take an order now": "这张桌台目前不能点单",
+  "The guests this order was taken for have left {value}, and the table has been cleared or seated again. Nothing was sent or charged. Check the order with the guests at the table now before sending it for them, or start over.":
+    "这张单点菜时的那桌客人已经离开{value}，这张桌台已清台或换了一桌客人。这张单没有发送，也没有收款。请先和现在这桌客人核对这张单，再替他们发送；或者重新点单。",
+  "Send it for the guests at the table now": "替现在这桌客人发送",
+  "this table": "这张桌台",
+  "Couldn't check who is at the table now. Check the connection and try again. Nothing was sent or charged.":
+    "暂时无法确认这张桌台现在坐的是哪桌客人。请检查网络后重试。这张单没有发送，也没有收款。",
+  "Start over": "重新点单",
   "This table changed since the page loaded. The list is refreshed; check it and try again.":
     "此页面加载后这张桌台已变更。列表已刷新；请核对后重试。",
   "This table has no table QR code yet": "这张桌台还没有桌台二维码",

@@ -19,6 +19,8 @@ const state = vi.hoisted(() => ({
   },
   staffRemovals: [] as Record<string, unknown>[],
   staffRemovalError: null as null | Error,
+  /** The table's current party when set (otherwise as the cart above implies). */
+  tableSession: undefined as string | null | undefined,
   // DEC-PAPER-SEND-IDEMPOTENT: whether the round still waits for its payment, and its card
   // machine (or paper) payment record once paid.
   waitsForPayment: true,
@@ -93,7 +95,11 @@ vi.mock("@rms/dining", async (importOriginal) => {
     createPostgresDiningTableStore: () => ({
       loadTable: async () => ({
         activeDiningSessionReference:
-          state.tableCart === null ? null : "0198a7c0-0000-7000-8000-00000000001f",
+          state.tableSession !== undefined
+            ? state.tableSession
+            : state.tableCart === null
+              ? null
+              : "0198a7c0-0000-7000-8000-00000000001f",
       }),
     }),
     createPostgresDiningCheckoutHoldSource: () => ({ read: async () => null }),
@@ -335,6 +341,51 @@ describe("staff dine-in round command — WP-2423 Q7 slice 2", () => {
     state.onStaffRemoval = null;
     state.waitsForPayment = true;
     state.paid = null;
+    state.tableSession = undefined;
+  });
+
+  it("v15 staff-round-speed: a round taken for a party that has left is refused before the table is touched", async () => {
+    const f = setup();
+    // Taken for party id(31); that party left and the table was cleaned: free, or a new party.
+    for (const now of [null, id(40)]) {
+      state.tableSession = now;
+      await expect(
+        f.send({ operationReference: id(0x501), expectedDiningSessionReference: id(31) }),
+      ).rejects.toMatchObject({ code: "STAFF_ROUND_TABLE_PARTY_CHANGED" });
+    }
+    expect(f.calls).not.toContain("openTable");
+    expect(f.calls).not.toContain("join");
+    expect(state.entries.size).toBe(0);
+  });
+
+  it("v15 staff-round-speed: the same party, or a table free when staff began, is sent as before", async () => {
+    const f = setup();
+    state.tableSession = id(31);
+    expect(
+      await f.send({ operationReference: id(0x502), expectedDiningSessionReference: id(31) }),
+    ).toMatchObject({ status: "Placed" });
+    expect(f.pipeline.openTable).toHaveBeenLastCalledWith(expect.anything(), {
+      tableReference: expect.any(String),
+      expectedDiningSessionReference: id(31),
+    });
+    state.tableSession = id(40);
+    expect(
+      await f.send({ operationReference: id(0x503), expectedDiningSessionReference: null }),
+    ).toMatchObject({ status: "Placed" });
+    expect(f.pipeline.openTable).toHaveBeenLastCalledWith(expect.anything(), {
+      tableReference: expect.any(String),
+    });
+  });
+
+  it("v15 staff-round-speed: a party that leaves just as the table is opened is refused there, nothing recorded", async () => {
+    const f = setup();
+    state.tableSession = id(31);
+    f.pipeline.openTable.mockResolvedValueOnce({ status: "PartyChanged" } as never);
+    await expect(
+      f.send({ operationReference: id(0x504), expectedDiningSessionReference: id(31) }),
+    ).rejects.toMatchObject({ code: "STAFF_ROUND_TABLE_PARTY_CHANGED" });
+    expect(f.calls).not.toContain("join");
+    expect(state.entries.size).toBe(0);
   });
 
   it("WP-2423 item 8 ⑦: a staff round takes only a tip the Store offers; with tips off, none", async () => {
