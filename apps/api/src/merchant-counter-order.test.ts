@@ -368,6 +368,8 @@ describe("counter order command — WP-2423 Q7", () => {
       totalMinor: "1130",
       payBy: "2026-10-13T18:30:00.000Z",
       recordedAfterOutage: true,
+      // Read back as paid, so the page never asks staff to charge it.
+      paid: true,
     };
     expect(await send({ recordedAfterOutage: true, tip: { kind: "None" } })).toEqual(expected);
     clock.at = "2026-10-13T21:00:00.000Z";
@@ -375,6 +377,33 @@ describe("counter order command — WP-2423 Q7", () => {
     // Nothing new was placed for either retry.
     expect(pipeline.open).toHaveBeenCalledTimes(1);
     expect(pipeline.preparePayment).toHaveBeenCalledTimes(1);
+  });
+
+  // A live counter order charged from Orders while the counter page's answer was lost: the same
+  // send reads it back as paid (never "Charge" with a pay-by in the past, a second card charge).
+  it("reads a live counter order charged meanwhile back as paid", async () => {
+    const clock = { at: "2026-10-13T18:00:00.000Z" };
+    const { send } = setup(clock);
+    const first = await send();
+    expect(first.paid).toBeUndefined();
+    // While it waits for its payment it is not paid.
+    expect((await send()).paid).toBeUndefined();
+    state.waitsForPayment = false;
+    state.paid = {
+      preparation: {
+        orderAllocation: { amountMinor: 1130n },
+        tip: { amountMinor: 150n },
+        total: { amountMinor: 1280n },
+        capacityExpiresAt: "2026-10-13T18:30:00.000Z",
+      },
+    };
+    clock.at = "2026-10-13T19:00:00.000Z";
+    expect(await send()).toMatchObject({
+      status: "AlreadyPlaced",
+      recordedAfterOutage: false,
+      totalMinor: "1280",
+      paid: true,
+    });
   });
 
   it("names an order that no longer waits for payment and was not paid, instead of placing it again", async () => {

@@ -72,6 +72,12 @@ export const staffDiningRoundErrorCodes = [
   "STAFF_ROUND_NOT_PRICED",
   "STAFF_ROUND_NOT_FINISHED",
   "STAFF_ROUND_IN_PROGRESS",
+  /**
+   * DEC-PAPER-SEND-IDEMPOTENT: the same round sent again after its first send placed it, once it
+   * neither waits for payment nor was paid (its time to pay ended and it was taken off): named by
+   * its order and table, nothing new sent or charged.
+   */
+  "STAFF_ROUND_ALREADY_SENT",
   "STAFF_ROUND_IDEMPOTENCY_CONFLICT",
   /** WP-2423 item 8 ⑦ (Owner decision 11): the Store turned tips off; send it with no tip. */
   "STAFF_ROUND_TIPS_OFF",
@@ -149,6 +155,12 @@ export class StaffDiningRoundError extends Error {
    * options chosen for it no longer fit the menu.
    */
   optionsChanged = false;
+  /**
+   * DEC-PAPER-SEND-IDEMPOTENT: for STAFF_ROUND_ALREADY_SENT (and the NOT_FINISHED it starts as),
+   * the Store's number of the table's order holding the round, and the table, when known.
+   */
+  placedOrderNumber: string | null = null;
+  placedTableLabel: string | null = null;
   constructor(
     code: StaffDiningRoundErrorCode,
     lineIndex: number | null = null,
@@ -330,6 +342,11 @@ export interface StaffDiningRoundResult {
   readonly payBy: string | null;
   readonly payLater: boolean;
   readonly recordedAfterOutage: boolean;
+  /**
+   * DEC-PAPER-SEND-IDEMPOTENT: present (true) when the round sent again is already paid (its
+   * payment record holds it): staff are never asked to charge it again.
+   */
+  readonly paid?: true;
 }
 
 export function parseStaffDiningRoundCommand(value: unknown): {
@@ -877,9 +894,17 @@ export function createMerchantStaffDiningRound(options: {
             authorize: async (_tx, value) =>
               value.orderReference === String(batch.orderReference) && (await allowed()),
           }).loadByBatch(tx, String(batch.orderReference), String(batch.orderBatchReference));
-          if (paid === null) return fail("STAFF_ROUND_NOT_FINISHED");
+          if (paid === null) {
+            // The round exists but neither waits for payment nor was paid: its time to pay ended
+            // and it was taken off. Named when sent again (after the still-sending window).
+            const ended = new StaffDiningRoundError("STAFF_ROUND_NOT_FINISHED");
+            ended.placedOrderNumber = batch.orderNumber;
+            ended.placedTableLabel = labels.get(String(entry.diningSessionReference)) ?? null;
+            throw ended;
+          }
           const p = paid.preparation;
           return Object.freeze({
+            paid: true as const,
             status,
             orderReference: String(batch.orderReference),
             orderBatchReference: String(batch.orderBatchReference),
@@ -948,6 +973,18 @@ export function createMerchantStaffDiningRound(options: {
             (options.inProgressMs ?? 120_000)
         )
           return fail("STAFF_ROUND_IN_PROGRESS");
+        // DEC-PAPER-SEND-IDEMPOTENT: the round was placed (its time to pay has since ended), so
+        // it is named, as a counter order is, never "didn't go through".
+        if (
+          error instanceof StaffDiningRoundError &&
+          error.code === "STAFF_ROUND_NOT_FINISHED" &&
+          error.placedOrderNumber !== null
+        ) {
+          const named = new StaffDiningRoundError("STAFF_ROUND_ALREADY_SENT");
+          named.placedOrderNumber = error.placedOrderNumber;
+          named.placedTableLabel = error.placedTableLabel;
+          throw named;
+        }
         throw error;
       }
     };

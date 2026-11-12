@@ -499,6 +499,8 @@ export function installMerchantOrderRoutes(
           totalMinor: result.totalMinor,
           payBy: result.payBy,
           recordedAfterOutage: result.recordedAfterOutage,
+          // DEC-PAPER-SEND-IDEMPOTENT: the order sent again is already paid; nothing to charge.
+          ...(result.paid === true ? { paid: true } : {}),
           ...paid,
         });
       })
@@ -614,6 +616,8 @@ export function installMerchantOrderRoutes(
           payBy: result.payBy,
           payLater: result.payLater,
           recordedAfterOutage: result.recordedAfterOutage,
+          // DEC-PAPER-SEND-IDEMPOTENT: the round sent again is already paid; nothing to charge.
+          ...(result.paid === true ? { paid: true } : {}),
         });
       })
       .catch((error: unknown) => {
@@ -642,6 +646,7 @@ export function installMerchantOrderRoutes(
             STAFF_ROUND_NOT_PRICED: [409, "order_not_priced"],
             STAFF_ROUND_NOT_FINISHED: [409, "staff_round_not_finished"],
             STAFF_ROUND_IN_PROGRESS: [409, "staff_round_in_progress"],
+            STAFF_ROUND_ALREADY_SENT: [409, "staff_round_already_sent"],
             STAFF_ROUND_IDEMPOTENCY_CONFLICT: [409, "staff_round_conflict"],
             STAFF_ROUND_TIPS_OFF: [409, "tips_turned_off"],
             STAFF_ROUND_TIP_CHOICES_CHANGED: [409, "tip_choices_changed"],
@@ -685,7 +690,13 @@ export function installMerchantOrderRoutes(
                             guestsCanSend: error.tableCart.guestsCanSend,
                           }),
                     }
-                  : { error: code },
+                  : error.code === "STAFF_ROUND_ALREADY_SENT" && error.placedOrderNumber !== null
+                    ? {
+                        error: code,
+                        orderNumber: error.placedOrderNumber,
+                        tableLabel: error.placedTableLabel,
+                      }
+                    : { error: code },
           );
       });
   });

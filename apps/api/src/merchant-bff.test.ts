@@ -3534,6 +3534,13 @@ it("WP-2423 Q7: protects counter order and card-machine transport and maps refus
     error: "counter_order_already_ordered",
     orderNumber: "13",
   });
+  // DEC-PAPER-SEND-IDEMPOTENT: an order sent again that is already paid says so.
+  counterOrder.mockResolvedValueOnce({ ...placed, status: "AlreadyPlaced", paid: true });
+  expect(await (await submit("/counter/orders")).json()).toEqual({
+    ...placed,
+    status: "AlreadyPlaced",
+    paid: true,
+  });
   counterOrder.mockRejectedValueOnce(new CounterOrderError("COUNTER_ORDER_ITEM_UNAVAILABLE", 1));
   const soldOut = await submit("/counter/orders");
   expect(soldOut.status).toBe(409);
@@ -4043,6 +4050,7 @@ it("WP-2423 Q7 slice 2: protects the staff table round transport and maps refusa
     ["STAFF_ROUND_NOT_PRICED", 409, "order_not_priced"],
     ["STAFF_ROUND_NOT_FINISHED", 409, "staff_round_not_finished"],
     ["STAFF_ROUND_IN_PROGRESS", 409, "staff_round_in_progress"],
+    ["STAFF_ROUND_ALREADY_SENT", 409, "staff_round_already_sent"],
     ["STAFF_ROUND_IDEMPOTENCY_CONFLICT", 409, "staff_round_conflict"],
     ["STAFF_ROUND_UNAVAILABLE", 503, "staff_round_unavailable"],
   ] as const) {
@@ -4051,6 +4059,19 @@ it("WP-2423 Q7 slice 2: protects the staff table round transport and maps refusa
     expect(refused.status).toBe(status);
     expect(await refused.json()).toEqual({ error });
   }
+  // DEC-PAPER-SEND-IDEMPOTENT: a round sent before is named by its order and table.
+  const sentBefore = new StaffDiningRoundError("STAFF_ROUND_ALREADY_SENT");
+  sentBefore.placedOrderNumber = "14";
+  sentBefore.placedTableLabel = "A3";
+  staffDiningRound.mockRejectedValueOnce(sentBefore);
+  expect(await (await submit()).json()).toEqual({
+    error: "staff_round_already_sent",
+    orderNumber: "14",
+    tableLabel: "A3",
+  });
+  // A round sent again that is already paid says so (nothing to charge).
+  staffDiningRound.mockResolvedValueOnce({ ...placed, status: "AlreadyPlaced", paid: true });
+  expect(await (await submit()).json()).toEqual({ ...placed, status: "AlreadyPlaced", paid: true });
   staffDiningRound.mockRejectedValueOnce(
     new StaffDiningRoundError("STAFF_ROUND_ITEM_UNAVAILABLE", 1),
   );

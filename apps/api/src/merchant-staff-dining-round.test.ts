@@ -531,11 +531,20 @@ describe("staff dine-in round command — WP-2423 Q7 slice 2", () => {
   it("returns a paid round to the same send with the amounts its payment record holds", async () => {
     const clock = { at: "2026-10-15T18:00:00.000Z" };
     const { send, pipeline } = setup(clock);
-    await send({ recordedAfterOutage: true });
+    const first = await send({ recordedAfterOutage: true });
     state.waitsForPayment = false;
     await expect(send({ recordedAfterOutage: true })).rejects.toMatchObject({
       code: "STAFF_ROUND_IN_PROGRESS",
     });
+    // Its time to pay ended and it was taken off: named by its order and table, never "didn't
+    // go through", once it can no longer be still sending.
+    clock.at = "2026-10-15T18:05:00.000Z";
+    await expect(send({ recordedAfterOutage: true })).rejects.toMatchObject({
+      code: "STAFF_ROUND_ALREADY_SENT",
+      placedOrderNumber: first.orderNumber,
+      placedTableLabel: first.tableLabel,
+    });
+    clock.at = "2026-10-15T18:00:00.000Z";
     state.paid = {
       preparation: {
         orderAllocation: { amountMinor: 2260n },
@@ -554,6 +563,7 @@ describe("staff dine-in round command — WP-2423 Q7 slice 2", () => {
       payBy: "2026-10-15T18:30:00.000Z",
       payLater: false,
       recordedAfterOutage: true,
+      paid: true,
     });
     expect(pipeline.openTable).toHaveBeenCalledTimes(1);
   });

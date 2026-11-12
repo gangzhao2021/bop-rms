@@ -384,6 +384,11 @@ export interface CounterOrderResult {
   /** The order is released automatically if no payment is recorded by then. */
   readonly payBy: string;
   readonly recordedAfterOutage: boolean;
+  /**
+   * DEC-PAPER-SEND-IDEMPOTENT: present (true) when the order sent again is already paid (its
+   * payment record holds it): staff are never asked to charge it again, whoever recorded it.
+   */
+  readonly paid?: true;
 }
 
 interface CounterStaffScope {
@@ -634,10 +639,12 @@ export function createMerchantCounterOrder(options: {
             readonly capacityExpiresAt: unknown;
           },
           placed: { readonly orderNumber: string; readonly orderVersion: number },
+          paid = false,
         ) =>
           ({
             kind: "order",
             result: Object.freeze({
+              ...(paid ? { paid: true as const } : {}),
               status,
               orderReference: String(order.orderReference),
               orderBatchReference: String(order.orderBatchReference),
@@ -656,14 +663,17 @@ export function createMerchantCounterOrder(options: {
           { scope: scope.selected, authorize: guard },
           String(order.submissionReference),
         );
-        // Paid already (a paper order's payment goes with its send): the same order, at the
-        // amounts its payment record holds, so a lost answer is recovered and never sold twice.
+        // Paid already (a paper order's payment goes with its send, or someone charged it from
+        // Orders): the same order, at the amounts its payment record holds, so a lost answer is
+        // recovered and never sold or charged twice. Cash is in this store too: a counter cash
+        // payment (live or paper, with its tenderedMinor) is a card-machine payment record, so
+        // "no payment record" below never misses an order paid in cash.
         const paid = await createPostgresCardMachinePaymentStore({
           scope: scope.selected,
           authorize: async (_tx, value) =>
             value.orderReference === String(order.orderReference) && (await guard()),
         }).loadByBatch(tx, String(order.orderReference), String(order.orderBatchReference));
-        if (paid !== null && placed !== null) return answer(paid.preparation, placed);
+        if (paid !== null && placed !== null) return answer(paid.preparation, placed, true);
         return { kind: "placed", orderNumber: placed?.orderNumber ?? null } as const;
       });
     const stillSending = (record: CounterOrderEntryRecord) =>
