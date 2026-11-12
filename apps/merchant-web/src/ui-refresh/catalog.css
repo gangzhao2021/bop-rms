@@ -914,3 +914,8 @@ fieldset.store-features__modules {
     color: var(--bop-color-text-muted);
   }
 }
+/* WP-2423 (b9): what saving a dish did, under that dish (where staff are looking). */
+.one-menu .one-menu__saved-note {
+  grid-area: editor;
+  margin: 4px 0 0;
+}

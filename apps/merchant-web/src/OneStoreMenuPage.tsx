@@ -127,6 +127,12 @@ export function OneStoreMenuPage({
   const [problemNeedsAllergens, setProblemNeedsAllergens] = useState(false);
   // WP-2423 (M151): the dish a refusal names, to open it from the refusal.
   const [problemDish, setProblemDish] = useState<{ sku: string; name: string } | null>(null);
+  // WP-2423 (b9): what saving a dish did, said at that dish, where staff are looking (a price at
+  // this Store only is charged from the save on), not at the top of a long menu out of view.
+  const [savedNote, setSavedNote] = useState<{ sku: string; text: string } | null>(null);
+  useEffect(() => {
+    if (problem !== null) setSavedNote(null);
+  }, [problem]);
   const [failed, setFailed] = useState<string | null>(null);
   // A read that failed while a form is open: the form and what is typed in it stay.
   const [readNotice, setReadNotice] = useState<string | null>(null);
@@ -353,6 +359,11 @@ export function OneStoreMenuPage({
   const underway = listingUnderway(view);
   const listingInProgress = listingSince !== null || (listingBusy && listing !== null);
   const narrowing = search.trim() !== "" || filters.size > 0;
+  // A saved dish the search or filters now hide: its note is said at the top instead.
+  const savedDishShown =
+    savedNote !== null &&
+    (shown.some((row) => row.dishes.some((d) => d.skuReference === savedNote.sku)) ||
+      (!narrowing && unplaced.some((d) => d.skuReference === savedNote.sku)));
   const reordering = !narrowing && view.permissions.mayEdit;
   const changedOrder = orderKey(rows) !== saved;
   const stage = menuStage(view.publication);
@@ -937,7 +948,8 @@ export function OneStoreMenuPage({
             setEditing(null);
             setOpenApply(null);
             if (product) setLastSaved(product);
-            setProblem(message);
+            setProblem(null);
+            setSavedNote({ sku: dish.skuReference, text: message });
             reload();
           }}
           onClose={() => {
@@ -945,6 +957,11 @@ export function OneStoreMenuPage({
             setOpenApply(null);
           }}
         />
+      ) : null}
+      {savedNote?.sku === dish.skuReference && editing !== dish.skuReference ? (
+        <p className="one-menu__message one-menu__saved-note" role="status">
+          {savedNote.text}
+        </p>
       ) : null}
     </li>
   );
@@ -1245,6 +1262,11 @@ export function OneStoreMenuPage({
             )}
           </p>
         </div>
+      ) : null}
+      {savedNote !== null && !savedDishShown ? (
+        <p className="one-menu__message" role="status">
+          {savedNote.text}
+        </p>
       ) : null}
       {problem ? (
         <p className="one-menu__message" role="status">

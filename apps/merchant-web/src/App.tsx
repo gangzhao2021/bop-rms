@@ -468,6 +468,31 @@ const sessionlessPaths: ReadonlySet<string> = new Set([
   "/app/identity/step-up-complete",
 ]);
 
+/**
+ * WP-2423 (b9): the menu pages' clients, made once per session token. A client made on every
+ * render of the app made the menu and an open dish editor read again whenever anything else on
+ * the screen changed (after a dropped save, too), which put back what staff had typed.
+ */
+function WithMenuClients({
+  clients,
+  csrf,
+  children,
+}: {
+  readonly clients: Pick<
+    Awaited<ReturnType<typeof routeClients.preload>>,
+    "createMenuClient" | "createAvailabilityClient"
+  >;
+  readonly csrf: string;
+  readonly children: (
+    client: ReturnType<typeof clients.createMenuClient>,
+    availability: ReturnType<typeof clients.createAvailabilityClient>,
+  ) => ReactNode;
+}) {
+  const client = useMemo(() => clients.createMenuClient(csrf), [clients, csrf]);
+  const availability = useMemo(() => clients.createAvailabilityClient(csrf), [clients, csrf]);
+  return <>{children(client, availability)}</>;
+}
+
 type WorkspaceState =
   | { readonly kind: "Loading" }
   | { readonly kind: "SignedOut" }
@@ -1295,11 +1320,15 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                 {!demo && state.kind === "Ready" && !state.switching ? (
                   <WithModule module={routeClients}>
                     {(clients) => (
-                      <StoreMenuListPage
+                      <WithMenuClients
                         key={state.workspace.selectedScope.storeReference + state.csrf}
-                        client={clients.createMenuClient(state.csrf)}
-                        availability={clients.createAvailabilityClient(state.csrf)}
-                      />
+                        clients={clients}
+                        csrf={state.csrf}
+                      >
+                        {(client, availability) => (
+                          <StoreMenuListPage client={client} availability={availability} />
+                        )}
+                      </WithMenuClients>
                     )}
                   </WithModule>
                 ) : (
@@ -1317,12 +1346,19 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
               {state.kind === "Ready" && !state.switching ? (
                 <WithModule module={routeClients}>
                   {(clients) => (
-                    <StoreMenuBuilderPage
+                    <WithMenuClients
                       key={state.workspace.selectedScope.storeReference + state.csrf}
-                      client={clients.createMenuClient(state.csrf)}
+                      clients={clients}
                       csrf={state.csrf}
-                      availability={clients.createAvailabilityClient(state.csrf)}
-                    />
+                    >
+                      {(client, availability) => (
+                        <StoreMenuBuilderPage
+                          client={client}
+                          csrf={state.csrf}
+                          availability={availability}
+                        />
+                      )}
+                    </WithMenuClients>
                   )}
                 </WithModule>
               ) : (

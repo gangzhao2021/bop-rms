@@ -248,6 +248,10 @@ export function DishEditor({
     readonly fingerprint: string;
     readonly content: Omit<SaveDishCommand, "operationReference">;
   } | null>(null);
+  // WP-2423 (b9): which dish the form was filled from. A later read of the same dish (the page read
+  // again, a slow read landing after Save) refreshes the groups only: it never puts back a field
+  // staff typed, or the choices they ticked, while a save of them may be waiting for its answer.
+  const filledFrom = useRef<{ readonly reference: string | null } | null>(null);
   useEffect(() => {
     let active = true;
     if (client.loadDish === undefined) return;
@@ -256,6 +260,13 @@ export function DishEditor({
       .then((loaded) => {
         if (!active) return;
         const found = dishEditorSource(readReference, loaded);
+        if (filledFrom.current !== null && filledFrom.current.reference === readReference) {
+          setSource((current) =>
+            current === null ? found : { ...current, groups: found.groups, usual: found.usual },
+          );
+          return;
+        }
+        filledFrom.current = { reference: readReference };
         setSource(found);
         setChosen(found.chosen);
         setForm((current) => ({
@@ -506,7 +517,10 @@ export function DishEditor({
   > => {
     const content = dishContent(allergenValues);
     if (client.oneStore === undefined) throw new MenuPageError("Unavailable");
-    if (loaded.current !== null && JSON.stringify(content) === loaded.current) return "Unchanged";
+    // b9: a save still waiting for its answer always goes again (as the same operation), so staff
+    // learn what it did; only with nothing waiting is an unchanged form "nothing to save".
+    if (operation === null && loaded.current !== null && JSON.stringify(content) === loaded.current)
+      return "Unchanged";
     // WP-2423 item 10: a save that stopped goes again as the same operation, so it finishes rather
     // than making a second product. Different content must not go under it. The price it was
     // compared with is the one that save sent (v15 batch 5: the form now compares with the price

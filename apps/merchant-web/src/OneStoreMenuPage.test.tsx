@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { act } from "react";
 import { MemoryRouter } from "react-router";
 import { afterEach, expect, it } from "vitest";
 import { OneStoreMenuPage } from "./OneStoreMenuPage.js";
@@ -579,4 +580,97 @@ it("WP-2423 (v15 batch 5): without the Brand's say over other Stores, the review
     "New dishes stay hidden at the other Stores until each Store shows them to guests.",
   );
   expect(container.textContent).toContain("Midtown (TEST), 1 dish: Har gow (TEST)");
+});
+
+/** The page as the app shows it, rendered again with a client made anew (the app re-rendering). */
+async function pageRenderedAgain(
+  menu: () => Promise<unknown>,
+  answer?: (body: Record<string, unknown>) => Promise<unknown> | undefined,
+) {
+  const { fetcher, sent } = server(menu, answer);
+  const csrf = "a".repeat(43);
+  const node = () => (
+    <MemoryRouter initialEntries={["/app/commerce/menus"]}>
+      <OneStoreMenuPage
+        menuReference={MENU}
+        client={createMenuClient(csrf, fetcher)}
+        availability={createAvailabilityClient(csrf, fetcher)}
+        onMultiStore={() => undefined}
+      />
+    </MemoryRouter>
+  );
+  const { container, root } = await mount(node());
+  await settle(10);
+  const renderAgain = async () => {
+    await act(async () => {
+      root.render(node());
+    });
+    await settle(10);
+  };
+  return { container, sent, renderAgain };
+}
+const englishName = (editor: HTMLElement) =>
+  [...editor.querySelectorAll("input")].find(
+    (input) => input.closest("label")?.textContent?.startsWith("English name") === true,
+  );
+
+it("WP-2423 (b9): the dish editor keeps what staff typed when the dish is read again", async () => {
+  const { container, renderAgain } = await pageRenderedAgain(async () => severalStores());
+  const editor = await editDish(container, "Dan dan noodles (TEST)");
+  await typeInto(englishName(editor), "Dan dan noodles renamed (TEST)");
+  await changeStorePrice(editor, "13.50");
+  // The dish is read again (the old name comes back): what staff typed stays.
+  await renderAgain();
+  const open = container.querySelector(".dish-editor") as HTMLElement;
+  expect(englishName(open)?.value).toBe("Dan dan noodles renamed (TEST)");
+});
+
+it("WP-2423 (b9): a dropped rename and store price goes again as the same save after the dish is read again", async () => {
+  let saves = 0;
+  const { container, sent, renderAgain } = await pageRenderedAgain(
+    async () => severalStores(),
+    (body) => {
+      if (body.action !== "SaveDish") return undefined;
+      saves += 1;
+      if (saves === 1) return Promise.reject(new TypeError("Failed to fetch"));
+      return Promise.resolve(storePriceAnswer(body, true));
+    },
+  );
+  const editor = await editDish(container, "Dan dan noodles (TEST)");
+  await typeInto(englishName(editor), "Dan dan noodles renamed (TEST)");
+  await changeStorePrice(editor, "13.50");
+  await click(buttonNamed(editor, "Save dish"));
+  await settle(10);
+  expect(sent).toHaveLength(1);
+  await renderAgain();
+  const open = container.querySelector(".dish-editor") as HTMLElement;
+  expect(englishName(open)?.value).toBe("Dan dan noodles renamed (TEST)");
+  await click(buttonNamed(open, "Save dish"));
+  await settle(10);
+  expect(container.textContent).not.toContain("This form changed after saving stopped");
+  expect(container.textContent).not.toContain("there is nothing new to list");
+  expect(sent).toHaveLength(2);
+  expect(sent[1]).toEqual(sent[0]);
+  expect(container.textContent).toContain(
+    "Dan dan noodles renamed (TEST): guests at this Store pay $13.50 from now. Its other changes go live when the menu is listed.",
+  );
+});
+
+it("WP-2423 (b9): what a dish save did is said at that dish, not at the top of the menu", async () => {
+  const { container } = await page(
+    async () => severalStores(),
+    (body) =>
+      body.action === "SaveDish" ? Promise.resolve(storePriceAnswer(body, false)) : undefined,
+  );
+  const editor = await editDish(container, "Dan dan noodles (TEST)");
+  await changeStorePrice(editor, "13.50");
+  await click(buttonNamed(editor, "Save dish"));
+  await settle(10);
+  const row = [...container.querySelectorAll(".one-menu__dish")].find((li) =>
+    li.textContent?.includes("Dan dan noodles (TEST)"),
+  );
+  expect(row?.querySelector('[role="status"]')?.textContent).toBe(
+    "Dan dan noodles (TEST): guests at this Store pay $13.50 from now. Nothing else changed, so there is nothing to list.",
+  );
+  expect(container.querySelectorAll(".one-menu > .one-menu__message, .one-menu__message")).toHaveLength(1);
 });
