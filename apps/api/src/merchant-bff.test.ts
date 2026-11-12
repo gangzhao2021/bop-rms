@@ -7485,6 +7485,56 @@ it("WP-2423 Q5: lists refunds awaiting approval as a same-origin read", async ()
   expect(JSON.stringify(body)).not.toContain(id(9));
 });
 
+// b10 cash-refund-approvals: the route listed each field by hand and left out the drawer's cash,
+// so every counter cash refund read as a card-machine refund on Approvals.
+it("b10: Approvals carries the cash a counter cash refund gives back from the drawer", async () => {
+  const id = (n: number) => "01909974-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+  const entry = (cashGivenBackMinor: string | null) => ({
+    orderReference: id(1),
+    orderNumber: "32",
+    requestReference: id(2),
+    requestOperationReference: id(4),
+    paymentAttemptReferences: [id(5)],
+    paymentIntentReferences: [id(3)],
+    paymentMethod: "CardMachine",
+    cashGivenBackMinor,
+    currencyCode: "CAD",
+    amountMinor: "13180",
+    reasonCode: "WRONG_ITEM",
+    note: null,
+    escalationReasons: ["OrderOrdinaryTotalAboveCad100"],
+    requestedAt: "2026-11-11T15:00:00.000Z",
+    requesterName: "Mia",
+    requestedByYou: false,
+    requesterVerifiedUntil: "2026-11-11T15:15:00.000Z",
+    state: "AwaitingApproval",
+    approvalReference: null,
+    approvedAt: null,
+    approverName: null,
+    canApprove: true,
+    soleOperatorApproval: false,
+  });
+  type Approvals = NonNullable<MerchantBffRouterOptions["ordinaryRefundApprovals"]>;
+  const read = vi.fn<Approvals>(
+    async () =>
+      ({
+        observedAt: "2026-11-11T15:01:00.000Z",
+        canApprove: true,
+        canSend: true,
+        soleOperator: null,
+        entries: [entry("13180"), { ...entry(null), requestReference: id(6) }],
+      }) as never,
+  );
+  const root = await serveRefundEscalation({ ordinaryRefundApprovals: read });
+  const ok = await request(root, "/merchant/payments/refunds/approvals", {
+    headers: { ...safeHeaders, Cookie: "__Host-bop-merchant=" + sessionCookie },
+  });
+  expect(ok.status).toBe(200);
+  const body = (await ok.json()) as { entries: { cashGivenBackMinor?: unknown }[] };
+  expect(body.entries.map((value) => value.cashGivenBackMinor)).toEqual(["13180", null]);
+  expect(body.entries[0]).toEqual(entry("13180"));
+});
+
 it("WP-2423 Q19: a self-approval without sole operator in effect is named, not a sign-in", async () => {
   type Approve = NonNullable<MerchantBffRouterOptions["ordinaryRefundApproval"]>;
   const command = vi.fn<Approve>(async () => {

@@ -159,6 +159,9 @@ export function installMerchantRefundRoutes(
             paymentAttemptReferences: entry.paymentAttemptReferences,
             paymentIntentReferences: entry.paymentIntentReferences,
             paymentMethod: entry.paymentMethod,
+            // b10 cash-refund-approvals: a counter cash refund's whole nickels from the drawer
+            // (null for a card or online payment). Without it Approvals reads it as card machine.
+            cashGivenBackMinor: entry.cashGivenBackMinor,
             currencyCode: entry.currencyCode,
             amountMinor: entry.amountMinor,
             reasonCode: entry.reasonCode,
