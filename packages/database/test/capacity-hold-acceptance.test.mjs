@@ -140,6 +140,9 @@ async function prove(context) {
     await admin.query(
       "GRANT SELECT,TRUNCATE ON rms_fulfillment.capacity_asap_commitment TO " + role,
     );
+    // 2000_780 (b9 checkout-session-outage): the turned-away record references capacity_slot, so
+    // TRUNCATE ... CASCADE reaches it; with TRUNCATE held its own append-only trigger refuses it.
+    await admin.query("GRANT SELECT,TRUNCATE ON rms_fulfillment.capacity_asap_refusal TO " + role);
 
     const security = await admin.query(
       `SELECT relrowsecurity,relforcerowsecurity FROM pg_class
