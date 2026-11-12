@@ -621,8 +621,32 @@ it("WP-2423 M52: the counter takes cash by the table's rules; replay, concurrenc
         asApi((tx) => recover(tx, takeBack(437n))),
         { code: "REFUND_RECOVERY_INPUT_INVALID" },
       );
-      // All the cash given back can come back, rounding included.
-      const allBack = await asApi((tx) => recover(tx, takeBack(2245n)));
+      // A recovery recorded before b10 could be any cents (the old command took $0.02 in cash on
+      // a cash order). Test-controlled legacy row: what is left is rounded down to whole nickels
+      // ($22.43 -> $22.40), so the payment page reads an amount it can offer, never 2243.
+      const legacy = id(++n);
+      await admin.query(
+        "INSERT INTO rms_payment.refund_recovery (tenant_id,brand_id,store_id,recovery_id,operation_id,order_id,method,slip_reference,amount_minor,currency_code,reason_code,actor_type,actor_id,permission_code,business_date,recorded_at,audit_id) VALUES ($1,$2,$3,$4,$5,$6,'Cash',NULL,2,'CAD','REFUNDED_TOO_MUCH','User',$7,'payment.refund.recover',$8::date,$9::timestamptz,$10)",
+        [
+          tenant,
+          brand,
+          store,
+          legacy,
+          id(++n),
+          first.orderReference,
+          actor,
+          recoveredAt.slice(0, 10),
+          recoveredAt,
+          id(++n),
+        ],
+      );
+      assert.deepEqual(await allowance(), { cashOnly: true, leftMinor: 2240n });
+      await assert.rejects(
+        asApi((tx) => recover(tx, takeBack(2245n))),
+        { code: "REFUND_RECOVERY_ABOVE_REFUNDED" },
+      );
+      // All the cash still left can come back, in whole nickels.
+      const allBack = await asApi((tx) => recover(tx, takeBack(2240n)));
       assert.equal(allBack.status, "Recorded");
       await assert.rejects(
         asApi((tx) => recover(tx, takeBack(5n))),
@@ -652,11 +676,14 @@ it("WP-2423 M52: the counter takes cash by the table's rules; replay, concurrenc
       assert.deepEqual(
         (
           await admin.query(
-            "SELECT method,amount_minor::text AS amount,slip_reference FROM rms_payment.refund_recovery WHERE order_id=$1",
+            "SELECT method,amount_minor::text AS amount,slip_reference FROM rms_payment.refund_recovery WHERE order_id=$1 ORDER BY amount_minor",
             [first.orderReference],
           )
         ).rows,
-        [{ method: "Cash", amount: "2245", slip_reference: null }],
+        [
+          { method: "Cash", amount: "2", slip_reference: null },
+          { method: "Cash", amount: "2240", slip_reference: null },
+        ],
       );
     } finally {
       for (const client of clients) await client.end().catch(() => undefined);

@@ -205,8 +205,12 @@ export async function readRefundRecoveryAllowance(
         0n,
       )
     : position.settlement.confirmedRefundMinor;
-  const leftMinor = back - taken;
-  return Object.freeze({ cashOnly, leftMinor: leftMinor > 0n ? leftMinor : 0n });
+  const left = back - taken;
+  // Cash comes back in whole nickels. A recovery recorded before b10 may be in any cents or way
+  // ($0.02 in cash, $3.67 on the card machine), so what is left is rounded down to whole nickels:
+  // the most the guest can still hand back, never an odd amount the page can't offer.
+  const leftMinor = left > 0n ? (cashOnly ? left - (left % 5n) : left) : 0n;
+  return Object.freeze({ cashOnly, leftMinor });
 }
 
 /**
