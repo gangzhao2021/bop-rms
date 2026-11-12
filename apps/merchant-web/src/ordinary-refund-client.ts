@@ -469,6 +469,9 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
         // v15 batch 8: a counter cash payment (absent from an older server: not known as cash).
         const withCash = Object.hasOwn(reply, "paidInCash");
         const withCashLeft = Object.hasOwn(reply, "cashLeftMinor");
+        // b10: an order paid only in cash: the cash the guest can still hand back (absent from an
+        // older server: the page falls back to the confirmed refunds).
+        const withCashTakeBack = Object.hasOwn(reply, "cashTakeBackLeftMinor");
         const data = exact(reply, [
           "paymentIntentReference",
           "paymentAttemptReference",
@@ -487,6 +490,7 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
           ...(withRecovery ? ["canRecover", "recoveries"] : []),
           ...(withCash ? ["paidInCash"] : []),
           ...(withCashLeft ? ["cashLeftMinor"] : []),
+          ...(withCashTakeBack ? ["cashTakeBackLeftMinor"] : []),
         ]);
         // WP-2423 M163: money taken back on the order (absent from an older server: none).
         if (
@@ -512,6 +516,15 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
           (!paidInCash ||
             typeof cashLeftMinor !== "string" ||
             !/^(0|[1-9][0-9]{0,17})$/u.test(cashLeftMinor))
+        )
+          return fail();
+        const cashTakeBackLeftMinor = withCashTakeBack ? data.cashTakeBackLeftMinor : null;
+        if (
+          cashTakeBackLeftMinor !== null &&
+          (!paidInCash ||
+            typeof cashTakeBackLeftMinor !== "string" ||
+            !/^(0|[1-9][0-9]{0,17})$/u.test(cashTakeBackLeftMinor) ||
+            BigInt(cashTakeBackLeftMinor) % 5n !== 0n)
         )
           return fail();
         // WP-2423 M13: why they may not record a request (absent from an older server).
@@ -586,6 +599,11 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
           /** WP-2423 M163: may record money taken back (a Store Manager or the Owner). */
           canRecover: withRecovery ? (data.canRecover as boolean) : false,
           recoveries: Object.freeze(recoveries),
+          /**
+           * b10: an order paid only in cash at the counter: money taken back comes back in cash
+           * alone, up to this (whole nickels); null for any other order.
+           */
+          cashTakeBackLeftMinor: cashTakeBackLeftMinor as string | null,
         });
       }, false);
     },

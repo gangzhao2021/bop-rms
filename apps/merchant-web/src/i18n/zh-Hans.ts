@@ -500,6 +500,11 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "如果退多了、顾客把钱还回来，在这里记录。",
   "How it was taken back": "怎么收回的",
   "Amount (up to {amount})": "金额（最多 {amount}）",
+  "Cash handed back (up to {amount})": "还回的现金（最多 {amount}）",
+  "Paid in cash: the guest hands back cash, in whole nickels.":
+    "这单用现金付款：顾客还回现金，按 5 分取整。",
+  "Cash comes back in whole nickels, for example 3.65.": "现金按 5 分取整，例如 3.65。",
+  "That is more than the {amount} given back in cash.": "这超过了已退还的现金 {amount}。",
   "Card machine slip reference": "刷卡机小票参考号",
   "This adds a record. The refund stays as it was.": "这会新增一条记录，原来的退款不变。",
   "Record money taken back": "记录收回的钱",

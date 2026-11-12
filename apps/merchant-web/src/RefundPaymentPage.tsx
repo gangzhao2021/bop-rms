@@ -2340,9 +2340,14 @@ export function MoneyTakenBack({
     [message, setMessage] = useState("");
   // One record per attempt: a retry after an unknown result reuses it.
   const operation = useRef<string | null>(null);
+  // b10 cash-refund-approvals: an order paid only in cash at the counter got cash back from the
+  // drawer, so the guest hands back cash alone (whole nickels), up to what the server says is left
+  // of the cash given back. Any other order: its confirmed refunds, in cash or on the card machine.
+  const cashOnly = context.cashTakeBackLeftMinor !== null;
   const refunded = BigInt(context.confirmedRefundMinor ?? "0");
   const taken = context.recoveries.reduce((sum, entry) => sum + BigInt(entry.amountMinor), 0n);
-  const left = refunded - taken;
+  const left = cashOnly ? BigInt(context.cashTakeBackLeftMinor ?? "0") : refunded - taken;
+  const how = cashOnly ? "Cash" : method;
   if (context.recoveries.length === 0 && (!context.canRecover || left <= 0n)) return null;
   const submit = async () => {
     const amountMinor = dollarsToMinor(dollars);
@@ -2350,15 +2355,23 @@ export function MoneyTakenBack({
       setMessage(t("Enter the amount taken back, for example 5.00."));
       return;
     }
+    if (cashOnly && BigInt(amountMinor) % 5n !== 0n) {
+      setMessage(t("Cash comes back in whole nickels, for example 3.65."));
+      return;
+    }
     if (BigInt(amountMinor) > left) {
       setMessage(
-        t("That is more than was refunded on this order ({amount}).", {
-          amount: amount(left.toString()),
-        }),
+        cashOnly
+          ? t("That is more than the {amount} given back in cash.", {
+              amount: amount(left.toString()),
+            })
+          : t("That is more than was refunded on this order ({amount}).", {
+              amount: amount(left.toString()),
+            }),
       );
       return;
     }
-    if (method === "CardMachine" && slip.trim() === "") {
+    if (how === "CardMachine" && slip.trim() === "") {
       setMessage(t("Enter the card machine slip's reference."));
       return;
     }
@@ -2374,10 +2387,10 @@ export function MoneyTakenBack({
         {
           orderReference: context.orderReference,
           operationReference: operation.current,
-          method,
+          method: how,
           amountMinor,
           reasonCode: reason,
-          ...(method === "CardMachine" ? { slipReference: slip.trim() } : {}),
+          ...(how === "CardMachine" ? { slipReference: slip.trim() } : {}),
         },
         csrf,
       );
@@ -2434,30 +2447,38 @@ export function MoneyTakenBack({
           <p className="refund-form__hint">
             {t("If too much was refunded and the guest gives it back, record it here.")}
           </p>
-          <fieldset className="refund-form__field">
-            <legend>{t("How it was taken back")}</legend>
-            <label>
-              <input
-                type="radio"
-                name="recovery-method"
-                checked={method === "Cash"}
-                onChange={() => setMethod("Cash")}
-              />{" "}
-              {t("Cash")}
-            </label>{" "}
-            <label>
-              <input
-                type="radio"
-                name="recovery-method"
-                checked={method === "CardMachine"}
-                onChange={() => setMethod("CardMachine")}
-              />{" "}
-              {t("Charged on the card machine")}
-            </label>
-          </fieldset>
+          {cashOnly ? (
+            <p className="refund-form__hint">
+              {t("Paid in cash: the guest hands back cash, in whole nickels.")}
+            </p>
+          ) : (
+            <fieldset className="refund-form__field">
+              <legend>{t("How it was taken back")}</legend>
+              <label>
+                <input
+                  type="radio"
+                  name="recovery-method"
+                  checked={method === "Cash"}
+                  onChange={() => setMethod("Cash")}
+                />{" "}
+                {t("Cash")}
+              </label>{" "}
+              <label>
+                <input
+                  type="radio"
+                  name="recovery-method"
+                  checked={method === "CardMachine"}
+                  onChange={() => setMethod("CardMachine")}
+                />{" "}
+                {t("Charged on the card machine")}
+              </label>
+            </fieldset>
+          )}
           <div className="refund-form__field">
             <label htmlFor="recovery-amount">
-              {t("Amount (up to {amount})", { amount: amount(left.toString()) })}
+              {cashOnly
+                ? t("Cash handed back (up to {amount})", { amount: amount(left.toString()) })
+                : t("Amount (up to {amount})", { amount: amount(left.toString()) })}
             </label>
             <input
               id="recovery-amount"
@@ -2467,7 +2488,7 @@ export function MoneyTakenBack({
               onChange={(event) => setDollars(event.target.value)}
             />
           </div>
-          {method === "CardMachine" ? (
+          {how === "CardMachine" ? (
             <div className="refund-form__field">
               <label htmlFor="recovery-slip">{t("Card machine slip reference")}</label>
               <input

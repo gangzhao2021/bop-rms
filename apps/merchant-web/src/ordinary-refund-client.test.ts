@@ -306,6 +306,7 @@ const context = {
   canSend: true,
   canRecover: false,
   recoveries: [],
+  cashTakeBackLeftMinor: null,
 };
 it("WP-2423 M14: a cashier's context says they request but do not send; an older server's means whoever requests sends", async () => {
   const older: Partial<typeof context> = { ...context };
@@ -408,6 +409,25 @@ it("v15 batch 8: reads a counter cash payment, and an older server's answer as n
     cashLeftMinor: null,
   });
   for (let n = 0; n < 4; n += 1) await expect(client.context(id(6), csrf)).rejects.toThrow();
+});
+// b10 cash-refund-approvals: money taken back on an order paid only in cash, as the server says.
+it("b10: reads the cash a guest can still hand back, only for a cash payment in whole nickels", async () => {
+  const cash = { ...context, paymentMethod: "CardMachine", paidInCash: true, cashLeftMinor: "0" };
+  const fetcher = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(response({ ...cash, cashTakeBackLeftMinor: "2245" }))
+    .mockResolvedValueOnce(response(cash))
+    .mockResolvedValueOnce(response({ ...cash, cashTakeBackLeftMinor: "2243" }))
+    .mockResolvedValueOnce(response({ ...cash, paidInCash: false, cashTakeBackLeftMinor: "5" }));
+  const client = createOrdinaryRefundClient(fetcher);
+  await expect(client.context(id(6), csrf)).resolves.toMatchObject({
+    cashTakeBackLeftMinor: "2245",
+  });
+  // An older server: not said, so the page keeps the confirmed refunds as its limit.
+  await expect(client.context(id(6), csrf)).resolves.toMatchObject({
+    cashTakeBackLeftMinor: null,
+  });
+  for (let n = 0; n < 2; n += 1) await expect(client.context(id(6), csrf)).rejects.toThrow();
 });
 it.each([
   { ...context, paymentIntentReference: id(99) },
