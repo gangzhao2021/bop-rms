@@ -280,7 +280,9 @@ it("names the button it points to, and a counter shop's kind matches its Counter
 it("leaves the roles this kind of shop doesn't use in place unless the owner ticks the box", () => {
   // v15 2026-11-11 b10: the box was ticked already, so Use these roles removed presets in use.
   const html = render({ storeType: "TeaShop" });
-  const box = /<label class="starter-roles__put-away"><input type="checkbox"([^>]*)\/?>/u.exec(html);
+  const box = /<label class="starter-roles__put-away"><input type="checkbox"([^>]*)\/?>/u.exec(
+    html,
+  );
   expect(box).not.toBeNull();
   expect(box?.[1] ?? "").not.toContain("checked");
 });

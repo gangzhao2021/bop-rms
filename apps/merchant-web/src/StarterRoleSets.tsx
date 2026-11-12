@@ -109,8 +109,7 @@ export function starterRolesProgress(
     (role) => role.change?.status === "InReview" || role.change?.status === "Approved",
   );
   const notSent = off.filter((role) => !waiting.includes(role));
-  const allRemoved =
-    ours.length > 0 && ours.every((role) => role.state === "Removed") ? ours : [];
+  const allRemoved = ours.length > 0 && ours.every((role) => role.state === "Removed") ? ours : [];
   return {
     done: off.length === 0 && allRemoved.length === 0,
     waiting,
@@ -402,7 +401,8 @@ export function StarterRoleSetOffer({
     );
   const several = (waiting?.mine.length ?? 0) > 1;
   const progress = read.kind === "Found" ? starterRolesProgress(read.sets, read.roles) : null;
-  const offCount = progress === null
+  const offCount =
+    progress === null
       ? 0
       : progress.waiting.length + progress.notSent.length + progress.allRemoved.length;
   // Roles the approval block above already names, so they are not listed twice.
