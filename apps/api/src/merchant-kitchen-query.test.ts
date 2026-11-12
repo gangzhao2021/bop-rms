@@ -503,7 +503,9 @@ it("WP-2423 (b9): a choice staff answered since listing does not leave the ticke
       },
     ],
   });
-  type Read = { items: { allergens: unknown }[] };
+  interface Read {
+    items: { allergens: unknown }[];
+  }
   const answered = (await f.operation(f.input)) as Read;
   // Mild was answered "Adds none": the dish's milk is all this line has, and nothing more to ask.
   expect(answered.items[0]?.allergens).toEqual({
