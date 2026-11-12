@@ -1236,6 +1236,30 @@ it("lets a guest finish an abandoned payment, staff cancel an unpaid round, and 
         (await recorder.record(await candidateOf(unknownRound))).record.status,
         "PaymentFailed",
       );
+      // Hotfix review (head-of-line): while another connection holds this round's row, its System
+      // cancellation fails for real on the pilot runner (lock timeout) under the restricted role.
+      // The sweep reports it, records nothing, and is not wedged: the next cycle starts from the
+      // top again and cancels it once the row is free.
+      const holder = new Client(context.clientConfig);
+      await holder.connect();
+      try {
+        await holder.query("BEGIN");
+        await holder.query(
+          "SELECT 1 FROM rms_ordering.order_batch WHERE order_batch_id=$1 FOR UPDATE",
+          [unknownRound.refs.batch],
+        );
+        await assert.rejects(dispatcher.runOnce());
+        assert.deepEqual(
+          await one(
+            "SELECT count(*)::int AS n FROM rms_ordering.order_batch_checkout_cancellation WHERE order_batch_id=$1",
+            [unknownRound.refs.batch],
+          ),
+          [{ n: 0 }],
+        );
+        await holder.query("ROLLBACK");
+      } finally {
+        await holder.end();
+      }
       assert.equal(await dispatcher.runOnce(), 1);
       assert.deepEqual(
         await one(
