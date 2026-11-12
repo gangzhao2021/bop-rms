@@ -465,3 +465,66 @@ test("@production What goes live names each extra price and the dishes the other
   expect(axe.violations).toEqual([]);
   await expectNoInternalText(page);
 });
+
+test("@production What goes live names each renamed dish and each dish whose allergens changed (M72)", async ({
+  page,
+}) => {
+  // WP-2423 M72 (v15 2026-11-11 b10): a listing that changes only a name and an allergen read
+  // "No price changes." and nothing else. Synthetic, TEST-only data.
+  const sesame = id(400);
+  const changed = (renames: unknown, allergenChanged: boolean) =>
+    view(false, null, {
+      allergenRegistry: true,
+      allergenChoices: [
+        { allergenReference: sesame, code: "SESAME", name: "Sesame seeds", nameZh: "芝麻" },
+      ],
+      dishRenames: renames,
+      sellables: [
+        sellable(30, "Har gow (TEST)", "虾饺", "788"),
+        {
+          ...sellable(32, "Dan dan noodles (TEST)", "担担面", "1288"),
+          allergens: {
+            source: "StaffDeclared",
+            declared: [{ allergenReference: sesame, classification: "CrossContactPossible" }],
+            ...(allergenChanged ? { changedByRecipe: true } : {}),
+          },
+        },
+      ],
+    });
+  let current: unknown = changed(
+    [
+      {
+        skuReference: id(32),
+        renamed: [{ locale: "zh-Hans-CA", from: "担担面", to: "四川担担面" }],
+      },
+    ],
+    true,
+  );
+  await routes(page, () => current);
+  await page.goto("/app/commerce/menus");
+  await page.getByRole("button", { name: "List it" }).click();
+  const shown = page.getByRole("region", { name: "What goes live" });
+  await expect(shown.getByText("No price changes.")).toBeVisible();
+  await expect(shown.getByRole("heading", { name: "Names and allergens" })).toBeVisible();
+  await expect(
+    shown.getByText("Dan dan noodles (TEST): Chinese name 担担面 → 四川担担面"),
+  ).toBeVisible();
+  await expect(
+    shown.getByText("Dan dan noodles (TEST): allergens changed · May contain Sesame seeds"),
+  ).toBeVisible();
+  await noSideScroll(page, "listing-review-names");
+  const axe = await new AxeBuilder({ page }).include(".one-menu").analyze();
+  expect(axe.violations).toEqual([]);
+  // Names could not be compared just now: it says so, never "no changes".
+  current = changed(null, false);
+  await page.goto("/app/commerce/menus");
+  await page.getByRole("button", { name: "List it" }).click();
+  const review = page.getByRole("region", { name: "What goes live" });
+  await expect(
+    review.getByText(
+      "Name changes could not be checked just now. The names go live as they are on this page.",
+    ),
+  ).toBeVisible();
+  await expect(review.getByText("No name or allergen changes.")).toHaveCount(0);
+  await expectNoInternalText(page);
+});
