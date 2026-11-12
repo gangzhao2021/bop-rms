@@ -451,6 +451,10 @@ describe("counter order (OPS-ORDER-ENTRY) — WP-2423 Q7", () => {
     };
     expect(parsePlacedCounterOrder(placed).totalMinor).toBe("1280");
     expect(() => parsePlacedCounterOrder({ ...placed, totalMinor: "1281" })).toThrow();
+    // DEC-PAPER-SEND-IDEMPOTENT: an order sent again that is already paid says so.
+    expect(parsePlacedCounterOrder(placed).paid).toBeUndefined();
+    expect(parsePlacedCounterOrder({ ...placed, paid: true }).paid).toBe(true);
+    expect(() => parsePlacedCounterOrder({ ...placed, paid: false })).toThrow();
     const responses: [number, unknown][] = [
       [409, { error: "item_unavailable", lineIndex: 1 }],
       [409, { error: "item_short", lineIndex: 0, available: 1 }],
@@ -601,6 +605,7 @@ describe("counter order (OPS-ORDER-ENTRY) — WP-2423 Q7", () => {
       [503, { error: "staff_round_unavailable" }],
       [409, { error: "staff_round_in_progress" }],
       [502, {}],
+      [409, { error: "staff_round_already_sent", orderNumber: "7", tableLabel: "T4" }],
     ];
     const fetcher = vi.fn(async () => {
       const [status, body] = responses.shift() ?? [500, {}];
@@ -665,6 +670,19 @@ describe("counter order (OPS-ORDER-ENTRY) — WP-2423 Q7", () => {
     expect(placeErrorText(new CounterOrderClientError("SystemProblem"), [], "Table T4")).toBe(
       "The system couldn't send this round for Table T4 (a problem on our side, not with the order). Nothing was sent to the kitchen or charged. Send it once more. If it fails again, take the order on paper, charge it on the card machine and enter it under Paper order later. Home shows any alert.",
     );
+    // DEC-PAPER-SEND-IDEMPOTENT: a round sent again after its time to pay ended is named by its
+    // table and order, never "didn't go through".
+    const sentBefore = await client.placeTableRound(command).catch((error: unknown) => error);
+    expect(sentBefore).toMatchObject({
+      code: "AlreadyOrdered",
+      placedOrderNumber: "7",
+      placedTableLabel: "T4",
+    });
+    expect(placeErrorText(sentBefore as CounterOrderClientError, [], "Table T9")).toBe(
+      "This round for Table T4 was sent before, on order 7. Its time to pay has ended, so it was taken off and nothing was charged. Nothing new was sent. Open it in Orders.",
+    );
+    // A round sent again that is already paid says so; a pay-later round never is "paid".
+    expect(parsePlacedCounterOrder({ ...placed, paid: true }, true).paid).toBe(true);
     // A table round's reply names its table; a counter order's never does.
     expect(() => parsePlacedCounterOrder(placed)).toThrow();
     const { tableLabel: _label, ...counter } = placed;

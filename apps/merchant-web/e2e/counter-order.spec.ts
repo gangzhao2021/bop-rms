@@ -1740,6 +1740,148 @@ test("@production a paper send with no answer stays the same order after the pai
   }
 });
 
+// DEC-PAPER-SEND-IDEMPOTENT (review): staff reload a tablet that looks stuck after a paper send got
+// no answer, then enter the slip again. The page kept that send for the Store, so the same order
+// operation and the same payment operation go again: the order already recorded comes back, never
+// a second paper sale. Once answered, a reload no longer mentions it.
+test("@production a paper send with no answer is the same order after the page is reloaded", async ({
+  page,
+}) => {
+  await signIn(page);
+  await page.route("**/merchant/counter/menu", (route) => route.fulfill({ headers, json: menu }));
+  const sent: Record<string, unknown>[] = [];
+  await page.route("**/merchant/counter/orders", (route) => {
+    const body = route.request().postDataJSON() as Record<string, unknown>;
+    sent.push(body);
+    // The server placed and recorded it; the first answer never reached the page.
+    if (sent.length === 1) return route.abort("failed");
+    if (sent.length > 2) throw new Error("no more sends were expected");
+    return route.fulfill({
+      headers,
+      json: {
+        status: "AlreadyPlaced",
+        orderReference: id(20),
+        orderBatchReference: id(21),
+        orderNumber: "77",
+        orderVersion: 2,
+        orderMinor: "367",
+        tipMinor: "0",
+        totalMinor: "367",
+        payBy: new Date(Date.now() + 10 * 60_000).toISOString(),
+        recordedAfterOutage: true,
+        paid: true,
+        payment: {
+          status: "AlreadyRecorded",
+          amountMinor: "367",
+          recordingReason: "RecordedAfterOutage",
+          takenAt: (body.paperPayment as { takenAt: string }).takenAt,
+          recordedAt: new Date().toISOString(),
+          acceptance: "Accepted",
+        },
+      },
+    });
+  });
+  const paidAt = new Date(Date.now() - 20 * 60_000);
+  const local = new Date(paidAt.getTime() - paidAt.getTimezoneOffset() * 60_000)
+    .toISOString()
+    .slice(0, 16);
+  const enterSlip = async () => {
+    await page.getByRole("button", { name: "Add Banana Bread" }).click();
+    await page.getByRole("checkbox", { name: "Recorded after an outage (taken on paper)" }).check();
+    await page.getByLabel("Paid at (store time, from the paper order)").fill(local);
+    await page.getByLabel("Slip reference (optional)").fill("TESTSLIP3");
+    await page.getByRole("button", { name: "Send and record paper order" }).click();
+  };
+  await page.goto("/operations/order-entry");
+  await enterSlip();
+  await expect(
+    page.getByText(
+      "No answer from the system. Send again — the same order is never created twice.",
+    ),
+  ).toBeVisible();
+  // The tablet looks stuck: staff reload it.
+  await page.reload();
+  const kept = page.getByText(
+    /The last paper order sent from this tablet \(\d\d:\d\d\) got no answer, so it may already be recorded\./u,
+  );
+  await expect(kept).toBeVisible();
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.screenshot({
+      path: `test-results/counter-paper-reloaded-${width}.png`,
+      fullPage: true,
+    });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  // Nothing about the slip itself is kept in the browser.
+  expect(
+    await page.evaluate(() => JSON.stringify(Object.entries(window.localStorage))),
+  ).not.toContain("TESTSLIP3");
+  await enterSlip();
+  await expect(page.getByRole("heading", { name: "Order 77 paid" })).toBeVisible();
+  expect(sent).toHaveLength(2);
+  expect(sent[1]?.operationReference).toBe(sent[0]?.operationReference);
+  const payment = (n: number) => sent[n]?.paperPayment as Record<string, unknown>;
+  expect(payment(1).operationReference).toBe(payment(0).operationReference);
+  // Answered: a later reload starts afresh.
+  await page.reload();
+  await expect(page.getByRole("button", { name: "Add Banana Bread" })).toBeVisible();
+  await expect(kept).toHaveCount(0);
+});
+
+// DEC-PAPER-SEND-IDEMPOTENT (review): a live counter order was charged from Orders while the
+// counter page had no answer. The same send reads it back as paid: the page says so and never
+// shows a charge step (a second card charge) with a pay-by in the past.
+test("@production a live send that comes back already paid goes to paid, never to charge", async ({
+  page,
+}) => {
+  await signIn(page);
+  await page.route("**/merchant/counter/menu", (route) => route.fulfill({ headers, json: menu }));
+  let sends = 0;
+  await page.route("**/merchant/counter/orders", (route) => {
+    sends += 1;
+    if (sends === 1) return route.abort("failed");
+    return route.fulfill({
+      headers,
+      json: {
+        status: "AlreadyPlaced",
+        orderReference: id(20),
+        orderBatchReference: id(21),
+        orderNumber: "81",
+        orderVersion: 2,
+        orderMinor: "367",
+        tipMinor: "0",
+        totalMinor: "367",
+        payBy: new Date(Date.now() - 5 * 60_000).toISOString(),
+        recordedAfterOutage: false,
+        paid: true,
+      },
+    });
+  });
+  await page.goto("/operations/order-entry");
+  await page.getByRole("button", { name: "Add Banana Bread" }).click();
+  const send = page.getByRole("button", { name: "Send order" });
+  await send.click();
+  await expect(
+    page.getByText(
+      "No answer from the system. Send again — the same order is never created twice.",
+    ),
+  ).toBeVisible();
+  await send.click();
+  await expect(page.getByRole("heading", { name: "Order 81 paid" })).toBeVisible();
+  await expect(
+    page.getByText(
+      "Order 81 is already paid; its payment is recorded. Don't charge the guest again",
+    ),
+  ).toBeVisible();
+  // No charge step: nothing to record or take payment for.
+  await expect(page.getByRole("button", { name: /Record/u })).toHaveCount(0);
+  await expect(page.locator("main")).not.toContainText(/Take payment by|released if unpaid/u);
+});
+
 // DEC-PAPER-ORDER-PAID-AT-SEND (v15 batch-5 review): a retry of a paper send after no answer, with
 // the tender changed, finds the first payment recorded; the sale is shown as recorded, never as
 // "isn't recorded yet" or something to check before charging.

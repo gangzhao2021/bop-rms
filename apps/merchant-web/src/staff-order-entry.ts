@@ -29,6 +29,8 @@ export class CounterOrderClientError extends Error {
   tableCart: { readonly cartVersion: number; readonly guestsCanSend: boolean } | null = null;
   /** WP-2423 M03 AlreadyOrdered: the store's number of the order that holds these dishes. */
   placedOrderNumber: string | null = null;
+  /** DEC-PAPER-SEND-IDEMPOTENT AlreadyOrdered of a table round: the table it was sent for. */
+  placedTableLabel: string | null = null;
   /** WP-2423 (staff-round-soldout) ItemUnavailable: the dish is sold, its choices changed. */
   optionsChanged = false;
   constructor(
@@ -464,6 +466,11 @@ export interface PlacedCounterOrder {
    * staff record it again). Null when no payment was sent with the order.
    */
   readonly paperPayment?: PaperPaymentOutcome | null;
+  /**
+   * DEC-PAPER-SEND-IDEMPOTENT: the order sent again is already paid (someone recorded its payment,
+   * here or from Orders, while this page had no answer): nothing is charged again.
+   */
+  readonly paid?: true;
 }
 /** How a paper order was paid during the outage, sent with the order. */
 export interface PaperPayment {
@@ -613,7 +620,7 @@ export function parsePlacedCounterOrder(value: unknown, table = false): PlacedCo
       "payBy",
       "recordedAfterOutage",
     ],
-    table ? ["payLater"] : [],
+    table ? ["payLater", "paid"] : ["paid"],
   );
   if (
     (raw.status !== "Placed" && raw.status !== "AlreadyPlaced") ||
@@ -629,6 +636,7 @@ export function parsePlacedCounterOrder(value: unknown, table = false): PlacedCo
   // Absent from an older server (it never sends a round unpaid).
   const payLater = table && raw.payLater === true;
   if (raw.payLater !== undefined && typeof raw.payLater !== "boolean") return invalid();
+  if (raw.paid !== undefined && raw.paid !== true) return invalid();
   // A pay-later round has no payment window and no tip; any other has a window.
   if (
     payLater
@@ -649,6 +657,7 @@ export function parsePlacedCounterOrder(value: unknown, table = false): PlacedCo
     payLater,
     recordedAfterOutage: raw.recordedAfterOutage,
     tableLabel: table && raw.tableLabel !== null ? text(raw.tableLabel, 120) : null,
+    ...(raw.paid === true && !payLater ? { paid: true as const } : {}),
   });
 }
 
@@ -794,6 +803,21 @@ export function createCounterOrderClient(csrf: string, fetcher: typeof fetch = f
       if (code === "order_not_priced") throw new CounterOrderClientError("NotPriced");
       if (code === "staff_round_not_finished") throw new CounterOrderClientError("NotFinished");
       if (code === "staff_round_in_progress") throw new CounterOrderClientError("InProgress");
+      // DEC-PAPER-SEND-IDEMPOTENT: the first send placed this round (its time to pay has ended).
+      if (code === "staff_round_already_sent") {
+        const refused = new CounterOrderClientError("AlreadyOrdered");
+        refused.placedOrderNumber =
+          typeof body.orderNumber === "string" && /^[1-9][0-9]{0,18}$/u.test(body.orderNumber)
+            ? body.orderNumber
+            : null;
+        refused.placedTableLabel =
+          typeof body.tableLabel === "string" &&
+          body.tableLabel.length > 0 &&
+          body.tableLabel.length <= 120
+            ? body.tableLabel
+            : null;
+        throw refused;
+      }
       if (code === "staff_round_conflict") throw new CounterOrderClientError("Conflict");
       if (code === "tips_turned_off") throw new CounterOrderClientError("TipsOff");
       if (code === "tip_choices_changed") throw new CounterOrderClientError("TipChoicesChanged");

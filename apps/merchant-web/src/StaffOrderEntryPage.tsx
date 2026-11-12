@@ -17,6 +17,13 @@ import { CounterCancelAction } from "./CounterCancelAction.js";
 import { CashTenderFields, cashTender } from "./CashTenderFields.js";
 import { loadOftenOrdered, recordOrdered } from "./counter-often-ordered.js";
 import {
+  clearUnansweredCounterSend,
+  keepUnansweredCounterSend,
+  loadUnansweredCounterSend,
+  paperPaymentDigest,
+  type UnansweredCounterSend,
+} from "./counter-unanswered-send.js";
+import {
   paidAtDayNote,
   paidAtInstant,
   paidAtRefusal,
@@ -577,6 +584,18 @@ export function placeErrorText(
       );
     // WP-2423 M03: these dishes went into an order already; never charge them a second time.
     case "AlreadyOrdered":
+      // DEC-PAPER-SEND-IDEMPOTENT: a table round sent before is named by its table and order.
+      if (table !== null && error.placedOrderNumber !== null)
+        return t(
+          "This round for {table} was sent before, on order {number}. Its time to pay has ended, so it was taken off and nothing was charged. Nothing new was sent. Open it in Orders.",
+          {
+            table:
+              error.placedTableLabel === null
+                ? table
+                : t("Table {tableLabel}", { tableLabel: saidTable(error.placedTableLabel) }),
+            number: error.placedOrderNumber,
+          },
+        );
       return error.placedOrderNumber !== null
         ? t("Already ordered as order {number}. Nothing new was charged. Open it in Orders.", {
             number: error.placedOrderNumber,
@@ -767,19 +786,36 @@ export function StaffOrderEntryPage({
   // WP-2423 M127: the order being charged may be cancelled by this staff member (from Orders' read);
   // null until that read answers, so nobody is told to ask a manager before it is known.
   const [placedCancellable, setPlacedCancellable] = useState<boolean | null>(null);
-  const placeOperation = useRef<string | null>(null);
+  // DEC-PAPER-SEND-IDEMPOTENT: a counter send from this tablet that got no answer before the page
+  // was reloaded (kept for the Store until it is answered): the next send is the same order.
+  const [restoredSend, setRestoredSend] = useState<UnansweredCounterSend | null>(() =>
+    tableMode ? null : loadUnansweredCounterSend(storeReference),
+  );
+  const placeOperation = useRef<string | null>(restoredSend?.operationReference ?? null);
   // DEC-PAPER-SEND-IDEMPOTENT: the last counter send got no answer (or is still being sent), so
   // it may have placed the order (and, on paper, recorded its sale). Until it is answered, a
   // change to the order keeps the same operation: the server then names the order it placed
   // instead of placing a second one.
-  const sendUnanswered = useRef(false);
+  const sendUnanswered = useRef(restoredSend !== null);
+  /** The send was answered (or staff start over): this tablet no longer keeps it. */
+  const sendAnswered = () => {
+    sendUnanswered.current = false;
+    if (tableMode) return;
+    clearUnansweredCounterSend(storeReference);
+    setRestoredSend(null);
+  };
   /** A change to what is ordered: a new order intent, unless the last send is unanswered. */
   const newOrderIntent = () => {
     if (tableMode || !sendUnanswered.current) placeOperation.current = null;
   };
   // DEC-PAPER-ORDER-PAID-AT-SEND: the payment operation sent with a paper order (one per order
   // operation and payment as entered), so a retry of either never records it twice.
-  const paperOperation = useRef<{ key: string; reference: string } | null>(null);
+  // The key is a digest of the payment as entered (kept across a reload without the slip itself).
+  const paperOperation = useRef<{ key: string; reference: string } | null>(
+    restoredSend?.paperPayment === null || restoredSend?.paperPayment === undefined
+      ? null
+      : { key: restoredSend.paperPayment.digest, reference: restoredSend.paperPayment.reference },
+  );
   // One operation per payment as staff entered it (as at table checkout): a retry after no answer
   // with the same details is the same command (never counted twice); a corrected paid-at or slip is
   // a new one, not a conflict with the first.
@@ -1137,12 +1173,9 @@ export function StaffOrderEntryPage({
       paper && !tablePaysLater && paperInstant !== null
         ? (() => {
             const slipReference = paperTender === "Cash" || slip.trim() === "" ? null : slip.trim();
-            const key = JSON.stringify([
-              placeOperation.current,
-              paperTender,
-              slipReference,
-              paperInstant,
-            ]);
+            const key = paperPaymentDigest(
+              JSON.stringify([placeOperation.current, paperTender, slipReference, paperInstant]),
+            );
             if (paperOperation.current?.key !== key)
               paperOperation.current = { key, reference: serviceOperationReference() };
             return {
@@ -1200,7 +1233,7 @@ export function StaffOrderEntryPage({
               recordedAfterOutage: paper,
               ...(paperPayment === undefined ? {} : { paperPayment }),
             });
-      sendUnanswered.current = false;
+      sendAnswered();
       setPlaced(order);
       setPlacedCancellable(null);
       if (decided !== null) setRemovedNote(guestRemovedNote(removedAtSend));
@@ -1232,6 +1265,19 @@ export function StaffOrderEntryPage({
         setPhase("Paid");
         setChangeDue(null);
         setPaidNote(paperAlreadyRecordedText());
+      } else if (order.paid === true) {
+        // DEC-PAPER-SEND-IDEMPOTENT: the order sent again was paid meanwhile (charged from Orders
+        // or another tablet while this page had no answer): never asked to be charged again.
+        setPhase("Paid");
+        setChangeDue(null);
+        setPaidNote(
+          order.recordedAfterOutage
+            ? paperAlreadyRecordedText()
+            : t(
+                "Order {number} is already paid; its payment is recorded. Don't charge the guest again; Orders shows it.",
+                { number: order.orderNumber },
+              ),
+        );
       } else {
         if (paperOutcome !== null && paperPayment !== undefined) {
           // Placed, but its payment was not recorded: the same payment, recorded again below.
@@ -1269,8 +1315,23 @@ export function StaffOrderEntryPage({
       // An unknown or still-running outcome keeps the same operation (a retry returns the same
       // order); anything else starts over as a new order.
       const unanswered = failure.code === "OutcomeUnknown" || failure.code === "InProgress";
-      sendUnanswered.current = unanswered;
-      if (!unanswered) placeOperation.current = null;
+      if (unanswered && !tableMode && placeOperation.current !== null) {
+        // Kept for the Store, so a reload (a tablet that looks stuck) sends the same order again.
+        sendUnanswered.current = true;
+        keepUnansweredCounterSend(storeReference, {
+          operationReference: placeOperation.current,
+          sentAt: restoredSend?.sentAt ?? new Date().toISOString(),
+          recordedAfterOutage: paper,
+          paperPayment:
+            paperPayment === undefined || paperOperation.current === null
+              ? (restoredSend?.paperPayment ?? null)
+              : { digest: paperOperation.current.key, reference: paperOperation.current.reference },
+        });
+      } else if (unanswered) sendUnanswered.current = true;
+      else {
+        sendAnswered();
+        placeOperation.current = null;
+      }
       setProblem(
         placeErrorText(
           failure,
@@ -1425,7 +1486,7 @@ export function StaffOrderEntryPage({
     setPaidNote(null);
     setRemovedNote(null);
     setPaidAtRefused(false);
-    sendUnanswered.current = false;
+    sendAnswered();
     placeOperation.current = null;
     payOperation.current = null;
     paperOperation.current = null;
@@ -1451,7 +1512,7 @@ export function StaffOrderEntryPage({
     setPaidNote(null);
     setRemovedNote(null);
     setPaidAtRefused(false);
-    sendUnanswered.current = false;
+    sendAnswered();
     placeOperation.current = null;
     payOperation.current = null;
     paperOperation.current = null;
@@ -1596,6 +1657,21 @@ export function StaffOrderEntryPage({
           onExcludedCancellable={setPlacedCancellable}
         />
       )}
+      {/* DEC-PAPER-SEND-IDEMPOTENT: a send from before this page was reloaded got no answer. */}
+      {restoredSend !== null && phase === "Building" ? (
+        <p className="order-accept-by" data-tier="warning" role="status">
+          {restoredSend.recordedAfterOutage
+            ? t(
+                "The last paper order sent from this tablet ({time}) got no answer, so it may already be recorded. Enter the same slip and send: the order already recorded comes back, never a second sale. Or look for it in Orders first.",
+                { time: storeTime(restoredSend.sentAt, timeZone) },
+              )
+            : t(
+                "The last order sent from this tablet ({time}) got no answer, so it may already be placed. Enter it again and send: the order already placed comes back, never a second one. Or look for it in Orders first.",
+                { time: storeTime(restoredSend.sentAt, timeZone) },
+              )}{" "}
+          <Link to="/operations/orders">{t("Open Orders")}</Link>
+        </p>
+      ) : null}
       <div className="counter-order__layout">
         <section className="counter-order__menu" aria-labelledby="counter-menu-heading">
           <h2 id="counter-menu-heading" className="counter-order__hidden-heading">
@@ -2132,6 +2208,14 @@ export function StaffOrderEntryPage({
                 <p id="counter-paper-hint" className="field-hint">
                   {t(
                     "Within the last 3 days. The order is marked “Recorded after outage” and its payment counts on the day it was paid.",
+                  )}
+                </p>
+              ) : null}
+              {/* DEC-PAPER-SEND-IDEMPOTENT: another tablet's unanswered send is not known here. */}
+              {paper && !tableMode && ordering ? (
+                <p className="field-hint">
+                  {t(
+                    "Sent this slip from another tablet and got no answer? Look for it in Orders (Recorded after outage, by time and amount) before entering it here.",
                   )}
                 </p>
               ) : null}

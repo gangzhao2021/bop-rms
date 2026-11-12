@@ -9456,6 +9456,16 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Paid on paper · payment not recorded": "纸单已付款 · 付款还没录入",
   "Payment not recorded": "付款未录入",
   "Record paper payment": "录入纸单付款",
+  "Order {number} is already paid; its payment is recorded. Don't charge the guest again; Orders shows it.":
+    "订单 {number} 已经付款，付款已录入。不要再向客人收款；可在订单页查看。",
+  "This round for {table} was sent before, on order {number}. Its time to pay has ended, so it was taken off and nothing was charged. Nothing new was sent. Open it in Orders.":
+    "{table}的这一轮之前已经发送，在订单 {number} 里。付款时限已过，这一轮已撤下，没有收款。这次没有发送新的菜品。请在“订单”中查看。",
+  "The last paper order sent from this tablet ({time}) got no answer, so it may already be recorded. Enter the same slip and send: the order already recorded comes back, never a second sale. Or look for it in Orders first.":
+    "这台平板上次发送的纸质订单（{time}）没有收到答复，可能已经录入。按同一张纸质单填写后发送：会找回已录入的订单，不会多记一笔。也可以先到订单页查找。",
+  "The last order sent from this tablet ({time}) got no answer, so it may already be placed. Enter it again and send: the order already placed comes back, never a second one. Or look for it in Orders first.":
+    "这台平板上次发送的订单（{time}）没有收到答复，可能已经下单。重新填写后发送：会找回已下的订单，不会再下一张。也可以先到订单页查找。",
+  "Sent this slip from another tablet and got no answer? Look for it in Orders (Recorded after outage, by time and amount) before entering it here.":
+    "在另一台平板上发送过这张纸质单但没收到答复？先到订单页按时间和金额查找（停电/断网后补录），再在这里录入。",
   "This paper order's payment is no longer waiting to be recorded (already recorded, or it was entered again). The list will update.":
     "这张纸质订单的付款已不需要录入（已经录入，或已重新录入）。列表会自动更新。",
   "Paid in cash during the outage: {amount}. Its change was given then.":
