@@ -14,6 +14,8 @@ const d = vi.hoisted(() => ({
   bindingOptions: vi.fn(),
   ordinary: vi.fn(),
   whole: vi.fn(async (): Promise<unknown> => null),
+  // b10: what an order paid only in cash can still take back (the payment owner's read).
+  allowance: vi.fn(async () => ({ cashOnly: true, leftMinor: 0n })),
 }));
 vi.mock("./merchant-card-machine-refund.js", () => ({
   cardMachineWholeRefundSource: d.whole,
@@ -47,6 +49,7 @@ vi.mock("@rms/payment", async (original) => ({
   createPostgresPaymentTerminalStore: () => ({ read: d.terminal }),
   createPostgresOrderPaymentRefundPosition: () => d.position,
   createPostgresOrdinaryRefundPositionSource: () => d.ordinary,
+  readRefundRecoveryAllowance: d.allowance,
 }));
 // WP-2423 M163: money taken back on the order (owner read), none unless a test says so.
 vi.mock("./merchant-refund-recovery.js", async (original) => ({
@@ -136,6 +139,7 @@ it("binds actual captured payment and returns distinct confirmed and pending ref
     canSend: true,
     canRecover: true,
     recoveries: [],
+    cashTakeBackLeftMinor: null,
   });
   expect(d.position.mock.calls[0]?.[1]).toEqual({
     orderReference: id(9),
@@ -166,6 +170,7 @@ it.each([null, { ...terminal, outcome: "Failed" }])(
       canSend: true,
       canRecover: false,
       recoveries: [],
+      cashTakeBackLeftMinor: null,
     });
     expect(d.position).not.toHaveBeenCalled();
   },
@@ -288,6 +293,23 @@ describe("a counter cash payment", () => {
   }
   afterEach(() => {
     d.cards = () => ({ loadByIntent: async () => null, loadByBatch: async () => null });
+  });
+  // b10 cash-refund-approvals: money taken back on an order paid only in cash is cash alone, up
+  // to what the drawer gave back, as the payment owner reads it at the payment's observation.
+  it("names the cash a guest can still hand back, only for an order paid only in cash", async () => {
+    cash(card(2243n, 2n), [refund("OrdinaryRefund", 435n, id(31))]);
+    d.ordinary.mockResolvedValue({ confirmedMinor: 437n, pendingMinor: 0n });
+    d.allowance.mockResolvedValueOnce({ cashOnly: true, leftMinor: 435n });
+    const f = setup();
+    expect(await f.operation(f.input)).toMatchObject({
+      paidInCash: true,
+      canRecover: true,
+      cashTakeBackLeftMinor: "435",
+    });
+    expect(d.allowance.mock.lastCall?.[2]).toEqual({ orderReference: id(9), observedAt: at });
+    // A table that also took card or online money keeps both ways (no cash-only limit).
+    d.allowance.mockResolvedValueOnce({ cashOnly: false, leftMinor: 437n });
+    expect(await setup().operation(f.input)).toMatchObject({ cashTakeBackLeftMinor: null });
   });
   it("$22.43 paid as $22.45 and cancelled: refunded in full, not refused", async () => {
     cash(card(2243n, 2n), [refund("StaffCancellation", 2245n)]);

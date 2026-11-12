@@ -4930,6 +4930,7 @@ it("protects refund payment context and preserves unknown amounts", async () => 
     canSend: false,
     canRecover: false,
     recoveries: [],
+    cashTakeBackLeftMinor: null,
   };
   const query = vi.fn<NonNullable<MerchantBffRouterOptions["refundPaymentContext"]>>(async () => ({
     ...data,
@@ -4956,6 +4957,11 @@ it("protects refund payment context and preserves unknown amounts", async () => 
   expect(result.status).toBe(200);
   expect(result.headers.get("cache-control")).toBe("no-store");
   expect(await result.json()).toEqual(data);
+  // b10: an order paid only in cash names the cash the guest can still hand back.
+  query.mockResolvedValueOnce({ ...data, cashTakeBackLeftMinor: "2245" } as never);
+  expect(((await (await send()).json()) as Record<string, unknown>).cashTakeBackLeftMinor).toBe(
+    "2245",
+  );
   const unconfigured = await serveRefundContext();
   expect(
     (

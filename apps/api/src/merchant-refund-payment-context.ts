@@ -12,6 +12,7 @@ import {
   createPostgresOrderPaymentRefundPosition,
   createOrdinaryRefundRoleResolver,
   observeOrdinaryRefundOrderAfterFence,
+  readRefundRecoveryAllowance,
 } from "@rms/payment";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import {
@@ -186,6 +187,35 @@ export function createMerchantRefundPaymentContext(options: {
         return {
           canRecover: canRecover && recoveries !== null,
           recoveries: recoveries ?? [],
+          cashTakeBackLeftMinor: null as string | null,
+        };
+      };
+      // b10 cash-refund-approvals: an Order paid only in cash at the counter takes back cash
+      // alone, up to the cash its drawer gave back (whole nickels, rounding included), as the
+      // record command allows. Read only for who may record it; unreadable: nothing offered.
+      const cashRecoveryFacts = async (orderReference: string, observedAt: string) => {
+        const facts = await recoveryFacts(orderReference);
+        if (!facts.canRecover) return facts;
+        const allowance = await withOptionalRead(
+          businessTransaction,
+          () =>
+            readRefundRecoveryAllowance(
+              businessTransaction,
+              {
+                scope,
+                providerAccountReference: configuration.providerAccountReference,
+                environment: configuration.environment,
+                authorize: async (tx, query) =>
+                  query.orderReference === orderReference && (await authority.guard(tx)),
+              },
+              { orderReference, observedAt },
+            ),
+          null,
+        );
+        if (allowance === null) return { ...facts, canRecover: false };
+        return {
+          ...facts,
+          cashTakeBackLeftMinor: allowance.cashOnly ? allowance.leftMinor.toString() : null,
         };
       };
       const allowed = (tx?: unknown) => authority.guard(tx);
@@ -282,7 +312,9 @@ export function createMerchantRefundPaymentContext(options: {
           canRequest: viewer.canRequest,
           requestBlocked: viewer.requestBlocked,
           canSend: viewer.canSend,
-          ...(await recoveryFacts(card.orderReference)),
+          ...(card.cash === undefined
+            ? await recoveryFacts(card.orderReference)
+            : await cashRecoveryFacts(card.orderReference, observedAt)),
         });
       }
       const binding = await createPostgresPaymentIntentBindingSource({
@@ -328,7 +360,11 @@ export function createMerchantRefundPaymentContext(options: {
           canRequest: viewer.canRequest,
           requestBlocked: viewer.requestBlocked,
           canSend: viewer.canSend,
-          ...({ canRecover: false, recoveries: [] } as Awaited<ReturnType<typeof recoveryFacts>>),
+          ...({
+            canRecover: false,
+            recoveries: [],
+            cashTakeBackLeftMinor: null,
+          } as Awaited<ReturnType<typeof recoveryFacts>>),
         });
       }
       if (

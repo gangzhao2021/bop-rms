@@ -435,6 +435,9 @@ export function installMerchantRefundRoutes(
           canSend: result.canSend,
           // WP-2423 M163: money taken back on the order, and whether they may record it.
           canRecover: result.canRecover,
+          // b10: an order paid only in cash at the counter: the cash the guest can still hand
+          // back (whole nickels), the only way it comes back; null otherwise.
+          cashTakeBackLeftMinor: result.cashTakeBackLeftMinor,
           recoveries: result.recoveries.map((recovery) => ({
             recoveryReference: recovery.recoveryReference,
             method: recovery.method,

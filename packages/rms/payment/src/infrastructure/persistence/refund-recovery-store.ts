@@ -3,6 +3,7 @@ import type { ConsumerTransaction } from "@bop/eventing";
 import { parsePaymentInstant } from "../../application/payment-intent-creation.js";
 import { parsePaymentReference } from "../../application/payment-provider-adapter.js";
 import { createPostgresOrderFinancialPosition } from "../order-financial-position.js";
+import { createPostgresCardMachinePaymentStore } from "./card-machine-payment-store.js";
 import { observeOrdinaryRefundOrderAfterFence } from "./ordinary-refund-request-store.js";
 
 /**
@@ -149,9 +150,70 @@ export async function listRefundRecoveriesRecordedBetween(
 }
 
 /**
+ * b10 cash-refund-approvals (M163): what can still be taken back on an Order, and how. An Order
+ * paid only in cash at the counter (no online, table or card-machine charge) can only get back the
+ * cash its drawer gave out: in cash, in whole nickels, up to every cash refund handed back (the
+ * drawer's rounding included) less what was taken back already. Any other Order: its confirmed
+ * refunds less what was taken back, in cash or on the card machine. Caller authorizes.
+ */
+export async function readRefundRecoveryAllowance(
+  tx: ConsumerTransaction,
+  options: {
+    readonly scope: Scope & { readonly tenantReference: string };
+    readonly providerAccountReference: string;
+    readonly environment: "Test" | "Live";
+    authorize(tx: ConsumerTransaction, query: { orderReference: string }): Promise<boolean>;
+  },
+  query: { readonly orderReference: string; readonly observedAt: string },
+): Promise<{ readonly cashOnly: boolean; readonly leftMinor: bigint }> {
+  const scope = Object.freeze({
+    tenantReference: ref(options.scope.tenantReference),
+    brandReference: ref(options.scope.brandReference),
+    storeReference: ref(options.scope.storeReference),
+  });
+  const orderReference = ref(query.orderReference),
+    observedAt = String(parsePaymentInstant(query.observedAt));
+  const position = await createPostgresOrderFinancialPosition({
+    scope,
+    providerAccountReference: options.providerAccountReference,
+    environment: options.environment,
+    authorize: (t, value) => options.authorize(t, { orderReference: value.orderReference }),
+  })(tx, { orderReference, observedAt });
+  const machine = (
+    await createPostgresCardMachinePaymentStore({
+      scope,
+      authorize: (t, value) => options.authorize(t as never, value),
+    }).listByOrder(tx, orderReference)
+  ).filter((entry) => entry.payment.recordedAt <= observedAt);
+  await setScope(tx, scope);
+  const taken = (await listRefundRecoveriesByOrders(tx, scope, [orderReference])).reduce(
+    (sum, recovery) => sum + recovery.amountMinor,
+    0n,
+  );
+  const cashOnly =
+    machine.length > 0 &&
+    machine.every((entry) => entry.payment.cash !== undefined) &&
+    position.capturedMinor === 0n &&
+    position.tableSettlementCaptures.length === 0;
+  const back = cashOnly
+    ? machine.reduce(
+        (sum, entry) =>
+          sum +
+          entry.refunds
+            .filter((refund) => refund.recordedAt <= observedAt)
+            .reduce((total, refund) => total + refund.amountMinor, 0n),
+        0n,
+      )
+    : position.settlement.confirmedRefundMinor;
+  const leftMinor = back - taken;
+  return Object.freeze({ cashOnly, leftMinor: leftMinor > 0n ? leftMinor : 0n });
+}
+
+/**
  * Records one recovery, or answers the one already recorded for its operation (a retry). Under the
  * Order's refund fence: never more than the Order's confirmed refunds (online, card machine and
- * table, Payment's own position) less what was already taken back. Refunds still pending or not
+ * table, Payment's own position) less what was already taken back; an Order paid only in cash at
+ * the counter takes back cash alone, in whole nickels, up to the cash given back (b10). Refunds still pending or not
  * sent cannot be taken back: they can still be stopped. The caller authorizes the actor's
  * payment.refund.recover and supplies the business date of `recordedAt` in the Store's zone.
  */
@@ -165,12 +227,6 @@ export function createPostgresRefundRecoveryStore(options: {
     tenantReference: ref(options.scope.tenantReference),
     brandReference: ref(options.scope.brandReference),
     storeReference: ref(options.scope.storeReference),
-  });
-  const position = createPostgresOrderFinancialPosition({
-    scope,
-    providerAccountReference: options.providerAccountReference,
-    environment: options.environment,
-    authorize: (tx, query) => options.authorize(tx, { orderReference: query.orderReference }),
   });
   return async (
     tx: ConsumerTransaction,
@@ -237,14 +293,20 @@ export function createPostgresRefundRecoveryStore(options: {
         return fail("REFUND_RECOVERY_CONFLICT");
       return Object.freeze({ status: "AlreadyRecorded" as const, recovery: existing });
     }
-    const current = await position(tx, { orderReference, observedAt });
-    await setScope(tx, scope);
-    const taken = (await listRefundRecoveriesByOrders(tx, scope, [orderReference])).reduce(
-      (sum, recovery) => sum + recovery.amountMinor,
-      0n,
+    const allowance = await readRefundRecoveryAllowance(
+      tx,
+      {
+        scope,
+        providerAccountReference: options.providerAccountReference,
+        environment: options.environment,
+        authorize: options.authorize,
+      },
+      { orderReference, observedAt },
     );
-    if (input.amountMinor > current.settlement.confirmedRefundMinor - taken)
-      return fail("REFUND_RECOVERY_ABOVE_REFUNDED");
+    // b10: an Order paid only in cash gets back cash, in whole nickels (never a card charge).
+    if (allowance.cashOnly && (input.method !== "Cash" || input.amountMinor % 5n !== 0n))
+      return fail("REFUND_RECOVERY_INPUT_INVALID");
+    if (input.amountMinor > allowance.leftMinor) return fail("REFUND_RECOVERY_ABOVE_REFUNDED");
     await setScope(tx, scope);
     const inserted = await tx.query<Record<string, unknown>>(
       "INSERT INTO rms_payment.refund_recovery (tenant_id,brand_id,store_id,recovery_id,operation_id,order_id,method,slip_reference,amount_minor,currency_code,reason_code,actor_type,actor_id,permission_code,business_date,recorded_at,audit_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'CAD',$10,'User',$11,'payment.refund.recover',$12::date,$13::timestamptz,$14) RETURNING " +

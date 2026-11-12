@@ -327,6 +327,7 @@ export {
   listRefundRecoveriesByBusinessDate,
   listRefundRecoveriesRecordedBetween,
   listRefundRecoveriesByOrders,
+  readRefundRecoveryAllowance,
   refundRecoveryMethods,
   refundRecoveryReasons,
   RefundRecoveryError,

@@ -10,6 +10,8 @@ import {
   cardMachineRefundGivenBackMinor,
   createPostgresCardMachinePaymentStore,
   createPostgresOrderFinancialPosition,
+  createPostgresRefundRecoveryStore,
+  readRefundRecoveryAllowance,
   parseCardMachinePaymentRecord,
   parseCardMachineRefundRecord,
   planCounterCashTender,
@@ -546,6 +548,116 @@ it("WP-2423 M52: the counter takes cash by the table's rules; replay, concurrenc
       assert.equal((await balance(request(4n)))[0].otherOccupiedAmountMinor, 2247n);
       assert.equal((await balance(request(2n)))[0].otherOccupiedAmountMinor, 2247n);
       assert.equal((await balance(dish, [dish]))[0].otherOccupiedAmountMinor, 2245n);
+
+      // 8. b10 cash-refund-approvals (M163): money taken back on an order paid only in cash at the
+      // counter, as the pilot API role. The guest can only hand back the cash the drawer gave them:
+      // in cash, in whole nickels, up to the $22.45 given back (the rounding up included, more than
+      // the Order's $22.43 refunded); never "charged on the card machine".
+      const recover = createPostgresRefundRecoveryStore({
+        scope: { tenantReference: tenant, brandReference: brand, storeReference: store },
+        providerAccountReference: id(++n),
+        environment: "Test",
+        authorize: async (_tx, query) => query.orderReference === first.orderReference,
+      });
+      const recoveredAt = new Date().toISOString();
+      const takeBack = (amountMinor, extra = {}) => {
+        const recoveryReference = id(++n);
+        return {
+          recoveryReference,
+          operationReference: id(++n),
+          orderReference: first.orderReference,
+          method: "Cash",
+          slipReference: null,
+          amountMinor,
+          reasonCode: "REFUNDED_TOO_MUCH",
+          actorReference: actor,
+          recordedAt: recoveredAt,
+          businessDate: recoveredAt.slice(0, 10),
+          audit: {
+            auditId: id(++n),
+            brandId: brand,
+            storeId: store,
+            actor: { type: "User", reference: actor },
+            actionCode: "PAYMENT_REFUND_RECOVERY_RECORDED",
+            targetType: "PaymentRefundRecovery",
+            targetId: recoveryReference,
+            reasonCode: "REFUNDED_TOO_MUCH",
+            correlationId: id(++n),
+            occurredAt: recoveredAt,
+            sourceChannel: "MERCHANT_WEB",
+            dataClassification: "Restricted",
+            retentionPolicyCode: "FINANCIAL_COMPLIANCE",
+            retentionPolicyVersion: 1,
+          },
+          ...extra,
+        };
+      };
+      assert.equal(
+        (await position(first.orderReference)).settlement.confirmedRefundMinor,
+        2243n,
+        "the Order was refunded $22.43; the drawer gave back $22.45",
+      );
+      // The payment page reads the same allowance: cash only, $22.45.
+      const allowance = () =>
+        asApi((tx) =>
+          readRefundRecoveryAllowance(
+            tx,
+            {
+              scope: { tenantReference: tenant, brandReference: brand, storeReference: store },
+              providerAccountReference: id(++n),
+              environment: "Test",
+              authorize: async () => true,
+            },
+            { orderReference: first.orderReference, observedAt: new Date().toISOString() },
+          ),
+        );
+      assert.deepEqual(await allowance(), { cashOnly: true, leftMinor: 2245n });
+      // A cash payment can't be charged back on the card machine, and cash has no odd cents.
+      await assert.rejects(
+        asApi((tx) => recover(tx, takeBack(500n, { method: "CardMachine", slipReference: "A1" }))),
+        { code: "REFUND_RECOVERY_INPUT_INVALID" },
+      );
+      await assert.rejects(
+        asApi((tx) => recover(tx, takeBack(437n))),
+        { code: "REFUND_RECOVERY_INPUT_INVALID" },
+      );
+      // All the cash given back can come back, rounding included.
+      const allBack = await asApi((tx) => recover(tx, takeBack(2245n)));
+      assert.equal(allBack.status, "Recorded");
+      await assert.rejects(
+        asApi((tx) => recover(tx, takeBack(5n))),
+        { code: "REFUND_RECOVERY_ABOVE_REFUNDED" },
+      );
+      assert.deepEqual(await allowance(), { cashOnly: true, leftMinor: 0n });
+      // A card-machine order keeps both ways and its confirmed refunds as the limit.
+      const carded2 = order(1000n, 0n);
+      await asApi((tx) =>
+        cards().record(tx, paymentOf(carded2, id(++n), { slipReference: "AUTH 10" })),
+      );
+      assert.deepEqual(
+        await asApi((tx) =>
+          readRefundRecoveryAllowance(
+            tx,
+            {
+              scope: { tenantReference: tenant, brandReference: brand, storeReference: store },
+              providerAccountReference: id(++n),
+              environment: "Test",
+              authorize: async () => true,
+            },
+            { orderReference: carded2.orderReference, observedAt: new Date().toISOString() },
+          ),
+        ),
+        { cashOnly: false, leftMinor: 0n },
+      );
+      assert.deepEqual(
+        (
+          await admin.query(
+            "SELECT method,amount_minor::text AS amount,slip_reference FROM rms_payment.refund_recovery WHERE order_id=$1",
+            [first.orderReference],
+          )
+        ).rows,
+        [{ method: "Cash", amount: "2245", slip_reference: null }],
+      );
     } finally {
       for (const client of clients) await client.end().catch(() => undefined);
       await admin.end();
