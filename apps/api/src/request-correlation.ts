@@ -8,10 +8,7 @@ import {
 import type { CoreTelemetry } from "@bop-rms/observability";
 import type { Request, RequestHandler } from "express";
 import { v7 as uuidV7 } from "uuid";
-import {
-  requestReadAnswerWithinMs,
-  withRequestAcquireBudget,
-} from "./request-acquire-budget.js";
+import { requestReadAnswerWithinMs, withRequestAcquireBudget } from "./request-acquire-budget.js";
 
 const requestContextKey = Symbol("bop.request-correlation");
 const requestErrorCodeKey = Symbol("bop.request-error-code");

@@ -27,13 +27,16 @@ export function isReadRequestMethod(method: string | undefined): boolean {
  * sole-operator, step-up and refund-approval screens wait 20 s. Cutting them at 12 s would make a
  * long period answer busy on a quiet database, and every retry the same.
  */
-const longerReadAnswers: readonly { readonly path: string; readonly prefix: boolean; readonly ms: number }[] =
-  Object.freeze([
-    { path: "/merchant/reports", prefix: true, ms: 27_000 },
-    { path: "/merchant/organization/sole-operator", prefix: false, ms: 17_000 },
-    { path: "/merchant/identity/step-up", prefix: false, ms: 17_000 },
-    { path: "/merchant/payments/refunds/approvals", prefix: false, ms: 17_000 },
-  ]);
+const longerReadAnswers: readonly {
+  readonly path: string;
+  readonly prefix: boolean;
+  readonly ms: number;
+}[] = Object.freeze([
+  { path: "/merchant/reports", prefix: true, ms: 27_000 },
+  { path: "/merchant/organization/sole-operator", prefix: false, ms: 17_000 },
+  { path: "/merchant/identity/step-up", prefix: false, ms: 17_000 },
+  { path: "/merchant/payments/refunds/approvals", prefix: false, ms: 17_000 },
+]);
 /**
  * A request's whole work time: undefined for a command (its work is never cut by the clock), the
  * screen's own longer time for the staff reads above, and `requestReadAnswerMs` for every other read.
