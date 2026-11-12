@@ -38,6 +38,24 @@ const copy: Record<OpeningCountErrorCode | "Loading", string> = {
   Offline: offlineCheckBeforeRepeatText,
   Unavailable: serverProblemText,
 };
+/**
+ * WP-2423 (b9): the count's heading says where it stands in the staff's language ("期初盘点 ·
+ * 已过账"), never the record's English state word or its internal version number.
+ */
+export function openingCountHeading(
+  lifecycle: NonNullable<OpeningCountPageView["selected"]>["lifecycle"],
+): string {
+  switch (lifecycle) {
+    case "Draft":
+      return t("Opening count · being counted");
+    case "Submitted":
+      return t("Opening count · waiting to be posted");
+    case "Posted":
+      return t("Opening count · posted");
+    case "Cancelled":
+      return t("Opening count · cancelled");
+  }
+}
 type State =
   | { readonly kind: "Loading" | OpeningCountErrorCode }
   | { readonly kind: "Found"; readonly view: OpeningCountPageView };
@@ -165,10 +183,7 @@ function Editor({
   return (
     <section className="detail-section">
       <h3>
-        {t("Opening count · {lifecycle} · version {version}", {
-          lifecycle: selected.lifecycle,
-          version: selected.version,
-        })}
+        {openingCountHeading(selected.lifecycle)}
       </h3>
       <table>
         <thead>

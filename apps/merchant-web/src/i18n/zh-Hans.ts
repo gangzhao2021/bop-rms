@@ -2837,7 +2837,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Opening and closing": "开店与打烊",
   "Opening count": "期初盘点",
   "Opening count is unavailable": "期初盘点暂不可用",
-  "Opening count · {lifecycle} · version {version}": "期初盘点 · {lifecycle} · 版本 {version}",
+  "Opening count · being counted": "期初盘点 · 盘点中",
+  "Opening count · cancelled": "期初盘点 · 已取消",
+  "Opening count · posted": "期初盘点 · 已过账",
+  "Opening count · waiting to be posted": "期初盘点 · 等待过账",
   "Opening hours are complete.": "营业时间已完整。",
   "Opening hours change": "营业时间更改",
   "Opening hours need at least one opening period, and each period may only use service modes this Store offers. Check steps 3 and 4.":
