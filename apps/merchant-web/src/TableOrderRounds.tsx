@@ -212,8 +212,28 @@ export function TableOrderRounds({
               </li>
             ))}
             {/* b13 (DEC-TAX-WHOLE-RECEIPT): the tax is worked out once on the bill after the
-                comps and is inside the whole bill below, as checkout and the paid bill print it;
-                no separate rounding line. */}
+                comps and is inside the whole bill below, as checkout and the paid bill print it.
+                The rounds above say what was ordered and the comps their tax-included amounts, so
+                the cent the tax moves by when worked out again is said here, in one line: the
+                list adds up to the whole bill. */}
+            {bill !== null &&
+            bill.paid === null &&
+            bill.mergedInto === undefined &&
+            bill.taxRoundingMinor !== undefined ? (
+              <li className="table-order-rounds__rounding">
+                <span>{t("Tax worked out again after comps")}</span>
+                <span>
+                  {BigInt(bill.taxRoundingMinor) < 0n ? "−" : "+"}
+                  {orderMoney({
+                    amountMinor: (BigInt(bill.taxRoundingMinor) < 0n
+                      ? -BigInt(bill.taxRoundingMinor)
+                      : BigInt(bill.taxRoundingMinor)
+                    ).toString(),
+                    currencyCode: "CAD",
+                  })}
+                </span>
+              </li>
+            ) : null}
             {/* v15 batch 7: this is the whole table's bill (every round, and the tables merged
                 into it), never one round's; a table merged away pays on the other table's bill. */}
             {bill !== null && bill.paid === null && bill.mergedInto === undefined ? (

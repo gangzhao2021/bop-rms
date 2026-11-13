@@ -250,11 +250,13 @@ test("@production a manager discounts a started dish from the Tables page; only 
   );
   // v15 batch 9 (DEC-TAX-WHOLE-RECEIPT): the order's Total stays what was ordered ($22.60).
   // b13: the whole bill after the comps carries its tax worked out once, as checkout and the paid
-  // bill print it, so no separate "Tax rounding" line is listed under the comps.
+  // bill print it. b13 review: $22.60 − $1.70 is $20.90, so the cent the tax moved by when worked
+  // out again on the whole bill is one line here, and the list adds up to the bill.
   const tableOrder = details.getByRole("region", { name: "This table's order" });
   const comps = details.getByRole("list", { name: "Comps and discounts" });
   await expect(comps.getByRole("listitem")).toHaveText([
     "Synthetic boiled fish · 15% off−$1.70",
+    "Tax worked out again after comps+$0.01",
     "Whole bill to pay after comps$20.91",
   ]);
   await expect(tableOrder.locator(".order-lines-totals").first()).toContainText("Total$22.60");
@@ -282,7 +284,7 @@ test("@production a manager discounts a started dish from the Tables page; only 
         return lines.size;
       }),
     );
-    expect(amountLines).toEqual([1, 1]);
+    expect(amountLines).toEqual([1, 1, 1]);
     await page.screenshot({
       path: `test-results/dining-item-comp-rounding-${width}.png`,
       fullPage: true,
