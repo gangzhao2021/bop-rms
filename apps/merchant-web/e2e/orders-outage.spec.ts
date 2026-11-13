@@ -337,6 +337,14 @@ for (const width of [390, 1024, 1440])
     await expect(page.getByText("Accepted all 2 orders.", { exact: true })).toBeVisible();
     expect(await dropped.count()).toBe(0);
     expect(await again.count()).toBe(0);
+    // WP-2423 (pickup-capacity-and-retry): after the summary and until the list is read again
+    // (2.5 s here), the accepted rows say so and offer no Accept: a tap there sent the accept again.
+    await expect(page.getByRole("status").filter({ hasText: /^Accepted ORD-\d$/u })).toHaveCount(2);
+    for (let i = 0; i < 10; i++) {
+      for (const button of await rowAccepts.all()) expect(await button.isEnabled()).toBe(false);
+      await page.waitForTimeout(150);
+    }
+    await expect(page.getByRole("button", { name: /^Accept all/u })).toHaveCount(0);
     expect([...accepted].sort()).toEqual([1, 2]);
     expect(acceptRequests).toBe(2);
     await expectNoInternalText(page);

@@ -19,8 +19,14 @@ export function OrderAcceptanceAction({
   resumeUnknown = false,
   paused = false,
   held = false,
+  accepted = false,
   closeWith = null,
 }: {
+  /**
+   * WP-2423 (pickup-capacity-and-retry): Accept all has just accepted this round; until the list
+   * reads again it says so, and never offers Accept for it again.
+   */
+  readonly accepted?: boolean;
   /**
    * Accept all is sending this list's accepts right now: a row's own Accept waits for it, so the
    * same round is never sent twice at once (staff would see a "changed" answer for nothing).
@@ -65,7 +71,7 @@ export function OrderAcceptanceAction({
   const pending = useRef<AbortController | null>(null);
   useEffect(() => () => pending.current?.abort(), []);
   const accept = async () => {
-    if (pending.current !== null || paused || held) return;
+    if (pending.current !== null || paused || held || accepted) return;
     const controller = new AbortController();
     pending.current = controller;
     setState("Submitting");
@@ -92,6 +98,15 @@ export function OrderAcceptanceAction({
       if (pending.current === controller) pending.current = null;
     }
   };
+  if (accepted)
+    return (
+      <div className="card-actions order-accept-action">
+        <p role="status" data-state="Accepted">
+          {t("Accepted")}
+          <span className="order-accept-action__number"> {orderNumber}</span>
+        </p>
+      </div>
+    );
   return (
     <div className="card-actions order-accept-action">
       {state === "Idle" || state === "Submitting" || state === "Unknown" || state === "Changed" ? (

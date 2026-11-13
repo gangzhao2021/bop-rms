@@ -4035,11 +4035,17 @@ export function CurrentOrderQueuePage({
     readonly summary: string | null;
   }>({ running: false, summary: null });
   const acceptAllRunning = useRef(false);
+  // WP-2423 (pickup-capacity-and-retry): rounds Accept all accepted, shown as accepted until the
+  // list reads again (the rows used to offer Accept again for ~3 s after the summary).
+  const [acceptedByAll, setAcceptedByAll] = useState<ReadonlySet<string>>(() => new Set());
   const acceptAllTargets =
     state.kind === "Ready" && phaseFilter === "AwaitingAcceptance" && !single
       ? awaitingFirst(filteredOrders).flatMap((order) =>
           order.batches
-            .filter((batch) => acceptsInRow(order, batch, now))
+            .filter(
+              (batch) =>
+                acceptsInRow(order, batch, now) && !acceptedByAll.has(batch.orderBatchReference),
+            )
             .map((batch) => ({
               order,
               batch,
@@ -4058,6 +4064,7 @@ export function CurrentOrderQueuePage({
     if (targets.length === 0) return;
     acceptAllRunning.current = true;
     setAcceptAll({ running: true, summary: null });
+    const accepted = new Set<string>();
     // Several paid rounds of one table can wait together; each acceptance moves the Order's
     // version forward, so a later round of the same order is sent at the version just returned.
     const versions = new Map<string, number>();
@@ -4079,6 +4086,7 @@ export function CurrentOrderQueuePage({
         operations.current.delete(reference);
         unknownOutcomes.current.delete(reference);
         versions.set(orderReference, result.acceptedOrderVersion);
+        accepted.add(reference);
       } catch (error) {
         notAccepted.add(orderReference);
         if (error instanceof OrderAcceptanceClientError && error.code === "Conflict") {
@@ -4098,9 +4106,9 @@ export function CurrentOrderQueuePage({
     // Counted in orders, as staff count them: a table with two rounds is one order, accepted only
     // when every round shown was.
     const count = orders.size;
-    const accepted = count - notAccepted.size;
+    const acceptedCount = count - notAccepted.size;
     const parts = [
-      ...(accepted === count
+      ...(acceptedCount === count
         ? [
             count === 1
               ? t("Accepted {orders}.", { orders: targets[0]?.label ?? "" })
@@ -4108,7 +4116,7 @@ export function CurrentOrderQueuePage({
           ]
         : count === 1
           ? []
-          : [t("Accepted {accepted} of {count} orders.", { accepted, count })]),
+          : [t("Accepted {accepted} of {count} orders.", { accepted: acceptedCount, count })]),
       ...(check.length === 0
         ? []
         : [
@@ -4144,6 +4152,7 @@ export function CurrentOrderQueuePage({
           ]),
     ];
     acceptAllRunning.current = false;
+    setAcceptedByAll((previous) => new Set([...previous, ...accepted]));
     setAcceptAll({ running: false, summary: parts.join(" ") });
     refreshInPlace();
   };
@@ -4170,6 +4179,7 @@ export function CurrentOrderQueuePage({
       }
       paused={offline}
       held={acceptAll.running}
+      accepted={acceptedByAll.has(batch.orderBatchReference)}
       operation={() => prepareAcceptance(order, batch)}
       onUnknown={() => unknownOutcomes.current.add(batch.orderBatchReference)}
       onRejected={() => {
@@ -5013,6 +5023,7 @@ export function CurrentOrderQueuePage({
                               resumeUnknown={unknownOutcomes.current.has(batch.orderBatchReference)}
                               paused={offline}
                               held={acceptAll.running}
+                              accepted={acceptedByAll.has(batch.orderBatchReference)}
                               csrf={csrf}
                               closeWith="RefundInstead"
                               orderNumber={
