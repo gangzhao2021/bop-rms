@@ -44,12 +44,12 @@ describe("WP-2423 DEC-TAX-WHOLE-RECEIPT: the Order's detail on Tables and Orders
     taxRounding: money(taxRounding),
     tip: null,
   });
-  it("shows the bill's tax rounding on its own line and a total equal to checkout", () => {
+  it("b15: says one Tax, its rounding in it, and a total equal to checkout", () => {
     const html = renderToStaticMarkup(
       <CurrentOrderLines lines={{ items: [], totals: totals("-1", "2705") }} />,
     );
-    expect(html).toContain("<dt>Tax</dt><dd>$3.12</dd>");
-    expect(html).toContain("<dt>Tax rounding</dt><dd>−$0.01</dd>");
+    expect(html).toContain("<dt>Tax</dt><dd>$3.11</dd>");
+    expect(html).not.toContain("Tax rounding");
     expect(html).toContain("<dt>Total</dt><dd>$27.05</dd>");
     const none = renderToStaticMarkup(
       <CurrentOrderLines lines={{ items: [], totals: totals("0", "2706") }} />,
@@ -77,10 +77,10 @@ describe("WP-2423 DEC-TAX-WHOLE-RECEIPT: the Order's detail on Tables and Orders
 });
 
 // v15 batch 9 review: three separate $12.50 rounds at 13% are charged $1.63 tax each ($4.89); the
-// whole bill's tax is $4.88, so the bill rounds by −$0.01. The Order's Total is what was ordered
-// ($42.39, the guest's "Total ordered") and never moves with a comp — here or on a table merged
-// into it; the rounding (as checkout takes it now) is always listed apart.
-describe("v15 batch 9: an Order's Total is as ordered, the bill's tax rounding apart", () => {
+// whole bill's tax is $4.88, so the bill rounds by −$0.01. v15 b15 live (TM2): the Tables panel
+// read "Tax $4.89 / Total $42.39 / Tax rounding −$0.01 / Whole bill to pay $42.38" while the guest,
+// checkout and the paid bill read Tax $4.88 / Total $42.38 — one tax figure everywhere now.
+describe("v15 b15: an Order on a pay-at-end table reads the bill's one Tax and Total", () => {
   const money = (amountMinor: string) => ({ amountMinor, currencyCode: "CAD" });
   const lines = {
     items: [],
@@ -99,7 +99,7 @@ describe("v15 batch 9: an Order's Total is as ordered, the bill's tax rounding a
       tableBill,
       batches: [{ compedItems: comped ? [{ orderItemReference: "x", amountMinor: "1413" }] : [] }],
     }) as never;
-  it("lists the rounding under the Total and then the whole bill to pay", () => {
+  it("puts the rounding in the Tax and Total, with no second total to pay", () => {
     const html = renderToStaticMarkup(
       <CurrentOrderLines
         lines={lines}
@@ -108,14 +108,15 @@ describe("v15 batch 9: an Order's Total is as ordered, the bill's tax rounding a
         )}
       />,
     );
-    expect(html).toContain("<dt>Total</dt><dd>$42.39</dd>");
-    expect(html).toContain("<dt>Tax rounding</dt><dd>−$0.01</dd>");
-    expect(html).toContain("<dt>Whole bill to pay</dt><dd>$42.38</dd>");
-    expect(html.indexOf("Total</dt>")).toBeLessThan(html.indexOf("Tax rounding"));
+    expect(html).toContain("<dt>Subtotal</dt><dd>$37.50</dd>");
+    expect(html).toContain("<dt>Tax</dt><dd>$4.88</dd>");
+    expect(html).toContain("<dt>Total</dt><dd>$42.38</dd>");
+    expect(html).not.toContain("Tax rounding");
+    expect(html).not.toContain("Whole bill to pay");
   });
-  it("keeps the same Total when a comp changes the rounding (a table merged into it too)", () => {
+  it("says the whole bill to pay apart only when a table merged into it adds to it", () => {
     // The host's rounding moved to +$0.01 because a dish on the merged table was comped; the
-    // host's own Order has no comps, so it is said under its Total, which stays $42.39.
+    // host's own Order has no comps, so its Tax and Total hold it; the bill has both tables.
     const html = renderToStaticMarkup(
       <CurrentOrderLines
         lines={lines}
@@ -125,8 +126,9 @@ describe("v15 batch 9: an Order's Total is as ordered, the bill's tax rounding a
         )}
       />,
     );
-    expect(html).toContain("<dt>Total</dt><dd>$42.39</dd>");
-    expect(html).toContain("<dt>Tax rounding</dt><dd>$0.01</dd>");
+    expect(html).toContain("<dt>Tax</dt><dd>$4.90</dd>");
+    expect(html).toContain("<dt>Total</dt><dd>$42.40</dd>");
+    expect(html).not.toContain("Tax rounding");
     expect(html).toContain("<dt>Whole bill to pay, with Table 3</dt><dd>$54.10</dd>");
   });
   it("leaves it to the comps list when this Order has comps, and says no amount once paid", () => {
@@ -156,7 +158,10 @@ describe("v15 batch 9: an Order's Total is as ordered, the bill's tax rounding a
     const paidHtml = renderToStaticMarkup(
       <CurrentOrderLines lines={lines} billRounding={{ taxRoundingMinor: "-1", toPay: null }} />,
     );
-    expect(paidHtml).toContain("<dt>Tax rounding</dt><dd>−$0.01</dd>");
+    // Paid: the Tax and Total are what the printed paid bill says ($4.88 / $42.38).
+    expect(paidHtml).toContain("<dt>Tax</dt><dd>$4.88</dd>");
+    expect(paidHtml).toContain("<dt>Total</dt><dd>$42.38</dd>");
+    expect(paidHtml).not.toContain("Tax rounding");
     expect(paidHtml).not.toContain("to pay");
   });
 });

@@ -49,21 +49,21 @@ it("reads nothing from a damaged value", () => {
   expect(loadLastBills()).toBeNull();
 });
 
-// DEC-TAX-WHOLE-RECEIPT: during an outage staff read the same figures as checkout — each round as
-// ordered and the bill's tax rounding as one line — never a third set of round amounts.
-it("keeps each round as ordered and the bill's tax rounding on its own", () => {
+// DEC-TAX-WHOLE-RECEIPT: during an outage staff read the same figures as checkout. b15: one tax
+// figure — each round as the bill charges it (its share of the rounding in it), no rounding line.
+it("keeps each round as the bill charges it, adding up to what is owed", () => {
   const value = splitBillFixture();
   const rounds = value.rounds as Record<string, unknown>[];
   rounds[0] = { ...rounds[0], taxMinor: "630", totalMinor: "5480", taxRoundingMinor: "-1" };
   value.owed = { subtotalMinor: "8400", taxMinor: "1091", totalMinor: "9491" };
   const kept = lastTableBill("T8", parseTableBill(value));
-  expect(kept.rounds.map((round) => round.totalMinor)).toEqual(["5481", "4011"]);
-  expect(kept.taxRoundingMinor).toBe("-1");
+  expect(kept.rounds.map((round) => round.totalMinor)).toEqual(["5480", "4011"]);
+  expect(kept.taxRoundingMinor).toBe("0");
   expect(kept.owedMinor).toBe("9491");
   saveLastBills([kept]);
   const html = renderToStaticMarkup(createElement(TablesOfflineGuide));
-  expect(html).toContain("<dt>Round 1</dt><dd>$54.81</dd>");
-  expect(html).toContain("<dt>Tax rounding</dt><dd>−$0.01</dd>");
+  expect(html).toContain("<dt>Round 1</dt><dd>$54.80</dd>");
+  expect(html).not.toContain("Tax rounding");
   expect(html).toContain("To pay $94.91");
 });
 

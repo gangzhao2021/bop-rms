@@ -13,8 +13,8 @@ export interface LastTableBill {
   readonly label: string;
   readonly owedMinor: string;
   /**
-   * DEC-TAX-WHOLE-RECEIPT: the tax rounding in what is owed (the unpaid rounds' shares), shown as
-   * one line as at checkout; each round is as ordered. Absent in a value saved by an older page.
+   * DEC-TAX-WHOLE-RECEIPT: a separate tax rounding line, only in a value an older page saved (its
+   * rounds as ordered). b15: saved as "0" — each round holds its share, as the bill charges it.
    */
   readonly taxRoundingMinor?: string;
   readonly settled: boolean;
@@ -43,14 +43,13 @@ export function lastTableBill(label: string, bill: TableBill): LastTableBill {
   return Object.freeze({
     label,
     owedMinor: bill.owed.totalMinor,
-    taxRoundingMinor: bill.rounds
-      .filter((round) => !round.paid)
-      .reduce((sum, round) => sum + BigInt(round.taxRoundingMinor), 0n)
-      .toString(),
+    // v15 b15 (DEC-TAX-WHOLE-RECEIPT): one tax figure — each round as the bill charges it, its
+    // share of the tax rounding in it, so the rounds add up to what is owed with no rounding line.
+    taxRoundingMinor: "0",
     settled: bill.settlement !== null,
     rounds: bill.rounds.map((round) => ({
       number: round.roundNumber,
-      totalMinor: (BigInt(round.totalMinor) - BigInt(round.taxRoundingMinor)).toString(),
+      totalMinor: round.totalMinor,
       items: round.items.map((item) => ({
         name: item.displayName,
         subtotalMinor: item.subtotalMinor,

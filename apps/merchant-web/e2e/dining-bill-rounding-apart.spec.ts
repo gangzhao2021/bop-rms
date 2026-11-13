@@ -1,12 +1,13 @@
 import { expect, test } from "@playwright/test";
 
 /**
- * v15 batch 9 review (DEC-TAX-WHOLE-RECEIPT): an Order's Total is what it ordered and never moves
- * with a comp — on this table or on a table merged into it. Two $12.50 dishes at a 13% TEST tax,
- * one per table, merged: each round was charged $1.63, the whole bill's tax is $3.25, so the bill
- * rounds by −$0.01 (rule v2: on the host's Order). The host's Total reads $14.13 with the rounding
- * listed under it; after a manager comps the merged table's dish the rounding is gone and the
- * host's Total still reads $14.13 (it read $14.12, then $14.13). Synthetic Store; server mocked.
+ * v15 batch 9 review / b15 (DEC-TAX-WHOLE-RECEIPT): one tax figure everywhere. Two $12.50 dishes
+ * at a 13% TEST tax, one per table, merged: each round was charged $1.63, the whole bill's tax is
+ * $3.25, so the bill rounds by −$0.01 (rule v2: on the host's Order). The host reads Tax $1.62 /
+ * Total $14.12 (its share of the rounding in them, never a "Tax rounding" line), then the whole
+ * bill with the merged table, $28.25; the merged table reads what it ordered, $14.13. After a
+ * manager comps the merged table's dish there is no rounding left: the host reads $1.63 / $14.13,
+ * the bill it is. Synthetic Store; server mocked.
  */
 const id = (n: number) => "0190996a-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 const headers = { "cache-control": "no-store" };
@@ -15,7 +16,7 @@ const money = (amountMinor: string) => ({ amountMinor, currencyCode: "CAD" });
 
 for (const width of [1440, 1024, 390])
   for (const comped of [false, true])
-    test(`@production the host's Total stays as ordered ${comped ? "after" : "before"} a comp on the merged table (${width})`, async ({
+    test(`@production the host reads the bill's one tax ${comped ? "after" : "before"} a comp on the merged table (${width})`, async ({
       page,
     }) => {
       await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
@@ -182,14 +183,15 @@ for (const width of [1440, 1024, 390])
       const details = page.getByRole("complementary", { name: "Selected table details" });
       const host = details.getByRole("region", { name: "This table's order" }).first();
       const totals = host.locator(".order-lines-totals");
-      await expect(totals.first()).toContainText("Total$14.13");
-      await expect(totals.first()).not.toContainText("Tax rounding");
+      await expect(host).not.toContainText("Tax rounding");
       if (comped) {
-        // No rounding left on the bill: nothing under the host's Total.
-        await expect(host).not.toContainText("Tax rounding");
+        // No rounding left on the bill: the host's Total as ordered, nothing under it.
+        await expect(totals.first()).toContainText("Tax$1.63");
+        await expect(totals.first()).toContainText("Total$14.13");
         await expect(host).not.toContainText("Whole bill to pay");
       } else {
-        await expect(totals.nth(1)).toContainText("Tax rounding−$0.01");
+        await expect(totals.first()).toContainText("Tax$1.62");
+        await expect(totals.first()).toContainText("Total$14.12");
         await expect(totals.nth(1)).toContainText("Whole bill to pay, with MRS 2$28.25");
       }
       const merged = details.getByRole("region", { name: /^From (table )?MRS 2$/u });

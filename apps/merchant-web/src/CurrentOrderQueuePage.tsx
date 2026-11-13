@@ -380,10 +380,14 @@ export function CurrentOrderLines({
   // v15 2026-10-29: the totals are what the order is charged — never the dishes taken off an
   // unpaid bill or the rounds cancelled for a failed payment (listed below as not charged), so staff
   // read the same figure the payment takes. v15 2026-11-06: nor a round waiting for staff OK.
-  const shown = chargedTotals(
+  const charged = chargedTotals(
     lines,
     lines.items.filter((item) => removedLine(item) || unpaidLine(item) || waitingLine(item)),
   );
+  // v15 b15 (DEC-TAX-WHOLE-RECEIPT): one tax figure everywhere — this Order's share of the bill's
+  // tax rounding is in its Tax and Total, as checkout, the printed paid bill and the guest's page
+  // read it ($4.88 / $42.38, never $4.89, "Tax rounding −$0.01" and a second total).
+  const shown = withBillRounding(charged, billRounding);
   // v15 2026-11-11 b10: with every round cancelled and refunded, the Total above still reads as
   // the money charged; what the order comes to after its refunds is said under them, so staff
   // never read a refunded total as money owed. Only when every refund's amount is known.
@@ -604,15 +608,17 @@ export function CurrentOrderLines({
         ) : null}
         <div>
           <dt>{t("Tax")}</dt>
-          <dd>{orderMoney(shown.tax)}</dd>
+          {/* WP-2423 DEC-TAX-WHOLE-RECEIPT: the table bill's tax is rounded once; the Total has it,
+              and so does this one Tax figure (an older server's lines rounding included). */}
+          <dd>
+            {orderMoney({
+              amountMinor: (
+                BigInt(shown.tax.amountMinor) + BigInt(totals.taxRounding.amountMinor)
+              ).toString(),
+              currencyCode: shown.tax.currencyCode,
+            })}
+          </dd>
         </div>
-        {/* WP-2423 DEC-TAX-WHOLE-RECEIPT: the table bill's tax is rounded once; the total has it. */}
-        {totals.taxRounding.amountMinor !== "0" ? (
-          <div>
-            <dt>{t("Tax rounding")}</dt>
-            <dd>{orderMoney(totals.taxRounding)}</dd>
-          </div>
-        ) : null}
         {totals.tip !== null && totals.tip.amountMinor !== "0" ? (
           <div>
             <dt>{t("Tip")}</dt>
@@ -624,34 +630,20 @@ export function CurrentOrderLines({
           <dd>{orderMoney(orderTotalWithTip(shown))}</dd>
         </div>
       </dl>
-      {billRounding !== undefined ? (
-        <dl
-          className={
-            billRounding.toPay === null
-              ? "order-lines-totals order-lines-cancelled-refund"
-              : "order-lines-totals"
-          }
-        >
+      {/* The whole bill to pay only when it is not this Total alone (a table merged into it). */}
+      {billRounding?.toPay != null &&
+      (billRounding.toPay.amountMinor !== orderTotalWithTip(shown).amountMinor ||
+        billRounding.toPay.label !== t("Whole bill to pay")) ? (
+        <dl className="order-lines-totals">
           <div>
-            <dt>{t("Tax rounding")}</dt>
+            <dt>{billRounding.toPay.label}</dt>
             <dd>
               {orderMoney({
-                amountMinor: billRounding.taxRoundingMinor,
+                amountMinor: billRounding.toPay.amountMinor,
                 currencyCode: lines.totals.total.currencyCode,
               })}
             </dd>
           </div>
-          {billRounding.toPay !== null ? (
-            <div>
-              <dt>{billRounding.toPay.label}</dt>
-              <dd>
-                {orderMoney({
-                  amountMinor: billRounding.toPay.amountMinor,
-                  currencyCode: lines.totals.total.currencyCode,
-                })}
-              </dd>
-            </div>
-          ) : null}
         </dl>
       ) : null}
       {waitingMinor > 0n ? (
@@ -725,6 +717,30 @@ export function totalAfterRefunds(
     : Object.freeze({ amountMinor: left.toString(), currencyCode: total.currencyCode });
 }
 
+/** "+$0.01" / "−$0.01": a cent the bill's tax moves by. */
+export function signedCad(amountMinor: string): string {
+  const value = BigInt(amountMinor);
+  return (
+    (value < 0n ? "−" : "+") +
+    orderMoney({ amountMinor: (value < 0n ? -value : value).toString(), currencyCode: "CAD" })
+  );
+}
+/**
+ * v15 b15 (DEC-TAX-WHOLE-RECEIPT): the Order's totals with its share of the bill's tax rounding in
+ * the Tax and the Total (one tax figure, the bill's own), or the totals as they are without one.
+ */
+export function withBillRounding(
+  totals: CurrentOrderDetail["lines"]["totals"],
+  billRounding: BillRoundingApart | undefined,
+): CurrentOrderDetail["lines"]["totals"] {
+  if (billRounding === undefined || billRounding.taxRoundingMinor === "0") return totals;
+  const plus = (value: { readonly amountMinor: string; readonly currencyCode: string }) =>
+    Object.freeze({
+      amountMinor: (BigInt(value.amountMinor) + BigInt(billRounding.taxRoundingMinor)).toString(),
+      currencyCode: value.currencyCode,
+    });
+  return Object.freeze({ ...totals, tax: plus(totals.tax), total: plus(totals.total) });
+}
 /** v15 batch 9 (DEC-TAX-WHOLE-RECEIPT): see billRoundingApart. */
 export interface BillRoundingApart {
   readonly taxRoundingMinor: string;
@@ -732,11 +748,11 @@ export interface BillRoundingApart {
   readonly toPay: { readonly label: string; readonly amountMinor: string } | null;
 }
 /**
- * v15 batch 9 (DEC-TAX-WHOLE-RECEIPT): an Order's Total is always what was ordered, so its share
- * of the bill's tax rounding (worked out on the whole bill, after any comps, here or on a table
- * merged into it) is listed apart, as the guest's page lists it. With comps on this Order it is
- * listed under them (CompRecordsNote, the Tables comps list); otherwise under the Total, followed
- * by the whole bill to pay. Undefined: no rounding on this Order, or listed under its comps.
+ * v15 batch 9 / b15 (DEC-TAX-WHOLE-RECEIPT): this Order's share of the bill's tax rounding (worked
+ * out on the whole bill, here or on a table merged into it), which CurrentOrderLines puts in its
+ * Tax and Total (withBillRounding), and the whole bill to pay. With comps on this Order the lines
+ * stay as ordered and the comps list says the cent the tax moves by (CompRecordsNote, the Tables
+ * comps list). Undefined: no rounding on this Order, or said under its comps.
  */
 export function billRoundingApart(
   order: QueuedOrder,
@@ -1122,16 +1138,12 @@ function CompRecordsNote({
         </li>
       ))}
       {/* v15 batch 9 (DEC-TAX-WHOLE-RECEIPT): the bill's tax is worked out once, after the comps;
-          the cent it rounds by is listed here, so the order's Total stays as ordered. */}
+          the cent it moves by is listed here, so the order's Total stays as ordered. b15: said as
+          the Tables comps list says it. */}
       {detail.order.tableBill?.taxRoundingMinor !== undefined ? (
         <li>
-          <span>{t("Tax rounding")}</span>{" "}
-          <span>
-            {orderMoney({
-              amountMinor: detail.order.tableBill.taxRoundingMinor,
-              currencyCode: "CAD",
-            })}
-          </span>
+          <span>{t("Tax worked out again after comps")}</span>{" "}
+          <span>{signedCad(detail.order.tableBill.taxRoundingMinor)}</span>
         </li>
       ) : null}
     </ul>
