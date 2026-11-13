@@ -106,6 +106,7 @@ import {
 } from "./dining-batch-payment-due.js";
 import { listRoundsWaitingForStaff } from "./dining-waiting-rounds.js";
 import {
+  cashRefundsAtRequestAmount,
   emptyOrderRecordFacts,
   nameOrderRecord,
   ordinaryRefundRecordEntries,
@@ -827,6 +828,10 @@ export function createPersistentMerchantOrderQueue(options: {
                     actor: String(refund.actorReference),
                     approver: null,
                     at: String(refund.refundedAt),
+                    // v15 b15: said at its request's amount below (the drawer's beside it).
+                    ...(method === "Cash" && refund.sourceKind === "OrdinaryRefund"
+                      ? { requestReference: String(refund.sourceReference) }
+                      : {}),
                   });
               }
               // The amount is rebuilt from five owners' records (as the payment record checks it),
@@ -1776,13 +1781,15 @@ export function createPersistentMerchantOrderQueue(options: {
                       });
                   // Ordinary refunds Payment sent back: who asked, and who approved (a second
                   // person, or the sole operator on their own under DEC-SOLE-OPERATOR).
+                  const requesters = await listOrderOrdinaryRefundRequesters(
+                    businessTransaction,
+                    scoped,
+                    only.orderReference,
+                  );
+                  recordFacts.refunds = cashRefundsAtRequestAmount(recordFacts.refunds, requesters);
                   recordFacts.refunds.push(
                     ...ordinaryRefundRecordEntries(
-                      await listOrderOrdinaryRefundRequesters(
-                        businessTransaction,
-                        scoped,
-                        only.orderReference,
-                      ),
+                      requesters,
                       await listOrderOrdinaryRefundApprovers(
                         businessTransaction,
                         scoped,

@@ -86,7 +86,12 @@ function order(
 }
 async function orders(
   page: Page,
-  state: { who: "Manager" | "Cashier"; waiting: boolean; notSentMinor: string },
+  state: {
+    who: "Manager" | "Cashier";
+    waiting: boolean;
+    notSentMinor: string;
+    record?: Record<string, unknown>;
+  },
 ) {
   const listed = () => ({
     items: [order(false, state.who, state.waiting)],
@@ -101,6 +106,7 @@ async function orders(
         screenId: "OPS-ORDER-DETAIL",
         pickupContact: null,
         order: order(true, state.who, state.waiting),
+        ...(state.record === undefined ? {} : { record: state.record }),
         paymentPosition: {
           refundedMinor: "0",
           refundPendingMinor: state.notSentMinor,
@@ -260,4 +266,45 @@ test("@production a refund waiting for approval says so on the order, not 'open 
   await expect(note).toContainText(
     "A refund of $31.37 is recorded but not sent yet. Open the payment under Payments and refunds to send it.",
   );
+});
+
+// v15 b15 (DEMO order 16): the Record said a $5.09 cash refund as "Refund $5.10" (the drawer's
+// whole nickels) while the payment pages say "Refunded $5.09" and "$5.10 given back from the
+// drawer". The Record says both, the same way.
+test("@production the order's Record names a cash refund and the cash given back from the drawer", async ({
+  page,
+}) => {
+  await signIn(page);
+  await orders(page, {
+    who: "Manager",
+    waiting: false,
+    notSentMinor: "0",
+    record: {
+      accepted: [{ round: 1, by: "Sam", at: "2026-11-06T15:00:30.000Z" }],
+      handedOver: [],
+      payments: [
+        { method: "Cash", part: null, round: null, by: "Sam", at: "2026-11-06T15:00:10.000Z" },
+      ],
+      cancellations: [],
+      refunds: [
+        {
+          method: "Cash",
+          amountMinor: "509",
+          by: "Mia",
+          approvedBy: null,
+          at: "2026-11-06T15:20:00.000Z",
+          cashGivenBackMinor: "510",
+        },
+      ],
+      writeOff: null,
+      paidOnlineByGuest: false,
+    },
+  });
+  await page.goto("/operations/orders/" + id(21));
+  const record = page.getByRole("region", { name: "Record" });
+  await expect(record).toContainText("Refund $5.09");
+  await expect(record).toContainText("Cash, $5.10 given back from the drawer · Mia");
+  await expect(record).not.toContainText("Refund $5.10");
+  await expectNoInternalText(page);
+  await widths(page, "order-record-cash-refund");
 });

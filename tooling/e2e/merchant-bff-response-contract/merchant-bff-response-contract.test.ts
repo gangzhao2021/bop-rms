@@ -721,6 +721,16 @@ const pickupDetailView = {
         by: "Mia",
         approvedBy: "Store owner",
         at: at(9),
+        cashGivenBackMinor: null,
+      },
+      // v15 b15: a counter cash refund at its request's amount, the drawer's cash beside it.
+      {
+        method: "Cash",
+        amountMinor: "509",
+        by: "Mia",
+        approvedBy: null,
+        at: at(10),
+        cashGivenBackMinor: "510",
       },
     ],
     writeOff: null,

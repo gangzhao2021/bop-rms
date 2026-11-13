@@ -57,6 +57,41 @@ describe("M61: the order record says who did what", () => {
     ]);
   });
 
+  it("v15 b15: a cash refund names the refund and the cash given back from the drawer (en and zh)", () => {
+    const cash = {
+      ...record,
+      payments: [{ ...record.payments[0], method: "Cash" }],
+      refunds: [
+        {
+          ...record.refunds[0],
+          method: "Cash",
+          amountMinor: "509",
+          approvedBy: null,
+          cashGivenBackMinor: "510",
+        },
+      ],
+    };
+    const rows = orderRecordRows(parseOrderRecordPeople(cash), "Pickup", tz, "2026-11-05");
+    expect(rows.at(-1)).toMatchObject({
+      label: "Refund $5.09",
+      text: "Cash, $5.10 given back from the drawer · Mia · 20:30",
+    });
+    setLanguageForTest("zh-Hans");
+    expect(
+      orderRecordRows(parseOrderRecordPeople(cash), "Pickup", tz, "2026-11-05").at(-1)?.text,
+    ).toContain("现金，从钱箱退还 $5.10");
+    // Only a cash refund carries the drawer's cash, and only as an amount.
+    expect(() =>
+      parseOrderRecordPeople({ ...cash, refunds: [{ ...cash.refunds[0], method: "CardMachine" }] }),
+    ).toThrow();
+    expect(() =>
+      parseOrderRecordPeople({
+        ...cash,
+        refunds: [{ ...cash.refunds[0], cashGivenBackMinor: 510 }],
+      }),
+    ).toThrow();
+  });
+
   it("says an automatic acceptance and an online payment plainly, per round at a table", () => {
     const parsed = parseOrderRecordPeople({
       ...record,

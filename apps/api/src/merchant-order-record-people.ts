@@ -31,6 +31,13 @@ export interface OrderRecordFacts {
     /** Who approved it, when an approval was required and recorded; else null. */
     approver: string | null;
     at: string;
+    /**
+     * v15 b15: a counter cash refund given back for a refund request — the request it gave back
+     * (read only to name the refund's own amount; never sent to the browser).
+     */
+    requestReference?: string;
+    /** v15 b15: the cash the drawer gave back (whole nickels), when not the refund's amount. */
+    cashGivenBackMinor?: string;
   }[];
   writeOff: { amountMinor: string; actor: string; approver: string; at: string } | null;
 }
@@ -82,6 +89,26 @@ export function ordinaryRefundRecordEntries(
     });
 }
 
+/**
+ * v15 b15: the order page's Record said a counter cash refund as the drawer's whole nickels
+ * ("Refund $5.10") while the payment pages say "Refunded $5.09" with "$5.10 given back from the
+ * drawer". Each such refund is said at its request's own amount, with the cash given back beside
+ * it when the two differ (the same rule the payment pages count by).
+ */
+export function cashRefundsAtRequestAmount(
+  refunds: OrderRecordFacts["refunds"],
+  requests: readonly { readonly requestReference: string; readonly amountMinor: string }[],
+): OrderRecordFacts["refunds"] {
+  const amounts = new Map(requests.map((request) => [request.requestReference, request]));
+  return refunds.map(({ requestReference, ...refund }) => {
+    const request = requestReference === undefined ? undefined : amounts.get(requestReference);
+    if (request === undefined || refund.method !== "Cash") return refund;
+    return request.amountMinor === refund.amountMinor
+      ? { ...refund, amountMinor: request.amountMinor }
+      : { ...refund, amountMinor: request.amountMinor, cashGivenBackMinor: refund.amountMinor };
+  });
+}
+
 export interface OrderRecordPerson {
   readonly name: string;
   readonly at: string;
@@ -108,10 +135,13 @@ export interface OrderRecord {
   }[];
   readonly refunds: readonly {
     readonly method: "CardMachine" | "Cash" | "Online";
+    /** The refund, in the Order's terms (as the payment pages say "Refunded"). */
     readonly amountMinor: string;
     readonly by: string;
     readonly approvedBy: string | null;
     readonly at: string;
+    /** v15 b15: the cash the drawer gave back for it (whole nickels) when not its amount; else null. */
+    readonly cashGivenBackMinor: string | null;
   }[];
   readonly writeOff: {
     readonly amountMinor: string;
@@ -191,6 +221,7 @@ export async function nameOrderRecord(
         by: label(item.actor),
         approvedBy: name(item.approver),
         at: item.at,
+        cashGivenBackMinor: item.cashGivenBackMinor ?? null,
       })),
     ),
     writeOff:

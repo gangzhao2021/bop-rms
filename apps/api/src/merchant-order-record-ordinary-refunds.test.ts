@@ -1,5 +1,8 @@
 import { expect, it } from "vitest";
-import { ordinaryRefundRecordEntries } from "./merchant-order-record-people.js";
+import {
+  cashRefundsAtRequestAmount,
+  ordinaryRefundRecordEntries,
+} from "./merchant-order-record-people.js";
 
 const request = (n: number, state: "Requested" | "Declined" | "Withdrawn" | "Sent" | "Failed") => ({
   requestReference: "request-" + n,
@@ -51,5 +54,41 @@ it("WP-2423 M61 review: the order record lists only money Payment sent back as a
       approver: null,
       at: "2026-11-06T18:06:00.000Z",
     },
+  ]);
+});
+
+// v15 b15 (DEMO order 16): a $5.09 cash refund request the drawer gave back as $5.10 read
+// "Refund $5.10" on the order's Record while the payment pages said "Refunded $5.09".
+it("says a counter cash refund at its request's amount, with the drawer's cash beside it", () => {
+  const cash = (amountMinor: string, requestReference?: string) => ({
+    method: "Cash" as const,
+    amountMinor,
+    actor: "manager",
+    approver: null,
+    at: "2026-11-13T18:55:40.829Z",
+    ...(requestReference === undefined ? {} : { requestReference }),
+  });
+  const requests = [
+    { requestReference: "request-1", amountMinor: "509" },
+    { requestReference: "request-2", amountMinor: "435" },
+  ];
+  expect(
+    cashRefundsAtRequestAmount(
+      [
+        cash("510", "request-1"),
+        cash("435", "request-2"),
+        // A cancellation's cash (no request) and a request not read: as the drawer recorded it.
+        cash("2245"),
+        cash("100", "request-9"),
+        { ...cash("300", "request-1"), method: "CardMachine" as const },
+      ],
+      requests,
+    ),
+  ).toEqual([
+    { ...cash("509"), cashGivenBackMinor: "510" },
+    cash("435"),
+    cash("2245"),
+    cash("100"),
+    { ...cash("300"), method: "CardMachine" },
   ]);
 });

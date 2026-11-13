@@ -482,6 +482,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Record money taken back after a refund made by mistake": "记录多退后收回的钱",
   "Refunded too much": "退多了",
   "The wrong item was refunded": "退错了菜",
+  "Cash, {amount} given back from the drawer": "现金，从钱箱退还 {amount}",
   "Enter the amount taken back, for example 5.00.": "请输入收回的金额，例如 5.00。",
   "That is more than was refunded on this order ({amount}).":
     "这超过了这单已退的金额（{amount}）。",

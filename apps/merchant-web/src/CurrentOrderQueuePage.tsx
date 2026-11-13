@@ -2521,24 +2521,33 @@ export function orderRecordRows(
               : t("Cancelled"),
       text: t("{name} · {at}", { name: personLabel(cancellation.by), at: when(cancellation.at) }),
     });
-  for (const [index, refund] of record.refunds.entries())
+  for (const [index, refund] of record.refunds.entries()) {
+    // v15 b15: a cash refund names the refund and the cash the drawer gave back for it, as the
+    // payment pages do ("Refund $5.09 · Cash, $5.10 given back from the drawer").
+    const method =
+      refund.cashGivenBackMinor == null
+        ? recordMethod(refund.method)
+        : t("Cash, {amount} given back from the drawer", {
+            amount: recordMoney(refund.cashGivenBackMinor),
+          });
     rows.push({
       key: "refund-" + index,
       label: t("Refund {amount}", { amount: recordMoney(refund.amountMinor) }),
       text:
         refund.approvedBy === null || refund.approvedBy === refund.by
           ? t("{method} · {name} · {at}", {
-              method: recordMethod(refund.method),
+              method,
               name: personLabel(refund.by),
               at: when(refund.at),
             })
           : t("{method} · asked by {name}, approved by {approver} · {at}", {
-              method: recordMethod(refund.method),
+              method,
               name: personLabel(refund.by),
               approver: personLabel(refund.approvedBy),
               at: when(refund.at),
             }),
     });
+  }
   if (record.writeOff !== null)
     rows.push({
       key: "write-off",

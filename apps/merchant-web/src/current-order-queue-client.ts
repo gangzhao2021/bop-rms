@@ -1557,6 +1557,11 @@ export interface OrderRecordPeople {
     readonly by: string;
     readonly approvedBy: string | null;
     readonly at: string;
+    /**
+     * v15 b15: the cash the drawer gave back for it (whole nickels) when not its amount; null or
+     * absent (an older server) otherwise.
+     */
+    readonly cashGivenBackMinor?: string | null;
   }[];
   readonly writeOff: {
     readonly amountMinor: string;
@@ -1646,14 +1651,30 @@ export function parseOrderRecordPeople(value: unknown): OrderRecordPeople | null
     ),
     refunds: Object.freeze(
       list(raw.refunds, 200).map((entry) => {
-        const r = exact(entry, ["method", "amountMinor", "by", "approvedBy", "at"]);
+        const withCash =
+          entry !== null && typeof entry === "object" && Object.hasOwn(entry, "cashGivenBackMinor");
+        const r = exact(entry, [
+          "method",
+          "amountMinor",
+          "by",
+          "approvedBy",
+          "at",
+          ...(withCash ? ["cashGivenBackMinor"] : []),
+        ]);
         if (typeof r.amountMinor !== "string" || !minorAmount.test(r.amountMinor)) return fail();
+        const cash = withCash ? r.cashGivenBackMinor : null;
+        if (
+          cash !== null &&
+          (r.method !== "Cash" || typeof cash !== "string" || !minorAmount.test(cash))
+        )
+          return fail();
         return Object.freeze({
           method: payMethod(r.method),
           amountMinor: r.amountMinor,
           by: personName(r.by),
           approvedBy: optionalName(r.approvedBy),
           at: instant(r.at),
+          ...(cash === null ? {} : { cashGivenBackMinor: cash as string }),
         });
       }),
     ),
