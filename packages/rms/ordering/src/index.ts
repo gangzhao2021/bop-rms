@@ -329,6 +329,7 @@ export * from "./domain/additional-dining-batch-codec.js";
 export * from "./infrastructure/persistence/additional-dining-batch-store.js";
 
 export { createPostgresOrderSubmittedConsumer } from "./infrastructure/persistence/order-submitted-consumer.js";
+export { isCurrentSubmittedOrderRevision } from "./infrastructure/persistence/order-submitted-history-source.js";
 
 export * from "./infrastructure/persistence/additional-dining-execution-reader.js";
 

@@ -2,6 +2,7 @@ import {
   createPostgresOrderSubmittedConsumer,
   createPostgresOrderBatchIdentitySource,
   createPostgresAdditionalDiningExecutionReader,
+  isCurrentSubmittedOrderRevision,
 } from "../../packages/rms/ordering/src/index.ts";
 import { isPilotRuntime } from "./pilot-environment.mjs";
 export function createInternalOrderSubmitted(resources) {
@@ -46,7 +47,14 @@ export function createInternalOrderSubmitted(resources) {
         submissionReference: identity.submissionReference,
         observedAt: resources.now(),
       });
-      if (!execution) throw new Error("ORDER_SUBMITTED_EXECUTION_UNAVAILABLE");
+      // DEC-ORDER-STATUS-CANCELLED-ROUND: the round no longer resolves as preparable once the Order
+      // moved on (every round of the table cancelled, as v15 01a1d36f's 21st round when its update
+      // was taken). A newer Order revision makes this event's state history: Stale, so the Order's
+      // later updates follow. Without one it stays unavailable and is retried; a read failure throws.
+      if (!execution) {
+        if (await isCurrentSubmittedOrderRevision(tx, snapshot, true)) return "Stale";
+        throw new Error("ORDER_SUBMITTED_EXECUTION_UNAVAILABLE");
+      }
       return execution.orderVersion === snapshot.sourceVersion ? "Fresh" : "Stale";
     },
   });
