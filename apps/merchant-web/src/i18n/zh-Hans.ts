@@ -5369,8 +5369,14 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Weekly times are in the store’s timezone chosen in step 2. Wait times are in whole minutes, up to 24 hours (1,440 minutes).":
     "每周时间使用第 2 步中选择的门店时区。等待时间为整数分钟，最长 24 小时（1,440 分钟）。",
   What: "内容",
-  "What choosing an option does to each size's recipe — for stock, cost, kitchen and the allergens customers see. A change needs a cost review and a food-safety review by two people other than its author, then publication. Source as of":
-    "选择某个选项会如何改变每个规格的配方 — 涉及库存、成本、后厨以及顾客看到的过敏原。更改需由作者以外的两个人分别进行成本审核和食品安全审核，然后发布。数据截至",
+  "What choosing an option does to each size's recipe — for stock, cost, kitchen and the allergens customers see. A change needs a cost review and a food-safety review by two people other than its author, then publication. A choice listed from the Menu page at a Brand with one Store, or by the Brand's owner, and a change reviewed by a sole operator are approved by that one person; their reviews say so. Source as of":
+    "选择某个选项会如何改变每个规格的配方 — 涉及库存、成本、后厨以及顾客看到的过敏原。更改需由作者以外的两个人分别进行成本审核和食品安全审核，然后发布。只有一家门店的品牌从菜单页上架的选项、品牌老板上架的选项，以及唯一操作人审核的更改，由这一个人批准，审核记录会注明。数据截至",
+  "given alone as sole operator": "以唯一操作人身份单独审核",
+  "given alone when listing from the Menu page (the Brand has one Store)":
+    "从菜单页上架时单独审核（品牌只有一家门店）",
+  "given alone by the Brand's owner when listing from the Menu page":
+    "品牌老板从菜单页上架时单独审核",
+  "Change on the Menu page": "在菜单页修改",
   "What choosing it does": "选择后的效果",
   "What customers see": "顾客看到的内容",
   "What customers will see": "顾客将看到的内容",
