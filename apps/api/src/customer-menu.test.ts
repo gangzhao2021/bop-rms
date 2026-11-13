@@ -6,6 +6,7 @@ import { createApp } from "./app.js";
 import {
   CustomerMenuHandler,
   createSharedCustomerMenuPort,
+  customerMenuShareLimit,
   customerMenuReuseMs,
   type CustomerMenuPort,
 } from "./customer-menu.js";
@@ -455,6 +456,32 @@ describe("WP-2423 reads-under-burst: phones opening the same menu share one read
     await fetch(url(port));
     expect(catalog.calls).toHaveLength(3);
     expect(customerMenuReuseMs).toBe(3_000);
+  });
+
+  it("keeps no search answer and no expired menu, and at most the limit (b12 review)", async () => {
+    const catalog = new MutablePort();
+    const clock = 1_000;
+    const shared = createSharedCustomerMenuPort(catalog, { nowMs: () => clock });
+    const input = (locale: string, searchTerm?: string) =>
+      ({
+        publicStoreReference: "public-store",
+        channelCode: "QR",
+        orderTypeCode: "PICKUP",
+        locale,
+        ...(searchTerm === undefined ? {} : { searchTerm }),
+      }) as Parameters<CustomerMenuPort["getPublishedMenu"]>[0];
+    // A search is read each time it is asked, one after another.
+    await shared.getPublishedMenu(input("en-CA", "latte"));
+    await shared.getPublishedMenu(input("en-CA", "latte"));
+    expect(catalog.calls).toHaveLength(2);
+    // More menus than the limit: the first one kept is dropped to make room.
+    for (let i = 0; i <= customerMenuShareLimit; i += 1)
+      await shared.getPublishedMenu(input("l" + i));
+    expect(catalog.calls).toHaveLength(3 + customerMenuShareLimit);
+    await shared.getPublishedMenu(input("l" + customerMenuShareLimit));
+    expect(catalog.calls).toHaveLength(3 + customerMenuShareLimit);
+    await shared.getPublishedMenu(input("l0"));
+    expect(catalog.calls).toHaveLength(4 + customerMenuShareLimit);
   });
 
   it("never gives a busy, missing or stale answer again: the next phone asks anew", async () => {

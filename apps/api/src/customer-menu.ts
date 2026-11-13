@@ -254,7 +254,13 @@ export function publicFound(value: CustomerMenuFound): CustomerMenuFound {
  * phone going away does not cut it for the others), and each phone's own answer time still holds.
  */
 export const customerMenuReuseMs = 3_000;
-const customerMenuShareLimit = 500;
+/**
+ * b12 review: what is kept stays small. Only menus without a search term are kept (a search is one
+ * guest's typing: phones asking the same search at the same moment still share its read, but it is
+ * not kept), expired menus are dropped as each new one is kept, and at most this many are kept
+ * (one per Store, channel, order type, language and section seen in the last 3 s).
+ */
+export const customerMenuShareLimit = 100;
 export function createSharedCustomerMenuPort(
   port: CustomerMenuPort,
   options: {
@@ -291,12 +297,14 @@ export function createSharedCustomerMenuPort(
       const flying = flights.get(key);
       if (flying !== undefined) return flying;
       const flight = detached(() => port.getPublishedMenu(input)).then((result) => {
-        if (resultStatus(result) === "Found") {
-          if (recent.size >= customerMenuShareLimit) {
-            const oldest = recent.keys().next().value;
-            if (oldest !== undefined) recent.delete(oldest);
+        if (resultStatus(result) === "Found" && !input.searchTerm) {
+          const at = nowMs();
+          // Kept in the order they were read: the expired ones are at the front.
+          for (const [oldKey, old] of recent) {
+            if (recent.size < customerMenuShareLimit && at - old.at < reuseMs) break;
+            recent.delete(oldKey);
           }
-          recent.set(key, { at: nowMs(), result });
+          recent.set(key, { at, result });
         }
         return result;
       });
