@@ -122,7 +122,12 @@ export function StoreOptionRecipesPage({
   const [comment, setComment] = useState("");
   const [pending, setPending] = useState<OptionRecipeCommand | null>(null);
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState<{ tone: "error" | "neutral"; text: string } | null>(null);
+  const [message, setMessage] = useState<{
+    tone: "error" | "neutral";
+    text: string;
+    /** v15 b12: a refusal said again as "sign in again" once the screen is known signed out. */
+    refused?: boolean;
+  } | null>(null);
   const reload = useCallback(() => setGeneration((value) => value + 1), []);
   const live = useReadAgainWhenSignedInAgain(reload);
   useEffect(() => {
@@ -218,7 +223,11 @@ export function StoreOptionRecipesPage({
               .flatMap((row) => row.sizes)
               .find((candidate) => candidate.skuReference === error.skuReference)?.name
           : undefined;
-      setMessage({ tone: "error", text: copy[code] + (size ? ` (${size})` : "") });
+      setMessage({
+        tone: "error",
+        text: copy[code] + (size ? ` (${size})` : ""),
+        refused: code === "PermissionDenied",
+      });
     } finally {
       setBusy(false);
     }
@@ -492,7 +501,7 @@ export function StoreOptionRecipesPage({
           tone={message.tone}
           status
         >
-          <p>{message.text}</p>
+          <p>{message.refused === true && !live ? copy.SignedOut : message.text}</p>
         </StatePanel>
       ) : null}
       {view.options.length === 0 ? (
