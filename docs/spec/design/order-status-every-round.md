@@ -1,7 +1,8 @@
 # A long table's order status, and a round sent while the Order moves on (v15 b13)
 
 Status: accepted for the pilot (WP-2423; decided as commercial choices, recorded here; no
-migration, no grant). Live finding: `.local/integ-tools/b13/order-projection-and-round-race.json`.
+migration, no grant). Live findings: `.local/integ-tools/b13/order-projection-and-round-race.json`,
+`.local/integ-tools/b14/order-status-cancelled-round.json` (b14 sections below).
 
 ## What happened on v15
 
@@ -72,7 +73,7 @@ Run in the pilot container (`docker exec bop-rms-pilot-pilot-1 node --import
 order, after the new image is live; operator `0190fa30-0000-7000-8000-000000000900` (TEST-ONLY
 platform support identity, as for the earlier v15 recoveries):
 
-1. `dead-letter-operations.mjs list --env-file .local/pilot-runtime/migrate-v14/migrate-v15.env`:
+1. `dead-letter-operations.mjs list --env-file .local/migrate-v14/migrate-v15.env`:
    the two open outbox and two open consumer dead letters of the order status at DEMO Store 2.
 2. With `PILOT_RUNTIME_DIRECTORY=.local/pilot-v15/stores/demo-2` (DEMO Store 2's own runtime
    directory): `outbox-recovery-operations.mjs recover --operator <operator> --dead-letter
@@ -80,9 +81,119 @@ platform support identity, as for the earlier v15 recoveries):
    `--dead-letter 0190fa46-e207-7f87-8451-f673fa76c3b1` (order of 11:51Z, round 21). Each hands the
    event to the order status once; the status takes the round and the event is published, after
    which the Order's later events (rounds 22 to 47 and their cancellations) go out by themselves.
-3. `dead-letter-operations.mjs resolve --env-file .local/pilot-runtime/migrate-v14/migrate-v15.env
+3. `dead-letter-operations.mjs resolve --env-file .local/migrate-v14/migrate-v15.env
 --confirm-target local:bop_rms_pilot_v15 --operator <operator>`: closes the two consumer dead
    letters whose consumer has now completed.
 
 The OrderConfirmed event of 2026-11-01 still exhausted at DEMO Store 2 is a separate, older item
 and is not part of this recovery.
+
+Path correction (b14): inside the container the migration env file is
+`.local/migrate-v14/migrate-v15.env`; `.local/pilot-runtime/migrate-v14/...` is the host path and
+does not exist in the container (the 2026-11-13 16:51Z deploy found this). The outcome of this
+recovery on v15 (2026-11-13): step 2 recovered `0190fa46-e207…` (order 01a1d4b2… at its latest
+version) but not `0190fa46-1f38…`, and step 3 closed nothing; both are taken up below.
+
+## What happened next on v15 (b14)
+
+**Order 01a1d36f… still failed after the deploy.** Read-only SQL on v15: all 28 rounds of that
+table were cancelled unpaid (25 by the System when the payment window lapsed, the last three by
+staff at 06:55:30Z; `order_batch_checkout_cancellation` has 28 rows for its 28 batches, the 21st
+round itself at Order version 47). Its 21st round's OrderSubmitted (version 24) was only taken
+after all that, held first by the 20-round cap. By then the round no longer resolves as preparable:
+the Order's preparation source answers "no open Order" for an Order whose every round is cancelled,
+so the round's execution reader returns nothing, and the pilot's freshness check
+(`pilot-order-submitted.mjs`) threw `ORDER_SUBMITTED_EXECUTION_UNAVAILABLE`, reported as
+`ORDER_STATUS_DEPENDENCY_UNAVAILABLE` and retried for ever (the order status stayed at version 23 of
+56; 32 later events waited). A round cancelled on its own while other rounds stay still returns its
+record (cancelled), so it was not affected; the trigger is an Order whose rounds are all cancelled
+when the update is taken (consumer lag, or an earlier update of the same Order held back).
+
+**`resolve` closed nothing.** It closed only dead letters an operator had retried
+(`retry_scheduled`). A consumer dead letter stays `open` when its event reaches the consumer another
+way: order 01a1d4b2…'s event was handed over by the Outbox recovery, the order status completed it
+(status at its latest version 94), but its consumer dead letter `0190fa46-03d2…` stayed open and its
+retry row stayed `dead_lettered`.
+
+## DEC-ORDER-STATUS-CANCELLED-ROUND
+
+- A round's OrderSubmitted taken after the Order **moved on** so far that the round no longer
+  resolves as preparable (every round of the table cancelled, or another later Order revision that
+  ends its preparation) is projected as **Stale** (superseded), never refused, so the Order's later
+  updates (its cancellations, later rounds) go out and bring the status up to date. The test is the
+  same one the stored status already applies to a Stale projection: the Order has a revision newer
+  than the event's version.
+- With **no** newer Order revision the event still fails as before (`..._UNAVAILABLE`, retried,
+  level 50, supervisor attention, dead letter): that would be an inconsistency, not history.
+- A **read failure** (database outage) during the check throws and is retried as before; an
+  outage never turns into Stale and no event is dropped.
+- Not chosen: skipping or discarding such events (the guest's and staff's status would stop at the
+  last round taken), or projecting them Fresh (they are not the Order as it is now).
+
+## DEC-DEAD-LETTER-RESOLVE-CONSUMED
+
+- `dead-letter-operations.mjs resolve` also closes a **consumer** dead letter still `open` once
+  that consumer has **completed its event** (its Inbox row is `completed`), as `retry_completed`.
+  Each closure appends a `dead_letter_action` (`resolve_retry`, the operator, permission
+  `EVENTING_DEAD_LETTER_RETRY`, purpose `RELIABILITY_RECOVERY`, reason `DEPENDENCY_RECOVERED`); a
+  left-over `dead_lettered` retry row becomes `completed`, exactly as a retry that completed.
+- A consumer retry still `scheduled` or `claimed` is left to the retry worker: run `resolve` again
+  after it completes. An event the consumer has not completed is never closed. No migration.
+- The earlier path is unchanged: `retry` (open → retry_scheduled), the worker delivers, `resolve`
+  closes it.
+
+## Recovery of order 01a1d36f… and the open consumer dead letters after the b14 deploy
+
+Run in the pilot container after the new image is live (`docker exec bop-rms-pilot-pilot-1 node
+--import ./tooling/environment/register-workspace-typescript.mjs tooling/environment/<tool> ...`),
+operator `0190fa30-0000-7000-8000-000000000900` (TEST-ONLY platform support identity, as for the
+earlier v15 recoveries), env file `.local/migrate-v14/migrate-v15.env`, target
+`local:bop_rms_pilot_v15`. Read-only SQL runs as
+`docker exec bop-rms-pilot-postgres-1 psql -U bop_rms_wp2402_v4_admin -p 55435 -d bop_rms_pilot_v15`.
+
+0. Before the restart (read-only), record:
+   `SELECT state, attempt_count, available_at FROM platform_eventing.consumer_retry_schedule WHERE
+event_id='01a1d38d-4949-71fe-a136-34e05ea34a0f'` (2026-11-13 ~18:00Z: `scheduled`, attempt 7;
+   it may be `dead_lettered`, attempt 8, by the window) and
+   `SELECT dead_letter_id, status, version FROM platform_eventing.dead_letter_item WHERE
+dead_letter_id IN ('0190fa46-1f38-7420-8daa-75caae3aced5','0190fa46-120b-70b6-8972-bf2d3cb4421e','0190fa46-03d2-7dc7-86ea-92bc15ed563c')`
+   (all three `open`).
+1. The consumer's own retry of version 24:
+   - if its retry row is `scheduled`: `consumer-retry-operations.mjs retry-now --env-file
+.local/migrate-v14/migrate-v15.env --confirm-target local:bop_rms_pilot_v15 --operator <operator>
+--consumer ordering.order-status-projection:v1` (or wait for its due time);
+   - if it is `dead_lettered`: `dead-letter-operations.mjs retry --env-file
+.local/migrate-v14/migrate-v15.env --confirm-target local:bop_rms_pilot_v15 --operator <operator>
+--dead-letter 0190fa46-120b-70b6-8972-bf2d3cb4421e`.
+     Expect within a minute: the retry row `completed`; `SELECT status FROM
+platform_eventing.consumer_inbox WHERE consumer_name='ordering.order-status-projection:v1' AND
+event_id='01a1d38d-4949-71fe-a136-34e05ea34a0f'` → `completed`; the order status at version 24,
+     Stale (`SELECT p.source_version, g.freshness_status FROM rms_ordering.order_status_projection p
+JOIN rms_ordering.order_status_projection_generation g USING (generation_id) WHERE
+p.order_id='01a1d36f-d90e-731c-a436-f9a1bf0978cd'` → `24|Stale`); no new
+     `OUTBOX_CONSUMER_FAILED` for this consumer in `store-workers.log`.
+2. With `-e PILOT_RUNTIME_DIRECTORY=.local/pilot-v15/stores/demo-2`:
+   `outbox-recovery-operations.mjs recover --operator <operator> --dead-letter
+0190fa46-1f38-7420-8daa-75caae3aced5`. The order status acknowledges version 24 as already done,
+   so the event is published and its outbox dead letter resolved; the Order's 32 later events then
+   go out by themselves. Expect within a few minutes:
+   `SELECT count(*) FROM platform_eventing.outbox_event WHERE
+aggregate_id='01a1d36f-d90e-731c-a436-f9a1bf0978cd' AND published_at IS NULL` → `0`; the status
+   query of step 1 → `56|Fresh` (its last event is the staff cancellation of the 28th round); the
+   dead letter `0190fa46-1f38…` `resolved`.
+3. `dead-letter-operations.mjs resolve --env-file .local/migrate-v14/migrate-v15.env
+--confirm-target local:bop_rms_pilot_v15 --operator <operator>`. Expect two `applied` results,
+   `0190fa46-120b…` and `0190fa46-03d2…` (if step 1 used `retry`, 120b closes through the retry
+   path; the same command). Then
+   `SELECT dead_letter_id, status, resolution_kind FROM platform_eventing.dead_letter_item WHERE
+dead_letter_id IN ('0190fa46-120b-70b6-8972-bf2d3cb4421e','0190fa46-03d2-7dc7-86ea-92bc15ed563c')`
+   → both `resolved|retry_completed`; `SELECT action, actor_id FROM
+platform_eventing.dead_letter_action WHERE dead_letter_id IN (...the two...)` → a `resolve_retry`
+   by the operator for each; `SELECT state FROM platform_eventing.consumer_retry_schedule WHERE
+event_id IN ('01a1d38d-4949-71fe-a136-34e05ea34a0f','01a1d4bf-6ac7-77cc-88c2-261c53d11bb2')` →
+   both `completed`. If 120b is not listed because its retry row is still `scheduled`/`claimed`,
+   run `resolve` again after step 1's retry completes.
+4. `dead-letter-operations.mjs list --env-file .local/migrate-v14/migrate-v15.env`: no open item for
+   `ordering.order-status-projection:v1` at DEMO Store 2 (the 2026-11-01 OrderConfirmed items
+   are `discarded`, not listed, and outside this recovery). The DEMO Store 2
+   business-events health file leaves `attention_required` on its next write.
