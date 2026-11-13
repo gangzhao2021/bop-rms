@@ -95,7 +95,7 @@ function fixture(
     if (sql.includes("FROM rms_ordering.dining_cart_operation"))
       return { rows: settings.prior === undefined ? [] : [{ receipt: settings.prior }] };
     if (sql.includes("LIMIT 2 FOR SHARE")) return { rows: settings.headers ?? [] };
-    if (sql.startsWith("SELECT jsonb_build_object("))
+    if (sql.replace(/^-- bop:stable-read\n/u, "").startsWith("SELECT jsonb_build_object("))
       return { rows: [{ cart: settings.existing ?? cart() }] };
     if (sql.startsWith("INSERT INTO rms_ordering.cart\n"))
       return { rows: [{ cart_id: values[0] }] };

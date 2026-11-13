@@ -102,12 +102,17 @@ function fixture() {
       if (sql.startsWith("SELECT snapshot_json") && sql.includes("additional_dining_batch_record"))
         rows = state.prior ? [{ snapshot: state.prior }] : [];
       else if (sql.startsWith("SELECT h.order_type")) rows = [parent];
-      else if (sql.startsWith("SELECT snapshot_json FROM rms_ordering.checkout_session_record"))
+      else if (
+        sql
+          .replace(/^-- bop:stable-read\n/u, "")
+          .startsWith("SELECT snapshot_json FROM rms_ordering.checkout_session_record")
+      )
         rows = state.checkout ? [{ snapshot_json: state.checkout }] : [];
       else if (sql.includes("FROM rms_ordering.checkout_details_record"))
         rows = state.details ? [{ snapshot: state.details }] : [];
       else if (sql.startsWith("SELECT cart_id")) rows = [{ cart_id: original.cart.cartReference }];
-      else if (sql.startsWith("SELECT jsonb_build_object")) rows = [{ cart: original.cart }];
+      else if (sql.replace(/^-- bop:stable-read\n/u, "").startsWith("SELECT jsonb_build_object"))
+        rows = [{ cart: original.cart }];
       else if (sql.startsWith("SELECT clock_timestamp")) rows = [{ observed_at: state.observedAt }];
       else if (
         !/^(INSERT INTO |UPDATE rms_ordering.cart |DELETE FROM rms_ordering.cart_line |SELECT set_config|SELECT pg_advisory|SAVEPOINT |RELEASE SAVEPOINT |ROLLBACK TO SAVEPOINT )/.test(

@@ -44,7 +44,8 @@ function setup(inventoryFinalizer?: OrderSubmissionInventoryFinalizer) {
         rows: [{ valid: !(late && ++checks >= 3), observedAt: f.request.record.createdAt }],
       };
     if (sql.startsWith("SELECT cart_id")) return { rows: [{ reference: f.cart.cartReference }] };
-    if (sql.startsWith("SELECT jsonb_build_object")) return { rows: [{ cart: f.cart }] };
+    if (sql.replace(/^-- bop:stable-read\n/u, "").startsWith("SELECT jsonb_build_object"))
+      return { rows: [{ cart: f.cart }] };
     if (sql.startsWith("INSERT INTO rms_ordering.order_number_counter"))
       return { rows: [{ sequence: "1" }], rowCount: 1 };
     return { rows: [], rowCount: 1 };

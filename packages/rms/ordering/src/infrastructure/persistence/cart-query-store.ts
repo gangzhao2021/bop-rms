@@ -20,7 +20,10 @@ export interface CartQueryStore {
   load(cartReference: string): Promise<CartAggregate | null>;
 }
 
-const select = `SELECT jsonb_build_object(
+// WP-2423 M35 (staff round speed): a plain read with no side effect, marked for the owner's
+// stable-read rule (packages/database transaction-statement-memo, request-check-memo).
+const select = `-- bop:stable-read
+SELECT jsonb_build_object(
   'cartReference', c.cart_id, 'brandReference', c.brand_id, 'storeReference', c.store_id,
   'orderType', c.order_type, 'sourceChannel', c.source_channel,
   'diningSessionReference', c.dining_session_id, 'createdByActorReference', c.created_by_actor_id,

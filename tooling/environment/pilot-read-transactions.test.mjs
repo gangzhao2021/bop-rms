@@ -78,3 +78,26 @@ it("WP-2423 M35: sends a scope setting only when it changes one, and answers a r
     "COMMIT",
   ]);
 });
+
+it("WP-2423 M35: a checked UUIDv7 scope goes with BEGIN in one round trip; any other text is sent as parameters", async () => {
+  const connection = { query: vi.fn(async () => ({ rows: [], rowCount: 0 })), release: vi.fn() };
+  const brand = "01a0ff00-0000-7000-8000-000000000002",
+    store = "01a0ff00-0000-7000-8000-000000000003";
+  await createInternalReadTransactions({
+    database: { acquire: async () => connection },
+    scope: { brandReference: brand, storeReference: store },
+  }).run(async (tx) => tx.query("SELECT 1", []));
+  expect(connection.query.mock.calls.map(([sql]) => sql)).toEqual([
+    "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY; SET LOCAL lock_timeout = '2s'; " +
+      `SELECT set_config('bop.brand_id', '${brand}', true), set_config('bop.store_id', '${store}', true)`,
+    "SELECT 1",
+    "COMMIT",
+  ]);
+  const quoted = fixture();
+  quoted.scope.brandReference = "x', true); DROP TABLE y; --";
+  await quoted.run(async () => undefined);
+  expect(quoted.connection.query.mock.calls[0][0]).toBe(
+    "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY; SET LOCAL lock_timeout = '2s'",
+  );
+  expect(quoted.connection.query.mock.calls[1][1][0]).toBe("x', true); DROP TABLE y; --");
+});

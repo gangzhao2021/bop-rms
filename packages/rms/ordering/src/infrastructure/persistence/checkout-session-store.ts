@@ -313,7 +313,8 @@ export async function loadCheckoutSessionDeadline(
     );
     const found = rows(
       await transaction.query(
-        "SELECT snapshot_json FROM rms_ordering.checkout_session_record WHERE brand_id=$1 AND store_id=$2 AND checkout_session_id=$3",
+        // WP-2423 M35: a plain read with no side effect (the owner's stable-read rule).
+        "-- bop:stable-read\nSELECT snapshot_json FROM rms_ordering.checkout_session_record WHERE brand_id=$1 AND store_id=$2 AND checkout_session_id=$3",
         [brand, store, reference],
       ),
     );
