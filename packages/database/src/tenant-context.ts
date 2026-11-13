@@ -174,6 +174,44 @@ export function tenantContextScopeStatement(scope: Readonly<{ brandId: string; s
   return `SELECT set_config('bop.brand_id', '${scope.brandId}', true), set_config('bop.store_id', '${scope.storeId}', true)`;
 }
 
+/**
+ * WP-2423 M35 (review of the third step): the scope settings a transaction's first statement
+ * would set, written into the BEGIN round trip instead of a round trip of their own. Only the
+ * five scope settings, each to a UUID (lower-case hex digits and dashes) or the empty value, are
+ * ever written into the text; anything else is refused before a connection is taken.
+ */
+const foldableScopeSettings: ReadonlySet<string> = new Set([
+  "bop.tenant_id",
+  "bop.brand_id",
+  "bop.store_id",
+  "bop.identity_session_id",
+  "bop.identity_actor_id",
+]);
+const foldableScopeValue = /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?$/u;
+export function tenantContextScopeSettingsStatement(
+  settings: readonly (readonly [string, string])[],
+): string {
+  if (
+    !Array.isArray(settings) ||
+    settings.length === 0 ||
+    settings.length > foldableScopeSettings.size ||
+    settings.some(
+      (pair) =>
+        !Array.isArray(pair) ||
+        pair.length !== 2 ||
+        typeof pair[0] !== "string" ||
+        typeof pair[1] !== "string" ||
+        !foldableScopeSettings.has(pair[0]) ||
+        !foldableScopeValue.test(pair[1]),
+    )
+  )
+    throw new TenantContextDatabaseError("TENANT_DATABASE_SCOPE_INVALID");
+  return (
+    "SELECT " +
+    settings.map(([name, value]) => `set_config('${name}', '${value}', true)`).join(", ")
+  );
+}
+
 export async function withTenantContextTransaction<T>(
   pool: Pick<Pool, "connect">,
   scopeInput: TenantDatabaseScope,
@@ -182,10 +220,17 @@ export async function withTenantContextTransaction<T>(
   mode: "ReadWrite" | "Snapshot" = "ReadWrite",
   /** WP-2423 item 4: transaction-local limits sent with BEGIN (see `transactionSetup`). */
   setup?: string,
+  /**
+   * WP-2423 M35: scope settings set after the runner's scope, in the BEGIN round trip (see
+   * `tenantContextScopeSettingsStatement`).
+   */
+  scopeSettings?: readonly (readonly [string, string])[],
 ): Promise<T> {
   const scope = readScope(scopeInput);
   if (setup !== undefined && (typeof setup !== "string" || !transactionSetup.test(setup)))
     throw new TenantContextDatabaseError("TENANT_DATABASE_SCOPE_INVALID");
+  const settingsStatement =
+    scopeSettings === undefined ? null : tenantContextScopeSettingsStatement(scopeSettings);
   let client: PoolClient;
   try {
     client = await pool.connect();
@@ -223,9 +268,12 @@ export async function withTenantContextTransaction<T>(
     // fails, the transaction is rolled back like any other setup failure.
     began = true;
     await client.query(
-      [begin, ...(setup === undefined ? [] : [setup]), tenantContextScopeStatement(scope)].join(
-        "; ",
-      ),
+      [
+        begin,
+        ...(setup === undefined ? [] : [setup]),
+        tenantContextScopeStatement(scope),
+        ...(settingsStatement === null ? [] : [settingsStatement]),
+      ].join("; "),
     );
     callbackActive = true;
     result = await callback(client);

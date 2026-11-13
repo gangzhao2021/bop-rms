@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import { withoutRowLock } from "./transaction-statement-memo.js";
 
 /**
  * WP-2423 M35 (DEC-STAFF-ROUND-SPEED, third step): one staff round runs its table guest through
@@ -18,13 +19,39 @@ import { AsyncLocalStorage } from "node:async_hooks";
  *   earlier in the same request.
  * - Any statement of the request that may write forgets what it remembered of the schemas it
  *   names (all of it when it names none), so the request never reads its own writes stale.
- * - An answer is at most `maxAgeMs` old (default 10 s).
+ * - A stable row-locking read that is not answered from here is a write fence of its own, so row
+ *   locks are taken in the order the code asks for them (review of the third step).
+ * - When a read answered from here comes back different at the fence, the transaction has written
+ *   and locked nothing; it runs once more as an ordinary transaction (every read sent for real),
+ *   unless something else in the request wrote since it began (then the retryable conflict
+ *   stands), so staff are never refused because another phone changed the table mid-request.
+ * - A read-only transaction is never sent again: what it answered from here is at most as old as
+ *   this request's first read of it (and at most `maxAgeMs`, default 3 s, above the 2 s staff round
+ *   budget). Every such answer must be read again for real (with or without a row lock) before
+ *   the request's next write (`unverifiedChecks`, which the staff round acceptance holds empty),
+ *   so no decision that reaches a write rests on it alone.
  */
 export interface RequestCheckMemo {
   answer(key: string): object | null;
   record(key: string, sql: string, result: unknown): void;
   /** A statement that may write ran (or was sent): forget what it may have changed. */
   wrote(sql: string): void;
+  /** How many statements that may write the request has sent so far. */
+  writes(): number;
+  /**
+   * The fact was read for real (sent, or sent again at a fence), with or without a row lock and
+   * under whichever scope settings: a later read of it is the fresh one.
+   */
+  reread(sql: string, values: readonly unknown[]): void;
+  /** A transaction ended having answered these checks from here, never sending them again. */
+  unverified(reads: readonly { readonly sql: string; readonly values: readonly unknown[] }[]): void;
+  /**
+   * The checks a read-only transaction answered from earlier in the request that a later write of
+   * the request followed before any transaction read them again for real (the statement's first
+   * line each): a decision that reached a write may have rested on the older answer. A check read
+   * only after the request's last write feeds no write of it and is not listed.
+   */
+  unverifiedChecks(): readonly string[];
 }
 
 const ownerSchema = /\b((?:bop|rms|platform)_[a-z0-9_]+|security)\s*\.\s*"?[a-z_]/giu;
@@ -34,6 +61,11 @@ export function statementSchemas(sql: string): ReadonlySet<string> | null {
   const found = new Set<string>();
   for (const match of sql.matchAll(ownerSchema)) found.add((match[1] ?? "").toLowerCase());
   return found.size === 0 ? null : found;
+}
+
+/** A fact read: its statement without a trailing row-locking clause, and its values. */
+function factOf(sql: string, values: readonly unknown[]): string {
+  return JSON.stringify([withoutRowLock(sql), values]);
 }
 
 const copyResult = (result: unknown): object => {
@@ -51,7 +83,12 @@ const copyResult = (result: unknown): object => {
 export function createRequestCheckMemo(
   options: { readonly maxAgeMs?: number; readonly now?: () => number } = {},
 ): RequestCheckMemo {
-  const maxAgeMs = options.maxAgeMs ?? 10_000;
+  const maxAgeMs = options.maxAgeMs ?? 3_000;
+  let written = 0;
+  /** Answered by a read-only transaction, not read for real since. */
+  const open = new Map<string, string>();
+  /** ...and then a write of the request came: it may have rested on the older answer. */
+  const reachedWrite = new Set<string>();
   const now = options.now ?? Date.now;
   const entries = new Map<
     string,
@@ -72,12 +109,27 @@ export function createRequestCheckMemo(
       entries.set(key, { result: copyResult(result), at: now(), schemas: statementSchemas(sql) });
     },
     wrote(sql: string) {
-      const written = statementSchemas(sql);
-      if (written === null) return entries.clear();
+      written += 1;
+      for (const line of open.values()) reachedWrite.add(line);
+      open.clear();
+      const schemas = statementSchemas(sql);
+      if (schemas === null) return entries.clear();
       for (const [key, entry] of entries)
-        if (entry.schemas === null || [...entry.schemas].some((schema) => written.has(schema)))
+        if (entry.schemas === null || [...entry.schemas].some((schema) => schemas.has(schema)))
           entries.delete(key);
     },
+    writes: () => written,
+    reread(sql: string, values: readonly unknown[]) {
+      if (open.size > 0) open.delete(factOf(sql, values));
+    },
+    unverified(reads: readonly { readonly sql: string; readonly values: readonly unknown[] }[]) {
+      for (const read of reads)
+        open.set(
+          factOf(read.sql, read.values),
+          (read.sql.trim().split("\n")[0] ?? "").replace(/\s+/gu, " ").slice(0, 120),
+        );
+    },
+    unverifiedChecks: () => Object.freeze([...reachedWrite]),
   });
 }
 

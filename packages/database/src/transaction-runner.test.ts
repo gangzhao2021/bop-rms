@@ -6,7 +6,7 @@ import {
   runTogether,
   type DatabaseTransaction,
 } from "./transaction-runner.js";
-import { withVerifiedChecks } from "./request-check-memo.js";
+import { currentRequestChecks, withVerifiedChecks } from "./request-check-memo.js";
 
 const scope = { brandId: "018f3f7a-8b1c-7a11-8d01-000000000041" };
 // WP-2423 item 4 and M35: BEGIN, the three limits and the (validated) scope in one round trip.
@@ -561,36 +561,126 @@ describe("WP-2423 M35 third step: one request's verified checks (request-check-m
     await runner.run(read);
     expect(f.connect).toHaveBeenCalledTimes(3);
   });
-  it("sends every borrowed read again before the first write, and a change fails it as a retryable conflict", async () => {
+  it("sends every borrowed read again before the first write; a change reruns it once on what is current", async () => {
     const f = rowsFixture();
     const plainCheck = check.slice(19);
     f.rows.set(plainCheck, [{ version: 1 }]);
     const runner = createTenantTransactionRunner(f.pool, { ...scope, storeId: store });
+    let attempts = 0;
     const write = async (t: DatabaseTransaction) => {
+      attempts += 1;
       const seen = await read(t);
       await t.query("INSERT INTO rms_ordering.order_batch VALUES ($1)", ["b"]);
       return seen;
     };
     await withVerifiedChecks(async () => {
       await runner.run(read);
-      // Someone closed the table since this request checked it.
+      // Someone changed the table (another phone joined) since this request checked it.
       f.rows.set(plainCheck, [{ version: 2 }]);
-      const error = await runner.run(write).catch((e: unknown) => e);
-      expect(error).toMatchObject({ code: "TENANT_DATABASE_TRANSACTION_CONFLICT" });
-      expect(isRetryableTransactionConflict(error)).toBe(true);
-      expect(statements(f)).not.toContain("INSERT INTO rms_ordering.order_batch VALUES ($1)");
-      expect(statements(f).at(-1)).toBe("ROLLBACK");
-      // Done again, it decides on what is current: the read is sent before the write.
+      const before = f.connect.mock.calls.length;
+      // Review of the third step: the staff member is not refused. The first attempt wrote
+      // nothing and is rolled back; the transaction runs again as an ordinary one, deciding on
+      // what is current under its own transaction.
       const again = (await runner.run(write)) as { rows: unknown[] };
       expect(again.rows).toEqual([{ version: 2 }]);
+      expect(attempts).toBe(2);
+      expect(f.connect.mock.calls.length - before).toBe(2);
     });
-    const last = statements(f);
-    expect(last.slice(-3)).toEqual([
+    const sent = statements(f);
+    expect(sent.filter((sql) => sql.startsWith("INSERT"))).toHaveLength(1);
+    const rollback = sent.lastIndexOf("ROLLBACK");
+    expect(rollback).toBeGreaterThan(-1);
+    expect(sent.slice(0, rollback).some((sql) => sql.startsWith("INSERT"))).toBe(false);
+    expect(sent.slice(-3)).toEqual([
       plainCheck,
       "INSERT INTO rms_ordering.order_batch VALUES ($1)",
       "COMMIT",
     ]);
   });
+  it("keeps the retryable conflict when the request wrote since the transaction began", async () => {
+    const f = rowsFixture();
+    const plainCheck = check.slice(19);
+    f.rows.set(plainCheck, [{ version: 1 }]);
+    const runner = createTenantTransactionRunner(f.pool, { ...scope, storeId: store });
+    const other = fixture();
+    const otherRunner = createTenantTransactionRunner(other.pool, { ...scope, storeId: store });
+    await withVerifiedChecks(async () => {
+      await runner.run(read);
+      f.rows.set(plainCheck, [{ version: 2 }]);
+      const error = await runner
+        .run(async (t) => {
+          await read(t);
+          // Another transaction of this request wrote meanwhile: rerunning could do it twice.
+          await otherRunner.run((u) => u.query("INSERT INTO rms_ordering.x VALUES ($1)", ["x"]));
+          await t.query("INSERT INTO rms_ordering.order_batch VALUES ($1)", ["b"]);
+        })
+        .catch((e: unknown) => e);
+      expect(error).toMatchObject({ code: "TENANT_DATABASE_TRANSACTION_CONFLICT" });
+      expect(isRetryableTransactionConflict(error)).toBe(true);
+    });
+    expect(statements(f)).not.toContain("INSERT INTO rms_ordering.order_batch VALUES ($1)");
+  });
+  it("reruns a runTogether call whose one transaction met a changed check before it wrote", async () => {
+    const f = rowsFixture();
+    const plainCheck = check.slice(19);
+    f.rows.set(plainCheck, [{ version: 1 }]);
+    const runner = createTenantTransactionRunner(f.pool, { ...scope, storeId: store });
+    let attempts = 0;
+    await withVerifiedChecks(async () => {
+      await runner.run(read);
+      f.rows.set(plainCheck, [{ version: 2 }]);
+      const seen = await runTogether(async () => {
+        attempts += 1;
+        const first = (await runner.run(read)) as { rows: unknown[] };
+        await runner.run((t) => t.query("INSERT INTO rms_ordering.order_batch VALUES ($1)", ["b"]));
+        return first.rows;
+      });
+      expect(seen).toEqual([{ version: 2 }]);
+    });
+    expect(attempts).toBe(2);
+    expect(statements(f).filter((sql) => sql.startsWith("INSERT"))).toHaveLength(1);
+    expect(statements(f).at(-1)).toBe("COMMIT");
+  });
+  it("a stable row-locking read sent for real is a fence: row locks are taken in the code's order", async () => {
+    const f = rowsFixture();
+    const runner = createTenantTransactionRunner(f.pool, { ...scope, storeId: store });
+    const lockA = "-- bop:stable-read\nSELECT * FROM bop_tenant.brand WHERE brand_id=$1 FOR SHARE";
+    const lockB =
+      "-- bop:stable-read\nSELECT * FROM bop_tenant.store WHERE brand_id=$1 AND store_id=$2 FOR SHARE";
+    await withVerifiedChecks(async () => {
+      await runner.run((t) => t.query(lockA, ["b"]));
+      await runner.run(async (t) => {
+        await t.query(lockA, ["b"]); // borrowed: its lock waits for the fence
+        await t.query(lockB, ["b", "s"]); // not borrowed: sent now, so A is sent again first
+      });
+    });
+    const sent = statements(f).filter((sql) => sql.includes("FOR SHARE"));
+    expect(sent).toEqual([lockA.slice(19), lockA.slice(19), lockB.slice(19)]);
+  });
+  it("lists a check a read-only transaction answered from earlier when a write follows before it is read again", async () => {
+    const f = rowsFixture();
+    f.rows.set(check.slice(19), [{ table: 1 }]);
+    const runner = createTenantTransactionRunner(f.pool, { ...scope, storeId: store });
+    const write = (t: DatabaseTransaction) =>
+      t.query("INSERT INTO rms_ordering.order_batch VALUES ($1)", ["b"]);
+    await withVerifiedChecks(async () => {
+      const checks = currentRequestChecks();
+      await runner.run(read);
+      await runner.run(read); // answered in full, read-only
+      // A later writing transaction reads it again (here under a row lock) before its write.
+      await runner.run(async (t) => {
+        await t.query(check.slice(19) + " FOR UPDATE", ["t1"]);
+        await write(t);
+      });
+      expect(checks?.unverifiedChecks()).toEqual([]);
+      await runner.run(read); // answered again, read-only
+      await runner.run(write); // a write that never read it again
+      expect(checks?.unverifiedChecks()).toEqual([
+        "SELECT * FROM rms_dining.dining_table WHERE table_id=$1",
+      ]);
+    });
+  });
+
   it("a lock is a fence too: the borrowed read is sent again before it, under its own scope", async () => {
     const f = rowsFixture();
     const runner = createTenantTransactionRunner(f.pool, { ...scope, storeId: store });

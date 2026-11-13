@@ -205,6 +205,14 @@ const resultOf = (column: string, value: string | null) =>
 const rowLockingClause =
   /\s+FOR\s+(?:UPDATE|NO\s+KEY\s+UPDATE|SHARE|KEY\s+SHARE)(?:\s+OF\s+[a-z_][a-z0-9_.]*(?:\s*,\s*[a-z_][a-z0-9_.]*)*)?(?:\s+(?:NOWAIT|SKIP\s+LOCKED))?\s*;?\s*$/iu;
 const leadingComments = /^(?:\s+|--[^\n]*(?:\n|$)|\/\*[\s\S]*?\*\/)*/u;
+/** WP-2423 M35 (review of the third step): the read without its trailing row-locking clause. */
+export function withoutRowLock(sql: string): string {
+  return typeof sql === "string" ? sql.trim().replace(rowLockingClause, "") : "";
+}
+/** WP-2423 M35 (review of the third step): true when a stable read ends in a row-locking clause. */
+export function stableReadLocksRows(sql: string): boolean {
+  return typeof sql === "string" && rowLockingClause.test(sql.trim());
+}
 /**
  * True unless the statement is one plain read that cannot change data, take a lock or change a
  * setting: a SELECT without a row-locking clause, a schema-qualified (owner) function call, INTO,

@@ -3,12 +3,14 @@ import type { Pool } from "pg";
 import {
   TenantContextDatabaseError,
   tenantContextDatabaseDiagnostic,
+  tenantContextScopeSettingsStatement,
   withTenantContextTransaction,
   type TenantDatabaseScope,
 } from "./tenant-context.js";
 import {
   createTransactionStatementMemo,
   stableReadStatement,
+  stableReadLocksRows,
   statementKind,
 } from "./transaction-statement-memo.js";
 import { currentRequestChecks, type RequestCheckMemo } from "./request-check-memo.js";
@@ -165,6 +167,24 @@ export function createTenantTransactionRunner(
     checks: RequestCheckMemo,
     action: (transaction: DatabaseTransaction) => Promise<T>,
   ): Promise<T> => {
+    const writesBefore = checks.writes();
+    const attempt: { changed: boolean } = { changed: false };
+    try {
+      return await runAnsweredFromChecks(checks, action, attempt);
+    } catch (error) {
+      // Review of the third step: a check answered from earlier in the request changed before
+      // this transaction wrote or locked anything (and nothing else of the request wrote since):
+      // it runs once more as an ordinary transaction, every read sent for real, as it did before
+      // checks were reused. Its first attempt only read, so nothing is done twice.
+      if (!attempt.changed || checks.writes() !== writesBefore) throw error;
+      return runNow("ReadWrite", action);
+    }
+  };
+  const runAnsweredFromChecks = async <T>(
+    checks: RequestCheckMemo,
+    action: (transaction: DatabaseTransaction) => Promise<T>,
+    attempt: { changed: boolean },
+  ): Promise<T> => {
     const opening = openWhenNeeded(connections, fixedScope);
     const state = transactionState(opening.client, "ReadWrite", fixedScope, checks);
     let value: T;
@@ -179,10 +199,13 @@ export function createTenantTransactionRunner(
       } catch (thrown) {
         reported = thrown;
       }
+      attempt.changed = state.checkChanged();
+      checks.unverified(state.borrowedWithoutFence());
       state.close();
       await opening.finish({ error: reported });
       throw reported;
     }
+    checks.unverified(state.borrowedWithoutFence());
     state.close();
     await opening.finish();
     return value;
@@ -221,6 +244,7 @@ export function createTenantTransactionRunner(
           failure = { error: reported };
         }
       }
+      checks.unverified(state.borrowedWithoutFence());
       state.close();
       await opening.finish(failure);
       if (failure !== undefined) throw failure.error;
@@ -272,6 +296,13 @@ interface TransactionState {
   useScope(scope: TenantDatabaseScope): void;
   /** How many statements that may write this transaction has sent. */
   writes(): number;
+  /**
+   * True when a read answered from this request's earlier check came back different at the
+   * write fence: the transaction failed before it wrote or locked anything.
+   */
+  checkChanged(): boolean;
+  /** The request checks this transaction was answered from and never sent again (no fence). */
+  borrowedWithoutFence(): readonly { readonly sql: string; readonly values: readonly unknown[] }[];
   /** The scope settings written last (sent with the next statement, or before COMMIT). */
   scope(): readonly (readonly [string, string | null])[];
   /** The scope settings to hold before COMMIT, written as the caller's last. */
@@ -293,6 +324,41 @@ interface TransactionState {
   close(): void;
 }
 
+const runnerSettingsStatement =
+  /^SELECT set_config\('([a-z_.]+)',\$(\d+),true\)((?:,set_config\('[a-z_.]+',\$\d+,true\))*)$/u;
+/**
+ * The scope settings of a pending-settings statement this runner wrote (`SELECT
+ * set_config('<name>',$n,true),...`) whose names and values may be written into the BEGIN round
+ * trip (tenantContextScopeSettingsStatement), or null to send it as it is.
+ */
+function foldableSettings(
+  sql: string,
+  values: readonly unknown[] | undefined,
+): readonly (readonly [string, string])[] | null {
+  if (typeof sql !== "string" || !Array.isArray(values) || !runnerSettingsStatement.test(sql))
+    return null;
+  const pairs: (readonly [string, string])[] = [];
+  for (const match of sql.matchAll(/set_config\('([a-z_.]+)',\$(\d+),true\)/gu)) {
+    const value: unknown = values[Number(match[2]) - 1];
+    if (typeof value !== "string") return null;
+    pairs.push([match[1] ?? "", value]);
+  }
+  if (pairs.length !== values.length) return null;
+  try {
+    tenantContextScopeSettingsStatement(pairs);
+  } catch {
+    return null;
+  }
+  return pairs;
+}
+const foldedSettingsResult = (settings: readonly (readonly [string, string])[]) =>
+  Object.freeze({
+    command: "SELECT",
+    rowCount: 1,
+    rows: [Object.fromEntries(settings.map(([, value]) => ["set_config", value]))],
+    fields: [],
+  });
+
 /**
  * WP-2423 M35 (third step): a client whose transaction begins (connection, BEGIN with its limits
  * and scope) with its first statement. `finish` commits a begun transaction (or rolls it back with
@@ -312,7 +378,7 @@ function openWhenNeeded(
     end = (failure) => (failure === undefined ? resolve() : reject(failure.error));
   });
   done.catch(() => undefined);
-  const begin = () =>
+  const begin = (settings?: readonly (readonly [string, string])[]) =>
     new Promise<{ query(sql: string, values?: unknown[]): Promise<unknown> }>(
       (opened, failedToOpen) => {
         let started = false;
@@ -326,6 +392,7 @@ function openWhenNeeded(
           },
           "ReadWrite",
           transactionLimits,
+          settings,
         ).catch((error: unknown) => {
           if (!started) failedToOpen(error);
           throw error;
@@ -336,6 +403,15 @@ function openWhenNeeded(
   return Object.freeze({
     client: Object.freeze({
       async query(sql: string, values?: unknown[]) {
+        if (begun === null) {
+          // WP-2423 M35: a first statement that only sets the scope goes with BEGIN.
+          const settings = foldableSettings(sql, values);
+          if (settings !== null) {
+            begun = begin(settings);
+            await begun;
+            return foldedSettingsResult(settings);
+          }
+        }
         begun ??= begin();
         return (await begun).query(sql, values);
       },
@@ -382,6 +458,8 @@ function transactionState(
   let writes = 0;
   let writesRefused = false;
   let openFailure: unknown = null;
+  // A borrowed read came back different at the write fence (nothing written or locked yet).
+  let checkChanged = false;
   const borrowed: {
     readonly key: string;
     readonly sql: string;
@@ -415,9 +493,11 @@ function transactionState(
       const result = await client.query(read.sql, [...read.values]);
       memo.observe(read.sql, read.values, result, true);
       checks?.record(read.key, read.sql, result);
+      checks?.reread(read.sql, read.values);
       if (rowsOf(result) !== read.rows) {
         // Changed since this request's check: decided again on what is current now.
         conflicted = true;
+        checkChanged = true;
         throw Object.assign(new Error("verified check changed"), { code: "40001" });
       }
     }
@@ -449,6 +529,8 @@ function transactionState(
       let settings: { readonly sql: string; readonly values: readonly string[] } | null = null;
       let kind: ReturnType<typeof statementKind> | null = null;
       let recordAs: string | null = null;
+      // A stable row-locking read sent for real is a fence too (see below).
+      let locksRows = false;
       if (pending === 0) {
         const planned = memo.plan(statement, values, marked.stable);
         if (planned.kind === "Answer") return planned.result;
@@ -470,7 +552,14 @@ function transactionState(
               return answered;
             }
             recordAs = key;
+            // Review of the third step: a borrowed row-locking read takes its row lock only
+            // when it is sent again at the fence, so one sent for real now is itself a fence;
+            // every row lock is then taken in the order the code asks for them.
+            locksRows = stableReadLocksRows(statement);
           }
+          // A read sent for real (with or without a row lock): a fresh answer of its fact.
+          if (kind === "Read" || (kind === "Lock" && stableReadLocksRows(statement)))
+            checks.reread(statement, values);
         }
       }
       // WP-2423 (guest-table-open-and-busy-reads): a read bounded by its answer time sends no
@@ -492,7 +581,7 @@ function transactionState(
           await client.query("SELECT set_config('statement_timeout',$1,true)", [`${narrowedMs}ms`]);
           statementLimit = narrowedMs;
         }
-        if (kind === "Lock" || kind === "Write") {
+        if (kind === "Lock" || kind === "Write" || locksRows) {
           // The write fence: borrowed reads are sent again for real before it.
           if (!fenced) {
             fenced = true;
@@ -514,7 +603,7 @@ function transactionState(
         }
         const result = await client.query(statement, [...values]);
         memo.observe(statement, values, result, marked.stable);
-        if (recordAs !== null && !fenced) checks?.record(recordAs, statement, result);
+        if (recordAs !== null && writes === 0) checks?.record(recordAs, statement, result);
         return result;
       } catch (error) {
         memo.forget();
@@ -547,6 +636,9 @@ function transactionState(
     transaction,
     useScope: (scope) => memo.useScope(scopeSettings(scope)),
     writes: () => writes,
+    checkChanged: () => checkChanged,
+    borrowedWithoutFence: () =>
+      fenced ? [] : borrowed.map((read) => ({ sql: read.sql, values: read.values })),
     scope: () => memo.scope(),
     restoreScope: (scope) =>
       memo.useScope(
@@ -667,6 +759,26 @@ const together: AsyncLocalStorage<TogetherSlot> = ((globalThis as Record<symbol,
  */
 export async function runTogether<T>(work: () => Promise<T>): Promise<T> {
   if (together.getStore() !== undefined) return work();
+  const checks = currentRequestChecks();
+  if (checks === undefined) return runTogetherOnce(work);
+  const writesBefore = checks.writes();
+  const attempt: { slot: TogetherSlot | null } = { slot: null };
+  try {
+    return await runTogetherOnce(work, attempt);
+  } catch (error) {
+    // Review of the third step: as one transaction of its own (runWhenNeeded), the call runs once
+    // more when a check answered from earlier in the request changed before its one transaction
+    // wrote or locked anything, and nothing of the request wrote in the meantime.
+    if (attempt.slot?.state?.checkChanged() !== true || checks.writes() !== writesBefore)
+      throw error;
+    return runTogetherOnce(work);
+  }
+}
+
+async function runTogetherOnce<T>(
+  work: () => Promise<T>,
+  attempt?: { slot: TogetherSlot | null },
+): Promise<T> {
   let finish: (failure?: { readonly error: unknown }) => void = () => undefined;
   const slot: TogetherSlot = {
     pool: null,
@@ -708,6 +820,7 @@ export async function runTogether<T>(work: () => Promise<T>): Promise<T> {
     },
   };
   slot.done.catch(() => undefined);
+  if (attempt !== undefined) attempt.slot = slot;
   return together.run(slot, async () => {
     let failure: { readonly error: unknown } | undefined;
     let value: T | undefined;
