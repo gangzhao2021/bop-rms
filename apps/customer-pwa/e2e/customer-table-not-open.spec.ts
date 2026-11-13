@@ -241,7 +241,7 @@ test.describe("@production CUST-ENTRY table not open", () => {
     await expect(
       main.getByRole("heading", { name: "This table is settled. Thank you for dining with us." }),
     ).toBeVisible();
-    await expect(main).toContainText("Table 12 has paid and closed.");
+    await expect(main).toContainText("Table 12 is closed.");
     const receipt = main.getByRole("region", { name: "Receipt" });
     await expect(receipt).toContainText("Total paid$5.10");
     await expect(receipt).toContainText("Paid byCash");

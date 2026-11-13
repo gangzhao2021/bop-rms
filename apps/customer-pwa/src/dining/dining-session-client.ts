@@ -40,6 +40,15 @@ export type DiningWaitingReason = "FirstOrder" | "PhoneRapid" | "TableRapid";
 export type DiningCancellationReason =
   "CustomerRequest" | "SoldOut" | "StoreError" | "DuplicateOrder" | "GuestLeft";
 
+/** b13: a bill or one round of it, as printed; the lines add up (checked when read). */
+export interface DiningBillLines {
+  readonly items: DiningMoney;
+  readonly takenOff: DiningMoney;
+  readonly pointsUsed: DiningMoney;
+  readonly subtotal: DiningMoney;
+  readonly tax: DiningMoney;
+  readonly total: DiningMoney;
+}
 export interface DiningRound {
   readonly roundNumber: number;
   /** WP-2423 Q7 slice 2: "Staff" — a round staff entered for the table. */
@@ -84,6 +93,8 @@ export interface DiningRound {
   readonly subtotal?: DiningMoney;
   readonly tax?: DiningMoney;
   readonly itemsTotal: DiningMoney;
+  /** b13: a round on the table's bill, as the bill prints it (after comps, tax worked once). */
+  readonly bill?: DiningBillLines;
 }
 
 export interface DiningOrderAgain {
@@ -167,6 +178,11 @@ export interface DiningSessionView {
     readonly closedByStaff?: true;
     /** v15 2026-11-02: the bill's tax rounding, so the lines add up to what is to pay. */
     readonly taxRounding?: DiningMoney;
+    /**
+     * b13 (DEC-TAX-WHOLE-RECEIPT): the whole bill as staff checkout and the paid bill print it:
+     * dishes before tax, what was taken off and points (before tax), subtotal, one tax, total.
+     */
+    readonly bill?: DiningBillLines;
     /** WP-2423 D5: what the table ordered: items before tax, tax and total including tax. */
     readonly ordered?: {
       readonly subtotal: DiningMoney;
@@ -269,6 +285,26 @@ function money(value: unknown): DiningMoney {
     return invalid();
   return Object.freeze({ amountMinor: raw.amountMinor, currencyCode: raw.currencyCode });
 }
+/** b13: a bill's lines as printed; they must add up, or the read is not shown. */
+function billLines(value: unknown): DiningBillLines {
+  const entry = record(value, ["items", "takenOff", "pointsUsed", "subtotal", "tax", "total"]);
+  const lines = Object.freeze({
+    items: money(entry.items),
+    takenOff: money(entry.takenOff),
+    pointsUsed: money(entry.pointsUsed),
+    subtotal: money(entry.subtotal),
+    tax: money(entry.tax),
+    total: money(entry.total),
+  });
+  const minor = (key: keyof DiningBillLines) => BigInt(lines[key].amountMinor);
+  if (
+    Object.values(lines).some((line) => BigInt(line.amountMinor) < 0n) ||
+    minor("items") - minor("takenOff") - minor("pointsUsed") !== minor("subtotal") ||
+    minor("subtotal") + minor("tax") !== minor("total")
+  )
+    return invalid();
+  return lines;
+}
 function oneOf<T extends string>(value: unknown, allowed: readonly T[]): T {
   return allowed.includes(value as T) ? (value as T) : invalid();
 }
@@ -317,7 +353,9 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
       value !== null && typeof value === "object" && Object.hasOwn(value, "awaitingStore");
     const stopped =
       value !== null && typeof value === "object" && Object.hasOwn(value, "stoppedBeforePaying");
+    const billed = value !== null && typeof value === "object" && Object.hasOwn(value, "bill");
     const round = record(value, [
+      ...(billed ? ["bill"] : []),
       ...(stopped ? ["stoppedBeforePaying"] : []),
       ...(priced ? ["subtotal", "tax"] : []),
       ...(awaitingStore ? ["awaitingStore"] : []),
@@ -438,6 +476,7 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
       items,
       ...(breakdown === null ? {} : breakdown),
       itemsTotal,
+      ...(billed ? { bill: billLines(round.bill) } : {}),
     });
   });
   let summary: DiningSessionView["summary"] = null;
@@ -469,7 +508,9 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
     const withTakenOff = has("takenOff");
     const closedByStaff = has("closedByStaff");
     const withTaxRounding = has("taxRounding");
+    const withBill = has("bill");
     const raw = record(session.summary, [
+      ...(withBill ? ["bill"] : []),
       ...(withPoints ? ["pointsUsed"] : []),
       ...(withTakenOff ? ["takenOff"] : []),
       ...(closedByStaff ? ["closedByStaff"] : []),
@@ -508,6 +549,7 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
         : {}),
       ...(withTakenOff ? { takenOff: money(raw.takenOff) } : {}),
       ...(withTaxRounding ? { taxRounding: money(raw.taxRounding) } : {}),
+      ...(withBill ? { bill: billLines(raw.bill) } : {}),
       ...(withSettlement
         ? { tableTip: money(raw.tableTip), cashRounding: money(raw.cashRounding) }
         : {}),

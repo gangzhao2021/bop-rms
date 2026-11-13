@@ -480,10 +480,43 @@ describe("CUST-DINE-IN-SESSION (WP-2423 Q8)", () => {
     expect(html).not.toContain("<dt>Waiting for payment</dt>");
   });
 
+  // v15 b12 live: a table comped to nothing read "SBC 1 (TEST) has paid and closed" though nothing
+  // was paid; its receipt says what was paid (or that nothing was).
+  it("b13: a closed table is said closed, never paid, and a $0 receipt says nothing was to pay", () => {
+    expect(render({ status: "settled", tableLabel: "SBC 1 (TEST)" })).not.toContain("paid");
+    const free = renderToStaticMarkup(
+      <SettledTableReceiptView
+        receipt={parseSettledTableReceipt({
+          schemaVersion: 1,
+          receipt: {
+            tableLabel: "SBC 1 (TEST)",
+            rounds: [
+              {
+                roundNumber: 1,
+                fromTableLabel: null,
+                items: [{ displayName: "Beef noodles", subtotalMinor: "0", reduced: "Comp" }],
+              },
+            ],
+            subtotalMinor: "0",
+            taxMinor: "0",
+            ordersTotalMinor: "0",
+            tipMinor: "0",
+            roundingMinor: "0",
+            paidMinor: "0",
+            split: false,
+            payments: [],
+          },
+        })}
+      />,
+    );
+    expect(free).toContain("<dt>Nothing to pay</dt><dd>The restaurant took everything off.</dd>");
+    expect(free).not.toContain("Paid by");
+  });
+
   it("thanks a guest whose table was settled and loads the table's receipt", () => {
     const plain = render({ status: "settled", tableLabel: "DEMO-02" });
     expect(plain).toContain("This table is settled. Thank you for dining with us.");
-    expect(plain).toContain("Table DEMO-02 has paid and closed.");
+    expect(plain).toContain("Table DEMO-02 is closed.");
     expect(plain).toContain("New party? Scan the table QR code");
     expect(plain).toContain("Loading receipt");
     expect(plain).not.toContain("/orders/");
@@ -745,6 +778,77 @@ describe("CUST-DINE-IN-SESSION item prices before tax (WP-2423 D5)", () => {
     expect(html).toContain(
       "Total ordered $39.00 Points used −$3.39 Taken off by the restaurant −$1.50 Rounding (tax worked out on the whole bill) $0.01",
     );
+  });
+
+  // v15 b12 live (BR E-style bill): the guest read Tax $6.51, "Taken off −$31.09" and "Rounding
+  // $0.01" while staff checkout and the paid bill read Subtotal $22.50 / Tax $2.93 / $25.43; at a
+  // table comped to $0 each round card still read its full "Round total $14.13".
+  it("b13: a table paying at the end reads its bill and each round as checkout prints them", () => {
+    const lines = (
+      items: string,
+      takenOff: string,
+      subtotal: string,
+      tax: string,
+      total: string,
+    ) => ({
+      items: cad(items),
+      takenOff: cad(takenOff),
+      pointsUsed: cad("0"),
+      subtotal: cad(subtotal),
+      tax: cad(tax),
+      total: cad(total),
+    });
+    const [first, second] = priced.rounds;
+    if (first === undefined || second === undefined || priced.summary === null)
+      throw new Error("fixture");
+    const billed = {
+      ...priced,
+      paymentTiming: "PayLater" as const,
+      rounds: [
+        {
+          ...first,
+          payment: "OnTableBill" as const,
+          bill: lines("2655", "655", "2000", "260", "2260"),
+        },
+        {
+          ...second,
+          payment: "OnTableBill" as const,
+          bill: lines("796", "0", "796", "103", "899"),
+        },
+      ],
+      summary: {
+        ...priced.summary,
+        paid: cad("0"),
+        due: cad("3159"),
+        takenOff: cad("740"),
+        taxRounding: cad("1"),
+        bill: lines("3451", "655", "2796", "363", "3159"),
+      },
+    };
+    const html = text(render({ status: "ready", view: billed, refreshing: false }));
+    expect(html).toContain(
+      "Dishes $34.51 Taken off by the restaurant −$6.55 Subtotal $27.96 Tax $3.63 Total $31.59",
+    );
+    expect(html).not.toContain("Rounding");
+    expect(html).not.toContain("Total ordered");
+    expect(html).toContain(
+      "Dishes $26.55 Taken off by the restaurant −$6.55 Subtotal $20.00 Tax $2.60 Round total $22.60",
+    );
+    expect(html).toContain("Subtotal $7.96 Tax $1.03 Round total $8.99");
+    // Comped to nothing: every card and the total say so, and nothing is to pay.
+    const nothing = {
+      ...billed,
+      rounds: billed.rounds.map((entry) => ({
+        ...entry,
+        bill: lines(entry.bill.items.amountMinor, entry.bill.items.amountMinor, "0", "0", "0"),
+      })),
+      summary: { ...billed.summary, due: cad("0"), bill: lines("3451", "3451", "0", "0", "0") },
+    };
+    const free = text(render({ status: "ready", view: nothing, refreshing: false }));
+    expect(free).not.toContain("Round total $30.00");
+    expect(free).toContain("Round total $0.00");
+    expect(free).toContain("The restaurant took everything off: there is nothing to pay.");
+    expect(free).not.toContain("The table pays once at the end");
   });
 
   it("lists items before tax, then each round's and the table's subtotal, tax and total", () => {

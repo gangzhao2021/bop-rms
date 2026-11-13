@@ -872,7 +872,7 @@ test.describe("@production CUST-DINE-IN-SESSION table view", () => {
     await expect(
       main.getByRole("heading", { name: "This table is settled. Thank you for dining with us." }),
     ).toBeVisible();
-    await expect(main).toContainText("Table 12 has paid and closed.");
+    await expect(main).toContainText("Table 12 is closed.");
     await expect(main).toContainText("New party? Scan the table QR code");
     const card = main.getByRole("region", { name: "Receipt" });
     await expect(card).toContainText("Milk tea");

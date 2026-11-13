@@ -241,6 +241,13 @@ export function SettledTableReceiptView({ receipt }: { readonly receipt: Settled
           <dt>{t("Total paid")}</dt>
           <dd>{money(receipt.paidMinor)}</dd>
         </div>
+        {/* b13: a table comped to nothing paid nothing, said as that. */}
+        {receipt.paidMinor === "0" && receipt.payments.length === 0 ? (
+          <div>
+            <dt>{t("Nothing to pay")}</dt>
+            <dd>{t("The restaurant took everything off.")}</dd>
+          </div>
+        ) : null}
         {receipt.refundedMinor !== "0" ? (
           <div>
             <dt>{t("Refunded")}</dt>

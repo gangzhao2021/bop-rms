@@ -446,6 +446,11 @@ function RoundCard({
           <span>{t("Round total")}</span>
           <span>{t("Not charged")}</span>
         </p>
+      ) : round.bill !== undefined ? (
+        // b13 (DEC-TAX-WHOLE-RECEIPT): a round on the table's bill reads as the bill prints it —
+        // what the restaurant took off, then its subtotal, tax and total — so the round cards add
+        // up to the Table total and the paid bill (never its full price after a comp).
+        <BillLines bill={round.bill} totalLabel={t("Round total")} />
       ) : round.subtotal !== undefined && round.tax !== undefined ? (
         <dl className="order-status__money">
           <div>
@@ -464,7 +469,7 @@ function RoundCard({
           </div>
         </dl>
       ) : null}
-      {notCharged ? null : (
+      {notCharged || round.bill !== undefined ? null : (
         <p className="order-status__total">
           <span>
             {round.subtotal === undefined ? t("Round total including tax") : t("Round total")}
@@ -504,6 +509,57 @@ const perPersonChargeRound = (view: DiningSessionView) =>
         .find((round) => round.tea === true && staffCharge(round) && !chargeTakenOff(round)) ??
       null);
 
+/**
+ * b13 (DEC-TAX-WHOLE-RECEIPT): a bill's lines as staff checkout and the paid bill print them: the
+ * dishes and what came off them before tax (only when something did), the subtotal, one tax
+ * worked out on the bill, and the total.
+ */
+function BillLines({
+  bill,
+  totalLabel,
+}: {
+  readonly bill: NonNullable<DiningSessionView["rounds"][number]["bill"]>;
+  readonly totalLabel: string;
+}) {
+  const reduced = bill.takenOff.amountMinor !== "0" || bill.pointsUsed.amountMinor !== "0";
+  return (
+    <>
+      <dl className="order-status__money">
+        {reduced ? (
+          <div>
+            <dt>{t("Dishes")}</dt>
+            <dd>{money(bill.items)}</dd>
+          </div>
+        ) : null}
+        {bill.takenOff.amountMinor !== "0" ? (
+          <div>
+            <dt>{t("Taken off by the restaurant")}</dt>
+            <dd>−{money(bill.takenOff)}</dd>
+          </div>
+        ) : null}
+        {bill.pointsUsed.amountMinor !== "0" ? (
+          <div>
+            <dt>{t("Points used")}</dt>
+            <dd>−{money(bill.pointsUsed)}</dd>
+          </div>
+        ) : null}
+        <div>
+          <dt>{t("Subtotal")}</dt>
+          <dd>{money(bill.subtotal)}</dd>
+        </div>
+        <div>
+          <dt>{t("Tax")}</dt>
+          <dd>{money(bill.tax)}</dd>
+        </div>
+      </dl>
+      <p className="order-status__total">
+        <span>{totalLabel}</span>
+        <span>{money(bill.total)}</span>
+      </p>
+    </>
+  );
+}
+
 function TableSummary({ view }: { readonly view: DiningSessionView }) {
   const payLater = view.paymentTiming === "PayLater";
   const summary = view.summary;
@@ -515,7 +571,27 @@ function TableSummary({ view }: { readonly view: DiningSessionView }) {
       aria-labelledby="dining-summary-heading"
     >
       <h2 id="dining-summary-heading">{t("Table total")}</h2>
-      {summary.ordered !== undefined ? (
+      {summary.bill !== undefined ? (
+        <>
+          <BillLines bill={summary.bill} totalLabel={t("Total")} />
+          {summary.tableTip !== undefined && nonZero(summary.tableTip) ? (
+            <dl className="order-status__money">
+              <div>
+                <dt>{t("Tip")}</dt>
+                <dd>{money(summary.tableTip)}</dd>
+              </div>
+            </dl>
+          ) : null}
+          {summary.cashRounding !== undefined && nonZero(summary.cashRounding) ? (
+            <dl className="order-status__money">
+              <div>
+                <dt>{t("Cash rounding")}</dt>
+                <dd>{money(summary.cashRounding)}</dd>
+              </div>
+            </dl>
+          ) : null}
+        </>
+      ) : summary.ordered !== undefined ? (
         <dl className="order-status__money">
           <div>
             <dt>{t("Subtotal")}</dt>
@@ -624,9 +700,14 @@ function TableSummary({ view }: { readonly view: DiningSessionView }) {
                 ? t(
                     "The table paid once at the end. Cash is rounded to the nearest 5 cents; card payments are not rounded.",
                   )
-                : t(
-                    "Rounds go to the kitchen when they are sent. The table pays once at the end, with tax and any tip.",
-                  )
+                : summary.bill !== undefined &&
+                    summary.bill.total.amountMinor === "0" &&
+                    summary.bill.items.amountMinor !== "0"
+                  ? // b13: a bill comped to nothing owes nothing, said as that.
+                    t("The restaurant took everything off: there is nothing to pay.")
+                  : t(
+                      "Rounds go to the kitchen when they are sent. The table pays once at the end, with tax and any tip.",
+                    )
               : t(
                   "Paid amounts include tax and any tip. Amounts waiting for payment include tax, before any tip. Each guest pays for the rounds they order.",
                 )}
@@ -905,7 +986,8 @@ function SettledTable({
     <>
       <section className="order-status__card" role="status">
         <h2>{t("This table is settled. Thank you for dining with us.")}</h2>
-        <p>{t("Table {table} has paid and closed.", { table: saidTable(tableLabel) })}</p>
+        {/* b13: a table comped to nothing closes too; "paid" is the receipt's to say. */}
+        <p>{t("Table {table} is closed.", { table: saidTable(tableLabel) })}</p>
         <p>{t("New party? Scan the table QR code")}</p>
       </section>
       <SettledTableReceiptPanel {...(receipt === undefined ? {} : { client: receipt })} />

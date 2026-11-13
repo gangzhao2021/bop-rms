@@ -130,7 +130,7 @@ describe("CUST-ENTRY-CONTEXT", () => {
     try {
       const settled = render(notOpen);
       expect(settled).toContain("This table is settled. Thank you for dining with us.");
-      expect(settled).toContain("Table DEMO-03 has paid and closed.");
+      expect(settled).toContain("Table DEMO-03 is closed.");
       expect(settled).toContain("Loading receipt");
       expect(settled).toContain("New party? Ask staff to seat you, then scan again.");
       expect(settled).not.toContain("isn’t open yet");

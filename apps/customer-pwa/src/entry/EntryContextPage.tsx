@@ -994,7 +994,7 @@ function EntryState({
               {t("This table is settled. Thank you for dining with us.")}
             </StateHeading>
             <p className="entry-context">
-              {t("Table {table} has paid and closed.", { table: saidTable(settled) })}
+              {t("Table {table} is closed.", { table: saidTable(settled) })}
             </p>
             <SettledTableReceiptPanel />
             <p>{t("New party? Ask staff to seat you, then scan again.")}</p>
@@ -1062,7 +1062,7 @@ function EntryState({
               {t("This table is settled. Thank you for dining with us.")}
             </StateHeading>
             <p className="entry-context">
-              {t("Table {table} has paid and closed.", { table: saidTable(settled) })}
+              {t("Table {table} is closed.", { table: saidTable(settled) })}
             </p>
             <SettledTableReceiptPanel />
           </>
@@ -1116,7 +1116,7 @@ function EntryState({
               {t("This table is settled. Thank you for dining with us.")}
             </StateHeading>
             <p className="entry-context">
-              {t("Table {table} has paid and closed.", { table: saidTable(settled) })}
+              {t("Table {table} is closed.", { table: saidTable(settled) })}
             </p>
             <SettledTableReceiptPanel />
             <p>{t("After you answer, this receipt won’t open on this phone.")}</p>

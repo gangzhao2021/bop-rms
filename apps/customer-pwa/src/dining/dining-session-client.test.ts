@@ -69,6 +69,37 @@ describe("WP-2423 Q8 dining session client", () => {
     }
   });
 
+  it("b13: decodes a bill read as printed for the table and a round, and refuses lines that don't add up", () => {
+    const lines = {
+      items: cad("5000"),
+      takenOff: cad("2750"),
+      pointsUsed: cad("0"),
+      subtotal: cad("2250"),
+      tax: cad("293"),
+      total: cad("2543"),
+    };
+    const base = payload() as unknown as {
+      session: { summary: Record<string, unknown>; rounds: Record<string, unknown>[] };
+    };
+    const billed = structuredClone(base);
+    billed.session.summary.bill = lines;
+    (billed.session.rounds[0] as Record<string, unknown>).bill = lines;
+    const view = parseDiningSessionView(billed);
+    expect(view.summary?.bill).toEqual(lines);
+    expect(view.rounds[0]?.bill).toEqual(lines);
+    expect(parseDiningSessionView(base).summary?.bill).toBeUndefined();
+    for (const broken of [
+      { ...lines, tax: cad("294") },
+      { ...lines, takenOff: cad("2700") },
+      { ...lines, takenOff: cad("-1") },
+      { ...lines, extra: cad("0") },
+    ]) {
+      const value = structuredClone(base);
+      value.session.summary.bill = broken;
+      expect(() => parseDiningSessionView(value)).toThrow();
+    }
+  });
+
   it("WP-2423 item 8b: decodes a charge round and the charge's name; absence stays fine", () => {
     const p = payload();
     const charged = structuredClone(p) as unknown as {

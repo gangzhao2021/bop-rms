@@ -341,7 +341,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Join this table": "加入这一桌",
   "Join your table first": "请先加入你的桌位",
   "This table is settled. Thank you for dining with us.": "这桌已结账，谢谢光临",
-  "Table {table} has paid and closed.": "桌号 {table}，已付清。",
+  "Table {table} is closed.": "桌号 {table} 已关台。",
   "From table {table}": "来自 {table} 桌",
   "Order more": "再点一些",
   "Order at this table": "在这张桌点餐",
@@ -1921,4 +1921,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Someone at your table is paying": "同桌有人正在付款",
   "A choice can add allergens not listed here. If you have an allergy, ask staff before ordering.":
     "选项可能会加入这里没列出的过敏原。如果你有过敏，请下单前先问店员。",
+  Dishes: "菜品",
+  "Nothing to pay": "无需付款",
+  "The restaurant took everything off.": "餐厅已全部免单。",
+  "The restaurant took everything off: there is nothing to pay.":
+    "餐厅已全部免单：没有需要付的钱。",
 });
