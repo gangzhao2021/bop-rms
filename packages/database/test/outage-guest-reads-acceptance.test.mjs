@@ -14,15 +14,24 @@
 //  6. (reads-under-burst) the guest's Session read, the first step of every cart read, says why it
 //     could not answer in a rush (no connection), and the request is noted as turned away by the
 //     rush; a read cut at its answer time (or abandoned) takes no connection at all.
+//  7. (rush-reads-and-orders-changes) a reloaded page's restore of its visit whose Session read the
+//     rush cut off answers busy (503, Retry-After 5), never the ended-visit 204 that made a pickup
+//     guest's checkout say "Your session ended".
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { URL } from "node:url";
 import pg from "pg";
 import { it } from "vitest";
+import { setTimeout as sleep } from "node:timers/promises";
 import {
   createGuestSession,
+  createGuestSessionCredentialProvider,
   createPostgresGuestSessionEntryStore,
 } from "../../bop/identity/src/index.ts";
+import {
+  createCustomerSessionBootstrapHandler,
+  createCustomerSessionBootstrapRead,
+} from "../../../apps/api/src/customer-session-bootstrap.ts";
 import { createConfiguredPickupSessionBinding } from "../../../apps/api/src/configured-pickup-session-binding.ts";
 import { createConfiguredDiningGuestContext } from "../../../apps/api/src/configured-dining-guest-context.ts";
 import { renderPilotAclSql } from "../../../tooling/environment/pilot-acl-render.mjs";
@@ -319,6 +328,103 @@ it("an outage of the Store's records never reads as an ended guest session, and 
       await runWithRequestAcquireBudget(3000, () =>
         runner.run((tx) => tx.query("SELECT pg_sleep(2)", [])),
       );
+
+      // 7. A reloaded page asks for its visit back in a rush: the read got its connection, but its
+      // answer time ran out before the Session was read (the rush held it up). Before, that was
+      // read as "no visit" (204) and the checkout told a pickup guest their session had ended.
+      const bootstrap = createCustomerSessionBootstrapHandler({
+        allowedOrigin: "https://store.example",
+        port: createCustomerSessionBootstrapRead({
+          scope: { brandReference: id(1), storeReference: id(2) },
+          transactions: {
+            // The rush: the read waits past its answer time before its first statement.
+            run: (work) =>
+              runner.run(async (tx) => {
+                await sleep(400);
+                return work(tx);
+              }),
+          },
+          credentials: createGuestSessionCredentialProvider(new Uint8Array(32).fill(7)),
+          binding: () => binding,
+          now: () => at,
+        }),
+      });
+      const answer = { headers: {}, statusCode: 200, body: undefined, ended: false };
+      const response = {
+        setHeader: (name, value) => {
+          answer.headers[name.toLowerCase()] = value;
+        },
+        status(code) {
+          answer.statusCode = code;
+          return response;
+        },
+        json(value) {
+          answer.body = value;
+          answer.ended = true;
+          return response;
+        },
+        end() {
+          answer.ended = true;
+          return response;
+        },
+      };
+      const headers = {
+        "sec-fetch-site": "same-origin",
+        origin: "https://store.example",
+        "x-bop-session-bootstrap": "1",
+      };
+      await runWithRequestAcquireBudget(
+        3000,
+        () =>
+          bootstrap(
+            {
+              get: (name) => headers[name.toLowerCase()],
+              headers: { cookie: "__Host-bop-guest=" + "A".repeat(43) },
+              query: {},
+              body: undefined,
+            },
+            response,
+          ),
+        { answerWithinMs: 200 },
+      );
+      assert.equal(answer.ended, true);
+      assert.equal(answer.statusCode, 503, "a visit the rush cut off is busy, not ended");
+      assert.equal(answer.headers["retry-after"], "5");
+      assert.deepEqual(answer.body, { schemaVersion: 1, error: { code: "session_unavailable" } });
+      // With time to answer, the same read says what the records say: no such visit (204).
+      const quiet = { headers: {}, statusCode: 200, ended: false };
+      await runWithRequestAcquireBudget(
+        3000,
+        () =>
+          bootstrap(
+            {
+              get: (name) => headers[name.toLowerCase()],
+              headers: { cookie: "__Host-bop-guest=" + "A".repeat(43) },
+              query: {},
+              body: undefined,
+            },
+            {
+              setHeader: (name, value) => {
+                quiet.headers[name.toLowerCase()] = value;
+              },
+              status(code) {
+                quiet.statusCode = code;
+                return this;
+              },
+              json() {
+                quiet.ended = true;
+                return this;
+              },
+              end() {
+                quiet.ended = true;
+                return this;
+              },
+            },
+          ),
+        { answerWithinMs: 12_000 },
+      );
+      assert.equal(quiet.statusCode, 204);
+      assert.equal(quiet.headers["retry-after"], undefined);
     } finally {
       held?.release();
       await pool.end().catch(() => undefined);
