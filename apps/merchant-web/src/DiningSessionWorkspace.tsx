@@ -602,6 +602,10 @@ export function DiningSessionWorkspace({
   // can still see what a table owes when the connection drops. Read again only when it changed.
   const lastBills = useRef(new Map<string, ListBill>());
   const billsInFlight = useRef(new Set<string>());
+  const billItems = useRef<{ poll: number; items: readonly StaffDiningTable[] }>({
+    poll: 0,
+    items: [],
+  });
   // v15 batch 8: a table checking out that the queue read did not bring is said from its own
   // bill (the panel's), never "Checking the bill" once that bill is read. By Order.
   const [billFacts, setBillFacts] = useState<
@@ -624,8 +628,11 @@ export function DiningSessionWorkspace({
     only: (table: StaffDiningTable) => boolean,
   ) => {
     const client = createTableCheckoutClient();
+    // The newest list read's tables are the ones said: an older read still answering never puts
+    // back an older table list (a table seated since then keeps its bill).
+    if (poll >= billItems.current.poll) billItems.current = { poll, items };
     const shown = () => {
-      setBillFacts(listBillsByOrder(items, lastBills.current));
+      setBillFacts(listBillsByOrder(billItems.current.items, lastBills.current));
       saveLastBills([...lastBills.current.values()].map((entry) => entry.bill));
     };
     return readListBills({
