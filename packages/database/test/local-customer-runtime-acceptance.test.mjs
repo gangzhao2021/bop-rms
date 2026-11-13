@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
+import { setTimeout as delay } from "node:timers/promises";
 import pg from "pg";
 import { it } from "vitest";
 import {
@@ -284,7 +285,7 @@ it("composes scoped persisted entry and menu through one restartable loopback ru
       cartFault = false;
       assert.deepEqual(await sessionStore.resolve(pickupSelector), pickupRecord);
       // reads-under-burst: a menu read in the last 3 s is given again, so the fault is read after it.
-      await new Promise((resolve) => setTimeout(resolve, 3_100));
+      await delay(3_100);
       menuFault = true;
       const unavailable = await menu();
       assert.equal(unavailable.status, 503);
