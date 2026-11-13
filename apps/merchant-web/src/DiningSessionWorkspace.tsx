@@ -16,6 +16,7 @@ import {
   type ListBill,
 } from "./table-list-bills.js";
 import {
+  loadTableKitchenFacts,
   loadTableOrderFacts,
   prepareServeAllReady,
   type TableOrderFacts,
@@ -100,19 +101,35 @@ export function listFactsOf(
   billFacts: ReadonlyMap<string, { readonly facts: TableOrderFacts; readonly read: number }>,
   /** The number of the order queue read `orderFacts` came from (0: none yet). */
   queueRead = 0,
+  /**
+   * b13: what a table checking out has at the pass and in the kitchen, from its own serving
+   * progress; it stands over the queue's and the bill's (the bill knows nothing of the kitchen).
+   */
+  kitchenFacts: ReadonlyMap<
+    string,
+    Pick<TableOrderFacts, "readyToServe" | "inKitchen" | "allServed">
+  > = new Map(),
 ): TableOrderFacts | null {
   const order = table.session?.orderReference;
   if (!order) return null;
   const queued = orderFacts.get(order) ?? null;
   if (table.session?.phase !== "Closing") return queued;
   const own = billFacts.get(order);
-  if (own === undefined) return queued;
-  if (queued === null) return own.facts;
-  // b13: an Order read from its serving progress alone has no bill of the queue's: the table's
-  // own bill says it.
-  return own.read > queueRead || queued.bill === null
-    ? { ...queued, bill: own.facts.bill }
-    : queued;
+  const said =
+    own === undefined
+      ? queued
+      : queued === null
+        ? own.facts
+        : // b13: an Order read from its serving progress alone has no bill of the queue's: the
+          // table's own bill says it.
+          own.read > queueRead || queued.bill === null
+          ? { ...queued, bill: own.facts.bill }
+          : queued;
+  const kitchen = kitchenFacts.get(order);
+  if (kitchen === undefined) return said;
+  // Dishes waiting at the pass are said even before the bill is read.
+  if (said === null) return kitchen.readyToServe > 0 ? { bill: null, ...kitchen } : null;
+  return { ...said, ...kitchen };
 }
 /** WP-2423 follow-up: how long a session has been open, in words staff read at a glance. */
 export function elapsedText(minutes: number): string {
@@ -641,6 +658,11 @@ export function DiningSessionWorkspace({
   const reads = useRef(0);
   const nextRead = () => (reads.current += 1);
   const [queueRead, setQueueRead] = useState(0);
+  // b13: the tables checking out, from their own serving progress (by Order; the newest read wins).
+  const [kitchenFacts, setKitchenFacts] = useState<
+    ReadonlyMap<string, Pick<TableOrderFacts, "readyToServe" | "inKitchen" | "allServed">>
+  >(new Map());
+  const kitchenReadNow = useRef(0);
   const queueReadNow = useRef(0);
   // Bill reads stop when this page is left or the sign-in ends.
   const billReads = useRef(new AbortController());
@@ -686,18 +708,23 @@ export function DiningSessionWorkspace({
     const poll = polls.current;
     const closing = (table: StaffDiningTable) => table.session?.phase === "Closing";
     const bills = keepLastBills(items, orderFactsNow.current, poll, closing);
+    // b13: a table checking out is read from its own serving progress too, beside the queue and
+    // whether or not the queue answers, so dishes at the pass offer Serve all on its row.
+    const kitchenRead = nextRead();
+    void loadTableKitchenFacts(
+      items.flatMap((table) =>
+        closing(table) && table.session?.orderReference ? [table.session.orderReference] : [],
+      ),
+      csrf,
+      signal,
+    ).then((found) => {
+      if (signal.aborted || kitchenRead < kitchenReadNow.current) return;
+      kitchenReadNow.current = kitchenRead;
+      setKitchenFacts(found);
+    });
     const read = nextRead();
     try {
-      // b13: a table checking out is read from its own serving progress too, so dishes at the
-      // pass offer Serve all on its row whatever its bill says.
-      const facts = await loadTableOrderFacts(orders, signal, undefined, {
-        csrf,
-        closing: new Set(
-          items.flatMap((table) =>
-            closing(table) && table.session?.orderReference ? [table.session.orderReference] : [],
-          ),
-        ),
-      });
+      const facts = await loadTableOrderFacts(orders, signal, undefined, { csrf });
       // A queue read that started before the one already shown is not shown over it.
       if (!signal.aborted && read > queueReadNow.current) {
         queueReadNow.current = read;
@@ -1075,14 +1102,14 @@ export function DiningSessionWorkspace({
           table,
           need: tableNeed(
             table,
-            listFactsOf(table, orderFacts, billFacts, queueRead),
+            listFactsOf(table, orderFacts, billFacts, queueRead, kitchenFacts),
             now,
             table.session?.orderReference != null && billUnread.has(table.session.orderReference),
             deviceBillOf(table),
           ),
         }))
         .sort(compareTables),
-    [tables, orderFacts, billFacts, billUnread, queueRead, now],
+    [tables, orderFacts, billFacts, billUnread, queueRead, kitchenFacts, now],
   );
   const counts = new Map(
     tableTabs.map((value) => [

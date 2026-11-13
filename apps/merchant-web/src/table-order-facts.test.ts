@@ -1,5 +1,6 @@
 import { expect, it, vi } from "vitest";
-import { loadTableOrderFacts } from "./table-order-facts.js";
+import { loadTableKitchenFacts, loadTableOrderFacts } from "./table-order-facts.js";
+import { listFactsOf } from "./DiningSessionWorkspace.js";
 import { CURRENT_ORDER_REFS, currentOrderQueueFixture } from "./current-order-queue.fixtures.js";
 import { tableNeed } from "./table-needs.js";
 
@@ -40,59 +41,53 @@ const csrf = "a".repeat(43);
 // v15 b12 live (SBC 1): a table comped to $0 with 3 dishes ready read "Nothing to pay · close
 // when the guests leave" and offered no Serve all, while the table's own Mark served showed them.
 it("b13: a table checking out is said from its own serving progress, so ready dishes offer Serve all", async () => {
-  const queue = currentOrderQueueFixture();
   const table = CURRENT_ORDER_REFS.awaitingAcceptance;
-  // The queue says nothing is ready for this table.
-  const queued = {
-    ...queue,
-    items: queue.items.map((item) =>
-      item.orderReference === table ? { ...item, readyToServeItemCount: 0 } : item,
+  const fetcher = vi.fn(async (_path: RequestInfo | URL, init?: RequestInit) =>
+    json(
+      progress(JSON.parse(String(init?.body)).orderReference as string, [
+        "Ready",
+        "Ready",
+        "Ready",
+      ]),
     ),
-  };
-  const fetcher = vi.fn(async (path: RequestInfo | URL, init?: RequestInit) =>
-    String(path) === "/merchant/dining/order-progress"
-      ? json(
-          progress(JSON.parse(String(init?.body)).orderReference as string, [
-            "Ready",
-            "Ready",
-            "Ready",
-          ]),
-        )
-      : json(queued),
   );
-  const facts = await loadTableOrderFacts([table], new AbortController().signal, fetcher, {
-    csrf,
-    closing: new Set([table]),
-  });
-  expect(facts.get(table)).toMatchObject({ readyToServe: 3, inKitchen: false, allServed: false });
-  // The Tables row then offers Serve all, before "Nothing to pay".
-  const need = tableNeed(
-    {
-      tableReference: id(1),
-      stableLabel: "SBC 1 (TEST)",
-      areaCode: "MAIN",
-      capacity: 4,
-      lifecycle: "Published",
-      operationalState: "Available",
-      blockReasonCode: null,
-      aggregateVersion: 1,
-      currentDiningSessionReference: id(900),
-      elapsedMinutes: 30,
-      qrCodeValidUntil: "2027-01-01T00:00:00.000Z",
-      paymentTiming: "PayLater",
-      staffRoundsAwaitingPayment: [],
-      guestRoundsAwaitingPayment: [],
-      roundsAwaitingAcceptance: [],
-      session: { phase: "Closing", version: 3, orderReference: table },
-      staffCall: null,
-    },
-    {
-      ...(facts.get(table) as NonNullable<ReturnType<typeof facts.get>>),
-      bill: { totalMinor: "0", paid: null },
-    },
-    Date.parse("2026-11-13T12:00:00.000Z"),
-  );
+  const kitchen = await loadTableKitchenFacts([table], csrf, new AbortController().signal, fetcher);
+  expect(kitchen.get(table)).toEqual({ readyToServe: 3, inKitchen: false, allServed: false });
+  const closing = {
+    tableReference: id(1),
+    stableLabel: "SBC 1 (TEST)",
+    areaCode: "MAIN",
+    capacity: 4,
+    lifecycle: "Published",
+    operationalState: "Available",
+    blockReasonCode: null,
+    aggregateVersion: 1,
+    currentDiningSessionReference: id(900),
+    elapsedMinutes: 30,
+    qrCodeValidUntil: "2027-01-01T00:00:00.000Z",
+    paymentTiming: "PayLater",
+    staffRoundsAwaitingPayment: [],
+    guestRoundsAwaitingPayment: [],
+    roundsAwaitingAcceptance: [],
+    session: { phase: "Closing", version: 3, orderReference: table },
+    staffCall: null,
+  } as const;
+  // The queue said nothing is ready and the bill says nothing is to pay: the progress stands.
+  const queued = new Map([
+    [
+      table,
+      { readyToServe: 0, inKitchen: false, allServed: true, bill: { totalMinor: "0", paid: null } },
+    ],
+  ]);
+  const facts = listFactsOf(closing, queued, new Map(), 1, kitchen);
+  expect(facts).toMatchObject({ readyToServe: 3, bill: { totalMinor: "0" } });
+  const need = tableNeed(closing, facts, Date.parse("2026-11-13T12:00:00.000Z"));
   expect(need.step).toBe("ServeAll");
+  // Before the queue or the bill answered, dishes at the pass are said already.
+  expect(listFactsOf(closing, new Map(), new Map(), 0, kitchen)).toMatchObject({ readyToServe: 3 });
+  // Nothing ready: still "Checking the bill" until the bill is read.
+  const none = new Map([[table, { readyToServe: 0, inKitchen: false, allServed: true }]]);
+  expect(listFactsOf(closing, new Map(), new Map(), 0, none)).toBeNull();
 });
 
 it("b13: a table's Order the queue pages did not bring is read on its own; one that can't be read stays unsaid", async () => {
@@ -104,7 +99,6 @@ it("b13: a table's Order the queue pages did not bring is read on its own; one t
   );
   const facts = await loadTableOrderFacts([missing], new AbortController().signal, fetcher, {
     csrf,
-    closing: new Set(),
   });
   expect(facts.get(missing)).toEqual({
     readyToServe: 1,
@@ -119,7 +113,6 @@ it("b13: a table's Order the queue pages did not bring is read on its own; one t
   );
   const none = await loadTableOrderFacts([missing], new AbortController().signal, failing, {
     csrf,
-    closing: new Set(),
   });
   expect(none.size).toBe(0);
   // Without the table's own reads (an older caller), only the queue is read.

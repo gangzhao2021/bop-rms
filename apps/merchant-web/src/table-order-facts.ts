@@ -133,18 +133,60 @@ export function kitchenFactsFromProgress(
   };
 }
 
+/** Reads each Order's serving progress on its own, a few at a time; one that fails is left out. */
+async function readKitchenFacts(
+  orderReferences: readonly string[],
+  csrf: string,
+  signal: AbortSignal,
+  fetcher: typeof fetch | undefined,
+): Promise<Map<string, Pick<TableOrderFacts, "readyToServe" | "inKitchen" | "allServed">>> {
+  const progress = createDiningProgressClient(fetcher);
+  const found = new Map<
+    string,
+    Pick<TableOrderFacts, "readyToServe" | "inKitchen" | "allServed">
+  >();
+  const toRead = [...new Set(orderReferences)].slice(0, TABLE_PROGRESS_READS);
+  const worker = async () => {
+    for (let next = toRead.shift(); next !== undefined; next = toRead.shift()) {
+      if (signal.aborted) return;
+      try {
+        found.set(next, kitchenFactsFromProgress(await progress.load(next, csrf, signal)));
+      } catch {
+        /* Not read now: what was said before stays; the next list read tries again. */
+      }
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(TABLE_PROGRESS_READS_AT_ONCE, toRead.length) }, worker),
+  );
+  return found;
+}
+
 /**
- * Reads the queue until every wanted Order is found (or the queue ends). v15 b13: a table checking
- * out, and an open table's Order the queue pages did not bring, is also read from its own serving
- * progress, so dishes waiting at the pass still offer Serve all on the list (v15 b12 live: a table
- * comped to $0 with 3 dishes ready read "Nothing to pay" and offered none). One that cannot be
- * read keeps what the queue said, or is left unsaid.
+ * v15 b13: what the kitchen and the pass hold for the tables checking out, each from its own
+ * serving progress (the read the table's own Mark served uses), whatever the order queue says or
+ * whether it could be read: dishes at the pass still offer Serve all on the list (v15 b12 live: a
+ * table comped to $0 with 3 dishes ready read "Nothing to pay" and offered none).
+ */
+export function loadTableKitchenFacts(
+  orderReferences: readonly string[],
+  csrf: string,
+  signal: AbortSignal,
+  fetcher?: typeof fetch,
+): Promise<ReadonlyMap<string, Pick<TableOrderFacts, "readyToServe" | "inKitchen" | "allServed">>> {
+  return readKitchenFacts(orderReferences, csrf, signal, fetcher);
+}
+
+/**
+ * Reads the queue until every wanted Order is found (or the queue ends). v15 b13: an open table's
+ * Order the queue pages did not bring (a busy day lists more Orders than are read) is read from its
+ * own serving progress, with no bill (the table's own bill says it).
  */
 export async function loadTableOrderFacts(
   orderReferences: readonly string[],
   signal: AbortSignal,
   fetcher?: typeof fetch,
-  own: { readonly csrf: string; readonly closing: ReadonlySet<string> } | null = null,
+  own: { readonly csrf: string } | null = null,
 ): Promise<ReadonlyMap<string, TableOrderFacts>> {
   const wanted = new Set(orderReferences);
   const facts = new Map<string, TableOrderFacts>();
@@ -163,24 +205,9 @@ export async function loadTableOrderFacts(
     after = queue.nextAfterOrderReference;
   }
   if (own === null) return facts;
-  const progress = createDiningProgressClient(fetcher);
-  const toRead = [...wanted]
-    .filter((reference) => own.closing.has(reference) || !facts.has(reference))
-    .slice(0, TABLE_PROGRESS_READS);
-  const worker = async () => {
-    for (let next = toRead.shift(); next !== undefined; next = toRead.shift()) {
-      if (signal.aborted) return;
-      try {
-        const kitchen = kitchenFactsFromProgress(await progress.load(next, own.csrf, signal));
-        facts.set(next, { bill: facts.get(next)?.bill ?? null, ...kitchen });
-      } catch {
-        /* Not read now: the queue's facts stay; the next list read tries again. */
-      }
-    }
-  };
-  await Promise.all(
-    Array.from({ length: Math.min(TABLE_PROGRESS_READS_AT_ONCE, toRead.length) }, worker),
-  );
+  const missing = [...wanted].filter((reference) => !facts.has(reference));
+  for (const [reference, kitchen] of await readKitchenFacts(missing, own.csrf, signal, fetcher))
+    facts.set(reference, { bill: null, ...kitchen });
   return facts;
 }
 
