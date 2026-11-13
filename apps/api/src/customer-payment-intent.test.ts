@@ -337,9 +337,11 @@ it("a payment for a round staff or the System cancelled is refused as cancelled 
   });
   // Its payer stopping it is said first, as before; an answer the guest can act on stays.
   f.stoppedByGuest.mockResolvedValueOnce(true);
-  expect((await (await f.send()).json()).error.code).toBe("payment_round_returned");
+  expect(await (await f.send()).json()).toMatchObject({
+    error: { code: "payment_round_returned" },
+  });
   f.create.mockRejectedValue(new OrderCreationError("ORDER_CREATE_TABLE_MOVED"));
-  expect((await (await f.send()).json()).error.code).toBe("payment_table_moved");
+  expect(await (await f.send()).json()).toMatchObject({ error: { code: "payment_table_moved" } });
   expect(f.roundCancelled).toHaveBeenCalledTimes(3);
 });
 
