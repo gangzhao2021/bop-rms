@@ -528,3 +528,77 @@ test("@production What goes live names each renamed dish and each dish whose all
   await expect(review.getByText("No name or allergen changes.")).toHaveCount(0);
   await expectNoInternalText(page);
 });
+
+test("@production b12: List it waits while a dish save is on its way and until the menu read after it shows it", async ({
+  page,
+}) => {
+  // v15 b12: List it tapped 42 ms after Save opened What goes live with the menu from before the
+  // save. It now waits for the save and the menu read after it. Synthetic, TEST-only data.
+  let saved = false;
+  let holdReads = false;
+  let releaseRead: () => void = () => undefined;
+  const current = () =>
+    view(false, null, {
+      dishRenames: saved
+        ? [
+            {
+              skuReference: id(32),
+              renamed: [{ locale: "zh-Hans-CA", from: "担担面", to: "四川担担面" }],
+            },
+          ]
+        : [],
+    });
+  await routes(page, current);
+  await page.route("**/merchant/commerce/menus/query", async (route) => {
+    const body = route.request().postDataJSON() as { menuReference: string | null };
+    if (body.menuReference === null || !holdReads) return route.fallback();
+    await new Promise<void>((resolve) => (releaseRead = resolve));
+    return route.fulfill({ headers, json: current() });
+  });
+  let releaseSave: () => void = () => undefined;
+  await page.route("**/merchant/commerce/one-store-dishes/command", async (route) => {
+    const body = route.request().postDataJSON() as Record<string, unknown>;
+    await new Promise<void>((resolve) => (releaseSave = resolve));
+    saved = true;
+    return route.fulfill({
+      headers,
+      json: {
+        status: "Saved",
+        productReference: body.productReference,
+        choicesWaiting: false,
+        price: { brandPriceMinor: "1288", pendingBrandPriceMinor: null, storePriceMinor: null },
+        listingNeeded: true,
+      },
+    });
+  });
+  await page.goto("/app/commerce/menus");
+  const listIt = page.getByRole("button", { name: "List it", exact: true });
+  await expect(listIt).toBeEnabled();
+  await page.getByRole("button", { name: "Edit Dan dan noodles (TEST) 担担面" }).click();
+  const editor = page.getByRole("form", { name: "Dan dan noodles (TEST) 担担面" });
+  await editor.getByLabel("Chinese name").fill("四川担担面");
+  holdReads = true;
+  await editor.getByRole("button", { name: "Save dish" }).click();
+  await expect(page.getByText("Saving… List it once the menu shows what you saved.")).toBeVisible();
+  await expect(listIt).toBeDisabled();
+  await noSideScroll(page, "b12-list-waits-saving");
+  releaseSave();
+  await expect(
+    page.getByText("Reading the menu again to show what you saved. List it once it shows."),
+  ).toBeVisible();
+  await expect(listIt).toBeDisabled();
+  await expect(page.getByRole("region", { name: "What goes live" })).toHaveCount(0);
+  holdReads = false;
+  releaseRead();
+  await expect(listIt).toBeEnabled();
+  await expect(page.getByText("List it once", { exact: false })).toHaveCount(0);
+  await listIt.click();
+  const review = page.getByRole("region", { name: "What goes live" });
+  await expect(
+    review.getByText("Dan dan noodles (TEST): Chinese name 担担面 → 四川担担面"),
+  ).toBeVisible();
+  await noSideScroll(page, "b12-list-waits-review");
+  const axe = await new AxeBuilder({ page }).include(".one-menu").analyze();
+  expect(axe.violations).toEqual([]);
+  await expectNoInternalText(page);
+});

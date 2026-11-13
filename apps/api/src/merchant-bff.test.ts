@@ -2264,6 +2264,9 @@ it("WP-2423 item 8 ⑦: reads and changes the Store's modules, and says when ano
   expect(command).toHaveBeenCalledWith({ sessionCookie, csrf, command: { action: "Read" } });
   for (const [code, status, error] of [
     ["STORE_FEATURES_CHANGED", 409, "store_features_changed"],
+    // v15 b12: the real "add the Store's phone first" refusal, as the Store features page reads it
+    // (store-features-client PhoneRequired; the store-phone-before-pickup spec answers the same).
+    ["STORE_FEATURES_PHONE_REQUIRED", 409, "store_features_phone_required"],
     ["STORE_FEATURES_PERMISSION_DENIED", 403, "store_features_permission_denied"],
     ["STORE_FEATURES_INPUT_INVALID", 400, "store_features_input_invalid"],
     ["STORE_FEATURES_UNAVAILABLE", 503, "store_features_unavailable"],

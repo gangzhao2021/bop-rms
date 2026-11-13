@@ -238,3 +238,71 @@ for (const language of ["en", "zh-Hans"] as const)
     });
     await expectNoInternalText(page);
   });
+
+test("@production b12: when the staff sign-in ends, Option recipes says sign in again, never check the Wi-Fi or no access", async ({
+  page,
+}) => {
+  // v15 b12: the shared sign-in was pushed out (too many screens) while Option recipes was open,
+  // and the page said "The connection may have dropped… Check the Wi-Fi". Synthetic data.
+  let ended = false;
+  let queries = 0;
+  await session(page, "RECIPE-OPTION-LIST", "/app/commerce/option-recipes", "recipe.read");
+  await page.route("**/merchant/sign-in-entry", (route) =>
+    route.fulfill({ headers, json: { path: "/staff-sign-in", testOnly: true } }),
+  );
+  for (const path of ["**/merchant/session/expiry", "**/merchant/session/activity"])
+    await page.route(path, (route) =>
+      ended
+        ? route.fulfill({
+            status: 401,
+            headers,
+            json: { error: "session_ended", reason: "too_many_screens" },
+          })
+        : route.fulfill({
+            headers,
+            json: {
+              idleExpiresAt: new Date(Date.now() + 30 * 60_000).toISOString(),
+              absoluteExpiresAt: new Date(Date.now() + 12 * 60 * 60_000).toISOString(),
+              idleTimeoutMinutes: 30,
+              serverTime: new Date().toISOString(),
+            },
+          }),
+    );
+  await page.route("**/merchant/commerce/option-recipes/query", (route) => {
+    queries += 1;
+    return ended
+      ? route.fulfill({ status: 403, headers, json: { error: "request_denied" } })
+      : route.fulfill({
+          headers,
+          json: {
+            screenId: "RECIPE-OPTION-LIST",
+            sourceAsOf: at,
+            permissions: { mayEdit: true, mayReview: true, mayPublish: true },
+            soleOperator: null,
+            ingredients: [],
+            declaredItems: [],
+            options: [answered(60, "Mild")],
+          },
+        });
+  });
+  await page.goto("/app/commerce/option-recipes");
+  await expect(page.getByRole("row", { name: /Mild/u })).toBeVisible();
+  ended = true;
+  await page.reload();
+  const panel = page.getByText(
+    "Your sign-in on this screen has ended, so this page wasn't read. Sign in again to keep working.",
+    { exact: false },
+  );
+  await eachWidth(page, "option-recipes-signed-out", async () => {
+    await expect(panel).toBeVisible();
+    await expect(page.getByRole("heading", { name: "You’ve been signed out" })).toBeVisible();
+    await expect(page.getByText("Check the Wi-Fi", { exact: false })).toHaveCount(0);
+    await expect(page.getByText("permission", { exact: false })).toHaveCount(0);
+  });
+  // Try again sends nothing with the ended sign-in, and keeps saying to sign in again.
+  const before = queries;
+  await page.getByRole("button", { name: "Try again" }).dispatchEvent("click");
+  await expect(panel).toBeVisible();
+  expect(queries).toBe(before);
+  await expectNoInternalText(page);
+});
