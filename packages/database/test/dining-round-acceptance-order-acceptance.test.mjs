@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
+import { setTimeout } from "node:timers";
 import { URL } from "node:url";
 import pg from "pg";
 import { it, vi } from "vitest";
@@ -809,10 +810,10 @@ it.each(["Unpaid", "Cancelled", "PaidFirst"])(
               },
             });
           };
-          const payRound2 = () =>
+          const payRound2 = (persistence = staffSession.persistence) =>
             withPaidBatchAcceptance(
               createMerchantCardMachinePayment({
-                persistence: { ...staffSession.persistence, now },
+                persistence: { ...persistence, now },
                 authentication: staffSession.authentication,
                 admission,
                 environment: "Test",
@@ -924,7 +925,77 @@ it.each(["Unpaid", "Cancelled", "PaidFirst"])(
           }
           if (variant === "PaidFirst") {
             // Round 2 is paid on the card machine and accepted (server side) before round 1.
-            const paid2 = await payRound2();
+            // WP-2423 (rush-reads-and-orders-changes review, money path): the counter waits 40 s
+            // for the answer, then offers to send the same record again. Here the first request
+            // is still running (its payment row written, not yet committed) when the resend with
+            // the same operation arrives: the resend waits for it and answers with what was
+            // recorded, never a conflict, "already paid" or "unavailable", and nothing twice.
+            let reachedInsert = () => undefined;
+            let releaseFirst = () => undefined;
+            const atInsert = new Promise((resolve) => {
+              reachedInsert = resolve;
+            });
+            const held = new Promise((resolve) => {
+              releaseFirst = resolve;
+            });
+            let holdOnce = true;
+            const base = staffSession.persistence.transactions;
+            const holding = {
+              ...base,
+              run: (work, ...rest) =>
+                base.run(
+                  (tx) =>
+                    work({
+                      ...tx,
+                      query: async (sql, values) => {
+                        const result = await tx.query(sql, values);
+                        if (
+                          holdOnce &&
+                          /^INSERT INTO rms_payment\.card_machine_payment \(/u.test(sql)
+                        ) {
+                          holdOnce = false;
+                          reachedInsert();
+                          await held;
+                        }
+                        return result;
+                      },
+                    }),
+                  ...rest,
+                ),
+            };
+            const measuredBefore = acceptStatements.length;
+            const first = payRound2({ ...staffSession.persistence, transactions: holding });
+            await atInsert;
+            let resendSettled = false;
+            const resend = payRound2().finally(() => {
+              resendSettled = true;
+            });
+            // The resend is in flight too: it waits on a lock the first holds.
+            for (let poll = 0; ; poll += 1) {
+              const [{ waiting }] = await one(
+                "SELECT count(*)::int AS waiting FROM pg_locks WHERE NOT granted",
+              );
+              if (waiting > 0) break;
+              assert.equal(resendSettled, false, "the resend answered before the first finished");
+              assert.ok(poll < 200, "the resend never waited for the first");
+              await new Promise((resolve) => setTimeout(resolve, 50));
+            }
+            releaseFirst();
+            const [paid2, again] = await Promise.all([first, resend]);
+            // Their acceptances ran side by side, so the statement counts below (one shared
+            // counter) can't tell them apart: they are left out of the query budget.
+            acceptStatements.splice(measuredBefore);
+            assert.equal(again.status, "AlreadyRecorded");
+            assert.equal(again.amountMinor, paid2.amountMinor);
+            assert.equal(again.recordedAt, paid2.recordedAt);
+            assert.equal(again.acceptance, "Accepted");
+            assert.deepEqual(
+              await one(
+                "SELECT count(*)::int AS payments FROM rms_payment.card_machine_payment WHERE order_batch_id=$1",
+                [R2.batch.orderBatchReference],
+              ),
+              [{ payments: 1 }],
+            );
             assert.equal(paid2.status, "Recorded");
             assert.equal(paid2.acceptance, "Accepted");
             assert.deepEqual(await accepted(R2.batch), { expected: 2, accepted: 3 });
