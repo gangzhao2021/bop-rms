@@ -6187,7 +6187,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Online card": "线上刷卡",
   "Still refundable": "仍可退",
   "Items on the order": "订单商品",
-  "{who} has confirmed it is them; approve before": "{who}已确认身份，请在此时间前批准：",
+  "{who} has confirmed it is them; approve before {time}.":
+    "{who} 已确认身份，请在 {time} 前批准。",
   "{who} needs to confirm it is them again (authenticator code on their own screen) before you can approve.":
     "{who}需要先在自己的屏幕上再次输入验证器代码确认身份，你才能批准。",
   "Withdraw…": "撤回…",

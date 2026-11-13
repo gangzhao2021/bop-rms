@@ -201,10 +201,28 @@ it("v15 batch 8: a counter cash refund is given back from the drawer in whole ni
     expect(html).not.toMatch(/\bsen[dt]\b/u);
   }
   // A card-machine payment keeps its card-machine words.
-  expect(card({ ...approved, cashGivenBackMinor: null })).toContain("slip reference");
+  expect(card({ ...approved, paymentMethod: "CardMachine", cashGivenBackMinor: null })).toContain(
+    "slip reference",
+  );
   setLanguageForTest("zh-Hans");
   expect(notSent(true)).toContain("现金付款：请从钱箱退还现金 $3.65（退款 $3.67，按 5 分取整）");
   expect(card(approved)).toContain("已批准。请从钱箱退还现金 $3.65（退款 $3.67，按 5 分取整）");
   expect(card(awaiting)).toContain("批准退还现金 $3.65");
+  setLanguageForTest("en");
+  // b12: the requester's check is one sentence in each language, punctuated in that language.
+  const verified = {
+    ...awaiting,
+    requesterName: "Mia (test)",
+    requesterVerifiedUntil: new Date(Date.now() + 10 * 60_000).toISOString(),
+  };
+  const line = (html: string) =>
+    /<p class="refund-approval-card__requester">(.*?)<\/p>/u
+      .exec(html)?.[1]
+      ?.replace(/<[^>]+>/gu, "") ?? "";
+  expect(line(card(verified))).toMatch(
+    /^Mia \(test\) has confirmed it is them; approve before [^.]+\.$/u,
+  );
+  setLanguageForTest("zh-Hans");
+  expect(line(card(verified))).toMatch(/^Mia \(test\) 已确认身份，请在 [^：.。]+ 前批准。$/u);
   setLanguageForTest("en");
 });

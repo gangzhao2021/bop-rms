@@ -1,5 +1,5 @@
 import { systemText, t } from "./i18n/i18n.js";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import { StatePanel } from "@bop-rms/ui";
 import { WorkspacePage } from "./WorkspacePage.js";
@@ -622,17 +622,20 @@ export function ApprovalCard({
       entry.state === "AwaitingApproval" ? (
         // Owner 2026-10-25: the requester's check in plain words.
         <p className="refund-approval-card__requester">
-          {requesterCurrent && requesterVerifiedUntil !== null ? (
-            <>
-              {t("{who} has confirmed it is them; approve before", { who: who })}{" "}
-              <SourceTime instant={requesterVerifiedUntil} />.
-            </>
-          ) : (
-            t(
-              "{who} needs to confirm it is them again (authenticator code on their own screen) before you can approve.",
-              { who: who },
-            )
-          )}
+          {requesterCurrent && requesterVerifiedUntil !== null
+            ? // b12: one sentence per language, with its own punctuation around the time.
+              t("{who} has confirmed it is them; approve before {time}.", { who, time: "\u0000" })
+                .split("\u0000")
+                .map((part, index) => (
+                  <Fragment key={index}>
+                    {index > 0 ? <SourceTime instant={requesterVerifiedUntil} /> : null}
+                    {part}
+                  </Fragment>
+                ))
+            : t(
+                "{who} needs to confirm it is them again (authenticator code on their own screen) before you can approve.",
+                { who: who },
+              )}
         </p>
       ) : null}
       {sole && outcome.kind !== "Sent" && outcome.kind !== "Declined" ? (
