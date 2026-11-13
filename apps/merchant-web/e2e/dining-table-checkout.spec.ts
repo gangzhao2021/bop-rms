@@ -1699,3 +1699,245 @@ for (const width of [390, 1024, 1440])
     ).toBe(true);
     await expectNoInternalText(page);
   });
+
+// v15 batch 11 (tables-list-bill-reads): three tables checking out while the order queue fails.
+// One table's bill answers 503 every time (BR C at Test Merchant 2): the other two are still read
+// and shown, each on its own, and a guest who pays on the phone turns that table's row to paid.
+const threeClosing = (page: Page) =>
+  page.route("**/merchant/dining/tables", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        canOperateTables: false,
+        canCloseSessions: true,
+        items: [1, 2, 3].map((n) => ({
+          tableReference: id(10 + n),
+          stableLabel: "C" + String(n),
+          areaCode: "MAIN",
+          capacity: 4,
+          lifecycle: "Published",
+          operationalState: "Available",
+          blockReasonCode: null,
+          aggregateVersion: 2,
+          currentDiningSessionReference: id(20 + n),
+          elapsedMinutes: 55,
+          qrCodeValidUntil: "2027-04-12T13:00:00.000Z",
+          paymentTiming: "PayLater",
+          session: { phase: "Closing", version: 7, orderReference: id(30 + n) },
+          staffRoundsAwaitingPayment: [],
+        })),
+        nextAfterTableReference: null,
+      },
+    }),
+  );
+const paidOnPhone = (bill: ReturnType<typeof unpaidBill>) => ({
+  ...bill,
+  rounds: bill.rounds.map((round) => ({ ...round, paid: true })),
+  owed: { subtotalMinor: "0", taxMinor: "0", totalMinor: "0" },
+  settlement: {
+    method: "Online",
+    roundsMinor: "3393",
+    tipMinor: "0",
+    roundingMinor: "0",
+    totalMinor: "3393",
+    tenderedMinor: null,
+    changeMinor: null,
+    recordedAt: "2026-10-15T19:00:20.000Z",
+    recordedAfterOutage: false,
+  },
+});
+for (const width of [390, 1024, 1440])
+  test(`@production one table whose bill can't be read never holds back the others on the list at ${width}`, async ({
+    page,
+  }) => {
+    await page.clock.install({ time: new Date("2026-10-15T19:00:00.000Z") });
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await floor(page, { phase: "Closing", version: 7 });
+    await threeClosing(page);
+    await page.route("**/merchant/orders*", (route) => route.abort("timedout"));
+    let guestPaid = false;
+    const reads: string[] = [];
+    await page.route("**/merchant/dining/table-bill", (route) => {
+      const session = (route.request().postDataJSON() as { diningSessionReference: string })
+        .diningSessionReference;
+      reads.push(session);
+      // C1's bill answers "try again later" every time.
+      if (session === id(21))
+        return route.fulfill({ status: 503, headers, json: { error: "retry_later" } });
+      const n = Number.parseInt(session.slice(-2), 16) - 0x20;
+      const bill = {
+        ...unpaidBill("Closing", 7),
+        diningSessionReference: session,
+        orderReference: id(30 + n),
+        tableLabel: "C" + String(n),
+      };
+      return route.fulfill({
+        headers,
+        json: guestPaid && session === id(23) ? paidOnPhone(bill) : bill,
+      });
+    });
+    await page.goto("/operations/dining");
+    const row = (label: string) =>
+      page
+        .locator(".table-row")
+        .filter({ has: page.getByRole("button", { name: `Select ${label}`, exact: true }) });
+    await expect(row("C2")).toContainText("Waiting for payment");
+    await expect(row("C2")).toContainText("$33.93");
+    await expect(row("C3")).toContainText("Waiting for payment");
+    await expect(row("C1")).toContainText("Checking the bill");
+    // The guest at C3 pays in full on the phone; C1 still fails and the queue still never answers.
+    guestPaid = true;
+    await page.clock.fastForward(15_500);
+    await page.clock.fastForward(15_500);
+    await expect(row("C3")).toContainText("Paid · close when the guests leave");
+    await expect(row("C3")).not.toContainText("Waiting for payment");
+    await expect(row("C2")).toContainText("Waiting for payment");
+    // Every table checking out was read in each list read, C1 included.
+    expect(reads.filter((session) => session === id(23)).length).toBeGreaterThanOrEqual(2);
+    expect(reads.filter((session) => session === id(21)).length).toBeGreaterThanOrEqual(2);
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.screenshot({ path: `test-results/tables-one-bill-fails-${width}.png` });
+  });
+
+// v15 batch 11: the queue answered once (the table owes $33.93), then fails. The guest pays in full
+// on the phone: the table's own bill, read after it, turns the row to paid.
+test("@production a table the queue last said owes money reads paid once its own bill says the guest paid", async ({
+  page,
+}) => {
+  await page.clock.install({ time: new Date("2026-10-15T19:00:00.000Z") });
+  await floor(page, { phase: "Closing", version: 7 });
+  let queueFails = false;
+  await page.route("**/merchant/orders*", (route) =>
+    queueFails
+      ? route.abort("timedout")
+      : route.fulfill({
+          headers,
+          json: {
+            items: [
+              {
+                orderReference: id(3),
+                orderNumber: "ORD-3",
+                orderType: "DineIn",
+                sourceChannel: "Qr",
+                submittedAt: "2026-10-15T18:10:00.000Z",
+                observedAt: "2026-10-15T19:00:00.000Z",
+                initialBatchReference: id(21),
+                batches: [
+                  {
+                    orderBatchReference: id(21),
+                    sequence: 1,
+                    acceptanceStatus: "Accepted",
+                    canRequestAcceptance: false,
+                    canCancel: false,
+                    staffCancellation: null,
+                    canCancelItems: false,
+                  },
+                ],
+                canRequestAcceptance: false,
+                readyToServeItemCount: 0,
+                tableBill: { totalMinor: "3393", paid: null },
+                currentPhase: "Fulfilled",
+                currentVersion: 4,
+                unfulfillable: null,
+                pickupNotCollected: false,
+                acceptBy: null,
+                awaitingPayment: false,
+              },
+            ],
+            nextAfterOrderReference: null,
+          },
+        }),
+  );
+  let guestPaid = false;
+  await page.route("**/merchant/dining/table-bill", (route) =>
+    route.fulfill({
+      headers,
+      json: guestPaid ? paidOnPhone(unpaidBill("Closing", 7)) : unpaidBill("Closing", 7),
+    }),
+  );
+  await page.goto("/operations/dining");
+  const row = page
+    .locator(".table-row")
+    .filter({ has: page.getByRole("button", { name: "Select T2", exact: true }) });
+  await expect(row).toContainText("Waiting for payment");
+  await expect(row).toContainText("$33.93");
+  queueFails = true;
+  guestPaid = true;
+  await page.clock.fastForward(15_500);
+  await page.clock.fastForward(15_500);
+  await expect(row).toContainText("Paid · close when the guests leave");
+  await expect(row).not.toContainText("Waiting for payment");
+});
+
+// v15 batch 11: stopping a phone payment asks the payment company, which can take a while on a busy
+// evening. Staff are told what is happening and not to take the payment another way meanwhile;
+// the bill's own re-reads wait, and a bill read before the stop answers never puts the phone
+// payment back on screen.
+for (const width of [390, 1024, 1440])
+  test(`@production stopping a phone payment says what staff wait for at ${width}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await floor(page, { phase: "Closing", version: 7 });
+    await page.route("**/merchant/dining/table-close-plan", (route) =>
+      route.fulfill({
+        headers,
+        json: {
+          orderReference: id(3),
+          diningSessionReference: id(2),
+          orderVersion: 4,
+          observedAt: "2026-10-15T19:00:00.000Z",
+          rounds: [],
+          closeBlockers: ["ORDER_BALANCE_UNPAID"],
+          totals: { onlineMinor: "0", cardMachineMinor: "0" },
+        },
+      }),
+    );
+    let stopped = false;
+    let billReadsDuringStop = 0;
+    let stopping = false;
+    const billOf = (status: string) => ({
+      ...unpaidBill("Closing", 7),
+      onlinePayment: {
+        status,
+        totalMinor: "3843",
+        tipMinor: "450",
+        startedAt: "2026-10-15T19:01:00.000Z",
+      },
+    });
+    await page.route("**/merchant/dining/table-bill", (route) => {
+      if (stopping) billReadsDuringStop += 1;
+      return route.fulfill({ headers, json: billOf(stopped ? "Cancelled" : "InProgress") });
+    });
+    let answerStop: () => void = () => undefined;
+    await page.route("**/merchant/dining/table-online-payment/stop", async (route) => {
+      stopping = true;
+      await new Promise<void>((resolve) => (answerStop = resolve));
+      stopped = true;
+      stopping = false;
+      return route.fulfill({ headers, json: { status: "Stopped", bill: billOf("Cancelled") } });
+    });
+    await page.goto("/operations/dining");
+    await page.getByRole("button", { name: "Select T2", exact: true }).click();
+    const checkout = page.getByRole("region", { name: "Checkout" });
+    await checkout.getByRole("button", { name: "Stop the phone payment" }).click();
+    await expect(
+      checkout.getByRole("button", { name: "Stopping the phone payment…" }),
+    ).toBeDisabled();
+    await expect(checkout).toContainText(
+      "Asking the payment company whether the guest finished paying. Don't take the payment another way until it answers.",
+    );
+    // Longer than the bill's 5-second re-read: it waits for the stop.
+    await page.waitForTimeout(6_500);
+    expect(billReadsDuringStop).toBe(0);
+    await checkout.screenshot({ path: `test-results/table-phone-stopping-${width}.png` });
+    answerStop();
+    await expect(checkout).toContainText("Phone payment stopped. Take the payment here.");
+    await expect(checkout.getByRole("radio", { name: "Cash" })).toBeVisible();
+    await expect(checkout).not.toContainText("Asking the payment company");
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+  });
