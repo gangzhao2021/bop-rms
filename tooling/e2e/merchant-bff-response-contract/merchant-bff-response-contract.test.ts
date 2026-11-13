@@ -789,6 +789,8 @@ const kitchenItem = (n: number, status: "Queued" | "Completed"): KitchenList["it
   comboPartSections: { [id(0x650 + n)]: null },
   chase: { count: 1, lastChasedAt: at(20) },
   takenOnPaper: true,
+  // WP-2423 b11: a round sent before the business day turned, at a table still seated.
+  atSeatedTable: true,
   // WP-2423 (M93): the dish contains alcohol; check ID when serving it (sent only then).
   checkId: true,
   // WP-2423 M10: one unit refunded and not to be made, and who refunded it.

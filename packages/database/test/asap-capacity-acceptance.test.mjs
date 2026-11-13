@@ -365,10 +365,11 @@ async function prove(context) {
       actionCode: "FULFILLMENT_ASAP_CAPACITY_" + record.state.toUpperCase(),
       targetType: "FulfillmentAsapCapacity",
       targetId: record.allocationReference,
-      reasonCode: "AUTHORIZED_CHECKOUT_CAPACITY",
+      // DEC-CANCELLED-ORDER-FREES-PICKUP-PLACE: only staff cancelling the unpaid Order releases it.
+      reasonCode: record.state === "Released" ? "ORDER_CANCELLED" : "AUTHORIZED_CHECKOUT_CAPACITY",
       correlationId: id(n + 100000),
       occurredAt: record.terminalAt ?? record.paymentRequestedAt ?? record.preparedAt,
-      sourceChannel: "CUSTOMER_PWA",
+      sourceChannel: record.state === "Released" ? "MERCHANT_WEB" : "CUSTOMER_PWA",
       dataClassification: "Restricted",
       retentionPolicyCode: "SYNTHETIC_RETENTION",
       retentionPolicyVersion: 1,
