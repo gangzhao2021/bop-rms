@@ -71,6 +71,12 @@ it("an outage of the Store's records never reads as an ended guest session, and 
       const runner = createTenantTransactionRunner(
         {
           options: pool.options,
+          // The pool's public face, as the pilot's real pool shows it (b12 review: the rush is a
+          // pool at its limit with every client out on other work).
+          on: (event, listener) => pool.on(event, listener),
+          get totalCount() {
+            return pool.totalCount;
+          },
           async connect() {
             const client = await pool.connect();
             try {

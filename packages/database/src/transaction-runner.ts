@@ -18,6 +18,7 @@ import { snapshotReadStatement } from "./snapshot-read.js";
 import {
   acquireTenantConnection,
   tenantConnectionAcquireBudgetMaxMs,
+  watchTenantConnectionPool,
 } from "./connection-acquire.js";
 import { noteRequestShed, requestAnswerTimeLeftMs } from "./request-acquire-budget.js";
 
@@ -123,6 +124,8 @@ export function createTenantTransactionRunner(
     budgetMs > tenantConnectionAcquireBudgetMaxMs
   )
     throw new TenantContextDatabaseError("TENANT_DATABASE_SCOPE_INVALID");
+  // b12 review: count the clients it hands out from now on, to tell the rush from a fault.
+  watchTenantConnectionPool(pool);
   const connections = Object.freeze({
     connect: () => acquireTenantConnection(pool, { budgetMs }),
   }) as Pick<Pool, "connect">;

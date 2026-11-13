@@ -3,7 +3,10 @@ import { readFile, lstat, realpath } from "node:fs/promises";
 import { createRequire } from "node:module";
 import process from "node:process";
 import { createTenantTransactionRunner } from "../../packages/database/dist/transaction-runner.js";
-import { acquireTenantConnection } from "../../packages/database/dist/connection-acquire.js";
+import {
+  acquireTenantConnection,
+  watchTenantConnectionPool,
+} from "../../packages/database/dist/connection-acquire.js";
 import { isPilotRuntime } from "./pilot-environment.mjs";
 import {
   isPilotEntryProcess,
@@ -117,6 +120,9 @@ async function openPool(service, config) {
     statement_timeout: 5000,
   });
   guardPilotPoolConnections(pool);
+  // WP-2423 (reads-under-burst, b12 review): its handed-out clients are counted from the start,
+  // so a wait for a pool full of work is told apart from a database that cannot be reached.
+  watchTenantConnectionPool(pool);
   return pool;
 }
 export async function createApplicationDatabase(

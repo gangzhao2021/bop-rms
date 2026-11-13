@@ -1,6 +1,7 @@
 import type { Pool, PoolClient } from "pg";
 import {
   boundingRequestAcquireBudget,
+  noteRequestFault,
   noteRequestShed,
   requestAnswerTimeLeftMs,
 } from "./request-acquire-budget.js";
@@ -67,29 +68,97 @@ export function isTransientConnectionAcquireFailure(error: unknown): boolean {
 
 /** Set on an acquire failure whose last attempt met a full pool or too many connections. */
 const rushCause = Symbol.for("bop.database.acquire-rush");
-/** The request's wait ran out with its attempt still queued (no free connection in time). */
-const queuedOutOfTime = Symbol.for("bop.database.acquire-queued-out-of-time");
 function isRushAcquireFailure(error: unknown): boolean {
   if (!(error instanceof TenantContextDatabaseError)) return false;
-  if (Object.getOwnPropertyDescriptor(error, queuedOutOfTime)?.value === true) return true;
   return Object.getOwnPropertyDescriptor(error, rushCause)?.value === true;
 }
-function acquireFailed(error: unknown): TenantContextDatabaseError {
+function acquireFailed(error: unknown, rush: boolean): TenantContextDatabaseError {
   const failed = new TenantContextDatabaseError(
     "TENANT_DATABASE_ACQUIRE_FAILED",
     tenantContextDatabaseDiagnostic(error),
   );
-  if (isPoolFull(error)) Object.defineProperty(failed, rushCause, { value: true });
+  if (rush) Object.defineProperty(failed, rushCause, { value: true });
   return failed;
 }
-/** The pool's own wait ran out, or the server has too many connections (53300). */
-function isPoolFull(error: unknown): boolean {
+
+/**
+ * b12 review: what the pool is doing, to tell the rush from a database that cannot be reached.
+ * The pool's own counts include clients still connecting, so the clients it has handed out are
+ * counted from its public `acquire` and `release` events (once per pool).
+ */
+interface PoolLoad {
+  out: number;
+}
+const poolLoads = new WeakMap<object, PoolLoad>();
+type WatchedPool = Pick<Pool, "connect"> & {
+  readonly on?: (event: string, listener: () => void) => unknown;
+  readonly totalCount?: unknown;
+  /** The pool's own options (`max`: the most connections it may open). */
+  readonly options?: unknown;
+};
+/**
+ * Starts counting the clients this pool hands out. Called where the pool is made or first given
+ * to a runner, before any client is taken, so the count is exact; the first acquire calls it too.
+ */
+export function watchTenantConnectionPool(pool: object): void {
+  watchPoolLoad(pool as WatchedPool);
+}
+function watchPoolLoad(pool: WatchedPool): PoolLoad | undefined {
+  try {
+    const known = poolLoads.get(pool);
+    if (known !== undefined) return known;
+    if (typeof pool.on !== "function") return undefined;
+    const load: PoolLoad = { out: 0 };
+    poolLoads.set(pool, load);
+    pool.on("acquire", () => {
+      load.out += 1;
+    });
+    pool.on("release", () => {
+      load.out = Math.max(0, load.out - 1);
+    });
+    return load;
+  } catch {
+    return undefined;
+  }
+}
+/**
+ * The rush: every connection the pool may open is open and handed out to other work, so this
+ * request waited in the pool's queue. Not the rush: a pool with free room or idle connections, or
+ * one whose connections are still being opened (a database that hangs or cannot be reached).
+ */
+function poolFullOfWork(pool: WatchedPool, load: PoolLoad | undefined): boolean {
+  try {
+    const options = pool.options;
+    const max =
+      options !== null && typeof options === "object"
+        ? (options as { readonly max?: unknown }).max
+        : undefined;
+    const total = pool.totalCount;
+    return (
+      load !== undefined &&
+      typeof max === "number" &&
+      typeof total === "number" &&
+      max > 0 &&
+      total >= max &&
+      load.out >= max
+    );
+  } catch {
+    return false;
+  }
+}
+/**
+ * The rush, by the failed attempt: the pool's own queue wait ran out while the pool was full of
+ * work, or the server has too many connections (53300). A new connection that timed out
+ * ("Connection terminated due to connection timeout": the database host hung or unreachable) and
+ * every other failure are faults.
+ */
+function isRushAttemptFailure(error: unknown, full: boolean): boolean {
   try {
     const message =
       error !== null && typeof error === "object"
         ? Object.getOwnPropertyDescriptor(error, "message")?.value
         : undefined;
-    if (typeof message === "string" && poolTimeoutMessages.has(message)) return true;
+    if (message === "timeout exceeded when trying to connect") return full;
     return tenantContextDatabaseDiagnostic(error).sqlState === "53300";
   } catch {
     return false;
@@ -100,6 +169,7 @@ const outOfTime = Symbol("out of time");
 
 export {
   endRequestAcquireBudget,
+  noteRequestFault,
   noteRequestShed,
   noteRequestCommittedWrite,
   remainingRequestAcquireBudgetMs,
@@ -110,7 +180,7 @@ export {
 } from "./request-acquire-budget.js";
 
 export async function acquireTenantConnection(
-  pool: Pick<Pool, "connect">,
+  pool: WatchedPool,
   policy: TenantConnectionAcquirePolicy,
 ): Promise<PoolClient> {
   const budget = policy.budgetMs;
@@ -146,11 +216,15 @@ export async function acquireTenantConnection(
       ? budget
       : Math.min(budget, request.remainingMs, answerLeft ?? Number.POSITIVE_INFINITY));
   try {
-    return await acquireUntil(pool, deadline, retries, now, sleep, random);
+    return await acquireUntil(pool, watchPoolLoad(pool), deadline, retries, now, sleep, random);
   } catch (error) {
-    // WP-2423 (reads-under-burst): every connection was busy until the request's wait ran out
-    // (the pool's own queue, or too many connections): the rush, not a fault.
-    if (request !== undefined && isRushAcquireFailure(error)) noteRequestShed();
+    // WP-2423 (reads-under-burst): every connection was busy with other work until the request's
+    // wait ran out (the pool's own queue, or too many connections): the rush. Anything else (a
+    // refusal, a database that hangs or cannot be reached) is a fault (b12 review).
+    if (request !== undefined) {
+      if (isRushAcquireFailure(error)) noteRequestShed();
+      else noteRequestFault();
+    }
     throw error;
   } finally {
     if (request !== undefined) request.remainingMs -= Math.max(0, now() - startedAt);
@@ -158,7 +232,8 @@ export async function acquireTenantConnection(
 }
 
 async function acquireUntil(
-  pool: Pick<Pool, "connect">,
+  pool: WatchedPool,
+  load: PoolLoad | undefined,
   deadline: number,
   retries: number,
   now: () => number,
@@ -187,7 +262,8 @@ async function acquireUntil(
         "TENANT_DATABASE_ACQUIRE_FAILED",
         Object.freeze({ sqlState: "08006", constraint: null, table: null, closed: false }),
       );
-      Object.defineProperty(queued, queuedOutOfTime, { value: true });
+      // The rush only when the pool was full of other work; a connect that hangs is a fault.
+      if (poolFullOfWork(pool, load)) Object.defineProperty(queued, rushCause, { value: true });
       throw queued;
     } catch (error) {
       if (error instanceof TenantContextDatabaseError) throw error;
@@ -198,7 +274,7 @@ async function acquireUntil(
         !isTransientConnectionAcquireFailure(error) ||
         deadline - now() - pause < tenantConnectionRetryMinimumMs
       )
-        throw acquireFailed(error);
+        throw acquireFailed(error, isRushAttemptFailure(error, poolFullOfWork(pool, load)));
       await sleep(pause);
     } finally {
       if (timer !== undefined) clearTimeout(timer);

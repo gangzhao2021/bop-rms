@@ -52,6 +52,12 @@ interface RequestAcquireBudget {
    * the rush. A command is never cut.
    */
   cut?: boolean;
+  /**
+   * b12 review: a real fault met this request (a database that refused, a new connection that
+   * timed out or hung while the pool was not full of work). It stays a fault (level 50,
+   * HTTP_SERVER_ERROR) even if a later step is then turned away as `shed`.
+   */
+  faulted?: boolean;
 }
 /** How long a read may work in all before it answers busy (inside the clients' 15 s). */
 export const requestReadAnswerMs = 12_000;
@@ -64,10 +70,19 @@ function requestBudgets(): AsyncLocalStorage<RequestAcquireBudget> {
 /** The current request's budget while it still bounds acquires (see RequestAcquireBudget). */
 export function boundingRequestAcquireBudget(): RequestAcquireBudget | undefined {
   const budget = requestBudgets().getStore();
-  if (budget?.cut === true && budget.answerBy !== undefined && budget.committedWrite !== true)
+  // A cut read stays cut while its phone or screen could still be waiting (b12 review): what it
+  // started and still runs after the 15 s window (a timer, lazy set-up shared with later requests)
+  // is unbounded like any request's, never starved for good.
+  if (
+    budget?.cut === true &&
+    budget.answerBy !== undefined &&
+    budget.committedWrite !== true &&
+    Date.now() - budget.startedAt < requestAnswerWindowMs
+  )
     return budget;
   if (
     budget === undefined ||
+    budget.cut === true ||
     budget.ended === true ||
     budget.committedWrite === true ||
     !(Date.now() - budget.startedAt < requestAnswerWindowMs)
@@ -117,6 +132,11 @@ export function requestAnswerTimeLeftMs(): number | undefined {
 export function noteRequestShed(): void {
   const budget = requestBudgets().getStore();
   if (budget !== undefined) budget.shed = true;
+}
+/** A real fault met this request (see `faulted`): its answer is logged as the fault it is. */
+export function noteRequestFault(): void {
+  const budget = requestBudgets().getStore();
+  if (budget !== undefined) budget.faulted = true;
 }
 /** What is left of the current request's acquire budget, or undefined when none bounds it. */
 export function remainingRequestAcquireBudgetMs(): number | undefined {

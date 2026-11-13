@@ -1,3 +1,4 @@
+import { EventEmitter } from "node:events";
 import type { PoolClient } from "pg";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -359,40 +360,90 @@ describe("WP-2423 reads-under-burst: the rush is told apart from a fault, and a 
     (globalThis as Record<symbol, { getStore(): { shed?: boolean; cut?: boolean } | undefined }>)[
       Symbol.for("bop.database.request-acquire-budget")
     ]?.getStore();
-  it("notes the rush when no connection came within the wait, never when the database refused", async () => {
+  /**
+   * A pg pool's public face: `max`, its clients (open or still opening) and the `acquire` and
+   * `release` events of the clients it hands out. `handedOut` clients are out with other work.
+   */
+  const pool = (
+    connect: () => Promise<PoolClient>,
+    shape: { max: number; total: number; handedOut: number },
+  ) => {
+    const events = new EventEmitter();
+    let started = false;
+    return Object.assign(events, {
+      options: { max: shape.max },
+      totalCount: shape.total,
+      connect: vi.fn(() => {
+        // The other work took its clients before this request asked (after the pool is watched).
+        if (!started) for (let i = 0; i < shape.handedOut; i += 1) events.emit("acquire");
+        started = true;
+        return connect();
+      }),
+    });
+  };
+  const outcome = async (
+    target: Parameters<typeof acquireTenantConnection>[0],
+    budgetMs = 1_000,
+  ) => {
+    const run = runWithRequestAcquireBudget(budgetMs, async () => {
+      await acquireTenantConnection(target, { budgetMs }).catch(() => undefined);
+      const store = budget() as { shed?: boolean; faulted?: boolean } | undefined;
+      return { shed: store?.shed === true, faulted: store?.faulted === true };
+    });
+    await vi.advanceTimersByTimeAsync(2_000);
+    return run;
+  };
+  const hang = () => new Promise<PoolClient>(() => undefined);
+  const fails = (error: () => Error) => async (): Promise<PoolClient> => {
+    throw error();
+  };
+  it("notes the rush only when the pool was full of other work, or the server had too many connections", async () => {
     vi.useFakeTimers();
     try {
-      const queued = vi.fn(() => new Promise<PoolClient>(() => undefined));
-      const rushed = runWithRequestAcquireBudget(1_000, async () => {
-        await acquireTenantConnection({ connect: queued }, { budgetMs: 1_000 }).catch(
-          () => undefined,
-        );
-        return budget()?.shed;
+      const full = { max: 2, total: 2, handedOut: 2 };
+      // Every connection out with other work until the wait ran out: the rush.
+      expect(await outcome(pool(hang, full))).toEqual({ shed: true, faulted: false });
+      // The pool's own queue wait ran out while it was full of work: the rush.
+      expect(await outcome(pool(fails(poolTimeout), full), 300)).toEqual({
+        shed: true,
+        faulted: false,
       });
-      await vi.advanceTimersByTimeAsync(2_000);
-      expect(await rushed).toBe(true);
-      // A pool full in its own queue (the pool's wait ran out) is the rush too.
-      const full = vi.fn(async () => {
-        throw new Error("timeout exceeded when trying to connect");
+      // The server has too many connections (53300): the rush.
+      expect(await outcome(pool(fails(tooMany), { max: 2, total: 0, handedOut: 0 }), 300)).toEqual({
+        shed: true,
+        faulted: false,
       });
-      const pooled = runWithRequestAcquireBudget(300, async () => {
-        await acquireTenantConnection({ connect: full }, { budgetMs: 300 }).catch(() => undefined);
-        return budget()?.shed;
-      });
-      await vi.advanceTimersByTimeAsync(2_000);
-      expect(await pooled).toBe(true);
-      // A database that refuses (a wrong password, 28P01) is a real fault: not the rush.
-      const refused = vi.fn(async () => {
-        throw Object.assign(new Error("password"), { code: "28P01", severity: "FATAL" });
-      });
-      const faulted = runWithRequestAcquireBudget(1_000, async () => {
-        await acquireTenantConnection({ connect: refused }, { budgetMs: 1_000 }).catch(
-          () => undefined,
-        );
-        return budget()?.shed;
-      });
-      await vi.advanceTimersByTimeAsync(2_000);
-      expect(await faulted).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps a database that refuses, hangs or cannot be reached a fault, never the rush (b12 review)", async () => {
+    vi.useFakeTimers();
+    try {
+      const fault = { shed: false, faulted: true };
+      // A wrong password (28P01).
+      expect(await outcome(pool(fails(badPassword), { max: 2, total: 0, handedOut: 0 }))).toEqual(
+        fault,
+      );
+      // A new connection that timed out: pg's own error when the database host hangs or cannot
+      // be reached, even with the pool at its limit.
+      const connectTimeout = () => new Error("Connection terminated due to connection timeout");
+      expect(
+        await outcome(pool(fails(connectTimeout), { max: 2, total: 1, handedOut: 1 }), 300),
+      ).toEqual(fault);
+      expect(
+        await outcome(pool(fails(connectTimeout), { max: 2, total: 2, handedOut: 2 }), 300),
+      ).toEqual(fault);
+      // The pool's queue wait ran out while its connections were still opening (none handed out).
+      expect(
+        await outcome(pool(fails(poolTimeout), { max: 2, total: 2, handedOut: 0 }), 300),
+      ).toEqual(fault);
+      // A connect that hangs with an empty or idle pool, until the request's wait ran out.
+      expect(await outcome(pool(hang, { max: 2, total: 1, handedOut: 0 }))).toEqual(fault);
+      expect(await outcome(pool(hang, { max: 2, total: 0, handedOut: 0 }))).toEqual(fault);
+      // A pool with no public face (a test double): unknown, so never the rush.
+      expect(await outcome({ connect: vi.fn(hang) })).toEqual(fault);
     } finally {
       vi.useRealTimers();
     }
@@ -418,5 +469,45 @@ describe("WP-2423 reads-under-burst: the rush is told apart from a fault, and a 
     );
     expect(outcome).toBe("TENANT_DATABASE_ACQUIRE_FAILED");
     expect(connect).not.toHaveBeenCalled();
+  });
+});
+
+describe("WP-2423 reads-under-burst (b12 review): a cut read is not starved for good", () => {
+  it("lets what a cut read still runs after the clients' 15 s window take connections again", async () => {
+    vi.useFakeTimers();
+    try {
+      const connect = vi.fn(async () => client());
+      const store = () =>
+        (globalThis as Record<symbol, { getStore(): { cut?: boolean } | undefined }>)[
+          Symbol.for("bop.database.request-acquire-budget")
+        ]?.getStore();
+      const outcome = runWithRequestAcquireBudget(
+        10_000,
+        async () => {
+          const budget = store();
+          if (budget) budget.cut = true;
+          const inside = await acquireTenantConnection({ connect }, { budgetMs: 10_000 }).then(
+            () => "connection",
+            (error: { code?: string }) => String(error.code),
+          );
+          // Work it started (a timer, lazy set-up later requests share) runs on past 15 s.
+          await new Promise((resolve) => setTimeout(resolve, 15_001));
+          const after = await acquireTenantConnection({ connect }, { budgetMs: 10_000 }).then(
+            () => "connection",
+            (error: { code?: string }) => String(error.code),
+          );
+          return { inside, after };
+        },
+        { answerWithinMs: 12_000 },
+      );
+      await vi.advanceTimersByTimeAsync(15_100);
+      expect(await outcome).toEqual({
+        inside: "TENANT_DATABASE_ACQUIRE_FAILED",
+        after: "connection",
+      });
+      expect(connect).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
