@@ -6,6 +6,7 @@ import { fileURLToPath, pathToFileURL, URL } from "node:url";
 import { loadMigrationConnectionConfig } from "../../packages/database/src/config.ts";
 import {
   applyDeadLetterCommand,
+  resolveConsumedDeadLetter,
   resolveDeadLetter,
 } from "../../packages/bop/eventing/src/index.ts";
 import { uuidV7 } from "./permission-catalog-install.mjs";
@@ -25,6 +26,8 @@ import { uuidV7 } from "./permission-catalog-install.mjs";
  *   discard --env-file --confirm-target --operator --dead-letter     AUTHORIZED_DISCARD of one item
  *   resolve --env-file --confirm-target --operator                   closes retries that completed
  *                                                                    (consumer completed or event published)
+ *                                                                    and open consumer items whose
+ *                                                                    consumer has since completed the event
  */
 const require = createRequire(new URL("../../packages/database/package.json", import.meta.url));
 const pg = require("pg");
@@ -130,6 +133,42 @@ const command = (row, operator, action, reason) => ({
   actionId: uuidV7(),
 });
 
+/**
+ * resolve: closes dead letters whose event is through. A retry that completed (the consumer
+ * completed the retried event, or on the Outbox path the event is now published), and a consumer
+ * dead letter still open although that consumer has since completed its event (it reached the
+ * consumer by an Outbox recovery or by a retry the delivery path rescheduled; WP-2423
+ * DEC-ORDER-STATUS-CANCELLED-ROUND). Each closure records the operator. A consumer retry still
+ * scheduled or claimed is left to the retry worker; run resolve again after it completes.
+ */
+export async function resolveCompletedDeadLetters(client, operator) {
+  const rows = (
+    await client.query(
+      `${itemsSql}
+       WHERE (d.status='retry_scheduled' AND (
+         (d.delivery_path='consumer' AND EXISTS (SELECT 1 FROM platform_eventing.consumer_retry_schedule s
+           WHERE s.event_id=d.event_id AND s.consumer_name=d.consumer_name AND s.state='completed'))
+         OR (d.delivery_path='outbox' AND o.published_at IS NOT NULL)))
+       OR (d.status='open' AND d.delivery_path='consumer'
+         AND EXISTS (SELECT 1 FROM platform_eventing.consumer_inbox i
+           WHERE i.consumer_name=d.consumer_name AND i.event_id=d.event_id AND i.status='completed')
+         AND NOT EXISTS (SELECT 1 FROM platform_eventing.consumer_retry_schedule s
+           WHERE s.event_id=d.event_id AND s.consumer_name=d.consumer_name
+             AND s.state IN ('scheduled','claimed')))
+       ORDER BY d.opened_at`,
+    )
+  ).rows;
+  return each(client, rows, (row) =>
+    row.status === "open"
+      ? resolveConsumedDeadLetter(client, command(row, operator, "retry", "DEPENDENCY_RECOVERED"))
+      : resolveDeadLetter(
+          client,
+          "retry_completed",
+          command(row, operator, "retry", "DEPENDENCY_RECOVERED"),
+        ),
+  );
+}
+
 export async function runDeadLetterOperations(args) {
   const { command: name, get } = parseDeadLetterArguments(args);
   if (name === "list")
@@ -193,24 +232,7 @@ export async function runDeadLetterOperations(args) {
           ),
         );
       }
-      // resolve: retries that completed: the consumer completed the event, or (Outbox path) the
-      // event is now published.
-      const rows = (
-        await client.query(
-          `${itemsSql} WHERE d.status='retry_scheduled' AND (
-             (d.delivery_path='consumer' AND EXISTS (SELECT 1 FROM platform_eventing.consumer_retry_schedule s
-               WHERE s.event_id=d.event_id AND s.consumer_name=d.consumer_name AND s.state='completed'))
-             OR (d.delivery_path='outbox' AND o.published_at IS NOT NULL))
-           ORDER BY d.opened_at`,
-        )
-      ).rows;
-      return each(client, rows, (row) =>
-        resolveDeadLetter(
-          client,
-          "retry_completed",
-          command(row, operator, "retry", "DEPENDENCY_RECOVERED"),
-        ),
-      );
+      return resolveCompletedDeadLetters(client, operator);
     },
     true,
   );

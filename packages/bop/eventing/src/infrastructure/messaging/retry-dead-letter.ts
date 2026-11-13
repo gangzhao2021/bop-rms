@@ -832,6 +832,114 @@ export async function resolveDeadLetter(
 }
 
 /**
+ * WP-2423 (DEC-ORDER-STATUS-CANCELLED-ROUND): a consumer dead letter left open although that
+ * consumer has since completed its event (completed in its Inbox) closes as `retry_completed`.
+ * This happens when the event reached the consumer another way after the dead letter opened: an
+ * Outbox recovery handed it over again (v15 order 01a1d4b2), or a retry the delivery path had
+ * already rescheduled succeeded. Platform support's action is appended (`resolve_retry`, actor,
+ * permission, purpose, reason); the item and a left-over dead-lettered retry move to their
+ * completed states exactly as a retry that completed would. A retry still scheduled or claimed is
+ * left to the retry worker; an event the consumer has not completed is never closed here (an
+ * Inbox completion is terminal, so it needs no lock).
+ */
+export async function resolveConsumedDeadLetter(
+  transaction: RetryDeadLetterTransaction,
+  command: DeadLetterCommand,
+): Promise<"applied" | "already_applied" | "conflict"> {
+  validateCommand(command, "retry");
+  const duplicate = await transaction.query(existingActionSql, [
+    command.brandId,
+    command.storeId ?? null,
+    command.idempotencyKey,
+  ]);
+  if (duplicate.rowCount === 1) return "already_applied";
+  const locked = await transaction.query<{
+    delivery_path: "outbox" | "consumer";
+    event_id: string;
+    consumer_name: string | null;
+    status: string;
+    version: string;
+  }>(lockDeadLetterSql, [command.deadLetterId, command.brandId, command.storeId ?? null]);
+  const item = locked.rows[0];
+  if (
+    !item ||
+    item.delivery_path !== "consumer" ||
+    item.consumer_name === null ||
+    item.status !== "open" ||
+    BigInt(item.version) !== command.expectedVersion
+  )
+    return "conflict";
+  const consumed = await transaction.query(
+    `SELECT event_id
+     FROM platform_eventing.consumer_inbox
+     WHERE consumer_name = $1
+       AND event_id = $2
+       AND brand_id = $3
+       AND store_id IS NOT DISTINCT FROM $4
+       AND status = 'completed'`,
+    [item.consumer_name, item.event_id, command.brandId, command.storeId ?? null],
+  );
+  if (consumed.rowCount !== 1) return "conflict";
+  const schedule = await transaction.query<{ schedule_id: string; state: string }>(
+    `SELECT schedule_id::text, state
+     FROM platform_eventing.consumer_retry_schedule
+     WHERE event_id = $1
+       AND consumer_name = $2
+       AND brand_id = $3
+       AND store_id IS NOT DISTINCT FROM $4
+     FOR UPDATE`,
+    [item.event_id, item.consumer_name, command.brandId, command.storeId ?? null],
+  );
+  const retry = schedule.rows[0];
+  if (
+    schedule.rows.length > 1 ||
+    (retry && retry.state !== "dead_lettered" && retry.state !== "completed")
+  )
+    return "conflict";
+  const inserted = await transaction.query(insertActionSql, [
+    command.actionId,
+    command.deadLetterId,
+    command.brandId,
+    command.storeId ?? null,
+    "resolve_retry",
+    command.actorId,
+    command.permission,
+    command.purpose,
+    command.reason,
+    command.expectedVersion.toString(),
+    command.idempotencyKey,
+  ]);
+  if (inserted.rowCount !== 1) return "already_applied";
+  if (retry?.state === "dead_lettered") {
+    const completed = await transaction.query(
+      `UPDATE platform_eventing.consumer_retry_schedule
+       SET state = 'completed',
+           lease_token = NULL,
+           lease_owner = NULL,
+           lease_expires_at = NULL,
+           version = version + 1
+       WHERE schedule_id = $1
+         AND state = 'dead_lettered'`,
+      [retry.schedule_id],
+    );
+    if (completed.rowCount !== 1) throw new Error("DEAD_LETTER_RESOLUTION_NOT_CONFIRMED");
+  }
+  const updated = await transaction.query(
+    `UPDATE platform_eventing.dead_letter_item
+     SET status = 'resolved',
+         resolution_kind = 'retry_completed',
+         resolved_at = statement_timestamp(),
+         version = version + 1
+     WHERE dead_letter_id = $1
+       AND status = 'open'
+       AND version = $2`,
+    [command.deadLetterId, command.expectedVersion.toString()],
+  );
+  if (updated.rowCount !== 1) throw new Error("DEAD_LETTER_RESOLUTION_NOT_CONFIRMED");
+  return "applied";
+}
+
+/**
  * WP-2423: once the cause of a consumer failure is fixed, platform support brings the retries
  * still waiting out their backoff forward to now, so the retry worker delivers them on its next
  * pass instead of after up to half an hour. Only `scheduled` retries due later than now move; a

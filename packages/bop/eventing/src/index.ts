@@ -78,6 +78,7 @@ export {
   expediteConsumerRetries,
   recordConsumerFailureDecision,
   recordOutboxFailureDecision,
+  resolveConsumedDeadLetter,
   resolveDeadLetter,
   scheduleParkedOutboxBatch,
   type ClaimedConsumerRetry,
