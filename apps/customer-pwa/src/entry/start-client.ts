@@ -131,9 +131,20 @@ export function createCustomerStartClient(input: CustomerStartClientInput): Cust
     : null;
   let active: CustomerEntryClient | null = null;
   let settled: Promise<CustomerEntryScreenState> | null = null;
+  // WP-2423 (rush-logging-and-entry): the scan (or the waiting scan replayed) being asked tells
+  // the page while the store answers busy; Try again then asks that scan again at once.
+  const busyListeners = new Set<(busy: boolean) => void>();
+  let busyClient: CustomerEntryClient | null = null;
+  const follow = (inner: CustomerEntryClient): CustomerEntryClient => {
+    inner.onBusy?.((busy) => {
+      busyClient = busy ? inner : busyClient === inner ? null : busyClient;
+      for (const listener of busyListeners) listener(busy);
+    });
+    return inner;
+  };
   const enterCode = (token: string | undefined): Promise<CustomerEntryScreenState> => {
     if (token === undefined) return Promise.resolve(missing);
-    active = forCode(token);
+    active = follow(forCode(token));
     return active.start();
   };
   async function begin(): Promise<CustomerEntryScreenState> {
@@ -150,7 +161,7 @@ export function createCustomerStartClient(input: CustomerStartClientInput): Cust
         return resumed;
       return enterCode(token);
     }
-    const replay = forReplay();
+    const replay = follow(forReplay());
     const answer = await replay.start();
     // A waiting scan answered: shown as any scan is (the guest scanned it last).
     if (
@@ -191,7 +202,18 @@ export function createCustomerStartClient(input: CustomerStartClientInput): Cust
       return next;
     },
     retry() {
+      // Asked while the store is busy: the scan waiting to be asked again goes now (no new one).
+      if (busyClient !== null) {
+        void busyClient.retry();
+        return settled ?? run();
+      }
       return active === null ? run() : active.retry();
+    },
+    onBusy(listener: (busy: boolean) => void) {
+      busyListeners.add(listener);
+      return () => {
+        busyListeners.delete(listener);
+      };
     },
     enter(intent: CustomerEntryIntent) {
       return active?.enter?.(intent) ?? Promise.resolve(missing);

@@ -308,6 +308,17 @@ export function EntryContextPage({
   const retry = (): void => {
     void runCurrent.current?.("retry");
   };
+  // WP-2423 (rush-logging-and-entry): while the store answers busy the scan is asked again by
+  // itself; the page says busy (with Try again, which asks at once), never "scan the code".
+  const [busyClient, setBusyClient] = useState<CustomerEntryClient | null>(null);
+  useEffect(() => {
+    const stop = client.onBusy?.((busy) => setBusyClient(busy ? client : null));
+    return () => {
+      stop?.();
+      setBusyClient(null);
+    };
+  }, [client]);
+  const entryBusy = busyClient === client && state.kind === "Loading";
   const answer = (intent: CustomerEntryIntent): void => {
     const enter = client.enter;
     if (enter === undefined) return;
@@ -390,6 +401,8 @@ export function EntryContextPage({
       headingRef={heading}
       onContinue={browse ?? (() => navigate("/menu"))}
       onRetry={retry}
+      busy={entryBusy}
+      onRetryNow={() => void client.retry()}
       onAnswer={client.enter === undefined ? undefined : answer}
       onSeated={recheckNow ?? undefined}
       autoJoin={answered !== null}
@@ -576,6 +589,12 @@ export interface EntryContextViewProps {
   /** They answered that they came to start this table. */
   readonly starting?: boolean | undefined;
   readonly state: CustomerEntryScreenState;
+  /**
+   * WP-2423 (rush-logging-and-entry): the store answered busy and the scan is asked again by
+   * itself (Loading only); `onRetryNow` asks at once.
+   */
+  readonly busy?: boolean | undefined;
+  readonly onRetryNow?: (() => void) | undefined;
   /** Shown under a started visit: the Store's hours, address and phone. */
   readonly storeProfile?: StoreProfileLoader | null | undefined;
   /** M105 (B.3): the Store where this phone still has a pickup order (null: none). */
@@ -600,6 +619,8 @@ export function EntryContextView({
   autoJoin,
   starting,
   state,
+  busy = false,
+  onRetryNow,
   storeProfile = null,
   keptElsewhere = null,
 }: EntryContextViewProps) {
@@ -636,6 +657,9 @@ export function EntryContextView({
       }
       className="entry-page"
       fallbackTitle={t("Start your order")}
+      // WP-2423 (rush-logging-and-entry): a page still checking the code it was opened with (or
+      // waiting out a busy store) never asks the guest to scan one.
+      askToScan={state.kind !== "Loading"}
       // M116: no visit was started, so there is no cart or order to go to.
       browseOnly={state.kind === "NotAccepting"}
     >
@@ -650,6 +674,8 @@ export function EntryContextView({
           autoJoin={autoJoin}
           starting={starting}
           state={state}
+          busy={busy}
+          onRetryNow={onRetryNow}
         />
       </section>
       {/* M105 (B.3): a notice, not a block: the order at the other Store is still on this phone. */}
@@ -835,6 +861,46 @@ function RateLimitedState({
   );
 }
 
+/**
+ * WP-2423 (rush-logging-and-entry, v15 2026-11-13): a new phone opening the pickup link in a rush
+ * was told to scan the location QR code for about 8 s while the store answered busy and the scan
+ * was asked again. It is told the store is busy and that nothing was ordered, with Try again (asks
+ * at once; a busy answer started nothing, so a second visit is never started).
+ */
+function EntryBusy({
+  headingRef,
+  onRetryNow,
+}: Readonly<{
+  headingRef?: React.RefObject<HTMLHeadingElement | null> | undefined;
+  onRetryNow?: (() => void) | undefined;
+}>) {
+  const [asking, setAsking] = useState(false);
+  useEffect(() => {
+    if (!asking) return;
+    const timer = setTimeout(() => setAsking(false), 1500);
+    return () => clearTimeout(timer);
+  }, [asking]);
+  return (
+    <div className="entry-state entry-state--warning" role="status">
+      <StateHeading headingRef={headingRef}>{t("The store’s system is busy")}</StateHeading>
+      <p>{t("Nothing has been ordered. This page asks again by itself in a few seconds.")}</p>
+      {onRetryNow ? (
+        <button
+          className="entry-action"
+          type="button"
+          disabled={asking}
+          onClick={() => {
+            setAsking(true);
+            onRetryNow();
+          }}
+        >
+          {asking ? t("Trying again…") : t("Try again")}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 function EntryState({
   diningAdmission,
   headingRef,
@@ -845,7 +911,11 @@ function EntryState({
   autoJoin,
   starting,
   state,
+  busy = false,
+  onRetryNow,
 }: Readonly<EntryContextViewProps>) {
+  if (state.kind === "Loading" && busy)
+    return <EntryBusy headingRef={headingRef} onRetryNow={onRetryNow} />;
   if (state.kind === "Loading")
     return (
       <div role="status">

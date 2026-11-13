@@ -125,6 +125,11 @@ export interface CustomerEntryClient {
   readonly hasEntry: boolean;
   start(): Promise<CustomerEntryScreenState>;
   retry(): Promise<CustomerEntryScreenState>;
+  /**
+   * WP-2423 (rush-logging-and-entry): told true while the store answered busy and the scan waits to
+   * be asked again, false once it is answered. `retry()` then asks again at once.
+   */
+  onBusy?(listener: (busy: boolean) => void): () => void;
   /** The guest answered a table's choice: a second entry, which may start a visit. */
   enter?(intent: CustomerEntryIntent): Promise<CustomerEntryScreenState>;
   /**

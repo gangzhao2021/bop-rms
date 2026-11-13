@@ -1063,6 +1063,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "无法继续这次结账。请检查购物车，必要时重新扫描二维码。",
   "We couldn’t load your cart": "无法加载你的购物车",
   "The store’s system is busy": "店里的系统有点忙",
+  "Nothing has been ordered. This page asks again by itself in a few seconds.":
+    "还没有下单。几秒后本页会自动再试。",
   "Your cart is kept. It loads again by itself in {seconds} seconds.":
     "购物车还在，{seconds} 秒后会自动重新加载。",
   "Nothing was changed. Try again in {seconds} seconds.": "这次没有改动，请 {seconds} 秒后再试。",

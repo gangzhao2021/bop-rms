@@ -42,6 +42,7 @@ export function CustomerPage({
   fallbackTitle,
   navigationHeld = false,
   browseOnly = false,
+  askToScan = true,
   children,
 }: {
   readonly step: CustomerJourneyStep;
@@ -58,6 +59,11 @@ export function CustomerPage({
    * to, so the journey offers only the menu.
    */
   readonly browseOnly?: boolean;
+  /**
+   * WP-2423 (rush-logging-and-entry): with no Store known, say "scan the code to begin" (default).
+   * False for a page that is still checking the code it was opened with.
+   */
+  readonly askToScan?: boolean;
   readonly children: ReactNode;
 }) {
   const { language } = useLanguage();
@@ -71,7 +77,7 @@ export function CustomerPage({
   // store does not know the Store yet; the guest is not told to scan a code they may not have.
   const description = store
     ? [store.brandName, mode].filter((part) => part !== undefined && part !== "").join(" · ")
-    : isCustomerSessionRestoreUnavailable()
+    : isCustomerSessionRestoreUnavailable() || !askToScan
       ? ""
       : t("Scan the location QR code to begin");
   const links: readonly { step: CustomerJourneyStep; label: string; href: string }[] = [

@@ -557,6 +557,33 @@ export function createCustomerEntryClient(
       retryAfterSeconds: Math.max(0, Math.ceil(((retryUntil ?? 0) - performance.now()) / 1000)),
     });
   let flight: Promise<CustomerEntryScreenState> | null = null;
+  // WP-2423 (rush-logging-and-entry): the store answered busy and the scan is asked again after
+  // a short wait. The page says so (busy, Try again) instead of only "checking"; Try again asks
+  // at once. A 503 issued nothing, so asking again never starts two visits.
+  const busyListeners = new Set<(busy: boolean) => void>();
+  let busyNow = false;
+  const setBusy = (busy: boolean) => {
+    if (busyNow === busy) return;
+    busyNow = busy;
+    for (const listener of busyListeners) {
+      try {
+        listener(busy);
+      } catch {
+        /* A listener never changes the scan. */
+      }
+    }
+  };
+  let wakeWait: (() => void) | null = null;
+  const busyWait = (ms: number) =>
+    new Promise<void>((resolve) => {
+      const timer = setTimeout(done, ms);
+      function done() {
+        clearTimeout(timer);
+        if (wakeWait === done) wakeWait = null;
+        resolve();
+      }
+      wakeWait = done;
+    });
   // M116: the last answer was "not taking orders now", which is worth asking again on return.
   let closedAnswer = false;
   const fetcher = boundary.fetch;
@@ -674,10 +701,12 @@ export function createCustomerEntryClient(
       // Owner 2026-11-04: nor is a Store busy for half a minute (a menu being listed) an error yet.
       for (const ms of scanRetryWaitsMs) {
         if (answer.status !== 503) break;
-        await new Promise((resolve) => setTimeout(resolve, ms));
+        setBusy(true);
+        await busyWait(ms);
         if (!online() || !current()) throw new Error("entry unavailable");
         answer = await receive(current, intent);
       }
+      setBusy(false);
       const { status, body, retryAfter } = answer;
       if (!online() || !current()) throw new Error("entry unavailable");
       // M104/M105: 200 is this phone's visit going on (nothing new started), 201 a new visit.
@@ -731,6 +760,8 @@ export function createCustomerEntryClient(
       return error;
     } catch {
       return Object.freeze({ kind: online() ? "CommandFailed" : "Offline" });
+    } finally {
+      setBusy(false);
     }
   };
   function launch(intent: CustomerEntryIntent | null = null) {
@@ -755,7 +786,15 @@ export function createCustomerEntryClient(
       return settled !== null && !closedAnswer ? settled : launch();
     },
     retry() {
+      // Asked while the store is busy: the waiting scan is sent again now.
+      wakeWait?.();
       return flight ?? launch();
+    },
+    onBusy(listener: (busy: boolean) => void) {
+      busyListeners.add(listener);
+      return () => {
+        busyListeners.delete(listener);
+      };
     },
     enter(intent: CustomerEntryIntent) {
       return flight ?? launch(intent);

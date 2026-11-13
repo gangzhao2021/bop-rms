@@ -257,3 +257,45 @@ describe("M105 B.3: another Store's code, or a table's, after a pickup visit", (
     expect(setup({ restored: restoredPickup }).client.leavesPickupVisit).toBe(false);
   });
 });
+
+describe("WP-2423 (rush-logging-and-entry): the start page hears when the scan it asks is busy", () => {
+  it("passes on the scan's busy and not-busy, and Try again asks that scan again, never a new one", async () => {
+    let tell: (busy: boolean) => void = () => undefined;
+    let finish: (state: CustomerEntryScreenState) => void = () => undefined;
+    const scan: CustomerEntryClient = {
+      hasEntry: true,
+      start: vi.fn(
+        () =>
+          new Promise<CustomerEntryScreenState>((resolve) => {
+            finish = resolve;
+          }),
+      ),
+      retry: vi.fn(async () => established),
+      onBusy: (listener) => {
+        tell = listener;
+        return () => undefined;
+      },
+    };
+    const forCode = vi.fn(() => scan);
+    const client = createCustomerStartClient({
+      source: { kind: "Code", load: async () => pickupB },
+      forCode,
+      forReplay: vi.fn(() => answer(missing)),
+      pickupCode: vi.fn(async () => undefined),
+    });
+    const heard: boolean[] = [];
+    client.onBusy?.((busy) => heard.push(busy));
+    const first = client.start();
+    await vi.waitFor(() => expect(forCode).toHaveBeenCalledOnce());
+    tell(true);
+    expect(heard).toEqual([true]);
+    const again = client.retry();
+    expect(scan.retry).toHaveBeenCalledOnce();
+    expect(forCode).toHaveBeenCalledOnce();
+    tell(false);
+    finish(established);
+    await expect(first).resolves.toBe(established);
+    await expect(again).resolves.toBe(established);
+    expect(heard).toEqual([true, false]);
+  });
+});

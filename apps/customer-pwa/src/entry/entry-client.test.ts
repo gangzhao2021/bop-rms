@@ -511,6 +511,40 @@ it("WP-2423: a scan answered 503 is tried again, and the guest gets in with no a
   await expect(client(fetcher).start()).resolves.toMatchObject({ kind: "Established" });
   expect(fetcher).toHaveBeenCalledTimes(2);
 });
+it("WP-2423 (rush-logging-and-entry): while the store answers busy the page is told so, and Try again asks at once", async () => {
+  // v15 2026-11-13: a new phone opening the pickup link in a rush waited about 8 s through four
+  // busy answers and their waits, told only that the location was being checked.
+  vi.useFakeTimers();
+  const busy = {
+    schemaVersion: 1,
+    code: "entry_service_unavailable",
+    messageKey: "customer.entry.service_unavailable",
+    recovery: { action: "RetryOrAskStaff", storeSelection: "Hidden" },
+  };
+  const fetcher = vi
+    .fn<typeof globalThis.fetch>()
+    .mockResolvedValueOnce(response(503, busy))
+    .mockResolvedValueOnce(response(503, busy))
+    .mockResolvedValueOnce(response(503, busy))
+    .mockResolvedValueOnce(response(201, established));
+  const entry = client(fetcher);
+  const said: boolean[] = [];
+  const stop = entry.onBusy?.((value) => said.push(value));
+  const answer = entry.start();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(said).toEqual([true]);
+  // The first waits pass by themselves; the third (3 s) is cut short by Try again.
+  await vi.advanceTimersByTimeAsync(400 + 1200);
+  expect(fetcher).toHaveBeenCalledTimes(3);
+  const again = entry.retry();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(fetcher).toHaveBeenCalledTimes(4);
+  await expect(answer).resolves.toMatchObject({ kind: "Established" });
+  // Try again joined the same scan: one visit, never two.
+  expect(await again).toBe(await answer);
+  expect(said).toEqual([true, false]);
+  stop?.();
+});
 afterEach(() => {
   vi.useRealTimers();
   setCustomerCsrfCredential(null);

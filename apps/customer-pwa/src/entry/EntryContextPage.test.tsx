@@ -30,6 +30,43 @@ function render(state: CustomerEntryScreenState): string {
   );
 }
 
+describe("WP-2423 (rush-logging-and-entry): a new phone opening the store's link in a rush", () => {
+  const view = (busy: boolean, onRetryNow = vi.fn()) =>
+    renderToStaticMarkup(
+      <MemoryRouter>
+        <EntryContextView
+          onContinue={vi.fn()}
+          onRetry={vi.fn()}
+          state={{ kind: "Loading" }}
+          busy={busy}
+          onRetryNow={onRetryNow}
+        />
+      </MemoryRouter>,
+    );
+  it("is never told to scan a code while the page checks the one it was opened with", () => {
+    const html = view(false);
+    expect(html).toContain("Checking this location");
+    expect(html).not.toContain("Scan the location QR code");
+  });
+  it("is told the store is busy, that nothing was ordered, with Try again, never to scan", () => {
+    const html = view(true);
+    expect(html).toContain("The store’s system is busy");
+    expect(html).toContain(
+      "Nothing has been ordered. This page asks again by itself in a few seconds.",
+    );
+    expect(html).toContain('class="entry-action" type="button">Try again</button>');
+    expect(html).not.toContain("Scan the location QR code");
+    expect(html).not.toContain("Checking this location");
+    expect(zh["Nothing has been ordered. This page asks again by itself in a few seconds."]).toBe(
+      "还没有下单。几秒后本页会自动再试。",
+    );
+  });
+  it("a page opened with no code still asks the guest to scan one", () => {
+    const html = render({ kind: "Missing" });
+    expect(html).toContain("Scan the location QR code to begin");
+  });
+});
+
 describe("DEC-DINING-GUEST-TABLE-START: a table guests start themselves", () => {
   const table = {
     publicStoreReference: context.publicStoreReference,
