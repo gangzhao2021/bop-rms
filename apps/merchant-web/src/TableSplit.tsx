@@ -437,13 +437,17 @@ export function TableSplitControls({
           )}
         </div>
       ) : null}
-      {split !== null ? (
+      {split !== null && split.stale ? (
+        // b13: a split the bill outgrew (a comp before any part was paid) lists no old parts: their
+        // amounts no longer add up to the bill, so only the whole bill as it stands is said.
+        <p role="alert">
+          {t(
+            "The bill changed after it was split: it is now {amount} for the whole table. Split it again before taking payments.",
+            { amount: cad(split.remainingMinor) },
+          )}
+        </p>
+      ) : split !== null ? (
         <>
-          {split.stale ? (
-            <p role="alert">
-              {t("The bill changed after it was split. Split it again before taking payments.")}
-            </p>
-          ) : null}
           <ol className="table-split__parts" aria-label={t("Parts")}>
             {split.parts.map((part) => (
               <li key={part.partNumber} data-selected={selectedPart === part.partNumber}>
@@ -480,7 +484,7 @@ export function TableSplitControls({
                     </span>
                   )}
                 </div>
-                {part.payment === null && !part.guestPaying && !split.stale ? (
+                {part.payment === null && !part.guestPaying ? (
                   <button
                     type="button"
                     className="table-split__collect"
