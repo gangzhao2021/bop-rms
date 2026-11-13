@@ -434,7 +434,8 @@ export function DiningRoundsProvider({
       {view === null || view.sessionPhase === "Active" ? null : (
         // The table is checking out (dishes still served, no new rounds), or closed.
         <p className="dining-rounds__table" role="status">
-          {view.sessionPhase === "Closing" ? t("Table closing") : t("Table closed")}
+          {/* v15 b12: the Closing phase is checkout (结账中); 关台 is only the close itself. */}
+          {view.sessionPhase === "Closing" ? t("Checking out") : t("Table closed")}
         </p>
       )}
       {view === null || !closeActions ? null : (

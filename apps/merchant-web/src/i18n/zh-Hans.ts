@@ -641,7 +641,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Combo: {comboName} · last dish of it": "套餐：{comboName} · 这道做好就齐了",
   "Combo: {comboName} · also {dishes}": "套餐：{comboName} · 还差 {dishes}",
   "Combo: {comboName} · {count} more dishes": "套餐：{comboName} · 还差 {count} 道",
-  "Added · {minutes} min ago": "加菜 · {minutes} 分钟前",
+  "Added · {ago}": "加菜 · {ago}",
   "{count} more": "还有 {count} 条",
   "Taken by the kitchen": "后厨已接手",
   "More orders are waiting. They show as you finish these.": "还有订单在等，做完这些就会显示。",
@@ -1513,7 +1513,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Couldn't check for sent orders waiting for payment. Orders lists them too.":
     "无法检查已发送但待付款的订单。订单页也会列出它们。",
   "Couldn't check the PIN. Try again.": "无法核对 PIN。请重试。",
-  "Couldn't check whether the order can be closed. Try again.": "无法检查订单能否关闭。请重试。",
+  "Couldn't check whether the table can be closed. Press Check again in a moment. If it keeps happening, press Cancel checkout, then Start checkout again.":
+    "暂时无法检查这桌能否关台。请稍后按“再次检查”。如果一直这样，请按“取消结账”，再按“开始结账”。",
   "Couldn't load the staff list": "无法加载员工列表",
   "Couldn't load this page": "无法加载此页面",
   "Couldn't read the amount to charge. Try again.": "无法读取应收金额。请重试。",
@@ -4331,8 +4332,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Table QR codes unavailable": "桌台二维码暂不可用",
   "Table availability action": "桌台可用性操作",
   "Table close plan unavailable": "关台计划暂不可用",
-  "Table closed": "桌台已关闭",
-  "Table closing": "正在结账",
+  "Table closed": "已关台",
   "Table marked available.": "桌台已标记为可用。",
   "Table marked temporarily unavailable.": "桌台已标记为暂时不可用。",
   "Table not found": "未找到桌台",
@@ -6626,6 +6626,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Confirm {amount} cash received": "确认已收现金 {amount}",
   "Confirm {amount} paid": "确认已收 {amount}",
   "Choose a tip to take payment": "先选小费再收款",
+  "Nothing to pay: everything on this bill was taken off. Close the table when the guests leave.":
+    "不用收款：这张账单上的菜已全部减免。客人离开后关台即可。",
   "If the guests have left, a manager closes out the open rounds (cancelling or refunding them).":
     "如果客人已经离开，由店长处理还没结束的轮次（取消或退款）。",
   "When the guests have left, close the table: its order is closed and it waits for cleaning.":
@@ -7212,7 +7214,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Not saved. Check your connection and save again.": "没有保存。请检查网络后再保存一次。",
   "a new party ended the last visit": "新客人结束了上一桌",
   "When the guests have left, clean the table, then close it: its order is closed and the next guest can start it straight away.":
-    "客人走后先把桌子收拾干净，再关桌：订单随之关闭，下一位客人马上可以开始用这张桌。",
+    "客人走后先把桌子收拾干净，再关台：订单随之关闭，下一位客人马上可以开始用这张桌。",
   "Table {table} is closed and free for the next guest.":
     "{table} 桌已关闭，下一位客人可以直接用。",
   "guests can start it now": "客人现在可以直接开始",
@@ -9716,7 +9718,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{count} items are paid and wait for you to accept them. Accept them on the Orders page, or turn the round down there for a full refund.":
     "{count} 项客人已付款，等你接单。请在订单页接单，或在那里拒掉这一轮并全额退款。",
   "This table can't be closed yet: a dish has not been served. Serve it, or resolve it on the Tables page, then close the table.":
-    "这桌还不能关：还有菜没上。请先上菜，或在“桌台”页处理这道菜，再关桌。",
+    "这桌还不能关台：还有菜没上。请先上菜，或在“桌台”页处理这道菜，再关台。",
   "This paper slip is already recorded with order {number}. Nothing was sent or recorded. Open order {number2} in Orders. If this is a different slip, check the reference printed on it.":
     "这张纸质签购单已经录入在订单 {number} 里。这次没有发送，也没有录入。请在“订单”中打开订单 {number2}。如果这是另一张签购单，请核对上面印的参考号。",
   "This paper slip is already recorded with another paper order. Nothing was sent or recorded. Find it in Orders. If this is a different slip, check the reference printed on it.":

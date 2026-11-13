@@ -1269,6 +1269,109 @@ test("@production DEC-TAX-WHOLE-RECEIPT: checkout states one tax, the bill's own
   await expectNoInternalText(page, ["Temporarily unavailable"]);
 });
 
+for (const width of [1440, 1024, 390])
+  test(`@production a bill comped to nothing after a split asks for no tip, part or payment at ${width}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 900 });
+    const state: { phase: "Active" | "Closing"; version: number } = {
+      phase: "Closing",
+      version: 7,
+    };
+    await floor(page, state);
+    await page.route("**/merchant/dining/table-close-plan", (route) =>
+      route.fulfill({
+        headers,
+        json: {
+          orderReference: id(3),
+          diningSessionReference: id(2),
+          orderVersion: 4,
+          observedAt: "2026-10-15T19:00:00.000Z",
+          rounds: [],
+          closeBlockers: [],
+          totals: { onlineMinor: "0", cardMachineMinor: "0" },
+        },
+      }),
+    );
+    // v15 b12 (L10 BCS 1): split evenly in 2 at $28.25, then every dish comped. The server says
+    // nothing is owed; the split is stale (its old parts are not the bill).
+    const bill = unpaidBill("Closing", 7);
+    const part = (partNumber: number, amountMinor: string) => ({
+      partNumber,
+      amountMinor,
+      subtotalMinor: "1250",
+      taxMinor: "163",
+      roundNumbers: [1, 2],
+      dishes: [],
+      payment: null,
+      guestPaying: false,
+    });
+    await page.route("**/merchant/dining/table-bill", (route) =>
+      route.fulfill({
+        headers,
+        json: {
+          ...bill,
+          rounds: bill.rounds.map((round) => ({
+            ...round,
+            items: round.items.map((item) => ({
+              ...item,
+              reduction: {
+                kind: "Comp",
+                percent: null,
+                amountMinor: item.totalMinor,
+                netMinor: item.subtotalMinor,
+              },
+            })),
+            subtotalMinor: "0",
+            taxMinor: "0",
+            totalMinor: "0",
+            taxRoundingMinor: "0",
+          })),
+          taxRoundingMinor: "0",
+          owed: { subtotalMinor: "0", taxMinor: "0", totalMinor: "0" },
+          consistent: false,
+          tips: { enabled: true, tierPercents: [10, 15, 18] },
+          split: {
+            mode: "Even",
+            stale: true,
+            paidInFull: false,
+            dishChoices: [],
+            parts: [part(1, "1413"), part(2, "1412")],
+            paidParts: 0,
+            remainingMinor: "0",
+          },
+        },
+      }),
+    );
+    await page.goto("/operations/dining");
+    // The Tables row says nothing is to pay, never the old split's $28.25.
+    await expect(page.getByText("Nothing to pay · close when the guests leave")).toBeVisible();
+    await expect(page.getByText("$28.25")).toHaveCount(0);
+    await page.getByRole("button", { name: "Select T2", exact: true }).click();
+    const checkout = page.getByRole("region", { name: "Checkout" });
+    await expect(
+      checkout.getByText(
+        "Nothing to pay: everything on this bill was taken off. Close the table when the guests leave.",
+      ),
+    ).toBeVisible();
+    // No tip tiers at $0.00, no payment method, no split to redo.
+    await expect(checkout.getByRole("group", { name: "Tip" })).toHaveCount(0);
+    await expect(checkout.getByText("10% · $0.00")).toHaveCount(0);
+    await expect(
+      checkout.getByRole("button", { name: "Choose a tip to take payment" }),
+    ).toHaveCount(0);
+    await expect(checkout.getByRole("radio", { name: "Card machine" })).toHaveCount(0);
+    await expect(checkout.getByText("Split it again", { exact: false })).toHaveCount(0);
+    await expect(checkout.getByText("Part 1 · $14.13")).toHaveCount(0);
+    await expect(checkout.getByRole("button", { name: "Cancel checkout" })).toBeVisible();
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    );
+    expect(overflow).toBeLessThanOrEqual(0);
+    await page.screenshot({ path: `test-results/b12-nothing-to-pay-${width}.png`, fullPage: true });
+    await expectNoInternalText(page, ["Temporarily unavailable"]);
+  });
+
 test("@production a table payment the server failed goes again as the same request, so it is recorded once", async ({
   page,
 }) => {

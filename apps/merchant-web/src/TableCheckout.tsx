@@ -807,6 +807,21 @@ export function TableCheckout({
               </p>
               <p>{t("Close the table when it has been cleared.")}</p>
             </div>
+          ) : bill.settlement === null && nothingToPay(bill) ? (
+            // v15 b12: every dish was taken off (comped) — no tip, no payment method, no split.
+            <>
+              <TableReceipt
+                bill={bill}
+                tableLabel={table.stableLabel}
+                storeLabel={storeLabel}
+                timeZone={timeZone}
+              />
+              <p className="table-checkout__nothing" role="status">
+                {t(
+                  "Nothing to pay: everything on this bill was taken off. Close the table when the guests leave.",
+                )}
+              </p>
+            </>
           ) : bill.settlement === null ? (
             <>
               {stoppedPhone ? (
@@ -1444,5 +1459,22 @@ function TableReceipt({
         {t("Print paid bill")}
       </button>
     </div>
+  );
+}
+
+/**
+ * v15 b12: a bill nothing is owed on any more (every dish comped) and nothing was paid on: checkout
+ * takes no payment, so it asks for no tip and offers no split.
+ */
+export function nothingToPay(bill: TableBill): boolean {
+  return (
+    bill.settlement === null &&
+    bill.writeOff === null &&
+    // A split the comps made stale has nothing left to split.
+    (bill.consistent || bill.split?.stale === true) &&
+    bill.waitingRounds.length === 0 &&
+    bill.onlinePayment?.status !== "InProgress" &&
+    BigInt(bill.owed.totalMinor) === 0n &&
+    (bill.split === null || (bill.split.paidParts === 0 && bill.split.mode !== "ByGuests"))
   );
 }

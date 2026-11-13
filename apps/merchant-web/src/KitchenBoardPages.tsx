@@ -1,3 +1,4 @@
+import { waitedAgoText } from "./paid-round-wait.js";
 import { LanguageSwitch } from "./i18n/LanguageSwitch.js";
 import { allergenName, listSeparator, t, saidTable, systemText } from "./i18n/i18n.js";
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
@@ -3152,10 +3153,16 @@ export function KitchenBoardScreen({
                                 // A later round of the table: read apart, and left out of the foot
                                 // button until the round above it is done.
                                 <p className="kitchen-ticket__round">
-                                  {t("Added · {minutes} min ago", {
-                                    minutes: Math.max(
-                                      0,
-                                      Math.floor((Date.parse(clockAt) - round.createdAt) / 60_000),
+                                  {/* v15 b12: a round carried over from the day before reads
+                                      "1 day ago", never "1476 min ago". */}
+                                  {t("Added · {ago}", {
+                                    ago: waitedAgoText(
+                                      Math.max(
+                                        0,
+                                        Math.floor(
+                                          (Date.parse(clockAt) - round.createdAt) / 60_000,
+                                        ),
+                                      ),
                                     ),
                                   })}
                                 </p>

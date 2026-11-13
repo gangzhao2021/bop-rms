@@ -329,6 +329,42 @@ for (const width of [1440, 1024, 390])
     expect(commands[0]).toMatchObject({ workItemReference: lateRound.workItemReference });
   });
 
+for (const width of [1440, 1024, 390])
+  test(`@production v15 b12: a seated table's later round from the day before reads its age in days, at ${width}`, async ({
+    page,
+  }) => {
+    // BR A/E on v15: both rounds sent the evening before, guests still seated; the later round's
+    // note read "Added · 1476 min ago".
+    const round = (n: number, name: string, createdAt: string) =>
+      item(n, {
+        localizedDisplayNames: { "en-CA": name },
+        orderReference: id(0x52),
+        orderLabel: { orderNumber: "8", orderType: "DineIn", tableLabel: "T5" },
+        workItemCreatedAt: createdAt,
+        businessDate: "2026-10-13",
+        atSeatedTable: true,
+      });
+    await board(page, true, {
+      items: [
+        round(0x40, "Wonton soup", "2026-10-13T17:00:00.000Z"),
+        round(0x48, "Fried rice", "2026-10-13T17:24:00.000Z"),
+      ],
+    });
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await page.goto("/operations/kitchen");
+    const ticket = page
+      .locator(".kitchen-board-lanes")
+      .first()
+      .getByRole("region", { name: "Table T5 · Order 8" });
+    await expect(ticket.getByText("Fried rice")).toBeVisible();
+    await expect(ticket.getByText("Added · 1 day ago", { exact: true })).toBeVisible();
+    await expect(ticket.getByText(/min ago/u)).toHaveCount(0);
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.screenshot({ path: `test-results/kitchen-added-day-ago-${width}.png` });
+  });
+
 test("@production DEC-KITCHEN-STALE-TICKETS: kitchen staff see earlier days apart but cannot close them", async ({
   page,
 }) => {
