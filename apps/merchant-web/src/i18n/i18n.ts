@@ -42,10 +42,34 @@ let current: StaffLanguage = typeof window === "undefined" ? "en" : initialLangu
 if (typeof document !== "undefined")
   document.documentElement.lang = current === "zh-Hans" ? "zh-Hans" : "en";
 
-function fill(text: string, values: Readonly<Record<string, string | number>> | undefined) {
+/**
+ * v15 b12: Chinese text puts a space between a Chinese character and Latin letters or digits
+ * ("为 B10 桌点单", "员工录入的 5 轮"). Templates are written so; a value filled in (a table's
+ * own name, a number) gets the space where it meets a Chinese character of the sentence.
+ */
+const hanCharacter = /\p{Script=Han}/u;
+const latinStart = /^[A-Za-z0-9]/u;
+const latinEnd = /[A-Za-z0-9)]$/u;
+function spacedInChinese(before: string | undefined, value: string, after: string | undefined) {
+  const lead = before !== undefined && hanCharacter.test(before) && latinStart.test(value);
+  const trail = after !== undefined && hanCharacter.test(after) && latinEnd.test(value);
+  return (lead ? " " : "") + value + (trail ? " " : "");
+}
+function fill(
+  text: string,
+  values: Readonly<Record<string, string | number>> | undefined,
+  chinese = false,
+) {
   if (values === undefined) return text;
-  return text.replace(/\{([a-zA-Z][a-zA-Z0-9]*)\}/gu, (whole, name: string) =>
-    Object.hasOwn(values, name) ? String(values[name]) : whole,
+  return text.replace(
+    /\{([a-zA-Z][a-zA-Z0-9]*)\}/gu,
+    (whole, name: string, at: number, sentence: string) => {
+      if (!Object.hasOwn(values, name)) return whole;
+      const value = String(values[name]);
+      return chinese
+        ? spacedInChinese(sentence[at - 1], value, sentence[at + whole.length])
+        : value;
+    },
   );
 }
 
@@ -65,13 +89,18 @@ const namedTable = new RegExp(
 export function saidTable(label: string): string {
   return /^[A-Za-z0-9-]*[0-9][A-Za-z0-9-]*$/u.test(label) ? label : NAME_OPEN + label + NAME_CLOSE;
 }
-const said = (text: string) => (text.includes(NAME_OPEN) ? text.replace(namedTable, "$1") : text);
+const said = (text: string) =>
+  text.includes(NAME_OPEN)
+    ? text.replace(namedTable, (whole, name: string, at: number, sentence: string) =>
+        spacedInChinese(sentence[at - 1], name, sentence[at + whole.length]),
+      )
+    : text;
 
 /** The staff wording of an English text, in the chosen language. */
 export function t(text: string, values?: Readonly<Record<string, string | number>>): string {
   if (current === "zh-Hans") {
     const translated = zhHans[text];
-    if (translated !== undefined) return said(fill(translated, values));
+    if (translated !== undefined) return said(fill(translated, values, true));
   }
   return said(fill(text, values));
 }

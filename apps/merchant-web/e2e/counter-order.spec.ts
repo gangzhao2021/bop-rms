@@ -475,7 +475,7 @@ for (const language of ["en", "zh-Hans"] as const)
       ? "付款时间（门店时间，以纸质订单为准）"
       : "Paid at (store time, from the paper order)";
     await page.goto("/operations/order-entry");
-    await page.getByRole("button", { name: zh ? "添加Flat White" : "Add Flat White" }).click();
+    await page.getByRole("button", { name: zh ? "添加 Flat White" : "Add Flat White" }).click();
     await page.getByRole("button", { name: zh ? "加入订单" : "Add to order" }).click();
     await page
       .getByRole("checkbox", {
@@ -2302,7 +2302,7 @@ for (const language of ["en", "zh-Hans"] as const)
     });
     const enterPaper = async () => {
       await page
-        .getByRole("button", { name: zh ? "添加Banana Bread" : "Add Banana Bread" })
+        .getByRole("button", { name: zh ? "添加 Banana Bread" : "Add Banana Bread" })
         .click();
       await page
         .getByRole("checkbox", {

@@ -201,3 +201,29 @@ it("WP-2423 M122: no Chinese sentence is pieced together around a counted Englis
   );
   expect(englishStop).toEqual([]);
 });
+
+it("v15 b12: a table's own name or a number filled into Chinese text is set off by spaces", () => {
+  setLanguageForTest("zh-Hans");
+  const table = t("Table {tableLabel}", { tableLabel: saidTable("B10 SRS Q (TEST)") });
+  expect(
+    t("Take order for table {stableLabel}", { stableLabel: saidTable("B10 SRS Q (TEST)") }),
+  ).toBe("为 B10 SRS Q (TEST) 点单");
+  expect(
+    t(
+      "The guests this order was taken for have left {value}, and the table has been cleared or seated again. Nothing was sent or charged. Check the order with the guests at the table now before sending it for them, or start over.",
+      { value: table },
+    ),
+  ).toMatch(/^这张单点菜时的那桌客人已经离开 B10 SRS Q \(TEST\)，/u);
+  expect(
+    t(
+      "{rounds} entered by staff are waiting for their card-machine payment. Record them by {at}; the kitchen starts once they are recorded.",
+      { rounds: countOf(5, "round"), at: "18:30" },
+    ),
+  ).toMatch(/^员工录入的 5 轮正在等待/u);
+  // A number next to a Chinese word, a table numbered as usual, and English untouched.
+  expect(t("Table {tableLabel}", { tableLabel: saidTable("12") })).toBe("桌台 12");
+  setLanguageForTest("en");
+  expect(
+    t("Take order for table {stableLabel}", { stableLabel: saidTable("B10 SRS Q (TEST)") }),
+  ).toBe("Take order for B10 SRS Q (TEST)");
+});

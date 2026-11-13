@@ -318,7 +318,7 @@ describe("WP-2423 P1 settlement report", () => {
     setLanguageForTest("zh-Hans");
     try {
       expect(notRun(true)).toContain(
-        "还没有和支付方核对。这个营业日已结束 13小时，日结核对还没有运行。已通知 BOP 技术支持；上面的数字不受影响。",
+        "还没有和支付方核对。这个营业日已结束 13 小时，日结核对还没有运行。已通知 BOP 技术支持；上面的数字不受影响。",
       );
     } finally {
       setLanguageForTest("en");

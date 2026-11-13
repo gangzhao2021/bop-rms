@@ -569,7 +569,7 @@ test("@production WP-2423 Settlement says plainly when a closed day has not been
   await page.evaluate(() => window.localStorage.setItem("bop.merchant.language", "zh-Hans"));
   await page.reload();
   await expect(line).toHaveText(
-    "还没有和支付方核对。这个营业日已结束 13小时，日结核对还没有运行。已通知 BOP 技术支持；上面的数字不受影响。",
+    "还没有和支付方核对。这个营业日已结束 13 小时，日结核对还没有运行。已通知 BOP 技术支持；上面的数字不受影响。",
   );
   await expectNoInternalText(page);
 });

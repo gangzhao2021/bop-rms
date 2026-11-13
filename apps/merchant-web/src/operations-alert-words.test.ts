@@ -255,11 +255,11 @@ describe("Owner 2026-11-03: system alerts in the store's language", () => {
   it("carries the values into the Chinese", () => {
     setLanguageForTest("zh-Hans");
     const say = (key: string, params: unknown) => alertSummary(renderAlert(key, params).summary);
-    expect(say("entry.api", { downMs: 3 * MIN })).toContain("3分钟");
+    expect(say("entry.api", { downMs: 3 * MIN })).toContain("3 分钟");
     expect(say("entry.api", { downMs: 30_000 })).toContain("不到一分钟");
-    expect(say("entry.api", { downMs: 3 * 60 * MIN })).toContain("3小时");
-    expect(say("certificate.expiring", { remainingMs: 6 * DAY })).toContain("还有6天到期");
-    expect(say("payment.updates", { count: 3, oldestAgeMs: 5 * MIN })).toMatch(/3 条更新.*5分钟/u);
+    expect(say("entry.api", { downMs: 3 * 60 * MIN })).toContain("3 小时");
+    expect(say("certificate.expiring", { remainingMs: 6 * DAY })).toContain("还有 6 天到期");
+    expect(say("payment.updates", { count: 3, oldestAgeMs: 5 * MIN })).toMatch(/3 条更新.*5 分钟/u);
     expect(say("updates.retrying", { count: 1, oldestAgeMs: 5 * MIN })).toContain("1 条");
     expect(say("backup.failed", { stage: "dump", attemptsLeft: 2 })).toMatch(/导出数据.*2 次/u);
     expect(say("service.attention", { services: ["business-worker:events", "customer"] })).toBe(
@@ -269,7 +269,7 @@ describe("Owner 2026-11-03: system alerts in the store's language", () => {
       say("disk.low", { disks: [{ name: "backups", freeBytes: 2 * 1024 ** 3, freePercent: 3 }] }),
     ).toBe("备份文件夹还剩 2.0 GB（3%）。空间用完后，订单和备份都会停止。");
     expect(say("channel.delivery", { channels: ["email", "webhook"], failingMs: 40 * MIN })).toBe(
-      "邮件、电话或消息提醒已失败40分钟。店主可能收不到问题通知。",
+      "邮件、电话或消息提醒已失败 40 分钟。店主可能收不到问题通知。",
     );
   });
   it("keeps the operating steps in the Chinese", () => {
@@ -343,7 +343,7 @@ describe("Owner 2026-11-03: system alerts in the store's language", () => {
     );
     // The last day before ordering stops: how long, who to call, and how to keep serving.
     expect(own("ordering.ending", { remainingMs: 23 * 60 * MIN })).toBe(
-      "这家店的点单服务还有23小时就会停止，除非 BOP 技术支持完成续期。请马上联系 BOP 技术支持。如果停了，继续用店里自己的收银机或纸单点单，用刷卡机收款。",
+      "这家店的点单服务还有 23 小时就会停止，除非 BOP 技术支持完成续期。请马上联系 BOP 技术支持。如果停了，继续用店里自己的收银机或纸单点单，用刷卡机收款。",
     );
     expect(own("ordering.ending", { remainingMs: 30_000 })).toContain("还有不到一分钟就会停止");
   });
@@ -360,7 +360,7 @@ describe("Owner 2026-11-03: system alerts in the store's language", () => {
     const shown = renderAlert("settlement.not_run", { count: 1, oldestAgeMs: 13 * 60 * MIN });
     expect(alertTitle(shown.title)).toBe("日结还没有和支付方核对");
     expect(alertSummary(shown.summary)).toBe(
-      "有 1 个已结束的营业日还没有和支付方核对（13小时前结束）。",
+      "有 1 个已结束的营业日还没有和支付方核对（13 小时前结束）。",
     );
     expect(alertAction(shown.action)).toBe(
       "店里不用做什么，线上付款照常收。修好后核对会自动补做；BOP 技术支持能看到这条提醒。",
@@ -369,7 +369,7 @@ describe("Owner 2026-11-03: system alerts in the store's language", () => {
       alertSummary(
         renderAlert("settlement.not_run", { count: 3, oldestAgeMs: 50 * 60 * MIN }).summary,
       ),
-    ).toBe("有 3 个已结束的营业日还没有和支付方核对（最早的 2天前结束）。");
+    ).toBe("有 3 个已结束的营业日还没有和支付方核对（最早的 2 天前结束）。");
     expect(
       alertSummary(renderAlert("stores.attention", { settlementNotRun: ["tea"] }).summary),
     ).toBe("有已结束的营业日还没有跑日结：tea。");

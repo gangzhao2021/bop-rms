@@ -80,9 +80,9 @@ describe('AGENTS.md "Warn before timeouts": what any staff member reads about or
   });
   it("says it in the Chinese too, with no internal words", () => {
     setLanguageForTest("zh-Hans");
-    expect(timeLeftWords(23 * HOUR)).toBe("23小时");
+    expect(timeLeftWords(23 * HOUR)).toBe("23 小时");
     const words = orderingEndingWords(inHours(23), T0);
-    expect(words.title).toBe("这家店的点单服务还有23小时就会停止");
+    expect(words.title).toBe("这家店的点单服务还有 23 小时就会停止");
     expect(words.detail).toContain("刷卡机");
     expect(orderingEndingWords(inHours(-1), T0).title).toBe("这家店的点单服务已经停止");
     for (const text of [words.title, words.detail])
