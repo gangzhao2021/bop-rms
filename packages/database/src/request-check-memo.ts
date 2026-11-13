@@ -13,8 +13,8 @@ import { withoutRowLock } from "./transaction-statement-memo.js";
  *   request's scope (`withVerifiedChecks`), never across requests or for snapshot reads.
  * - Before such a transaction sends its first statement that may write or lock (its write fence),
  *   every read it was answered from here is sent again for real, in order and under its own scope,
- *   and must return the same rows; otherwise the transaction fails as a retryable conflict (and
- *   the fresh rows replace the remembered ones). So a transaction that writes decides on facts
+ *   and must return the same rows; otherwise the transaction fails (the fresh rows replace the
+ *   remembered ones) and is decided again, see below. So a transaction that writes decides on facts
  *   current under its own locks, exactly as before; only read-only checks are answered from
  *   earlier in the same request.
  * - Any statement of the request that may write forgets what it remembered of the schemas it
