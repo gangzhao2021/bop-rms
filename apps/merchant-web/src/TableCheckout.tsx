@@ -28,15 +28,6 @@ const cad = (minor: string | bigint) =>
 /** "0": no tip; one of the Store's percentages, as text; or an amount typed in. */
 type Tip = string;
 /** "12.50" → 1250; null when it isn't an amount of money. */
-/** WP-2423 DEC-TAX-WHOLE-RECEIPT: the tax rounding still owed (the unpaid rounds' shares). */
-const owedTaxRounding = (bill: TableBill) =>
-  bill.rounds
-    .filter((round) => !round.paid)
-    .reduce((sum, round) => sum + BigInt(round.taxRoundingMinor), 0n);
-
-/** A round as it was ordered: its total without its share of the bill's tax rounding. */
-export const roundAsOrderedMinor = (round: TableBill["rounds"][number]) =>
-  (BigInt(round.totalMinor) - BigInt(round.taxRoundingMinor)).toString();
 
 export function dollarsToMinor(value: string): bigint | null {
   const match = /^(0|[1-9][0-9]{0,6})(?:\.([0-9]{1,2}))?$/u.exec(value.trim());
@@ -63,7 +54,7 @@ function errorText(error: unknown): string {
     error instanceof TableCheckoutError
       ? error.code
       : error instanceof DiningSessionCloseClientError
-        ? error.code === "Conflict"
+        ? error.code === "Conflict" || error.code === "NotReady"
           ? "SessionChanged"
           : error.code === "Unavailable"
             ? "Unavailable"
@@ -700,9 +691,10 @@ export function TableCheckout({
             {bill.rounds.map((round) => (
               <li key={round.roundNumber}>
                 <span>{t("Round {number}", { number: String(round.roundNumber) })}</span>
-                {/* DEC-TAX-WHOLE-RECEIPT: each round as it was ordered (as Orders and the guest
-                    show it); the bill's rounding is its one "Tax rounding" line below. */}
-                <span>{cad(roundAsOrderedMinor(round))}</span>
+                {/* v15 b11 (DEC-TAX-WHOLE-RECEIPT): checkout reads as the paper the guests get:
+                    each round as the bill charges it (its tax holds its share of the bill's
+                    rounding, as the split by rounds), so the rounds add up to the total. */}
+                <span>{cad(round.totalMinor)}</span>
                 <ul>
                   {round.items.map((item, index) => (
                     <li key={index}>
@@ -715,7 +707,9 @@ export function TableCheckout({
                             {item.reduction.points === true
                               ? t("Points used")
                               : compedText(item.reduction.kind, item.reduction.percent)}{" "}
-                            −{cad(item.reduction.amountMinor)}
+                            <span className="table-checkout__comp-amount">
+                              −{cad(item.reduction.amountMinor)}
+                            </span>
                           </span>
                         ) : null}
                       </span>
@@ -828,17 +822,13 @@ export function TableCheckout({
                             ? selected.taxMinor
                             : byGuests
                               ? (owed - subtotal).toString()
-                              : (BigInt(bill.owed.taxMinor) - owedTaxRounding(bill)).toString(),
+                              : // v15 b11 (DEC-TAX-WHOLE-RECEIPT): one tax, the bill's own (worked
+                                // out once on the whole bill), as the printed paid bill: $2.93 on
+                                // $22.50, never "Tax $2.92" and a separate "Tax rounding $0.01".
+                                bill.owed.taxMinor,
                         )}
                       </dd>
                     </div>
-                    {/* WP-2423 DEC-TAX-WHOLE-RECEIPT: the bill's tax is rounded once. */}
-                    {selected === null && !byGuests && owedTaxRounding(bill) !== 0n ? (
-                      <div>
-                        <dt>{t("Tax rounding")}</dt>
-                        <dd>{cad(owedTaxRounding(bill).toString())}</dd>
-                      </div>
-                    ) : null}
                     <div>
                       <dt>
                         {selected

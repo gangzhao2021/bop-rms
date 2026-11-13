@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import { parseTableBill } from "./table-checkout-client.js";
 import { splitBillFixture } from "./table-split.fixtures.js";
 import { billRoundingApart, CurrentOrderLines } from "./CurrentOrderQueuePage.js";
-import { roundAsOrderedMinor } from "./TableCheckout.js";
 import { parseCurrentOrderDetail } from "./current-order-queue-client.js";
 import {
   CURRENT_ORDER_REFS,
@@ -74,13 +73,6 @@ describe("WP-2423 DEC-TAX-WHOLE-RECEIPT: the Order's detail on Tables and Orders
       lines.totals = { ...lines.totals, taxRounding: broken };
       expect(() => parseCurrentOrderDetail(detail, orderId)).toThrow();
     }
-  });
-  it("lists each checkout round as it was ordered; the rounding is the bill's one line", () => {
-    const value = splitBillFixture();
-    const rounds = value.rounds as Record<string, unknown>[];
-    rounds[0] = { ...rounds[0], taxMinor: "630", totalMinor: "5480", taxRoundingMinor: "-1" };
-    const bill = parseTableBill(value);
-    expect(bill.rounds.map(roundAsOrderedMinor)).toEqual(["5481", "4011"]);
   });
 });
 

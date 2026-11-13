@@ -1210,7 +1210,7 @@ test("@production guests paying by dish: staff see each guest's dishes and take 
   await expectNoInternalText(page, ["Temporarily unavailable"]);
 });
 
-test("@production DEC-TAX-WHOLE-RECEIPT: the bill shows its tax rounding on its own line", async ({
+test("@production DEC-TAX-WHOLE-RECEIPT: checkout states one tax, the bill's own, as the paid bill does", async ({
   page,
 }) => {
   const state: { phase: "Active" | "Closing"; version: number } = {
@@ -1254,12 +1254,13 @@ test("@production DEC-TAX-WHOLE-RECEIPT: the bill shows its tax rounding on its 
   await page.goto("/operations/dining");
   await page.getByRole("button", { name: "Select T2", exact: true }).click();
   const checkout = page.getByRole("region", { name: "Checkout" });
-  await expect(checkout).toContainText("Tax$3.90");
-  // Each round as it was ordered (as Orders and the guest show it); the rounding is one line.
+  // v15 b11: one tax, the whole bill's ($3.89), as the printed paid bill; no "Tax rounding" line.
+  await expect(checkout).toContainText("Tax$3.89");
+  await expect(checkout).not.toContainText("Tax rounding");
+  // Each round as the bill charges it (its share of the rounding in its tax): they add up.
   await expect(checkout.locator(".table-checkout__rounds > li").nth(1)).toContainText(
-    "Round 2$11.30",
+    "Round 2$11.29",
   );
-  await expect(checkout).toContainText("Tax rounding−$0.01");
   await expect(checkout).toContainText("Total with tax$33.92");
   await checkout.getByRole("radio", { name: "Card machine" }).check();
   await expect(

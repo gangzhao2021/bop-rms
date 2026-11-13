@@ -621,21 +621,12 @@ export function TablePayPanel({
                 <dt>{t("Subtotal")}</dt>
                 <dd>{money(view.owed.subtotalMinor)}</dd>
               </div>
+              {/* v15 b11 (DEC-TAX-WHOLE-RECEIPT): one tax, the bill's own (worked out once on the
+                  whole bill), as the receipt and the restaurant's paid bill state it. */}
               <div>
                 <dt>{t("Tax")}</dt>
-                <dd>
-                  {money(
-                    (BigInt(view.owed.taxMinor) - BigInt(view.owed.taxRoundingMinor)).toString(),
-                  )}
-                </dd>
+                <dd>{money(view.owed.taxMinor)}</dd>
               </div>
-              {/* WP-2423 DEC-TAX-WHOLE-RECEIPT: the bill's tax is rounded once. */}
-              {view.owed.taxRoundingMinor !== "0" ? (
-                <div>
-                  <dt>{t("Rounding (tax worked out on the whole bill)")}</dt>
-                  <dd>{money(view.owed.taxRoundingMinor)}</dd>
-                </div>
-              ) : null}
             </dl>
           )}
           {tipOptions.length === 0 ? null : (
