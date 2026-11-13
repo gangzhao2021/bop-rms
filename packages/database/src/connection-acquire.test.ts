@@ -5,6 +5,7 @@ import {
   acquireTenantConnection,
   isTransientConnectionAcquireFailure,
   endRequestAcquireBudget,
+  noteTenantDatabaseAnswered,
   noteRequestCommittedWrite,
   remainingRequestAcquireBudgetMs,
   runWithRequestAcquireBudget,
@@ -518,6 +519,45 @@ describe("WP-2423 reads-under-burst: the rush is told apart from a fault, and a 
     expect(await at(5_000_000, 4_999_000)).toEqual({ shed: true, faulted: false });
     // Nothing answered for 6 s on that clock: a fault.
     expect(await at(5_000_000, 4_994_000)).toEqual({ shed: false, faulted: true });
+  });
+
+  it("WP-2423 (rush-logging-and-entry): a pool that got nothing back for ten seconds is the rush while the database answers the heartbeat", async () => {
+    // v15 2026-11-13, three bursts: every guest cart read of the API's pool waited its whole 10 s
+    // and failed at the same moment (TENANT_DATABASE_ACQUIRE_FAILED under GUEST_SESSION_UNAVAILABLE
+    // or GUEST_BINDING_SOURCE_UNAVAILABLE), the pool's last answer 10 s old and its slots opening
+    // again, while the entry's staff reads on the same database were answered throughout. All
+    // were logged level 50: the pool alone could not tell the rush from a database that hangs.
+    vi.useFakeTimers();
+    try {
+      const connectTimeout = () => new Error("Connection terminated due to connection timeout");
+      const silent = (connect: () => Promise<PoolClient>, heartbeatAgoMs: number | null) => {
+        const target = pool(connect, { max: 2, total: 2, handedOut: 1 });
+        watchTenantConnectionPool(target);
+        // The pool's last answer, long before this request's wait ran out.
+        target.emit("acquire");
+        target.emit("release", undefined);
+        vi.advanceTimersByTime(10_000);
+        if (heartbeatAgoMs !== null) {
+          noteTenantDatabaseAnswered(target);
+          vi.advanceTimersByTime(heartbeatAgoMs);
+        }
+        return target;
+      };
+      const rush = { shed: true, faulted: false };
+      const fault = { shed: false, faulted: true };
+      // The database answered the heartbeat a moment ago: each way the wait ran out is the rush.
+      expect(await outcome(silent(fails(connectTimeout), 1_000), 300)).toEqual(rush);
+      expect(await outcome(silent(hang, 1_000))).toEqual(rush);
+      expect(await outcome(silent(fails(poolTimeout), 1_000), 300)).toEqual(rush);
+      // No heartbeat runs, or none answered within the window (the database hung or went away).
+      expect(await outcome(silent(fails(connectTimeout), null), 300)).toEqual(fault);
+      expect(await outcome(silent(hang, 6_000))).toEqual(fault);
+      expect(await outcome(silent(fails(poolTimeout), 6_000), 300)).toEqual(fault);
+      // A refusal stays a fault whatever the heartbeat says.
+      expect(await outcome(silent(fails(badPassword), 1_000), 300)).toEqual(fault);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("takes no connection for a read already answered or abandoned (cut), even after its answer", async () => {

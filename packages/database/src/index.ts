@@ -42,6 +42,7 @@ export {
 export {
   acquireTenantConnection,
   isTransientConnectionAcquireFailure,
+  noteTenantDatabaseAnswered,
   remainingRequestAcquireBudgetMs,
   requestAnswerTimeLeftMs,
   requestReadAnswerMs,

@@ -1,9 +1,12 @@
 import { EventEmitter } from "node:events";
+import { setImmediate } from "node:timers";
 import { expect, it } from "vitest";
 import {
   acquirePilotConnection,
   guardPilotPoolConnections,
   pilotAcquireBudgetMs,
+  pilotDatabaseHeartbeatMs,
+  startPilotDatabaseHeartbeat,
 } from "./pilot-connections.mjs";
 
 // WP-2423 pilot resilience (2026-10-15): v15 customer process exited three times on an unhandled
@@ -79,4 +82,133 @@ it("WP-2423 M68: an entry retries a full pool for 10 s, a worker for one 2 s wai
   };
   expect(await acquirePilotConnection(pool, policy)).toBe(ready);
   expect(attempts).toBe(4);
+});
+
+it("WP-2423 (rush-logging-and-entry): an entry's heartbeat asks on its own connection and notes each answer for the pool", async () => {
+  const beats = [];
+  const schedule = (work, ms) => {
+    beats.push({ work, ms });
+    return beats.length;
+  };
+  const opened = [];
+  let answer = "ok";
+  const openClient = () => {
+    const client = Object.assign(new EventEmitter(), {
+      connected: false,
+      ended: false,
+      async connect() {
+        if (answer === "refused") throw new Error("connect ECONNREFUSED");
+        this.connected = true;
+      },
+      async query(sql) {
+        expect(sql).toBe("SELECT 1");
+        if (answer === "hangs") throw new Error("Query read timeout");
+      },
+      async end() {
+        this.ended = true;
+      },
+    });
+    opened.push(client);
+    return client;
+  };
+  const pool = Object.assign(new EventEmitter(), { options: { max: 2 }, totalCount: 2 });
+  const heartbeat = startPilotDatabaseHeartbeat(pool, openClient, {
+    schedule,
+    cancel: () => undefined,
+  });
+  const next = async () => {
+    const beat = beats.shift();
+    await beat.work();
+    await new Promise((resolve) => setImmediate(resolve));
+  };
+  // First beat at once, then every second, on one connection while it answers.
+  expect(beats[0].ms).toBe(0);
+  await next();
+  await next();
+  expect(beats[0].ms).toBe(pilotDatabaseHeartbeatMs);
+  expect(opened).toHaveLength(1);
+  // An unanswered ask drops its connection; the next beat opens a new one.
+  answer = "hangs";
+  await next();
+  expect(opened[0].ended).toBe(true);
+  answer = "refused";
+  await next();
+  expect(opened).toHaveLength(2);
+  expect(opened[1].ended).toBe(true);
+  answer = "ok";
+  await next();
+  expect(opened).toHaveLength(3);
+  // An error on the heartbeat's own connection never reaches the process.
+  expect(() => opened[2].emit("error", new Error("terminated"))).not.toThrow();
+  heartbeat.stop();
+  expect(opened[2].ended).toBe(true);
+});
+
+it("WP-2423 (rush-logging-and-entry): a guest read whose wait ran out with no pool answer for 10 s is the rush while the heartbeat is answered, a fault when it is not", async () => {
+  // v15 2026-11-13: the API pool had no answer for ten seconds while the database answered the
+  // staff entry; the waits ran out in the pool's own queue and on handshakes still opening.
+  const { runWithRequestAcquireBudget, watchTenantConnectionPool } =
+    await import("../../packages/database/dist/connection-acquire.js");
+  const store = () =>
+    globalThis[Symbol.for("bop.database.request-acquire-budget")]?.getStore() ?? {};
+  const outcome = async (heartbeatAnswers) => {
+    // The pool is watched on the wall clock, as openPool watches it.
+    let at = Date.now();
+    const beats = [];
+    const pool = Object.assign(new EventEmitter(), {
+      options: { max: 2, connectionTimeoutMillis: 2000 },
+      totalCount: 2,
+      async connect() {
+        at += 2000;
+        // The heartbeat goes on asking while the request waits.
+        const beat = beats.shift();
+        if (beat !== undefined) await beat();
+        throw new Error(
+          beats.length % 2 === 0
+            ? "timeout exceeded when trying to connect"
+            : "Connection terminated due to connection timeout",
+        );
+      },
+    });
+    watchTenantConnectionPool(pool);
+    // One client out with work, the pool's last answer long before the request.
+    pool.emit("acquire");
+    pool.emit("release", undefined);
+    pool.emit("acquire");
+    at += 10_000;
+    const heartbeat = startPilotDatabaseHeartbeat(
+      pool,
+      () =>
+        Object.assign(new EventEmitter(), {
+          connect: async () => undefined,
+          query: async () => {
+            if (!heartbeatAnswers) throw new Error("Query read timeout");
+          },
+          end: async () => undefined,
+        }),
+      { schedule: (work) => beats.push(work), cancel: () => undefined },
+    );
+    const result = await runWithRequestAcquireBudget(10_000, async () => {
+      const error = await acquirePilotConnection(pool, {
+        budgetMs: 10_000,
+        now: () => at,
+        sleep: async (ms) => {
+          at += ms;
+        },
+      }).catch((caught) => caught);
+      return { message: error?.message, shed: store().shed === true, faulted: store().faulted };
+    });
+    heartbeat.stop();
+    return result;
+  };
+  expect(await outcome(true)).toEqual({
+    message: "LOCAL_DATABASE_UNAVAILABLE",
+    shed: true,
+    faulted: undefined,
+  });
+  expect(await outcome(false)).toEqual({
+    message: "LOCAL_DATABASE_UNAVAILABLE",
+    shed: false,
+    faulted: true,
+  });
 });

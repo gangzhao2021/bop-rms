@@ -2,9 +2,11 @@ import { URL } from "node:url";
 import { readFile, lstat, realpath } from "node:fs/promises";
 import { createRequire } from "node:module";
 import process from "node:process";
+import { clearTimeout, setTimeout } from "node:timers";
 import { createTenantTransactionRunner } from "../../packages/database/dist/transaction-runner.js";
 import {
   acquireTenantConnection,
+  noteTenantDatabaseAnswered,
   watchTenantConnectionPool,
 } from "../../packages/database/dist/connection-acquire.js";
 import { isPilotRuntime } from "./pilot-environment.mjs";
@@ -68,6 +70,76 @@ export async function acquirePilotConnection(pool, policy = {}) {
     throw new Error("LOCAL_DATABASE_UNAVAILABLE");
   }
 }
+/** How often an entry's heartbeat asks the database (`startPilotDatabaseHeartbeat`). */
+export const pilotDatabaseHeartbeatMs = 1000;
+/**
+ * WP-2423 (rush-logging-and-entry, v15 2026-11-13): an entry asks the database `SELECT 1` once a
+ * second on a connection of its own, never one of its pool's, and notes each answer for the pool
+ * (`noteTenantDatabaseAnswered`). In three live bursts the API's pool got nothing back for ten
+ * seconds while the database answered the staff entry all the time, so every guest read turned away
+ * by the rush was logged as a fault (level 50, HTTP_SERVER_ERROR). The heartbeat is answered in a
+ * rush and not when the database hangs, restarts or cannot be reached, so a wait that ran out is
+ * told apart: the rush (level 40, HTTP_RETRY_LATER) or a fault (level 50). Each ask is bounded by
+ * the client's own 2 s limits; a failed one drops its connection and the next opens a new one.
+ */
+export function startPilotDatabaseHeartbeat(
+  pool,
+  openClient,
+  {
+    intervalMs = pilotDatabaseHeartbeatMs,
+    schedule = (work, ms) => {
+      const handle = setTimeout(work, ms);
+      handle.unref?.();
+      return handle;
+    },
+    cancel = clearTimeout,
+  } = {},
+) {
+  let client = null;
+  let stopped = false;
+  let timer;
+  const end = (target) => {
+    try {
+      void Promise.resolve(target?.end()).catch(() => undefined);
+    } catch {
+      /* Already ended. */
+    }
+  };
+  const beat = async () => {
+    if (stopped) return;
+    let opening = null;
+    try {
+      if (client === null) {
+        opening = openClient();
+        // An error on the heartbeat's own connection never reaches the process.
+        opening.on("error", () => {
+          if (client === opening) client = null;
+        });
+        await opening.connect();
+        if (stopped) return end(opening);
+        client = opening;
+        opening = null;
+      }
+      await client.query("SELECT 1");
+      if (!stopped) noteTenantDatabaseAnswered(pool);
+    } catch {
+      end(opening);
+      end(client);
+      client = null;
+    } finally {
+      if (!stopped) timer = schedule(() => void beat(), intervalMs);
+    }
+  };
+  timer = schedule(() => void beat(), 0);
+  return Object.freeze({
+    stop() {
+      stopped = true;
+      cancel(timer);
+      end(client);
+      client = null;
+    },
+  });
+}
 /** This role's usable connections, read from the database itself; null when it can't be read. */
 export async function readPilotRoleLimit(config) {
   const client = new Client(config);
@@ -103,15 +175,18 @@ async function openPool(service, config) {
   // Sized from the Stores served and the role's real limit, so the pools of every process fit.
   // Unreadable: the smallest pool, and the first real query reports the cause.
   const limit = await readPilotRoleLimit({ ...config, connectionTimeoutMillis: 2000 });
+  const entry = isPilotEntryProcess(process.argv[1]);
+  const planned =
+    service === "api" && limit !== null
+      ? pilotProcessPoolSize(
+          planPilotConnections({ storeCount: await servedStoreCount(), limit }),
+          process.argv[1],
+        )
+      : 2;
   const pool = new Pool({
     ...config,
-    max:
-      service === "api" && limit !== null
-        ? pilotProcessPoolSize(
-            planPilotConnections({ storeCount: await servedStoreCount(), limit }),
-            process.argv[1],
-          )
-        : 2,
+    // An entry's heartbeat (below) holds one of its planned connections.
+    max: entry ? Math.max(1, planned - 1) : planned,
     connectionTimeoutMillis: isPilotEntryProcess(process.argv[1])
       ? pilotEntryAcquireMs
       : pilotWorkerAcquireMs,
@@ -123,7 +198,21 @@ async function openPool(service, config) {
   // WP-2423 (reads-under-burst, b12 review): its handed-out clients are counted from the start,
   // so a wait for a pool full of work is told apart from a database that cannot be reached.
   watchTenantConnectionPool(pool);
-  return pool;
+  // WP-2423 (rush-logging-and-entry): an entry's requests wait on its pool; the heartbeat tells
+  // whether the database answers while they do (the rush) or not (a fault).
+  const heartbeat = entry
+    ? startPilotDatabaseHeartbeat(
+        pool,
+        () =>
+          new Client({
+            ...config,
+            connectionTimeoutMillis: 2000,
+            query_timeout: 2000,
+            statement_timeout: 2000,
+          }),
+      )
+    : null;
+  return { pool, heartbeat };
 }
 export async function createApplicationDatabase(
   service,
@@ -146,8 +235,10 @@ export async function createApplicationDatabase(
     throw new Error("LOCAL_DATABASE_CONFIGURATION_UNAVAILABLE");
   const config = { host, port, database, user: user(service), password, ssl: false };
   const shared = sharedPools.get(service + ":" + database);
-  const pool = shared?.pool ?? (await openPool(service, config));
-  if (shared === undefined) sharedPools.set(service + ":" + database, { pool, users: 1 });
+  const opened = shared === undefined ? await openPool(service, config) : null;
+  const pool = shared?.pool ?? opened.pool;
+  if (shared === undefined)
+    sharedPools.set(service + ":" + database, { pool, heartbeat: opened.heartbeat, users: 1 });
   else shared.users += 1;
   if (process.env.PILOT_CLOCK_FROM_DATABASE === "1")
     await alignProcessClockToDatabase((sql) => pool.query(sql));
@@ -177,6 +268,7 @@ export async function createApplicationDatabase(
         const entry = sharedPools.get(service + ":" + database);
         if (entry === undefined || --entry.users > 0) return;
         sharedPools.delete(service + ":" + database);
+        entry.heartbeat?.stop();
         await pool.end();
       })();
       return closing;

@@ -95,6 +95,12 @@ interface PoolLoad {
   answeredAt: number | null;
   /** The clock `answeredAt` is read on: the acquiring runner's own (its injected `now`). */
   clock: () => number;
+  /**
+   * WP-2423 (rush-logging-and-entry): when the database last answered this process's own
+   * heartbeat, on a connection of its own outside the pool (`noteTenantDatabaseAnswered`). Null:
+   * no heartbeat answered yet, or none runs for this pool.
+   */
+  databaseAnsweredAt: number | null;
 }
 /**
  * WP-2423 (rush-reads-and-orders-changes, v15 2026-11-13): how recently the database must have
@@ -126,7 +132,12 @@ function watchPoolLoad(pool: WatchedPool, clock?: () => number): PoolLoad | unde
       return known;
     }
     if (typeof pool.on !== "function") return undefined;
-    const load: PoolLoad = { out: 0, answeredAt: null, clock: clock ?? Date.now };
+    const load: PoolLoad = {
+      out: 0,
+      answeredAt: null,
+      clock: clock ?? Date.now,
+      databaseAnsweredAt: null,
+    };
     poolLoads.set(pool, load);
     pool.on("acquire", () => {
       load.out += 1;
@@ -182,6 +193,29 @@ function poolBusyAndAnswering(load: PoolLoad | undefined, now: number): boolean 
     load.answeredAt !== null &&
     now - load.answeredAt <= tenantConnectionAnsweringWindowMs
   );
+}
+/**
+ * WP-2423 (rush-logging-and-entry, v15 2026-11-13): the database itself is answering, though this
+ * pool got nothing back. In three live bursts the API's pool had no answer for ten seconds (every
+ * guest read waited until its whole wait ran out, at the same moment), while the guest and staff
+ * entry's reads on the same database were answered all the time: the database was busy, not gone.
+ * So the pool's own answers cannot tell the rush from a fault; a heartbeat on a connection of its
+ * own can: it is answered in a rush and not when the database hangs, restarts or cannot be reached.
+ */
+function databaseAnswering(load: PoolLoad | undefined, now: number): boolean {
+  return (
+    load !== undefined &&
+    load.databaseAnsweredAt !== null &&
+    now - load.databaseAnsweredAt <= tenantConnectionAnsweringWindowMs
+  );
+}
+/**
+ * WP-2423 (rush-logging-and-entry): the database answered this process's heartbeat now (see
+ * `databaseAnswering`). The heartbeat runs on its own connection, never one of `pool`'s.
+ */
+export function noteTenantDatabaseAnswered(pool: object): void {
+  const load = watchPoolLoad(pool as WatchedPool);
+  if (load !== undefined) load.databaseAnsweredAt = load.clock();
 }
 /**
  * The rush, by the failed attempt: a wait ran out (the pool's own queue wait, or a new
@@ -308,9 +342,14 @@ async function acquireUntil(
         "TENANT_DATABASE_ACQUIRE_FAILED",
         Object.freeze({ sqlState: "08006", constraint: null, table: null, closed: false }),
       );
-      // The rush only when the pool was full of other work or the database was answering it; a
-      // connect that hangs with nothing answered is a fault.
-      if (poolFullOfWork(pool, load) || poolBusyAndAnswering(load, now()))
+      // The rush only when the pool was full of other work or the database was answering (this
+      // pool's work, or this process's heartbeat); a connect that hangs with nothing answered is
+      // a fault.
+      if (
+        poolFullOfWork(pool, load) ||
+        poolBusyAndAnswering(load, now()) ||
+        databaseAnswering(load, now())
+      )
         Object.defineProperty(queued, rushCause, { value: true });
       throw queued;
     } catch (error) {
@@ -327,7 +366,7 @@ async function acquireUntil(
           isRushAttemptFailure(
             error,
             poolFullOfWork(pool, load),
-            poolBusyAndAnswering(load, now()),
+            poolBusyAndAnswering(load, now()) || databaseAnswering(load, now()),
           ),
         );
       await sleep(pause);
