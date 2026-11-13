@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { afterAll, afterEach, beforeAll, expect, it } from "vitest";
-import { renderUnavailable, startPilotFront } from "./pilot-front.mjs";
+import { createRelayTiming, renderUnavailable, startPilotFront } from "./pilot-front.mjs";
 import { parsePilotHosting } from "./pilot-hosting.mjs";
 import { startPlannedMaintenance } from "./pilot-ops-maintenance.mjs";
 import { createTestCertificates } from "./pilot-test-certificates.mjs";
@@ -367,4 +367,52 @@ it("M02: guests of Chinese restaurants read the page in Chinese; French and Engl
   ).toString("utf8");
   expect(staff).toContain("系统正在更新");
   expect(staff).toContain("店员：在页面恢复前，请继续在柜台或用纸质单（停机单）接单。");
+});
+
+it("WP-2423 (rush-reads-and-orders-changes review): writes where a slow answer's time went at the front, never what was asked", async () => {
+  const { EventEmitter } = await import("node:events");
+  let at = 1_000_000;
+  const lines = [];
+  const timing = createRelayTiming({
+    now: () => at,
+    log: (line) => lines.push(line),
+    everyMs: 60_000,
+  });
+  try {
+    // A connection that waited 1.5 s in the front before the entry took it, then one request the
+    // entry answered after 16 s (the screens give up at 15 s), then a quick one.
+    const client = new EventEmitter();
+    const entry = new EventEmitter();
+    const acceptedAt = at;
+    at += 1_500;
+    timing.watch(client, entry, acceptedAt);
+    client.emit("data", Buffer.from("secret request bytes"));
+    at += 16_000;
+    entry.emit("data", Buffer.from("secret answer bytes"));
+    client.emit("data", Buffer.from("x"));
+    at += 200;
+    entry.emit("data", Buffer.from("y"));
+    timing.flush();
+    // A quiet window writes nothing.
+    const quiet = new EventEmitter();
+    const quietEntry = new EventEmitter();
+    timing.watch(quiet, quietEntry, at);
+    quiet.emit("data", Buffer.from("x"));
+    quietEntry.emit("data", Buffer.from("y"));
+    timing.flush();
+  } finally {
+    timing.close();
+  }
+  expect(lines.map((line) => JSON.parse(line))).toEqual([
+    {
+      level: 40,
+      time: new Date(at).toISOString(),
+      event: "front_relay_timing",
+      connections: 1,
+      slowestConnectMs: 1_500,
+      slowestExchangeMs: 16_000,
+      exchangesOver15s: 1,
+    },
+  ]);
+  expect(lines.join("")).not.toContain("secret");
 });

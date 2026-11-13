@@ -177,6 +177,64 @@ async function fileStamp(file) {
  * Starts the front. `hosting` is the parsed hosting.json; files are absolute paths. Returns the
  * listening server (tests close it).
  */
+/**
+ * WP-2423 (rush-reads-and-orders-changes review, v15 2026-11-13): in a burst staff answers reached
+ * the screens after 16-18 s although the entry answers staff reads busy by 11 s from when their
+ * connection reached it. What lies before the entry was not measured: the time a connection waits
+ * in this front before the entry takes it, and each exchange the front relays (from the client's
+ * bytes to the entry's first reply; the bytes stay encrypted, so this is a request's time at the
+ * entry and behind it). One line per 5 s, only when something was slow, with the slowest of each
+ * and how many exchanges took over 15 s. A screen's time beyond the slowest exchange seen here was
+ * spent before the front (the host's port forward). Nothing of a request is logged.
+ */
+export function createRelayTiming({
+  now = Date.now,
+  log = (line) => console.log(line),
+  everyMs = 5000,
+} = {}) {
+  let window = null;
+  const take = () =>
+    (window ??= { connections: 0, slowestConnectMs: 0, slowestExchangeMs: 0, exchangesOver15s: 0 });
+  const flush = () => {
+    if (window === null) return;
+    const seen = window;
+    window = null;
+    if (seen.slowestConnectMs < 1000 && seen.slowestExchangeMs < 5000) return;
+    log(
+      JSON.stringify({
+        level: seen.exchangesOver15s > 0 ? 40 : 30,
+        time: new Date(now()).toISOString(),
+        event: "front_relay_timing",
+        ...seen,
+      }),
+    );
+  };
+  const timer = setInterval(flush, everyMs);
+  timer.unref?.();
+  return {
+    /** Watches one relayed connection that arrived at `acceptedAt`, now joined to the entry. */
+    watch(client, upstream, acceptedAt) {
+      const opened = take();
+      opened.connections += 1;
+      opened.slowestConnectMs = Math.max(opened.slowestConnectMs, Math.max(0, now() - acceptedAt));
+      let askedAt = null;
+      client.on("data", () => {
+        askedAt ??= now();
+      });
+      upstream.on("data", () => {
+        if (askedAt === null) return;
+        const tookMs = Math.max(0, now() - askedAt);
+        askedAt = null;
+        const seen = take();
+        seen.slowestExchangeMs = Math.max(seen.slowestExchangeMs, tookMs);
+        if (tookMs > 15_000) seen.exchangesOver15s += 1;
+      });
+    },
+    flush,
+    close: () => clearInterval(timer),
+  };
+}
+
 export async function startPilotFront({
   runtimeDirectory,
   hosting,
@@ -192,8 +250,10 @@ export async function startPilotFront({
   reloadEveryMs = 60_000,
   now = Date.now,
   log = (line) => console.log(line),
+  relayTimingEveryMs = 5000,
 }) {
   const terminate = hosting.tls.mode === "front";
+  const timing = createRelayTiming({ now, log, everyMs: relayTimingEveryMs });
   const files = terminate
     ? { cert: hosting.tls.certificateFile, key: hosting.tls.keyFile }
     : {
@@ -280,6 +340,7 @@ export async function startPilotFront({
       minVersion: "TLSv1.2",
     });
     server.on("secureConnection", (clear) => {
+      const acceptedAt = now();
       clear.pause();
       void connectUpstream(clear, () => ({
         socket: tls.connect({
@@ -307,12 +368,14 @@ export async function startPilotFront({
         }
         noteUpstream(false);
         relay(clear, upstream);
+        timing.watch(clear, upstream, acceptedAt);
         clear.resume();
       });
     });
     server.on("tlsClientError", () => undefined);
   } else {
     server = net.createServer({ pauseOnConnect: true }, (socket) => {
+      const acceptedAt = now();
       socket.on("error", () => socket.destroy());
       void connectUpstream(socket, () => {
         const attempt = net.connect({ host: upstreamHost, port: upstreamPort });
@@ -328,6 +391,7 @@ export async function startPilotFront({
           }
           noteUpstream(false);
           relay(socket, upstream);
+          timing.watch(socket, upstream, acceptedAt);
           socket.resume();
           return;
         }
@@ -356,7 +420,10 @@ export async function startPilotFront({
     }
   }, reloadEveryMs);
   reload.unref();
-  server.on("close", () => clearInterval(reload));
+  server.on("close", () => {
+    clearInterval(reload);
+    timing.close();
+  });
   await new Promise((resolve, reject) => {
     server.once("error", reject);
     server.listen(listenPort, listenHost, () => {
