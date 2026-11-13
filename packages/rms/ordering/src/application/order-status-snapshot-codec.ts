@@ -1,4 +1,5 @@
 import {
+  orderStatusMaximumRounds,
   parseOrderStatusSourceSnapshot,
   OrderStatusProjectionError,
 } from "../domain/order-status-projection.js";
@@ -14,7 +15,7 @@ export function decodeOrderStatusSnapshot(value: unknown) {
   try {
     if (typeof value !== "string") throw new Error("invalid");
     const snapshot = JSON.parse(value);
-    if (!Array.isArray(snapshot?.batches) || snapshot.batches.length > 20)
+    if (!Array.isArray(snapshot?.batches) || snapshot.batches.length > orderStatusMaximumRounds)
       throw new Error("invalid");
     for (const batch of snapshot.batches) {
       if (!Array.isArray(batch?.items) || batch.items.length > 100) throw new Error("invalid");

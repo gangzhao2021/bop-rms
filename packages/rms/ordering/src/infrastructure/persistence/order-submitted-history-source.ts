@@ -123,7 +123,7 @@ export function createPostgresOrderSubmittedHistorySource(options: {
       )
         return fail();
       const records = await tx.query(
-        "SELECT snapshot_json::text AS snapshot FROM rms_ordering.additional_dining_batch_record WHERE brand_id=$1 AND store_id=$2 AND order_id=$3 AND batch_sequence<=$4 ORDER BY batch_sequence LIMIT 21",
+        "SELECT snapshot_json::text AS snapshot FROM rms_ordering.additional_dining_batch_record WHERE brand_id=$1 AND store_id=$2 AND order_id=$3 AND batch_sequence<=$4 ORDER BY batch_sequence LIMIT 10001",
         [brand, store, event.aggregateId, event.payload.batchSequence],
       );
       const additional = records.rows.map((row) =>

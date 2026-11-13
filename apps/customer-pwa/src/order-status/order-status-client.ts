@@ -15,6 +15,8 @@ import {
 import type { OrderReceivedView, OrderStatusView } from "./types.js";
 
 const reference = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+/** The rounds one table's Order may hold, as Ordering bounds it (v15 b13: once 20). */
+const maximumRounds = 10_000;
 const credential = /^[A-Za-z0-9_-]{43}$/u;
 
 function record(value: unknown): Record<string, unknown> {
@@ -58,7 +60,8 @@ function decodeStatus(value: unknown, orderReference: string): OrderStatusView |
     throw new Error("invalid status");
   const status = record(root.status);
   const order = record(status.order);
-  if (!Array.isArray(order.batches) || order.batches.length > 20) throw new Error("invalid status");
+  if (!Array.isArray(order.batches) || order.batches.length > maximumRounds)
+    throw new Error("invalid status");
   const batches = order.batches.map((value: unknown) => {
     const batch = record(value);
     if (!Array.isArray(batch.items) || batch.items.length > 100) throw new Error("invalid status");

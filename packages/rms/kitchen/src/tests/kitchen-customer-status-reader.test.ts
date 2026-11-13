@@ -161,4 +161,23 @@ describe("customer-safe Kitchen status", () => {
       ),
     ).not.toContain("private");
   });
+  it("v15 b13: reads every round of a long table, one ticket each", async () => {
+    // DEMO Store 2's tables reached 28 and 47 rounds; the guest's status once refused past 20.
+    const f = fixture("Queued");
+    const tickets = Array.from({ length: 47 }, (_, index) => ({
+      ...f.ticket,
+      kitchen_ticket_id: id(100 + index),
+      order_batch_id: id(200 + index),
+    }));
+    f.query.mockImplementation(async (sql: string, values: readonly unknown[]) => ({
+      rows: sql.includes("FROM rms_kitchen.kitchen_ticket")
+        ? tickets
+        : [{ ...f.item, kitchen_work_item_id: id(300 + Number(String(values[2]).slice(-3))) }],
+      rowCount: 1,
+    }));
+    const result = await f.load();
+    expect(result?.batches).toHaveLength(47);
+    expect(String(f.query.mock.calls[0]?.[0])).toMatch(/LIMIT 10001 FOR SHARE$/u);
+  });
 });
+

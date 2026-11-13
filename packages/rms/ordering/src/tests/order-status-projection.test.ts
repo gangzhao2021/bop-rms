@@ -4,7 +4,15 @@ import {
   createOrderStatusProjector,
   createOrderStatusQueryService,
 } from "../application/order-status-projection-service.js";
-import type { OrderStatusProjection } from "../domain/order-status-projection.js";
+import {
+  orderStatusMaximumRounds,
+  parseOrderStatusSourceSnapshot,
+  type OrderStatusProjection,
+} from "../domain/order-status-projection.js";
+import {
+  decodeOrderStatusSnapshot,
+  encodeOrderStatusSnapshot,
+} from "../application/order-status-snapshot-codec.js";
 
 const id = (n: number) => `018f6300-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 const at = "2026-08-03T14:00:00.000Z";
@@ -405,5 +413,36 @@ describe("Order status projection", () => {
         observedAt: at,
       }),
     ).rejects.toMatchObject({ code: "ORDER_STATUS_PERMISSION_DENIED" });
+  });
+
+  it("v15 b13: holds every round of a long dine-in table, as many as the Order holds", () => {
+    // DEMO Store 2's tables reached 28 and 47 rounds; the status once stopped at 20.
+    const rounds = (count: number) =>
+      Array.from({ length: count }, (_, index) => ({
+        orderBatchReference: id(0x1000 + index),
+        submittedAt: new Date(Date.parse(at) + index * 60_000).toISOString(),
+        items: [
+          {
+            orderItemReference: id(0x2000 + index),
+            displayName: "Synthetic item",
+            quantity: 1,
+            lineTotal: { amountMinor: 735n, currencyCode: "CAD" },
+          },
+        ],
+      }));
+    for (const count of [21, 47]) {
+      const snapshot = source({ orderType: "DineIn", batches: rounds(count) });
+      expect(parseOrderStatusSourceSnapshot(snapshot).batches).toHaveLength(count);
+      // As the projection store saves and reads it back.
+      expect(decodeOrderStatusSnapshot(encodeOrderStatusSnapshot(snapshot)).batches).toHaveLength(
+        count,
+      );
+    }
+    expect(orderStatusMaximumRounds).toBe(10_000);
+    expect(() =>
+      parseOrderStatusSourceSnapshot(
+        source({ orderType: "DineIn", batches: rounds(orderStatusMaximumRounds + 1) }),
+      ),
+    ).toThrow();
   });
 });

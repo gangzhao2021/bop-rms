@@ -19,6 +19,9 @@ export interface KitchenCustomerBatchStatus {
   }[];
 }
 
+/** The rounds one table's Order may hold (Ordering's own bound): one kitchen ticket each. */
+const kitchenCustomerStatusMaximumRounds = 10_000;
+
 function unavailable(): never {
   throw new KitchenWorkLifecycleError("KITCHEN_WORK_DEPENDENCY_UNAVAILABLE");
 }
@@ -50,14 +53,16 @@ export function createPostgresKitchenCustomerStatusReader(options: {
         const scope = { brandReference, storeReference, orderReference };
         if ((await options.authorize(input.transaction, scope)) !== true) return unavailable();
         // Lifecycle writers lock the ticket before changing any work item or ready result.
+        // One ticket per round: as many as the table's Order holds rounds (v15 b13: a table past
+        // 20 rounds once lost its whole status).
         const tickets = await input.transaction.query(
           "SELECT kitchen_ticket_id,order_batch_id,aggregate_version::text AS version,status,updated_at " +
             "FROM rms_kitchen.kitchen_ticket WHERE brand_id=$1 AND store_id=$2 AND order_id=$3 " +
-            "ORDER BY kitchen_ticket_id LIMIT 21 FOR SHARE",
+            "ORDER BY kitchen_ticket_id LIMIT 10001 FOR SHARE",
           [brandReference, storeReference, orderReference],
         );
         if (tickets.rows.length === 0) return null;
-        if (tickets.rows.length > 20) return unavailable();
+        if (tickets.rows.length > kitchenCustomerStatusMaximumRounds) return unavailable();
         const batches: KitchenCustomerBatchStatus[] = [];
         for (const ticket of tickets.rows) {
           const ticketReference = parseKitchenTicketReference(ticket.kitchen_ticket_id);

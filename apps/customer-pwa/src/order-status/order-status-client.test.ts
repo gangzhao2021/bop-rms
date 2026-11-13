@@ -153,6 +153,30 @@ describe("customer order status HTTP client", () => {
     });
   });
 
+  it("v15 b13: loads a long dine-in table's order with all its rounds", async () => {
+    // DEMO Store 2's tables reached 28 and 47 rounds; the page once refused past 20.
+    setCustomerCsrfCredential("a".repeat(43));
+    const body = payload();
+    const order = body.status.order;
+    order.orderType = "DineIn";
+    order.batches = Array.from({ length: 47 }, (_, index) => ({
+      orderBatchReference: id(0x100 + index),
+      submittedAt: new Date(Date.parse(order.submittedAt) + index * 60_000).toISOString(),
+      items: [
+        {
+          orderItemReference: id(0x200 + index),
+          displayName: "Synthetic bowl",
+          quantity: 1,
+          lineTotal: { amountMinor: "735", currencyCode: "CAD" },
+        },
+      ],
+    }));
+    const result = await createHttpOrderStatusClient(responder(body)).load(id(1));
+    if (!("order" in result)) throw new Error("expected the order's status");
+    expect(result.order.batches).toHaveLength(47);
+    expect(result.order.batches.at(-1)?.items[0]?.lineTotal.amountMinor).toBe(735n);
+  });
+
   it("Owner 2026-10-23: asks the order's item names in Chinese while Chinese is chosen", async () => {
     setCustomerCsrfCredential("a".repeat(43));
     const request = responder(payload());

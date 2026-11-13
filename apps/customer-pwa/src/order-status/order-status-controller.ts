@@ -10,6 +10,8 @@ import type {
 } from "./types.js";
 
 const reference = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+/** The rounds one table's Order may hold, as Ordering bounds it (v15 b13: once 20). */
+const maximumRounds = 10_000;
 const instant = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/u;
 
 export type OrderStatusClientErrorCode =
@@ -973,7 +975,7 @@ export function parseOrderStatusView(value: unknown, expectedReference: string):
     order.eta !== null ||
     !Array.isArray(order.batches) ||
     order.batches.length < 1 ||
-    order.batches.length > 20
+    order.batches.length > maximumRounds
   )
     return invalid();
   const submittedAt = parseInstant(order.submittedAt);
