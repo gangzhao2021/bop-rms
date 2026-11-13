@@ -10,6 +10,7 @@ import { createCustomerPersistentAdditionalDiningPayment } from "./customer-pers
 const mocks = vi.hoisted(() => ({
   prepare: vi.fn(),
   parent: vi.fn(),
+  prepareRound: vi.fn(),
   payment: vi.fn(),
   create: vi.fn(),
   read: vi.fn(),
@@ -36,7 +37,7 @@ vi.mock("@rms/dining", async (original) => ({
 vi.mock("./customer-additional-dining-payment-composition.js", () => ({
   createCustomerAdditionalDiningPaymentComposition: (options: unknown) => {
     mocks.payment(options);
-    return { create: mocks.create };
+    return { create: mocks.create, prepare: mocks.prepareRound };
   },
 }));
 vi.mock("./customer-additional-dining-session-preparation.js", () => ({
@@ -137,6 +138,7 @@ async function fixture() {
   });
   mocks.payment.mockReset();
   mocks.create.mockReset().mockResolvedValue({ status: "Created" });
+  mocks.prepareRound.mockReset().mockResolvedValue({ status: "Prepared" });
   mocks.prepare.mockReset().mockResolvedValue({ record: prepared, session });
   const service = createCustomerPersistentAdditionalDiningPayment({
     targetOrderReference: order.orderReference,
@@ -248,4 +250,39 @@ it("rejects invalid tip before creating a first commitment", async () => {
   ).rejects.toThrow();
   expect(mocks.prepare).not.toHaveBeenCalled();
   expect(mocks.create).not.toHaveBeenCalled();
+});
+
+const parentVersions = () =>
+  mocks.payment.mock.calls.map(
+    ([options]) =>
+      (options as { submission: { parent: { expectedOrderVersion: number } } }).submission.parent
+        .expectedOrderVersion,
+  );
+it("v15 b12: a staff round the System's cancellation of another round overtook is sent again on the Order as it is now", async () => {
+  // 06:18:42Z: the System took the table's expired unpaid round off while staff sent the next
+  // one; the round's write found the Order a version further on and refused (nothing written).
+  const f = await fixture();
+  mocks.order.mockResolvedValue(null);
+  mocks.clock.mockResolvedValue(f.prepared);
+  const moved = Object.assign(new Error("additional Dining batch persistence is unavailable"), {
+    code: "ADDITIONAL_DINING_BATCH_STORE_UNAVAILABLE",
+  });
+  const current = await mocks.parent();
+  mocks.parent
+    .mockReset()
+    .mockResolvedValueOnce({ ...current, orderVersion: 3 })
+    .mockResolvedValue({ ...current, orderVersion: 4 });
+  mocks.prepareRound.mockRejectedValueOnce(moved);
+  await expect(f.service.prepare(f.input)).resolves.toEqual({ status: "Prepared" });
+  expect(mocks.prepareRound).toHaveBeenCalledTimes(2);
+  expect(parentVersions()).toEqual([3, 4]);
+});
+it("v15 b12: a failure while the Order stayed as it was is answered as it is, not sent again", async () => {
+  const f = await fixture();
+  mocks.order.mockResolvedValue(null);
+  mocks.clock.mockResolvedValue(f.prepared);
+  mocks.prepareRound.mockRejectedValueOnce(new Error("connection reset"));
+  await expect(f.service.prepare(f.input)).rejects.toThrow("connection reset");
+  expect(mocks.prepareRound).toHaveBeenCalledTimes(1);
+  expect(parentVersions()).toEqual([3, 3]);
 });

@@ -145,10 +145,47 @@ export function createCustomerPersistentAdditionalDiningPayment(
     }
     if (JSON.stringify(parseCheckoutSession(await access.read(input))) !== JSON.stringify(session))
       throw new CheckoutSessionServiceError("PERMISSION_DENIED");
-    return createCustomerAdditionalDiningPaymentComposition({
-      ...options,
-      submission: { ...s, parent },
+    return Object.freeze({
+      composition: createCustomerAdditionalDiningPaymentComposition({
+        ...options,
+        submission: { ...s, parent },
+      }),
+      parent,
+      submitted: saved !== null,
     });
+  }
+  /**
+   * v15 b12: a round is sent against the table Order as it stood when its facts were read. When
+   * the Order moved on before the round was written (the System took an expired unpaid round off,
+   * or another round of the table went in), the write refuses and nothing is recorded. The round
+   * is then sent once more against the Order as it is now (at most three times); a failure with
+   * the Order unchanged is answered as it is. Only for sends that call no Provider.
+   */
+  async function onCurrentOrder<T>(
+    input: Parameters<typeof compose>[0],
+    send: (composition: Awaited<ReturnType<typeof compose>>["composition"]) => Promise<T>,
+  ): Promise<T> {
+    let composed = await compose(input);
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        return await send(composed.composition);
+      } catch (error) {
+        if (composed.submitted || attempt >= 3) throw error;
+        let current: Awaited<ReturnType<typeof compose>>;
+        try {
+          current = await compose(input);
+        } catch {
+          throw error;
+        }
+        if (
+          !current.submitted &&
+          current.parent.expectedOrderVersion === composed.parent.expectedOrderVersion &&
+          current.parent.batchSequence === composed.parent.batchSequence
+        )
+          throw error;
+        composed = current;
+      }
+    }
   }
   return Object.freeze({
     /** WP-2423 DEC-DINE-IN-PAY-LATER: submit the round of a pay-later table (no clock, no tip). */
@@ -159,13 +196,14 @@ export function createCustomerPersistentAdditionalDiningPayment(
         "checkoutSessionReference",
         "selectionReference",
       ]);
-      return (
-        await compose({
+      return onCurrentOrder(
+        {
           sessionCredential: raw.sessionCredential,
           csrfCredential: raw.csrfCredential,
           checkoutSessionReference: raw.checkoutSessionReference,
-        })
-      ).submitRound(value);
+        },
+        (composition) => composition.submitRound(value),
+      );
     },
     /** WP-2423 Q7 slice 2: submit the round and start its clock without a Provider call. */
     async prepare(value: unknown) {
@@ -176,13 +214,14 @@ export function createCustomerPersistentAdditionalDiningPayment(
         "selectionReference",
         "tip",
       ]);
-      return (
-        await compose({
+      return onCurrentOrder(
+        {
           sessionCredential: raw.sessionCredential,
           csrfCredential: raw.csrfCredential,
           checkoutSessionReference: raw.checkoutSessionReference,
-        })
-      ).prepare(value);
+        },
+        (composition) => composition.prepare(value),
+      );
     },
     async create(value: unknown) {
       const raw = readClosedRecord(value, [
@@ -206,7 +245,7 @@ export function createCustomerPersistentAdditionalDiningPayment(
           csrfCredential: raw.csrfCredential,
           checkoutSessionReference: raw.checkoutSessionReference,
         })
-      ).create(value);
+      ).composition.create(value);
     },
     /** WP-2423 Q20: another card for this round's existing payment after a decline. */
     async retry(value: unknown) {
@@ -221,7 +260,7 @@ export function createCustomerPersistentAdditionalDiningPayment(
           csrfCredential: raw.csrfCredential,
           checkoutSessionReference: raw.checkoutSessionReference,
         })
-      ).retry(value);
+      ).composition.retry(value);
     },
     /** WP-2423 abandoned payment: the same guest comes back to this round's open payment. */
     async resume(value: unknown) {
@@ -236,7 +275,7 @@ export function createCustomerPersistentAdditionalDiningPayment(
           csrfCredential: raw.csrfCredential,
           checkoutSessionReference: raw.checkoutSessionReference,
         })
-      ).resume(value);
+      ).composition.resume(value);
     },
   });
 }
