@@ -474,7 +474,6 @@ export function createPostgresAdditionalDiningBatchStore(options: {
           audit.dataClassification !== "Restricted"
         )
           return fail();
-        await appendAuditRecordInTransaction(tx, audit);
         await options.finalize(
           tx,
           snapshot,
@@ -485,6 +484,10 @@ export function createPostgresAdditionalDiningBatchStore(options: {
             observedAt: await recheck(),
           }),
         );
+        // v15 b12 lock order: the round's stock is locked (finalize) before the Store's audit
+        // chain, as for the table's first round; the other order deadlocked against stock
+        // commands that lock an item and then audit (v15 2026-11-13 05:47:41Z).
+        await appendAuditRecordInTransaction(tx, audit);
         await appendEventInTransaction(
           tx,
           parseOrderSubmittedEnvelope({
