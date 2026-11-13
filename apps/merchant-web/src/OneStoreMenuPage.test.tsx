@@ -770,7 +770,7 @@ it("v15 b12: a menu read that fails after a save keeps List it waiting until it 
 it("v15 b12: a listing still running after a reload, past two minutes, says it is taking longer", async () => {
   globalThis.localStorage.setItem("bop.menu-listing." + MENU, String(Date.now() - 150_000));
   try {
-    const { container } = await page(async () => builder(id(3), "Publish", id(2)));
+    const { container } = await page(async () => builder(id(3), "Submit", id(2)));
     expect(container.textContent).toContain("This usually takes under a minute");
     expect(container.textContent).toMatch(
       /15\d s · Taking longer than usual\. Nothing needs doing; this page says when it is listed\./,
