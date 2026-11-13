@@ -35,6 +35,19 @@ places read "the Store could not answer" as "there is no visit":
   "session ended" text is true and stays).
 - The page header does not ask the guest to scan a QR code while the visit is unknown.
 
+**Review fix-up.** The page's recovery restored the credential but not the menu, the current
+order or the table, so after a recovered reload of Checkout the Menu said "Scan the location QR
+code", and a reload of the menu or the entry page in a rush never asked again at all. Now every
+guest page waits for the Store's real answer before it starts: while the restore is unanswered
+(busy, no answer in 5 s, no network) the page says "The store's system is busy · Your order and
+cart are kept. This page loads again by itself in 5 seconds" with Try again (journey links held),
+asks again every 5 s (each ask waits up to 14 s, the busy text stays on screen meanwhile), and then
+starts with what the Store restored: menu, current order and table reach every route. A first
+visit (no cookie) is answered at once and never waits. Checkout no longer waits for a recovery
+before it shows anything: it shows the busy notice at once and reloads in 5 s. On the server, what
+no wait can change (stored data that is malformed, an `*_INVALID` refusal of the moved, settled or
+ended-visit read) is nothing to restore (204), never busy for ever.
+
 ## 2. The Orders change check was not wired in the pilot
 
 `tooling/environment/pilot-merchant.mjs` built the merchant routes with `orderQueue` but not
@@ -43,12 +56,18 @@ answered 503 on every 3 s poll and logged a level-50 fault from every open Order
 built beside `orderQueue`.
 
 **Guard.** `tooling/environment/pilot-merchant-wiring.test.mjs` reads every port of
-`MerchantBffRouterOptions` that a merchant route uses and fails when the pilot composition neither
-builds it nor names it in a short "not in the pilot" list with its reason. The list holds the 19
-earlier authoring ports (product publication v1/v2, menu drafts, price books, brand topology,
-reconciliation assignment) that existed before batch 10 and were never in this composition; the
-test also fails when a listed port is built after all or no longer read, so the list stays true.
-Of the ports added in batches 10–12, only `orderChanges` was missing.
+`MerchantBffRouterOptions` that a merchant route uses and fails when the `bff: { ... }` block the
+pilot passes to `createMerchantBffRouter` does not give it (its own keys, and what its spreads
+bring: inline `...(cond ? {} : { ... })`, immediately called functions, and the named factories
+`createInternalMerchantProduct`, `createInternalCounterOrder`, the Store setup factories and the
+product publication runtime; an unknown spread fails the test) and it is not named in a short "not
+in the pilot" list with its reason. Review fix-up: the first version matched a port name anywhere
+in any pilot file (a local variable passed), and listed five product publication v2 ports as
+missing although `...product` gives them; the list now holds 14 earlier authoring ports. Of the
+ports added in batches 10–12, only `orderChanges` was missing. The guest side of batches 10–12 is
+checked link by link through pilot-api.mjs → createLocalCustomerRuntime → the API server: contact
+removal and the order and pickup pages under an earlier visit, the named table that is not open,
+the shared menu read, and the visit restore's moved, settled and ended-visit reads.
 
 ## 3. Rush waits logged as faults
 
@@ -71,6 +90,16 @@ Staff requests the rush turned away now log level 40 with `resultCode: HTTP_RETR
 merchant request reporter and in the composition's own wrappers; a request that met a real fault
 first stays level 50.
 
+**Review fix-up.** The level was sticky: a request shed once and then refused for a real reason
+was still logged 40. Now a failed statement that is not the rush's own (anything but 57014, 53300
+and a conflict to run again) marks the request faulted in the transaction runner, and each logged
+error is read too: a programming error or a database refusal that is not the rush's (42501, a
+constraint) anywhere in its chain marks the request faulted and logs level 50, its completion line
+included. The answering window reads the runner's injected clock. The 51 cart lines with only
+`CART_DEPENDENCY_UNAVAILABLE` came from the pickup cart read, which dropped what its cart and
+placed-order reads met; it now keeps it as the cause, so those lines name the acquire failure or
+the refusal. Whether the rush rule is the whole cause is still to be confirmed live.
+
 ## 4. Staff answers after 16–18 s
 
 **What happened.** Staff (merchant BFF) requests are answered by the guest and staff entry (the
@@ -91,7 +120,14 @@ handshake and the time a request sat in the busy entry came on top. Every staff 
   previous line, so the live run can see where the time goes.
 
 What is still outside these bounds: time in the macOS port forward and the relay, and an event
-loop stalled past the busy timer. The live check compares client times with these lines.
+loop stalled past the busy timer (11 s plus up to 7 s before Node can still pass 15 s, and the
+`stateClientAddress` entry mode falls back to the route start). This finding is **not fixed** until
+a live burst shows where the time goes. Review fix-up: the front now writes one
+`front_relay_timing` line per 5 s when something was slow: the longest a connection waited in the
+front before the entry took it, the slowest relayed exchange (client bytes to the entry's first
+reply) and how many exchanges took over 15 s. A screen's time beyond the front's slowest exchange
+was spent before the front (the host's port forward); the entry's `beforeRouteMs` and
+`longestStallMs` say what the entry added.
 
 ## 5. A counter send that took 35 s
 
@@ -101,7 +137,10 @@ no time limit, while the page said "Still working; the system is busy. No need t
 finishes by itself." A connection that never answered would have said that for ever.
 
 **Decision.** These requests wait at most 40 s for the answer to begin (above the 35 s seen under
-heavy load). Then the page says "No answer from the system. Send again — the same order is never
+heavy load). Review fix-up: an acceptance case under the pilot api role sends the same card-machine
+payment record again while the first is still being recorded (its row written, not committed):
+the resend waits, answers `AlreadyRecorded` with the same amount and time, the round is accepted
+once and one payment row exists (with the replay check removed it answered "already paid"). Then the page says "No answer from the system. Send again — the same order is never
 created twice." Sending again sends the same operation, so the system answers with what it did
 (or that it is still being sent). An answer that began is always read in full, so a definite
 answer is never taken for none. The server never cuts a command.
