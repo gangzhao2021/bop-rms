@@ -458,8 +458,19 @@ it("rolls back owner writes if audit append fails", async () => {
     new Error("synthetic audit failure"),
   );
   await expect(f.append()).rejects.toThrow();
-  expect(f.state.finalizeCalls).toBe(0);
+  // v15 b12 lock order: the round's stock is finalized (locked) before the audit chain.
+  expect(f.state.finalizeCalls).toBe(1);
   expect(f.calls.at(-2)?.sql).toBe("ROLLBACK TO SAVEPOINT ordering_additional_batch");
+});
+it("v15 b12: locks the round's stock (finalize) before appending to the Store's audit chain", async () => {
+  const f = fixture();
+  const order: string[] = [];
+  vi.mocked(appendAuditRecordInTransaction).mockImplementationOnce(async () => {
+    order.push(f.state.finalizeCalls === 1 ? "audit after finalize" : "audit before finalize");
+    return undefined as never;
+  });
+  await f.append();
+  expect(order).toEqual(["audit after finalize"]);
 });
 it("does not append another audit on exact replay", async () => {
   const f = fixture();
