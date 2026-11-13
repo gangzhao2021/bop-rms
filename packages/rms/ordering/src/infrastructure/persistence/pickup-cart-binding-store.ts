@@ -57,6 +57,19 @@ interface Binding {
   readonly preparedAt: string;
   readonly activatedAt: string | null;
 }
+/**
+ * WP-2423 (rush-logging-and-entry review): the failure a read met is kept behind its plain answer,
+ * non-enumerable under `bop.failure.cause` (as the API's `withFailureCause` and the Guest Session
+ * store keep theirs), never as `cause`: it is never serialized or answered, and the guest's log line
+ * reads only its safe code and SQLSTATE, so operations can tell a rush (no database connection in
+ * time) from a fault.
+ */
+const failureCauseKey = Symbol.for("bop.failure.cause");
+function keepingFailure<T extends object>(target: T, failure: unknown): T {
+  if (failure !== null && typeof failure === "object")
+    Object.defineProperty(target, failureCauseKey, { value: failure, enumerable: false });
+  return target;
+}
 function fail(): never {
   throw new CartError("CART_DEPENDENCY_UNAVAILABLE");
 }
@@ -431,7 +444,7 @@ export function createPostgresPickupCartBindingReader(
       session.diningState !== "ContextOnly" ||
       Date.parse(at) < Date.parse(session.lastSeenAt)
     )
-      fail();
+      throw new Error("PICKUP_CART_BINDING_SESSION_MISMATCH");
     return session;
   }
   async function run<T>(action: (tx: CartQueryTransaction) => Promise<T>): Promise<T> {
@@ -457,7 +470,7 @@ export function createPostgresPickupCartBindingReader(
             ),
           );
           if (result.length === 0) return null;
-          if (result.length !== 1) fail();
+          if (result.length !== 1) throw new Error("PICKUP_CART_BINDING_NOT_SINGLE");
           const cartReference = parseOrderingReference(closed(result[0], ["cart_id"]).cart_id);
           const cart = await createPostgresCartQueryStore(
             {
@@ -470,11 +483,14 @@ export function createPostgresPickupCartBindingReader(
             cart.orderType !== "Pickup" ||
             cart.createdByActorReference !== String(session.sessionReference)
           )
-            fail();
+            throw new Error("PICKUP_CART_BINDING_CART_MISMATCH");
           return cart;
         });
-      } catch {
-        return fail();
+      } catch (error) {
+        // WP-2423 (rush-logging-and-entry review): the same "unavailable" as before, keeping what
+        // the read met (no database connection in a rush, a statement cut off, a session past its
+        // use) behind it for the guest's log line.
+        throw keepingFailure(new CartError("CART_DEPENDENCY_UNAVAILABLE"), error);
       }
     },
   });

@@ -422,13 +422,25 @@ describe("safe Customer Cart display", () => {
         code: "CART_DEPENDENCY_UNAVAILABLE",
       });
     }
+    // WP-2423 (rush-logging-and-entry review): Catalog's own "can't say now" is named for the log.
+    f.describeMany.mockResolvedValue([
+      { status: "Unavailable" },
+    ] as CatalogSelectionDisplayResult[]);
+    const unavailable = await f.query.read(request).catch((error: unknown) => error);
+    expect((unavailable as { cause?: { cause?: Error } }).cause?.cause?.message).toBe(
+      "CATALOG_DISPLAY_UNAVAILABLE",
+    );
   });
   it("bounds profile and malformed snapshot failures without copying private error details", async () => {
     const f = fixture();
     f.getPublicStore.mockResolvedValue({ status: "StoreUnavailable" });
-    await expect(f.query.read(request)).rejects.toMatchObject({
-      code: "CART_DEPENDENCY_UNAVAILABLE",
-    });
+    // WP-2423 (rush-logging-and-entry review): what the owner said is kept for the log, never
+    // read as a malformed answer (ACTOR_SHAPE_INVALID).
+    const store = await f.query.read(request).catch((error: unknown) => error);
+    expect(store).toMatchObject({ code: "CART_DEPENDENCY_UNAVAILABLE" });
+    expect((store as { cause?: { cause?: Error } }).cause?.cause?.message).toBe(
+      "PUBLIC_STORE_UNAVAILABLE",
+    );
     f.read.mockResolvedValue({ ...snapshot(), cart: {} } as PickupCartReadResult);
     await expect(f.query.read(request)).rejects.toMatchObject({
       code: "CART_DEPENDENCY_UNAVAILABLE",

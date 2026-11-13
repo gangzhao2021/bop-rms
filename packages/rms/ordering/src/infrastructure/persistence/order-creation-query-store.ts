@@ -85,6 +85,19 @@ LEFT JOIN rms_ordering.order_batch b ON b.order_id=h.order_id AND b.submission_i
 LEFT JOIN rms_ordering.order_number_allocation n ON n.order_id=h.order_id AND n.brand_id=$1 AND n.store_id=$2
 WHERE s.brand_id=$1 AND s.store_id=$2 AND s.submission_id=$3 AND s.submission_kind='Initial' LIMIT 2`;
 
+/**
+ * WP-2423 (rush-logging-and-entry review): the failure a read met is kept behind its plain answer,
+ * non-enumerable under `bop.failure.cause` (as the API's `withFailureCause` and the Guest Session
+ * store keep theirs), never as `cause`: it is never serialized or answered, and the guest's log line
+ * reads only its safe code and SQLSTATE, so operations can tell a rush (no database connection in
+ * time) from a fault.
+ */
+const failureCauseKey = Symbol.for("bop.failure.cause");
+function keepingFailure<T extends object>(target: T, failure: unknown): T {
+  if (failure !== null && typeof failure === "object")
+    Object.defineProperty(target, failureCauseKey, { value: failure, enumerable: false });
+  return target;
+}
 function unavailable(): never {
   throw new OrderCreationError("ORDER_CREATE_DEPENDENCY_UNAVAILABLE");
 }
@@ -845,8 +858,11 @@ export function createPostgresCartOrderLookup(
         );
         return work(transaction);
       });
-    } catch {
-      return unavailable();
+    } catch (error) {
+      // WP-2423 (rush-logging-and-entry review): a read that failed on its own terms says so as
+      // before; one the database failed keeps what it met behind it, for the guest's log line.
+      if (error instanceof OrderCreationError) throw error;
+      throw keepingFailure(new OrderCreationError("ORDER_CREATE_DEPENDENCY_UNAVAILABLE"), error);
     }
   }
   return Object.freeze({

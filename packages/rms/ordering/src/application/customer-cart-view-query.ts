@@ -353,6 +353,19 @@ function viewer(value: unknown): DiningCartViewer {
 function unavailable(): never {
   throw new CartError("CART_DEPENDENCY_UNAVAILABLE");
 }
+/**
+ * WP-2423 (rush-logging-and-entry review): an owner answered that what the cart shows can't be had
+ * now (the Store profile, a dish's name). Its answer has no other fields, so reading it as a full
+ * answer first logged "ACTOR_SHAPE_INVALID" (12 lines in the 2026-11-13 bursts) instead of what the
+ * owner said; the guest's answer is the same "unavailable" as before.
+ */
+function ownerAnswered(code: "PUBLIC_STORE_UNAVAILABLE" | "CATALOG_DISPLAY_UNAVAILABLE"): never {
+  throw Object.assign(new CartError("CART_DEPENDENCY_UNAVAILABLE"), { cause: new Error(code) });
+}
+const answerStatus = (value: unknown): unknown =>
+  value !== null && typeof value === "object"
+    ? Object.getOwnPropertyDescriptor(value, "status")?.value
+    : undefined;
 function closed(value: unknown, keys: readonly string[]) {
   return readClosedRecord(value, keys, "ACTOR_SHAPE_INVALID");
 }
@@ -491,6 +504,8 @@ function createViewQuery(ports: ViewPorts, mode: "Pickup" | "DineIn") {
           cartVersion: cart.aggregateVersion,
           observedAt: first.observedAt,
         });
+        if (answerStatus(storeResult) !== "Available")
+          return ownerAnswered("PUBLIC_STORE_UNAVAILABLE");
         const store = closed(storeResult, ["status", "profile"]);
         if (store.status !== "Available") return unavailable();
         const profile = closed(store.profile, [
@@ -698,6 +713,8 @@ function createViewQuery(ports: ViewPorts, mode: "Pickup" | "DineIn") {
           );
         const items = Object.freeze(
           cart.items.map((item, index) => {
+            if (answerStatus(descriptions[index]) !== "Found")
+              return ownerAnswered("CATALOG_DISPLAY_UNAVAILABLE");
             const description = closed(descriptions[index], [
               "status",
               "menuVersionReference",

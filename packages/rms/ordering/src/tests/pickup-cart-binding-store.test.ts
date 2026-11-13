@@ -218,4 +218,26 @@ describe("independent Pickup binding reader", () => {
     });
     expect(error).not.toHaveProperty("cause");
   });
+  it("WP-2423 (rush-logging-and-entry review): keeps what the read met behind its plain answer, never enumerable", async () => {
+    const f = setup();
+    const reader = createPostgresPickupCartBindingReader(f.runner, scope);
+    const kept = (error: unknown) =>
+      Object.getOwnPropertyDescriptor(error, Symbol.for("bop.failure.cause"));
+    // No database connection in a rush: the log can say so, and the read is not repeated.
+    const acquire = Object.assign(new Error("tenant database unavailable"), {
+      code: "TENANT_DATABASE_ACQUIRE_FAILED",
+      diagnostic: { sqlState: "08006" },
+    });
+    f.run.mockImplementationOnce(() => {
+      throw acquire;
+    });
+    const rushed = await reader.current(session, at).catch((e: unknown) => e);
+    expect(rushed).toMatchObject({ code: "CART_DEPENDENCY_UNAVAILABLE" });
+    expect(kept(rushed)).toMatchObject({ value: acquire, enumerable: false });
+    expect(JSON.stringify(rushed)).not.toContain("TENANT_DATABASE");
+    // Its own refusals are named, so a duplicate binding is told from a database fault.
+    f.query.mockResolvedValue({ rows: [{ cart_id: id(20) }, { cart_id: id(21) }] });
+    const duplicate = await reader.current(session, at).catch((e: unknown) => e);
+    expect((kept(duplicate)?.value as Error).message).toBe("PICKUP_CART_BINDING_NOT_SINGLE");
+  });
 });
