@@ -326,6 +326,9 @@ it("logs an unexpected failure as its code and source frames only", async () => 
     const lines = log.mock.calls.map(([line]) => JSON.parse(line));
     expect(lines).toEqual([
       {
+        // v15 b12: with its level and time, as the api log's lines.
+        level: 50,
+        time: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u),
         event: "INTERNAL_COUNTER_ORDER_UNAVAILABLE",
         code: "ORDER_CREATE_UNAVAILABLE",
         frames: [

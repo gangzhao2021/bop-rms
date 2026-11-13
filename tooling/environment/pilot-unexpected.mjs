@@ -71,6 +71,10 @@ export function reportUnexpected(event, error, context = {}) {
   }
   console.error(
     JSON.stringify({
+      // v15 b12: as the api log writes its lines (level 50 = error, with the time), so a staff
+      // send that failed is found by time and level in whichever process served it.
+      level: 50,
+      time: new Date().toISOString(),
       event,
       code,
       ...(causes.length > 0 ? { causes } : {}),

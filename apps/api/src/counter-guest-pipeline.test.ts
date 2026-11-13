@@ -3,6 +3,7 @@ import { CheckoutSessionServiceError } from "@rms/ordering";
 import {
   counterEntryOperatingReader,
   createCounterGuestPipeline,
+  createGuestOrderSteps,
 } from "./counter-guest-pipeline.js";
 import {
   counterTakesOrder,
@@ -158,7 +159,10 @@ describe("counter guest pipeline — WP-2423 Q7", () => {
       issueCodes: ["CATALOG_SELECTION_REJECTED"],
     } as never);
     expect(await p.addItem(guest, line)).toEqual({ status: "NotAvailable" });
+    // v15 b12: a moved Cart is named (the counter command treats it as a fault).
     options.cart.addItem.mockResolvedValueOnce({ status: "VersionConflict" } as never);
+    expect(await p.addItem(guest, line)).toEqual({ status: "CartChanged" });
+    options.cart.addItem.mockResolvedValueOnce({ status: "Unavailable" } as never);
     await expect(p.addItem(guest, line)).rejects.toThrow();
   });
 
@@ -465,5 +469,46 @@ describe("counter order command — WP-2423 Q7", () => {
     expect(counterTipMinor({ kind: "Percent", percent: 18 }, 1025n)).toBe(185n);
     expect(counterTipMinor({ kind: "Amount", amountMinor: "200" }, 1000n)).toBe(200n);
     expect(() => counterTipMinor({ kind: "Amount", amountMinor: "1001" }, 1000n)).toThrow();
+  });
+});
+
+describe("guest order steps for a table's shared cart — v15 b12", () => {
+  const steps = (result: unknown) =>
+    createGuestOrderSteps({
+      cart: { addItem: async () => result as never },
+      quote: { quoteCart: async () => ({ status: "RetryLater", retryAfterSeconds: 2 }) } as never,
+      details: { save: async () => ({}) } as never,
+      checkout: { create: async () => ({}) },
+    });
+  const add = (result: unknown) =>
+    steps(result).addItem(guest, {
+      operationReference: id(1),
+      cartReference: id(2),
+      expectedCartVersion: 3,
+      sellableReference: id(4),
+      quantity: 1,
+      optionSelections: [],
+      requestedAt: "2026-11-13T06:47:43.000Z",
+    });
+  it("names a cart someone at the table changed, nothing added", async () => {
+    await expect(add({ status: "VersionConflict", currentVersion: 4 })).resolves.toEqual({
+      status: "CartChanged",
+    });
+  });
+  it("gives an unexpected answer's status as its cause code, nothing else of it", async () => {
+    const failed = await add({ status: "RetryLater", retryAfterSeconds: 2 }).catch((e) => e);
+    expect(failed).toMatchObject({
+      message: "COUNTER_GUEST_PIPELINE_UNAVAILABLE",
+      cause: { code: "RetryLater" },
+    });
+    const quoted = await steps({})
+      .quote(guest, {
+        operationReference: id(1),
+        cartReference: id(2),
+        cartVersion: 3,
+        requestedAt: "2026-11-13T06:47:43.000Z",
+      })
+      .catch((e) => e);
+    expect(quoted).toMatchObject({ cause: { code: "RetryLater" } });
   });
 });

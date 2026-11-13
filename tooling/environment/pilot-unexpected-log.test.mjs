@@ -270,3 +270,21 @@ describe("a merchant request that failed for a reason that is not a refusal (WP-
     expect(storeOfDirectory("/app/.local/pilot-v15")).toBeUndefined();
   });
 });
+
+it("v15 b12: a staff send that failed is logged with its level, time and the owner's answer as its cause", () => {
+  const lines = logged();
+  // The guest pipeline names the owner's answer (a status word) as the cause of its failure.
+  const pipeline = new Error("COUNTER_GUEST_PIPELINE_UNAVAILABLE", {
+    cause: { code: "VersionConflict" },
+  });
+  reportUnexpected("INTERNAL_STAFF_DINING_ROUND_UNAVAILABLE", pipeline);
+  expect(lines()).toEqual([
+    expect.objectContaining({
+      level: 50,
+      time: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u),
+      event: "INTERNAL_STAFF_DINING_ROUND_UNAVAILABLE",
+      code: "COUNTER_GUEST_PIPELINE_UNAVAILABLE",
+      causes: ["VersionConflict"],
+    }),
+  ]);
+});
