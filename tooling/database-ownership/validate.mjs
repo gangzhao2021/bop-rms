@@ -2514,6 +2514,16 @@ async function scanUnsupported(root, module, diagnostics) {
             owner: "ordering",
             tables: ["counter_order_entry", "order_batch"],
           },
+          // DEC-STAFF-ROUND-ONE-AT-A-TIME: staff rounds for one table take turns.
+          "src/infrastructure/persistence/staff-dining-round-table-turn-store.ts": {
+            owner: "ordering",
+            tables: [
+              "staff_dining_round_table_turn",
+              "staff_dining_round_table_turn_end",
+              "staff_dining_round_entry",
+              "order_batch",
+            ],
+          },
           // WP-2423 Q7 slice 2: the staff member and command behind a staff-entered dine-in round.
           "src/infrastructure/persistence/staff-dining-round-entry-store.ts": {
             owner: "ordering",

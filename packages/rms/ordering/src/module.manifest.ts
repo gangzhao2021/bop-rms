@@ -70,6 +70,9 @@ const moduleManifestInput =
         "order_staff_cancellation",
         "counter_order_entry",
         "staff_dining_round_entry",
+        // DEC-STAFF-ROUND-ONE-AT-A-TIME: staff rounds for one table take turns.
+        "staff_dining_round_table_turn",
+        "staff_dining_round_table_turn_end",
         "order_item_staff_cancellation",
         // WP-2423 M10: refunded units not to be made or handed over.
         "order_item_refund_withdrawal",

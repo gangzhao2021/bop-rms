@@ -76,6 +76,23 @@ const databaseAccessManifestInput = {
       retentionCategory: "transactional",
       piiClassification: ["indirect_identifier"],
     },
+    // DEC-STAFF-ROUND-ONE-AT-A-TIME: staff rounds for one table take turns (2000_950).
+    {
+      table: "staff_dining_round_table_turn",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/ordering" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "transactional",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "staff_dining_round_table_turn_end",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/ordering" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "transactional",
+      piiClassification: ["indirect_identifier"],
+    },
     {
       table: "counter_order_entry",
       classification: "append-only-record",
@@ -883,6 +900,66 @@ const databaseAccessManifestInput = {
       principal: { kind: "module", id: "@rms/ordering" },
       readPattern: "owner-repository",
       source: "packages/rms/ordering/src/infrastructure/persistence/order-progress-store.ts",
+    },
+    {
+      id: "staff-dining-round-table-turn.read.staff_dining_round_table_turn",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "staff_dining_round_table_turn" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/ordering/src/infrastructure/persistence/staff-dining-round-table-turn-store.ts",
+    },
+    {
+      id: "staff-dining-round-table-turn.write.staff_dining_round_table_turn",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "staff_dining_round_table_turn" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: null,
+      source:
+        "packages/rms/ordering/src/infrastructure/persistence/staff-dining-round-table-turn-store.ts",
+    },
+    {
+      id: "staff-dining-round-table-turn.read.staff_dining_round_table_turn_end",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "staff_dining_round_table_turn_end" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/ordering/src/infrastructure/persistence/staff-dining-round-table-turn-store.ts",
+    },
+    {
+      id: "staff-dining-round-table-turn.write.staff_dining_round_table_turn_end",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "staff_dining_round_table_turn_end" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: null,
+      source:
+        "packages/rms/ordering/src/infrastructure/persistence/staff-dining-round-table-turn-store.ts",
+    },
+    {
+      id: "staff-dining-round-table-turn.read.staff_dining_round_entry",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "staff_dining_round_entry" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/ordering/src/infrastructure/persistence/staff-dining-round-table-turn-store.ts",
+    },
+    {
+      id: "staff-dining-round-table-turn.read.order_batch",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "order_batch" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/ordering/src/infrastructure/persistence/staff-dining-round-table-turn-store.ts",
     },
     {
       id: "staff-dining-round-entry.read.staff_dining_round_entry",

@@ -276,8 +276,17 @@ export function createGuestOrderSteps(options: {
   details: Pick<CustomerCheckoutDetailsPort, "save">;
   checkout: { create(value: unknown): Promise<unknown> };
 }): Pick<CounterGuestPipeline, "addItem" | "quote" | "saveDetails" | "startCheckout"> {
-  const failed = (): never => {
-    throw new Error("COUNTER_GUEST_PIPELINE_UNAVAILABLE");
+  /**
+   * v15 b12: the owner's answer that was not expected, as a cause code only (its status word, such
+   * as `RetryLater`), so the log says why a staff send failed; never anything else of the answer.
+   */
+  const failed = (status?: unknown): never => {
+    throw new Error(
+      "COUNTER_GUEST_PIPELINE_UNAVAILABLE",
+      typeof status === "string" && /^[A-Za-z]{1,40}$/u.test(status)
+        ? { cause: { code: status } }
+        : undefined,
+    );
   };
   return {
     async addItem(credentials, input) {
@@ -306,7 +315,9 @@ export function createGuestOrderSteps(options: {
       if (result.status === "SelectionInvalid") return { status: "NotAvailable" as const };
       // A table guest is paying for this table's Cart right now (dine-in only).
       if (result.status === "CheckoutInProgress") return { status: "CheckoutInProgress" as const };
-      return failed();
+      // v15 b12: someone at the table changed the shared Cart since it was read; nothing added.
+      if (result.status === "VersionConflict") return { status: "CartChanged" as const };
+      return failed(result.status);
     },
     async quote(credentials, input) {
       const result = await options.quote.quoteCart({
@@ -335,7 +346,7 @@ export function createGuestOrderSteps(options: {
       if (result.status === "TableCheckingOut") return { status: "TableCheckingOut" as const };
       // The Cart changed since it was read (a guest edited it): nothing was priced; send again.
       if (result.status === "VersionConflict") return { status: "NotPriced" as const };
-      if (result.status !== "Created" && result.status !== "Current") return failed();
+      if (result.status !== "Created" && result.status !== "Current") return failed(result.status);
       const quote = result.quote;
       if (
         String(quote.cartReference) !== input.cartReference ||

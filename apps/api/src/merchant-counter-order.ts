@@ -254,6 +254,11 @@ export interface CounterGuestPipeline {
     | { readonly status: "NotAvailable" }
     /** Another guest at the table is paying for the table's Cart (dine-in only). */
     | { readonly status: "CheckoutInProgress" }
+    /**
+     * v15 b12: the Cart moved on since it was read (someone at the table changed it); nothing
+     * was added. A table's shared Cart only: a counter guest's own Cart never moves under it.
+     */
+    | { readonly status: "CartChanged" }
   >;
   /**
    * WP-2423 (v15 run): whether the Store's stock covers this quantity of one item (with these
@@ -842,6 +847,11 @@ export function createMerchantCounterOrder(options: {
           customerNote: line.customerNote ?? null,
           requestedAt: now(),
         });
+        // Nobody else adds to a counter guest's own Cart: a moved Cart is a fault, never "sold out".
+        if (added.status === "CartChanged")
+          throw new Error("COUNTER_GUEST_PIPELINE_UNAVAILABLE", {
+            cause: { code: "VersionConflict" },
+          });
         if (added.status !== "Applied") return await notSellable(index);
         cartVersion = added.cartVersion;
         cartLines.push(addedCartLine(lines, added.lines));

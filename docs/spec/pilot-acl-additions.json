@@ -6551,6 +6551,42 @@
       "privilege": "SELECT",
       "principal": "api",
       "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); DEC-CHECKOUT-SESSION-OUTAGE: an online pickup order the hour could not take is recorded, so staff on Orders are told online guests are being turned away (2000_780)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "staff_dining_round_table_turn",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); DEC-STAFF-ROUND-ONE-AT-A-TIME: staff rounds for one table take turns, so two staff sending a round for the same table at once never mix their dishes; who held the table and how each turn ended is kept (2000_950)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "staff_dining_round_table_turn",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); DEC-STAFF-ROUND-ONE-AT-A-TIME: staff rounds for one table take turns, so two staff sending a round for the same table at once never mix their dishes; who held the table and how each turn ended is kept (2000_950)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "staff_dining_round_table_turn_end",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); DEC-STAFF-ROUND-ONE-AT-A-TIME: staff rounds for one table take turns, so two staff sending a round for the same table at once never mix their dishes; who held the table and how each turn ended is kept (2000_950)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "staff_dining_round_table_turn_end",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); DEC-STAFF-ROUND-ONE-AT-A-TIME: staff rounds for one table take turns, so two staff sending a round for the same table at once never mix their dishes; who held the table and how each turn ended is kept (2000_950)"
     }
   ]
 }

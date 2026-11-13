@@ -689,6 +689,10 @@ export function installMerchantOrderRoutes(
               STAFF_ROUND_IDEMPOTENCY_CONFLICT: [409, "staff_round_conflict"],
               STAFF_ROUND_TIPS_OFF: [409, "tips_turned_off"],
               STAFF_ROUND_TIP_CHOICES_CHANGED: [409, "tip_choices_changed"],
+              // DEC-STAFF-ROUND-ONE-AT-A-TIME: another staff member's round for the table is going.
+              STAFF_ROUND_TABLE_BUSY: [409, "table_busy"],
+              // v15 b12: not sent, but its dishes are still (or no longer) in the table's cart.
+              STAFF_ROUND_NOT_WITHDRAWN: [503, "staff_round_not_withdrawn"],
               STAFF_ROUND_UNAVAILABLE: [503, "staff_round_unavailable"],
             } as const
           )[error.code];

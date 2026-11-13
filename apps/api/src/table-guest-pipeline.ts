@@ -223,8 +223,14 @@ export function createStaffTableGuestPipeline(options: {
   nextReference(): string;
   now(): string;
 }): StaffTableGuestPipeline {
-  const failed = (): never => {
-    throw new Error("TABLE_GUEST_PIPELINE_UNAVAILABLE");
+  /** v15 b12: the owner's unexpected answer as a cause code only (its status word). */
+  const failed = (status?: unknown): never => {
+    throw new Error(
+      "TABLE_GUEST_PIPELINE_UNAVAILABLE",
+      typeof status === "string" && /^[A-Za-z]{1,40}$/u.test(status)
+        ? { cause: { code: status } }
+        : undefined,
+    );
   };
   const steps = createGuestOrderSteps(options);
   return Object.freeze<StaffTableGuestPipeline>({
@@ -256,7 +262,7 @@ export function createStaffTableGuestPipeline(options: {
         typeof result.sessionCredential !== "string" ||
         typeof result.csrfCredential !== "string"
       )
-        return failed();
+        return failed(result.status);
       return Object.freeze({
         status: "Established" as const,
         credentials: Object.freeze({
@@ -283,7 +289,7 @@ export function createStaffTableGuestPipeline(options: {
         joined.operationReference !== input.operationReference ||
         typeof joined.admissionReference !== "string"
       )
-        return failed();
+        return failed(joined.status);
       return Object.freeze({ admissionReference: joined.admissionReference });
     },
     async bind(credentials, input) {
@@ -308,7 +314,7 @@ export function createStaffTableGuestPipeline(options: {
         typeof prepared.csrfCredential !== "string" ||
         typeof prepared.recoveryProof !== "string"
       )
-        return failed();
+        return failed(prepared.status);
       const activated = readClosedRecord(
         await options.binding.activate({
           operationReference: input.operationReference,
@@ -324,7 +330,7 @@ export function createStaffTableGuestPipeline(options: {
         activated.sessionCredential !== prepared.sessionCredential ||
         activated.csrfCredential !== prepared.csrfCredential
       )
-        return failed();
+        return failed(activated.status);
       const current: CounterGuestCredentials = Object.freeze({
         sessionCredential: prepared.sessionCredential,
         csrfCredential: prepared.csrfCredential,
@@ -353,7 +359,7 @@ export function createStaffTableGuestPipeline(options: {
         (result.status !== "Applied" && result.status !== "Current") ||
         result.view.cart.orderType !== "DineIn"
       )
-        return failed();
+        return failed(result.status);
       return Object.freeze({
         status: "Selected" as const,
         cartReference: result.view.cart.cartReference,
@@ -393,6 +399,7 @@ export function createStaffTableGuestPipeline(options: {
                 expectedCartVersion: version,
               });
               if (result.status !== "Applied") return "Kept" as const;
+              input.onRemoved?.(cartItemReference);
               version = result.view.cart.version;
             }
             return "Removed" as const;

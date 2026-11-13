@@ -27,6 +27,12 @@ const state = vi.hoisted(() => ({
   paid: null as Record<string, unknown> | null,
   /** b11: the System (or staff) took the round off. */
   takenOff: false,
+  /**
+   * DEC-STAFF-ROUND-ONE-AT-A-TIME: how many more times the table's turn is held by another staff
+   * round when this one asks for it, and each turn taken and ended.
+   */
+  turnBusy: 0,
+  turnLog: [] as string[],
   /** What the table's cart does with a staff removal (the shared-cart double below). */
   onStaffRemoval: null as
     | null
@@ -123,6 +129,20 @@ vi.mock("@rms/ordering", async (importOriginal) => {
       },
       loadBatch: async (_tx: unknown, guest: string) => state.batches.get(guest) ?? null,
       isTakenOff: async () => state.takenOff,
+    }),
+    createPostgresStaffDiningRoundTableTurnStore: () => ({
+      take: async () => {
+        if (state.turnBusy > 0) {
+          state.turnBusy -= 1;
+          state.turnLog.push("busy");
+          return { status: "Busy", heldUntil: "2026-10-15T18:02:00.000Z" };
+        }
+        state.turnLog.push("taken");
+        return { status: "Taken", heldUntil: "2026-10-15T18:02:00.000Z" };
+      },
+      end: async (_tx: unknown, input: { outcome: string }) => {
+        state.turnLog.push("end:" + input.outcome);
+      },
     }),
     // WP-2423 D1: a later round's table Order is at the version its rounds moved it to (7), not
     // the Order header's version (4).
@@ -294,6 +314,9 @@ function setup(
     pipeline,
     nextReference: () => id(++sequence),
     onUnexpected,
+    // DEC-STAFF-ROUND-ONE-AT-A-TIME: waits for another round's turn without real time passing.
+    tableTurnWaitMs: 1000,
+    sleep: async () => undefined,
     ...(payLater === null
       ? {}
       : {
@@ -345,6 +368,8 @@ describe("staff dine-in round command — WP-2423 Q7 slice 2", () => {
     state.waitsForPayment = true;
     state.paid = null;
     state.takenOff = false;
+    state.turnBusy = 0;
+    state.turnLog = [];
     state.tableSession = undefined;
   });
 
@@ -637,6 +662,8 @@ describe("staff dine-in round command — WP-2423 Q7 slice 2", () => {
     });
     // Its time to pay ended but the System has not taken it off yet: named the same way.
     state.takenOff = false;
+    state.turnBusy = 0;
+    state.turnLog = [];
     clock.at = "2026-10-15T18:31:00.000Z";
     await expect(send()).rejects.toMatchObject({ code: "STAFF_ROUND_ALREADY_SENT" });
     // Paid before it ended: still the paid round, never "taken off".
@@ -823,6 +850,12 @@ describe("staff dine-in round command — WP-2423 Q7 slice 2", () => {
 
   it("answers in progress, then not finished, for an attempt that made no round", async () => {
     const { send, pipeline, clock, onUnexpected } = setup();
+    pipeline.addItem.mockResolvedValue({
+      status: "Applied",
+      cartVersion: 4,
+      lines: [{ cartItemReference: id(40), quantity: 2 }],
+    } as never);
+    Object.assign(pipeline, { removeItems: vi.fn(async () => "Removed" as const) });
     pipeline.quote.mockRejectedValueOnce(new Error("connection reset"));
     await expect(send()).rejects.toMatchObject({ code: "STAFF_ROUND_UNAVAILABLE" });
     expect(onUnexpected).toHaveBeenCalledTimes(1);
@@ -961,11 +994,14 @@ describe("staff dine-in round command — WP-2423 Q7 slice 2", () => {
       available: 1,
       sharedStock: true,
     });
-    expect(removeItems).toHaveBeenCalledWith(guest, {
-      cartReference: id(6),
-      cartVersion: 5,
-      cartItemReferences: [id(40), id(41)],
-    });
+    expect(removeItems).toHaveBeenCalledWith(
+      guest,
+      expect.objectContaining({
+        cartReference: id(6),
+        cartVersion: 5,
+        cartItemReferences: [id(40), id(41)],
+      }),
+    );
     expect(f.pipeline.preparePayment).not.toHaveBeenCalled();
     expect(f.pipeline.abandonTable).toHaveBeenCalledTimes(1);
     expect(f.onUnexpected).not.toHaveBeenCalled();
@@ -1008,10 +1044,9 @@ describe("staff dine-in round command — WP-2423 Q7 slice 2", () => {
           { cartItemReference: id(40), name: "Soup", quantity: 2, standing: "Available" },
         ],
       });
-    await expect(f.send()).rejects.toMatchObject({
-      code: "STAFF_ROUND_ITEM_UNAVAILABLE",
-      lineIndex: 0,
-    });
+    // v15 b12: the round's dish is still in the table's cart, so staff are never told that
+    // nothing was sent: it could go out with the next round from the table.
+    await expect(f.send()).rejects.toMatchObject({ code: "STAFF_ROUND_NOT_WITHDRAWN" });
     expect(f.pipeline.abandonTable).not.toHaveBeenCalled();
   });
 
@@ -1085,11 +1120,14 @@ describe("staff dine-in round command — WP-2423 Q7 slice 2", () => {
     const removeItems = vi.fn(async () => "Removed" as const);
     Object.assign(f.pipeline, { removeItems });
     await expect(f.send()).rejects.toMatchObject({ code: "STAFF_ROUND_UNAVAILABLE" });
-    expect(removeItems).toHaveBeenCalledWith(guest, {
-      cartReference: id(6),
-      cartVersion: 4,
-      cartItemReferences: [id(40)],
-    });
+    expect(removeItems).toHaveBeenCalledWith(
+      guest,
+      expect.objectContaining({
+        cartReference: id(6),
+        cartVersion: 4,
+        cartItemReferences: [id(40)],
+      }),
+    );
     expect(f.pipeline.startCheckout).not.toHaveBeenCalled();
     // Staff send it again as a new attempt (a new operation): the round is placed once.
     await expect(f.send({ operationReference: id(90) })).resolves.toMatchObject({
@@ -1117,11 +1155,14 @@ describe("staff dine-in round command — WP-2423 Q7 slice 2", () => {
         ],
       }),
     ).rejects.toMatchObject({ code: "STAFF_ROUND_ITEM_UNAVAILABLE", lineIndex: 1 });
-    expect(removeItems).toHaveBeenCalledWith(guest, {
-      cartReference: id(6),
-      cartVersion: 4,
-      cartItemReferences: [id(40)],
-    });
+    expect(removeItems).toHaveBeenCalledWith(
+      guest,
+      expect.objectContaining({
+        cartReference: id(6),
+        cartVersion: 4,
+        cartItemReferences: [id(40)],
+      }),
+    );
   });
 });
 
@@ -1377,11 +1418,14 @@ describe("staff round with a guest item that can't be sold — WP-2423", () => {
     });
     // Exactly the round's own line was taken out, once; the guests' Cart is as it was.
     expect(table.removeItems).toHaveBeenCalledTimes(1);
-    expect(table.removeItems).toHaveBeenCalledWith(guest, {
-      cartReference: id(6),
-      cartVersion: 4,
-      cartItemReferences: [...table.staffLines],
-    });
+    expect(table.removeItems).toHaveBeenCalledWith(
+      guest,
+      expect.objectContaining({
+        cartReference: id(6),
+        cartVersion: 4,
+        cartItemReferences: [...table.staffLines],
+      }),
+    );
     expect(table.cart.lines.map((line) => line.cartItemReference)).toEqual([plum, noodles]);
     expect(f.pipeline.startCheckout).not.toHaveBeenCalled();
     expect(f.onUnexpected).not.toHaveBeenCalled();
@@ -1737,12 +1781,165 @@ describe("staff round with a guest item that can't be sold — WP-2423", () => {
     }) as never);
     await expect(f.send(including())).rejects.toMatchObject({ code: "STAFF_ROUND_NOT_PRICED" });
     expect(table.removeItems).toHaveBeenCalledTimes(2);
-    expect(table.removeItems).toHaveBeenLastCalledWith(guest, {
-      cartReference: id(6),
-      cartVersion: 5,
-      cartItemReferences: [...table.staffLines],
-    });
+    expect(table.removeItems).toHaveBeenLastCalledWith(
+      guest,
+      expect.objectContaining({
+        cartReference: id(6),
+        cartVersion: 5,
+        cartItemReferences: [...table.staffLines],
+      }),
+    );
     expect(table.cart.lines.map((line) => line.name)).toEqual(["Noodles"]);
     expect(f.onUnexpected).not.toHaveBeenCalled();
+  });
+});
+
+describe("two staff send a round for the same table — v15 b12 staff-round-concurrency", () => {
+  beforeEach(() => {
+    state.entries.clear();
+    state.batches.clear();
+    state.tablePermission = "Allow";
+    state.allowed = true;
+    state.tips = { enabled: true, tierPercents: [10, 15, 18] };
+    state.tableCart = null;
+    state.staffRemovals = [];
+    state.staffRemovalError = null;
+    state.onStaffRemoval = null;
+    state.waitsForPayment = true;
+    state.paid = null;
+    state.takenOff = false;
+    state.turnBusy = 0;
+    state.turnLog = [];
+  });
+  const withOwnLine = (f: ReturnType<typeof setup>) =>
+    f.pipeline.addItem.mockResolvedValue({
+      status: "Applied",
+      cartVersion: 4,
+      lines: [{ cartItemReference: id(40), quantity: 2 }],
+    } as never);
+
+  it("waits while another staff member's round holds the table, then sends this one", async () => {
+    const f = setup();
+    state.turnBusy = 2;
+    const placed = await f.send();
+    expect(placed.status).toBe("Placed");
+    expect(state.turnLog).toEqual(["busy", "busy", "taken"]);
+    expect(f.calls.indexOf("openTable")).toBeGreaterThan(-1);
+  });
+
+  it("is refused as busy, with nothing touched, when the other round does not finish in time", async () => {
+    const f = setup();
+    state.turnBusy = 100;
+    await expect(f.send()).rejects.toMatchObject({ code: "STAFF_ROUND_TABLE_BUSY" });
+    expect(f.calls).toEqual([]);
+    expect(state.entries.size).toBe(0);
+    expect(state.turnLog.every((entry) => entry === "busy")).toBe(true);
+  });
+
+  it("ends its turn as not sent when refused, so the next staff round can go at once", async () => {
+    const f = setup();
+    withOwnLine(f);
+    Object.assign(f.pipeline, { removeItems: vi.fn(async () => "Removed" as const) });
+    f.pipeline.startCheckout.mockResolvedValueOnce({
+      status: "ItemShort",
+      cartItemReference: id(40),
+      available: 1,
+      sharedStock: false,
+    } as never);
+    await expect(f.send()).rejects.toMatchObject({ code: "STAFF_ROUND_STOCK_SHORT" });
+    expect(state.turnLog).toEqual(["taken", "end:NotSent"]);
+  });
+
+  it("never says nothing was sent while its dish could not be taken back out of the cart", async () => {
+    // v15 06:47Z: a failure before the checkout, and the round's dish stayed in the table's cart
+    // (a guest or another tablet changed it meanwhile); staff were told "nothing was sent".
+    const f = setup();
+    withOwnLine(f);
+    Object.assign(f.pipeline, { removeItems: vi.fn(async () => "Kept" as const) });
+    f.pipeline.quote.mockRejectedValueOnce(new Error("connection reset"));
+    await expect(f.send()).rejects.toMatchObject({ code: "STAFF_ROUND_NOT_WITHDRAWN" });
+    expect(state.turnLog).toEqual(["taken", "end:DishesLeftAtTable"]);
+  });
+
+  it("says its dish may have gone out when it left the cart without this round taking it out", async () => {
+    const f = setup();
+    withOwnLine(f);
+    Object.assign(f.pipeline, { removeItems: vi.fn(async () => "Kept" as const) });
+    f.pipeline.quote.mockRejectedValueOnce(new Error("connection reset"));
+    // Read again: the cart moved on and the round's line is gone (another round took it).
+    f.pipeline.selectCart
+      .mockResolvedValueOnce({
+        status: "Selected",
+        cartReference: id(6),
+        cartVersion: 3,
+        pendingItems: [],
+      })
+      .mockResolvedValueOnce({
+        status: "Selected",
+        cartReference: id(6),
+        cartVersion: 5,
+        pendingItems: [],
+      });
+    await expect(f.send()).rejects.toMatchObject({ code: "STAFF_ROUND_NOT_WITHDRAWN" });
+  });
+
+  it("still says nothing was sent when it took its own dish out after a guest's edit", async () => {
+    const f = setup();
+    withOwnLine(f);
+    const removeItems = vi
+      .fn()
+      .mockResolvedValueOnce("Kept")
+      .mockImplementationOnce(async (_c: unknown, input: { onRemoved?: (r: string) => void }) => {
+        input.onRemoved?.(id(40));
+        return "Removed";
+      });
+    Object.assign(f.pipeline, { removeItems });
+    f.pipeline.quote.mockRejectedValueOnce(new Error("connection reset"));
+    f.pipeline.selectCart
+      .mockResolvedValueOnce({
+        status: "Selected",
+        cartReference: id(6),
+        cartVersion: 3,
+        pendingItems: [],
+      })
+      .mockResolvedValueOnce({
+        status: "Selected",
+        cartReference: id(6),
+        cartVersion: 5,
+        pendingItems: [
+          { cartItemReference: id(40), name: "Rice", quantity: 2, standing: "Available" },
+        ],
+      });
+    await expect(f.send()).rejects.toMatchObject({ code: "STAFF_ROUND_UNAVAILABLE" });
+    expect(removeItems).toHaveBeenCalledTimes(2);
+  });
+
+  it("a cart changed under its first dish: refused with the cart as it is now, nothing sent", async () => {
+    const f = setup();
+    f.pipeline.addItem.mockResolvedValueOnce({ status: "CartChanged" } as never);
+    f.pipeline.selectCart
+      .mockResolvedValueOnce({
+        status: "Selected",
+        cartReference: id(6),
+        cartVersion: 3,
+        pendingItems: [],
+      })
+      .mockResolvedValueOnce({
+        status: "Selected",
+        cartReference: id(6),
+        cartVersion: 4,
+        pendingItems: [
+          { cartItemReference: id(41), name: "Rice", quantity: 1, standing: "Available" },
+        ],
+      });
+    await expect(f.send()).rejects.toMatchObject({
+      code: "STAFF_ROUND_TABLE_CART_HAS_ITEMS",
+      pendingItems: [
+        { cartItemReference: id(41), name: "Rice", quantity: 1, standing: "Available" },
+      ],
+      tableCart: { cartVersion: 4 },
+    });
+    expect(f.calls).not.toContain("quote");
+    expect(state.turnLog).toEqual(["taken", "end:NotSent"]);
   });
 });
