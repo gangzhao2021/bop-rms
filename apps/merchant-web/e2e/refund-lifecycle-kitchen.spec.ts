@@ -251,11 +251,43 @@ test("@production M14: a cashier refunding a card-machine payment is told a mana
   await page.getByRole("combobox", { name: "Reason" }).selectOption("WRONG_ITEM");
   await page.getByRole("button", { name: "Review refund" }).click();
   const review = page.getByRole("region", { name: "Review this refund" });
+  // b13: a card-machine refund is refunded on the machine and recorded, never "sent from
+  // Approvals", as the request line after recording says.
   await expect(review).toContainText(
-    "Paid on the store's card machine. Recording this request does not refund anything yet: a manager or the owner sends it from Approvals.",
+    "Paid on the store's card machine. Recording this request does not refund anything yet: a manager or the owner refunds it on the card machine and records it on the payment page.",
   );
+  await expect(review).not.toContainText("Approvals");
   await expect(review).not.toContainText("refund this amount on that machine");
   await expect(review.getByRole("button", { name: "Record refund request" })).toBeVisible();
+  await page.route("**/merchant/payments/refunds/request", (route) => {
+    const command = JSON.parse(route.request().postData() ?? "{}");
+    return route.fulfill({
+      status: 202,
+      headers,
+      json: {
+        status: "RequestRecorded",
+        requestReference: command.requestReference,
+        operationReference: command.operationReference,
+        claimVersion: 1,
+        currencyCode: "CAD",
+        amountMinor: "1500",
+        paymentAttemptReferences: [id(32)],
+        approvalRequired: false,
+        escalationReasons: [],
+        approveAlone: false,
+        replayed: false,
+      },
+    });
+  });
+  await review.getByRole("checkbox", { name: /I confirm/u }).check();
+  await review.getByRole("button", { name: "Record refund request" }).click();
+  await expect(
+    page.getByText(
+      "Nothing is refunded yet: a manager or the owner refunds it on the card machine and records it on the payment page.",
+      { exact: false },
+    ),
+  ).toBeVisible();
+  await expect(page.getByText(/sends it from Approvals/u)).toHaveCount(0);
   await expectNoInternalText(page);
   await noHorizontalScroll(page, "refund-card-machine-cashier");
 });

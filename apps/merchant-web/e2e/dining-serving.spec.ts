@@ -149,6 +149,148 @@ test("@production serving retains its intent after a lost response and locks ref
   });
 });
 
+// b13 (v15 b12 live, host load ~4.7): Mark served answered 200 but the round kept "Ready to serve
+// · Served 0/1" for 5–10 s, which invites a second tap. A confirmed serve shows at once, and a
+// reread that has not caught up yet does not offer the dish again.
+for (const width of [1440, 1024, 390])
+  test(`@production a dish the server confirmed served reads served at once, over a lagging reread, at ${width}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 900 });
+    const id = (n: number) => "01909968-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+    const scope = {
+      brandLabel: "Synthetic Brand",
+      storeLabel: "Synthetic Store",
+      storeReference: id(99),
+    };
+    const headers = { "cache-control": "no-store" };
+    await page.route("**/merchant/session", (route) =>
+      route.fulfill({
+        headers,
+        json: {
+          authenticated: true,
+          csrf: "a".repeat(43),
+          workspace: {
+            screenId: "HOME-OVERVIEW",
+            selectedScope: scope,
+            authorizedStores: [scope],
+            businessDate: "2026-09-14",
+            storeStatus: "Open",
+            freshness: "Current",
+            dashboardAvailability: "UnavailableUntilWP1905",
+            navigation: [
+              {
+                screenId: "OPS-ORDER-QUEUE",
+                label: "Orders",
+                href: "/operations/orders",
+                permission: "ordering.operate",
+              },
+            ],
+          },
+        },
+      }),
+    );
+    await page.route("**/merchant/orders", (route) =>
+      route.fulfill({
+        headers,
+        json: {
+          items: [
+            {
+              orderReference: id(1),
+              orderNumber: "ORD-1",
+              orderType: "DineIn",
+              sourceChannel: "Web",
+              submittedAt: "2026-09-14T00:00:00.000Z",
+              observedAt: "2026-09-14T00:01:00.000Z",
+              initialBatchReference: id(90),
+              batches: [
+                {
+                  orderBatchReference: id(90),
+                  sequence: 1,
+                  acceptanceStatus: "Accepted",
+                  canRequestAcceptance: false,
+                  canCancel: false,
+                  staffCancellation: null,
+                  canCancelItems: false,
+                },
+              ],
+              canRequestAcceptance: false,
+              currentPhase: "Ready",
+              currentVersion: 2,
+              unfulfillable: null,
+              pickupNotCollected: false,
+              acceptBy: null,
+              awaitingPayment: false,
+            },
+          ],
+          nextAfterOrderReference: null,
+        },
+      }),
+    );
+    // The serving progress keeps answering "ready" (its read lags behind the serve).
+    let progressReads = 0;
+    await page.route("**/merchant/dining/order-progress", (route) => {
+      progressReads += 1;
+      return route.fulfill({
+        headers,
+        json: {
+          orderReference: id(1),
+          orderVersion: 2,
+          sessionVersion: 2,
+          diningSessionReference: id(55),
+          sessionPhase: "Closing",
+          tableAssignmentVersion: 3,
+          closureStatus: "Open",
+          closureVersion: 0,
+          currentOrderVersion: 4,
+          tableLabel: "SBC 1 (TEST)",
+          phase: "Ready",
+          observedAt: "2026-09-14T00:01:00.000Z",
+          items: [
+            {
+              orderItemReference: id(3),
+              orderBatchReference: id(90),
+              displayName: "Meal",
+              batchSequence: 1,
+              itemOrdinal: 1,
+              phase: "Ready",
+              orderedQuantity: 1,
+              deliveredQuantity: 0,
+              remainingQuantity: 1,
+              itemServiceVersion: 0,
+            },
+          ],
+        },
+      });
+    });
+    const serves: string[] = [];
+    await page.route("**/merchant/dining/serve", (route) => {
+      serves.push(route.request().postData() ?? "");
+      return route.fulfill({ headers, json: { status: "Created", itemServiceVersion: 1 } });
+    });
+    await page.goto("/operations/orders");
+    const round = page.getByRole("region", { name: "Round 1", exact: true });
+    await expect(round.getByText("Served 0/1")).toBeVisible();
+    const served = round.getByRole("button", { name: "Mark 1 × Meal served", exact: true });
+    const reads = progressReads;
+    await served.click();
+    await expect(round.getByText("Served 1/1")).toBeVisible();
+    await expect(served).toHaveCount(0);
+    // The progress is read again after the serve, and still says "ready".
+    await expect.poll(() => progressReads).toBeGreaterThan(reads);
+    await page.waitForTimeout(1_000);
+    await expect(round.getByText("Served 1/1")).toBeVisible();
+    await expect(round.getByRole("button", { name: /served$/u })).toHaveCount(0);
+    expect(serves).toHaveLength(1);
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.screenshot({
+      path: test.info().outputPath(`b13-served-at-once-${width}.png`),
+      fullPage: true,
+    });
+  });
+
 test("@production WP-2423 (2026-10-18): a dish the kitchen is remaking says so and is not offered for serving", async ({
   page,
 }) => {

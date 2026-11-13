@@ -282,7 +282,7 @@ test("@production a manager discounts a started dish from the Tables page; only 
         return lines.size;
       }),
     );
-    expect(amountLines).toEqual([1, 1, 1]);
+    expect(amountLines).toEqual([1, 1]);
     await page.screenshot({
       path: `test-results/dining-item-comp-rounding-${width}.png`,
       fullPage: true,

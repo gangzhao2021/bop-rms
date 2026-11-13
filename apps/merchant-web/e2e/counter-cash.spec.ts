@@ -1312,7 +1312,9 @@ test("@production a cashier's cash refund is listed once on the payment page, at
     "Not given back yet. A manager or the owner gives back $5.10 in cash and records it.",
   );
   await expect(cash.locator(".refund-request__amount")).toHaveText("$5.10");
-  await expect(main.getByText(/^Request 1 ·/u)).toHaveCount(1);
+  await expect(main.getByText(/Request 1 ·/u)).toHaveCount(1);
+  // b13: the refund itself is named beside the cash that goes back.
+  await expect(cash).toContainText("Refund of $5.09, in cash rounded to 5 cents");
   await expect(main.locator(".refund-request__amount")).toHaveCount(1);
   await expect(main.getByRole("button", { name: /^Refresh/u })).toHaveCount(1);
   for (const width of [1440, 1024, 390]) {
@@ -1326,6 +1328,163 @@ test("@production a cashier's cash refund is listed once on the payment page, at
     });
   }
 });
+
+// b13 (v15 b12 live, DEMO order 3): the Refund page still read "$5.09 To give back in cash" with
+// "gives back $5.10" and three Refresh links; once given back, "$5.09 Given back in cash" and
+// "Refunded $5.09" though $5.10 left the drawer. Both amounts are said together, with one Refresh.
+for (const done of [false, true])
+  test(`@production the refund page says a cash refund's refund and cash together, with one Refresh (${done ? "given back" : "to give back"})`, async ({
+    page,
+  }) => {
+    await signIn(page);
+    const intent = id(371),
+      attempt = id(372);
+    let contexts = 0;
+    await page.route("**/merchant/payments/refunds/approvals", (route) =>
+      route.fulfill({
+        headers,
+        json: {
+          observedAt: new Date().toISOString(),
+          canApprove: false,
+          soleOperator: null,
+          entries: [],
+        },
+      }),
+    );
+    await page.route("**/merchant/payments/refunds/context", (route) => {
+      contexts += 1;
+      return route.fulfill({
+        headers,
+        json: {
+          paymentIntentReference: intent,
+          paymentAttemptReference: attempt,
+          orderReference: id(370),
+          orderBatchReference: id(373),
+          observedAt: new Date().toISOString(),
+          paymentState: "Captured",
+          paymentMethod: "CardMachine",
+          paidInCash: true,
+          cashLeftMinor: done ? "0" : "510",
+          cashGivenBackMinor: done ? "510" : "0",
+          currencyCode: "CAD",
+          capturedAmountMinor: "509",
+          confirmedRefundMinor: done ? "509" : "0",
+          pendingRefundMinor: done ? "0" : "509",
+          canRequest: true,
+          requestBlocked: null,
+          canSend: false,
+        },
+      });
+    });
+    let items = 0;
+    await page.route("**/merchant/payments/refunds/items", (route) => {
+      items += 1;
+      return route.fulfill({
+        headers,
+        json: {
+          orderReference: id(370),
+          orderNumber: "3",
+          canRequest: true,
+          claimVersion: 1,
+          recentRequests: [
+            {
+              requestReference: id(374),
+              operationReference: id(375),
+              claimVersion: 1,
+              requestedAt: "2026-11-13T11:30:00.000Z",
+              reasonCode: "QUALITY_ISSUE",
+              currencyCode: "CAD",
+              amountMinor: "509",
+              decline: null,
+              progress: done ? "Refunded" : "Recorded",
+              paymentMethod: "CardMachine",
+              cashGivenBackMinor: "510",
+            },
+          ],
+          items: [
+            {
+              orderBatchReference: id(373),
+              orderItemReference: id(376),
+              label: "Lemon tea (TEST)",
+              quantity: 1,
+              unclaimedQuantity: 0,
+              paymentCaptured: true,
+              refundedByCancellation: false,
+              paymentIntentReference: intent,
+              paymentMethod: "CardMachine",
+            },
+          ],
+        },
+      });
+    });
+    await page.route("**/merchant/payments/refunds/status", (route) =>
+      route.fulfill({
+        headers,
+        json: {
+          orderReference: id(370),
+          requestReference: id(374),
+          operationReference: id(375),
+          observedAt: new Date().toISOString(),
+          currencyCode: "CAD",
+          amountMinor: "509",
+          payments: [
+            {
+              paymentAttemptReference: attempt,
+              paymentIntentReference: intent,
+              state: done ? "Confirmed" : "NotDispatched",
+              method: "CardMachine",
+              refundedOnCardMachineAt: done ? "2026-11-13T11:40:00.000Z" : null,
+              cardMachineSlipReference: null,
+              executionOperationReference: null,
+              executionApprovalReference: null,
+              amountMinor: "509",
+              confirmedMinor: done ? "509" : "0",
+              pendingMinor: done ? "0" : "509",
+              cashGivenBackMinor: "510",
+            },
+          ],
+        },
+      }),
+    );
+    const main = page.getByRole("main");
+    await page.goto("/app/operations/payments/" + intent + "/refund");
+    const request = main.locator(".refund-request").first();
+    await expect(request.locator(".refund-request__amount")).toHaveText("$5.10");
+    await expect(request).toContainText(done ? "Given back in cash" : "To give back in cash");
+    await expect(request).toContainText("Refund of $5.09, in cash rounded to 5 cents");
+    await expect(main.getByText("$5.09 To give back in cash")).toHaveCount(0);
+    // One Refresh for the page: it reads the amounts and the requests again.
+    const refresh = main.getByRole("button", { name: /Refresh/u });
+    await expect(refresh).toHaveCount(1);
+    await expect(
+      main.getByRole("button", { name: "Refresh the payment and its refunds" }),
+    ).toBeVisible();
+    if (done) {
+      await expect(main.locator(".refund-summary")).toContainText("Refunded$5.09");
+      await expect(main.locator(".refund-summary")).toContainText(
+        "Cash given back from the drawer$5.10",
+      );
+    } else
+      await expect(main).toContainText(
+        "Not given back yet. A manager or the owner gives back $5.10 in cash and records it.",
+      );
+    const before = { contexts, items };
+    await refresh.click();
+    await expect.poll(() => contexts).toBeGreaterThan(before.contexts);
+    await expect.poll(() => items).toBeGreaterThan(before.items);
+    for (const width of [1440, 1024, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true);
+      await page.screenshot({
+        path: test
+          .info()
+          .outputPath(`b13-refund-page-cash-${done ? "done" : "pending"}-${width}.png`),
+        fullPage: true,
+      });
+    }
+  });
 
 test("@production on Approvals a cash refund is approved and given back from the drawer, never on the machine", async ({
   page,

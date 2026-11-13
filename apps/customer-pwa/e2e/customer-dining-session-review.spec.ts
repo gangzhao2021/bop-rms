@@ -320,6 +320,99 @@ test.describe("@production CUST-DINE-IN-SESSION table view", () => {
     await expectNoInternalText(page);
   });
 
+  // b13 (v15 b12 live, BR E-style bill: $50 ordered, two dishes comped, 10% off the third line):
+  // the guest read Tax $6.51, "Taken off −$31.09" and "Rounding $0.01" while staff checkout and
+  // the paid bill read Subtotal $22.50 / Tax $2.93 / $25.43; comped to $0, each round card kept
+  // its full "Round total $14.13". The guest reads the bill as the paper prints it.
+  for (const free of [false, true])
+    test(`b13: the table total and round cards read as the paid bill prints them${free ? ", comped to nothing" : ""}`, async ({
+      page,
+    }) => {
+      const [round1] = session.session.rounds;
+      if (round1 === undefined) throw new Error("fixture");
+      const lines = (items: number, off: number, tax: number) => ({
+        items: cad(String(items)),
+        takenOff: cad(String(off)),
+        pointsUsed: cad("0"),
+        subtotal: cad(String(items - off)),
+        tax: cad(String(tax)),
+        total: cad(String(items - off + tax)),
+      });
+      const rounds = free
+        ? [lines(1250, 1250, 0), lines(1250, 1250, 0), lines(2500, 2500, 0)]
+        : [lines(1250, 1250, 0), lines(1250, 1250, 0), lines(2500, 250, 293)];
+      const priced = {
+        schemaVersion: 1,
+        session: {
+          ...session.session,
+          paymentTiming: "PayLater",
+          rounds: rounds.map((bill, index) => ({
+            ...round1,
+            roundNumber: index + 1,
+            payment: "OnTableBill",
+            items: [
+              {
+                ...round1.items[0],
+                quantity: index === 2 ? 2 : 1,
+                servedQuantity: 0,
+                lineTotal: cad(index === 2 ? "2825" : "1413"),
+                priceBeforeTax: cad(index === 2 ? "2500" : "1250"),
+              },
+            ],
+            itemsTotal: cad(index === 2 ? "2825" : "1413"),
+            subtotal: cad(index === 2 ? "2500" : "1250"),
+            tax: cad(index === 2 ? "325" : "163"),
+            bill,
+          })),
+          summary: {
+            paid: cad("0"),
+            refunded: cad("0"),
+            refundPending: cad("0"),
+            due: cad(free ? "0" : "2543"),
+            ordered: { subtotal: cad("5000"), tax: cad("651"), total: cad("5651") },
+            takenOff: cad(free ? "5651" : "3109"),
+            bill: free ? lines(5000, 5000, 0) : lines(5000, 2750, 293),
+          },
+        },
+      };
+      await enterTable(page, () => ({ status: 200, json: priced }));
+      const main = page.getByRole("main");
+      const summary = main.getByRole("region", { name: "Table total" });
+      if (free) {
+        await expect(summary).toContainText("Total$0.00");
+        await expect(summary).toContainText(
+          "The restaurant took everything off: there is nothing to pay.",
+        );
+        await expect(summary).not.toContainText("The table pays once at the end");
+        await expect(main.getByText("Round total$14.13")).toHaveCount(0);
+        await expect(main.locator(".order-status__total").first()).toHaveText("Round total$0.00");
+      } else {
+        await expect(summary).toContainText("Dishes$50.00");
+        await expect(summary).toContainText("Taken off by the restaurant−$27.50");
+        await expect(summary).toContainText("Subtotal$22.50");
+        await expect(summary).toContainText("Tax$2.93");
+        await expect(summary).toContainText("Total$25.43");
+        await expect(
+          main.getByRole("article", { name: /^Round 3 /u }).locator(".order-status__total"),
+        ).toHaveText("Round total$25.43");
+        await expect(
+          main.getByRole("article", { name: /^Round 1 /u }).locator(".order-status__total"),
+        ).toHaveText("Round total$0.00");
+      }
+      await expect(summary).not.toContainText("$6.51");
+      await expect(summary).not.toContainText("Rounding");
+      await expect(summary).not.toContainText("Total ordered");
+      for (const width of [1440, 1024, 390]) {
+        await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+        await expectNoHorizontalOverflow(page);
+        await page.screenshot({
+          path: test.info().outputPath(`b13-guest-bill-${free ? "free" : "comped"}-${width}.png`),
+          fullPage: true,
+        });
+      }
+      await expectNoInternalText(page);
+    });
+
   // WP-2423 Q7 slice 2 (DEC-STAFF-DINE-IN-ROUND): a round staff entered for the table.
   test("WP-2423 item 8 ⑦ 4b-3: tells the table the per-head tea staff added", async ({ page }) => {
     await enterTable(page, () => ({

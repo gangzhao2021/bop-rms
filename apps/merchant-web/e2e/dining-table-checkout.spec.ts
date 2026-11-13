@@ -2183,3 +2183,201 @@ for (const width of [390, 1024, 1440])
     ).toBe(true);
     await expectNoInternalText(page);
   });
+
+// b13 (v15 b12 live, TM2 by-rounds split): after round 1 was comped, staff read "Part 1 · $14.13
+// / Part 2 · $14.12" next to "$14.13 to go". A split the bill outgrew lists no old parts.
+for (const width of [1440, 1024, 390])
+  test(`@production a split a comp made stale shows the whole bill only, never its old parts, at ${width}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await floor(page, { phase: "Closing", version: 7 });
+    await page.route("**/merchant/dining/table-close-plan", (route) =>
+      route.fulfill({
+        headers,
+        json: {
+          orderReference: id(3),
+          diningSessionReference: id(2),
+          orderVersion: 4,
+          observedAt: "2026-10-15T19:00:00.000Z",
+          rounds: [],
+          closeBlockers: ["ORDER_BALANCE_UNPAID"],
+          totals: { onlineMinor: "0", cardMachineMinor: "0" },
+        },
+      }),
+    );
+    const bill = unpaidBill("Closing", 7);
+    const part = (partNumber: number, amountMinor: string, round: number) => ({
+      partNumber,
+      amountMinor,
+      subtotalMinor: "1250",
+      taxMinor: "163",
+      roundNumbers: [round],
+      dishes: [],
+      payment: null,
+      guestPaying: false,
+    });
+    const [first, second] = bill.rounds;
+    if (first === undefined || second === undefined) throw new Error("fixture");
+    await page.route("**/merchant/dining/table-bill", (route) =>
+      route.fulfill({
+        headers,
+        json: {
+          ...bill,
+          rounds: [
+            {
+              ...first,
+              items: first.items.map((item) => ({
+                ...item,
+                reduction: {
+                  kind: "Comp",
+                  percent: null,
+                  amountMinor: item.totalMinor,
+                  netMinor: item.subtotalMinor,
+                },
+                totalMinor: "0",
+              })),
+              subtotalMinor: "0",
+              taxMinor: "0",
+              totalMinor: "0",
+              taxRoundingMinor: "0",
+            },
+            { ...second, taxRoundingMinor: "0" },
+          ],
+          taxRoundingMinor: "0",
+          owed: { subtotalMinor: "1000", taxMinor: "130", totalMinor: "1130" },
+          consistent: false,
+          matchesOrderApartFromSplit: true,
+          tips: { enabled: true, tierPercents: [10, 15, 18] },
+          split: {
+            mode: "ByRounds",
+            stale: true,
+            paidInFull: false,
+            dishChoices: [],
+            parts: [part(1, "2263", 1), part(2, "1130", 2)],
+            paidParts: 0,
+            remainingMinor: "1130",
+          },
+        },
+      }),
+    );
+    await page.goto("/operations/dining");
+    await page.getByRole("button", { name: "Select T2", exact: true }).click();
+    const checkout = page.getByRole("region", { name: "Checkout" });
+    await expect(
+      checkout.getByText(
+        "The bill changed after it was split: it is now $11.30 for the whole table. Split it again before taking payments.",
+      ),
+    ).toBeVisible();
+    await expect(checkout.getByText(/Part 1 ·|Part 2 ·/u)).toHaveCount(0);
+    await expect(checkout.getByText(/parts paid/u)).toHaveCount(0);
+    await expect(checkout.getByRole("button", { name: "Collect this part" })).toHaveCount(0);
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      ),
+    ).toBeLessThanOrEqual(0);
+    await page.screenshot({
+      path: test.info().outputPath(`b13-stale-split-${width}.png`),
+      fullPage: true,
+    });
+  });
+
+// b13 (v15 b12 live, SBC 1): a table comped to $0 with 3 dishes ready read "Nothing to pay ·
+// close when the guests leave" and offered no Serve all (dining-serving.spec covers Mark served).
+for (const width of [1440, 1024, 390])
+  test(`@production a table comped to nothing with dishes ready offers Serve all on its row at ${width}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await floor(page, { phase: "Closing", version: 7 });
+    // The table's serving progress: two dishes ready at the pass.
+    await page.route("**/merchant/dining/order-progress", (route) =>
+      route.fulfill({
+        headers,
+        json: {
+          orderReference: id(3),
+          tableLabel: "T2",
+          diningSessionReference: id(2),
+          sessionPhase: "Closing",
+          closureStatus: "Open",
+          closureVersion: 0,
+          currentOrderVersion: 4,
+          sessionVersion: 7,
+          tableAssignmentVersion: 1,
+          orderVersion: 4,
+          phase: "Accepted",
+          observedAt: "2026-10-15T19:00:00.000Z",
+          items: [21, 22].map((batch, index) => ({
+            orderItemReference: id(100 + batch),
+            orderBatchReference: id(batch),
+            displayName: index === 0 ? "Shoyu Ramen" : "Gyoza",
+            batchSequence: index + 1,
+            itemOrdinal: 1,
+            phase: "Ready",
+            orderedQuantity: 1,
+            deliveredQuantity: 0,
+            remainingQuantity: 1,
+            itemServiceVersion: 1,
+          })),
+        },
+      }),
+    );
+    await page.route("**/merchant/dining/table-close-plan", (route) =>
+      route.fulfill({
+        headers,
+        json: {
+          orderReference: id(3),
+          diningSessionReference: id(2),
+          orderVersion: 4,
+          observedAt: "2026-10-15T19:00:00.000Z",
+          rounds: [],
+          closeBlockers: ["DINING_ITEMS_UNSERVED"],
+          totals: { onlineMinor: "0", cardMachineMinor: "0" },
+        },
+      }),
+    );
+    const bill = unpaidBill("Closing", 7);
+    await page.route("**/merchant/dining/table-bill", (route) =>
+      route.fulfill({
+        headers,
+        json: {
+          ...bill,
+          rounds: bill.rounds.map((round) => ({
+            ...round,
+            items: round.items.map((item) => ({
+              ...item,
+              reduction: {
+                kind: "Comp",
+                percent: null,
+                amountMinor: item.totalMinor,
+                netMinor: item.subtotalMinor,
+              },
+              totalMinor: "0",
+            })),
+            subtotalMinor: "0",
+            taxMinor: "0",
+            totalMinor: "0",
+            taxRoundingMinor: "0",
+          })),
+          taxRoundingMinor: "0",
+          owed: { subtotalMinor: "0", taxMinor: "0", totalMinor: "0" },
+          tips: { enabled: true, tierPercents: [10, 15, 18] },
+          split: null,
+        },
+      }),
+    );
+    await page.goto("/operations/dining");
+    await expect(page.getByText("2 dishes ready to serve")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Serve all" })).toBeVisible();
+    await expect(page.getByText("Nothing to pay · close when the guests leave")).toHaveCount(0);
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      ),
+    ).toBeLessThanOrEqual(0);
+    await page.screenshot({
+      path: test.info().outputPath(`b13-serve-at-zero-${width}.png`),
+      fullPage: true,
+    });
+  });

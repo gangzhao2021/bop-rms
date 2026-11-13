@@ -58,9 +58,10 @@ const answered = (n: number, optionName: string, standIn: number) => ({
   },
 });
 
-test("@production b9: Option recipes says what a choice answered on the Menu page adds, never one unit of stock", async ({
-  page,
-}) => {
+async function optionRecipes(
+  page: import("@playwright/test").Page,
+  declaredItems: readonly Record<string, unknown>[],
+) {
   await page.route("**/merchant/session", (route) =>
     route.fulfill({
       headers,
@@ -96,15 +97,21 @@ test("@production b9: Option recipes says what a choice answered on the Menu pag
         permissions: { mayEdit: false, mayReview: false, mayPublish: false },
         soleOperator: null,
         ingredients: [],
-        declaredItems: [
-          { itemReference: id(70), declared: true, contains: [], mayContain: [] },
-          { itemReference: id(71), declared: true, contains: ["Mustard"], mayContain: [] },
-        ],
+        declaredItems,
         options: [answered(60, "Mild", 70), answered(61, "Extra hot", 71)],
       },
     }),
   );
   await page.goto("/app/commerce/option-recipes");
+}
+
+test("@production b9: Option recipes says what a choice answered on the Menu page adds, never one unit of stock", async ({
+  page,
+}) => {
+  await optionRecipes(page, [
+    { itemReference: id(70), declared: true, contains: [], mayContain: [] },
+    { itemReference: id(71), declared: true, contains: ["Mustard"], mayContain: [] },
+  ]);
   const mild = page.getByRole("row", { name: /Mild/u });
   await expect(mild).toContainText(
     "Adds no allergens (declared by staff on the Menu page; not a stock item)",
@@ -126,4 +133,40 @@ test("@production b9: Option recipes says what a choice answered on the Menu pag
     });
   }
   await expectNoInternalText(page);
+});
+
+// b13 (v15 b12 live): in Chinese the recipe change read "增加 Wheat and triticale、Crustaceans and
+// molluscs" for Har gow; allergens are safety text, named in the staff member's language.
+test("@production b13: Option recipes names a choice's allergens in Chinese while Chinese is chosen", async ({
+  page,
+}) => {
+  await page.addInitScript(() => localStorage.setItem("bop.merchant.language", "zh-Hans"));
+  await optionRecipes(page, [
+    { itemReference: id(70), declared: true, contains: [], mayContain: [] },
+    {
+      itemReference: id(71),
+      declared: true,
+      contains: ["Wheat and triticale", "Crustaceans and molluscs"],
+      mayContain: ["Sesame"],
+      containsCodes: ["WHEAT_TRITICALE", "CRUSTACEAN_MOLLUSC"],
+      mayContainCodes: ["SESAME"],
+    },
+  ]);
+  const hot = page.getByRole("row", { name: /Extra hot/u });
+  await expect(hot).toContainText("小麦和黑小麦");
+  await expect(hot).toContainText("甲壳类和软体类海鲜");
+  await expect(hot).toContainText("芝麻");
+  await expect(hot).not.toContainText("Wheat");
+  await expect(hot).not.toContainText("Crustaceans");
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await expect(hot).toBeVisible();
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.screenshot({
+      path: test.info().outputPath("b13-option-recipes-zh-" + String(width) + ".png"),
+      fullPage: true,
+    });
+  }
 });

@@ -364,7 +364,9 @@ for (const recovery of ["retry", "history"] as const)
         }),
       { times: 1 },
     );
-    await page.getByRole("button", { name: "Refresh payment amounts", exact: true }).click();
+    await page
+      .getByRole("button", { name: "Refresh the payment and its refunds", exact: true })
+      .click();
     await expect(page.getByRole("region", { name: "Payment summary" })).toHaveCount(0);
     await expect(
       page.getByText("Payment amounts could not be shown. Refresh to try again."),
@@ -372,7 +374,9 @@ for (const recovery of ["retry", "history"] as const)
     await expect(
       page.getByRole("button", { name: "Retry same refund request", exact: true }),
     ).toBeVisible();
-    await page.getByRole("button", { name: "Refresh payment amounts", exact: true }).click();
+    await page
+      .getByRole("button", { name: "Refresh the payment and its refunds", exact: true })
+      .click();
     await expect(page.getByRole("region", { name: "Payment summary" })).toBeVisible();
     await expect(
       page.getByRole("button", { name: "Retry same refund request", exact: true }),
@@ -514,12 +518,12 @@ for (const recovery of ["retry", "history"] as const)
       await page.route("**/merchant/payments/refunds/items", (route) => route.abort("failed"), {
         times: 1,
       });
-      await page.getByRole("button", { name: "Refresh refund requests and items" }).click();
+      await page.getByRole("button", { name: "Refresh the payment and its refunds" }).click();
       await expect(
         page.getByText("Unable to refresh this information.", { exact: false }),
       ).toBeVisible();
       await expect(page.getByRole("button", { name: "Review refund" })).toHaveCount(0);
-      await page.getByRole("button", { name: "Refresh refund requests and items" }).click();
+      await page.getByRole("button", { name: "Refresh the payment and its refunds" }).click();
       await expect(page.getByText("The request stays recorded.", { exact: false })).toBeVisible();
       await expect(list).toContainText("Request 1");
       // v15 2026-10-18 (dd750045): a refund recorded for this order while the list was loading
@@ -536,7 +540,7 @@ for (const recovery of ["retry", "history"] as const)
           route.fulfill({ status: 409, headers, json: { error: "changed_while_loading" } }),
         { times: 1 },
       );
-      await page.getByRole("button", { name: "Refresh refund requests and items" }).click();
+      await page.getByRole("button", { name: "Refresh the payment and its refunds" }).click();
       await expect.poll(() => itemStatuses).toEqual([409, 200]);
       await expect(page.getByText("The request stays recorded.", { exact: false })).toBeVisible();
       await expect(list).toContainText("Request 1");
