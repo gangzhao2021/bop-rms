@@ -234,3 +234,21 @@ it("WP-2423 hotfix review: a round whose cancellation keeps failing no longer st
   await expect(f.dispatcher.runOnce()).rejects.toThrow();
   expect(f.discover.mock.calls.map(([, query]) => query.after)).toEqual([null, id(40), null]);
 });
+it("WP-2423 hotfix review decision: an answer that does not match its round stops the page at once, as before", async () => {
+  const f = fixture();
+  const wrong = expiry(20),
+    next = expiry(40);
+  f.discover.mockResolvedValueOnce([wrong, next]);
+  f.cancel.mockImplementation(async ({ expiry: e }) =>
+    // The owner answered with another round's record: an integrity mismatch, not a failed round.
+    e.recordReference === wrong.recordReference ? receipt(next) : receipt(e),
+  );
+  await expect(f.dispatcher.runOnce()).rejects.toThrow(
+    "DINING_BATCH_CANCELLATION_DISPATCH_UNAVAILABLE",
+  );
+  expect(f.cancel.mock.calls.map(([input]) => input.operationReference)).toEqual([id(20)]);
+  // The page is not passed: the next cycle starts from the top again.
+  f.discover.mockResolvedValueOnce([]);
+  await f.dispatcher.runOnce();
+  expect(f.discover.mock.calls.map(([, query]) => query.after)).toEqual([null, null]);
+});

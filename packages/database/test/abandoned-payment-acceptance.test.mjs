@@ -346,6 +346,9 @@ it("lets a guest finish an abandoned payment, staff cancel an unpaid round, and 
       // WP-2423 item 8 ⑤: a guest round with no payment that waits for staff (as a pay-later
       // round held before the kitchen); its payment window ended long ago.
       let heldRound;
+      // Hotfix review (head-of-line): a second round in the same state as unknownRound, on the same
+      // sweep page, so one failing round is shown not to keep the next one from being cancelled.
+      let neighbourRound;
       try {
         resumed = await guestRound(1, time(-minutes(5)));
         staffRound = await guestRound(2, time(-minutes(6)));
@@ -357,6 +360,7 @@ it("lets a guest finish an abandoned payment, staff cancel an unpaid round, and 
         legacyRound = await guestRound(6, time(-minutes(42)));
         recentRound = await guestRound(7, time(-minutes(31)));
         heldRound = await guestRound(8, time(-minutes(45)));
+        neighbourRound = await guestRound(9, time(-minutes(43)));
         pay = {
           resumed: await payment(resumed, "Open", 1),
           staff: await payment(staffRound, "Open", 2),
@@ -370,6 +374,12 @@ it("lets a guest finish an abandoned payment, staff cancel an unpaid round, and 
           ),
           legacy: await payment(legacyRound, "CreateUnknown", 6),
           recent: await payment(recentRound, "CreateUnknown", 7),
+          neighbour: await payment(
+            neighbourRound,
+            "CreateUnknown",
+            9,
+            digest("create-intent:" + attemptOf(9)),
+          ),
         };
       } finally {
         await admin.query("SET session_replication_role = origin");
@@ -691,7 +701,7 @@ it("lets a guest finish an abandoned payment, staff cancel an unpaid round, and 
 
       // ── Test-only Provider with the simulator's semantics: an intent answers RequiresCustomerAction
       // until the guest confirms it (Captured) or Payment cancels it (Cancelled, idempotent).
-      const lostCreates = [pay.unknown, pay.legacy, pay.recent];
+      const lostCreates = [pay.unknown, pay.legacy, pay.recent, pay.neighbour];
       const intents = new Map(
         Object.values(pay)
           .filter((refs) => !lostCreates.includes(refs))
@@ -851,6 +861,7 @@ it("lets a guest finish an abandoned payment, staff cancel an unpaid round, and 
           legacyRound,
           recentRound,
           heldRound,
+          neighbourRound,
         ].map((round) => [round.refs.batch, 1, round.expiresAt]),
       );
 
@@ -1123,6 +1134,7 @@ it("lets a guest finish an abandoned payment, staff cancel an unpaid round, and 
           [6, legacyRound],
           // WP-2423 item 8 ⑤: the held round's items are untracked too.
           [8, heldRound],
+          [9, neighbourRound],
         ]) {
           const k = 0x5000 + n * 0x10;
           const v = parseSubmissionInventoryFinalValidation({
@@ -1206,7 +1218,7 @@ it("lets a guest finish an abandoned payment, staff cancel an unpaid round, and 
             }).discover(tx, { observedAt: now(), after: null, limit: 20 }),
           )
         ).find((candidate) => candidate.orderBatchReference === round.refs.batch);
-      for (const round of [unknownRound, legacyRound])
+      for (const round of [unknownRound, legacyRound, neighbourRound])
         assert.equal(
           (await recorder.record(await candidateOf(round))).record.status,
           "AwaitingPaymentResolution",
@@ -1232,14 +1244,30 @@ it("lets a guest finish an abandoned payment, staff cancel an unpaid round, and 
       assert.deepEqual(await terminal(pay.legacy), []);
       assert.deepEqual(await counts(), beforeUnknown);
       // Next sweep: PaymentFailed evidence, the round is cancelled as not completed (nobody paid).
-      assert.equal(
-        (await recorder.record(await candidateOf(unknownRound))).record.status,
-        "PaymentFailed",
+      for (const round of [unknownRound, neighbourRound])
+        assert.equal(
+          (await recorder.record(await candidateOf(round))).record.status,
+          "PaymentFailed",
+        );
+      // Both on the one sweep page, unknownRound first.
+      const sweepPage = (
+        await transactions.run((tx) =>
+          createPostgresDiningBatchCancellationCandidates({
+            ...scope,
+            authorize: async () => true,
+          }).discover(tx, { observedAt: now(), after: null, limit: 10 }),
+        )
+      ).map((entry) => entry.orderBatchReference);
+      assert.ok(sweepPage.includes(unknownRound.refs.batch));
+      assert.ok(
+        sweepPage.indexOf(unknownRound.refs.batch) < sweepPage.indexOf(neighbourRound.refs.batch),
+        "the failing round comes first on the page",
       );
       // Hotfix review (head-of-line): while another connection holds this round's row, its System
       // cancellation fails for real on the pilot runner (lock timeout) under the restricted role.
-      // The sweep reports it, records nothing, and is not wedged: the next cycle starts from the
-      // top again and cancels it once the row is free.
+      // The sweep reports it and records nothing for it, but the next round on the same page is
+      // still cancelled in this cycle (before: the page stopped at the first failure every cycle).
+      // The next cycle starts from the top again and cancels the first once its row is free.
       const holder = new Client(context.clientConfig);
       await holder.connect();
       try {
@@ -1255,6 +1283,13 @@ it("lets a guest finish an abandoned payment, staff cancel an unpaid round, and 
             [unknownRound.refs.batch],
           ),
           [{ n: 0 }],
+        );
+        assert.deepEqual(
+          await one(
+            "SELECT reason_code FROM rms_ordering.order_batch_checkout_cancellation WHERE order_batch_id=$1",
+            [neighbourRound.refs.batch],
+          ),
+          [{ reason_code: "PAYMENT_NOT_COMPLETED" }],
         );
         await holder.query("ROLLBACK");
       } finally {

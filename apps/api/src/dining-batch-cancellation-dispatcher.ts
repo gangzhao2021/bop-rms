@@ -7,6 +7,12 @@ import {
 } from "@rms/ordering";
 import type { ConsumerTransaction } from "@bop/eventing";
 type Expiry = ReturnType<typeof parseOrderBatchCheckoutExpiry>;
+/** The owner's cancellation command failed for this one round (not an integrity mismatch). */
+class RoundCommandFailure extends Error {
+  constructor(override readonly cause: unknown) {
+    super("DINING_BATCH_CANCELLATION_ROUND_FAILED");
+  }
+}
 const fail = (): never => {
   throw new Error("DINING_BATCH_CANCELLATION_DISPATCH_UNAVAILABLE");
 };
@@ -69,10 +75,14 @@ export function createDiningBatchCancellationDispatcher(options: {
       batches.add(expiry.orderBatchReference);
     }
     let processed = 0;
-    // WP-2423 (hotfix review): one round whose cancellation fails (its records unreadable, a
-    // refusal) no longer stops the rest of its page every cycle: the others are cancelled, the
-    // page is passed, and the first failure is reported once the page is done (the worker logs it
-    // and retries; the failing round comes round again with the next pass from the start).
+    // WP-2423 (hotfix review): one round whose cancellation command fails (a lock timeout, its
+    // records unreadable for now, a refusal) no longer stops the rest of its page every cycle: the
+    // others are cancelled, the page is passed, and the first failure is reported once the page is
+    // done (the worker logs it and retries; the failing round comes round again with the next pass
+    // from the start). Decision (docs/spec/design/table-round-states-batch5.md, batch-cancellation
+    // integrity): an answer that does not match the round asked about (wrong Order, round, scope,
+    // payment, evidence or time) is not a failure of that round but of the records themselves; it
+    // still stops the page at once, as before, and nothing after it is cancelled this cycle.
     let firstFailure: { readonly error: unknown } | null = null;
     for (const expiry of page) {
       if (stopping) break;
@@ -80,7 +90,8 @@ export function createDiningBatchCancellationDispatcher(options: {
       try {
         if (await cancelOne(expiry)) processed++;
       } catch (error) {
-        firstFailure ??= { error };
+        if (!(error instanceof RoundCommandFailure)) throw error;
+        firstFailure ??= { error: error.cause };
       }
     }
     if (!stopping)
@@ -91,7 +102,12 @@ export function createDiningBatchCancellationDispatcher(options: {
   /** Cancels one round past its deadline: true when it is cancelled (now or already). */
   async function cancelOne(expiry: Expiry): Promise<boolean> {
     const operationReference = expiry.recordReference;
-    const outcome = await options.cancel({ operationReference, expiry });
+    let outcome: unknown;
+    try {
+      outcome = await options.cancel({ operationReference, expiry });
+    } catch (error) {
+      throw new RoundCommandFailure(error);
+    }
     // WP-2423: a round still unresolved at its deadline whose payment was started (online or on
     // the card machine) is not cancelled here; Payment first resolves the online attempt with the
     // Provider, then the round is decided on its next (failed or paid) expiry evidence.
