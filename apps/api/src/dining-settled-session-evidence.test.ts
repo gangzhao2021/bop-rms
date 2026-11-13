@@ -190,6 +190,10 @@ it.each(["nonterminal", "finality", "closed", "pending", "kitchen", "unknown-tas
         taskType: "UNKNOWN",
         source: { sourceType: "ORDER" },
       });
-    await expect(f.run()).rejects.toThrow("DINING_SETTLED_SESSION_EVIDENCE_UNAVAILABLE");
+    // v15 b11: a dish still to be served is said (the close answers "not ready", never
+    // "couldn't confirm"); every other gap stays unavailable.
+    if (kind === "nonterminal")
+      await expect(f.run()).rejects.toMatchObject({ code: "DINING_CLOSING_BATCH_NOT_TERMINAL" });
+    else await expect(f.run()).rejects.toThrow("DINING_SETTLED_SESSION_EVIDENCE_UNAVAILABLE");
   },
 );

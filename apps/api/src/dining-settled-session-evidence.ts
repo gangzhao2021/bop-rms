@@ -4,6 +4,7 @@ import { canonicalizeRfc8785 } from "@bop/audit";
 import { createTaskRecord } from "@bop/task";
 import { summarizeOrderItemProgress } from "@rms/ordering";
 import {
+  DiningClosingError,
   createDiningExceptionResolution,
   createPostgresDiningExceptionTaskSource,
   parseDiningClosureEvidence,
@@ -56,8 +57,10 @@ function createSessionEvidence(options: Options, allowUnresolved: boolean) {
               (item) => String(item.orderBatchReference) === String(batch.orderBatchReference),
             );
             const state = summarizeOrderItemProgress(items).phase;
+            // v15 b11: a dish still to be served is a reason the table can't close yet (the close
+            // says so), never "couldn't confirm the result".
             if (state !== "Fulfilled" && state !== "Rejected" && state !== "Cancelled")
-              return fail();
+              throw new DiningClosingError("DINING_CLOSING_BATCH_NOT_TERMINAL");
             return { batchReference: batch.orderBatchReference, executionState: state };
           });
           // v15 2026-10-27 (DEMO-02): an Order already closed on a manager's unpaid-departure
@@ -196,7 +199,12 @@ function createSessionEvidence(options: Options, allowUnresolved: boolean) {
             .update(canonicalizeRfc8785({ evidence, digests }))
             .digest("hex"),
         });
-      } catch {
+      } catch (error) {
+        if (
+          error instanceof DiningClosingError &&
+          error.code === "DINING_CLOSING_BATCH_NOT_TERMINAL"
+        )
+          throw error;
         return fail();
       }
     },

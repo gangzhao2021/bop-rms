@@ -37,7 +37,9 @@ function dependencyFailure(error: unknown): never {
   if (
     error instanceof DiningClosingError &&
     (error.code === "DINING_CLOSING_VERSION_CONFLICT" ||
-      error.code === "DINING_CLOSING_IDEMPOTENCY_CONFLICT")
+      error.code === "DINING_CLOSING_IDEMPOTENCY_CONFLICT" ||
+      // v15 b11: the closure evidence says a dish is still to be served (said, not "unavailable").
+      error.code === "DINING_CLOSING_BATCH_NOT_TERMINAL")
   )
     throw new DiningClosingError(error.code);
   throw new DiningClosingError("DINING_CLOSING_DEPENDENCY_UNAVAILABLE");

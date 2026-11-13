@@ -16,6 +16,8 @@ export class DiningSessionCloseClientError extends Error {
     readonly code:
       | "PermissionDenied"
       | "Conflict"
+      /** v15 b11: a dish is still to be served (or a problem is still open), so it can't close. */
+      | "NotReady"
       | "AlreadyPaid"
       | "GuestPaying"
       | "Unavailable"
@@ -116,7 +118,9 @@ export function createDiningSessionCloseClient(
                 ? "AlreadyPaid"
                 : error === "table_guest_paying"
                   ? "GuestPaying"
-                  : "Conflict",
+                  : error === "dining_session_not_ready"
+                    ? "NotReady"
+                    : "Conflict",
             );
           }
           if (

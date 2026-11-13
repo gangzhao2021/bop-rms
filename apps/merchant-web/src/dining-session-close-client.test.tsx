@@ -111,3 +111,23 @@ it("WP-2423: a lost Finalize answer is re-checked with the same operation", asyn
   ).resolves.toMatchObject({ status: "AlreadyApplied", phase: "Closed" });
   expect(fetcher.mock.calls[1]?.[1]?.body).toBe(fetcher.mock.calls[0]?.[1]?.body);
 });
+
+it("v15 b11: a table with a dish still to serve is refused as not ready (said), not as changed", async () => {
+  const refused = (error: string) =>
+    vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ error }), {
+        status: 409,
+        headers: { "content-type": "application/json", "cache-control": "no-store" },
+      }),
+    );
+  await expect(
+    createDiningSessionCloseClient(refused("dining_session_not_ready"), once)
+      .prepare(command("Finalize"))
+      .execute("A".repeat(43)),
+  ).rejects.toMatchObject({ code: "NotReady" });
+  await expect(
+    createDiningSessionCloseClient(refused("dining_session_changed"), once)
+      .prepare(command("Finalize"))
+      .execute("A".repeat(43)),
+  ).rejects.toMatchObject({ code: "Conflict" });
+});

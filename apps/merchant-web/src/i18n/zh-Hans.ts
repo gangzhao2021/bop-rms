@@ -9696,4 +9696,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "1 项客人已付款，等你接单。请在订单页接单，或在那里拒掉这一轮并全额退款。",
   "{count} items are paid and wait for you to accept them. Accept them on the Orders page, or turn the round down there for a full refund.":
     "{count} 项客人已付款，等你接单。请在订单页接单，或在那里拒掉这一轮并全额退款。",
+  "This table can't be closed yet: a dish has not been served. Serve it, or resolve it on the Tables page, then close the table.":
+    "这桌还不能关：还有菜没上。请先上菜，或在“桌台”页处理这道菜，再关桌。",
 });

@@ -22,7 +22,7 @@ export function DiningSessionCloseAction({
   readonly onClosed: () => void;
 }) {
   const [confirmed, setConfirmed] = useState(false),
-    [state, setState] = useState<"Idle" | "Submitting" | "Unknown" | "Denied">("Idle");
+    [state, setState] = useState<"Idle" | "Submitting" | "Unknown" | "Denied" | "NotReady">("Idle");
   const operation = useRef<Operation | null>(null),
     pending = useRef<AbortController | null>(null);
   useEffect(() => () => pending.current?.abort(), []);
@@ -50,7 +50,13 @@ export function DiningSessionCloseAction({
       if (!controller.signal.aborted) {
         const unknown =
           error instanceof DiningSessionCloseClientError && error.code === "OutcomeUnknown";
-        setState(unknown ? "Unknown" : "Denied");
+        setState(
+          unknown
+            ? "Unknown"
+            : error instanceof DiningSessionCloseClientError && error.code === "NotReady"
+              ? "NotReady"
+              : "Denied",
+        );
         if (!unknown) onBusy(false);
       }
     } finally {
@@ -75,7 +81,7 @@ export function DiningSessionCloseAction({
         />
         {t("I confirm this dining session is ready for the next closing step")}
       </label>
-      {state !== "Denied" ? (
+      {state !== "Denied" && state !== "NotReady" ? (
         <button
           disabled={state === "Submitting" || (state !== "Unknown" && (!confirmed || locked))}
           onClick={() => void submit()}
@@ -91,6 +97,12 @@ export function DiningSessionCloseAction({
       ) : null}
       {state === "Unknown" ? (
         <p role="status">{notConfirmedPressAgainText}</p>
+      ) : state === "NotReady" ? (
+        <p role="status">
+          {t(
+            "This table can't be closed yet: a dish has not been served. Serve it, or resolve it on the Tables page, then close the table.",
+          )}
+        </p>
       ) : state === "Denied" ? (
         <p role="status">
           {t(
