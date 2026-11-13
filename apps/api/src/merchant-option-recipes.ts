@@ -416,6 +416,12 @@ export function createMerchantOptionRecipes(options: {
               name(entry.localizedNames, entry.code),
             ]),
           );
+          const allergenCodes = new Map(
+            (ingredients.registry?.entries ?? []).map((entry) => [
+              entry.allergenReference,
+              entry.code,
+            ]),
+          );
           // Who saved and who reviewed each change, by name ("You" for the viewer): Store members
           // first, then the Brand's member directory (a Brand Owner need not be assigned here).
           const directory = tx as unknown as MemberDirectoryTransaction;
@@ -530,15 +536,23 @@ export function createMerchantOptionRecipes(options: {
               .filter((item) => item.internalCode.startsWith("DECL-") && !item.stockTracked)
               .map((item) => {
                 const d = ingredients.declarationOf(item);
+                const of = (classification: string) =>
+                  (d?.allergens ?? []).filter((a) => a.classification === classification);
                 const named = (classification: string) =>
-                  (d?.allergens ?? [])
-                    .filter((a) => a.classification === classification)
-                    .map((a) => allergenNames.get(a.allergenReference) ?? a.allergenReference);
+                  of(classification).map(
+                    (a) => allergenNames.get(a.allergenReference) ?? a.allergenReference,
+                  );
+                // b13: each allergen's registry code beside its name (same order), so the page
+                // names it in the staff member's language (Chinese while Chinese is chosen).
+                const coded = (classification: string) =>
+                  of(classification).map((a) => allergenCodes.get(a.allergenReference) ?? "");
                 return {
                   itemReference: item.itemReference,
                   declared: d !== null,
                   contains: named("Contains"),
                   mayContain: named("CrossContactPossible"),
+                  containsCodes: coded("Contains"),
+                  mayContainCodes: coded("CrossContactPossible"),
                 };
               }),
             options: options_,

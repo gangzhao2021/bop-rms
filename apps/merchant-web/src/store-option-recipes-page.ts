@@ -110,6 +110,9 @@ export interface OptionRecipeView {
     readonly declared: boolean;
     readonly contains: readonly string[];
     readonly mayContain: readonly string[];
+    /** b13: each allergen's registry code, in the same order (absent from an older server). */
+    readonly containsCodes?: readonly string[];
+    readonly mayContainCodes?: readonly string[];
   }[];
   readonly options: readonly OptionRecipeRow[];
 }

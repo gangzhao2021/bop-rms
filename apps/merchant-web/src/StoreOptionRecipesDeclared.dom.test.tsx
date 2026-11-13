@@ -103,6 +103,19 @@ describe("WP-2423 (b9): a choice answered on the Menu page reads as a declaratio
       expect(declaredSummaryText({ declared: true, contains: ["芥末"], mayContain: [] })).toBe(
         "增加 芥末（员工在菜单页申报；不是库存品）",
       );
+      // b13: allergens the registry names in English read in Chinese by their code (v15 b12 live:
+      // "增加 Wheat and triticale、Crustaceans and molluscs" for Har gow).
+      const zh = declaredSummaryText({
+        declared: true,
+        contains: ["Wheat and triticale", "Crustaceans and molluscs"],
+        mayContain: ["Sesame"],
+        containsCodes: ["WHEAT_TRITICALE", "CRUSTACEAN_MOLLUSC"],
+        mayContainCodes: ["SESAME"],
+      });
+      expect(zh).toContain("小麦和黑小麦");
+      expect(zh).toContain("甲壳类和软体类海鲜");
+      expect(zh).toContain("芝麻");
+      expect(zh).not.toMatch(/[A-Za-z]/u);
     } finally {
       setLanguageForTest("en");
     }

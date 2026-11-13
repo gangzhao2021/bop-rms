@@ -1,4 +1,4 @@
-import { systemText, t } from "./i18n/i18n.js";
+import { allergenName, systemText, t } from "./i18n/i18n.js";
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { SoleOperatorSelfApproval } from "./SoleOperatorSelfApproval.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
@@ -91,13 +91,20 @@ export function declaredSummaryText(declared: {
   readonly declared: boolean;
   readonly contains: readonly string[];
   readonly mayContain: readonly string[];
+  readonly containsCodes?: readonly string[];
+  readonly mayContainCodes?: readonly string[];
 }): string {
   if (!declared.declared) return t("Allergens declared by staff on the Menu page: not answered");
   if (declared.contains.length === 0 && declared.mayContain.length === 0)
     return t("Adds no allergens (declared by staff on the Menu page; not a stock item)");
+  // b13: allergens are safety text: named in the staff member's language, as on the Menu page.
+  const said = (names: readonly string[], codes: readonly string[] | undefined) =>
+    names.map((name, index) => allergenName(codes?.[index] ?? "", name));
   const list = [
-    ...declared.contains,
-    ...declared.mayContain.map((allergen) => t("may contain {allergen}", { allergen })),
+    ...said(declared.contains, declared.containsCodes),
+    ...said(declared.mayContain, declared.mayContainCodes).map((allergen) =>
+      t("may contain {allergen}", { allergen }),
+    ),
   ].join(t(", "));
   return t("Adds {allergens} (declared by staff on the Menu page; not a stock item)", {
     allergens: list,
