@@ -2,7 +2,7 @@ import { t } from "./i18n/i18n.js";
 import { unitText } from "./stock-reason-text.js";
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
-import { SourceTime } from "./StoreTime.js";
+import { SourceTime, StoreDate } from "./StoreTime.js";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { newOperationReference } from "./operation-reference.js";
@@ -263,9 +263,10 @@ function Editor({
                       value={line.expiryDate}
                       onChange={(e) => update(index, { expiryDate: e.currentTarget.value })}
                     />
-                  ) : (
-                    line.expiryDate
-                  )}
+                  ) : line.expiryDate ? (
+                    // A date as staff read it ("Oct 20, 2026" / "2026年10月20日"), never 2026-10-20.
+                    <StoreDate value={line.expiryDate} />
+                  ) : null}
                 </td>
                 <td data-label={t("Quantity")}>
                   {draft ? (
