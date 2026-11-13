@@ -1689,10 +1689,11 @@ async function journey(journeyEnding) {
         assert.equal(reopened.phase, "Active");
         assert.deepEqual(
           await rows(
-            "SELECT actor_reference::text AS actor FROM platform_audit.audit_record WHERE action_code='DINING_SESSION_CLOSING_CANCEL' AND target_id=$1",
+            "SELECT actor_reference::text AS actor,reason_code FROM platform_audit.audit_record WHERE action_code='DINING_SESSION_CLOSING_CANCEL' AND target_id=$1",
             [sessionReference],
           ),
-          [{ actor: id(0x700) }],
+          // v15 b11: staff bringing the table back to ordering, never "the guests finished".
+          [{ actor: id(0x700), reason_code: "CHECKOUT_CANCELLED" }],
         );
         assert.equal(
           (

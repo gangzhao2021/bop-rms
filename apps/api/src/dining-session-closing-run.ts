@@ -201,6 +201,9 @@ export async function runDiningSessionClosing(input: {
     (closingReason ??=
       input.closingReason?.() ??
       (async () => {
+        // v15 b11: staff bringing the table back to ordering is its own reason, never "the
+        // guests finished" (the split that ends with it is recorded as CHECKOUT_CANCELLED too).
+        if (command.action === "Cancel") return "CHECKOUT_CANCELLED";
         const owner = {
           brandReference: scope.brandReference,
           storeReference: scope.storeReference,
