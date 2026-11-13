@@ -1347,14 +1347,17 @@ export function createPostgresDiningTableSettlementStore(options: {
         /**
          * v15 batch 9: why the table is paid whole again, on the audit (absent: staff chose
          * "All together"). CHECKOUT_CANCELLED: checkout was cancelled, so the split ended with it.
+         * v15 b12 BILL_CHANGED: a comp, a discount or a dish taken off changed the bill before any
+         * part was paid, and the same split was worked out again over it (never a Whole plan).
          */
-        readonly reasonCode?: "CHECKOUT_CANCELLED";
+        readonly reasonCode?: "CHECKOUT_CANCELLED" | "BILL_CHANGED";
       },
     ) {
       const order = ref(input.orderReference);
       await allowed(tx, order);
       if (!/^sha256:[0-9a-f]{64}$/u.test(input.intentDigest)) return fail();
-      if (input.reasonCode !== undefined && input.split.mode !== "Whole") return fail();
+      if (input.reasonCode === "CHECKOUT_CANCELLED" && input.split.mode !== "Whole") return fail();
+      if (input.reasonCode === "BILL_CHANGED" && input.split.mode === "Whole") return fail();
       const bill = minor(String(input.split.billMinor), 1n);
       const parts = input.split.mode === "Whole" ? [] : input.split.parts;
       if (input.split.mode !== "Whole" && (parts.length < 2 || parts.length > 20)) return fail();

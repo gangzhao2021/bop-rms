@@ -812,28 +812,7 @@ export async function readDiningTableBill(
           subtotalMinor: BigInt(round.subtotalMinor),
           taxMinor: BigInt(round.taxMinor),
         }));
-        const again =
-          plan.mode === "Even"
-            ? splitDiningTableBill({ mode: "Even", rounds: splitRounds, people: plan.parts.length })
-            : plan.mode === "ByItems"
-              ? splitDiningTableBill({
-                  mode: "ByItems",
-                  rounds: splitRounds,
-                  people: plan.parts.length,
-                  dishes: splitDishes,
-                  choices: plan.dishChoices,
-                })
-              : splitDiningTableBill({
-                  mode: "ByRounds",
-                  rounds: splitRounds,
-                  partOf: new Map(
-                    plan.parts.flatMap((part) =>
-                      part.slices.map(
-                        (slice) => [slice.orderBatchReference, part.partNumber] as const,
-                      ),
-                    ),
-                  ),
-                });
+        const again = splitAgain(plan, splitRounds, splitDishes);
         const shape = (
           parts: readonly {
             amountMinor: bigint;
@@ -928,7 +907,10 @@ export async function readDiningTableBill(
       });
     });
     // Guests paying by dish owe what the rounds' paid parts did not pay (computed per round above).
-    if (plan.mode !== "ByGuests") {
+    // v15 b12: a stale split (the bill changed before any part was paid) no longer says what is
+    // owed: the bill as it now stands does (nothing at all after every dish was comped), never the
+    // old parts' amounts on the guest's phone or the Tables list.
+    if (plan.mode !== "ByGuests" && !stale) {
       const unpaid = plan.parts.filter((part) => !partPayments.has(part.partNumber));
       paidAllocation = plan.parts
         .filter((part) => partPayments.has(part.partNumber))
@@ -1360,6 +1342,121 @@ export async function refreshBillTaxRounding(
     authorize: input.authorize,
     recordTaxRounding: { nextReference: input.nextReference },
   });
+}
+
+/**
+ * v15 b12 (DEC-DINE-IN-SPLIT-BILL rule 7): a comp, a discount or a dish taken off before any part
+ * was paid changes a split bill, so in the same transaction the split is worked out again the same
+ * way over the bill as it now stands and recorded as the Order's next plan version (attributed to
+ * the staff member who changed the bill, audit reason BILL_CHANGED; the old plan stays on record).
+ * Guests and the Tables list then never see an outdated share. Nothing is recorded when nothing is
+ * owed any more (there is nothing to split: the bill reads "nothing to pay"), when that split no
+ * longer exists (a part would be left with nothing: staff split it again, and until then the bill
+ * owes its whole amount and no part can be paid), when rounds wait for staff OK, or once anything
+ * was paid, is being paid on a phone or was written off. Call after refreshBillTaxRounding.
+ */
+export async function splitAgainAfterBillChange(
+  tx: ConsumerTransaction,
+  scope: Scope,
+  input: {
+    readonly orderReference: string;
+    readonly observedAt: string;
+    authorize(): Promise<boolean>;
+    nextReference(): string;
+    readonly actorReference: string;
+    readonly correlationReference: string;
+  },
+): Promise<"SplitAgain" | "Unchanged"> {
+  const owner = { brandReference: scope.brandReference, storeReference: scope.storeReference };
+  const order = String(parseOrderingReference(input.orderReference));
+  const holder = (await listOrderMergedInto(tx, owner, [order])).get(order) ?? order;
+  const payments = createPostgresDiningTableSettlementStore({
+    scope,
+    authorize: async (_tx, value) =>
+      value.orderReference === holder && (await input.authorize()) === true,
+  });
+  const [plan] = await payments.listSplitPlans(tx, [holder]);
+  if (plan === undefined || plan.mode === "Whole" || plan.mode === "ByGuests") return "Unchanged";
+  if (
+    (await payments.listByOrders(tx, [holder])).length > 0 ||
+    (await payments.listOnlinePaymentsByOrders(tx, [holder])).some(onlinePaymentHoldsBill) ||
+    (await payments.listWriteOffsByOrders(tx, [holder])).length > 0
+  )
+    return "Unchanged";
+  const session = (await listOrderDiningSessions(tx, owner, [holder])).get(holder);
+  if (session === undefined) return "Unchanged";
+  const bill = await readDiningTableBill(tx, scope, {
+    diningSessionReference: session,
+    observedAt: input.observedAt,
+    authorize: input.authorize,
+  });
+  if (
+    bill.split?.stale !== true ||
+    bill.orderReference === null ||
+    bill.waitingRounds.length > 0 ||
+    bill.splitRounds.length === 0
+  )
+    return "Unchanged";
+  let split: ReturnType<typeof splitAgain>;
+  try {
+    split = splitAgain(plan, bill.splitRounds, bill.splitDishes);
+  } catch (error) {
+    if (error instanceof DiningTableSettlementError) return "Unchanged";
+    throw error;
+  }
+  await payments.recordSplitPlan(tx, {
+    splitPlanReference: input.nextReference(),
+    operationReference: input.nextReference(),
+    intentDigest:
+      "sha256:" +
+      createHash("sha256")
+        .update(
+          JSON.stringify(["BILL_CHANGED", input.correlationReference, plan.splitPlanReference]),
+        )
+        .digest("hex"),
+    diningSessionReference: session,
+    orderReference: bill.orderReference,
+    split,
+    roundOrders: roundOrdersOf(bill.rounds),
+    recordedAt: input.observedAt,
+    actorReference: input.actorReference,
+    auditReference: input.nextReference(),
+    correlationReference: input.correlationReference,
+    reasonCode: "BILL_CHANGED",
+  });
+  return "SplitAgain";
+}
+
+/**
+ * v15 b12 (DEC-DINE-IN-SPLIT-BILL rule 7): the table's split worked out again, the same way, over
+ * the bill as it now stands — the same number of parts for "split evenly", the same rounds for
+ * "each pays own rounds", the same dish choices for "by dish". Throws when that split no longer
+ * exists (a part left with nothing to pay).
+ */
+function splitAgain(
+  plan: DiningTableSplitPlanRecord,
+  rounds: Parameters<typeof splitDiningTableBill>[0]["rounds"],
+  dishes: readonly DiningTableSplitDish[],
+) {
+  return plan.mode === "Even"
+    ? splitDiningTableBill({ mode: "Even", rounds, people: plan.parts.length })
+    : plan.mode === "ByItems"
+      ? splitDiningTableBill({
+          mode: "ByItems",
+          rounds,
+          people: plan.parts.length,
+          dishes,
+          choices: plan.dishChoices,
+        })
+      : splitDiningTableBill({
+          mode: "ByRounds",
+          rounds,
+          partOf: new Map(
+            plan.parts.flatMap((part) =>
+              part.slices.map((slice) => [slice.orderBatchReference, part.partNumber] as const),
+            ),
+          ),
+        });
 }
 
 export const publicBill = (

@@ -21,7 +21,10 @@ import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { keepingCause, onlyRefusal } from "./merchant-failure.js";
 import { fenceTableBill } from "./dining-waiting-rounds.js";
-import { refreshBillTaxRounding } from "./merchant-dining-table-checkout.js";
+import {
+  refreshBillTaxRounding,
+  splitAgainAfterBillChange,
+} from "./merchant-dining-table-checkout.js";
 
 /**
  * WP-2423 item 8 ① segment 2 (Owner decision 2, DEC-TABLES-SERVER-MAIN): a manager comps or
@@ -268,6 +271,16 @@ export function createMerchantDiningItemComp(options: {
               observedAt: decidedAt,
               authorize: async () => (await guard()) === true,
               nextReference: options.nextReference,
+            });
+            // v15 b12 (DEC-DINE-IN-SPLIT-BILL rule 7): a split bill is split again the same way, so
+            // no guest is asked to pay a share of the bill as it was before.
+            await splitAgainAfterBillChange(tx, selected, {
+              orderReference: intent.orderReference,
+              observedAt: decidedAt,
+              authorize: async () => (await guard()) === true,
+              nextReference: options.nextReference,
+              actorReference,
+              correlationReference: intent.operationReference,
             });
             return Object.freeze({ status: "Recorded", reductions: publicRecords(records) });
           },

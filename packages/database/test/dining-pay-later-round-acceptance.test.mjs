@@ -229,6 +229,11 @@ it("a table's bill is charged its whole-bill tax; the rounding is recorded and p
 it("a cancelled phone payment never fixes the bill's tax rounding; a later comp still rounds", () =>
   journey("TaxRoundingCancelled"));
 
+// v15 b12 (DEC-DINE-IN-SPLIT-BILL rule 7): a comp under a split before any part is paid splits
+// the bill again the same way, so no guest is asked for an outdated share; when that split no
+// longer exists, the bill owes its whole amount and no old part can be paid until staff split it.
+it("a comp under a split bill splits it again, or owes the whole bill until staff split it again", () =>
+  journey("TaxRoundingSplitComped"));
 // WP-2423 item 8 ④ DEC-DINE-IN-SPLIT-BILL: the table splits the bill evenly in three; each part is
 // paid once, by its own method, with its own tip and cash rounding; a whole-table payment, a
 // second payment of a part and a new split once paying started are all refused.
@@ -1091,41 +1096,43 @@ async function journey(journeyEnding) {
               ? "wp2423_pltaxr"
               : ending === "TaxRoundingCancelled"
                 ? "wp2423_pltaxrc"
-                : ending === "Comped"
-                  ? "wp2423_plcomp"
-                  : ending === "CompedWhole"
-                    ? "wp2423_plcwhole"
-                    : ending === "MemberPointsOnline"
-                      ? "wp2423_plmembon"
-                      : ending === "MemberPointsOtherPhone"
-                        ? "wp2423_plmembop"
-                        : ending === "MemberPointsStoreAccount"
-                          ? "wp2423_plmembac"
-                          : ending === "MemberPointsRefunded"
-                            ? "wp2423_plmembrf"
-                            : ending === "MemberPointsPickup"
-                              ? "wp2423_plmembpk"
-                              : ending === "MemberPoints"
-                                ? "wp2423_plmember"
-                                : ending === "MemberPointsSplit"
-                                  ? "wp2423_plmembsp"
-                                  : ending === "MemberPointsWrittenOff"
-                                    ? "wp2423_plmembwo"
-                                    : ending === "PaidSplit"
-                                      ? "wp2423_plsplit"
-                                      : ending === "SplitWrittenOff"
-                                        ? "wp2423_plsplwo"
-                                        : ending === "Held"
-                                          ? "wp2423_plheld"
-                                          : ending === "HeldAtCheckout"
-                                            ? "wp2423_plheldco"
-                                            : ending === "TipsOff"
-                                              ? "wp2423_pltips"
-                                              : ending === "Moved"
-                                                ? "wp2423_plmove"
-                                                : ending === "Merged"
-                                                  ? "wp2423_plmerge"
-                                                  : "wp2423_plon",
+                : ending === "TaxRoundingSplitComped"
+                  ? "wp2423_pltaxsc"
+                  : ending === "Comped"
+                    ? "wp2423_plcomp"
+                    : ending === "CompedWhole"
+                      ? "wp2423_plcwhole"
+                      : ending === "MemberPointsOnline"
+                        ? "wp2423_plmembon"
+                        : ending === "MemberPointsOtherPhone"
+                          ? "wp2423_plmembop"
+                          : ending === "MemberPointsStoreAccount"
+                            ? "wp2423_plmembac"
+                            : ending === "MemberPointsRefunded"
+                              ? "wp2423_plmembrf"
+                              : ending === "MemberPointsPickup"
+                                ? "wp2423_plmembpk"
+                                : ending === "MemberPoints"
+                                  ? "wp2423_plmember"
+                                  : ending === "MemberPointsSplit"
+                                    ? "wp2423_plmembsp"
+                                    : ending === "MemberPointsWrittenOff"
+                                      ? "wp2423_plmembwo"
+                                      : ending === "PaidSplit"
+                                        ? "wp2423_plsplit"
+                                        : ending === "SplitWrittenOff"
+                                          ? "wp2423_plsplwo"
+                                          : ending === "Held"
+                                            ? "wp2423_plheld"
+                                            : ending === "HeldAtCheckout"
+                                              ? "wp2423_plheldco"
+                                              : ending === "TipsOff"
+                                                ? "wp2423_pltips"
+                                                : ending === "Moved"
+                                                  ? "wp2423_plmove"
+                                                  : ending === "Merged"
+                                                    ? "wp2423_plmerge"
+                                                    : "wp2423_plon",
     },
     async (context) => {
       const admin = new Client(context.clientConfig);
@@ -4639,14 +4646,21 @@ async function journey(journeyEnding) {
             afterOne.tax === afterOne.charged ? [] : [[1, one.taxRoundingMinor]],
           );
 
-          // $0.50 off round 2's dish: the bill changed before anything was paid, so the split is
-          // stale and planning it again records a new version superseding the last.
+          // $0.50 off round 2's dish: the bill changed before anything was paid. The discount
+          // records a new rounding version superseding the last and (v15 b12) splits the bill
+          // again the same way in its transaction, so the split is never stale. Staff may still
+          // plan it again.
           await discount(dish2);
           const two = await bill();
           const afterTwo = wholeBill(two);
           assert.equal(afterTwo.tax - afterTwo.charged, 1n);
           assert.equal(two.taxRoundingMinor, "1");
-          assert.equal(two.split.stale, true);
+          assert.equal(two.split.stale, false);
+          assert.equal(two.consistent, true);
+          assert.equal(
+            two.split.parts.reduce((sum, part) => sum + BigInt(part.amountMinor), 0n),
+            BigInt(two.owed.totalMinor),
+          );
           const resplit = await splitInTwo();
           assert.equal(resplit.status, "Recorded");
           // The Order's detail (the table panel and Orders) reads its share of the bill's tax
@@ -4903,6 +4917,125 @@ async function journey(journeyEnding) {
          * comps", the Order's detail and the guest's bill all read the same figure, the card
          * machine payment records it as a new rounding version, and the reports agree.
          */
+        async function splitThenCompedEnding() {
+          await cookAndServeRound1([round1, round2]);
+          const dish1 = String(items1[0].orderItemReference),
+            dish2 = String(items2[0].orderItemReference);
+          const splitWith = (command) =>
+            createMerchantDiningTableSplit({
+              persistence: persistenceOf(server),
+              authentication: server.authentication,
+              nextReference: fresh,
+            })({
+              ...as(server),
+              command: {
+                operationReference: fresh(),
+                diningSessionReference: sessionReference,
+                mode: "Even",
+                people: 2,
+                rounds: null,
+                ...command,
+              },
+            });
+          const plans = () =>
+            rows(
+              "SELECT plan_version AS version,mode,part_count AS parts,bill_minor::text AS bill,actor_id::text AS actor,audit_id::text AS audit FROM rms_payment.dining_table_split_plan WHERE order_id=$1 ORDER BY plan_version",
+              [orderReference],
+            );
+          const evenly = (total, count) =>
+            Array.from({ length: count }, (_, index) =>
+              (
+                total / BigInt(count) +
+                (BigInt(index) < total % BigInt(count) ? 1n : 0n)
+              ).toString(),
+            );
+          assert.equal((await splitWith({})).status, "Recorded");
+          const [first] = await plans();
+          // $0.50 off round 2's dish before anything was paid: the bill changed under the split.
+          await comp(manager, {
+            orderItemReferences: [dish2],
+            kind: "Amount",
+            amountOffMinor: "50",
+            reasonCode: "GOODWILL",
+          });
+          const after = await bill();
+          const total = after.rounds.reduce((sum, round) => sum + BigInt(round.totalMinor), 0n);
+          // Split again the same way (two even parts of the bill as it now stands), in the comp's
+          // transaction: the guest's phone and the Tables list never read the old shares.
+          assert.equal(after.split.stale, false);
+          assert.equal(after.consistent, true);
+          assert.equal(after.owed.totalMinor, total.toString());
+          assert.equal(after.split.remainingMinor, total.toString());
+          assert.deepEqual(
+            after.split.parts.map((part) => part.amountMinor),
+            evenly(total, 2),
+          );
+          assert.equal((await pageFacts()).owedMinor, total);
+          const resplit = await plans();
+          assert.equal(resplit.length, 2);
+          assert.deepEqual(
+            [resplit[1].mode, resplit[1].parts, resplit[1].bill],
+            ["Even", 2, total.toString()],
+          );
+          // Attributed to the manager who changed the bill (not the server who split it), and
+          // audited as the bill changing; the first plan stays on record unchanged.
+          assert.notEqual(resplit[1].actor, first.actor);
+          assert.deepEqual(resplit[0], first);
+          assert.deepEqual(
+            await rows(
+              "SELECT reason_code AS reason,actor_reference::text AS actor FROM platform_audit.audit_record WHERE audit_id=$1",
+              [resplit[1].audit],
+            ),
+            [{ reason: "BILL_CHANGED", actor: resplit[1].actor }],
+          );
+          // A part of the bill as it stands is paid as usual (the guests may pay now).
+          // Staff split by rounds instead; then round 1's dish is comped in full: part 1 would be
+          // left with nothing, so that split no longer exists and nothing is recorded for it.
+          assert.equal(
+            (
+              await splitWith({
+                mode: "ByRounds",
+                people: null,
+                rounds: [
+                  { roundNumber: 1, partNumber: 1 },
+                  { roundNumber: 2, partNumber: 2 },
+                ],
+              })
+            ).status,
+            "Recorded",
+          );
+          await comp(manager, { orderItemReferences: [dish1] });
+          assert.equal((await plans()).length, 3);
+          const stale = await bill();
+          const left = stale.rounds.reduce((sum, round) => sum + BigInt(round.totalMinor), 0n);
+          assert.equal(stale.split.stale, true);
+          assert.equal(stale.consistent, false);
+          // What is owed is the bill as it stands (round 2), never the old parts' amounts.
+          assert.equal(stale.owed.totalMinor, left.toString());
+          assert.equal(stale.split.remainingMinor, left.toString());
+          assert.equal((await pageFacts()).owedMinor, left);
+          // No old part can be paid; staff split it again and the parts are the bill again.
+          await assert.rejects(
+            settleWith(server, { partNumber: 2, tip: { kind: "None" }, tenderedMinor: "100000" }),
+            { code: "TABLE_CHECKOUT_BILL_CHANGED" },
+          );
+          assert.equal((await splitWith({})).status, "Recorded");
+          const again = await bill();
+          assert.equal(again.split.stale, false);
+          assert.equal(again.consistent, true);
+          assert.deepEqual(
+            again.split.parts.map((part) => part.amountMinor),
+            evenly(left, 2),
+          );
+          const paid = await settleWith(server, {
+            partNumber: 1,
+            tip: { kind: "None" },
+            tenderedMinor: "100000",
+          });
+          assert.equal(paid.bill.split.parts[0].payment.method, "Cash");
+          assert.equal(paid.bill.owed.totalMinor, evenly(left, 2)[1]);
+        }
+
         async function taxRoundingCancelledEnding() {
           await cookAndServeRound1([round1, round2]);
           const dish1 = String(items1[0].orderItemReference),
@@ -5355,6 +5488,27 @@ async function journey(journeyEnding) {
           );
           assert.equal(stuck.taxRoundingMinor, "0");
           assert.equal(stuck.split.stale, true);
+          // v15 b12: nothing is owed, and the old parts' amounts are never what the guest's phone
+          // or the Tables list say is to pay ($28.25 on a $0.00 bill on v15); no new plan either.
+          assert.equal(stuck.owed.totalMinor, "0");
+          assert.equal(stuck.split.remainingMinor, "0");
+          assert.equal((await pageFacts()).owedMinor, 0n);
+          // v15 b12 (BR C): the close check reads the bill as Close does (its rounding recorded
+          // again first), not "couldn't check" while Close itself works; it records nothing.
+          const versionsBeforePlan = await roundingVersions();
+          const stuckPlan = await createMerchantDiningTableClosePlan({
+            persistence: persistenceOf(server),
+            authentication: server.authentication,
+            resolveRefundConfiguration: async () => ({
+              providerAccountReference: provider,
+              environment: "Test",
+            }),
+          })({
+            ...as(server),
+            query: { orderReference, diningSessionReference: sessionReference },
+          });
+          assert.deepEqual(stuckPlan.closeBlockers, []);
+          assert.deepEqual(await roundingVersions(), versionsBeforePlan);
           assert.equal((await closing(server, "Cancel")).phase, "Active");
           // Cancelling recorded the bill's rounding as it stands, so Ordering prices it at $0.00.
           assert.deepEqual((await roundingVersions()).at(-1)?.total, "0");
@@ -7144,6 +7298,10 @@ async function journey(journeyEnding) {
         if (ending === "TaxRoundingCancelled") {
           await taxRoundingCancelledEnding();
           await assertSalesCountEveryRoundOnce();
+          return;
+        }
+        if (ending === "TaxRoundingSplitComped") {
+          await splitThenCompedEnding();
           return;
         }
         if (ending === "CompedWhole") {

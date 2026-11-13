@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import type { ConsumerTransaction } from "@bop/eventing";
 import { readClosedRecord } from "@bop/identity";
 import { listStoreKitchenBatchReceivedAt } from "@rms/kitchen";
@@ -26,6 +26,7 @@ import {
 } from "./dining-order-delivery-progress.js";
 import { createDiningSettledCloseEvidence } from "./dining-settled-close-evidence.js";
 import { listRoundsWaitingForStaff } from "./dining-waiting-rounds.js";
+import { refreshBillTaxRounding } from "./merchant-dining-table-checkout.js";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import {
@@ -478,6 +479,16 @@ async function readCloseBlockers(
   const { scope, configuration, authorize } = input;
   await tx.query("SAVEPOINT table_close_readiness", []);
   try {
+    // v15 b12: the close command first records the bill's tax rounding again for a bill nothing
+    // was paid on (b11), so its readiness is read the same way here — inside this savepoint, rolled
+    // back below, so the preview records nothing. A rounding recorded before a comp (BR C: −$0.01
+    // on a $0.00 bill) no longer reads as "couldn't check" while Close itself would work.
+    await refreshBillTaxRounding(tx, scope, {
+      orderReference: input.input.orderReference,
+      observedAt: input.input.observedAt,
+      authorize: async () => (await authorize()) === true,
+      nextReference: previewReference,
+    });
     const readiness = await createDiningSettledCloseEvidence({
       ...scope,
       diningScope: scope,
@@ -487,6 +498,7 @@ async function readCloseBlockers(
       authorizeDining: authorize,
       includeCancelled: true,
     }).readiness({ ...input.input, ...scope });
+    await tx.query("ROLLBACK TO SAVEPOINT table_close_readiness", []);
     await tx.query("RELEASE SAVEPOINT table_close_readiness", []);
     // DEC-DINE-IN-PAY-LATER (rule 14): a manager wrote the bill off when the guests left — it
     // is not "unpaid" any more; the table closes as usual.
@@ -508,4 +520,16 @@ async function readCloseBlockers(
     await tx.query("RELEASE SAVEPOINT table_close_readiness", []);
     return Object.freeze(["CLOSE_CHECK_UNAVAILABLE"]);
   }
+}
+
+/** A UUIDv7 for a record the close preview writes inside its savepoint and always rolls back. */
+function previewReference(): string {
+  const bytes = randomBytes(16);
+  const now = BigInt(Date.now());
+  for (let index = 0; index < 6; index += 1)
+    bytes[index] = Number((now >> BigInt(8 * (5 - index))) & 0xffn);
+  bytes[6] = 0x70 | ((bytes[6] as number) & 0x0f);
+  bytes[8] = 0x80 | ((bytes[8] as number) & 0x3f);
+  const hex = bytes.toString("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }

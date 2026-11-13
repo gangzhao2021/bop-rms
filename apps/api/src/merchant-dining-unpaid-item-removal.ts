@@ -25,7 +25,10 @@ import { createSubmissionInventoryRelease } from "./submission-inventory-release
 import { staffOrderCancellationPermission } from "./merchant-order-staff-cancellation.js";
 import { keepingCause, onlyRefusal } from "./merchant-failure.js";
 import { fenceTableBill } from "./dining-waiting-rounds.js";
-import { refreshBillTaxRounding } from "./merchant-dining-table-checkout.js";
+import {
+  refreshBillTaxRounding,
+  splitAgainAfterBillChange,
+} from "./merchant-dining-table-checkout.js";
 
 /**
  * WP-2423 DEC-DINE-IN-PAY-LATER (rule 2): staff take dishes — or a whole round — off the bill of a
@@ -304,6 +307,16 @@ export function createMerchantDiningUnpaidItemRemoval(options: {
               observedAt: cancelledAt,
               authorize: async () => (await guard()) === true,
               nextReference: options.nextReference,
+            });
+            // v15 b12 (DEC-DINE-IN-SPLIT-BILL rule 7): a split bill is split again the same way, so
+            // no guest is asked to pay a share of the bill as it was before.
+            await splitAgainAfterBillChange(tx, selected, {
+              orderReference: intent.orderReference,
+              observedAt: cancelledAt,
+              authorize: async () => (await guard()) === true,
+              nextReference: options.nextReference,
+              actorReference,
+              correlationReference: intent.operationReference,
             });
             return result(record, "Removed");
           },
