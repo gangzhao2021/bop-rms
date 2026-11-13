@@ -202,36 +202,26 @@ it("uses current selected scope and projects only safe fields", async () => {
     expect.objectContaining({ afterTableReference: null, limit: 10 }),
   );
 });
-it("WP-2423: leaves a retired table out, keeping the page's place in the list", async () => {
+it("v15 b12: asks the store for the tables in use, so a page with a next reference is full", async () => {
   const f = setup();
-  mock.list.mockResolvedValue({
-    items: [
-      {
-        tableReference: id(4),
-        stableLabel: "T1",
-        areaCode: "MAIN",
-        capacity: 4,
-        lifecycle: "Retired",
-        operationalState: "Available",
-        aggregateVersion: 3,
-        activeDiningSessionReference: null,
-      },
-      {
-        tableReference: id(5),
-        stableLabel: "T2",
-        areaCode: "MAIN",
-        capacity: 4,
-        lifecycle: "Published",
-        operationalState: "Available",
-        aggregateVersion: 2,
-        activeDiningSessionReference: null,
-      },
-    ],
-    nextAfterTableReference: id(5),
-  });
+  const page = Array.from({ length: 10 }, (_, n) => ({
+    tableReference: id(10 + n),
+    stableLabel: "T" + (n + 1),
+    areaCode: "MAIN",
+    capacity: 4,
+    lifecycle: "Published",
+    operationalState: "Available",
+    aggregateVersion: 2,
+    activeDiningSessionReference: null,
+  }));
+  mock.list.mockResolvedValue({ items: page, nextAfterTableReference: id(19) });
   const view = await f.read(f.input);
-  expect(view.items.map((table) => table.stableLabel)).toEqual(["T2"]);
-  expect(view.nextAfterTableReference).toBe(id(5));
+  // Retired tables are left out by the store's query, never after the page was cut.
+  expect(mock.list).toHaveBeenCalledWith(
+    expect.objectContaining({ afterTableReference: null, limit: 10, lifecycle: "InUse" }),
+  );
+  expect(view.items.map((table) => table.stableLabel)).toEqual(page.map((t) => t.stableLabel));
+  expect(view.nextAfterTableReference).toBe(id(19));
 });
 it("refuses the page before any table read without the dining.operate grant", async () => {
   const f = setup();

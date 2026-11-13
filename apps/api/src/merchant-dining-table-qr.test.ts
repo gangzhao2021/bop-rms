@@ -110,6 +110,8 @@ it("WP-2423: the table list resolves the caller in full twice; table pages take 
   expect(result.items).toMatchObject([{ tableReference: id(4), codeState: "NotPrintable" }]);
   expect(m.resolve).toHaveBeenCalledWith(f.tx, "synthetic", "dining.table.qr.manage", id(9));
   expect(during).toEqual([true]);
+  // v15 b12: retired tables are left out in the query, so they never use up the 500-table limit.
+  expect(m.listTables).toHaveBeenCalledWith(expect.objectContaining({ lifecycle: "InUse" }));
   expect(f.allowed).toHaveBeenCalledTimes(2);
   // The guard ends with the run.
   expect(await m.listTables.mock.calls[0]?.[0].authorize()).toBe(false);

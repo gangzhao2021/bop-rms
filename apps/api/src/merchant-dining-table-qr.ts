@@ -176,6 +176,10 @@ export function createMerchantDiningTableQr(options: Options) {
     );
   }
 
+  /**
+   * Every table of the Store in use (at most 500). v15 b12 (tables-list-paging): retired tables
+   * are left out in the query, so tables retired over the years never count toward the limit.
+   */
   async function listAll(
     tables: ReturnType<typeof createPostgresDiningTableStore>,
     guard: () => Promise<boolean>,
@@ -186,6 +190,7 @@ export function createMerchantDiningTableQr(options: Options) {
       const result = await tables.listTables({
         afterTableReference: after,
         limit: 100,
+        lifecycle: "InUse",
         authorize: () => guard(),
       });
       all.push(...result.items);
@@ -220,11 +225,7 @@ export function createMerchantDiningTableQr(options: Options) {
           // A retired table is kept (its history stays) but is no longer one of the Store's tables.
           return Object.freeze({
             pickupLink: store === null ? null : pickupLink(store.publicStoreReference),
-            items: Object.freeze(
-              all
-                .filter((table) => table.lifecycle !== "Retired")
-                .map((table) => item(table, latest.get(table.tableReference))),
-            ),
+            items: Object.freeze(all.map((table) => item(table, latest.get(table.tableReference)))),
           });
         },
       );
@@ -481,7 +482,7 @@ export function createMerchantDiningTableQr(options: Options) {
         input.sessionCookie,
         authenticated.sessionReference,
         async (_tx, { current, guard, scope, tables, codes }) => {
-          const all = await listAll(tables, guard);
+          const inUse = await listAll(tables, guard);
           const run = async (
             step: "CreateDraft" | "Publish" | "Rename" | "Retire",
             operation: string,
@@ -578,7 +579,6 @@ export function createMerchantDiningTableQr(options: Options) {
             });
           }
           const at = parseDiningInstant(current.context.resolvedAt);
-          const inUse = all.filter((table) => table.lifecycle !== "Retired");
           const taken = (name: string, except: string | null) =>
             inUse.some(
               (table) =>
@@ -588,8 +588,17 @@ export function createMerchantDiningTableQr(options: Options) {
           if (action === "Add") {
             if (label === null || capacity === null) return fail("TABLE_QR_INVALID");
             if (taken(label, null)) return fail("TABLE_NAME_TAKEN");
-            // The Store's dining area: the one its tables are in, else the Store's main area.
-            const area = inUse[0] ?? all[0];
+            // The Store's dining area: the one its tables are in (else the one its retired tables
+            // were in), else the Store's main area.
+            const area =
+              inUse[0] ??
+              (
+                await tables.listTables({
+                  afterTableReference: null,
+                  limit: 1,
+                  authorize: () => guard(),
+                })
+              ).items[0];
             const tableReference = derivedReference(operationReference, "table");
             const draft = createDiningTable({
               tableReference,

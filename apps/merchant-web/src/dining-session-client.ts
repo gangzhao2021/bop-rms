@@ -53,6 +53,13 @@ const kind = (v: unknown): "HumanCode" | "Invitation" => {
 };
 /** A session open longer than this is most likely a table nobody closed. */
 export const longOpenSessionMinutes = 12 * 60;
+/**
+ * v15 b12 (tables-list-paging): the Tables list is read 100 tables a page (the server's most), and
+ * every page is read: the floor, Home and a table's round all see the whole Store.
+ */
+export const tablePageSize = 100;
+/** The most pages read (10,000 tables in use); a Store never has that many. */
+export const tablePagesAtMost = 100;
 export interface StaffDiningTable {
   tableReference: string;
   stableLabel: string;
@@ -177,6 +184,31 @@ export interface StaffDiningJoinState {
   generation: number;
   joinKind: "HumanCode" | "Invitation";
 }
+export type StaffDiningTablePage = Awaited<
+  ReturnType<ReturnType<typeof createDiningSessionClient>["tables"]>
+>;
+/**
+ * v15 b12 (tables-list-paging): every table of the Store, page after page, as one list. What the
+ * staff member may do comes from the last page read. Any page that fails fails the whole read (the
+ * screen keeps what it showed and says so), so a list is never shown with tables silently missing.
+ */
+export async function readAllTables(
+  client: {
+    tables(csrf: string, after: string | null, signal?: AbortSignal): Promise<StaffDiningTablePage>;
+  },
+  csrf: string,
+  signal?: AbortSignal,
+): Promise<StaffDiningTablePage> {
+  let page = await client.tables(csrf, null, signal);
+  const items = [...page.items];
+  for (let read = 1; page.next !== null; read += 1) {
+    if (read >= tablePagesAtMost) return fail();
+    page = await client.tables(csrf, page.next, signal);
+    items.push(...page.items);
+  }
+  return { ...page, items, next: null };
+}
+
 export function createDiningSessionClient(fetcher: typeof fetch = fetch) {
   const send = async (
     path: string,
@@ -259,13 +291,16 @@ export function createDiningSessionClient(fetcher: typeof fetch = fetch) {
     async tables(csrf: string, after: string | null = null, signal?: AbortSignal) {
       const data = await send(
         "/merchant/dining/tables",
-        JSON.stringify({ afterTableReference: after === null ? null : ref(after), limit: 50 }),
+        JSON.stringify({
+          afterTableReference: after === null ? null : ref(after),
+          limit: tablePageSize,
+        }),
         csrf,
         signal,
       );
       if (
         !Array.isArray(data.items) ||
-        data.items.length > 50 ||
+        data.items.length > tablePageSize ||
         typeof data.canOperateTables !== "boolean"
       )
         return fail();
@@ -529,7 +564,9 @@ export function createDiningSessionClient(fetcher: typeof fetch = fetch) {
         } as StaffDiningTable;
       });
       const next = data.nextAfterTableReference === null ? null : ref(data.nextAfterTableReference);
-      if (next !== null && (items.length !== 50 || next !== previous)) return fail();
+      // A next reference continues after this page's last table. A shorter page that points on is
+      // read on too (v15 b12: a server leaving tables out once must never hide the rest).
+      if (next !== null && (items.length === 0 || next !== previous)) return fail();
       return {
         items,
         next,

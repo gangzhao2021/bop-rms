@@ -44,6 +44,7 @@ import {
 import {
   createDiningSessionClient,
   longOpenSessionMinutes,
+  readAllTables,
   type StaffDiningTable,
 } from "./dining-session-client.js";
 import {
@@ -116,7 +117,7 @@ export interface PickupsSummary {
   readonly remaking: number;
   readonly more: boolean;
 }
-/** WP-2423 (3cd0f8dd M7): the Store's tables as the Tables page reads them (first page). */
+/** WP-2423 (3cd0f8dd M7): the Store's tables as the Tables page reads them (every page, v15 b12). */
 export interface TablesRead {
   readonly tables: readonly StaffDiningTable[];
   /** The staff member may close tables (Owner, Store Manager). */
@@ -1354,11 +1355,12 @@ export function StoreOverview({
         permitted.tables
           ? read(
               async (): Promise<TablesRead> => {
-                const page = await clients.tables.tables(csrf, null, controller.signal);
+                // v15 b12 (tables-list-paging): every table, as the Tables page reads them.
+                const page = await readAllTables(clients.tables, csrf, controller.signal);
                 return {
                   tables: page.items,
                   canClose: page.canCloseSessions,
-                  more: page.next !== null,
+                  more: false,
                   readAt: new Date().toISOString(),
                 };
               },

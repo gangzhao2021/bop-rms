@@ -492,6 +492,46 @@ describe("v15 batch 8: a table checking out the order queue did not bring", () =
       "Checking the bill",
     );
   });
+  it("v15 b12: a table checking out whose bill and queue both failed stays in Needs action with Take payment", () => {
+    const facts = listFactsOf(closing, new Map(), new Map());
+    // Still on its way: not said as owing, among the seated.
+    expect(tableNeed(closing, facts, now, false)).toMatchObject({
+      tone: "progress",
+      words: "Checking the bill",
+      step: null,
+    });
+    // Its own read failed (503 or no answer): a person has to take the payment.
+    const unread = tableNeed(closing, facts, now, true);
+    expect(unread).toMatchObject({
+      tone: "action",
+      words: "Checking out · bill not read",
+      detail: "open the table to see what is owed",
+      step: "TakePayment",
+    });
+    expect(tableInTab(closing, unread, "Needs")).toBe(true);
+    // Never said as owing an amount, and a bill read later says what it is.
+    expect(unread.words).not.toContain("Waiting for payment");
+    const own = tableFactsFromBill(
+      bill({ settlement: { roundsMinor: "4238", totalMinor: "4238" } }),
+    );
+    expect(
+      tableNeed(
+        closing,
+        listFactsOf(closing, new Map(), new Map([[id(207), { facts: own, read: 2 }]])),
+        now,
+        true,
+      ).words,
+    ).toBe("Paid · close when the guests leave");
+    setLanguageForTest("zh-Hans");
+    try {
+      expect(tableNeed(closing, facts, now, true)).toMatchObject({
+        words: "正在结账 · 没读到账单",
+        detail: "打开这张桌查看应付金额",
+      });
+    } finally {
+      setLanguageForTest("en");
+    }
+  });
   it("v15 batch 11: a bill read after a queue read that failed says what the guest paid", () => {
     // The queue's last answer (read 3) still says the table owes $42.38; its next reads fail.
     const queue = facts({

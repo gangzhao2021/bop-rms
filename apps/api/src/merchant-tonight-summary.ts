@@ -90,8 +90,12 @@ export interface TonightFacts {
   };
 }
 
-/** At most this many tables are read (the Tables page reads 50 a page; a store has fewer). */
-const TONIGHT_TABLE_PAGES = 4;
+/**
+ * At most this many pages of 100 tables in use are read, as the Tables page reads them (retired
+ * tables are left out in the query, v15 b12). A Store with more is said as not read, never as a
+ * shorter list of open tables and a smaller amount still owed.
+ */
+const TONIGHT_TABLE_PAGES = 10;
 
 export async function readTonightFacts(
   tx: ConsumerTransaction,
@@ -126,6 +130,7 @@ export async function readTonightFacts(
     const listed = await tables.listTables({
       afterTableReference: after,
       limit: 100,
+      lifecycle: "InUse",
       authorize: async () => allowed(),
     });
     for (const table of listed.items) {
@@ -159,6 +164,7 @@ export async function readTonightFacts(
       );
     }
     if (listed.nextAfterTableReference === null) break;
+    if (page === TONIGHT_TABLE_PAGES - 1) throw new Error("MERCHANT_STORE_REPORTS_UNAVAILABLE");
     after = listed.nextAfterTableReference;
   }
   const standings = await readPayFirstRoundStandings(tx, input.scope, open, input.ledger, allowed);

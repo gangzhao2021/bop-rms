@@ -246,3 +246,18 @@ export function pilotHiddenRedirect(
     if (entry.hiddenTo && matchPath(entry.path, pathname)) return entry.hiddenTo;
   return null;
 }
+
+/**
+ * Where an address no route serves goes. v15 b12: staff and bookmarks reach the store's daily
+ * screens under Home's "/app" too ("/app/operations/dining" is Tables, not Home), so such an address
+ * opens the screen it names, with its query; anything else opens Home.
+ */
+export function unknownAddressTarget(pathname: string, search = ""): string {
+  const prefix = "/app/operations/";
+  if (pathname.startsWith(prefix)) {
+    const operations = pathname.slice("/app".length);
+    if (merchantRoutes.some((entry) => matchPath(entry.path, operations) !== null))
+      return operations + search;
+  }
+  return home;
+}

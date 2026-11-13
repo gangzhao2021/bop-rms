@@ -155,12 +155,16 @@ export function createMerchantDiningTables(options: {
               equals: (a, b) => a === b,
             },
           );
-          const listed = await store.listTables({ afterTableReference, limit, authorize });
           // A retired table is kept for its history but is no longer one of the Store's tables.
-          const page = {
-            ...listed,
-            items: listed.items.filter((table) => table.lifecycle !== "Retired"),
-          };
+          // v15 b12 (tables-list-paging): it is left out in the query, so a page is full whenever
+          // a next reference follows (filtering here after the limit gave short pages that still
+          // pointed on, and a Store with many retired tables lost its whole Tables screen).
+          const page = await store.listTables({
+            afterTableReference,
+            limit,
+            lifecycle: "InUse",
+            authorize,
+          });
           const activeReferences = page.items.flatMap((table) =>
             table.activeDiningSessionReference === null ? [] : [table.activeDiningSessionReference],
           );

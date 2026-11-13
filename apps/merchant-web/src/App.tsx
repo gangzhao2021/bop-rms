@@ -35,7 +35,7 @@ import { StaffPinControls } from "./StaffPinControls.js";
 import { StaffSwitchPage } from "./StaffSwitchPage.js";
 import { StaffSignInPage } from "./StaffSignInPage.js";
 import { StepUpCompletePage } from "./StepUpCompletePage.js";
-import { pilotHiddenRedirect } from "./pilot-routes.js";
+import { pilotHiddenRedirect, unknownAddressTarget } from "./pilot-routes.js";
 import { StoreTimeZoneContext } from "./StoreTime.js";
 import { StoreBusinessDayProvider } from "./StoreBusinessDay.js";
 import { MerchantShell } from "./MerchantShell.js";
@@ -2395,7 +2395,10 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
             </SessionPending>
           }
         />
-        <Route path="*" element={<Navigate replace to="/app" />} />
+        <Route
+          path="*"
+          element={<Navigate replace to={unknownAddressTarget(pathname, search)} />}
+        />
       </Routes>
     </Suspense>
   );

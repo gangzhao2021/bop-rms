@@ -1,7 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { StaffDiningTable } from "./dining-session-client.js";
 import type { TableBill } from "./table-checkout-client.js";
-import { listBillsByOrder, readListBills, type ListBill } from "./table-list-bills.js";
+import {
+  listBillsByOrder,
+  readListBills,
+  unreadBillOrders,
+  type ListBill,
+} from "./table-list-bills.js";
 
 const id = (n: number) => "01909969-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 const table = (n: number, phase: "Active" | "Closing" = "Closing") =>
@@ -54,6 +59,55 @@ describe("v15 batch 11: the Tables list reads each table's bill on its own", () 
     expect(byOrder.get(id(201))?.facts.bill).toMatchObject({ totalMinor: "4238", paid: null });
     // Each table is shown as its answer comes, not after the slowest one.
     expect(state.shown).toHaveBeenCalledTimes(3);
+  });
+
+  it("v15 b12: a table whose bill read failed is marked unread until a later read answers", async () => {
+    const state = { ...setup(), failed: new Set<string>() };
+    const items = [table(1), table(2)];
+    await readListBills({
+      items,
+      queued: new Map(),
+      poll: 1,
+      read: async (session) => (session === id(102) ? Promise.reject(failure()) : bill(false)),
+      ...state,
+    });
+    expect([...unreadBillOrders(items, state.failed)]).toEqual([id(202)]);
+    // The failure is shown at once (the row moves to Needs action), not after the slowest read.
+    expect(state.shown).toHaveBeenCalledTimes(2);
+    await readListBills({
+      items,
+      queued: new Map(),
+      poll: 2,
+      read: async () => bill(true),
+      ...state,
+    });
+    expect(unreadBillOrders(items, state.failed).size).toBe(0);
+    // A table no longer open is forgotten.
+    state.failed.add(id(109));
+    await readListBills({
+      items,
+      queued: new Map(),
+      poll: 3,
+      read: async () => bill(true),
+      ...state,
+    });
+    expect(state.failed.has(id(109))).toBe(false);
+  });
+
+  it("v15 b12: leaving the page is not a failed read", async () => {
+    const controller = new AbortController();
+    const state = { ...setup(), failed: new Set<string>(), signal: controller.signal };
+    await readListBills({
+      items: [table(1)],
+      queued: new Map(),
+      poll: 1,
+      read: async () => {
+        controller.abort();
+        throw failure();
+      },
+      ...state,
+    });
+    expect(state.failed.size).toBe(0);
   });
 
   it("a table whose read fails keeps what was read for it before", async () => {

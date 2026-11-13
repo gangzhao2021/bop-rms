@@ -373,3 +373,9 @@ a.table-checkout__primary {
   align-items: center;
   text-decoration: none;
 }
+
+/* v15 b12: a stopped phone payment is said where it was shown, in the panel's own text (no box). */
+.table-checkout__phone-stopped {
+  font-size: 16px;
+  font-weight: 600;
+}

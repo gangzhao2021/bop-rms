@@ -1,5 +1,9 @@
 import { expect, it, vi } from "vitest";
-import { createDiningSessionClient, type StaffDiningTable } from "./dining-session-client.js";
+import {
+  createDiningSessionClient,
+  readAllTables,
+  type StaffDiningTable,
+} from "./dining-session-client.js";
 const id = (n: number) => "01909988-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 const table: StaffDiningTable = {
   tableReference: id(1),
@@ -73,6 +77,59 @@ it("rejects duplicate table rows and mismatched next cursor", async () => {
     response({ canOperateTables: false, items: [table, table], nextAfterTableReference: null }),
   );
   await expect(createDiningSessionClient(f).tables("A".repeat(43))).rejects.toThrow();
+});
+/**
+ * v15 b12 (tables-list-paging): Test Merchant 2 (21 tables in use, 30 retired) got 21 tables and a
+ * next reference; the page was refused and Tables read "Tables unavailable" for every staff member.
+ */
+it("reads every page of tables, a short one that points on included, as one list", async () => {
+  const page = (from: number, count: number, next: number | null) =>
+    response({
+      canOperateTables: true,
+      canCloseSessions: from > 1,
+      items: Array.from({ length: count }, (_, n) => ({
+        ...table,
+        tableReference: id(from + n),
+        stableLabel: "T" + (from + n),
+      })),
+      nextAfterTableReference: next === null ? null : id(next),
+    });
+  const f = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(page(1, 21, 21))
+    .mockResolvedValueOnce(page(22, 100, 121))
+    .mockResolvedValueOnce(page(122, 7, null));
+  const all = await readAllTables(createDiningSessionClient(f), "A".repeat(43));
+  expect(all.items.map((t) => t.stableLabel)).toEqual(
+    Array.from({ length: 128 }, (_, n) => "T" + (n + 1)),
+  );
+  expect(all.next).toBeNull();
+  // What the staff member may do is the latest page's.
+  expect(all.canCloseSessions).toBe(true);
+  expect(f.mock.calls.map((call) => JSON.parse(String(call[1]?.body)))).toEqual([
+    { afterTableReference: null, limit: 100 },
+    { afterTableReference: id(21), limit: 100 },
+    { afterTableReference: id(121), limit: 100 },
+  ]);
+});
+it("refuses a page that points on from nowhere, and fails the whole list when a page fails", async () => {
+  const empty = vi.fn(async () =>
+    response({ canOperateTables: true, items: [], nextAfterTableReference: id(5) }),
+  );
+  await expect(createDiningSessionClient(empty).tables("A".repeat(43))).rejects.toThrow();
+  const elsewhere = vi.fn(async () =>
+    response({ canOperateTables: true, items: [table], nextAfterTableReference: id(5) }),
+  );
+  await expect(createDiningSessionClient(elsewhere).tables("A".repeat(43))).rejects.toThrow();
+  const second = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(
+      response({ canOperateTables: true, items: [table], nextAfterTableReference: id(1) }),
+    )
+    .mockResolvedValueOnce(new Response("", { status: 503 }));
+  await expect(
+    readAllTables(createDiningSessionClient(second), "A".repeat(43)),
+  ).rejects.toMatchObject({ code: "ServerProblem" });
 });
 it("accepts elapsed minutes only when a current Session is linked", async () => {
   const f = vi.fn(async () =>

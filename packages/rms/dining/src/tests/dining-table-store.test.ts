@@ -208,6 +208,43 @@ describe("authorized table pagination", () => {
     );
     expect(f.authorize).toHaveBeenCalledTimes(2);
   });
+  it("leaves retired tables out in the query when asked for the tables in use", async () => {
+    const first = table();
+    const query = vi.fn(async (sql: string) => ({
+      rows: sql.startsWith("SELECT table_snapshot") ? [{ table: first }] : [],
+    }));
+    const store = createPostgresDiningTableStore({ run: (work) => work({ query }) }, scope, refs);
+    const authorize = vi.fn(async () => true);
+    await store.listTables({ limit: 50, afterTableReference: null, lifecycle: "InUse", authorize });
+    expect(query).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /AND table_snapshot->>'lifecycle'<>'Retired' ORDER BY table_id LIMIT \$5$/u,
+      ),
+      [id(1), id(2), id(3), null, 51],
+    );
+    // Every row is still listed when not asked (Table QR codes keeps a retired table's area).
+    await store.listTables({ limit: 50, afterTableReference: null, authorize });
+    expect(query).toHaveBeenLastCalledWith(expect.not.stringContaining("Retired"), [
+      id(1),
+      id(2),
+      id(3),
+      null,
+      51,
+    ]);
+    // A retired row answering an in-use read is a broken read, never shown as a table.
+    const retired = vi.fn(async (sql: string) => ({
+      rows: sql.startsWith("SELECT table_snapshot")
+        ? [{ table: { ...first, lifecycle: "Retired" } }]
+        : [],
+    }));
+    await expect(
+      createPostgresDiningTableStore(
+        { run: (work) => work({ query: retired }) },
+        scope,
+        refs,
+      ).listTables({ limit: 50, afterTableReference: null, lifecycle: "InUse", authorize }),
+    ).rejects.toMatchObject({ code: "DINING_TABLE_DEPENDENCY_UNAVAILABLE" });
+  });
   it("returns no next cursor for empty or exhausted page", async () => {
     expect(await setup([]).read()).toEqual({ items: [], nextAfterTableReference: null });
     expect((await setup([{ table: table() }]).read()).nextAfterTableReference).toBeNull();

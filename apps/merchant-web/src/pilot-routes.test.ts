@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { merchantRoutes, pilotHiddenRedirect } from "./pilot-routes.js";
+import { merchantRoutes, pilotHiddenRedirect, unknownAddressTarget } from "./pilot-routes.js";
 
 // v15 aa3d9fac D3 (pilot rule "no reachable stubs"): typing /app/reports opened a layout review
 // ("PHASE 2 · DESIGN REVIEW", "source values unavailable") and /app/reports/reconciliation an
@@ -38,6 +38,18 @@ describe("merchant route classification", () => {
     ])
       expect(pilotHiddenRedirect(path)).toBe("/app/reports/operations");
     expect(pilotHiddenRedirect("/app/reports/operations")).toBeNull();
+  });
+
+  it("v15 b12: an address under /app naming a store screen opens that screen, not Home", () => {
+    expect(unknownAddressTarget("/app/operations/dining")).toBe("/operations/dining");
+    expect(unknownAddressTarget("/app/operations/order-entry", "?table=x")).toBe(
+      "/operations/order-entry?table=x",
+    );
+    expect(unknownAddressTarget("/app/operations/orders/x")).toBe("/operations/orders/x");
+    // Anything else still opens Home.
+    expect(unknownAddressTarget("/app/operations/nothing-here")).toBe("/app");
+    expect(unknownAddressTarget("/somewhere")).toBe("/app");
+    expect(unknownAddressTarget("/app/operationsdining")).toBe("/app");
   });
 
   it("keeps every working screen, including ones a hidden pattern would also match", () => {

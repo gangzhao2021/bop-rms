@@ -985,7 +985,7 @@ export function StaffOrderEntryPage({
     }
     const loadTable = async () => {
       if (tableReference === null) return;
-      // The table's name as staff know it, from the Tables list (paged, at most 500 tables).
+      // The table's name as staff know it, from the Tables list (paged, at most 1,000 tables).
       const tables = createDiningSessionClient(fetcher);
       let after: string | null = null;
       for (let page = 0; page < 10; page += 1) {

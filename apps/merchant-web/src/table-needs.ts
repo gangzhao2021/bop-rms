@@ -107,6 +107,11 @@ export function tableNeed(
   table: StaffDiningTable,
   order: TableOrderFacts | null,
   now: number,
+  /**
+   * v15 b12: this table's own bill read ended without a bill (an error or no answer), and nothing
+   * else said what it owes. Only "not read yet" while a read is still on its way.
+   */
+  billUnread = false,
 ): TableNeed {
   const seated = table.currentDiningSessionReference !== null;
   if (!seated) {
@@ -257,6 +262,17 @@ export function tableNeed(
         };
   if (table.session?.phase === "Closing") {
     // Owner 2026-11-03 walkthrough: the bill is not read yet. A paid table never flashes "to pay".
+    // v15 b12: once its bill could not be read, the table checking out still needs a person: it
+    // stays in "Needs action" with Take payment (the panel reads the bill and says what is owed),
+    // never said as owing, and never dropped among the seated tables where nobody looks.
+    if (order === null && billUnread)
+      return {
+        tone: "action",
+        rank: 3,
+        words: t("Checking out · bill not read"),
+        detail: t("open the table to see what is owed"),
+        step: "TakePayment",
+      };
     if (order === null)
       return {
         tone: "progress",

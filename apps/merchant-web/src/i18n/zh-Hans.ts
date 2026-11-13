@@ -2249,7 +2249,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Load eligible employees": "加载符合条件的员工",
   "Load eligible employees to select another person.": "加载符合条件的员工以选择其他人。",
   "Load more": "加载更多",
-  "Load more tables": "加载更多桌台",
   "Load next page": "加载下一页",
   "Load older changes": "加载更早的更改",
   Loading: "正在加载",
@@ -6234,6 +6233,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "This table has one round, so it can't be split by rounds. Split it evenly instead.":
     "这桌只有一轮，不能按轮次分，可以用平均分。",
   "Checking the bill": "正在核对账单",
+  "Checking out · bill not read": "正在结账 · 没读到账单",
+  "open the table to see what is owed": "打开这张桌查看应付金额",
   "Store system is not responding": "门店系统没有响应",
   "Customer ordering page is not loading": "客人点单页打不开",
   "Staff screens are not loading": "员工页面打不开",

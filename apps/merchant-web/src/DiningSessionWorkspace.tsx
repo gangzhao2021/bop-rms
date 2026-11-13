@@ -9,7 +9,12 @@ import { useContext, useEffect, useMemo, useRef, useState } from "react";
 import { StaffCallsWaitingContext } from "./approvals-waiting.js";
 import { DiningServeReadyClientError } from "./dining-serve-ready-client.js";
 import { serveReadySummary } from "./dining-serve-ready.js";
-import { listBillsByOrder, readListBills, type ListBill } from "./table-list-bills.js";
+import {
+  listBillsByOrder,
+  readListBills,
+  unreadBillOrders,
+  type ListBill,
+} from "./table-list-bills.js";
 import {
   loadTableOrderFacts,
   prepareServeAllReady,
@@ -33,6 +38,7 @@ import {
   createDiningSessionClient,
   DiningSessionClientError,
   longOpenSessionMinutes,
+  readAllTables,
   type StaffDiningTable,
   type StaffTableAllergenChoice,
 } from "./dining-session-client.js";
@@ -511,7 +517,6 @@ export function DiningSessionWorkspace({
   readonly tableQrHref?: string | undefined;
 }) {
   const [tables, setTables] = useState<StaffDiningTable[]>([]),
-    [next, setNext] = useState<string | null>(null),
     [selectedReference, setSelectedReference] = useState<string | null>(null),
     [code, setCode] = useState<{ table: string; value: string } | null>(null),
     [message, setMessage] = useState(""),
@@ -602,6 +607,9 @@ export function DiningSessionWorkspace({
   // can still see what a table owes when the connection drops. Read again only when it changed.
   const lastBills = useRef(new Map<string, ListBill>());
   const billsInFlight = useRef(new Set<string>());
+  // v15 b12: tables whose own bill read failed (by Dining Session), and their Orders as shown.
+  const billsFailed = useRef(new Set<string>());
+  const [billUnread, setBillUnread] = useState<ReadonlySet<string>>(new Set());
   const billItems = useRef<{ poll: number; items: readonly StaffDiningTable[] }>({
     poll: 0,
     items: [],
@@ -633,6 +641,7 @@ export function DiningSessionWorkspace({
     if (poll >= billItems.current.poll) billItems.current = { poll, items };
     const shown = () => {
       setBillFacts(listBillsByOrder(billItems.current.items, lastBills.current));
+      setBillUnread(unreadBillOrders(billItems.current.items, billsFailed.current));
       saveLastBills([...lastBills.current.values()].map((entry) => entry.bill));
     };
     return readListBills({
@@ -642,6 +651,7 @@ export function DiningSessionWorkspace({
       only,
       kept: lastBills.current,
       inFlight: billsInFlight.current,
+      failed: billsFailed.current,
       read: (session, signal) => client.bill(csrf, session, signal),
       nextRead,
       signal: billReads.current.signal,
@@ -673,8 +683,12 @@ export function DiningSessionWorkspace({
       /* The list still shows each table's own state; the dishes are read again with it. */
     }
   };
-  /** `background`: an automatic re-read; the selected table and any shown join code stay. */
-  const load = async (more = false, background = false) => {
+  /**
+   * `background`: an automatic re-read; the selected table and any shown join code stay.
+   * v15 b12 (tables-list-paging): every table of the Store is read each time, page after page, so
+   * "Needs action" and every count cover the whole floor, never only the first tables listed.
+   */
+  const load = async (background = false) => {
     if ((pending.current && !pending.current.signal.aborted) || state === "Unknown" || hostLocked)
       return;
     const controller = new AbortController();
@@ -687,19 +701,14 @@ export function DiningSessionWorkspace({
       setUnknownAction(null);
     }
     try {
-      const loaded = await createDiningSessionClient().tables(
-        csrf,
-        more ? next : null,
-        controller.signal,
-      );
+      const loaded = await readAllTables(createDiningSessionClient(), csrf, controller.signal);
       if (!controller.signal.aborted) {
         loadedAt.current = new Date().toISOString();
         setStale(null);
         setFirstReadFailures(null);
         setMessage((shown) => (shown === floorServerProblemText ? "" : shown));
-        const items = more ? [...tables, ...loaded.items] : loaded.items;
+        const items = loaded.items;
         setTables(items);
-        setNext(loaded.next);
         setCanOperateTables(loaded.canOperateTables);
         setAllergenChoices(loaded.allergenChoices);
         setCanCloseSessions(loaded.canCloseSessions);
@@ -709,7 +718,7 @@ export function DiningSessionWorkspace({
         setCanTakeTableRounds(loaded.canTakeTableRounds);
         setGuestStarts(loaded.guestTableStart);
         guestStartsNow.current = loaded.guestTableStart;
-        if (loaded.items.length === 0 && !more) setMessage(noTablesMessage);
+        if (loaded.items.length === 0) setMessage(noTablesMessage);
         void loadFacts(items, controller.signal);
       }
     } catch (error) {
@@ -727,7 +736,6 @@ export function DiningSessionWorkspace({
           loadedAt.current = null;
           setStale(null);
           setTables([]);
-          setNext(null);
           setCanOperateTables(false);
           setFirstReadFailures((prior) => (server ? (prior ?? 0) + 1 : null));
           setMessage(
@@ -748,7 +756,7 @@ export function DiningSessionWorkspace({
   };
   const loadRef = useRef(load);
   loadRef.current = load;
-  const reread = () => void loadRef.current(false, true);
+  const reread = () => void loadRef.current(true);
   useStaleRetry(stale?.attempts ?? firstReadFailures, reread);
   // v15 cbff9d6f: no reads once this screen's sign-in has ended.
   const live = useStaffSessionLive();
@@ -758,6 +766,7 @@ export function DiningSessionWorkspace({
     billReads.current.abort();
     billReads.current = new AbortController();
     lastBills.current.clear();
+    billsFailed.current.clear();
     clearLastBills();
   }, [live]);
   useEffect(() => {
@@ -768,7 +777,7 @@ export function DiningSessionWorkspace({
       setNow(Date.now());
       ticks += 1;
       // Every 30 seconds; a failing read goes read-only through the stale retry above.
-      if (ticks % 2 === 0 && !paused) void loadRef.current(false, true);
+      if (ticks % 2 === 0 && !paused) void loadRef.current(true);
     }, 15_000);
     return () => clearInterval(timer);
   }, [anySeated, live, paused]);
@@ -787,7 +796,7 @@ export function DiningSessionWorkspace({
   useEffect(() => {
     if (!live || typeof document === "undefined") return;
     const visible = () => {
-      if (document.visibilityState === "visible" && !paused) void loadRef.current(false, true);
+      if (document.visibilityState === "visible" && !paused) void loadRef.current(true);
     };
     document.addEventListener("visibilitychange", visible);
     return () => document.removeEventListener("visibilitychange", visible);
@@ -1037,10 +1046,15 @@ export function DiningSessionWorkspace({
       tables
         .map((table) => ({
           table,
-          need: tableNeed(table, listFactsOf(table, orderFacts, billFacts, queueRead), now),
+          need: tableNeed(
+            table,
+            listFactsOf(table, orderFacts, billFacts, queueRead),
+            now,
+            table.session?.orderReference != null && billUnread.has(table.session.orderReference),
+          ),
         }))
         .sort(compareTables),
-    [tables, orderFacts, billFacts, queueRead, now],
+    [tables, orderFacts, billFacts, billUnread, queueRead, now],
   );
   const counts = new Map(
     tableTabs.map((value) => [
@@ -1310,7 +1324,7 @@ export function DiningSessionWorkspace({
                 reread={async () => {
                   // Whatever read is on its way began before this change.
                   pending.current?.abort();
-                  await loadRef.current(false, true);
+                  await loadRef.current(true);
                   return guestStartsNow.current;
                 }}
                 onResult={(text) => setResult({ text })}
@@ -1320,20 +1334,9 @@ export function DiningSessionWorkspace({
         ) : null
       }
       actions={
-        <>
-          <button className="tables-v3__quiet" disabled={locked} onClick={() => void load()}>
-            {t("Refresh tables")}
-          </button>
-          {next ? (
-            <button
-              className="tables-v3__quiet"
-              disabled={locked || stale !== null}
-              onClick={() => void load(true)}
-            >
-              {t("Load more tables")}
-            </button>
-          ) : null}
-        </>
+        <button className="tables-v3__quiet" disabled={locked} onClick={() => void load()}>
+          {t("Refresh tables")}
+        </button>
       }
     >
       {/* DEC-PAID-ORDER-AUTO-ACCEPT: the brake, at a Store sending paid rounds straight through. */}
@@ -1466,7 +1469,7 @@ export function DiningSessionWorkspace({
               tables={tables}
               onMoved={(text, targetReference) => {
                 // WP-2423 item 8 ⑧: the party sits at the other table now; show that table.
-                void loadRef.current(false, true).then(() => {
+                void loadRef.current(true).then(() => {
                   if (targetReference !== null) setSelectedReference(targetReference);
                   if (text !== "") setResult({ text });
                 });
@@ -1474,7 +1477,7 @@ export function DiningSessionWorkspace({
               onSettled={(message) => {
                 setResult({ text: message });
                 // The table's row says paid right away, not at the next read.
-                void loadRef.current(false, true);
+                void loadRef.current(true);
               }}
               onReread={reread}
               onChanged={() => {
@@ -1483,7 +1486,7 @@ export function DiningSessionWorkspace({
               }}
               onClosed={() => {
                 const frees = selected.guestStart != null && guestStarts !== null;
-                void loadRef.current(false, true).then(() =>
+                void loadRef.current(true).then(() =>
                   setResult({
                     text: frees
                       ? t("Table {table} is closed and free for the next guest.", {

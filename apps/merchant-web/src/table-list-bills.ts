@@ -37,6 +37,11 @@ export async function readListBills(input: {
   readonly only?: ((table: StaffDiningTable) => boolean) | undefined;
   readonly kept: Map<string, ListBill>;
   readonly inFlight: Set<string>;
+  /**
+   * v15 b12: the tables (by Dining Session) whose last bill read ended without a bill — an error,
+   * a refusal or no answer in time; a later answer takes the table off.
+   */
+  readonly failed?: Set<string> | undefined;
   readonly read: (diningSessionReference: string, signal: AbortSignal) => Promise<TableBill>;
   readonly nextRead: () => number;
   /** Aborted when the page is left or the sign-in ended. */
@@ -65,6 +70,8 @@ export async function readListBills(input: {
   }
   // A table no longer open is forgotten (its bill does not stay on this device).
   for (const session of [...input.kept.keys()]) if (!open.has(session)) input.kept.delete(session);
+  for (const session of [...(input.failed ?? [])])
+    if (!open.has(session)) input.failed?.delete(session);
   const limitMs = input.limitMs ?? LIST_BILL_READ_LIMIT_MS;
   const readOne = async ({ session, table, key }: (typeof due)[number]) => {
     if (input.signal.aborted) return;
@@ -77,6 +84,7 @@ export async function readListBills(input: {
     try {
       const bill = await input.read(session, controller.signal);
       if (controller.signal.aborted) return;
+      input.failed?.delete(session);
       const prior = input.kept.get(session);
       if (prior !== undefined && prior.read > number) return;
       if (bill.paymentTiming === "PayLater")
@@ -90,6 +98,11 @@ export async function readListBills(input: {
       input.shown();
     } catch {
       // Not read this time (or not allowed): what was kept for this table stays until a later read.
+      // Leaving the page is not a failed read.
+      if (!input.signal.aborted && input.failed !== undefined) {
+        input.failed.add(session);
+        input.shown();
+      }
     } finally {
       clearTimeout(limit);
       input.signal.removeEventListener("abort", stop);
@@ -103,6 +116,22 @@ export async function readListBills(input: {
   await Promise.all(
     Array.from({ length: Math.min(input.atOnce ?? LIST_BILL_READS_AT_ONCE, queue.length) }, worker),
   );
+}
+
+/** v15 b12: the Orders of the open tables whose last bill read failed. */
+export function unreadBillOrders(
+  items: readonly StaffDiningTable[],
+  failed: ReadonlySet<string>,
+): ReadonlySet<string> {
+  const orders = new Set<string>();
+  for (const table of items)
+    if (
+      table.currentDiningSessionReference !== null &&
+      failed.has(table.currentDiningSessionReference) &&
+      table.session?.orderReference
+    )
+      orders.add(table.session.orderReference);
+  return orders;
 }
 
 /** The bills kept, by Order, for the list to say each table checking out from. */

@@ -48,6 +48,12 @@ export type DiningTableConfigurationStore = Pick<
   listTables(input: {
     afterTableReference: string | null;
     limit: number;
+    /**
+     * v15 b12 (tables-list-paging): "InUse" pages over the Store's tables staff work with — a
+     * retired table (kept for its history) is left out in the query itself, so every page but the
+     * last is full and a next reference always means more tables to show. Omitted: every row.
+     */
+    lifecycle?: "InUse";
     authorize(transaction: DiningTableTransaction): Promise<boolean>;
   }): Promise<{
     readonly items: readonly DiningTable[];
@@ -183,12 +189,17 @@ export function createPostgresDiningTableStore(
       if (!Number.isSafeInteger(input.limit) || input.limit < 1 || input.limit > 100)
         throw new DiningTableWorkflowError("DINING_TABLE_INPUT_INVALID");
       const limit = input.limit;
+      if (input.lifecycle !== undefined && input.lifecycle !== "InUse")
+        throw new DiningTableWorkflowError("DINING_TABLE_INPUT_INVALID");
+      const inUse = input.lifecycle === "InUse";
       try {
         return await runner.run(async (transaction) => {
           if ((await input.authorize(transaction)) !== true) return dependency();
           await context(transaction);
           const result = await transaction.query(
-            'SELECT table_snapshot AS "table" FROM rms_dining.dining_table WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND ($4::uuid IS NULL OR table_id>$4::uuid) ORDER BY table_id LIMIT $5',
+            'SELECT table_snapshot AS "table" FROM rms_dining.dining_table WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND ($4::uuid IS NULL OR table_id>$4::uuid)' +
+              (inUse ? " AND table_snapshot->>'lifecycle'<>'Retired'" : "") +
+              " ORDER BY table_id LIMIT $5",
             [tenant, brand, store, after, limit + 1],
           );
           if (!result || typeof result !== "object") return dependency();
@@ -197,6 +208,7 @@ export function createPostgresDiningTableStore(
           let previous: string | null = after;
           const tables = raw.map((row) => {
             const table = scoped(createDiningTable(closed(row, ["table"]).table));
+            if (inUse && table.lifecycle === "Retired") return dependency();
             if (previous !== null && table.tableReference <= previous) return dependency();
             previous = table.tableReference;
             return table;

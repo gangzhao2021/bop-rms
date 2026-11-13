@@ -809,6 +809,13 @@ export function TableCheckout({
             </div>
           ) : bill.settlement === null ? (
             <>
+              {stoppedPhone ? (
+                // v15 b12: said where the phone payment was, right above how the table pays, so
+                // staff see at once that they take it here now (not under Cancel checkout).
+                <p className="table-checkout__phone-stopped" role="status">
+                  {t("Phone payment stopped. Take the payment here.")}
+                </p>
+              ) : null}
               {bill.waitingRounds.length > 0 ? (
                 <WaitingRoundsAtCheckout
                   bill={bill}
@@ -1285,9 +1292,6 @@ export function TableCheckout({
           </button>{" "}
           <small>{t("The table can order again; checkout is started again later.")}</small>
         </p>
-      ) : null}
-      {stoppedPhone && bill?.onlinePayment?.status !== "InProgress" && bill?.settlement === null ? (
-        <p role="status">{t("Phone payment stopped. Take the payment here.")}</p>
       ) : null}
       {problem && !(paper && paidAtRefused) ? <p role="alert">{problem}</p> : null}
     </section>
