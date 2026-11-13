@@ -93,7 +93,7 @@ export function requestBlockedMessage(context: Context): ReactNode {
       // owner running the store alone is told how to record one.
       <p>
         {t(
-          "Refunds are recorded by a store manager, and then you approve them. If you run the store alone, turn on Sole operator in Store setup (it applies to every store of this brand), or give someone the Store Manager role in Staff.",
+          "New refund requests are made by a store manager, and then you approve them. If you run the store alone, turn on Sole operator in Store setup (it applies to every store of this brand), or give someone the Store Manager role in Staff.",
         )}{" "}
         <Link to="/app/approvals">{t("Open Approvals")}</Link>
       </p>
@@ -293,9 +293,15 @@ function RecordedRequestStatus({
   refreshSignal,
   canSend = true,
   paidInCash = false,
+  machineRecordedAbove = false,
 }: {
   orderReference: string;
   entry: Items["recentRequests"][number];
+  /**
+   * b11: this page lists the card-machine refunds still to make, each with its one record form,
+   * above this list; a request here points there instead of offering a second form.
+   */
+  machineRecordedAbove?: boolean;
   /** v15 batch 8: the payment was taken in cash at the counter (given back in cash). */
   paidInCash?: boolean;
   /**
@@ -485,6 +491,18 @@ function RecordedRequestStatus({
                           ? null
                           : amount(payment.cashGivenBackMinor),
                       )}
+                    </p>
+                  ) : machineRecordedAbove ? (
+                    <p>
+                      {payment.cashGivenBackMinor != null || paidInCash
+                        ? t(
+                            "Give back {amount} in cash, then record it above, under Cash to give back.",
+                            { amount: amount(payment.cashGivenBackMinor ?? payment.amountMinor) },
+                          )
+                        : t(
+                            "Refund {amount} on the card machine, then record it above, under Refunds to make on the card machine.",
+                            { amount: amount(payment.amountMinor) },
+                          )}
                     </p>
                   ) : (
                     <CardMachineRequestRefund
@@ -847,7 +865,13 @@ function RefundWizard({
   canSend = true,
   paidInCash = false,
   cashLeftMinor = null,
+  machineRecordedAbove = false,
+  revision = 0,
 }: {
+  /** b11: the payment page lists the card-machine refunds to record above (one form each). */
+  readonly machineRecordedAbove?: boolean;
+  /** b11: changes after a refund or payment is recorded on this page: requests are read again. */
+  readonly revision?: number;
   readonly orderReference: string;
   /** v15 batch 8: this payment was taken in cash at the counter (given back in cash). */
   readonly paidInCash?: boolean;
@@ -884,6 +908,10 @@ function RefundWizard({
   const [preparing, setPreparing] = useState<ReadonlySet<string>>(new Set());
   // Staff refreshed the whole list: every open request rereads its status too.
   const [refreshSignal, setRefreshSignal] = useState(0);
+  // b11: a refund recorded elsewhere on this page is shown here as recorded, never as still to do.
+  useEffect(() => {
+    if (revision > 0) setRefreshSignal((value) => value + 1);
+  }, [revision]);
   // WP-2423 item 6: one confirmation records, prepares and sends a refund needing no approval.
   // The run keeps every step's references, so a retry resumes where it stopped.
   const run = useRef<RefundRun<Submitted> | null>(null),
@@ -1371,6 +1399,7 @@ function RefundWizard({
                 ) : (
                   <RecordedRequestStatus
                     paidInCash={paidInCash}
+                    machineRecordedAbove={machineRecordedAbove}
                     held={heldRequest === entry.requestReference}
                     approval={approvals.get(entry.requestReference) ?? null}
                     canSend={canSend}
@@ -2243,6 +2272,8 @@ function PaymentContent({
               canSend={context.canSend}
               paidInCash={context.paidInCash}
               cashLeftMinor={context.cashLeftMinor}
+              machineRecordedAbove={!wizard}
+              revision={financialRevision}
             />
           )}
         </>

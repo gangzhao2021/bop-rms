@@ -826,3 +826,195 @@ test("@production a cashier sees who makes a card-machine refund and is offered 
   await check("cashier-refund-requests");
   expect(records).toEqual([]);
 });
+
+// b11 (refund-cashier-authorization): the owner (Sole operator off) opens the payment page of a
+// cashier's card-machine refund request. It is listed once with one record form, under Refunds to
+// make on the card machine; the refund requests list points there, and reads it as recorded once
+// it is, without a reload. The blocked note never says the owner cannot record it.
+test("@production an owner records a cashier's card-machine refund from one place on the payment page", async ({
+  page,
+}) => {
+  let recorded = false;
+  const records: string[] = [];
+  const request = () => ({
+    requestReference: id(41),
+    operationReference: id(51),
+    claimVersion: 1,
+    requestedAt: "2026-10-15T15:00:00.000Z",
+    reasonCode: "QUALITY_ISSUE",
+    currencyCode: "CAD",
+    amountMinor: "283",
+    decline: null,
+    progress: recorded ? "Refunded" : "Recorded",
+    paymentMethod: "CardMachine",
+  });
+  await page.route("**/merchant/session", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        authenticated: true,
+        csrf: "a".repeat(43),
+        workspace: {
+          screenId: "HOME-OVERVIEW",
+          selectedScope: scope,
+          authorizedStores: [scope],
+          businessDate: "2026-10-15",
+          storeStatus: "Open",
+          freshness: "Current",
+          dashboardAvailability: "UnavailableUntilWP1905",
+          navigation: [
+            {
+              screenId: "OPS-ORDER-QUEUE",
+              label: "Orders",
+              href: "/operations/orders",
+              permission: "ordering.operate",
+            },
+          ],
+        },
+      },
+    }),
+  );
+  await page.route("**/merchant/payments/refunds/approvals", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        observedAt: new Date().toISOString(),
+        canApprove: true,
+        canSend: true,
+        soleOperator: null,
+        entries: [],
+      },
+    }),
+  );
+  await page.route("**/merchant/payments/refunds/context", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        paymentIntentReference: id(31),
+        paymentAttemptReference: id(32),
+        orderReference: id(1),
+        orderBatchReference: id(90),
+        observedAt: new Date().toISOString(),
+        paymentState: "Captured",
+        paymentMethod: "CardMachine",
+        currencyCode: "CAD",
+        capturedAmountMinor: "2486",
+        confirmedRefundMinor: recorded ? "283" : "0",
+        pendingRefundMinor: recorded ? "0" : "283",
+        canRequest: false,
+        requestBlocked: "SoleOperatorOff",
+        canSend: true,
+      },
+    }),
+  );
+  await page.route("**/merchant/payments/refunds/items", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        orderReference: id(1),
+        orderNumber: "43",
+        canRequest: false,
+        claimVersion: 1,
+        recentRequests: [request()],
+        items: [
+          {
+            orderBatchReference: id(90),
+            orderItemReference: id(3),
+            label: "Rice",
+            quantity: 2,
+            unclaimedQuantity: 1,
+            paymentCaptured: true,
+            refundedByCancellation: false,
+            paymentIntentReference: id(31),
+            paymentMethod: "CardMachine",
+          },
+        ],
+      },
+    }),
+  );
+  await page.route("**/merchant/payments/refunds/status", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        orderReference: id(1),
+        requestReference: id(41),
+        operationReference: id(51),
+        observedAt: new Date().toISOString(),
+        currencyCode: "CAD",
+        amountMinor: "283",
+        payments: [
+          {
+            paymentAttemptReference: id(32),
+            paymentIntentReference: id(31),
+            state: recorded ? "Confirmed" : "NotDispatched",
+            method: "CardMachine",
+            refundedOnCardMachineAt: recorded ? "2026-10-15T15:02:00.000Z" : null,
+            cardMachineSlipReference: recorded ? "REF 4302" : null,
+            executionOperationReference: null,
+            executionApprovalReference: null,
+            amountMinor: "283",
+            confirmedMinor: recorded ? "283" : "0",
+            pendingMinor: recorded ? "0" : "283",
+          },
+        ],
+      },
+    }),
+  );
+  await page.route("**/merchant/payments/refunds/card-machine-record", (route) => {
+    records.push(route.request().postData() ?? "");
+    recorded = true;
+    return route.fulfill({
+      headers,
+      json: {
+        status: "Recorded",
+        orderReference: id(1),
+        requestReference: id(41),
+        amountMinor: "283",
+        refundedAt: "2026-10-15T15:02:00.000Z",
+        receipt: "NoDigitalReceipt",
+      },
+    });
+  });
+
+  await page.goto("/app/operations/payments/" + id(31));
+  const pending = page.getByRole("region", { name: "Refunds to make on the card machine" });
+  const action = pending.getByRole("button", { name: "Record the $2.83 card-machine refund" });
+  await expect(action).toBeVisible();
+  const requests = page.getByRole("region", { name: "Refunds on this order" });
+  await expect(requests).toContainText(
+    "Refund $2.83 on the card machine, then record it above, under Refunds to make on the card machine.",
+  );
+  // One record control and no second slip field anywhere on the page.
+  await expect(
+    page.getByRole("button", { name: /card-machine refund|on card machine/u }),
+  ).toHaveCount(1);
+  await expect(page.getByRole("textbox", { name: "Slip reference (optional)" })).toHaveCount(0);
+  await expect(page.getByText(/^New refund requests are made by a store manager/u)).toBeVisible();
+  await expect(page.getByText(/^Refunds are recorded by a store manager/u)).toHaveCount(0);
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.screenshot({
+      path: test.info().outputPath("owner-cashier-card-refund-" + width + ".png"),
+      fullPage: true,
+    });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await action.click();
+  await pending.getByRole("textbox", { name: "Slip reference (optional)" }).fill("REF 4302");
+  await pending.getByRole("button", { name: "Refunded $2.83 on card machine" }).click();
+  await expect(
+    pending.getByText(/^Card-machine refund recorded: \$2\.83 refunded on the card machine/u),
+  ).toBeVisible();
+  // The request list reads it as recorded without a reload: nothing to do there any more.
+  await expect(requests).not.toContainText("then record it above");
+  await expect(page.getByRole("button", { name: /on card machine/u })).toHaveCount(0);
+  expect(records).toHaveLength(1);
+  await expectNoInternalText(page);
+  const axe = await new AxeBuilder({ page }).analyze();
+  expect(axe.violations.filter((v) => v.impact === "critical" || v.impact === "serious")).toEqual(
+    [],
+  );
+});
