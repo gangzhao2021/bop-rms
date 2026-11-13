@@ -16,6 +16,7 @@ import {
   type PersistentPublicStoreProfileOptions,
 } from "./persistent-public-store-profile.js";
 import type { RequestHandler } from "express";
+import { isGuestDependencyFailure } from "./guest-binding-dependency.js";
 import {
   GuestSessionService,
   GuestSessionError,
@@ -321,6 +322,9 @@ export function createCustomerSessionBootstrapHandler(options?: {
     response.setHeader("Referrer-Policy", "no-referrer");
     response.setHeader("X-Content-Type-Options", "nosniff");
     const reject = (status: number) => {
+      // WP-2423 (rush-reads-and-orders-changes): a busy or unreachable store says when to ask
+      // again, so the phone keeps the visit it has and asks again instead of starting over.
+      if (status === 503) response.setHeader("Retry-After", "5");
       response.status(status).json({ schemaVersion: 1, error: { code: "session_unavailable" } });
     };
     if (!options) {
@@ -353,6 +357,18 @@ export function createCustomerSessionBootstrapHandler(options?: {
       reject(400);
       return;
     }
+    /**
+     * WP-2423 (rush-reads-and-orders-changes, v15 2026-11-13): what the visit's own records say
+     * ("not this visit", "nothing to restore") is nothing to restore. A store that could not
+     * answer (no free connection in a rush, a statement cut off, a database fault) says nothing
+     * about the visit: it is thrown on, so the phone hears "busy, try again" and keeps its visit.
+     * Before, it was read as no visit (204) and a pickup guest in a rush was told their session
+     * ended and to scan a QR code they do not have at home.
+     */
+    const notReadable = (error: unknown): null => {
+      if (error instanceof GuestSessionError && !isGuestDependencyFailure(error)) return null;
+      throw error;
+    };
     const readMovedTable = async (sessionCredential: string) => {
       if (options.port.readMovedTable === undefined) return null;
       try {
@@ -360,8 +376,8 @@ export function createCustomerSessionBootstrapHandler(options?: {
         return moved !== null && /^[^\p{Cc}\p{Cf}<>{}$]{1,40}$/u.test(moved.tableLabel)
           ? { tableLabel: moved.tableLabel, ...(moved.merged === true ? { merged: true } : {}) }
           : null;
-      } catch {
-        return null;
+      } catch (error) {
+        return notReadable(error);
       }
     };
     const readSettledTable = async (sessionCredential: string) => {
@@ -374,8 +390,8 @@ export function createCustomerSessionBootstrapHandler(options?: {
               csrfToken: parseGuestRawCredential(settled.csrfToken),
             }
           : null;
-      } catch {
-        return null;
+      } catch (error) {
+        return notReadable(error);
       }
     };
     /** The ended visit's receipt access, validated; null when there is none to give. */
@@ -399,8 +415,8 @@ export function createCustomerSessionBootstrapHandler(options?: {
           },
           receiptAvailableUntil: until,
         };
-      } catch {
-        return null;
+      } catch (error) {
+        return notReadable(error);
       }
     };
     try {
@@ -488,28 +504,36 @@ export function createCustomerSessionBootstrapHandler(options?: {
       // WP-2423: a visit that ended or expired (or a cookie no Session matches) has nothing to
       // restore, exactly like a first visit: an empty 204 with no CSRF token, so the guest page
       // does not log a failed request. Every other Session failure still says so.
-      if (error instanceof GuestSessionError && error.code === "GUEST_SESSION_UNAVAILABLE") {
-        // v15 2026-10-30: staff moved this guest's party; the page says where it sits now (the
-        // phone scans that table's code to join it again). Nothing to act with is issued.
-        const moved = await readMovedTable(credential);
-        if (moved !== null) {
-          response.status(200).json({ schemaVersion: 1, movedTable: moved });
-          return;
+      if (
+        error instanceof GuestSessionError &&
+        error.code === "GUEST_SESSION_UNAVAILABLE" &&
+        !isGuestDependencyFailure(error)
+      ) {
+        try {
+          // v15 2026-10-30: staff moved this guest's party; the page says where it sits now (the
+          // phone scans that table's code to join it again). Nothing to act with is issued.
+          const moved = await readMovedTable(credential);
+          if (moved !== null) {
+            response.status(200).json({ schemaVersion: 1, movedTable: moved });
+            return;
+          }
+          // The table was settled while this guest sat at it: thank them, with the table's
+          // receipt (read only), instead of asking them to join.
+          const settled = await readSettledTable(credential);
+          if (settled !== null) {
+            response.status(200).json({ schemaVersion: 1, settledTable: settled });
+            return;
+          }
+          // WP-2423 (v15 3cd0f8dd M5): a guest who left can still open their receipt here.
+          const ended = await readEndedVisit(credential);
+          if (ended === null) response.status(204).end();
+          else response.status(200).json({ schemaVersion: 1, endedVisit: ended });
+        } catch {
+          reject(503);
         }
-        // The table was settled while this guest sat at it: thank them, with the table's receipt
-        // (read only), instead of asking them to join.
-        const settled = await readSettledTable(credential);
-        if (settled !== null) {
-          response.status(200).json({ schemaVersion: 1, settledTable: settled });
-          return;
-        }
-        // WP-2423 (v15 3cd0f8dd M5): a guest who left can still open their receipt here.
-        const ended = await readEndedVisit(credential);
-        if (ended === null) response.status(204).end();
-        else response.status(200).json({ schemaVersion: 1, endedVisit: ended });
         return;
       }
-      reject(error instanceof GuestSessionError ? 401 : 503);
+      reject(error instanceof GuestSessionError && !isGuestDependencyFailure(error) ? 401 : 503);
     }
   };
 }

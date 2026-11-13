@@ -143,11 +143,16 @@ it("v15 2026-10-30: tells a phone whose party staff moved where it sits now, not
   expect(await r.json()).toEqual({ schemaVersion: 1, movedTable: { tableLabel: "DEMO-02" } });
   expect(f.readMovedTable).toHaveBeenCalledWith("A".repeat(43));
   expect(f.readEndedVisit).not.toHaveBeenCalled();
-  // A label that isn't plain text, or a failed read, is nothing to restore.
+  // A label that isn't plain text, or a Session the read can't use, is nothing to restore.
   f.readMovedTable.mockResolvedValue({ tableLabel: "<b>" });
   expect((await f.request()).status).toBe(204);
-  f.readMovedTable.mockRejectedValue(new Error("down"));
+  f.readMovedTable.mockRejectedValue(new GuestSessionError("GUEST_SESSION_UNAVAILABLE"));
   expect((await f.request()).status).toBe(204);
+  // A read the store could not answer says nothing about the visit: busy, ask again.
+  f.readMovedTable.mockRejectedValue(new Error("down"));
+  const busy = await f.request();
+  expect(busy.status).toBe(503);
+  expect(busy.headers.get("retry-after")).toBe("5");
 });
 it("thanks a guest whose table was settled, with the ended visit's read-only receipt access", async () => {
   const f = await setup();
@@ -174,8 +179,37 @@ it("thanks a guest whose table was settled, with the ended visit's read-only rec
   expect((await f.request()).status).toBe(204);
   f.readSettledTable.mockResolvedValue({ tableLabel: "T7", csrfToken: "short" });
   expect((await f.request()).status).toBe(204);
-  f.readSettledTable.mockRejectedValue(new Error("down"));
+  f.readSettledTable.mockRejectedValue(new GuestSessionError("GUEST_SESSION_UNAVAILABLE"));
   expect((await f.request()).status).toBe(204);
+  f.readSettledTable.mockRejectedValue(new Error("down"));
+  expect((await f.request()).status).toBe(503);
+});
+
+it("WP-2423 (rush-reads-and-orders-changes): a Session read the store could not answer is busy, never an ended visit", async () => {
+  // v15 2026-11-13: in a rush the Session read found no free connection. Identity said so
+  // (`dependencyFailure`), but the answer was the ended-visit 204, so a pickup guest's checkout
+  // said "Your session ended. Scan the location QR code again" and Continue stayed disabled.
+  const f = await setup();
+  const passing = () =>
+    Object.assign(new GuestSessionError("GUEST_SESSION_UNAVAILABLE"), {
+      dependencyFailure: true,
+      cause: Object.assign(new Error("acquire"), { code: "TENANT_DATABASE_ACQUIRE_FAILED" }),
+    });
+  f.read.mockRejectedValue(passing());
+  const r = await f.request();
+  expect(r.status).toBe(503);
+  expect(r.headers.get("retry-after")).toBe("5");
+  expect(r.headers.get("cache-control")).toBe("no-store");
+  expect(await r.json()).toEqual({ schemaVersion: 1, error: { code: "session_unavailable" } });
+  // Nothing else is read for a visit that could not be read at all.
+  expect(f.readMovedTable).not.toHaveBeenCalled();
+  expect(f.readEndedVisit).not.toHaveBeenCalled();
+  // The visit is not usable, but the ended-visit reads met the same rush: still busy, not 204.
+  f.read.mockRejectedValue(new GuestSessionError("GUEST_SESSION_UNAVAILABLE"));
+  f.readEndedVisit.mockRejectedValue(passing());
+  const ended = await f.request();
+  expect(ended.status).toBe(503);
+  expect(ended.headers.get("retry-after")).toBe("5");
 });
 it("conceals other Session failures and fails safely without configuration", async () => {
   const f = await setup();
