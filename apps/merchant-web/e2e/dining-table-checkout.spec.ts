@@ -1949,16 +1949,16 @@ for (const width of [390, 1024, 1440])
     await expect(stoppedLine).toHaveText("Phone payment stopped. Take the payment here.");
     const before = (a: string, b: string) =>
       page.evaluate(
-        ([first, second]) => {
-          const x = document.querySelector(first!);
-          const y = document.querySelector(second!);
+        ({ first, second }) => {
+          const x = document.querySelector(first);
+          const y = document.querySelector(second);
           return (
             x !== null &&
             y !== null &&
             (x.compareDocumentPosition(y) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0
           );
         },
-        [a, b],
+        { first: a, second: b },
       );
     expect(await before(".table-checkout__phone-stopped", ".table-checkout__method")).toBe(true);
     expect(await before(".table-checkout__phone-stopped", ".table-checkout__cancel")).toBe(true);
