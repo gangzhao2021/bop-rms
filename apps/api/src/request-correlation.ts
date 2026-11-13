@@ -233,7 +233,7 @@ export function createRequestCorrelationMiddleware({
         ),
         // WP-2423 (reads-under-burst): and its whole answer, not only its database work.
         busyAnswerMarginMs: readAnswerMarginMs,
-        answerBusy: () => sendReadAnswerBusy(response),
+        answerBusy: () => sendReadAnswerBusy(response, request.originalUrl ?? request.url),
       },
     );
   };

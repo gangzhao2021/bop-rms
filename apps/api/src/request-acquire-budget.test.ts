@@ -191,13 +191,28 @@ describe("WP-2423 reads-under-burst: a read's whole answer inside the 15 s clien
     app.get("/fault", (_request, response) => {
       response.status(503).json({ error: "broken" });
     });
+    // b12 review: a request a real fault met (a database that cannot be reached) stays a fault,
+    // even when a later step of it was then turned away as the rush.
+    let faultShedSeen: boolean | undefined;
+    app.get("/fault-then-rush", (_request, response) => {
+      const budget = shared() as { shed?: boolean; faulted?: boolean } | undefined;
+      if (budget) {
+        budget.faulted = true;
+        budget.shed = true;
+      }
+      faultShedSeen = requestWasShed();
+      response.status(503).json({ error: "busy" });
+    });
     const base = await listen(app);
     await fetch(base + "/rush");
     await fetch(base + "/fault");
+    await fetch(base + "/fault-then-rush");
     await pause(20);
     expect(shedSeen).toBe(true);
+    expect(faultShedSeen).toBe(false);
     expect(entries.map((entry) => [entry.statusCode, entry.resultCode])).toEqual([
       [503, "HTTP_RETRY_LATER"],
+      [503, "HTTP_SERVER_ERROR"],
       [503, "HTTP_SERVER_ERROR"],
     ]);
     expect(requestShedFor({})).toBe(false);

@@ -9,6 +9,8 @@ import { AsyncLocalStorage } from "node:async_hooks";
  * process-wide store under the same key, because the API does not depend on that package.
  */
 export const requestAcquireBudgetMs = 10_000;
+/** The longest a phone or staff screen waits for an answer (the database package's own window). */
+export const requestAnswerWindowMs = 15_000;
 /**
  * WP-2423 (guest-table-open-and-busy-reads, v15 2026-11-12): a read (GET/HEAD) does all its
  * database work within this time, inside the 15 s phones and staff screens wait, or answers
@@ -62,6 +64,8 @@ interface RequestAcquireBudget {
   shed?: boolean;
   /** A read answered busy or abandoned by its client: nothing more of it reaches the database. */
   cut?: boolean;
+  /** A real fault met the request: it is logged as a fault even if it was later turned away. */
+  faulted?: boolean;
 }
 /**
  * WP-2423 (reads-under-burst, v15 2026-11-13): the whole answer of a read, not only its database
@@ -74,12 +78,26 @@ interface RequestAcquireBudget {
  * gives its own answer a further second for the hop.
  */
 export const readAnswerMarginMs = 1_000;
-/** The 503 body of a read cut at its answer time: a plain busy code the clients treat as busy. */
+/** The 503 body of a guest read cut at its answer time: the phones read an unknown 503 as busy. */
 export const readAnswerBusyBody = Object.freeze({
   schemaVersion: 1,
   error: Object.freeze({ code: "service_busy", messageKey: "common.service_busy" }),
   code: "SERVICE_BUSY",
 });
+/**
+ * b12 review: the staff screens' busy body. The merchant clients know "busy, ask again" only as
+ * `{ error: "retry_later" }` (apps/api/src/merchant-bff-http.ts `failed`): the workspace asks for
+ * its session again (Owner 2026-11-04) and the refund screens read again, where any other 503 body
+ * would end the workspace start as "unavailable".
+ */
+export const merchantReadAnswerBusyBody = Object.freeze({ error: "retry_later" });
+/** The busy body the surface of `url` understands: staff (/merchant/...) or guest. */
+export function readAnswerBusyBodyFor(url: string | undefined): object {
+  const path = (url ?? "").split(/[?#]/u, 1)[0] ?? "";
+  return path === "/merchant" || path.startsWith("/merchant/")
+    ? merchantReadAnswerBusyBody
+    : readAnswerBusyBody;
+}
 const requestBudgetKey = Symbol.for("bop.database.request-acquire-budget");
 function requestBudgets(): AsyncLocalStorage<RequestAcquireBudget> {
   const holder = globalThis as { [requestBudgetKey]?: AsyncLocalStorage<RequestAcquireBudget> };
@@ -90,11 +108,16 @@ function requestBudgets(): AsyncLocalStorage<RequestAcquireBudget> {
 const budgetsByResponse = new WeakMap<object, RequestAcquireBudget>();
 /** True when the rush turned this response's request away (logged as a wait, not a fault). */
 export function requestShedFor(response: object): boolean {
-  return budgetsByResponse.get(response)?.shed === true;
+  const budget = budgetsByResponse.get(response);
+  return budget?.shed === true && budget.faulted !== true;
 }
-/** True when the rush turned the current request away (no connection in time, time spent). */
+/**
+ * True when the rush turned the current request away (no connection in time, time spent) and no
+ * real fault met it (b12 review: a database that cannot be reached stays a fault).
+ */
 export function requestWasShed(): boolean {
-  return requestBudgets().getStore()?.shed === true;
+  const budget = requestBudgets().getStore();
+  return budget?.shed === true && budget.faulted !== true;
 }
 
 interface AnsweringResponse {
@@ -196,6 +219,9 @@ export function withRequestAcquireBudget<T>(
 export function requestAnswerTimeLeftMs(): number | undefined {
   const budget = requestBudgets().getStore();
   if (budget === undefined || budget.answerBy === undefined) return undefined;
+  // Past the 15 s the clients wait, what the request still runs is unbounded, cut or not (b12
+  // review: never starved for good), as packages/database/src/request-acquire-budget.ts.
+  if (!(Date.now() - budget.startedAt < requestAnswerWindowMs)) return undefined;
   if (budget.cut === true) return 0;
   if (budget.ended) return undefined;
   return budget.answerBy - Date.now();
@@ -206,18 +232,22 @@ export function requestAnswerTimeLeftMs(): number | undefined {
  * it: the handler that is still working may try to answer later, and that answer goes nowhere
  * (it would otherwise throw "headers already sent" into the handler, or be written after the end).
  */
-export function sendReadAnswerBusy(response: {
-  statusCode: number;
-  setHeader(name: string, value: string): unknown;
-  end(chunk?: unknown, ...rest: unknown[]): unknown;
-  write?(chunk: unknown, ...rest: unknown[]): unknown;
-  writeHead?(...rest: unknown[]): unknown;
-}): void {
+export function sendReadAnswerBusy(
+  response: {
+    statusCode: number;
+    setHeader(name: string, value: string): unknown;
+    end(chunk?: unknown, ...rest: unknown[]): unknown;
+    write?(chunk: unknown, ...rest: unknown[]): unknown;
+    writeHead?(...rest: unknown[]): unknown;
+  },
+  /** The request's URL: a staff read (/merchant/...) answers the body staff screens know. */
+  url?: string,
+): void {
   response.statusCode = 503;
   response.setHeader("Retry-After", "5");
   response.setHeader("Cache-Control", "no-store");
   response.setHeader("Content-Type", "application/json; charset=utf-8");
-  response.end(JSON.stringify(readAnswerBusyBody));
+  response.end(JSON.stringify(readAnswerBusyBodyFor(url)));
   const ignored = function (this: unknown) {
     return this;
   };

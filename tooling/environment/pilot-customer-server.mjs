@@ -276,7 +276,7 @@ export async function startInternalCustomerServer({
       answerWithinMs: requestReadAnswerWithinMs(req.method, req.originalUrl ?? req.url),
       busyAnswerMarginMs: 2 * readAnswerMarginMs,
       answerBusy: () => {
-        sendReadAnswerBusy(res);
+        sendReadAnswerBusy(res, req.originalUrl ?? req.url);
         res.emit(readAnsweredBusy);
       },
     }),
