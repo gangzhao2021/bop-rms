@@ -334,7 +334,10 @@ it("reads only one eligible shared Dining Cart under scoped read-only transactio
             const result = await action({
               query: async (sql, values) => {
                 const result = await client.query(sql, [...values]);
-                if (afterAggregateRead && sql.startsWith("SELECT jsonb_build_object(")) {
+                if (
+                  afterAggregateRead &&
+                  sql.replace(/^-- bop:stable-read\n/, "").startsWith("SELECT jsonb_build_object(")
+                ) {
                   const inject = afterAggregateRead;
                   afterAggregateRead = null;
                   await inject();
