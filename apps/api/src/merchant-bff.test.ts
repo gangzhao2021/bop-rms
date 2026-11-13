@@ -1135,6 +1135,26 @@ it("WP-2423 reads-under-burst: says whether the Store's Orders changed, under th
   const failed = await request(root, "/merchant/orders/changes", { headers });
   expect(failed.status).toBe(503);
   expect(JSON.stringify(await failed.json())).not.toContain("synthetic");
+  // b12 review: a signed-in staff member without the Orders permission is refused (403), and a
+  // database that cannot be reached is busy (503 retry_later), never a refusal.
+  orderChanges.mockRejectedValueOnce(new Error("MERCHANT_ORDER_QUEUE_DENIED"));
+  const refused = await request(root, "/merchant/orders/changes", { headers });
+  expect(refused.status).toBe(403);
+  orderChanges.mockRejectedValueOnce(
+    Object.assign(new Error("TENANT_DATABASE_ACQUIRE_FAILED"), {
+      code: "TENANT_DATABASE_ACQUIRE_FAILED",
+      diagnostic: Object.freeze({
+        sqlState: "08006",
+        constraint: null,
+        table: null,
+        closed: false,
+      }),
+    }),
+  );
+  const outage = await request(root, "/merchant/orders/changes", { headers });
+  expect(outage.status).toBe(503);
+  expect(outage.headers.get("retry-after")).not.toBeNull();
+  expect(await outage.json()).toEqual({ error: "retry_later" });
   const unconfigured = await serve(fakeService());
   expect((await request(unconfigured, "/merchant/orders/changes", { headers })).status).toBe(503);
 });
