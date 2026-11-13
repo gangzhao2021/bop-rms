@@ -365,7 +365,15 @@ export function StoreOptionRecipesPage({
     const change = row.change;
     const status = optionRecipeStatus(row);
     const buttons = [];
-    if (view.permissions.mayEdit && editing !== keyOf(row))
+    // WP-2423 (b11): a choice answered on the Menu page is a staff declaration, not stock; it is
+    // changed where it was answered, never in the stock-recipe form.
+    if (change !== null && declaredOf(change.content) !== undefined)
+      buttons.push(
+        <Link key="menu" to="/app/commerce/menus">
+          {t("Change on the Menu page")}
+        </Link>,
+      );
+    else if (view.permissions.mayEdit && editing !== keyOf(row))
       buttons.push(
         <button
           key="edit"
@@ -443,7 +451,7 @@ export function StoreOptionRecipesPage({
           <h2>{t("Option recipes")}</h2>
           <p>
             {t(
-              "What choosing an option does to each size's recipe — for stock, cost, kitchen and the allergens customers see. A change needs a cost review and a food-safety review by two people other than its author, then publication. Source as of",
+              "What choosing an option does to each size's recipe — for stock, cost, kitchen and the allergens customers see. A change needs a cost review and a food-safety review by two people other than its author, then publication. A choice listed from the Menu page at a Brand with one Store, or by the Brand's owner, and a change reviewed by a sole operator are approved by that one person; their reviews say so. Source as of",
             )}{" "}
             <SourceTime instant={view.sourceAsOf} />
           </p>
@@ -669,6 +677,19 @@ export function StoreOptionRecipesPage({
   );
 }
 
+/**
+ * WP-2423 (b11): a review one person gave alone says under which rule, so "approved by You" never
+ * reads as breaking the two-reviewer rule the page states.
+ */
+export function aloneReviewText(
+  mode: "SoleOperator" | "SingleStoreListing" | "BrandOwnerListing",
+): string {
+  if (mode === "SoleOperator") return t("given alone as sole operator");
+  if (mode === "SingleStoreListing")
+    return t("given alone when listing from the Menu page (the Brand has one Store)");
+  return t("given alone by the Brand's owner when listing from the Menu page");
+}
+
 /** Who saved the change and when, each review given (by whom, when) and what is still needed. */
 export function ChangeHistory({ row }: { readonly row: OptionRecipeRow }) {
   const change = row.change;
@@ -692,6 +713,9 @@ export function ChangeHistory({ row }: { readonly row: OptionRecipeRow }) {
             reviewerLabel: systemText(review.reviewerLabel),
           })}{" "}
           <SourceTime instant={review.reviewedAt} />
+          {review.mode !== undefined && review.mode !== "Independent"
+            ? ` — ${aloneReviewText(review.mode)}`
+            : ""}
           {review.comment ? ` — ${review.comment}` : ""}
         </li>
       ))}

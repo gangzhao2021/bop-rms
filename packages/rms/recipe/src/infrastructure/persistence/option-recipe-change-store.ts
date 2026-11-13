@@ -440,9 +440,17 @@ export interface OptionRecipeChangeView {
     readonly reviewerReference: string;
     readonly comment: string | null;
     readonly reviewedAt: string;
+    /**
+     * WP-2423 (b11): how the review was given. `Independent`: by someone other than the author;
+     * otherwise by one person alone, under the rule named (sole operator, listing at the Brand's
+     * one Store, or the Brand's owner listing).
+     */
+    readonly mode: OptionRecipeReviewMode;
   }[];
   readonly publishedAt: string | null;
 }
+export type OptionRecipeReviewMode =
+  "Independent" | "SoleOperator" | "SingleStoreListing" | "BrandOwnerListing";
 /** The latest change of each binding option, with its reviews and publication. */
 export async function listOptionRecipeChanges(
   tx: RecipeAuthoringTransaction,
@@ -459,7 +467,7 @@ export async function listOptionRecipeChanges(
          c.quantity_microunits::text quantity,c.unit_cost_numerator::text cost,c.loss_basis_points,c.change_digest,c.expansion_json,
          c.author_actor_id::text author,c.recorded_at,p.published_at,
          COALESCE((SELECT jsonb_agg(jsonb_build_object('kind',r.review_kind,'decision',r.decision,'reviewer',r.reviewer_actor_id,
-           'comment',r.comment,'at',to_char(r.reviewed_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')) ORDER BY r.review_kind)
+           'comment',r.comment,'mode',r.review_mode,'at',to_char(r.reviewed_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')) ORDER BY r.review_kind)
            FROM rms_recipe.option_recipe_change_review r WHERE r.change_version_id=c.change_version_id AND r.brand_id=c.brand_id),'[]'::jsonb) reviews
        FROM rms_recipe.option_recipe_change c
        LEFT JOIN rms_recipe.option_recipe_change_publication p ON p.change_version_id=c.change_version_id AND p.brand_id=c.brand_id
@@ -502,6 +510,7 @@ export async function listOptionRecipeChanges(
           decision: string;
           reviewer: string;
           comment: string | null;
+          mode: string;
           at: string;
         }[]
       ).map((r) => ({
@@ -510,6 +519,9 @@ export async function listOptionRecipeChanges(
         reviewerReference: r.reviewer,
         comment: r.comment,
         reviewedAt: r.at,
+        mode: (["SoleOperator", "SingleStoreListing", "BrandOwnerListing"].includes(r.mode)
+          ? r.mode
+          : "Independent") as OptionRecipeReviewMode,
       })),
       publishedAt: row.published_at === null ? null : iso(row.published_at),
     });

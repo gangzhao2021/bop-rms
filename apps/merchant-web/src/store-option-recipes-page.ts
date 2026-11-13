@@ -63,6 +63,11 @@ export interface OptionRecipeRow {
       readonly reviewerLabel: string;
       readonly comment: string | null;
       readonly reviewedAt: string;
+      /**
+       * WP-2423 (b11): given by one person alone, and under which rule (absent from an older
+       * server, or `Independent`: by someone other than the author).
+       */
+      readonly mode?: "Independent" | "SoleOperator" | "SingleStoreListing" | "BrandOwnerListing";
     }[];
     readonly lines: readonly {
       readonly skuReference: string;

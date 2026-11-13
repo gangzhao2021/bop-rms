@@ -3,6 +3,7 @@ import pg from "pg";
 import { it } from "vitest";
 import {
   createPostgresRecipeModifierSource,
+  listOptionRecipeChanges,
   parseOptionRecipeChangeContent,
   publishOptionRecipeChange,
   reviewOptionRecipeChange,
@@ -325,6 +326,22 @@ it("option recipe review: a single store's author reviews and publishes alone; n
           )
         ).rows[0].n,
         2,
+      );
+      // WP-2423 (b11): the read Option recipes shows says each review was given alone, and
+      // under which rule, under the pilot API role.
+      const listed = await tx((t) =>
+        listOptionRecipeChanges(t, scope, [
+          { bindingReference: binding, optionReference: oatOption },
+        ]),
+      );
+      assert.deepEqual(
+        listed
+          .get(binding + ":" + oatOption)
+          .reviews.map((entry) => [entry.kind, entry.reviewerReference, entry.mode]),
+        [
+          ["Cost", owner, "SingleStoreListing"],
+          ["FoodSafety", owner, "SingleStoreListing"],
+        ],
       );
       assert.equal((await publish(oatChange)).status, "Applied");
       const source = createPostgresRecipeModifierSource({ run: (work) => tx(work) });

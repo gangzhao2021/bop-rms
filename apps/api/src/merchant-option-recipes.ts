@@ -476,6 +476,8 @@ export function createMerchantOptionRecipes(options: {
                         reviewerLabel: label(review.reviewerReference),
                         comment: review.comment,
                         reviewedAt: review.reviewedAt,
+                        // WP-2423 (b11): one person alone, and under which rule, said as such.
+                        mode: review.mode,
                       })),
                       lines: change.expansion.map((entry) => ({
                         skuReference: entry.skuReference,
