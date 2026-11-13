@@ -121,7 +121,8 @@ export function paperOrderPaymentCommand(
     expectedTotalMinor: placed.totalMinor,
     slipReference: payment.tender === "Cash" ? null : payment.slipReference,
     takenAt: payment.takenAt,
-    ...(payment.slipConfirmation === null || payment.tender === "Cash"
+    // Only a confirmed slip sends the field (a payment built without one sends none).
+    ...((payment.slipConfirmation ?? null) === null || payment.tender === "Cash"
       ? {}
       : { slipConfirmation: payment.slipConfirmation }),
     // Paid in cash during the outage: the cash total was taken and any change given then.
