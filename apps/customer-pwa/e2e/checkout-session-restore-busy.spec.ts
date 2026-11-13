@@ -145,7 +145,7 @@ for (const screen of [
       const alert = page.getByRole("alert").filter({ hasText: "The store’s system is busy" });
       await expect(alert).toBeVisible();
       await expect(alert).toContainText(
-        "Your cart is kept. It loads again by itself in 5 seconds.",
+        "Your order and cart are kept. This page loads again by itself in 5 seconds.",
       );
       await expect(alert.getByRole("button", { name: "Try again" })).toBeVisible();
       await expect(page.getByText(/session ended|Scan the location QR code/iu)).toHaveCount(0);
@@ -169,6 +169,66 @@ for (const screen of [
       await page.screenshot({
         path: test.info().outputPath("checkout-restore-after-busy-" + screen.width + ".png"),
       });
+      // The restored visit reaches every page: the menu opens at this Store, never "scan again".
+      await page
+        .getByRole("navigation", { name: "Customer journey" })
+        .getByRole("link", { name: "Menu" })
+        .click();
+      await expect(page).toHaveURL(/\/menu$/u);
+      await expect(page.getByText("Synthetic Rush Store").first()).toBeVisible();
+      await expect(
+        page.getByText(/Scan the (?:location )?QR code|don’t know which location/iu),
+      ).toHaveCount(0);
+      expect(failures).toEqual([]);
+    });
+
+    test("a reload of the menu in the rush waits busy, then opens at the guest's Store", async ({
+      page,
+    }) => {
+      const failures: string[] = [];
+      page.on("pageerror", () => failures.push("page error"));
+      let busy = true;
+      await page.route("**/api/v1/customer/session/csrf", (route) =>
+        busy
+          ? route.fulfill({
+              status: 503,
+              headers: { "retry-after": "5", "cache-control": "no-store" },
+              json: { schemaVersion: 1, error: { code: "session_unavailable" } },
+            })
+          : route.fulfill({
+              status: 200,
+              headers: { "cache-control": "no-store" },
+              json: {
+                schemaVersion: 1,
+                csrfToken: "e".repeat(43),
+                menuContext: {
+                  publicStoreReference: id(4),
+                  channel: "Pickup",
+                  locale: "en-CA",
+                  brandDisplayName: "Synthetic Brand",
+                  storeDisplayName: "Synthetic Rush Store",
+                },
+              },
+            }),
+      );
+      await page.goto("/menu");
+      const alert = page.getByRole("alert").filter({ hasText: "The store’s system is busy" });
+      await expect(alert).toBeVisible();
+      await expect(
+        page.getByText(/Scan the (?:location )?QR code|don’t know which location/iu),
+      ).toHaveCount(0);
+      await expectNoInternalText(page);
+      await page.screenshot({
+        path: test.info().outputPath("menu-restore-busy-" + screen.width + ".png"),
+      });
+      // Try again asks at once once the rush has passed.
+      busy = false;
+      await alert.getByRole("button", { name: "Try again" }).click();
+      await expect(alert).toHaveCount(0);
+      await expect(page.getByText("Synthetic Rush Store").first()).toBeVisible();
+      await expect(
+        page.getByText(/Scan the (?:location )?QR code|don’t know which location/iu),
+      ).toHaveCount(0);
       expect(failures).toEqual([]);
     });
   });

@@ -244,35 +244,44 @@ describe("WP-1703 Checkout transport", () => {
       code: "cart_service_unavailable",
       retryAfterSeconds: 5,
     });
-    // Asked for again before the next load: once the store answers, the page has its visit.
+    // The visit is asked for again meanwhile (never waited for): once the store answers, the
+    // next load (the busy notice's own, 5 s later) has its visit.
     fetchMock.mockResolvedValue(
       new Response(JSON.stringify({ schemaVersion: 1, csrfToken: "B".repeat(43) }), {
         headers: { "content-type": "application/json", "cache-control": "no-store" },
       }),
     );
-    await client.recoverVisit?.();
-    expect(getCustomerCsrfCredential()).toBe("B".repeat(43));
+    await expect(client.loadCart()).rejects.toMatchObject({ code: "cart_service_unavailable" });
+    await vi.waitFor(() => expect(getCustomerCsrfCredential()).toBe("B".repeat(43)));
     expect(await client.loadCart()).toBe(cart);
   });
 
-  it("WP-2423 (rush-reads-and-orders-changes): the checkout page asks for its visit again before it loads, then prices it", async () => {
+  it("WP-2423 (rush-reads-and-orders-changes review): checkout says busy at once while the visit is asked for, never a long blank load", async () => {
     setCustomerSessionRestoreUnavailable(true);
-    const order: string[] = [];
-    const client: CheckoutClient = {
-      recoverVisit: vi.fn(async () => {
-        order.push("recover");
-        setCustomerCsrfCredential("C".repeat(43));
-      }),
-      loadCart: vi.fn(async () => {
-        order.push("load");
-        return cart;
-      }),
-      quote: vi.fn(async () => quote),
-    };
-    const controller = createCheckoutController(client, () => id(9));
+    let resolveRestore: (response: Response) => void = () => undefined;
+    const fetchMock = vi.fn(
+      () =>
+        new Promise<Response>((resolve) => {
+          resolveRestore = resolve;
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const loadCurrent = vi.fn(async () => cart);
+    const controller = createCheckoutController(
+      createCheckoutClient({ loadCurrent } as unknown as CustomerCartClient),
+      () => id(9),
+    );
+    // The restore asked again has not answered (a slow rush): the busy notice shows at once.
     await controller.load();
-    expect(order).toEqual(["recover", "load"]);
-    // The new credential came before the load, so the load is current and the cart shows.
+    expect(controller.getState()).toMatchObject({ status: "unavailable" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    resolveRestore(
+      new Response(JSON.stringify({ schemaVersion: 1, csrfToken: "C".repeat(43) }), {
+        headers: { "content-type": "application/json", "cache-control": "no-store" },
+      }),
+    );
+    await vi.waitFor(() => expect(getCustomerCsrfCredential()).toBe("C".repeat(43)));
+    await controller.load();
     expect(controller.getState()).toMatchObject({ status: "ready", cart });
   });
 

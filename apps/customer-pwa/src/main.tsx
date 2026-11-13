@@ -19,11 +19,14 @@ import {
   setCustomerCsrfCredential,
 } from "./session/customer-transaction-context.js";
 import {
+  customerSessionRetryAfterMs,
   restoreCustomerSession,
+  restoreCustomerSessionUntilAnswered,
   type CustomerCurrentOrder,
   type CustomerRestoredVisit,
 } from "./session/session-bootstrap.js";
 import { protectCustomerHistoryRestore } from "./session/history-recovery.js";
+import { SessionRestoreBusy } from "./session/SessionRestoreBusy.js";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router";
@@ -127,18 +130,47 @@ async function start() {
       : null;
   // WP-2423 Q10: a reopened app, or a QR code scanned again while an order is in progress, still
   // finds the order this browser placed before a new visit could replace its Session.
-  await restoreCustomerSession(
-    window.fetch.bind(window),
-    (context) => {
-      initialMenuContext = context;
+  // WP-2423 (rush-reads-and-orders-changes review): every page waits for the Store's real answer
+  // about the visit; while it is busy the page says so and asks again, never "scan the QR code".
+  if (!root) throw new Error("Application root is missing");
+  const reactRoot = createRoot(root);
+  let busyShown = 0;
+  await restoreCustomerSessionUntilAnswered({
+    restore: (timeoutMs) =>
+      restoreCustomerSession(
+        window.fetch.bind(window),
+        (context) => {
+          initialMenuContext = context;
+        },
+        (order) => {
+          currentOrder = order;
+        },
+        (visit) => {
+          restoredVisit = visit;
+        },
+        { timeoutMs },
+      ),
+    onBusy: (retryNow) => {
+      busyShown += 1;
+      reactRoot.render(
+        <StrictMode>
+          <AppErrorBoundary>
+            <BrowserRouter>
+              <LanguageRoot>
+                {() => (
+                  <SessionRestoreBusy
+                    key={busyShown}
+                    retryNow={retryNow}
+                    retryAfterSeconds={customerSessionRetryAfterMs / 1000}
+                  />
+                )}
+              </LanguageRoot>
+            </BrowserRouter>
+          </AppErrorBoundary>
+        </StrictMode>,
+      );
     },
-    (order) => {
-      currentOrder = order;
-    },
-    (visit) => {
-      restoredVisit = visit;
-    },
-  );
+  });
   const runtimePayment = await runtimePaymentLoad;
   const pickupEnabled =
     runtimePayment?.internalTestEntry ??
@@ -203,7 +235,6 @@ async function start() {
           pickupOffered: pickupEnabled,
         })
       : undefined;
-  if (!root) throw new Error("Application root is missing");
   const transport = { fetch: window.fetch.bind(window), online: () => window.navigator.onLine };
   const diningAdmission = {
     journey: createDiningAdmissionJourney({
@@ -220,7 +251,7 @@ async function start() {
     }),
     generateOperationReference: uuidv7,
   };
-  createRoot(root).render(
+  reactRoot.render(
     <StrictMode>
       <AppErrorBoundary>
         <BrowserRouter>

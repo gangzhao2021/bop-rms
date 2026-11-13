@@ -334,3 +334,43 @@ export function recoverCustomerSession(fetcher: typeof fetch = fetch): Promise<v
     });
   return recovery;
 }
+
+/** How long the page waits before it asks for its visit again, as the Store's Retry-After says. */
+export const customerSessionRetryAfterMs = 5000;
+/**
+ * WP-2423 (rush-reads-and-orders-changes review): every guest page (the entry, the menu, the cart,
+ * checkout, the table, an order) starts from what the Store says about this browser's visit. When
+ * the Store could not answer (busy, no answer in time, no network), the page does not start as if
+ * there were no visit ("Scan the location QR code"): it says the system is busy, asks again by
+ * itself every 5 s (or at once on Try again), and starts only with the Store's real answer, so the
+ * menu, the current order and the table it restores reach every page.
+ */
+export async function restoreCustomerSessionUntilAnswered(options: {
+  /** One restore, waiting this long for the answer (the restored facts go to its callbacks). */
+  readonly restore: (timeoutMs: number) => Promise<unknown>;
+  /** The Store has not answered yet: show busy; `retryNow` asks again at once. */
+  readonly onBusy: (retryNow: () => void) => void;
+  readonly sleep?: (milliseconds: number, wake: Promise<void>) => Promise<void>;
+}): Promise<void> {
+  const sleep =
+    options.sleep ??
+    ((milliseconds: number, wake: Promise<void>) =>
+      Promise.race([
+        new Promise<void>((resolve) => {
+          setTimeout(resolve, milliseconds);
+        }),
+        wake,
+      ]));
+  await options.restore(firstRestoreTimeoutMs).catch(() => undefined);
+  while (getCustomerCsrfCredential() === null && isCustomerSessionRestoreUnavailable()) {
+    let retryNow: () => void = () => undefined;
+    const wake = new Promise<void>((resolve) => {
+      retryNow = resolve;
+    });
+    options.onBusy(() => {
+      retryNow();
+    });
+    await sleep(customerSessionRetryAfterMs, wake);
+    await options.restore(customerSessionRecoveryTimeoutMs).catch(() => undefined);
+  }
+}

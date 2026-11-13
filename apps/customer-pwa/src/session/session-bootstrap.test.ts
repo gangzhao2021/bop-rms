@@ -1,5 +1,9 @@
 import { afterEach, it, expect, vi } from "vitest";
-import { recoverCustomerSession, restoreCustomerSession } from "./session-bootstrap.js";
+import {
+  recoverCustomerSession,
+  restoreCustomerSession,
+  restoreCustomerSessionUntilAnswered,
+} from "./session-bootstrap.js";
 import {
   getCustomerCsrfCredential,
   getCheckoutSessionReference,
@@ -415,4 +419,100 @@ it("WP-2423 (rush-reads-and-orders-changes): the store's own answer settles it: 
     await restoreCustomerSession(vi.fn().mockResolvedValue(new Response(null, { status: 401 }))),
   ).toBe(false);
   expect(isCustomerSessionRestoreUnavailable()).toBe(false);
+});
+
+it("WP-2423 (rush-reads-and-orders-changes review): every page waits for the store's answer, says busy meanwhile, and starts with the restored menu, order and table", async () => {
+  // v15 2026-11-13 review: a reload of /menu (or /checkout, then Menu) in a rush started the page
+  // with no menu context, so it said "Scan the location QR code" while the visit was alive.
+  const busy = () =>
+    new Response(JSON.stringify({ schemaVersion: 1 }), {
+      status: 503,
+      headers: { "retry-after": "5", "content-type": "application/json" },
+    });
+  const answered = response({
+    schemaVersion: 1,
+    csrfToken: "D".repeat(43),
+    menuContext: {
+      publicStoreReference: "018f8904-0000-7000-8000-000000000004",
+      channel: "DineIn",
+      locale: "en-CA",
+      brandDisplayName: "Brand",
+      storeDisplayName: "Store",
+    },
+    currentOrder: {
+      orderReference: "018f8904-0000-7000-8000-000000000005",
+      orderNumber: "7",
+      orderType: "DineIn",
+    },
+    visit: { publicTableReference: "018f8904-0000-7000-8000-000000000006", joined: true },
+  });
+  const fetcher = vi
+    .fn()
+    .mockResolvedValueOnce(busy())
+    .mockRejectedValueOnce(new Error("timeout"))
+    .mockResolvedValueOnce(answered);
+  const restored: string[] = [];
+  const timeouts: number[] = [];
+  const waits: number[] = [];
+  let busyShown = 0;
+  await restoreCustomerSessionUntilAnswered({
+    restore: async (timeoutMs) => {
+      timeouts.push(timeoutMs);
+      return restoreCustomerSession(
+        fetcher,
+        (context) => restored.push("menu " + context.storeDisplayName),
+        (order) => restored.push("order " + order.orderNumber),
+        (visit) => restored.push("table " + String(visit.joined)),
+        { timeoutMs },
+      );
+    },
+    onBusy: () => {
+      busyShown += 1;
+    },
+    sleep: async (milliseconds) => {
+      waits.push(milliseconds);
+    },
+  });
+  expect(busyShown).toBe(2);
+  expect(waits).toEqual([5000, 5000]);
+  // The first ask waits 5 s, the asks again as long as a read in a rush may take.
+  expect(timeouts).toEqual([5000, 14_000, 14_000]);
+  expect(restored).toEqual(["menu Store", "order 7", "table true"]);
+  expect(getCustomerCsrfCredential()).toBe("D".repeat(43));
+  expect(isCustomerSessionRestoreUnavailable()).toBe(false);
+});
+
+it("WP-2423 (rush-reads-and-orders-changes review): a store that answers at once, or says there is no visit, shows no busy page; Try again asks at once", async () => {
+  let busyShown = 0;
+  await restoreCustomerSessionUntilAnswered({
+    restore: (timeoutMs) =>
+      restoreCustomerSession(
+        vi.fn().mockResolvedValue(new Response(null, { status: 204 })),
+        undefined,
+        undefined,
+        undefined,
+        { timeoutMs },
+      ),
+    onBusy: () => {
+      busyShown += 1;
+    },
+  });
+  expect(busyShown).toBe(0);
+  expect(isCustomerSessionRestoreUnavailable()).toBe(false);
+  // Try again wakes the wait at once (no 5 s timer is needed).
+  const fetcher = vi
+    .fn()
+    .mockResolvedValueOnce(new Response(null, { status: 503 }))
+    .mockResolvedValueOnce(new Response(null, { status: 204 }));
+  await restoreCustomerSessionUntilAnswered({
+    restore: (timeoutMs) =>
+      restoreCustomerSession(fetcher, undefined, undefined, undefined, { timeoutMs }),
+    onBusy: (retryNow) => {
+      busyShown += 1;
+      retryNow();
+    },
+    sleep: (_milliseconds, wake) => wake,
+  });
+  expect(busyShown).toBe(1);
+  expect(fetcher).toHaveBeenCalledTimes(2);
 });

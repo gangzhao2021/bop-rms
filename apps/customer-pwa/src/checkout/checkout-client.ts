@@ -280,12 +280,6 @@ export interface CheckoutMutationOptions {
 }
 
 export interface CheckoutClient {
-  /**
-   * WP-2423 (rush-reads-and-orders-changes): asks the Store for this page's visit again when it
-   * could not answer before (a rush). Runs before a load starts, as it replaces the credential.
-   * Undefined when there is nothing to ask (the load then starts at once, as before).
-   */
-  recoverVisit?(): Promise<void> | undefined;
   loadCart(): Promise<CartView | null>;
   quote(
     cart: CartView,
@@ -413,12 +407,14 @@ async function requestCheckoutMutationOnce(
 
 export function createCheckoutClient(cartClient: CustomerCartClient): CheckoutClient {
   return Object.freeze({
-    recoverVisit: () =>
-      isCustomerSessionRestoreUnavailable() ? recoverCustomerSession() : undefined,
     async loadCart() {
-      const cart = await cartClient.loadCurrent();
-      if (cart !== null && isCustomerSessionRestoreUnavailable()) throw visitNotKnownYet();
-      return cart;
+      // WP-2423 (rush-reads-and-orders-changes review): busy at once, never a page that only
+      // loads while the visit is asked for again; the busy notice loads it again in 5 s.
+      if (isCustomerSessionRestoreUnavailable()) {
+        void recoverCustomerSession();
+        throw visitNotKnownYet();
+      }
+      return cartClient.loadCurrent();
     },
     async quote(cart: CartView, operationReference: string, options?: CheckoutMutationOptions) {
       const contextCurrent = captureCustomerCsrfContext();
@@ -791,14 +787,6 @@ export function createCheckoutController(
       }
       const observedRevision = revision;
       const query = ++querySequence;
-      // The visit is asked for again first (it replaces the credential this load then holds to),
-      // so the total can be priced right after the cart shows.
-      const recovering = client.recoverVisit?.();
-      if (recovering !== undefined) {
-        await recovering.catch(() => undefined);
-        if (observedRevision !== revision || query !== querySequence || quoteFlight !== null)
-          return;
-      }
       const contextCurrent = captureCustomerCsrfContext();
       try {
         const current = await client.loadCart();

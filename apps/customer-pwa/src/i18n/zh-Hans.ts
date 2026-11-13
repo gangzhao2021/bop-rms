@@ -1066,6 +1066,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Your cart is kept. It loads again by itself in {seconds} seconds.":
     "购物车还在，{seconds} 秒后会自动重新加载。",
   "Nothing was changed. Try again in {seconds} seconds.": "这次没有改动，请 {seconds} 秒后再试。",
+  "Your order and cart are kept. This page loads again by itself in {seconds} seconds.":
+    "你的订单和购物车都还在，页面会在 {seconds} 秒后自动重新加载。",
+  "Trying again…": "正在重试…",
   "We couldn’t load your checkout details. Refresh your checkout to try again.":
     "无法加载结账信息，请刷新结账后重试。",
   "We couldn’t load your order status. Please try again.": "无法加载订单状态，请重试。",

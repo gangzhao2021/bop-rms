@@ -620,8 +620,10 @@ export function createBrowserCustomerCartClient(): CustomerCartClient {
           { method: "GET", ...(signal === undefined ? {} : { signal }) },
           parseCurrent,
         );
-      // The visit is asked for again first when the Store could not answer before (a rush).
-      return isCustomerSessionRestoreUnavailable() ? recoverCustomerSession().then(read) : read();
+      // The visit is asked for again when the Store could not answer before (a rush); the cart is
+      // read with the cookie at once, so the guest sees it while the visit is asked for.
+      if (isCustomerSessionRestoreUnavailable()) void recoverCustomerSession();
+      return read();
     },
     async createCart(input) {
       const contextCurrent = captureCustomerCsrfContext();
