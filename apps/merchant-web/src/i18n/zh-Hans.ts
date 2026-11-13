@@ -5385,8 +5385,12 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "What choosing an option does to each size's recipe — for stock, cost, kitchen and the allergens customers see. A change needs a cost review and a food-safety review by two people other than its author, then publication. A choice listed from the Menu page at a Brand with one Store, or by the Brand's owner, and a change reviewed by a sole operator are approved by that one person; their reviews say so. Source as of":
     "选择某个选项会如何改变每个规格的配方 — 涉及库存、成本、后厨以及顾客看到的过敏原。更改需由作者以外的两个人分别进行成本审核和食品安全审核，然后发布。只有一家门店的品牌从菜单页上架的选项、品牌老板上架的选项，以及唯一操作人审核的更改，由这一个人批准，审核记录会注明。数据截至",
   "given alone as sole operator": "以唯一操作人身份单独审核",
-  "given alone when listing from the Menu page (the Brand has one Store)":
-    "从菜单页上架时单独审核（品牌只有一家门店）",
+  "Your sign-in on this screen has ended, so this page wasn't read. Sign in again to keep working. Nothing you saved is affected.":
+    "这台设备上的登录已结束，所以这个页面没有读取。请重新登录后继续工作。你已保存的内容不受影响。",
+  "Your sign-in on this screen has ended, so this wasn't sent. Sign in again, then try again.":
+    "这台设备上的登录已结束，所以这次没有发送。请重新登录，然后再试一次。",
+  "given alone when listing from the Menu page (the Brand had one Store then)":
+    "从菜单页上架时单独审核（当时品牌只有一家门店）",
   "given alone by the Brand's owner when listing from the Menu page":
     "品牌老板从菜单页上架时单独审核",
   "Change allergens on the Menu page": "在菜单页修改过敏原",

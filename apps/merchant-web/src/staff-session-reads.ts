@@ -103,13 +103,30 @@ export function gateStaffSignInFetch(
     if (!usesStaffSignIn(input, base())) return original(input, init);
     if (ended || leaving)
       return Promise.reject(
-        new DOMException(t("This screen's sign-in has ended; nothing was sent."), "AbortError"),
+        Object.assign(
+          new DOMException(t("This screen's sign-in has ended; nothing was sent."), "AbortError"),
+          ended ? { [signInEndedMark]: true } : {},
+        ),
       );
     return original(input, init).then((response) => {
       if (response.status === 401 || response.status === 403) noteSignedInRequestRefused();
       return response;
     });
   };
+}
+
+const signInEndedMark = Symbol.for("bop.staff-sign-in-ended");
+
+/**
+ * v15 b12: a request this tab did not send because its sign-in has ended (not a dropped
+ * connection). A page says "sign in again", never "check the Wi-Fi".
+ */
+export function isStaffSignInEndedRefusal(error: unknown): boolean {
+  return (
+    error !== null &&
+    typeof error === "object" &&
+    (error as Record<symbol, unknown>)[signInEndedMark] === true
+  );
 }
 
 let installed = false;

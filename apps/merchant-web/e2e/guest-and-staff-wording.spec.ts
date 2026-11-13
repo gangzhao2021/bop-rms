@@ -130,7 +130,9 @@ test("@production b11: a Menu-page choice says who approved it alone and why, ha
     await expect(mild).toBeVisible();
     await expect(mild).toContainText("Cost: approved by You on");
     await expect(
-      mild.getByText(/given alone when listing from the Menu page \(the Brand has one Store\)/u),
+      mild.getByText(
+        /given alone when listing from the Menu page \(the Brand had one Store then\)/u,
+      ),
     ).toHaveCount(2);
     await expect(
       mild.getByRole("link", { name: "Change allergens on the Menu page" }),

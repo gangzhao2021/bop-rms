@@ -131,7 +131,7 @@ describe("WP-2423 (b11): a review one person gave alone says under which rule", 
         })
       ).textContent ?? "";
     expect(
-      text.match(/given alone when listing from the Menu page \(the Brand has one Store\)/gu),
+      text.match(/given alone when listing from the Menu page \(the Brand had one Store then\)/gu),
     ).toHaveLength(2);
     expect(text).toContain("approved by that one person; their reviews say so");
   });
@@ -200,7 +200,7 @@ describe("WP-2423 (b11): a review one person gave alone says under which rule", 
             ],
           })
         ).textContent ?? "";
-      expect(text).toContain("从菜单页上架时单独审核（品牌只有一家门店）");
+      expect(text).toContain("从菜单页上架时单独审核（当时品牌只有一家门店）");
       expect(text).toContain("在菜单页修改过敏原");
       expect(text).toContain("按库存记录此选项");
       expect(text).toContain("由这一个人批准，审核记录会注明");

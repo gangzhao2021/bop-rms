@@ -23,7 +23,7 @@ import {
 } from "./store-option-recipes-page.js";
 import { unitText } from "./recipe-pages.js";
 import { serverProblemText, offlineCheckBeforeRepeatText } from "./failure-words.js";
-import { PageDidNotLoad, readingAgain } from "./PageDidNotLoad.js";
+import { PageDidNotLoad, readingAgain, useReadAgainWhenSignedInAgain } from "./PageDidNotLoad.js";
 
 /** WP-2423 slice 4.4: what each option does to a product's recipes, reviewed and published. */
 const copy: Record<OptionRecipeErrorCode | "Loading", string> = {
@@ -55,6 +55,9 @@ const copy: Record<OptionRecipeErrorCode | "Loading", string> = {
   NeedsReverification: t("Confirm it is you with your authenticator code, then review again."),
   Invalid: t("The change is not valid. Check the amounts."),
   Offline: offlineCheckBeforeRepeatText,
+  SignedOut: t(
+    "Your sign-in on this screen has ended, so this wasn't sent. Sign in again, then try again.",
+  ),
   Unavailable: serverProblemText,
 };
 const statusText: Record<OptionRecipeStatus, string> = {
@@ -121,6 +124,7 @@ export function StoreOptionRecipesPage({
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ tone: "error" | "neutral"; text: string } | null>(null);
   const reload = useCallback(() => setGeneration((value) => value + 1), []);
+  const live = useReadAgainWhenSignedInAgain(reload);
   useEffect(() => {
     setState(readingAgain);
     let active = true;
@@ -137,8 +141,21 @@ export function StoreOptionRecipesPage({
       active = false;
     };
   }, [client, generation]);
-  if (state.kind === "Unavailable" || state.kind === "Offline")
-    return <PageDidNotLoad code={state.kind} title={t("Option recipes")} onRetry={reload} />;
+  // v15 b12: a sign-in that ended mid-page (a refused read while the screen is signed out) says
+  // sign in again, never check the Wi-Fi or no access.
+  if (
+    state.kind === "Unavailable" ||
+    state.kind === "Offline" ||
+    state.kind === "SignedOut" ||
+    (state.kind === "PermissionDenied" && !live)
+  )
+    return (
+      <PageDidNotLoad
+        code={state.kind === "PermissionDenied" ? "SignedOut" : state.kind}
+        title={t("Option recipes")}
+        onRetry={reload}
+      />
+    );
   if (state.kind !== "Found")
     return (
       <StatePanel
@@ -193,7 +210,8 @@ export function StoreOptionRecipesPage({
       setMessage({ tone: "neutral", text: done });
     } catch (error) {
       const code = error instanceof OptionRecipePageError ? error.code : "Unavailable";
-      if (code !== "Offline" && code !== "Unavailable") setPending(null);
+      // Not sent or not known: the same command goes again (a sign-in that ended sent nothing).
+      if (code !== "Offline" && code !== "Unavailable" && code !== "SignedOut") setPending(null);
       const size =
         error instanceof OptionRecipePageError && error.skuReference !== null
           ? view.options
@@ -690,13 +708,15 @@ export function StoreOptionRecipesPage({
 /**
  * WP-2423 (b11): a review one person gave alone says under which rule, so "approved by You" never
  * reads as breaking the two-reviewer rule the page states.
+ * v15 b12: said as at the review: a Brand that has opened more Stores since keeps the review, and
+ * the page never states a Store count that is no longer true.
  */
 export function aloneReviewText(
   mode: "SoleOperator" | "SingleStoreListing" | "BrandOwnerListing",
 ): string {
   if (mode === "SoleOperator") return t("given alone as sole operator");
   if (mode === "SingleStoreListing")
-    return t("given alone when listing from the Menu page (the Brand has one Store)");
+    return t("given alone when listing from the Menu page (the Brand had one Store then)");
   return t("given alone by the Brand's owner when listing from the Menu page");
 }
 

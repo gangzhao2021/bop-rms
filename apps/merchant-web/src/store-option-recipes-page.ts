@@ -1,4 +1,5 @@
 import { t } from "./i18n/i18n.js";
+import { isStaffSignInEndedRefusal } from "./staff-session-reads.js";
 import { parseSoleOperatorGate, type SoleOperatorGateView } from "./SoleOperatorSelfApproval.js";
 /** WP-2423 slice 4.4: RECIPE-OPTION-LIST view contract and same-origin client. */
 export type OptionRecipeErrorCode =
@@ -17,6 +18,8 @@ export type OptionRecipeErrorCode =
   | "SoleOperatorNotInEffect"
   | "NeedsReverification"
   | "Offline"
+  /** v15 b12: this screen's sign-in ended, so nothing was sent. */
+  | "SignedOut"
   | "Unavailable";
 export class OptionRecipePageError extends Error {
   constructor(
@@ -206,8 +209,8 @@ export function createOptionRecipeClient(
         headers: { "content-type": "application/json", "x-bop-csrf": csrf },
         body: JSON.stringify(body),
       });
-    } catch {
-      throw new OptionRecipePageError("Offline");
+    } catch (error) {
+      throw new OptionRecipePageError(isStaffSignInEndedRefusal(error) ? "SignedOut" : "Offline");
     }
     if (!response.ok) {
       const payload = (await response.json().catch(() => null)) as {
