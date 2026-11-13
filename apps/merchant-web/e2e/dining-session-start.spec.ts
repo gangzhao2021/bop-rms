@@ -373,7 +373,7 @@ test("@production Dining reloads tables after an authorized Store switch", async
     expect(route.request().method()).toBe("POST");
     expect(route.request().headers()["x-bop-csrf"]).toBe(csrfFor(selectedStore));
     const query = route.request().postDataJSON();
-    expect(query).toEqual({ afterTableReference: null, limit: 50 });
+    expect(query).toEqual({ afterTableReference: null, limit: 100 });
     expect(query).not.toHaveProperty("storeReference");
     expect(query).not.toHaveProperty("tenantReference");
     expect(query).not.toHaveProperty("brandReference");

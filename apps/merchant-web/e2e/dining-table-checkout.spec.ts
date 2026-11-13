@@ -1784,7 +1784,14 @@ for (const width of [390, 1024, 1440])
     await expect(row("C2")).toContainText("Waiting for payment");
     await expect(row("C2")).toContainText("$33.93");
     await expect(row("C3")).toContainText("Waiting for payment");
-    await expect(row("C1")).toContainText("Checking the bill");
+    // v15 b12: C1's own bill and the queue both failed: it stays in "Needs action" with its Take
+    // payment step, never moved among the seated tables as "Checking the bill".
+    await expect(row("C1")).toContainText("Checking out · bill not read");
+    await expect(row("C1")).toContainText("open the table to see what is owed");
+    await expect(row("C1").getByRole("button", { name: "Take payment" })).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: /^Needs action/u }).locator(".table-tabs__count"),
+    ).toHaveText("3");
     // The guest at C3 pays in full on the phone; C1 still fails and the queue still never answers.
     guestPaid = true;
     await page.clock.fastForward(15_500);
@@ -1936,6 +1943,31 @@ for (const width of [390, 1024, 1440])
     answerStop();
     await expect(checkout).toContainText("Phone payment stopped. Take the payment here.");
     await expect(checkout.getByRole("radio", { name: "Cash" })).toBeVisible();
+    // v15 b12: said where the phone payment was, above how the table pays — not under "Cancel
+    // checkout" — and in the panel's own text size.
+    const stoppedLine = checkout.locator(".table-checkout__phone-stopped");
+    await expect(stoppedLine).toHaveText("Phone payment stopped. Take the payment here.");
+    const before = (a: string, b: string) =>
+      page.evaluate(
+        ([first, second]) => {
+          const x = document.querySelector(first!);
+          const y = document.querySelector(second!);
+          return (
+            x !== null &&
+            y !== null &&
+            (x.compareDocumentPosition(y) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0
+          );
+        },
+        [a, b],
+      );
+    expect(await before(".table-checkout__phone-stopped", ".table-checkout__method")).toBe(true);
+    expect(await before(".table-checkout__phone-stopped", ".table-checkout__cancel")).toBe(true);
+    expect(
+      await stoppedLine.evaluate((element) =>
+        Number.parseFloat(getComputedStyle(element).fontSize),
+      ),
+    ).toBeGreaterThanOrEqual(16);
+    await checkout.screenshot({ path: `test-results/table-phone-stopped-${width}.png` });
     await expect(checkout).not.toContainText("Asking the payment company");
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
