@@ -5594,6 +5594,26 @@ async function journey(journeyEnding) {
           });
           assert.equal(closed.status, "Committed");
           assert.equal((await closing(server, "Finalize")).phase, "Closed");
+          // v15 b15 (L14 BRD 2): a phone of the table, reloading after it closed, reads its
+          // receipt — the comped dishes and $0.00, no payment — not "not found" (it was 404).
+          const zeroReceipt = await settledReceiptFor({
+            scope,
+            ownerScope,
+            transactions: transactions(),
+            phone: tablePhone,
+            provider,
+          });
+          assert.notEqual(zeroReceipt, null);
+          assert.equal(zeroReceipt.paidMinor, "0");
+          assert.equal(zeroReceipt.ordersTotalMinor, "0");
+          assert.deepEqual(zeroReceipt.payments, []);
+          assert.equal(zeroReceipt.split, false);
+          assert.ok(zeroReceipt.rounds.length > 0);
+          assert.ok(
+            zeroReceipt.rounds
+              .flatMap((round) => round.items)
+              .every((item) => item.reduced === "Comp" && item.subtotalMinor !== undefined),
+          );
           // A closed table takes no new party size: the command says so and the database refuses.
           await assert.rejects(recordPartySize(fresh(), 2, 6), {
             code: "DINING_PARTY_SIZE_TABLE_CLOSED",

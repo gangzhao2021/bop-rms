@@ -142,8 +142,14 @@ export function createCustomerDiningTablePayment(options: CustomerDiningTablePay
       );
       const bill = view.bill;
       const paidInFull = bill.settlement !== null || (bill.split !== null && bill.split.paidInFull);
-      // Written off, or closed with nothing paid: there is no receipt to show.
-      if (bill.sessionPhase !== "Closed" || !paidInFull)
+      // v15 b15: a table whose every dish the restaurant comped owed nothing and closed without a
+      // payment; its receipt (the comped dishes, $0.00) is the guest's record of the meal too.
+      const compedToNothing =
+        bill.writeOff === null &&
+        bill.rounds.some((round) => round.items.length > 0) &&
+        bill.rounds.every((round) => round.totalMinor === "0");
+      // Written off, or closed with nothing ordered: there is no receipt to show.
+      if (bill.sessionPhase !== "Closed" || !(paidInFull || compedToNothing))
         throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
       return view;
     },
@@ -395,7 +401,8 @@ export function customerSettledTableReceiptBody(view: DiningTableOnlinePaymentVi
       roundingMinor: sum(payments.map((entry) => entry.roundingMinor)),
       paidMinor: sum(payments.map((entry) => entry.totalMinor)),
       ...(bill.refundedMinor === undefined ? {} : { refundedMinor: bill.refundedMinor }),
-      split: bill.settlement === null,
+      // A table comped to nothing has no payment at all, so no parts either.
+      split: bill.settlement === null && bill.split !== null,
       payments,
     },
   };
