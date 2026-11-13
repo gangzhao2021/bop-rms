@@ -89,14 +89,25 @@ const render = (change: Partial<DiningProgress> = {}) =>
     />,
   );
 it("uses owner phase to offer each confirmed step", () => {
-  expect(render()).toContain("Begin session closing");
+  expect(render()).toContain("Start checkout");
   expect(render()).toContain("disabled");
-  expect(render({ sessionPhase: "Closing" })).toContain("Finalize session closing");
+  expect(render({ sessionPhase: "Closing" })).toContain("Close the table");
   expect(render({ sessionPhase: "Closed" })).toBe("");
-  expect(render({ closureStatus: "Open" })).toContain("Begin session closing");
-  expect(render({ closureStatus: "Open", sessionPhase: "Closing" })).toContain(
-    "Finalize session closing",
+  expect(render({ closureStatus: "Open" })).toContain("Start checkout");
+  expect(render({ closureStatus: "Open", sessionPhase: "Closing" })).toContain("Close the table");
+});
+
+it("b13: the order page's close steps use table words, never dining session terms", () => {
+  // v15 b12 live: "Finish closing this dining session … Finalize session closing" on the English
+  // order page, while every other staff screen says "Close the table".
+  for (const phase of ["Active", "Closing"] as const) {
+    const html = render({ sessionPhase: phase });
+    expect(html).not.toMatch(/dining session|session clos|Finalize/iu);
+  }
+  expect(render({ sessionPhase: "Closing" })).toContain(
+    "I confirm the guests have left and the table can be closed",
   );
+  expect(render()).toContain("I confirm the guests have finished ordering");
 });
 
 it("WP-2423: a lost Finalize answer is re-checked with the same operation", async () => {

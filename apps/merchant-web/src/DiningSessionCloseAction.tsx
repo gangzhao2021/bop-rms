@@ -67,9 +67,9 @@ export function DiningSessionCloseAction({
     <div>
       <p>
         {action === "Begin"
-          ? t("Begin closing this dining session to stop further ordering.")
+          ? t("Start checkout for this table: the guests can't send more rounds.")
           : t(
-              "Finish closing this dining session. All orders, payments and unresolved exceptions will be checked before releasing its table.",
+              "Close the table. Every order, payment and open problem is checked before the table is free for the next guests.",
             )}
       </p>
       <label>
@@ -79,7 +79,10 @@ export function DiningSessionCloseAction({
           disabled={state !== "Idle" || locked}
           onChange={(event) => setConfirmed(event.target.checked)}
         />
-        {t("I confirm this dining session is ready for the next closing step")}
+        {/* b13: plain table words, as on the Tables page (never "dining session"). */}
+        {action === "Begin"
+          ? t("I confirm the guests have finished ordering")
+          : t("I confirm the guests have left and the table can be closed")}
       </label>
       {state !== "Denied" && state !== "NotReady" ? (
         <button
@@ -87,12 +90,12 @@ export function DiningSessionCloseAction({
           onClick={() => void submit()}
         >
           {state === "Unknown"
-            ? t("Retry same session close request")
+            ? t("Send it again")
             : state === "Submitting"
-              ? t("Updating dining session…")
+              ? t("Updating the table…")
               : action === "Begin"
-                ? t("Begin session closing")
-                : t("Finalize session closing")}
+                ? t("Start checkout")
+                : t("Close the table")}
         </button>
       ) : null}
       {state === "Unknown" ? (
@@ -106,7 +109,7 @@ export function DiningSessionCloseAction({
       ) : state === "Denied" ? (
         <p role="status">
           {t(
-            "Session closure was not confirmed. Refresh and check all orders, payments, exceptions and permissions.",
+            "The table was not closed. Refresh, then check its orders, payments and open problems.",
           )}
         </p>
       ) : null}

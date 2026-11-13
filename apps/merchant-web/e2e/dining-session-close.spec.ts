@@ -137,20 +137,26 @@ test("@production session closing advances both steps and recovers a lost finali
   });
   await page.goto("/operations/orders");
   // Orders v3: the table's rounds and close steps are read with the order (no switch).
-  const confirm = page.getByRole("checkbox", {
-    name: "I confirm this dining session is ready for the next closing step",
+  // b13: table words, as on the Tables page (never "dining session").
+  const ordering = page.getByRole("checkbox", {
+    name: "I confirm the guests have finished ordering",
     exact: true,
   });
-  const begin = page.getByRole("button", { name: "Begin session closing", exact: true });
+  const begin = page.getByRole("button", { name: "Start checkout", exact: true });
   await expect(begin).toBeDisabled();
-  await confirm.check();
+  await ordering.check();
   await begin.click();
-  const finalize = page.getByRole("button", { name: "Finalize session closing", exact: true });
+  const finalize = page.getByRole("button", { name: "Close the table", exact: true });
   await expect(finalize).toBeDisabled();
   await expect(page.getByText("Checking out", { exact: true })).toBeVisible();
+  const confirm = page.getByRole("checkbox", {
+    name: "I confirm the guests have left and the table can be closed",
+    exact: true,
+  });
   await confirm.check();
   await finalize.click();
-  const retry = page.getByRole("button", { name: "Retry same session close request", exact: true });
+  await expect(page.getByText(/dining session/iu)).toHaveCount(0);
+  const retry = page.getByRole("button", { name: "Send it again", exact: true });
   await expect(retry).toBeEnabled();
   await expect(page.getByRole("button", { name: "Refresh orders", exact: true })).toBeDisabled();
   await retry.click();
