@@ -5,7 +5,7 @@ import {
   type CustomerCartDisplayView,
 } from "@rms/ordering";
 import type { CustomerCartPort, CustomerCartPortResult } from "./customer-cart.js";
-import { requestAnswerTimeLeftMs } from "./request-acquire-budget.js";
+import { requestAnswerTimeLeftMs, requestWasShed } from "./request-acquire-budget.js";
 
 export interface CustomerCartDisplayQuery {
   /** `displayLocale`: the guest's chosen language for names (null: the session's own). */
@@ -52,12 +52,14 @@ const own = (value: unknown, key: string): unknown =>
   value !== null && typeof value === "object"
     ? Object.getOwnPropertyDescriptor(value, key)?.value
     : undefined;
+/** The safe code an owner keeps behind its plain answer (the Guest Session store's, M68). */
+const failureCauseKey = Symbol.for("bop.failure.cause");
 /** No database connection could be had (the rush itself): reading again only adds to it. */
 function noConnection(error: unknown): boolean {
   for (
     let at = error, depth = 0;
     depth < 8 && at !== null && typeof at === "object";
-    depth += 1, at = own(at, "cause")
+    depth += 1, at = own(at, "cause") ?? own(at, failureCauseKey)
   ) {
     const code = own(at, "code"),
       message = own(at, "message");
@@ -96,12 +98,17 @@ export function createCustomerCartReadPort(
   options: {
     readonly pause?: (ms: number) => Promise<void>;
     readonly timeLeftMs?: () => number | undefined;
+    /** Whether the rush turned this request away (no connection in time, its time spent). */
+    readonly shed?: () => boolean;
+    readonly log?: typeof logGuestFailure;
   } = {},
 ): CustomerCartPort {
   const unavailable = Object.freeze({ status: "Unavailable" } as const);
   const pause =
     options.pause ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const timeLeftMs = options.timeLeftMs ?? requestAnswerTimeLeftMs;
+  const shed = options.shed ?? requestWasShed;
+  const log = options.log ?? logGuestFailure;
   const read = async (
     input: unknown,
     displayLocale: string | null | undefined,
@@ -114,19 +121,24 @@ export function createCustomerCartReadPort(
         const known = guestState(error);
         if (known !== null) return known;
         const left = timeLeftMs();
+        const rushed = shed();
         if (
           attempt === 0 &&
           passingFault(error) &&
+          !rushed &&
           !noConnection(error) &&
           (left === undefined || left >= cartReadAgainNeedsMs)
         ) {
           // b10 review: what the first read met is still unknown; its cause codes are kept at a
           // lower level, so live runs can pin it down though the second read may hide it.
-          logGuestFailure("CUSTOMER_CART_READ_RETRIED", error, undefined, 40);
+          log("CUSTOMER_CART_READ_RETRIED", error, undefined, 40);
           await pause(cartReadAgainAfterMs);
           continue;
         }
-        logGuestFailure("CUSTOMER_CART_READ_UNAVAILABLE", error);
+        // WP-2423 (reads-under-burst, v15 2026-11-13): a read the rush turned away (no connection
+        // within its wait, its answer time spent) is the expected "busy, try again" (503 +
+        // Retry-After) the phone sits out: a level-40 line. A real fault stays level 50.
+        log("CUSTOMER_CART_READ_UNAVAILABLE", error, undefined, rushed ? 40 : 50);
         return unavailable;
       }
     }

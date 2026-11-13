@@ -169,6 +169,71 @@ describe("Customer Cart read bridge", () => {
       write.mockRestore();
     }
   });
+  it("WP-2423 reads-under-burst: a read the rush turned away is a level-40 wait, read once, and names why", async () => {
+    // As v15 logged it on 2026-11-13 (05:46Z), with the Session store now keeping its safe code:
+    // the cart's error, the pickup read's, the Session service's passing fault, the store's answer.
+    const store = new Error("GUEST_SESSION_UNAVAILABLE");
+    Object.defineProperty(store, Symbol.for("bop.failure.cause"), {
+      value: Object.freeze({ code: "TENANT_DATABASE_ACQUIRE_FAILED" }),
+    });
+    const burst = Object.assign(new CartError("CART_DEPENDENCY_UNAVAILABLE"), {
+      cause: Object.assign(new CartError("CART_DEPENDENCY_UNAVAILABLE"), {
+        cause: Object.assign(new Error("GUEST_SESSION_UNAVAILABLE"), {
+          dependencyFailure: true,
+          cause: store,
+        }),
+      }),
+    });
+    const lines: { level: number; event: string; causes?: string[] }[] = [];
+    const log = (event: string, error: unknown, _write: unknown, level: 40 | 50 = 50) => {
+      const causes: string[] = [];
+      for (
+        let at = (error as { cause?: unknown }).cause;
+        at !== undefined && at !== null;
+        at =
+          (at as { cause?: unknown }).cause ??
+          Object.getOwnPropertyDescriptor(at, Symbol.for("bop.failure.cause"))?.value
+      )
+        causes.push(
+          String((at as { code?: unknown; message?: unknown }).code ?? (at as Error).message),
+        );
+      lines.push({ level, event, causes });
+    };
+    const pause = vi.fn(async () => undefined);
+    // The database noted that this request found no connection within its wait.
+    const rushed = vi.fn().mockRejectedValue(burst);
+    expect(
+      await createCustomerCartReadPort(
+        { read: rushed },
+        { pause, timeLeftMs: () => 9_000, shed: () => true, log },
+      ).getCurrentCart(input),
+    ).toEqual({ status: "Unavailable" });
+    // Without the request's own note, the kept code alone says there was no connection to give.
+    const kept = vi.fn().mockRejectedValue(burst);
+    expect(
+      await createCustomerCartReadPort(
+        { read: kept },
+        { pause, timeLeftMs: () => 9_000, shed: () => false, log },
+      ).getCurrentCart(input),
+    ).toEqual({ status: "Unavailable" });
+    expect(rushed).toHaveBeenCalledOnce();
+    expect(kept).toHaveBeenCalledOnce();
+    expect(pause).not.toHaveBeenCalled();
+    expect(lines).toEqual([
+      {
+        level: 40,
+        event: "CUSTOMER_CART_READ_UNAVAILABLE",
+        causes: [
+          "CART_DEPENDENCY_UNAVAILABLE",
+          "GUEST_SESSION_UNAVAILABLE",
+          "GUEST_SESSION_UNAVAILABLE",
+          "TENANT_DATABASE_ACQUIRE_FAILED",
+        ],
+      },
+      // Not noted as the rush (the database could also be down): a real fault stays level 50.
+      expect.objectContaining({ level: 50, event: "CUSTOMER_CART_READ_UNAVAILABLE" }),
+    ]);
+  });
   it("M126 I.2: a phone whose place at the table ended reads why, plain or as a cause", async () => {
     for (const error of [
       new CartParticipationEndedError("TableClosed"),

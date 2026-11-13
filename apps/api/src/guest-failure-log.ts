@@ -9,6 +9,7 @@ const codeOf = (error: unknown): string => {
   const code = raw?.code ?? (/^[A-Z][A-Z0-9_]{2,79}$/u.test(message) ? message : raw?.name);
   return typeof code === "string" && /^[A-Za-z0-9_]{1,80}$/u.test(code) ? code : "UNAVAILABLE";
 };
+const failureCauseKey = Symbol.for("bop.failure.cause");
 export function logGuestFailure(
   event: string,
   error: unknown,
@@ -18,11 +19,14 @@ export function logGuestFailure(
 ): void {
   try {
     const causes: string[] = [];
-    for (
-      let at = (error as { cause?: unknown } | null)?.cause;
-      at !== undefined && at !== null && causes.length < 4;
-      at = (at as { cause?: unknown }).cause
-    )
+    // WP-2423 (reads-under-burst): an owner's plain answer may keep its failure's safe code under
+    // `bop.failure.cause` instead of `cause` (the Guest Session store does); both are followed.
+    const next = (at: unknown): unknown =>
+      at === null || typeof at !== "object"
+        ? undefined
+        : ((at as { cause?: unknown }).cause ??
+          Object.getOwnPropertyDescriptor(at, failureCauseKey)?.value);
+    for (let at = next(error); at !== undefined && at !== null && causes.length < 4; at = next(at))
       causes.push(codeOf(at));
     write(
       JSON.stringify({

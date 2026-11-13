@@ -92,6 +92,39 @@ WHERE brand_id = $1 AND store_id = $2 AND session_selector_hash = decode($3, 'he
   AND (closure_expires_at IS NULL OR closure_expires_at > $5)
 RETURNING ${projection}`;
 const unavailable = () => new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
+/**
+ * WP-2423 (reads-under-burst, v15 2026-11-13): the plain answer keeps a safe code of what failed
+ * behind it (`bop.failure.cause`, as the API's own failures do: a code and a SQLSTATE only, never a
+ * message, never enumerated), so the API can tell a read that found no database connection in a
+ * rush from a real fault. Before, every cart read's first step (this Session read) dropped it: the
+ * log said only GUEST_SESSION_UNAVAILABLE, and a read with no connection to give was read again,
+ * adding to the rush.
+ */
+const failureCauseKey = Symbol.for("bop.failure.cause");
+const safeFailureCode = /^[A-Z][A-Z0-9_]{0,63}$/u;
+const ownValue = (value: unknown, key: PropertyKey): unknown =>
+  value !== null && typeof value === "object"
+    ? Object.getOwnPropertyDescriptor(value, key)?.value
+    : undefined;
+const unavailableFrom = (cause: unknown): GuestSessionError => {
+  // This store's own refusal is already the plain answer.
+  if (cause instanceof GuestSessionError && cause.code === "GUEST_SESSION_UNAVAILABLE")
+    return cause;
+  const error = unavailable();
+  const code = ownValue(cause, "code");
+  if (typeof code !== "string" || !safeFailureCode.test(code)) return error;
+  const sqlState = ownValue(ownValue(cause, "diagnostic"), "sqlState");
+  Object.defineProperty(error, failureCauseKey, {
+    value: Object.freeze({
+      code,
+      ...(typeof sqlState === "string" && /^[0-9A-Z]{5}$/u.test(sqlState)
+        ? { diagnostic: Object.freeze({ sqlState }) }
+        : {}),
+    }),
+    enumerable: false,
+  });
+  return error;
+};
 
 export function createPostgresGuestSessionEntryStore(
   runner: GuestSessionEntryTransactionRunner,
@@ -224,7 +257,7 @@ function createGuestEntryStore(
   function lifecycleError(error: unknown): never {
     if (error instanceof GuestSessionError && error.code === "GUEST_SESSION_VERSION_CONFLICT")
       throw new GuestSessionError("GUEST_SESSION_VERSION_CONFLICT");
-    throw unavailable();
+    throw unavailableFrom(error);
   }
 
   return Object.freeze<GuestSessionEntryStore>({
@@ -369,8 +402,8 @@ function createGuestEntryStore(
           }
           return persisted;
         });
-      } catch {
-        throw unavailable();
+      } catch (error) {
+        throw unavailableFrom(error);
       }
     },
     async create(command) {
@@ -415,8 +448,8 @@ function createGuestEntryStore(
           await append(transaction, persisted);
           return persisted;
         });
-      } catch {
-        throw unavailable();
+      } catch (error) {
+        throw unavailableFrom(error);
       }
     },
     async resolve(selectorInput) {
@@ -432,8 +465,8 @@ function createGuestEntryStore(
           if (found !== null && found.sessionSelectorHash !== selector) throw unavailable();
           return found;
         });
-      } catch {
-        throw unavailable();
+      } catch (error) {
+        throw unavailableFrom(error);
       }
     },
     async resolveOperation(operationInput) {
@@ -448,8 +481,8 @@ function createGuestEntryStore(
           if (found !== null && found.operationReference !== operation) throw unavailable();
           return found;
         });
-      } catch {
-        throw unavailable();
+      } catch (error) {
+        throw unavailableFrom(error);
       }
     },
   });
@@ -516,8 +549,8 @@ export function createPostgresGuestSessionLegacyInspector(
               ? "InactiveLegacyRowsOnly"
               : "NoLegacyRows",
         });
-      } catch {
-        throw unavailable();
+      } catch (error) {
+        throw unavailableFrom(error);
       }
     },
   });
@@ -584,8 +617,8 @@ export function createPostgresGuestParticipantSessionSource(
             return parsed;
           }),
         );
-      } catch {
-        throw unavailable();
+      } catch (error) {
+        throw unavailableFrom(error);
       }
     },
   });
