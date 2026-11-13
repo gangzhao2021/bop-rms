@@ -436,6 +436,14 @@ export function createPostgresCardMachinePaymentStore(options: {
           : null;
       if (heldSlip !== null && paper.slipConfirmation === null)
         return fail("CARD_MACHINE_SLIP_ALREADY_RECORDED");
+      // b12 (DEC-PAPER-SLIP-SAME-TABLE): one slip may pay several rounds of one table order; the
+      // audit names the earlier round it was recorded with (and any staff answer given for it).
+      const sharedRound =
+        heldSlip === null &&
+        record.recordingReason === "RecordedAfterOutage" &&
+        record.slipReference !== null
+          ? await findPaperSlip(tx, record.slipReference, record.takenAt, null)
+          : null;
       const event = createCardMachinePaymentEnvelope(record);
       count(
         await tx.query(
@@ -499,6 +507,14 @@ export function createPostgresCardMachinePaymentStore(options: {
             : {
                 slipConfirmation: paper.slipConfirmation,
                 slipAlsoRecordedWithOrder: heldSlip.orderReference,
+              }),
+          ...(sharedRound === null
+            ? {}
+            : {
+                ...(paper.slipConfirmation === null
+                  ? {}
+                  : { slipConfirmation: paper.slipConfirmation }),
+                slipAlsoRecordedWithRound: sharedRound.orderBatchReference,
               }),
           ...(record.cash === undefined
             ? {}

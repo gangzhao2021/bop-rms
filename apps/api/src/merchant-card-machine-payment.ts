@@ -1,6 +1,8 @@
 import { canonicalizeRfc8785, sha256Hex } from "@bop/audit";
 import type { ConsumerTransaction } from "@bop/eventing";
 import { readClosedRecord } from "@bop/identity";
+import { createHash } from "node:crypto";
+import { createPostgresDiningTableStore, parseDiningReference } from "@rms/dining";
 import {
   createPostgresCounterOrderEntryStore,
   createPostgresStaffDiningRoundEntryStore,
@@ -176,6 +178,42 @@ export type StaffCardMachineOrderKind = "CounterPickup" | "DiningInitial" | "Din
  * order (DEC-COUNTER-PAYMENT-RECORD) or a dine-in round staff entered (DEC-STAFF-DINE-IN-ROUND).
  * Null when no staff member entered this batch.
  */
+/**
+ * b12 (DEC-PAPER-SLIP-SAME-TABLE): the dining session seated at a table now, read under the caller's
+ * Store authority; null for a free table or a reference that is not a table of this Store (a
+ * malformed one included, which then names no seating). A failed read is an outage.
+ */
+async function currentSeating(
+  tx: ConsumerTransaction,
+  resolved: {
+    readonly selected: { readonly tenantReference: unknown };
+    readonly context: { readonly brand: { readonly brandReference: unknown } };
+    readonly store: { readonly storeReference: unknown };
+  },
+  tableReference: string,
+): Promise<string | null> {
+  let table: ReturnType<typeof parseDiningReference>;
+  try {
+    table = parseDiningReference(tableReference);
+  } catch {
+    return null;
+  }
+  const found = await createPostgresDiningTableStore(
+    { run: (work) => work(tx as never) },
+    {
+      tenantReference: String(resolved.selected.tenantReference),
+      brandReference: String(resolved.context.brand.brandReference),
+      storeReference: String(resolved.store.storeReference),
+    },
+    {
+      hashIntent: (value: string) => "sha256:" + createHash("sha256").update(value).digest("hex"),
+      equals: (a, b) => a === b,
+    },
+  ).loadTable(table);
+  const session = found?.activeDiningSessionReference ?? null;
+  return session === null ? null : String(session);
+}
+
 /**
  * DEC-PAPER-SEND-IDEMPOTENT (b11): refuses a paper slip already recorded with another order of the
  * Store, naming that order, so the same slip never reaches the day's takings twice by mistake.
@@ -718,7 +756,16 @@ export function createMerchantPaperPaidAtCheck(options: {
               if (sentBefore) return;
             }
             const table = paper.tableReference;
-            const seating = paper.diningSessionReference;
+            // b12 (DEC-PAPER-SLIP-SAME-TABLE): a table that pays each round on one slip is normal.
+            // The seating is the one the send names, or else the table's current seating (staff
+            // send "Another order for this table" without one), so a later round of that seating's
+            // order goes through with its slip and no question; any other order still asks.
+            const seating =
+              typeof paper.diningSessionReference === "string"
+                ? paper.diningSessionReference
+                : typeof table === "string"
+                  ? await currentSeating(tx, resolved, table)
+                  : null;
             await refuseHeldPaperSlip(
               tx,
               owners,

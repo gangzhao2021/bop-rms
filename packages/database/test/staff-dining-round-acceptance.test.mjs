@@ -1897,7 +1897,15 @@ it("the real staff round command takes a round from table entry to the card mach
           },
         });
       await slipCheck({ tableReference, diningSessionReference: seating });
-      await assert.rejects(slipCheck({ tableReference }), {
+      // b12 (DEC-PAPER-SLIP-SAME-TABLE): staff send "Another order for this table" naming no
+      // seating; the server takes the table's current seating, so the round goes through with no
+      // question. A seating that is not the table's, or another table, still asks staff.
+      await slipCheck({ tableReference });
+      await assert.rejects(slipCheck({ tableReference, diningSessionReference: id(0x3f01) }), {
+        code: "CARD_MACHINE_SLIP_ALREADY_RECORDED",
+        slipOrderNumber: second.orderNumber,
+      });
+      await assert.rejects(slipCheck({ tableReference: id(0x3f02) }), {
         code: "CARD_MACHINE_SLIP_ALREADY_RECORDED",
         slipOrderNumber: second.orderNumber,
       });
@@ -1914,7 +1922,6 @@ it("the real staff round command takes a round from table entry to the card mach
       const sharedRound = await send(server, {
         lines: [line(1)],
         recordedAfterOutage: true,
-        expectedDiningSessionReference: seating,
       });
       assert.equal(sharedRound.orderReference, first.orderReference);
       const sharedPaid = await pay({
@@ -1926,6 +1933,50 @@ it("the real staff round command takes a round from table entry to the card mach
       assert.deepEqual(
         [sharedPaid.status, sharedPaid.recordingReason],
         ["Recorded", "RecordedAfterOutage"],
+      );
+      // The shared slip is recorded once per payment, and its audit names the earlier round.
+      assert.deepEqual(
+        await rows(
+          `SELECT a.after_summary_json AS summary FROM rms_payment.card_machine_payment p
+           JOIN platform_audit.audit_record a ON a.audit_id=p.audit_id WHERE p.order_batch_id=$1`,
+          [sharedRound.orderBatchReference],
+        ),
+        [
+          {
+            summary: {
+              amountMinor: sharedRound.totalMinor,
+              recordingReason: "RecordedAfterOutage",
+              slipAlsoRecordedWithRound: second.orderBatchReference,
+            },
+          },
+        ],
+      );
+      // An older page still asks and staff answer "Same slip, it also paid for this order" for a
+      // round of the same order: the answer is kept in the audit with the earlier round.
+      const confirmedRound = await send(server, { lines: [line(1)], recordedAfterOutage: true });
+      await pay({
+        orderBatchReference: confirmedRound.orderBatchReference,
+        expectedTotalMinor: confirmedRound.totalMinor,
+        slipReference: "AUTH 771204",
+        takenAt: earlier,
+        slipConfirmation: "SameSlipAlsoPaysThisOrder",
+      });
+      assert.deepEqual(
+        await rows(
+          `SELECT a.after_summary_json AS summary FROM rms_payment.card_machine_payment p
+           JOIN platform_audit.audit_record a ON a.audit_id=p.audit_id WHERE p.order_batch_id=$1`,
+          [confirmedRound.orderBatchReference],
+        ),
+        [
+          {
+            summary: {
+              amountMinor: confirmedRound.totalMinor,
+              recordingReason: "RecordedAfterOutage",
+              slipConfirmation: "SameSlipAlsoPaysThisOrder",
+              slipAlsoRecordedWithRound: second.orderBatchReference,
+            },
+          },
+        ],
       );
 
       // DEC-PAPER-SEND-IDEMPOTENT (b11 major): a third round is left unpaid until the System
