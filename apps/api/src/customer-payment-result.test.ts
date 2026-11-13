@@ -117,6 +117,28 @@ it("reports missing creation as pending and fails closed when unconfigured", asy
     failure: null,
   });
   expect((await f.send()).status).toBe(200);
+  // v15 b15: a round cancelled unpaid before any payment existed; never declined, paid or unknown.
+  const none = {
+    checkoutSessionReference: id(31),
+    paymentIntentReference: null,
+    orderReference: null,
+    orderBatchReference: null,
+    total: null,
+    payBy: null,
+  };
+  for (const failure of ["NotCompleted", "CancelledByStaff", "StoppedByGuest"]) {
+    f.read.mockResolvedValue({ ...none, status: "Failed", failure });
+    expect((await f.send()).status).toBe(200);
+  }
+  for (const [status, failure] of [
+    ["Failed", "Declined"],
+    ["Failed", null],
+    ["Succeeded", null],
+    ["Unknown", null],
+  ]) {
+    f.read.mockResolvedValue({ ...none, status, failure });
+    expect((await f.send()).status).toBe(503);
+  }
   expect((await (await setup(false)).send()).status).toBe(503);
 });
 

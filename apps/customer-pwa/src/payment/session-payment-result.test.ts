@@ -250,4 +250,17 @@ it("WP-2423: keeps the paid round when the server names it, and rejects a malfor
   await expect(read({ ...unprepared, orderBatchReference: id(4) })).rejects.toMatchObject({
     code: "unknown",
   });
+  // v15 b15: a round cancelled unpaid before any payment existed (never declined or paid).
+  for (const failure of ["NotCompleted", "CancelledByStaff", "StoppedByGuest"] as const)
+    expect(
+      await read({ ...unprepared, orderBatchReference: null, status: "Failed", failure }),
+    ).toEqual({ ...unprepared, status: "Failed", failure });
+  for (const [status, failure] of [
+    ["Failed", "Declined"],
+    ["Succeeded", null],
+    ["Unknown", null],
+  ] as const)
+    await expect(
+      read({ ...unprepared, orderBatchReference: null, status, failure }),
+    ).rejects.toMatchObject({ code: "unknown" });
 });

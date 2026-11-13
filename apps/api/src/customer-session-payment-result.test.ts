@@ -313,3 +313,48 @@ it("a cancelled attempt whose round staff cancelled is said as cancelled by the 
   }
   expect(asked).toEqual(Array(4).fill(refs.operation));
 });
+
+// v15 b15 review (L14 OSC A round 3): the System cancelled the round 2 minutes before the guest
+// looked, but Payment had not recorded the cancelled attempt yet, so the page still offered
+// "Finish paying · $5.09". Ordering's cancellation (recorded only once Payment proved nothing was
+// charged) now answers while Payment has no outcome: with a payment, and with none at all.
+it("a round cancelled before Payment recorded an outcome, or before any payment, is said as cancelled", async () => {
+  for (const [answer, status, failure] of [
+    [async () => "Staff" as const, "Failed", "CancelledByStaff"],
+    [async () => "System" as const, "Failed", "NotCompleted"],
+    [async () => "Guest" as const, "Failed", "StoppedByGuest"],
+    [async () => null, "Pending", null],
+    // Ordering can't be read: said as before (still open), never an outage.
+    [
+      async () => {
+        throw new Error("synthetic outage");
+      },
+      "Pending",
+      null,
+    ],
+  ] as const) {
+    const asked: string[] = [];
+    const f = await fixture(undefined, async (operation) => {
+      asked.push(operation);
+      return answer();
+    });
+    expect(await f.service.read(f.input)).toMatchObject({
+      paymentIntentReference: String(f.original.record.intent.paymentIntentReference),
+      status,
+      failure,
+    });
+    // No payment was ever started for this checkout (System: PAYMENT_NOT_STARTED).
+    f.history.resolveOperation.mockResolvedValue(null as never);
+    expect(await f.service.read(f.input)).toEqual({
+      checkoutSessionReference: f.session.checkoutSessionReference,
+      paymentIntentReference: null,
+      orderReference: null,
+      orderBatchReference: null,
+      status,
+      total: null,
+      payBy: null,
+      failure,
+    });
+    expect(asked).toEqual([refs.operation, refs.operation]);
+  }
+});

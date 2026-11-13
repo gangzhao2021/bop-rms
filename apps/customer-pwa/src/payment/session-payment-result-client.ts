@@ -95,7 +95,8 @@ export function createSessionPaymentResultClient() {
           raw.orderReference !== null ||
           (withRound && raw.orderBatchReference !== null) ||
           raw.total !== null ||
-          raw.status !== "Pending" ||
+          // v15 b15: a round cancelled unpaid before any payment existed (never declined).
+          !(raw.status === "Pending" || (raw.status === "Failed" && failure !== "Declined")) ||
           raw.payBy !== null
         )
           throw new Error();
@@ -103,10 +104,10 @@ export function createSessionPaymentResultClient() {
           checkoutSessionReference: session,
           paymentIntentReference: null,
           orderReference: null,
-          status: "Pending",
+          status: raw.status === "Failed" ? "Failed" : "Pending",
           total: null,
           payBy: null,
-          failure: null,
+          failure,
         });
       }
       if (

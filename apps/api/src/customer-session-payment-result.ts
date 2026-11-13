@@ -77,6 +77,23 @@ export function createCustomerSessionPaymentResult(options: CustomerSessionPayme
       const session = parseCheckoutSession(await reader.read(input));
       if (session.checkoutSessionReference !== input.checkoutSessionReference) return unavailable();
       const stored = await options.history.resolveOperation(session.paymentOperationReference);
+      // v15 b15 (L14 OSC A round 3): who cancelled the round this checkout pays for, read only
+      // while Payment has no outcome to say (no payment, or none recorded yet). Ordering records a
+      // cancellation only once Payment proved nothing was or can be charged, so the guest is told
+      // the round was cancelled instead of being offered to pay it. Unreadable: not said.
+      const cancelledRound = async (): Promise<CustomerSessionPaymentResult["failure"]> => {
+        if (options.cancelledBy === undefined) return null;
+        const by = await options
+          .cancelledBy(String(session.paymentOperationReference))
+          .catch(() => null);
+        return by === "Staff"
+          ? "CancelledByStaff"
+          : by === "Guest"
+            ? "StoppedByGuest"
+            : by === "System"
+              ? "NotCompleted"
+              : null;
+      };
       let result: CustomerSessionPaymentResult = Object.freeze({
         checkoutSessionReference: session.checkoutSessionReference,
         paymentIntentReference: null,
@@ -87,6 +104,10 @@ export function createCustomerSessionPaymentResult(options: CustomerSessionPayme
         payBy: null,
         failure: null,
       });
+      if (stored === null) {
+        const failure = await cancelledRound();
+        if (failure !== null) result = Object.freeze({ ...result, status: "Failed", failure });
+      }
       if (stored !== null) {
         const record = parsePaymentIntentCreationRecord(stored);
         const p = record.intent.preparation,
@@ -159,6 +180,12 @@ export function createCustomerSessionPaymentResult(options: CustomerSessionPayme
                 .catch(() => null)) === "Staff"
                 ? "CancelledByStaff"
                 : failure;
+        } else {
+          const cancelled = await cancelledRound();
+          if (cancelled !== null) {
+            status = "Failed";
+            failure = cancelled;
+          }
         }
         result = Object.freeze({
           checkoutSessionReference: session.checkoutSessionReference,

@@ -119,7 +119,15 @@ export class CustomerPaymentResultHandler {
           throw new Error();
         if (result.paymentIntentReference === null) {
           if (
-            result.status !== "Pending" ||
+            // v15 b15: before any payment, only Pending, or a round cancelled unpaid (by staff,
+            // its guest or its time to pay): never declined, paid or unknown.
+            !(
+              result.status === "Pending" ||
+              (result.status === "Failed" &&
+                ["NotCompleted", "StoppedByGuest", "CancelledByStaff"].includes(
+                  String(result.failure),
+                ))
+            ) ||
             result.orderReference !== null ||
             result.orderBatchReference !== null ||
             result.total !== null
