@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { readClosedRecord, parseCanonicalInstant, GuestSessionError } from "@bop/identity";
 import {
+  CheckoutValidationError,
   createPostgresCartQueryStore,
   createPostgresCartQuoteReader,
   createPostgresConfiguredCartQuoteReader,
@@ -28,6 +29,17 @@ export interface CustomerPickupCapacitySourcesOptions {
     ): Promise<unknown>;
   };
   readonly now: () => string;
+}
+/**
+ * WP-2423 (pickup-capacity-and-retry): the checkout's price is no longer held. By name and code: the
+ * pilot can load Ordering as two copies.
+ */
+export function isQuoteExpired(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    error.name === "CheckoutValidationError" &&
+    (error as { code?: unknown }).code === "CHECKOUT_QUOTE_EXPIRED"
+  );
 }
 /** Compose real owner readers; this source remains behind current Guest/CSRF authorization. */
 function createVersionedCustomerPickupCapacitySources(
@@ -77,6 +89,15 @@ function createVersionedCustomerPickupCapacitySources(
           cartVersion: input.cartVersion,
           observedAt: input.observedAt,
         });
+        // WP-2423 (pickup-capacity-and-retry): the price this checkout was asked with is no longer
+        // held (a guest who waited on "the hour is full" and tried again later). Said as such, so
+        // the page prices the order again; never told as the service being down.
+        if (
+          quote !== null &&
+          String(quote.quoteReference) === input.quoteReference &&
+          String(quote.quoteExpiresAt) <= input.observedAt
+        )
+          throw new CheckoutValidationError("CHECKOUT_QUOTE_EXPIRED");
         const common = {
           cart,
           quote,
@@ -122,7 +143,8 @@ function createVersionedCustomerPickupCapacitySources(
           validUntil,
           ...(cart?.sourceChannel === "Pos" ? { admission: "WalkUp" as const } : {}),
         });
-      } catch {
+      } catch (error) {
+        if (isQuoteExpired(error)) throw error;
         throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
       }
     },

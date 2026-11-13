@@ -1097,6 +1097,15 @@ export const checkoutText = Object.freeze({
       "The restaurant just updated its menu, so we priced your order again. Nothing was sent or charged. Check the total, then continue.",
     );
   },
+  /**
+   * WP-2423 (pickup-capacity-and-retry): the price held for this checkout ran out while the guest
+   * waited (for a pickup place, say), so the order was priced again.
+   */
+  get priceHoldEndedPricedAgain() {
+    return t(
+      "The price we held for you ran out while you waited, so we priced your order again. Nothing was sent or charged. Check the total, then continue.",
+    );
+  },
   get checkoutUnconfirmed() {
     return t("We couldn’t start your checkout. This order hasn’t been charged. Try again.");
   },

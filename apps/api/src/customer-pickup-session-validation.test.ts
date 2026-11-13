@@ -1,5 +1,6 @@
 import { expect, it, vi } from "vitest";
 import { AsapCapacityError } from "@rms/fulfillment";
+import { CheckoutValidationError } from "@rms/ordering";
 
 /**
  * WP-2423 (checkout-session-outage, v15 2026-11-11): Test Merchant 2's pickup hour (limit 20) was
@@ -75,4 +76,13 @@ it("passes any other capacity failure on as it was", async () => {
   const other = new AsapCapacityError("ASAP_CAPACITY_CONFLICT");
   prepare.mockRejectedValueOnce(other);
   await expect(validate()).rejects.toBe(other);
+});
+it("tells a checkout asked with a price no longer held as REQUOTE_REQUIRED, never as the service being down", async () => {
+  // WP-2423 (pickup-capacity-and-retry): a guest told the hour was full pressed Retry checkout
+  // after the 5-minute price hold; it looped on 503 checkout_session_service_unavailable.
+  prepare.mockRejectedValueOnce(new CheckoutValidationError("CHECKOUT_QUOTE_EXPIRED"));
+  await expect(validate()).rejects.toMatchObject({
+    name: "CheckoutSessionServiceError",
+    code: "REQUOTE_REQUIRED",
+  });
 });

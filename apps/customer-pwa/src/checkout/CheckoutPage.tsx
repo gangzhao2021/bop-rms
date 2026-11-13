@@ -179,9 +179,14 @@ export function CheckoutPage({
   );
   /** WP-2423 M132: the large typed tip the guest confirmed (its amount), if any. */
   const [confirmedTip, setConfirmedTip] = useState<string | null>(null);
-  const priceAgainAfterMenuUpdate = () => {
+  // WP-2423 (pickup-capacity-and-retry): the price held for this checkout ran out while the guest
+  // waited (e.g. on "the hour is full"): it is priced again the same way, and says why.
+  const [priceHoldEnded, setPriceHoldEnded] = useState(false);
+  const heldPriceEnded = useRef(false);
+  const priceAgainAfterMenuUpdate = (reason: "menu" | "hold-ended" = "menu") => {
     selectedTip.current = null;
-    setMenuUpdated(true);
+    setMenuUpdated(reason === "menu");
+    setPriceHoldEnded(reason === "hold-ended");
     setSendState("idle");
     sessionController.reset();
     void controller.quote();
@@ -235,7 +240,8 @@ export function CheckoutPage({
     }
   }, [navigate, sessionState, payLater]);
   useEffect(() => {
-    if (sessionState.status === "requote_required") priceAgainAfterMenuUpdate();
+    if (sessionState.status === "requote_required")
+      priceAgainAfterMenuUpdate(heldPriceEnded.current ? "hold-ended" : "menu");
     // Once per refusal: the price-again step leaves this state straight away.
   }, [sessionState.status]);
   useEffect(() => {
@@ -417,6 +423,7 @@ export function CheckoutPage({
       ? retained.selection
       : null;
   const quoteExpired = quote !== null && Date.parse(quote.expiresAt) <= now();
+  heldPriceEnded.current = quoteExpired;
   useEffect(() => {
     if (quote === null || quoteExpired) return;
     const remaining = Date.parse(quote.expiresAt) - now();
@@ -1144,6 +1151,9 @@ export function CheckoutPage({
           {menuUpdated && sessionState.status === "idle" && sendState === "idle" ? (
             <p role="status">{checkoutText.menuUpdatedPricedAgain}</p>
           ) : null}
+          {priceHoldEnded && sessionState.status === "idle" && sendState === "idle" ? (
+            <p role="status">{checkoutText.priceHoldEndedPricedAgain}</p>
+          ) : null}
           {sendState === "failed" ? <p role="alert">{checkoutText.orderUnconfirmed}</p> : null}
           {sendState === "pay_first" ? (
             <p role="alert">{checkoutText.tablePaysAsItOrders}</p>
@@ -1217,7 +1227,14 @@ export function CheckoutPage({
           ) : "canRetry" in sessionState && sessionState.canRetry ? (
             <button
               type="button"
-              onClick={() => void sessionController.retry()}
+              // WP-2423 (pickup-capacity-and-retry): the price is held for 5 minutes; a retry
+              // after that prices the order again first (the guest checks the total), instead of
+              // asking again with a price that is no longer held.
+              onClick={() =>
+                quoteExpired
+                  ? priceAgainAfterMenuUpdate("hold-ended")
+                  : void sessionController.retry()
+              }
               disabled={state.status === "offline"}
             >
               {payLater ? checkoutText.placeOrderAgain : checkoutText.retryCheckout}

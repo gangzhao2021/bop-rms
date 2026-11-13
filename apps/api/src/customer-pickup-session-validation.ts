@@ -15,6 +15,7 @@ import {
   createCustomerPickupCheckoutComposition,
   pickupOrderCapacityLinkFromHistory,
 } from "./customer-pickup-checkout-composition.js";
+import { isQuoteExpired } from "./customer-pickup-capacity-sources.js";
 
 type Options<V extends 1 | 2> = Pick<
   CustomerPickupOrderSubmissionOptions<V>,
@@ -151,6 +152,9 @@ function create<V extends 1 | 2>(
       // The guest is told the hour is full (nothing created or charged), never "try again later"
       // as if the system were down.
       if (isPickupFull(error)) throw new CheckoutSessionServiceError("PICKUP_FULL");
+      // WP-2423 (pickup-capacity-and-retry): the price this checkout was asked with is no longer
+      // held (e.g. tried again after the hour was full): the page prices the order again.
+      if (isQuoteExpired(error)) throw new CheckoutSessionServiceError("REQUOTE_REQUIRED");
       throw error;
     }
     if (prepared.record.paymentOperationReference !== allocation.paymentOperationReference)

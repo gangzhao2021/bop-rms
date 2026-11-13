@@ -1,5 +1,6 @@
 import { parseOrderCapacityLink } from "@rms/ordering";
 import { createHash } from "node:crypto";
+import { isQuoteExpired } from "./customer-pickup-capacity-sources.js";
 import {
   GuestSessionService,
   GuestSessionError,
@@ -302,6 +303,8 @@ export function createCustomerPickupCheckoutComposition(options: CustomerPickupC
       }
     } catch (error) {
       if (error instanceof AsapCapacityError) throw error;
+      // WP-2423 (pickup-capacity-and-retry): a new checkout asked with a price no longer held.
+      if (mode === "Prepare" && isQuoteExpired(error)) throw error;
       return unavailable();
     }
   }
