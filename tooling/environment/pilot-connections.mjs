@@ -73,6 +73,16 @@ export async function acquirePilotConnection(pool, policy = {}) {
 /** How often an entry's heartbeat asks the database (`startPilotDatabaseHeartbeat`). */
 export const pilotDatabaseHeartbeatMs = 1000;
 /**
+ * WP-2423 (rush-logging-and-entry review): how many answered asks one heartbeat connection serves
+ * before it is closed and the next beat opens a new one. An answer on a connection opened long ago
+ * only shows that connection still works; a fault where new connections hang (the database's
+ * listener or sign-in stuck, a network or TLS fault on new sockets) would still read as the rush.
+ * With a new connection every 5 s, at least once per answering window
+ * (`tenantConnectionAnsweringWindowMs`, 5 s), the heartbeat stops being answered within about that
+ * window when new connections cannot be opened, and those waits are logged as faults again.
+ */
+export const pilotDatabaseHeartbeatReopenBeats = 5;
+/**
  * WP-2423 (rush-logging-and-entry, v15 2026-11-13): an entry asks the database `SELECT 1` once a
  * second on a connection of its own, never one of its pool's, and notes each answer for the pool
  * (`noteTenantDatabaseAnswered`). In three live bursts the API's pool got nothing back for ten
@@ -80,13 +90,16 @@ export const pilotDatabaseHeartbeatMs = 1000;
  * by the rush was logged as a fault (level 50, HTTP_SERVER_ERROR). The heartbeat is answered in a
  * rush and not when the database hangs, restarts or cannot be reached, so a wait that ran out is
  * told apart: the rush (level 40, HTTP_RETRY_LATER) or a fault (level 50). Each ask is bounded by
- * the client's own 2 s limits; a failed one drops its connection and the next opens a new one.
+ * the client's own 2 s limits; a failed one drops its connection and the next opens a new one, and
+ * a connection that answered `reopenEveryBeats` asks is replaced, so the answers also show that new
+ * connections can be opened.
  */
 export function startPilotDatabaseHeartbeat(
   pool,
   openClient,
   {
     intervalMs = pilotDatabaseHeartbeatMs,
+    reopenEveryBeats = pilotDatabaseHeartbeatReopenBeats,
     schedule = (work, ms) => {
       const handle = setTimeout(work, ms);
       handle.unref?.();
@@ -96,6 +109,7 @@ export function startPilotDatabaseHeartbeat(
   } = {},
 ) {
   let client = null;
+  let answered = 0;
   let stopped = false;
   let timer;
   const end = (target) => {
@@ -105,27 +119,36 @@ export function startPilotDatabaseHeartbeat(
       /* Already ended. */
     }
   };
+  const drop = () => {
+    end(client);
+    client = null;
+    answered = 0;
+  };
   const beat = async () => {
     if (stopped) return;
     let opening = null;
     try {
       if (client === null) {
-        opening = openClient();
-        // An error on the heartbeat's own connection never reaches the process.
-        opening.on("error", () => {
-          if (client === opening) client = null;
+        const opened = openClient();
+        opening = opened;
+        // An error on the heartbeat's own connection never reaches the process; a connection that
+        // failed between beats is dropped, so the next beat opens a new one at once.
+        opened.on("error", () => {
+          if (client === opened) drop();
         });
-        await opening.connect();
-        if (stopped) return end(opening);
-        client = opening;
+        await opened.connect();
+        if (stopped) return end(opened);
+        client = opened;
         opening = null;
       }
       await client.query("SELECT 1");
-      if (!stopped) noteTenantDatabaseAnswered(pool);
+      if (stopped) return;
+      noteTenantDatabaseAnswered(pool);
+      answered += 1;
+      if (answered >= reopenEveryBeats) drop();
     } catch {
       end(opening);
-      end(client);
-      client = null;
+      drop();
     } finally {
       if (!stopped) timer = schedule(() => void beat(), intervalMs);
     }
@@ -135,8 +158,7 @@ export function startPilotDatabaseHeartbeat(
     stop() {
       stopped = true;
       cancel(timer);
-      end(client);
-      client = null;
+      drop();
     },
   });
 }

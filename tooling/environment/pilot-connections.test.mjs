@@ -6,6 +6,7 @@ import {
   guardPilotPoolConnections,
   pilotAcquireBudgetMs,
   pilotDatabaseHeartbeatMs,
+  pilotDatabaseHeartbeatReopenBeats,
   startPilotDatabaseHeartbeat,
 } from "./pilot-connections.mjs";
 
@@ -138,10 +139,28 @@ it("WP-2423 (rush-logging-and-entry): an entry's heartbeat asks on its own conne
   answer = "ok";
   await next();
   expect(opened).toHaveLength(3);
-  // An error on the heartbeat's own connection never reaches the process.
+  // An error on the heartbeat's own connection never reaches the process, and the connection is
+  // dropped at once: the next beat opens a new one instead of losing a beat on a dead connection.
   expect(() => opened[2].emit("error", new Error("terminated"))).not.toThrow();
-  heartbeat.stop();
   expect(opened[2].ended).toBe(true);
+  await next();
+  expect(opened).toHaveLength(4);
+  expect(opened[3].ended).toBe(false);
+  // Review: an answer only on an old connection never shows new ones can be opened, so after
+  // its answered asks the connection is closed and the next beat opens a new one.
+  for (let ask = 1; ask < pilotDatabaseHeartbeatReopenBeats; ask += 1) await next();
+  expect(opened).toHaveLength(4);
+  expect(opened[3].ended).toBe(true);
+  await next();
+  expect(opened).toHaveLength(5);
+  // New connections that cannot be opened stop the answers, though the last one worked.
+  answer = "refused";
+  for (let ask = 1; ask < pilotDatabaseHeartbeatReopenBeats; ask += 1) await next();
+  await next();
+  expect(opened).toHaveLength(6);
+  expect(opened[5].connected).toBe(false);
+  heartbeat.stop();
+  expect(opened.every((client) => client.ended)).toBe(true);
 });
 
 it("WP-2423 (rush-logging-and-entry): a guest read whose wait ran out with no pool answer for 10 s is the rush while the heartbeat is answered, a fault when it is not", async () => {
