@@ -40,6 +40,7 @@ import {
   listDiningSessionMergedInto,
   listDiningSessionMovedFrom,
   listDiningSessionTableLabels,
+  listSeatedDiningSessions,
 } from "@rms/dining";
 import {
   listOpenDiningTableAllergies,
@@ -190,6 +191,12 @@ export interface KitchenPreparation {
   readonly takenOnPaper?: boolean;
   /** WP-2423 (M93, Owner decision 18): the dish contains alcohol; check ID (19+) when serving. */
   readonly checkId?: boolean;
+  /**
+   * v15 b11: the dish is for a table whose guests are still seated (its dining session, or the
+   * table it was merged into, is open). Its round stays that table's work on the board even after
+   * the business day turned (late-night service), never an earlier day's ticket to close.
+   */
+  readonly atSeatedTable?: boolean;
 }
 const unavailableAllergens: KitchenItemAllergens = Object.freeze({ status: "Unavailable" });
 const noPreparation: KitchenPreparation = Object.freeze({
@@ -276,6 +283,7 @@ const itemView = (
   kitchenSection: preparation.kitchenSection,
   ...(preparation.takenOnPaper === true ? { takenOnPaper: true as const } : {}),
   ...(preparation.checkId === true ? { checkId: true as const } : {}),
+  ...(preparation.atSeatedTable === true ? { atSeatedTable: true as const } : {}),
 });
 /**
  * WP-2423 Q3: Kitchen gives each work item's menu keys, Catalog the disclosure published for them.
@@ -353,6 +361,18 @@ export async function kitchenPreparation(
   const tables = await listDiningSessionTableLabels(transaction, scope, diningSessions);
   const movedFrom = await listDiningSessionMovedFrom(transaction, scope, diningSessions);
   const mergedInto = await listDiningSessionMergedInto(transaction, scope, diningSessions);
+  const seatedSessions = await listSeatedDiningSessions(
+    transaction as never,
+    scope,
+    diningSessions,
+  );
+  const seated = (session: string | null) => {
+    if (session === null) return false;
+    const host = mergedInto.get(session);
+    return host !== undefined
+      ? host.phase === "Active" || host.phase === "Closing"
+      : seatedSessions.has(session);
+  };
   // WP-2423 (M171, Owner decision 17): what each open table must avoid, named from the Brand's
   // allergen list (only when any table is marked).
   const tableAllergyCodes = await listOpenDiningTableAllergies(
@@ -410,6 +430,7 @@ export async function kitchenPreparation(
         Object.freeze({
           ...(takenOnPaper ? { takenOnPaper: true } : {}),
           ...(facts?.checkId === true ? { checkId: true } : {}),
+          ...(seated(order?.diningSessionReference ?? null) ? { atSeatedTable: true } : {}),
           allergens: facts?.allergens ?? unavailableAllergens,
           customerNote: facts?.customerNote ?? null,
           kitchenSection: sections.get(item.workItemReference) ?? null,

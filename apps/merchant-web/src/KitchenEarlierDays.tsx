@@ -19,9 +19,12 @@ import { businessDateText } from "./StoreBusinessDay.js";
  * apart, labelled with their day, guarded before any kitchen step, and closed by a manager.
  */
 export function fromEarlierKitchenDay(
-  item: Pick<KitchenBoardItem, "businessDate">,
+  item: Pick<KitchenBoardItem, "businessDate" | "atSeatedTable">,
   today: string | null | undefined,
 ): boolean {
+  // v15 b11: a table still seated across the day's turn (late-night service) is today's work:
+  // made, marked ready and served as usual, so the table can be closed; never closed as stale.
+  if (item.atSeatedTable === true) return false;
   return Boolean(item.businessDate && today && item.businessDate < today);
 }
 

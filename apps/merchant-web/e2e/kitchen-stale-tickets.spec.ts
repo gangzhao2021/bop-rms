@@ -296,6 +296,39 @@ test("@production DEC-KITCHEN-STALE-TICKETS: an earlier day's ticket is kept apa
   ).toEqual({ local: 0, session: 0 });
 });
 
+for (const width of [1440, 1024, 390])
+  test(`@production v15 b11: a seated table's round sent before the day turned stays on today's board, at ${width}`, async ({
+    page,
+  }) => {
+    // BR A on v15: round sent at 23:52 on Oct 13, the guests still at the table on Oct 14. It is
+    // that table's work, made and served as usual (else the table can never close), never an
+    // earlier day's ticket to close.
+    const lateRound = item(0x30, {
+      localizedDisplayNames: { "en-CA": "Late-night congee" },
+      orderLabel: { orderNumber: "7", orderType: "DineIn", tableLabel: "T9" },
+      workItemCreatedAt: "2026-10-14T03:52:00.000Z",
+      businessDate: "2026-10-13",
+      atSeatedTable: true,
+    });
+    const { commands } = await board(page, true, { items: [lateRound] });
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await page.goto("/operations/kitchen");
+    const lanes = page.locator(".kitchen-board-lanes").first();
+    await expect(lanes.getByText("Late-night congee")).toBeVisible();
+    // Only the Oct 9 pickup is kept apart.
+    await expect(page.getByText("1 ticket from earlier days to check and close")).toBeVisible();
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.screenshot({ path: `test-results/kitchen-seated-late-round-${width}.png` });
+    // A kitchen step on it goes straight through, as on today's tickets (no "from Oct 13?").
+    const ticket = lanes.getByRole("region", { name: "Table T9 · Order 7" });
+    await ticket.getByRole("button", { name: "Finished" }).click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect.poll(() => commands.length, { timeout: 8_000 }).toBe(1);
+    expect(commands[0]).toMatchObject({ workItemReference: lateRound.workItemReference });
+  });
+
 test("@production DEC-KITCHEN-STALE-TICKETS: kitchen staff see earlier days apart but cannot close them", async ({
   page,
 }) => {

@@ -134,6 +134,8 @@ function item(value: unknown) {
     ...("comboPartSections" in raw ? { comboPartSections: raw.comboPartSections } : {}),
     ...("chase" in raw ? { chase: raw.chase } : {}),
     ...("takenOnPaper" in raw ? { takenOnPaper: raw.takenOnPaper } : {}),
+    // v15 b11: a dish for a table still seated (kept as that table's work across the day's turn).
+    ...("atSeatedTable" in raw ? { atSeatedTable: raw.atSeatedTable } : {}),
     // WP-2423 M10: refunded units not to be made, when this server gives them.
     ...("refundedQuantity" in raw ? { refundedQuantity: raw.refundedQuantity } : {}),
     // WP-2423 M10: who refunded them (names), when this server gives them.

@@ -72,6 +72,11 @@ export interface KitchenBoardItem {
   /** WP-2423 (M93): the dish contains alcohol; check ID (19+) when serving it. */
   readonly checkId?: boolean;
   /**
+   * v15 b11: for a table whose guests are still seated: its round is the table's work today even
+   * when it was sent before the business day turned (never an earlier day's ticket to close).
+   */
+  readonly atSeatedTable?: boolean;
+  /**
    * WP-2423 M10: units of this dish staff refunded and said not to make (1..requiredQuantity);
    * absent when none.
    */
@@ -447,6 +452,8 @@ function item(value: unknown): KitchenBoardItem {
   const hasPaper =
     value !== null && typeof value === "object" && Object.hasOwn(value, "takenOnPaper");
   const hasCheckId = value !== null && typeof value === "object" && Object.hasOwn(value, "checkId");
+  const hasSeated =
+    value !== null && typeof value === "object" && Object.hasOwn(value, "atSeatedTable");
   const hasRefunded =
     value !== null && typeof value === "object" && Object.hasOwn(value, "refundedQuantity");
   const hasRefundedBy =
@@ -488,6 +495,7 @@ function item(value: unknown): KitchenBoardItem {
     ...(hasChase ? ["chase"] : []),
     ...(hasPaper ? ["takenOnPaper"] : []),
     ...(hasCheckId ? ["checkId"] : []),
+    ...(hasSeated ? ["atSeatedTable"] : []),
     ...(hasRefunded ? ["refundedQuantity"] : []),
     ...(hasRefundedBy ? ["refundedBy"] : []),
     ...(hasRefundedByRoles ? ["refundedByRoles"] : []),
@@ -552,6 +560,13 @@ function item(value: unknown): KitchenBoardItem {
     ...(hasSection ? { kitchenSection: input.kitchenSection as string | null } : {}),
     ...(hasPartSections ? { comboPartSections: comboPartSections(input.comboPartSections) } : {}),
     ...(input.takenOnPaper === true ? { takenOnPaper: true } : {}),
+    ...(hasSeated
+      ? input.atSeatedTable === true
+        ? { atSeatedTable: true }
+        : (() => {
+            throw new Error("KITCHEN_BOARD_INVALID");
+          })()
+      : {}),
     ...(hasCheckId
       ? input.checkId === true
         ? { checkId: true }

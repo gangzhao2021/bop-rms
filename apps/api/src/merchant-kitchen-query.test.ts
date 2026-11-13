@@ -314,6 +314,8 @@ it("WP-2423 Q3: serves the published menu disclosure per work item and restores 
     allergenFreeClaim: false,
     assistanceCode: "ALLERGEN_ASSISTANCE_REQUIRED",
   };
+  // v15 b11: the table's guests are still seated (its session is Active or Closing).
+  let seatedRows: { session: string }[] = [{ session: id(40) }];
   f.tx.query.mockImplementation((async (sql: string) =>
     sql.includes("FROM rms_kitchen.kitchen_work_item")
       ? {
@@ -337,20 +339,22 @@ it("WP-2423 Q3: serves the published menu disclosure per work item and restores 
           }
         : sql.includes("FROM rms_dining.dining_session s")
           ? { rows: [{ session_id: id(40), label: "T4" }], rowCount: 1 }
-          : sql.includes("published_menu_projection_sellable")
-            ? {
-                rows: [
-                  {
-                    menu_version: id(20),
-                    sellable: id(21),
-                    product_version: id(22),
-                    default_locale: "en-CA",
-                    disclosure: JSON.stringify(disclosure),
-                  },
-                ],
-                rowCount: 1,
-              }
-            : { rows: [], rowCount: 0 }) as never);
+          : sql.includes("FROM rms_dining.dining_session at_table")
+            ? { rows: seatedRows, rowCount: seatedRows.length }
+            : sql.includes("published_menu_projection_sellable")
+              ? {
+                  rows: [
+                    {
+                      menu_version: id(20),
+                      sellable: id(21),
+                      product_version: id(22),
+                      default_locale: "en-CA",
+                      disclosure: JSON.stringify(disclosure),
+                    },
+                  ],
+                  rowCount: 1,
+                }
+              : { rows: [], rowCount: 0 }) as never);
   const result = (await f.operation(f.input)) as {
     items: { allergens: unknown; orderLabel: unknown; customerNote: unknown }[];
   };
@@ -371,6 +375,12 @@ it("WP-2423 Q3: serves the published menu disclosure per work item and restores 
     forChoices: false,
     items: [{ code: "MILK", name: "Milk", classification: "Contains" }],
   });
+  // v15 b11: a seated table's dish stays that table's work across the business day's turn.
+  expect((result.items[0] as { atSeatedTable?: boolean }).atSeatedTable).toBe(true);
+  seatedRows = [];
+  const left = (await f.operation(f.input)) as typeof result;
+  expect(Object.hasOwn(left.items[0] ?? {}, "atSeatedTable")).toBe(false);
+  seatedRows = [{ session: id(40) }];
   const calls = f.tx.query.mock.calls as unknown as [string, unknown[]][];
   const catalogRead = calls.findIndex(([sql]) =>
     sql.includes("published_menu_projection_sellable"),

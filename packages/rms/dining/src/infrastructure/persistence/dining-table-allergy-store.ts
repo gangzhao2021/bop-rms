@@ -161,6 +161,36 @@ export async function setDiningTableAllergies(
  * The current allergens of each open table Session asked about (at most 200). Sessions with none,
  * cleared, or no longer open are absent.
  */
+/**
+ * v15 b11: the tables still seated (their dining session is Active or Closing) among these
+ * sessions. A round a table sent before the business day turned is still that table's work while
+ * the guests are there (late-night service), so the kitchen keeps it on the board.
+ */
+export async function listSeatedDiningSessions(
+  tx: AllergyTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  diningSessionReferences: readonly string[],
+): Promise<ReadonlySet<string>> {
+  if (diningSessionReferences.length === 0) return new Set();
+  if (diningSessionReferences.length > 200) return invalid();
+  const sessions = [...new Set(diningSessionReferences.map(ref))];
+  return inStore(tx, scope, async (brand, store) => {
+    const { rows } = await tx.query<{ session: string }>(
+      `SELECT at_table.session_id::text session FROM rms_dining.dining_session at_table
+       WHERE at_table.brand_id=$1 AND at_table.store_id=$2 AND at_table.session_id=ANY($3::uuid[])
+       AND at_table.phase IN ('Active','Closing')`,
+      [brand, store, sessions],
+    );
+    const found = new Set<string>();
+    for (const row of rows) {
+      if (!sessions.includes(row.session))
+        throw new DiningSessionError("DINING_SESSION_DEPENDENCY_UNAVAILABLE");
+      found.add(row.session);
+    }
+    return found;
+  });
+}
+
 export async function listOpenDiningTableAllergies(
   tx: AllergyTransaction,
   scope: { readonly brandReference: string; readonly storeReference: string },
