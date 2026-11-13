@@ -430,7 +430,9 @@ it("a Session read that could not get a database connection keeps that failure b
     },
     scope,
   );
-  const refused = await store.resolve("1".repeat(64)).catch((error: unknown) => error);
+  const refused = await store
+    .resolve(fixture().sessionSelectorHash)
+    .catch((error: unknown) => error);
   expect(refused).toMatchObject({ code: "GUEST_SESSION_UNAVAILABLE" });
   // A safe code only, under the key the API's failure log reads; never the error itself.
   const kept = Object.getOwnPropertyDescriptor(refused, Symbol.for("bop.failure.cause"));
@@ -440,7 +442,9 @@ it("a Session read that could not get a database connection keeps that failure b
   expect(Object.keys(refused as object)).toEqual(["code", "name"]);
   // The store's own refusal (a row that is not this Session's) stays the plain answer.
   const own = harness({ rows: [{ record: fixture() }] });
-  const mismatch = await own.store.resolve("9".repeat(64)).catch((error: unknown) => error);
+  const mismatch = await own.store
+    .resolve("9".repeat(64) as ReturnType<typeof fixture>["sessionSelectorHash"])
+    .catch((error: unknown) => error);
   expect(mismatch).toMatchObject({ code: "GUEST_SESSION_UNAVAILABLE" });
   expect(Object.getOwnPropertySymbols(mismatch)).toEqual([]);
 });

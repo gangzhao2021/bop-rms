@@ -48,7 +48,7 @@ function guestState(error: unknown): CustomerCartPortResult | null {
   }
 }
 
-const own = (value: unknown, key: string): unknown =>
+const own = (value: unknown, key: PropertyKey): unknown =>
   value !== null && typeof value === "object"
     ? Object.getOwnPropertyDescriptor(value, key)?.value
     : undefined;
