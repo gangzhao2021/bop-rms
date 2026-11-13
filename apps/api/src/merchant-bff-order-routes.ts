@@ -19,6 +19,7 @@ import express, { type Response as ExpressResponse, type Router } from "express"
 import { CounterOrderError } from "./merchant-counter-order.js";
 import { StaffDiningRoundError } from "./merchant-staff-dining-round.js";
 import { CardMachinePaymentCommandError } from "./merchant-card-machine-payment.js";
+import { onePaperSlipSendAtATime } from "./merchant-paper-slip-sends.js";
 import {
   cardMachinePaymentHttpErrors,
   paperPaidAtRefusal,
@@ -92,39 +93,6 @@ function fieldOf(command: unknown, name: string): unknown {
     : undefined;
 }
 const operationOf = (command: unknown) => fieldOf(command, "operationReference");
-
-/**
- * DEC-PAPER-SEND-IDEMPOTENT (b11 review): paper sends carrying the same slip reference are run one
- * after another in this process (check, place and record), so two tablets sending the same slip at
- * once never both pass the check and both place an order: the second one is refused before it
- * places anything. Across processes the payment record's own slip lock still records it once,
- * and the counter then names the order placed without its payment. An earlier send is waited for
- * at most `paperSlipSendWaitMs`.
- */
-const paperSlipSends = new Map<string, Promise<void>>();
-const paperSlipSendWaitMs = 15_000;
-function onePaperSlipSendAtATime(
-  slipReference: string | null,
-  work: () => Promise<void>,
-): Promise<void> {
-  const key = slipReference?.replace(/\s+/gu, "").toUpperCase() ?? "";
-  if (key === "") return work();
-  const earlier = paperSlipSends.get(key);
-  const waited =
-    earlier === undefined
-      ? Promise.resolve()
-      : Promise.race([
-          earlier,
-          new Promise<void>((resolve) => setTimeout(resolve, paperSlipSendWaitMs).unref?.()),
-        ]);
-  const run = waited.then(work);
-  const settled = run.catch(() => undefined);
-  paperSlipSends.set(key, settled);
-  void settled.then(() => {
-    if (paperSlipSends.get(key) === settled) paperSlipSends.delete(key);
-  });
-  return run;
-}
 
 function orderQueueRow(item: MerchantOrderQueueItem) {
   return {

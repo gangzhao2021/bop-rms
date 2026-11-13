@@ -2214,3 +2214,178 @@ test("@production a paper order past its time stays listed until a manager links
     await expect(kept.getByRole("button", { name: "Link the re-entered order" })).toHaveCount(0);
   }
 });
+
+// b11 review: a paper slip already recorded with another order is never a dead end. Before
+// anything is placed, staff answer that the same slip also paid this order (one swipe for two
+// orders); the send goes again with that answer and the sale is recorded. A placed order whose
+// payment is refused for the slip says the order is in and how a duplicate is closed, and is
+// recorded once staff say it is another slip with the same reference. In both languages, at
+// 1440, 1024 and 390.
+for (const language of ["en", "zh-Hans"] as const)
+  test(`@production a paper slip recorded with another order is sent once staff answer for it (${language})`, async ({
+    page,
+  }) => {
+    if (language === "zh-Hans")
+      await page.addInitScript(() => {
+        window.localStorage.setItem("bop.merchant.language", "zh-Hans");
+      });
+    const zh = language === "zh-Hans";
+    await signIn(page);
+    await page.route("**/merchant/counter/menu", (route) => route.fulfill({ headers, json: menu }));
+    const sent: Record<string, unknown>[] = [];
+    await page.route("**/merchant/counter/orders", (route) => {
+      const body = route.request().postDataJSON() as Record<string, unknown>;
+      sent.push(body);
+      const paperPayment = body.paperPayment as Record<string, unknown>;
+      if (paperPayment.slipConfirmation === undefined)
+        return route.fulfill({
+          status: 409,
+          headers,
+          json: { error: "slip_already_recorded", orderNumber: "29" },
+        });
+      return route.fulfill({
+        headers,
+        json: {
+          status: "Placed",
+          orderReference: id(20),
+          orderBatchReference: id(21),
+          orderNumber: sent.length > 2 ? "31" : "30",
+          orderVersion: 1,
+          orderMinor: "423",
+          tipMinor: "0",
+          totalMinor: "423",
+          payBy: new Date(Date.now() + 30 * 60_000).toISOString(),
+          recordedAfterOutage: true,
+          ...(sent.length > 2
+            ? { paymentError: "slip_already_recorded", paymentSlipOrderNumber: "29" }
+            : {
+                payment: {
+                  status: "Recorded",
+                  amountMinor: "423",
+                  recordingReason: "RecordedAfterOutage",
+                  takenAt: paperPayment.takenAt,
+                  recordedAt: new Date().toISOString(),
+                  acceptance: "Accepted",
+                },
+              }),
+        },
+      });
+    });
+    const payments: Record<string, unknown>[] = [];
+    await page.route("**/merchant/orders/card-machine-payment", (route) => {
+      const body = route.request().postDataJSON() as Record<string, unknown>;
+      payments.push(body);
+      if (body.slipConfirmation === undefined)
+        return route.fulfill({
+          status: 409,
+          headers,
+          json: { error: "slip_already_recorded", orderNumber: "29" },
+        });
+      return route.fulfill({
+        headers,
+        json: {
+          status: "Recorded",
+          orderReference: id(20),
+          orderBatchReference: id(21),
+          amountMinor: "423",
+          recordingReason: "RecordedAfterOutage",
+          takenAt: body.takenAt,
+          recordedAt: new Date().toISOString(),
+          acceptance: "Accepted",
+        },
+      });
+    });
+    const local = (at: Date) =>
+      new Date(at.getTime() - at.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+    const sendPaper = page.getByRole("button", {
+      name: zh ? "发送并录入纸质订单" : "Send and record paper order",
+    });
+    const enterPaper = async () => {
+      await page
+        .getByRole("button", { name: zh ? "添加Banana Bread" : "Add Banana Bread" })
+        .click();
+      await page
+        .getByRole("checkbox", {
+          name: zh ? "停电/断网后补录（纸质记录）" : "Recorded after an outage (taken on paper)",
+        })
+        .check();
+      await page
+        .getByLabel(
+          zh
+            ? "付款时间（门店时间，以纸质订单为准）"
+            : "Paid at (store time, from the paper order)",
+        )
+        .fill(local(new Date(Date.now() - 20 * 60_000)));
+      await page
+        .getByRole("textbox", { name: zh ? "签购单参考号（可选）" : "Slip reference (optional)" })
+        .fill("AUTH 4829");
+    };
+    const question = page.getByRole("group", {
+      name: zh
+        ? "这是已经录入在订单 29 里的那张签购单吗？"
+        : "Is this the slip already recorded with order 29?",
+    });
+    await page.goto("/operations/order-entry");
+    await enterPaper();
+    await sendPaper.click();
+    await expect(question).toBeVisible();
+    await expect(page.getByRole("alert")).toContainText(
+      zh ? "这次没有发送，也没有录入" : "Nothing was sent or recorded.",
+    );
+    for (const width of [1440, 1024, 390]) {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true);
+      await page.screenshot({
+        path: `test-results/counter-slip-question-${language}-${width}.png`,
+        fullPage: true,
+      });
+    }
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await question
+      .getByRole("button", {
+        name: zh ? "同一张签购单，也付了这单" : "Same slip, it also paid for this order",
+      })
+      .click();
+    await expect(
+      page.getByRole("heading", { name: zh ? "订单 30 已付款" : "Order 30 paid" }),
+    ).toBeVisible();
+    expect(sent).toHaveLength(2);
+    // Nothing was placed by the refused try, so the answered send is a new order.
+    expect(sent[1]?.paperPayment).toMatchObject({
+      slipReference: "AUTH 4829",
+      slipConfirmation: "SameSlipAlsoPaysThisOrder",
+    });
+
+    // A placed paper order whose payment was refused for the slip: the order is in, and how a
+    // duplicate is closed is said; staff answer it is another slip and it is recorded.
+    await page.getByRole("button", { name: zh ? "新建柜台订单" : "New counter order" }).click();
+    await enterPaper();
+    await sendPaper.click();
+    // The first try is refused before placing; answering sends it, placed but its payment refused.
+    await question
+      .getByRole("button", {
+        name: zh ? "另一张签购单，参考号相同" : "Another slip with the same reference",
+      })
+      .click();
+    await expect(page.getByRole("alert")).toContainText(
+      zh ? "这张订单已经下单，但付款没有录入" : "This order is in, but its payment wasn't recorded",
+    );
+    await expect(page.locator("main")).not.toContainText(
+      zh ? "这次没有再录入" : "so it was not recorded again",
+    );
+    await question
+      .getByRole("button", {
+        name: zh ? "另一张签购单，参考号相同" : "Another slip with the same reference",
+      })
+      .click();
+    await expect(
+      page.getByRole("heading", { name: zh ? "订单 31 已付款" : "Order 31 paid" }),
+    ).toBeVisible();
+    expect(payments.at(-1)).toMatchObject({
+      slipReference: "AUTH 4829",
+      slipConfirmation: "DifferentSlipSameReference",
+    });
+    await expect(page.locator("body")).not.toContainText(/SameSlip|DifferentSlip|slip_already/u);
+  });
