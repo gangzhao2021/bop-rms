@@ -88,10 +88,23 @@ function acquireFailed(error: unknown, rush: boolean): TenantContextDatabaseErro
  */
 interface PoolLoad {
   out: number;
+  /**
+   * WP-2423 (rush-reads-and-orders-changes): when a client last came back from its work without
+   * an error (the database answered it). Null: never yet.
+   */
+  answeredAt: number | null;
 }
+/**
+ * WP-2423 (rush-reads-and-orders-changes, v15 2026-11-13): how recently the database must have
+ * answered this pool's work for a wait that ran out to count as the rush. In a rush the database is
+ * slow but answering: requests finish every moment, and a new connection's handshake or a queue
+ * wait runs out only because everything is waiting. A database that hangs or cannot be reached
+ * answers nothing, so within this window its failures are faults again.
+ */
+export const tenantConnectionAnsweringWindowMs = 5_000;
 const poolLoads = new WeakMap<object, PoolLoad>();
 type WatchedPool = Pick<Pool, "connect"> & {
-  readonly on?: (event: string, listener: () => void) => unknown;
+  readonly on?: (event: string, listener: (error?: unknown) => void) => unknown;
   readonly totalCount?: unknown;
   /** The pool's own options (`max`: the most connections it may open). */
   readonly options?: unknown;
@@ -108,13 +121,15 @@ function watchPoolLoad(pool: WatchedPool): PoolLoad | undefined {
     const known = poolLoads.get(pool);
     if (known !== undefined) return known;
     if (typeof pool.on !== "function") return undefined;
-    const load: PoolLoad = { out: 0 };
+    const load: PoolLoad = { out: 0, answeredAt: null };
     poolLoads.set(pool, load);
     pool.on("acquire", () => {
       load.out += 1;
     });
-    pool.on("release", () => {
+    pool.on("release", (error?: unknown) => {
       load.out = Math.max(0, load.out - 1);
+      // A client returned without an error: its work was answered by the database.
+      if (error === undefined || error === null || error === false) load.answeredAt = Date.now();
     });
     return load;
   } catch {
@@ -147,18 +162,36 @@ function poolFullOfWork(pool: WatchedPool, load: PoolLoad | undefined): boolean 
   }
 }
 /**
- * The rush, by the failed attempt: the pool's own queue wait ran out while the pool was full of
- * work, or the server has too many connections (53300). A new connection that timed out
- * ("Connection terminated due to connection timeout": the database host hung or unreachable) and
- * every other failure are faults.
+ * WP-2423 (rush-reads-and-orders-changes, v15 2026-11-13): the database is busy, not gone: other
+ * work holds this pool's connections now, and the database answered some of it within the last
+ * few seconds. Live, burst reads that found no connection were still logged as faults (level 50):
+ * a slot freed in the rush was reopened, and the new connection's handshake to a database busy
+ * with 57 others ran out ("Connection terminated due to connection timeout"), or the request's
+ * wait ended while that slot was still opening, so the pool was not "full of work" at that moment.
+ * A database that hangs or cannot be reached answers nothing, so it stays a fault.
  */
-function isRushAttemptFailure(error: unknown, full: boolean): boolean {
+function poolBusyAndAnswering(load: PoolLoad | undefined, now: number): boolean {
+  return (
+    load !== undefined &&
+    load.out > 0 &&
+    load.answeredAt !== null &&
+    now - load.answeredAt <= tenantConnectionAnsweringWindowMs
+  );
+}
+/**
+ * The rush, by the failed attempt: a wait ran out (the pool's own queue wait, or a new
+ * connection's handshake) while the pool was full of work or the database was busy answering
+ * other work, or the server has too many connections (53300). Every other failure is a fault: a
+ * refusal, or a wait that ran out with nothing answered (the database host hung or unreachable).
+ */
+function isRushAttemptFailure(error: unknown, full: boolean, answering: boolean): boolean {
   try {
     const message =
       error !== null && typeof error === "object"
         ? Object.getOwnPropertyDescriptor(error, "message")?.value
         : undefined;
-    if (message === "timeout exceeded when trying to connect") return full;
+    if (message === "timeout exceeded when trying to connect") return full || answering;
+    if (message === "Connection terminated due to connection timeout") return answering;
     return tenantContextDatabaseDiagnostic(error).sqlState === "53300";
   } catch {
     return false;
@@ -262,8 +295,10 @@ async function acquireUntil(
         "TENANT_DATABASE_ACQUIRE_FAILED",
         Object.freeze({ sqlState: "08006", constraint: null, table: null, closed: false }),
       );
-      // The rush only when the pool was full of other work; a connect that hangs is a fault.
-      if (poolFullOfWork(pool, load)) Object.defineProperty(queued, rushCause, { value: true });
+      // The rush only when the pool was full of other work or the database was answering it; a
+      // connect that hangs with nothing answered is a fault.
+      if (poolFullOfWork(pool, load) || poolBusyAndAnswering(load, Date.now()))
+        Object.defineProperty(queued, rushCause, { value: true });
       throw queued;
     } catch (error) {
       if (error instanceof TenantContextDatabaseError) throw error;
@@ -274,7 +309,14 @@ async function acquireUntil(
         !isTransientConnectionAcquireFailure(error) ||
         deadline - now() - pause < tenantConnectionRetryMinimumMs
       )
-        throw acquireFailed(error, isRushAttemptFailure(error, poolFullOfWork(pool, load)));
+        throw acquireFailed(
+          error,
+          isRushAttemptFailure(
+            error,
+            poolFullOfWork(pool, load),
+            poolBusyAndAnswering(load, Date.now()),
+          ),
+        );
       await sleep(pause);
     } finally {
       if (timer !== undefined) clearTimeout(timer);

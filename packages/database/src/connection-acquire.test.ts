@@ -8,6 +8,7 @@ import {
   noteRequestCommittedWrite,
   remainingRequestAcquireBudgetMs,
   runWithRequestAcquireBudget,
+  watchTenantConnectionPool,
 } from "./connection-acquire.js";
 import { createTenantTransactionRunner } from "./transaction-runner.js";
 
@@ -444,6 +445,47 @@ describe("WP-2423 reads-under-burst: the rush is told apart from a fault, and a 
       expect(await outcome(pool(hang, { max: 2, total: 0, handedOut: 0 }))).toEqual(fault);
       // A pool with no public face (a test double): unknown, so never the rush.
       expect(await outcome({ connect: vi.fn(hang) })).toEqual(fault);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("WP-2423 (rush-reads-and-orders-changes): a wait that ran out while the database was answering other work is the rush", async () => {
+    // v15 2026-11-13: in the burst, cart reads that found no connection were logged level 50. A
+    // slot freed in the rush was being reopened (its handshake to a database busy with 57 others
+    // ran out, or the request's wait ended while it was still opening), so the pool was not "full
+    // of work" at that moment, though the database was answering everything else.
+    vi.useFakeTimers();
+    try {
+      const busy = (connect: () => Promise<PoolClient>, answeredAgoMs: number, healthy = true) => {
+        const target = pool(connect, { max: 2, total: 2, handedOut: 0 });
+        watchTenantConnectionPool(target);
+        // Other work came back answered (or failed) a moment ago; one client is still out with
+        // work and the other slot is opening again.
+        target.emit("acquire");
+        target.emit("release", healthy ? false : new Error("lost"));
+        target.emit("acquire");
+        target.emit("release", healthy ? undefined : new Error("lost"));
+        target.emit("acquire");
+        vi.advanceTimersByTime(answeredAgoMs);
+        return target;
+      };
+      const connectTimeout = () => new Error("Connection terminated due to connection timeout");
+      const rush = { shed: true, faulted: false };
+      const fault = { shed: false, faulted: true };
+      // The new connection's handshake ran out while the database answered other work.
+      expect(await outcome(busy(fails(connectTimeout), 1_000), 300)).toEqual(rush);
+      // The request's wait ended while that slot was still opening.
+      expect(await outcome(busy(hang, 1_000))).toEqual(rush);
+      // The pool's own queue wait ran out with one slot opening again.
+      expect(await outcome(busy(fails(poolTimeout), 1_000), 300)).toEqual(rush);
+      // Nothing answered for longer than the window (the database hung or went away): a fault.
+      expect(await outcome(busy(fails(connectTimeout), 6_000), 300)).toEqual(fault);
+      expect(await outcome(busy(hang, 6_000))).toEqual(fault);
+      // Work that came back failed is no sign of an answering database.
+      expect(await outcome(busy(fails(connectTimeout), 1_000, false), 300)).toEqual(fault);
+      // A refusal stays a fault however busy the database is.
+      expect(await outcome(busy(fails(badPassword), 1_000), 300)).toEqual(fault);
     } finally {
       vi.useRealTimers();
     }
