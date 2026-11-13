@@ -169,3 +169,80 @@ it("WP-2423 (settlement-coverage): Settlement learns where this Store's day-end 
     "dayEndCheckCoveredFrom: createDayEndCheckCoveredFrom({ installation })",
   );
 });
+
+/**
+ * WP-2423 (rush-reads-and-orders-changes, v15 2026-11-13): GET /merchant/orders/changes answered
+ * 503 on every poll because this composition passed `orderQueue` but not `orderChanges` (the API's
+ * own merchant-runtime wires both), and the route's "not wired" 503 logged a level-50 fault from
+ * every open Orders screen. Every port the merchant routes read must be built here, or be named
+ * below with why the pilot does not offer it, so a route added later can't go live unwired.
+ */
+const notInPilot = Object.freeze({
+  // Earlier authoring flows the pilot workspace replaced with the one-page menu (WP-2423 item 8 ⑥)
+  // and Store setup; they existed before batch 10 and were never part of this composition.
+  brandLifecycle: "brand lifecycle commands (organization setup outside the pilot workspace)",
+  brandStoreTopologyClock: "brand Store topology drafts (organization setup)",
+  brandStoreTopologyDraft: "brand Store topology drafts (organization setup)",
+  categoryTree: "category tree authoring (replaced by the one-page menu)",
+  menuDraft: "menu draft authoring (replaced by the one-page menu)",
+  menuPublication: "menu publication (replaced by the one-page menu's List it)",
+  priceBooks: "price book commands (prices are set on the one-page menu)",
+  productCategoryLookup: "product authoring (replaced by the one-page menu)",
+  productDraftBaseline: "product authoring (replaced by the one-page menu)",
+  productPublication: "product publication v1 (replaced by the one-page menu)",
+  productPublicationManagement: "product publication v1 (replaced by the one-page menu)",
+  productPublicationManagementV2: "product publication v2 (replaced by the one-page menu)",
+  productPublicationQuery: "product publication v1 (replaced by the one-page menu)",
+  productPublicationResolution: "product publication v1 (replaced by the one-page menu)",
+  productPublicationV2: "product publication v2 (replaced by the one-page menu)",
+  productPublicationValidationReportV2: "product publication v2 (replaced by the one-page menu)",
+  productPublicationWarningAcknowledgement: "product publication (replaced by the one-page menu)",
+  productScopeJournals: "product publication journals (replaced by the one-page menu)",
+  reconciliationAssigneeQuery: "reconciliation assignment (not offered in the pilot)",
+});
+
+it("builds every port the merchant routes read, or names why the pilot does not offer it", async () => {
+  const contract = await readFile(new URL("merchant-bff-contract.ts", api), "utf8");
+  const start = contract.indexOf("export interface MerchantBffRouterOptions {");
+  expect(start).toBeGreaterThan(0);
+  const body = contract.slice(start, contract.indexOf("\n}\n", start));
+  const ports = new Set(
+    [...body.matchAll(/^ {2}readonly ([A-Za-z_$][\w$]*)\??:/gmu)].map((m) => m[1]),
+  );
+  const files = (await readdir(api)).filter(
+    (name) => /^merchant-bff.*\.ts$/u.test(name) && !name.endsWith(".test.ts"),
+  );
+  const read = new Set();
+  for (const name of files) {
+    const source = (await readFile(new URL(name, api), "utf8")).replace(/^\s*\/\/.*$/gmu, "");
+    for (const match of source.matchAll(/\boptions\.([A-Za-z_$][\w$]*)/gu))
+      if (ports.has(match[1])) read.add(match[1]);
+  }
+  // The routes read the ports this test is about (the Orders change mark among them).
+  expect(read.has("orderQueue")).toBe(true);
+  expect(read.has("orderChanges")).toBe(true);
+  const here = new URL("./", import.meta.url);
+  const compositions = (await readdir(here)).filter(
+    (name) => /^pilot-.*\.mjs$/u.test(name) && !name.endsWith(".test.mjs"),
+  );
+  let composed = "";
+  for (const name of compositions)
+    composed += (await readFile(new URL(name, here), "utf8")).replace(/^\s*\/\/.*$/gmu, "") + "\n";
+  const built = (port) =>
+    new RegExp(`(?:^|[\\s{,(])${port.replace("$", "\\$")}\\s*(?::|,|\\}|\\)|$)`, "mu").test(
+      composed,
+    );
+  const unwired = [...read].filter((port) => !built(port) && !(port in notInPilot)).sort();
+  expect(unwired).toEqual([]);
+  // The list stays true: each named port is still read by a route and still not built here.
+  for (const port of Object.keys(notInPilot)) {
+    expect(read.has(port), port).toBe(true);
+    expect(built(port), port).toBe(false);
+  }
+  // The Orders change mark is in the BFF the pilot serves, beside the Orders list.
+  const pilotSource = (await readFile(pilot, "utf8")).replace(/^\s*\/\/.*$/gmu, "");
+  const bff = block(pilotSource, pilotSource.indexOf("bff: {") + 5);
+  const present = keys(bff).found;
+  expect(present.has("orderQueue")).toBe(true);
+  expect(present.has("orderChanges")).toBe(true);
+});

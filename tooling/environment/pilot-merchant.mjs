@@ -160,6 +160,7 @@ import { createMerchantBusinessDayWindows } from "../../apps/api/dist/merchant-b
 import { createMerchantOrderItemStaffCancellation } from "../../apps/api/dist/merchant-order-item-staff-cancellation.js";
 import { createMerchantOrdinaryRefundBusinessDate } from "../../apps/api/dist/merchant-ordinary-refund-business-date.js";
 import { createPersistentMerchantOrderQueue } from "../../apps/api/dist/persistent-merchant-order-queue.js";
+import { createPersistentMerchantOrderChanges } from "../../apps/api/dist/merchant-order-changes.js";
 import {
   createMerchantKitchenScreenPresence,
   createMerchantStorePresence,
@@ -1910,6 +1911,11 @@ export async function createInternalMerchant(
       diningItemService,
       service,
       orderQueue,
+      // WP-2423 (rush-reads-and-orders-changes, v15 2026-11-13): Orders asks every 3 s whether
+      // anything changed and reads its list at once when it did, so a freshly paid pickup shows
+      // within a few seconds. Unwired here (apps/api/src/merchant-runtime.ts wires it with
+      // orderQueue), every check answered 503 and logged a level-50 fault from every tablet.
+      orderChanges: createPersistentMerchantOrderChanges({ persistence }),
       kitchenQuery,
       kitchenCommand,
       kitchenStep,
