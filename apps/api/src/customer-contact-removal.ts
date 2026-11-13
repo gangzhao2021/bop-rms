@@ -19,6 +19,7 @@ import type { CustomerCheckoutSessionAuthorizationOptions } from "./customer-che
 import {
   earlierVisitCredentials,
   earlierVisitInput,
+  issuedCsrfCheck,
   type CustomerVisitInput,
 } from "./customer-earlier-visit.js";
 
@@ -142,10 +143,15 @@ function reject(response: Response, status: 400 | 404 | 503) {
  * pickup order before the guest joined a table), for a request that proved the current visit.
  */
 export function customerContactRemovalForEarlierVisit(
-  options: Pick<CustomerCheckoutSessionAuthorizationOptions, "credentials">,
+  options: Pick<CustomerCheckoutSessionAuthorizationOptions, "credentials" | "scope"> & {
+    readonly transactions: {
+      run<T>(work: (transaction: ConsumerTransaction) => Promise<T>): Promise<T>;
+    };
+  },
 ) {
+  const issued = issuedCsrfCheck(options);
   return (input: CustomerVisitInput, earlierCredential: string) =>
-    earlierVisitInput(options.credentials, input, earlierCredential);
+    earlierVisitInput(options.credentials, input, earlierCredential, issued);
 }
 
 export function createCustomerContactRemovalHandler(options: {
@@ -154,7 +160,7 @@ export function createCustomerContactRemovalHandler(options: {
   readonly forEarlierVisit?: (
     input: CustomerVisitInput,
     earlierCredential: string,
-  ) => CustomerVisitInput | null;
+  ) => Promise<CustomerVisitInput | null>;
 }): RequestHandler {
   const origin = new URL(options.allowedOrigin).origin;
   return async (request, response) => {
@@ -209,7 +215,7 @@ export function createCustomerContactRemovalHandler(options: {
         if (!notFound(error) || options.forEarlierVisit === undefined) throw error;
         let found: Awaited<ReturnType<typeof port>> | null = null;
         for (const earlierCredential of earlier) {
-          const target = options.forEarlierVisit(input, earlierCredential);
+          const target = await options.forEarlierVisit(input, earlierCredential);
           if (target === null) break;
           try {
             found = await port(target);

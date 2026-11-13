@@ -59,7 +59,7 @@ interface CustomerOrderStatusPort {
   forEarlierVisit?(
     input: CustomerOrderStatusInput,
     earlierCredential: string,
-  ): CustomerOrderStatusInput | null;
+  ): Promise<CustomerOrderStatusInput | null>;
 }
 /** Not this visit's order (or no such order): a 404, never an outage. */
 export function notOwnedOrderStatus(error: unknown): boolean {
@@ -80,7 +80,7 @@ export async function readWithEarlierVisits<T>(
     | ((
         input: CustomerOrderStatusInput,
         earlierCredential: string,
-      ) => CustomerOrderStatusInput | null)
+      ) => Promise<CustomerOrderStatusInput | null>)
     | undefined,
   read: (input: CustomerOrderStatusInput) => Promise<T>,
   notOwned: (error: unknown) => boolean = notOwnedOrderStatus,
@@ -90,7 +90,7 @@ export async function readWithEarlierVisits<T>(
   } catch (error) {
     if (!notOwned(error) || forEarlierVisit === undefined) throw error;
     for (const earlierCredential of earlier) {
-      const target = forEarlierVisit(input, earlierCredential);
+      const target = await forEarlierVisit(input, earlierCredential);
       if (target === null) break;
       try {
         return await read(target);

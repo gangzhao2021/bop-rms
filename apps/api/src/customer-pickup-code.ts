@@ -37,7 +37,7 @@ interface CustomerPickupCodePort {
   forEarlierVisit?(
     input: CustomerOrderStatusInput,
     earlierCredential: string,
-  ): CustomerOrderStatusInput | null;
+  ): Promise<CustomerOrderStatusInput | null>;
 }
 export class CustomerPickupCodeHandler {
   readonly #origin: string;

@@ -62,18 +62,62 @@ it("reads the earlier visits this phone keeps, never the current one or a malfor
   expect(earlierVisitCredentials(undefined, table)).toEqual([]);
 });
 
-it("uses a kept visit only for a request that proved the current one, with that visit's own CSRF", () => {
+it("uses a kept visit only for a request that proved the current one, with that visit's own CSRF", async () => {
   const proved = { sessionCredential: table, csrfCredential: csrf(table), orderReference: order };
-  expect(earlierVisitInput(credentials, proved, pickup)).toEqual({
+  expect(await earlierVisitInput(credentials, proved, pickup)).toEqual({
     sessionCredential: pickup,
     csrfCredential: csrf(pickup),
     orderReference: order,
   });
   // The kept visit's CSRF, or any other, does not prove the current visit.
   for (const token of [csrf(pickup), "c".repeat(43)])
-    expect(earlierVisitInput(credentials, { ...proved, csrfCredential: token }, pickup)).toBe(null);
+    expect(await earlierVisitInput(credentials, { ...proved, csrfCredential: token }, pickup)).toBe(
+      null,
+    );
   // No derivation configured: no kept visit is used.
-  expect(earlierVisitInput({}, proved, pickup)).toBe(null);
+  expect(await earlierVisitInput({}, proved, pickup)).toBe(null);
+});
+
+it("a visit the entry just started proves itself with the CSRF the entry issued, and an outage of that check is thrown", async () => {
+  // Right after joining a table the page holds the CSRF the entry issued, not the derived one.
+  const issuedToken = "i".repeat(43);
+  const issued = vi.fn(
+    async (session: string, token: string) => session === table && token === issuedToken,
+  );
+  const proved = { sessionCredential: table, csrfCredential: issuedToken, orderReference: order };
+  expect(await earlierVisitInput(credentials, proved, pickup, issued)).toEqual({
+    sessionCredential: pickup,
+    csrfCredential: csrf(pickup),
+    orderReference: order,
+  });
+  expect(issued).toHaveBeenCalledWith(table, issuedToken);
+  // Another token is not the issued one.
+  expect(
+    await earlierVisitInput(
+      credentials,
+      { ...proved, csrfCredential: csrf(pickup) },
+      pickup,
+      issued,
+    ),
+  ).toBe(null);
+  // The derived CSRF proves it without reading the store.
+  issued.mockClear();
+  expect(
+    await earlierVisitInput(
+      credentials,
+      { ...proved, csrfCredential: csrf(table) },
+      pickup,
+      issued,
+    ),
+  ).not.toBe(null);
+  expect(issued).not.toHaveBeenCalled();
+  // The store can't answer: an outage, never "not this phone's order".
+  const down = vi.fn(async () => {
+    throw new Error("synthetic store outage");
+  });
+  await expect(earlierVisitInput(credentials, proved, pickup, down)).rejects.toThrow(
+    "synthetic store outage",
+  );
 });
 
 it("the order page and its pickup code answer for the kept pickup visit; an outage is never retried as another visit", async () => {
