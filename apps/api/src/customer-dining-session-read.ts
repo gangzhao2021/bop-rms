@@ -158,6 +158,15 @@ export interface CustomerDiningSessionFacts {
       readonly taxRoundingMinor: bigint;
       /** Staff recorded the guests left without paying: nothing is waiting to be paid here. */
       readonly closedByStaff?: boolean;
+      /** b13: the split's parts were made before the bill changed (a comp): staff split again. */
+      readonly splitStale?: boolean;
+      /**
+       * b13 (DEC-TAX-WHOLE-RECEIPT): the whole bill as checkout and the paid bill print it — its
+       * dishes before tax, what staff and points took off (before tax), the subtotal after them,
+       * the tax worked out once on it, and the total — and each round's share, by round.
+       */
+      readonly bill?: CustomerTableBillLines;
+      readonly rounds?: ReadonlyMap<string, CustomerTableBillLines>;
     };
     /**
      * WP-2423 item 8 ④ (v15 2026-10-28 a): a split bill being paid part by part — how many parts
@@ -310,6 +319,8 @@ export interface CustomerDiningSessionView {
     readonly subtotal?: CustomerMoney;
     readonly tax?: CustomerMoney;
     readonly itemsTotal: CustomerMoney;
+    /** b13: a round on a table's bill, as the bill prints it (after comps, tax worked once). */
+    readonly bill?: CustomerBillView;
   }[];
   /** Null until the table has ordered. Due is the item total of rounds still waiting for payment. */
   readonly summary: null | {
@@ -326,6 +337,11 @@ export interface CustomerDiningSessionView {
     readonly takenOff?: CustomerMoney;
     /** v15 2026-11-02: the bill's tax rounding (DEC-TAX-WHOLE-RECEIPT), which can be negative. */
     readonly taxRounding?: CustomerMoney;
+    /**
+     * b13 (DEC-TAX-WHOLE-RECEIPT): a table paying at the end, its whole bill as staff checkout and
+     * the paid bill print it: one Tax line, worked out on the bill after what was taken off.
+     */
+    readonly bill?: CustomerBillView;
     /**
      * WP-2423 item 8 ⑦ 4b-3: the per-head tea on the bill: what one guest's tea costs, and how many;
      * item 8b: the Store's own name for it.
@@ -398,6 +414,24 @@ const movedFrom = (facts: CustomerDiningSessionFacts) =>
  * add a part with each payment, so there is no count to say until the bill is paid (`count`
  * null). `paid`: the payments recorded so far. Null once paid in full or with no split.
  */
+/** b13: a bill or round for the guest, as printed (taken off and points before tax). */
+export interface CustomerBillView {
+  readonly items: CustomerMoney;
+  readonly takenOff: CustomerMoney;
+  readonly pointsUsed: CustomerMoney;
+  readonly subtotal: CustomerMoney;
+  readonly tax: CustomerMoney;
+  readonly total: CustomerMoney;
+}
+/** b13: a bill (or one round of it) as printed: before tax, taken off, after, tax, total. */
+export interface CustomerTableBillLines {
+  readonly itemsMinor: bigint;
+  readonly takenOffMinor: bigint;
+  readonly pointsMinor: bigint;
+  readonly subtotalMinor: bigint;
+  readonly taxMinor: bigint;
+  readonly totalMinor: bigint;
+}
 export interface CustomerSplitParts {
   readonly count: number | null;
   readonly paid: number;
@@ -462,6 +496,15 @@ export function composeCustomerDiningSession(
   if (currency === undefined) return unavailable();
   const money = (amountMinor: bigint): CustomerMoney =>
     Object.freeze({ amountMinor, currencyCode: currency });
+  const billView = (lines: CustomerTableBillLines): CustomerBillView =>
+    Object.freeze({
+      items: money(lines.itemsMinor),
+      takenOff: money(lines.takenOffMinor),
+      pointsUsed: money(lines.pointsMinor),
+      subtotal: money(lines.subtotalMinor),
+      tax: money(lines.taxMinor),
+      total: money(lines.totalMinor),
+    });
   const itemCancellation = (orderItemReference: string) =>
     order.itemCancellations.find((entry) => entry.orderItemReferences.includes(orderItemReference));
   let due = 0n;
@@ -674,6 +717,12 @@ export function composeCustomerDiningSession(
       ),
       ...(prices === undefined ? {} : { subtotal: money(subtotal), tax: money(tax) }),
       itemsTotal: money(itemsTotal),
+      // b13: a round on the table's bill says what the bill says of it (comps taken off, the tax
+      // worked out once), so the round cards add up to the Table total and the paid bill.
+      ...((payment === "OnTableBill" || order.settledRounds?.has(reference) === true) &&
+      order.tableBill?.rounds?.get(reference) !== undefined
+        ? { bill: billView(order.tableBill.rounds.get(reference) as CustomerTableBillLines) }
+        : {}),
     });
   });
   let paid = 0n;
@@ -710,9 +759,11 @@ export function composeCustomerDiningSession(
       ...((order.tableBill?.takenOffMinor ?? 0n) > 0n
         ? { takenOff: money(order.tableBill?.takenOffMinor as bigint) }
         : {}),
-      ...((order.tableBill?.taxRoundingMinor ?? 0n) !== 0n
+      // b13: a bill read whole says its one tax; only an older bill read has a rounding line.
+      ...(order.tableBill?.bill === undefined && (order.tableBill?.taxRoundingMinor ?? 0n) !== 0n
         ? { taxRounding: money(order.tableBill?.taxRoundingMinor as bigint) }
         : {}),
+      ...(order.tableBill?.bill === undefined ? {} : { bill: billView(order.tableBill.bill) }),
       paid: money(paid),
       refunded: money(refunded),
       refundPending: money(refundPending),
@@ -720,8 +771,10 @@ export function composeCustomerDiningSession(
       ...(order.tableBill?.closedByStaff === true ? { closedByStaff: true } : {}),
       // v15 b12: a split with nothing paid on a bill that now owes nothing (every dish comped)
       // is no split to speak of: the page says "nothing to pay", never "paying in 2 parts".
+      // b13: nor is a split the bill outgrew (staff split it again): its old parts are not said.
       ...(order.splitParts == null ||
-      (order.splitParts.paid === 0 && due + (order.tableBill?.owedMinor ?? 0n) === 0n)
+      (order.splitParts.paid === 0 && due + (order.tableBill?.owedMinor ?? 0n) === 0n) ||
+      (order.splitParts.paid === 0 && order.tableBill?.splitStale === true)
         ? {}
         : { splitParts: { count: order.splitParts.count, paid: order.splitParts.paid } }),
       ...(() => {
@@ -1463,12 +1516,53 @@ export async function readCustomerTableBillFacts(
     reductions
       .filter((reduction) => (reduction.points === true) === points)
       .reduce((total, reduction) => total + BigInt(reduction.amountMinor), 0n);
+  // b13: each round as the bill prints it (its share of the tax rounding in its tax).
+  const lines = (round: (typeof bill.rounds)[number]): CustomerTableBillLines => {
+    const off = (points: boolean) =>
+      round.items.reduce(
+        (total, item) =>
+          item.reduction !== null && (item.reduction.points === true) === points
+            ? total + BigInt(item.reduction.netMinor)
+            : total,
+        0n,
+      );
+    return {
+      itemsMinor: round.items.reduce((total, item) => total + BigInt(item.subtotalMinor), 0n),
+      takenOffMinor: off(false),
+      pointsMinor: off(true),
+      subtotalMinor: BigInt(round.subtotalMinor),
+      taxMinor: BigInt(round.taxMinor),
+      totalMinor: BigInt(round.totalMinor),
+    };
+  };
+  const rounds = new Map(bill.rounds.map((round) => [round.orderBatchReference, lines(round)]));
+  const whole = [...rounds.values()].reduce(
+    (total, round) => ({
+      itemsMinor: total.itemsMinor + round.itemsMinor,
+      takenOffMinor: total.takenOffMinor + round.takenOffMinor,
+      pointsMinor: total.pointsMinor + round.pointsMinor,
+      subtotalMinor: total.subtotalMinor + round.subtotalMinor,
+      taxMinor: total.taxMinor + round.taxMinor,
+      totalMinor: total.totalMinor + round.totalMinor,
+    }),
+    {
+      itemsMinor: 0n,
+      takenOffMinor: 0n,
+      pointsMinor: 0n,
+      subtotalMinor: 0n,
+      taxMinor: 0n,
+      totalMinor: 0n,
+    },
+  );
   return {
     owedMinor: bill.writeOff !== null ? 0n : BigInt(bill.owed.totalMinor),
     ...(bill.writeOff !== null ? { closedByStaff: true } : {}),
     pointsUsedMinor: sum(true),
     takenOffMinor: sum(false),
     taxRoundingMinor: BigInt(bill.taxRoundingMinor),
+    ...(bill.split?.stale === true ? { splitStale: true } : {}),
+    bill: whole,
+    rounds,
   };
 }
 

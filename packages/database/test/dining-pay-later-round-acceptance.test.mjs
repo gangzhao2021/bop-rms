@@ -1619,6 +1619,29 @@ async function journey(journeyEnding) {
           const owed = await bill();
           assert.equal(facts.owedMinor.toString(), owed.owed.totalMinor);
           assert.equal(facts.taxRoundingMinor.toString(), owed.taxRoundingMinor);
+          // b13 (DEC-TAX-WHOLE-RECEIPT): the guest's Table total and round cards are the bill as
+          // staff checkout prints it — after comps, one tax worked out on the whole bill — never
+          // the items' own tax with a rounding line beside it.
+          const sum = (pick) =>
+            owed.rounds.reduce((total, round) => total + BigInt(pick(round)), 0n);
+          assert.deepEqual(
+            [facts.bill.subtotalMinor, facts.bill.taxMinor, facts.bill.totalMinor],
+            [
+              sum((round) => round.subtotalMinor),
+              sum((round) => round.taxMinor),
+              sum((round) => round.totalMinor),
+            ],
+          );
+          assert.equal(
+            facts.bill.itemsMinor - facts.bill.takenOffMinor - facts.bill.pointsMinor,
+            facts.bill.subtotalMinor,
+          );
+          for (const round of owed.rounds)
+            assert.equal(
+              facts.rounds.get(round.orderBatchReference)?.totalMinor.toString(),
+              round.totalMinor,
+            );
+          assert.equal(facts.splitStale === true, owed.split?.stale === true);
           return facts;
         };
         const settleWith = (who, command) =>

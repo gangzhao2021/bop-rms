@@ -8,6 +8,7 @@ import {
   DiningOrderStillProcessingError,
   DiningTableMovedError,
   type CustomerDiningSessionView,
+  type CustomerBillView,
   type CustomerMoney,
 } from "./customer-dining-session-read.js";
 
@@ -41,6 +42,17 @@ function money(value: CustomerMoney) {
   )
     throw new Error("invalid amount");
   return { amountMinor: value.amountMinor.toString(), currencyCode: value.currencyCode };
+}
+/** b13: a bill or round as printed — public amounts only. */
+function billLines(bill: CustomerBillView) {
+  return {
+    items: money(bill.items),
+    takenOff: money(bill.takenOff),
+    pointsUsed: money(bill.pointsUsed),
+    subtotal: money(bill.subtotal),
+    tax: money(bill.tax),
+    total: money(bill.total),
+  };
 }
 
 interface DiningSessionPort {
@@ -149,6 +161,8 @@ export class CustomerDiningSessionHandler {
               ? {}
               : { subtotal: money(round.subtotal), tax: money(round.tax) }),
             itemsTotal: money(round.itemsTotal),
+            // b13: a round on the table's bill, as the bill prints it.
+            ...(round.bill === undefined ? {} : { bill: billLines(round.bill) }),
           })),
           summary:
             view.summary === null
@@ -181,6 +195,10 @@ export class CustomerDiningSessionHandler {
                   ...(view.summary.taxRounding === undefined
                     ? {}
                     : { taxRounding: money(view.summary.taxRounding) }),
+                  // b13 (DEC-TAX-WHOLE-RECEIPT): the whole bill as staff checkout prints it.
+                  ...(view.summary.bill === undefined
+                    ? {}
+                    : { bill: billLines(view.summary.bill) }),
                   // DEC-DINE-IN-PAY-LATER: the table's one payment's tip and cash rounding.
                   ...(view.summary.cashRounding === undefined || view.summary.tableTip === undefined
                     ? {}

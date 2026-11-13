@@ -218,6 +218,80 @@ describe("WP-2423 Q8 composeCustomerDiningSession", () => {
     expect(view.summary?.taxRounding).toEqual(cad(1n));
   });
 
+  // v15 b12 live (BR E-style bill): the guest read Tax $6.51, "Taken off −$31.09" and "Rounding
+  // $0.01" while staff checkout and the paid bill read Subtotal $22.50 / Tax $2.93 / $25.43.
+  it("b13: a table paying at the end reads its bill as checkout prints it, one Tax line, round by round", () => {
+    const lines = (
+      itemsMinor: bigint,
+      takenOffMinor: bigint,
+      subtotalMinor: bigint,
+      taxMinor: bigint,
+    ) => ({
+      itemsMinor,
+      takenOffMinor,
+      pointsMinor: 0n,
+      subtotalMinor,
+      taxMinor,
+      totalMinor: subtotalMinor + taxMinor,
+    });
+    const rounds = new Map([
+      [id(30), lines(3000n, 1250n, 1750n, 228n)],
+      [id(40), lines(2000n, 1500n, 500n, 65n)],
+    ]);
+    const view = composeCustomerDiningSession({
+      ...facts({
+        paymentOutcomes: new Map(),
+        payments: [],
+        payLaterRounds: new Set([id(30), id(40)]),
+        tableBill: {
+          owedMinor: 2543n,
+          pointsUsedMinor: 0n,
+          takenOffMinor: 3109n,
+          taxRoundingMinor: 1n,
+          bill: lines(5000n, 2750n, 2250n, 293n),
+          rounds,
+        },
+      }),
+      paymentTiming: "PayLater",
+    });
+    expect(view.summary?.bill).toEqual({
+      items: cad(5000n),
+      takenOff: cad(2750n),
+      pointsUsed: cad(0n),
+      subtotal: cad(2250n),
+      tax: cad(293n),
+      total: cad(2543n),
+    });
+    // One Tax line: no separate rounding when the bill is read whole.
+    expect(view.summary?.taxRounding).toBeUndefined();
+    expect(view.summary?.due).toEqual(cad(2543n));
+    // Each round card says what the bill says of it, so they add up to the Table total.
+    expect(view.rounds.map((round) => round.bill?.total)).toEqual([cad(1978n), cad(565n)]);
+    expect(view.rounds[1]?.bill?.takenOff).toEqual(cad(1500n));
+  });
+
+  it("b13: a split the bill outgrew says nothing of its old parts", () => {
+    const base = {
+      paymentOutcomes: new Map(),
+      payments: [],
+      payLaterRounds: new Set([id(30), id(40)]),
+      splitParts: { count: 2, paid: 0 },
+    };
+    const bill = { owedMinor: 1413n, pointsUsedMinor: 0n, takenOffMinor: 0n, taxRoundingMinor: 0n };
+    expect(
+      composeCustomerDiningSession({
+        ...facts({ ...base, tableBill: bill }),
+        paymentTiming: "PayLater",
+      }).summary?.splitParts,
+    ).toEqual({ count: 2, paid: 0 });
+    expect(
+      composeCustomerDiningSession({
+        ...facts({ ...base, tableBill: { ...bill, splitStale: true } }),
+        paymentTiming: "PayLater",
+      }).summary?.splitParts,
+    ).toBeUndefined();
+  });
+
   it("v15 2026-10-29: a round staff cancelled on a table paying at the end was never charged", () => {
     const view = composeCustomerDiningSession({
       ...facts({
