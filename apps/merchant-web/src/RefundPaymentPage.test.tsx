@@ -22,6 +22,7 @@ import {
   cashRequestRecordedText,
   refundSendsOnConfirm,
   refundWizardSections,
+  requestOnlyAbove,
   requestBlockedMessage,
   requestFinished,
   refundStopForCashierText,
@@ -359,6 +360,17 @@ it("v15 2026-10-17: the payment page lists this payment's card-machine refunds s
   // Already recorded, or a request of another payment of the same order: not offered here.
   expect(cardMachineRefundToRecord(id(1), first, status("Confirmed"), null)).toBeNull();
   expect(cardMachineRefundToRecord(id(1), first, status("NotDispatched", id(9)), null)).toBeNull();
+  // b12: listed above alone only when nothing is left to do on another payment of the request.
+  const own = status("NotDispatched");
+  expect(requestOnlyAbove(id(1), own)).toBe(true);
+  const other = status("NotDispatched", id(9)).payments[0];
+  expect(requestOnlyAbove(id(1), { ...own, payments: [...own.payments, other] } as never)).toBe(
+    false,
+  );
+  const otherDone = status("Confirmed", id(9)).payments[0];
+  expect(requestOnlyAbove(id(1), { ...own, payments: [...own.payments, otherDone] } as never)).toBe(
+    true,
+  );
 });
 
 it("M126 I.5: another store's payment and a role that can't refund say why, with no Refresh", () => {

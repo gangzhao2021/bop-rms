@@ -871,11 +871,14 @@ function RefundWizard({
   cashLeftMinor = null,
   recordedAbove = null,
   revision = 0,
+  requestsRevision = 0,
 }: {
   /** b11: the card-machine refunds the payment page lists above to record (one form each). */
   readonly recordedAbove?: RecordedAbove | null;
   /** b11: changes after a refund or payment is recorded on this page: requests are read again. */
   readonly revision?: number;
+  /** b12: a refund of one of this order's requests was recorded elsewhere on this page. */
+  readonly requestsRevision?: number;
   readonly orderReference: string;
   /** v15 batch 8: this payment was taken in cash at the counter (given back in cash). */
   readonly paidInCash?: boolean;
@@ -1091,14 +1094,15 @@ function RefundWizard({
     }
   };
   // b11: a refund recorded elsewhere on this page is shown here as recorded, never as still to do.
-  // b12: the list is read again too, so each request's own line says where it stands now (it
-  // said "To refund on the card machine" until a reload).
   useEffect(() => {
-    if (revision === 0) return;
-    setRefreshSignal((value) => value + 1);
-    void reloadRequests();
-    // Only a new revision rereads; reloadRequests itself changes on every render.
+    if (revision > 0) setRefreshSignal((value) => value + 1);
   }, [revision]);
+  // b12: a request's refund recorded above is read again in this list too, so its own line says
+  // where it stands now (it said "To refund on the card machine" until a reload).
+  useEffect(() => {
+    if (requestsRevision > 0) void reloadRequests();
+    // Only a new recording above rereads; reloadRequests itself changes on every render.
+  }, [requestsRevision]);
   // The refundable items and this order's requests are there as soon as the page opens. Under
   // React's development double run the abort above clears the first read, so the second starts.
   useEffect(() => {
@@ -1365,7 +1369,7 @@ function RefundWizard({
     items === null
       ? []
       : items.recentRequests.filter(
-          (entry) => recordedAbove === null || !recordedAbove.requests.has(entry.requestReference),
+          (entry) => recordedAbove?.onlyAbove?.has(entry.requestReference) !== true,
         );
   const showRequests =
     items !== null &&
@@ -2017,6 +2021,21 @@ export function cardMachineRefundToRecord(
 export interface RecordedAbove {
   readonly paymentIntentReference: string;
   readonly requests: ReadonlySet<string>;
+  /**
+   * b12: those of them with nothing left to do on another payment: listed above only, so the
+   * same request is never shown twice. One with a refund of another payment stays in the list.
+   */
+  readonly onlyAbove?: ReadonlySet<string>;
+}
+/**
+ * b12: whether everything left to do on a request is this payment's card-machine or cash refund
+ * (every other payment of the request is refunded already), so it is listed above alone.
+ */
+export function requestOnlyAbove(paymentIntentReference: string, status: RequestStatus): boolean {
+  return status.payments.every(
+    (payment) =>
+      payment.paymentIntentReference === paymentIntentReference || payment.state === "Confirmed",
+  );
 }
 
 /**
@@ -2035,12 +2054,16 @@ export function PendingCardMachineRefunds({
   readonly context: Context;
   readonly csrf: string;
   readonly onFinancialChange: () => void;
-  /** b11 review: told which requests are listed here with a record form (none while hidden). */
-  readonly onListed?: (requests: ReadonlySet<string>) => void;
+  /**
+   * b11 review: told which requests are listed here with a record form (none while hidden), and
+   * (b12) which of them have nothing left to do elsewhere, so the list below leaves them out.
+   */
+  readonly onListed?: (requests: ReadonlySet<string>, onlyAbove: ReadonlySet<string>) => void;
 }) {
   const pendingMinor = context.pendingRefundMinor ?? "0";
   const owed = context.paymentMethod === "CardMachine" && BigInt(pendingMinor) > 0n;
   const [refunds, setRefunds] = useState<readonly CardMachineRefundToRecord[] | null>(null);
+  const [onlyAbove, setOnlyAbove] = useState("");
   const [message, setMessage] = useState("");
   const [hidden, setHidden] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
@@ -2050,6 +2073,7 @@ export function PendingCardMachineRefunds({
   useEffect(() => {
     if (!owed) {
       setRefunds([]);
+      setOnlyAbove("");
       return;
     }
     const controller = new AbortController();
@@ -2073,6 +2097,7 @@ export function PendingCardMachineRefunds({
                 )
                 .catch(() => new Map<string, RefundApprovalEntry>());
         const found: CardMachineRefundToRecord[] = [];
+        const alone = new Set<string>();
         // One request at a time: each status read is small and the list stays short.
         for (const entry of candidates) {
           const status = await client.status(
@@ -2088,10 +2113,13 @@ export function PendingCardMachineRefunds({
             approvals.get(entry.requestReference) ?? null,
           );
           if (refund !== null) found.push(refund);
+          if (refund !== null && requestOnlyAbove(context.paymentIntentReference, status))
+            alone.add(entry.requestReference);
         }
         if (!controller.signal.aborted) {
           setHidden(false);
           setRefunds(found);
+          setOnlyAbove([...alone].sort().join(","));
         }
       } catch (error) {
         if (controller.signal.aborted) return;
@@ -2103,9 +2131,18 @@ export function PendingCardMachineRefunds({
   }, [owed, context.orderReference, context.paymentIntentReference, pendingMinor, csrf, reload]);
   const listed =
     hidden || refunds === null ? "" : refunds.map((r) => r.entry.requestReference).join(",");
+  // Only requests listed here now (a refund recorded since is listed below again).
+  const alone =
+    hidden || refunds === null
+      ? ""
+      : onlyAbove
+          .split(",")
+          .filter((value) => refunds.some((refund) => refund.entry.requestReference === value))
+          .join(",");
   useEffect(() => {
-    onListed?.(new Set(listed === "" ? [] : listed.split(",")));
-  }, [listed, onListed]);
+    const set = (value: string) => new Set(value === "" ? [] : value.split(","));
+    onListed?.(set(listed), set(alone));
+  }, [listed, alone, onListed]);
   if (hidden || (notice === null && message === "" && (refunds === null || refunds.length === 0)))
     return null;
   return (
@@ -2214,8 +2251,22 @@ function PaymentContent({
 }) {
   const [financialRevision, setFinancialRevision] = useState(0);
   const refreshFinancial = useCallback(() => setFinancialRevision((value) => value + 1), []);
+  // b12: a refund recorded above, under its request: the request list is read again too.
+  const [requestsRevision, setRequestsRevision] = useState(0);
+  const recordedAboveChange = useCallback(() => {
+    refreshFinancial();
+    setRequestsRevision((value) => value + 1);
+  }, [refreshFinancial]);
   // b11 review: the requests whose card-machine refund of this payment is recorded above.
-  const [listedAbove, setListedAbove] = useState<ReadonlySet<string>>(() => new Set());
+  const [listedAbove, setListedAbove] = useState<{
+    readonly requests: ReadonlySet<string>;
+    readonly onlyAbove: ReadonlySet<string>;
+  }>(() => ({ requests: new Set(), onlyAbove: new Set() }));
+  const onListed = useCallback(
+    (requests: ReadonlySet<string>, onlyAbove: ReadonlySet<string>) =>
+      setListedAbove({ requests, onlyAbove }),
+    [],
+  );
   const [context, setContext] = useState<Context | null>(null),
     [loading, setLoading] = useState(true),
     [failure, setFailure] = useState<PaymentLoadFailure>({ message: "", retry: true }),
@@ -2281,8 +2332,8 @@ function PaymentContent({
             <PendingCardMachineRefunds
               context={context}
               csrf={csrf}
-              onFinancialChange={refreshFinancial}
-              onListed={setListedAbove}
+              onFinancialChange={recordedAboveChange}
+              onListed={onListed}
             />
           ) : null}
           {!wizard ? (
@@ -2312,8 +2363,9 @@ function PaymentContent({
               canSend={context.canSend}
               paidInCash={context.paidInCash}
               cashLeftMinor={context.cashLeftMinor}
-              recordedAbove={wizard ? null : { paymentIntentReference, requests: listedAbove }}
+              recordedAbove={wizard ? null : { paymentIntentReference, ...listedAbove }}
               revision={financialRevision}
+              requestsRevision={requestsRevision}
             />
           )}
         </>
