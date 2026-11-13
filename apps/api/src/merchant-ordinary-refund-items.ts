@@ -367,6 +367,9 @@ export function createMerchantOrdinaryRefundItems(options: {
           });
           const progress = new Map<string, OrdinaryRefundProgress>();
           const methods = new Map<string, "Online" | "CardMachine">();
+          // b13: a counter cash request's cash, given back or to give back (whole nickels), so the
+          // list names both the refund and the cash that leaves the drawer for it.
+          const cash = new Map<string, string>();
           for (const request of recent) {
             if (declines.has(request.requestReference)) {
               progress.set(request.requestReference, "Declined");
@@ -380,6 +383,16 @@ export function createMerchantOrdinaryRefundItems(options: {
             // WP-2423 item 4: a card-machine refund request names that one payment.
             if (current.payments.some((payment) => payment.method === "CardMachine"))
               methods.set(request.requestReference, "CardMachine");
+            const drawer = current.payments.map((payment) =>
+              "cashGivenBackMinor" in payment && typeof payment.cashGivenBackMinor === "string"
+                ? BigInt(payment.cashGivenBackMinor)
+                : null,
+            );
+            if (drawer.length > 0 && drawer.every((value) => value !== null))
+              cash.set(
+                request.requestReference,
+                drawer.reduce((sum: bigint, value) => sum + (value ?? 0n), 0n).toString(),
+              );
             progress.set(
               request.requestReference,
               ordinaryRefundProgress(
@@ -409,6 +422,9 @@ export function createMerchantOrdinaryRefundItems(options: {
                   decline: declines.get(request.requestReference) ?? null,
                   progress: progress.get(request.requestReference) ?? "Recorded",
                   paymentMethod: methods.get(request.requestReference) ?? ("Online" as const),
+                  ...(cash.has(request.requestReference)
+                    ? { cashGivenBackMinor: cash.get(request.requestReference) as string }
+                    : {}),
                 }),
               ),
             ),

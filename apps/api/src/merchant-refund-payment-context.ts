@@ -308,6 +308,9 @@ export function createMerchantRefundPaymentContext(options: {
                   const left = cardMachinePaymentTakenMinor(card) - handedBack;
                   return (left > 0n ? left : 0n).toString();
                 })(),
+          // b13: the cash the drawer gave back for this payment's refunds (whole nickels), said
+          // beside the refunded amount so both figures of one cash refund are on the page.
+          cashGivenBackMinor: card.cash === undefined ? null : handedBack.toString(),
           currencyCode: "CAD" as const,
           capturedAmountMinor: captured.toString(),
           confirmedRefundMinor: confirmed.toString(),
@@ -356,6 +359,7 @@ export function createMerchantRefundPaymentContext(options: {
           paymentMethod: "Online" as const,
           paidInCash: false,
           cashLeftMinor: null,
+          cashGivenBackMinor: null,
           currencyCode: null,
           capturedAmountMinor: null,
           confirmedRefundMinor: null,
@@ -398,6 +402,7 @@ export function createMerchantRefundPaymentContext(options: {
         paymentMethod: "Online" as const,
         paidInCash: false,
         cashLeftMinor: null,
+        cashGivenBackMinor: null,
         currencyCode: "CAD" as const,
         capturedAmountMinor: terminal.amount.amountMinor.toString(),
         confirmedRefundMinor: position.confirmedMinor.toString(),

@@ -4956,6 +4956,51 @@ it("protects refund items transport and strips private nested data", async () =>
   ).toBe(503);
 });
 
+// b13: a counter cash request names the cash that left (or leaves) the drawer, so the refund
+// list says both the refund and the cash given back for it.
+it("b13: refund items carry a cash request's cash given back, and nothing for other requests", async () => {
+  const id = (n: number) => "01909974-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+  const entry = (n: number, extra: Record<string, string>) => ({
+    requestReference: id(n),
+    operationReference: id(n + 100),
+    claimVersion: n,
+    requestedAt: "2026-11-13T12:00:00.000Z",
+    reasonCode: "CUSTOMER_REQUEST",
+    currencyCode: "CAD",
+    amountMinor: "509",
+    decline: null,
+    progress: "Refunded" as const,
+    paymentMethod: "CardMachine" as const,
+    ...extra,
+  });
+  const query = vi.fn<NonNullable<MerchantBffRouterOptions["ordinaryRefundItems"]>>(
+    async () =>
+      ({
+        orderReference: id(1),
+        canRequest: true,
+        canWithdraw: false,
+        orderNumber: "3",
+        claimVersion: 2,
+        recentRequests: [entry(1, { cashGivenBackMinor: "510" }), entry(2, {})],
+        items: [],
+      }) as never,
+  );
+  const root = await serveRefundItems(query);
+  const result = await request(root, "/merchant/payments/refunds/items", {
+    method: "POST",
+    body: "{}",
+    headers: {
+      ...safeHeaders,
+      Cookie: "__Host-bop-merchant=" + sessionCookie,
+      "X-BOP-CSRF": csrf,
+      "Content-Type": "application/json",
+    },
+  });
+  const body = (await result.json()) as { recentRequests: Record<string, unknown>[] };
+  expect(body.recentRequests.map((value) => value.cashGivenBackMinor)).toEqual(["510", undefined]);
+  expect(Object.hasOwn(body.recentRequests[1] as object, "cashGivenBackMinor")).toBe(false);
+});
+
 async function serveRefundPreview(
   ordinaryRefundPreview?: MerchantBffRouterOptions["ordinaryRefundPreview"],
 ) {
@@ -7729,6 +7774,30 @@ it("b12: a cash order's take-back refused for its method or cents answers its ow
     [422, { error: "recovery_cash_only" }, "no-store"],
     [422, { error: "recovery_whole_nickels" }, "no-store"],
     [409, { error: "recovery_above_refunded" }, "no-store"],
+  ]);
+});
+
+// b13: a cash take-back of 0 was answered 403 request_denied (read as no permission).
+it("b13: a take-back of nothing answers its own 422, never a permission refusal", async () => {
+  type Recover = NonNullable<MerchantBffRouterOptions["refundRecovery"]>;
+  const command = vi.fn<Recover>(async () => {
+    throw new RefundRecoveryError("REFUND_RECOVERY_AMOUNT_ZERO");
+  });
+  const root = await serveRefundEscalation({ refundRecovery: command });
+  const answer = await request(root, "/merchant/payments/refunds/recover", {
+    method: "POST",
+    headers: {
+      ...safeHeaders,
+      Cookie: "__Host-bop-merchant=" + sessionCookie,
+      "X-BOP-CSRF": csrf,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ method: "Cash", amountMinor: "0" }),
+  });
+  expect([answer.status, await answer.json(), answer.headers.get("cache-control")]).toEqual([
+    422,
+    { error: "recovery_amount_zero" },
+    "no-store",
   ]);
 });
 

@@ -42,6 +42,8 @@ export class RefundRecoveryError extends Error {
       | "REFUND_RECOVERY_CASH_ONLY"
       /** b12: cash comes back in whole nickels. */
       | "REFUND_RECOVERY_WHOLE_NICKELS"
+      /** b13: nothing (0) taken back is no record: the amount is refused, never the person. */
+      | "REFUND_RECOVERY_AMOUNT_ZERO"
       | "REFUND_RECOVERY_CONFLICT"
       | "REFUND_RECOVERY_UNAVAILABLE",
   ) {
@@ -257,11 +259,13 @@ export function createPostgresRefundRecoveryStore(options: {
   }> => {
     const orderReference = ref(input.orderReference),
       operationReference = ref(input.operationReference);
+    // b13: a well-formed take-back of nothing is answered as that (after the permission check).
+    const nothing = typeof input.amountMinor === "bigint" && input.amountMinor === 0n;
     if (
       !refundRecoveryMethods.includes(input.method) ||
       !refundRecoveryReasons.includes(input.reasonCode) ||
       typeof input.amountMinor !== "bigint" ||
-      input.amountMinor <= 0n ||
+      (input.amountMinor <= 0n && !nothing) ||
       input.amountMinor > 100_000_000n ||
       (input.method === "CardMachine") !==
         (typeof input.slipReference === "string" &&
@@ -273,6 +277,7 @@ export function createPostgresRefundRecoveryStore(options: {
     validateAuditRecord(input.audit);
     if (!(await options.authorize(tx, { orderReference })))
       return fail("REFUND_RECOVERY_UNAVAILABLE");
+    if (nothing) return fail("REFUND_RECOVERY_AMOUNT_ZERO");
     // The Order's refund fence, then the time: every refund recorded before is in the position.
     const observedAt = await observeOrdinaryRefundOrderAfterFence(
       tx,

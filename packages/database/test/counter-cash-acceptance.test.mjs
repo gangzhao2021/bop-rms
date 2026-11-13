@@ -622,6 +622,27 @@ it("WP-2423 M52: the counter takes cash by the table's rules; replay, concurrenc
         asApi((tx) => recover(tx, takeBack(437n))),
         { code: "REFUND_RECOVERY_WHOLE_NICKELS" },
       );
+      // b13: nothing taken back is refused as an amount (422 at the route, never the generic
+      // permission refusal), after the store's permission check, and writes nothing.
+      const recoveriesBefore = await admin.query(
+        "SELECT count(*)::int AS n FROM rms_payment.refund_recovery WHERE order_id=$1",
+        [first.orderReference],
+      );
+      await assert.rejects(
+        asApi((tx) => recover(tx, takeBack(0n))),
+        {
+          code: "REFUND_RECOVERY_AMOUNT_ZERO",
+        },
+      );
+      assert.deepEqual(
+        (
+          await admin.query(
+            "SELECT count(*)::int AS n FROM rms_payment.refund_recovery WHERE order_id=$1",
+            [first.orderReference],
+          )
+        ).rows,
+        recoveriesBefore.rows,
+      );
       // A recovery recorded before b10 could be any cents (the old command took $0.02 in cash on
       // a cash order). Test-controlled legacy row: what is left is rounded down to whole nickels
       // ($22.43 -> $22.40), so the payment page reads an amount it can offer, never 2243.

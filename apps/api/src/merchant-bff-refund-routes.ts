@@ -307,6 +307,8 @@ export function installMerchantRefundRoutes(
         for (const [code, answer] of [
           ["REFUND_RECOVERY_CASH_ONLY", "recovery_cash_only"],
           ["REFUND_RECOVERY_WHOLE_NICKELS", "recovery_whole_nickels"],
+          // b13: nothing taken back is said as that, never as a permission refusal.
+          ["REFUND_RECOVERY_AMOUNT_ZERO", "recovery_amount_zero"],
         ] as const)
           if (failureNamed(error, code)) {
             response.status(422).set("Cache-Control", NO_STORE).json({ error: answer });
@@ -434,6 +436,8 @@ export function installMerchantRefundRoutes(
           paidInCash: result.paidInCash,
           // v15 batch 8: what the drawer still holds of a cash payment (null otherwise).
           cashLeftMinor: result.cashLeftMinor,
+          // b13: the cash the drawer gave back for its refunds (null when not a cash payment).
+          cashGivenBackMinor: result.cashGivenBackMinor,
           currencyCode: result.currencyCode,
           capturedAmountMinor: result.capturedAmountMinor,
           confirmedRefundMinor: result.confirmedRefundMinor,
@@ -519,6 +523,10 @@ export function installMerchantRefundRoutes(
                   },
             progress: entry.progress,
             paymentMethod: entry.paymentMethod,
+            // b13: a counter cash request's cash given back or to give back (whole nickels).
+            ...("cashGivenBackMinor" in entry && typeof entry.cashGivenBackMinor === "string"
+              ? { cashGivenBackMinor: entry.cashGivenBackMinor }
+              : {}),
           })),
           items: result.items.map((item) => ({
             orderBatchReference: item.orderBatchReference,

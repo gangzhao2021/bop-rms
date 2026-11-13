@@ -86,7 +86,8 @@ export function createMerchantRefundRecovery(options: {
       !refundRecoveryMethods.includes(raw.method as never) ||
       !refundRecoveryReasons.includes(raw.reasonCode as never) ||
       typeof raw.amountMinor !== "string" ||
-      !/^[1-9][0-9]{0,8}$/u.test(raw.amountMinor) ||
+      // b13: "0" reaches the record, which answers that nothing was taken back (422).
+      !/^(0|[1-9][0-9]{0,8})$/u.test(raw.amountMinor) ||
       (raw.method === "CardMachine") !== withSlip ||
       (withSlip &&
         (typeof raw.slipReference !== "string" ||
