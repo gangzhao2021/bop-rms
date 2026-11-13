@@ -121,7 +121,8 @@ import {
   type CustomerEntryOperatingReader,
 } from "./customer-entry-composition.js";
 import { CustomerEntryHandler } from "./customer-entry.js";
-import { CustomerMenuHandler } from "./customer-menu.js";
+import { CustomerMenuHandler, createSharedCustomerMenuPort } from "./customer-menu.js";
+import { runDetachedRead } from "./request-acquire-budget.js";
 import {
   createApiServerRuntime,
   type ApiServerRuntime,
@@ -1016,6 +1017,10 @@ export function createLocalCustomerRuntime(options: LocalCustomerRuntimeOptions)
       now,
       uuidV7Factory: options.uuidV7Factory,
     }),
-    customerMenu: new CustomerMenuHandler({ port: customerMenu, now }),
+    // WP-2423 (reads-under-burst): phones asking for the same menu at once share one read.
+    customerMenu: new CustomerMenuHandler({
+      port: createSharedCustomerMenuPort(customerMenu, { detached: runDetachedRead }),
+      now,
+    }),
   });
 }

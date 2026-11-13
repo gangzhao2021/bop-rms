@@ -6,6 +6,7 @@ import {
   requestAnswerTimeLeftMs,
   requestShedFor,
   requestWasShed,
+  runDetachedRead,
   sendReadAnswerBusy,
   withRequestAcquireBudget,
 } from "./request-acquire-budget.js";
@@ -154,6 +155,23 @@ describe("WP-2423 reads-under-burst: a read's whole answer inside the 15 s clien
     );
     expect(commandLeft).toBeUndefined();
     expect(cut).toBeUndefined();
+  });
+
+  it("runs a read shared by many phones in its own time, never cut by the phone that started it", async () => {
+    const { EventEmitter } = await import("node:events");
+    const first = Object.assign(new EventEmitter(), { writableFinished: false });
+    const seen = await withRequestAcquireBudget(
+      async () => {
+        first.emit("close");
+        const own = requestAnswerTimeLeftMs();
+        const shared = await runDetachedRead(async () => requestAnswerTimeLeftMs());
+        return { own, shared };
+      },
+      { response: first, answerWithinMs: 12_000 },
+    );
+    expect(seen.own).toBe(0);
+    expect(seen.shared).toBeGreaterThan(11_000);
+    expect(seen.shared).toBeLessThanOrEqual(12_000);
   });
 
   it("logs a 503 the rush caused as a wait (HTTP_RETRY_LATER), and a route's own fault as an error", async () => {

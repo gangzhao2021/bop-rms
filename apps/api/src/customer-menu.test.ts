@@ -3,7 +3,12 @@ import type { AddressInfo } from "node:net";
 import type { CustomerMenuQueryInput, CustomerMenuQueryResult } from "@rms/catalog";
 import { afterEach, describe, expect, it } from "vitest";
 import { createApp } from "./app.js";
-import { CustomerMenuHandler, type CustomerMenuPort } from "./customer-menu.js";
+import {
+  CustomerMenuHandler,
+  createSharedCustomerMenuPort,
+  customerMenuReuseMs,
+  type CustomerMenuPort,
+} from "./customer-menu.js";
 
 const STORE_REFERENCE = "018f7500-0000-7000-8000-000000000001";
 const MENU_REFERENCE = "018f7500-0000-7000-8000-000000000002";
@@ -405,4 +410,65 @@ it("WP-2423 (cart-unsellable-dishes): sends a choice not offered now as offeredN
     body.menu.sections[0]?.sellables[0]?.optionRules[0]?.options ?? [];
   expect(sent[0]?.offeredNow).toBe(false);
   expect(sent.slice(1).some((o: object) => "offeredNow" in o)).toBe(false);
+});
+
+describe("WP-2423 reads-under-burst: phones opening the same menu share one read", () => {
+  async function listenShared(port: CustomerMenuPort): Promise<number> {
+    const customerMenu = new CustomerMenuHandler({ now: () => AT, port });
+    const server = createServer(createApp({ customerMenu }));
+    servers.push(server);
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    return (server.address() as AddressInfo).port;
+  }
+  it("answers 20 phones at once from one read, the same answer each, and reads again after 3 s", async () => {
+    const catalog = new MutablePort();
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const slow: CustomerMenuPort = {
+      async getPublishedMenu(input) {
+        await gate;
+        return catalog.getPublishedMenu(input);
+      },
+    };
+    let clock = 1_000_000;
+    const port = await listenShared(createSharedCustomerMenuPort(slow, { nowMs: () => clock }));
+    const answers = Array.from({ length: 20 }, () => fetch(url(port)));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    release();
+    const responses = await Promise.all(answers);
+    expect(responses.map((response) => response.status)).toEqual(Array(20).fill(200));
+    const bodies = await Promise.all(responses.map((response) => response.text()));
+    expect(new Set(bodies).size).toBe(1);
+    expect(JSON.parse(bodies[0] ?? "")).toEqual(found());
+    expect(responses[0]?.headers.get("content-type")).toBe("application/json; charset=utf-8");
+    expect(catalog.calls).toHaveLength(1);
+    // Within the reuse time the menu is given again; another language or channel is its own read.
+    clock += customerMenuReuseMs - 1;
+    expect((await fetch(url(port))).status).toBe(200);
+    expect(catalog.calls).toHaveLength(1);
+    await fetch(url(port, "channel=DINE_IN&orderType=TABLE_SERVICE&locale=zh-Hans-CN"));
+    expect(catalog.calls).toHaveLength(2);
+    // After it, a sold-out mark staff made meanwhile is read.
+    clock += 2;
+    await fetch(url(port));
+    expect(catalog.calls).toHaveLength(3);
+    expect(customerMenuReuseMs).toBe(3_000);
+  });
+
+  it("never gives a busy, missing or stale answer again: the next phone asks anew", async () => {
+    const catalog = new MutablePort();
+    const port = await listenShared(createSharedCustomerMenuPort(catalog, { nowMs: () => 5 }));
+    catalog.error = new Error("busy");
+    expect((await fetch(url(port))).status).toBe(503);
+    catalog.error = undefined;
+    catalog.result = { status: "ProjectionStale" };
+    expect((await fetch(url(port))).status).toBe(503);
+    catalog.result = { status: "NotFound" };
+    expect((await fetch(url(port))).status).toBe(404);
+    catalog.result = found();
+    expect((await fetch(url(port))).status).toBe(200);
+    expect(catalog.calls).toHaveLength(4);
+  });
 });

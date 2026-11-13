@@ -228,3 +228,23 @@ export function sendReadAnswerBusy(response: {
     end: { value: ignored, configurable: true, writable: true },
   });
 }
+
+/**
+ * WP-2423 (reads-under-burst): a read shared by several requests (the same public menu asked for
+ * by many phones at once) runs within its own waiting budget and answer time, apart from the
+ * request that happened to start it: that phone going away (its read cut) must not cut it for the
+ * others, and each of them still answers within its own time.
+ */
+export function runDetachedRead<T>(work: () => Promise<T>): Promise<T> {
+  const startedAt = Date.now();
+  return requestBudgets().run(
+    {
+      remainingMs: requestAcquireBudgetMs,
+      startedAt,
+      ended: false,
+      committedWrite: false,
+      answerBy: startedAt + requestReadAnswerMs,
+    },
+    work,
+  );
+}

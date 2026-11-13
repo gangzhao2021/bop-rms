@@ -238,6 +238,81 @@ export function publicFound(value: CustomerMenuFound): CustomerMenuFound {
   };
 }
 
+/**
+ * WP-2423 (reads-under-burst, v15 2026-11-13): a guest menu is the same public answer for every
+ * phone at the Store. Each read did the whole work again: the menu, every dish's offer, price,
+ * each choice's price (one database round trip per choice), sold-out marks and stock, and the
+ * answer was built and serialized per phone. 20 phones opening the menu together took 1.5-2.5 s
+ * (20 cart reads together took 0.4-0.6 s), and in a burst the menu reads held the process and its
+ * connections while every other answer waited past the 15 s clients wait.
+ *
+ * Now the phones asking for the same menu at the same moment share one read, and a menu read in
+ * the last `customerMenuReuseMs` is given again. Commercially: a dish staff mark sold out shows so
+ * on a menu opened up to 3 s later; adding it is refused by the cart with its usual words, as for
+ * any menu already open on a phone. Only a found menu is given again: "busy", "not found" and a
+ * stale menu are always asked anew. The shared read works within its own answer time (the first
+ * phone going away does not cut it for the others), and each phone's own answer time still holds.
+ */
+export const customerMenuReuseMs = 3_000;
+const customerMenuShareLimit = 500;
+export function createSharedCustomerMenuPort(
+  port: CustomerMenuPort,
+  options: {
+    readonly reuseMs?: number;
+    readonly nowMs?: () => number;
+    /** Runs the shared read in its own answer time (apart from any one phone's request). */
+    readonly detached?: <T>(work: () => Promise<T>) => Promise<T>;
+  } = {},
+): CustomerMenuPort {
+  const reuseMs = options.reuseMs ?? customerMenuReuseMs;
+  const nowMs = options.nowMs ?? Date.now;
+  const detached = options.detached ?? (<T>(work: () => Promise<T>) => work());
+  const flights = new Map<string, Promise<CustomerMenuQueryResult>>();
+  const recent = new Map<
+    string,
+    { readonly at: number; readonly result: CustomerMenuQueryResult }
+  >();
+  return Object.freeze({
+    getPublishedMenu(input: Readonly<CustomerMenuQueryInput>) {
+      const key = JSON.stringify([
+        input.publicStoreReference,
+        input.channelCode,
+        input.orderTypeCode,
+        input.locale,
+        input.searchTerm ?? null,
+        input.sectionReference ?? null,
+      ]);
+      const kept = recent.get(key);
+      if (kept !== undefined) {
+        const age = nowMs() - kept.at;
+        if (age >= 0 && age < reuseMs) return Promise.resolve(kept.result);
+        recent.delete(key);
+      }
+      const flying = flights.get(key);
+      if (flying !== undefined) return flying;
+      const flight = detached(() => port.getPublishedMenu(input)).then((result) => {
+        if (resultStatus(result) === "Found") {
+          if (recent.size >= customerMenuShareLimit) {
+            const oldest = recent.keys().next().value;
+            if (oldest !== undefined) recent.delete(oldest);
+          }
+          recent.set(key, { at: nowMs(), result });
+        }
+        return result;
+      });
+      flights.set(key, flight);
+      const settle = () => {
+        if (flights.get(key) === flight) flights.delete(key);
+      };
+      flight.then(settle, settle);
+      return flight;
+    },
+  });
+}
+
+/** The serialized public answer of each found menu result (one per shared read). */
+const publicBodies = new WeakMap<object, string>();
+
 export class CustomerMenuHandler {
   readonly #now: () => string;
   readonly #port: CustomerMenuPort;
@@ -266,7 +341,13 @@ export class CustomerMenuHandler {
       switch (resultStatus(result)) {
         case "Found":
           try {
-            response.status(200).json(publicFound(result as CustomerMenuFound));
+            // A shared menu (createSharedCustomerMenuPort) is built and serialized once.
+            let body = publicBodies.get(result);
+            if (body === undefined) {
+              body = JSON.stringify(publicFound(result as CustomerMenuFound));
+              publicBodies.set(result, body);
+            }
+            response.status(200).type("application/json").send(body);
           } catch {
             sendError(response, "menu_service_unavailable");
           }
