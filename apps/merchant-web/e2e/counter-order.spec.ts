@@ -547,8 +547,14 @@ for (const language of ["en", "zh-Hans"] as const)
       }),
     ).toBeVisible();
     // No answer: pressed again with the same time, it is the same payment (never counted twice).
+    // WP-2423 (rush-logging-and-entry): its button says "Record again", as the note does.
     await expect(chargePaidAt).toBeEnabled();
-    await pay.click();
+    await page
+      .getByRole("button", {
+        name: zh ? "再次记录 · $6.72" : "Record again · $6.72",
+        exact: true,
+      })
+      .click();
     await expect(
       page.getByText(zh ? "停电/断网后补录并已接单。" : "Recorded after the outage and accepted.", {
         exact: false,
@@ -1718,13 +1724,14 @@ test("@production a paper send with no answer stays the same order after the pai
   await page.getByRole("checkbox", { name: "Recorded after an outage (taken on paper)" }).check();
   const paidAt = page.getByLabel("Paid at (store time, from the paper order)");
   await paidAt.fill(local(new Date(Date.now() - 20 * 60_000)));
-  const send = page.getByRole("button", { name: "Send and record paper order" });
-  await send.click();
+  await page.getByRole("button", { name: "Send and record paper order" }).click();
   await expect(
     page.getByText(
       "No answer from the system. Send again — the same order is never created twice.",
     ),
   ).toBeVisible();
+  // WP-2423 (rush-logging-and-entry): the button says what the note asks.
+  const send = page.getByRole("button", { name: "Send again", exact: true });
   // The paid-at is corrected from the slip: the same order, a new payment.
   await paidAt.fill(local(new Date(Date.now() - 25 * 60_000)));
   await send.click();
@@ -1827,7 +1834,8 @@ test("@production a paper send with no answer is the same order after the page i
     await page.getByRole("checkbox", { name: "Recorded after an outage (taken on paper)" }).check();
     await page.getByLabel("Paid at (store time, from the paper order)").fill(local);
     await page.getByLabel("Slip reference (optional)").fill("TESTSLIP3");
-    await page.getByRole("button", { name: "Send and record paper order" }).click();
+    // WP-2423 (rush-logging-and-entry): a kept send with no answer is offered as "Send again".
+    await page.getByRole("button", { name: /^(Send and record paper order|Send again)$/u }).click();
   };
   await page.goto("/operations/order-entry");
   await enterSlip();
@@ -1842,6 +1850,7 @@ test("@production a paper send with no answer is the same order after the page i
     /The last paper order sent from this tablet \(\d\d:\d\d\) got no answer, so it may already be recorded\./u,
   );
   await expect(kept).toBeVisible();
+  await expect(page.getByRole("button", { name: "Send again", exact: true })).toBeVisible();
   for (const width of [1440, 1024, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
     expect(
@@ -1946,14 +1955,14 @@ test("@production a live send that comes back already paid goes to paid, never t
   );
   await page.goto("/operations/order-entry");
   await page.getByRole("button", { name: "Add Banana Bread" }).click();
-  const send = page.getByRole("button", { name: "Send order" });
-  await send.click();
+  await page.getByRole("button", { name: "Send order" }).click();
   await expect(
     page.getByText(
       "No answer from the system. Send again — the same order is never created twice.",
     ),
   ).toBeVisible();
-  await send.click();
+  // WP-2423 (rush-logging-and-entry): the button says what the note asks.
+  await page.getByRole("button", { name: "Send again", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Order 81 paid" })).toBeVisible();
   // The amount is what was paid, never "To charge"; the lagging list never offers to take it.
   await expect(page.getByText("Amount paid", { exact: true })).toBeVisible();
@@ -2388,4 +2397,125 @@ for (const language of ["en", "zh-Hans"] as const)
       slipConfirmation: "DifferentSlipSameReference",
     });
     await expect(page.locator("body")).not.toContainText(/SameSlip|DifferentSlip|slip_already/u);
+  });
+
+// WP-2423 (rush-logging-and-entry, v15 2026-11-13): after the 40 s bound the counter said "No
+// answer from the system. Send again" above a button still labelled "Send order", and the
+// card-machine step said "Record again" above "Paid on card machine · $17.94". The buttons now say
+// what the note asks, and pressing them sends the same operation again (never a second order or
+// payment).
+for (const language of ["en", "zh-Hans"] as const)
+  test(`@production a send or a payment record with no answer is offered again by name (${language})`, async ({
+    page,
+  }) => {
+    const zh = language === "zh-Hans";
+    if (zh)
+      await page.addInitScript(() => {
+        window.localStorage.setItem("bop.merchant.language", "zh-Hans");
+      });
+    await signIn(page);
+    await page.route("**/merchant/counter/menu", (route) => route.fulfill({ headers, json: menu }));
+    const sends: Record<string, unknown>[] = [];
+    await page.route("**/merchant/counter/orders", (route) => {
+      sends.push(route.request().postDataJSON() as Record<string, unknown>);
+      // The first send's answer never reaches the page.
+      if (sends.length === 1) return route.abort("failed");
+      return route.fulfill({
+        headers,
+        json: {
+          status: "Placed",
+          orderReference: id(20),
+          orderBatchReference: id(21),
+          orderNumber: "15",
+          orderVersion: 1,
+          orderMinor: "450",
+          tipMinor: "0",
+          totalMinor: "450",
+          payBy: new Date(Date.now() + 30 * 60_000).toISOString(),
+          recordedAfterOutage: false,
+        },
+      });
+    });
+    const records: Record<string, unknown>[] = [];
+    await page.route("**/merchant/orders/card-machine-payment", (route) => {
+      records.push(route.request().postDataJSON() as Record<string, unknown>);
+      if (records.length === 1) return route.abort("failed");
+      return route.fulfill({
+        headers,
+        json: {
+          status: "Recorded",
+          orderReference: id(20),
+          orderBatchReference: id(21),
+          amountMinor: "450",
+          recordingReason: "AtCounter",
+          takenAt: new Date().toISOString(),
+          recordedAt: new Date().toISOString(),
+          acceptance: "Accepted",
+        },
+      });
+    });
+    await page.goto("/operations/order-entry");
+    await page.getByRole("button", { name: zh ? "添加 Flat White" : "Add Flat White" }).click();
+    await page.getByRole("button", { name: zh ? "加入订单" : "Add to order" }).click();
+    await page.getByRole("button", { name: zh ? "发送订单" : "Send order" }).click();
+    await expect(
+      page.getByText(
+        zh
+          ? "系统没有回应。请再次发送 — 同一笔订单绝不会重复创建。"
+          : "No answer from the system. Send again — the same order is never created twice.",
+      ),
+    ).toBeVisible();
+    const sendAgain = page.getByRole("button", {
+      name: zh ? "再次发送" : "Send again",
+      exact: true,
+    });
+    await expect(sendAgain).toBeEnabled();
+    await expect(page.getByRole("button", { name: zh ? "发送订单" : "Send order" })).toHaveCount(0);
+    for (const width of [1440, 1024, 390]) {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true);
+      await page.screenshot({
+        path: test.info().outputPath(`counter-send-again-${language}-${width}.png`),
+        fullPage: true,
+      });
+    }
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await sendAgain.click();
+    await expect(
+      page.getByRole("heading", {
+        name: zh ? "在刷卡机上收款 $4.50" : "Charge $4.50 on the card machine",
+      }),
+    ).toBeVisible();
+    expect(sends).toHaveLength(2);
+    expect(sends[1]?.operationReference).toBe(sends[0]?.operationReference);
+
+    await page
+      .getByRole("button", { name: zh ? "已用刷卡机付款 · $4.50" : "Paid on card machine · $4.50" })
+      .click();
+    const recordAgain = page.getByRole("button", {
+      name: zh ? "再次记录 · $4.50" : "Record again · $4.50",
+      exact: true,
+    });
+    await expect(recordAgain).toBeEnabled();
+    for (const width of [1440, 1024, 390]) {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true);
+      await page.screenshot({
+        path: test.info().outputPath(`counter-record-again-${language}-${width}.png`),
+        fullPage: true,
+      });
+    }
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await recordAgain.click();
+    await expect(
+      page.getByRole("status").filter({
+        hasText: zh ? "已付款并发送到后厨。" : "Paid and sent to the kitchen.",
+      }),
+    ).toBeVisible();
+    expect(records).toHaveLength(2);
+    expect(records[1]?.operationReference).toBe(records[0]?.operationReference);
   });

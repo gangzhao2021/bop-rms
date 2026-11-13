@@ -938,6 +938,9 @@ export function StaffOrderEntryPage({
   // WP-2423 M52: a cash Record that got no answer keeps the cash received as sent until it is
   // answered, so recording again is the same payment (never a new one the server calls paid).
   const [cashUnanswered, setCashUnanswered] = useState(false);
+  // WP-2423 (rush-logging-and-entry): the last payment record got no answer: its button says
+  // "Record again" as the note above it does, and records the same payment operation again.
+  const [recordAgain, setRecordAgain] = useState(false);
   const [changeDue, setChangeDue] = useState<string | null>(null);
   const [placed, setPlaced] = useState<PlacedCounterOrder | null>(null);
   const [phase, setPhase] = useState<
@@ -1019,9 +1022,13 @@ export function StaffOrderEntryPage({
   // change to the order keeps the same operation: the server then names the order it placed
   // instead of placing a second one.
   const sendUnanswered = useRef(restoredSend !== null);
+  // WP-2423 (rush-logging-and-entry): the button says what the note above it asks ("Send again"),
+  // not "Send order", while the last send is unanswered; it sends the same operation again.
+  const [sendAgain, setSendAgain] = useState(restoredSend !== null);
   /** The send was answered (or staff start over): this tablet no longer keeps it. */
   const sendAnswered = () => {
     sendUnanswered.current = false;
+    setSendAgain(false);
     if (tableMode) return;
     clearUnansweredCounterSend(storeReference);
     setRestoredSend(null);
@@ -1589,6 +1596,7 @@ export function StaffOrderEntryPage({
       if (unanswered && !tableMode && placeOperation.current !== null) {
         // Kept for the Store, so a reload (a tablet that looks stuck) sends the same order again.
         sendUnanswered.current = true;
+        setSendAgain(true);
         keepUnansweredCounterSend(storeReference, {
           operationReference: placeOperation.current,
           sentAt: restoredSend?.sentAt ?? new Date().toISOString(),
@@ -1598,8 +1606,10 @@ export function StaffOrderEntryPage({
               ? (restoredSend?.paperPayment ?? null)
               : { digest: paperOperation.current.key, reference: paperOperation.current.reference },
         });
-      } else if (unanswered) sendUnanswered.current = true;
-      else {
+      } else if (unanswered) {
+        sendUnanswered.current = true;
+        setSendAgain(true);
+      } else {
         sendAnswered();
         placeOperation.current = null;
       }
@@ -1745,6 +1755,7 @@ export function StaffOrderEntryPage({
           ? error
           : new CounterOrderClientError("Unavailable");
       if (failure.code !== "OutcomeUnknown") payOperation.current = null;
+      setRecordAgain(failure.code === "OutcomeUnknown");
       if (placed.recordedAfterOutage && failure.code === "AlreadyPaid") {
         // DEC-PAPER-ORDER-PAID-AT-SEND: its payment is already recorded (an earlier try, or
         // another tablet): the sale is in the takings and nothing is charged.
@@ -1778,6 +1789,7 @@ export function StaffOrderEntryPage({
       return;
     }
     setCashUnanswered(false);
+    setRecordAgain(false);
     slipConfirmation.current = null;
     refreshMenu();
     setAwaitingKey((value) => value + 1);
@@ -2705,9 +2717,11 @@ export function StaffOrderEntryPage({
                 >
                   {phase === "Sending"
                     ? t("Sending…")
-                    : paper && !tablePaysLater
-                      ? t("Send and record paper order")
-                      : t("Send order")}
+                    : sendAgain
+                      ? t("Send again")
+                      : paper && !tablePaysLater
+                        ? t("Send and record paper order")
+                        : t("Send order")}
                 </button>
                 <SlowWaitNotice busy={phase === "Sending"} />
               </div>
@@ -3044,10 +3058,10 @@ export function StaffOrderEntryPage({
                     >
                       {phase === "Recording"
                         ? t("Recording…")
-                        : placed.recordedAfterOutage
-                          ? t("Record paper payment · {amount}", {
+                        : recordAgain && (placed.recordedAfterOutage || !counterCash)
+                          ? t("Record again · {amount}", {
                               amount: cad(
-                                counterCash
+                                placed.recordedAfterOutage && counterCash
                                   ? cashTender(
                                       BigInt(placed.totalMinor),
                                       "",
@@ -3055,15 +3069,29 @@ export function StaffOrderEntryPage({
                                   : placed.totalMinor,
                               ),
                             })
-                          : counterCash
-                            ? t("Cash received · {amount}", {
+                          : placed.recordedAfterOutage
+                            ? t("Record paper payment · {amount}", {
                                 amount: cad(
-                                  cashTender(BigInt(placed.totalMinor), "").cashDueMinor.toString(),
+                                  counterCash
+                                    ? cashTender(
+                                        BigInt(placed.totalMinor),
+                                        "",
+                                      ).cashDueMinor.toString()
+                                    : placed.totalMinor,
                                 ),
                               })
-                            : t("Paid on card machine · {totalMinor}", {
-                                totalMinor: cad(placed.totalMinor),
-                              })}
+                            : counterCash
+                              ? t("Cash received · {amount}", {
+                                  amount: cad(
+                                    cashTender(
+                                      BigInt(placed.totalMinor),
+                                      "",
+                                    ).cashDueMinor.toString(),
+                                  ),
+                                })
+                              : t("Paid on card machine · {totalMinor}", {
+                                  totalMinor: cad(placed.totalMinor),
+                                })}
                     </button>
                   </div>
                 </form>

@@ -2451,6 +2451,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "品牌尚未批准过敏原清单。拟定清单（{jurisdictionCode}）：{value}。",
   "No answer from the system. Record again — the same payment is never counted twice.":
     "系统没有回应。请再次记录 — 同一笔付款绝不会重复计算。",
+  "Send again": "再次发送",
+  "Record again · {amount}": "再次记录 · {amount}",
   "No answer from the system. Send again — the same order is never created twice.":
     "系统没有回应。请再次发送 — 同一笔订单绝不会重复创建。",
   "No authorized operational projection exists.": "没有已授权的运营投影。",

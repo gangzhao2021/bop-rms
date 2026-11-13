@@ -892,7 +892,8 @@ test("@production a table round the system could not send says so plainly, then 
   await expect(page.getByRole("alert")).toHaveText(
     "No answer from the system. Send again — the same order is never created twice.",
   );
-  await page.getByRole("button", { name: "Send order" }).click();
+  // WP-2423 (rush-logging-and-entry): the button says what the note asks.
+  await page.getByRole("button", { name: "Send again", exact: true }).click();
   await expect(
     page.getByRole("heading", { name: "Charge $15.99 on the card machine" }),
   ).toBeVisible();
