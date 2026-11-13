@@ -80,8 +80,12 @@ it("WP-2423 (M166): a choice's own allergens reach the listed menu for that choi
         declared: true,
         contains: [],
         mayContain: [],
+        // b13: the allergen codes too, so the page names them in the staff member's language.
+        containsCodes: [],
+        mayContainCodes: [],
       });
       assert.equal(declaredFor(fried)?.contains.length, 1);
+      assert.equal(declaredFor(fried)?.containsCodes.length, 1);
       assert.ok(
         recipes.ingredients.every(
           (item) => item.itemReference !== declaredFor(plain)?.itemReference,
