@@ -65,7 +65,9 @@ export function ResumePaymentPanel({
         error.code === "retry_pending" ||
         error.code === "conflict" ||
         // v15 batch-5: the round's payer stopped it: the result says so.
-        error.code === "round_returned")
+        error.code === "round_returned" ||
+        // v15 b15: the restaurant (or its time to pay) cancelled it: the result says so.
+        error.code === "round_cancelled")
     ) {
       setState({ step: "offer" });
       onSettled();

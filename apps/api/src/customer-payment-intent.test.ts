@@ -103,12 +103,15 @@ async function setup(enabled = true) {
   const stoppedByGuest = vi
     .fn<NonNullable<CustomerPaymentIntentPort["stoppedByGuest"]>>()
     .mockResolvedValue(false);
+  const roundCancelled = vi
+    .fn<NonNullable<CustomerPaymentIntentPort["roundCancelled"]>>()
+    .mockResolvedValue(false);
   const server = createServer(
     createApp(
       enabled
         ? {
             customerPaymentIntent: new CustomerPaymentIntentHandler({
-              port: { create, retry, resume, sendToKitchen, stoppedByGuest },
+              port: { create, retry, resume, sendToKitchen, stoppedByGuest, roundCancelled },
               allowedOrigin: "https://customer.example",
               now: () => "2026-08-03T15:01:00.000Z",
             }),
@@ -148,7 +151,18 @@ async function setup(enabled = true) {
       headers: { ...retryHeaders, ...extra },
       body: JSON.stringify(payload),
     });
-  return { result, create, retry, resume, sendToKitchen, stoppedByGuest, body, send, sendRetry };
+  return {
+    result,
+    create,
+    retry,
+    resume,
+    sendToKitchen,
+    stoppedByGuest,
+    roundCancelled,
+    body,
+    send,
+    sendRetry,
+  };
 }
 it.each([
   ["Created", 201],
@@ -298,6 +312,35 @@ it("v15 batch-5: a payment for a round its payer stopped is refused as that at o
   f.create.mockRejectedValue(new OrderCreationError("ORDER_CREATE_TABLE_MOVED"));
   expect((await f.send()).status).toBe(409);
   expect(f.stoppedByGuest).toHaveBeenCalledTimes(3);
+});
+
+// v15 b15 (order 12): Confirm on a page still open on a round staff cancelled answered 503
+// "payment service unavailable" for ~30 s, then the page said the payment timed out.
+it("a payment for a round staff or the System cancelled is refused as cancelled at once, not as an outage", async () => {
+  const f = await setup();
+  f.create.mockRejectedValue(new Error("SIMULATION_OUTCOME_CONFLICT"));
+  expect((await f.send()).status).toBe(503);
+  f.roundCancelled.mockRejectedValueOnce(new Error("synthetic outage"));
+  expect((await f.send()).status).toBe(503);
+  f.roundCancelled.mockResolvedValue(true);
+  const response = await f.send();
+  expect(response.status).toBe(409);
+  expect(response.headers.get("retry-after")).toBeNull();
+  expect(await response.json()).toEqual({
+    schemaVersion: 1,
+    error: { code: "payment_round_cancelled", messageKey: "customer.payment.round_cancelled" },
+  });
+  expect(f.roundCancelled).toHaveBeenLastCalledWith({
+    sessionCredential: "s".repeat(43),
+    csrfCredential: "c".repeat(43),
+    checkoutSessionReference: id(31),
+  });
+  // Its payer stopping it is said first, as before; an answer the guest can act on stays.
+  f.stoppedByGuest.mockResolvedValueOnce(true);
+  expect((await (await f.send()).json()).error.code).toBe("payment_round_returned");
+  f.create.mockRejectedValue(new OrderCreationError("ORDER_CREATE_TABLE_MOVED"));
+  expect((await (await f.send()).json()).error.code).toBe("payment_table_moved");
+  expect(f.roundCancelled).toHaveBeenCalledTimes(3);
 });
 
 it("WP-2423: says staff moved the table while the round was being sent (nothing placed or charged)", async () => {

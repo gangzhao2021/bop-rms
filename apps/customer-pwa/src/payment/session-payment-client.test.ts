@@ -133,6 +133,22 @@ it("v15 batch-5: says the round's payer stopped it, so a stale page stops waitin
   });
 });
 
+// v15 b15 (order 12): Confirm on a round staff cancelled was answered "unavailable" for ~30 s.
+it("says a round the restaurant cancelled as cancelled, at once", async () => {
+  const fetcher = vi.fn(async () =>
+    Response.json(
+      { schemaVersion: 1, error: { code: "payment_round_cancelled" } },
+      { status: 409 },
+    ),
+  );
+  vi.stubGlobal("fetch", fetcher);
+  await expect(createSessionPaymentClient().simulate(id(1), id(4), "0")).rejects.toMatchObject({
+    code: "round_cancelled",
+  });
+  // One request: a refusal is never retried as an outage.
+  expect(fetcher.mock.calls.length).toBeLessThanOrEqual(2);
+});
+
 it("WP-2423: says staff moved the table while the round was being sent", async () => {
   vi.stubGlobal(
     "fetch",

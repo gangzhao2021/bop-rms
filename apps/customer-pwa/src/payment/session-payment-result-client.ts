@@ -20,7 +20,8 @@ export interface SessionPaymentResult {
   readonly payBy: string | null;
   /** Failed only: declined, or never finished and cancelled when its time ran out. */
   /** v15 batch-5: `StoppedByGuest`: its payer stopped the round; the dishes are back in the cart. */
-  readonly failure: "Declined" | "NotCompleted" | "StoppedByGuest" | null;
+  /** v15 b15: `CancelledByStaff`: the restaurant cancelled the round before it was paid. */
+  readonly failure: "Declined" | "NotCompleted" | "StoppedByGuest" | "CancelledByStaff" | null;
 }
 function exact(value: unknown, fields: readonly string[]) {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error();
@@ -77,7 +78,8 @@ export function createSessionPaymentResultClient() {
       const failure =
         raw.failure === "Declined" ||
         raw.failure === "NotCompleted" ||
-        raw.failure === "StoppedByGuest"
+        raw.failure === "StoppedByGuest" ||
+        raw.failure === "CancelledByStaff"
           ? raw.failure
           : null;
       if (

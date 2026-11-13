@@ -150,6 +150,7 @@ export {
 export {
   findGuestDiningRound,
   isDiningRoundReturnedToCart,
+  readCheckoutRoundCancellation,
   returnDiningRoundToCart,
   type DiningRoundCartReturn,
   type DiningRoundCartReturnInput,

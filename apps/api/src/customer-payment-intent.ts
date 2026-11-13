@@ -59,6 +59,12 @@ export interface CustomerPaymentIntentPort {
    * table's cart), from the guest's own payment result. Rejects or false: not said.
    */
   stoppedByGuest?(input: CustomerPaymentRetryInput): Promise<boolean>;
+  /**
+   * v15 b15: whether the round this checkout pays for was cancelled before it was paid (by staff,
+   * or by the System when its time ran out) and the payment with it, from the guest's own payment
+   * result: nothing was charged and nothing can be. Rejects or false: not said.
+   */
+  roundCancelled?(input: CustomerPaymentRetryInput): Promise<boolean>;
 }
 function protect(response: Response) {
   response.setHeader("Cache-Control", "no-store");
@@ -91,7 +97,12 @@ type ExplicitRejection =
    * v15 batch-5: the guest paying for this round stopped it before paying ("Don't pay. Put the
    * dishes back"); nothing was charged and its dishes are back in the table's cart.
    */
-  | "round_returned";
+  | "round_returned"
+  /**
+   * v15 b15: staff (or the System, its time to pay over) cancelled this round before it was paid;
+   * its payment was cancelled with it and nothing was charged.
+   */
+  | "round_cancelled";
 /**
  * WP-2423 M03: the guest's own Order that already holds these dishes, so the page can open it.
  * Only references the guest already holds; never another guest's Order.
@@ -498,6 +509,23 @@ export class CustomerPaymentIntentHandler {
             .catch(() => false))
         ) {
           reject(response, 409, "round_returned");
+          return;
+        }
+        // v15 b15: a payment page still open on a round staff (or the System) cancelled is told
+        // so at once — never a "payment service unavailable" retried until its time runs out.
+        if (
+          explicit === undefined &&
+          status === 503 &&
+          this.#port.roundCancelled !== undefined &&
+          (await this.#port
+            .roundCancelled({
+              sessionCredential: input.sessionCredential,
+              csrfCredential: input.csrfCredential,
+              checkoutSessionReference: input.checkoutSessionReference,
+            })
+            .catch(() => false))
+        ) {
+          reject(response, 409, "round_cancelled");
           return;
         }
         reject(response, status, explicit);

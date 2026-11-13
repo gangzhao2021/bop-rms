@@ -10,6 +10,7 @@ import {
   createPostgresOrderRoundStaffHoldStore,
   listStoreUnpaidGuestDiningRounds,
   orderCancelledEventMatchesRecord,
+  readCheckoutRoundCancellation,
 } from "../../rms/ordering/src/index.ts";
 import {
   createPaymentIntentCreationService,
@@ -920,6 +921,12 @@ it("lets a guest finish an abandoned payment, staff cancel an unpaid round, and 
       assert.equal(created.status, "Created");
       assert.equal(created.record.reasonCode, "STAFF_CANCELLED_UNPAID");
       assert.equal(created.record.expiryRecordReference, null);
+      // v15 b15: the guest's payment page (its result, Confirm) reads who cancelled the round, by
+      // the checkout's payment operation, as the pilot API role: staff; a paid round: nobody.
+      const cancelledBy = (round) =>
+        transactions.run((tx) => readCheckoutRoundCancellation(tx, scope, round.refs.operation));
+      assert.equal(await cancelledBy(staffRound), "Staff");
+      assert.equal(await cancelledBy(paidRound), null);
       // Its reserved stock returned in the same transaction.
       assert.deepEqual(await reservedStock(), { onHand: "10", reserved: "0" });
       assert.deepEqual(await counts(), {
@@ -1303,6 +1310,8 @@ it("lets a guest finish an abandoned payment, staff cancel an unpaid round, and 
         ),
         [{ reason_code: "PAYMENT_NOT_COMPLETED" }],
       );
+      // v15 b15: the System's deadline cancellation reads as the System's, never staff's.
+      assert.equal(await cancelledBy(unknownRound), "System");
       // Still unresolved: the round goes to staff. Without the manager's confirmation, or before
       // the grace after the deadline has passed, it is refused as before; a paid round never.
       assert.deepEqual(await staffCancel(legacyRound, id(0x701)), {

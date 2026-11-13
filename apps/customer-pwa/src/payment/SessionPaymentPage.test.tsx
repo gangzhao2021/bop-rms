@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  cardWatchEnds,
   checkoutLoadFailureState,
   paymentStartFailureState,
   resolveUnknownPayment,
@@ -160,5 +161,27 @@ describe("Guest payment state: the time to pay runs out on the payment page", ()
   it("a payment being confirmed, or a page already saying what happened, stays as it is", () => {
     for (const status of ["confirming", "unknown", "window_ended", "denied", "time_up"])
       expect(statusAtPaymentDeadline(status, false)).toBeNull();
+  });
+});
+
+// v15 b15 (order 12): the card stayed offered after staff cancelled its round.
+describe("v15 b15: an offered card learns its round was cancelled", () => {
+  const answer = (status: "Pending" | "Failed" | "Succeeded", failure: string | null) =>
+    ({
+      checkoutSessionReference: "s",
+      paymentIntentReference: "p",
+      orderReference: "o",
+      status,
+      total: null,
+      payBy: null,
+      failure,
+    }) as never;
+  it("leaves for the result once the payment ended untaken, never on a decline or while open", () => {
+    expect(cardWatchEnds(answer("Failed", "CancelledByStaff"))).toBe(true);
+    expect(cardWatchEnds(answer("Failed", "NotCompleted"))).toBe(true);
+    expect(cardWatchEnds(answer("Failed", "StoppedByGuest"))).toBe(true);
+    expect(cardWatchEnds(answer("Failed", "Declined"))).toBe(false);
+    expect(cardWatchEnds(answer("Pending", null))).toBe(false);
+    expect(cardWatchEnds(answer("Succeeded", null))).toBe(false);
   });
 });

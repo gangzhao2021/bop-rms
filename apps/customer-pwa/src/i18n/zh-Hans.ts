@@ -1731,6 +1731,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "有 {count} 道菜现在不能点，没有放回。",
   "Go to your cart": "去购物车",
   "Payment stopped": "付款已停止",
+  "Round cancelled": "这一轮已取消",
+  "The restaurant cancelled this round before it was paid. Nothing was charged.":
+    "餐厅在付款前取消了这一轮。没有扣款。",
   "Your cart is empty now. Put these dishes back to order them again, or choose from the menu.":
     "购物车现在是空的。可以把这些菜放回去重新下单，或从菜单选择。",
   "These dishes can’t be put back right now. Check the order’s status first.":

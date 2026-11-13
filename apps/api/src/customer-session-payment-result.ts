@@ -23,6 +23,13 @@ export interface CustomerSessionPaymentResultOptions {
    * the guest paying for it stopped before paying (absent: not composed; a failed read: not said).
    */
   readonly returned?: (orderBatchReference: string) => Promise<boolean>;
+  /**
+   * v15 b15: who cancelled the unpaid round this checkout's payment was for (Ordering's record,
+   * by the payment operation), or null; absent: not composed; a failed read: not said.
+   */
+  readonly cancelledBy?: (
+    paymentOperationReference: string,
+  ) => Promise<"Staff" | "Guest" | "System" | null>;
 }
 export interface CustomerSessionPaymentResult {
   readonly checkoutSessionReference: string;
@@ -43,10 +50,10 @@ export interface CustomerSessionPaymentResult {
   /**
    * Why a failed payment failed: the card was declined, or the payment was never finished and was
    * cancelled when its time ran out (`NotCompleted`), or (v15 batch-5) the guest paying for the
-   * round stopped before paying and its dishes went back to the cart (`StoppedByGuest`). Null
-   * unless Failed.
+   * round stopped before paying and its dishes went back to the cart (`StoppedByGuest`), or (v15
+   * b15) staff cancelled the round before it was paid (`CancelledByStaff`). Null unless Failed.
    */
-  readonly failure: "Declined" | "NotCompleted" | "StoppedByGuest" | null;
+  readonly failure: "Declined" | "NotCompleted" | "StoppedByGuest" | "CancelledByStaff" | null;
 }
 const unavailable = (): never => {
   throw new CheckoutSessionServiceError("DEPENDENCY_UNAVAILABLE");
@@ -143,6 +150,15 @@ export function createCustomerSessionPaymentResult(options: CustomerSessionPayme
             failure = (await options.returned(String(p.orderBatchReference)).catch(() => false))
               ? "StoppedByGuest"
               : failure;
+          // v15 b15: a payment staff stopped by cancelling its round is said as that, never as
+          // one whose time ran out ("Cancel unpaid round" while the guest was on the page).
+          if (failure === "NotCompleted" && options.cancelledBy !== undefined)
+            failure =
+              (await options
+                .cancelledBy(String(session.paymentOperationReference))
+                .catch(() => null)) === "Staff"
+                ? "CancelledByStaff"
+                : failure;
         }
         result = Object.freeze({
           checkoutSessionReference: session.checkoutSessionReference,

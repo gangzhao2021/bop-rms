@@ -165,3 +165,14 @@ it("requires explicit same-origin JSON POST for reconciliation and rejects injec
   expect(response.headers.get("cache-control")).toBe("no-store");
   expect(read).toHaveBeenCalledTimes(1);
 });
+// v15 b15: a payment staff stopped by cancelling its round reaches the guest's page as that.
+it("passes a round staff cancelled as CancelledByStaff, only on a failed payment", async () => {
+  const f = await setup();
+  const cancelled = { ...f.result, status: "Failed", failure: "CancelledByStaff" };
+  f.read.mockResolvedValue(cancelled);
+  const response = await f.send();
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({ schemaVersion: 1, payment: cancelled });
+  f.read.mockResolvedValue({ ...f.result, failure: "CancelledByStaff" });
+  expect((await f.send()).status).toBe(503);
+});

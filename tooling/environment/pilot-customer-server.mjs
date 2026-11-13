@@ -197,6 +197,8 @@ function paymentRoutes({
         },
         // v15 batch-5: a stale page confirming a round its payer stopped is told at once.
         stoppedByGuest: (input) => terminal.stoppedByGuest(input),
+        // v15 b15: a stale page confirming a round staff or the System cancelled is told so.
+        roundCancelled: (input) => terminal.roundCancelled(input),
       },
     });
     router.post(

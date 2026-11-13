@@ -409,3 +409,42 @@ export async function isDiningRoundReturnedToCart(
   if (rows.length !== 1 || typeof returned !== "boolean") throw new CartError("CART_UNAVAILABLE");
   return returned;
 }
+
+/**
+ * v15 b15: who cancelled the unpaid round a checkout's payment was for — staff ("Staff", e.g.
+ * "Cancel unpaid round"), the guest paying for it ("Guest"), or the System when its time to pay
+ * ran out ("System"); null while it is not cancelled. Read by the payment operation the checkout
+ * session names, under the Store's own row security. The caller authorizes the guest.
+ */
+export async function readCheckoutRoundCancellation(
+  tx: CartQueryTransaction,
+  scopeInput: { readonly brandReference: string; readonly storeReference: string },
+  paymentOperationReference: string,
+): Promise<"Staff" | "Guest" | "System" | null> {
+  const brand = parseOrderingReference(scopeInput.brandReference);
+  const store = parseOrderingReference(scopeInput.storeReference);
+  const operation = parseOrderingReference(paymentOperationReference);
+  await tx.query(
+    "SELECT set_config('bop.brand_id', $1, true), set_config('bop.store_id', $2, true)",
+    [brand, store],
+  );
+  const rows = rowsOf(
+    await tx.query(
+      `SELECT x.reason_code FROM rms_ordering.order_batch_checkout_cancellation x
+         WHERE x.brand_id=$1 AND x.store_id=$2 AND x.payment_operation_id=$3 LIMIT 2`,
+      [brand, store, operation],
+    ),
+  );
+  if (rows.length > 1) throw new CartError("CART_UNAVAILABLE");
+  const reason = rows[0]?.reason_code;
+  if (reason === undefined) return null;
+  if (reason === "STAFF_CANCELLED_UNPAID") return "Staff";
+  if (reason === "GUEST_CANCELLED_UNPAID") return "Guest";
+  if (
+    reason === "CHECKOUT_DEADLINE_REACHED" ||
+    reason === "PAYMENT_NOT_STARTED" ||
+    reason === "PAYMENT_NOT_COMPLETED"
+  )
+    return "System";
+  throw new CartError("CART_UNAVAILABLE");
+}

@@ -43,6 +43,21 @@ import { StripeCardForm } from "./StripeCardForm.js";
 import { paymentConfiguration } from "./payment-configuration.js";
 import { RestoreDishesPanel } from "./RestoreDishesPanel.js";
 
+/** v15 b15: how often an offered card checks that its round is still there to pay. */
+export const cardWatchIntervalMs = 10_000;
+/**
+ * v15 b15: an offered card's payment ended without being taken — the restaurant cancelled its
+ * round, its time to pay ran out, or its payer stopped it — so the result page says which.
+ */
+export function cardWatchEnds(answer: SessionPaymentResult): boolean {
+  return (
+    answer.status === "Failed" &&
+    (answer.failure === "CancelledByStaff" ||
+      answer.failure === "NotCompleted" ||
+      answer.failure === "StoppedByGuest")
+  );
+}
+
 /**
  * WP-2423 Q10: only a checkout the server no longer recognises ends the payment page; a timeout,
  * outage or other failure keeps the customer here with a retry.
@@ -369,7 +384,11 @@ function PreparedSessionPaymentPage({
         return;
       }
       // v15 batch-5: the round's payer stopped it (another tab): its result says so at once.
-      if (error instanceof SessionPaymentClientError && error.code === "round_returned") {
+      // v15 b15: and so does a round the restaurant (or its time to pay) cancelled.
+      if (
+        error instanceof SessionPaymentClientError &&
+        (error.code === "round_returned" || error.code === "round_cancelled")
+      ) {
         void navigate("/checkout/result", { replace: true });
         return;
       }
@@ -451,6 +470,27 @@ function PreparedSessionPaymentPage({
       if (timer !== undefined) window.clearTimeout(timer);
     };
   }, [status, sessionReference, resolveReads, online, navigate]);
+  // v15 b15 (order 12): while the card is offered, staff may cancel the round (or its time to pay
+  // runs out). The payment's own result is read now and then, so the page says the round was
+  // cancelled and nothing was charged instead of offering to pay it.
+  useEffect(() => {
+    if (status !== "card" || !sessionReference || !online) return;
+    let stopped = false;
+    const timer = window.setInterval(() => {
+      if (flight.current || wasCheckoutCardSubmitted()) return;
+      void createSessionPaymentResultClient()
+        .read(sessionReference)
+        .then((answer) => {
+          if (!stopped && alive.current && cardWatchEnds(answer))
+            void navigate("/checkout/result", { replace: true });
+        })
+        .catch(() => undefined);
+    }, cardWatchIntervalMs);
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+    };
+  }, [status, sessionReference, online, navigate]);
   const simulate = async (outcome: "approve" | "decline" = "approve") => {
     if (
       config?.mode !== "simulation" ||
@@ -478,7 +518,7 @@ function PreparedSessionPaymentPage({
         alive.current &&
         inContext() &&
         error instanceof SessionPaymentClientError &&
-        error.code === "round_returned"
+        (error.code === "round_returned" || error.code === "round_cancelled")
       ) {
         void navigate("/checkout/result", { replace: true });
         return;

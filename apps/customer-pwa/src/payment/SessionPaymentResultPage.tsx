@@ -107,6 +107,8 @@ export function SessionPaymentResultPage({
   const notCompleted = result?.status === "Failed" && result.failure === "NotCompleted";
   // v15 batch-5: the round's payer stopped it before paying; its dishes are back in the cart.
   const stopped = result?.status === "Failed" && result.failure === "StoppedByGuest";
+  // v15 b15: the restaurant cancelled the round before it was paid; nothing was charged.
+  const cancelled = result?.status === "Failed" && result.failure === "CancelledByStaff";
   // WP-2423 M03: a pickup order empties its cart when it is placed, so once a payment started
   // there is no checkout to go back to (going back must never pay the same dishes twice).
   const pickup = store?.serviceMode !== "DineIn";
@@ -133,14 +135,16 @@ export function SessionPaymentResultPage({
                   ? t("Payment confirmed")
                   : stopped
                     ? t("Payment stopped")
-                    : notCompleted
-                      ? t("Payment not finished")
-                      : result?.status === "Failed"
-                        ? t("Payment declined")
-                        : t("Payment result not found");
+                    : cancelled
+                      ? t("Round cancelled")
+                      : notCompleted
+                        ? t("Payment not finished")
+                        : result?.status === "Failed"
+                          ? t("Payment declined")
+                          : t("Payment result not found");
   const badge = unknown
     ? t("Status not confirmed")
-    : notCompleted || unprepared || stopped
+    : notCompleted || unprepared || stopped || cancelled
       ? t("Not charged")
       : result?.status === "Failed"
         ? t("Declined")
@@ -155,7 +159,7 @@ export function SessionPaymentResultPage({
                 : t("Not found");
   const badgeTone = unknown
     ? "warning"
-    : stopped
+    : stopped || cancelled
       ? "neutral"
       : result?.status === "Failed"
         ? "danger"
@@ -169,7 +173,7 @@ export function SessionPaymentResultPage({
     state.status === "denied" ||
     state.status === "offline" ||
     unknown ||
-    (result?.status === "Failed" && !stopped);
+    (result?.status === "Failed" && !stopped && !cancelled);
   return (
     <CustomerPage
       step="payment"
@@ -185,15 +189,17 @@ export function SessionPaymentResultPage({
             ? t("The payment result is still being confirmed.")
             : stopped
               ? orderStatusText.roundWithdrawnUnpaid
-              : notCompleted
-                ? t(
-                    "This payment wasn’t finished in time, so it was cancelled. Nothing was charged.",
-                  )
-                : result?.status === "Failed"
-                  ? t("Your card was declined. Nothing was charged.")
-                  : result?.status === "Succeeded"
-                    ? paidIntroText(kitchen)
-                    : t("Payment details come from your current checkout.")}
+              : cancelled
+                ? t("The restaurant cancelled this round before it was paid. Nothing was charged.")
+                : notCompleted
+                  ? t(
+                      "This payment wasn’t finished in time, so it was cancelled. Nothing was charged.",
+                    )
+                  : result?.status === "Failed"
+                    ? t("Your card was declined. Nothing was charged.")
+                    : result?.status === "Succeeded"
+                      ? paidIntroText(kitchen)
+                      : t("Payment details come from your current checkout.")}
         </p>
       </PageHeading>
       <ol className="checkout-progress" aria-label={t("Checkout progress")}>
@@ -254,6 +260,9 @@ export function SessionPaymentResultPage({
                 : t("Your payment is still being confirmed. Don’t start another payment.")}
             </p>
           ) : null}
+          {cancelled ? (
+            <p>{t("It wasn’t sent to the kitchen. Ask staff if you still want it.")}</p>
+          ) : null}
           {notCompleted && !pickup ? (
             <p>{t("It wasn’t sent to the kitchen. Ask staff if you still want it.")}</p>
           ) : null}
@@ -280,7 +289,7 @@ export function SessionPaymentResultPage({
               ) : null}
             </>
           ) : null}
-          {result?.status === "Failed" && !notCompleted && !stopped ? (
+          {result?.status === "Failed" && !notCompleted && !stopped && !cancelled ? (
             <p>
               {t("Your card was declined. Try another card or ask staff to pay at the counter.")}
             </p>
@@ -299,7 +308,7 @@ export function SessionPaymentResultPage({
         {notCompleted && pickup && result?.orderReference ? (
           <RestoreDishesPanel orderReference={result.orderReference} />
         ) : null}
-        {result?.status === "Failed" && !notCompleted && !stopped ? (
+        {result?.status === "Failed" && !notCompleted && !stopped && !cancelled ? (
           <RetryCardPanel
             checkoutSessionReference={result.checkoutSessionReference}
             total={result.total}

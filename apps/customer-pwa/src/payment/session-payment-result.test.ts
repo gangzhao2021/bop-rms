@@ -96,6 +96,20 @@ it("preserves pending/unknown/failed and rejects responses after credential repl
     ),
   );
   expect((await createSessionPaymentResultClient().read(id(1))).failure).toBe("StoppedByGuest");
+  // v15 b15: the restaurant cancelled the round before it was paid.
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(
+      Response.json(
+        {
+          schemaVersion: 1,
+          payment: { ...success, status: "Failed", failure: "CancelledByStaff" },
+        },
+        { headers: { "cache-control": "no-store" } },
+      ),
+    ),
+  );
+  expect((await createSessionPaymentResultClient().read(id(1))).failure).toBe("CancelledByStaff");
   // WP-2423 abandoned payment: a failure reason only with a failed payment, from a closed set.
   for (const payment of [
     { ...success, failure: "Declined" },

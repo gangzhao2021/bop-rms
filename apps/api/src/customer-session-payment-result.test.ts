@@ -19,7 +19,10 @@ const mocks = vi.hoisted(() => ({ read: vi.fn() }));
 vi.mock("./customer-checkout-session-read.js", () => ({
   createCustomerCheckoutSessionRead: () => ({ read: mocks.read }),
 }));
-async function fixture(returned?: (orderBatchReference: string) => Promise<boolean>) {
+async function fixture(
+  returned?: (orderBatchReference: string) => Promise<boolean>,
+  cancelledBy?: (paymentOperationReference: string) => Promise<"Staff" | "Guest" | "System" | null>,
+) {
   const original = await createPaymentIntentCreationService(
     harness({ prepared: preparation({ committedAt: at }) }).ports,
   ).create(command({ tipSelectionReference: id(30) }));
@@ -79,6 +82,7 @@ async function fixture(returned?: (orderBatchReference: string) => Promise<boole
     history,
     terminal,
     ...(returned === undefined ? {} : { returned }),
+    ...(cancelledBy === undefined ? {} : { cancelledBy }),
   });
   const p = original.record.intent.preparation;
   const fact = {
@@ -268,4 +272,44 @@ it("v15 batch-5: a cancelled attempt whose round its payer stopped is said as st
   }
   expect(asked).toHaveLength(3);
   expect(new Set(asked).size).toBe(1);
+});
+
+// v15 b15 (order 12, L14 OSC B): staff cancelled an unpaid round while its guest was on the payment
+// page; the payment was cancelled with it and the page said it "wasn't finished in time".
+it("a cancelled attempt whose round staff cancelled is said as cancelled by the restaurant", async () => {
+  const asked: string[] = [];
+  for (const [answer, failure] of [
+    [async () => "Staff" as const, "CancelledByStaff"],
+    [async () => "System" as const, "NotCompleted"],
+    [async () => null, "NotCompleted"],
+    // Ordering can't be read: said as before, never an outage.
+    [
+      async () => {
+        throw new Error("synthetic outage");
+      },
+      "NotCompleted",
+    ],
+  ] as const) {
+    const f = await fixture(undefined, async (operation) => {
+      asked.push(operation);
+      return answer();
+    });
+    const cancelled = {
+      ...f.success,
+      outcome: "Failed" as const,
+      amount: null,
+      failureReason: "Cancelled" as const,
+      retryDisposition: "Never" as const,
+    };
+    f.terminal.read.mockResolvedValue({
+      ...cancelled,
+      event: createPaymentTerminalEnvelope({
+        eventReference: id(88),
+        correlationReference: refs.operation,
+        fact: cancelled as never,
+      }),
+    });
+    expect(await f.service.read(f.input)).toMatchObject({ status: "Failed", failure });
+  }
+  expect(asked).toEqual(Array(4).fill(refs.operation));
 });

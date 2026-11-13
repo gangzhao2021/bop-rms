@@ -12,7 +12,10 @@ import {
 } from "../../packages/rms/payment/src/index.ts";
 import { createCustomerSessionPaymentResult } from "../../apps/api/dist/customer-session-payment-result.js";
 import { isPilotRuntime, pilotProviderEnvironment } from "./pilot-environment.mjs";
-import { isDiningRoundReturnedToCart } from "../../packages/rms/ordering/src/index.ts";
+import {
+  isDiningRoundReturnedToCart,
+  readCheckoutRoundCancellation,
+} from "../../packages/rms/ordering/src/index.ts";
 /** InternalTest simulated channel only. Does not perform Ordering settlement. */
 export function createInternalPaymentTerminal(
   resources,
@@ -83,7 +86,16 @@ export function createInternalPaymentTerminal(
   // v15 batch-5: a payment whose round its payer stopped (dishes back in the cart) says so.
   const returned = (orderBatchReference) =>
     transactions.run((tx) => isDiningRoundReturnedToCart(tx, scope, orderBatchReference));
-  const resultOptions = { access: checkout.accessOptions, history, terminal, returned };
+  // v15 b15: a payment whose round staff cancelled before it was paid says so.
+  const cancelledBy = (paymentOperationReference) =>
+    transactions.run((tx) => readCheckoutRoundCancellation(tx, scope, paymentOperationReference));
+  const resultOptions = {
+    access: checkout.accessOptions,
+    history,
+    terminal,
+    returned,
+    cancelledBy,
+  };
   const reader = createCustomerSessionPaymentResult(resultOptions);
   const service = createPaymentTerminalService({
     source: createPostgresPaymentTerminalSource(
@@ -174,6 +186,21 @@ export function createInternalPaymentTerminal(
             checkoutSessionReference: input.checkoutSessionReference,
           })
         ).failure === "StoppedByGuest"
+      );
+    },
+    /**
+     * v15 b15: the round this payment was for was cancelled before it was paid (staff, or the
+     * System when its time ran out), and the payment with it: nothing was or can be charged.
+     */
+    async roundCancelled(input) {
+      const result = await reader.read({
+        sessionCredential: input.sessionCredential,
+        csrfCredential: input.csrfCredential,
+        checkoutSessionReference: input.checkoutSessionReference,
+      });
+      return (
+        result.status === "Failed" &&
+        (result.failure === "CancelledByStaff" || result.failure === "NotCompleted")
       );
     },
     async reconcile(input) {

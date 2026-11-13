@@ -122,6 +122,8 @@ export async function createRuntime(
         ...paymentIntent,
         // v15 batch-5: a stale page paying a round its payer stopped is told at once.
         stoppedByGuest: (input) => paymentTerminal.stoppedByGuest(input),
+        // v15 b15: and one staff or the System cancelled is told it was cancelled.
+        roundCancelled: (input) => paymentTerminal.roundCancelled(input),
         async create(input) {
           if (!(await diningCheckout.takesOrder(input))) throw new CustomerStoreClosedError();
           if (payLater !== null && (await payLater.tableTiming(input)) === "PayLater")

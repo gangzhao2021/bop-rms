@@ -1010,3 +1010,56 @@ test("@production a card form still hung after Try again reloads onto the same p
   await main.getByRole("button", { name: "Try again", exact: true }).click();
   await expect.poll(() => navigations.length).toBeGreaterThan(0);
 });
+
+// v15 b15 (order 12, L14 OSC B): staff cancelled the unpaid round while the guest was on the
+// payment page. The card stayed offered, Confirm answered "payment service unavailable" for ~30 s,
+// and the page then said the payment "wasn't finished in time". The page now learns the round was
+// cancelled by itself and says so plainly: nothing was charged, no card to try again.
+test("@production a round the restaurant cancels while its card is offered says so, nothing charged", async ({
+  page,
+}) => {
+  test.setTimeout(60_000);
+  await checkout(page, { channel: "DineIn", intents: created });
+  let cancelled = false;
+  await page.route(`**/api/v1/checkout-sessions/${session}/payment-result`, (route) =>
+    route.fulfill({
+      headers: { "cache-control": "no-store" },
+      json: {
+        schemaVersion: 1,
+        payment: {
+          checkoutSessionReference: session,
+          paymentIntentReference: id(11),
+          orderReference: id(12),
+          status: cancelled ? "Failed" : "Pending",
+          total: { amountMinor: "2260", currency: "CAD" },
+          payBy: new Date(Date.now() + 600_000).toISOString(),
+          failure: cancelled ? "CancelledByStaff" : null,
+        },
+      },
+    }),
+  );
+  await goToPayment(page);
+  const main = page.getByRole("main");
+  await expect(main.getByText("Synthetic secure card component")).toBeVisible();
+  // Staff choose "Cancel unpaid round" on Orders; the guest touches nothing.
+  cancelled = true;
+  await expect(page).toHaveURL(/\/checkout\/result$/u, { timeout: 20_000 });
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await expect(page.getByRole("heading", { name: "Round cancelled", exact: true })).toBeVisible();
+    await expect(
+      page.getByText(
+        "The restaurant cancelled this round before it was paid. Nothing was charged.",
+      ),
+    ).toBeVisible();
+    await expect(page.getByText("Not charged", { exact: true })).toBeVisible();
+    await expect(page.getByText("declined", { exact: false })).toHaveCount(0);
+    await expect(page.getByText("wasn’t finished in time", { exact: false })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /another card|Try again/u })).toHaveCount(0);
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.screenshot({ path: `test-results/payment-round-cancelled-${width}.png` });
+  }
+  await expectNoInternalText(page);
+});

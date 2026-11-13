@@ -53,6 +53,8 @@ export class SessionPaymentClientError extends Error {
       | "table_moved"
       /** v15 batch-5: the guest paying for this round stopped it; nothing was charged. */
       | "round_returned"
+      /** v15 b15: the restaurant (or its time to pay) cancelled this round; nothing was charged. */
+      | "round_cancelled"
       | "unknown",
     /** already_ordered: the guest's own order that holds these dishes, when the server named it. */
     readonly placedOrder: {
@@ -124,6 +126,7 @@ export function createSessionPaymentClient() {
     payment_already_ordered: "already_ordered",
     payment_table_moved: "table_moved",
     payment_round_returned: "round_returned",
+    payment_round_cancelled: "round_cancelled",
   } as const;
   async function post(
     session: string,
