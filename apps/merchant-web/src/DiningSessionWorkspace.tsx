@@ -520,12 +520,15 @@ const noTablesMessage = "no-tables";
 
 export function DiningSessionWorkspace({
   csrf,
+  storeReference,
   storeLabel,
   timeZone,
   canTakeOrders = false,
   tableQrHref,
 }: {
   readonly csrf: string;
+  /** The selected Store: the bills this device keeps are said only for the Store they came from. */
+  readonly storeReference: string;
   readonly storeLabel: string;
   /** The Store's IANA time zone, for the times staff are told (WP-2423 item 5). */
   readonly timeZone?: string | undefined;
@@ -627,14 +630,15 @@ export function DiningSessionWorkspace({
   // Owner 2026-11-03 (operating continuity): each open table's bill stays on this device, so staff
   // can still see what a table owes when the connection drops. Read again only when it changed.
   const lastBills = useRef(new Map<string, ListBill>());
-  // b13: the bills this device kept from its last reads (by table), said while they are read again.
+  // b13: the bills this device kept from its last reads (by table), said while they are read again,
+  // only from this Store (a manager who switched Store never sees the other Store's table "1").
   const deviceBills = useMemo(() => {
-    const saved = loadLastBills();
+    const saved = loadLastBills(Date.now(), storeReference);
     return {
       savedAt: saved === null ? 0 : Date.parse(saved.savedAt),
       byLabel: new Map((saved?.tables ?? []).map((bill) => [bill.label, bill] as const)),
     };
-  }, []);
+  }, [storeReference]);
   /** Only a bill saved while this party sat at the table (never a party before it). */
   const deviceBillOf = (table: StaffDiningTable) =>
     table.elapsedMinutes !== null &&
@@ -682,7 +686,11 @@ export function DiningSessionWorkspace({
     const shown = () => {
       setBillFacts(listBillsByOrder(billItems.current.items, lastBills.current));
       setBillUnread(unreadBillOrders(billItems.current.items, billsFailed.current));
-      saveLastBills([...lastBills.current.values()].map((entry) => entry.bill));
+      saveLastBills(
+        [...lastBills.current.values()].map((entry) => entry.bill),
+        new Date(),
+        { storeReference, storeLabel },
+      );
     };
     return readListBills({
       items,
@@ -1400,7 +1408,9 @@ export function DiningSessionWorkspace({
       <LastOrdersNotice timeZone={timeZone} />
       {stale ? <StaleReadNotice stale={stale} /> : null}
       {/* Operating continuity: what servers do while the page can't reach the store system. */}
-      {stale || firstReadFailures !== null ? <TablesOfflineGuide /> : null}
+      {stale || firstReadFailures !== null ? (
+        <TablesOfflineGuide storeReference={storeReference} />
+      ) : null}
       <nav className="table-tabs" aria-label={t("Show tables")}>
         {tableTabs.map((value) => (
           <button

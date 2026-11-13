@@ -66,3 +66,19 @@ it("keeps each round as ordered and the bill's tax rounding on its own", () => {
   expect(html).toContain("<dt>Tax rounding</dt><dd>−$0.01</dd>");
   expect(html).toContain("To pay $94.91");
 });
+
+// b13 review: a manager who switches Store on this device never reads the other Store's table "1".
+it("says a saved bill only for the Store it was read in", () => {
+  saveLastBills([table], new Date("2026-11-03T22:00:00.000Z"), {
+    storeReference: "store-a",
+    storeLabel: "Downtown",
+  });
+  const now = Date.parse("2026-11-03T22:01:00.000Z");
+  expect(loadLastBills(now, "store-a")?.tables).toEqual([table]);
+  expect(loadLastBills(now, "store-a")?.storeLabel).toBe("Downtown");
+  expect(loadLastBills(now, "store-b")).toBeNull();
+  // A value an older page saved names no Store: never said for a Store.
+  saveLastBills([table], new Date("2026-11-03T22:00:00.000Z"));
+  expect(loadLastBills(now, "store-a")).toBeNull();
+  expect(loadLastBills(now)?.tables).toEqual([table]);
+});

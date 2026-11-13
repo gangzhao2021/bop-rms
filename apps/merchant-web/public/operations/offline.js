@@ -115,7 +115,12 @@
   else {
     el(
       "p",
-      w.asOf + new Date(saved.savedAt).toLocaleTimeString(language) + " · " + w.note,
+      w.asOf +
+        new Date(saved.savedAt).toLocaleTimeString(language) +
+        // b13: which Store these bills are from (a table label repeats across Stores).
+        (typeof saved.storeLabel === "string" && saved.storeLabel ? " · " + saved.storeLabel : "") +
+        " · " +
+        w.note,
       null,
       "quiet",
     );

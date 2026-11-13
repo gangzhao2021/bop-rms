@@ -26,7 +26,17 @@ export interface LastTableBill {
 }
 export interface LastBills {
   readonly savedAt: string;
+  /**
+   * b13: the Store these bills belong to. A table label ("1", "A1") repeats across Stores, so a
+   * bill is only said for the Store it was read in (absent in a value saved by an older page).
+   */
+  readonly storeReference?: string;
+  readonly storeLabel?: string;
   readonly tables: readonly LastTableBill[];
+}
+export interface LastBillsStore {
+  readonly storeReference: string;
+  readonly storeLabel: string;
 }
 
 export function lastTableBill(label: string, bill: TableBill): LastTableBill {
@@ -49,13 +59,23 @@ export function lastTableBill(label: string, bill: TableBill): LastTableBill {
   });
 }
 
-export function saveLastBills(tables: readonly LastTableBill[], now = new Date()): void {
+export function saveLastBills(
+  tables: readonly LastTableBill[],
+  now = new Date(),
+  store: LastBillsStore | null = null,
+): void {
   try {
     if (tables.length === 0) globalThis.localStorage?.removeItem(LAST_BILLS_KEY);
     else
       globalThis.localStorage?.setItem(
         LAST_BILLS_KEY,
-        JSON.stringify({ savedAt: now.toISOString(), tables }),
+        JSON.stringify({
+          savedAt: now.toISOString(),
+          ...(store === null
+            ? {}
+            : { storeReference: store.storeReference, storeLabel: store.storeLabel }),
+          tables,
+        }),
       );
   } catch {
     /* Storage full or blocked: the page still works, only this fallback is missing. */
@@ -70,8 +90,14 @@ export function clearLastBills(): void {
   }
 }
 
-/** The saved bills, unless too old to trust (a table from last night is not tonight's bill). */
-export function loadLastBills(now = Date.now()): LastBills | null {
+/**
+ * The saved bills, unless too old to trust (a table from last night is not tonight's bill). With
+ * `storeReference`, only bills read in that Store: another Store's table "1" is not this one's.
+ */
+export function loadLastBills(
+  now = Date.now(),
+  storeReference: string | null = null,
+): LastBills | null {
   try {
     const value = JSON.parse(
       globalThis.localStorage?.getItem(LAST_BILLS_KEY) ?? "null",
@@ -80,7 +106,8 @@ export function loadLastBills(now = Date.now()): LastBills | null {
       value === null ||
       typeof value.savedAt !== "string" ||
       !Array.isArray(value.tables) ||
-      !(now - Date.parse(value.savedAt) <= MAX_AGE_MS)
+      !(now - Date.parse(value.savedAt) <= MAX_AGE_MS) ||
+      (storeReference !== null && value.storeReference !== storeReference)
     )
       return null;
     return value;

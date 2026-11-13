@@ -2209,6 +2209,7 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                 <DiningSessionWorkspace
                   key={state.workspace.selectedScope.storeReference + state.csrf}
                   csrf={state.csrf}
+                  storeReference={state.workspace.selectedScope.storeReference}
                   storeLabel={state.workspace.selectedScope.storeLabel}
                   timeZone={state.workspace.selectedScope.timeZone}
                   canTakeOrders={state.workspace.navigation.some(

@@ -11,8 +11,13 @@ const cad = (minor: string) => orderMoney({ amountMinor: minor, currencyCode: "C
  * in — staff can't open a document while offline. The full procedure is the runbook's "Store
  * outage procedure" (Tables that pay at the end). Nothing is queued in the browser (IDR-0039).
  */
-export function TablesOfflineGuide() {
-  const last = loadLastBills();
+export function TablesOfflineGuide({
+  storeReference = null,
+}: {
+  /** b13: only this Store's saved bills (a table label repeats across Stores). */
+  readonly storeReference?: string | null;
+} = {}) {
+  const last = loadLastBills(Date.now(), storeReference);
   return (
     <section className="tables-offline" aria-labelledby="tables-offline-title" role="note">
       <h2 id="tables-offline-title">{t("While Tables isn't working")}</h2>
