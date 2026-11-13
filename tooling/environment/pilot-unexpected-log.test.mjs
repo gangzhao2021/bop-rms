@@ -310,3 +310,46 @@ it("v15 b12: a failure carrying a guest's visit cookies or CSRF value logs none 
   for (const canary of [guest, visits, csrf, "__Host-bop", "x-bop-csrf", "cookie"])
     expect(text).not.toContain(canary);
 });
+
+describe("WP-2423 (rush-reads-and-orders-changes): a staff request the rush turned away", () => {
+  it("is logged as a wait (level 40, HTTP_RETRY_LATER); a real fault stays level 50", async () => {
+    const { noteRequestFault, noteRequestShed, runWithRequestAcquireBudget } =
+      await import("../../packages/database/src/request-acquire-budget.ts");
+    const lines = logged();
+    const report = createMerchantRequestReporter({ store: "stores/demo" });
+    const acquire = () =>
+      Object.assign(new Error("acquire"), { code: "TENANT_DATABASE_ACQUIRE_FAILED" });
+    // No connection within the request's wait (a full pool in a burst): a wait.
+    await runWithRequestAcquireBudget(1000, async () => {
+      noteRequestShed();
+      report("/orders", acquire());
+      reportPilotUnexpected("INTERNAL_ORDER_QUEUE_UNAVAILABLE", acquire());
+    });
+    // A database that could not be reached met the same request first: a fault, as before.
+    await runWithRequestAcquireBudget(1000, async () => {
+      noteRequestFault();
+      noteRequestShed();
+      report("/kitchen", acquire());
+    });
+    // Outside any request (a worker), and a request nothing turned away: level 50.
+    report("/tables", acquire());
+    expect(
+      lines().map(({ level, resultCode, event, route }) => ({ level, resultCode, event, route })),
+    ).toEqual([
+      {
+        level: 40,
+        resultCode: "HTTP_RETRY_LATER",
+        event: "MERCHANT_REQUEST_UNEXPECTED",
+        route: "/orders",
+      },
+      {
+        level: 40,
+        resultCode: "HTTP_RETRY_LATER",
+        event: "INTERNAL_ORDER_QUEUE_UNAVAILABLE",
+        route: undefined,
+      },
+      { level: 50, resultCode: undefined, event: "MERCHANT_REQUEST_UNEXPECTED", route: "/kitchen" },
+      { level: 50, resultCode: undefined, event: "MERCHANT_REQUEST_UNEXPECTED", route: "/tables" },
+    ]);
+  });
+});

@@ -55,10 +55,21 @@ const ruleOf = (error) => {
   }
   return null;
 };
+const budgetKey = Symbol.for("bop.database.request-acquire-budget");
+/** The rush turned the current request away and no real fault met it (the shared budget). */
+function turnedAwayByRush() {
+  try {
+    const budget = globalThis[budgetKey]?.getStore();
+    return budget?.shed === true && budget.faulted !== true;
+  } catch {
+    return false;
+  }
+}
 /** The errors already logged, so a request's own report does not say the same failure twice. */
 const alreadyLogged = new WeakSet();
 export function reportUnexpected(event, error, context = {}) {
   if (error !== null && typeof error === "object") alreadyLogged.add(error);
+  const wait = context.level === undefined ? turnedAwayByRush() : context.level === 40;
   const { code, codeMessage } = codeOf(error);
   const rule = ruleOf(error);
   // v15 2026-11-01: a wrapped error names the code of what it wraps (owner services rewrite
@@ -73,9 +84,12 @@ export function reportUnexpected(event, error, context = {}) {
     JSON.stringify({
       // v15 b12: as the api log writes its lines (level 50 = error, with the time), so a staff
       // send that failed is found by time and level in whichever process served it.
-      level: 50,
+      // WP-2423 (rush-reads-and-orders-changes): a request the rush turned away (no connection in
+      // time, its answer time spent) is a wait staff sit out, not a fault: level 40.
+      level: wait ? 40 : 50,
       time: new Date().toISOString(),
       event,
+      ...(wait ? { resultCode: "HTTP_RETRY_LATER" } : {}),
       code,
       ...(causes.length > 0 ? { causes } : {}),
       ...(rule !== null ? { rule } : {}),
@@ -130,12 +144,14 @@ export function createMerchantRequestReporter({
   store,
   now = Date.now,
   event = "MERCHANT_REQUEST_UNEXPECTED",
+  rushed = turnedAwayByRush,
 } = {}) {
   const windows = new Map();
   return (route, error) => {
     if (error !== null && typeof error === "object" && alreadyLogged.has(error)) return;
     const { sqlState, table, constraint } = diagnosticOf(error);
-    const key = `${route} ${codeOf(error).code} ${sqlState} ${table} ${constraint}`;
+    const wait = rushed();
+    const key = `${route} ${codeOf(error).code} ${sqlState} ${table} ${constraint} ${wait}`;
     const at = now();
     const window = windows.get(key);
     if (window !== undefined && at - window.since < reportingWindowMs) {
@@ -148,6 +164,7 @@ export function createMerchantRequestReporter({
       route,
       ...(store === undefined ? {} : { store }),
       suppressed: window?.suppressed ?? 0,
+      level: wait ? 40 : 50,
     });
   };
 }
