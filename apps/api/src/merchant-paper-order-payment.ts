@@ -35,6 +35,7 @@ export const cardMachinePaymentHttpErrors: Readonly<
   CARD_MACHINE_IDEMPOTENCY_CONFLICT: [409, "card_machine_conflict"],
   CARD_MACHINE_TAKEN_BEFORE_RECORDS: [409, "taken_before_records"],
   CARD_MACHINE_CASH_TENDER_SHORT: [409, "cash_tender_short"],
+  CARD_MACHINE_SLIP_ALREADY_RECORDED: [409, "slip_already_recorded"],
   CARD_MACHINE_UNAVAILABLE: [503, "card_machine_payment_unavailable"],
 } as const);
 
@@ -126,7 +127,12 @@ export type PaperOrderPaymentAnswer =
         readonly acceptance: "Accepted" | "NotAccepted";
       };
     }
-  | { readonly paymentError: string; readonly paymentTotalMinor?: string };
+  | {
+      readonly paymentError: string;
+      readonly paymentTotalMinor?: string;
+      /** slip_already_recorded: the order the slip is recorded with. */
+      readonly paymentSlipOrderNumber?: string;
+    };
 
 /**
  * DEC-PAPER-ORDER-NEVER-RELEASED: how long the send waits before recording a paper payment again
@@ -191,6 +197,8 @@ export async function recordPaperOrderPayment(
   } catch (error) {
     if (error instanceof CardMachinePaymentCommandError) {
       const [, code] = cardMachinePaymentHttpErrors[error.code];
+      if (error.code === "CARD_MACHINE_SLIP_ALREADY_RECORDED" && error.slipOrderNumber !== null)
+        return { paymentError: code, paymentSlipOrderNumber: error.slipOrderNumber };
       return error.code === "CARD_MACHINE_AMOUNT_CHANGED" && error.totalMinor !== null
         ? { paymentError: code, paymentTotalMinor: error.totalMinor }
         : { paymentError: code };
@@ -212,6 +220,14 @@ export async function recordPaperOrderPayment(
  * correct in the paid-at field; an outage of the check is the route's own "unavailable" (send
  * again), never a refusal of the person.
  */
+export function paperPaidAtRefusalBody(error: unknown, code: string): Record<string, string> {
+  return error instanceof CardMachinePaymentCommandError &&
+    error.code === "CARD_MACHINE_SLIP_ALREADY_RECORDED" &&
+    error.slipOrderNumber !== null
+    ? { error: code, orderNumber: error.slipOrderNumber }
+    : { error: code };
+}
+
 export function paperPaidAtRefusal(
   error: unknown,
   route: "counter_order" | "staff_round",
@@ -220,6 +236,9 @@ export function paperPaidAtRefusal(
   switch (error.code) {
     case "CARD_MACHINE_TAKEN_BEFORE_RECORDS":
       return [409, "taken_before_records"];
+    // DEC-PAPER-SEND-IDEMPOTENT (b11): the slip is recorded with another paper order already.
+    case "CARD_MACHINE_SLIP_ALREADY_RECORDED":
+      return [409, "slip_already_recorded"];
     case "CARD_MACHINE_INPUT_INVALID":
       return [409, "paper_paid_at_out_of_range"];
     case "CARD_MACHINE_PERMISSION_DENIED":

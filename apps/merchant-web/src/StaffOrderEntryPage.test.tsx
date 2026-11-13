@@ -421,6 +421,35 @@ describe("counter order (OPS-ORDER-ENTRY) — WP-2423 Q7", () => {
     });
   });
 
+  // DEC-PAPER-SEND-IDEMPOTENT (b11): a paper slip already recorded with another order is named.
+  it("reads a paper slip already recorded with another order and says where it is", async () => {
+    const responses: [number, unknown][] = [
+      [409, { error: "slip_already_recorded", orderNumber: "29" }],
+      [409, { error: "slip_already_recorded" }],
+    ];
+    const fetcher = vi.fn(async () => {
+      const [status, body] = responses.shift() ?? [500, {}];
+      return new Response(JSON.stringify(body), { status });
+    });
+    const client = createCounterOrderClient("a".repeat(43), fetcher as unknown as typeof fetch);
+    const command = {
+      operationReference: id(30),
+      lines: [],
+      tip: { kind: "None" } as const,
+      recordedAfterOutage: true,
+    };
+    const named = await client.placeOrder(command).catch((error: unknown) => error);
+    expect(named).toMatchObject({ code: "SlipAlreadyRecorded", placedOrderNumber: "29" });
+    expect(placeErrorText(named as CounterOrderClientError, [])).toBe(
+      "This paper slip is already recorded with order 29. Nothing was sent or recorded. Open order 29 in Orders. If this is a different slip, check the reference printed on it.",
+    );
+    const unnamed = await client.placeOrder(command).catch((error: unknown) => error);
+    expect(unnamed).toMatchObject({ code: "SlipAlreadyRecorded", placedOrderNumber: null });
+    expect(placeErrorText(unnamed as CounterOrderClientError, [])).toContain(
+      "already recorded with another paper order",
+    );
+  });
+
   it("accepts a paper order's paid time only within the last three days", () => {
     const now = Date.parse("2026-10-13T18:00:00");
     expect(paidAtInstant("2026-10-13T14:05", now)).toBe(new Date("2026-10-13T14:05").toISOString());

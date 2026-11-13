@@ -286,8 +286,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "只有店长或店主可以把未取的单结束。",
   "The guest is not refunded automatically. To refund, a store manager records it from the order's payments; an owner who runs the store alone turns on Sole operator first.":
     "顾客不会自动收到退款。要退款，由店长在这单的付款里记录；一个人经营的店主先打开“独立经营者”。",
-  "Refunds are recorded by a store manager, and then you approve them. If you run the store alone, turn on Sole operator in Store setup (it applies to every store of this brand), or give someone the Store Manager role in Staff.":
-    "退款由店长记录，再由你批准。如果你一个人经营，请在“门店设置”里打开“独立经营者”（对本品牌所有门店生效），或在“员工”里给一位员工店长角色。",
+  "New refund requests are made by a store manager, and then you approve them. If you run the store alone, turn on Sole operator in Store setup (it applies to every store of this brand), or give someone the Store Manager role in Staff.":
+    "新的退款申请由店长提出，再由你批准。如果你一个人经营，请在“门店设置”里打开“独立经营者”（对本品牌所有门店生效），或在“员工”里给一位员工店长角色。",
   "This order was refunded in full. Close it with Can't make it.":
     "这单已全额退款。请按“做不了”结束。",
   "This order hasn't been accepted. Use Refuse and refund on the order to refund it in full.":
@@ -9703,4 +9703,21 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "{count} 项客人已付款，等你接单。请在订单页接单，或在那里拒掉这一轮并全额退款。",
   "This table can't be closed yet: a dish has not been served. Serve it, or resolve it on the Tables page, then close the table.":
     "这桌还不能关：还有菜没上。请先上菜，或在“桌台”页处理这道菜，再关桌。",
+  "This paper slip is already recorded with order {number}. Nothing was sent or recorded. Open order {number2} in Orders. If this is a different slip, check the reference printed on it.":
+    "这张纸质签购单已经录入在订单 {number} 里。这次没有发送，也没有录入。请在“订单”中打开订单 {number2}。如果这是另一张签购单，请核对上面印的参考号。",
+  "This paper slip is already recorded with another paper order. Nothing was sent or recorded. Find it in Orders. If this is a different slip, check the reference printed on it.":
+    "这张纸质签购单已经录入在另一张纸质订单里。这次没有发送，也没有录入。请在“订单”中查找。如果这是另一张签购单，请核对上面印的参考号。",
+  "This paper slip is already recorded with order {number}, so it was not recorded again. Open order {number2} in Orders. If this is a different slip, check the reference printed on it.":
+    "这张纸质签购单已经录入在订单 {number} 里，这次没有再录入。请在“订单”中打开订单 {number2}。如果这是另一张签购单，请核对上面印的参考号。",
+  "This paper slip is already recorded with another paper order, so it was not recorded again. Find it in Orders. If this is a different slip, check the reference printed on it.":
+    "这张纸质签购单已经录入在另一张纸质订单里，这次没有再录入。请在“订单”中查找。如果这是另一张签购单，请核对上面印的参考号。",
+  "Already ordered as order {number}; this paper slip goes with that order. Nothing new was charged or recorded. The slip was cleared here so it is never recorded twice. To send dishes that aren't in order {number2}, take their own payment. Open it in Orders.":
+    "已下单，订单 {number}，这张纸质签购单属于这笔订单。这次没有新的扣款，也没有新的录入。为了不重复录入，这里已清空签购单。订单 {number2} 里没有的菜要另外收款后再发送。请在“订单”中查看。",
+  "These items are already in an order, and this paper slip goes with it. Nothing new was charged or recorded. The slip was cleared here so it is never recorded twice. To send other dishes, take their own payment. Open it in Orders.":
+    "这些菜已经在一笔订单里，这张纸质签购单属于那笔订单。这次没有新的扣款，也没有新的录入。为了不重复录入，这里已清空签购单。其他菜要另外收款后再发送。请在“订单”中查看。",
+  "Amount paid": "已付金额",
+  "Refund {amount} on the card machine, then record it above, under Refunds to make on the card machine.":
+    "请先在刷卡机上退款 {amount}，再在上方“需要在刷卡机上办理的退款”里录入。",
+  "Give back {amount} in cash, then record it above, under Cash to give back.":
+    "请先退还现金 {amount}，再在上方“需要退还的现金”里录入。",
 });

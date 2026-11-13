@@ -1687,6 +1687,23 @@ test("@production a paper send with no answer stays the same order after the pai
         headers,
         json: { error: "counter_order_already_ordered", orderNumber: "77" },
       }),
+    // b11: the next tap is a new order with no paper slip (the slip went with order 77).
+    (route) =>
+      route.fulfill({
+        headers,
+        json: {
+          status: "Placed",
+          orderReference: id(40),
+          orderBatchReference: id(41),
+          orderNumber: "78",
+          orderVersion: 1,
+          orderMinor: "848",
+          tipMinor: "0",
+          totalMinor: "848",
+          payBy: new Date(Date.now() + 20 * 60_000).toISOString(),
+          recordedAfterOutage: false,
+        },
+      }),
   ];
   await page.route("**/merchant/counter/orders", (route) => {
     sent.push(route.request().postDataJSON() as Record<string, unknown>);
@@ -1719,9 +1736,16 @@ test("@production a paper send with no answer stays the same order after the pai
   // A dish is added: still the same order operation, answered with the order it placed.
   await page.getByRole("button", { name: "Add Banana Bread" }).click();
   await send.click();
+  // b11: the paper slip went with order 77, so it is cleared here: sending again never records the
+  // same slip twice.
   await expect(
-    page.getByText("Already ordered as order 77. Nothing new was charged. Open it in Orders."),
+    page.getByText(
+      "Already ordered as order 77; this paper slip goes with that order. Nothing new was charged or recorded. The slip was cleared here so it is never recorded twice. To send dishes that aren't in order 77, take their own payment. Open it in Orders.",
+    ),
   ).toBeVisible();
+  await expect(
+    page.getByRole("checkbox", { name: "Recorded after an outage (taken on paper)" }),
+  ).not.toBeChecked();
   expect(sent).toHaveLength(3);
   const operation = sent[0]?.operationReference;
   expect(sent.map((body) => body.operationReference)).toEqual([operation, operation, operation]);
@@ -1738,6 +1762,16 @@ test("@production a paper send with no answer stays the same order after the pai
       fullPage: true,
     });
   }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  // The next tap sends the dishes as a new order to charge, with no paper payment in it.
+  await page.getByRole("button", { name: "Send order" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Charge $8.48 on the card machine" }),
+  ).toBeVisible();
+  expect(sent).toHaveLength(4);
+  expect(sent[3]?.operationReference).not.toBe(operation);
+  expect(sent[3]?.paperPayment).toBeUndefined();
+  expect(sent[3]?.recordedAfterOutage).toBe(false);
 });
 
 // DEC-PAPER-SEND-IDEMPOTENT (review): staff reload a tablet that looks stuck after a paper send got
@@ -1861,6 +1895,52 @@ test("@production a live send that comes back already paid goes to paid, never t
       },
     });
   });
+  // b11: the sent-not-paid read lags the payment for a moment and still lists order 81 unpaid.
+  await page.route("**/merchant/orders", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        items: [
+          {
+            orderReference: id(20),
+            orderNumber: "81",
+            orderType: "Pickup",
+            sourceChannel: "Pos",
+            submittedAt: new Date(Date.now() - 3 * 60_000).toISOString(),
+            observedAt: new Date().toISOString(),
+            initialBatchReference: id(21),
+            counter: {
+              recordedAfterOutage: false,
+              paidOnCardMachine: null,
+              payBy: new Date(Date.now() + 20 * 60_000).toISOString(),
+              amountDueMinor: "367",
+            },
+            canRecordCardMachinePayment: true,
+            canViewPayments: false,
+            batches: [
+              {
+                orderBatchReference: id(21),
+                sequence: 1,
+                acceptanceStatus: "NotAccepted",
+                canRequestAcceptance: false,
+                canCancel: false,
+                staffCancellation: null,
+                canCancelItems: false,
+              },
+            ],
+            canRequestAcceptance: false,
+            currentPhase: "Submitted",
+            currentVersion: 1,
+            unfulfillable: null,
+            pickupNotCollected: false,
+            acceptBy: null,
+            awaitingPayment: true,
+          },
+        ],
+        nextAfterOrderReference: null,
+      },
+    }),
+  );
   await page.goto("/operations/order-entry");
   await page.getByRole("button", { name: "Add Banana Bread" }).click();
   const send = page.getByRole("button", { name: "Send order" });
@@ -1872,6 +1952,21 @@ test("@production a live send that comes back already paid goes to paid, never t
   ).toBeVisible();
   await send.click();
   await expect(page.getByRole("heading", { name: "Order 81 paid" })).toBeVisible();
+  // The amount is what was paid, never "To charge"; the lagging list never offers to take it.
+  await expect(page.getByText("Amount paid", { exact: true })).toBeVisible();
+  await expect(page.getByText("To charge", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Sent, not paid yet" })).toHaveCount(0);
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.screenshot({
+      path: `test-results/counter-paid-replay-${width}.png`,
+      fullPage: true,
+    });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
   await expect(
     page.getByText(
       "Order 81 is already paid; its payment is recorded. Don't charge the guest again",

@@ -1,6 +1,10 @@
 import { expect, it } from "vitest";
 import { CardMachinePaymentCommandError } from "./merchant-card-machine-payment.js";
-import { recordPaperOrderPayment } from "./merchant-paper-order-payment.js";
+import {
+  paperPaidAtRefusal,
+  paperPaidAtRefusalBody,
+  recordPaperOrderPayment,
+} from "./merchant-paper-order-payment.js";
 
 const placed = {
   orderReference: "01909995-0000-7000-8000-000000000001",
@@ -91,4 +95,35 @@ it("answers a refusal at once and an outage only after its tries, never as an er
   expect(down).toEqual({ paymentError: "card_machine_payment_unavailable" });
   expect(calls).toBe(3);
   expect(reported).toHaveLength(1);
+});
+
+// DEC-PAPER-SEND-IDEMPOTENT (b11): a paper slip already recorded with another order is a refusal
+// staff act on (named by that order), never "the system is unavailable, send again".
+it("answers a paper slip already recorded with the order that holds it", async () => {
+  const held = new CardMachinePaymentCommandError("CARD_MACHINE_SLIP_ALREADY_RECORDED");
+  held.slipOrderNumber = "29";
+  for (const route of ["counter_order", "staff_round"] as const)
+    expect(paperPaidAtRefusal(held, route)).toEqual([409, "slip_already_recorded"]);
+  expect(paperPaidAtRefusalBody(held, "slip_already_recorded")).toEqual({
+    error: "slip_already_recorded",
+    orderNumber: "29",
+  });
+  const answer = await recordPaperOrderPayment(
+    async () => {
+      throw held;
+    },
+    { sessionCookie: "c", csrf: "x" },
+    {
+      orderReference: "01909995-0000-7000-8000-000000000001",
+      orderBatchReference: "01909995-0000-7000-8000-000000000002",
+      totalMinor: "735",
+    },
+    {
+      operationReference: "01909995-0000-7000-8000-000000000003",
+      tender: "CardMachine",
+      slipReference: "TESTSLIP6D",
+      takenAt: "2026-11-11T17:00:00.000Z",
+    },
+  );
+  expect(answer).toEqual({ paymentError: "slip_already_recorded", paymentSlipOrderNumber: "29" });
 });

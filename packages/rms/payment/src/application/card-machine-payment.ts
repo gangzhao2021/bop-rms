@@ -43,6 +43,11 @@ export const cardMachinePaymentErrorCodes = [
   "CARD_MACHINE_REFUND_EXCEEDS_PAYMENT",
   /** WP-2423 M52: the cash handed over is less than the cash total (rounded to 5 cents). */
   "CARD_MACHINE_CASH_TENDER_SHORT",
+  /**
+   * DEC-PAPER-SEND-IDEMPOTENT (b11): this paper slip's reference is already recorded with another
+   * paper order or round of the Store (within the paper back-entry window). Nothing was recorded.
+   */
+  "CARD_MACHINE_SLIP_ALREADY_RECORDED",
   "CARD_MACHINE_UNAVAILABLE",
 ] as const;
 export type CardMachinePaymentErrorCode = (typeof cardMachinePaymentErrorCodes)[number];

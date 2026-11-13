@@ -22,6 +22,7 @@ import { CardMachinePaymentCommandError } from "./merchant-card-machine-payment.
 import {
   cardMachinePaymentHttpErrors,
   paperPaidAtRefusal,
+  paperPaidAtRefusalBody,
   recordPaperOrderPayment,
   splitPaperOrderPayment,
 } from "./merchant-paper-order-payment.js";
@@ -84,6 +85,13 @@ export function orderDetailResponse(
  * mapping over the read model's full output and fails when a field the browser parses is dropped
  * (v15 2026-10-16: `awaitingAcceptanceSince` was, so no paid round ever showed its wait).
  */
+/** The order (or round) operation a send names, as sent (checked by its own command). */
+function operationOf(command: unknown): unknown {
+  return command !== null && typeof command === "object" && !Array.isArray(command)
+    ? (command as Record<string, unknown>).operationReference
+    : undefined;
+}
+
 function orderQueueRow(item: MerchantOrderQueueItem) {
   return {
     orderReference: item.orderReference,
@@ -478,7 +486,15 @@ export function installMerchantOrderRoutes(
     void (
       paperPayment === null || check === undefined
         ? Promise.resolve()
-        : check({ ...auth, takenAt: paperPayment.takenAt })
+        : check({
+            ...auth,
+            takenAt: paperPayment.takenAt,
+            paperSlip: {
+              slipReference: paperPayment.slipReference,
+              paymentOperationReference: paperPayment.operationReference,
+              orderOperationReference: operationOf(split.command),
+            },
+          })
     )
       .then(() => placeOrder({ ...auth, command: split.command }))
       .then(async (result) => {
@@ -509,7 +525,10 @@ export function installMerchantOrderRoutes(
         noteFailure(response, error);
         const paidAt = paperPaidAtRefusal(error, "counter_order");
         if (paidAt !== null) {
-          response.status(paidAt[0]).set("Cache-Control", NO_STORE).json({ error: paidAt[1] });
+          response
+            .status(paidAt[0])
+            .set("Cache-Control", NO_STORE)
+            .json(paperPaidAtRefusalBody(error, paidAt[1]));
           return;
         }
         if (!(error instanceof CounterOrderError)) {
@@ -589,7 +608,15 @@ export function installMerchantOrderRoutes(
     void (
       paperPayment === null || check === undefined
         ? Promise.resolve()
-        : check({ ...auth, takenAt: paperPayment.takenAt })
+        : check({
+            ...auth,
+            takenAt: paperPayment.takenAt,
+            paperSlip: {
+              slipReference: paperPayment.slipReference,
+              paymentOperationReference: paperPayment.operationReference,
+              orderOperationReference: operationOf(split.command),
+            },
+          })
     )
       .then(() => placeRound({ ...auth, command: split.command }))
       .then(async (result) => {
@@ -625,7 +652,10 @@ export function installMerchantOrderRoutes(
         noteFailure(response, error);
         const paidAt = paperPaidAtRefusal(error, "staff_round");
         if (paidAt !== null) {
-          response.status(paidAt[0]).set("Cache-Control", NO_STORE).json({ error: paidAt[1] });
+          response
+            .status(paidAt[0])
+            .set("Cache-Control", NO_STORE)
+            .json(paperPaidAtRefusalBody(error, paidAt[1]));
           return;
         }
         if (!(error instanceof StaffDiningRoundError)) {
@@ -741,7 +771,10 @@ export function installMerchantOrderRoutes(
           .json(
             error.code === "CARD_MACHINE_AMOUNT_CHANGED"
               ? { error: code, totalMinor: error.totalMinor }
-              : { error: code },
+              : error.code === "CARD_MACHINE_SLIP_ALREADY_RECORDED" &&
+                  error.slipOrderNumber !== null
+                ? { error: code, orderNumber: error.slipOrderNumber }
+                : { error: code },
           );
       });
   });

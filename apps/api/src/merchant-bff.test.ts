@@ -3875,10 +3875,25 @@ it("DEC-PAPER-ORDER-PAID-AT-SEND: a paper order records its payment with the sen
     expect(refused.status).toBe(status);
     expect(await refused.json()).toEqual({ error });
   }
+  // DEC-PAPER-SEND-IDEMPOTENT (b11): the slip is checked with the send too, and one already
+  // recorded with another order is refused before anything is placed, naming that order.
+  for (const path of [undefined, "/merchant/dining/staff-rounds"] as const) {
+    const held = new CardMachinePaymentCommandError("CARD_MACHINE_SLIP_ALREADY_RECORDED");
+    held.slipOrderNumber = "29";
+    paperPaidAtCheck.mockRejectedValueOnce(held);
+    const refused = await submit({ ...command, paperPayment: card }, path);
+    expect(refused.status).toBe(409);
+    expect(await refused.json()).toEqual({ error: "slip_already_recorded", orderNumber: "29" });
+  }
   expect(paperPaidAtCheck).toHaveBeenLastCalledWith({
     sessionCookie,
     csrf,
     takenAt: "2026-10-13T16:00:00.000Z",
+    paperSlip: {
+      slipReference: card.slipReference,
+      paymentOperationReference: card.operationReference,
+      orderOperationReference: command.operationReference,
+    },
   });
   expect(counterOrder).not.toHaveBeenCalled();
   expect(staffDiningRound).not.toHaveBeenCalled();

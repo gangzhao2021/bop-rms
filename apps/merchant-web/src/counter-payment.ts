@@ -38,6 +38,16 @@ export function payErrorText(
         : t("Check the slip reference and the paid-at time.");
     case "CashShort":
       return t("The cash received is less than the cash total.");
+    // DEC-PAPER-SEND-IDEMPOTENT (b11): a paper slip is recorded once, on one order.
+    case "SlipAlreadyRecorded":
+      return error.placedOrderNumber !== null
+        ? t(
+            "This paper slip is already recorded with order {number}, so it was not recorded again. Open order {number2} in Orders. If this is a different slip, check the reference printed on it.",
+            { number: error.placedOrderNumber, number2: error.placedOrderNumber },
+          )
+        : t(
+            "This paper slip is already recorded with another paper order, so it was not recorded again. Find it in Orders. If this is a different slip, check the reference printed on it.",
+          );
     case "TakenBeforeRecords":
       return t(
         "That paid-at time is before this store started recording sales in the system. Check when it was paid and enter it again.",

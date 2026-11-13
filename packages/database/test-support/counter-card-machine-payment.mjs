@@ -704,6 +704,54 @@ export async function exerciseCounterCardMachinePayment({
       }),
       { code: "COUNTER_ORDER_ALREADY_ORDERED", orderNumber: waiting.orderNumber },
     );
+    if (!paperCash) {
+      // DEC-PAPER-SEND-IDEMPOTENT (b11): the counter page then sent the cart as a new order with
+      // the same paper slip, which recorded it a second time. A paper slip is recorded once: the
+      // send's check (as the restricted role) refuses it before anything is placed, naming the
+      // order it is recorded with, however the reference is spaced or cased.
+      for (const slipReference of ["AUTH 482913", "auth482913"])
+        await assert.rejects(
+          paidAtCheck({
+            ...auth,
+            takenAt: paperTakenAt,
+            paperSlip: {
+              slipReference,
+              paymentOperationReference: next(),
+              orderOperationReference: next(),
+            },
+          }),
+          { code: "CARD_MACHINE_SLIP_ALREADY_RECORDED", slipOrderNumber: waiting.orderNumber },
+        );
+      // The same send again (its order operation, or its payment operation) is its own replay.
+      await paidAtCheck({
+        ...auth,
+        takenAt: paperTakenAt,
+        paperSlip: {
+          slipReference: "AUTH 482913",
+          paymentOperationReference: next(),
+          orderOperationReference: sentCommand.operationReference,
+        },
+      });
+      await paidAtCheck({
+        ...auth,
+        takenAt: paperTakenAt,
+        paperSlip: {
+          slipReference: "AUTH 482913",
+          paymentOperationReference: id(1),
+          orderOperationReference: next(),
+        },
+      });
+      // Another slip is another sale.
+      await paidAtCheck({
+        ...auth,
+        takenAt: paperTakenAt,
+        paperSlip: {
+          slipReference: "AUTH 482915",
+          paymentOperationReference: next(),
+          orderOperationReference: next(),
+        },
+      });
+    }
     assert.deepEqual(await counts(), {
       payments: before.payments + 1,
       events: before.events + 1,

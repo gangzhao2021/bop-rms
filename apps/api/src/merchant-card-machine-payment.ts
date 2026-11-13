@@ -4,6 +4,7 @@ import { readClosedRecord } from "@bop/identity";
 import {
   createPostgresCounterOrderEntryStore,
   createPostgresStaffDiningRoundEntryStore,
+  listStoreOrderNumbers,
   parseOrderingReference,
   type OrderPaymentPreparationEvidence,
 } from "@rms/ordering";
@@ -50,6 +51,11 @@ export const cardMachinePaymentCommandErrorCodes = [
    * was recorded.
    */
   "CARD_MACHINE_CASH_TENDER_SHORT",
+  /**
+   * DEC-PAPER-SEND-IDEMPOTENT (b11): the paper slip is already recorded with another paper order
+   * or round of the Store (named by its order number when known). Nothing was recorded.
+   */
+  "CARD_MACHINE_SLIP_ALREADY_RECORDED",
   "CARD_MACHINE_UNAVAILABLE",
 ] as const;
 export type CardMachinePaymentCommandErrorCode =
@@ -58,6 +64,8 @@ export class CardMachinePaymentCommandError extends Error {
   readonly code: CardMachinePaymentCommandErrorCode;
   /** For CARD_MACHINE_AMOUNT_CHANGED: the amount to charge now. */
   readonly totalMinor: string | null;
+  /** For CARD_MACHINE_SLIP_ALREADY_RECORDED: the Store's number of the order holding the slip. */
+  slipOrderNumber: string | null = null;
   constructor(code: CardMachinePaymentCommandErrorCode, totalMinor: string | null = null) {
     super("card machine payment is unavailable");
     this.name = "CardMachinePaymentCommandError";
@@ -146,6 +154,26 @@ export type StaffCardMachineOrderKind = "CounterPickup" | "DiningInitial" | "Din
  * order (DEC-COUNTER-PAYMENT-RECORD) or a dine-in round staff entered (DEC-STAFF-DINE-IN-ROUND).
  * Null when no staff member entered this batch.
  */
+/**
+ * DEC-PAPER-SEND-IDEMPOTENT (b11): refuses a paper slip already recorded with another paper order or
+ * round of the Store, naming that order, so the same slip never reaches the day's takings twice.
+ */
+async function refuseHeldPaperSlip(
+  tx: ConsumerTransaction,
+  scope: { brandReference: string; storeReference: string },
+  payments: Pick<ReturnType<typeof createPostgresCardMachinePaymentStore>, "findPaperSlip">,
+  slipReference: string,
+  takenAt: string,
+  sameSend: (held: { readonly operationReference: string }) => boolean = () => false,
+): Promise<void> {
+  const held = await payments.findPaperSlip(tx as never, slipReference, takenAt);
+  if (held === null || sameSend(held)) return;
+  const numbers = await listStoreOrderNumbers(tx, scope, [held.orderReference]);
+  const refused = new CardMachinePaymentCommandError("CARD_MACHINE_SLIP_ALREADY_RECORDED");
+  refused.slipOrderNumber = numbers.get(held.orderReference) ?? null;
+  throw refused;
+}
+
 async function resolveStaffEntry(
   tx: ConsumerTransaction,
   scope: { tenantReference: string; brandReference: string; storeReference: string },
@@ -373,6 +401,9 @@ export function createMerchantCardMachinePayment(options: {
               )) !== null
             )
               return fail("CARD_MACHINE_ALREADY_PAID");
+            // DEC-PAPER-SEND-IDEMPOTENT (b11): a paper slip is recorded once, on one order or round.
+            if (command.takenAt !== null && command.slipReference !== null)
+              await refuseHeldPaperSlip(tx, scope, payments, command.slipReference, takenAt);
             // Only an order staff took at the counter, or a dine-in round staff entered for a table,
             // is paid on the Store's card machine.
             const staffEntry = await resolveStaffEntry(tx, scope, allowed, command, {
@@ -449,6 +480,8 @@ export function createMerchantCardMachinePayment(options: {
           return fail("CARD_MACHINE_PERMISSION_DENIED");
         if (error.code === "CARD_MACHINE_CASH_TENDER_SHORT")
           return fail("CARD_MACHINE_CASH_TENDER_SHORT");
+        if (error.code === "CARD_MACHINE_SLIP_ALREADY_RECORDED")
+          return fail("CARD_MACHINE_SLIP_ALREADY_RECORDED");
       }
       const code = (error as { code?: unknown } | null)?.code;
       if (code === "STORE_SERVICE_PERMISSION_DENIED") return fail("CARD_MACHINE_PERMISSION_DENIED");
@@ -549,6 +582,17 @@ export function createMerchantPaperPaidAtCheck(options: {
     sessionCookie: unknown;
     csrf: unknown;
     takenAt: string;
+    /**
+     * DEC-PAPER-SEND-IDEMPOTENT (b11): the slip the paper order's payment carries, its payment
+     * operation and the order (or round) operation it is sent with. A slip already recorded with
+     * another paper order is refused before anything is placed, unless this is the same send again
+     * (that order operation was recorded before: its own replay answers it).
+     */
+    paperSlip?: {
+      readonly slipReference: string | null;
+      readonly paymentOperationReference: string;
+      readonly orderOperationReference: unknown;
+    };
   }): Promise<void> => {
     const session = await options.authentication.authorize(input);
     let takenAt: string;
@@ -593,6 +637,41 @@ export function createMerchantPaperPaidAtCheck(options: {
             ).catch(keepingCause(() => fail("CARD_MACHINE_UNAVAILABLE")));
             if (opening !== null && takenAt < opening)
               return fail("CARD_MACHINE_TAKEN_BEFORE_RECORDS");
+            const paper = input.paperSlip;
+            if (paper === undefined || paper.slipReference === null) return;
+            const owners = {
+              brandReference: String(resolved.context.brand.brandReference),
+              storeReference: String(resolved.store.storeReference),
+            };
+            const allowed = () => authority.guard();
+            const tx = transaction as unknown as ConsumerTransaction;
+            const operation = paper.orderOperationReference;
+            if (
+              typeof operation === "string" &&
+              /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u.test(operation)
+            ) {
+              const sentBefore =
+                (await createPostgresCounterOrderEntryStore({
+                  ...owners,
+                  authorize: allowed,
+                }).loadByOperation(tx as never, operation)) !== null ||
+                (await createPostgresStaffDiningRoundEntryStore({
+                  ...owners,
+                  authorize: allowed,
+                }).loadByOperation(tx as never, operation)) !== null;
+              if (sentBefore) return;
+            }
+            await refuseHeldPaperSlip(
+              tx,
+              owners,
+              createPostgresCardMachinePaymentStore({
+                scope: owners,
+                authorize: async () => allowed(),
+              }),
+              paper.slipReference,
+              takenAt,
+              (held) => held.operationReference === paper.paymentOperationReference,
+            );
           },
         ),
       );

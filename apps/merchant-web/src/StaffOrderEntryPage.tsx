@@ -545,6 +545,16 @@ export function placeErrorText(
       return t(
         "That paid-at time is later than now, or more than 3 days ago, by the system's clock. Nothing was sent. Check the time on the paper slip and this device's clock, then send again.",
       );
+    // DEC-PAPER-SEND-IDEMPOTENT (b11): a paper slip is recorded once, on one order.
+    case "SlipAlreadyRecorded":
+      return error.placedOrderNumber !== null
+        ? t(
+            "This paper slip is already recorded with order {number}. Nothing was sent or recorded. Open order {number2} in Orders. If this is a different slip, check the reference printed on it.",
+            { number: error.placedOrderNumber, number2: error.placedOrderNumber },
+          )
+        : t(
+            "This paper slip is already recorded with another paper order. Nothing was sent or recorded. Find it in Orders. If this is a different slip, check the reference printed on it.",
+          );
     case "StoreNotTakingOrders":
       return table !== null
         ? t(
@@ -798,6 +808,17 @@ export function StaffOrderEntryPage({
   const [paidNote, setPaidNote] = useState<string | null>(null);
   // WP-2423 (v15 751dd768): re-read the sent, unpaid counter orders after a send or a payment.
   const [awaitingKey, setAwaitingKey] = useState(0);
+  // b11: orders this page saw paid; the sent-not-paid list never offers payment for them again,
+  // even when its read lags the payment by a few seconds.
+  const [paidHere, setPaidHere] = useState<ReadonlySet<string>>(() => new Set());
+  const paidOrderReference =
+    placed !== null && (phase === "Paid" || phase === "Accepted") ? placed.orderReference : null;
+  useEffect(() => {
+    if (paidOrderReference === null) return;
+    setPaidHere((known) =>
+      known.has(paidOrderReference) ? known : new Set([...known, paidOrderReference]),
+    );
+  }, [paidOrderReference]);
   // WP-2423 M127: the order being charged may be cancelled by this staff member (from Orders' read);
   // null until that read answers, so nobody is told to ask a manager before it is known.
   const [placedCancellable, setPlacedCancellable] = useState<boolean | null>(null);
@@ -1363,6 +1384,25 @@ export function StaffOrderEntryPage({
           tableQrHref !== undefined,
         ),
       );
+      // DEC-PAPER-SEND-IDEMPOTENT (b11): the paper slip went with the order already placed; it is
+      // cleared here, so sending again (with dishes added) never records the same slip twice.
+      if (failure.code === "AlreadyOrdered" && paperPayment !== undefined) {
+        setPaper(false);
+        setPaidAt("");
+        setSlip("");
+        setPaidAtRefused(false);
+        paperOperation.current = null;
+        setProblem(
+          failure.placedOrderNumber !== null
+            ? t(
+                "Already ordered as order {number}; this paper slip goes with that order. Nothing new was charged or recorded. The slip was cleared here so it is never recorded twice. To send dishes that aren't in order {number2}, take their own payment. Open it in Orders.",
+                { number: failure.placedOrderNumber, number2: failure.placedOrderNumber },
+              )
+            : t(
+                "These items are already in an order, and this paper slip goes with it. Nothing new was charged or recorded. The slip was cleared here so it is never recorded twice. To send other dishes, take their own payment. Open it in Orders.",
+              ),
+        );
+      }
       setProblemNeedsTableCode(failure.code === "TableHasNoQr");
       setPartyChanged(failure.code === "TablePartyChanged");
       // v15 batch-5 review: the paper paid-at was refused before anything was placed; staff
@@ -1676,6 +1716,7 @@ export function StaffOrderEntryPage({
               ? placed.orderReference
               : null
           }
+          paidOrderReferences={paidHere}
           onExcludedCancellable={setPlacedCancellable}
         />
       )}
@@ -2519,7 +2560,9 @@ export function StaffOrderEntryPage({
                   <dt>
                     {placed.recordedAfterOutage
                       ? t("Paid on the card machine during the outage")
-                      : t("To charge")}
+                      : phase === "Paid" || phase === "Accepted"
+                        ? t("Amount paid")
+                        : t("To charge")}
                   </dt>
                   <dd>
                     <strong>{cad(placed.totalMinor)}</strong>

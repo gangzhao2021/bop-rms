@@ -67,6 +67,11 @@ export class CounterOrderClientError extends Error {
       | "PaidAtOutOfRange"
       /** WP-2423 M52: less cash handed over than the cash total. Nothing was recorded. */
       | "CashShort"
+      /**
+       * DEC-PAPER-SEND-IDEMPOTENT (b11): this paper slip is already recorded with another paper
+       * order (`placedOrderNumber` when known). Nothing was recorded (or, before a send, placed).
+       */
+      | "SlipAlreadyRecorded"
       | "AlreadyPaid"
       | "NotPayable"
       | "Invalid"
@@ -492,7 +497,8 @@ function parsePlacedWithPayment(
   paper: PaperPayment | undefined,
 ): PlacedCounterOrder {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return invalid();
-  const { payment, paymentError, paymentTotalMinor, ...order } = value as Record<string, unknown>;
+  const { payment, paymentError, paymentTotalMinor, paymentSlipOrderNumber, ...order } =
+    value as Record<string, unknown>;
   const placed = parsePlacedCounterOrder(order, table);
   if (paper === undefined || (payment === undefined && paymentError === undefined)) {
     if (payment !== undefined || paymentError !== undefined) return invalid();
@@ -517,6 +523,7 @@ function parsePlacedWithPayment(
       error: paymentErrorOf(null, {
         error: paymentError,
         ...(paymentTotalMinor === undefined ? {} : { totalMinor: paymentTotalMinor }),
+        ...(paymentSlipOrderNumber === undefined ? {} : { orderNumber: paymentSlipOrderNumber }),
       }),
     }),
   });
@@ -579,6 +586,16 @@ function parseRecordedPayment(
   });
 }
 
+/** DEC-PAPER-SEND-IDEMPOTENT (b11): the paper slip is recorded with another order (named). */
+function slipAlreadyRecorded(body: Record<string, unknown>) {
+  const refused = new CounterOrderClientError("SlipAlreadyRecorded");
+  refused.placedOrderNumber =
+    typeof body.orderNumber === "string" && /^[1-9][0-9]{0,18}$/u.test(body.orderNumber)
+      ? body.orderNumber
+      : null;
+  return refused;
+}
+
 /** Why a card-machine (or cash) payment was not recorded, from the server's error code. */
 function paymentErrorOf(status: number | null, body: Record<string, unknown>) {
   const code = body.error;
@@ -599,6 +616,7 @@ function paymentErrorOf(status: number | null, body: Record<string, unknown>) {
   if (code === "card_machine_conflict") return new CounterOrderClientError("Conflict");
   if (code === "taken_before_records") return new CounterOrderClientError("TakenBeforeRecords");
   if (code === "cash_tender_short") return new CounterOrderClientError("CashShort");
+  if (code === "slip_already_recorded") return slipAlreadyRecorded(body);
   if (status === 400 || code === "card_machine_input_invalid")
     return new CounterOrderClientError("Invalid");
   // The server's own answer that it could not record it (nothing was recorded): record again.
@@ -834,6 +852,7 @@ export function createCounterOrderClient(csrf: string, fetcher: typeof fetch = f
       if (code === "staff_round_unavailable") throw new CounterOrderClientError("SystemProblem");
       // A paper round's paid-at refused before it was placed (nothing was sent).
       if (code === "taken_before_records") throw new CounterOrderClientError("TakenBeforeRecords");
+      if (code === "slip_already_recorded") throw slipAlreadyRecorded(body);
       if (code === "paper_paid_at_out_of_range")
         throw new CounterOrderClientError("PaidAtOutOfRange");
       if (response.status === 400) throw new CounterOrderClientError("Invalid");
@@ -883,6 +902,7 @@ export function createCounterOrderClient(csrf: string, fetcher: typeof fetch = f
       if (code === "counter_order_unavailable") throw new CounterOrderClientError("SystemProblem");
       // A paper order's paid-at refused before it was placed (nothing was sent).
       if (code === "taken_before_records") throw new CounterOrderClientError("TakenBeforeRecords");
+      if (code === "slip_already_recorded") throw slipAlreadyRecorded(body);
       if (code === "paper_paid_at_out_of_range")
         throw new CounterOrderClientError("PaidAtOutOfRange");
       if (response.status === 400) throw new CounterOrderClientError("Invalid");

@@ -72,6 +72,7 @@ export function CounterAwaitingPayment({
   fetcher,
   refreshKey,
   excludeOrderReference,
+  paidOrderReferences,
   onExcludedCancellable,
 }: {
   /**
@@ -88,6 +89,11 @@ export function CounterAwaitingPayment({
   readonly refreshKey: number;
   /** The order this page is charging right now (shown in its own charge step). */
   readonly excludeOrderReference?: string | null | undefined;
+  /**
+   * b11: orders this page saw paid (recorded here, or answered as paid when sent again). A read
+   * that lags the payment never lists them again with "Take payment".
+   */
+  readonly paidOrderReferences?: ReadonlySet<string> | undefined;
 }) {
   const client = useMemo(() => createCurrentOrderQueueClient(fetcher), [fetcher]);
   const [orders, setOrders] = useState<readonly Order[] | null>(null);
@@ -265,6 +271,7 @@ export function CounterAwaitingPayment({
   const shown = (orders ?? []).filter(
     (order) =>
       order.orderReference !== excludeOrderReference &&
+      paidOrderReferences?.has(order.orderReference) !== true &&
       order.counter?.payBy != null &&
       (Date.parse(order.counter.payBy) > now || paperAwaitingReentry(order, now)),
   );
