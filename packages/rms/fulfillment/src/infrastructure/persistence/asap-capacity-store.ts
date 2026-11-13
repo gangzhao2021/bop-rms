@@ -226,12 +226,21 @@ export function createPostgresAsapCapacityStore(
           audit.targetType !== "FulfillmentAsapCapacity" ||
           audit.targetId !== record.allocationReference ||
           // WP-2423 DEC-PICKUP-CAPACITY-CONSUMED: staff accepting the paid Order consumes it.
+          // DEC-CANCELLED-ORDER-FREES-PICKUP-PLACE: staff cancelling the unpaid Order releases it.
           audit.reasonCode !==
-            (record.state === "Consumed" ? "ORDER_ACCEPTED" : "AUTHORIZED_CHECKOUT_CAPACITY") ||
+            (record.state === "Consumed"
+              ? "ORDER_ACCEPTED"
+              : record.state === "Released"
+                ? "ORDER_CANCELLED"
+                : "AUTHORIZED_CHECKOUT_CAPACITY") ||
           audit.occurredAt !== at ||
           // A staff Accept, or the worker's automatic acceptance (DEC-PAID-ORDER-AUTO-ACCEPT).
           !(
-            record.state === "Consumed" ? ["MERCHANT_WEB", "EVENT_CONSUMER"] : ["CUSTOMER_PWA"]
+            record.state === "Consumed"
+              ? ["MERCHANT_WEB", "EVENT_CONSUMER"]
+              : record.state === "Released"
+                ? ["MERCHANT_WEB"]
+                : ["CUSTOMER_PWA"]
           ).includes(audit.sourceChannel) ||
           audit.dataClassification !== "Restricted"
         )
@@ -386,6 +395,86 @@ export async function consumeAcceptedAsapCapacity(
     await transaction.query("ROLLBACK TO SAVEPOINT " + savepoint, []);
     await transaction.query("RELEASE SAVEPOINT " + savepoint, []);
     return "NotConsumable";
+  }
+}
+
+/**
+ * WP-2423 DEC-CANCELLED-ORDER-FREES-PICKUP-PLACE: staff cancelled the unpaid pickup Order of this
+ * submission (a counter order nobody paid for), so its ASAP commitment is Released at once and stops
+ * counting against its pickup hour; until now it kept the place until its payment window ended (up
+ * to 30 minutes), while the full-hour notice told staff to cancel such orders to free places. Runs
+ * inside the caller's cancellation transaction, under a savepoint: the cancellation stands even when
+ * the commitment can no longer be released (it already ended). Repeats report the earlier end. The
+ * caller authorizes the Order and Store and has already ended the Order.
+ */
+export async function releaseCancelledAsapCapacity(
+  transaction: AuditTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  input: {
+    readonly submissionReference: string;
+    readonly orderReference: string;
+    readonly orderBatchReference: string;
+    /** Server-owned audit identity of the capacity fact (System actor, linked to the cancellation). */
+    readonly auditReference: string;
+    readonly correlationReference: string;
+  },
+): Promise<"Released" | "AlreadyEnded" | "NotReleasable"> {
+  const savepoint = "fulfillment_asap_release";
+  await transaction.query("SAVEPOINT " + savepoint, []);
+  try {
+    const instant = (
+      (await transaction.query(
+        "SELECT to_char(date_trunc('milliseconds',clock_timestamp()) AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') AS observed_at",
+        [],
+      )) as { rows: readonly { observed_at: unknown }[] }
+    ).rows[0]?.observed_at;
+    const observedAt = parseFulfillmentInstant(instant);
+    const store = createPostgresAsapCapacityStore(
+      { run: async (work) => work(transaction) },
+      { brandReference: scope.brandReference, storeReference: scope.storeReference },
+      { now: () => observedAt },
+      { joined: true },
+    );
+    const current = await store.loadSubmission(input.submissionReference);
+    let outcome: "Released" | "AlreadyEnded" | "NotReleasable";
+    if (
+      current === null ||
+      current.orderReference !== parseFulfillmentReference(input.orderReference) ||
+      current.orderBatchReference !== parseFulfillmentReference(input.orderBatchReference)
+    )
+      outcome = "NotReleasable";
+    else if (current.state !== "Prepared" && current.state !== "PaymentPending")
+      outcome = "AlreadyEnded";
+    else {
+      const record = finishAsapCapacityCommitment(current, "Released", observedAt);
+      await store.append({
+        record,
+        audit: {
+          auditId: input.auditReference,
+          brandId: record.slot.brandReference,
+          storeId: record.slot.storeReference,
+          actor: { type: "System" },
+          actionCode: "FULFILLMENT_ASAP_CAPACITY_RELEASED",
+          targetType: "FulfillmentAsapCapacity",
+          targetId: record.allocationReference,
+          reasonCode: "ORDER_CANCELLED",
+          correlationId: input.correlationReference,
+          occurredAt: observedAt,
+          sourceChannel: "MERCHANT_WEB",
+          dataClassification: "Restricted",
+          retentionPolicyCode: "OPERATIONAL",
+          retentionPolicyVersion: 1,
+        },
+      });
+      outcome = "Released";
+    }
+    await transaction.query("RELEASE SAVEPOINT " + savepoint, []);
+    return outcome;
+  } catch (error) {
+    if (!(error instanceof AsapCapacityError)) throw error;
+    await transaction.query("ROLLBACK TO SAVEPOINT " + savepoint, []);
+    await transaction.query("RELEASE SAVEPOINT " + savepoint, []);
+    return "NotReleasable";
   }
 }
 

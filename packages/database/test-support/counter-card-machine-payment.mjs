@@ -782,6 +782,21 @@ async function exerciseCounterUnpaidCancellation({
   const heldBefore = await reserved();
   assert.notEqual(heldBefore, "0");
   assert.deepEqual(await releases(), []);
+  // DEC-CANCELLED-ORDER-FREES-PICKUP-PLACE: the unpaid order holds a pickup place until cancelled.
+  const commitment = async () =>
+    (
+      await admin.query(
+        "SELECT a.state,a.version::int AS version,a.capacity_units::int AS units," +
+          "(a.state='Consumed' OR (a.state='Prepared' AND a.preparation_valid_until>clock_timestamp()) " +
+          "OR (a.state='PaymentPending' AND a.capacity_expires_at>clock_timestamp())) AS holds_place " +
+          "FROM rms_fulfillment.capacity_asap_commitment a WHERE a.order_id=$1 ORDER BY a.version DESC LIMIT 1",
+        [orderReference],
+      )
+    ).rows[0];
+  assert.deepEqual(
+    { ...(await commitment()), units: undefined },
+    { state: "PaymentPending", version: 2, units: undefined, holds_place: true },
+  );
 
   const cancelCommand = {
     operationReference: next(),
@@ -838,6 +853,29 @@ async function exerciseCounterUnpaidCancellation({
   assert.equal(Date.parse(released[0].occurredAt), Date.parse(cancelled.cancelledAt));
   assert.equal(released[0].movementReference.slice(0, 14), termination[0].id.slice(0, 14));
 
+  // DEC-CANCELLED-ORDER-FREES-PICKUP-PLACE: its pickup place is free at once (not when its payment
+  // window would have ended), with a System capacity audit linked to the termination.
+  assert.deepEqual(
+    { ...(await commitment()), units: undefined },
+    { state: "Released", version: 3, units: undefined, holds_place: false },
+  );
+  const capacityAudits = (
+    await admin.query(
+      "SELECT actor_type,reason_code,source_channel,correlation_id::text AS correlation FROM platform_audit.audit_record " +
+        "WHERE action_code='FULFILLMENT_ASAP_CAPACITY_RELEASED' AND target_id::text IN " +
+        "(SELECT allocation_id::text FROM rms_fulfillment.capacity_asap_commitment WHERE order_id=$1)",
+      [orderReference],
+    )
+  ).rows;
+  assert.deepEqual(capacityAudits, [
+    {
+      actor_type: "System",
+      reason_code: "ORDER_CANCELLED",
+      source_channel: "MERCHANT_WEB",
+      correlation: termination[0].id,
+    },
+  ]);
+
   // Orders: cancelled before payment by staff, with the reason; it no longer offers the cancel.
   const after = await listed();
   assert.equal(after.currentPhase, "Cancelled");
@@ -875,6 +913,7 @@ async function exerciseCounterUnpaidCancellation({
   });
   assert.deepEqual({ terminations: await terminations(), movements: await movements() }, written);
   assert.equal(await reserved(), "0");
+  assert.equal((await commitment()).version, 3);
 
   // The card machine can no longer record a payment for it: nothing is charged or written.
   await assert.rejects(command(payInput({ operationReference: next(), takenAt: null })), {

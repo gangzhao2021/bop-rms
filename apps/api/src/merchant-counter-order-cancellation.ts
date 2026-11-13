@@ -1,6 +1,6 @@
 import type { ConsumerTransaction } from "@bop/eventing";
 import { readClosedRecord } from "@bop/identity";
-import { createPostgresAsapCapacityStore } from "@rms/fulfillment";
+import { createPostgresAsapCapacityStore, releaseCancelledAsapCapacity } from "@rms/fulfillment";
 import {
   counterUnpaidCancellationReasons,
   createPostgresCounterUnpaidCancellation,
@@ -74,7 +74,9 @@ const fail = (code: CounterCancellationErrorCode): never => {
  *    finds the order cancelled;
  * 3. Fulfillment's capacity commitment must not be consumed (no payment reached it);
  * 4. Ordering's append-only User termination naming the staff member and the reason, with audit;
- * 5. the reserved stock released in the same transaction (all or nothing).
+ * 5. the reserved stock released in the same transaction (all or nothing);
+ * 6. Fulfillment's capacity commitment released, so its pickup place is free at once
+ *    (DEC-CANCELLED-ORDER-FREES-PICKUP-PLACE).
  * The cancelled order stays on Orders as cancelled before payment by that staff member. Same
  * operation reference → the original outcome, nothing written.
  *
@@ -293,6 +295,19 @@ export function createMerchantCounterOrderCancellation(options: {
             });
             if (inventory.status === "NotReleasable")
               return fail("COUNTER_CANCEL_STOCK_NOT_RELEASABLE");
+            // DEC-CANCELLED-ORDER-FREES-PICKUP-PLACE: its pickup place is free at once, as the
+            // full-hour notice tells staff. A replay releases one an earlier build left holding.
+            await releaseCancelledAsapCapacity(
+              transaction,
+              { brandReference: selected.brandReference, storeReference: selected.storeReference },
+              {
+                submissionReference: String(link.submissionReference),
+                orderReference,
+                orderBatchReference,
+                auditReference: options.nextReference(),
+                correlationReference: String(record.terminationReference),
+              },
+            );
             return Object.freeze({
               status: cancelled.status,
               cancelledAt: String(record.terminatedAt),
