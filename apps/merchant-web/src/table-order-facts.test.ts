@@ -1,5 +1,11 @@
 import { expect, it, vi } from "vitest";
-import { loadTableKitchenFacts, loadTableOrderFacts } from "./table-order-facts.js";
+import {
+  kitchenReadsDue,
+  loadTableKitchenFacts,
+  loadTableOrderFacts,
+  mergeKitchenFacts,
+  SERVED_TABLE_REREAD_MS,
+} from "./table-order-facts.js";
 import { listFactsOf } from "./DiningSessionWorkspace.js";
 import { CURRENT_ORDER_REFS, currentOrderQueueFixture } from "./current-order-queue.fixtures.js";
 import { tableNeed } from "./table-needs.js";
@@ -119,4 +125,65 @@ it("b13: a table's Order the queue pages did not bring is read on its own; one t
   const queueOnly = vi.fn(async () => json({ ...currentOrderQueueFixture(), items: [] }));
   await loadTableOrderFacts([missing], new AbortController().signal, queueOnly);
   expect(queueOnly).toHaveBeenCalledTimes(1);
+});
+
+// b13 review: on a busy host one table's own read fails; its Serve all must not vanish for a poll.
+it("b13: a table whose own serving read failed keeps what was read before", async () => {
+  const [ready, other] = [id(51), id(52)];
+  const previous = new Map([
+    [ready, { readyToServe: 3, inKitchen: false, allServed: false }],
+    [other, { readyToServe: 0, inKitchen: true, allServed: false }],
+    [id(53), { readyToServe: 1, inKitchen: false, allServed: false }],
+  ]);
+  const fetcher = vi.fn(async (_path: RequestInfo | URL, init?: RequestInit) => {
+    const order = JSON.parse(String(init?.body)).orderReference as string;
+    return order === ready ? json({ error: "retry_later" }, 503) : json(progress(order, ["Ready"]));
+  });
+  const found = await loadTableKitchenFacts(
+    [ready, other],
+    csrf,
+    new AbortController().signal,
+    fetcher,
+  );
+  expect(found.has(ready)).toBe(false);
+  const merged = mergeKitchenFacts(previous, found, [ready, other]);
+  // The failed table keeps its 3 dishes at the pass; the one read now says what it read.
+  expect(merged.get(ready)).toEqual({ readyToServe: 3, inKitchen: false, allServed: false });
+  expect(merged.get(other)).toEqual({ readyToServe: 1, inKitchen: false, allServed: false });
+  // A table no longer checking out is dropped.
+  expect(merged.has(id(53))).toBe(false);
+});
+
+// b13 review (load): a table at checkout with every dish served is not read on its own each poll.
+it("b13: a served table checking out is read on its own again only after a while", async () => {
+  const done = { readyToServe: 0, inKitchen: false, allServed: true };
+  const [served, ready, missing, fresh] = [id(61), id(62), id(63), id(64)];
+  const now = Date.parse("2026-11-13T12:00:00.000Z");
+  const lastOwn = new Map([
+    [served, { at: now - 30_000, facts: done }],
+    [ready, { at: now - 30_000, facts: done }],
+    [missing, { at: now - 30_000, facts: done }],
+  ]);
+  const queued = new Map([
+    [served, done],
+    // The queue now says a dish is at the pass: read it on its own again at once.
+    [ready, { readyToServe: 1, inKitchen: false, allServed: false }],
+    [fresh, done],
+  ]);
+  const orders = [served, ready, missing, fresh];
+  expect(kitchenReadsDue(orders, lastOwn, queued, now)).toEqual([ready, missing, fresh]);
+  expect(kitchenReadsDue(orders, lastOwn, queued, now + SERVED_TABLE_REREAD_MS)).toEqual(orders);
+  // The queue's own reads leave out the tables read on their own (never read twice).
+  const fetcher = vi.fn(async (path: RequestInfo | URL) =>
+    String(path) === "/merchant/dining/order-progress"
+      ? json(progress(id(65), ["Ready"]))
+      : json({ ...currentOrderQueueFixture(), items: [] }),
+  );
+  await loadTableOrderFacts([served, id(65)], new AbortController().signal, fetcher, {
+    csrf,
+    except: new Set([served]),
+  });
+  expect(
+    fetcher.mock.calls.filter(([path]) => String(path) === "/merchant/dining/order-progress"),
+  ).toHaveLength(1);
 });

@@ -178,6 +178,54 @@ export function loadTableKitchenFacts(
 }
 
 /**
+ * v15 b13 review: the kitchen facts said after a read. A table still checking out whose own read
+ * failed now (a busy host) keeps what was read before, so its Serve all does not vanish for a
+ * poll; a table no longer checking out is dropped.
+ */
+export function mergeKitchenFacts<T>(
+  previous: ReadonlyMap<string, T>,
+  found: ReadonlyMap<string, T>,
+  asked: readonly string[],
+): ReadonlyMap<string, T> {
+  const merged = new Map<string, T>();
+  for (const order of asked) {
+    const value = found.get(order) ?? previous.get(order);
+    if (value !== undefined) merged.set(order, value);
+  }
+  return merged;
+}
+
+/** A table whose dishes were all served is read on its own again after this long at most. */
+export const SERVED_TABLE_REREAD_MS = 120_000;
+type KitchenFacts = Pick<TableOrderFacts, "readyToServe" | "inKitchen" | "allServed">;
+const allDone = (facts: KitchenFacts | undefined) =>
+  facts !== undefined && facts.allServed && !facts.inKitchen && facts.readyToServe === 0;
+
+/**
+ * v15 b13 review (load): which tables checking out are read from their own serving progress in
+ * this list read. Most tables at checkout have every dish served; such a table is read again only
+ * every {@link SERVED_TABLE_REREAD_MS}, while the queue agrees. Any other table — never read on its
+ * own, with a dish at the pass or in the kitchen, or missing from the queue or not all served
+ * there — is read every time, so Serve all shows within one list read.
+ */
+export function kitchenReadsDue(
+  orders: readonly string[],
+  lastOwn: ReadonlyMap<string, { readonly at: number; readonly facts: KitchenFacts }>,
+  queued: ReadonlyMap<string, KitchenFacts>,
+  now: number,
+): string[] {
+  return orders.filter((order) => {
+    const own = lastOwn.get(order);
+    return !(
+      own !== undefined &&
+      now - own.at < SERVED_TABLE_REREAD_MS &&
+      allDone(own.facts) &&
+      allDone(queued.get(order))
+    );
+  });
+}
+
+/**
  * Reads the queue until every wanted Order is found (or the queue ends). v15 b13: an open table's
  * Order the queue pages did not bring (a busy day lists more Orders than are read) is read from its
  * own serving progress, with no bill (the table's own bill says it).
@@ -186,7 +234,11 @@ export async function loadTableOrderFacts(
   orderReferences: readonly string[],
   signal: AbortSignal,
   fetcher?: typeof fetch,
-  own: { readonly csrf: string } | null = null,
+  own: {
+    readonly csrf: string;
+    /** Orders read on their own elsewhere (the tables checking out): never read twice. */
+    readonly except?: ReadonlySet<string>;
+  } | null = null,
 ): Promise<ReadonlyMap<string, TableOrderFacts>> {
   const wanted = new Set(orderReferences);
   const facts = new Map<string, TableOrderFacts>();
@@ -205,7 +257,9 @@ export async function loadTableOrderFacts(
     after = queue.nextAfterOrderReference;
   }
   if (own === null) return facts;
-  const missing = [...wanted].filter((reference) => !facts.has(reference));
+  const missing = [...wanted].filter(
+    (reference) => !facts.has(reference) && !(own.except?.has(reference) ?? false),
+  );
   for (const [reference, kitchen] of await readKitchenFacts(missing, own.csrf, signal, fetcher))
     facts.set(reference, { bill: null, ...kitchen });
   return facts;

@@ -17,6 +17,8 @@ import {
 } from "./table-list-bills.js";
 import {
   loadTableKitchenFacts,
+  kitchenReadsDue,
+  mergeKitchenFacts,
   loadTableOrderFacts,
   prepareServeAllReady,
   type TableOrderFacts,
@@ -667,6 +669,16 @@ export function DiningSessionWorkspace({
     ReadonlyMap<string, Pick<TableOrderFacts, "readyToServe" | "inKitchen" | "allServed">>
   >(new Map());
   const kitchenReadNow = useRef(0);
+  // When each table checking out was last read on its own, and what it said (by Order).
+  const kitchenOwn = useRef(
+    new Map<
+      string,
+      {
+        readonly at: number;
+        readonly facts: Pick<TableOrderFacts, "readyToServe" | "inKitchen" | "allServed">;
+      }
+    >(),
+  );
   const queueReadNow = useRef(0);
   // Bill reads stop when this page is left or the sign-in ends.
   const billReads = useRef(new AbortController());
@@ -719,20 +731,27 @@ export function DiningSessionWorkspace({
     // b13: a table checking out is read from its own serving progress too, beside the queue and
     // whether or not the queue answers, so dishes at the pass offer Serve all on its row.
     const kitchenRead = nextRead();
-    void loadTableKitchenFacts(
-      items.flatMap((table) =>
-        closing(table) && table.session?.orderReference ? [table.session.orderReference] : [],
-      ),
-      csrf,
-      signal,
-    ).then((found) => {
+    const checkingOut = items.flatMap((table) =>
+      closing(table) && table.session?.orderReference ? [table.session.orderReference] : [],
+    );
+    // A table whose dishes were all served (by its own read and the queue) is read less often.
+    const readAt = Date.now();
+    const due = kitchenReadsDue(checkingOut, kitchenOwn.current, orderFactsNow.current, readAt);
+    void loadTableKitchenFacts(due, csrf, signal).then((found) => {
+      for (const [order, facts] of found) kitchenOwn.current.set(order, { at: readAt, facts });
+      for (const order of kitchenOwn.current.keys())
+        if (!checkingOut.includes(order)) kitchenOwn.current.delete(order);
       if (signal.aborted || kitchenRead < kitchenReadNow.current) return;
       kitchenReadNow.current = kitchenRead;
-      setKitchenFacts(found);
+      // A table whose own read failed now keeps what was read before (merged, never replaced).
+      setKitchenFacts((current) => mergeKitchenFacts(current, found, checkingOut));
     });
     const read = nextRead();
     try {
-      const facts = await loadTableOrderFacts(orders, signal, undefined, { csrf });
+      const facts = await loadTableOrderFacts(orders, signal, undefined, {
+        csrf,
+        except: new Set(checkingOut),
+      });
       // A queue read that started before the one already shown is not shown over it.
       if (!signal.aborted && read > queueReadNow.current) {
         queueReadNow.current = read;
