@@ -726,15 +726,36 @@ async function errorOf(response: Response): Promise<Record<string, unknown>> {
   }
 }
 
-export function createCounterOrderClient(csrf: string, fetcher: typeof fetch = fetch) {
+/**
+ * WP-2423 (rush-reads-and-orders-changes, v15 2026-11-13): the longest a counter send, a table
+ * round sent by staff or a card-machine payment record waits for the system's answer. A send took
+ * about 35 s on a loaded host and finished by itself, while the page said "Still working ... this
+ * finishes by itself"; with no bound, a connection that never answered would have said so for
+ * ever. Past this the page says there was no answer and that sending again never creates the same
+ * order twice (the same operation is sent again, so the system answers with what it did).
+ */
+export const counterAnswerWaitMs = 40_000;
+
+export function createCounterOrderClient(
+  csrf: string,
+  fetcher: typeof fetch = fetch,
+  answerWaitMs: number = counterAnswerWaitMs,
+) {
   const post = async (path: string, body: unknown, signal?: AbortSignal) => {
+    // Bounds the wait for the answer to begin; reading an answer that came is never cut, so a
+    // definite answer is never mistaken for none.
+    const waiting = new AbortController();
+    const timer = setTimeout(() => waiting.abort(), answerWaitMs);
+    const stop = () => waiting.abort();
+    signal?.addEventListener("abort", stop, { once: true });
+    if (signal?.aborted === true) waiting.abort();
     try {
       return await fetcher(path, {
         method: "POST",
         credentials: "same-origin",
         redirect: "error",
         cache: "no-store",
-        ...(signal ? { signal } : {}),
+        signal: waiting.signal,
         headers: {
           Accept: "application/json",
           "Content-Type": "application/json",
@@ -745,6 +766,9 @@ export function createCounterOrderClient(csrf: string, fetcher: typeof fetch = f
     } catch {
       // The request may have reached the server: retry with the same operation.
       throw new CounterOrderClientError("OutcomeUnknown");
+    } finally {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", stop);
     }
   };
   return Object.freeze({
