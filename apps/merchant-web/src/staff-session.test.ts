@@ -221,3 +221,20 @@ describe("WP-2423 Q18 staff session client", () => {
     expect(html).not.toContain("href=");
   });
 });
+
+it("b13: reads the sign-in this browser holds now, so a sign-in made on another screen is found", async () => {
+  const answer = (status: number, body: unknown) =>
+    vi.fn(async () => new Response(JSON.stringify(body), { status }));
+  const fresh = "b".repeat(43);
+  const request = answer(200, { authenticated: true, csrf: fresh, workspace: {} });
+  await expect(createStaffSessionClient(request).currentSignIn?.()).resolves.toBe(fresh);
+  expect(request.mock.calls[0]?.[0]).toBe("/merchant/session");
+  for (const status of [401, 403, 404])
+    await expect(
+      createStaffSessionClient(answer(status, { error: "x" })).currentSignIn?.(),
+    ).resolves.toBeNull();
+  // Busy or down is not "signed out": the cover stays and nothing reopens.
+  await expect(
+    createStaffSessionClient(answer(503, { error: "retry_later" })).currentSignIn?.(),
+  ).rejects.toThrow();
+});

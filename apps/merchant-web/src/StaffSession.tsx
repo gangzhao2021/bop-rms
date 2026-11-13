@@ -16,6 +16,8 @@ import {
   createStaffSessionClient,
   isOperationalScreen,
   isSessionEnded,
+  rememberReturnPage,
+  takeReturnPage,
   remaining,
   sessionNotice,
   shouldReportActivity,
@@ -29,9 +31,12 @@ import {
 export function StaffSignInLink({
   client,
   label = t("Sign in"),
+  returnTo,
 }: {
   readonly client?: StaffSessionClient;
   readonly label?: string;
+  /** b13: the page to come back to after signing in again (a path of this app). */
+  readonly returnTo?: string;
 }) {
   const source = useMemo(() => client ?? createStaffSessionClient(), [client]);
   const [entry, setEntry] = useState<SignInEntry | "Loading" | "Unavailable">("Loading");
@@ -53,7 +58,13 @@ export function StaffSignInLink({
     );
   return (
     <p className="staff-session__sign-in">
-      <a className="shell-action" href={entry.path}>
+      <a
+        className="shell-action"
+        href={entry.path}
+        onClick={() => {
+          if (returnTo !== undefined) rememberReturnPage(returnTo);
+        }}
+      >
         {label}
       </a>
       {entry.testOnly ? (
@@ -200,6 +211,8 @@ export function StaffSessionGuard({
   onCover,
   idleReturnMinutes = null,
   returnToStaffList,
+  reopenPage,
+  reopenAt,
 }: {
   readonly csrf: string;
   readonly path: string;
@@ -223,6 +236,13 @@ export function StaffSessionGuard({
   readonly idleReturnMinutes?: number | null;
   /** Where the idle return goes once the sign-in is ended here (tests replace the navigation). */
   readonly returnToStaffList?: () => void;
+  /**
+   * b13: opens this same page again with the sign-in made on another screen (tests replace it),
+   * so staff carry on where they were.
+   */
+  readonly reopenPage?: () => void;
+  /** b13: opens the page staff signed in again from (tests replace the navigation). */
+  readonly reopenAt?: (path: string) => void;
 }) {
   const source = useMemo(() => client ?? createStaffSessionClient(), [client]);
   const [current, setCurrent] = useState<SessionDeadlines | null>(null);
@@ -447,11 +467,20 @@ export function StaffSessionGuard({
   }, [ended]);
   useEffect(() => () => setStaffSessionEnded(false), []);
 
+  // b13: staff who pressed "Sign in again" on this screen come back to the page they were on
+  // (v15 b12 live: the sign-in brought them back to Orders), once, soon after.
+  useEffect(() => {
+    const back = takeReturnPage();
+    if (back !== null && back !== path) (reopenAt ?? ((to) => window.location.replace(to)))(back);
+    // Once, when this screen is signed in.
+  }, []);
+  // b13: staff signed in again on another screen of this browser: this page opens again with it.
+  const [signedInElsewhere, setSignedInElsewhere] = useState(false);
   const checkAgain = async () => {
     setChecking(true);
     try {
-      const read = await source.expiry(csrf);
-      if (!isSessionEnded(read)) {
+      const read = await source.expiry(csrf).catch(() => null);
+      if (read !== null && !isSessionEnded(read)) {
         // Still signed in after all: remove the cover and resume normally.
         setCurrent(read);
         setUnconfirmed(false);
@@ -460,9 +489,16 @@ export function StaffSessionGuard({
         lastReport.current = Number.NEGATIVE_INFINITY;
         nextAttempt.current = Number.NEGATIVE_INFINITY;
         setEnded(null);
+        return;
       }
-    } catch {
-      // Unreachable: stay on the cover; the sign-in link still works.
+      // v15 b12 live: after signing in again in another tab, this screen still sent the ended
+      // sign-in's value and its check was refused (403), so the cover never went. The browser's
+      // own sign-in is read: a new one opens this page again with it, on the page staff were on.
+      const now = await source.currentSignIn?.().catch(() => null);
+      if (typeof now === "string" && now !== csrf) {
+        setSignedInElsewhere(true);
+        (reopenPage ?? (() => window.location.reload()))();
+      }
     } finally {
       setChecking(false);
     }
@@ -495,7 +531,10 @@ export function StaffSessionGuard({
                     )
                   : t("This sign-in has ended (signed out here or on another screen).")}
           </p>
-          <StaffSignInLink client={source} label={t("Sign in again")} />
+          {signedInElsewhere ? (
+            <p role="status">{t("Signed in again. Opening this page with that sign-in…")}</p>
+          ) : null}
+          <StaffSignInLink client={source} label={t("Sign in again")} returnTo={path} />
           <button type="button" disabled={checking} onClick={() => void checkAgain()}>
             {checking ? t("Checking…") : t("Check again")}
           </button>

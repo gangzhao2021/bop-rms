@@ -34,6 +34,11 @@ export interface StaffSessionClient {
   expiry(csrf: string): Promise<SessionRead>;
   signInEntry(): Promise<SignInEntry>;
   signOut(): Promise<void>;
+  /**
+   * b13: the sign-in this browser holds now (its CSRF value), or null when it holds none. Staff who
+   * signed in again on another screen are found by it: this screen still sends the ended one's.
+   */
+  currentSignIn?(): Promise<string | null>;
 }
 
 export const ACTIVITY_INTERVAL_MS = 60_000;
@@ -220,5 +225,53 @@ export function createStaffSessionClient(
       const response = await send("/merchant/logout", { method: "POST" });
       if (!response.ok) throw new Error("STAFF_SIGN_OUT_FAILED");
     },
+    async currentSignIn() {
+      const response = await send("/merchant/session", { headers: { Accept: "application/json" } });
+      if (response.status === 401 || response.status === 403 || response.status === 404)
+        return null;
+      if (!response.ok) throw new Error("STAFF_SESSION_UNAVAILABLE");
+      const body: unknown = await response.json();
+      const csrf =
+        body !== null &&
+        typeof body === "object" &&
+        (body as { authenticated?: unknown }).authenticated === true
+          ? (body as { csrf?: unknown }).csrf
+          : null;
+      return typeof csrf === "string" && /^[A-Za-z0-9_-]{43}$/u.test(csrf) ? csrf : null;
+    },
   });
+}
+
+/**
+ * b13: the page a staff member pressed "Sign in again" on, kept in this tab for a few minutes so
+ * they come back to it after signing in (the sign-in itself always lands on the workspace). A
+ * convenience only: a path of this app, never anything private; nothing breaks without storage.
+ */
+const RETURN_PAGE_KEY = "bop.staff.returnAfterSignIn.v1";
+const RETURN_PAGE_MAX_AGE_MS = 15 * 60_000;
+const RETURN_PAGE = /^\/(?!\/)(?:app|operations)(?:\/[A-Za-z0-9_.-]{1,80}){0,8}$/u;
+export function rememberReturnPage(path: string, now = Date.now()): void {
+  if (!RETURN_PAGE.test(path)) return;
+  try {
+    globalThis.sessionStorage?.setItem(RETURN_PAGE_KEY, JSON.stringify({ path, at: now }));
+  } catch {
+    /* Storage blocked: staff land on the workspace as before. */
+  }
+}
+export function takeReturnPage(now = Date.now()): string | null {
+  try {
+    const raw = globalThis.sessionStorage?.getItem(RETURN_PAGE_KEY) ?? null;
+    if (raw === null) return null;
+    globalThis.sessionStorage?.removeItem(RETURN_PAGE_KEY);
+    const value = JSON.parse(raw) as { path?: unknown; at?: unknown } | null;
+    return typeof value?.path === "string" &&
+      RETURN_PAGE.test(value.path) &&
+      typeof value.at === "number" &&
+      now - value.at >= 0 &&
+      now - value.at <= RETURN_PAGE_MAX_AGE_MS
+      ? value.path
+      : null;
+  } catch {
+    return null;
+  }
 }
