@@ -1330,6 +1330,8 @@ for (const width of [1440, 1024, 390])
           taxRoundingMinor: "0",
           owed: { subtotalMinor: "0", taxMinor: "0", totalMinor: "0" },
           consistent: false,
+          // Nothing else is changing: only the split is out of date.
+          matchesOrderApartFromSplit: true,
           tips: { enabled: true, tierPercents: [10, 15, 18] },
           split: {
             mode: "Even",

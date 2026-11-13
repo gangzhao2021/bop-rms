@@ -451,18 +451,19 @@ export function TablePayPanel({
       </section>
     );
 
-  // v15 b12: every dish was taken off (comped) — nothing to pay, no tip and no part to choose.
+  // v15 b12: comps (or the guests' points) took off the whole bill — nothing to pay, no tip and no
+  // part to choose. Only once the bill matches the Order: while it is being changed it can read $0
+  // for a moment, and the panel waits (it is read again by itself).
   if (
     (view.state === "NotPaid" || view.state === "Failed") &&
     view.owed.totalMinor === "0" &&
+    (view.consistent || (view.split?.stale === true && view.matchesOrderApartFromSplit)) &&
     (view.split === null || view.split.paidParts === 0)
   )
     return (
       <section className="order-status__card dining-session__table-pay" aria-labelledby="table-pay">
         <h2 id="table-pay">{t("Pay the bill")}</h2>
-        <p role="status">
-          {t("There is nothing to pay. The restaurant took everything off this bill.")}
-        </p>
+        <p role="status">{t("There is nothing left to pay on this bill.")}</p>
       </section>
     );
   // v15 b12: the bill changed after it was split (and nothing could split it the same way again):

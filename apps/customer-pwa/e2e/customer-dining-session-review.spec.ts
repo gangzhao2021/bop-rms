@@ -1187,6 +1187,8 @@ test.describe("@production DEC-DINE-IN-PAY-LATER S4 the guest pays the whole tab
                 taxRoundingMinor: "0",
               },
               consistent: false,
+              // Nothing else is changing: only the split is out of date.
+              matchesOrderApartFromSplit: true,
               tips: { enabled: true, tierPercents: [10, 15, 18] },
               state: "NotPaid",
               attempt: null,
@@ -1215,10 +1217,9 @@ test.describe("@production DEC-DINE-IN-PAY-LATER S4 the guest pays the whole tab
       await pay.screenshot({ path: `test-results/guest-split-stale-${width}.png` });
       // Every dish comped: the panel reads again by itself and says there is nothing to pay.
       owedMinor = "0";
-      await expect(pay).toContainText(
-        "There is nothing to pay. The restaurant took everything off this bill.",
-        { timeout: 12_000 },
-      );
+      await expect(pay).toContainText("There is nothing left to pay on this bill.", {
+        timeout: 12_000,
+      });
       await expect(pay.getByRole("radio")).toHaveCount(0);
       await expect(pay).not.toContainText("$14.13");
       await expectNoHorizontalOverflow(page);

@@ -108,6 +108,11 @@ export interface TableBill {
   readonly taxRoundingMinor: string;
   readonly consistent: boolean;
   /**
+   * v15 b12: with a stale split (`consistent` is then false), whether the bill otherwise matches
+   * the Order (no change waiting, totals agree). Absent (older server, no stale split): false.
+   */
+  readonly matchesOrderApartFromSplit?: boolean;
+  /**
    * WP-2423 item 8 ⑦ (Owner decision 11): the Store's tip percentages (of the subtotal before
    * tax), or tips off. An older server sends none: 10 / 15 / 18 %.
    */
@@ -298,6 +303,7 @@ export function parseTableBill(value: unknown): TableBill {
     taxRoundingMinor: signed(raw.taxRoundingMinor),
     waitingRounds: waitingRoundsOf(raw.waitingRounds),
     consistent: raw.consistent,
+    matchesOrderApartFromSplit: raw.matchesOrderApartFromSplit === true,
     settlement:
       settlement === null
         ? null

@@ -38,6 +38,11 @@ export interface TablePaymentView {
   };
   readonly consistent: boolean;
   /**
+   * v15 b12: with a stale split (`consistent` is then false), whether the bill otherwise matches
+   * the Order (no change waiting, totals agree). Absent: false.
+   */
+  readonly matchesOrderApartFromSplit: boolean;
+  /**
    * WP-2423 item 8 ⑦ (Owner decision 11): the Store's tip percentages (of the subtotal before
    * tax), or tips off. An older server sends none: 10 / 15 / 18 %.
    */
@@ -218,6 +223,7 @@ export function parseTablePaymentView(value: unknown): TablePaymentView {
             : fail(),
     }),
     consistent: p.consistent,
+    matchesOrderApartFromSplit: p.matchesOrderApartFromSplit === true,
     tips: tipsOf(p.tips),
     state: p.state as TablePaymentState,
     attempt:

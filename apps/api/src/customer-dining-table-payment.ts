@@ -233,6 +233,9 @@ export function customerTablePaymentBody(view: DiningTableOnlinePaymentView) {
           .toString(),
       },
       consistent: bill.consistent,
+      ...(bill.matchesOrderApartFromSplit === undefined
+        ? {}
+        : { matchesOrderApartFromSplit: bill.matchesOrderApartFromSplit }),
       // WP-2423 item 8 ⑦: the tips this Store offers (none chosen for the guest), or tips off.
       tips: { enabled: bill.tips.enabled, tierPercents: bill.tips.tierPercents },
       state:

@@ -1835,8 +1835,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Someone at your table just started paying for some of these dishes. Check again.":
     "同桌刚刚有人开始付其中几道菜，请再看一下。",
   "Staff split this bill. Pay one of its parts.": "店员已经分好这张账单，请付其中一份。",
-  "There is nothing to pay. The restaurant took everything off this bill.":
-    "不用付款：这张账单上的全部菜品都已由店家减免。",
+  "There is nothing left to pay on this bill.": "这张账单已经没有需要付的金额。",
   "The bill changed after it was split, so the parts are being worked out again. The table now owes {amount}. Ask a staff member to split it again; this page updates by itself.":
     "分单后账单有变，正在重新计算每份金额。这桌现在共需付 {amount}。请找店员重新分单；本页会自动更新。",
   "The bill is being updated. This page updates by itself in a moment.":

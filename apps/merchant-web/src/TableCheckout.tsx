@@ -1470,11 +1470,14 @@ export function nothingToPay(bill: TableBill): boolean {
   return (
     bill.settlement === null &&
     bill.writeOff === null &&
-    // A split the comps made stale has nothing left to split.
-    (bill.consistent || bill.split?.stale === true) &&
+    // A split the comps made stale has nothing left to split, but only when the bill otherwise
+    // matches the Order: while a change is still waiting it may read $0 for a moment.
+    (bill.consistent || (bill.split?.stale === true && bill.matchesOrderApartFromSplit === true)) &&
     bill.waitingRounds.length === 0 &&
     bill.onlinePayment?.status !== "InProgress" &&
     BigInt(bill.owed.totalMinor) === 0n &&
-    (bill.split === null || (bill.split.paidParts === 0 && bill.split.mode !== "ByGuests"))
+    // Any split, paying by dish too, as on the guest's phone: nothing paid and nobody paying.
+    (bill.split === null ||
+      (bill.split.paidParts === 0 && !bill.split.parts.some((part) => part.guestPaying)))
   );
 }

@@ -237,6 +237,11 @@ export interface DiningTableBill {
   };
   /** False while a round is still being sent: the bill would not match the Order (refresh). */
   readonly consistent: boolean;
+  /**
+   * v15 b12: only with a stale split (which makes `consistent` false): whether the bill matches
+   * the Order apart from that (no change waiting for approval, totals agree).
+   */
+  readonly matchesOrderApartFromSplit?: boolean;
   /** WP-2423 item 8 ⑦: the tips offered now (the Store's percentages, or tips off). */
   readonly tips: StoreTipChoices;
   readonly settlement: null | {
@@ -1057,14 +1062,14 @@ export async function readDiningTableBill(
   // Ordering's priced total holds the recorded tax rounding; a bill shown before it is recorded
   // carries the one it would record instead. Rounds waiting for staff are on the Order, not yet
   // on the bill.
-  const consistent =
+  const matchesOrder =
     priced.pendingAmendmentCount === 0 &&
     priced.pricedTotalMinor -
       (anyPayment ? (recordedRounding?.totalMinor ?? 0n) : 0n) +
       taxRoundingMinor ===
       paidAllocation + owedTotal + waitingMinor &&
-    (settlement === null || settlement.roundsMinor === paidAllocation) &&
-    split?.stale !== true;
+    (settlement === null || settlement.roundsMinor === paidAllocation);
+  const consistent = matchesOrder && split?.stale !== true;
   const result = {
     ...base,
     ...(refundedMinor > 0n ? { refundedMinor: refundedMinor.toString() } : {}),
@@ -1077,6 +1082,9 @@ export async function readDiningTableBill(
       totalMinor: owedTotal.toString(),
     }),
     consistent,
+    // v15 b12: with a stale split, whether the bill matches the Order otherwise (no change waiting,
+    // totals agree): only then can a bill that owes nothing be treated as nothing to pay.
+    ...(split?.stale === true ? { matchesOrderApartFromSplit: matchesOrder } : {}),
     settlement:
       settlement === null
         ? null

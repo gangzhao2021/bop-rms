@@ -5010,6 +5010,8 @@ async function journey(journeyEnding) {
           const left = stale.rounds.reduce((sum, round) => sum + BigInt(round.totalMinor), 0n);
           assert.equal(stale.split.stale, true);
           assert.equal(stale.consistent, false);
+          // Apart from the out-of-date split, the bill matches the Order (nothing else changing).
+          assert.equal(stale.matchesOrderApartFromSplit, true);
           // What is owed is the bill as it stands (round 2), never the old parts' amounts.
           assert.equal(stale.owed.totalMinor, left.toString());
           assert.equal(stale.split.remainingMinor, left.toString());
@@ -5023,6 +5025,7 @@ async function journey(journeyEnding) {
           const again = await bill();
           assert.equal(again.split.stale, false);
           assert.equal(again.consistent, true);
+          assert.equal("matchesOrderApartFromSplit" in again, false);
           assert.deepEqual(
             again.split.parts.map((part) => part.amountMinor),
             evenly(left, 2),
@@ -5488,6 +5491,7 @@ async function journey(journeyEnding) {
           );
           assert.equal(stuck.taxRoundingMinor, "0");
           assert.equal(stuck.split.stale, true);
+          assert.equal(stuck.matchesOrderApartFromSplit, true);
           // v15 b12: nothing is owed, and the old parts' amounts are never what the guest's phone
           // or the Tables list say is to pay ($28.25 on a $0.00 bill on v15); no new plan either.
           assert.equal(stuck.owed.totalMinor, "0");

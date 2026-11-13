@@ -417,5 +417,15 @@ it("v15 b12: a split the bill changed under says so to the guest, so no old part
     stale: true,
     remainingMinor: "0",
   });
+  // Whether the bill matches the Order apart from the split is passed on only when it is said.
+  expect(customerTablePaymentBody(view(true)).payment).not.toHaveProperty(
+    "matchesOrderApartFromSplit",
+  );
+  const said = view(true) as { bill: Record<string, unknown> };
+  said.bill.matchesOrderApartFromSplit = true;
+  expect(customerTablePaymentBody(said as never).payment).toMatchObject({
+    consistent: false,
+    matchesOrderApartFromSplit: true,
+  });
   expect(customerTablePaymentBody(view(false)).payment.split).toMatchObject({ stale: false });
 });
