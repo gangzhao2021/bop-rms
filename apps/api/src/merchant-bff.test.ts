@@ -7648,7 +7648,8 @@ it("b12: a cash order's take-back refused for its method or cents answers its ow
   });
   const root = await serveRefundEscalation({ refundRecovery: command });
   const answers = [];
-  for (const _code of codes) {
+  for (const expected of codes) {
+    expect(expected).toMatch(/^REFUND_RECOVERY_/u);
     const answer = await request(root, "/merchant/payments/refunds/recover", {
       method: "POST",
       headers: {
