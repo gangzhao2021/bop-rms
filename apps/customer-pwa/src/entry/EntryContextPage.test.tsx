@@ -61,7 +61,7 @@ describe("DEC-DINING-GUEST-TABLE-START: a table guests start themselves", () => 
     setSettledTable({ tableLabel: "DEMO-03", csrfToken: "C".repeat(43) });
     try {
       const asked = render({ kind: "TableAskNewParty", context: table });
-      expect(asked).toContain("This table is settled. Thank you for dining with us.");
+      expect(asked).toContain("Thank you for dining with us.");
       expect(asked).toContain("Loading receipt");
       expect(asked).toContain("After you answer, this receipt won’t open on this phone.");
       expect(asked.indexOf("Loading receipt")).toBeLessThan(asked.indexOf("Yes, join them"));
@@ -129,8 +129,8 @@ describe("CUST-ENTRY-CONTEXT", () => {
     setSettledTable({ tableLabel: "DEMO-03", csrfToken: "C".repeat(43) });
     try {
       const settled = render(notOpen);
-      expect(settled).toContain("This table is settled. Thank you for dining with us.");
-      expect(settled).toContain("Table DEMO-03 is closed.");
+      expect(settled).toContain("Thank you for dining with us.");
+      expect(settled).toContain("Your meal at table DEMO-03 has ended.");
       expect(settled).toContain("Loading receipt");
       expect(settled).toContain("New party? Ask staff to seat you, then scan again.");
       expect(settled).not.toContain("isn’t open yet");

@@ -985,9 +985,9 @@ function SettledTable({
   return (
     <>
       <section className="order-status__card" role="status">
-        <h2>{t("This table is settled. Thank you for dining with us.")}</h2>
+        <h2>{t("Thank you for dining with us.")}</h2>
         {/* b13: a table comped to nothing closes too; "paid" is the receipt's to say. */}
-        <p>{t("Table {table} is closed.", { table: saidTable(tableLabel) })}</p>
+        <p>{t("Your meal at table {table} has ended.", { table: saidTable(tableLabel) })}</p>
         <p>{t("New party? Scan the table QR code")}</p>
       </section>
       <SettledTableReceiptPanel {...(receipt === undefined ? {} : { client: receipt })} />

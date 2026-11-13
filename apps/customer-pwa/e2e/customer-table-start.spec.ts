@@ -575,7 +575,7 @@ test.describe("@production CUST-ENTRY guest starts a free table", () => {
       await page.goto("/#qr=aaa.bbb.ccc");
       const main = page.getByRole("main");
       await expect(
-        main.getByRole("heading", { name: "This table is settled. Thank you for dining with us." }),
+        main.getByRole("heading", { name: "Thank you for dining with us." }),
       ).toBeVisible();
       await expect(main).toContainText(words);
       await expect(main.getByRole("button", { name: button })).toBeVisible();

@@ -963,9 +963,9 @@ test.describe("@production CUST-DINE-IN-SESSION table view", () => {
     settled = true;
     await page.reload();
     await expect(
-      main.getByRole("heading", { name: "This table is settled. Thank you for dining with us." }),
+      main.getByRole("heading", { name: "Thank you for dining with us." }),
     ).toBeVisible();
-    await expect(main).toContainText("Table 12 is closed.");
+    await expect(main).toContainText("Your meal at table 12 has ended.");
     await expect(main).toContainText("New party? Scan the table QR code");
     const card = main.getByRole("region", { name: "Receipt" });
     await expect(card).toContainText("Milk tea");
@@ -986,7 +986,10 @@ test.describe("@production CUST-DINE-IN-SESSION table view", () => {
 
     // In Chinese.
     await page.getByRole("button", { name: "切换到中文" }).click();
-    await expect(main.getByRole("heading", { name: "这桌已结账，谢谢光临" })).toBeVisible();
+    await expect(main.getByRole("heading", { name: "谢谢光临" })).toBeVisible();
+    // b13 review: plain words for guests (never staff's "关台"), and nothing said of paying.
+    await expect(main).toContainText("桌号 12 的用餐已结束。");
+    await expect(main).not.toContainText("关台");
     await expect(main).toContainText("新的一桌？扫桌台二维码");
     await expect(main.getByRole("region", { name: "收据" })).toContainText("现金");
     await page.screenshot({
@@ -1044,7 +1047,7 @@ test.describe("@production CUST-DINE-IN-SESSION table view", () => {
     receipt = { status: 404, json: { schemaVersion: 1, error: { code: "table_not_found" } } };
     await page.reload();
     await expect(
-      main.getByRole("heading", { name: "This table is settled. Thank you for dining with us." }),
+      main.getByRole("heading", { name: "Thank you for dining with us." }),
     ).toBeVisible();
     await expect(main.getByRole("region", { name: "Receipt" })).toHaveCount(0);
     await expect(main).not.toContainText("Loading receipt");

@@ -991,10 +991,10 @@ function EntryState({
         ) : (
           <>
             <StateHeading headingRef={headingRef}>
-              {t("This table is settled. Thank you for dining with us.")}
+              {t("Thank you for dining with us.")}
             </StateHeading>
             <p className="entry-context">
-              {t("Table {table} is closed.", { table: saidTable(settled) })}
+              {t("Your meal at table {table} has ended.", { table: saidTable(settled) })}
             </p>
             <SettledTableReceiptPanel />
             <p>{t("New party? Ask staff to seat you, then scan again.")}</p>
@@ -1059,10 +1059,10 @@ function EntryState({
         {settled === null ? null : (
           <>
             <StateHeading headingRef={headingRef}>
-              {t("This table is settled. Thank you for dining with us.")}
+              {t("Thank you for dining with us.")}
             </StateHeading>
             <p className="entry-context">
-              {t("Table {table} is closed.", { table: saidTable(settled) })}
+              {t("Your meal at table {table} has ended.", { table: saidTable(settled) })}
             </p>
             <SettledTableReceiptPanel />
           </>
@@ -1113,10 +1113,10 @@ function EntryState({
         {settled === null ? null : (
           <>
             <StateHeading headingRef={headingRef}>
-              {t("This table is settled. Thank you for dining with us.")}
+              {t("Thank you for dining with us.")}
             </StateHeading>
             <p className="entry-context">
-              {t("Table {table} is closed.", { table: saidTable(settled) })}
+              {t("Your meal at table {table} has ended.", { table: saidTable(settled) })}
             </p>
             <SettledTableReceiptPanel />
             <p>{t("After you answer, this receipt won’t open on this phone.")}</p>

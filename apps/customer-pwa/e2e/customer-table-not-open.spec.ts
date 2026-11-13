@@ -239,9 +239,9 @@ test.describe("@production CUST-ENTRY table not open", () => {
     await scanNotOpenTable(page, entries);
     const main = page.getByRole("main");
     await expect(
-      main.getByRole("heading", { name: "This table is settled. Thank you for dining with us." }),
+      main.getByRole("heading", { name: "Thank you for dining with us." }),
     ).toBeVisible();
-    await expect(main).toContainText("Table 12 is closed.");
+    await expect(main).toContainText("Your meal at table 12 has ended.");
     const receipt = main.getByRole("region", { name: "Receipt" });
     await expect(receipt).toContainText("Total paid$5.10");
     await expect(receipt).toContainText("Paid byCash");
@@ -254,7 +254,7 @@ test.describe("@production CUST-ENTRY table not open", () => {
     // After the scan, the table page (a fresh load) still thanks them with the receipt.
     await page.goto("/dine-in/session");
     await expect(
-      main.getByRole("heading", { name: "This table is settled. Thank you for dining with us." }),
+      main.getByRole("heading", { name: "Thank you for dining with us." }),
     ).toBeVisible();
     await expect(main.getByRole("region", { name: "Receipt" })).toContainText("Total paid$5.10");
     await expect(main).not.toContainText("Join your table first");
