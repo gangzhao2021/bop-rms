@@ -1566,6 +1566,102 @@ test("@production v15 staff-round-speed: the left-party refusal and its choices 
   await expect(page.getByRole("alert")).toHaveCount(0);
 });
 
+// b12 (DEC-PAPER-SLIP-SAME-TABLE): on a table's order page the paper fields, a slip question and
+// Send make the order panel taller than a landscape tablet or laptop window. The panel scrolls on
+// its own, so the answers and Send are always reachable: at 1440×900, 1366×768, 1024×768 and 390.
+test("@production a table round's slip question and Send stay reachable at tablet and laptop sizes", async ({
+  page,
+}) => {
+  await signIn(page);
+  await page.route("**/merchant/counter/menu**", (route) => route.fulfill({ headers, json: menu }));
+  const rounds: Record<string, unknown>[] = [];
+  await page.route("**/merchant/dining/staff-rounds", (route) => {
+    const body = route.request().postDataJSON() as Record<string, unknown>;
+    rounds.push(body);
+    const paperPayment = body.paperPayment as Record<string, unknown> | undefined;
+    if (paperPayment?.slipConfirmation === undefined)
+      return route.fulfill({
+        status: 409,
+        headers,
+        json: { error: "slip_already_recorded", orderNumber: "9" },
+      });
+    return route.fulfill({
+      headers,
+      json: {
+        status: "Placed",
+        orderReference: id(20),
+        orderBatchReference: id(21),
+        orderNumber: "9",
+        orderVersion: 5,
+        tableLabel: "T4",
+        orderMinor: "791",
+        tipMinor: "0",
+        totalMinor: "791",
+        payBy: new Date(Date.now() + 30 * 60_000).toISOString(),
+        recordedAfterOutage: true,
+        payment: {
+          status: "Recorded",
+          amountMinor: "791",
+          recordingReason: "RecordedAfterOutage",
+          takenAt: paperPayment.takenAt,
+          recordedAt: new Date().toISOString(),
+          acceptance: "Accepted",
+        },
+      },
+    });
+  });
+  const local = (at: Date) =>
+    new Date(at.getTime() - at.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/operations/dining");
+  await page.getByRole("button", { name: "Select T4", exact: true }).click();
+  await page.getByRole("link", { name: "Take order for table T4" }).click();
+  for (let count = 0; count < 3; count += 1)
+    await page.getByRole("button", { name: "Add Gyoza" }).click();
+  await page.getByRole("button", { name: "Add Shoyu Ramen" }).click();
+  await page.getByRole("button", { name: "Add to order" }).click();
+  await page.getByRole("checkbox", { name: "Recorded after an outage (taken on paper)" }).check();
+  await page
+    .getByLabel("Paid at (store time, from the paper order)")
+    .fill(local(new Date(Date.now() - 15 * 60_000)));
+  await page.getByRole("textbox", { name: "Slip reference (optional)" }).fill("TESTL10R2");
+  const send = page.getByRole("button", { name: "Send and record paper order" });
+  await send.click();
+  const question = page.getByRole("group", {
+    name: "Is this the slip already recorded with order 9?",
+  });
+  await expect(question).toBeVisible();
+  const same = question.getByRole("button", { name: "Same slip, it also paid for this order" });
+  for (const [width, height] of [
+    [1440, 900],
+    [1366, 768],
+    [1024, 768],
+    [390, 844],
+  ] as const) {
+    await page.setViewportSize({ width, height });
+    for (const target of [same, send]) {
+      await target.scrollIntoViewIfNeeded();
+      await expect(target, `${width}×${height}`).toBeInViewport({ ratio: 1 });
+    }
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      `no horizontal overflow at ${width}`,
+    ).toBe(true);
+    await page.screenshot({
+      path: test
+        .info()
+        .outputPath(`table-slip-question-${width}x${height}.png`)
+        .replace(/^.*\//u, (process.env.B12_SHOTS ?? test.info().outputDir) + "/"),
+    });
+  }
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await same.click();
+  expect(rounds).toHaveLength(2);
+  expect((rounds[1]?.paperPayment as Record<string, unknown>).slipConfirmation).toBe(
+    "SameSlipAlsoPaysThisOrder",
+  );
+});
+
 // v15 b12 staff-round-concurrency (DEC-STAFF-ROUND-ONE-AT-A-TIME): two tablets send a round for
 // one table at once. The one that waited too long is told the table is busy and keeps its order;
 // one whose dishes stayed in the table's cart is never told nothing was sent: its order is cleared

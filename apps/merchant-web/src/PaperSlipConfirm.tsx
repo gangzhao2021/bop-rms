@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { t } from "./i18n/i18n.js";
 import type { SlipConfirmation } from "./staff-order-entry.js";
 
@@ -18,8 +19,14 @@ export function PaperSlipConfirm({
   readonly disabled?: boolean;
   readonly onConfirm: (confirmation: SlipConfirmation) => void;
 }) {
+  const question = useRef<HTMLFieldSetElement>(null);
+  // b12: the question opens at the end of the order panel; it is brought into view with its
+  // answers, so staff never hunt for it below the window.
+  useEffect(() => {
+    question.current?.scrollIntoView?.({ block: "nearest" });
+  }, []);
   return (
-    <fieldset className="paper-slip-confirm" disabled={disabled}>
+    <fieldset ref={question} className="paper-slip-confirm" disabled={disabled}>
       <legend>
         {orderNumber !== null
           ? t("Is this the slip already recorded with order {number}?", { number: orderNumber })

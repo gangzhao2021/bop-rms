@@ -208,6 +208,15 @@
   display: flex;
   flex-direction: column;
   max-height: calc(100vh - 2 * 16px - var(--bop-pinned-top, 0px));
+  /* b12: a long foot (paper payment, a slip question, a refusal) never pushes Send or an answer
+     below the window: the order panel scrolls on its own, and its lines keep one row in view. */
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.counter-order__layout:not(:has(.counter-order__charge))
+  .counter-order__ticket
+  .counter-order__lines {
+  min-height: 4.5rem;
 }
 .counter-order__ticket-header {
   display: flex;
