@@ -200,6 +200,7 @@ function Editor({
             const item = items.get(line.itemReference);
             const mode = item?.lotTracking ?? "NoLot";
             const flagged = error?.line === line.lineReference;
+            // At 390 the header row is hidden; each value names its column (b11).
             return (
               <tr
                 key={line.lineReference}
@@ -223,7 +224,7 @@ function Editor({
                     `${item?.name ?? line.itemReference} (${unitText(item?.unitCode)})`
                   )}
                 </td>
-                <td>
+                <td data-label={t("Location")}>
                   {draft ? (
                     <select
                       aria-label={t("Location")}
@@ -240,7 +241,7 @@ function Editor({
                     (locations.get(line.locationReference)?.name ?? line.locationReference)
                   )}
                 </td>
-                <td>
+                <td data-label={t("Lot code")}>
                   {draft && mode !== "NoLot" ? (
                     <input
                       aria-label={t("Lot code")}
@@ -253,7 +254,7 @@ function Editor({
                     line.lotCode || (mode === "NoLot" ? t("Not tracked") : "")
                   )}
                 </td>
-                <td>
+                <td data-label={t("Expiry")}>
                   {draft && mode !== "NoLot" ? (
                     <input
                       aria-label={t("Expiry date")}
@@ -266,7 +267,7 @@ function Editor({
                     line.expiryDate
                   )}
                 </td>
-                <td>
+                <td data-label={t("Quantity")}>
                   {draft ? (
                     <input
                       aria-label={t("Quantity")}
@@ -280,7 +281,7 @@ function Editor({
                   )}{" "}
                   {unitText(item?.unitCode)}
                 </td>
-                <td>
+                <td data-label={t("Unit cost ($)")}>
                   {draft ? (
                     <input
                       aria-label={t("Unit cost")}
