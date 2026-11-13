@@ -180,4 +180,3 @@ describe("customer-safe Kitchen status", () => {
     expect(String(f.query.mock.calls[0]?.[0])).toMatch(/LIMIT 10001 FOR SHARE$/u);
   });
 });
-

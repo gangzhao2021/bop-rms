@@ -171,8 +171,9 @@ describe("customer order status HTTP client", () => {
         },
       ],
     }));
-    const result = await createHttpOrderStatusClient(responder(body)).load(id(1));
-    if (!("order" in result)) throw new Error("expected the order's status");
+    const result = (await createHttpOrderStatusClient(responder(body)).load(
+      id(1),
+    )) as OrderStatusView;
     expect(result.order.batches).toHaveLength(47);
     expect(result.order.batches.at(-1)?.items[0]?.lineTotal.amountMinor).toBe(735n);
   });

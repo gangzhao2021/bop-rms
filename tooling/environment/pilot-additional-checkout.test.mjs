@@ -111,9 +111,10 @@ it("WP-2423 item 6: a cart or quote that moved on is a fixed refusal, not an out
 
 describe("v15 b13: the table's Order moves on while a round is prepared", () => {
   // The preparation's own refusal when the Order is no longer at the version it was read at.
-  const moved = () => Object.assign(new Error("guest session unavailable"), {
-    code: "GUEST_SESSION_UNAVAILABLE",
-  });
+  const moved = () =>
+    Object.assign(new Error("guest session unavailable"), {
+      code: "GUEST_SESSION_UNAVAILABLE",
+    });
   const versions = () => mocks.prepare.mock.calls.map(([value]) => value.expectedOrderVersion);
 
   it("prepares the round again against the Order as it is now", async () => {
@@ -164,4 +165,3 @@ describe("v15 b13: the table's Order moves on while a round is prepared", () => 
     expect(versions()).toEqual([3]);
   });
 });
-
