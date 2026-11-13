@@ -56,6 +56,11 @@ export interface TablePaymentView {
   readonly split: null | {
     /** "ByGuests": guests at the table pay by dish as they go (WP-2423 同桌结账). */
     readonly mode: "Even" | "ByRounds" | "ByItems" | "ByGuests";
+    /**
+     * v15 b12: the bill changed after it was split and before any part was paid; staff split it
+     * again, and until then no part is paid (the parts are not what is owed now).
+     */
+    readonly stale: boolean;
     /** Every part paid (by dish: the parts cover the whole bill). */
     readonly paidInFull: boolean;
     readonly paidParts: number;
@@ -347,6 +352,7 @@ function splitOf(value: unknown): TablePaymentView["split"] {
   let previous = 0;
   return Object.freeze({
     mode: raw.mode,
+    stale: raw.stale === true,
     // An older server: every part paid.
     paidInFull:
       typeof raw.paidInFull === "boolean"

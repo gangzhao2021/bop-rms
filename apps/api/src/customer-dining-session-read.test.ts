@@ -661,6 +661,32 @@ describe("WP-2423 item 8 ④ v15 a: a split bill paid part by part", () => {
       splitParts: { count: 3, paid: 2 },
     });
   });
+  it("v15 b12: a split nothing was paid on, on a bill comped to nothing, is not mentioned", () => {
+    const summary = (owedMinor: bigint, paid: number) =>
+      composeCustomerDiningSession(
+        facts({
+          batches: [
+            { orderBatchReference: id(30), submittedAt: at, items: [item(31, "Ramen", 1, 1018n)] },
+          ],
+          authorship: new Map([[id(30), true]]),
+          delivery: new Map([[id(31), { phase: "Accepted" as never, deliveredQuantity: 0 }]]),
+          paymentDeadlines: new Map(),
+          paymentOutcomes: new Map(),
+          payments: [],
+          payLaterRounds: new Set([id(30)]),
+          tableBill: {
+            owedMinor,
+            pointsUsedMinor: 0n,
+            takenOffMinor: 1018n - owedMinor,
+            taxRoundingMinor: 0n,
+          },
+          splitParts: { count: 2, paid },
+        }),
+      ).summary;
+    expect(summary(0n, 0)?.due.amountMinor).toBe(0n);
+    expect(summary(0n, 0)).not.toHaveProperty("splitParts");
+    expect(summary(1018n, 0)).toMatchObject({ splitParts: { count: 2, paid: 0 } });
+  });
 });
 
 describe("v15 batch 7 table-pay-by-dish: what the table page says about the parts", () => {

@@ -215,6 +215,17 @@ export function TablePayPanel({
     const timer = window.setInterval(() => void read(), 3000);
     return () => window.clearInterval(timer);
   }, [view?.state, submitted, configuration?.mode, read]);
+  // v15 b12: while the bill is being changed (a comp, a round being sent, a split staff are doing
+  // again) nothing can be paid; it is read again until it can, so the guest never has to reload.
+  const settling =
+    view !== null &&
+    (view.state === "NotPaid" || view.state === "Failed") &&
+    (!view.consistent || view.split?.stale === true);
+  useEffect(() => {
+    if (!settling) return;
+    const timer = window.setInterval(() => void read(), 5000);
+    return () => window.clearInterval(timer);
+  }, [settling, read]);
   // The secure card form's one-time value, once this guest's payment is open (Stripe only).
   useEffect(() => {
     if (view?.state !== "Paying" || configuration?.mode !== "stripe" || clientSecret !== null)
@@ -437,6 +448,35 @@ export function TablePayPanel({
               })}
         </p>
         <MemberJoinPanel />
+      </section>
+    );
+
+  // v15 b12: every dish was taken off (comped) — nothing to pay, no tip and no part to choose.
+  if (
+    (view.state === "NotPaid" || view.state === "Failed") &&
+    view.owed.totalMinor === "0" &&
+    (view.split === null || view.split.paidParts === 0)
+  )
+    return (
+      <section className="order-status__card dining-session__table-pay" aria-labelledby="table-pay">
+        <h2 id="table-pay">{t("Pay the bill")}</h2>
+        <p role="status">
+          {t("There is nothing to pay. The restaurant took everything off this bill.")}
+        </p>
+      </section>
+    );
+  // v15 b12: the bill changed after it was split (and nothing could split it the same way again):
+  // the old parts are never offered; staff split it again, and the panel follows by itself.
+  if ((view.state === "NotPaid" || view.state === "Failed") && view.split?.stale === true)
+    return (
+      <section className="order-status__card dining-session__table-pay" aria-labelledby="table-pay">
+        <h2 id="table-pay">{t("Pay the bill")}</h2>
+        <p role="status">
+          {t(
+            "The bill changed after it was split, so the parts are being worked out again. The table now owes {amount}. Ask a staff member to split it again; this page updates by itself.",
+            { amount: money(view.owed.totalMinor) },
+          )}
+        </p>
       </section>
     );
 
@@ -735,6 +775,12 @@ export function TablePayPanel({
                     : t("Choose a tip to pay")
                   : t("Pay {amount}", { amount: money(total) })}
           </button>
+          {view.consistent ? null : (
+            // v15 b12: the button never waits without a reason.
+            <p role="status">
+              {t("The bill is being updated. This page updates by itself in a moment.")}
+            </p>
+          )}
         </>
       )}
       {problem ? <p role="alert">{problem}</p> : null}

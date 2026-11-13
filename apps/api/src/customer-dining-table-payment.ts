@@ -264,6 +264,9 @@ export function customerTablePaymentBody(view: DiningTableOnlinePaymentView) {
           ? null
           : {
               mode: bill.split.mode,
+              // v15 b12: the bill changed after the split and staff split it again before
+              // anyone pays (its parts are not what is owed now).
+              stale: bill.split.stale,
               paidInFull: bill.split.paidInFull,
               paidParts: bill.split.paidParts,
               remainingMinor: bill.split.remainingMinor,

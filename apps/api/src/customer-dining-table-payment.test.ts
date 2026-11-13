@@ -379,3 +379,43 @@ it("M92: a declined phone payment for a part says it failed, while that part is 
   expect(customerTablePaymentBody(view({ partNumber: 1 }, true)).payment.state).toBe("NotPaid");
   expect(customerTablePaymentBody(view(null)).payment.state).toBe("NotPaid");
 });
+
+it("v15 b12: a split the bill changed under says so to the guest, so no old part is offered", () => {
+  const view = (stale: boolean) =>
+    ({
+      attempt: null,
+      bill: {
+        tableLabel: "T1",
+        sessionPhase: "Closing",
+        tips: { enabled: false, tierPercents: [] },
+        consistent: !stale,
+        owed: { subtotalMinor: "0", taxMinor: "0", totalMinor: "0" },
+        settlement: null,
+        writeOff: null,
+        onlinePayment: null,
+        split: {
+          mode: "Even",
+          stale,
+          dishChoices: [],
+          paidParts: 0,
+          remainingMinor: "0",
+          parts: [1, 2].map((partNumber) => ({
+            partNumber,
+            amountMinor: "1413",
+            subtotalMinor: "1250",
+            taxMinor: "163",
+            roundNumbers: [1],
+            dishes: [],
+            guestPaying: false,
+            payment: null,
+          })),
+        },
+        rounds: [],
+      },
+    }) as never;
+  expect(customerTablePaymentBody(view(true)).payment.split).toMatchObject({
+    stale: true,
+    remainingMinor: "0",
+  });
+  expect(customerTablePaymentBody(view(false)).payment.split).toMatchObject({ stale: false });
+});

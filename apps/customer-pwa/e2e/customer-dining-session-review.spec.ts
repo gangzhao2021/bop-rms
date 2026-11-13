@@ -1149,6 +1149,83 @@ test.describe("@production DEC-DINE-IN-PAY-LATER S4 the guest pays the whole tab
     await expectNoInternalText(page);
   });
 
+  for (const width of [1440, 1024, 390])
+    test(`v15 b12: after comps change a split bill, no old part or amount is offered (${width})`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+      const payLater = {
+        schemaVersion: 1,
+        session: {
+          ...session.session,
+          paymentTiming: "PayLater",
+          rounds: [{ ...session.session.rounds[0], payment: "OnTableBill" }],
+        },
+      };
+      const part = (partNumber: number, amountMinor: string) => ({
+        partNumber,
+        amountMinor,
+        subtotalMinor: "1250",
+        status: "ToPay",
+      });
+      // L10 BCS 1 on v15: split evenly at $28.25, then dishes comped. First the split could not
+      // be worked out again (the server says so); then every dish was comped: nothing to pay.
+      let owedMinor = "1413";
+      await page.route("**/api/v1/dine-in/table-payment", (route) =>
+        route.fulfill({
+          headers: { "cache-control": "no-store" },
+          json: {
+            schemaVersion: 1,
+            payment: {
+              tableLabel: "12",
+              checkingOut: true,
+              rounds: [],
+              owed: {
+                subtotalMinor: owedMinor === "0" ? "0" : "1250",
+                taxMinor: owedMinor === "0" ? "0" : "163",
+                totalMinor: owedMinor,
+                taxRoundingMinor: "0",
+              },
+              consistent: false,
+              tips: { enabled: true, tierPercents: [10, 15, 18] },
+              state: "NotPaid",
+              attempt: null,
+              receipt: null,
+              split: {
+                mode: "ByRounds",
+                stale: true,
+                paidInFull: false,
+                paidParts: 0,
+                remainingMinor: owedMinor,
+                parts: [part(1, "1413"), part(2, "1412")],
+              },
+            },
+          },
+        }),
+      );
+      await enterTable(page, () => ({ status: 200, json: payLater }));
+      const pay = page.getByRole("region", { name: "Pay the bill" });
+      await expect(pay).toContainText(
+        "The bill changed after it was split, so the parts are being worked out again. The table now owes $14.13. Ask a staff member to split it again; this page updates by itself.",
+      );
+      await expect(pay.getByRole("radio")).toHaveCount(0);
+      await expect(pay.getByRole("button", { name: /^Pay/u })).toHaveCount(0);
+      await expect(pay).not.toContainText("Part 1");
+      await expectNoHorizontalOverflow(page);
+      await pay.screenshot({ path: `test-results/guest-split-stale-${width}.png` });
+      // Every dish comped: the panel reads again by itself and says there is nothing to pay.
+      owedMinor = "0";
+      await expect(pay).toContainText(
+        "There is nothing to pay. The restaurant took everything off this bill.",
+        { timeout: 12_000 },
+      );
+      await expect(pay.getByRole("radio")).toHaveCount(0);
+      await expect(pay).not.toContainText("$14.13");
+      await expectNoHorizontalOverflow(page);
+      await pay.screenshot({ path: `test-results/guest-nothing-to-pay-${width}.png` });
+      await expectNoInternalText(page);
+    });
+
   test("chooses the tip once, pays with a card and gets the whole table's receipt", async ({
     page,
   }) => {

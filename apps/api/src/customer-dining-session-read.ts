@@ -718,7 +718,10 @@ export function composeCustomerDiningSession(
       refundPending: money(refundPending),
       due: money(due + (order.tableBill?.owedMinor ?? 0n)),
       ...(order.tableBill?.closedByStaff === true ? { closedByStaff: true } : {}),
-      ...(order.splitParts == null
+      // v15 b12: a split with nothing paid on a bill that now owes nothing (every dish comped)
+      // is no split to speak of: the page says "nothing to pay", never "paying in 2 parts".
+      ...(order.splitParts == null ||
+      (order.splitParts.paid === 0 && due + (order.tableBill?.owedMinor ?? 0n) === 0n)
         ? {}
         : { splitParts: { count: order.splitParts.count, paid: order.splitParts.paid } }),
       ...(() => {
