@@ -1099,6 +1099,46 @@ it("protects current order queue reads and bounds cursor authority", async () =>
   expect((await request(unconfigured, "/merchant/orders", { headers })).status).toBe(503);
 });
 
+it("WP-2423 reads-under-burst: says whether the Store's Orders changed, under the list's own guard", async () => {
+  const orderChanges = vi.fn<NonNullable<MerchantBffRouterOptions["orderChanges"]>>(async () => ({
+    mark: "a".repeat(32),
+  }));
+  const app = express();
+  app.use(
+    "/merchant",
+    createMerchantBffRouter({
+      service: fakeService(),
+      exactOrigin: "https://merchant.invalid",
+      acceptedHost: "merchant.invalid",
+      orderChanges,
+    }),
+  );
+  const server = app.listen(0, "127.0.0.1");
+  servers.push(server);
+  await new Promise<void>((resolve) => server.once("listening", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("listener unavailable");
+  const root = `http://127.0.0.1:${address.port}`;
+  const headers = { ...safeHeaders, Cookie: "__Host-bop-merchant=" + sessionCookie };
+  expect((await request(root, "/merchant/orders/changes?store=x", { headers })).status).toBe(403);
+  expect(
+    (await request(root, "/merchant/orders/changes", { headers: { ...headers, Cookie: "" } }))
+      .status,
+  ).toBe(403);
+  expect(orderChanges).not.toHaveBeenCalled();
+  const answered = await request(root, "/merchant/orders/changes", { headers });
+  expect(answered.status).toBe(200);
+  expect(answered.headers.get("cache-control")).toBe("no-store");
+  expect(await answered.json()).toEqual({ schemaVersion: 1, mark: "a".repeat(32) });
+  expect(orderChanges).toHaveBeenCalledWith({ sessionCookie });
+  orderChanges.mockRejectedValueOnce(new Error("synthetic-private-source"));
+  const failed = await request(root, "/merchant/orders/changes", { headers });
+  expect(failed.status).toBe(503);
+  expect(JSON.stringify(await failed.json())).not.toContain("synthetic");
+  const unconfigured = await serve(fakeService());
+  expect((await request(unconfigured, "/merchant/orders/changes", { headers })).status).toBe(503);
+});
+
 it("WP-2423: reads one order's detail with its lines and hides other Stores' orders", async () => {
   const order = "0198a408-0000-7000-8000-000000000123";
   const item = {

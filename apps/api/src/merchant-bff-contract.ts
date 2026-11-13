@@ -153,6 +153,7 @@ import type { createMerchantOrdinaryRefundCommand } from "./merchant-ordinary-re
 import type { createMerchantOrdinaryRefundSendCommand } from "./merchant-ordinary-refund-send-command.js";
 import type { createMerchantOrdinaryRefundReconciliationCommand } from "./merchant-ordinary-refund-reconciliation-command.js";
 import type { createPersistentMerchantOrderQueue } from "./persistent-merchant-order-queue.js";
+import type { createPersistentMerchantOrderChanges } from "./merchant-order-changes.js";
 import type { createMerchantMenuPublicationCommand } from "./merchant-menu-publication-command.js";
 import type { createMerchantMenuDraftQuery } from "./merchant-menu-draft-query.js";
 import type { createBrandLifecycleCommand } from "./brand-lifecycle-command.js";
@@ -641,6 +642,8 @@ export interface MerchantBffRouterOptions {
     typeof createMerchantOrdinaryRefundReconciliationCommand
   >;
   readonly orderQueue?: ReturnType<typeof createPersistentMerchantOrderQueue>;
+  /** WP-2423 (reads-under-burst): whether the Store's Orders changed (Orders reads again then). */
+  readonly orderChanges?: ReturnType<typeof createPersistentMerchantOrderChanges>;
   readonly menuPublication?: ReturnType<typeof createMerchantMenuPublicationCommand>;
   readonly menuDraft?: ReturnType<typeof createMerchantMenuDraftQuery>;
   readonly brandLifecycle?: ReturnType<typeof createBrandLifecycleCommand>;

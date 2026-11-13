@@ -68,6 +68,7 @@ import { createMerchantPriceBookCommands } from "./merchant-price-book-commands.
 import { createMerchantPriceBookHttpCommand } from "./merchant-price-book-http-command.js";
 import { createSingleStorePriceBookFacts } from "./single-store-price-book-facts.js";
 import { createPersistentMerchantOrderQueue } from "./persistent-merchant-order-queue.js";
+import { createPersistentMerchantOrderChanges } from "./merchant-order-changes.js";
 import { createMerchantOrderAcceptanceCommand } from "./merchant-order-acceptance-command.js";
 import { createMerchantDiningItemService } from "./merchant-dining-item-service.js";
 import { createMerchantDiningTables } from "./merchant-dining-tables.js";
@@ -905,6 +906,7 @@ export function createMerchantRuntime(options: MerchantRuntimeOptions): Merchant
             quoteVersion: options.orderQueue.quoteVersion,
             acceptanceConfigured: options.orderAcceptance !== undefined,
           }),
+          orderChanges: createPersistentMerchantOrderChanges({ persistence: options.persistence }),
         }),
     ...(options.orderAcceptance === undefined
       ? {}

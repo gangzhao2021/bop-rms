@@ -263,6 +263,34 @@ export function installMerchantOrderRoutes(
       .catch((error: unknown) => refundReadFailure(response, error));
   });
 
+  // WP-2423 (reads-under-burst): whether anything changed among the Store's Orders since the
+  // screen's last look, so Orders reads its whole list at once when a paid order arrives (an
+  // opaque mark; the screen compares it, it names no Order).
+  router.get("/orders/changes", safeRead(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    if (
+      request.method !== "GET" ||
+      request.body !== undefined ||
+      sessionCookie === null ||
+      Object.keys(request.query).length > 0 ||
+      rawHeaderValues(request, "origin").length > 1 ||
+      rawHeaderValues(request, "sec-fetch-site").length !== 1
+    ) {
+      denied(response);
+      return;
+    }
+    const orderChanges = options.orderChanges;
+    if (!orderChanges) {
+      response.status(503).json({ error: "order_queue_unavailable" });
+      return;
+    }
+    void orderChanges({ sessionCookie })
+      .then((changes) => {
+        response.set("Cache-Control", "no-store").json({ schemaVersion: 1, mark: changes.mark });
+      })
+      .catch((error: unknown) => refundReadFailure(response, error));
+  });
+
   router.get("/orders", safeRead(options), (request, response) => {
     const sessionCookie = cookie(request, "__Host-bop-merchant");
     const after = request.query.after;

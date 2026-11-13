@@ -152,6 +152,7 @@ export const apiRouteTemplates = Object.freeze([
   "/merchant/catalog/menus/draft",
   "/merchant/catalog/menus/publication",
   "/merchant/orders",
+  "/merchant/orders/changes",
   "/merchant/organization/stores",
   "/merchant/organization/stores/may-open",
   "/merchant/store-context",
