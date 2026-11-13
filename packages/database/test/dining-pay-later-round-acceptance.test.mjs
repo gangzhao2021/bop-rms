@@ -149,6 +149,20 @@ import {
   seedJourneyQuote,
 } from "../test-support/dine-in-journey-seed.mjs";
 
+/**
+ * v15 b15 (DEC-TAX-WHOLE-RECEIPT): an Order's rounds as checkout's bill charges them, in the shape
+ * the Order's detail carries them (`tableBill.rounds`).
+ */
+const billRoundsOf = (rounds, orderReference) =>
+  rounds
+    .filter((round) => round.orderReference === orderReference)
+    .map((round) => ({
+      orderBatchReference: round.orderBatchReference,
+      subtotalMinor: round.subtotalMinor,
+      taxMinor: round.taxMinor,
+      totalMinor: round.totalMinor,
+    }));
+
 const { Client } = pg;
 const id = (n) => "01a0fe00-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 const minutes = (n) => n * 60_000;
@@ -2380,6 +2394,7 @@ async function journey(journeyEnding) {
               .reduce((sum, round) => sum + BigInt(round.totalMinor), 0n)
               .toString(),
             paid: null,
+            rounds: billRoundsOf(merchantRounds, orderReference),
           });
           // DEC-TAX-WHOLE-RECEIPT (v15 batch 7): the bill's tax rounding is one line of the bill,
           // on the host's Order (the one that holds the bill); the merged table's Order keeps what
@@ -2474,12 +2489,24 @@ async function journey(journeyEnding) {
             totalMinor: mergedBill.owed.totalMinor,
             paid: null,
             taxRoundingMinor: mergedBill.taxRoundingMinor,
+            rounds: billRoundsOf(mergedBill.rounds, orderReference),
           });
           assert.deepEqual(details[1].items[0].tableBill, {
             totalMinor: "0",
             paid: null,
             mergedInto: { tableLabel: dining.table.stableLabel, paid: false },
+            rounds: billRoundsOf(mergedBill.rounds, mOrder),
           });
+          // v15 b15: the two details' rounds are the bill's rounds, so the host and the merged
+          // table's panels add up, round by round and in Tax, to what checkout takes.
+          for (const field of ["subtotalMinor", "taxMinor", "totalMinor"])
+            assert.equal(
+              details
+                .flatMap((detail) => detail.items[0].tableBill.rounds)
+                .reduce((sum, round) => sum + BigInt(round[field]), 0n)
+                .toString(),
+              mergedBill.owed[field],
+            );
           // The merged table's Order totals exactly what it ordered (its dishes' own totals).
           assert.equal(
             details[1].lines.totals.total.amountMinor,
@@ -5168,6 +5195,19 @@ async function journey(journeyEnding) {
             (BigInt(detail.lines.totals.total.amountMinor) - comps + 1n).toString(),
             owed,
           );
+          // v15 b15 review: with comps, each round, the Tax and the Total staff read are the
+          // bill's (after the comps, one tax figure), never the ordered block's tax.
+          assert.deepEqual(
+            detail.items[0].tableBill.rounds,
+            billRoundsOf(after.rounds, orderReference),
+          );
+          for (const field of ["subtotalMinor", "taxMinor", "totalMinor"])
+            assert.equal(
+              detail.items[0].tableBill.rounds
+                .reduce((sum, round) => sum + BigInt(round[field]), 0n)
+                .toString(),
+              after.owed[field],
+            );
           // The guest's own phone bill too.
           await pageFacts();
           // Paid on the card machine: it records the rounding (version 1, 1¢) and takes exactly it.
@@ -5201,6 +5241,12 @@ async function journey(journeyEnding) {
           assert.equal(
             (BigInt(paidDetail.lines.totals.total.amountMinor) - comps + 1n).toString(),
             owed,
+          );
+          // v15 b15: paid, the rounds are worked out from the recorded rounding (the table is not
+          // read again) and are the rounds the payment took.
+          assert.deepEqual(
+            paidDetail.items[0].tableBill.rounds,
+            billRoundsOf(after.rounds, orderReference),
           );
         }
 

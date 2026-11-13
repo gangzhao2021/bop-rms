@@ -18,15 +18,69 @@ type TableBill = NonNullable<ReturnType<typeof parseTableBillBody>> & {
    * detail). The Order's Total is as ordered and leaves it out; the bill to pay (or paid) has it.
    */
   readonly taxRoundingMinor?: string;
+  /**
+   * v15 b15 (DEC-TAX-WHOLE-RECEIPT): on an Order's detail, each of its pay-at-end rounds as the
+   * table's bill charges it — after comps, its tax holding its share of the bill's tax rounding —
+   * the figures checkout, the guest and the saved offline bill read (absent: an older server, or
+   * not a detail).
+   */
+  readonly rounds?: readonly OrderBillRound[];
 };
+export interface OrderBillRound {
+  readonly orderBatchReference: string;
+  readonly subtotalMinor: string;
+  readonly taxMinor: string;
+  readonly totalMinor: string;
+}
+function parseBillRounds(value: unknown): readonly OrderBillRound[] {
+  if (!Array.isArray(value) || value.length === 0 || value.length > 500) return fail();
+  const seen = new Set<string>();
+  return Object.freeze(
+    value.map((entry: unknown) => {
+      if (entry === null || typeof entry !== "object" || Array.isArray(entry)) return fail();
+      const raw = entry as Record<string, unknown>;
+      const keys = ["orderBatchReference", "subtotalMinor", "taxMinor", "totalMinor"];
+      if (Object.keys(raw).length !== keys.length || keys.some((key) => !Object.hasOwn(raw, key)))
+        return fail();
+      const { orderBatchReference, subtotalMinor, taxMinor, totalMinor } = raw;
+      if (
+        typeof orderBatchReference !== "string" ||
+        !ref.test(orderBatchReference) ||
+        seen.has(orderBatchReference) ||
+        typeof subtotalMinor !== "string" ||
+        !minorAmount.test(subtotalMinor) ||
+        typeof taxMinor !== "string" ||
+        !minorAmount.test(taxMinor) ||
+        typeof totalMinor !== "string" ||
+        !minorAmount.test(totalMinor)
+      )
+        return fail();
+      seen.add(orderBatchReference);
+      return Object.freeze({ orderBatchReference, subtotalMinor, taxMinor, totalMinor });
+    }),
+  );
+}
 function parseTableBill(value: unknown, orderType: unknown): TableBill | null {
-  if (value === null || typeof value !== "object" || !Object.hasOwn(value, "taxRoundingMinor"))
+  if (
+    value === null ||
+    typeof value !== "object" ||
+    !(Object.hasOwn(value, "taxRoundingMinor") || Object.hasOwn(value, "rounds"))
+  )
     return parseTableBillBody(value, orderType);
-  const { taxRoundingMinor, ...rest } = value as Record<string, unknown>;
-  if (typeof taxRoundingMinor !== "string" || !/^-?[1-9][0-9]{0,5}$/u.test(taxRoundingMinor))
+  const { taxRoundingMinor, rounds, ...rest } = value as Record<string, unknown>;
+  if (
+    taxRoundingMinor !== undefined &&
+    (typeof taxRoundingMinor !== "string" || !/^-?[1-9][0-9]{0,5}$/u.test(taxRoundingMinor))
+  )
     return fail();
   const body = parseTableBillBody(rest, orderType);
-  return body === null ? fail() : Object.freeze({ ...body, taxRoundingMinor });
+  return body === null
+    ? fail()
+    : Object.freeze({
+        ...body,
+        ...(taxRoundingMinor === undefined ? {} : { taxRoundingMinor: taxRoundingMinor as string }),
+        ...(rounds === undefined ? {} : { rounds: parseBillRounds(rounds) }),
+      });
 }
 function parseTableBillBody(
   value: unknown,

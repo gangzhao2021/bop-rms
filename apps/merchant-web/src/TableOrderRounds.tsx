@@ -1,9 +1,9 @@
 import { saidTable, t } from "./i18n/i18n.js";
 import { useEffect, useMemo, useState } from "react";
 import {
-  billRoundingApart,
   CurrentOrderLines,
   failedPaymentBatches,
+  orderBill,
   orderRefundRows,
   removedUnpaidItems,
   waitingForStaffBatches,
@@ -126,7 +126,7 @@ export function TableOrderRounds({
           waitingBatches={waitingForStaffBatches(detail.view)}
           failedPaymentBatches={failedPaymentBatches(detail.view)}
           refundRows={orderRefundRows(detail.order, detail.lines, detail.paymentPosition)}
-          billRounding={billRoundingApart(
+          billRounding={orderBill(
             detail.order,
             mergedTableLabels.length === 0
               ? t("Whole bill to pay")
@@ -211,12 +211,12 @@ export function TableOrderRounds({
                 <span>−{orderMoney({ amountMinor: comp.amountMinor, currencyCode: "CAD" })}</span>
               </li>
             ))}
-            {/* b13 (DEC-TAX-WHOLE-RECEIPT): the tax is worked out once on the bill after the
-                comps and is inside the whole bill below, as checkout and the paid bill print it.
-                The rounds above say what was ordered and the comps their tax-included amounts, so
-                the cent the tax moves by when worked out again is said here, in one line: the
-                list adds up to the whole bill. */}
+            {/* b13 (DEC-TAX-WHOLE-RECEIPT), from an older server only: its rounds above say what
+                was ordered, so the cent the tax moves by after the comps is said here and the
+                whole bill after them below. b15: the rounds, Tax and Total above are the bill's
+                own (after the comps), so neither line is needed. */}
             {bill !== null &&
+            bill.rounds === undefined &&
             bill.paid === null &&
             bill.mergedInto === undefined &&
             bill.taxRoundingMinor !== undefined ? (
@@ -236,7 +236,10 @@ export function TableOrderRounds({
             ) : null}
             {/* v15 batch 7: this is the whole table's bill (every round, and the tables merged
                 into it), never one round's; a table merged away pays on the other table's bill. */}
-            {bill !== null && bill.paid === null && bill.mergedInto === undefined ? (
+            {bill !== null &&
+            bill.rounds === undefined &&
+            bill.paid === null &&
+            bill.mergedInto === undefined ? (
               <li className="table-order-rounds__owed">
                 <span>
                   {mergedTableLabels.length === 0

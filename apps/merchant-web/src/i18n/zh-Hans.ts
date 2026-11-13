@@ -6721,6 +6721,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "开始结账，核对账单和纸单一致，选小费，勾选“断网时已收款”并填时间，再记下收款。",
   "Close the table, then mark it cleaned.": "关台，清洁后点“已清洁”。",
   "Whole bill to pay after comps": "整桌账单减免后应付",
+  "Subtotal after comps": "减免后小计",
   "Tax worked out again after comps": "减免后整单重算的税差",
   "Whole bill to pay": "整桌账单应付",
   "Whole bill to pay, with {tables}": "整桌账单应付（含 {tables}）",

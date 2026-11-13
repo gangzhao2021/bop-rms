@@ -379,6 +379,42 @@ export const roundOrdersOf = (
   new Map(rounds.map((round) => [round.orderBatchReference, round.orderReference]));
 
 /** The table's bill from the owners' records, in the caller's (authorized) transaction. */
+/**
+ * v15 b15 (DEC-TAX-WHOLE-RECEIPT): a round as the bill charges it — its dishes less what a manager
+ * took off them, and its share of the bill's tax rounding in its tax and total. Checkout, the split
+ * by rounds and an Order's own detail (readOrderBillRounds) read every round this one way.
+ */
+function billRoundFigures(
+  items: readonly {
+    readonly orderItemReference: unknown;
+    readonly subtotal: { readonly amountMinor: bigint };
+    readonly tax: { readonly amountMinor: bigint };
+    readonly total: { readonly amountMinor: bigint };
+  }[],
+  reductions: ReadonlyMap<
+    string,
+    { readonly netMinor: bigint; readonly taxMinor: bigint; readonly totalMinor: bigint }
+  >,
+  taxRounding: bigint,
+): { readonly subtotal: bigint; readonly tax: bigint; readonly total: bigint } {
+  const off = (item: (typeof items)[number]) =>
+    reductions.get(String(item.orderItemReference)) ?? null;
+  return {
+    subtotal: items.reduce(
+      (sum, item) => sum + item.subtotal.amountMinor - (off(item)?.netMinor ?? 0n),
+      0n,
+    ),
+    tax:
+      items.reduce((sum, item) => sum + item.tax.amountMinor - (off(item)?.taxMinor ?? 0n), 0n) +
+      taxRounding,
+    total:
+      items.reduce(
+        (sum, item) => sum + item.total.amountMinor - (off(item)?.totalMinor ?? 0n),
+        0n,
+      ) + taxRounding,
+  };
+}
+
 export async function readDiningTableBill(
   tx: ConsumerTransaction,
   scope: Scope,
@@ -672,20 +708,9 @@ export async function readDiningTableBill(
     const items = prices.filter((item) => String(item.orderBatchReference) === batch);
     const off = (item: (typeof items)[number]) =>
       reductions.get(String(item.orderItemReference)) ?? null;
-    const subtotal = items.reduce(
-      (sum, item) => sum + item.subtotal.amountMinor - (off(item)?.netMinor ?? 0n),
-      0n,
-    );
     // The round's share of the bill's tax rounding is part of its tax (and what it is paid).
     const taxRounding = taxRoundingOf(batch);
-    const tax =
-      items.reduce((sum, item) => sum + item.tax.amountMinor - (off(item)?.taxMinor ?? 0n), 0n) +
-      taxRounding;
-    const total =
-      items.reduce(
-        (sum, item) => sum + item.total.amountMinor - (off(item)?.totalMinor ?? 0n),
-        0n,
-      ) + taxRounding;
+    const { subtotal, tax, total } = billRoundFigures(items, reductions, taxRounding);
     const paidSlices = paidSlicesOf.get(batch);
     const paid = byGuests
       ? total > 0n && paidSlices !== undefined && paidSlices.amount >= total
@@ -1227,16 +1252,29 @@ export async function tableRefundedMinor(
   ].reduce((sum, refund) => sum + refund.amountMinor, 0n);
 }
 
+/** v15 b15 (DEC-TAX-WHOLE-RECEIPT): one of an Order's rounds as its table's bill charges it. */
+export interface OrderBillRound {
+  readonly orderBatchReference: string;
+  /** After comps and discounts, before tax. */
+  readonly subtotalMinor: bigint;
+  /** After comps; holds the round's share of the bill's tax rounding (`taxRoundingMinor`). */
+  readonly taxMinor: bigint;
+  readonly totalMinor: bigint;
+  readonly taxRoundingMinor: bigint;
+}
+
 /**
- * WP-2423 DEC-TAX-WHOLE-RECEIPT (docs/spec/design/tax-whole-receipt.md): this Order's share of its
- * bill's tax rounding, for the Order's own detail, so the table panel and Orders read the figure
- * the checkout takes. 0 for an Order with no pay-at-end rounds (pickup, counter, a table paying
- * each round first): each of its rounds is its own receipt. Once the bill has any payment (or was
- * written off) the recorded version is the answer, without reading the table (it may be closed
- * long since); before that, the bill as checkout reads it now. A read never records. Fails closed
+ * WP-2423 DEC-TAX-WHOLE-RECEIPT (docs/spec/design/tax-whole-receipt.md): this Order's rounds as its
+ * bill charges them (after comps, each round's tax holding its share of the bill's tax rounding),
+ * for the Order's own detail, so the table panel and Orders read the figures checkout, the guest's
+ * page, the receipt and the saved offline bill read (v15 b15: per round, not only the share). None
+ * for an Order with no pay-at-end rounds (pickup, counter, a table paying each round first): each of
+ * its rounds is its own receipt. Once the bill has any payment (or was written off) the recorded
+ * rounding is the answer, without reading the table (it may be closed long since); before that,
+ * the bill as checkout reads it now. A read never records. Fails closed
  * (TABLE_CHECKOUT_UNAVAILABLE) only when neither can be read.
  */
-export async function readOrderTaxRoundingShare(
+export async function readOrderBillRounds(
   tx: ConsumerTransaction,
   scope: Scope,
   input: {
@@ -1244,7 +1282,7 @@ export async function readOrderTaxRoundingShare(
     readonly observedAt: string;
     authorize(): Promise<boolean>;
   },
-): Promise<bigint> {
+): Promise<readonly OrderBillRound[]> {
   const owner = { brandReference: scope.brandReference, storeReference: scope.storeReference };
   const allowed = async () => (await input.authorize()) === true;
   const order = input.orderReference;
@@ -1259,7 +1297,7 @@ export async function readOrderTaxRoundingShare(
     sha256,
     authorize: allowed,
   }).listByOrders({ transaction: tx, orderReferences: [order] });
-  if (rounds.length === 0 && (await listOrderBillOrders(tx, owner, order)).length <= 1) return 0n;
+  if (rounds.length === 0 && (await listOrderBillOrders(tx, owner, order)).length <= 1) return [];
   const payments = createPostgresDiningTableSettlementStore({
     scope,
     authorize: async (_tx, value) => value.orderReference === order && (await allowed()),
@@ -1286,10 +1324,54 @@ export async function readOrderTaxRoundingShare(
               (await there.listWriteOffsByOrders(tx, [holder])).length > 0
             );
           })();
-    if (holderPaid)
-      return ((await loadBillTaxRounding(tx, owner, holder))?.lines ?? [])
-        .filter((line) => line.orderReference === order)
-        .reduce((sum, line) => sum + line.amountMinor, 0n);
+    if (holderPaid) {
+      // The bill as it was paid: this Order's dishes (less those taken off and what came off
+      // them) and its rounds' lines of the recorded rounding (none before the rule: 0).
+      const lines = ((await loadBillTaxRounding(tx, owner, holder))?.lines ?? []).filter(
+        (line) => line.orderReference === order,
+      );
+      const removed = new Set(
+        (
+          await createPostgresPayLaterItemCancellationStore({
+            ...owner,
+            authorize: async (_tx, value) =>
+              String(value.orderReference) === order && (await allowed()),
+          }).listByOrders(tx, [order])
+        ).flatMap((record) => record.orderItemReferences),
+      );
+      const prices = (await listOrderItemPrices(tx, owner, order, "")).filter(
+        (item) => !removed.has(String(item.orderItemReference)),
+      );
+      const reductions = new Map(
+        (await listOrderPriceReductions(tx, owner, [order], input.observedAt)).map((record) => [
+          record.orderItemReference,
+          record,
+        ]),
+      );
+      // In the order they were confirmed, as checkout lists them.
+      return [...rounds]
+        .sort((a, b) =>
+          a.confirmedAt < b.confirmedAt ? -1 : a.confirmedAt > b.confirmedAt ? 1 : 0,
+        )
+        .map((confirmation) => {
+          const batch = String(confirmation.orderBatchReference);
+          const taxRounding = lines
+            .filter((line) => line.orderBatchReference === batch)
+            .reduce((sum, line) => sum + line.amountMinor, 0n);
+          const figures = billRoundFigures(
+            prices.filter((item) => String(item.orderBatchReference) === batch),
+            reductions,
+            taxRounding,
+          );
+          return Object.freeze({
+            orderBatchReference: batch,
+            subtotalMinor: figures.subtotal,
+            taxMinor: figures.tax,
+            totalMinor: figures.total,
+            taxRoundingMinor: taxRounding,
+          });
+        });
+    }
   }
   const session = (await listOrderDiningSessions(tx, owner, [holder])).get(holder);
   if (session === undefined) return fail("TABLE_CHECKOUT_UNAVAILABLE");
@@ -1300,7 +1382,15 @@ export async function readOrderTaxRoundingShare(
   });
   return bill.rounds
     .filter((round) => round.orderReference === order)
-    .reduce((sum, round) => sum + BigInt(round.taxRoundingMinor), 0n);
+    .map((round) =>
+      Object.freeze({
+        orderBatchReference: round.orderBatchReference,
+        subtotalMinor: BigInt(round.subtotalMinor),
+        taxMinor: BigInt(round.taxMinor),
+        totalMinor: BigInt(round.totalMinor),
+        taxRoundingMinor: BigInt(round.taxRoundingMinor),
+      }),
+    );
 }
 
 /**

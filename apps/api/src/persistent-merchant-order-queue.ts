@@ -93,7 +93,7 @@ import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js"
 import { runMerchantSnapshotRead } from "./merchant-snapshot-read.js";
 import {
   readDiningTableBill,
-  readOrderTaxRoundingShare,
+  readOrderBillRounds,
   tableRefundedMinor,
 } from "./merchant-dining-table-checkout.js";
 import { withOptionalRead } from "./merchant-round-business-date.js";
@@ -685,6 +685,16 @@ export function createPersistentMerchantOrderQueue(options: {
                * Total leaves it out (Total is as ordered); the bill to pay or paid has it.
                */
               taxRoundingMinor?: string;
+              /**
+               * v15 b15 (DEC-TAX-WHOLE-RECEIPT): on an Order's detail, each of its pay-at-end rounds
+               * as the bill charges it (after comps; its tax holds its share of the rounding).
+               */
+              rounds?: {
+                orderBatchReference: string;
+                subtotalMinor: string;
+                taxMinor: string;
+                totalMinor: string;
+              }[];
               /**
                * v15 M176: this table was merged into another; its dishes are on that table's bill
                * (and in its amount), paid there or still to be.
@@ -1544,15 +1554,14 @@ export function createPersistentMerchantOrderQueue(options: {
                     )
                   : 0n) + (cardMachineTips.get(only.orderReference) ?? 0n);
           // WP-2423 DEC-TAX-WHOLE-RECEIPT: a pay-at-end table's tax is rounded once over its bill.
-          // v15 batch 9 (review): the Order's Total is always what was ordered — its lines, the
-          // guest's "Total ordered" and checkout's rounds — and never moves with a comp, on this
-          // table or a table merged into it. This Order's share of the bill's rounding (as checkout
-          // takes it now, after any comps) is always listed apart, as the guest's page lists it:
-          // under the comps when there are any, else under the Total, then the bill to pay.
-          const roundingShareMinor =
+          // The lines stay as ordered; this Order's share of the bill's rounding (as checkout takes
+          // it now, after any comps, or as it was paid) is on its table bill.
+          // v15 b15: and each of its rounds as the bill charges it (after comps, its share of the
+          // rounding in its tax), so the round headers and totals read checkout's figures.
+          const billRounds =
             lines === null || only === undefined || scoped === null || tenantReference === null
-              ? 0n
-              : await readOrderTaxRoundingShare(
+              ? []
+              : await readOrderBillRounds(
                   businessTransaction,
                   { tenantReference, ...scoped },
                   {
@@ -1561,6 +1570,10 @@ export function createPersistentMerchantOrderQueue(options: {
                     authorize: async () => stillAllowed(),
                   },
                 );
+          const roundingShareMinor = billRounds.reduce(
+            (sum, round) => sum + round.taxRoundingMinor,
+            0n,
+          );
           const detailLines =
             lines === null || only === undefined
               ? lines
@@ -2116,9 +2129,22 @@ export function createPersistentMerchantOrderQueue(options: {
                   // DEC-DINE-IN-PAY-LATER: on the table's bill (owed), or what the table paid.
                   tableBill: ((bill) =>
                     bill !== undefined &&
-                    roundingShareMinor !== 0n &&
+                    billRounds.length > 0 &&
                     item.orderReference === only?.orderReference
-                      ? { ...bill, taxRoundingMinor: roundingShareMinor.toString() }
+                      ? {
+                          ...bill,
+                          ...(roundingShareMinor === 0n
+                            ? {}
+                            : { taxRoundingMinor: roundingShareMinor.toString() }),
+                          // v15 b15 (DEC-TAX-WHOLE-RECEIPT): this Order's rounds as the bill
+                          // charges them, in the order they were confirmed.
+                          rounds: billRounds.map((round) => ({
+                            orderBatchReference: round.orderBatchReference,
+                            subtotalMinor: round.subtotalMinor.toString(),
+                            taxMinor: round.taxMinor.toString(),
+                            totalMinor: round.totalMinor.toString(),
+                          })),
+                        }
                       : (bill ?? null))(tableBills.get(item.orderReference)),
                   ...(item.diningSessionReference !== null &&
                   guestStartedSessions.has(item.diningSessionReference)

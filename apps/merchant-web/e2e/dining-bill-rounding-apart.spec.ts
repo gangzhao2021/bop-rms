@@ -7,7 +7,8 @@ import { expect, test } from "@playwright/test";
  * Total $14.12 (its share of the rounding in them, never a "Tax rounding" line), then the whole
  * bill with the merged table, $28.25; the merged table reads what it ordered, $14.13. After a
  * manager comps the merged table's dish there is no rounding left: the host reads $1.63 / $14.13,
- * the bill it is. Synthetic Store; server mocked.
+ * the bill it is, and the merged table its round on the bill, $0.00. b15 review: each round's
+ * amount is the bill's for it (tax included). Synthetic Store; server mocked.
  */
 const id = (n: number) => "0190996a-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 const headers = { "cache-control": "no-store" };
@@ -107,6 +108,12 @@ for (const width of [1440, 1024, 390])
         canCancel: false,
         cancellation: null,
       });
+      const billRound = (n: number, subtotal: string, tax: string, total: string) => ({
+        orderBatchReference: id(50 + n),
+        subtotalMinor: subtotal,
+        taxMinor: tax,
+        totalMinor: total,
+      });
       const order = (n: number) => ({
         orderReference: id(n),
         orderNumber: "T-" + n,
@@ -146,9 +153,22 @@ for (const width of [1440, 1024, 390])
         tableBill:
           n === 1
             ? comped
-              ? { totalMinor: "1413", paid: null }
-              : { totalMinor: "2825", paid: null, taxRoundingMinor: "-1" }
-            : { totalMinor: "0", paid: null, mergedInto: { tableLabel: "MRS 1", paid: false } },
+              ? { totalMinor: "1413", paid: null, rounds: [billRound(n, "1250", "163", "1413")] }
+              : {
+                  totalMinor: "2825",
+                  paid: null,
+                  taxRoundingMinor: "-1",
+                  rounds: [billRound(n, "1250", "162", "1412")],
+                }
+            : {
+                totalMinor: "0",
+                paid: null,
+                mergedInto: { tableLabel: "MRS 1", paid: false },
+                // b15: the merged table's round as the host's bill charges it (after its comp).
+                rounds: [
+                  comped ? billRound(n, "0", "0", "0") : billRound(n, "1250", "163", "1413"),
+                ],
+              },
         currentPhase: "InProgress",
         currentVersion: 3,
         unfulfillable: null,
@@ -185,17 +205,33 @@ for (const width of [1440, 1024, 390])
       const totals = host.locator(".order-lines-totals");
       await expect(host).not.toContainText("Tax rounding");
       if (comped) {
-        // No rounding left on the bill: the host's Total as ordered, nothing under it.
+        // No rounding left on the bill: the host's Tax and Total are its round on the bill.
         await expect(totals.first()).toContainText("Tax$1.63");
         await expect(totals.first()).toContainText("Total$14.13");
-        await expect(host).not.toContainText("Whole bill to pay");
+        // b15 review: the comps list no longer repeats the bill; the merged table's bill is said
+        // once, under the Total (the merged table's $0.00 round is on it).
+        await expect(totals.nth(1)).toContainText("Whole bill to pay, with MRS 2$14.13");
+        await expect(host).not.toContainText("after comps");
       } else {
         await expect(totals.first()).toContainText("Tax$1.62");
         await expect(totals.first()).toContainText("Total$14.12");
         await expect(totals.nth(1)).toContainText("Whole bill to pay, with MRS 2$28.25");
       }
+      // b15 review: the round says what the bill charges for it, as checkout and the guest do.
+      await expect(host.locator(".order-round__amount")).toHaveText([comped ? "$14.13" : "$14.12"]);
       const merged = details.getByRole("region", { name: /^From (table )?MRS 2$/u });
-      await expect(merged.locator(".order-lines-totals").first()).toContainText("Total$14.13");
+      const mergedTotals = merged.locator(".order-lines-totals").first();
+      if (comped) {
+        // The merged table's dish was comped: its round and Total are the bill's, $0.00, and the
+        // comp list says what came off; no "Tax worked out again" line, the Tax is the bill's.
+        await expect(merged.locator(".order-round__amount")).toHaveText(["$0.00"]);
+        await expect(mergedTotals).toContainText("Subtotal after comps$0.00");
+        await expect(mergedTotals).toContainText("Total$0.00");
+        await expect(merged).not.toContainText("Tax worked out again");
+      } else {
+        await expect(merged.locator(".order-round__amount")).toHaveText(["$14.13"]);
+        await expect(mergedTotals).toContainText("Total$14.13");
+      }
       await expect(merged).not.toContainText("Tax rounding");
       expect(
         await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
