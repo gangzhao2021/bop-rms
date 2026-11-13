@@ -8225,6 +8225,11 @@ body:has(.product-complete-draft) .bop-shell__header,
   flex-wrap: wrap;
   gap: 8px;
 }
+/* v15 b12: the left-party choices wrap under each other from the same edge (the flex gap
+   spaces them; the shell's margin between two plain buttons would indent the second). */
+.counter-order__party-choices button + button {
+  margin-left: 0;
+}
 .table-qr__confirm-actions button + button {
   margin-left: 0;
 }

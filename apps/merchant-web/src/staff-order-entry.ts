@@ -48,6 +48,16 @@ export class CounterOrderClientError extends Error {
       | "TableUnavailable"
       /** v15 staff-round-speed: the party the round was taken for has left the table. */
       | "TablePartyChanged"
+      /**
+       * DEC-STAFF-ROUND-ONE-AT-A-TIME: another staff member's round for the table was being sent
+       * and did not finish in time; nothing of this one was sent or put in the table's cart.
+       */
+      | "TableBusy"
+      /**
+       * v15 b12: this round was not sent, but its dishes are still in the table's cart (or went
+       * out with another round from the table): never "nothing was sent".
+       */
+      | "DishesLeftAtTable"
       | "TableHasNoQr"
       | "TableCartHasItems"
       | "TableCheckoutInProgress"
@@ -830,6 +840,9 @@ export function createCounterOrderClient(csrf: string, fetcher: typeof fetch = f
         throw new CounterOrderClientError("TableCheckoutInProgress");
       if (code === "table_unavailable") throw new CounterOrderClientError("TableUnavailable");
       if (code === "table_party_changed") throw new CounterOrderClientError("TablePartyChanged");
+      if (code === "table_busy") throw new CounterOrderClientError("TableBusy");
+      if (code === "staff_round_not_withdrawn")
+        throw new CounterOrderClientError("DishesLeftAtTable");
       if (code === "table_qr_missing") throw new CounterOrderClientError("TableHasNoQr");
       if (code === "new_guests_paused") throw new CounterOrderClientError("NewGuestsPaused");
       if (code === "store_not_taking_dine_in_orders")

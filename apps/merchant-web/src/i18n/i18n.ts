@@ -303,6 +303,65 @@ export function leavingWithUnsavedWork(): boolean {
 }
 
 /** Chooses a language for this device and reloads, so every text follows it. */
+/**
+ * v15 b12: work in progress a screen keeps across the language switch's reload (an order being
+ * taken), in this tab only and read back once: switching the language never loses it.
+ */
+const keptThroughSwitch = new Map<string, () => unknown>();
+const KEPT_PREFIX = "bop.merchant.keptThroughLanguageSwitch.";
+export function keepThroughLanguageSwitch(key: string, snapshot: () => unknown): () => void {
+  keptThroughSwitch.set(key, snapshot);
+  return () => {
+    if (keptThroughSwitch.get(key) === snapshot) keptThroughSwitch.delete(key);
+  };
+}
+/** How long after a language switch what a screen kept is read back (the reload's own time). */
+const KEPT_FOR_MS = 60_000;
+/**
+ * What the screen kept under `key` at the last language switch, while the reload is recent (null:
+ * nothing). Read as often as the screen renders; the screen forgets it once it is used.
+ */
+export function takeKeptThroughLanguageSwitch(key: string): unknown {
+  try {
+    const raw = globalThis.sessionStorage.getItem(KEPT_PREFIX + key);
+    if (raw === null) return null;
+    const kept = JSON.parse(raw) as { at?: unknown; value?: unknown } | null;
+    if (
+      kept === null ||
+      typeof kept.at !== "number" ||
+      Math.abs(Date.now() - kept.at) > KEPT_FOR_MS
+    ) {
+      globalThis.sessionStorage.removeItem(KEPT_PREFIX + key);
+      return null;
+    }
+    return kept.value ?? null;
+  } catch {
+    return null;
+  }
+}
+/** The screen used (or no longer needs) what it kept: a later reload does not bring it back. */
+export function forgetKeptThroughLanguageSwitch(key: string): void {
+  try {
+    globalThis.sessionStorage.removeItem(KEPT_PREFIX + key);
+  } catch {
+    // Nothing kept.
+  }
+}
+function keepForSwitch(): void {
+  for (const [key, snapshot] of keptThroughSwitch) {
+    try {
+      const value = snapshot();
+      if (value !== null && value !== undefined)
+        globalThis.sessionStorage.setItem(
+          KEPT_PREFIX + key,
+          JSON.stringify({ at: Date.now(), value }),
+        );
+    } catch {
+      // Private browsing or a full store: the page reloads without it, as before.
+    }
+  }
+}
+
 export function chooseLanguage(language: StaffLanguage): void {
   if (
     language !== current &&
@@ -322,5 +381,6 @@ export function chooseLanguage(language: StaffLanguage): void {
   if (language === current) return;
   current = language;
   leavingOnPurpose = unsavedWork.size > 0;
+  keepForSwitch();
   globalThis.location.reload();
 }

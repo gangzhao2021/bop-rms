@@ -1082,7 +1082,7 @@ test("@production every guest item sold out: staff remove them and send just thi
   ]);
   await page.goto("/operations/order-entry?table=" + tableReference);
   await expect(page.getByRole("heading", { level: 1, name: "桌台 T4 的订单" })).toBeVisible();
-  await page.getByRole("button", { name: "添加Gyoza" }).click();
+  await page.getByRole("button", { name: "添加 Gyoza" }).click();
   await page.getByRole("button", { name: "发送订单" }).click();
   await expect(page.getByRole("alert")).toHaveText(
     "这桌客人的共用购物车里还有没送出的菜。酸梅汤、手拉面 现在不供应。可以把它们从他们的点单里删掉，或者请客人在手机上修改。",
@@ -1519,7 +1519,7 @@ async function partyLeftBeforeSend(page: Page, zh: boolean) {
     });
   });
   await page.goto("/operations/order-entry?table=" + tableReference);
-  await page.getByRole("button", { name: zh ? "添加Gyoza" : "Add Gyoza" }).click();
+  await page.getByRole("button", { name: zh ? "添加 Gyoza" : "Add Gyoza" }).click();
   party = id(42);
   await page.getByRole("button", { name: zh ? "发送订单" : "Send order" }).click();
   return rounds;
@@ -1564,4 +1564,164 @@ test("@production v15 staff-round-speed: the left-party refusal and its choices 
   // Start over: the old order is cleared; nothing was sent.
   await page.getByRole("button", { name: "重新点单" }).click();
   await expect(page.getByRole("alert")).toHaveCount(0);
+});
+
+// v15 b12 staff-round-concurrency (DEC-STAFF-ROUND-ONE-AT-A-TIME): two tablets send a round for
+// one table at once. The one that waited too long is told the table is busy and keeps its order;
+// one whose dishes stayed in the table's cart is never told nothing was sent: its order is cleared
+// and those dishes show with the table's unsent dishes, marked as staff's.
+async function twoTabletsOnOneTable(page: Page, zh: boolean) {
+  if (zh)
+    await page.addInitScript(() => {
+      window.localStorage.setItem("bop.merchant.language", "zh-Hans");
+    });
+  await signIn(page);
+  await page.route("**/merchant/counter/menu**", (route) => route.fulfill({ headers, json: menu }));
+  let leftAtTable = false;
+  await page.route("**/merchant/dining/sessions/table-cart", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        cart: leftAtTable
+          ? {
+              cartReference: id(70),
+              cartVersion: 5,
+              guestPaying: false,
+              lines: [guestLine(84, 11, { phoneNumber: null })],
+            }
+          : null,
+      },
+    }),
+  );
+  const rounds: Record<string, unknown>[] = [];
+  const replies = [
+    { status: 409, json: { error: "table_busy" } },
+    { status: 503, json: { error: "staff_round_not_withdrawn" } },
+  ];
+  await page.route("**/merchant/dining/staff-rounds", (route) => {
+    rounds.push(route.request().postDataJSON() as Record<string, unknown>);
+    const reply = replies.shift();
+    if (reply?.json.error === "staff_round_not_withdrawn") leftAtTable = true;
+    return route.fulfill({ ...(reply ?? { status: 500, json: {} }), headers });
+  });
+  await page.goto("/operations/order-entry?table=" + tableReference);
+  await page.getByRole("button", { name: zh ? "添加 Gyoza" : "Add Gyoza" }).click();
+  await page.getByRole("button", { name: zh ? "发送订单" : "Send order" }).click();
+  return rounds;
+}
+
+test("@production v15 b12: a table another tablet is sending for is busy, the order kept; dishes left at the table clear it", async ({
+  page,
+}) => {
+  const rounds = await twoTabletsOnOneTable(page, false);
+  await expect(page.getByRole("alert")).toHaveText(
+    "Another staff member is sending a round for Table T4 right now. Nothing of this order was sent or charged, and it is still here: send it again in a moment.",
+  );
+  const totals = page.locator(".counter-order__totals");
+  await expect(totals).toContainText("$7.00");
+  await expectNoInternalText(page);
+  // Sent again (nothing was recorded the first time); this time its dish stayed in the cart.
+  await page.getByRole("button", { name: "Send order" }).click();
+  await expect(page.getByRole("alert")).toHaveText(
+    "This round for Table T4 wasn't sent, but its dishes are still in the table's cart, or already went out with another round from the table. This order was cleared so nothing is sent twice. Check the table's unsent dishes above and its order, then send only what is still missing.",
+  );
+  expect(rounds).toHaveLength(2);
+  // The dish shows once, with the table's unsent dishes, as staff's; the order itself is empty.
+  const guests = page.getByRole("list", { name: "From the guests' phones (not sent yet)" });
+  await expect(guests.getByRole("listitem")).toHaveCount(1);
+  await expect(guests.getByRole("listitem").nth(0)).toContainText("1 × Gyoza · Staff");
+  await expect(totals).toContainText("From the guests' phones$7.00");
+  await expect(totals).not.toContainText("Your items");
+  await expectNoInternalText(page);
+  await expectAccessible(page);
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await expect(page.getByRole("alert")).toBeVisible();
+    await expect(guests).toBeVisible();
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1),
+    ).toBe(false);
+  }
+});
+
+test("@production v15 b12: the busy table and the dishes left at it read in Chinese at 1440, 1024 and 390", async ({
+  page,
+}) => {
+  await twoTabletsOnOneTable(page, true);
+  await expect(page.getByRole("alert")).toHaveText(
+    "另一位员工正在为桌台 T4 发送一轮。这张单没有发送，也没有收款，仍保留在这里，请稍等片刻再发送。",
+  );
+  await page.getByRole("button", { name: "发送订单" }).click();
+  await expect(page.getByRole("alert")).toHaveText(
+    "桌台 T4 的这一轮没有发送，但它的菜仍在这桌的购物车里，或已随这桌的另一轮送出。为避免重复下单，这张单已清空。请先查看上方这桌还没送出的菜和这桌的订单，只补发仍缺少的菜。",
+  );
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await expect(page.getByRole("alert")).toBeVisible();
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1),
+    ).toBe(false);
+  }
+  await expectNoInternalText(page);
+});
+
+test("@production v15 b12: switching the language on Take order keeps the order in progress", async ({
+  page,
+}) => {
+  await signIn(page);
+  await page.route("**/merchant/counter/menu**", (route) => route.fulfill({ headers, json: menu }));
+  const rounds: Record<string, unknown>[] = [];
+  await page.route("**/merchant/dining/staff-rounds", (route) => {
+    rounds.push(route.request().postDataJSON() as Record<string, unknown>);
+    return route.fulfill({
+      headers,
+      json: {
+        ...placedRound,
+        payLater: false,
+        payBy: new Date(Date.now() + 30 * 60_000).toISOString(),
+        orderMinor: "1400",
+        totalMinor: "1400",
+      },
+    });
+  });
+  await page.goto("/operations/order-entry?table=" + tableReference);
+  await page.getByRole("button", { name: "Add Gyoza" }).click();
+  await page.getByRole("button", { name: "Add Gyoza" }).click();
+  const totals = page.locator(".counter-order__totals");
+  await expect(totals).toContainText("$14.00");
+  await page.getByRole("button", { name: "切换到中文" }).first().click();
+  await expect(page.getByRole("button", { name: "发送订单" })).toBeVisible();
+  // The order is still here after the reload, in Chinese, for the party it was taken for.
+  await expect(totals).toContainText("$14.00");
+  await expect(page.getByText("还没有商品")).toHaveCount(0);
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await expect(totals).toBeVisible();
+  }
+  await page.getByRole("button", { name: "发送订单" }).click();
+  await expect(page.getByRole("heading", { name: /\$14\.00/u })).toBeVisible();
+  expect(rounds).toHaveLength(1);
+  expect(rounds[0]?.lines).toEqual([
+    { sellableReference: id(11), quantity: 2, optionSelections: [], note: null },
+  ]);
+  expect(rounds[0]?.expectedDiningSessionReference).toBe(id(41));
+});
+
+test("@production v15 b12: the left-party choices line up at 1440, 1024 and 390", async ({
+  page,
+}) => {
+  await partyLeftBeforeSend(page, false);
+  const send = page.getByRole("button", { name: "Send it for the guests at the table now" });
+  const over = page.getByRole("button", { name: "Start over" });
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    const a = await send.boundingBox();
+    const b = await over.boundingBox();
+    if (a === null || b === null) throw new Error("both choices are shown");
+    // Side by side on one line, or one under the other starting at the same edge.
+    const sameRow = Math.abs(a.y - b.y) <= 1;
+    expect(sameRow || Math.abs(a.x - b.x) <= 1, `at ${width}: ${JSON.stringify([a, b])}`).toBe(
+      true,
+    );
+  }
 });

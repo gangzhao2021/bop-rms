@@ -5091,6 +5091,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "这张桌台还不能关闭。请先结束其未完成的轮次。",
   "This table can't be closed yet:": "这张桌台还不能关闭：",
   "This table can't take an order now": "这张桌台目前不能点单",
+  "Another staff member is sending a round for {value} right now. Nothing of this order was sent or charged, and it is still here: send it again in a moment.":
+    "另一位员工正在为{value}发送一轮。这张单没有发送，也没有收款，仍保留在这里，请稍等片刻再发送。",
+  "This round for {value} wasn't sent, but its dishes are still in the table's cart, or already went out with another round from the table. This order was cleared so nothing is sent twice. Check the table's unsent dishes above and its order, then send only what is still missing.":
+    "{value}的这一轮没有发送，但它的菜仍在这桌的购物车里，或已随这桌的另一轮送出。为避免重复下单，这张单已清空。请先查看上方这桌还没送出的菜和这桌的订单，只补发仍缺少的菜。",
   "The guests this order was taken for have left {value}, and the table has been cleared or seated again. Nothing was sent or charged. Check the order with the guests at the table now before sending it for them, or start over.":
     "这张单点菜时的那桌客人已经离开{value}，这张桌台已清台或换了一桌客人。这张单没有发送，也没有收款。请先和现在这桌客人核对这张单，再替他们发送；或者重新点单。",
   "Send it for the guests at the table now": "替现在这桌客人发送",

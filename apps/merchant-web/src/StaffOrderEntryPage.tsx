@@ -1,4 +1,12 @@
-import { t, saidTable, listSeparator, contentName } from "./i18n/i18n.js";
+import {
+  t,
+  saidTable,
+  listSeparator,
+  contentName,
+  forgetKeptThroughLanguageSwitch,
+  keepThroughLanguageSwitch,
+  takeKeptThroughLanguageSwitch,
+} from "./i18n/i18n.js";
 import { SlowWaitNotice } from "./slow-wait.js";
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { StatePanel } from "@bop-rms/ui";
@@ -224,7 +232,18 @@ export function rebindLines<L extends Line>(
   const next = lines.map((line) => {
     const item = items.get(line.item.sellableReference);
     if (item === undefined) return line;
-    const rebound = { ...line, item };
+    // The chosen options named as the menu just read names them (v15 b12: in the language now).
+    const named = new Map(
+      item.rules.flatMap((rule) => rule.options.map((option) => [option.optionReference, option])),
+    );
+    const rebound = {
+      ...line,
+      item,
+      options: line.options.map((option) => {
+        const current = named.get(option.optionReference);
+        return current === undefined ? option : { ...option, name: current.name };
+      }),
+    };
     const before = estimatedLineMinor(line),
       after = estimatedLineMinor(rebound);
     if (before !== null && after !== null && before !== after)
@@ -550,6 +569,18 @@ export function placeErrorText(
         "{value} can't take an order now (marked unavailable, or its session is closing). Check the table on the Tables page.",
         { value: table ?? "This table" },
       );
+    // DEC-STAFF-ROUND-ONE-AT-A-TIME: two tablets sending for one table take turns.
+    case "TableBusy":
+      return t(
+        "Another staff member is sending a round for {value} right now. Nothing of this order was sent or charged, and it is still here: send it again in a moment.",
+        { value: table ?? t("this table") },
+      );
+    // v15 b12: the round's dishes stayed in the table's cart (or went out with another round).
+    case "DishesLeftAtTable":
+      return t(
+        "This round for {value} wasn't sent, but its dishes are still in the table's cart, or already went out with another round from the table. This order was cleared so nothing is sent twice. Check the table's unsent dishes above and its order, then send only what is still missing.",
+        { value: table ?? t("this table") },
+      );
     case "TablePartyChanged":
       // v15 staff-round-speed: an order left on this screen after its party left the table.
       return t(
@@ -788,6 +819,56 @@ export function TableCartOfferActions({
   );
 }
 
+/**
+ * v15 b12: the order being taken, kept across the language switch (the page reloads for it) in
+ * this tab only: its dishes, the tip and the party it was taken for. Null when nothing usable.
+ */
+interface KeptDraft {
+  readonly lines: readonly Line[];
+  readonly tip: string;
+  readonly customTip: string;
+  readonly party: { readonly session: string | null } | null;
+}
+export function keptDraftOf(value: unknown): KeptDraft | null {
+  if (value === null || typeof value !== "object") return null;
+  const raw = value as Record<string, unknown>;
+  const party = raw.party as { session?: unknown } | null | undefined;
+  if (
+    !Array.isArray(raw.lines) ||
+    raw.lines.length === 0 ||
+    raw.lines.length > 200 ||
+    typeof raw.tip !== "string" ||
+    typeof raw.customTip !== "string" ||
+    !(
+      party === null ||
+      (typeof party === "object" &&
+        party !== undefined &&
+        (party.session === null || typeof party.session === "string"))
+    ) ||
+    !raw.lines.every((line: unknown) => {
+      const entry = line as Partial<Line> | null;
+      return (
+        entry !== null &&
+        typeof entry === "object" &&
+        typeof entry.key === "string" &&
+        typeof entry.item?.sellableReference === "string" &&
+        typeof entry.item.name === "string" &&
+        Array.isArray(entry.item.rules) &&
+        Number.isSafeInteger(entry.quantity) &&
+        (entry.quantity ?? 0) >= 1 &&
+        Array.isArray(entry.options)
+      );
+    })
+  )
+    return null;
+  return {
+    lines: raw.lines as Line[],
+    tip: raw.tip,
+    customTip: raw.customTip,
+    party: party === null ? null : { session: (party?.session as string | null) ?? null },
+  };
+}
+
 export function StaffOrderEntryPage({
   storeLabel,
   storeReference = storeLabel,
@@ -822,7 +903,10 @@ export function StaffOrderEntryPage({
     { kind: "Loading" } | { kind: "Error"; code: string } | { kind: "Ready"; menu: CounterMenu }
   >({ kind: "Loading" });
   const [reload, setReload] = useState(0);
-  const [lines, setLines] = useState<readonly Line[]>([]);
+  // v15 b12: switching the language reloads the page; the order being taken comes back with it.
+  const draftKey = "staffOrder:" + storeReference + ":" + (tableReference ?? "counter");
+  const [restoredDraft] = useState(() => keptDraftOf(takeKeptThroughLanguageSwitch(draftKey)));
+  const [lines, setLines] = useState<readonly Line[]>(() => restoredDraft?.lines ?? []);
   /** WP-2423 M165: ticket lines whose price changed on the last menu read (until the next edit). */
   const [repriced, setRepriced] = useState<readonly RepricedLine[]>([]);
   const linesNow = useRef(lines);
@@ -842,8 +926,8 @@ export function StaffOrderEntryPage({
   const [oftenOrdered] = useState(() => loadOftenOrdered(storeReference));
   const [activeSection, setActiveSection] = useState<string | null>(null);
   // "0": no tip; a percentage the Store offers, as text; or an amount typed in.
-  const [tip, setTip] = useState<string>("0");
-  const [customTip, setCustomTip] = useState("");
+  const [tip, setTip] = useState<string>(() => restoredDraft?.tip ?? "0");
+  const [customTip, setCustomTip] = useState(() => restoredDraft?.customTip ?? "");
   const [paper, setPaper] = useState(false);
   const [paidAt, setPaidAt] = useState("");
   const [slip, setSlip] = useState("");
@@ -878,7 +962,9 @@ export function StaffOrderEntryPage({
    * when its first dish went on (null: the table was free). Sent with the order, so an order left
    * on a tablet after its party has gone is never placed on the next party's bill unasked.
    */
-  const draftParty = useRef<{ readonly session: string | null } | null>(null);
+  const draftParty = useRef<{ readonly session: string | null } | null>(
+    restoredDraft?.party ?? null,
+  );
   const [partyChanged, setPartyChanged] = useState(false);
   if (lines.length === 0) draftParty.current = null;
   else if (tableMode && draftParty.current === null) draftParty.current = { session: tableSession };
@@ -1007,7 +1093,10 @@ export function StaffOrderEntryPage({
     };
     Promise.all([client.loadMenu(controller.signal, tableMode ? "DineIn" : "Pickup"), loadTable()])
       .then(([value]) => {
-        if (!controller.signal.aborted) setMenu({ kind: "Ready", menu: value });
+        if (controller.signal.aborted) return;
+        setMenu({ kind: "Ready", menu: value });
+        // An order kept through a language switch is named as the menu just read names it.
+        setLines((current) => (current.length === 0 ? current : rebindLines(current, value).lines));
       })
       .catch((error: unknown) => {
         if (controller.signal.aborted) return;
@@ -1027,6 +1116,32 @@ export function StaffOrderEntryPage({
   useEffect(() => {
     if (phase === "Charge" || phase === "Sent") chargeHeading.current?.focus();
   }, [phase]);
+  // v15 b12: what the language switch keeps of the order being built (nothing once it is sent).
+  const tipNow = useRef({ tip, customTip });
+  tipNow.current = { tip, customTip };
+  // Once the kept order is sent, started over or changed, a later reload does not bring it back.
+  const keptLines = useRef(restoredDraft?.lines ?? null);
+  useEffect(() => {
+    if (keptLines.current === null) return;
+    if (phase === "Building" && lines.length > 0 && lines.length === keptLines.current.length)
+      return;
+    keptLines.current = null;
+    forgetKeptThroughLanguageSwitch(draftKey);
+  }, [draftKey, lines, phase]);
+  useEffect(
+    () =>
+      keepThroughLanguageSwitch(draftKey, () =>
+        phaseNow.current === "Building" && linesNow.current.length > 0
+          ? {
+              lines: linesNow.current,
+              tip: tipNow.current.tip,
+              customTip: tipNow.current.customTip,
+              party: draftParty.current,
+            }
+          : null,
+      ),
+    [draftKey],
+  );
   // After the charge heading takes focus on returning to Charge: a refused paid-at takes it instead.
   useEffect(() => {
     if (focusPaidAt === 0) return;
@@ -1547,9 +1662,15 @@ export function StaffOrderEntryPage({
       // staff decide on it as it is now; the server's own list only when it can't be read here.
       const liveList =
         failure.code === "TableCartHasItems" && (decided !== null || guestCart !== null);
-      if (failure.code === "TableCartHasItems") {
+      if (failure.code === "TableCartHasItems" || failure.code === "DishesLeftAtTable") {
         if (tableSession === null) void findTableSession();
         else readGuestCart();
+      }
+      // v15 b12: the dishes of this order may still go out from the table's cart (they show
+      // there, marked as staff's), so the order on screen is cleared: never sent twice.
+      if (failure.code === "DishesLeftAtTable") {
+        setLines([]);
+        setRepriced([]);
       }
       if (liveList)
         setProblem(
@@ -2540,7 +2661,7 @@ export function StaffOrderEntryPage({
               />
             ) : null}
             {problem !== null && ordering && partyChanged ? (
-              <div className="card-actions">
+              <div className="card-actions counter-order__party-choices">
                 <button
                   type="button"
                   disabled={!canSend}

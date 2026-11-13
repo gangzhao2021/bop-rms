@@ -23,8 +23,17 @@ import {
   paymentWindowNotice,
   rebindLines,
   withdrawnOptions,
+  keptDraftOf,
 } from "./StaffOrderEntryPage.js";
-import { setLanguageForTest } from "./i18n/i18n.js";
+import {
+  chooseLanguage,
+  forgetKeptThroughLanguageSwitch,
+  keepThroughLanguageSwitch,
+  saidTable,
+  setLanguageForTest,
+  t,
+  takeKeptThroughLanguageSwitch,
+} from "./i18n/i18n.js";
 import {
   CounterOrderClientError,
   createCounterOrderClient,
@@ -884,7 +893,7 @@ describe("counter order (OPS-ORDER-ENTRY) — WP-2423 Q7", () => {
       );
       const zh = offer(refused.pendingItems);
       expect(zh).toContain("现在不供应");
-      expect(zh).toContain("删掉Plum juice，其余加进这一轮");
+      expect(zh).toContain("删掉 Plum juice，其余加进这一轮");
     } finally {
       setLanguageForTest("en");
     }
@@ -1216,5 +1225,113 @@ describe("WP-2423 M35: the guests' unsent lines on the staff round screen", () =
       "手机 1 已离开",
     );
     setLanguageForTest("en");
+  });
+});
+
+describe("v15 b12 staff-round-concurrency: two tablets on one table, and the language switch", () => {
+  it("reads 'the table is busy' and 'dishes left at the table' from the server, never as nothing sent", async () => {
+    const responses: [number, unknown][] = [
+      [409, { error: "table_busy" }],
+      [503, { error: "staff_round_not_withdrawn" }],
+    ];
+    const fetcher = vi.fn(async () => {
+      const [status, body] = responses.shift() ?? [500, {}];
+      return new Response(JSON.stringify(body), { status });
+    });
+    const client = createCounterOrderClient("a".repeat(43), fetcher as unknown as typeof fetch);
+    const command = {
+      operationReference: id(30),
+      tableReference: id(40),
+      lines: [{ sellableReference: id(5), quantity: 1, optionSelections: [], note: null }],
+      tip: { kind: "None" } as const,
+      recordedAfterOutage: false,
+    };
+    await expect(client.placeTableRound(command)).rejects.toMatchObject({ code: "TableBusy" });
+    await expect(client.placeTableRound(command)).rejects.toMatchObject({
+      code: "DishesLeftAtTable",
+    });
+    const table = t("Table {tableLabel}", { tableLabel: saidTable("B10 SRS Q (TEST)") });
+    const busy = placeErrorText(new CounterOrderClientError("TableBusy"), [], table);
+    expect(busy).toBe(
+      "Another staff member is sending a round for B10 SRS Q (TEST) right now. Nothing of this order was sent or charged, and it is still here: send it again in a moment.",
+    );
+    const left = placeErrorText(new CounterOrderClientError("DishesLeftAtTable"), [], table);
+    expect(left).toContain("its dishes are still in the table's cart");
+    expect(left).not.toContain("Nothing was sent");
+    setLanguageForTest("zh-Hans");
+    try {
+      const zhTable = t("Table {tableLabel}", { tableLabel: saidTable("B10 SRS Q (TEST)") });
+      expect(placeErrorText(new CounterOrderClientError("TableBusy"), [], zhTable)).toBe(
+        "另一位员工正在为 B10 SRS Q (TEST) 发送一轮。这张单没有发送，也没有收款，仍保留在这里，请稍等片刻再发送。",
+      );
+      const zhLeft = placeErrorText(new CounterOrderClientError("DishesLeftAtTable"), [], zhTable);
+      expect(zhLeft).toMatch(/^B10 SRS Q \(TEST\) 的这一轮没有发送/u);
+      expect(zhLeft).not.toContain("没有发送，也没有收款");
+    } finally {
+      setLanguageForTest("en");
+    }
+  });
+
+  it("keeps the order being taken through the language switch's reload, once, in this tab", () => {
+    const stored = new Map<string, string>();
+    vi.stubGlobal("sessionStorage", {
+      getItem: (key: string) => stored.get(key) ?? null,
+      setItem: (key: string, value: string) => void stored.set(key, value),
+      removeItem: (key: string) => void stored.delete(key),
+    });
+    vi.stubGlobal("localStorage", { setItem: () => undefined, getItem: () => null });
+    const reload = vi.fn();
+    vi.stubGlobal("location", { reload });
+    try {
+      const menu = parseCounterMenu(counterMenuResponse());
+      const item = menu.sections[0]?.items[0];
+      if (item === undefined) throw new Error("menu fixture");
+      const draft = {
+        lines: [{ key: "a", item, quantity: 2, options: [], note: "no onions" }],
+        tip: "15",
+        customTip: "",
+        party: { session: id(70) },
+      };
+      const stop = keepThroughLanguageSwitch("staffOrder:s:t", () => draft);
+      chooseLanguage("zh-Hans");
+      stop();
+      expect(reload).toHaveBeenCalledTimes(1);
+      // After the reload the screen reads its order back (as often as it renders) until it
+      // forgets it; a reload long after the switch brings nothing back.
+      expect(keptDraftOf(takeKeptThroughLanguageSwitch("staffOrder:s:t"))).toEqual(draft);
+      expect(keptDraftOf(takeKeptThroughLanguageSwitch("staffOrder:s:t"))).toEqual(draft);
+      forgetKeptThroughLanguageSwitch("staffOrder:s:t");
+      expect(takeKeptThroughLanguageSwitch("staffOrder:s:t")).toBeNull();
+      stored.set(
+        "bop.merchant.keptThroughLanguageSwitch.staffOrder:s:t",
+        JSON.stringify({ at: Date.now() - 120_000, value: draft }),
+      );
+      expect(takeKeptThroughLanguageSwitch("staffOrder:s:t")).toBeNull();
+      // Anything else read back is no order at all.
+      expect(keptDraftOf({ ...draft, lines: [] })).toBeNull();
+      expect(keptDraftOf({ ...draft, lines: [{ key: "a", quantity: 0 }] })).toBeNull();
+    } finally {
+      setLanguageForTest("en");
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("names a kept order's dishes and choices as the menu just read names them", () => {
+    const menu = parseCounterMenu(counterMenuResponse());
+    const item = menu.sections
+      .flatMap((section) => section.items)
+      .find((entry) => entry.rules.length > 0);
+    if (item === undefined) throw new Error("menu fixture");
+    const option = item.rules[0]?.options[0];
+    if (option === undefined) throw new Error("menu fixture");
+    const old = {
+      key: "a",
+      item: { ...item, name: "旧名" },
+      quantity: 1,
+      options: [{ optionReference: option.optionReference, name: "旧选项", quantity: 1 }],
+    };
+    const [rebound] = rebindLines([old], menu).lines;
+    expect(rebound?.item.name).toBe(item.name);
+    expect(rebound?.options[0]?.name).toBe(option.name);
   });
 });
