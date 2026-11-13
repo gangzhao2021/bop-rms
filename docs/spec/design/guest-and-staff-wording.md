@@ -23,9 +23,17 @@ for a kept visit in the same way the receipt does.
   not own the order. An outage (503) is answered as an outage and is never retried as another
   visit.
 - Stricter than the receipt: a kept visit is used only when the request proved the current visit,
-  that is, when its CSRF token is the current Session's own token (compared in constant time). The
-  kept visit's CSRF is then derived on the server, and the owner checks of the read or command run
-  unchanged under that visit. No credential reaches the page, a URL or the logs.
+  that is, when its CSRF token is the current Session's own token: the one derived for it
+  (compared in constant time) or, for a visit the entry has just started and the page has not
+  reloaded, the one the entry issued with it (checked against that Session's stored CSRF hash; a
+  failed read is an outage, 503). The kept visit's CSRF is then derived on the server, and the
+  owner checks of the read or command run unchanged under that visit. No credential reaches the
+  page, a URL or the logs.
+- Review fix-up: the first version accepted only the derived token, so right after joining a
+  table (before any reload) the order still read as not this phone's. The restricted-role
+  acceptance now joins the table through the real entry and uses the cookies and token it
+  returns, and also removes the contact under the kept visit (one redaction, one audit row
+  without the value, a repeat changes nothing).
 - The kept visit is read, never renewed. Only scanning its own pickup QR renews it.
 - The guest pages are unchanged. The order link now works, and "This order isn't available on
   this phone" stays for an order that really is not this phone's.
