@@ -722,7 +722,7 @@ export async function exerciseCounterCardMachinePayment({
           }),
           { code: "CARD_MACHINE_SLIP_ALREADY_RECORDED", slipOrderNumber: waiting.orderNumber },
         );
-      // The same send again (its order operation, or its payment operation) is its own replay.
+      // The same send again (its order operation) is its own replay.
       await paidAtCheck({
         ...auth,
         takenAt: paperTakenAt,
@@ -732,15 +732,37 @@ export async function exerciseCounterCardMachinePayment({
           orderOperationReference: sentCommand.operationReference,
         },
       });
-      await paidAtCheck({
-        ...auth,
-        takenAt: paperTakenAt,
-        paperSlip: {
-          slipReference: "AUTH 482913",
-          paymentOperationReference: id(1),
-          orderOperationReference: next(),
-        },
-      });
+      // b11 review: its payment operation with a new order operation would place a new order whose
+      // payment can never be recorded (that operation is on order N): refused before placing,
+      // even when staff confirm the slip.
+      for (const slipConfirmation of [null, "SameSlipAlsoPaysThisOrder"])
+        await assert.rejects(
+          paidAtCheck({
+            ...auth,
+            takenAt: paperTakenAt,
+            paperSlip: {
+              slipReference: "AUTH 482913",
+              paymentOperationReference: id(1),
+              orderOperationReference: next(),
+              slipConfirmation,
+            },
+          }),
+          { code: "CARD_MACHINE_SLIP_ALREADY_RECORDED", slipOrderNumber: waiting.orderNumber },
+        );
+      // b11 review: one swipe paid two counter orders, or two card machines printed the same
+      // reference: staff confirm it and the new order is sent (its payment then names the
+      // confirmation and order N in its audit).
+      for (const slipConfirmation of ["SameSlipAlsoPaysThisOrder", "DifferentSlipSameReference"])
+        await paidAtCheck({
+          ...auth,
+          takenAt: paperTakenAt,
+          paperSlip: {
+            slipReference: "auth 482913",
+            paymentOperationReference: next(),
+            orderOperationReference: next(),
+            slipConfirmation,
+          },
+        });
       // Another slip is another sale.
       await paidAtCheck({
         ...auth,

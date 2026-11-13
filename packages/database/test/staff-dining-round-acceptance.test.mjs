@@ -1876,6 +1876,58 @@ it("the real staff round command takes a round from table entry to the card mach
         ],
       );
 
+      // b11 review: a table that pays each round paid two paper rounds with one swipe. Another
+      // round of the same seating's order carries the same slip: the send's check (as the
+      // restricted role) lets it through for that seating, and its payment is recorded. A send
+      // that names no seating is refused unless staff confirm the slip, and this round's payment
+      // operation is never accepted for a new round.
+      const [{ seating }] = await rows(
+        "SELECT dining_session_id::text AS seating FROM rms_ordering.staff_dining_round_entry WHERE operation_id=$1",
+        [secondOperation],
+      );
+      const slipCheck = (paperSlip) =>
+        paperPaidAtCheck({
+          ...as(server),
+          takenAt: earlier,
+          paperSlip: {
+            slipReference: "auth 771204",
+            paymentOperationReference: reference(),
+            orderOperationReference: reference(),
+            ...paperSlip,
+          },
+        });
+      await slipCheck({ tableReference, diningSessionReference: seating });
+      await assert.rejects(slipCheck({ tableReference }), {
+        code: "CARD_MACHINE_SLIP_ALREADY_RECORDED",
+        slipOrderNumber: second.orderNumber,
+      });
+      await slipCheck({ tableReference, slipConfirmation: "DifferentSlipSameReference" });
+      await assert.rejects(
+        slipCheck({
+          tableReference,
+          diningSessionReference: seating,
+          paymentOperationReference: paperPayOperation,
+          slipConfirmation: "SameSlipAlsoPaysThisOrder",
+        }),
+        { code: "CARD_MACHINE_SLIP_ALREADY_RECORDED", slipOrderNumber: second.orderNumber },
+      );
+      const sharedRound = await send(server, {
+        lines: [line(1)],
+        recordedAfterOutage: true,
+        expectedDiningSessionReference: seating,
+      });
+      assert.equal(sharedRound.orderReference, first.orderReference);
+      const sharedPaid = await pay({
+        orderBatchReference: sharedRound.orderBatchReference,
+        expectedTotalMinor: sharedRound.totalMinor,
+        slipReference: "AUTH 771204",
+        takenAt: earlier,
+      });
+      assert.deepEqual(
+        [sharedPaid.status, sharedPaid.recordingReason],
+        ["Recorded", "RecordedAfterOutage"],
+      );
+
       // DEC-PAPER-SEND-IDEMPOTENT (b11 major): a third round is left unpaid until the System
       // takes it off; sent again with the same operation (the answer was lost), it is named by
       // its order and table under this restricted role, never offered for a card-machine charge,

@@ -85,11 +85,45 @@ export function orderDetailResponse(
  * mapping over the read model's full output and fails when a field the browser parses is dropped
  * (v15 2026-10-16: `awaitingAcceptanceSince` was, so no paid round ever showed its wait).
  */
-/** The order (or round) operation a send names, as sent (checked by its own command). */
-function operationOf(command: unknown): unknown {
+/** A field of the order (or round) command a send names, as sent (checked by its own command). */
+function fieldOf(command: unknown, name: string): unknown {
   return command !== null && typeof command === "object" && !Array.isArray(command)
-    ? (command as Record<string, unknown>).operationReference
+    ? (command as Record<string, unknown>)[name]
     : undefined;
+}
+const operationOf = (command: unknown) => fieldOf(command, "operationReference");
+
+/**
+ * DEC-PAPER-SEND-IDEMPOTENT (b11 review): paper sends carrying the same slip reference are run one
+ * after another in this process (check, place and record), so two tablets sending the same slip at
+ * once never both pass the check and both place an order: the second one is refused before it
+ * places anything. Across processes the payment record's own slip lock still records it once,
+ * and the counter then names the order placed without its payment. An earlier send is waited for
+ * at most `paperSlipSendWaitMs`.
+ */
+const paperSlipSends = new Map<string, Promise<void>>();
+const paperSlipSendWaitMs = 15_000;
+function onePaperSlipSendAtATime(
+  slipReference: string | null,
+  work: () => Promise<void>,
+): Promise<void> {
+  const key = slipReference?.replace(/\s+/gu, "").toUpperCase() ?? "";
+  if (key === "") return work();
+  const earlier = paperSlipSends.get(key);
+  const waited =
+    earlier === undefined
+      ? Promise.resolve()
+      : Promise.race([
+          earlier,
+          new Promise<void>((resolve) => setTimeout(resolve, paperSlipSendWaitMs).unref?.()),
+        ]);
+  const run = waited.then(work);
+  const settled = run.catch(() => undefined);
+  paperSlipSends.set(key, settled);
+  void settled.then(() => {
+    if (paperSlipSends.get(key) === settled) paperSlipSends.delete(key);
+  });
+  return run;
 }
 
 function orderQueueRow(item: MerchantOrderQueueItem) {
@@ -483,8 +517,8 @@ export function installMerchantOrderRoutes(
     const placeOrder = options.counterOrder;
     // The paid-at is checked as its payment record will check it before anything is placed, so a
     // refusal that is certain never leaves a placed, unpaid paper order behind.
-    void (
-      paperPayment === null || check === undefined
+    void onePaperSlipSendAtATime(paperPayment?.slipReference ?? null, () =>
+      (paperPayment === null || check === undefined
         ? Promise.resolve()
         : check({
             ...auth,
@@ -493,91 +527,93 @@ export function installMerchantOrderRoutes(
               slipReference: paperPayment.slipReference,
               paymentOperationReference: paperPayment.operationReference,
               orderOperationReference: operationOf(split.command),
+              slipConfirmation: paperPayment.slipConfirmation,
             },
           })
-    )
-      .then(() => placeOrder({ ...auth, command: split.command }))
-      .then(async (result) => {
-        const paid =
-          split.payment === null || recordPayment === undefined || !result.recordedAfterOutage
-            ? {}
-            : await recordPaperOrderPayment(recordPayment, auth, result, split.payment, (error) =>
-                noteFailure(response, error),
-              );
-        response.set("Cache-Control", NO_STORE);
-        response.json({
-          status: result.status,
-          orderReference: result.orderReference,
-          orderBatchReference: result.orderBatchReference,
-          orderNumber: result.orderNumber,
-          orderVersion: result.orderVersion,
-          orderMinor: result.orderMinor,
-          tipMinor: result.tipMinor,
-          totalMinor: result.totalMinor,
-          payBy: result.payBy,
-          recordedAfterOutage: result.recordedAfterOutage,
-          // DEC-PAPER-SEND-IDEMPOTENT: the order sent again is already paid; nothing to charge.
-          ...(result.paid === true ? { paid: true } : {}),
-          ...paid,
-        });
-      })
-      .catch((error: unknown) => {
-        noteFailure(response, error);
-        const paidAt = paperPaidAtRefusal(error, "counter_order");
-        if (paidAt !== null) {
+      )
+        .then(() => placeOrder({ ...auth, command: split.command }))
+        .then(async (result) => {
+          const paid =
+            split.payment === null || recordPayment === undefined || !result.recordedAfterOutage
+              ? {}
+              : await recordPaperOrderPayment(recordPayment, auth, result, split.payment, (error) =>
+                  noteFailure(response, error),
+                );
+          response.set("Cache-Control", NO_STORE);
+          response.json({
+            status: result.status,
+            orderReference: result.orderReference,
+            orderBatchReference: result.orderBatchReference,
+            orderNumber: result.orderNumber,
+            orderVersion: result.orderVersion,
+            orderMinor: result.orderMinor,
+            tipMinor: result.tipMinor,
+            totalMinor: result.totalMinor,
+            payBy: result.payBy,
+            recordedAfterOutage: result.recordedAfterOutage,
+            // DEC-PAPER-SEND-IDEMPOTENT: the order sent again is already paid; nothing to charge.
+            ...(result.paid === true ? { paid: true } : {}),
+            ...paid,
+          });
+        })
+        .catch((error: unknown) => {
+          noteFailure(response, error);
+          const paidAt = paperPaidAtRefusal(error, "counter_order");
+          if (paidAt !== null) {
+            response
+              .status(paidAt[0])
+              .set("Cache-Control", NO_STORE)
+              .json(paperPaidAtRefusalBody(error, paidAt[1]));
+            return;
+          }
+          if (!(error instanceof CounterOrderError)) {
+            failed(response, error);
+            return;
+          }
+          const [status, code] = (
+            {
+              COUNTER_ORDER_INPUT_INVALID: [400, "counter_order_input_invalid"],
+              COUNTER_ORDER_PERMISSION_DENIED: [403, "counter_order_permission_denied"],
+              COUNTER_ORDER_STORE_NOT_TAKING_ORDERS: [409, "store_not_taking_pickup_orders"],
+              COUNTER_ORDER_ITEM_UNAVAILABLE: [409, "item_unavailable"],
+              COUNTER_ORDER_STOCK_SHORT: [409, "item_short"],
+              COUNTER_ORDER_NOT_PRICED: [409, "order_not_priced"],
+              COUNTER_ORDER_NOT_FINISHED: [409, "counter_order_not_finished"],
+              COUNTER_ORDER_IN_PROGRESS: [409, "counter_order_in_progress"],
+              COUNTER_ORDER_IDEMPOTENCY_CONFLICT: [409, "counter_order_conflict"],
+              COUNTER_ORDER_NO_PICKUP_TIMES: [409, "counter_order_no_pickup_times"],
+              COUNTER_ORDER_TURNED_OFF: [409, "counter_ordering_turned_off"],
+              COUNTER_ORDER_NEW_GUESTS_PAUSED: [409, "new_guests_paused"],
+              COUNTER_ORDER_TIPS_OFF: [409, "tips_turned_off"],
+              COUNTER_ORDER_TIP_CHOICES_CHANGED: [409, "tip_choices_changed"],
+              COUNTER_ORDER_ALREADY_ORDERED: [409, "counter_order_already_ordered"],
+              COUNTER_ORDER_UNAVAILABLE: [503, "counter_order_unavailable"],
+            } as const
+          )[error.code];
           response
-            .status(paidAt[0])
+            .status(status)
             .set("Cache-Control", NO_STORE)
-            .json(paperPaidAtRefusalBody(error, paidAt[1]));
-          return;
-        }
-        if (!(error instanceof CounterOrderError)) {
-          failed(response, error);
-          return;
-        }
-        const [status, code] = (
-          {
-            COUNTER_ORDER_INPUT_INVALID: [400, "counter_order_input_invalid"],
-            COUNTER_ORDER_PERMISSION_DENIED: [403, "counter_order_permission_denied"],
-            COUNTER_ORDER_STORE_NOT_TAKING_ORDERS: [409, "store_not_taking_pickup_orders"],
-            COUNTER_ORDER_ITEM_UNAVAILABLE: [409, "item_unavailable"],
-            COUNTER_ORDER_STOCK_SHORT: [409, "item_short"],
-            COUNTER_ORDER_NOT_PRICED: [409, "order_not_priced"],
-            COUNTER_ORDER_NOT_FINISHED: [409, "counter_order_not_finished"],
-            COUNTER_ORDER_IN_PROGRESS: [409, "counter_order_in_progress"],
-            COUNTER_ORDER_IDEMPOTENCY_CONFLICT: [409, "counter_order_conflict"],
-            COUNTER_ORDER_NO_PICKUP_TIMES: [409, "counter_order_no_pickup_times"],
-            COUNTER_ORDER_TURNED_OFF: [409, "counter_ordering_turned_off"],
-            COUNTER_ORDER_NEW_GUESTS_PAUSED: [409, "new_guests_paused"],
-            COUNTER_ORDER_TIPS_OFF: [409, "tips_turned_off"],
-            COUNTER_ORDER_TIP_CHOICES_CHANGED: [409, "tip_choices_changed"],
-            COUNTER_ORDER_ALREADY_ORDERED: [409, "counter_order_already_ordered"],
-            COUNTER_ORDER_UNAVAILABLE: [503, "counter_order_unavailable"],
-          } as const
-        )[error.code];
-        response
-          .status(status)
-          .set("Cache-Control", NO_STORE)
-          .json(
-            error.code === "COUNTER_ORDER_ITEM_UNAVAILABLE"
-              ? {
-                  error: code,
-                  lineIndex: error.lineIndex,
-                  sharedStock: error.sharedStock,
-                  optionsChanged: error.optionsChanged,
-                }
-              : error.code === "COUNTER_ORDER_STOCK_SHORT"
+            .json(
+              error.code === "COUNTER_ORDER_ITEM_UNAVAILABLE"
                 ? {
                     error: code,
                     lineIndex: error.lineIndex,
-                    available: error.available,
                     sharedStock: error.sharedStock,
+                    optionsChanged: error.optionsChanged,
                   }
-                : error.code === "COUNTER_ORDER_ALREADY_ORDERED" && error.orderNumber !== null
-                  ? { error: code, orderNumber: error.orderNumber }
-                  : { error: code },
-          );
-      });
+                : error.code === "COUNTER_ORDER_STOCK_SHORT"
+                  ? {
+                      error: code,
+                      lineIndex: error.lineIndex,
+                      available: error.available,
+                      sharedStock: error.sharedStock,
+                    }
+                  : error.code === "COUNTER_ORDER_ALREADY_ORDERED" && error.orderNumber !== null
+                    ? { error: code, orderNumber: error.orderNumber }
+                    : { error: code },
+            );
+        }),
+    );
   });
   // WP-2423 Q7 slice 2 (DEC-STAFF-DINE-IN-ROUND): staff enter a round for a table on behalf of its
   // guests (or a paper round after an outage); the reply is the amount to charge on the card machine.
@@ -605,8 +641,8 @@ export function installMerchantOrderRoutes(
     const paperPayment = split.payment;
     const check = options.paperPaidAtCheck;
     const placeRound = options.staffDiningRound;
-    void (
-      paperPayment === null || check === undefined
+    void onePaperSlipSendAtATime(paperPayment?.slipReference ?? null, () =>
+      (paperPayment === null || check === undefined
         ? Promise.resolve()
         : check({
             ...auth,
@@ -615,122 +651,126 @@ export function installMerchantOrderRoutes(
               slipReference: paperPayment.slipReference,
               paymentOperationReference: paperPayment.operationReference,
               orderOperationReference: operationOf(split.command),
+              slipConfirmation: paperPayment.slipConfirmation,
+              tableReference: fieldOf(split.command, "tableReference"),
+              diningSessionReference: fieldOf(split.command, "expectedDiningSessionReference"),
             },
           })
-    )
-      .then(() => placeRound({ ...auth, command: split.command }))
-      .then(async (result) => {
-        const paid =
-          split.payment === null ||
-          recordPayment === undefined ||
-          !result.recordedAfterOutage ||
-          result.payLater
-            ? {}
-            : await recordPaperOrderPayment(recordPayment, auth, result, split.payment, (error) =>
-                noteFailure(response, error),
-              );
-        response.set("Cache-Control", NO_STORE);
-        response.json({
-          ...paid,
-          status: result.status,
-          orderReference: result.orderReference,
-          orderBatchReference: result.orderBatchReference,
-          orderNumber: result.orderNumber,
-          orderVersion: result.orderVersion,
-          tableLabel: result.tableLabel,
-          orderMinor: result.orderMinor,
-          tipMinor: result.tipMinor,
-          totalMinor: result.totalMinor,
-          payBy: result.payBy,
-          payLater: result.payLater,
-          recordedAfterOutage: result.recordedAfterOutage,
-          // DEC-PAPER-SEND-IDEMPOTENT: the round sent again is already paid; nothing to charge.
-          ...(result.paid === true ? { paid: true } : {}),
-        });
-      })
-      .catch((error: unknown) => {
-        noteFailure(response, error);
-        const paidAt = paperPaidAtRefusal(error, "staff_round");
-        if (paidAt !== null) {
+      )
+        .then(() => placeRound({ ...auth, command: split.command }))
+        .then(async (result) => {
+          const paid =
+            split.payment === null ||
+            recordPayment === undefined ||
+            !result.recordedAfterOutage ||
+            result.payLater
+              ? {}
+              : await recordPaperOrderPayment(recordPayment, auth, result, split.payment, (error) =>
+                  noteFailure(response, error),
+                );
+          response.set("Cache-Control", NO_STORE);
+          response.json({
+            ...paid,
+            status: result.status,
+            orderReference: result.orderReference,
+            orderBatchReference: result.orderBatchReference,
+            orderNumber: result.orderNumber,
+            orderVersion: result.orderVersion,
+            tableLabel: result.tableLabel,
+            orderMinor: result.orderMinor,
+            tipMinor: result.tipMinor,
+            totalMinor: result.totalMinor,
+            payBy: result.payBy,
+            payLater: result.payLater,
+            recordedAfterOutage: result.recordedAfterOutage,
+            // DEC-PAPER-SEND-IDEMPOTENT: the round sent again is already paid; nothing to charge.
+            ...(result.paid === true ? { paid: true } : {}),
+          });
+        })
+        .catch((error: unknown) => {
+          noteFailure(response, error);
+          const paidAt = paperPaidAtRefusal(error, "staff_round");
+          if (paidAt !== null) {
+            response
+              .status(paidAt[0])
+              .set("Cache-Control", NO_STORE)
+              .json(paperPaidAtRefusalBody(error, paidAt[1]));
+            return;
+          }
+          if (!(error instanceof StaffDiningRoundError)) {
+            failed(response, error);
+            return;
+          }
+          const [status, code] = (
+            {
+              STAFF_ROUND_INPUT_INVALID: [400, "staff_round_input_invalid"],
+              STAFF_ROUND_PERMISSION_DENIED: [403, "staff_round_permission_denied"],
+              STAFF_ROUND_STORE_NOT_TAKING_ORDERS: [409, "store_not_taking_dine_in_orders"],
+              STAFF_ROUND_TABLE_UNAVAILABLE: [409, "table_unavailable"],
+              STAFF_ROUND_TABLE_PARTY_CHANGED: [409, "table_party_changed"],
+              STAFF_ROUND_TABLE_QR_MISSING: [409, "table_qr_missing"],
+              STAFF_ROUND_NEW_GUESTS_PAUSED: [409, "new_guests_paused"],
+              STAFF_ROUND_TABLE_CART_HAS_ITEMS: [409, "table_cart_has_items"],
+              STAFF_ROUND_TABLE_CHECKOUT_IN_PROGRESS: [409, "table_checkout_in_progress"],
+              STAFF_ROUND_ITEM_UNAVAILABLE: [409, "item_unavailable"],
+              STAFF_ROUND_STOCK_SHORT: [409, "item_short"],
+              STAFF_ROUND_NOT_PRICED: [409, "order_not_priced"],
+              STAFF_ROUND_NOT_FINISHED: [409, "staff_round_not_finished"],
+              STAFF_ROUND_IN_PROGRESS: [409, "staff_round_in_progress"],
+              STAFF_ROUND_ALREADY_SENT: [409, "staff_round_already_sent"],
+              STAFF_ROUND_IDEMPOTENCY_CONFLICT: [409, "staff_round_conflict"],
+              STAFF_ROUND_TIPS_OFF: [409, "tips_turned_off"],
+              STAFF_ROUND_TIP_CHOICES_CHANGED: [409, "tip_choices_changed"],
+              STAFF_ROUND_UNAVAILABLE: [503, "staff_round_unavailable"],
+            } as const
+          )[error.code];
           response
-            .status(paidAt[0])
+            .status(status)
             .set("Cache-Control", NO_STORE)
-            .json(paperPaidAtRefusalBody(error, paidAt[1]));
-          return;
-        }
-        if (!(error instanceof StaffDiningRoundError)) {
-          failed(response, error);
-          return;
-        }
-        const [status, code] = (
-          {
-            STAFF_ROUND_INPUT_INVALID: [400, "staff_round_input_invalid"],
-            STAFF_ROUND_PERMISSION_DENIED: [403, "staff_round_permission_denied"],
-            STAFF_ROUND_STORE_NOT_TAKING_ORDERS: [409, "store_not_taking_dine_in_orders"],
-            STAFF_ROUND_TABLE_UNAVAILABLE: [409, "table_unavailable"],
-            STAFF_ROUND_TABLE_PARTY_CHANGED: [409, "table_party_changed"],
-            STAFF_ROUND_TABLE_QR_MISSING: [409, "table_qr_missing"],
-            STAFF_ROUND_NEW_GUESTS_PAUSED: [409, "new_guests_paused"],
-            STAFF_ROUND_TABLE_CART_HAS_ITEMS: [409, "table_cart_has_items"],
-            STAFF_ROUND_TABLE_CHECKOUT_IN_PROGRESS: [409, "table_checkout_in_progress"],
-            STAFF_ROUND_ITEM_UNAVAILABLE: [409, "item_unavailable"],
-            STAFF_ROUND_STOCK_SHORT: [409, "item_short"],
-            STAFF_ROUND_NOT_PRICED: [409, "order_not_priced"],
-            STAFF_ROUND_NOT_FINISHED: [409, "staff_round_not_finished"],
-            STAFF_ROUND_IN_PROGRESS: [409, "staff_round_in_progress"],
-            STAFF_ROUND_ALREADY_SENT: [409, "staff_round_already_sent"],
-            STAFF_ROUND_IDEMPOTENCY_CONFLICT: [409, "staff_round_conflict"],
-            STAFF_ROUND_TIPS_OFF: [409, "tips_turned_off"],
-            STAFF_ROUND_TIP_CHOICES_CHANGED: [409, "tip_choices_changed"],
-            STAFF_ROUND_UNAVAILABLE: [503, "staff_round_unavailable"],
-          } as const
-        )[error.code];
-        response
-          .status(status)
-          .set("Cache-Control", NO_STORE)
-          .json(
-            error.code === "STAFF_ROUND_ITEM_UNAVAILABLE"
-              ? {
-                  error: code,
-                  lineIndex: error.lineIndex,
-                  sharedStock: error.sharedStock,
-                  optionsChanged: error.optionsChanged,
-                }
-              : error.code === "STAFF_ROUND_STOCK_SHORT"
+            .json(
+              error.code === "STAFF_ROUND_ITEM_UNAVAILABLE"
                 ? {
                     error: code,
                     lineIndex: error.lineIndex,
-                    available: error.available,
                     sharedStock: error.sharedStock,
+                    optionsChanged: error.optionsChanged,
                   }
-                : error.code === "STAFF_ROUND_TABLE_CART_HAS_ITEMS"
+                : error.code === "STAFF_ROUND_STOCK_SHORT"
                   ? {
                       error: code,
-                      // WP-2423 (staff-round-soldout): each item's Cart line (staff name it
-                      // to remove it) and whether it can be sold; names only, no notes or prices.
-                      items: error.pendingItems.slice(0, 30).map((item) => ({
-                        cartItemReference: item.cartItemReference,
-                        name: item.name,
-                        quantity: item.quantity,
-                        standing: item.standing,
-                        ...(item.available === undefined ? {} : { available: item.available }),
-                      })),
-                      ...(error.tableCart === null
-                        ? {}
-                        : {
-                            cartVersion: error.tableCart.cartVersion,
-                            guestsCanSend: error.tableCart.guestsCanSend,
-                          }),
+                      lineIndex: error.lineIndex,
+                      available: error.available,
+                      sharedStock: error.sharedStock,
                     }
-                  : error.code === "STAFF_ROUND_ALREADY_SENT" && error.placedOrderNumber !== null
+                  : error.code === "STAFF_ROUND_TABLE_CART_HAS_ITEMS"
                     ? {
                         error: code,
-                        orderNumber: error.placedOrderNumber,
-                        tableLabel: error.placedTableLabel,
+                        // WP-2423 (staff-round-soldout): each item's Cart line (staff name it
+                        // to remove it) and whether it can be sold; names only, no notes or prices.
+                        items: error.pendingItems.slice(0, 30).map((item) => ({
+                          cartItemReference: item.cartItemReference,
+                          name: item.name,
+                          quantity: item.quantity,
+                          standing: item.standing,
+                          ...(item.available === undefined ? {} : { available: item.available }),
+                        })),
+                        ...(error.tableCart === null
+                          ? {}
+                          : {
+                              cartVersion: error.tableCart.cartVersion,
+                              guestsCanSend: error.tableCart.guestsCanSend,
+                            }),
                       }
-                    : { error: code },
-          );
-      });
+                    : error.code === "STAFF_ROUND_ALREADY_SENT" && error.placedOrderNumber !== null
+                      ? {
+                          error: code,
+                          orderNumber: error.placedOrderNumber,
+                          tableLabel: error.placedTableLabel,
+                        }
+                      : { error: code },
+            );
+        }),
+    );
   });
   // WP-2423 Q7: the Store's card machine approved the payment of a counter order; staff record it.
   router.post("/orders/card-machine-payment", sameOriginMutation(options), (request, response) => {

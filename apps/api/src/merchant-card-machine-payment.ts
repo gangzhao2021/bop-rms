@@ -14,12 +14,14 @@ import {
   CardMachinePaymentError,
   createPostgresCardMachinePaymentStore,
   parseCardMachinePaymentRecord,
+  parseCardMachineSlipConfirmation,
   parseCardMachineSlipReference,
   parsePaymentDigest,
   planCounterCashTender,
   cardMachinePaymentTakenMinor,
   parsePaymentInstant,
   type CardMachinePaymentRecord,
+  type CardMachineSlipConfirmation,
   type PaymentIntentClaimAdmission,
 } from "@rms/payment";
 import { readStoreFirstConfigurationGoverningFrom } from "@rms/store";
@@ -107,6 +109,12 @@ export function parseCardMachinePaymentCommand(value: unknown) {
       value !== null &&
       typeof value === "object" &&
       Object.prototype.hasOwnProperty.call(value, "tenderedMinor");
+    // DEC-PAPER-SEND-IDEMPOTENT (b11 review): staff confirmed a paper slip already recorded with
+    // another order (sent only then).
+    const confirmed =
+      value !== null &&
+      typeof value === "object" &&
+      Object.prototype.hasOwnProperty.call(value, "slipConfirmation");
     const raw = readClosedRecord(value, [
       "operationReference",
       "orderReference",
@@ -115,7 +123,16 @@ export function parseCardMachinePaymentCommand(value: unknown) {
       "slipReference",
       "takenAt",
       ...(inCash ? ["tenderedMinor"] : []),
+      ...(confirmed ? ["slipConfirmation"] : []),
     ]);
+    const slipConfirmation = confirmed
+      ? parseCardMachineSlipConfirmation(raw.slipConfirmation)
+      : null;
+    if (
+      confirmed &&
+      (slipConfirmation === null || raw.takenAt === null || raw.slipReference === null || inCash)
+    )
+      return fail("CARD_MACHINE_INPUT_INVALID");
     if (
       typeof raw.expectedTotalMinor !== "string" ||
       !/^[1-9][0-9]{0,15}$/u.test(raw.expectedTotalMinor)
@@ -140,6 +157,11 @@ export function parseCardMachinePaymentCommand(value: unknown) {
       takenAt: raw.takenAt === null ? null : String(parsePaymentInstant(raw.takenAt)),
       /** WP-2423 M52: cash handed over (exact cents); null when paid on the card machine. */
       tenderedMinor: tendered as string | null,
+      /**
+       * b11 review: a paper slip already recorded with another order, confirmed by staff (never part
+       * of the payment's identity: a refused try recorded nothing).
+       */
+      slipConfirmation,
     });
   } catch (error) {
     if (error instanceof CardMachinePaymentCommandError) throw error;
@@ -155,8 +177,12 @@ export type StaffCardMachineOrderKind = "CounterPickup" | "DiningInitial" | "Din
  * Null when no staff member entered this batch.
  */
 /**
- * DEC-PAPER-SEND-IDEMPOTENT (b11): refuses a paper slip already recorded with another paper order or
- * round of the Store, naming that order, so the same slip never reaches the day's takings twice.
+ * DEC-PAPER-SEND-IDEMPOTENT (b11): refuses a paper slip already recorded with another order of the
+ * Store, naming that order, so the same slip never reaches the day's takings twice by mistake.
+ * Another round of the same order (`exceptOrder`, or `sameOrder` when the order is not known yet)
+ * may carry it, and staff may confirm that it also paid this order or is another slip with the
+ * same reference (`confirmed`). A held payment with this send's own payment operation on another
+ * order is always refused: it can only be recorded on the order it was sent with.
  */
 async function refuseHeldPaperSlip(
   tx: ConsumerTransaction,
@@ -164,10 +190,27 @@ async function refuseHeldPaperSlip(
   payments: Pick<ReturnType<typeof createPostgresCardMachinePaymentStore>, "findPaperSlip">,
   slipReference: string,
   takenAt: string,
-  sameSend: (held: { readonly operationReference: string }) => boolean = () => false,
+  options: {
+    readonly exceptOrder: string | null;
+    readonly confirmed: CardMachineSlipConfirmation | null;
+    readonly paymentOperationReference?: string;
+    readonly sameOrder?: (orderReference: string) => Promise<boolean>;
+  },
 ): Promise<void> {
-  const held = await payments.findPaperSlip(tx as never, slipReference, takenAt);
-  if (held === null || sameSend(held)) return;
+  const held = await payments.findPaperSlip(
+    tx as never,
+    slipReference,
+    takenAt,
+    options.exceptOrder,
+  );
+  if (held === null) return;
+  const ownOperation =
+    options.paymentOperationReference !== undefined &&
+    held.operationReference === options.paymentOperationReference;
+  if (!ownOperation) {
+    if (options.confirmed !== null) return;
+    if (options.sameOrder !== undefined && (await options.sameOrder(held.orderReference))) return;
+  }
   const numbers = await listStoreOrderNumbers(tx, scope, [held.orderReference]);
   const refused = new CardMachinePaymentCommandError("CARD_MACHINE_SLIP_ALREADY_RECORDED");
   refused.slipOrderNumber = numbers.get(held.orderReference) ?? null;
@@ -403,7 +446,10 @@ export function createMerchantCardMachinePayment(options: {
               return fail("CARD_MACHINE_ALREADY_PAID");
             // DEC-PAPER-SEND-IDEMPOTENT (b11): a paper slip is recorded once, on one order or round.
             if (command.takenAt !== null && command.slipReference !== null)
-              await refuseHeldPaperSlip(tx, scope, payments, command.slipReference, takenAt);
+              await refuseHeldPaperSlip(tx, scope, payments, command.slipReference, takenAt, {
+                exceptOrder: command.orderReference,
+                confirmed: command.slipConfirmation,
+              });
             // Only an order staff took at the counter, or a dine-in round staff entered for a table,
             // is paid on the Store's card machine.
             const staffEntry = await resolveStaffEntry(tx, scope, allowed, command, {
@@ -464,7 +510,9 @@ export function createMerchantCardMachinePayment(options: {
               .admit(tx, cardMachinePaymentIntentView(record), recordedAt);
             if (admitted === false || (admitted !== true && admitted.validUntil <= recordedAt))
               return fail("CARD_MACHINE_NOT_PAYABLE");
-            const saved = await payments.record(tx, record);
+            const saved = await payments.record(tx, record, {
+              slipConfirmation: command.slipConfirmation,
+            });
             return reply(saved.status === "Created" ? "Recorded" : "AlreadyRecorded", saved.record);
           },
         ),
@@ -592,6 +640,14 @@ export function createMerchantPaperPaidAtCheck(options: {
       readonly slipReference: string | null;
       readonly paymentOperationReference: string;
       readonly orderOperationReference: unknown;
+      /** b11 review: staff confirmed the slip also paid this order, or is another slip. */
+      readonly slipConfirmation?: CardMachineSlipConfirmation | null;
+      /**
+       * b11 review: a table round's table and seating (when the send names the seating): another
+       * round of that seating's order may carry the same slip (one swipe for several rounds).
+       */
+      readonly tableReference?: unknown;
+      readonly diningSessionReference?: unknown;
     };
   }): Promise<void> => {
     const session = await options.authentication.authorize(input);
@@ -661,6 +717,8 @@ export function createMerchantPaperPaidAtCheck(options: {
                 }).loadByOperation(tx as never, operation)) !== null;
               if (sentBefore) return;
             }
+            const table = paper.tableReference;
+            const seating = paper.diningSessionReference;
             await refuseHeldPaperSlip(
               tx,
               owners,
@@ -670,7 +728,30 @@ export function createMerchantPaperPaidAtCheck(options: {
               }),
               paper.slipReference,
               takenAt,
-              (held) => held.operationReference === paper.paymentOperationReference,
+              {
+                exceptOrder: null,
+                confirmed: paper.slipConfirmation ?? null,
+                // b11 review: a payment operation already recorded on another order is never
+                // this send's (that order operation was not sent before): refused, not placed.
+                paymentOperationReference: paper.paymentOperationReference,
+                ...(typeof table === "string" && typeof seating === "string"
+                  ? {
+                      sameOrder: async (orderReference: string) =>
+                        [
+                          ...(
+                            await createPostgresStaffDiningRoundEntryStore({
+                              ...owners,
+                              authorize: allowed,
+                            }).listByOrders(tx as never, [orderReference])
+                          ).values(),
+                        ].some(
+                          (found) =>
+                            String(found.entry.tableReference) === table &&
+                            String(found.entry.diningSessionReference) === seating,
+                        ),
+                    }
+                  : {}),
+              },
             );
           },
         ),

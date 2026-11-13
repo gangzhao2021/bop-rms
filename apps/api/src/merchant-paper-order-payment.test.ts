@@ -3,7 +3,9 @@ import { CardMachinePaymentCommandError } from "./merchant-card-machine-payment.
 import {
   paperPaidAtRefusal,
   paperPaidAtRefusalBody,
+  paperOrderPaymentCommand,
   recordPaperOrderPayment,
+  splitPaperOrderPayment,
 } from "./merchant-paper-order-payment.js";
 
 const placed = {
@@ -16,6 +18,7 @@ const payment = {
   tender: "CardMachine" as const,
   slipReference: null,
   takenAt: "2026-11-11T14:00:00.000Z",
+  slipConfirmation: null,
 };
 const recorded = {
   status: "Recorded" as const,
@@ -123,7 +126,50 @@ it("answers a paper slip already recorded with the order that holds it", async (
       tender: "CardMachine",
       slipReference: "TESTSLIP6D",
       takenAt: "2026-11-11T17:00:00.000Z",
+      slipConfirmation: null,
     },
   );
   expect(answer).toEqual({ paymentError: "slip_already_recorded", paymentSlipOrderNumber: "29" });
+});
+
+// DEC-PAPER-SEND-IDEMPOTENT (b11 review): staff may confirm that a slip already recorded with
+// another order also paid this one, or is another slip with the same reference; the confirmation
+// goes with the paper card-machine payment only (cash has no slip).
+it("carries a staff member's slip confirmation with a paper card-machine payment only", () => {
+  const body = (extra: Record<string, unknown>) => ({
+    operationReference: "01909995-0000-7000-8000-000000000009",
+    recordedAfterOutage: true,
+    paperPayment: {
+      operationReference: payment.operationReference,
+      tender: "CardMachine",
+      slipReference: "AUTH 482913",
+      takenAt: payment.takenAt,
+      ...extra,
+    },
+  });
+  const split = splitPaperOrderPayment(body({ slipConfirmation: "SameSlipAlsoPaysThisOrder" }), {
+    cashAllowed: true,
+    required: true,
+  });
+  expect(split?.payment?.slipConfirmation).toBe("SameSlipAlsoPaysThisOrder");
+  const confirmedPayment = split?.payment;
+  if (!confirmedPayment) throw new Error("the confirmed payment is split off");
+  expect(paperOrderPaymentCommand(placed, confirmedPayment)).toMatchObject({
+    slipReference: "AUTH 482913",
+    slipConfirmation: "SameSlipAlsoPaysThisOrder",
+  });
+  expect(
+    splitPaperOrderPayment(body({}), { cashAllowed: true, required: true })?.payment
+      ?.slipConfirmation,
+  ).toBeNull();
+  const plain = splitPaperOrderPayment(body({}), { cashAllowed: true, required: true })?.payment;
+  if (!plain) throw new Error("the plain payment is split off");
+  expect(paperOrderPaymentCommand(placed, plain)).not.toHaveProperty("slipConfirmation");
+  for (const refused of [
+    body({ slipConfirmation: "Anyway" }),
+    body({ slipConfirmation: null }),
+    body({ slipConfirmation: "DifferentSlipSameReference", slipReference: null }),
+    body({ slipConfirmation: "DifferentSlipSameReference", tender: "Cash", slipReference: null }),
+  ])
+    expect(splitPaperOrderPayment(refused, { cashAllowed: true, required: true })).toBeNull();
 });

@@ -69,6 +69,26 @@ const invalid = (): never => {
  * The last part of the machine's slip (approval or reference code). Never a card number: at most
  * 40 characters and at most 12 digits, so a full card number cannot be stored.
  */
+/**
+ * DEC-PAPER-SEND-IDEMPOTENT (b11 review): what staff confirmed about a paper slip whose reference
+ * is already recorded with another order of the Store: the same swipe also paid this order (one
+ * slip for two counter orders), or it is another slip printed with the same reference (two card
+ * machines). Recorded, with who confirmed it, in the payment's audit.
+ */
+export const cardMachineSlipConfirmations = [
+  "SameSlipAlsoPaysThisOrder",
+  "DifferentSlipSameReference",
+] as const;
+export type CardMachineSlipConfirmation = (typeof cardMachineSlipConfirmations)[number];
+export function parseCardMachineSlipConfirmation(
+  value: unknown,
+): CardMachineSlipConfirmation | null {
+  if (value === null || value === undefined) return null;
+  if (!(cardMachineSlipConfirmations as readonly unknown[]).includes(value))
+    throw new CardMachinePaymentError("CARD_MACHINE_INPUT_INVALID");
+  return value as CardMachineSlipConfirmation;
+}
+
 export function parseCardMachineSlipReference(value: unknown): string | null {
   if (value === null) return null;
   if (

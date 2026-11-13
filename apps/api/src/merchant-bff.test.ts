@@ -3893,11 +3893,77 @@ it("DEC-PAPER-ORDER-PAID-AT-SEND: a paper order records its payment with the sen
       slipReference: card.slipReference,
       paymentOperationReference: card.operationReference,
       orderOperationReference: command.operationReference,
+      slipConfirmation: null,
+      tableReference: undefined,
+      diningSessionReference: undefined,
     },
   });
   expect(counterOrder).not.toHaveBeenCalled();
   expect(staffDiningRound).not.toHaveBeenCalled();
   expect(cardMachinePayment).not.toHaveBeenCalled();
+  // b11 review: a round names its table and seating, and staff's confirmation of a slip already
+  // recorded with another order goes to the check (refused here, so nothing is placed).
+  paperPaidAtCheck.mockRejectedValueOnce(
+    new CardMachinePaymentCommandError("CARD_MACHINE_TAKEN_BEFORE_RECORDS"),
+  );
+  await submit(
+    {
+      ...command,
+      tableReference: order,
+      expectedDiningSessionReference: batch,
+      paperPayment: { ...card, slipConfirmation: "DifferentSlipSameReference" },
+    },
+    "/merchant/dining/staff-rounds",
+  );
+  expect(paperPaidAtCheck).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      paperSlip: expect.objectContaining({
+        slipConfirmation: "DifferentSlipSameReference",
+        tableReference: order,
+        diningSessionReference: batch,
+      }),
+    }),
+  );
+  expect(staffDiningRound).not.toHaveBeenCalled();
+  // b11 review: two tablets send the same slip at once. The sends run one after another, so the
+  // second is checked only once the first has placed and recorded (and is refused by the check
+  // then), never both placed with one slip.
+  const events: string[] = [];
+  let releaseFirst: () => void = () => undefined;
+  paperPaidAtCheck.mockImplementationOnce(async () => {
+    events.push("check 1");
+    await new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+  });
+  paperPaidAtCheck.mockImplementationOnce(async () => {
+    events.push("check 2");
+    const held = new CardMachinePaymentCommandError("CARD_MACHINE_SLIP_ALREADY_RECORDED");
+    held.slipOrderNumber = "31";
+    throw held;
+  });
+  counterOrder.mockImplementationOnce(async () => {
+    events.push("place 1");
+    return placed;
+  });
+  const first = submit({ ...command, paperPayment: card });
+  const second = submit({
+    ...command,
+    operationReference: "y",
+    paperPayment: { ...card, operationReference: order, slipReference: "a1 b2" },
+  });
+  await vi.waitFor(() => expect(events).toEqual(["check 1"]));
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(events).toEqual(["check 1"]);
+  releaseFirst();
+  expect((await first).status).toBe(200);
+  const refusedSecond = await second;
+  expect(events).toEqual(["check 1", "place 1", "check 2"]);
+  expect(refusedSecond.status).toBe(409);
+  expect(await refusedSecond.json()).toEqual({ error: "slip_already_recorded", orderNumber: "31" });
+  expect(counterOrder).toHaveBeenCalledTimes(1);
+  counterOrder.mockClear();
+  cardMachinePayment.mockClear();
   // Without the check, a paper order is never placed unchecked.
   const unchecked = await serveCounter({ counterOrder, cardMachinePayment, staffDiningRound });
   const noCheck = await submit({ ...command, paperPayment: card }, undefined, unchecked);

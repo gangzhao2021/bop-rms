@@ -19,6 +19,11 @@ export interface PaperOrderPayment {
   readonly tender: "CardMachine" | "Cash";
   readonly slipReference: string | null;
   readonly takenAt: string;
+  /**
+   * DEC-PAPER-SEND-IDEMPOTENT (b11 review): staff confirmed that this slip, already recorded with
+   * another order, also paid this one or is another slip with the same reference. Null otherwise.
+   */
+  readonly slipConfirmation: "SameSlipAlsoPaysThisOrder" | "DifferentSlipSameReference" | null;
 }
 
 /** The HTTP error code of each card-machine payment refusal (shared with its own route). */
@@ -63,7 +68,8 @@ export function splitPaperOrderPayment(
     return null;
   const raw = paperPayment as Record<string, unknown>;
   const keys = Object.keys(raw).sort().join(",");
-  if (keys !== "operationReference,slipReference,takenAt,tender") return null;
+  const confirmed = keys === "operationReference,slipConfirmation,slipReference,takenAt,tender";
+  if (keys !== "operationReference,slipReference,takenAt,tender" && !confirmed) return null;
   if (raw.tender !== "CardMachine" && (raw.tender !== "Cash" || !options.cashAllowed)) return null;
   if (typeof raw.operationReference !== "string" || !uuid.test(raw.operationReference)) return null;
   if (raw.tender === "Cash" && raw.slipReference !== null) return null;
@@ -76,10 +82,14 @@ export function splitPaperOrderPayment(
       expectedTotalMinor: "1",
       slipReference: raw.slipReference,
       takenAt: raw.takenAt,
+      ...(confirmed && raw.tender === "CardMachine"
+        ? { slipConfirmation: raw.slipConfirmation }
+        : {}),
     });
   } catch {
     return null;
   }
+  if (confirmed && raw.tender !== "CardMachine") return null;
   if (typeof raw.takenAt !== "string") return null;
   return {
     command,
@@ -88,6 +98,9 @@ export function splitPaperOrderPayment(
       tender: raw.tender,
       slipReference: raw.slipReference as string | null,
       takenAt: raw.takenAt,
+      slipConfirmation: confirmed
+        ? (raw.slipConfirmation as NonNullable<PaperOrderPayment["slipConfirmation"]>)
+        : null,
     }),
   };
 }
@@ -108,6 +121,9 @@ export function paperOrderPaymentCommand(
     expectedTotalMinor: placed.totalMinor,
     slipReference: payment.tender === "Cash" ? null : payment.slipReference,
     takenAt: payment.takenAt,
+    ...(payment.slipConfirmation === null || payment.tender === "Cash"
+      ? {}
+      : { slipConfirmation: payment.slipConfirmation }),
     // Paid in cash during the outage: the cash total was taken and any change given then.
     ...(payment.tender === "Cash"
       ? { tenderedMinor: roundCashTotal(BigInt(placed.totalMinor)).roundedMinor.toString() }

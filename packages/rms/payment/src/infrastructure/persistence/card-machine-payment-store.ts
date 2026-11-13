@@ -11,6 +11,7 @@ import {
   serializeCardMachinePreparation,
   type CardMachinePaymentErrorCode,
   type CardMachinePaymentRecord,
+  type CardMachineSlipConfirmation,
   type CardMachineRefundRecord,
 } from "../../application/card-machine-payment.js";
 import { parsePaymentReference } from "../../application/payment-provider-adapter.js";
@@ -182,16 +183,17 @@ export function createPostgresCardMachinePaymentStore(options: {
   };
   /**
    * DEC-PAPER-SEND-IDEMPOTENT (b11): a paper payment of the Store recorded with this slip reference
-   * (spaces and letter case aside) and taken within the back-entry window of `takenAt`, other
-   * than one of `exceptBatch`. Only the order it is recorded with is named, so the caller (already
-   * allowed at this Store) can tell staff where it is. The slip's lock is held to the end of the
-   * caller's transaction, so two sends of the same slip never both record it.
+   * (spaces and letter case aside) and taken within the back-entry window of `takenAt`, on an
+   * order other than `exceptOrder` (one swipe may pay several rounds of one table order). Only
+   * the order it is recorded with is named, so the caller (already allowed at this Store) can tell
+   * staff where it is. The slip's lock is held to the end of the caller's transaction, so two
+   * sends of the same slip never both record it.
    */
   const findPaperSlip = async (
     tx: AuditTransaction,
     slipReference: string,
     takenAt: string,
-    exceptBatch: string | null,
+    exceptOrder: string | null,
   ) => {
     const slip = slipReference.replace(/\s+/gu, "").toUpperCase();
     if (slip.length === 0) return null;
@@ -207,9 +209,9 @@ export function createPostgresCardMachinePaymentStore(options: {
   AND p.slip_reference IS NOT NULL AND upper(regexp_replace(p.slip_reference,'\\s+','','g'))=$3
   AND p.recorded_at > $4::timestamptz - interval '72 hours'
   AND p.taken_at > $4::timestamptz - interval '72 hours' AND p.taken_at < $4::timestamptz + interval '72 hours'
-  AND ($5::uuid IS NULL OR p.order_batch_id<>$5::uuid)
+  AND ($5::uuid IS NULL OR p.order_id<>$5::uuid)
  ORDER BY p.recorded_at,p.card_machine_payment_id LIMIT 1`,
-        [brand, store, slip, String(parsePaymentInstant(takenAt)), exceptBatch],
+        [brand, store, slip, String(parsePaymentInstant(takenAt)), exceptOrder],
       ),
     );
     const row = found[0];
@@ -221,8 +223,12 @@ export function createPostgresCardMachinePaymentStore(options: {
     });
   };
   return Object.freeze({
-    findPaperSlip: (tx: AuditTransaction, slipReference: string, takenAt: string) =>
-      findPaperSlip(tx, slipReference, takenAt, null),
+    findPaperSlip: (
+      tx: AuditTransaction,
+      slipReference: string,
+      takenAt: string,
+      exceptOrder: string | null = null,
+    ) => findPaperSlip(tx, slipReference, takenAt, exceptOrder),
     loadByOperation: (tx: AuditTransaction, operationReference: string) =>
       one(tx, "p.operation_id=$3", [String(parsePaymentReference(operationReference))]),
     loadByPaymentOperation: (tx: AuditTransaction, paymentOperationReference: string) =>
@@ -387,7 +393,18 @@ export function createPostgresCardMachinePaymentStore(options: {
      * caller's transaction. The same operation replays its original record; a different payment of
      * the same Batch is refused.
      */
-    async record(tx: AuditTransaction, value: CardMachinePaymentRecord) {
+    async record(
+      tx: AuditTransaction,
+      value: CardMachinePaymentRecord,
+      /**
+       * DEC-PAPER-SEND-IDEMPOTENT (b11 review): staff confirmed that a paper slip already recorded
+       * with another order also paid this one, or is another slip printed with the same reference.
+       * The payment is then recorded, and the audit names the confirmation and the other order.
+       */
+      paper: { readonly slipConfirmation: CardMachineSlipConfirmation | null } = {
+        slipConfirmation: null,
+      },
+    ) {
       const record = parseCardMachinePaymentRecord(value);
       const tenant = requireTenant();
       if (
@@ -411,17 +428,13 @@ export function createPostgresCardMachinePaymentStore(options: {
         record.orderBatchReference,
       ]);
       if (paid !== null) return fail("CARD_MACHINE_ALREADY_PAID");
-      // DEC-PAPER-SEND-IDEMPOTENT (b11): a paper slip is recorded once, on one order or round.
-      if (
-        record.recordingReason === "RecordedAfterOutage" &&
-        record.slipReference !== null &&
-        (await findPaperSlip(
-          tx,
-          record.slipReference,
-          record.takenAt,
-          record.orderBatchReference,
-        )) !== null
-      )
+      // DEC-PAPER-SEND-IDEMPOTENT (b11): a paper slip is recorded once per order, unless staff
+      // confirm that it also paid this order or is another slip with the same reference.
+      const heldSlip =
+        record.recordingReason === "RecordedAfterOutage" && record.slipReference !== null
+          ? await findPaperSlip(tx, record.slipReference, record.takenAt, record.orderReference)
+          : null;
+      if (heldSlip !== null && paper.slipConfirmation === null)
         return fail("CARD_MACHINE_SLIP_ALREADY_RECORDED");
       const event = createCardMachinePaymentEnvelope(record);
       count(
@@ -480,6 +493,13 @@ export function createPostgresCardMachinePaymentStore(options: {
         afterSummary: {
           amountMinor: record.preparation.total.amountMinor.toString(),
           recordingReason: record.recordingReason,
+          // b11 review: who confirmed a slip already recorded with another order, and which.
+          ...(heldSlip === null || paper.slipConfirmation === null
+            ? {}
+            : {
+                slipConfirmation: paper.slipConfirmation,
+                slipAlsoRecordedWithOrder: heldSlip.orderReference,
+              }),
           ...(record.cash === undefined
             ? {}
             : {
