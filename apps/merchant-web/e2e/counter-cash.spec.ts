@@ -1635,114 +1635,131 @@ test("@production on Approvals a cash refund is approved and given back from the
 
 // b10 cash-refund-approvals: after $3.65 was given back from the drawer for a $3.67 refund, Money
 // taken back on the payment page offers cash alone, up to $3.65, and records it in cash.
-test("@production money taken back on a cash order is cash from the guest, up to the cash given back", async ({
-  page,
-}) => {
-  await signIn(page);
-  const intent = id(361),
-    attempt = id(362);
-  let recovered: Record<string, unknown> | null = null;
-  await page.route("**/merchant/payments/refunds/approvals", (route) =>
-    route.fulfill({
-      headers,
-      json: {
-        observedAt: new Date().toISOString(),
-        canApprove: false,
-        soleOperator: null,
-        entries: [],
-      },
-    }),
-  );
-  await page.route("**/merchant/payments/refunds/context", (route) =>
-    route.fulfill({
-      headers,
-      json: {
-        paymentIntentReference: intent,
-        paymentAttemptReference: attempt,
-        orderReference: id(360),
-        orderBatchReference: id(363),
-        observedAt: new Date().toISOString(),
-        paymentState: "Captured",
-        paymentMethod: "CardMachine",
-        paidInCash: true,
-        cashLeftMinor: "710",
-        currencyCode: "CAD",
-        capturedAmountMinor: "1074",
-        confirmedRefundMinor: "367",
-        pendingRefundMinor: "0",
-        canRequest: true,
-        requestBlocked: null,
-        canSend: true,
-        canRecover: true,
-        recoveries:
-          recovered === null
-            ? []
-            : [
-                {
-                  recoveryReference: id(364),
-                  method: "Cash",
-                  amountMinor: String(recovered.amountMinor),
-                  currencyCode: "CAD",
-                  reasonCode: "REFUNDED_TOO_MUCH",
-                  businessDate: "2026-11-11",
-                  recordedAt: new Date().toISOString(),
-                  recordedByName: "Mia",
-                },
-              ],
-        cashTakeBackLeftMinor: recovered === null ? "365" : "0",
-      },
-    }),
-  );
-  await page.route("**/merchant/payments/refunds/items", (route) =>
-    route.fulfill({
-      headers,
-      json: {
-        orderReference: id(360),
-        orderNumber: "96",
-        canRequest: true,
-        claimVersion: 1,
-        recentRequests: [],
-        items: [],
-      },
-    }),
-  );
-  await page.route("**/merchant/payments/refunds/recover", (route) => {
-    recovered = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>;
-    return route.fulfill({
-      headers,
-      json: {
-        status: "Recorded",
-        orderReference: id(360),
-        recovery: {
-          recoveryReference: id(364),
-          method: "Cash",
-          amountMinor: String(recovered.amountMinor),
-          currencyCode: "CAD",
-          reasonCode: "REFUNDED_TOO_MUCH",
-          businessDate: "2026-11-11",
-          recordedAt: new Date().toISOString(),
-          recordedByName: "Mia",
+// v15 b15: a take-back of 0 is told plainly — it must be more than $0.00 and nothing was recorded —
+// before anything is sent (it read only "Enter the amount taken back, for example 5.00.").
+for (const width of [1440, 1024, 390])
+  test(`@production money taken back on a cash order is cash from the guest, up to the cash given back (${width})`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await signIn(page);
+    const intent = id(361),
+      attempt = id(362);
+    let recovered: Record<string, unknown> | null = null;
+    await page.route("**/merchant/payments/refunds/approvals", (route) =>
+      route.fulfill({
+        headers,
+        json: {
+          observedAt: new Date().toISOString(),
+          canApprove: false,
+          soleOperator: null,
+          entries: [],
         },
-      },
+      }),
+    );
+    await page.route("**/merchant/payments/refunds/context", (route) =>
+      route.fulfill({
+        headers,
+        json: {
+          paymentIntentReference: intent,
+          paymentAttemptReference: attempt,
+          orderReference: id(360),
+          orderBatchReference: id(363),
+          observedAt: new Date().toISOString(),
+          paymentState: "Captured",
+          paymentMethod: "CardMachine",
+          paidInCash: true,
+          cashLeftMinor: "710",
+          currencyCode: "CAD",
+          capturedAmountMinor: "1074",
+          confirmedRefundMinor: "367",
+          pendingRefundMinor: "0",
+          canRequest: true,
+          requestBlocked: null,
+          canSend: true,
+          canRecover: true,
+          recoveries:
+            recovered === null
+              ? []
+              : [
+                  {
+                    recoveryReference: id(364),
+                    method: "Cash",
+                    amountMinor: String(recovered.amountMinor),
+                    currencyCode: "CAD",
+                    reasonCode: "REFUNDED_TOO_MUCH",
+                    businessDate: "2026-11-11",
+                    recordedAt: new Date().toISOString(),
+                    recordedByName: "Mia",
+                  },
+                ],
+          cashTakeBackLeftMinor: recovered === null ? "365" : "0",
+        },
+      }),
+    );
+    await page.route("**/merchant/payments/refunds/items", (route) =>
+      route.fulfill({
+        headers,
+        json: {
+          orderReference: id(360),
+          orderNumber: "96",
+          canRequest: true,
+          claimVersion: 1,
+          recentRequests: [],
+          items: [],
+        },
+      }),
+    );
+    await page.route("**/merchant/payments/refunds/recover", (route) => {
+      recovered = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>;
+      return route.fulfill({
+        headers,
+        json: {
+          status: "Recorded",
+          orderReference: id(360),
+          recovery: {
+            recoveryReference: id(364),
+            method: "Cash",
+            amountMinor: String(recovered.amountMinor),
+            currencyCode: "CAD",
+            reasonCode: "REFUNDED_TOO_MUCH",
+            businessDate: "2026-11-11",
+            recordedAt: new Date().toISOString(),
+            recordedByName: "Mia",
+          },
+        },
+      });
     });
+    await page.goto("/app/operations/payments/" + intent);
+    const section = page.getByRole("region", { name: "Money taken back" });
+    await section.getByRole("button", { name: "Take money back" }).click();
+    await expect(section).toContainText(
+      "Paid in cash: the guest hands back cash, in whole nickels.",
+    );
+    await expect(section.getByRole("radio")).toHaveCount(0);
+    await expect(section).not.toContainText("card machine");
+    const amount = section.getByLabel("Cash handed back (up to $3.65)");
+    await amount.fill("0");
+    await section.getByRole("checkbox").check();
+    await section.getByRole("button", { name: "Record money taken back" }).click();
+    await expect(section.getByRole("status")).toHaveText(
+      "Enter the amount taken back; it must be more than $0.00. Nothing was recorded.",
+    );
+    expect(recovered).toBeNull();
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await section.getByRole("checkbox").uncheck();
+    await amount.fill("3.67");
+    await section.getByRole("button", { name: "Record money taken back" }).click();
+    await expect(section.getByRole("status")).toHaveText(
+      "Cash comes back in whole nickels, for example 3.65.",
+    );
+    await amount.fill("3.65");
+    await section.getByRole("checkbox").check();
+    await section.getByRole("button", { name: "Record money taken back" }).click();
+    await expect(section).toContainText("Money taken back +$3.65 · Cash · Mia");
+    expect(recovered).toMatchObject({ method: "Cash", amountMinor: "365" });
+    expect(recovered).not.toHaveProperty("slipReference");
+    await expect(section.getByRole("button", { name: "Take money back" })).toHaveCount(0);
   });
-  await page.goto("/app/operations/payments/" + intent);
-  const section = page.getByRole("region", { name: "Money taken back" });
-  await section.getByRole("button", { name: "Take money back" }).click();
-  await expect(section).toContainText("Paid in cash: the guest hands back cash, in whole nickels.");
-  await expect(section.getByRole("radio")).toHaveCount(0);
-  await expect(section).not.toContainText("card machine");
-  const amount = section.getByLabel("Cash handed back (up to $3.65)");
-  await amount.fill("3.67");
-  await section.getByRole("button", { name: "Record money taken back" }).click();
-  await expect(section.getByRole("status")).toHaveText(
-    "Cash comes back in whole nickels, for example 3.65.",
-  );
-  await amount.fill("3.65");
-  await section.getByRole("checkbox").check();
-  await section.getByRole("button", { name: "Record money taken back" }).click();
-  await expect(section).toContainText("Money taken back +$3.65 · Cash · Mia");
-  expect(recovered).toMatchObject({ method: "Cash", amountMinor: "365" });
-  expect(recovered).not.toHaveProperty("slipReference");
-  await expect(section.getByRole("button", { name: "Take money back" })).toHaveCount(0);
-});

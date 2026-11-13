@@ -2571,8 +2571,15 @@ export function MoneyTakenBack({
   if (context.recoveries.length === 0 && (!context.canRecover || left <= 0n)) return null;
   const submit = async () => {
     const amountMinor = dollarsToMinor(dollars);
-    if (amountMinor === null || BigInt(amountMinor) <= 0n) {
+    if (amountMinor === null) {
       setMessage(t("Enter the amount taken back, for example 5.00."));
+      return;
+    }
+    // v15 b15: 0 is no take-back, said as the server says it (nothing was recorded).
+    if (BigInt(amountMinor) <= 0n) {
+      setMessage(
+        t("Enter the amount taken back; it must be more than $0.00. Nothing was recorded."),
+      );
       return;
     }
     if (cashOnly && BigInt(amountMinor) % 5n !== 0n) {

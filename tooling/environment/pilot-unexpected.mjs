@@ -75,7 +75,10 @@ function turnedAwayByRush(error) {
 const alreadyLogged = new WeakSet();
 export function reportUnexpected(event, error, context = {}) {
   if (error !== null && typeof error === "object") alreadyLogged.add(error);
-  const wait = context.level === undefined ? turnedAwayByRush(error) : context.level === 40;
+  // v15 b15: level 30 is an expected refusal the caller was answered with (nothing recorded).
+  const refused = context.level === 30;
+  const wait =
+    !refused && (context.level === undefined ? turnedAwayByRush(error) : context.level === 40);
   const { code, codeMessage } = codeOf(error);
   const rule = ruleOf(error);
   // v15 2026-11-01: a wrapped error names the code of what it wraps (owner services rewrite
@@ -92,10 +95,10 @@ export function reportUnexpected(event, error, context = {}) {
       // send that failed is found by time and level in whichever process served it.
       // WP-2423 (rush-reads-and-orders-changes): a request the rush turned away (no connection in
       // time, its answer time spent) is a wait staff sit out, not a fault: level 40.
-      level: wait ? 40 : 50,
+      level: refused ? 30 : wait ? 40 : 50,
       time: new Date().toISOString(),
       event,
-      ...(wait ? { resultCode: "HTTP_RETRY_LATER" } : {}),
+      ...(wait ? { resultCode: "HTTP_RETRY_LATER" } : refused ? { resultCode: "REFUSED" } : {}),
       code,
       ...(causes.length > 0 ? { causes } : {}),
       ...(rule !== null ? { rule } : {}),

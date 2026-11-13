@@ -62,6 +62,34 @@ it("logs unexpected failures of a wrapped call and passes expected refusals thro
   ]);
 });
 
+// v15 b15: a take-back of $0 was answered 422 recovery_amount_zero (nothing recorded) but logged
+// as a level-50 INTERNAL_REFUND_RECOVERY_UNAVAILABLE line: an alert for the person's own typing.
+it("logs a refused take-back as information (level 30); its records not read stays level 50", async () => {
+  const lines = logged();
+  class RefundRecoveryError extends Error {
+    constructor(code) {
+      super(code);
+      this.code = code;
+      this.name = "RefundRecoveryError";
+    }
+  }
+  const recover = (code) =>
+    logUnexpected("INTERNAL_REFUND_RECOVERY_UNAVAILABLE", async () =>
+      Promise.reject(new RefundRecoveryError(code)),
+    )({});
+  for (const code of [
+    "REFUND_RECOVERY_AMOUNT_ZERO",
+    "REFUND_RECOVERY_ABOVE_REFUNDED",
+    "REFUND_RECOVERY_UNAVAILABLE",
+  ])
+    await expect(recover(code)).rejects.toThrow(code);
+  expect(lines().map(({ level, code, resultCode }) => ({ level, code, resultCode }))).toEqual([
+    { level: 30, code: "REFUND_RECOVERY_AMOUNT_ZERO", resultCode: "REFUSED" },
+    { level: 30, code: "REFUND_RECOVERY_ABOVE_REFUNDED", resultCode: "REFUSED" },
+    { level: 50, code: "REFUND_RECOVERY_UNAVAILABLE", resultCode: undefined },
+  ]);
+});
+
 it("names a refused Store switch's failing step, never ids or other text (v15 2026-10-31)", () => {
   const lines = logged();
   const refused = new Error("MERCHANT_BFF_STORE_SWITCH_DENIED");

@@ -185,13 +185,23 @@ export async function createInternalMerchantPickup(
 
 export { reportUnexpected } from "./pilot-unexpected.mjs";
 import { reportUnexpected } from "./pilot-unexpected.mjs";
+/**
+ * v15 b15: a refusal the person can act on (a take-back of $0, more than was refunded, cash not in
+ * whole nickels): answered 409/422 and nothing was recorded. Logged as information (level 30),
+ * never as an alert; only "the records could not be read" stays a fault.
+ */
+const expectedRefusal = (error) =>
+  error?.name === "RefundRecoveryError" &&
+  typeof error.code === "string" &&
+  error.code !== "REFUND_RECOVERY_UNAVAILABLE";
 export function logUnexpected(event, call) {
   return async (input) => {
     try {
       return await call(input);
     } catch (error) {
-      // Expected business refusals are answered to the caller, not logged.
-      if (
+      // Expected business refusals are answered to the caller, not logged as faults.
+      if (expectedRefusal(error)) reportUnexpected(event, error, { level: 30 });
+      else if (
         error?.name !== "FulfillmentReadinessError" &&
         !/^Merchant[A-Za-z]*Error$/.test(error?.name ?? "")
       )
