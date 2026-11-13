@@ -49,6 +49,16 @@ function outcomeUnknown(error: unknown): boolean {
  */
 export const billReadCeilingMs = 25_000;
 
+/**
+ * v15 batch 11 review: the longest staff wait for the answer to stopping a phone payment. The stop
+ * asks the payment company first (up to about 19 s on a loaded v15 host); a stop still unanswered
+ * after this (Wi-Fi dropped mid-request) is given up as not known, and the bill is read again.
+ */
+export const stopPhoneCeilingMs = 30_000;
+
+/** The stop of a phone payment had no answer within its ceiling. */
+class StopNotAnswered extends Error {}
+
 function errorText(error: unknown): string {
   const code =
     error instanceof TableCheckoutError
@@ -248,7 +258,10 @@ export function TableCheckout({
   // v15 batch 11: while a phone payment is being stopped, the payment company is asked; the bill's
   // own re-reads wait (they only slowed the stop), and an answer read before the stop is not shown.
   const [stoppingPhone, setStoppingPhone] = useState(false);
+  // Counts each stop's start and end: odd while a stop is on its way.
   const stops = useRef(0);
+  const stopController = useRef<AbortController | null>(null);
+  useEffect(() => () => stopController.current?.abort(), []);
   const [busy, setBusy] = useState(false);
   // WP-2423 item 8 ① (Owner 2026-10-27): no tip is chosen for the guests; staff ask and choose.
   const [tip, setTip] = useState<Tip | null>(null);
@@ -292,7 +305,9 @@ export function TableCheckout({
     const ceiling = window.setTimeout(() => {
       controller.abort();
       billReading.current = false;
-      setReadProblem(t("The bill couldn't be read just now. Trying again by itself."));
+      // While a phone payment is being stopped no re-read runs, so "trying again" is not said then.
+      if (stops.current === stopsBefore && stops.current % 2 === 0)
+        setReadProblem(t("The bill couldn't be read just now. Trying again by itself."));
     }, billReadCeilingMs);
     client
       .bill(csrf, sessionReference, controller.signal)
@@ -526,18 +541,40 @@ export function TableCheckout({
     setStoppingPhone(true);
     stops.current += 1;
     setProblem(null);
+    // A stop that never answers is given up: what happened is not known, and the bill's re-reads
+    // (paused while it was on its way) start again, so a guest who did pay still reads paid.
+    const controller = new AbortController();
+    stopController.current = controller;
+    let ceiling = 0;
+    const givenUp = new Promise<never>((_, reject) => {
+      ceiling = window.setTimeout(() => {
+        controller.abort();
+        reject(new StopNotAnswered());
+      }, stopPhoneCeilingMs);
+    });
     try {
-      const stopped = await client.stopOnlinePayment(csrf, sessionReference);
-      stops.current += 1;
+      const stopped = await Promise.race([
+        client.stopOnlinePayment(csrf, sessionReference, controller.signal),
+        givenUp,
+      ]);
       if (stopped === null) setReload((value) => value + 1);
       else setBill(stopped);
       setStoppedPhone(true);
       onChanged();
     } catch (error) {
-      stops.current += 1;
-      setProblem(errorText(error));
+      if (stopController.current !== controller || controller.signal.aborted) {
+        if (!(error instanceof StopNotAnswered)) return; // the panel was closed meanwhile
+        setProblem(
+          t(
+            "No answer came about stopping the phone payment, so it isn't known whether it stopped or whether the guest paid. The bill is being read again: check it before taking the payment another way.",
+          ),
+        );
+      } else setProblem(errorText(error));
       setReload((value) => value + 1);
     } finally {
+      window.clearTimeout(ceiling);
+      if (stopController.current === controller) stopController.current = null;
+      stops.current += 1;
       setBusy(false);
       setStoppingPhone(false);
     }

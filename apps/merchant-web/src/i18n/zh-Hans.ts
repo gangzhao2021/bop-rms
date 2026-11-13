@@ -6542,6 +6542,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Stopping the phone payment…": "正在停止手机付款…",
   "Asking the payment company whether the guest finished paying. Don't take the payment another way until it answers.":
     "正在向支付公司确认客人是否已付完。收到答复前，请不要用其他方式收款。",
+  "No answer came about stopping the phone payment, so it isn't known whether it stopped or whether the guest paid. The bill is being read again: check it before taking the payment another way.":
+    "停止手机付款一直没有答复，还不知道是否已停止，也不知道客人是否已付款。正在重新读取账单：请先查看账单，再决定是否用其他方式收款。",
   "Guest's phone": "客人手机",
   "Paid at the table · guest's phone": "已在桌上付清 · 客人手机",
   "Table {table} is open. Guests scan the QR code on the table to join.":

@@ -1941,3 +1941,108 @@ for (const width of [390, 1024, 1440])
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);
   });
+
+// v15 batch 11 review: a stop that never answers (Wi-Fi dropped mid-request) is given up. Staff are
+// told it isn't known whether it stopped, never that they lack access or were signed out, and the
+// bill's re-reads start again, so a guest who finished paying meanwhile reads paid.
+for (const width of [390, 1024, 1440])
+  test(`@production a phone payment stop that never answers is given up and the bill read again at ${width}`, async ({
+    page,
+  }) => {
+    await page.clock.install({ time: new Date("2026-10-15T19:02:00.000Z") });
+    await page.setViewportSize({ width, height: 900 });
+    await floor(page, { phase: "Closing", version: 7 });
+    await page.route("**/merchant/dining/table-close-plan", (route) =>
+      route.fulfill({
+        headers,
+        json: {
+          orderReference: id(3),
+          diningSessionReference: id(2),
+          orderVersion: 4,
+          observedAt: "2026-10-15T19:00:00.000Z",
+          rounds: [],
+          closeBlockers: ["ORDER_BALANCE_UNPAID"],
+          totals: { onlineMinor: "0", cardMachineMinor: "0" },
+        },
+      }),
+    );
+    let guestPaid = false;
+    const paying = {
+      ...unpaidBill("Closing", 7),
+      onlinePayment: {
+        status: "InProgress",
+        totalMinor: "3843",
+        tipMinor: "450",
+        startedAt: "2026-10-15T19:01:00.000Z",
+      },
+    };
+    const paid = {
+      ...unpaidBill("Closing", 7),
+      rounds: unpaidBill("Closing", 7).rounds.map((round) => ({ ...round, paid: true })),
+      owed: { subtotalMinor: "0", taxMinor: "0", totalMinor: "0" },
+      settlement: {
+        method: "Online",
+        roundsMinor: "3393",
+        tipMinor: "450",
+        roundingMinor: "0",
+        totalMinor: "3843",
+        tenderedMinor: null,
+        changeMinor: null,
+        recordedAt: "2026-10-15T19:02:10.000Z",
+        recordedAfterOutage: false,
+      },
+    };
+    // While the connection is down, a bill read sent never answers either.
+    let down = false;
+    await page.route("**/merchant/dining/table-bill", async (route) => {
+      if (down) return;
+      await route.fulfill({ headers, json: guestPaid ? paid : paying });
+    });
+    let stopsSent = 0;
+    // The stop never answers.
+    await page.route("**/merchant/dining/table-online-payment/stop", () => {
+      stopsSent += 1;
+    });
+    await page.goto("/operations/dining");
+    await page.getByRole("button", { name: "Select T2", exact: true }).click();
+    const checkout = page.getByRole("region", { name: "Checkout" });
+    const stop = checkout.getByRole("button", { name: "Stop the phone payment" });
+    await expect(stop).toBeVisible();
+    // The connection drops: the bill's next re-read is sent and never answers, then Stop is pressed.
+    down = true;
+    await page.clock.runFor(5_500);
+    await stop.click();
+    await expect(
+      checkout.getByRole("button", { name: "Stopping the phone payment…" }),
+    ).toBeDisabled();
+    await expect.poll(() => stopsSent).toBe(1);
+    // The re-read reaches its own limit during the stop: no "trying again" is said, as none runs.
+    await page.clock.runFor(25_000);
+    await expect(checkout).toContainText("Asking the payment company");
+    await expect(checkout).not.toContainText("Trying again by itself");
+    // The connection is back; the stop itself never answers and is given up.
+    down = false;
+    await page.clock.runFor(6_000);
+    await expect(
+      checkout.getByText(
+        "No answer came about stopping the phone payment, so it isn't known whether it stopped or whether the guest paid. The bill is being read again: check it before taking the payment another way.",
+      ),
+    ).toBeVisible();
+    await expect(checkout).not.toContainText("Asking the payment company");
+    await expect(checkout).not.toContainText("Your access doesn't allow this");
+    await expect(page.getByText("signed out", { exact: false })).toHaveCount(0);
+    // The bill was read again: the phone payment still reads open, and Stop can be pressed again.
+    await expect(stop).toBeEnabled();
+    await checkout.screenshot({ path: `test-results/table-phone-stop-unanswered-${width}.png` });
+    // The guest finishes paying on the phone: the next re-read shows it paid, nothing more to take.
+    guestPaid = true;
+    await page.clock.runFor(5_500);
+    await expect(checkout).toContainText("Paid in full.");
+    await expect(checkout.getByRole("radio", { name: "Cash" })).toHaveCount(0);
+    await expect(stop).toHaveCount(0);
+    expect(stopsSent).toBe(1);
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await expectNoInternalText(page);
+  });

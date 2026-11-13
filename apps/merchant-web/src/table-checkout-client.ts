@@ -673,10 +673,13 @@ export function createTableCheckoutClient(fetcher: typeof fetch = fetch) {
       return parseTableBill(raw.bill);
     },
     /** S4: stop a phone payment a guest gave up on (the Provider is asked first). */
-    async stopOnlinePayment(csrf: string, diningSessionReference: string) {
-      const raw = (await post("/merchant/dining/table-online-payment/stop", csrf, {
-        diningSessionReference,
-      })) as { status?: unknown; bill?: unknown } | null;
+    async stopOnlinePayment(csrf: string, diningSessionReference: string, signal?: AbortSignal) {
+      const raw = (await post(
+        "/merchant/dining/table-online-payment/stop",
+        csrf,
+        { diningSessionReference },
+        signal,
+      )) as { status?: unknown; bill?: unknown } | null;
       if (raw?.status !== "Stopped") return invalid();
       // M89: the stop was recorded but the bill could not be read with the answer: read it again.
       if (raw.bill === null) return null;
