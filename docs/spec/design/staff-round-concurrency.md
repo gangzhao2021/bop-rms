@@ -19,9 +19,11 @@ was sent" whether or not the round's own dish could be taken back out of the car
   transaction that checks the command was not sent before (no extra round trip on the quiet path:
   about five more statements, M35's statement guard still passes, 2,185 a later round).
 - The turn is an append-only record (`rms_ordering.staff_dining_round_table_turn`, 2000_950, Store
-  RLS) with a lease timed by the database clock. It ends when the round is placed (derived from the
-  round itself, nothing written), or with an end record when the round is not sent
-  (`NotSent`, `DishesLeftAtTable`, `Unknown`).
+  RLS) with a lease timed by the database clock. It ends with an end record: `Placed`, written in
+  the transaction that reads the placed round back (no extra round trip), or `NotSent`,
+  `DishesLeftAtTable`, `Unknown` when the round is not sent. A turn whose end could not be written
+  is still over once its round exists; that check finds the round by its table guest through an
+  index (`order_batch_submitted_by_actor_idx`), so it never reads the Store's sent rounds.
 - **Lease: two minutes**, the same window in which an unfinished attempt is answered "still being
   sent". A tablet that loses its connection mid-send never blocks the table longer. A round slower
   than that (heavy load) can overlap the next one; the cart's version checks then refuse rather than
@@ -31,7 +33,11 @@ was sent" whether or not the round's own dish could be taken back out of the car
   is sending a round for this table right now. Nothing of this order was sent or charged, and it is
   still here: send it again in a moment." Nothing of it was recorded, so sending again is safe.
 - Guest phones do not take turns: a guest's own send still meets the cart's version and checkout
-  hold, as before.
+  hold, as before. **Known pilot limitation:** a guest phone's checkout started while a staff round
+  is in the table's cart sends that round's dishes with the guest's round, charged to whoever pays
+  at that phone. Staff are told the truth (`staff_round_not_withdrawn`, their order cleared) and
+  the dishes go out once, but on the guest's payment. Trigger to revisit: a store reports a guest
+  charged for a staff-entered dish.
 
 ## True answers when a round fails
 
@@ -42,6 +48,16 @@ was sent" whether or not the round's own dish could be taken back out of the car
   sent, but its dishes are still in the table's cart or already went out with another round. The
   screen **clears the order** (so nothing is sent twice) and reads the table's unsent dishes, where
   those dishes show marked as staff's; staff check the table's order and send only what is missing.
+- From the checkout on, a failure with no round behind it (read twice, before and after taking the
+  dishes back out) is answered the same way: `staff_round_not_withdrawn` when they could not be
+  taken out or left the cart another way, never "still being sent".
+- An add whose answer was lost (it may have committed) counts as possibly in the cart: "nothing
+  was sent" stands only when the cart then holds nothing but the guests' lines as the round took
+  them in. A line it can't tell from a guest's new one is never taken out.
+- The same command sent again (its answer was lost) with no round behind it reads how its turns
+  ended: dishes left at the table, or an attempt that ended without knowing (after the two-minute
+  sending window), is answered `staff_round_not_withdrawn`, never "didn't go through, send it
+  again" (`staff_round_not_finished`), which could send its dishes twice.
 - A cart someone at the table changed under the round's dish (`VersionConflict` on adding it) is the
   ordinary `table_cart_has_items` refusal with the cart as it is now, after the round's own lines
   are out.
@@ -52,7 +68,9 @@ The System cancelling an expired unpaid round (or another round going in) betwee
 staff round reads the table Order and the moment it writes moved the Order's version, and the write
 refused (503). Card-machine and pay-later sends (no Provider call) now read the Order again and send
 once more, at most three times, only when the Order did move. The guest's online payment send keeps
-its current behaviour (it calls the Provider).
+its current behaviour (it calls the Provider) and still answers unavailable when the Order moves.
+Proved by unit tests only; a real System cancellation committed between the read and the write is
+left to the v15 live check.
 
 ## Lock order
 
