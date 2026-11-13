@@ -1515,6 +1515,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Couldn't check the PIN. Try again.": "无法核对 PIN。请重试。",
   "Couldn't check whether the table can be closed. Press Check again in a moment. If it keeps happening, press Cancel checkout, then Start checkout again.":
     "暂时无法检查这桌能否关台。请稍后按“再次检查”。如果一直这样，请按“取消结账”，再按“开始结账”。",
+  "Couldn't check whether the table can be closed. Press Check again in a moment. If it keeps happening, check the table's order on the Orders page.":
+    "暂时无法检查这桌能否关台。请稍后按“再次检查”。如果一直这样，请到订单页查看这桌的订单。",
   "Couldn't load the staff list": "无法加载员工列表",
   "Couldn't load this page": "无法加载此页面",
   "Couldn't read the amount to charge. Try again.": "无法读取应收金额。请重试。",

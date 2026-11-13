@@ -44,9 +44,9 @@ const texts: Readonly<Record<string, string>> = {
   FINANCIAL_FINALITY_REQUIRED: t(
     "The order's payments aren't settled yet. Check the order on the Orders page.",
   ),
-  // v15 b12: says what to do when Check again does not help (Cancel checkout records the bill again).
+  // v15 b12: says what to do when Check again does not help, with steps every table has.
   CLOSE_CHECK_UNAVAILABLE: t(
-    "Couldn't check whether the table can be closed. Press Check again in a moment. If it keeps happening, press Cancel checkout, then Start checkout again.",
+    "Couldn't check whether the table can be closed. Press Check again in a moment. If it keeps happening, check the table's order on the Orders page.",
   ),
 };
 const fallback = t(
@@ -57,6 +57,10 @@ const fallback = t(
 const payLaterTexts: Readonly<Record<string, string>> = {
   ORDER_BALANCE_UNPAID: t(
     "The table hasn't paid yet. Take the payment in Checkout above, or, if the guests left without paying, ask a manager or the owner to record it there.",
+  ),
+  // v15 b12: only a table paying at the end has Cancel checkout (it records the bill again).
+  CLOSE_CHECK_UNAVAILABLE: t(
+    "Couldn't check whether the table can be closed. Press Check again in a moment. If it keeps happening, press Cancel checkout, then Start checkout again.",
   ),
 };
 

@@ -151,6 +151,12 @@ it("WP-2423 B759: a refusal is told apart from a missing permission, with what i
   expect(texts).toHaveLength(3);
   expect(texts[0]).toMatch(/refund is still being made/u);
   for (const text of texts) expect(text).not.toMatch(/[A-Z]{2,}_[A-Z]/u);
+  // v15 b12: only a table paying at the end has Cancel checkout / Start checkout.
+  const [payFirst] = closeReasonTexts(["CLOSE_CHECK_UNAVAILABLE"], "PayFirst");
+  const [payLater] = closeReasonTexts(["CLOSE_CHECK_UNAVAILABLE"], "PayLater");
+  expect(payFirst).toMatch(/Check again/u);
+  expect(payFirst).not.toMatch(/checkout/iu);
+  expect(payLater).toMatch(/Cancel checkout, then Start checkout again/u);
 });
 
 it("WP-2423: a lost answer is re-checked with the same operation and reports the real result", async () => {
