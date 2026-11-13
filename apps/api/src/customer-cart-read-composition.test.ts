@@ -234,6 +234,28 @@ describe("Customer Cart read bridge", () => {
       expect.objectContaining({ level: 50, event: "CUSTOMER_CART_READ_UNAVAILABLE" }),
     ]);
   });
+  it("WP-2423 (rush-reads-and-orders-changes review): a read turned away once that then meets a real fault logs level 50", async () => {
+    const levels: number[] = [];
+    const log = (_event: string, _error: unknown, _write: unknown, level: 40 | 50 = 50) => {
+      levels.push(level);
+    };
+    for (const error of [
+      // A missing pilot grant under the read's own "unavailable".
+      Object.assign(new CartError("CART_DEPENDENCY_UNAVAILABLE"), {
+        cause: Object.assign(new Error("TENANT_DATABASE_TRANSACTION_FAILED"), {
+          code: "TENANT_DATABASE_TRANSACTION_FAILED",
+          diagnostic: { sqlState: "42501" },
+        }),
+      }),
+      // A programming error.
+      Object.assign(new CartError("CART_DEPENDENCY_UNAVAILABLE"), { cause: new TypeError("x") }),
+    ])
+      await createCustomerCartReadPort(
+        { read: vi.fn().mockRejectedValue(error) },
+        { pause: async () => undefined, timeLeftMs: () => 9_000, shed: () => true, log },
+      ).getCurrentCart(input);
+    expect(levels).toEqual([50, 50]);
+  });
   it("M126 I.2: a phone whose place at the table ended reads why, plain or as a cause", async () => {
     for (const error of [
       new CartParticipationEndedError("TableClosed"),

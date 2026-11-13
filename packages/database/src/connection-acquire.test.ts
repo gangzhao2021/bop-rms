@@ -491,6 +491,35 @@ describe("WP-2423 reads-under-burst: the rush is told apart from a fault, and a 
     }
   });
 
+  it("WP-2423 (rush-reads-and-orders-changes review): when the database last answered is read on the runner's own clock", async () => {
+    // Review: the answering window compared Date.now() although the runner injects its `now`.
+    const connectTimeout = () => new Error("Connection terminated due to connection timeout");
+    const at = async (clock: number, answeredAt: number) => {
+      const target = pool(fails(connectTimeout), { max: 2, total: 2, handedOut: 0 });
+      let now = answeredAt;
+      // The pool is first watched by the runner, so its answers are timed on that clock.
+      const first = runWithRequestAcquireBudget(1_000, () =>
+        acquireTenantConnection(target, { budgetMs: 100, now: () => now }).catch(() => undefined),
+      );
+      await first;
+      target.emit("acquire");
+      target.emit("release", undefined);
+      target.emit("acquire");
+      now = clock;
+      return runWithRequestAcquireBudget(1_000, async () => {
+        await acquireTenantConnection(target, { budgetMs: 100, now: () => now }).catch(
+          () => undefined,
+        );
+        const store = budget() as { shed?: boolean; faulted?: boolean } | undefined;
+        return { shed: store?.shed === true, faulted: store?.faulted === true };
+      });
+    };
+    // Answered 1 s before on the runner's clock (whatever the wall clock says): the rush.
+    expect(await at(5_000_000, 4_999_000)).toEqual({ shed: true, faulted: false });
+    // Nothing answered for 6 s on that clock: a fault.
+    expect(await at(5_000_000, 4_994_000)).toEqual({ shed: false, faulted: true });
+  });
+
   it("takes no connection for a read already answered or abandoned (cut), even after its answer", async () => {
     const connect = vi.fn(async () => client());
     const outcome = await runWithRequestAcquireBudget(

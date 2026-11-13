@@ -143,6 +143,66 @@ export function requestWasShed(): boolean {
   return budget?.shed === true && budget.faulted !== true;
 }
 
+const programmingErrorNames = new Set([
+  "TypeError",
+  "ReferenceError",
+  "RangeError",
+  "SyntaxError",
+  "EvalError",
+  "URIError",
+]);
+/**
+ * SQLSTATEs the rush itself leaves behind: a statement cut at its time (57014), too many
+ * connections (53300), no connection in time (08006, the acquire's own), a conflict to run again
+ * (40001, 40P01, 55P03) and what an aborted transaction answers after any of them (25P02).
+ */
+const rushSqlStates = new Set(["57014", "53300", "08006", "40001", "40P01", "55P03", "25P02"]);
+const databaseFailureKey = Symbol.for("bop.database.failure");
+const failureCauseKey = Symbol.for("bop.failure.cause");
+const ownValue = (value: unknown, key: PropertyKey): unknown => {
+  try {
+    return value !== null && typeof value === "object"
+      ? Object.getOwnPropertyDescriptor(value, key)?.value
+      : undefined;
+  } catch {
+    return undefined;
+  }
+};
+/**
+ * WP-2423 (rush-reads-and-orders-changes review): what no rush explains, anywhere in the error's
+ * chain: a programming error (TypeError, ...) or a database refusal other than the rush's own (a
+ * missing grant 42501, a constraint). A request turned away by the rush once that then meets one
+ * of these is logged as the fault it is (level 50), never as a wait.
+ */
+export function isRealFault(error: unknown): boolean {
+  for (
+    let at = error, depth = 0;
+    depth < 8 && at !== null && typeof at === "object";
+    depth += 1, at = ownValue(at, "cause") ?? ownValue(at, failureCauseKey)
+  ) {
+    if (at instanceof Error && programmingErrorNames.has(at.name)) return true;
+    const states: unknown[] = [
+      (ownValue(at, databaseFailureKey) as { sqlState?: unknown } | undefined)?.sqlState,
+      (ownValue(at, "diagnostic") as { sqlState?: unknown } | undefined)?.sqlState,
+      ownValue(at, "severity") === undefined ? undefined : ownValue(at, "code"),
+    ];
+    for (const state of states)
+      if (typeof state === "string" && /^[0-9A-Z]{5}$/u.test(state) && !rushSqlStates.has(state))
+        return true;
+  }
+  return false;
+}
+/**
+ * The current request met a real fault (see `isRealFault`): it stays a fault for every line it
+ * writes from now on, its completion line included.
+ */
+export function noteRequestRealFault(error: unknown): boolean {
+  if (!isRealFault(error)) return false;
+  const budget = requestBudgets().getStore();
+  if (budget !== undefined) budget.faulted = true;
+  return true;
+}
+
 interface AnsweringResponse {
   once(event: "finish" | "close", listener: () => void): unknown;
   readonly headersSent?: boolean;

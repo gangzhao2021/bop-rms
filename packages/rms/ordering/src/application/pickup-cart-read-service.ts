@@ -152,8 +152,10 @@ export function createPickupCartReadService(ports: PickupCartReadPorts) {
       let loaded: CartAggregate | null;
       try {
         loaded = await ports.binding.current(session, startedAt);
-      } catch {
-        throw new CartError("CART_DEPENDENCY_UNAVAILABLE");
+      } catch (error) {
+        // WP-2423 (rush-reads-and-orders-changes): what the read met stays under it (no connection
+        // in a rush is a wait, a refusal a fault), so the line it is logged with can say which.
+        throw Object.assign(new CartError("CART_DEPENDENCY_UNAVAILABLE"), { cause: error });
       }
       // Re-resolve even for absence, so an intervening revocation has uniform behavior.
       const observedAt = at();
@@ -209,8 +211,13 @@ export function createPickupCartReadService(ports: PickupCartReadPorts) {
                     guestSessionReference,
                   }) ?? Promise.resolve(null);
       if (lookup !== undefined) {
+        let found: Awaited<ReturnType<typeof lookup>>;
         try {
-          const found = await lookup();
+          found = await lookup();
+        } catch (error) {
+          throw Object.assign(new CartError("CART_DEPENDENCY_UNAVAILABLE"), { cause: error });
+        }
+        try {
           if (
             found !== null &&
             (!/^[1-9][0-9]{0,18}$/u.test(found.orderNumber) || typeof found.notMade !== "boolean")

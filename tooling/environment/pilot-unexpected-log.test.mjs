@@ -352,4 +352,38 @@ describe("WP-2423 (rush-reads-and-orders-changes): a staff request the rush turn
       { level: 50, resultCode: undefined, event: "MERCHANT_REQUEST_UNEXPECTED", route: "/tables" },
     ]);
   });
+
+  it("review: a request turned away once that then meets a real fault logs the fault (level 50)", async () => {
+    const { noteRequestShed, runWithRequestAcquireBudget } =
+      await import("../../packages/database/src/request-acquire-budget.ts");
+    const lines = logged();
+    const report = createMerchantRequestReporter({ store: "stores/demo" });
+    const grant = () =>
+      Object.assign(new Error("TENANT_DATABASE_TRANSACTION_FAILED"), {
+        code: "TENANT_DATABASE_TRANSACTION_FAILED",
+        diagnostic: { sqlState: "42501", table: "order_header", constraint: null },
+      });
+    const faulted = await runWithRequestAcquireBudget(1000, async () => {
+      // A statement cut at the read's time earlier in the request: shed.
+      noteRequestShed();
+      // Then a missing pilot grant, and a programming error under a wrapper: faults.
+      report("/orders", grant());
+      reportPilotUnexpected(
+        "INTERNAL_ORDER_QUEUE_UNAVAILABLE",
+        Object.assign(new Error("ORDER_QUEUE_UNAVAILABLE"), { cause: new TypeError("x") }),
+      );
+      // The request stays a fault for every later line (its completion line too).
+      report(
+        "/orders/changes",
+        Object.assign(new Error("acquire"), { code: "TENANT_DATABASE_ACQUIRE_FAILED" }),
+      );
+      return globalThis[Symbol.for("bop.database.request-acquire-budget")].getStore().faulted;
+    });
+    expect(faulted).toBe(true);
+    expect(lines().map(({ level, resultCode }) => ({ level, resultCode }))).toEqual([
+      { level: 50, resultCode: undefined },
+      { level: 50, resultCode: undefined },
+      { level: 50, resultCode: undefined },
+    ]);
+  });
 });

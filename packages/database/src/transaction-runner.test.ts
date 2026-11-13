@@ -848,3 +848,33 @@ describe("WP-2423 guest-table-open-and-busy-reads: a read's statements end with 
     }
   });
 });
+
+describe("WP-2423 (rush-reads-and-orders-changes review): a real refusal stays a fault after the rush", () => {
+  it("marks the request faulted on a refusal that is not the rush, never on a conflict or a cut", async () => {
+    const { runWithRequestAcquireBudget, noteRequestShed } =
+      await import("./request-acquire-budget.js");
+    const budget = () =>
+      (globalThis as Record<symbol, { getStore(): { shed?: boolean; faulted?: boolean } }>)[
+        Symbol.for("bop.database.request-acquire-budget")
+      ]?.getStore();
+    const outcome = async (code: string) => {
+      const f = fixture();
+      f.query.mockImplementation(async (sql: string) => {
+        if (sql === "SELECT a") throw Object.assign(new Error("private"), { code });
+        return { rows: [] };
+      });
+      return runWithRequestAcquireBudget(1_000, async () => {
+        // An earlier step of the same request was turned away by the rush.
+        noteRequestShed();
+        await f.runner.run((t) => t.query("SELECT a", [])).catch(() => undefined);
+        return budget()?.faulted === true;
+      });
+    };
+    // A missing pilot grant, a constraint: faults, logged as such (level 50), not as a wait.
+    expect(await outcome("42501")).toBe(true);
+    expect(await outcome("23505")).toBe(true);
+    // A conflict to run again, too many connections and a statement cut: not faults.
+    for (const code of ["40001", "40P01", "55P03", "53300", "57014"])
+      expect(await outcome(code), code).toBe(false);
+  });
+});

@@ -93,6 +93,8 @@ interface PoolLoad {
    * an error (the database answered it). Null: never yet.
    */
   answeredAt: number | null;
+  /** The clock `answeredAt` is read on: the acquiring runner's own (its injected `now`). */
+  clock: () => number;
 }
 /**
  * WP-2423 (rush-reads-and-orders-changes, v15 2026-11-13): how recently the database must have
@@ -116,12 +118,15 @@ type WatchedPool = Pick<Pool, "connect"> & {
 export function watchTenantConnectionPool(pool: object): void {
   watchPoolLoad(pool as WatchedPool);
 }
-function watchPoolLoad(pool: WatchedPool): PoolLoad | undefined {
+function watchPoolLoad(pool: WatchedPool, clock?: () => number): PoolLoad | undefined {
   try {
     const known = poolLoads.get(pool);
-    if (known !== undefined) return known;
+    if (known !== undefined) {
+      if (clock !== undefined) known.clock = clock;
+      return known;
+    }
     if (typeof pool.on !== "function") return undefined;
-    const load: PoolLoad = { out: 0, answeredAt: null };
+    const load: PoolLoad = { out: 0, answeredAt: null, clock: clock ?? Date.now };
     poolLoads.set(pool, load);
     pool.on("acquire", () => {
       load.out += 1;
@@ -129,7 +134,7 @@ function watchPoolLoad(pool: WatchedPool): PoolLoad | undefined {
     pool.on("release", (error?: unknown) => {
       load.out = Math.max(0, load.out - 1);
       // A client returned without an error: its work was answered by the database.
-      if (error === undefined || error === null || error === false) load.answeredAt = Date.now();
+      if (error === undefined || error === null || error === false) load.answeredAt = load.clock();
     });
     return load;
   } catch {
@@ -249,7 +254,15 @@ export async function acquireTenantConnection(
       ? budget
       : Math.min(budget, request.remainingMs, answerLeft ?? Number.POSITIVE_INFINITY));
   try {
-    return await acquireUntil(pool, watchPoolLoad(pool), deadline, retries, now, sleep, random);
+    return await acquireUntil(
+      pool,
+      watchPoolLoad(pool, now),
+      deadline,
+      retries,
+      now,
+      sleep,
+      random,
+    );
   } catch (error) {
     // WP-2423 (reads-under-burst): every connection was busy with other work until the request's
     // wait ran out (the pool's own queue, or too many connections): the rush. Anything else (a
@@ -297,7 +310,7 @@ async function acquireUntil(
       );
       // The rush only when the pool was full of other work or the database was answering it; a
       // connect that hangs with nothing answered is a fault.
-      if (poolFullOfWork(pool, load) || poolBusyAndAnswering(load, Date.now()))
+      if (poolFullOfWork(pool, load) || poolBusyAndAnswering(load, now()))
         Object.defineProperty(queued, rushCause, { value: true });
       throw queued;
     } catch (error) {
@@ -314,7 +327,7 @@ async function acquireUntil(
           isRushAttemptFailure(
             error,
             poolFullOfWork(pool, load),
-            poolBusyAndAnswering(load, Date.now()),
+            poolBusyAndAnswering(load, now()),
           ),
         );
       await sleep(pause);

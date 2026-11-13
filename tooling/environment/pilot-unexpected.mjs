@@ -1,4 +1,5 @@
 import console from "node:console";
+import { noteRequestRealFault } from "../../apps/api/dist/request-acquire-budget.js";
 
 /**
  * Logs an unexpected failure as its event, error code and source frames only: never the message
@@ -56,9 +57,14 @@ const ruleOf = (error) => {
   return null;
 };
 const budgetKey = Symbol.for("bop.database.request-acquire-budget");
-/** The rush turned the current request away and no real fault met it (the shared budget). */
-function turnedAwayByRush() {
+/**
+ * The rush turned the current request away and no real fault met it (the shared budget). Review:
+ * the error being logged counts too: a programming error or a database refusal that is not the
+ * rush's own (42501, a constraint) marks the request faulted and is logged as the fault it is.
+ */
+function turnedAwayByRush(error) {
   try {
+    if (noteRequestRealFault(error)) return false;
     const budget = globalThis[budgetKey]?.getStore();
     return budget?.shed === true && budget.faulted !== true;
   } catch {
@@ -69,7 +75,7 @@ function turnedAwayByRush() {
 const alreadyLogged = new WeakSet();
 export function reportUnexpected(event, error, context = {}) {
   if (error !== null && typeof error === "object") alreadyLogged.add(error);
-  const wait = context.level === undefined ? turnedAwayByRush() : context.level === 40;
+  const wait = context.level === undefined ? turnedAwayByRush(error) : context.level === 40;
   const { code, codeMessage } = codeOf(error);
   const rule = ruleOf(error);
   // v15 2026-11-01: a wrapped error names the code of what it wraps (owner services rewrite
@@ -150,7 +156,7 @@ export function createMerchantRequestReporter({
   return (route, error) => {
     if (error !== null && typeof error === "object" && alreadyLogged.has(error)) return;
     const { sqlState, table, constraint } = diagnosticOf(error);
-    const wait = rushed();
+    const wait = rushed(error);
     const key = `${route} ${codeOf(error).code} ${sqlState} ${table} ${constraint} ${wait}`;
     const at = now();
     const window = windows.get(key);

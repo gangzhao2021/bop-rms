@@ -5,7 +5,11 @@ import {
   type CustomerCartDisplayView,
 } from "@rms/ordering";
 import type { CustomerCartPort, CustomerCartPortResult } from "./customer-cart.js";
-import { requestAnswerTimeLeftMs, requestWasShed } from "./request-acquire-budget.js";
+import {
+  noteRequestRealFault,
+  requestAnswerTimeLeftMs,
+  requestWasShed,
+} from "./request-acquire-budget.js";
 
 export interface CustomerCartDisplayQuery {
   /** `displayLocale`: the guest's chosen language for names (null: the session's own). */
@@ -138,7 +142,9 @@ export function createCustomerCartReadPort(
         // WP-2423 (reads-under-burst, v15 2026-11-13): a read the rush turned away (no connection
         // within its wait, its answer time spent) is the expected "busy, try again" (503 +
         // Retry-After) the phone sits out: a level-40 line. A real fault stays level 50.
-        log("CUSTOMER_CART_READ_UNAVAILABLE", error, undefined, rushed ? 40 : 50);
+        // Review: a request turned away once that then met a real fault logs the fault.
+        const faulted = noteRequestRealFault(error);
+        log("CUSTOMER_CART_READ_UNAVAILABLE", error, undefined, rushed && !faulted ? 40 : 50);
         return unavailable;
       }
     }

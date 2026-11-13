@@ -273,6 +273,17 @@ describe("authorized Pickup reads", () => {
       message: "cart is unavailable",
     });
   });
+  it("WP-2423 (rush-reads-and-orders-changes): keeps what the cart read met under its answer, so its log line can say whether it was the rush", async () => {
+    // v15 2026-11-13: 51 burst lines said only CART_DEPENDENCY_UNAVAILABLE with no cause.
+    const f = fixture();
+    const acquire = Object.assign(new Error("acquire"), { code: "TENANT_DATABASE_ACQUIRE_FAILED" });
+    f.current.mockRejectedValue(acquire);
+    await expect(f.service.read({ sessionCredential: credential })).rejects.toMatchObject({
+      code: "CART_DEPENDENCY_UNAVAILABLE",
+      message: "cart is unavailable",
+      cause: acquire,
+    });
+  });
   it("denies revocation while loading, including a missing Cart", async () => {
     for (const loaded of [cart(), null]) {
       const f = fixture();

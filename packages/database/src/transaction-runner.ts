@@ -20,7 +20,11 @@ import {
   tenantConnectionAcquireBudgetMaxMs,
   watchTenantConnectionPool,
 } from "./connection-acquire.js";
-import { noteRequestShed, requestAnswerTimeLeftMs } from "./request-acquire-budget.js";
+import {
+  noteRequestFault,
+  noteRequestShed,
+  requestAnswerTimeLeftMs,
+} from "./request-acquire-budget.js";
 
 const retryableSqlStates: ReadonlySet<string> = new Set(["55P03", "40001", "40P01"]);
 function sqlState(error: unknown): string {
@@ -624,6 +628,17 @@ function transactionState(
         // WP-2423 (reads-under-burst): cut where the read's answer time ended (the narrowed
         // limit), not by the ordinary 5 s limit: the rush, not a slow statement.
         if (diagnostic.sqlState === "57014" && statementLimit < statementLimitMs) noteRequestShed();
+        // WP-2423 (rush-reads-and-orders-changes review): any other refusal (a missing grant
+        // 42501, a constraint, a lost connection) is a real fault of this request, even when an
+        // earlier step was turned away by the rush: it is logged as the fault it is (level 50).
+        // A conflict the caller may run again, too many connections (53300) and a statement cut
+        // by its time limit (57014: slow under load, as before neither) are not.
+        else if (
+          !retryableSqlStates.has(sqlState(error)) &&
+          diagnostic.sqlState !== "53300" &&
+          diagnostic.sqlState !== "57014"
+        )
+          noteRequestFault();
         if (retryableSqlStates.has(sqlState(error))) {
           conflicted = true;
           conflictDiagnostic ??= diagnostic;
