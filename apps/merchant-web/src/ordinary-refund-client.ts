@@ -24,6 +24,8 @@ export class OrdinaryRefundClientError extends Error {
       | "RecoveryCashOnly"
       /** b12: cash comes back in whole nickels (nothing was recorded). */
       | "RecoveryWholeNickels"
+      /** b13: nothing (0) taken back is not recorded (an amount, never a permission). */
+      | "RecoveryAmountZero"
       /**
        * WP-2423 M10: "stop making it too" the kitchen or the counter can't do as asked (the refund
        * needs approval, part was handed over, every dish would be stopped, the kitchen just
@@ -370,6 +372,8 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
         if (error === "recovery_cash_only") throw new OrdinaryRefundClientError("RecoveryCashOnly");
         if (error === "recovery_whole_nickels")
           throw new OrdinaryRefundClientError("RecoveryWholeNickels");
+        if (error === "recovery_amount_zero")
+          throw new OrdinaryRefundClientError("RecoveryAmountZero");
       }
       // v15 2026-10-18: a read that met a refund recorded while it was loading answers 409
       // changed_while_loading; a busy server answers 503 retry_later. Neither is a refusal.
@@ -451,6 +455,7 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
             error.code === "RecoveryConflict" ||
             error.code === "RecoveryCashOnly" ||
             error.code === "RecoveryWholeNickels" ||
+            error.code === "RecoveryAmountZero" ||
             error.code === "WithdrawNeedsApproval" ||
             error.code === "WithdrawHandedOver" ||
             error.code === "WithdrawEverything" ||
@@ -482,6 +487,8 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
         // v15 batch 8: a counter cash payment (absent from an older server: not known as cash).
         const withCash = Object.hasOwn(reply, "paidInCash");
         const withCashLeft = Object.hasOwn(reply, "cashLeftMinor");
+        // b13: the cash given back for a cash payment's refunds (absent from an older server).
+        const withCashGiven = Object.hasOwn(reply, "cashGivenBackMinor");
         // b10: an order paid only in cash: the cash the guest can still hand back (absent from an
         // older server: the page falls back to the confirmed refunds).
         const withCashTakeBack = Object.hasOwn(reply, "cashTakeBackLeftMinor");
@@ -505,6 +512,7 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
           ...(withRecovery ? ["canRecover", "recoveries"] : []),
           ...(withCash ? ["paidInCash"] : []),
           ...(withCashLeft ? ["cashLeftMinor"] : []),
+          ...(withCashGiven ? ["cashGivenBackMinor"] : []),
           ...(withCashTakeBack ? ["cashTakeBackLeftMinor"] : []),
           ...(withUnreadable ? ["recoveryUnreadable"] : []),
         ]);
@@ -532,6 +540,15 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
           (!paidInCash ||
             typeof cashLeftMinor !== "string" ||
             !/^(0|[1-9][0-9]{0,17})$/u.test(cashLeftMinor))
+        )
+          return fail();
+        const cashGivenBackMinor = withCashGiven ? data.cashGivenBackMinor : null;
+        if (
+          cashGivenBackMinor !== null &&
+          (!paidInCash ||
+            typeof cashGivenBackMinor !== "string" ||
+            !/^(0|[1-9][0-9]{0,17})$/u.test(cashGivenBackMinor) ||
+            BigInt(cashGivenBackMinor) % 5n !== 0n)
         )
           return fail();
         const cashTakeBackLeftMinor = withCashTakeBack ? data.cashTakeBackLeftMinor : null;
@@ -601,6 +618,8 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
            */
           paidInCash,
           cashLeftMinor: cashLeftMinor as string | null,
+          /** b13: the cash the drawer gave back for its refunds (null: not cash, older server). */
+          cashGivenBackMinor: cashGivenBackMinor as string | null,
           currencyCode: data.paymentState === "Captured" ? ("CAD" as const) : null,
           capturedAmountMinor,
           confirmedRefundMinor,
@@ -946,7 +965,13 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
         )
           return fail();
         const recentRequests = data.recentRequests.map((value, index) => {
+          // b13: a counter cash request's cash (whole nickels; absent: not cash, older server).
+          const inCash =
+            value !== null &&
+            typeof value === "object" &&
+            Object.hasOwn(value, "cashGivenBackMinor");
           const entry = exact(value, [
+            ...(inCash ? ["cashGivenBackMinor"] : []),
             "requestReference",
             "operationReference",
             "claimVersion",
@@ -998,10 +1023,14 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
             typeof entry.reasonCode !== "string" ||
             !/^[A-Z][A-Z0-9_]{0,63}$/u.test(entry.reasonCode) ||
             entry.currencyCode !== "CAD" ||
-            money(entry.amountMinor) === "0"
+            money(entry.amountMinor) === "0" ||
+            (inCash &&
+              (entry.paymentMethod !== "CardMachine" ||
+                BigInt(money(entry.cashGivenBackMinor)) % 5n !== 0n))
           )
             return fail();
           return Object.freeze({
+            ...(inCash ? { cashGivenBackMinor: money(entry.cashGivenBackMinor) } : {}),
             requestReference: ref(entry.requestReference),
             operationReference: ref(entry.operationReference),
             claimVersion: count(entry.claimVersion, 1, 1000),

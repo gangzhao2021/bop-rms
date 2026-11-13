@@ -24,6 +24,7 @@ const cash = {
   paymentMethod: "CardMachine" as const,
   paidInCash: true,
   cashLeftMinor: "0" as string | null,
+  cashGivenBackMinor: null as string | null,
   currencyCode: "CAD" as const,
   capturedAmountMinor: "367",
   confirmedRefundMinor: "367",

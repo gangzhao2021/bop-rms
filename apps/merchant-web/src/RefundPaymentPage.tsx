@@ -207,6 +207,7 @@ function requestTone(
 function RequestRow({
   entry,
   amountMinor = entry.amountMinor,
+  cash = false,
   tone,
   state,
   action,
@@ -214,6 +215,8 @@ function RequestRow({
 }: {
   readonly entry: Items["recentRequests"][number];
   readonly amountMinor?: string;
+  /** b13: `amountMinor` is the cash given back for the request (whole nickels). */
+  readonly cash?: boolean;
   readonly tone: RequestTone;
   readonly state: string;
   readonly action?: ReactNode;
@@ -229,6 +232,13 @@ function RequestRow({
         {action}
       </div>
       <p className="refund-request__meta">
+        {/* b13: a cash refund is headed by the cash that leaves the drawer (whole nickels); the
+            refund itself is named here, so both amounts of one refund are read together. */}
+        {cash && amountMinor !== entry.amountMinor
+          ? t("Refund of {amount}, in cash rounded to 5 cents", {
+              amount: amount(entry.amountMinor),
+            }) + " · "
+          : null}
         {t("Request {value}", { value: entry.claimVersion })} ·{" "}
         {describeRefundReason(entry.reasonCode)} · <SourceTime instant={entry.requestedAt} />
       </p>
@@ -417,6 +427,9 @@ function RecordedRequestStatus({
   return (
     <RequestRow
       entry={entry}
+      // b13: a counter cash request is headed by the cash given back (or to give back).
+      amountMinor={paidInCash ? (entry.cashGivenBackMinor ?? entry.amountMinor) : entry.amountMinor}
+      cash={paidInCash && entry.cashGivenBackMinor !== undefined}
       tone={requestTone(entry, approval?.state ?? null)}
       state={requestProgressLabel(
         entry.progress,
@@ -424,20 +437,20 @@ function RecordedRequestStatus({
         approval?.state ?? null,
         paidInCash,
       )}
+      // b13: one Refresh for the whole page (under the payment amounts) reads every request
+      // again; a request done with offers only its details.
       action={
-        <button
-          type="button"
-          className="refund-text refund-request__refresh"
-          disabled={busy || preparing.size > 0}
-          aria-label={
-            opened
-              ? t("Refresh request {value}", { value: entry.claimVersion })
-              : t("Show details of request {value}", { value: entry.claimVersion })
-          }
-          onClick={() => void load("tap")}
-        >
-          {opened ? t("Refresh") : t("Details")}
-        </button>
+        opened ? null : (
+          <button
+            type="button"
+            className="refund-text refund-request__refresh"
+            disabled={busy || preparing.size > 0}
+            aria-label={t("Show details of request {value}", { value: entry.claimVersion })}
+            onClick={() => void load("tap")}
+          >
+            {t("Details")}
+          </button>
+        )
       }
     >
       {notice ? (
@@ -793,10 +806,10 @@ export const cardMachineReviewText = (
     : !canSend
       ? approvalRequired
         ? t(
-            "Paid on the store's card machine. Recording this request does not refund anything yet: once it is approved, a manager or the owner sends it from Approvals.",
+            "Paid on the store's card machine. Recording this request does not refund anything yet: once it is approved, a manager or the owner refunds it on the card machine and records it on the payment page.",
           )
         : t(
-            "Paid on the store's card machine. Recording this request does not refund anything yet: a manager or the owner sends it from Approvals.",
+            "Paid on the store's card machine. Recording this request does not refund anything yet: a manager or the owner refunds it on the card machine and records it on the payment page.",
           )
       : approvalRequired
         ? t(
@@ -872,7 +885,10 @@ function RefundWizard({
   recordedAbove = null,
   revision = 0,
   requestsRevision = 0,
+  pageRefresh = 0,
 }: {
+  /** b13: changes when staff press the page's Refresh: requests and each request are read again. */
+  readonly pageRefresh?: number;
   /** b11: the card-machine refunds the payment page lists above to record (one form each). */
   readonly recordedAbove?: RecordedAbove | null;
   /** b11: changes after a refund or payment is recorded on this page: requests are read again. */
@@ -1103,6 +1119,14 @@ function RefundWizard({
     if (requestsRevision > 0) void reloadRequests();
     // Only a new recording above rereads; reloadRequests itself changes on every render.
   }, [requestsRevision]);
+  // b13: the page's one Refresh reads the requests, their approvals and each request again,
+  // leaving what staff are choosing or confirming as it is.
+  useEffect(() => {
+    if (pageRefresh === 0) return;
+    void reloadRequests();
+    setRefreshSignal((value) => value + 1);
+    // Only a new press rereads; reloadRequests itself changes on every render.
+  }, [pageRefresh]);
   // The refundable items and this order's requests are there as soon as the page opens. Under
   // React's development double run the abort above clears the first read, so the second starts.
   useEffect(() => {
@@ -1272,15 +1296,21 @@ function RefundWizard({
                           "Request recorded for {total}. Nothing is refunded yet: it is sent once the owner approves it. Ask the owner to open Approvals on this device or theirs. If more than 15 minutes pass after your verification, you'll be asked to verify again here.",
                           { total },
                         )
-                      : !canSend
-                        ? t(
-                            "Request recorded for {total}. Nothing is refunded yet: a manager or the owner sends it from Approvals.",
+                      : !canSend && previewOnMachine
+                        ? // b13: a card-machine refund is made on the machine, never "sent".
+                          t(
+                            "Request recorded for {total}. Nothing is refunded yet: a manager or the owner refunds it on the card machine and records it on the payment page.",
                             { total },
                           )
-                        : t(
-                            "Request recorded for {total}. Now refund it on the store's card machine and record it under the request above.",
-                            { total },
-                          )),
+                        : !canSend
+                          ? t(
+                              "Request recorded for {total}. Nothing is refunded yet: a manager or the owner sends it from Approvals.",
+                              { total },
+                            )
+                          : t(
+                              "Request recorded for {total}. Now refund it on the store's card machine and record it under the request above.",
+                              { total },
+                            )),
         );
         // The request appears in the list (and its units leave the selection) straight away.
         void reloadRequests();
@@ -1342,25 +1372,17 @@ function RefundWizard({
     refundStopOffered(item, items?.canWithdraw === true, canSend);
   const stops = (item: RefundItem) =>
     stopOffered(item) && (stopMaking[item.orderItemReference] ?? stopMakingByDefault(item.kitchen));
-  // The items and requests load by themselves; rereading them is offered when it has a purpose:
-  // a failed read, an unknown result, a recorded request, or a follower watching the list.
+  // The items and requests load by themselves. b13: the page's one Refresh (under the payment
+  // amounts) reads them again; here only a failed read or an unknown result offers its own step.
   const refresh =
-    (items === null && state === "Busy") ||
-    (state === "Idle" && items !== null && requestable && message === "") ? null : (
+    state !== "Unknown" && (items !== null || state === "Busy") ? null : (
       <button
         type="button"
         className="refund-text"
-        disabled={state === "Busy" || preparing.size > 0}
-        aria-label={
-          state === "Unknown" || items === null ? undefined : t("Refresh refund requests and items")
-        }
+        disabled={preparing.size > 0}
         onClick={() => void load()}
       >
-        {state === "Unknown"
-          ? t("Check whether it was recorded")
-          : items === null
-            ? t("Try again")
-            : t("Refresh")}
+        {state === "Unknown" ? t("Check whether it was recorded") : t("Try again")}
       </button>
     );
   // b12: a card-machine or cash refund still to make on this payment is listed once, above with
@@ -1870,10 +1892,13 @@ export function PaymentFinancialSummary({
   csrf,
   revision,
   onContext,
+  onRefresh,
 }: {
   initial: Context;
   csrf: string;
   revision: number;
+  /** b13: the page's one Refresh also reads the refunds below again. */
+  onRefresh?: () => void;
   /** The reread payment, so what the page offers next follows the current amounts. */
   onContext: (context: Context) => void;
 }) {
@@ -1929,6 +1954,15 @@ export function PaymentFinancialSummary({
               <dt>{t("Refunded")}</dt>
               <dd>{amount(context.confirmedRefundMinor)}</dd>
             </div>
+            {/* b13: a cash refund leaves the drawer in whole nickels, so both figures are said. */}
+            {context.paidInCash &&
+            context.cashGivenBackMinor !== null &&
+            context.cashGivenBackMinor !== "0" ? (
+              <div>
+                <dt>{t("Cash given back from the drawer")}</dt>
+                <dd>{amount(context.cashGivenBackMinor)}</dd>
+              </div>
+            ) : null}
             <div>
               <dt>{t("Being refunded")}</dt>
               <dd>{amount(context.pendingRefundMinor)}</dd>
@@ -1962,8 +1996,15 @@ export function PaymentFinancialSummary({
           type="button"
           className="refund-text"
           disabled={busy}
-          aria-label={t("Refresh payment amounts")}
-          onClick={() => setRefresh((value) => value + 1)}
+          aria-label={
+            onRefresh === undefined
+              ? t("Refresh payment amounts")
+              : t("Refresh the payment and its refunds")
+          }
+          onClick={() => {
+            setRefresh((value) => value + 1);
+            onRefresh?.();
+          }}
         >
           {t("Refresh")}
         </button>
@@ -2050,10 +2091,13 @@ export function PendingCardMachineRefunds({
   csrf,
   onFinancialChange,
   onListed,
+  pageRefresh = 0,
 }: {
   readonly context: Context;
   readonly csrf: string;
   readonly onFinancialChange: () => void;
+  /** b13: changes when staff press the page's Refresh: this list is read again. */
+  readonly pageRefresh?: number;
   /**
    * b11 review: told which requests are listed here with a record form (none while hidden), and
    * (b12) which of them have nothing left to do elsewhere, so the list below leaves them out.
@@ -2128,7 +2172,15 @@ export function PendingCardMachineRefunds({
       }
     })();
     return () => controller.abort();
-  }, [owed, context.orderReference, context.paymentIntentReference, pendingMinor, csrf, reload]);
+  }, [
+    owed,
+    context.orderReference,
+    context.paymentIntentReference,
+    pendingMinor,
+    csrf,
+    reload,
+    pageRefresh,
+  ]);
   const listed =
     hidden || refunds === null ? "" : refunds.map((r) => r.entry.requestReference).join(",");
   // Only requests listed here now (a refund recorded since is listed below again).
@@ -2177,6 +2229,7 @@ export function PendingCardMachineRefunds({
                 entry={entry}
                 // b12: the cash that goes back (whole nickels), the amount every line here says.
                 amountMinor={cashMinor ?? amountMinor}
+                cash={cashMinor !== null}
                 tone={requestTone(entry, approval?.state ?? null)}
                 state={requestProgressLabel(
                   entry.progress,
@@ -2253,6 +2306,9 @@ function PaymentContent({
   const refreshFinancial = useCallback(() => setFinancialRevision((value) => value + 1), []);
   // b12: a refund recorded above, under its request: the request list is read again too.
   const [requestsRevision, setRequestsRevision] = useState(0);
+  // b13: the page's one Refresh (under the payment amounts) reads everything on it again.
+  const [pageRefresh, setPageRefresh] = useState(0);
+  const refreshPage = useCallback(() => setPageRefresh((value) => value + 1), []);
   const recordedAboveChange = useCallback(() => {
     refreshFinancial();
     setRequestsRevision((value) => value + 1);
@@ -2327,6 +2383,7 @@ function PaymentContent({
             csrf={csrf}
             revision={financialRevision}
             onContext={setContext}
+            onRefresh={refreshPage}
           />
           {!wizard ? (
             <PendingCardMachineRefunds
@@ -2334,6 +2391,7 @@ function PaymentContent({
               csrf={csrf}
               onFinancialChange={recordedAboveChange}
               onListed={onListed}
+              pageRefresh={pageRefresh}
             />
           ) : null}
           {!wizard ? (
@@ -2366,6 +2424,7 @@ function PaymentContent({
               recordedAbove={wizard ? null : { paymentIntentReference, ...listedAbove }}
               revision={financialRevision}
               requestsRevision={requestsRevision}
+              pageRefresh={pageRefresh}
             />
           )}
         </>
@@ -2435,6 +2494,12 @@ export function moneyTakenBackFailure(error: unknown): {
   if (code === "RecoveryWholeNickels")
     return {
       message: t("Cash comes back in whole nickels, for example 3.65. Nothing was recorded."),
+      attemptAnswered: true,
+      reread: false,
+    };
+  if (code === "RecoveryAmountZero")
+    return {
+      message: t("Enter the amount taken back; it must be more than $0.00. Nothing was recorded."),
       attemptAnswered: true,
       reread: false,
     };

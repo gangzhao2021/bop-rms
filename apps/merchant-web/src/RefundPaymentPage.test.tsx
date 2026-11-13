@@ -46,6 +46,7 @@ const context = {
   paymentMethod: "CardMachine" as const,
   paidInCash: false,
   cashLeftMinor: null,
+  cashGivenBackMinor: null,
   currencyCode: "CAD" as const,
   capturedAmountMinor: "593",
   confirmedRefundMinor: "0",
@@ -528,17 +529,24 @@ it("WP-2423 M14: a cashier's review never says the refund is sent on confirming"
 });
 
 it("v15 batch 5: a cashier's card-machine review matches what they are told after recording", () => {
-  // The review told a cashier to refund on the machine and record it, which a cashier can't do;
-  // after recording they read that a manager or the owner sends it from Approvals.
+  // The review told a cashier to refund on the machine and record it, which a cashier can't do.
+  // b13: nor is a card-machine refund "sent from Approvals": a manager or the owner refunds it on
+  // the card machine and records it on the payment page, as the request line says.
   for (const approvalRequired of [false, true]) {
     const cashier = cardMachineReviewText(approvalRequired, false);
-    expect(cashier).toContain("a manager or the owner sends it from Approvals");
+    expect(cashier).toContain(
+      "a manager or the owner refunds it on the card machine and records it on the payment page",
+    );
+    expect(cashier).not.toMatch(/sends? it|Approvals/u);
     expect(cashier).not.toContain("refund this amount on that machine");
   }
   expect(cardMachineReviewText(false, true)).toContain("refund this amount on that machine");
   expect(cardMachineReviewText(true, true)).toContain("recorded and approved");
   setLanguageForTest("zh-Hans");
-  expect(cardMachineReviewText(false, false)).toContain("由店长或店主在“审批”里发出");
+  expect(cardMachineReviewText(false, false)).toContain(
+    "由店长或店主在刷卡机上退款，并在付款页记录",
+  );
+  expect(cardMachineReviewText(false, false)).not.toContain("审批");
   expect(cardMachineReviewText(true, false)).toContain("批准后");
 });
 
@@ -638,4 +646,61 @@ it("tells a cashier that a manager or the owner makes and records the machine or
   expect(cardMachineRefundBySenderText("$2.83", "$2.85")).toBe(
     "还没退还。由店长或店主从钱箱退还现金 $2.85，再在这里记录。",
   );
+});
+
+it("b13: a cash payment says both the refund and the cash given back, with one Refresh for the page", () => {
+  // v15 b12 live: after $5.10 left the drawer for a $5.09 refund, the page read "Refunded $5.09"
+  // only, and the refund page had three Refresh links.
+  const html = renderToStaticMarkup(
+    <PaymentFinancialSummary
+      initial={{
+        ...context,
+        paidInCash: true,
+        cashLeftMinor: "0",
+        cashGivenBackMinor: "510",
+        capturedAmountMinor: "509",
+        confirmedRefundMinor: "509",
+        pendingRefundMinor: "0",
+      }}
+      csrf={"a".repeat(43)}
+      revision={0}
+      onContext={vi.fn()}
+      onRefresh={vi.fn()}
+    />,
+  );
+  expect(html).toContain("<dt>Refunded</dt><dd>$5.09</dd>");
+  expect(html).toContain("<dt>Cash given back from the drawer</dt><dd>$5.10</dd>");
+  expect(html.match(/>Refresh</gu)).toHaveLength(1);
+  expect(html).toContain('aria-label="Refresh the payment and its refunds"');
+  // A card payment has no cash line.
+  const card = renderToStaticMarkup(
+    <PaymentFinancialSummary
+      initial={context}
+      csrf={"a".repeat(43)}
+      revision={0}
+      onContext={vi.fn()}
+    />,
+  );
+  expect(card).not.toContain("Cash given back");
+  setLanguageForTest("zh-Hans");
+  expect(
+    renderToStaticMarkup(
+      <PaymentFinancialSummary
+        initial={{ ...context, paidInCash: true, cashLeftMinor: "0", cashGivenBackMinor: "510" }}
+        csrf={"a".repeat(43)}
+        revision={0}
+        onContext={vi.fn()}
+      />,
+    ),
+  ).toContain("从钱箱退还的现金");
+});
+
+it("b13: a take-back of nothing is told as an amount to enter, never as a permission refusal", () => {
+  const answer = moneyTakenBackFailure(new OrdinaryRefundClientError("RecoveryAmountZero"));
+  expect(answer).toEqual({
+    message: "Enter the amount taken back; it must be more than $0.00. Nothing was recorded.",
+    attemptAnswered: true,
+    reread: false,
+  });
+  expect(answer.message).not.toMatch(/manager|owner|permission/iu);
 });

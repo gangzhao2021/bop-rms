@@ -8322,10 +8322,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "这笔款是在门店刷卡机上付的。申请记录并批准后，请在那台刷卡机上退这笔金额，再到申请下记录。",
   "Paid on the store's card machine. After the request is recorded, refund this amount on that machine and record it under the request.":
     "这笔款是在门店刷卡机上付的。申请记录后，请在那台刷卡机上退这笔金额，再到申请下记录。",
-  "Paid on the store's card machine. Recording this request does not refund anything yet: once it is approved, a manager or the owner sends it from Approvals.":
-    "这笔款是在门店刷卡机上付的。记录这笔申请还不会退款：批准后，由店长或店主在“审批”里发出。",
-  "Paid on the store's card machine. Recording this request does not refund anything yet: a manager or the owner sends it from Approvals.":
-    "这笔款是在门店刷卡机上付的。记录这笔申请还不会退款：由店长或店主在“审批”里发出。",
+  "Paid on the store's card machine. Recording this request does not refund anything yet: once it is approved, a manager or the owner refunds it on the card machine and records it on the payment page.":
+    "这笔款是在门店刷卡机上付的。记录这笔申请还不会退款：批准后，由店长或店主在刷卡机上退款，并在付款页记录。",
+  "Paid on the store's card machine. Recording this request does not refund anything yet: a manager or the owner refunds it on the card machine and records it on the payment page.":
+    "这笔款是在门店刷卡机上付的。记录这笔申请还不会退款：由店长或店主在刷卡机上退款，并在付款页记录。",
   "Paid on the store's card machine. Its refunds are made on that machine and recorded here; they count on the day they are made.":
     "这笔款是在门店刷卡机上付的。退款要在那台刷卡机上办理，再到这里记录，并计入办理当天。",
   "Paid, refund pending": "已付款，退款处理中",
@@ -9793,4 +9793,11 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "请先核对纸质签购单。你的回答会和你的名字一起记录。如果这笔销售已经在那张订单里，请不要再录入。",
   "Same slip, it also paid for this order": "同一张签购单，也付了这单",
   "Another slip with the same reference": "另一张签购单，参考号相同",
+  "Request recorded for {total}. Nothing is refunded yet: a manager or the owner refunds it on the card machine and records it on the payment page.":
+    "已记录 {total} 的退款申请。还没有退款：由店长或店主在刷卡机上退款，并在付款页记录。",
+  "Refund of {amount}, in cash rounded to 5 cents": "退款 {amount}，现金按 5 分取整",
+  "Refresh the payment and its refunds": "刷新这笔付款和退款",
+  "Cash given back from the drawer": "从钱箱退还的现金",
+  "Enter the amount taken back; it must be more than $0.00. Nothing was recorded.":
+    "请输入收回的金额，必须大于 $0.00。没有记录。",
 });
