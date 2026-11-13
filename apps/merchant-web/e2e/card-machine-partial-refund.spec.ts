@@ -829,8 +829,9 @@ test("@production a cashier sees who makes a card-machine refund and is offered 
 
 // b11 (refund-cashier-authorization): the owner (Sole operator off) opens the payment page of a
 // cashier's card-machine refund request. It is listed once with one record form, under Refunds to
-// make on the card machine; the refund requests list points there, and reads it as recorded once
-// it is, without a reload. The blocked note never says the owner cannot record it.
+// make on the card machine (b12: not a second time in the refund requests list), and once recorded
+// it is listed under the order's refunds with its own line saying "Refunded on the card machine",
+// without a reload. The blocked note never says the owner cannot record it.
 test("@production an owner records a cashier's card-machine refund from one place on the payment page", async ({
   page,
 }) => {
@@ -981,9 +982,10 @@ test("@production an owner records a cashier's card-machine refund from one plac
   const action = pending.getByRole("button", { name: "Record the $2.83 card-machine refund" });
   await expect(action).toBeVisible();
   const requests = page.getByRole("region", { name: "Refunds on this order" });
-  await expect(requests).toContainText(
-    "Refund $2.83 on the card machine, then record it above, under Refunds to make on the card machine.",
-  );
+  // b12: the request is listed once, above with its record step.
+  await expect(pending.getByText(/^Request 1 ·/u)).toBeVisible();
+  await expect(page.getByText(/^Request 1 ·/u)).toHaveCount(1);
+  await expect(requests).toHaveCount(0);
   // One record control and no second slip field anywhere on the page.
   await expect(
     page.getByRole("button", { name: /card-machine refund|on card machine/u }),
@@ -1008,8 +1010,12 @@ test("@production an owner records a cashier's card-machine refund from one plac
   await expect(
     pending.getByText(/^Card-machine refund recorded: \$2\.83 refunded on the card machine/u),
   ).toBeVisible();
-  // The request list reads it as recorded without a reload: nothing to do there any more.
-  await expect(requests).not.toContainText("then record it above");
+  // The request list reads it as recorded without a reload: its own line says so (b12).
+  await expect(requests.locator(".refund-request__state")).toHaveText(
+    "Refunded on the card machine",
+  );
+  await expect(page.getByText("To refund on the card machine")).toHaveCount(0);
+  await expect(page.getByText(/^Request 1 ·/u)).toHaveCount(1);
   await expect(page.getByRole("button", { name: /on card machine/u })).toHaveCount(0);
   expect(records).toHaveLength(1);
   await expectNoInternalText(page);

@@ -912,10 +912,6 @@ function RefundWizard({
   const [preparing, setPreparing] = useState<ReadonlySet<string>>(new Set());
   // Staff refreshed the whole list: every open request rereads its status too.
   const [refreshSignal, setRefreshSignal] = useState(0);
-  // b11: a refund recorded elsewhere on this page is shown here as recorded, never as still to do.
-  useEffect(() => {
-    if (revision > 0) setRefreshSignal((value) => value + 1);
-  }, [revision]);
   // WP-2423 item 6: one confirmation records, prepares and sends a refund needing no approval.
   // The run keeps every step's references, so a retry resumes where it stopped.
   const run = useRef<RefundRun<Submitted> | null>(null),
@@ -1094,6 +1090,15 @@ function RefundWizard({
       if (requestsRefresh.current === controller) requestsRefresh.current = null;
     }
   };
+  // b11: a refund recorded elsewhere on this page is shown here as recorded, never as still to do.
+  // b12: the list is read again too, so each request's own line says where it stands now (it
+  // said "To refund on the card machine" until a reload).
+  useEffect(() => {
+    if (revision === 0) return;
+    setRefreshSignal((value) => value + 1);
+    void reloadRequests();
+    // Only a new revision rereads; reloadRequests itself changes on every render.
+  }, [revision]);
   // The refundable items and this order's requests are there as soon as the page opens. Under
   // React's development double run the abort above clears the first read, so the second starts.
   useEffect(() => {
@@ -1354,7 +1359,17 @@ function RefundWizard({
             : t("Refresh")}
       </button>
     );
-  const showRequests = items !== null && (items.recentRequests.length > 0 || !requestable);
+  // b12: a card-machine or cash refund still to make on this payment is listed once, above with
+  // its record step; here are the order's other requests and those already made.
+  const listedRequests =
+    items === null
+      ? []
+      : items.recentRequests.filter(
+          (entry) => recordedAbove === null || !recordedAbove.requests.has(entry.requestReference),
+        );
+  const showRequests =
+    items !== null &&
+    (listedRequests.length > 0 || (!requestable && items.recentRequests.length === 0));
   return (
     <section aria-label={t("Refund")} data-screen-id="PAY-REFUND-WIZARD" className="refund-wizard">
       {items !== null && showRequests ? (
@@ -1379,7 +1394,7 @@ function RefundWizard({
             </p>
           ) : null}
           <ol>
-            {items.recentRequests.map((entry) => (
+            {listedRequests.map((entry) => (
               <li key={entry.requestReference} className="refund-request">
                 {entry.decline !== null ? (
                   <RequestRow
@@ -2123,7 +2138,8 @@ export function PendingCardMachineRefunds({
             <li key={entry.requestReference} className="refund-request">
               <RequestRow
                 entry={entry}
-                amountMinor={amountMinor}
+                // b12: the cash that goes back (whole nickels), the amount every line here says.
+                amountMinor={cashMinor ?? amountMinor}
                 tone={requestTone(entry, approval?.state ?? null)}
                 state={requestProgressLabel(
                   entry.progress,

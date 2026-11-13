@@ -1195,6 +1195,138 @@ test("@production a cashier's cash refund names a manager giving it back from th
   await expect(main).not.toContainText("then record it here");
 });
 
+// b12: a cashier opened the payment page of cash order 18 after asking for a $5.09 refund. It was
+// listed twice, under Cash to give back (headed $5.09, "gives back $5.10") and again under the
+// order's refund requests, each with its own Refresh. It is listed once, at the cash that goes back.
+test("@production a cashier's cash refund is listed once on the payment page, at the cash that goes back", async ({
+  page,
+}) => {
+  await signIn(page);
+  const intent = id(361),
+    attempt = id(362);
+  await page.route("**/merchant/payments/refunds/approvals", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        observedAt: new Date().toISOString(),
+        canApprove: false,
+        soleOperator: null,
+        entries: [],
+      },
+    }),
+  );
+  await page.route("**/merchant/payments/refunds/context", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        paymentIntentReference: intent,
+        paymentAttemptReference: attempt,
+        orderReference: id(360),
+        orderBatchReference: id(363),
+        observedAt: new Date().toISOString(),
+        paymentState: "Captured",
+        paymentMethod: "CardMachine",
+        paidInCash: true,
+        cashLeftMinor: "510",
+        currencyCode: "CAD",
+        capturedAmountMinor: "509",
+        confirmedRefundMinor: "0",
+        pendingRefundMinor: "509",
+        canRequest: true,
+        requestBlocked: null,
+        canSend: false,
+      },
+    }),
+  );
+  await page.route("**/merchant/payments/refunds/items", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        orderReference: id(360),
+        orderNumber: "18",
+        canRequest: true,
+        claimVersion: 1,
+        recentRequests: [
+          {
+            requestReference: id(364),
+            operationReference: id(365),
+            claimVersion: 1,
+            requestedAt: "2026-11-12T16:30:00.000Z",
+            reasonCode: "QUALITY_ISSUE",
+            currencyCode: "CAD",
+            amountMinor: "509",
+            decline: null,
+            progress: "Recorded",
+            paymentMethod: "CardMachine",
+          },
+        ],
+        items: [
+          {
+            orderBatchReference: id(363),
+            orderItemReference: id(366),
+            label: "Lemon tea (TEST)",
+            quantity: 1,
+            unclaimedQuantity: 0,
+            paymentCaptured: true,
+            refundedByCancellation: false,
+            paymentIntentReference: intent,
+            paymentMethod: "CardMachine",
+          },
+        ],
+      },
+    }),
+  );
+  await page.route("**/merchant/payments/refunds/status", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        orderReference: id(360),
+        requestReference: id(364),
+        operationReference: id(365),
+        observedAt: new Date().toISOString(),
+        currencyCode: "CAD",
+        amountMinor: "509",
+        payments: [
+          {
+            paymentAttemptReference: attempt,
+            paymentIntentReference: intent,
+            state: "NotDispatched",
+            method: "CardMachine",
+            refundedOnCardMachineAt: null,
+            cardMachineSlipReference: null,
+            executionOperationReference: null,
+            executionApprovalReference: null,
+            amountMinor: "509",
+            confirmedMinor: "0",
+            pendingMinor: "509",
+            cashGivenBackMinor: "510",
+          },
+        ],
+      },
+    }),
+  );
+  const main = page.getByRole("main");
+  await page.goto("/app/operations/payments/" + intent);
+  const cash = page.getByRole("region", { name: "Cash to give back" });
+  await expect(cash).toContainText(
+    "Not given back yet. A manager or the owner gives back $5.10 in cash and records it.",
+  );
+  await expect(cash.locator(".refund-request__amount")).toHaveText("$5.10");
+  await expect(main.getByText(/^Request 1 ·/u)).toHaveCount(1);
+  await expect(main.locator(".refund-request__amount")).toHaveCount(1);
+  await expect(main.getByRole("button", { name: /^Refresh/u })).toHaveCount(1);
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.screenshot({
+      path: test.info().outputPath("cashier-cash-refund-once-" + width + ".png"),
+      fullPage: true,
+    });
+  }
+});
+
 test("@production on Approvals a cash refund is approved and given back from the drawer, never on the machine", async ({
   page,
 }) => {
