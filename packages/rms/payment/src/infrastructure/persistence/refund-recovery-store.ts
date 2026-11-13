@@ -38,6 +38,10 @@ export class RefundRecoveryError extends Error {
     readonly code:
       | "REFUND_RECOVERY_INPUT_INVALID"
       | "REFUND_RECOVERY_ABOVE_REFUNDED"
+      /** b12: an Order paid only in cash takes back cash, never a card-machine charge. */
+      | "REFUND_RECOVERY_CASH_ONLY"
+      /** b12: cash comes back in whole nickels. */
+      | "REFUND_RECOVERY_WHOLE_NICKELS"
       | "REFUND_RECOVERY_CONFLICT"
       | "REFUND_RECOVERY_UNAVAILABLE",
   ) {
@@ -308,8 +312,10 @@ export function createPostgresRefundRecoveryStore(options: {
       { orderReference, observedAt },
     );
     // b10: an Order paid only in cash gets back cash, in whole nickels (never a card charge).
-    if (allowance.cashOnly && (input.method !== "Cash" || input.amountMinor % 5n !== 0n))
-      return fail("REFUND_RECOVERY_INPUT_INVALID");
+    // b12: each refused for its own reason (an amount or method, never the person's permission).
+    if (allowance.cashOnly && input.method !== "Cash") return fail("REFUND_RECOVERY_CASH_ONLY");
+    if (allowance.cashOnly && input.amountMinor % 5n !== 0n)
+      return fail("REFUND_RECOVERY_WHOLE_NICKELS");
     if (input.amountMinor > allowance.leftMinor) return fail("REFUND_RECOVERY_ABOVE_REFUNDED");
     await setScope(tx, scope);
     const inserted = await tx.query<Record<string, unknown>>(

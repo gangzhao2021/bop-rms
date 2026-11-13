@@ -302,6 +302,16 @@ export function installMerchantRefundRoutes(
             .json({ error: "recovery_above_refunded" });
           return;
         }
+        // b12: an order paid only in cash takes back cash, in whole nickels: the amount or the
+        // method is wrong, never the person's permission (nothing was recorded).
+        for (const [code, answer] of [
+          ["REFUND_RECOVERY_CASH_ONLY", "recovery_cash_only"],
+          ["REFUND_RECOVERY_WHOLE_NICKELS", "recovery_whole_nickels"],
+        ] as const)
+          if (failureNamed(error, code)) {
+            response.status(422).set("Cache-Control", NO_STORE).json({ error: answer });
+            return;
+          }
         // WP-2423 M163: the same attempt was already recorded with other details.
         if (failureNamed(error, "REFUND_RECOVERY_CONFLICT")) {
           response.status(409).set("Cache-Control", NO_STORE).json({ error: "recovery_conflict" });

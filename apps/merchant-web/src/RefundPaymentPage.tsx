@@ -2356,6 +2356,20 @@ export function moneyTakenBackFailure(error: unknown): {
       attemptAnswered: true,
       reread: false,
     };
+  if (code === "RecoveryCashOnly")
+    return {
+      message: t(
+        "This order was paid in cash, so money taken back is cash only. Nothing was recorded.",
+      ),
+      attemptAnswered: true,
+      reread: true,
+    };
+  if (code === "RecoveryWholeNickels")
+    return {
+      message: t("Cash comes back in whole nickels, for example 3.65. Nothing was recorded."),
+      attemptAnswered: true,
+      reread: false,
+    };
   if (code === "RecoveryConflict")
     return {
       message: t(

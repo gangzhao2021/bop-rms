@@ -26,7 +26,11 @@ import { CardMachineRefundCommandError } from "./merchant-card-machine-refund.js
 import { OrderCloseCommandError } from "./merchant-dining-order-close-command.js";
 import { DiningServeReadyError } from "./merchant-dining-serve-ready-command.js";
 import { BrowserSessionError } from "@bop/identity";
-import { parsePaymentReference, ReconciliationFollowUpError } from "@rms/payment";
+import {
+  parsePaymentReference,
+  ReconciliationFollowUpError,
+  RefundRecoveryError,
+} from "@rms/payment";
 import { parsePaymentInstant } from "@rms/payment";
 import { DiningClosingError, parseDiningReference } from "@rms/dining";
 import { FulfillmentReadinessError } from "@rms/fulfillment";
@@ -7627,6 +7631,41 @@ it("b10: Approvals carries the cash a counter cash refund gives back from the dr
   const body = (await ok.json()) as { entries: { cashGivenBackMinor?: unknown }[] };
   expect(body.entries.map((value) => value.cashGivenBackMinor)).toEqual(["13180", null]);
   expect(body.entries[0]).toEqual(entry("13180"));
+});
+
+// b12 cash-refund-approvals: money taken back on a cash order with the card machine or odd cents
+// was answered 403 request_denied, the same as a permission refusal. Each has its own 422 now.
+it("b12: a cash order's take-back refused for its method or cents answers its own 422", async () => {
+  type Recover = NonNullable<MerchantBffRouterOptions["refundRecovery"]>;
+  const codes = [
+    "REFUND_RECOVERY_CASH_ONLY",
+    "REFUND_RECOVERY_WHOLE_NICKELS",
+    "REFUND_RECOVERY_ABOVE_REFUNDED",
+  ] as const;
+  let next = 0;
+  const command = vi.fn<Recover>(async () => {
+    throw new RefundRecoveryError(codes[next++] ?? "REFUND_RECOVERY_UNAVAILABLE");
+  });
+  const root = await serveRefundEscalation({ refundRecovery: command });
+  const answers = [];
+  for (const _code of codes) {
+    const answer = await request(root, "/merchant/payments/refunds/recover", {
+      method: "POST",
+      headers: {
+        ...safeHeaders,
+        Cookie: "__Host-bop-merchant=" + sessionCookie,
+        "X-BOP-CSRF": csrf,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ method: "CardMachine", amountMinor: "500" }),
+    });
+    answers.push([answer.status, await answer.json(), answer.headers.get("cache-control")]);
+  }
+  expect(answers).toEqual([
+    [422, { error: "recovery_cash_only" }, "no-store"],
+    [422, { error: "recovery_whole_nickels" }, "no-store"],
+    [409, { error: "recovery_above_refunded" }, "no-store"],
+  ]);
 });
 
 it("WP-2423 Q19: a self-approval without sole operator in effect is named, not a sign-in", async () => {

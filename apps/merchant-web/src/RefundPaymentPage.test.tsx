@@ -464,6 +464,26 @@ it("WP-2423 M163: an attempt already recorded with other details is said plainly
   ).toBe(true);
 });
 
+it("b12: a cash order's take-back refused for its method or cents says why, never a permission", () => {
+  const cashOnly = moneyTakenBackFailure(new OrdinaryRefundClientError("RecoveryCashOnly"));
+  expect(cashOnly).toMatchObject({
+    message: "This order was paid in cash, so money taken back is cash only. Nothing was recorded.",
+    attemptAnswered: true,
+    reread: true,
+  });
+  const nickels = moneyTakenBackFailure(new OrdinaryRefundClientError("RecoveryWholeNickels"));
+  expect(nickels.message).toBe(
+    "Cash comes back in whole nickels, for example 3.65. Nothing was recorded.",
+  );
+  setLanguageForTest("zh-Hans");
+  expect(moneyTakenBackFailure(new OrdinaryRefundClientError("RecoveryCashOnly")).message).toBe(
+    "这单用现金付款，收回的钱只能是现金。没有记录。",
+  );
+  expect(moneyTakenBackFailure(new OrdinaryRefundClientError("RecoveryWholeNickels")).message).toBe(
+    "现金按 5 分取整，例如 3.65。没有记录。",
+  );
+});
+
 it("WP-2423 M10: stop making it too is ticked by default only for a dish known not to be made", () => {
   expect(stopMakingByDefault("NotStarted")).toBe(true);
   expect(stopMakingByDefault("Started")).toBe(false);

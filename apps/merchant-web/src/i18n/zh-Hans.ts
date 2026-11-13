@@ -504,6 +504,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Paid in cash: the guest hands back cash, in whole nickels.":
     "这单用现金付款：顾客还回现金，按 5 分取整。",
   "Cash comes back in whole nickels, for example 3.65.": "现金按 5 分取整，例如 3.65。",
+  "This order was paid in cash, so money taken back is cash only. Nothing was recorded.":
+    "这单用现金付款，收回的钱只能是现金。没有记录。",
+  "Cash comes back in whole nickels, for example 3.65. Nothing was recorded.":
+    "现金按 5 分取整，例如 3.65。没有记录。",
   "Money taken back could not be loaded just now. Refresh the page to try again.":
     "已收回的多退款暂时读不到，请刷新本页再试。",
   "That is more than the {amount} given back in cash.": "这超过了已退还的现金 {amount}。",

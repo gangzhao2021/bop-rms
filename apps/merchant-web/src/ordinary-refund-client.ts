@@ -20,6 +20,10 @@ export class OrdinaryRefundClientError extends Error {
       | "RecoveryAboveRefunded"
       /** WP-2423 M163: this attempt was already recorded with other details (nothing more is). */
       | "RecoveryConflict"
+      /** b12: an order paid only in cash takes back cash alone (nothing was recorded). */
+      | "RecoveryCashOnly"
+      /** b12: cash comes back in whole nickels (nothing was recorded). */
+      | "RecoveryWholeNickels"
       /**
        * WP-2423 M10: "stop making it too" the kitchen or the counter can't do as asked (the refund
        * needs approval, part was handed over, every dish would be stopped, the kitchen just
@@ -360,6 +364,13 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
       // M126 I.5: a payment this Store has no record of (another Store's): never "try again".
       if (response.status === 404 && (await replyError(response)) === "refund_payment_not_found")
         throw new OrdinaryRefundClientError("NotFound");
+      // b12: money taken back on a cash order is cash, in whole nickels (nothing was recorded).
+      if (response.status === 422) {
+        const error = await replyError(response);
+        if (error === "recovery_cash_only") throw new OrdinaryRefundClientError("RecoveryCashOnly");
+        if (error === "recovery_whole_nickels")
+          throw new OrdinaryRefundClientError("RecoveryWholeNickels");
+      }
       // v15 2026-10-18: a read that met a refund recorded while it was loading answers 409
       // changed_while_loading; a busy server answers 503 retry_later. Neither is a refusal.
       if (response.status === 409 || response.status === 503) {
@@ -438,6 +449,8 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
             error.code === "OrderNotAccepted" ||
             error.code === "RecoveryAboveRefunded" ||
             error.code === "RecoveryConflict" ||
+            error.code === "RecoveryCashOnly" ||
+            error.code === "RecoveryWholeNickels" ||
             error.code === "WithdrawNeedsApproval" ||
             error.code === "WithdrawHandedOver" ||
             error.code === "WithdrawEverything" ||

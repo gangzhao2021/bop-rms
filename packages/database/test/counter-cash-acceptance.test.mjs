@@ -615,11 +615,12 @@ it("WP-2423 M52: the counter takes cash by the table's rules; replay, concurrenc
       // A cash payment can't be charged back on the card machine, and cash has no odd cents.
       await assert.rejects(
         asApi((tx) => recover(tx, takeBack(500n, { method: "CardMachine", slipReference: "A1" }))),
-        { code: "REFUND_RECOVERY_INPUT_INVALID" },
+        // b12: refused for its own reason, answered 422 by the route (never a permission refusal).
+        { code: "REFUND_RECOVERY_CASH_ONLY" },
       );
       await assert.rejects(
         asApi((tx) => recover(tx, takeBack(437n))),
-        { code: "REFUND_RECOVERY_INPUT_INVALID" },
+        { code: "REFUND_RECOVERY_WHOLE_NICKELS" },
       );
       // A recovery recorded before b10 could be any cents (the old command took $0.02 in cash on
       // a cash order). Test-controlled legacy row: what is left is rounded down to whole nickels

@@ -911,7 +911,9 @@ it("WP-2423 M163: money taken back is read with the payment, and recorded once p
     .fn<typeof fetch>()
     .mockResolvedValueOnce(response({ status: "Recorded", orderReference: id(1), recovery }))
     .mockResolvedValueOnce(response({ error: "recovery_above_refunded" }, 409))
-    .mockResolvedValueOnce(response({ error: "recovery_conflict" }, 409));
+    .mockResolvedValueOnce(response({ error: "recovery_conflict" }, 409))
+    .mockResolvedValueOnce(response({ error: "recovery_cash_only" }, 422))
+    .mockResolvedValueOnce(response({ error: "recovery_whole_nickels" }, 422));
   const client = createOrdinaryRefundClient(fetcher);
   await expect(client.recover(command, csrf)).resolves.toMatchObject({ status: "Recorded" });
   expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body))).toEqual(command);
@@ -920,10 +922,15 @@ it("WP-2423 M163: money taken back is read with the payment, and recorded once p
   });
   // The same attempt recorded with other details is named, not an unknown result.
   await expect(client.recover(command, csrf)).rejects.toMatchObject({ code: "RecoveryConflict" });
+  // b12: a cash order's take-back refused for its method or odd cents says so (never "denied").
+  await expect(client.recover(command, csrf)).rejects.toMatchObject({ code: "RecoveryCashOnly" });
+  await expect(client.recover(command, csrf)).rejects.toMatchObject({
+    code: "RecoveryWholeNickels",
+  });
   // A card-machine recovery needs its slip; too many digits (a card number) never leave here.
   await expect(client.recover({ ...command, method: "CardMachine" }, csrf)).rejects.toThrow();
   await expect(
     client.recover({ ...command, method: "CardMachine", slipReference: "4111111111111111" }, csrf),
   ).rejects.toThrow();
-  expect(fetcher).toHaveBeenCalledTimes(3);
+  expect(fetcher).toHaveBeenCalledTimes(5);
 });
