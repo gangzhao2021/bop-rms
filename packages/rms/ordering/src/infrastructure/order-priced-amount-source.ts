@@ -11,7 +11,16 @@ const fail = (): never => {
  * remain independent; this source never issues settlement or closure evidence.
  * Caller must retain the transaction while consuming this position. */
 export function createPostgresOrderPricedAmountSource(
-  options: Parameters<typeof createPostgresSubmittedOrderAmountSource>[0],
+  options: Parameters<typeof createPostgresSubmittedOrderAmountSource>[0] & {
+    /**
+     * v15 b11 (DEC-TAX-WHOLE-RECEIPT): "Excluded" prices the Order without its share of the bill's
+     * recorded tax rounding (`taxRoundingMinor` 0). Only for a reader of a bill nothing has been
+     * paid on, which adds the rounding as it computes it now: a version recorded before a comp or
+     * a dish taken off may no longer fit the bill, and must never make the bill unreadable.
+     * Absent: "Recorded", the figure a payment, a write-off and closing are checked against.
+     */
+    readonly taxRounding?: "Recorded" | "Excluded";
+  },
 ) {
   const brandReference = String(parseOrderingReference(options.brandReference)),
     storeReference = String(parseOrderingReference(options.storeReference));
@@ -77,11 +86,14 @@ export function createPostgresOrderPricedAmountSource(
       )
         return fail();
       // WP-2423 DEC-TAX-WHOLE-RECEIPT: this Order's share of its bill's recorded tax rounding.
-      const taxRounding = await loadOrderTaxRoundingMinor(
-        tx as never,
-        { brandReference, storeReference },
-        query.orderReference,
-      );
+      const taxRounding =
+        options.taxRounding === "Excluded"
+          ? 0n
+          : await loadOrderTaxRoundingMinor(
+              tx as never,
+              { brandReference, storeReference },
+              query.orderReference,
+            );
       const pricedTotalMinor =
         base.totalMinor + adjustment - cancelled.cancelledTotalMinor + taxRounding;
       if (pricedTotalMinor < 0n || pricedTotalMinor > 9223372036854775807n) return fail();

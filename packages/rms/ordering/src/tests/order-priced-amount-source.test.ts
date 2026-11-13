@@ -145,3 +145,20 @@ it("WP-2423 DEC-TAX-WHOLE-RECEIPT: includes the Order's share of its bill's reco
   mock.taxRounding.mockResolvedValue(-1n);
   expect((await f.load()).pricedTotalMinor).toBe(999n);
 });
+it("v15 b11: a bill read with nothing paid prices the Order without the recorded rounding, so a version recorded before every dish was comped never makes it unreadable", async () => {
+  const f = setup();
+  // Split recorded −$0.01 on the bill, then every dish was comped: comps take the full $10.00.
+  mock.cancelled.mockResolvedValue({
+    cancelledTotalMinor: 1000n,
+    snapshotDigest: "sha256:" + "c".repeat(64),
+  });
+  mock.taxRounding.mockResolvedValue(-1n);
+  await expect(f.load()).rejects.toThrow("ORDER_PRICED_AMOUNT_UNAVAILABLE");
+  const excluded = await createPostgresOrderPricedAmountSource({
+    ...scope,
+    authorize: f.authorize,
+    taxRounding: "Excluded",
+  })(f.tx, query);
+  expect(excluded.pricedTotalMinor).toBe(0n);
+  expect(excluded.taxRoundingMinor).toBe(0n);
+});
