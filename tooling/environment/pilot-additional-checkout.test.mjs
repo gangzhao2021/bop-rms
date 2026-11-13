@@ -1,8 +1,10 @@
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   v1: vi.fn(),
   v2: vi.fn(),
   prepare: vi.fn(async () => undefined),
+  parent: vi.fn(async () => ({ orderVersion: 1 })),
+  prior: vi.fn(async () => null),
 }));
 vi.mock("../../packages/bop/identity/src/index.ts", () => ({
   GuestSessionService: vi.fn(),
@@ -10,7 +12,7 @@ vi.mock("../../packages/bop/identity/src/index.ts", () => ({
 }));
 vi.mock("../../packages/rms/ordering/src/index.ts", () => ({
   createPostgresDiningOrderPreparationSource: () => ({
-    resolveAdditionalParent: async () => ({ orderVersion: 1 }),
+    resolveAdditionalParent: mocks.parent,
   }),
   CheckoutValidationError: class extends Error {
     constructor(code) {
@@ -33,7 +35,15 @@ vi.mock("./pilot-dining-parent.mjs", () => ({
   createInternalDiningParent: () => ({ resolve: async () => "order" }),
 }));
 import { createInternalAdditionalCheckout } from "./pilot-additional-checkout.mjs";
-afterEach(() => vi.clearAllMocks());
+afterEach(() => {
+  vi.clearAllMocks();
+  mocks.prepare.mockReset();
+  mocks.prepare.mockImplementation(async () => undefined);
+  mocks.parent.mockReset();
+  mocks.parent.mockImplementation(async () => ({ orderVersion: 1 }));
+  mocks.prior.mockReset();
+  mocks.prior.mockImplementation(async () => null);
+});
 
 const cart = {
   cartReference: "cart",
@@ -57,7 +67,7 @@ async function prepareWith(raw) {
       transactions: { run: (work) => work({}) },
     },
     {},
-    { submissions: { loadSubmission: async () => null }, references: { generate: vi.fn() } },
+    { submissions: { loadSubmission: mocks.prior }, references: { generate: vi.fn() } },
   );
   await service.prepare(
     {
@@ -98,3 +108,60 @@ it("WP-2423 item 6: a cart or quote that moved on is a fixed refusal, not an out
   await expect(prepareWith(null)).rejects.toMatchObject(refusal);
   expect(mocks.prepare).not.toHaveBeenCalled();
 });
+
+describe("v15 b13: the table's Order moves on while a round is prepared", () => {
+  // The preparation's own refusal when the Order is no longer at the version it was read at.
+  const moved = () => Object.assign(new Error("guest session unavailable"), {
+    code: "GUEST_SESSION_UNAVAILABLE",
+  });
+  const versions = () => mocks.prepare.mock.calls.map(([value]) => value.expectedOrderVersion);
+
+  it("prepares the round again against the Order as it is now", async () => {
+    // The System took an expired unpaid round off (version 51 to 52) during the preparation.
+    mocks.v2.mockReturnValue(quote);
+    mocks.parent
+      .mockResolvedValueOnce({ orderVersion: 51 })
+      .mockResolvedValue({ orderVersion: 52 });
+    mocks.prepare.mockRejectedValueOnce(moved());
+    await prepareWith({ quoteVersion: 2 });
+    expect(versions()).toEqual([51, 52]);
+  });
+
+  it("keeps the refusal when the Order did not move, or has no open Order any more", async () => {
+    mocks.v2.mockReturnValue(quote);
+    mocks.prepare.mockRejectedValue(moved());
+    await expect(prepareWith({ quoteVersion: 2 })).rejects.toMatchObject({
+      code: "GUEST_SESSION_UNAVAILABLE",
+    });
+    expect(versions()).toEqual([1]);
+    mocks.prepare.mockClear();
+    mocks.parent.mockResolvedValueOnce({ orderVersion: 7 }).mockResolvedValue(null);
+    await expect(prepareWith({ quoteVersion: 2 })).rejects.toMatchObject({
+      code: "GUEST_SESSION_UNAVAILABLE",
+    });
+    expect(versions()).toEqual([7]);
+  });
+
+  it("tries at most three times while the Order keeps moving", async () => {
+    mocks.v2.mockReturnValue(quote);
+    let version = 10;
+    mocks.parent.mockImplementation(async () => ({ orderVersion: (version += 1) }));
+    mocks.prepare.mockRejectedValue(moved());
+    await expect(prepareWith({ quoteVersion: 2 })).rejects.toMatchObject({
+      code: "GUEST_SESSION_UNAVAILABLE",
+    });
+    expect(versions()).toEqual([11, 12, 13]);
+  });
+
+  it("a round its last check refused after it was prepared stands as prepared", async () => {
+    mocks.v2.mockReturnValue(quote);
+    mocks.parent.mockResolvedValueOnce({ orderVersion: 3 }).mockResolvedValue({ orderVersion: 4 });
+    mocks.prior
+      .mockResolvedValueOnce(null)
+      .mockResolvedValue({ orderReference: "order", submissionReference: "submission" });
+    mocks.prepare.mockRejectedValueOnce(moved());
+    await prepareWith({ quoteVersion: 2 });
+    expect(versions()).toEqual([3]);
+  });
+});
+

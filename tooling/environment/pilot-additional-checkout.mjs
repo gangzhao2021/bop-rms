@@ -20,12 +20,15 @@ export function createInternalAdditionalCheckout(resources, entry, preparation) 
       };
       const orderReference = await lookup.resolve(credentials);
       if (orderReference === null) return;
-      const allocation = input.allocation,
-        prior = await preparation.submissions.loadSubmission(allocation.submissionReference);
-      if (prior !== null) {
+      const allocation = input.allocation;
+      /** Whether this round was prepared already (by an earlier attempt or request). */
+      const preparedBefore = async () => {
+        const prior = await preparation.submissions.loadSubmission(allocation.submissionReference);
+        if (prior === null) return false;
         if (prior.orderReference !== orderReference) throw new Error("ADDITIONAL_PARENT_CONFLICT");
-        return;
-      }
+        return true;
+      };
+      if (await preparedBefore()) return;
       const authorizeOrder = async (tx, query) => {
         const bound = { run: (work) => work(tx) },
           identity = new GuestSessionService({
@@ -61,19 +64,21 @@ export function createInternalAdditionalCheckout(resources, entry, preparation) 
         quote.cartVersion !== cart.aggregateVersion
       )
         throw movedOn();
-      const parent = await resources.transactions.run((transaction) =>
-        createPostgresDiningOrderPreparationSource({
-          ...resources.scope,
-          authorize: authorizeOrder,
-        }).resolveAdditionalParent({
-          transaction,
-          ...resources.scope,
-          orderReference,
-          diningSessionReference: cart.diningSessionReference,
-          guestSessionReference: allocation.guestSessionReference,
-          observedAt: resources.now(),
-        }),
-      );
+      const readParent = () =>
+        resources.transactions.run((transaction) =>
+          createPostgresDiningOrderPreparationSource({
+            ...resources.scope,
+            authorize: authorizeOrder,
+          }).resolveAdditionalParent({
+            transaction,
+            ...resources.scope,
+            orderReference,
+            diningSessionReference: cart.diningSessionReference,
+            guestSessionReference: allocation.guestSessionReference,
+            observedAt: resources.now(),
+          }),
+        );
+      let parent = await readParent();
       if (!parent) throw new Error("ADDITIONAL_PARENT_UNAVAILABLE");
       const sourceValidUntil = new Date(
         Math.min(
@@ -82,7 +87,7 @@ export function createInternalAdditionalCheckout(resources, entry, preparation) 
           Date.parse(cart.lifecycle.absoluteExpiresAt),
         ),
       ).toISOString();
-      await createPersistentAdditionalDiningPreparation({
+      const service = createPersistentAdditionalDiningPreparation({
         preparation: {
           ...preparation,
           references: {
@@ -94,18 +99,44 @@ export function createInternalAdditionalCheckout(resources, entry, preparation) 
         },
         transactions: resources.transactions,
         authorizeOrder,
-      }).prepareForOrdering({
-        ...credentials,
-        orderReference,
-        expectedOrderVersion: parent.orderVersion,
-        intent: {
-          submissionReference: allocation.submissionReference,
-          cartReference: allocation.cartReference,
-          cartVersion: allocation.cartVersion,
-          quoteReference: allocation.quoteReference,
-          sourceValidUntil,
-        },
       });
+      /**
+       * v15 b13 (DEC-ROUND-PREPARED-ON-CURRENT-ORDER): the round is prepared against the table's
+       * Order as it stood when it was read. When the Order moves on meanwhile (the System takes an
+       * expired unpaid round off, staff accept or cancel a round), the preparation refuses and
+       * records nothing. It is then prepared once more against the Order as it is now, at most three
+       * times in all; a refusal with the Order unchanged, or with no open Order any more, stands.
+       */
+      for (let attempt = 1; ; attempt += 1) {
+        try {
+          await service.prepareForOrdering({
+            ...credentials,
+            orderReference,
+            expectedOrderVersion: parent.orderVersion,
+            intent: {
+              submissionReference: allocation.submissionReference,
+              cartReference: allocation.cartReference,
+              cartVersion: allocation.cartVersion,
+              quoteReference: allocation.quoteReference,
+              sourceValidUntil,
+            },
+          });
+          return;
+        } catch (error) {
+          if (attempt >= 3) throw error;
+          let current;
+          try {
+            current = await readParent();
+            // Prepared after all (its final check found the Order moved): it stands as it is.
+            if (current && current.orderVersion !== parent.orderVersion && (await preparedBefore()))
+              return;
+          } catch {
+            throw error;
+          }
+          if (!current || current.orderVersion === parent.orderVersion) throw error;
+          parent = current;
+        }
+      }
     },
   };
 }
