@@ -12,6 +12,7 @@ const d = vi.hoisted(() => ({
   commitment: vi.fn(),
   releaseFactory: vi.fn(),
   release: vi.fn(),
+  freePlace: vi.fn(),
   batchOf: vi.fn(),
   loadByBatch: vi.fn(),
   candidates: vi.fn(),
@@ -33,6 +34,7 @@ vi.mock("@rms/payment", async (original) => ({
 vi.mock("@rms/fulfillment", async (original) => ({
   ...(await original<object>()),
   createPostgresAsapCapacityStore: d.capacity,
+  releaseCancelledAsapCapacity: d.freePlace,
 }));
 vi.mock("./submission-inventory-release.js", () => ({
   createSubmissionInventoryRelease: d.releaseFactory,
@@ -99,6 +101,7 @@ function setup() {
   d.cancel.mockResolvedValue({ status: "Cancelled", record });
   d.releaseFactory.mockReturnValue({ release: d.release });
   d.release.mockResolvedValue({ status: "Released", entryCount: 1 });
+  d.freePlace.mockResolvedValue("Released");
   const installContext = vi.fn(async () => undefined);
   const operation = createMerchantCounterOrderCancellation({
     persistence: { transactions: { run }, now: () => at } as unknown as Options["persistence"],
@@ -176,6 +179,21 @@ it("WP-2423 M127: cancels an unpaid counter order in one transaction and puts it
       },
       releasedAt: record.terminatedAt,
     }),
+  );
+  // DEC-CANCELLED-ORDER-FREES-PICKUP-PLACE: its pickup place is freed in the same transaction,
+  // after the termination, linked to it.
+  expect(d.freePlace).toHaveBeenCalledWith(
+    expect.anything(),
+    { brandReference: id(3), storeReference: id(4) },
+    expect.objectContaining({
+      submissionReference: id(7),
+      orderReference: id(5),
+      orderBatchReference: id(6),
+      correlationReference: id(30),
+    }),
+  );
+  expect(d.cancel.mock.invocationCallOrder[0]).toBeLessThan(
+    d.freePlace.mock.invocationCallOrder[0] ?? 0,
   );
 });
 
