@@ -1095,9 +1095,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Before refunds": "退款前",
   "Before saving": "保存前",
   "Before you close": "打烊前",
-  "Begin closing this dining session to stop further ordering.":
-    "开始关闭此堂食会话，停止继续点单。",
-  "Begin session closing": "开始关台",
+  "Start checkout for this table: the guests can't send more rounds.":
+    "这桌开始结账：顾客不能再加菜。",
   "Being cleaned": "清洁中",
   "Being made": "制作中",
   "Being remade": "重做中",
@@ -1862,15 +1861,14 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Filter Kitchen work items": "筛选后厨工作项",
   "Filter orders on this page": "筛选本页订单",
   "Filters{value}": "筛选{value}",
-  "Finalize session closing": "完成关台",
   "Finalize uploaded media": "完成媒体上传",
   Find: "查找",
   "Find a table": "查找桌台",
   "Find an order · Applied": "查找订单 · 已筛选",
   "Find an order": "查找订单",
   "Finding the sign-in page…": "正在查找登录页面…",
-  "Finish closing this dining session. All orders, payments and unresolved exceptions will be checked before releasing its table.":
-    "这桌关台：关台前会检查所有订单、付款和未解决的异常。",
+  "Close the table. Every order, payment and open problem is checked before the table is free for the next guests.":
+    "这桌关台：关台前会检查所有订单、付款和未解决的问题，然后桌台空出给下一桌客人。",
   "Finish signing in in the new window. This page continues when you are done.":
     "请在新窗口中完成登录。完成后此页面会继续。",
   "Finished good": "成品",
@@ -1994,7 +1992,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "I checked this refund and approve it on my own": "我已核对此退款，并自行批准",
   "I checked {what} and approve on my own": "我已核对{what}，并自行批准",
   "I confirm the selected table and session action": "我确认所选桌台和会话操作",
-  "I confirm this dining session is ready for the next closing step": "我确认这桌可以关台",
+  "I confirm the guests have finished ordering": "我确认顾客已点完菜",
   "I confirm this order is complete": "我确认这笔订单已完成",
   "I confirm {quantity} × {displayName} delivered to table {tableLabel}":
     "我确认已将 {quantity} × {displayName} 送到桌台 {tableLabel}",
@@ -3649,7 +3647,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Retry same remake": "重试同一重做",
   "Retry same request": "重试同一请求",
   "Retry same serving request": "重试同一上桌请求",
-  "Retry same session close request": "重试同一会话关闭请求",
+  "Send it again": "再发一次",
   "Retry same session request": "重试同一会话请求",
   "Retry sending the approved refund": "重试发送已批准的退款",
   "Retry sending the same refund": "重试发送同一笔退款",
@@ -3909,8 +3907,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Serving was not confirmed. Refresh progress to check current quantities, table and permissions.":
     "上桌未确认。请刷新进度，检查当前数量、桌台和权限。",
   Session: "会话",
-  "Session closure was not confirmed. Refresh and check all orders, payments, exceptions and permissions.":
-    "会话关闭未确认。请刷新并检查所有订单、付款、异常和权限。",
+  "The table was not closed. Refresh, then check its orders, payments and open problems.":
+    "这桌没有关台。请刷新，然后查看这桌的订单、付款和未解决的问题。",
   Set: "设置",
   "Set (see Tax review)": '已设置（见"税务核对"）',
   "Set a PIN to switch quickly on this store's shared tablets.":
@@ -5236,7 +5234,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   Updated: "已更新",
   "Updated {value} ({timeZone})": "更新于 {value}（{timeZone}）",
   "Updating availability…": "正在更新可用性…",
-  "Updating dining session…": "正在更新堂食会话…",
+  "Updating the table…": "正在更新这桌…",
   "Updating remake": "正在更新重做",
   "Upload media": "上传媒体",
   "Uploading photo…": "正在上传照片…",
@@ -6079,7 +6077,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "{times}（{services}；打烊前 {orderCutoffSeconds} 分钟最后点单；制作 {leadTimeSeconds} 分钟）",
   "{time}{suffix} today": "今天 {time}{suffix}",
   "{time}{suffix} tomorrow": "明天 {time}{suffix}",
-  "{toClose} served — close when the guests have left": "{toClose} 已上桌 — 顾客离开后关台",
+  "{toClose} served — close when the guests have left": "{toClose}已上完菜，顾客离开后关台",
   "{total} (the oldest).": "{total}（最早的）。",
   "{value} (the guest left or is still paying). Nothing was charged, so there is nothing to do.":
     "{value}（顾客已离开或仍在付款）。没有扣款，因此无需处理。",
@@ -9800,4 +9798,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Cash given back from the drawer": "从钱箱退还的现金",
   "Enter the amount taken back; it must be more than $0.00. Nothing was recorded.":
     "请输入收回的金额，必须大于 $0.00。没有记录。",
+  "I confirm the guests have left and the table can be closed": "我确认顾客已离开，可以关台",
+  "Signed in again. Opening this page with that sign-in…": "已重新登录。正在用这个登录打开本页…",
 });

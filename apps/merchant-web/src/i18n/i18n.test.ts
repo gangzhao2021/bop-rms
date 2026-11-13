@@ -227,3 +227,12 @@ it("v15 b12: a table's own name or a number filled into Chinese text is set off 
     t("Take order for table {stableLabel}", { stableLabel: saidTable("B10 SRS Q (TEST)") }),
   ).toBe("Take order for B10 SRS Q (TEST)");
 });
+
+it("b13: Home's tables to close reads as one Chinese phrase, with no stray space", () => {
+  // v15 b12 live: "5 张桌台 已上桌 — 顾客离开后关台" (the English template's space carried over).
+  setLanguageForTest("zh-Hans");
+  expect(
+    t("{toClose} served — close when the guests have left", { toClose: countOf(5, "table") }),
+  ).toBe("5 张桌台已上完菜，顾客离开后关台");
+  setLanguageForTest("en");
+});
