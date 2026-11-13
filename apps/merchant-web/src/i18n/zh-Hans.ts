@@ -5376,7 +5376,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "从菜单页上架时单独审核（品牌只有一家门店）",
   "given alone by the Brand's owner when listing from the Menu page":
     "品牌老板从菜单页上架时单独审核",
-  "Change on the Menu page": "在菜单页修改",
+  "Change allergens on the Menu page": "在菜单页修改过敏原",
+  "Track stock for this choice": "按库存记录此选项",
+  "Saving replaces the allergens answered on the Menu page for this choice: customers then see the chosen ingredient's allergens, and stock counts it.":
+    "保存后，此选项在菜单页填写的过敏原会被替换：顾客将看到所选食材的过敏原，库存也会扣减它。",
   "What choosing it does": "选择后的效果",
   "What customers see": "顾客看到的内容",
   "What customers will see": "顾客将看到的内容",

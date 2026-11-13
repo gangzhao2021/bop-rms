@@ -106,7 +106,7 @@ const answered = (n: number, optionName: string) => ({
   },
 });
 
-test("@production b11: a Menu-page choice says who approved it alone and why, and is changed on the Menu page", async ({
+test("@production b11: a Menu-page choice says who approved it alone and why, has its allergens changed on the Menu page and can be tracked as stock", async ({
   page,
 }) => {
   await session(page, "RECIPE-OPTION-LIST", "/app/commerce/option-recipes", "recipe.read");
@@ -132,13 +132,17 @@ test("@production b11: a Menu-page choice says who approved it alone and why, an
     await expect(
       mild.getByText(/given alone when listing from the Menu page \(the Brand has one Store\)/u),
     ).toHaveCount(2);
-    await expect(mild.getByRole("link", { name: "Change on the Menu page" })).toHaveAttribute(
-      "href",
-      "/app/commerce/menus",
-    );
-    // The stock-recipe form is never offered for a declaration.
-    await expect(mild.getByRole("button", { name: "Change" })).toHaveCount(0);
+    await expect(
+      mild.getByRole("link", { name: "Change allergens on the Menu page" }),
+    ).toHaveAttribute("href", "/app/commerce/menus");
+    // The declaration is not edited as stock; a kitchen that starts counting it can track it.
+    await expect(mild.getByRole("button", { name: "Change", exact: true })).toHaveCount(0);
+    await expect(mild.getByRole("button", { name: "Track stock for this choice" })).toBeVisible();
   });
+  await mild.getByRole("button", { name: "Track stock for this choice" }).click();
+  await expect(
+    page.getByText(/Saving replaces the allergens answered on the Menu page for this choice/u),
+  ).toBeVisible();
   await expect(page.getByText(/approved by that one person; their reviews say so/u)).toBeVisible();
   await expectNoInternalText(page);
 });

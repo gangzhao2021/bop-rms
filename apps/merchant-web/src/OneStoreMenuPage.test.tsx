@@ -201,11 +201,12 @@ function server(
 async function page(
   menu: () => Promise<unknown>,
   answer?: (body: Record<string, unknown>) => Promise<unknown> | undefined,
+  arrival: unknown = null,
 ) {
   const { fetcher, sent } = server(menu, answer);
   const csrf = "a".repeat(43);
   const { container } = await mount(
-    <MemoryRouter initialEntries={["/app/commerce/menus"]}>
+    <MemoryRouter initialEntries={[{ pathname: "/app/commerce/menus", state: arrival }]}>
       <OneStoreMenuPage
         menuReference={MENU}
         client={createMenuClient(csrf, fetcher)}
@@ -687,4 +688,16 @@ it("v15 2026-11-11 b10: a listing says what is usual, and past two minutes that 
   expect(listingProgressText(130)).toContain(
     "130 s · Taking longer than usual. Nothing needs doing; this page says when it is listed.",
   );
+});
+
+it("WP-2423 (b11): arriving from Option recipes to change a choice's allergens finds that dish", async () => {
+  const { container } = await page(
+    () => Promise.resolve(builder(id(3), "Listed", id(3))),
+    undefined,
+    { findDish: "Dan dan noodles (TEST)" },
+  );
+  const search = container.querySelector<HTMLInputElement>('input[type="search"]');
+  expect(search?.value).toBe("Dan dan noodles (TEST)");
+  expect(container.textContent).toContain("Dan dan noodles (TEST)");
+  expect(container.textContent).not.toContain("Har gow (TEST)");
 });

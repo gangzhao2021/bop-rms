@@ -182,6 +182,11 @@ export function OneStoreMenuPage({
   } | null>(null);
   const location = useLocation();
   const navigate = useNavigate();
+  // WP-2423 (b11): arriving from Option recipes to change a choice's allergens: that dish is found.
+  useEffect(() => {
+    const dish = (location.state as { readonly findDish?: unknown } | null)?.findDish;
+    if (typeof dish === "string" && dish !== "") setSearch(dish);
+  }, [location.state]);
   const [newSection, setNewSection] = useState<{ name: string; nameZh: string } | null>(null);
   // One listing reference per intended listing, kept until it is answered (a retry continues it).
   const [listing, setListing] = useState<string | null>(null);

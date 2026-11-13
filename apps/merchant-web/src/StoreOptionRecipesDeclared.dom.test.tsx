@@ -7,7 +7,7 @@ import {
   aloneReviewText,
   declaredSummaryText,
 } from "./StoreOptionRecipesPage.js";
-import { mount, settle } from "./dom-test-kit.fixture.js";
+import { click, mount, settle } from "./dom-test-kit.fixture.js";
 
 afterEach(() => document.body.replaceChildren());
 
@@ -152,16 +152,26 @@ describe("WP-2423 (b11): a review one person gave alone says under which rule", 
       ).textContent ?? "";
     expect(independent).not.toContain("given alone");
   });
-  it("a declaration is changed on the Menu page, never in the stock-recipe form", async () => {
+  it("a declaration's allergens are changed on the Menu page, and staff who edit can track it as stock", async () => {
     const container = await mountPage(declared, { mayEdit: true });
     const link = [...container.querySelectorAll("a")].find(
-      (anchor) => anchor.textContent === "Change on the Menu page",
+      (anchor) => anchor.textContent === "Change allergens on the Menu page",
     );
     expect(link?.getAttribute("href")).toBe("/app/commerce/menus");
-    expect(
-      [...container.querySelectorAll("button")].some((button) => button.textContent === "Change"),
-    ).toBe(false);
-    // A stock change keeps its own editor.
+    const buttons = () => [...container.querySelectorAll("button")];
+    expect(buttons().some((button) => button.textContent === "Change")).toBe(false);
+    // A kitchen that starts counting the add-on turns it into a stock recipe here.
+    const track = buttons().find((button) => button.textContent === "Track stock for this choice");
+    expect(track).toBeDefined();
+    await click(track);
+    await settle();
+    expect(container.querySelector("form")).not.toBeNull();
+    expect(container.textContent).toContain(
+      "Saving replaces the allergens answered on the Menu page for this choice",
+    );
+    // It starts as a stock add with no ingredient chosen (the stand-in is not an ingredient).
+    expect(container.querySelector<HTMLSelectElement>("form select")?.value).toBe("Add");
+    // A stock change keeps its own editor, and no Menu-page link.
     const stock = await mountPage(declared, {
       mayEdit: true,
       toItemReference: "01a3ff00-0000-7000-8000-0000000000d9",
@@ -169,6 +179,13 @@ describe("WP-2423 (b11): a review one person gave alone says under which rule", 
     expect(
       [...stock.querySelectorAll("button")].some((button) => button.textContent === "Change"),
     ).toBe(true);
+    expect(stock.textContent).not.toContain("Change allergens on the Menu page");
+  });
+  it("staff who cannot edit are shown no change action for a declaration", async () => {
+    const container = await mountPage(declared, { mayEdit: false });
+    expect(container.textContent).not.toContain("Change allergens on the Menu page");
+    expect(container.textContent).not.toContain("Track stock for this choice");
+    expect(container.textContent).toContain("declared by staff on the Menu page");
   });
   it("says it in Chinese", async () => {
     setLanguageForTest("zh-Hans");
@@ -184,7 +201,8 @@ describe("WP-2423 (b11): a review one person gave alone says under which rule", 
           })
         ).textContent ?? "";
       expect(text).toContain("从菜单页上架时单独审核（品牌只有一家门店）");
-      expect(text).toContain("在菜单页修改");
+      expect(text).toContain("在菜单页修改过敏原");
+      expect(text).toContain("按库存记录此选项");
       expect(text).toContain("由这一个人批准，审核记录会注明");
       expect(aloneReviewText("SoleOperator")).toBe("以唯一操作人身份单独审核");
       expect(aloneReviewText("BrandOwnerListing")).toBe("品牌老板从菜单页上架时单独审核");

@@ -49,9 +49,14 @@ one chosen"), but this choice is a staff declaration and not stock.
   以唯一操作人身份单独审核). An independent review says nothing extra.
 - The header names the same exceptions: such changes are approved by that one person, and their
   reviews say so.
-- A row whose change is a Menu-page declaration offers "Change on the Menu page" (在菜单页修改).
-  The link goes to `/app/commerce/menus`, where the declaration is answered, and the stock-recipe
-  editor is not offered. A stock change keeps its own editor.
+- A row whose change is a Menu-page declaration offers, to staff who may edit option recipes,
+  "Change allergens on the Menu page" (在菜单页修改过敏原) and "Track stock for this choice"
+  (按库存记录此选项). The link goes to `/app/commerce/menus` with the dish typed into the
+  one-page menu's search, where the declaration is answered. The button opens the stock-recipe
+  editor starting from an empty "Add", and says that saving replaces the Menu-page allergens with
+  the chosen ingredient's (a kitchen does start counting a declared add-on later; a stock recipe
+  set here is kept by later Menu-page saves). Staff who may not edit see neither. A stock change
+  keeps its own "Change".
 - No rule changed. Reviews and their evidence are append-only and are read as recorded.
 
 ## 3. 中文 posted opening count at 390 lists values with no column labels

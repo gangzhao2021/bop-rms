@@ -341,6 +341,13 @@ export function StoreOptionRecipesPage({
             </label>
           </>
         ) : null}
+        {row.change !== null && declaredOf(row.change.content) !== undefined ? (
+          <p>
+            {t(
+              "Saving replaces the allergens answered on the Menu page for this choice: customers then see the chosen ingredient's allergens, and stock counts it.",
+            )}
+          </p>
+        ) : null}
         <p>
           {t(
             "Saving applies this to every size's recipe{value}; reviewers see the result for each size.",
@@ -365,15 +372,17 @@ export function StoreOptionRecipesPage({
     const change = row.change;
     const status = optionRecipeStatus(row);
     const buttons = [];
-    // WP-2423 (b11): a choice answered on the Menu page is a staff declaration, not stock; it is
-    // changed where it was answered, never in the stock-recipe form.
-    if (change !== null && declaredOf(change.content) !== undefined)
+    // WP-2423 (b11): a choice answered on the Menu page is a staff declaration, not stock: its
+    // allergens are changed where they were answered (the dish found there), and a kitchen that
+    // starts counting the add-on turns it into a stock recipe here. Both only for staff who edit.
+    const declared = change !== null && declaredOf(change.content) !== undefined;
+    if (declared && view.permissions.mayEdit)
       buttons.push(
-        <Link key="menu" to="/app/commerce/menus">
-          {t("Change on the Menu page")}
+        <Link key="menu" to="/app/commerce/menus" state={{ findDish: row.productName }}>
+          {t("Change allergens on the Menu page")}
         </Link>,
       );
-    else if (view.permissions.mayEdit && editing !== keyOf(row))
+    if (view.permissions.mayEdit && editing !== keyOf(row))
       buttons.push(
         <button
           key="edit"
@@ -381,10 +390,11 @@ export function StoreOptionRecipesPage({
           disabled={busy}
           onClick={() => {
             setEditing(keyOf(row));
-            setDraft(change?.content ?? blank);
+            // The stand-in holding a declaration is not an ingredient to choose: start a stock add.
+            setDraft(declared ? { ...blank, kind: "Add" } : (change?.content ?? blank));
           }}
         >
-          {change === null ? t("Set") : t("Change")}
+          {declared ? t("Track stock for this choice") : change === null ? t("Set") : t("Change")}
         </button>,
       );
     if (change !== null && !change.published && !change.byViewer && view.permissions.mayReview)
