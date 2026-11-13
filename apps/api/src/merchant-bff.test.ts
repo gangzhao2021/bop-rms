@@ -4133,6 +4133,9 @@ it("WP-2423 Q7 slice 2: protects the staff table round transport and maps refusa
     ["STAFF_ROUND_IN_PROGRESS", 409, "staff_round_in_progress"],
     ["STAFF_ROUND_ALREADY_SENT", 409, "staff_round_already_sent"],
     ["STAFF_ROUND_IDEMPOTENCY_CONFLICT", 409, "staff_round_conflict"],
+    // v15 b12: another tablet's round holds the table; this round's dishes left at the table.
+    ["STAFF_ROUND_TABLE_BUSY", 409, "table_busy"],
+    ["STAFF_ROUND_NOT_WITHDRAWN", 503, "staff_round_not_withdrawn"],
     ["STAFF_ROUND_UNAVAILABLE", 503, "staff_round_unavailable"],
   ] as const) {
     staffDiningRound.mockRejectedValueOnce(new StaffDiningRoundError(code));
