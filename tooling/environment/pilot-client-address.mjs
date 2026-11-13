@@ -72,12 +72,12 @@ function afterLine(socket, first) {
  * installation without it listens as plain HTTPS, exactly as before.
  */
 /**
- * v15 2026-11-11 (staff reloads failing with net::ERR_TOO_MANY_RETRIES): with Node's 5 s idle
- * keep-alive, every connection a page load opened was closed at about the same moment 5 s later.
- * A reload in that moment sent its requests down connections being closed; the browser retries
- * each on the next idle one, which was closing too, and gives up after a few. The entry keeps an
- * idle connection for 75 s (as common web servers do), so the pages' own refreshes (every few
- * seconds) keep their connections and a reload rarely meets one being closed.
+ * The entry keeps an idle connection for 75 s (as common web servers do), so the pages' own
+ * refreshes (every few seconds) keep their connections instead of opening new ones.
+ * Note (2026-11-12, docs/spec/design/pickup-capacity-and-retry.md §4): the staff reloads failing
+ * with net::ERR_TOO_MANY_RETRIES were not caused by keep-alive. They come from a browser that only
+ * clicked through the self-signed InternalTest certificate (see pilot-tls-trust.mjs); with the
+ * certificate trusted they do not occur.
  */
 export const pilotEntryKeepAliveMs = 75_000;
 export function configurePilotEntryConnections(server) {
