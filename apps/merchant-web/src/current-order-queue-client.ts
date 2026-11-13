@@ -1890,6 +1890,24 @@ export function createCurrentOrderQueueClient(fetcher: typeof fetch = fetch) {
         (value) => parseCurrentOrderQueue(value, after),
       );
     },
+    /**
+     * WP-2423 (reads-under-burst): an opaque mark of what changed last among the Store's Orders.
+     * Orders compares it every few seconds and reads its whole list when it moved.
+     */
+    loadChanges(signal: AbortSignal) {
+      return get(fetcher, "/merchant/orders/changes", signal, (value) => {
+        const raw = value as { schemaVersion?: unknown; mark?: unknown } | null;
+        if (
+          raw === null ||
+          typeof raw !== "object" ||
+          raw.schemaVersion !== 1 ||
+          typeof raw.mark !== "string" ||
+          !/^[0-9a-f]{32}$/u.test(raw.mark)
+        )
+          return fail();
+        return raw.mark;
+      });
+    },
     /** WP-2423 OPS-ORDER-DETAIL; NotFound when the Order is not at the selected Store. */
     loadDetail(orderReference: string, signal: AbortSignal) {
       reference(orderReference);

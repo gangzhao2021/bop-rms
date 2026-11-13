@@ -201,6 +201,11 @@ export const localMerchantFetch: typeof fetch = async (input, init) => {
       })),
     });
   }
+  // WP-2423 (reads-under-burst): the demo Store's Orders change only by its own cancellations.
+  if (method === "GET" && url.pathname === "/merchant/orders/changes") {
+    const mark = (demoCancellations.size + 1).toString(16).padStart(32, "0");
+    return json({ schemaVersion: 1, mark });
+  }
   if (method === "GET" && url.pathname === "/merchant/orders/detail") {
     const detail = currentOrderDetailFixture(url.searchParams.get("order") ?? "");
     if (detail !== null) applyDemoCancellation(detail.order);

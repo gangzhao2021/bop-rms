@@ -1918,6 +1918,8 @@ function QueuedOrderLines({
 
 /** WP-2423 Q1: the page re-reads current orders this often while it is open. */
 export const ORDER_REFRESH_MS = 10_000;
+/** WP-2423 (reads-under-burst): how often Orders asks whether anything changed (a light read). */
+export const ORDER_CHANGES_MS = 3_000;
 /**
  * WP-2423 Q1: how close a paid pickup is to the end of its acceptance window (30 minutes after
  * payment; Payment refunds it afterwards). Warning from 10 minutes left, urgent from 5.
@@ -3741,6 +3743,8 @@ export function CurrentOrderQueuePage({
   );
   const [linesRevision, setLinesRevision] = useState(0);
   const background = useRef<AbortController | null>(null);
+  /** Reads the list now, because the Store's Orders changed (set by the background read). */
+  const readOnChange = useRef<() => void>(() => undefined);
   // merchant-outage-recovery M42: this device remembers that staff wanted sound on Orders.
   const {
     soundOn,
@@ -3779,9 +3783,16 @@ export function CurrentOrderQueuePage({
   const live = useStaffSessionLive();
   useEffect(() => {
     if (!ready || !live) return;
-    const tick = () => {
+    let changedMeanwhile = false;
+    const read = (changed: boolean) => {
       setNow(Date.now());
-      if (servingOrders.current.size > 0 || background.current !== null) return;
+      if (servingOrders.current.size > 0) return;
+      // A change seen while a read is on its way, which may have read before it: read once more.
+      if (background.current !== null) {
+        if (changed) changedMeanwhile = true;
+        return;
+      }
+      changedMeanwhile = false;
       const controller = new AbortController();
       background.current = controller;
       void readCurrentOrders(client, after, orderReference, controller.signal)
@@ -3799,8 +3810,11 @@ export function CurrentOrderQueuePage({
         })
         .finally(() => {
           if (background.current === controller) background.current = null;
+          if (changedMeanwhile && !controller.signal.aborted) read(true);
         });
     };
+    const tick = () => read(false);
+    readOnChange.current = () => read(true);
     const timer = setInterval(tick, ORDER_REFRESH_MS);
     const visible = () => {
       if (document.visibilityState === "visible") tick();
@@ -3809,11 +3823,46 @@ export function CurrentOrderQueuePage({
     // merchant-outage-recovery M102: back online, the list reads again at once.
     window.addEventListener("online", tick);
     return () => {
+      readOnChange.current = () => undefined;
       clearInterval(timer);
       document.removeEventListener("visibilitychange", visible);
       window.removeEventListener("online", tick);
       background.current?.abort();
       background.current = null;
+    };
+  }, [ready, live, after, orderReference, client]);
+  // WP-2423 (reads-under-burst, v15 2026-11-13): a freshly paid pickup reached this list 30-70 s
+  // late: the whole list was read only every 10 s, and in a rush that heavy read ran long or
+  // answered busy. Every few seconds the screen now asks only whether anything changed among the
+  // Store's Orders (a light read), and reads the list at once when it did. Only while the list is
+  // on screen and signed in; a failed look changes nothing (the list's own reads say so).
+  const changeMark = useRef<string | null>(null);
+  useEffect(() => {
+    if (!ready || !live || orderReference !== undefined || after !== null) return;
+    let flight: AbortController | null = null;
+    changeMark.current = null;
+    const look = () => {
+      if (flight !== null || document.visibilityState !== "visible") return;
+      const controller = new AbortController();
+      flight = controller;
+      void client
+        .loadChanges(controller.signal)
+        .then((mark) => {
+          if (controller.signal.aborted) return;
+          const before = changeMark.current;
+          changeMark.current = mark;
+          if (before !== null && before !== mark) readOnChange.current();
+        })
+        .catch(() => undefined)
+        .finally(() => {
+          if (flight === controller) flight = null;
+        });
+    };
+    look();
+    const timer = setInterval(look, ORDER_CHANGES_MS);
+    return () => {
+      clearInterval(timer);
+      flight?.abort();
     };
   }, [ready, live, after, orderReference, client]);
   // WP-2423 item 10, merchant-outage-recovery M102: the first read failed (the server, no answer,

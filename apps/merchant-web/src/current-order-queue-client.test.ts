@@ -1363,3 +1363,27 @@ it("reads a paid round still on its way to the kitchen, and counts it for Home o
     ),
   ).toThrow();
 });
+
+it("WP-2423 reads-under-burst: reads the Store's Orders change mark, and nothing else", async () => {
+  const answer = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { "content-type": "application/json", "cache-control": "no-store" },
+    });
+  const fetcher = vi.fn<typeof fetch>(async () =>
+    answer({ schemaVersion: 1, mark: "0123456789abcdef0123456789abcdef" }),
+  );
+  const client = createCurrentOrderQueueClient(fetcher);
+  expect(await client.loadChanges(new AbortController().signal)).toBe(
+    "0123456789abcdef0123456789abcdef",
+  );
+  expect(fetcher.mock.calls[0]?.[0]).toBe("/merchant/orders/changes");
+  expect(fetcher.mock.calls[0]?.[1]).toMatchObject({ method: "GET", cache: "no-store" });
+  // An answer that is not a mark (an order reference, another shape) is no answer.
+  fetcher.mockResolvedValueOnce(answer({ schemaVersion: 1, mark: "ORD-1" }));
+  await expect(client.loadChanges(new AbortController().signal)).rejects.toThrow();
+  fetcher.mockResolvedValueOnce(answer({ error: "retry_later" }, 503));
+  await expect(client.loadChanges(new AbortController().signal)).rejects.toMatchObject({
+    code: "ServerProblem",
+  });
+});
