@@ -302,10 +302,9 @@ export function leavingWithUnsavedWork(): boolean {
   return leavingOnPurpose;
 }
 
-/** Chooses a language for this device and reloads, so every text follows it. */
 /**
  * v15 b12: work in progress a screen keeps across the language switch's reload (an order being
- * taken), in this tab only and read back once: switching the language never loses it.
+ * taken), in this tab only, read back for a minute after it: switching the language never loses it.
  */
 const keptThroughSwitch = new Map<string, () => unknown>();
 const KEPT_PREFIX = "bop.merchant.keptThroughLanguageSwitch.";
@@ -362,6 +361,7 @@ function keepForSwitch(): void {
   }
 }
 
+/** Chooses a language for this device and reloads, so every text follows it. */
 export function chooseLanguage(language: StaffLanguage): void {
   if (
     language !== current &&
