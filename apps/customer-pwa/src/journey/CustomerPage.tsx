@@ -2,6 +2,7 @@ import { LanguageSwitch, t, useLanguage } from "../i18n/i18n.js";
 import { AppFrame } from "@bop-rms/ui";
 import { useEffect, type MouseEvent, type ReactNode } from "react";
 import { Link } from "react-router";
+import { isCustomerSessionRestoreUnavailable } from "../session/customer-transaction-context.js";
 
 export type CustomerJourneyStep =
   "entry" | "menu" | "cart" | "checkout" | "payment" | "order" | "receipt" | "table" | "other";
@@ -66,9 +67,13 @@ export function CustomerPage({
   useEffect(() => {
     document.title = customerPageTitle(step, store?.storeName);
   }, [step, store, language]);
+  // WP-2423 (rush-reads-and-orders-changes): a page that could not get its visit back from a busy
+  // store does not know the Store yet; the guest is not told to scan a code they may not have.
   const description = store
     ? [store.brandName, mode].filter((part) => part !== undefined && part !== "").join(" · ")
-    : t("Scan the location QR code to begin");
+    : isCustomerSessionRestoreUnavailable()
+      ? ""
+      : t("Scan the location QR code to begin");
   const links: readonly { step: CustomerJourneyStep; label: string; href: string }[] = [
     { step: "menu", label: t("Menu"), href: "/menu" },
     ...(browseOnly ? [] : [{ step: "cart" as const, label: t("Cart"), href: "/cart" }]),

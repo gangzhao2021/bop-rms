@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createBrowserCustomerCartClient, setCustomerCartCsrfCredential } from "./cart-client.js";
 import { CartClientError, type CartView } from "./types.js";
-import { getCustomerCsrfCredential } from "../session/customer-transaction-context.js";
+import {
+  getCustomerCsrfCredential,
+  setCustomerSessionRestoreUnavailable,
+} from "../session/customer-transaction-context.js";
 
 const id = (n: number) => `018f5300-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 
@@ -31,6 +34,33 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   setCustomerCartCsrfCredential(null);
+  setCustomerSessionRestoreUnavailable(false);
+});
+
+it("WP-2423 (rush-reads-and-orders-changes): an add while the store could not give the visit back says busy, sends nothing, and asks for the visit again", async () => {
+  setCustomerSessionRestoreUnavailable(true);
+  const fetch = vi.fn().mockResolvedValue(
+    new Response(JSON.stringify({ schemaVersion: 1, csrfToken: "f".repeat(43) }), {
+      headers: { "content-type": "application/json", "cache-control": "no-store" },
+    }),
+  );
+  vi.stubGlobal("fetch", fetch);
+  const client = createBrowserCustomerCartClient();
+  const failure = await client
+    .addItem({
+      cart: cart(),
+      sellableReference: id(3),
+      operationReference: id(21),
+      draft: { quantity: 1, optionSelections: [], customerNote: null },
+    })
+    .catch((error: unknown) => error);
+  // Never "your session ended": nothing was changed, try again in a moment.
+  expect(failure).toBeInstanceOf(CartClientError);
+  expect(failure).toMatchObject({ code: "cart_service_unavailable", retryAfterSeconds: 5 });
+  // Nothing was sent to the cart; the visit is asked for again, and the next try has it.
+  await vi.waitFor(() => expect(getCustomerCsrfCredential()).toBe("f".repeat(43)));
+  expect(fetch).toHaveBeenCalledTimes(1);
+  expect(fetch.mock.calls[0]?.[0]).toBe("/api/v1/customer/session/csrf");
 });
 
 describe("Customer Cart browser client", () => {

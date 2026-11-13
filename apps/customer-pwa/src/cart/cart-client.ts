@@ -14,9 +14,11 @@ import {
   getCustomerCsrfCredential,
   setCustomerCsrfCredential,
   isUnseatedTableScan,
+  isCustomerSessionRestoreUnavailable,
   setParticipationEnded,
   type ParticipationEndedReason,
 } from "../session/customer-transaction-context.js";
+import { recoverCustomerSession } from "../session/session-bootstrap.js";
 
 /** M126 I.2: the Store's reason, or null when it sent none this page knows. */
 export function participationReason(value: unknown): ParticipationEndedReason | null {
@@ -348,6 +350,13 @@ export function setCustomerCartCsrfCredential(value: string | null): void {
 
 function csrf(): string {
   const value = getCustomerCsrfCredential();
+  // WP-2423 (rush-reads-and-orders-changes): the Store could not say yet whether this visit goes
+  // on (it was busy when the page asked). Nothing is sent; the guest is told the system is busy
+  // and the visit is asked for again, never "your session ended".
+  if (value === null && isCustomerSessionRestoreUnavailable()) {
+    void recoverCustomerSession();
+    throw new CartClientError("cart_service_unavailable", { retryAfterSeconds: 5 });
+  }
   // Coordinator 2026-10-30: a scan of a table no party is seated at started no visit.
   if (value === null)
     throw new CartClientError(
@@ -604,12 +613,16 @@ export function createBrowserCustomerCartClient(): CustomerCartClient {
         throw new CartClientError("network_unknown");
       }
     },
-    loadCurrent: (signal?: AbortSignal) =>
-      request(
-        withNameLocale("/bff/customer/cart"),
-        { method: "GET", ...(signal === undefined ? {} : { signal }) },
-        parseCurrent,
-      ),
+    loadCurrent(signal?: AbortSignal) {
+      const read = () =>
+        request(
+          withNameLocale("/bff/customer/cart"),
+          { method: "GET", ...(signal === undefined ? {} : { signal }) },
+          parseCurrent,
+        );
+      // The visit is asked for again first when the Store could not answer before (a rush).
+      return isCustomerSessionRestoreUnavailable() ? recoverCustomerSession().then(read) : read();
+    },
     async createCart(input) {
       const contextCurrent = captureCustomerCsrfContext();
       const result = await request(withNameLocale("/api/v1/carts"), {

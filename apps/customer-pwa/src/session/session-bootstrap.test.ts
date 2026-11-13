@@ -1,5 +1,5 @@
 import { afterEach, it, expect, vi } from "vitest";
-import { restoreCustomerSession } from "./session-bootstrap.js";
+import { recoverCustomerSession, restoreCustomerSession } from "./session-bootstrap.js";
 import {
   getCustomerCsrfCredential,
   getCheckoutSessionReference,
@@ -11,8 +11,11 @@ import {
   getSettledTableLabel,
   setSettledTable,
   getSettledTableReceiptCsrf,
+  isCustomerSessionRestoreUnavailable,
+  setCustomerSessionRestoreUnavailable,
 } from "./customer-transaction-context.js";
 afterEach(() => {
+  setCustomerSessionRestoreUnavailable(false);
   setCustomerCsrfCredential(null);
   setEndedVisitReceiptAccess(null);
   setMovedTableLabel(null);
@@ -369,4 +372,47 @@ it("M104 B.2: restores this visit's earlier orders under the latest, and refuses
     setCustomerCsrfCredential(null);
     expect(await restore(body)).toBe(false);
   }
+});
+
+it("WP-2423 (rush-reads-and-orders-changes): a restore the store could not answer leaves the visit unknown, never ended, and is asked again", async () => {
+  // v15 2026-11-13: the restore of a pickup guest who reloaded in a rush was answered busy (or
+  // not in 5 s); the page read that as no visit and Checkout said the session had ended.
+  const busy = new Response(JSON.stringify({ schemaVersion: 1 }), {
+    status: 503,
+    headers: { "retry-after": "5", "content-type": "application/json" },
+  });
+  expect(await restoreCustomerSession(vi.fn().mockResolvedValue(busy))).toBe(false);
+  expect(getCustomerCsrfCredential()).toBeNull();
+  expect(isCustomerSessionRestoreUnavailable()).toBe(true);
+  // No answer in time (the request timed out or the network failed) is the same: not known.
+  setCustomerSessionRestoreUnavailable(false);
+  expect(await restoreCustomerSession(vi.fn().mockRejectedValue(new Error("timeout")))).toBe(false);
+  expect(isCustomerSessionRestoreUnavailable()).toBe(true);
+  // Asked again (once, however many ask), with the longer wait of a read in a rush.
+  const fetcher = vi.fn().mockResolvedValue(response());
+  await Promise.all([recoverCustomerSession(fetcher), recoverCustomerSession(fetcher)]);
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  expect(getCustomerCsrfCredential()).toBe("B".repeat(43));
+  expect(isCustomerSessionRestoreUnavailable()).toBe(false);
+  // With the credential back nothing is asked again.
+  await recoverCustomerSession(fetcher);
+  expect(fetcher).toHaveBeenCalledTimes(1);
+});
+
+it("WP-2423 (rush-reads-and-orders-changes): the store's own answer settles it: no visit is no visit", async () => {
+  setCustomerSessionRestoreUnavailable(true);
+  const none = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+  await recoverCustomerSession(none);
+  expect(none).toHaveBeenCalledTimes(1);
+  expect(getCustomerCsrfCredential()).toBeNull();
+  expect(isCustomerSessionRestoreUnavailable()).toBe(false);
+  // Nothing more to ask: the store said there is no visit.
+  await recoverCustomerSession(none);
+  expect(none).toHaveBeenCalledTimes(1);
+  // A refusal (401) is an answer too.
+  setCustomerSessionRestoreUnavailable(false);
+  expect(
+    await restoreCustomerSession(vi.fn().mockResolvedValue(new Response(null, { status: 401 }))),
+  ).toBe(false);
+  expect(isCustomerSessionRestoreUnavailable()).toBe(false);
 });

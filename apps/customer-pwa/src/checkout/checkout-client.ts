@@ -4,8 +4,19 @@ import { CartClientError, type CartMoney, type CartView } from "../cart/types.js
 import {
   captureCustomerCsrfContext,
   getCustomerCsrfCredential,
+  isCustomerSessionRestoreUnavailable,
   setParticipationEnded,
 } from "../session/customer-transaction-context.js";
+import { recoverCustomerSession } from "../session/session-bootstrap.js";
+
+/**
+ * WP-2423 (rush-reads-and-orders-changes, v15 2026-11-13): the page has no credential for the
+ * visit because the Store could not answer when it asked (a rush), not because the visit ended.
+ * The guest is told the system is busy, the cart is kept, and the page tries again by itself.
+ */
+function visitNotKnownYet(): CartClientError {
+  return new CartClientError("cart_service_unavailable", { retryAfterSeconds: 5 });
+}
 import type { CheckoutQuote, CheckoutState, DishRename } from "./types.js";
 
 const uuidV7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
@@ -269,6 +280,12 @@ export interface CheckoutMutationOptions {
 }
 
 export interface CheckoutClient {
+  /**
+   * WP-2423 (rush-reads-and-orders-changes): asks the Store for this page's visit again when it
+   * could not answer before (a rush). Runs before a load starts, as it replaces the credential.
+   * Undefined when there is nothing to ask (the load then starts at once, as before).
+   */
+  recoverVisit?(): Promise<void> | undefined;
   loadCart(): Promise<CartView | null>;
   quote(
     cart: CartView,
@@ -396,10 +413,20 @@ async function requestCheckoutMutationOnce(
 
 export function createCheckoutClient(cartClient: CustomerCartClient): CheckoutClient {
   return Object.freeze({
-    loadCart: () => cartClient.loadCurrent(),
+    recoverVisit: () =>
+      isCustomerSessionRestoreUnavailable() ? recoverCustomerSession() : undefined,
+    async loadCart() {
+      const cart = await cartClient.loadCurrent();
+      if (cart !== null && isCustomerSessionRestoreUnavailable()) throw visitNotKnownYet();
+      return cart;
+    },
     async quote(cart: CartView, operationReference: string, options?: CheckoutMutationOptions) {
       const contextCurrent = captureCustomerCsrfContext();
       const csrf = getCustomerCsrfCredential();
+      if (csrf === null && isCustomerSessionRestoreUnavailable()) {
+        void recoverCustomerSession();
+        throw visitNotKnownYet();
+      }
       if (csrf === null) throw new CartClientError("cart_session_expired");
       if (!credential.test(csrf) || !uuidV7.test(operationReference))
         throw new CartClientError("cart_request_invalid");
@@ -764,6 +791,14 @@ export function createCheckoutController(
       }
       const observedRevision = revision;
       const query = ++querySequence;
+      // The visit is asked for again first (it replaces the credential this load then holds to),
+      // so the total can be priced right after the cart shows.
+      const recovering = client.recoverVisit?.();
+      if (recovering !== undefined) {
+        await recovering.catch(() => undefined);
+        if (observedRevision !== revision || query !== querySequence || quoteFlight !== null)
+          return;
+      }
       const contextCurrent = captureCustomerCsrfContext();
       try {
         const current = await client.loadCart();

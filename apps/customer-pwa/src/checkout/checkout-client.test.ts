@@ -5,6 +5,7 @@ import {
   getCustomerCsrfCredential,
   getParticipationEnded,
   setCustomerCsrfCredential,
+  setCustomerSessionRestoreUnavailable,
 } from "../session/customer-transaction-context.js";
 import {
   createCheckoutClient,
@@ -83,6 +84,7 @@ afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
   setCustomerCsrfCredential(null);
+  setCustomerSessionRestoreUnavailable(false);
   vi.unstubAllGlobals();
 });
 
@@ -224,6 +226,54 @@ describe("WP-1703 Checkout transport", () => {
       code: "cart_session_expired",
     });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("WP-2423 (rush-reads-and-orders-changes): a visit the store could not give back yet is busy, never an ended session", async () => {
+    // v15 2026-11-13: the page's restore met a rush, so it held no credential; the cart itself
+    // loaded, and Checkout said "Your session ended. Scan the location QR code again".
+    setCustomerSessionRestoreUnavailable(true);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const client = createCheckoutClient({ loadCurrent: async () => cart } as CustomerCartClient);
+    await expect(client.quote(cart, id(9))).rejects.toMatchObject({
+      code: "cart_service_unavailable",
+      retryAfterSeconds: 5,
+    });
+    // The cart is read, but the page says busy (and reads again by itself) instead of a dead total.
+    await expect(client.loadCart()).rejects.toMatchObject({
+      code: "cart_service_unavailable",
+      retryAfterSeconds: 5,
+    });
+    // Asked for again before the next load: once the store answers, the page has its visit.
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ schemaVersion: 1, csrfToken: "B".repeat(43) }), {
+        headers: { "content-type": "application/json", "cache-control": "no-store" },
+      }),
+    );
+    await client.recoverVisit?.();
+    expect(getCustomerCsrfCredential()).toBe("B".repeat(43));
+    expect(await client.loadCart()).toBe(cart);
+  });
+
+  it("WP-2423 (rush-reads-and-orders-changes): the checkout page asks for its visit again before it loads, then prices it", async () => {
+    setCustomerSessionRestoreUnavailable(true);
+    const order: string[] = [];
+    const client: CheckoutClient = {
+      recoverVisit: vi.fn(async () => {
+        order.push("recover");
+        setCustomerCsrfCredential("C".repeat(43));
+      }),
+      loadCart: vi.fn(async () => {
+        order.push("load");
+        return cart;
+      }),
+      quote: vi.fn(async () => quote),
+    };
+    const controller = createCheckoutController(client, () => id(9));
+    await controller.load();
+    expect(order).toEqual(["recover", "load"]);
+    // The new credential came before the load, so the load is current and the cart shows.
+    expect(controller.getState()).toMatchObject({ status: "ready", cart });
   });
 
   it("makes no request with a malformed in-memory credential or operation key", async () => {

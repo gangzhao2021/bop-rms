@@ -219,9 +219,27 @@ export function getTablePaymentTiming(): TablePaymentTiming | null {
   return tablePaymentTiming;
 }
 
+/**
+ * WP-2423 (rush-reads-and-orders-changes, v15 2026-11-13): this page asked the Store for its visit
+ * and got no answer it could use (busy, no connection in time, a network failure), so it does not
+ * know whether the visit goes on. Not knowing is never "your session ended": an action that needs
+ * the visit says the system is busy, and the visit is asked for again. Memory only; cleared once
+ * the Store answers (a visit restored, or none to restore).
+ */
+let sessionRestoreUnavailable = false;
+
+export function setCustomerSessionRestoreUnavailable(value: boolean): void {
+  sessionRestoreUnavailable = value;
+}
+
+export function isCustomerSessionRestoreUnavailable(): boolean {
+  return sessionRestoreUnavailable && csrfCredential === null;
+}
+
 export function setCustomerCsrfCredential(value: string | null): void {
   csrfContext = Symbol();
   csrfCredential = value;
+  if (value !== null) sessionRestoreUnavailable = false;
   tablePaymentTiming = null;
   // A new visit replaces the ended one on this device (its cookie replaces the old Session).
   if (value !== null) {

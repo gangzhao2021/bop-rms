@@ -3,6 +3,8 @@ import {
   captureCustomerCsrfContext,
   getCustomerCsrfCredential,
   setCustomerCsrfCredential,
+  setCustomerSessionRestoreUnavailable,
+  isCustomerSessionRestoreUnavailable,
   setCheckoutSessionReference,
   setEndedVisitReceiptAccess,
   setMovedTableLabel,
@@ -103,15 +105,36 @@ function restoredVisit(value: unknown): CustomerRestoredVisit | null {
     return null;
   return Object.freeze({ publicTableReference: raw.publicTableReference, joined: raw.joined });
 }
+/**
+ * The Store's answer said nothing about the visit: busy (503, 429), another server failure, or no
+ * answer at all. 204 (no visit), 400/401/403/404 and every 200 are answers.
+ */
+function unanswered(status: number): boolean {
+  return status === 429 || status >= 500 || status === 0;
+}
+/** The first restore waits this long, so a page opened in a rush still paints in time. */
+const firstRestoreTimeoutMs = 5000;
+/**
+ * A restore asked again because the first one had no answer waits as long as the Store may take
+ * to answer a read in a rush (it answers busy by 13 s), inside the 15 s a phone waits.
+ */
+export const customerSessionRecoveryTimeoutMs = 14_000;
 /** Restore foreground CSRF and current public menu context in memory only. */
 export async function restoreCustomerSession(
   fetcher: typeof fetch = fetch,
   onMenuContext?: (context: MenuJourneyContext) => void,
   onCurrentOrder?: (order: CustomerCurrentOrder) => void,
   onVisit?: (visit: CustomerRestoredVisit) => void,
+  options: { readonly timeoutMs?: number } = {},
 ): Promise<boolean> {
   if (getCustomerCsrfCredential() !== null) return true;
   const current = captureCustomerCsrfContext();
+  // WP-2423 (rush-reads-and-orders-changes): whether the Store answered at all. A restore that
+  // got no usable answer leaves the page not knowing whether its visit goes on (see
+  // setCustomerSessionRestoreUnavailable); a real answer ("no visit", "this visit") settles it.
+  const settle = (unavailable: boolean) => {
+    if (current()) setCustomerSessionRestoreUnavailable(unavailable);
+  };
   try {
     const response = await fetcher("/api/v1/customer/session/csrf", {
       credentials: "same-origin",
@@ -119,8 +142,9 @@ export async function restoreCustomerSession(
       redirect: "error",
       referrerPolicy: "no-referrer",
       headers: { "x-bop-session-bootstrap": "1" },
-      signal: AbortSignal.timeout(5000),
+      signal: AbortSignal.timeout(options.timeoutMs ?? firstRestoreTimeoutMs),
     });
+    settle(unanswered(response.status));
     // 204: this browser has no Guest Session yet (a first visit), or its visit ended or expired;
     // there is nothing to restore and no token is issued.
     if (
@@ -286,6 +310,27 @@ export async function restoreCustomerSession(
     if (visit) onVisit?.(visit);
     return true;
   } catch {
+    // No answer in time, or the connection failed: whether the visit goes on is not known.
+    settle(true);
     return false;
   }
+}
+
+let recovery: Promise<void> | null = null;
+/**
+ * WP-2423 (rush-reads-and-orders-changes, v15 2026-11-13): a page that has no credential because
+ * the Store could not answer its restore asks for the visit again (one request at a time). Does
+ * nothing when the page has its credential or the Store already said there is no visit.
+ */
+export function recoverCustomerSession(fetcher: typeof fetch = fetch): Promise<void> {
+  if (getCustomerCsrfCredential() !== null || !isCustomerSessionRestoreUnavailable())
+    return Promise.resolve();
+  recovery ??= restoreCustomerSession(fetcher, undefined, undefined, undefined, {
+    timeoutMs: customerSessionRecoveryTimeoutMs,
+  })
+    .then(() => undefined)
+    .finally(() => {
+      recovery = null;
+    });
+  return recovery;
 }
