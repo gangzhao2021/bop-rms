@@ -1516,8 +1516,30 @@ export async function readCustomerTableBillFacts(
     reductions
       .filter((reduction) => (reduction.points === true) === points)
       .reduce((total, reduction) => total + BigInt(reduction.amountMinor), 0n);
+  const printed = customerTableBillLines(bill.rounds);
+  return {
+    owedMinor: bill.writeOff !== null ? 0n : BigInt(bill.owed.totalMinor),
+    ...(bill.writeOff !== null ? { closedByStaff: true } : {}),
+    pointsUsedMinor: sum(true),
+    takenOffMinor: sum(false),
+    taxRoundingMinor: BigInt(bill.taxRoundingMinor),
+    ...(bill.split?.stale === true ? { splitStale: true } : {}),
+    ...(printed.bill === undefined ? {} : { bill: printed.bill }),
+    rounds: printed.rounds,
+  };
+}
+
+type TableBillRounds = Awaited<ReturnType<typeof readDiningTableBill>>["rounds"];
+/**
+ * b13: the guest's bill lines from the table bill's rounds — each round's, and the whole bill's
+ * only when every round's add up.
+ */
+export function customerTableBillLines(billRounds: TableBillRounds): {
+  readonly bill?: CustomerTableBillLines;
+  readonly rounds: ReadonlyMap<string, CustomerTableBillLines>;
+} {
   // b13: each round as the bill prints it (its share of the tax rounding in its tax).
-  const lines = (round: (typeof bill.rounds)[number]): CustomerTableBillLines => {
+  const lines = (round: TableBillRounds[number]): CustomerTableBillLines => {
     const off = (points: boolean) =>
       round.items.reduce(
         (total, item) =>
@@ -1535,33 +1557,41 @@ export async function readCustomerTableBillFacts(
       totalMinor: BigInt(round.totalMinor),
     };
   };
-  const rounds = new Map(bill.rounds.map((round) => [round.orderBatchReference, lines(round)]));
-  const whole = [...rounds.values()].reduce(
-    (total, round) => ({
-      itemsMinor: total.itemsMinor + round.itemsMinor,
-      takenOffMinor: total.takenOffMinor + round.takenOffMinor,
-      pointsMinor: total.pointsMinor + round.pointsMinor,
-      subtotalMinor: total.subtotalMinor + round.subtotalMinor,
-      taxMinor: total.taxMinor + round.taxMinor,
-      totalMinor: total.totalMinor + round.totalMinor,
-    }),
-    {
-      itemsMinor: 0n,
-      takenOffMinor: 0n,
-      pointsMinor: 0n,
-      subtotalMinor: 0n,
-      taxMinor: 0n,
-      totalMinor: 0n,
-    },
-  );
+  // b13 review: lines say a bill only when they add up as printed (dishes − taken off − points =
+  // subtotal; subtotal + tax = total). A round with an order-time discount or fee does not (its
+  // total holds what these lines have no line for): it and the whole bill then keep the earlier
+  // reading (round totals as ordered and the tax rounding line), never a page that can't be read.
+  const addsUp = (entry: CustomerTableBillLines) =>
+    entry.itemsMinor - entry.takenOffMinor - entry.pointsMinor === entry.subtotalMinor &&
+    entry.subtotalMinor + entry.taxMinor === entry.totalMinor &&
+    [entry.itemsMinor, entry.takenOffMinor, entry.pointsMinor, entry.subtotalMinor].every(
+      (amount) => amount >= 0n,
+    ) &&
+    entry.taxMinor >= 0n;
+  const allRounds = billRounds.map((round) => [round.orderBatchReference, lines(round)] as const);
+  const rounds = new Map(allRounds.filter(([, entry]) => addsUp(entry)));
+  const whole = allRounds
+    .map(([, entry]) => entry)
+    .reduce(
+      (total, round) => ({
+        itemsMinor: total.itemsMinor + round.itemsMinor,
+        takenOffMinor: total.takenOffMinor + round.takenOffMinor,
+        pointsMinor: total.pointsMinor + round.pointsMinor,
+        subtotalMinor: total.subtotalMinor + round.subtotalMinor,
+        taxMinor: total.taxMinor + round.taxMinor,
+        totalMinor: total.totalMinor + round.totalMinor,
+      }),
+      {
+        itemsMinor: 0n,
+        takenOffMinor: 0n,
+        pointsMinor: 0n,
+        subtotalMinor: 0n,
+        taxMinor: 0n,
+        totalMinor: 0n,
+      },
+    );
   return {
-    owedMinor: bill.writeOff !== null ? 0n : BigInt(bill.owed.totalMinor),
-    ...(bill.writeOff !== null ? { closedByStaff: true } : {}),
-    pointsUsedMinor: sum(true),
-    takenOffMinor: sum(false),
-    taxRoundingMinor: BigInt(bill.taxRoundingMinor),
-    ...(bill.split?.stale === true ? { splitStale: true } : {}),
-    bill: whole,
+    ...(rounds.size === allRounds.length && addsUp(whole) ? { bill: whole } : {}),
     rounds,
   };
 }

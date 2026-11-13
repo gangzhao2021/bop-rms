@@ -285,8 +285,11 @@ function money(value: unknown): DiningMoney {
     return invalid();
   return Object.freeze({ amountMinor: raw.amountMinor, currencyCode: raw.currencyCode });
 }
-/** b13: a bill's lines as printed; they must add up, or the read is not shown. */
-function billLines(value: unknown): DiningBillLines {
+/**
+ * b13: a bill's lines as printed. A malformed value fails the read; lines that do not add up are
+ * not shown (null: the page says the bill as before), never the whole table page unavailable.
+ */
+function billLines(value: unknown): DiningBillLines | null {
   const entry = record(value, ["items", "takenOff", "pointsUsed", "subtotal", "tax", "total"]);
   const lines = Object.freeze({
     items: money(entry.items),
@@ -297,12 +300,12 @@ function billLines(value: unknown): DiningBillLines {
     total: money(entry.total),
   });
   const minor = (key: keyof DiningBillLines) => BigInt(lines[key].amountMinor);
+  if (Object.values(lines).some((line) => BigInt(line.amountMinor) < 0n)) return invalid();
   if (
-    Object.values(lines).some((line) => BigInt(line.amountMinor) < 0n) ||
     minor("items") - minor("takenOff") - minor("pointsUsed") !== minor("subtotal") ||
     minor("subtotal") + minor("tax") !== minor("total")
   )
-    return invalid();
+    return null;
   return lines;
 }
 function oneOf<T extends string>(value: unknown, allowed: readonly T[]): T {
@@ -476,7 +479,10 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
       items,
       ...(breakdown === null ? {} : breakdown),
       itemsTotal,
-      ...(billed ? { bill: billLines(round.bill) } : {}),
+      ...(() => {
+        const bill = billed ? billLines(round.bill) : null;
+        return bill === null ? {} : { bill };
+      })(),
     });
   });
   let summary: DiningSessionView["summary"] = null;
@@ -549,7 +555,10 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
         : {}),
       ...(withTakenOff ? { takenOff: money(raw.takenOff) } : {}),
       ...(withTaxRounding ? { taxRounding: money(raw.taxRounding) } : {}),
-      ...(withBill ? { bill: billLines(raw.bill) } : {}),
+      ...(() => {
+        const bill = withBill ? billLines(raw.bill) : null;
+        return bill === null ? {} : { bill };
+      })(),
       ...(withSettlement
         ? { tableTip: money(raw.tableTip), cashRounding: money(raw.cashRounding) }
         : {}),

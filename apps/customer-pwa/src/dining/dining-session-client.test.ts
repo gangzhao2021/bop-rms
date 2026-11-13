@@ -69,7 +69,7 @@ describe("WP-2423 Q8 dining session client", () => {
     }
   });
 
-  it("b13: decodes a bill read as printed for the table and a round, and refuses lines that don't add up", () => {
+  it("b13: decodes a bill read as printed for the table and a round; lines that don't add up are not shown", () => {
     const lines = {
       items: cad("5000"),
       takenOff: cad("2750"),
@@ -88,9 +88,22 @@ describe("WP-2423 Q8 dining session client", () => {
     expect(view.summary?.bill).toEqual(lines);
     expect(view.rounds[0]?.bill).toEqual(lines);
     expect(parseDiningSessionView(base).summary?.bill).toBeUndefined();
-    for (const broken of [
+    // b13 review: a line with an order-time discount or fee leaves the lines not adding up: only
+    // those lines go unsaid, the guest's table page still reads (never "unavailable").
+    for (const uneven of [
       { ...lines, tax: cad("294") },
       { ...lines, takenOff: cad("2700") },
+    ]) {
+      const value = structuredClone(base);
+      value.session.summary.bill = uneven;
+      (value.session.rounds[0] as Record<string, unknown>).bill = uneven;
+      const read = parseDiningSessionView(value);
+      expect(read.summary?.bill).toBeUndefined();
+      expect(read.rounds[0]?.bill).toBeUndefined();
+      expect(read.summary?.due).toEqual(parseDiningSessionView(base).summary?.due);
+    }
+    // A malformed value is still refused.
+    for (const broken of [
       { ...lines, takenOff: cad("-1") },
       { ...lines, extra: cad("0") },
     ]) {

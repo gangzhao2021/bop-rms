@@ -5,6 +5,7 @@ import {
   composeCustomerDiningSession,
   createCustomerDiningSessionRead,
   customerSplitParts,
+  customerTableBillLines,
   mergeBillOrderFacts,
   type CustomerDiningSessionDependencies,
   type CustomerDiningSessionFacts,
@@ -268,6 +269,76 @@ describe("WP-2423 Q8 composeCustomerDiningSession", () => {
     // Each round card says what the bill says of it, so they add up to the Table total.
     expect(view.rounds.map((round) => round.bill?.total)).toEqual([cad(1978n), cad(565n)]);
     expect(view.rounds[1]?.bill?.takenOff).toEqual(cad(1500n));
+  });
+
+  // b13 review: a dish priced with an order-time discount or fee has a total these lines have no
+  // line for; its round and the whole bill are then not said as lines (the guest's page still
+  // reads, with round totals as ordered and the tax rounding line), never the page unavailable.
+  it("b13: bill lines are said only where they add up as printed", () => {
+    const round = (
+      reference: string,
+      subtotalMinor: string,
+      taxMinor: string,
+      totalMinor: string,
+      reduction: { amountMinor: string; netMinor: string } | null = null,
+    ) => ({
+      roundNumber: 1,
+      orderReference: id(1),
+      orderBatchReference: reference,
+      submissionReference: id(2),
+      items: [
+        {
+          orderItemReference: id(3),
+          quantity: 1,
+          displayName: "Dish (TEST)",
+          subtotalMinor: "2000",
+          totalMinor: "2260",
+          reduction:
+            reduction === null ? null : { kind: "Comp" as const, percent: null, ...reduction },
+        },
+      ],
+      subtotalMinor,
+      taxMinor,
+      totalMinor,
+      taxRoundingMinor: "0",
+      paid: false,
+      orderedBy: null,
+      fromTableLabel: null,
+      liveOrderedAt: null,
+    });
+    const even = round(id(30), "1500", "195", "1695", { amountMinor: "565", netMinor: "500" });
+    const ok = customerTableBillLines([even]);
+    expect(ok.bill).toEqual({
+      itemsMinor: 2000n,
+      takenOffMinor: 500n,
+      pointsMinor: 0n,
+      subtotalMinor: 1500n,
+      taxMinor: 195n,
+      totalMinor: 1695n,
+    });
+    expect(ok.rounds.get(id(30))?.totalMinor).toBe(1695n);
+    // An order-time discount of $2.00 left in the total: subtotal + tax is not the total.
+    const discounted = round(id(40), "2000", "234", "2034");
+    const mixed = customerTableBillLines([even, discounted]);
+    expect(mixed.bill).toBeUndefined();
+    expect([...mixed.rounds.keys()]).toEqual([id(30)]);
+    const view = composeCustomerDiningSession({
+      ...facts({
+        paymentOutcomes: new Map(),
+        payments: [],
+        payLaterRounds: new Set([id(30), id(40)]),
+        tableBill: {
+          owedMinor: 3729n,
+          pointsUsedMinor: 0n,
+          takenOffMinor: 565n,
+          taxRoundingMinor: 1n,
+          ...mixed,
+        },
+      }),
+      paymentTiming: "PayLater",
+    });
+    expect(view.summary?.bill).toBeUndefined();
+    expect(view.summary?.taxRounding).toEqual(cad(1n));
   });
 
   it("b13: a split the bill outgrew says nothing of its old parts", () => {
