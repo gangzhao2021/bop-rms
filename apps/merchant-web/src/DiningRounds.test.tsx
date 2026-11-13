@@ -10,6 +10,8 @@ import {
   DiningRoundsContext,
   roundServedCount,
   roundStateText,
+  servedNow,
+  withConfirmedServes,
   type DiningRoundsProgress,
 } from "./DiningRounds.js";
 
@@ -388,5 +390,43 @@ describe("a combo's dishes read as the combo until the kitchen finishes each", (
     expect(comboPartStateText(item("Accepted"), part(true), 0)).toBe("Ready to serve");
     expect(comboPartServable(item("Accepted"), part(true))).toBe(true);
     expect(comboPartServable(item("Accepted"), part(true, true))).toBe(false);
+  });
+});
+
+// v15 b12 live: Mark served answered 200 but the round kept "Ready to serve · Served 0/1" for
+// 5–10 s under load, which invites a second tap.
+describe("b13: a serve the server confirmed shows at once and stays over a lagging reread", () => {
+  const ready = progress([progressItem(1, 1, "TEST noodles", "Ready")]);
+  it("shows the dish served as soon as the answer is confirmed", () => {
+    const now = servedNow(ready, [{ orderItemReference: id(201), quantity: 1 }]);
+    expect(now.items[0]).toMatchObject({
+      phase: "Fulfilled",
+      deliveredQuantity: 1,
+      remainingQuantity: 0,
+    });
+    expect(roundServedCount(now.items, 1)).toEqual({
+      served: 1,
+      ordered: 1,
+    });
+    expect(readyToServe(now)).toEqual([]);
+    // Nothing else changes; never more than was left.
+    expect(servedNow(ready, [{ orderItemReference: id(999), quantity: 1 }])).toBe(ready);
+    expect(servedNow(ready, [{ orderItemReference: id(201), quantity: 5 }]).items[0]).toMatchObject(
+      { deliveredQuantity: 1, remainingQuantity: 0 },
+    );
+  });
+  it("keeps it over an older reread for a while, then the server's progress stands", () => {
+    const confirmed = new Map([[id(201), { delivered: 1, until: 1_000 }]]);
+    // The reread has not caught up yet: still shown served.
+    expect(withConfirmedServes(ready, confirmed, 500).items[0]?.phase).toBe("Fulfilled");
+    expect(confirmed.size).toBe(1);
+    // The reread has it: the entry goes.
+    const caughtUp = progress([progressItem(1, 1, "TEST noodles", "Fulfilled", 1)]);
+    expect(withConfirmedServes(caughtUp, confirmed, 600)).toBe(caughtUp);
+    expect(confirmed.size).toBe(0);
+    // Too long without the server having it: the server's progress is shown as it is.
+    const stale = new Map([[id(201), { delivered: 1, until: 1_000 }]]);
+    expect(withConfirmedServes(ready, stale, 1_001)).toBe(ready);
+    expect(stale.size).toBe(0);
   });
 });

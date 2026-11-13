@@ -164,6 +164,57 @@ export function roundStateText(
 }
 
 /**
+ * v15 b13: what the server just confirmed as served, shown at once (v15 b12 live: under load the
+ * round kept "Ready to serve · Served 0/1" for 5–10 s after Mark served answered, which invites a
+ * second tap). The reread that follows replaces it with the server's own progress.
+ */
+export function servedNow(
+  view: DiningProgress,
+  served: readonly { readonly orderItemReference: string; readonly quantity: number }[],
+): DiningProgress {
+  const by = new Map(served.map((line) => [line.orderItemReference, line.quantity]));
+  let changed = false;
+  const items = view.items.map((item) => {
+    const quantity = Math.min(by.get(item.orderItemReference) ?? 0, item.remainingQuantity);
+    if (quantity <= 0) return item;
+    changed = true;
+    const remainingQuantity = item.remainingQuantity - quantity;
+    return Object.freeze({
+      ...item,
+      deliveredQuantity: item.deliveredQuantity + quantity,
+      remainingQuantity,
+      phase: remainingQuantity === 0 ? "Fulfilled" : item.phase,
+    });
+  });
+  return changed ? Object.freeze({ ...view, items: Object.freeze(items) }) : view;
+}
+
+/**
+ * b13: a reread that is older than a serve the server already confirmed (its progress catches up
+ * within seconds) keeps the confirmed serve shown, for up to `CONFIRMED_SERVE_MS`; then, or once
+ * the reread has it, the server's own progress stands alone.
+ */
+export const CONFIRMED_SERVE_MS = 30_000;
+export function withConfirmedServes(
+  view: DiningProgress,
+  confirmed: Map<string, { readonly delivered: number; readonly until: number }>,
+  now: number,
+): DiningProgress {
+  const behind: { orderItemReference: string; quantity: number }[] = [];
+  for (const [reference, entry] of confirmed) {
+    const item = view.items.find((value) => value.orderItemReference === reference);
+    if (item === undefined || now > entry.until || item.deliveredQuantity >= entry.delivered)
+      confirmed.delete(reference);
+    else
+      behind.push({
+        orderItemReference: reference,
+        quantity: entry.delivered - item.deliveredQuantity,
+      });
+  }
+  return servedNow(view, behind);
+}
+
+/**
  * Reads the order's serving progress with the order (and again when `refreshKey` changes, which
  * the page's own refresh does), and serves dishes and rounds in one tap. Children render the rounds
  * (`CurrentOrderLines` with rounds); the table's close steps follow them, as before.
@@ -204,6 +255,10 @@ export function DiningRoundsProvider({
     new Map<string, { execute: (csrf: string, signal?: AbortSignal) => Promise<unknown> }>(),
   );
   const busyRef = useRef(false);
+  // b13: serves the server confirmed, kept shown until the progress read has them.
+  const confirmedServes = useRef(
+    new Map<string, { readonly delivered: number; readonly until: number }>(),
+  );
   const onBusyRef = useRef(onBusy);
   onBusyRef.current = onBusy;
   useEffect(() => {
@@ -228,7 +283,7 @@ export function DiningRoundsProvider({
         controller.signal,
       );
       if (!controller.signal.aborted) {
-        setView(next);
+        setView(withConfirmedServes(next, confirmedServes.current, Date.now()));
         setUnavailable(null);
       }
     } catch (error) {
@@ -258,6 +313,8 @@ export function DiningRoundsProvider({
     prepare: () => { execute: (csrf: string, signal?: AbortSignal) => Promise<unknown> },
     done: (result: unknown) => string | null,
     refused: (error: unknown) => string,
+    /** b13: what the confirmed answer served, shown before the reread. */
+    served?: (result: unknown) => readonly { orderItemReference: string; quantity: number }[],
   ) => {
     const controller = lifetime.current;
     if (busyRef.current || controller === null || controller.signal.aborted) return;
@@ -271,6 +328,20 @@ export function DiningRoundsProvider({
       pending.current.delete(key);
       setRetrying((current) => without(current, key));
       setNotice(done(result));
+      if (served !== undefined && view !== null) {
+        const lines = served(result);
+        for (const line of lines) {
+          const item = view.items.find(
+            (value) => value.orderItemReference === line.orderItemReference,
+          );
+          if (item !== undefined)
+            confirmedServes.current.set(line.orderItemReference, {
+              delivered: item.deliveredQuantity + Math.min(line.quantity, item.remainingQuantity),
+              until: Date.now() + CONFIRMED_SERVE_MS,
+            });
+        }
+        setView((current) => (current === null ? current : servedNow(current, lines)));
+      }
       markBusy(false);
       changed();
     } catch (error) {
@@ -328,6 +399,7 @@ export function DiningRoundsProvider({
           }),
         () => null,
         refusedServe,
+        () => [{ orderItemReference: item.orderItemReference, quantity: servableQuantity(item) }],
       );
     },
     serveComboPart: (item, part) => {
@@ -412,6 +484,20 @@ export function DiningRoundsProvider({
           }),
         (result) => serveReadySummary(result as Parameters<typeof serveReadySummary>[0]),
         refusedServe,
+        (result) => {
+          const outcomes = new Map(
+            (result as Parameters<typeof serveReadySummary>[0]).lines.map((line) => [
+              line.orderItemReference,
+              line.outcome,
+            ]),
+          );
+          return lines
+            .filter((item) => outcomes.get(item.orderItemReference) === "Served")
+            .map((item) => ({
+              orderItemReference: item.orderItemReference,
+              quantity: servableQuantity(item),
+            }));
+        },
       );
     },
   };
