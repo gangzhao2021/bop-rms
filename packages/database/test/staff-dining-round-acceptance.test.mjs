@@ -1876,6 +1876,59 @@ it("the real staff round command takes a round from table entry to the card mach
         ],
       );
 
+      // DEC-PAPER-SEND-IDEMPOTENT (b11 major): a third round is left unpaid until the System
+      // takes it off; sent again with the same operation (the answer was lost), it is named by
+      // its order and table under this restricted role, never offered for a card-machine charge,
+      // and nothing new is ordered or charged.
+      const thirdOperation = reference();
+      const third = await send(server, { operationReference: thirdOperation, lines: [line(1)] });
+      assert.equal(third.status, "Placed");
+      const unpaidAgain = await send(server, {
+        operationReference: thirdOperation,
+        lines: [line(1)],
+      });
+      assert.deepEqual([unpaidAgain.status, unpaidAgain.paid], ["AlreadyPlaced", undefined]);
+      const [{ version: thirdVersion }] = await rows(
+        "SELECT max(version)::int AS version FROM rms_ordering.order_revision WHERE order_id=$1",
+        [first.orderReference],
+      );
+      await cancelUnpaidRound(admin, {
+        tenant: store.ownerScope.tenantReference,
+        scope: store.ownerScope,
+        orderReference: first.orderReference,
+        round: {
+          orderBatchReference: third.orderBatchReference,
+          submissionReference: (
+            await rows(
+              "SELECT submission_id::text AS s FROM rms_ordering.order_batch WHERE order_batch_id=$1",
+              [third.orderBatchReference],
+            )
+          )[0].s,
+          orderVersion: thirdVersion,
+          items: (
+            await rows(
+              "SELECT order_item_id::text AS i FROM rms_ordering.order_item WHERE order_batch_id=$1",
+              [third.orderBatchReference],
+            )
+          ).map((row) => row.i),
+        },
+        id: (k) => id(0x3500 + k),
+      });
+      const beforeEnded = await counts();
+      const paymentsBeforeEnded = await rows(
+        "SELECT count(*)::int AS n FROM rms_payment.card_machine_payment",
+      );
+      await assert.rejects(send(server, { operationReference: thirdOperation, lines: [line(1)] }), {
+        code: "STAFF_ROUND_ALREADY_SENT",
+        placedOrderNumber: third.orderNumber,
+        placedTableLabel: "T01",
+      });
+      assert.deepEqual(await counts(), beforeEnded);
+      assert.deepEqual(
+        await rows("SELECT count(*)::int AS n FROM rms_payment.card_machine_payment"),
+        paymentsBeforeEnded,
+      );
+
       // Staff sending rounds are no phones at the table (2026-11-03: "Phone 1 just joined").
       const [{ session }] = await rows(
         "SELECT dining_session_id::text AS session FROM rms_ordering.staff_dining_round_entry LIMIT 1",

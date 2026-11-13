@@ -25,6 +25,8 @@ const state = vi.hoisted(() => ({
   // machine (or paper) payment record once paid.
   waitsForPayment: true,
   paid: null as Record<string, unknown> | null,
+  /** b11: the System (or staff) took the round off. */
+  takenOff: false,
   /** What the table's cart does with a staff removal (the shared-cart double below). */
   onStaffRemoval: null as
     | null
@@ -120,6 +122,7 @@ vi.mock("@rms/ordering", async (importOriginal) => {
         return { status: "Created", record: value };
       },
       loadBatch: async (_tx: unknown, guest: string) => state.batches.get(guest) ?? null,
+      isTakenOff: async () => state.takenOff,
     }),
     // WP-2423 D1: a later round's table Order is at the version its rounds moved it to (7), not
     // the Order header's version (4).
@@ -341,6 +344,7 @@ describe("staff dine-in round command — WP-2423 Q7 slice 2", () => {
     state.onStaffRemoval = null;
     state.waitsForPayment = true;
     state.paid = null;
+    state.takenOff = false;
     state.tableSession = undefined;
   });
 
@@ -616,6 +620,35 @@ describe("staff dine-in round command — WP-2423 Q7 slice 2", () => {
       recordedAfterOutage: true,
       paid: true,
     });
+    expect(pipeline.openTable).toHaveBeenCalledTimes(1);
+  });
+
+  // DEC-PAPER-SEND-IDEMPOTENT (b11 major): the System took an unpaid round off while its payment
+  // clock stayed open; sent again it is named by its order, never offered for a card charge.
+  it("names a round the System took off when it is sent again, never asking to charge it", async () => {
+    const clock = { at: "2026-10-15T18:00:00.000Z" };
+    const { send, pipeline } = setup(clock);
+    const first = await send();
+    state.takenOff = true;
+    await expect(send()).rejects.toMatchObject({
+      code: "STAFF_ROUND_ALREADY_SENT",
+      placedOrderNumber: first.orderNumber,
+      placedTableLabel: first.tableLabel,
+    });
+    // Its time to pay ended but the System has not taken it off yet: named the same way.
+    state.takenOff = false;
+    clock.at = "2026-10-15T18:31:00.000Z";
+    await expect(send()).rejects.toMatchObject({ code: "STAFF_ROUND_ALREADY_SENT" });
+    // Paid before it ended: still the paid round, never "taken off".
+    state.paid = {
+      preparation: {
+        orderAllocation: { amountMinor: 2260n },
+        tip: { amountMinor: 300n },
+        total: { amountMinor: 2560n },
+        capacityExpiresAt: "2026-10-15T18:30:00.000Z",
+      },
+    };
+    expect(await send()).toMatchObject({ status: "AlreadyPlaced", paid: true });
     expect(pipeline.openTable).toHaveBeenCalledTimes(1);
   });
 

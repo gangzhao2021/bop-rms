@@ -273,6 +273,24 @@ export function createPostgresStaffDiningRoundEntryStore(options: {
       return row === undefined ? null : batchOf(row);
     },
     /**
+     * DEC-PAPER-SEND-IDEMPOTENT (b11): whether this round was taken off, by the System when its
+     * time to pay ended or by staff, so a round sent again is named, never offered for payment.
+     */
+    async isTakenOff(tx: AuditTransaction, orderBatchReference: string): Promise<boolean> {
+      await context(tx);
+      const found = rows(
+        await tx.query(
+          `SELECT (EXISTS (SELECT 1 FROM rms_ordering.order_batch_checkout_cancellation c
+   WHERE c.brand_id=$1 AND c.store_id=$2 AND c.order_batch_id=$3)
+ OR EXISTS (SELECT 1 FROM rms_ordering.order_staff_cancellation s
+   WHERE s.brand_id=$1 AND s.store_id=$2 AND s.order_batch_id=$3)) AS "takenOff"`,
+          [brand, store, parseOrderingReference(orderBatchReference)],
+        ),
+      );
+      const value = found[0]?.takenOff;
+      return typeof value === "boolean" ? value : fail();
+    },
+    /**
      * WP-2423 item 5: rounds staff entered at these tables that still wait for their card-machine
      * payment as far as Ordering knows (no payment recorded, not accepted, not cancelled), with the
      * time their payment window ends (the round's Dining capacity link + the dining payment window).

@@ -991,6 +991,21 @@ export function createMerchantStaffDiningRound(options: {
         // A round's payment clock stays open once it is paid: a round sent again is read as paid
         // from its payment record, so staff are never asked to charge it a second time.
         const paidAlready = status === "AlreadyPlaced" && (await paymentRecord()) !== null;
+        // DEC-PAPER-SEND-IDEMPOTENT (b11): the clock also stays open after the System (or staff)
+        // took an unpaid round off. Sent again, such a round, or one whose time to pay has ended,
+        // is named by its order and table, never offered for a card-machine charge.
+        if (
+          status === "AlreadyPlaced" &&
+          !paidAlready &&
+          (Date.parse(payBy) <= Date.parse(now()) ||
+            (await entries(scope, allowed).isTakenOff(tx, String(batch.orderBatchReference))))
+        ) {
+          // Placed for certain (it has a payment clock), so never answered as still sending.
+          const named = new StaffDiningRoundError("STAFF_ROUND_ALREADY_SENT");
+          named.placedOrderNumber = batch.orderNumber;
+          named.placedTableLabel = labels.get(String(entry.diningSessionReference)) ?? null;
+          throw named;
+        }
         return Object.freeze({
           ...(paidAlready ? { paid: true as const } : {}),
           status,
