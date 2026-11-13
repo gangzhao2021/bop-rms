@@ -353,3 +353,70 @@ describe("WP-2423 guest-table-open-and-busy-reads: a read answers within its tim
     }
   });
 });
+
+describe("WP-2423 reads-under-burst: the rush is told apart from a fault, and a cut read stops", () => {
+  const budget = () =>
+    (globalThis as Record<symbol, { getStore(): { shed?: boolean; cut?: boolean } | undefined }>)[
+      Symbol.for("bop.database.request-acquire-budget")
+    ]?.getStore();
+  it("notes the rush when no connection came within the wait, never when the database refused", async () => {
+    vi.useFakeTimers();
+    try {
+      const queued = vi.fn(() => new Promise<PoolClient>(() => undefined));
+      const rushed = runWithRequestAcquireBudget(1_000, async () => {
+        await acquireTenantConnection({ connect: queued }, { budgetMs: 1_000 }).catch(
+          () => undefined,
+        );
+        return budget()?.shed;
+      });
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(await rushed).toBe(true);
+      // A pool full in its own queue (the pool's wait ran out) is the rush too.
+      const full = vi.fn(async () => {
+        throw new Error("timeout exceeded when trying to connect");
+      });
+      const pooled = runWithRequestAcquireBudget(300, async () => {
+        await acquireTenantConnection({ connect: full }, { budgetMs: 300 }).catch(() => undefined);
+        return budget()?.shed;
+      });
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(await pooled).toBe(true);
+      // A database that refuses (a wrong password, 28P01) is a real fault: not the rush.
+      const refused = vi.fn(async () => {
+        throw Object.assign(new Error("password"), { code: "28P01", severity: "FATAL" });
+      });
+      const faulted = runWithRequestAcquireBudget(1_000, async () => {
+        await acquireTenantConnection({ connect: refused }, { budgetMs: 1_000 }).catch(
+          () => undefined,
+        );
+        return budget()?.shed;
+      });
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(await faulted).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("takes no connection for a read already answered or abandoned (cut), even after its answer", async () => {
+    const connect = vi.fn(async () => client());
+    const outcome = await runWithRequestAcquireBudget(
+      10_000,
+      async () => {
+        const store = budget() as { cut?: boolean; ended?: boolean } | undefined;
+        if (store) {
+          store.cut = true;
+          // The busy answer was sent (the response finished): still cut, never unbounded.
+          store.ended = true;
+        }
+        return acquireTenantConnection({ connect }, { budgetMs: 10_000 }).then(
+          () => "connection",
+          (error: { code?: string }) => String(error.code),
+        );
+      },
+      { answerWithinMs: 12_000 },
+    );
+    expect(outcome).toBe("TENANT_DATABASE_ACQUIRE_FAILED");
+    expect(connect).not.toHaveBeenCalled();
+  });
+});

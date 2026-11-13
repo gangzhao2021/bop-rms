@@ -1,5 +1,9 @@
 import type { Pool, PoolClient } from "pg";
-import { boundingRequestAcquireBudget, requestAnswerTimeLeftMs } from "./request-acquire-budget.js";
+import {
+  boundingRequestAcquireBudget,
+  noteRequestShed,
+  requestAnswerTimeLeftMs,
+} from "./request-acquire-budget.js";
 import { TenantContextDatabaseError, tenantContextDatabaseDiagnostic } from "./tenant-context.js";
 
 /**
@@ -61,17 +65,42 @@ export function isTransientConnectionAcquireFailure(error: unknown): boolean {
   }
 }
 
+/** Set on an acquire failure whose last attempt met a full pool or too many connections. */
+const rushCause = Symbol.for("bop.database.acquire-rush");
+/** The request's wait ran out with its attempt still queued (no free connection in time). */
+const queuedOutOfTime = Symbol.for("bop.database.acquire-queued-out-of-time");
+function isRushAcquireFailure(error: unknown): boolean {
+  if (!(error instanceof TenantContextDatabaseError)) return false;
+  if (Object.getOwnPropertyDescriptor(error, queuedOutOfTime)?.value === true) return true;
+  return Object.getOwnPropertyDescriptor(error, rushCause)?.value === true;
+}
 function acquireFailed(error: unknown): TenantContextDatabaseError {
-  return new TenantContextDatabaseError(
+  const failed = new TenantContextDatabaseError(
     "TENANT_DATABASE_ACQUIRE_FAILED",
     tenantContextDatabaseDiagnostic(error),
   );
+  if (isPoolFull(error)) Object.defineProperty(failed, rushCause, { value: true });
+  return failed;
+}
+/** The pool's own wait ran out, or the server has too many connections (53300). */
+function isPoolFull(error: unknown): boolean {
+  try {
+    const message =
+      error !== null && typeof error === "object"
+        ? Object.getOwnPropertyDescriptor(error, "message")?.value
+        : undefined;
+    if (typeof message === "string" && poolTimeoutMessages.has(message)) return true;
+    return tenantContextDatabaseDiagnostic(error).sqlState === "53300";
+  } catch {
+    return false;
+  }
 }
 
 const outOfTime = Symbol("out of time");
 
 export {
   endRequestAcquireBudget,
+  noteRequestShed,
   noteRequestCommittedWrite,
   remainingRequestAcquireBudgetMs,
   requestAnswerTimeLeftMs,
@@ -103,11 +132,13 @@ export async function acquireTenantConnection(
   // A read past the time it may work in all, like one that waited all it may: busy, try again.
   const answerLeft = request === undefined ? undefined : requestAnswerTimeLeftMs();
   // The request has already waited all it may: busy, try again (nothing has been sent).
-  if (request !== undefined && (request.remainingMs <= 0 || (answerLeft ?? 1) <= 0))
+  if (request !== undefined && (request.remainingMs <= 0 || (answerLeft ?? 1) <= 0)) {
+    noteRequestShed();
     throw new TenantContextDatabaseError(
       "TENANT_DATABASE_ACQUIRE_FAILED",
       Object.freeze({ sqlState: "08006", constraint: null, table: null, closed: false }),
     );
+  }
   const startedAt = now();
   const deadline =
     startedAt +
@@ -116,6 +147,11 @@ export async function acquireTenantConnection(
       : Math.min(budget, request.remainingMs, answerLeft ?? Number.POSITIVE_INFINITY));
   try {
     return await acquireUntil(pool, deadline, retries, now, sleep, random);
+  } catch (error) {
+    // WP-2423 (reads-under-burst): every connection was busy until the request's wait ran out
+    // (the pool's own queue, or too many connections): the rush, not a fault.
+    if (request !== undefined && isRushAcquireFailure(error)) noteRequestShed();
+    throw error;
   } finally {
     if (request !== undefined) request.remainingMs -= Math.max(0, now() - startedAt);
   }
@@ -147,10 +183,12 @@ async function acquireUntil(
         (late) => late.release(),
         () => undefined,
       );
-      throw new TenantContextDatabaseError(
+      const queued = new TenantContextDatabaseError(
         "TENANT_DATABASE_ACQUIRE_FAILED",
         Object.freeze({ sqlState: "08006", constraint: null, table: null, closed: false }),
       );
+      Object.defineProperty(queued, queuedOutOfTime, { value: true });
+      throw queued;
     } catch (error) {
       if (error instanceof TenantContextDatabaseError) throw error;
       const step = Math.min(tenantConnectionRetryBaseMs * 2 ** attempt, tenantConnectionRetryCapMs);

@@ -11,12 +11,18 @@
 //  3. the same for a table guest's check of the table's QR records (the dining context), while a
 //     registration that doesn't fit the phone's QR stays the answer "Unavailable" (scan again),
 //     never "busy" for ever.
+//  6. (reads-under-burst) the guest's Session read, the first step of every cart read, says why it
+//     could not answer in a rush (no connection), and the request is noted as turned away by the
+//     rush; a read cut at its answer time (or abandoned) takes no connection at all.
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { URL } from "node:url";
 import pg from "pg";
 import { it } from "vitest";
-import { createGuestSession } from "../../bop/identity/src/index.ts";
+import {
+  createGuestSession,
+  createPostgresGuestSessionEntryStore,
+} from "../../bop/identity/src/index.ts";
 import { createConfiguredPickupSessionBinding } from "../../../apps/api/src/configured-pickup-session-binding.ts";
 import { createConfiguredDiningGuestContext } from "../../../apps/api/src/configured-dining-guest-context.ts";
 import { renderPilotAclSql } from "../../../tooling/environment/pilot-acl-render.mjs";
@@ -174,6 +180,29 @@ it("an outage of the Store's records never reads as an ended guest session, and 
 
       // 1. Every connection busy (a rush): the guest is told to try again, not that the visit ended.
       held = await pool.connect();
+      // 6. The Session read in that rush keeps its safe code, and the request is noted as shed.
+      const sessions = createPostgresGuestSessionEntryStore(runner, {
+        brandReference: id(1),
+        storeReference: id(2),
+      });
+      const shedStore = () =>
+        globalThis[Symbol.for("bop.database.request-acquire-budget")]?.getStore();
+      await runWithRequestAcquireBudget(
+        1500,
+        async () => {
+          await assert.rejects(sessions.resolve("1".repeat(64)), (error) => {
+            assert.equal(error.code, "GUEST_SESSION_UNAVAILABLE");
+            assert.equal(
+              Object.getOwnPropertyDescriptor(error, Symbol.for("bop.failure.cause"))?.value?.code,
+              "TENANT_DATABASE_ACQUIRE_FAILED",
+            );
+            assert.equal(Object.keys(error).includes("cause"), false);
+            return true;
+          });
+          assert.equal(shedStore()?.shed, true);
+        },
+        { answerWithinMs: 12_000 },
+      );
       await assert.rejects(binding.validate(session, at), (error) => {
         assert.equal(error.dependencyFailure, true);
         assert.equal(error.cause?.code, "TENANT_DATABASE_ACQUIRE_FAILED");
@@ -257,6 +286,28 @@ it("an outage of the Store's records never reads as an ended guest session, and 
           );
         },
         { answerWithinMs: 1500 },
+      );
+      // The cut statement was the read's answer time ending: the request is noted as shed.
+      await runWithRequestAcquireBudget(
+        3000,
+        async () => {
+          await runner.run((tx) => tx.query("SELECT pg_sleep(2)", [])).catch(() => undefined);
+          assert.equal(shedStore()?.shed, true);
+        },
+        { answerWithinMs: 1000 },
+      );
+      // 6. A read cut (answered busy at its time, or its phone went away) sends nothing more,
+      // under the api role too: no connection is taken (none is busy now).
+      await runWithRequestAcquireBudget(
+        3000,
+        async () => {
+          shedStore().cut = true;
+          await assert.rejects(
+            runner.run((tx) => tx.query("SELECT 1", [])),
+            (error) => error.code === "TENANT_DATABASE_ACQUIRE_FAILED",
+          );
+        },
+        { answerWithinMs: 12_000 },
       );
       // A command has no answer time: the same statement runs to its end.
       await runWithRequestAcquireBudget(3000, () =>

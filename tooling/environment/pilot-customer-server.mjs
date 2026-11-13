@@ -24,7 +24,9 @@ import {
 } from "../../apps/api/dist/merchant-store-routing.js";
 import { staffContentLocaleMiddleware } from "../../apps/api/dist/staff-content-locale.js";
 import {
+  readAnswerMarginMs,
   requestReadAnswerWithinMs,
+  sendReadAnswerBusy,
   withRequestAcquireBudget,
 } from "../../apps/api/dist/request-acquire-budget.js";
 import { createPilotProductImages } from "../../apps/api/dist/product-image-route.js";
@@ -208,6 +210,8 @@ function paymentRoutes({
   return router;
 }
 
+/** Emitted on a response a read's answer time answered busy (its upstream request is dropped). */
+const readAnsweredBusy = "bop-read-answered-busy";
 export async function startInternalCustomerServer({
   createInternalMerchant,
   additionalStores = [],
@@ -262,10 +266,19 @@ export async function startInternalCustomerServer({
   // connection waiting budget per request, so a rush answers "busy, try again" within 15 s.
   // A read also does all its work within 12 s, or its screen's longer wait less 3 s for the
   // reports and approval reads, or says busy (guest-table-open-and-busy-reads).
+  // WP-2423 (reads-under-burst): and its whole answer arrives in time. A read (a staff screen's
+  // own, or a guest's on its way to the Store's API) that has not started answering by its time
+  // plus 2 s says busy (503 + Retry-After) and is cut; a guest read's API request is dropped with
+  // it. The API itself answers 1 s earlier, so this is only for time lost before or between them.
   app.use((req, res, next) =>
     withRequestAcquireBudget(next, {
       response: res,
       answerWithinMs: requestReadAnswerWithinMs(req.method, req.originalUrl ?? req.url),
+      busyAnswerMarginMs: 2 * readAnswerMarginMs,
+      answerBusy: () => {
+        sendReadAnswerBusy(res);
+        res.emit(readAnsweredBusy);
+      },
     }),
   );
   app.use((req, res, next) => {
@@ -572,7 +585,11 @@ export async function startInternalCustomerServer({
         },
       );
       upstream.setTimeout(30000, () => upstream.destroy());
+      // A read answered busy here at its time: the Store's API stops working on it too.
+      res.once(readAnsweredBusy, () => upstream.destroy());
       upstream.on("error", () => {
+        // Already answered (busy, at its time): the guest has that answer in full.
+        if (res.writableFinished) return;
         if (res.headersSent) return res.destroy();
         res.status(502).set("Cache-Control", "no-store").json({ code: "INTERNAL_API_UNAVAILABLE" });
       });

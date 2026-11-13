@@ -39,6 +39,19 @@ interface RequestAcquireBudget {
    * work is never cut by the clock, only its waiting.
    */
   readonly answerBy?: number;
+  /**
+   * WP-2423 (reads-under-burst, v15 2026-11-13): this request was turned away by the rush itself
+   * (no connection within its wait, or its answer time ran out), not by a fault. Its busy answer is
+   * logged as a wait (level 40, HTTP_RETRY_LATER), and it is never read again inside the request.
+   */
+  shed?: boolean;
+  /**
+   * WP-2423 (reads-under-burst): a read already answered "busy" (its whole answer time ran out) or
+   * whose phone or screen went away before it was answered. Nothing more of it reaches the
+   * database: no connection is taken and no statement sent, so an abandoned read stops adding to
+   * the rush. A command is never cut.
+   */
+  cut?: boolean;
 }
 /** How long a read may work in all before it answers busy (inside the clients' 15 s). */
 export const requestReadAnswerMs = 12_000;
@@ -51,6 +64,8 @@ function requestBudgets(): AsyncLocalStorage<RequestAcquireBudget> {
 /** The current request's budget while it still bounds acquires (see RequestAcquireBudget). */
 export function boundingRequestAcquireBudget(): RequestAcquireBudget | undefined {
   const budget = requestBudgets().getStore();
+  if (budget?.cut === true && budget.answerBy !== undefined && budget.committedWrite !== true)
+    return budget;
   if (
     budget === undefined ||
     budget.ended === true ||
@@ -93,8 +108,15 @@ export function runWithRequestAcquireBudget<T>(
  * less once the time is spent). Undefined for a command, outside a request, or once unbounded.
  */
 export function requestAnswerTimeLeftMs(): number | undefined {
-  const answerBy = boundingRequestAcquireBudget()?.answerBy;
-  return answerBy === undefined ? undefined : answerBy - Date.now();
+  const budget = boundingRequestAcquireBudget();
+  const answerBy = budget?.answerBy;
+  if (answerBy === undefined) return undefined;
+  return budget?.cut === true ? 0 : answerBy - Date.now();
+}
+/** The rush turned this request away (see `shed`): its busy answer is a wait, not a fault. */
+export function noteRequestShed(): void {
+  const budget = requestBudgets().getStore();
+  if (budget !== undefined) budget.shed = true;
 }
 /** What is left of the current request's acquire budget, or undefined when none bounds it. */
 export function remainingRequestAcquireBudgetMs(): number | undefined {

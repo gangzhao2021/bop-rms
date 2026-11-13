@@ -8,7 +8,13 @@ import {
 import type { CoreTelemetry } from "@bop-rms/observability";
 import type { Request, RequestHandler } from "express";
 import { v7 as uuidV7 } from "uuid";
-import { requestReadAnswerWithinMs, withRequestAcquireBudget } from "./request-acquire-budget.js";
+import {
+  readAnswerMarginMs,
+  requestReadAnswerWithinMs,
+  requestShedFor,
+  sendReadAnswerBusy,
+  withRequestAcquireBudget,
+} from "./request-acquire-budget.js";
 
 const requestContextKey = Symbol("bop.request-correlation");
 const requestErrorCodeKey = Symbol("bop.request-error-code");
@@ -175,8 +181,11 @@ export function createRequestCorrelationMiddleware({
       response.off("finish", complete);
       response.off("close", complete);
       const durationMs = durationBetween(startedAt, nowMilliseconds());
+      // WP-2423 (reads-under-burst): a 503 the rush itself caused (no connection in time, the
+      // read's answer time spent) is a wait the client sits out, like a route's own Retry-After.
       const completionResult =
-        response.statusCode === 503 && localRequest[requestRetryLaterKey] === true
+        response.statusCode === 503 &&
+        (localRequest[requestRetryLaterKey] === true || requestShedFor(response))
           ? ("HTTP_RETRY_LATER" as const)
           : resultCode(response.statusCode);
       telemetryOperation?.complete({
@@ -222,6 +231,9 @@ export function createRequestCorrelationMiddleware({
           request.method,
           request.originalUrl ?? request.url,
         ),
+        // WP-2423 (reads-under-burst): and its whole answer, not only its database work.
+        busyAnswerMarginMs: readAnswerMarginMs,
+        answerBusy: () => sendReadAnswerBusy(response),
       },
     );
   };

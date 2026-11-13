@@ -58,53 +58,173 @@ interface RequestAcquireBudget {
   ended: boolean;
   committedWrite: boolean;
   readonly answerBy?: number;
+  /** The rush turned the request away (no connection in time, answer time spent): a wait. */
+  shed?: boolean;
+  /** A read answered busy or abandoned by its client: nothing more of it reaches the database. */
+  cut?: boolean;
 }
+/**
+ * WP-2423 (reads-under-burst, v15 2026-11-13): the whole answer of a read, not only its database
+ * work, arrives inside the 15 s the phones and staff screens wait. Under a burst, reads whose
+ * database work was done in 12 s still answered after 15-18 s (and 20-26 s at the phone): the
+ * time went to the process itself (one busy event loop serving 400 requests, menu reads the
+ * heaviest) and to the second hop for guest requests. A read that has not started its answer
+ * by its answer time plus this margin answers "busy, try again" (503 + Retry-After 5) at once,
+ * and whatever it was still doing is cut (see `cut`). The guest/staff entry in front of the API
+ * gives its own answer a further second for the hop.
+ */
+export const readAnswerMarginMs = 1_000;
+/** The 503 body of a read cut at its answer time: a plain busy code the clients treat as busy. */
+export const readAnswerBusyBody = Object.freeze({
+  schemaVersion: 1,
+  error: Object.freeze({ code: "service_busy", messageKey: "common.service_busy" }),
+  code: "SERVICE_BUSY",
+});
 const requestBudgetKey = Symbol.for("bop.database.request-acquire-budget");
 function requestBudgets(): AsyncLocalStorage<RequestAcquireBudget> {
   const holder = globalThis as { [requestBudgetKey]?: AsyncLocalStorage<RequestAcquireBudget> };
   holder[requestBudgetKey] ??= new AsyncLocalStorage<RequestAcquireBudget>();
   return holder[requestBudgetKey];
 }
+/** The budget each answered request ran under, for its completion line (kept with the answer). */
+const budgetsByResponse = new WeakMap<object, RequestAcquireBudget>();
+/** True when the rush turned this response's request away (logged as a wait, not a fault). */
+export function requestShedFor(response: object): boolean {
+  return budgetsByResponse.get(response)?.shed === true;
+}
+/** True when the rush turned the current request away (no connection in time, time spent). */
+export function requestWasShed(): boolean {
+  return requestBudgets().getStore()?.shed === true;
+}
+
+interface AnsweringResponse {
+  once(event: "finish" | "close", listener: () => void): unknown;
+  readonly headersSent?: boolean;
+  readonly writableEnded?: boolean;
+  readonly writableFinished?: boolean;
+}
+
 /**
  * Runs one request's handling inside its own waiting budget (an outer one is kept). Once its
- * response has finished or closed, what the request started and still runs (a timer, a
- * follow-through) is no longer bounded by it (WP-2423 outage-reads-and-retry review).
+ * response has finished, what the request started and still runs (a timer, a follow-through) is
+ * no longer bounded by it (WP-2423 outage-reads-and-retry review). A read whose client went away
+ * before its answer, or that answered busy at its answer time, is cut instead: nothing more of it
+ * reaches the database (reads-under-burst). A command is never cut.
  */
 export function withRequestAcquireBudget<T>(
   work: () => T,
   options: {
-    readonly response?: { once(event: "finish" | "close", listener: () => void): unknown };
+    readonly response?: AnsweringResponse;
     readonly budgetMs?: number;
     /** A read's whole work time (`requestReadAnswerMs` for GET/HEAD); none for a command. */
     readonly answerWithinMs?: number | undefined;
+    /**
+     * WP-2423 (reads-under-burst): a read that has not started its answer by its answer time plus
+     * this margin is answered busy by `answerBusy` and cut. Omitted: no such answer.
+     */
+    readonly busyAnswerMarginMs?: number;
+    readonly answerBusy?: () => void;
+    readonly setTimer?: (work: () => void, ms: number) => { cancel(): void };
   } = {},
 ): T {
   if (requestBudgets().getStore() !== undefined) return work();
   const startedAt = Date.now();
   const within = options.answerWithinMs;
+  const read = within !== undefined && Number.isFinite(within) && within >= 0;
   const budget: RequestAcquireBudget = {
     remainingMs: options.budgetMs ?? requestAcquireBudgetMs,
     startedAt,
     ended: false,
     committedWrite: false,
-    ...(within !== undefined && Number.isFinite(within) && within >= 0
-      ? { answerBy: startedAt + within }
-      : {}),
+    ...(read ? { answerBy: startedAt + within } : {}),
   };
-  const end = () => {
+  const response = options.response;
+  if (response !== undefined) budgetsByResponse.set(response, budget);
+  let timer: { cancel(): void } | undefined;
+  const margin = options.busyAnswerMarginMs;
+  const answerBusy = options.answerBusy;
+  if (
+    read &&
+    response !== undefined &&
+    answerBusy !== undefined &&
+    margin !== undefined &&
+    Number.isFinite(margin) &&
+    margin >= 0
+  ) {
+    const schedule =
+      options.setTimer ??
+      ((callback: () => void, ms: number) => {
+        const handle = setTimeout(callback, ms);
+        handle.unref?.();
+        return { cancel: () => clearTimeout(handle) };
+      });
+    timer = schedule(() => {
+      // An answer under way, a finished one or a read that already wrote: left to finish.
+      if (
+        budget.ended ||
+        budget.committedWrite ||
+        response.headersSent === true ||
+        response.writableEnded === true
+      )
+        return;
+      budget.shed = true;
+      budget.cut = true;
+      try {
+        answerBusy();
+      } catch {
+        // The busy answer could not be written (the client went away): the read is cut anyway.
+      }
+    }, within + margin);
+  }
+  response?.once("finish", () => {
+    timer?.cancel();
     budget.ended = true;
-  };
-  options.response?.once("finish", end);
-  options.response?.once("close", end);
+  });
+  response?.once("close", () => {
+    timer?.cancel();
+    // A read whose client left before its answer: nothing more of it is worth a connection.
+    if (read && response.writableFinished !== true && !budget.committedWrite) budget.cut = true;
+    else budget.ended = true;
+  });
   return requestBudgets().run(budget, work);
 }
 
 /**
  * For a read still bounded by its request: the milliseconds left before it must answer; undefined
- * for a command, outside a request, or once its answer was sent.
+ * for a command, outside a request, or once its answer was sent. Zero once it was cut.
  */
 export function requestAnswerTimeLeftMs(): number | undefined {
   const budget = requestBudgets().getStore();
-  if (budget === undefined || budget.ended || budget.answerBy === undefined) return undefined;
+  if (budget === undefined || budget.answerBy === undefined) return undefined;
+  if (budget.cut === true) return 0;
+  if (budget.ended) return undefined;
   return budget.answerBy - Date.now();
+}
+
+/**
+ * WP-2423 (reads-under-burst): the busy answer of a read cut at its answer time, and nothing after
+ * it: the handler that is still working may try to answer later, and that answer goes nowhere
+ * (it would otherwise throw "headers already sent" into the handler, or be written after the end).
+ */
+export function sendReadAnswerBusy(response: {
+  statusCode: number;
+  setHeader(name: string, value: string): unknown;
+  end(chunk?: unknown, ...rest: unknown[]): unknown;
+  write?(chunk: unknown, ...rest: unknown[]): unknown;
+  writeHead?(...rest: unknown[]): unknown;
+}): void {
+  response.statusCode = 503;
+  response.setHeader("Retry-After", "5");
+  response.setHeader("Cache-Control", "no-store");
+  response.setHeader("Content-Type", "application/json; charset=utf-8");
+  response.end(JSON.stringify(readAnswerBusyBody));
+  const ignored = function (this: unknown) {
+    return this;
+  };
+  Object.defineProperties(response, {
+    setHeader: { value: ignored, configurable: true, writable: true },
+    writeHead: { value: ignored, configurable: true, writable: true },
+    write: { value: () => true, configurable: true, writable: true },
+    end: { value: ignored, configurable: true, writable: true },
+  });
 }

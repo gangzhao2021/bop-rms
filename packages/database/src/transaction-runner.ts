@@ -19,7 +19,7 @@ import {
   acquireTenantConnection,
   tenantConnectionAcquireBudgetMaxMs,
 } from "./connection-acquire.js";
-import { requestAnswerTimeLeftMs } from "./request-acquire-budget.js";
+import { noteRequestShed, requestAnswerTimeLeftMs } from "./request-acquire-budget.js";
 
 const retryableSqlStates: ReadonlySet<string> = new Set(["55P03", "40001", "40P01"]);
 function sqlState(error: unknown): string {
@@ -569,6 +569,7 @@ function transactionState(
       if (answerLeft !== undefined && answerLeft <= 0) {
         failed = true;
         failureDiagnostic ??= answerTimeSpent;
+        noteRequestShed();
         throw new TenantContextDatabaseError("TENANT_DATABASE_TRANSACTION_FAILED", answerTimeSpent);
       }
       const narrowedMs =
@@ -617,6 +618,9 @@ function transactionState(
         // caller may rerun the whole idempotent transaction. No SQL detail is exposed.
         const diagnostic = tenantContextDatabaseDiagnostic(error);
         failureDiagnostic ??= diagnostic;
+        // WP-2423 (reads-under-burst): cut where the read's answer time ended (the narrowed
+        // limit), not by the ordinary 5 s limit: the rush, not a slow statement.
+        if (diagnostic.sqlState === "57014" && statementLimit < statementLimitMs) noteRequestShed();
         if (retryableSqlStates.has(sqlState(error))) {
           conflicted = true;
           conflictDiagnostic ??= diagnostic;
