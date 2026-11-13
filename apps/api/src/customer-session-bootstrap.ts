@@ -16,7 +16,10 @@ import {
   type PersistentPublicStoreProfileOptions,
 } from "./persistent-public-store-profile.js";
 import type { RequestHandler } from "express";
-import { isGuestDependencyFailure } from "./guest-binding-dependency.js";
+import {
+  isGuestBindingPermanentRefusal,
+  isGuestDependencyFailure,
+} from "./guest-binding-dependency.js";
 import {
   GuestSessionService,
   GuestSessionError,
@@ -366,8 +369,22 @@ export function createCustomerSessionBootstrapHandler(options?: {
      * ended and to scan a QR code they do not have at home.
      */
     const notReadable = (error: unknown): null => {
-      if (error instanceof GuestSessionError && !isGuestDependencyFailure(error)) return null;
+      // What no wait can change (a refusal of this visit, an *_INVALID input) is an answer too:
+      // nothing to restore, never "busy" for ever.
+      if (
+        (error instanceof GuestSessionError && !isGuestDependencyFailure(error)) ||
+        isGuestBindingPermanentRefusal(error)
+      )
+        return null;
       throw error;
+    };
+    /** Stored data the page can't be given (malformed) is nothing to restore, never busy. */
+    const wellFormed = <T>(parse: () => T): T | null => {
+      try {
+        return parse();
+      } catch {
+        return null;
+      }
     };
     const readMovedTable = async (sessionCredential: string) => {
       if (options.port.readMovedTable === undefined) return null;
@@ -382,42 +399,47 @@ export function createCustomerSessionBootstrapHandler(options?: {
     };
     const readSettledTable = async (sessionCredential: string) => {
       if (options.port.readSettledTable === undefined) return null;
+      let settled: Awaited<ReturnType<NonNullable<typeof options.port.readSettledTable>>>;
       try {
-        const settled = await options.port.readSettledTable(sessionCredential);
-        return settled !== null && /^[^\p{Cc}\p{Cf}<>{}$]{1,40}$/u.test(settled.tableLabel)
-          ? {
-              tableLabel: settled.tableLabel,
-              csrfToken: parseGuestRawCredential(settled.csrfToken),
-            }
-          : null;
+        settled = await options.port.readSettledTable(sessionCredential);
       } catch (error) {
         return notReadable(error);
       }
+      if (settled === null || !/^[^\p{Cc}\p{Cf}<>{}$]{1,40}$/u.test(settled.tableLabel))
+        return null;
+      const csrfToken = wellFormed(() => parseGuestRawCredential(settled.csrfToken));
+      return csrfToken === null ? null : { tableLabel: settled.tableLabel, csrfToken };
     };
     /** The ended visit's receipt access, validated; null when there is none to give. */
     const readEndedVisit = async (sessionCredential: string) => {
       if (options.port.readEndedVisit === undefined) return null;
+      let ended: Awaited<ReturnType<NonNullable<typeof options.port.readEndedVisit>>>;
       try {
-        const ended = await options.port.readEndedVisit(sessionCredential);
-        const until = ended.receiptAvailableUntil;
-        if (
-          !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(until) ||
-          !/^[1-9][0-9]{0,18}$/u.test(ended.order.orderNumber) ||
-          (ended.order.orderType !== "Pickup" && ended.order.orderType !== "DineIn")
-        )
-          return null;
-        return {
-          csrfToken: parseGuestRawCredential(ended.csrfToken),
-          order: {
-            orderReference: String(parseOrderingReference(ended.order.orderReference)),
-            orderNumber: ended.order.orderNumber,
-            orderType: ended.order.orderType,
-          },
-          receiptAvailableUntil: until,
-        };
+        ended = await options.port.readEndedVisit(sessionCredential);
       } catch (error) {
         return notReadable(error);
       }
+      const until = ended.receiptAvailableUntil;
+      if (
+        !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(until) ||
+        !/^[1-9][0-9]{0,18}$/u.test(ended.order.orderNumber) ||
+        (ended.order.orderType !== "Pickup" && ended.order.orderType !== "DineIn")
+      )
+        return null;
+      const csrfToken = wellFormed(() => parseGuestRawCredential(ended.csrfToken));
+      const orderReference = wellFormed(() =>
+        String(parseOrderingReference(ended.order.orderReference)),
+      );
+      if (csrfToken === null || orderReference === null) return null;
+      return {
+        csrfToken,
+        order: {
+          orderReference,
+          orderNumber: ended.order.orderNumber,
+          orderType: ended.order.orderType,
+        },
+        receiptAvailableUntil: until,
+      };
     };
     try {
       const result = await options.port.read(credential);

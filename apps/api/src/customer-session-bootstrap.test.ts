@@ -211,6 +211,48 @@ it("WP-2423 (rush-reads-and-orders-changes): a Session read the store could not 
   expect(ended.status).toBe(503);
   expect(ended.headers.get("retry-after")).toBe("5");
 });
+
+it("WP-2423 (rush-reads-and-orders-changes review): what no wait can change is nothing to restore, never busy for ever", async () => {
+  const f = await setup();
+  f.read.mockRejectedValue(new GuestSessionError("GUEST_SESSION_UNAVAILABLE"));
+  const order = {
+    orderReference: "018f8a00-0000-7000-8000-000000000016",
+    orderNumber: "22",
+    orderType: "DineIn",
+  };
+  // Stored data the page can't be given: a malformed credential or order reference.
+  f.readEndedVisit.mockResolvedValue({
+    csrfToken: "short",
+    order,
+    receiptAvailableUntil: "2026-10-18T18:01:49.437Z",
+  });
+  expect((await f.request()).status).toBe(204);
+  f.readEndedVisit.mockResolvedValue({
+    csrfToken: "C".repeat(43),
+    order: { ...order, orderReference: "not-a-reference" },
+    receiptAvailableUntil: "2026-10-18T18:01:49.437Z",
+  });
+  expect((await f.request()).status).toBe(204);
+  // An input refusal of the owner (an *_INVALID code) is an answer too.
+  f.readEndedVisit.mockRejectedValue(
+    Object.assign(new Error("ORDERING_INPUT_INVALID"), { code: "ORDERING_INPUT_INVALID" }),
+  );
+  expect((await f.request()).status).toBe(204);
+  f.readMovedTable.mockRejectedValue(
+    Object.assign(new Error("DINING_SESSION_INPUT_INVALID"), {
+      code: "DINING_SESSION_INPUT_INVALID",
+    }),
+  );
+  expect((await f.request()).status).toBe(204);
+  // The same refusal over a database failure is the rush, not an answer.
+  f.readMovedTable.mockRejectedValue(
+    Object.assign(new Error("DINING_SESSION_INPUT_INVALID"), {
+      code: "DINING_SESSION_INPUT_INVALID",
+      cause: Object.assign(new Error("canceling statement"), { code: "57014", severity: "ERROR" }),
+    }),
+  );
+  expect((await f.request()).status).toBe(503);
+});
 it("conceals other Session failures and fails safely without configuration", async () => {
   const f = await setup();
   f.read.mockRejectedValue(new GuestSessionError("GUEST_SESSION_VERSION_CONFLICT"));
