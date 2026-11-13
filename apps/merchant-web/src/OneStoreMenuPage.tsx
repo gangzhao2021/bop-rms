@@ -105,10 +105,12 @@ const saveOrderOfflineText = t(
  * v15 2026-11-11 b10: what a listing in progress says. A busy system took 42–82 s, past the
  * "up to a minute" this used to promise, so it says what is usual and, past two minutes, that it
  * is taking longer and nothing needs doing (the listing finishes on the server; this page shows it).
+ * v15 b12: real listings took 10–13 s, so "one to two minutes" overstated the usual wait: it says
+ * under a minute, up to two when busy (the 42–82 s seen under load), as measured.
  */
 export function listingProgressText(seconds: number | null): string {
   const base = t(
-    "Listing… New prices go live first, then the menu. This usually takes one to two minutes, longer when the system is busy. Guests keep ordering throughout.",
+    "Listing… New prices go live first, then the menu. This usually takes under a minute, up to two when the system is busy. Guests keep ordering throughout.",
   );
   if (seconds === null) return base;
   const elapsed = t("{seconds} s", { seconds });
@@ -119,6 +121,18 @@ export function listingProgressText(seconds: number | null): string {
         elapsed +
         " · " +
         t("Taking longer than usual. Nothing needs doing; this page says when it is listed.");
+}
+
+/**
+ * v15 b12: why "List it" waits. A save on its way, or a saved change the menu on screen does not
+ * show yet: "What goes live" is read from the menu on screen, so it would show the menu from before.
+ */
+export function savedListWaitText(state: "Saving" | "Reading" | "ReadFailed"): string {
+  return state === "Saving"
+    ? t("Saving… List it once the menu shows what you saved.")
+    : state === "Reading"
+      ? t("Reading the menu again to show what you saved. List it once it shows.")
+      : t("List it once the menu is read again and shows what you saved.");
 }
 
 export function OneStoreMenuPage({
@@ -204,6 +218,19 @@ export function OneStoreMenuPage({
   };
   const [generation, setGeneration] = useState(0);
   const reload = useCallback(() => setGeneration((value) => value + 1), []);
+  // v15 b12: "What goes live" must never show the menu from before a save. A save on its way, or a
+  // saved change the menu on screen does not show yet (it is read again after each save, seconds
+  // under load), holds "List it" until the menu read after it is on screen.
+  const [editorSaving, setEditorSaving] = useState(false);
+  const generationRef = useRef(generation);
+  generationRef.current = generation;
+  const [shownGeneration, setShownGeneration] = useState(0);
+  const [mustShowGeneration, setMustShowGeneration] = useState(0);
+  const reloadAfterWrite = useCallback(() => {
+    setMustShowGeneration(generationRef.current + 1);
+    reload();
+  }, [reload]);
+  const savedNotShown = editorSaving || shownGeneration < mustShowGeneration;
   // v15 finding e: a listing in progress — this tab's request, or one started before a reload.
   const [listingSince, setListingSince] = useState<number | null>(() =>
     readListingMarker(menuReference, Date.now()),
@@ -215,6 +242,7 @@ export function OneStoreMenuPage({
   const [clock, setClock] = useState(() => Date.now());
   useEffect(() => {
     let active = true;
+    const requested = generation;
     void Promise.all([
       client.load(menuReference),
       availability.load(),
@@ -244,6 +272,7 @@ export function OneStoreMenuPage({
         setFailed(null);
         setReadNotice(null);
         setListedVersion(null);
+        setShownGeneration(requested);
         shownMenu.current = menuReference;
       })
       .catch((error: unknown) => {
@@ -425,7 +454,7 @@ export function OneStoreMenuPage({
       setProblem(t("That didn't go through. Read the menu again and retry."));
     } finally {
       setListingBusy(false);
-      reload();
+      reloadAfterWrite();
     }
   };
   const comboOf = (skuReference: string) => combos.find((c) => c.skuReference === skuReference);
@@ -490,7 +519,7 @@ export function OneStoreMenuPage({
         })),
       });
       setProblem(done);
-      reload();
+      reloadAfterWrite();
     } catch (error) {
       // The arrangement on screen is kept (no reread): staff press Save order again.
       setProblem(
@@ -696,7 +725,7 @@ export function OneStoreMenuPage({
       });
       setNewSection(null);
       setProblem(t("Section added. Guests see it when the menu is listed."));
-      reload();
+      reloadAfterWrite();
     } catch (error) {
       setProblem(
         error instanceof MenuPageError
@@ -946,10 +975,11 @@ export function OneStoreMenuPage({
               ?.code ?? ""
           }
           client={client}
+          onSaving={setEditorSaving}
           onSaved={(message) => {
             setEditing(null);
             setProblem(message);
-            reload();
+            reloadAfterWrite();
           }}
           onClose={() => setEditing(null)}
         />
@@ -966,6 +996,7 @@ export function OneStoreMenuPage({
           allergenChoices={choices}
           keepsStock={view.keepsStock === true}
           client={client}
+          onSaving={setEditorSaving}
           {...(view.pricePowers === undefined ? {} : { priceScopes: view.pricePowers })}
           isCombo={isCombo}
           openApply={openApply?.skuReference === dish.skuReference ? openApply : null}
@@ -975,7 +1006,7 @@ export function OneStoreMenuPage({
             if (product) setLastSaved(product);
             setProblem(null);
             setSavedNote({ sku: dish.skuReference, text: message });
-            reload();
+            reloadAfterWrite();
           }}
           onClose={() => {
             setEditing(null);
@@ -1131,6 +1162,7 @@ export function OneStoreMenuPage({
           allergenChoices={choices}
           keepsStock={view.keepsStock === true}
           client={client}
+          onSaving={setEditorSaving}
           {...(view.pricePowers === undefined ? {} : { priceScopes: view.pricePowers })}
           isCombo={isCombo}
           lastSaved={lastSaved}
@@ -1138,12 +1170,12 @@ export function OneStoreMenuPage({
             setEditing(null);
             if (product) setLastSaved(product);
             setProblem(message);
-            reload();
+            reloadAfterWrite();
           }}
           onSavedKeepOpen={(product) => {
             if (product !== null) setLastSaved(product);
             setProblem(null);
-            reload();
+            reloadAfterWrite();
           }}
           onClose={() => setEditing(null)}
         />
@@ -1156,10 +1188,11 @@ export function OneStoreMenuPage({
           sections={rows}
           sectionCode={rows[rows.length - 1]?.code ?? ""}
           client={client}
+          onSaving={setEditorSaving}
           onSaved={(message) => {
             setEditing(null);
             setProblem(message);
-            reload();
+            reloadAfterWrite();
           }}
           onClose={() => setEditing(null)}
         />
@@ -1238,7 +1271,7 @@ export function OneStoreMenuPage({
             <MenuListingReview
               view={view}
               undeclared={undeclaredOnMenu}
-              busy={blocked}
+              busy={blocked || savedNotShown}
               onList={() => void listMenu()}
               onRebase={() => void rebasePrices()}
               onShowUndeclared={() => {
@@ -1252,7 +1285,8 @@ export function OneStoreMenuPage({
               <button
                 type="button"
                 className="one-menu__primary"
-                disabled={blocked}
+                disabled={blocked || savedNotShown}
+                aria-describedby={savedNotShown ? "one-menu-saved-not-shown" : undefined}
                 onClick={() =>
                   underway || listing !== null ? void listMenu() : setReviewing(true)
                 }
@@ -1266,6 +1300,13 @@ export function OneStoreMenuPage({
               <Link to={`/app/commerce/menus/${menuReference}`}>{t("Open the menu")}</Link>
             </p>
           )}
+          {mayList && savedNotShown && !changedOrder ? (
+            <p className="one-menu__note" id="one-menu-saved-not-shown" role="status">
+              {savedListWaitText(
+                editorSaving ? "Saving" : readNotice === null ? "Reading" : "ReadFailed",
+              )}
+            </p>
+          ) : null}
         </div>
       ) : null}
       {guestUnreadable.length > 0 ? (

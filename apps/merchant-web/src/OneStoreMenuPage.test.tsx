@@ -682,7 +682,7 @@ it("v15 2026-11-11 b10: a listing says what is usual, and past two minutes that 
   // A busy system took 42–82 s: never promised "up to a minute".
   expect(listingProgressText(null)).not.toContain("up to a minute");
   expect(listingProgressText(45)).toBe(
-    "Listing… New prices go live first, then the menu. This usually takes one to two minutes, longer when the system is busy. Guests keep ordering throughout. 45 s",
+    "Listing… New prices go live first, then the menu. This usually takes under a minute, up to two when the system is busy. Guests keep ordering throughout. 45 s",
   );
   expect(listingProgressText(119)).not.toContain("Taking longer");
   expect(listingProgressText(130)).toContain(
@@ -700,4 +700,83 @@ it("WP-2423 (b11): arriving from Option recipes to change a choice's allergens f
   expect(search?.value).toBe("Dan dan noodles (TEST)");
   expect(container.textContent).toContain("Dan dan noodles (TEST)");
   expect(container.textContent).not.toContain("Har gow (TEST)");
+});
+
+it("v15 b12: List it waits while a dish save is on its way and until the menu read after it is on screen", async () => {
+  const save = deferred<unknown>();
+  const reads: ReturnType<typeof deferred<unknown>>[] = [];
+  const { container } = await page(
+    () => {
+      if (reads.length === 0) {
+        reads.push(deferred());
+        return Promise.resolve(builder(id(3), "Submit", id(2)));
+      }
+      const next = deferred<unknown>();
+      reads.push(next);
+      return next.promise;
+    },
+    (body) => (body.action === "SaveDish" ? save.promise : undefined),
+  );
+  const listIt = () => buttonNamed(container, "List it") as HTMLButtonElement | undefined;
+  expect(listIt()?.disabled).toBe(false);
+  const editor = await editDish(container, "Har gow (TEST)");
+  await typeInto(englishName(editor), "Har gow renamed (TEST)");
+  await click(buttonNamed(editor, "Save dish"));
+  await settle(5);
+  // The save is on its way: the review would show the menu from before it.
+  expect(listIt()?.disabled).toBe(true);
+  expect(container.textContent).toContain("Saving… List it once the menu shows what you saved.");
+  await click(listIt());
+  await settle(5);
+  expect(container.textContent).not.toContain("What goes live");
+  // Saved; the menu is being read again (still on its way): still not.
+  save.resolve({ status: "Saved", productReference: id(11), choicesWaiting: false });
+  await settle(10);
+  expect(listIt()?.disabled).toBe(true);
+  expect(container.textContent).toContain(
+    "Reading the menu again to show what you saved. List it once it shows.",
+  );
+  // The menu as saved is on screen: List it opens the review of it.
+  reads.at(-1)?.resolve(builder(id(4), "Submit", id(2)));
+  await settle(10);
+  expect(listIt()?.disabled).toBe(false);
+  expect(container.textContent).not.toContain("List it once");
+  await click(listIt());
+  await settle(5);
+  expect(container.textContent).toContain("What goes live");
+});
+
+it("v15 b12: a menu read that fails after a save keeps List it waiting until it is read again", async () => {
+  let reads = 0;
+  const { container } = await page(async () => {
+    reads += 1;
+    if (reads === 1) return builder(id(3), "Submit", id(2));
+    if (reads === 2) throw new TypeError("Failed to fetch");
+    return builder(id(4), "Submit", id(2));
+  });
+  const editor = await editDish(container, "Har gow (TEST)");
+  await typeInto(englishName(editor), "Har gow renamed (TEST)");
+  await click(buttonNamed(editor, "Save dish"));
+  await settle(10);
+  expect((buttonNamed(container, "List it") as HTMLButtonElement).disabled).toBe(true);
+  expect(container.textContent).toContain(
+    "List it once the menu is read again and shows what you saved.",
+  );
+  await click(buttonNamed(container, "Read again"));
+  await settle(10);
+  expect((buttonNamed(container, "List it") as HTMLButtonElement).disabled).toBe(false);
+});
+
+it("v15 b12: a listing still running after a reload, past two minutes, says it is taking longer", async () => {
+  globalThis.localStorage.setItem("bop.menu-listing." + MENU, String(Date.now() - 150_000));
+  try {
+    const { container } = await page(async () => builder(id(3), "Publish", id(2)));
+    expect(container.textContent).toContain("This usually takes under a minute");
+    expect(container.textContent).toMatch(
+      /15\d s · Taking longer than usual\. Nothing needs doing; this page says when it is listed\./,
+    );
+    expect(buttonNamed(container, "List it")).toBeUndefined();
+  } finally {
+    globalThis.localStorage.removeItem("bop.menu-listing." + MENU);
+  }
 });

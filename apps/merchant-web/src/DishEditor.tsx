@@ -100,6 +100,7 @@ export function DishEditor({
   priceScopes = singleStorePrice,
   onSaved,
   onSavedKeepOpen,
+  onSaving,
   onClose,
 }: {
   readonly menuReference: string;
@@ -124,6 +125,11 @@ export function DishEditor({
   readonly onSaved: (message: string, productReference?: string | null) => void;
   /** "Save and add another": the menu reads again, and this form stays. */
   readonly onSavedKeepOpen?: (productReference: string | null) => void;
+  /**
+   * v15 b12: a save (or "Use on other dishes") is on its way. The menu page holds "List it" until
+   * the menu shows it, so the review never shows the menu from before it.
+   */
+  readonly onSaving?: (saving: boolean) => void;
   readonly onClose: () => void;
 }) {
   const readReference = dish?.productReference ?? null;
@@ -197,6 +203,12 @@ export function DishEditor({
   // Item 3 F: the group whose "Use on other dishes" is open, and whether its run is going.
   const [applying, setApplying] = useState<string | null>(null);
   const [applyRunning, setApplyRunning] = useState(false);
+  const saving = busy || applyRunning;
+  useEffect(() => {
+    if (onSaving === undefined) return;
+    onSaving(saving);
+    return () => onSaving(false);
+  }, [saving, onSaving]);
   const nameInput = useRef<HTMLInputElement>(null);
   const allergenRows = useRef<HTMLDivElement>(null);
   // Where focus returns once the fields unlock after a save.

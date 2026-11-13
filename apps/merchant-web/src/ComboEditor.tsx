@@ -140,6 +140,7 @@ export function ComboEditor({
   sectionCode,
   client,
   onSaved,
+  onSaving,
   onClose,
 }: {
   readonly menuReference: string;
@@ -150,6 +151,8 @@ export function ComboEditor({
   readonly sectionCode: string;
   readonly client: MenuClient;
   readonly onSaved: (message: string) => void;
+  /** v15 b12: a save is on its way ("List it" waits until the menu shows it). */
+  readonly onSaving?: (saving: boolean) => void;
   readonly onClose: () => void;
 }) {
   const productReference = combo?.productReference ?? null;
@@ -177,6 +180,11 @@ export function ComboEditor({
         })),
   );
   const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (onSaving === undefined) return;
+    onSaving(busy);
+    return () => onSaving(false);
+  }, [busy, onSaving]);
   const [problem, setProblem] = useState<string | null>(null);
   // One reference per intended save, kept until it is answered (a retry continues it).
   const [operation, setOperation] = useState<string | null>(null);
