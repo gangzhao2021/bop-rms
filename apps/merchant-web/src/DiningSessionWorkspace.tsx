@@ -1,12 +1,7 @@
 import { PaidOrderSwitchLine } from "./PaidOrderSwitchLine.js";
 import { listSeparator, t, saidTable } from "./i18n/i18n.js";
 import { createTableCheckoutClient } from "./table-checkout-client.js";
-import {
-  clearLastBills,
-  lastTableBill,
-  saveLastBills,
-  type LastTableBill,
-} from "./table-last-bills.js";
+import { clearLastBills, saveLastBills } from "./table-last-bills.js";
 import { UnpaidRoundCancelAction, isPaymentUnconfirmed } from "./UnpaidRoundCancelAction.js";
 import { paidRoundWait, tableRoundWaitText, type PaidRoundWaitTier } from "./paid-round-wait.js";
 import { DiningHostTransferAction } from "./DiningHostTransferAction.js";
@@ -14,9 +9,9 @@ import { useContext, useEffect, useMemo, useRef, useState } from "react";
 import { StaffCallsWaitingContext } from "./approvals-waiting.js";
 import { DiningServeReadyClientError } from "./dining-serve-ready-client.js";
 import { serveReadySummary } from "./dining-serve-ready.js";
+import { listBillsByOrder, readListBills, type ListBill } from "./table-list-bills.js";
 import {
   loadTableOrderFacts,
-  tableFactsFromBill,
   prepareServeAllReady,
   type TableOrderFacts,
 } from "./table-order-facts.js";
@@ -88,19 +83,26 @@ const tableBlockReasons = [
 ] as const;
 /**
  * The facts the Tables list says a table's need from: the order queue's for its Order; for a table
- * checking out that the queue did not bring, its own bill's (v15 batch 8).
+ * checking out that the queue did not bring, its own bill's (v15 batch 8). v15 batch 11: when the
+ * table's own bill was read after the queue (a queue read that fails keeps its last answer), what
+ * the table paid is the bill's: a guest who paid on the phone is never left on the queue's older
+ * "Waiting for payment". What the kitchen still has stays the queue's.
  */
 export function listFactsOf(
   table: StaffDiningTable,
   orderFacts: ReadonlyMap<string, TableOrderFacts>,
-  billFacts: ReadonlyMap<string, TableOrderFacts>,
+  billFacts: ReadonlyMap<string, { readonly facts: TableOrderFacts; readonly read: number }>,
+  /** The number of the order queue read `orderFacts` came from (0: none yet). */
+  queueRead = 0,
 ): TableOrderFacts | null {
   const order = table.session?.orderReference;
   if (!order) return null;
-  return (
-    orderFacts.get(order) ??
-    (table.session?.phase === "Closing" ? (billFacts.get(order) ?? null) : null)
-  );
+  const queued = orderFacts.get(order) ?? null;
+  if (table.session?.phase !== "Closing") return queued;
+  const own = billFacts.get(order);
+  if (own === undefined) return queued;
+  if (queued === null) return own.facts;
+  return own.read > queueRead ? { ...queued, bill: own.facts.bill } : queued;
 }
 /** WP-2423 follow-up: how long a session has been open, in words staff read at a glance. */
 export function elapsedText(minutes: number): string {
@@ -598,68 +600,46 @@ export function DiningSessionWorkspace({
   /** The open tables' dishes and bills, from the order queue (kept on a failed read). */
   // Owner 2026-11-03 (operating continuity): each open table's bill stays on this device, so staff
   // can still see what a table owes when the connection drops. Read again only when it changed.
-  const lastBills = useRef(
-    new Map<string, { key: string; bill: LastTableBill; facts: TableOrderFacts }>(),
-  );
+  const lastBills = useRef(new Map<string, ListBill>());
+  const billsInFlight = useRef(new Set<string>());
   // v15 batch 8: a table checking out that the queue read did not bring is said from its own
   // bill (the panel's), never "Checking the bill" once that bill is read. By Order.
-  const [billFacts, setBillFacts] = useState<ReadonlyMap<string, TableOrderFacts>>(new Map());
+  const [billFacts, setBillFacts] = useState<
+    ReadonlyMap<string, { readonly facts: TableOrderFacts; readonly read: number }>
+  >(new Map());
+  // v15 batch 11: every list read (queue or bill) is numbered when it starts; the newer one wins.
+  const reads = useRef(0);
+  const nextRead = () => (reads.current += 1);
+  const [queueRead, setQueueRead] = useState(0);
+  const queueReadNow = useRef(0);
+  // Bill reads stop when this page is left or the sign-in ends.
+  const billReads = useRef(new AbortController());
   const polls = useRef(0);
-  const keepLastBills = async (
+  const keepLastBills = (
     items: readonly StaffDiningTable[],
     facts: ReadonlyMap<string, TableOrderFacts>,
-    /** This list read's number: a table checking out the queue did not bring is read once in each. */
+    /** This list read's number: a table checking out is read once in each. */
     poll: number,
     /** Only these tables are read now; the others keep what was read before. */
-    only?: (table: StaffDiningTable) => boolean,
+    only: (table: StaffDiningTable) => boolean,
   ) => {
-    const kept = new Map<string, { key: string; bill: LastTableBill; facts: TableOrderFacts }>();
     const client = createTableCheckoutClient();
-    try {
-      for (const table of items) {
-        const session = table.currentDiningSessionReference;
-        const order = table.session?.orderReference;
-        if (session === null || !order) continue;
-        // A table checking out that the queue did not bring is said from this bill alone, and the
-        // guest may pay on the phone between two reads: it is read again on every list read (once
-        // per read, shared by the read beside the queue and the one after it), never kept stale.
-        const queued = facts.get(order);
-        const key = JSON.stringify([
-          table.session?.phase,
-          queued ?? (table.session?.phase === "Closing" ? { poll } : null),
-        ]);
-        const prior = lastBills.current.get(session);
-        if (only !== undefined && !only(table)) {
-          if (prior !== undefined) kept.set(session, prior);
-          continue;
-        }
-        if (prior?.key === key) {
-          kept.set(session, prior);
-          continue;
-        }
-        const bill = await client.bill(csrf, session);
-        if (bill.paymentTiming === "PayLater")
-          kept.set(session, {
-            key,
-            bill: lastTableBill(table.stableLabel, bill),
-            facts: tableFactsFromBill(bill),
-          });
-      }
-    } catch {
-      return; // Not read this time (or not allowed): what was kept stays until the next read.
-    }
-    lastBills.current = kept;
-    const byOrder = new Map<string, TableOrderFacts>();
-    for (const table of items) {
-      const entry =
-        table.currentDiningSessionReference === null
-          ? undefined
-          : kept.get(table.currentDiningSessionReference);
-      if (entry !== undefined && table.session?.orderReference)
-        byOrder.set(table.session.orderReference, entry.facts);
-    }
-    setBillFacts(byOrder);
-    saveLastBills([...kept.values()].map((entry) => entry.bill));
+    const shown = () => {
+      setBillFacts(listBillsByOrder(items, lastBills.current));
+      saveLastBills([...lastBills.current.values()].map((entry) => entry.bill));
+    };
+    return readListBills({
+      items,
+      queued: facts,
+      poll,
+      only,
+      kept: lastBills.current,
+      inFlight: billsInFlight.current,
+      read: (session, signal) => client.bill(csrf, session, signal),
+      nextRead,
+      signal: billReads.current.signal,
+      shown,
+    }).then(shown);
   };
   const loadFacts = async (items: readonly StaffDiningTable[], signal: AbortSignal) => {
     const orders = items.flatMap((table) =>
@@ -669,17 +649,19 @@ export function DiningSessionWorkspace({
     // left tables paid in full on "Checking the bill"), then again for what the queue changed.
     polls.current += 1;
     const poll = polls.current;
-    const bills = keepLastBills(
-      items,
-      orderFactsNow.current,
-      poll,
-      (table) => table.session?.phase === "Closing",
-    );
+    const closing = (table: StaffDiningTable) => table.session?.phase === "Closing";
+    const bills = keepLastBills(items, orderFactsNow.current, poll, closing);
+    const read = nextRead();
     try {
       const facts = await loadTableOrderFacts(orders, signal);
-      if (!signal.aborted) setOrderFacts(facts);
+      // A queue read that started before the one already shown is not shown over it.
+      if (!signal.aborted && read > queueReadNow.current) {
+        queueReadNow.current = read;
+        setOrderFacts(facts);
+        setQueueRead(read);
+      }
       await bills;
-      if (!signal.aborted) void keepLastBills(items, facts, poll);
+      if (!signal.aborted) void keepLastBills(items, facts, poll, (table) => !closing(table));
     } catch {
       /* The list still shows each table's own state; the dishes are read again with it. */
     }
@@ -764,8 +746,12 @@ export function DiningSessionWorkspace({
   // v15 cbff9d6f: no reads once this screen's sign-in has ended.
   const live = useStaffSessionLive();
   useEffect(() => {
-    // Signed out: the bills don't stay on a shared device for the next person.
-    if (!live) clearLastBills();
+    // Signed out: the bills don't stay on a shared device for the next person, and none is read.
+    if (live) return;
+    billReads.current.abort();
+    billReads.current = new AbortController();
+    lastBills.current.clear();
+    clearLastBills();
   }, [live]);
   useEffect(() => {
     if (!anySeated || !live) return;
@@ -808,6 +794,8 @@ export function DiningSessionWorkspace({
   useEffect(() => {
     void loadRef.current();
     return () => {
+      billReads.current.abort();
+      billReads.current = new AbortController();
       const controller = pending.current;
       controller?.abort();
       if (pending.current === controller) pending.current = null;
@@ -1042,10 +1030,10 @@ export function DiningSessionWorkspace({
       tables
         .map((table) => ({
           table,
-          need: tableNeed(table, listFactsOf(table, orderFacts, billFacts), now),
+          need: tableNeed(table, listFactsOf(table, orderFacts, billFacts, queueRead), now),
         }))
         .sort(compareTables),
-    [tables, orderFacts, billFacts, now],
+    [tables, orderFacts, billFacts, queueRead, now],
   );
   const counts = new Map(
     tableTabs.map((value) => [

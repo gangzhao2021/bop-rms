@@ -435,7 +435,7 @@ describe("v15 batch 8: a table checking out the order queue did not bring", () =
         },
       }),
     );
-    const facts = listFactsOf(closing, new Map(), new Map([[id(207), own]]));
+    const facts = listFactsOf(closing, new Map(), new Map([[id(207), { facts: own, read: 1 }]]));
     expect(tableNeed(closing, facts, now)).toMatchObject({
       tone: "done",
       words: "Paid · close when the guests leave",
@@ -476,14 +476,53 @@ describe("v15 batch 8: a table checking out the order queue did not bring", () =
   it("the queue's own facts come first, and an open table is never said from its bill", () => {
     const queue = facts({ readyToServe: 1 });
     const own = tableFactsFromBill(bill({ settlement: { roundsMinor: "100", totalMinor: "113" } }));
-    expect(listFactsOf(closing, new Map([[id(207), queue]]), new Map([[id(207), own]]))).toBe(
-      queue,
-    );
-    expect(listFactsOf(table(7), new Map(), new Map([[id(207), own]]))).toBeNull();
+    expect(
+      listFactsOf(
+        closing,
+        new Map([[id(207), queue]]),
+        new Map([[id(207), { facts: own, read: 1 }]]),
+        2,
+      ),
+    ).toBe(queue);
+    expect(
+      listFactsOf(table(7), new Map(), new Map([[id(207), { facts: own, read: 1 }]])),
+    ).toBeNull();
     // Before either is read: still "Checking the bill".
     expect(tableNeed(closing, listFactsOf(closing, new Map(), new Map()), now).words).toBe(
       "Checking the bill",
     );
+  });
+  it("v15 batch 11: a bill read after a queue read that failed says what the guest paid", () => {
+    // The queue's last answer (read 3) still says the table owes $42.38; its next reads fail.
+    const queue = facts({
+      inKitchen: true,
+      bill: { totalMinor: "4238", paid: null },
+    });
+    // The table's own bill, read later (read 5): the guest paid in full on the phone.
+    const own = tableFactsFromBill(
+      bill({ settlement: { roundsMinor: "4238", totalMinor: "4238" } }),
+    );
+    const shown = listFactsOf(
+      closing,
+      new Map([[id(207), queue]]),
+      new Map([[id(207), { facts: own, read: 5 }]]),
+      3,
+    );
+    expect(tableNeed(closing, shown, now)).toMatchObject({
+      words: "Paid · close when the guests leave",
+      detail: "$42.38",
+    });
+    // What the kitchen still has stays the queue's.
+    expect(shown?.inKitchen).toBe(true);
+    // A bill read before the queue's answer does not replace it.
+    expect(
+      listFactsOf(
+        closing,
+        new Map([[id(207), queue]]),
+        new Map([[id(207), { facts: own, read: 2 }]]),
+        3,
+      ),
+    ).toBe(queue);
   });
 });
 
