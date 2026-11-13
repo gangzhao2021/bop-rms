@@ -224,7 +224,7 @@ describe("WP-2423 Q18 staff session client", () => {
 
 it("b13: reads the sign-in this browser holds now, so a sign-in made on another screen is found", async () => {
   const answer = (status: number, body: unknown) =>
-    vi.fn(async () => new Response(JSON.stringify(body), { status }));
+    vi.fn<typeof fetch>(async () => new Response(JSON.stringify(body), { status }));
   const fresh = "b".repeat(43);
   const request = answer(200, { authenticated: true, csrf: fresh, workspace: {} });
   await expect(createStaffSessionClient(request).currentSignIn?.()).resolves.toBe(fresh);
