@@ -9,6 +9,7 @@ import { storeContactJson } from "./customer-store-contact.js";
 import { customerFailureCode } from "./customer-failure-diagnostic.js";
 import { markRequestFailure } from "./request-correlation.js";
 import { customerDisplayLocale } from "./customer-display-locale.js";
+import { earlierVisitCredentials } from "./customer-earlier-visit.js";
 
 type SourcedStatus = Awaited<ReturnType<ReturnType<typeof createCustomerOrderStatusRead>["read"]>>;
 type CustomerStatusResponse = CustomerOrderStatusView & Partial<Pick<SourcedStatus, "sources">>;
@@ -51,6 +52,54 @@ interface CustomerOrderStatusPort {
   received?(input: CustomerOrderStatusInput): Promise<CustomerOrderReceived | null>;
   /** WP-2423 (46940b76 L5): the Order is the current Order of the open table this guest joined. */
   tableOrder?(input: CustomerOrderStatusInput): Promise<boolean>;
+  /**
+   * WP-2423 (b11): the same order read under an earlier visit this phone keeps (a paid pickup
+   * order, after the guest joined a table). Null: this request may not use that visit.
+   */
+  forEarlierVisit?(
+    input: CustomerOrderStatusInput,
+    earlierCredential: string,
+  ): CustomerOrderStatusInput | null;
+}
+/** Not this visit's order (or no such order): a 404, never an outage. */
+export function notOwnedOrderStatus(error: unknown): boolean {
+  return (
+    error instanceof GuestSessionError ||
+    (error instanceof OrderStatusProjectionError &&
+      ["ORDER_STATUS_PERMISSION_DENIED", "ORDER_STATUS_NOT_FOUND"].includes(error.code))
+  );
+}
+/**
+ * Reads with the current visit first, then with each earlier visit this phone keeps when the
+ * current one does not own the order. Any other failure (an outage) is answered as it is.
+ */
+export async function readWithEarlierVisits<T>(
+  input: CustomerOrderStatusInput,
+  earlier: readonly string[],
+  forEarlierVisit:
+    | ((
+        input: CustomerOrderStatusInput,
+        earlierCredential: string,
+      ) => CustomerOrderStatusInput | null)
+    | undefined,
+  read: (input: CustomerOrderStatusInput) => Promise<T>,
+  notOwned: (error: unknown) => boolean = notOwnedOrderStatus,
+): Promise<T> {
+  try {
+    return await read(input);
+  } catch (error) {
+    if (!notOwned(error) || forEarlierVisit === undefined) throw error;
+    for (const earlierCredential of earlier) {
+      const target = forEarlierVisit(input, earlierCredential);
+      if (target === null) break;
+      try {
+        return await read(target);
+      } catch (next) {
+        if (!notOwned(next)) throw next;
+      }
+    }
+    throw error;
+  }
 }
 export class CustomerOrderStatusHandler {
   readonly #origin: string;
@@ -64,6 +113,7 @@ export class CustomerOrderStatusHandler {
       protect(response);
       let input: CustomerOrderStatusInput;
       let displayLocale: string | null;
+      let earlier: string[];
       try {
         if (
           (request.get("origin") !== undefined && request.get("origin") !== this.#origin) ||
@@ -93,15 +143,19 @@ export class CustomerOrderStatusHandler {
           csrfCredential: csrf,
           orderReference: id,
         };
+        earlier = earlierVisitCredentials(request.headers.cookie, input.sessionCredential);
       } catch {
         reject(response, 400);
         return;
       }
       try {
-        const view =
-          displayLocale === null
-            ? await this.#port.read(input)
-            : await this.#port.read(input, displayLocale);
+        const locale = displayLocale;
+        const view = await readWithEarlierVisits(
+          input,
+          earlier,
+          this.#port.forEarlierVisit?.bind(this.#port),
+          (target) => (locale === null ? this.#port.read(target) : this.#port.read(target, locale)),
+        );
         if (view.order.orderReference !== input.orderReference)
           throw new Error("invalid order binding");
         // Explicit public-field serialization prevents owner metadata or credential leakage.

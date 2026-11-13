@@ -56,6 +56,8 @@ import {
 import { readCurrentStoreReceiptProfile } from "@rms/store";
 import { retryTransactionConflict } from "./transaction-conflict-retry.js";
 import { withFailureCause } from "./customer-failure-diagnostic.js";
+import { earlierVisitInput } from "./customer-earlier-visit.js";
+import type { CustomerOrderStatusInput } from "./customer-order-status.js";
 import { reportOrderPaymentOutcomes } from "./customer-order-payment-outcomes.js";
 import type { CustomerCheckoutSessionAuthorizationOptions } from "./customer-checkout-session-authorization.js";
 import type { PersistentPublicStoreProfileOptions } from "./persistent-public-store-profile.js";
@@ -929,6 +931,13 @@ export function createCustomerOrderStatusRead(
      * "not found". Same guest authorization and lock order as `read`; never reveals anything for an
      * Order of another table, another party or another Store.
      */
+    /** WP-2423 (b11): the same read under an earlier visit this phone keeps. */
+    forEarlierVisit(
+      input: CustomerOrderStatusInput,
+      earlierCredential: string,
+    ): CustomerOrderStatusInput | null {
+      return earlierVisitInput(options.credentials, input, earlierCredential);
+    },
     async tableOrder(value: unknown): Promise<boolean> {
       let credentials: { sessionCredential: string; csrfCredential: string };
       let orderReference: string;

@@ -40,6 +40,7 @@ import { CustomerReceiptHandler } from "./customer-receipt.js";
 import {
   createCustomerContactRemoval,
   createCustomerContactRemovalHandler,
+  customerContactRemovalForEarlierVisit,
 } from "./customer-contact-removal.js";
 import { createCustomerOrderStatusRead } from "./customer-order-status-read.js";
 import { createCustomerDiningSessionRead } from "./customer-dining-session-read.js";
@@ -448,6 +449,7 @@ export function createApiServerRuntime({
           customerContactRemoval: createCustomerContactRemovalHandler({
             allowedOrigin: customerContactRemoval.allowedOrigin,
             port: createCustomerContactRemoval(customerContactRemoval),
+            forEarlierVisit: customerContactRemovalForEarlierVisit(customerContactRemoval),
           }),
         }),
     ...(customerSessionBootstrap === undefined

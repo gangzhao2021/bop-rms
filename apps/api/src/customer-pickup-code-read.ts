@@ -9,6 +9,7 @@ import {
   PickupProofError,
 } from "@rms/fulfillment";
 import { listStoreCounterOrders } from "@rms/ordering";
+import { earlierVisitInput } from "./customer-earlier-visit.js";
 
 /**
  * WP-2423: why a Ready pickup order has no code to show. `CounterOrder`: staff took it at the
@@ -58,6 +59,13 @@ export function createCustomerPickupCodeRead(options: CustomerPickupCodeReadOpti
   const readiness = createPostgresFulfillmentReadinessStore(options.readiness);
   const proof = createPostgresPickupProofStore(options.proof);
   return {
+    /** WP-2423 (b11): the same read under an earlier visit this phone keeps. */
+    forEarlierVisit(
+      input: CustomerOrderStatusInput,
+      earlierCredential: string,
+    ): CustomerOrderStatusInput | null {
+      return earlierVisitInput(options.status.credentials, input, earlierCredential);
+    },
     async read(input: CustomerOrderStatusInput) {
       return options.status.transactions.run(async (transaction) => {
         const status = createCustomerOrderStatusRead({

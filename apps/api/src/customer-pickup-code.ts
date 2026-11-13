@@ -1,9 +1,13 @@
 import type { RequestHandler, Response } from "express";
 import { customerFailureCode } from "./customer-failure-diagnostic.js";
 import { markRequestFailure } from "./request-correlation.js";
-import { GuestSessionError, readClosedRecord } from "@bop/identity";
-import { OrderStatusProjectionError } from "@rms/ordering";
-import type { CustomerOrderStatusInput } from "./customer-order-status.js";
+import { readClosedRecord } from "@bop/identity";
+import {
+  notOwnedOrderStatus,
+  readWithEarlierVisits,
+  type CustomerOrderStatusInput,
+} from "./customer-order-status.js";
+import { earlierVisitCredentials } from "./customer-earlier-visit.js";
 import type { createCustomerPickupCodeRead } from "./customer-pickup-code-read.js";
 type View = Awaited<ReturnType<ReturnType<typeof createCustomerPickupCodeRead>["read"]>>;
 const credential = /^[A-Za-z0-9_-]{43}$/u;
@@ -27,13 +31,18 @@ function reject(response: Response, status: number) {
     },
   });
 }
+interface CustomerPickupCodePort {
+  read(input: CustomerOrderStatusInput): Promise<View>;
+  /** WP-2423 (b11): the same read under an earlier visit this phone keeps. */
+  forEarlierVisit?(
+    input: CustomerOrderStatusInput,
+    earlierCredential: string,
+  ): CustomerOrderStatusInput | null;
+}
 export class CustomerPickupCodeHandler {
   readonly #origin: string;
-  readonly #port: { read(input: CustomerOrderStatusInput): Promise<View> };
-  constructor(options: {
-    allowedOrigin: string;
-    port: { read(input: CustomerOrderStatusInput): Promise<View> };
-  }) {
+  readonly #port: CustomerPickupCodePort;
+  constructor(options: { allowedOrigin: string; port: CustomerPickupCodePort }) {
     this.#origin = new URL(options.allowedOrigin).origin;
     this.#port = options.port;
   }
@@ -41,6 +50,7 @@ export class CustomerPickupCodeHandler {
     return async (request, response) => {
       protect(response);
       let input: CustomerOrderStatusInput;
+      let earlier: string[];
       try {
         if (
           (request.get("origin") !== undefined && request.get("origin") !== this.#origin) ||
@@ -70,12 +80,18 @@ export class CustomerPickupCodeHandler {
           csrfCredential: csrf,
           orderReference: id,
         };
+        earlier = earlierVisitCredentials(request.headers.cookie, input.sessionCredential);
       } catch {
         reject(response, 400);
         return;
       }
       try {
-        const view = await this.#port.read(input);
+        const view = await readWithEarlierVisits(
+          input,
+          earlier,
+          this.#port.forEarlierVisit?.bind(this.#port),
+          (target) => this.#port.read(target),
+        );
         if (view.orderReference !== input.orderReference) throw new Error("PICKUP_BINDING_INVALID");
         if (view.status === "NotReady" || view.status === "Collected") {
           response
@@ -125,12 +141,7 @@ export class CustomerPickupCodeHandler {
           expiresAt: view.expiresAt,
         });
       } catch (error) {
-        const status =
-          error instanceof GuestSessionError ||
-          (error instanceof OrderStatusProjectionError &&
-            ["ORDER_STATUS_PERMISSION_DENIED", "ORDER_STATUS_NOT_FOUND"].includes(error.code))
-            ? 404
-            : 503;
+        const status = notOwnedOrderStatus(error) ? 404 : 503;
         if (status === 503) markRequestFailure(request, customerFailureCode(error));
         reject(response, status);
       }

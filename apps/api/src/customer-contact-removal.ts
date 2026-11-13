@@ -16,6 +16,11 @@ import {
 } from "@rms/ordering";
 import type { RequestHandler, Response } from "express";
 import type { CustomerCheckoutSessionAuthorizationOptions } from "./customer-checkout-session-authorization.js";
+import {
+  earlierVisitCredentials,
+  earlierVisitInput,
+  type CustomerVisitInput,
+} from "./customer-earlier-visit.js";
 
 /**
  * WP-2423 Q16 (DEC-RECEIPT-TAX-AND-PRIVACY): "Remove my contact details" on the customer's own order
@@ -132,13 +137,29 @@ function reject(response: Response, status: 400 | 404 | 503) {
   });
 }
 
+/**
+ * WP-2423 (b11): the same removal under an earlier visit this phone keeps (the visit that placed a
+ * pickup order before the guest joined a table), for a request that proved the current visit.
+ */
+export function customerContactRemovalForEarlierVisit(
+  options: Pick<CustomerCheckoutSessionAuthorizationOptions, "credentials">,
+) {
+  return (input: CustomerVisitInput, earlierCredential: string) =>
+    earlierVisitInput(options.credentials, input, earlierCredential);
+}
+
 export function createCustomerContactRemovalHandler(options: {
   readonly allowedOrigin: string;
   readonly port?: ReturnType<typeof createCustomerContactRemoval>;
+  readonly forEarlierVisit?: (
+    input: CustomerVisitInput,
+    earlierCredential: string,
+  ) => CustomerVisitInput | null;
 }): RequestHandler {
   const origin = new URL(options.allowedOrigin).origin;
   return async (request, response) => {
     let input: { sessionCredential: string; csrfCredential: string; orderReference: string };
+    let earlier: string[];
     try {
       if (
         request.get("origin") !== origin ||
@@ -168,6 +189,7 @@ export function createCustomerContactRemovalHandler(options: {
         csrfCredential: csrf,
         orderReference: id,
       };
+      earlier = earlierVisitCredentials(request.headers.cookie, input.sessionCredential);
     } catch {
       reject(response, 400);
       return;
@@ -177,7 +199,28 @@ export function createCustomerContactRemovalHandler(options: {
       return;
     }
     try {
-      const result = await options.port(input);
+      const port = options.port;
+      const notFound = (error: unknown) =>
+        error instanceof CustomerContactRemovalError && error.code === "NotFound";
+      let result: Awaited<ReturnType<typeof port>>;
+      try {
+        result = await port(input);
+      } catch (error) {
+        if (!notFound(error) || options.forEarlierVisit === undefined) throw error;
+        let found: Awaited<ReturnType<typeof port>> | null = null;
+        for (const earlierCredential of earlier) {
+          const target = options.forEarlierVisit(input, earlierCredential);
+          if (target === null) break;
+          try {
+            found = await port(target);
+            break;
+          } catch (next) {
+            if (!notFound(next)) throw next;
+          }
+        }
+        if (found === null) throw error;
+        result = found;
+      }
       response.setHeader("Cache-Control", "no-store");
       response.setHeader("Referrer-Policy", "no-referrer");
       response.status(200).json({ schemaVersion: 1, removal: { status: result.status } });
