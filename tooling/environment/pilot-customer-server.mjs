@@ -24,11 +24,15 @@ import {
 } from "../../apps/api/dist/merchant-store-routing.js";
 import { staffContentLocaleMiddleware } from "../../apps/api/dist/staff-content-locale.js";
 import {
-  readAnswerMarginMs,
-  requestReadAnswerWithinMs,
   sendReadAnswerBusy,
   withRequestAcquireBudget,
 } from "../../apps/api/dist/request-acquire-budget.js";
+import {
+  createStaffRequestCompletionLog,
+  entryReadTiming,
+  noteEntryConnections,
+  requestArrivedAt,
+} from "./pilot-entry-timing.mjs";
 import { createPilotProductImages } from "../../apps/api/dist/product-image-route.js";
 import { CustomerPaymentIntentHandler } from "../../apps/api/dist/customer-payment-intent.js";
 import { CustomerPaymentHandoffHandler } from "../../apps/api/dist/customer-payment-handoff.js";
@@ -270,11 +274,13 @@ export async function startInternalCustomerServer({
   // own, or a guest's on its way to the Store's API) that has not started answering by its time
   // plus 2 s says busy (503 + Retry-After) and is cut; a guest read's API request is dropped with
   // it. The API itself answers 1 s earlier, so this is only for time lost before or between them.
+  // WP-2423 (rush-reads-and-orders-changes): counted from when the connection arrived, and staff
+  // reads (answered here) work 2 s less and answer busy 1 s after it (pilot-entry-timing.mjs).
   app.use((req, res, next) =>
     withRequestAcquireBudget(next, {
       response: res,
-      answerWithinMs: requestReadAnswerWithinMs(req.method, req.originalUrl ?? req.url),
-      busyAnswerMarginMs: 2 * readAnswerMarginMs,
+      ...entryReadTiming(req.method, req.originalUrl ?? req.url),
+      arrivedAt: requestArrivedAt(req),
       answerBusy: () => {
         sendReadAnswerBusy(res, req.originalUrl ?? req.url);
         res.emit(readAnsweredBusy);
@@ -480,7 +486,12 @@ export async function startInternalCustomerServer({
     // sign in with their own Cognito account.
     if (merchant.staffSignInMode !== "cognito") installInternalStaffLogin(app, merchant);
     // Owner 2026-10-24: item and option names on staff screens in the staff member's language.
-    app.use("/merchant", staffContentLocaleMiddleware(), staffRoutes);
+    app.use(
+      "/merchant",
+      createStaffRequestCompletionLog({ answeredBusyEvent: readAnsweredBusy }),
+      staffContentLocaleMiddleware(),
+      staffRoutes,
+    );
 
     app.use(async (req, res, next) => {
       // One Store served (alone, or the others failed to start): its payments, as before.
@@ -629,6 +640,7 @@ export async function startInternalCustomerServer({
       entryListener = createPilotEntryListener({ ...secure, app });
       server = entryListener.server;
     } else server = configurePilotEntryConnections(createServer(secure, app));
+    noteEntryConnections(server);
     server.listen(listenPort, "127.0.0.1", () =>
       process.stdout.write(
         "Pilot customer HTTPS listening on 127.0.0.1:" + server.address().port + "\n",

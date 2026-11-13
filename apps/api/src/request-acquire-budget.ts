@@ -78,6 +78,32 @@ interface RequestAcquireBudget {
  * gives its own answer a further second for the hop.
  */
 export const readAnswerMarginMs = 1_000;
+/**
+ * WP-2423 (rush-reads-and-orders-changes, v15 2026-11-13): staff reads answered by the guest and
+ * staff entry itself (the merchant BFF runs in that process, behind the TLS relay). In a burst
+ * their answers reached the screens after 16-18 s, past the 15 s every staff screen waits before
+ * it gives up: the entry's own clock started only once a request reached its route, after the
+ * connection's TLS handshake and the time the request sat in the busy entry, and its busy answer
+ * came at 12 s + 2 s. Staff reads there now work 2 s less (10 s, or their screen's longer time
+ * less 2 s) and answer busy 1 s after it (no second hop), counted from when the connection
+ * arrived: what the busy entry and the relay still add fits inside the screen's wait.
+ */
+export const entryStaffReadShortfallMs = 2_000;
+/** A connection's time before its first request counts only up to this (a preconnect may idle). */
+export const entryArrivalCountMaxMs = 5_000;
+/** The staff (merchant BFF) answer time of a read at the entry; undefined for a command. */
+export function entryStaffReadAnswerWithinMs(
+  method: string | undefined,
+  url: string | undefined,
+): number | undefined {
+  const within = requestReadAnswerWithinMs(method, url);
+  return within === undefined ? undefined : within - entryStaffReadShortfallMs;
+}
+/** Whether `url` is a staff (merchant BFF) request. */
+export function isStaffRequestPath(url: string | undefined): boolean {
+  const path = (url ?? "").split(/[?#]/u, 1)[0] ?? "";
+  return path === "/merchant" || path.startsWith("/merchant/");
+}
 /** The 503 body of a guest read cut at its answer time: the phones read an unknown 503 as busy. */
 export const readAnswerBusyBody = Object.freeze({
   schemaVersion: 1,
@@ -93,10 +119,7 @@ export const readAnswerBusyBody = Object.freeze({
 export const merchantReadAnswerBusyBody = Object.freeze({ error: "retry_later" });
 /** The busy body the surface of `url` understands: staff (/merchant/...) or guest. */
 export function readAnswerBusyBodyFor(url: string | undefined): object {
-  const path = (url ?? "").split(/[?#]/u, 1)[0] ?? "";
-  return path === "/merchant" || path.startsWith("/merchant/")
-    ? merchantReadAnswerBusyBody
-    : readAnswerBusyBody;
+  return isStaffRequestPath(url) ? merchantReadAnswerBusyBody : readAnswerBusyBody;
 }
 const requestBudgetKey = Symbol.for("bop.database.request-acquire-budget");
 function requestBudgets(): AsyncLocalStorage<RequestAcquireBudget> {
@@ -148,10 +171,18 @@ export function withRequestAcquireBudget<T>(
     readonly busyAnswerMarginMs?: number;
     readonly answerBusy?: () => void;
     readonly setTimer?: (work: () => void, ms: number) => { cancel(): void };
+    /**
+     * WP-2423 (rush-reads-and-orders-changes): when the request's connection arrived, if earlier
+     * than now (its handshake and its wait in a busy process count against its answer time).
+     */
+    readonly arrivedAt?: number;
   } = {},
 ): T {
   if (requestBudgets().getStore() !== undefined) return work();
-  const startedAt = Date.now();
+  const now = Date.now();
+  const arrivedAt = options.arrivedAt;
+  const startedAt =
+    arrivedAt !== undefined && Number.isFinite(arrivedAt) && arrivedAt < now ? arrivedAt : now;
   const within = options.answerWithinMs;
   const read = within !== undefined && Number.isFinite(within) && within >= 0;
   const budget: RequestAcquireBudget = {
@@ -181,23 +212,26 @@ export function withRequestAcquireBudget<T>(
         handle.unref?.();
         return { cancel: () => clearTimeout(handle) };
       });
-    timer = schedule(() => {
-      // An answer under way, a finished one or a read that already wrote: left to finish.
-      if (
-        budget.ended ||
-        budget.committedWrite ||
-        response.headersSent === true ||
-        response.writableEnded === true
-      )
-        return;
-      budget.shed = true;
-      budget.cut = true;
-      try {
-        answerBusy();
-      } catch {
-        // The busy answer could not be written (the client went away): the read is cut anyway.
-      }
-    }, within + margin);
+    timer = schedule(
+      () => {
+        // An answer under way, a finished one or a read that already wrote: left to finish.
+        if (
+          budget.ended ||
+          budget.committedWrite ||
+          response.headersSent === true ||
+          response.writableEnded === true
+        )
+          return;
+        budget.shed = true;
+        budget.cut = true;
+        try {
+          answerBusy();
+        } catch {
+          // The busy answer could not be written (the client went away): the read is cut anyway.
+        }
+      },
+      Math.max(0, within + margin - (now - startedAt)),
+    );
   }
   response?.once("finish", () => {
     timer?.cancel();

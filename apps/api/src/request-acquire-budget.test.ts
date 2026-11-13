@@ -2,6 +2,8 @@ import { createServer, type Server } from "node:http";
 import express from "express";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  entryStaffReadAnswerWithinMs,
+  isStaffRequestPath,
   readAnswerBusyBody,
   requestAnswerTimeLeftMs,
   requestShedFor,
@@ -128,6 +130,55 @@ describe("WP-2423 reads-under-burst: a read's whole answer inside the 15 s clien
     );
     timers.splice(0).forEach((fire) => fire());
     expect(answered).toBe(0);
+  });
+
+  it("WP-2423 (rush-reads-and-orders-changes): a read's answer time counts from when its connection arrived", async () => {
+    // v15 2026-11-13: staff answers reached the screens after 16-18 s though the entry's own
+    // busy answer came at 14 s: its clock started when the request reached the route, after the
+    // handshake and the wait in the busy entry.
+    const delays: number[] = [];
+    const setTimer = (_work: () => void, ms: number) => {
+      delays.push(ms);
+      return { cancel: () => undefined };
+    };
+    const { EventEmitter } = await import("node:events");
+    const response = Object.assign(new EventEmitter(), {
+      headersSent: false,
+      writableEnded: false,
+      writableFinished: false,
+    });
+    let left: number | undefined;
+    withRequestAcquireBudget(() => (left = requestAnswerTimeLeftMs()), {
+      response,
+      answerWithinMs: 10_000,
+      busyAnswerMarginMs: 1_000,
+      answerBusy: () => undefined,
+      setTimer,
+      arrivedAt: Date.now() - 3_000,
+    });
+    // 3 s were spent before the route: the busy answer comes 3 s sooner, and so does the work's end.
+    expect(delays).toHaveLength(1);
+    expect(delays[0]).toBeGreaterThan(7_900);
+    expect(delays[0]).toBeLessThanOrEqual(8_000);
+    expect(left).toBeGreaterThan(6_900);
+    expect(left).toBeLessThanOrEqual(7_000);
+    // A time in the future (a clock oddity) is never believed: the request's own start counts.
+    withRequestAcquireBudget(() => undefined, {
+      response: Object.assign(new EventEmitter(), { headersSent: false, writableEnded: false }),
+      answerWithinMs: 10_000,
+      busyAnswerMarginMs: 1_000,
+      answerBusy: () => undefined,
+      setTimer,
+      arrivedAt: Date.now() + 60_000,
+    });
+    expect(delays[1]).toBe(11_000);
+    // Staff reads answered by the entry itself work 2 s less than the API's own reads.
+    expect(entryStaffReadAnswerWithinMs("GET", "/merchant/orders")).toBe(10_000);
+    expect(entryStaffReadAnswerWithinMs("GET", "/merchant/reports/day")).toBe(25_000);
+    expect(entryStaffReadAnswerWithinMs("POST", "/merchant/counter/orders")).toBeUndefined();
+    expect(isStaffRequestPath("/merchant/orders/changes?x=1")).toBe(true);
+    expect(isStaffRequestPath("/merchantish")).toBe(false);
+    expect(isStaffRequestPath("/bff/customer/cart")).toBe(false);
   });
 
   it("cuts a read whose phone or screen went away before its answer, never a command", async () => {
