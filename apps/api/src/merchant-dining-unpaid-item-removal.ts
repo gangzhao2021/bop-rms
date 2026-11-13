@@ -8,6 +8,8 @@ import {
 import {
   createPostgresPayLaterItemCancellationStore,
   listOrderPriceReductions,
+  listOrderBillOrders,
+  listOrderMergedInto,
   parseOrderingInstant,
   parseOrderingReference,
   parseStaffItemCancellationSelection,
@@ -22,6 +24,8 @@ import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js"
 import { createSubmissionInventoryRelease } from "./submission-inventory-release.js";
 import { staffOrderCancellationPermission } from "./merchant-order-staff-cancellation.js";
 import { keepingCause, onlyRefusal } from "./merchant-failure.js";
+import { fenceTableBill } from "./dining-waiting-rounds.js";
+import { refreshBillTaxRounding } from "./merchant-dining-table-checkout.js";
 
 /**
  * WP-2423 DEC-DINE-IN-PAY-LATER (rule 2): staff take dishes — or a whole round — off the bill of a
@@ -182,6 +186,17 @@ export function createMerchantDiningUnpaidItemRemoval(options: {
               )
             )
               return fail("UNPAID_ITEM_REMOVAL_ALREADY_PAID");
+            // v15 b11: the whole bill's fences, the Order holding the bill first (the order the
+            // payment commands take): the bill's tax rounding is recorded again below.
+            const owner = {
+              brandReference: selected.brandReference,
+              storeReference: selected.storeReference,
+            };
+            const holder =
+              (await listOrderMergedInto(tx, owner, [intent.orderReference])).get(
+                intent.orderReference,
+              ) ?? intent.orderReference;
+            await fenceTableBill(tx, owner, await listOrderBillOrders(tx, owner, holder));
             const prepared = await ordering.prepare(tx, intent);
             if (prepared.status === "NotEligible")
               return fail(
@@ -282,6 +297,14 @@ export function createMerchantDiningUnpaidItemRemoval(options: {
             });
             if (inventory.status === "NotReleasable")
               return fail("UNPAID_ITEM_REMOVAL_NOT_REMOVABLE");
+            // v15 b11 (DEC-TAX-WHOLE-RECEIPT): the bill changed, so a tax rounding recorded for it
+            // is recorded again for the bill as it now stands.
+            await refreshBillTaxRounding(tx, selected, {
+              orderReference: intent.orderReference,
+              observedAt: cancelledAt,
+              authorize: async () => (await guard()) === true,
+              nextReference: options.nextReference,
+            });
             return result(record, "Removed");
           },
         ),

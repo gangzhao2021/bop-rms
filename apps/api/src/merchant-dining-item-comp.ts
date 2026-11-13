@@ -3,6 +3,8 @@ import { readClosedRecord } from "@bop/identity";
 import { listStoreKitchenOrderItemStates } from "@rms/kitchen";
 import {
   createPostgresOrderPriceReductionStore,
+  listOrderBillOrders,
+  listOrderMergedInto,
   orderPriceReductionPermission,
   orderPriceReductionReasonCodes,
   OrderPriceReductionError,
@@ -18,6 +20,8 @@ import { withMerchantTransactionAuthorization } from "./merchant-transaction-aut
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { keepingCause, onlyRefusal } from "./merchant-failure.js";
+import { fenceTableBill } from "./dining-waiting-rounds.js";
+import { refreshBillTaxRounding } from "./merchant-dining-table-checkout.js";
 
 /**
  * WP-2423 item 8 ① segment 2 (Owner decision 2, DEC-TABLES-SERVER-MAIN): a manager comps or
@@ -187,7 +191,18 @@ export function createMerchantDiningItemComp(options: {
               return Object.freeze({ status: "AlreadyRecorded", reductions: publicRecords(prior) });
             }
             // Ordering's fence is taken first and held to commit: a table payment, write-off or
-            // phone payment for this Order either committed before (seen below) or waits.
+            // phone payment for this Order either committed before (seen below) or waits. v15 b11:
+            // the whole bill's fences, the Order holding the bill first (the order the payment
+            // commands take), because the comp records the bill's tax rounding again below.
+            const owner = {
+              brandReference: selected.brandReference,
+              storeReference: selected.storeReference,
+            };
+            const holder =
+              (await listOrderMergedInto(tx, owner, [intent.orderReference])).get(
+                intent.orderReference,
+              ) ?? intent.orderReference;
+            await fenceTableBill(tx, owner, await listOrderBillOrders(tx, owner, holder));
             const prepared = await ordering.prepare(tx, intent);
             const payments = createPostgresDiningTableSettlementStore({
               scope: selected,
@@ -237,12 +252,21 @@ export function createMerchantDiningItemComp(options: {
               if (state === "Cancelled") return fail("ITEM_COMP_NOT_ELIGIBLE");
               if (state === undefined) return fail("ITEM_COMP_NOT_STARTED");
             }
+            const decidedAt = String(parseOrderingInstant(options.persistence.now()));
             const records = await ordering.commit(tx, {
               plan: prepared.plan,
               operationReference: intent.operationReference,
               actorReference,
               reasonCode: intent.reasonCode,
-              decidedAt: String(parseOrderingInstant(options.persistence.now())),
+              decidedAt,
+              nextReference: options.nextReference,
+            });
+            // v15 b11 (DEC-TAX-WHOLE-RECEIPT): the bill changed, so a tax rounding recorded for it
+            // (at a split or a started payment) is recorded again for the bill as it now stands.
+            await refreshBillTaxRounding(tx, selected, {
+              orderReference: intent.orderReference,
+              observedAt: decidedAt,
+              authorize: async () => (await guard()) === true,
               nextReference: options.nextReference,
             });
             return Object.freeze({ status: "Recorded", reductions: publicRecords(records) });

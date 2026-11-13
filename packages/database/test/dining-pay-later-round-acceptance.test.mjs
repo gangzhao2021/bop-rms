@@ -5291,12 +5291,72 @@ async function journey(journeyEnding) {
           });
           assert.equal(splitFirst.status, "Recorded");
           assert.equal(splitFirst.bill.split.parts.length, 2);
+          // v15 b11 (BR C, order 141): the split had recorded a −$0.01 tax rounding for the bill
+          // (set here as the system rule had recorded it on v15: a version superseding the last,
+          // one line on round 1). Comping every dish then took their full amounts off, so the
+          // Order priced at −$0.01 and the table could be neither read, cancelled nor closed.
+          const roundingVersions = () =>
+            rows(
+              "SELECT version,total_minor::text AS total FROM rms_ordering.order_tax_rounding_adjustment WHERE bill_order_id=$1 ORDER BY version",
+              [orderReference],
+            );
+          const recordStaleRounding = async () => {
+            const versions = await roundingVersions();
+            const adjustment = fresh();
+            await admin.query("BEGIN");
+            try {
+              await admin.query(
+                "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+                [scope.brandReference, scope.storeReference],
+              );
+              await admin.query(
+                "INSERT INTO rms_ordering.order_tax_rounding_adjustment (adjustment_id,brand_id,store_id,bill_order_id,version,supersedes_adjustment_id,rule_code,rule_version,basis_digest,total_minor,currency_code,recorded_at) VALUES ($1,$2,$3,$4::uuid,$5::int,(SELECT adjustment_id FROM rms_ordering.order_tax_rounding_adjustment WHERE bill_order_id=$4::uuid AND version=$5::int-1),'DEC_TAX_WHOLE_RECEIPT',2,$6,-1,'CAD',date_trunc('milliseconds',now()))",
+                [
+                  adjustment,
+                  scope.brandReference,
+                  scope.storeReference,
+                  orderReference,
+                  versions.length + 1,
+                  "sha256:" + "b".repeat(64),
+                ],
+              );
+              await admin.query(
+                "INSERT INTO rms_ordering.order_tax_rounding_adjustment_line (adjustment_id,brand_id,store_id,bill_order_id,line_number,order_id,order_batch_id,tax_component_code,amount_minor) VALUES ($1,$2,$3,$4,1,$4,$5,'HST',-1)",
+                [
+                  adjustment,
+                  scope.brandReference,
+                  scope.storeReference,
+                  orderReference,
+                  R1.batch.orderBatchReference,
+                ],
+              );
+              await admin.query("COMMIT");
+            } catch (error) {
+              await admin.query("ROLLBACK");
+              throw error;
+            }
+          };
+          await recordStaleRounding();
           const comped = await comp(manager, {
             orderItemReferences: items1.map((item) => String(item.orderItemReference)),
           });
           assert.equal(comped.status, "Recorded");
-          assert.equal((await bill()).split.stale, true);
+          // The comp recorded the bill's rounding again, for the bill as it now stands: nothing.
+          assert.deepEqual((await roundingVersions()).at(-1)?.total, "0");
+          // A table left as v15 left BR C (the −$0.01 version recorded after every dish was comped)
+          // is still read: nothing to pay, checkout can be cancelled and the table closed.
+          await recordStaleRounding();
+          const stuck = await bill();
+          // Read (it was 503 on v15): every round comes to nothing; the old split says split again.
+          assert.equal(
+            stuck.rounds.reduce((sum, round) => sum + BigInt(round.totalMinor), 0n),
+            0n,
+          );
+          assert.equal(stuck.taxRoundingMinor, "0");
+          assert.equal(stuck.split.stale, true);
           assert.equal((await closing(server, "Cancel")).phase, "Active");
+          // Cancelling recorded the bill's rounding as it stands, so Ordering prices it at $0.00.
+          assert.deepEqual((await roundingVersions()).at(-1)?.total, "0");
           assert.deepEqual(
             await rows(
               "SELECT mode FROM rms_payment.dining_table_split_plan WHERE order_id=$1 ORDER BY plan_version",

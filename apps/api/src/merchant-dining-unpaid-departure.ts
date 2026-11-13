@@ -19,6 +19,7 @@ import type { createMerchantDiningOrderCloseCommand } from "./merchant-dining-or
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import { isMerchantRefusal, keepingCause, onlyRefusal } from "./merchant-failure.js";
+import { refreshBillTaxRounding } from "./merchant-dining-table-checkout.js";
 
 /**
  * WP-2423 DEC-DINE-IN-PAY-LATER: a table left without paying what it still owed. A manager
@@ -228,6 +229,17 @@ export function createMerchantDiningUnpaidDeparture(options: {
               position.closureVersion !== command.expectedClosureVersion
             )
               return refuse("UNPAID_DEPARTURE_VERSION_CONFLICT");
+            // v15 b11 (DEC-TAX-WHOLE-RECEIPT rule 3): a write-off fixes the bill like a payment, so
+            // the bill's tax rounding is recorded first for the bill as it stands (a comp after a
+            // split no longer leaves the version recorded at the split): the amount written off is
+            // the bill staff saw.
+            await refreshBillTaxRounding(tx, scope, {
+              orderReference: command.orderReference,
+              observedAt: now,
+              authorize: async () => (await authorize()) === true,
+              nextReference: options.newReference,
+              whenNeverRecorded: true,
+            });
             const basis = await evidence.writeOffBasis(evidenceInput);
             if (basis === null) return refuse("UNPAID_DEPARTURE_ALREADY_CLOSED");
             if (basis.orderVersion !== command.expectedOrderVersion)

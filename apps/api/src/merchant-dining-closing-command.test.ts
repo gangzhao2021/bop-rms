@@ -30,6 +30,11 @@ const mock = vi.hoisted(() => ({
   cancellations: vi.fn(),
   taskComposition: vi.fn(),
   evidence: vi.fn(),
+  refresh: vi.fn(),
+}));
+vi.mock("./merchant-dining-table-checkout.js", async (original) => ({
+  ...(await original<typeof import("./merchant-dining-table-checkout.js")>()),
+  refreshBillTaxRounding: (...input: unknown[]) => mock.refresh(...input),
 }));
 vi.mock("@rms/ordering", async (original) => ({
   ...(await original<typeof import("@rms/ordering")>()),
@@ -53,6 +58,8 @@ const id = (n: number) => "0190fad7-0000-7000-8000-" + String(n).padStart(12, "0
   at = "2026-09-20T00:00:00.000Z";
 beforeEach(() => vi.resetAllMocks());
 function setup() {
+  mock.sessionOrders.mockResolvedValue(new Map());
+  mock.refresh.mockResolvedValue(undefined);
   mock.guestStarted.mockResolvedValue(new Map());
   mock.guestSetting.mockResolvedValue({ guestTableStart: false });
   const allowed = vi.fn(async () => true),
@@ -180,6 +187,28 @@ it("WP-2423: a permission withdrawn during the close refuses it before commit", 
   expect(mock.begin).toHaveBeenCalledOnce();
   // The refusal is thrown inside the transaction callback, so nothing it wrote commits.
   expect(f.inside.thrown).toBe(true);
+});
+it("v15 b11: starting or finishing checkout records the bill's tax rounding again first, at the table's Order", async () => {
+  const f = setup();
+  mock.sessionOrders.mockResolvedValue(new Map([[id(5), id(11)]]));
+  const order: string[] = [];
+  mock.refresh.mockImplementation(async () => void order.push("refresh"));
+  mock.begin.mockImplementation(async () => {
+    order.push("begin");
+    return { status: "Applied", session: { phase: "Closing", version: 3 } };
+  });
+  await f.handler(f.input);
+  expect(order).toEqual(["refresh", "begin"]);
+  expect(mock.refresh).toHaveBeenCalledWith(
+    expect.anything(),
+    { tenantReference: id(1), brandReference: id(2), storeReference: id(3) },
+    expect.objectContaining({ orderReference: id(11), observedAt: at }),
+  );
+  // A table with no Order yet has no bill to record.
+  mock.refresh.mockClear();
+  mock.sessionOrders.mockResolvedValue(new Map());
+  await f.handler({ ...f.input, command: { ...f.input.command, operationReference: id(12) } });
+  expect(mock.refresh).not.toHaveBeenCalled();
 });
 it("WP-2423: owner callbacks take the run's guard during the close and are refused after it", async () => {
   const f = setup();

@@ -16,7 +16,7 @@ import {
   listStoreDiningSessionOrders,
 } from "@rms/ordering";
 import { createPostgresDiningTableSettlementStore } from "@rms/payment";
-import { readDiningTableBill } from "./merchant-dining-table-checkout.js";
+import { readDiningTableBill, refreshBillTaxRounding } from "./merchant-dining-table-checkout.js";
 import {
   createDiningSettledSessionEvidence,
   createDiningSessionClosingEvidence,
@@ -116,6 +116,24 @@ export async function runDiningSessionClosing(input: {
     });
   }
   if (session.version !== command.expectedSessionVersion) return changed();
+  // v15 b11 (DEC-TAX-WHOLE-RECEIPT rule 3): starting, cancelling or finishing checkout of a table
+  // nothing was paid on records its bill's tax rounding again for the bill as it stands, so a
+  // version recorded before a comp (every dish comped after a split left −$0.01 on a $0.00 bill)
+  // never stops the table being brought back to ordering or closed. Nothing once anything is paid.
+  const tableOrder = (
+    await listStoreDiningSessionOrders(
+      tx,
+      { brandReference: scope.brandReference, storeReference: scope.storeReference },
+      [String(command.diningSessionReference)],
+    )
+  ).get(String(command.diningSessionReference));
+  if (tableOrder !== undefined)
+    await refreshBillTaxRounding(tx, scope, {
+      orderReference: tableOrder,
+      observedAt,
+      authorize: async () => (await guard()) === true,
+      nextReference: input.newReference,
+    });
   // Cancel is reversible only once proven here: nothing paid or written off for the table.
   let reversible = false;
   if (command.action === "Cancel") {

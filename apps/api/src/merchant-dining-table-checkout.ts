@@ -28,6 +28,7 @@ import {
   computeBillTaxRounding,
   loadBillTaxRounding,
   recordBillTaxRounding,
+  parseOrderingReference,
 } from "@rms/ordering";
 import {
   createPostgresDiningTableSettlementStore,
@@ -1048,10 +1049,18 @@ export async function readDiningTableBill(
   // The Order's priced total (Ordering) is what the rounds must come to: a round still being sent
   // (submitted, not yet in the kitchen) or a change to the Order makes the bill inconsistent.
   // WP-2423 item 8 ⑨: a merged bill comes to every Order on it.
+  // v15 b11: before anything is paid the bill carries the rounding it computes now, so Ordering's
+  // total is read without the recorded version: one recorded before a comp or a dish taken off
+  // (every dish comped after a split with a −$0.01 rounding came to −$0.01) no longer fits the
+  // bill and must never make the table unreadable, uncancellable or unclosable.
   const pricedOrders = [];
   for (const order of billOrders)
     pricedOrders.push(
-      await createPostgresOrderPricedAmountSource({ ...owner, authorize: allowed })(tx, {
+      await createPostgresOrderPricedAmountSource({
+        ...owner,
+        authorize: allowed,
+        ...(anyPayment ? {} : { taxRounding: "Excluded" as const }),
+      })(tx, {
         orderReference: order,
         observedAt: input.observedAt,
       }),
@@ -1068,7 +1077,9 @@ export async function readDiningTableBill(
   // on the bill.
   const consistent =
     priced.pendingAmendmentCount === 0 &&
-    priced.pricedTotalMinor - (recordedRounding?.totalMinor ?? 0n) + taxRoundingMinor ===
+    priced.pricedTotalMinor -
+      (anyPayment ? (recordedRounding?.totalMinor ?? 0n) : 0n) +
+      taxRoundingMinor ===
       paidAllocation + owedTotal + waitingMinor &&
     (settlement === null || settlement.roundsMinor === paidAllocation) &&
     split?.stale !== true;
@@ -1300,6 +1311,55 @@ export async function readOrderTaxRoundingShare(
   return bill.rounds
     .filter((round) => round.orderReference === order)
     .reduce((sum, round) => sum + BigInt(round.taxRoundingMinor), 0n);
+}
+
+/**
+ * v15 b11 (DEC-TAX-WHOLE-RECEIPT rule 3): a command that changes a bill nothing has been paid on (a
+ * comp or discount, a dish or round taken off) or closes it records the bill's tax rounding again in
+ * its own transaction, so the recorded version Ordering's priced total, the write-off and closing
+ * read is the bill as it now stands (a new version only when it changed). Every dish comped after a
+ * split had left a −$0.01 version recorded at the split on a $0.00 bill: the table could then be
+ * neither read nor closed. `whenNeverRecorded` also records a bill that has none yet (before a
+ * write-off fixes it). Nothing once the bill has a payment: its recorded version is what was paid.
+ * Holds the bill's fence (the Order holding the bill first), as the payment commands do.
+ */
+export async function refreshBillTaxRounding(
+  tx: ConsumerTransaction,
+  scope: Scope,
+  input: {
+    readonly orderReference: string;
+    readonly observedAt: string;
+    authorize(): Promise<boolean>;
+    nextReference(): string;
+    readonly whenNeverRecorded?: boolean;
+  },
+): Promise<void> {
+  const owner = { brandReference: scope.brandReference, storeReference: scope.storeReference };
+  const order = String(parseOrderingReference(input.orderReference));
+  const holder = (await listOrderMergedInto(tx, owner, [order])).get(order) ?? order;
+  if (input.whenNeverRecorded !== true && (await loadBillTaxRounding(tx, owner, holder)) === null)
+    return;
+  // The same test as readDiningTableBill (which would not record either): anything paid, being
+  // paid online, or written off. Said here first so a paid table's close never reads its bill.
+  const payments = createPostgresDiningTableSettlementStore({
+    scope,
+    authorize: async (_tx, value) =>
+      value.orderReference === holder && (await input.authorize()) === true,
+  });
+  if (
+    (await payments.listByOrders(tx, [holder])).length > 0 ||
+    (await payments.listOnlinePaymentsByOrders(tx, [holder])).some(onlinePaymentHoldsBill) ||
+    (await payments.listWriteOffsByOrders(tx, [holder])).length > 0
+  )
+    return;
+  const session = (await listOrderDiningSessions(tx, owner, [holder])).get(holder);
+  if (session === undefined) return;
+  await readDiningTableBill(tx, scope, {
+    diningSessionReference: session,
+    observedAt: input.observedAt,
+    authorize: input.authorize,
+    recordTaxRounding: { nextReference: input.nextReference },
+  });
 }
 
 export const publicBill = (
