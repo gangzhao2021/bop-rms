@@ -28,6 +28,19 @@ const denied = (): never => {
  * reason, who asked and when, and whether the requester's verification is still current. A read
  * model only: approval and sending recheck every fact. Names are shown to staff, never logged.
  */
+/**
+ * b12 (cash-refund-approvals): how the refund's payment was taken, as staff and any other reader
+ * (a report, a future screen) should read it. A counter cash payment is recorded with the card
+ * machine's records (the drawer gives back what the machine would), but it was paid in cash: it
+ * reads "Cash", with the whole nickels the drawer gives back.
+ */
+export function approvalPaymentMethod(entry: {
+  readonly paymentMethod: "Online" | "CardMachine";
+  readonly cashGivenBackMinor: bigint | null;
+}): "Online" | "CardMachine" | "Cash" {
+  return entry.cashGivenBackMinor === null ? entry.paymentMethod : "Cash";
+}
+
 export function createMerchantOrdinaryRefundApprovals(options: {
   persistence: PersistentMerchantBffOptions;
   resolveConfiguration: Configuration;
@@ -196,7 +209,7 @@ export function createMerchantOrdinaryRefundApprovals(options: {
                 requestOperationReference: entry.operationReference,
                 paymentAttemptReferences: entry.paymentAttemptReferences,
                 paymentIntentReferences: entry.paymentIntentReferences,
-                paymentMethod: entry.paymentMethod,
+                paymentMethod: approvalPaymentMethod(entry),
                 // v15 batch 8: a counter cash payment: the whole nickels the drawer gives back
                 // (never on the card machine); null for a card or online payment.
                 cashGivenBackMinor:

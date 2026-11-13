@@ -1205,7 +1205,8 @@ test("@production on Approvals a cash refund is approved and given back from the
     requestOperationReference: id(352),
     paymentAttemptReferences: [id(353)],
     paymentIntentReferences: [id(354)],
-    paymentMethod: "CardMachine",
+    // b12: a counter cash payment reads Cash, never CardMachine.
+    paymentMethod: "Cash",
     // $3.67 asked; the drawer gives back $3.65 (whole nickels, as the server counts it).
     cashGivenBackMinor: "365",
     currencyCode: "CAD",

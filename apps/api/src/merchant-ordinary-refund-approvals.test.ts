@@ -1,5 +1,8 @@
 import { beforeEach, expect, it, vi } from "vitest";
-import { createMerchantOrdinaryRefundApprovals } from "./merchant-ordinary-refund-approvals.js";
+import {
+  approvalPaymentMethod,
+  createMerchantOrdinaryRefundApprovals,
+} from "./merchant-ordinary-refund-approvals.js";
 
 const d = vi.hoisted(() => ({
   scope: vi.fn(),
@@ -98,4 +101,16 @@ it("WP-2423 M14: a cashier's role read in its savepoint lists the request at onc
       "RELEASE SAVEPOINT refund_requester_may_send",
     ]);
   }
+});
+
+it("b12: a counter cash payment reads Cash on Approvals, never CardMachine", () => {
+  expect(approvalPaymentMethod({ paymentMethod: "CardMachine", cashGivenBackMinor: 510n })).toBe(
+    "Cash",
+  );
+  expect(approvalPaymentMethod({ paymentMethod: "CardMachine", cashGivenBackMinor: null })).toBe(
+    "CardMachine",
+  );
+  expect(approvalPaymentMethod({ paymentMethod: "Online", cashGivenBackMinor: null })).toBe(
+    "Online",
+  );
 });

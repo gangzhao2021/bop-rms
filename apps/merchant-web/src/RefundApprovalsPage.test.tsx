@@ -128,7 +128,7 @@ it("v15 batch 8: a counter cash refund is given back from the drawer in whole ni
     requestOperationReference: "01909974-0000-7000-8000-000000000003",
     paymentAttemptReferences: ["01909974-0000-7000-8000-000000000004"],
     paymentIntentReferences: ["01909974-0000-7000-8000-000000000005"],
-    paymentMethod: "CardMachine",
+    paymentMethod: "Cash",
     // The request is $3.67; the drawer gives back $3.65 (the server's whole nickels).
     cashGivenBackMinor: "365",
     currencyCode: "CAD",

@@ -401,15 +401,21 @@ it("v15 batch 8: reads the cash a counter cash refund gives back, and refuses it
     });
   const fetcher = vi
     .fn<typeof fetch>()
-    .mockResolvedValueOnce(view({ paymentMethod: "CardMachine", cashGivenBackMinor: "365" }))
+    .mockResolvedValueOnce(view({ paymentMethod: "Cash", cashGivenBackMinor: "365" }))
     .mockResolvedValueOnce(view({ paymentMethod: "CardMachine", cashGivenBackMinor: null }))
     // Cash only on a counter payment, and only in whole nickels.
     .mockResolvedValueOnce(view({ paymentMethod: "Online", cashGivenBackMinor: "365" }))
-    .mockResolvedValueOnce(view({ paymentMethod: "CardMachine", cashGivenBackMinor: "367" }))
-    .mockResolvedValueOnce(view({ paymentMethod: "CardMachine", cashGivenBackMinor: 365 }));
+    .mockResolvedValueOnce(view({ paymentMethod: "Cash", cashGivenBackMinor: "367" }))
+    .mockResolvedValueOnce(view({ paymentMethod: "Cash", cashGivenBackMinor: 365 }))
+    // b12: a cash payment is never labelled CardMachine, and Cash always says what goes back.
+    .mockResolvedValueOnce(view({ paymentMethod: "CardMachine", cashGivenBackMinor: "365" }))
+    .mockResolvedValueOnce(view({ paymentMethod: "Cash", cashGivenBackMinor: null }));
   const client = createRefundApprovalClient(fetcher);
-  expect((await client.approvals()).entries[0]?.cashGivenBackMinor).toBe("365");
+  expect((await client.approvals()).entries[0]).toMatchObject({
+    paymentMethod: "Cash",
+    cashGivenBackMinor: "365",
+  });
   expect((await client.approvals()).entries[0]?.cashGivenBackMinor).toBeNull();
-  for (let n = 0; n < 3; n += 1)
+  for (let n = 0; n < 5; n += 1)
     await expect(client.approvals()).rejects.toMatchObject({ code: "Unavailable" });
 });

@@ -139,7 +139,8 @@ export interface RefundApprovalEntry {
   readonly requestReference: string;
   readonly paymentIntentReferences: readonly string[];
   /** WP-2423 item 4: refunded on the store's card machine (staff record it) or sent online. */
-  readonly paymentMethod: "Online" | "CardMachine";
+  /** b12: Cash for a counter cash payment (given back from the drawer, cashGivenBackMinor). */
+  readonly paymentMethod: "Online" | "CardMachine" | "Cash";
   /**
    * v15 batch 8: paid in cash at the counter: the whole nickels the drawer gives back for this
    * request (never on the card machine). Null for a card or online payment, or an older server.
@@ -209,11 +210,14 @@ function entry(value: unknown): RefundApprovalEntry {
     typeof raw.soleOperatorApproval !== "boolean" ||
     (raw.soleOperatorApproval && (!raw.requestedByYou || !raw.canApprove)) ||
     raw.currencyCode !== "CAD" ||
-    (raw.paymentMethod !== "Online" && raw.paymentMethod !== "CardMachine") ||
+    (raw.paymentMethod !== "Online" &&
+      raw.paymentMethod !== "CardMachine" &&
+      raw.paymentMethod !== "Cash") ||
+    // b12: a cash payment always says what the drawer gives back; a card or online one never.
+    (raw.paymentMethod === "Cash") !== (withCash && raw.cashGivenBackMinor !== null) ||
     (withCash &&
       raw.cashGivenBackMinor !== null &&
-      (raw.paymentMethod !== "CardMachine" ||
-        typeof raw.cashGivenBackMinor !== "string" ||
+      (typeof raw.cashGivenBackMinor !== "string" ||
         !/^(0|[1-9][0-9]{0,17})$/u.test(raw.cashGivenBackMinor) ||
         BigInt(raw.cashGivenBackMinor) % 5n !== 0n)) ||
     (raw.state !== "AwaitingApproval" && raw.state !== "Approved" && raw.state !== "NotSent") ||

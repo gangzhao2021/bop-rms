@@ -145,7 +145,7 @@ export function waitingText(requestedAt: string, now: number): string {
  * counter (whole nickels, as the server counts it), else null (a card or online payment).
  */
 export const cashBackOf = (entry: RefundApprovalEntry): string | null =>
-  entry.paymentMethod === "CardMachine" && entry.cashGivenBackMinor !== null
+  entry.paymentMethod === "Cash" && entry.cashGivenBackMinor !== null
     ? formatCad(entry.cashGivenBackMinor)
     : null;
 
@@ -171,7 +171,8 @@ export function NotSentCard({
   const [done, setDone] = useState<string | null>(null);
   const paymentPage =
     "/app/operations/payments/" + (entry.paymentIntentReferences[0] ?? "") + "/refund";
-  const onMachine = entry.paymentMethod === "CardMachine";
+  // Made at the store (card machine or cash drawer) and recorded on the payment page.
+  const onMachine = entry.paymentMethod !== "Online";
   const cash = cashBackOf(entry);
   return (
     <li className="refund-approval-card">
@@ -512,7 +513,8 @@ export function ApprovalCard({
     requesterVerifiedUntil !== null && Date.parse(requesterVerifiedUntil) > Date.now();
   const busy = outcome.kind === "Busy";
   // WP-2423 item 4: a card-machine refund is made on the store's machine once approved.
-  const onMachine = entry.paymentMethod === "CardMachine";
+  // b12: a counter cash payment is recorded on the payment page like a card-machine one.
+  const onMachine = entry.paymentMethod !== "Online";
   // v15 batch 8: a counter cash payment goes back in cash from the drawer, never on the machine.
   const cash = cashBackOf(entry);
   const machineApproved = onMachine && (entry.state === "Approved" || outcome.kind === "OnMachine");
