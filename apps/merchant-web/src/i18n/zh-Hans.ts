@@ -6539,6 +6539,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "If the guest gave up, stop the phone payment to take it here. A payment they did finish is kept.":
     "如果客人放弃了，停止手机付款后可以在这里收款。客人已经完成的付款会保留。",
   "Stop the phone payment": "停止手机付款",
+  "Stopping the phone payment…": "正在停止手机付款…",
+  "Asking the payment company whether the guest finished paying. Don't take the payment another way until it answers.":
+    "正在向支付公司确认客人是否已付完。收到答复前，请不要用其他方式收款。",
   "Guest's phone": "客人手机",
   "Paid at the table · guest's phone": "已在桌上付清 · 客人手机",
   "Table {table} is open. Guests scan the QR code on the table to join.":

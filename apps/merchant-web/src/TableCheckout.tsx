@@ -245,6 +245,10 @@ export function TableCheckout({
   const [readProblem, setReadProblem] = useState<string | null>(null);
   // M89: said once a phone payment was stopped, until the next action.
   const [stoppedPhone, setStoppedPhone] = useState(false);
+  // v15 batch 11: while a phone payment is being stopped, the payment company is asked; the bill's
+  // own re-reads wait (they only slowed the stop), and an answer read before the stop is not shown.
+  const [stoppingPhone, setStoppingPhone] = useState(false);
+  const stops = useRef(0);
   const [busy, setBusy] = useState(false);
   // WP-2423 item 8 ① (Owner 2026-10-27): no tip is chosen for the guests; staff ask and choose.
   const [tip, setTip] = useState<Tip | null>(null);
@@ -281,6 +285,7 @@ export function TableCheckout({
       return;
     }
     const controller = new AbortController();
+    const stopsBefore = stops.current;
     billReading.current = true;
     // A read that never settles (Wi-Fi dropped mid-request, a socket gone silent) has a ceiling:
     // it is given up, staff are told, and the next 5 s tick reads again.
@@ -292,12 +297,13 @@ export function TableCheckout({
     client
       .bill(csrf, sessionReference, controller.signal)
       .then((value) => {
-        if (controller.signal.aborted) return;
+        if (controller.signal.aborted || stops.current !== stopsBefore) return;
         setBill(value);
         setReadProblem(null);
       })
       .catch((error: unknown) => {
-        if (!controller.signal.aborted) setReadProblem(errorText(error));
+        if (!controller.signal.aborted && stops.current === stopsBefore)
+          setReadProblem(errorText(error));
       })
       .finally(() => {
         window.clearTimeout(ceiling);
@@ -315,7 +321,7 @@ export function TableCheckout({
   // Owner 2026-11-03 walkthrough: a guest can start or finish paying (a part too) at any moment,
   // so an open bill keeps being read while the table checks out.
   useEffect(() => {
-    if (session.phase !== "Closing" || paidNow || bill?.writeOff != null) return;
+    if (session.phase !== "Closing" || paidNow || bill?.writeOff != null || stoppingPhone) return;
     // v15 2026-11-11: a read still running is never cut off by the next one. On a busy evening a
     // merged table's bill took 7–8 s, so restarting every 5 s left staff on "Reading the bill…"
     // until one read happened to finish in time (and each cut-off read still loaded the server).
@@ -323,7 +329,7 @@ export function TableCheckout({
       if (!billReading.current) setReload((value) => value + 1);
     }, 5000);
     return () => window.clearInterval(timer);
-  }, [session.phase, paidNow, bill?.writeOff]);
+  }, [session.phase, paidNow, bill?.writeOff, stoppingPhone]);
   // M100: once the table has paid, a warning left by an earlier lost answer no longer applies.
   useEffect(() => {
     if (paidNow) setProblem(null);
@@ -517,18 +523,23 @@ export function TableCheckout({
   const stopPhone = async () => {
     if (busy || locked) return;
     setBusy(true);
+    setStoppingPhone(true);
+    stops.current += 1;
     setProblem(null);
     try {
       const stopped = await client.stopOnlinePayment(csrf, sessionReference);
+      stops.current += 1;
       if (stopped === null) setReload((value) => value + 1);
       else setBill(stopped);
       setStoppedPhone(true);
       onChanged();
     } catch (error) {
+      stops.current += 1;
       setProblem(errorText(error));
       setReload((value) => value + 1);
     } finally {
       setBusy(false);
+      setStoppingPhone(false);
     }
   };
 
@@ -734,8 +745,19 @@ export function TableCheckout({
                 )}
               </p>
               <button type="button" disabled={busy || locked} onClick={() => void stopPhone()}>
-                {busy ? t("Checking…") : t("Stop the phone payment")}
+                {stoppingPhone
+                  ? t("Stopping the phone payment…")
+                  : busy
+                    ? t("Checking…")
+                    : t("Stop the phone payment")}
               </button>
+              {stoppingPhone ? (
+                <p>
+                  {t(
+                    "Asking the payment company whether the guest finished paying. Don't take the payment another way until it answers.",
+                  )}
+                </p>
+              ) : null}
             </div>
           ) : bill.writeOff !== null ? (
             // DEC-DINE-IN-PAY-LATER (rule 14): the guests left without paying; nothing to take.
