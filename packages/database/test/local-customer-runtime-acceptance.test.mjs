@@ -283,6 +283,8 @@ it("composes scoped persisted entry and menu through one restartable loopback ru
       assert(!(await cartUnavailable.text()).includes("synthetic_cart_driver_fault"));
       cartFault = false;
       assert.deepEqual(await sessionStore.resolve(pickupSelector), pickupRecord);
+      // reads-under-burst: a menu read in the last 3 s is given again, so the fault is read after it.
+      await new Promise((resolve) => setTimeout(resolve, 3_100));
       menuFault = true;
       const unavailable = await menu();
       assert.equal(unavailable.status, 503);

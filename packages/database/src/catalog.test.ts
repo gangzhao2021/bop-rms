@@ -2554,7 +2554,7 @@ $unsafe$;
     const catalog = await readMigrationCatalog(root);
     expect(catalog.diagnostics).toEqual([]);
     expect(catalog.migrations.map((migration) => migration.id)).toContain(
-      "2000_900_create_permission_catalog_probe",
+      "2000_999_create_permission_catalog_probe",
     );
     expect(catalog.migrations.at(-1)?.id).toBe("2000_999_create_permission_catalog_probe");
   });
