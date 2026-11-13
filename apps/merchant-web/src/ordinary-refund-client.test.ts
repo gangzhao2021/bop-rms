@@ -178,6 +178,40 @@ it("binds item queries to order and denies selectable units on uncaptured batche
   for (let i = 0; i < 4; i++)
     await expect(client.items(id(1), csrf)).rejects.toMatchObject({ code: "Unavailable" });
 });
+// b13: a counter cash request carries the cash given back (or to give back), whole nickels.
+it("b13: a cash request in the refund list reads its cash given back, only on the card machine in whole nickels", async () => {
+  const entry = {
+    requestReference: id(40),
+    operationReference: id(41),
+    claimVersion: 1,
+    requestedAt: "2026-11-13T12:00:00.000Z",
+    reasonCode: "CUSTOMER_REQUEST",
+    currencyCode: "CAD",
+    amountMinor: "509",
+    decline: null,
+    progress: "Refunded",
+    paymentMethod: "CardMachine",
+  };
+  const data = (extra: Record<string, unknown>) => ({
+    orderReference: id(1),
+    orderNumber: "3",
+    canRequest: true,
+    canWithdraw: false,
+    claimVersion: 1,
+    recentRequests: [{ ...entry, ...extra }],
+    items: [],
+  });
+  const fetcher = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(response(data({ cashGivenBackMinor: "510" })))
+    .mockResolvedValueOnce(response(data({})))
+    .mockResolvedValueOnce(response(data({ cashGivenBackMinor: "509" })))
+    .mockResolvedValueOnce(response(data({ cashGivenBackMinor: "510", paymentMethod: "Online" })));
+  const client = createOrdinaryRefundClient(fetcher);
+  expect((await client.items(id(1), csrf)).recentRequests[0]?.cashGivenBackMinor).toBe("510");
+  expect((await client.items(id(1), csrf)).recentRequests[0]?.cashGivenBackMinor).toBeUndefined();
+  for (let i = 0; i < 2; i++) await expect(client.items(id(1), csrf)).rejects.toThrow();
+});
 it("WP-2423 M10: an older server's items read as not known and not withdrawable; stop making it too is sent for refunded units only", async () => {
   const older = {
     orderReference: id(1),
@@ -297,6 +331,7 @@ const context = {
   paymentMethod: "Online",
   paidInCash: false,
   cashLeftMinor: null,
+  cashGivenBackMinor: null as string | null,
   currencyCode: "CAD",
   capturedAmountMinor: "2260",
   confirmedRefundMinor: "0",
@@ -410,6 +445,22 @@ it("v15 batch 8: reads a counter cash payment, and an older server's answer as n
     cashLeftMinor: null,
   });
   for (let n = 0; n < 4; n += 1) await expect(client.context(id(6), csrf)).rejects.toThrow();
+});
+// b13: the cash a cash payment's refunds gave back from the drawer, said beside "Refunded".
+it("b13: reads the cash given back for a cash payment, whole nickels only, and none from an older server", async () => {
+  const cash = { ...context, paymentMethod: "CardMachine", paidInCash: true, cashLeftMinor: "0" };
+  const older: Record<string, unknown> = { ...cash };
+  delete older.cashGivenBackMinor;
+  const fetcher = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(response({ ...cash, cashGivenBackMinor: "510" }))
+    .mockResolvedValueOnce(response(older))
+    .mockResolvedValueOnce(response({ ...cash, cashGivenBackMinor: "509" }))
+    .mockResolvedValueOnce(response({ ...context, cashGivenBackMinor: "510" }));
+  const client = createOrdinaryRefundClient(fetcher);
+  await expect(client.context(id(6), csrf)).resolves.toMatchObject({ cashGivenBackMinor: "510" });
+  await expect(client.context(id(6), csrf)).resolves.toMatchObject({ cashGivenBackMinor: null });
+  for (let n = 0; n < 2; n += 1) await expect(client.context(id(6), csrf)).rejects.toThrow();
 });
 // b10 cash-refund-approvals: money taken back on an order paid only in cash, as the server says.
 it("b10: reads the cash a guest can still hand back, only for a cash payment in whole nickels", async () => {

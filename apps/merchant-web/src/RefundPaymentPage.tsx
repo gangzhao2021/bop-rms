@@ -1123,9 +1123,17 @@ function RefundWizard({
   // leaving what staff are choosing or confirming as it is.
   useEffect(() => {
     if (pageRefresh === 0) return;
+    // A recorded request is read again as before: it says whether it stays recorded. One whose
+    // result is unknown keeps its own "Check whether it was recorded" (and its retry) as it is.
+    // Otherwise nothing being chosen or confirmed is cleared.
+    if (state === "Unknown" || state === "Busy") return;
+    if (state === "Recorded") {
+      void load();
+      return;
+    }
     void reloadRequests();
     setRefreshSignal((value) => value + 1);
-    // Only a new press rereads; reloadRequests itself changes on every render.
+    // Only a new press rereads; load and reloadRequests change on every render.
   }, [pageRefresh]);
   // The refundable items and this order's requests are there as soon as the page opens. Under
   // React's development double run the abort above clears the first read, so the second starts.
