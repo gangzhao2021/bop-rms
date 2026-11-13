@@ -183,10 +183,10 @@ export function CheckoutPage({
   // waited (e.g. on "the hour is full"): it is priced again the same way, and says why.
   const [priceHoldEnded, setPriceHoldEnded] = useState(false);
   const heldPriceEnded = useRef(false);
-  const priceAgainAfterMenuUpdate = (reason: "menu" | "hold-ended" = "menu") => {
+  const priceAgainAfterMenuUpdate = (reason: "menu" | "hold" = "menu") => {
     selectedTip.current = null;
     setMenuUpdated(reason === "menu");
-    setPriceHoldEnded(reason === "hold-ended");
+    setPriceHoldEnded(reason === "hold");
     setSendState("idle");
     sessionController.reset();
     void controller.quote();
@@ -241,7 +241,7 @@ export function CheckoutPage({
   }, [navigate, sessionState, payLater]);
   useEffect(() => {
     if (sessionState.status === "requote_required")
-      priceAgainAfterMenuUpdate(heldPriceEnded.current ? "hold-ended" : "menu");
+      priceAgainAfterMenuUpdate(heldPriceEnded.current ? "hold" : "menu");
     // Once per refusal: the price-again step leaves this state straight away.
   }, [sessionState.status]);
   useEffect(() => {
@@ -1231,9 +1231,7 @@ export function CheckoutPage({
               // after that prices the order again first (the guest checks the total), instead of
               // asking again with a price that is no longer held.
               onClick={() =>
-                quoteExpired
-                  ? priceAgainAfterMenuUpdate("hold-ended")
-                  : void sessionController.retry()
+                quoteExpired ? priceAgainAfterMenuUpdate("hold") : void sessionController.retry()
               }
               disabled={state.status === "offline"}
             >
