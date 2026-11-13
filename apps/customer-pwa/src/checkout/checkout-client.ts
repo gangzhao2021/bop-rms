@@ -634,6 +634,10 @@ export function createCheckoutController(
                   : "unavailable",
       cart: parsed === "cart_session_expired" ? null : current,
       canRetry: false,
+      // WP-2423 (reads-under-burst): a busy store says when to try again; the page does then.
+      ...(error instanceof CartClientError && error.retryAfterSeconds !== null
+        ? { retryAfterSeconds: error.retryAfterSeconds }
+        : {}),
     });
   };
   const executeQuote = async () => {

@@ -469,3 +469,29 @@ describe("WP-2423 guest-payment-state: what the guest pays, and until when", () 
     );
   });
 });
+
+describe("WP-2423 reads-under-burst: a checkout whose cart could not be read", () => {
+  it("says the store is busy and reads again by itself, with Try again, never a dead Continue", () => {
+    const html = render({
+      status: "unavailable",
+      cart: null,
+      canRetry: false,
+      retryAfterSeconds: 5,
+    });
+    expect(html).toContain('role="alert"');
+    expect(html).toContain("The store’s system is busy");
+    expect(html).toContain("Your cart is kept. It loads again by itself in 5 seconds.");
+    expect(html).toContain("Try again");
+    expect(html).not.toContain("Continue to payment");
+    expect(html).not.toContain("Getting your total…");
+  });
+  it("without a time from the store, says the cart couldn’t load and offers Try again", () => {
+    for (const status of ["unavailable", "conflict", "validation"] as const) {
+      const html = render({ status, cart: null, canRetry: false });
+      expect(html).toContain("We couldn’t load your cart");
+      expect(html).toContain("Your cart is kept and nothing was changed. Try loading it again.");
+      expect(html).toContain("Try again");
+      expect(html).not.toContain("Continue to payment");
+    }
+  });
+});

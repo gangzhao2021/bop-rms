@@ -77,6 +77,11 @@ export type CheckoutState =
         | "participation-ended";
       cart: CartView | null;
       canRetry: boolean;
+      /**
+       * WP-2423 (reads-under-burst): the store said it is busy and when to read again (503 +
+       * Retry-After); the page reads again by itself then.
+       */
+      retryAfterSeconds?: number | null;
     }>
   | Readonly<{
       /**

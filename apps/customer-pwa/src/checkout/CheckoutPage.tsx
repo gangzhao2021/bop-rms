@@ -277,6 +277,25 @@ export function CheckoutPage({
     };
   }, [controller]);
   const cart = "cart" in state ? state.cart : null;
+  // WP-2423 (reads-under-burst, v15 2026-11-13): the cart itself could not be read (the store was
+  // busy right after the guest joined the table). The page said nothing and kept a dead "Continue
+  // to payment"; now it says so, reads again by itself when the store said when, and offers Try
+  // again. The cart is kept: nothing was changed or charged.
+  const cartLoadFailed =
+    cart === null &&
+    (state.status === "unavailable" ||
+      state.status === "conflict" ||
+      state.status === "validation");
+  const cartLoadRetryAfter =
+    cartLoadFailed && "retryAfterSeconds" in state ? (state.retryAfterSeconds ?? null) : null;
+  useEffect(() => {
+    if (!cartLoadFailed || cartLoadRetryAfter === null) return;
+    const timer = setTimeout(
+      () => void controller.load(),
+      Math.min(Math.max(cartLoadRetryAfter, 1), 60) * 1000,
+    );
+    return () => clearTimeout(timer);
+  }, [cartLoadFailed, cartLoadRetryAfter, controller, state]);
   const service = useStoreService(
     storeProfile === undefined ? browserCheckoutStoreProfile : storeProfile,
   );
@@ -646,6 +665,30 @@ export function CheckoutPage({
               {checkoutText.seeYourTable}
             </Link>
             {tableChange.cartHasDishes ? <Link to="/cart">{checkoutText.goToYourCart}</Link> : null}
+          </div>
+        </section>
+      </CustomerPage>
+    );
+  if (cartLoadFailed)
+    return (
+      <CustomerPage step="checkout" store={resolvedStore} className="checkout-page">
+        <PageHeading title={checkoutText.pageTitle} />
+        <section role="alert" className="checkout-attention">
+          <h2>
+            {cartLoadRetryAfter === null
+              ? cartText.failure.unavailable[0]
+              : cartText.failure.busyHeading}
+          </h2>
+          <p>
+            {cartLoadRetryAfter === null
+              ? cartText.failure.unavailable[1]
+              : cartText.failure.busyRead(cartLoadRetryAfter)}
+          </p>
+          <div className="cart-state__actions">
+            <button type="button" onClick={() => void controller.load()}>
+              {commonText.tryAgain}
+            </button>
+            <Link to="/cart">{checkoutText.editCart}</Link>
           </div>
         </section>
       </CustomerPage>

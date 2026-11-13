@@ -1322,3 +1322,24 @@ describe("WP-2423 guest-cart-503: a dish the Store can't sell now when priced", 
     expect(failure).toMatchObject({ code: "network_unknown" });
   });
 });
+
+describe("WP-2423 reads-under-burst: a busy cart read at checkout", () => {
+  it("keeps when the store said to read again, so the page can read again by itself", async () => {
+    const client = {
+      loadCart: async () => {
+        throw new CartClientError("cart_service_unavailable", { retryAfterSeconds: 5 });
+      },
+      quote: async () => {
+        throw new Error("not priced");
+      },
+    };
+    const controller = createCheckoutController(client as never, () => "key");
+    await controller.load();
+    expect(controller.getState()).toEqual({
+      status: "unavailable",
+      cart: null,
+      canRetry: false,
+      retryAfterSeconds: 5,
+    });
+  });
+});
