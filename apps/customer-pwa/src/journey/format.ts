@@ -12,7 +12,9 @@ export function formatMoney(amountMinor: string | bigint, currency: string): str
   const magnitude = minor < 0n ? -minor : minor;
   const fraction = (magnitude % 100n).toString().padStart(2, "0");
   const amount = `${wholeUnits.format(magnitude / 100n)}.${fraction}`;
-  const sign = minor < 0n ? "-" : "";
+  // v15 b11: the typographic minus (U+2212), as beside "Taken off by the restaurant −$14.13" and
+  // on every staff screen, never an ASCII hyphen ("Rounding -$0.01").
+  const sign = minor < 0n ? "−" : "";
   return currency === "CAD" ? `${sign}$${amount}` : `${sign}${currency} ${amount}`;
 }
 

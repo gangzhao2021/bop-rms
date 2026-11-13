@@ -268,6 +268,58 @@ test.describe("@production CUST-DINE-IN-SESSION table view", () => {
     });
   });
 
+  test("v15 b11: a negative rounding on the table total uses the same minus sign as the amount taken off", async ({
+    page,
+  }) => {
+    // Three single $12.50 rounds at 13%: $1.63 tax each ($4.89); the whole bill's tax is $4.88.
+    const [round1] = session.session.rounds;
+    if (round1 === undefined) throw new Error("fixture");
+    const priced = {
+      schemaVersion: 1,
+      session: {
+        ...session.session,
+        paymentTiming: "PayLater",
+        rounds: [1, 2, 3].map((roundNumber) => ({
+          ...round1,
+          roundNumber,
+          payment: "OnTableBill",
+          items: [
+            {
+              ...round1.items[0],
+              quantity: 1,
+              servedQuantity: 1,
+              lineTotal: cad("1413"),
+              priceBeforeTax: cad("1250"),
+            },
+          ],
+          itemsTotal: cad("1413"),
+          subtotal: cad("1250"),
+          tax: cad("163"),
+        })),
+        summary: {
+          paid: cad("0"),
+          refunded: cad("0"),
+          refundPending: cad("0"),
+          due: cad("2825"),
+          ordered: { subtotal: cad("3750"), tax: cad("489"), total: cad("4239") },
+          takenOff: cad("1413"),
+          taxRounding: cad("-1"),
+        },
+      },
+    };
+    await enterTable(page, () => ({ status: 200, json: priced }));
+    const summary = page.getByRole("main").getByRole("region", { name: "Table total" });
+    await expect(summary).toContainText("Taken off by the restaurant−$14.13");
+    await expect(summary).toContainText("Rounding (tax worked out on the whole bill)−$0.01");
+    await expect(summary).not.toContainText("-$");
+    for (const width of [1440, 1024, 390]) {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+      await expectNoHorizontalOverflow(page);
+      await summary.screenshot({ path: `test-results/guest-table-total-minus-${width}.png` });
+    }
+    await expectNoInternalText(page);
+  });
+
   // WP-2423 Q7 slice 2 (DEC-STAFF-DINE-IN-ROUND): a round staff entered for the table.
   test("WP-2423 item 8 ⑦ 4b-3: tells the table the per-head tea staff added", async ({ page }) => {
     await enterTable(page, () => ({
@@ -1044,6 +1096,56 @@ test.describe("@production DEC-DINE-IN-PAY-LATER S4 the guest pays the whole tab
         partNumber: 2,
       },
     ]);
+    await expectNoInternalText(page);
+  });
+
+  test("v15 b11: the bill to pay states one tax, the whole bill's, as the receipt does", async ({
+    page,
+  }) => {
+    const payLater = {
+      schemaVersion: 1,
+      session: {
+        ...session.session,
+        paymentTiming: "PayLater",
+        rounds: [{ ...session.session.rounds[0], payment: "OnTableBill" }],
+      },
+    };
+    // Three $12.50 rounds charged $1.63 tax each; the whole bill's tax is $4.88 (−$0.01).
+    await page.route("**/api/v1/dine-in/table-payment", (route) =>
+      route.fulfill({
+        headers: { "cache-control": "no-store" },
+        json: {
+          schemaVersion: 1,
+          payment: {
+            tableLabel: "12",
+            checkingOut: true,
+            rounds: [],
+            owed: {
+              subtotalMinor: "3750",
+              taxMinor: "488",
+              totalMinor: "4238",
+              taxRoundingMinor: "-1",
+            },
+            consistent: true,
+            tips: { enabled: false, tierPercents: [10, 15, 18] },
+            state: "NotPaid",
+            attempt: null,
+            receipt: null,
+            split: null,
+          },
+        },
+      }),
+    );
+    await enterTable(page, () => ({ status: 200, json: payLater }));
+    const pay = page.getByRole("region", { name: "Pay the bill" });
+    await expect(pay).toContainText("Subtotal$37.50");
+    await expect(pay).toContainText("Tax$4.88");
+    await expect(pay).not.toContainText("Rounding");
+    for (const width of [1440, 1024, 390]) {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+      await expectNoHorizontalOverflow(page);
+      await pay.screenshot({ path: `test-results/guest-pay-one-tax-${width}.png` });
+    }
     await expectNoInternalText(page);
   });
 

@@ -16,10 +16,10 @@ describe("customer money presentation", () => {
   it.each([
     ["0", "$0.00"],
     ["1", "$0.01"],
-    ["-1", "-$0.01"],
+    ["-1", "−$0.01"],
     ["1130", "$11.30"],
     [1130n, "$11.30"],
-    ["-1130", "-$11.30"],
+    ["-1130", "−$11.30"],
     ["9223372036854775807", "$92,233,720,368,547,758.07"],
   ])("shows CAD %s as %s without floating point", (minor, expected) => {
     expect(formatMoney(minor, "CAD")).toBe(expected);
