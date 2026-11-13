@@ -248,14 +248,13 @@ test("@production a manager discounts a started dish from the Tables page; only 
   await expect(details.getByRole("list", { name: "Comps and discounts" })).toContainText(
     "Whole bill to pay after comps$20.91",
   );
-  // v15 batch 9 (DEC-TAX-WHOLE-RECEIPT): the order's Total stays what was ordered ($22.60, as
-  // the guest's "Total ordered"); the cent the bill's tax rounds by after the discount is listed
-  // under the comps, so ordered − taken off + rounding = to pay: 22.60 − 1.70 + 0.01 = 20.91.
+  // v15 batch 9 (DEC-TAX-WHOLE-RECEIPT): the order's Total stays what was ordered ($22.60).
+  // b13: the whole bill after the comps carries its tax worked out once, as checkout and the paid
+  // bill print it, so no separate "Tax rounding" line is listed under the comps.
   const tableOrder = details.getByRole("region", { name: "This table's order" });
   const comps = details.getByRole("list", { name: "Comps and discounts" });
   await expect(comps.getByRole("listitem")).toHaveText([
     "Synthetic boiled fish · 15% off−$1.70",
-    "Tax rounding$0.01",
     "Whole bill to pay after comps$20.91",
   ]);
   await expect(tableOrder.locator(".order-lines-totals").first()).toContainText("Total$22.60");
