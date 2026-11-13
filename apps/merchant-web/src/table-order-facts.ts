@@ -1,5 +1,9 @@
 import { createCurrentOrderQueueClient } from "./current-order-queue-client.js";
-import { createDiningProgressClient, servableQuantity } from "./dining-progress-client.js";
+import {
+  createDiningProgressClient,
+  servableQuantity,
+  type DiningProgress,
+} from "./dining-progress-client.js";
 import { readyToServe } from "./dining-serve-ready.js";
 import {
   createDiningServeReadyClient,
@@ -79,11 +83,68 @@ const kitchenPhases = new Set(["Submitted", "Accepted", "InProgress"]);
 /** At most this many queue pages are read to find the open tables' Orders. */
 export const TABLE_ORDER_PAGES = 5;
 
-/** Reads the queue until every wanted Order is found (or the queue ends). */
+type QueuedOrder = Awaited<
+  ReturnType<ReturnType<typeof createCurrentOrderQueueClient>["load"]>
+>["items"][number];
+/** One Order of the queue (or its own detail read) as the Tables list says it. */
+function factsOfOrder(order: QueuedOrder): TableOrderFacts {
+  const ready = order.readyToServeItemCount ?? 0;
+  return {
+    readyToServe: ready,
+    inKitchen:
+      (order.remakingItemCount ?? 0) > 0 ||
+      (order.currentPhase !== null && kitchenPhases.has(order.currentPhase)),
+    allServed: order.currentPhase === "Fulfilled" && ready === 0,
+    bill:
+      order.tableBill === null
+        ? null
+        : {
+            totalMinor: order.tableBill.totalMinor,
+            ...(order.tableBill.partlyPaid === undefined
+              ? {}
+              : { partlyPaid: order.tableBill.partlyPaid }),
+            paid:
+              order.tableBill.paid === null
+                ? null
+                : { amountMinor: order.tableBill.paid.amountMinor },
+          },
+  };
+}
+/** At most this many tables' serving progress is read on its own in one list read. */
+export const TABLE_PROGRESS_READS = 20;
+const TABLE_PROGRESS_READS_AT_ONCE = 4;
+const unfinished = new Set(["Submitted", "Accepted", "InProgress"]);
+
+/**
+ * v15 b13: what the kitchen and the pass hold for one table, from its serving progress — the read
+ * the table's own Mark served uses — over the queue's (the bill stays the queue's or the bill's).
+ */
+export function kitchenFactsFromProgress(
+  view: DiningProgress,
+): Pick<TableOrderFacts, "readyToServe" | "inKitchen" | "allServed"> {
+  const ready = readyToServe(view).reduce((sum, item) => sum + servableQuantity(item), 0);
+  const live = view.items.filter((item) => item.phase !== "Cancelled" && item.phase !== "Rejected");
+  return {
+    readyToServe: ready,
+    inKitchen:
+      live.some((item) => unfinished.has(item.phase)) ||
+      live.some((item) => (item.remakingQuantity ?? 0) > 0),
+    allServed: live.length > 0 && live.every((item) => item.phase === "Fulfilled"),
+  };
+}
+
+/**
+ * Reads the queue until every wanted Order is found (or the queue ends). v15 b13: a table checking
+ * out, and an open table's Order the queue pages did not bring, is also read from its own serving
+ * progress, so dishes waiting at the pass still offer Serve all on the list (v15 b12 live: a table
+ * comped to $0 with 3 dishes ready read "Nothing to pay" and offered none). One that cannot be
+ * read keeps what the queue said, or is left unsaid.
+ */
 export async function loadTableOrderFacts(
   orderReferences: readonly string[],
   signal: AbortSignal,
   fetcher?: typeof fetch,
+  own: { readonly csrf: string; readonly closing: ReadonlySet<string> } | null = null,
 ): Promise<ReadonlyMap<string, TableOrderFacts>> {
   const wanted = new Set(orderReferences);
   const facts = new Map<string, TableOrderFacts>();
@@ -92,30 +153,8 @@ export async function loadTableOrderFacts(
   let after: string | null = null;
   for (let page = 0; page < TABLE_ORDER_PAGES; page++) {
     const queue = await client.load(after, signal);
-    for (const order of queue.items) {
-      if (!wanted.has(order.orderReference)) continue;
-      const ready = order.readyToServeItemCount ?? 0;
-      facts.set(order.orderReference, {
-        readyToServe: ready,
-        inKitchen:
-          (order.remakingItemCount ?? 0) > 0 ||
-          (order.currentPhase !== null && kitchenPhases.has(order.currentPhase)),
-        allServed: order.currentPhase === "Fulfilled" && ready === 0,
-        bill:
-          order.tableBill === null
-            ? null
-            : {
-                totalMinor: order.tableBill.totalMinor,
-                ...(order.tableBill.partlyPaid === undefined
-                  ? {}
-                  : { partlyPaid: order.tableBill.partlyPaid }),
-                paid:
-                  order.tableBill.paid === null
-                    ? null
-                    : { amountMinor: order.tableBill.paid.amountMinor },
-              },
-      });
-    }
+    for (const order of queue.items)
+      if (wanted.has(order.orderReference)) facts.set(order.orderReference, factsOfOrder(order));
     if (
       [...wanted].every((reference) => facts.has(reference)) ||
       queue.nextAfterOrderReference === null
@@ -123,6 +162,25 @@ export async function loadTableOrderFacts(
       break;
     after = queue.nextAfterOrderReference;
   }
+  if (own === null) return facts;
+  const progress = createDiningProgressClient(fetcher);
+  const toRead = [...wanted]
+    .filter((reference) => own.closing.has(reference) || !facts.has(reference))
+    .slice(0, TABLE_PROGRESS_READS);
+  const worker = async () => {
+    for (let next = toRead.shift(); next !== undefined; next = toRead.shift()) {
+      if (signal.aborted) return;
+      try {
+        const kitchen = kitchenFactsFromProgress(await progress.load(next, own.csrf, signal));
+        facts.set(next, { bill: facts.get(next)?.bill ?? null, ...kitchen });
+      } catch {
+        /* Not read now: the queue's facts stay; the next list read tries again. */
+      }
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(TABLE_PROGRESS_READS_AT_ONCE, toRead.length) }, worker),
+  );
   return facts;
 }
 

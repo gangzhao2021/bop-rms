@@ -474,7 +474,7 @@ describe("v15 batch 8: a table checking out the order queue did not bring", () =
     });
   });
   it("the queue's own facts come first, and an open table is never said from its bill", () => {
-    const queue = facts({ readyToServe: 1 });
+    const queue = facts({ readyToServe: 1, bill: { totalMinor: "1413", paid: null } });
     const own = tableFactsFromBill(bill({ settlement: { roundsMinor: "100", totalMinor: "113" } }));
     expect(
       listFactsOf(
@@ -484,6 +484,15 @@ describe("v15 batch 8: a table checking out the order queue did not bring", () =
         2,
       ),
     ).toBe(queue);
+    // b13: facts read from the table's serving progress alone carry no bill: its own bill says it.
+    expect(
+      listFactsOf(
+        closing,
+        new Map([[id(207), facts({ readyToServe: 3 })]]),
+        new Map([[id(207), { facts: own, read: 1 }]]),
+        2,
+      ),
+    ).toEqual({ ...facts({ readyToServe: 3 }), bill: own.bill });
     expect(
       listFactsOf(table(7), new Map(), new Map([[id(207), { facts: own, read: 1 }]])),
     ).toBeNull();
@@ -601,4 +610,27 @@ it("v15 batch 8: a paid round waiting since last week reads in days", () => {
   } finally {
     setLanguageForTest("en");
   }
+});
+
+// v15 b12 live: a table checking out read "Checking the bill" for 6–10 s, with no amount, on a
+// busy evening. What this device read last is said beside it until the bill is read again.
+it("b13: a table checking out says what this device read last while its bill is read again", () => {
+  const checking = table(9, { session: { phase: "Closing", version: 3, orderReference: id(209) } });
+  expect(
+    tableNeed(checking, null, now, false, { owedMinor: "1413", settled: false }),
+  ).toMatchObject({ words: "Checking the bill", detail: "last read: $14.13 to pay", step: null });
+  expect(tableNeed(checking, null, now, false, { owedMinor: "0", settled: true }).detail).toBe(
+    "last read: paid",
+  );
+  expect(tableNeed(checking, null, now, false, { owedMinor: "0", settled: false }).detail).toBe(
+    "last read: nothing to pay",
+  );
+  expect(tableNeed(checking, null, now).detail).toBeNull();
+  // Once the bill is read, it is said from the bill alone.
+  expect(
+    tableNeed(checking, facts({ bill: { totalMinor: "2825", paid: null } }), now, false, {
+      owedMinor: "1413",
+      settled: false,
+    }).detail,
+  ).toBe("$28.25");
 });

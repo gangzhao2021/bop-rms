@@ -1,7 +1,7 @@
 import { PaidOrderSwitchLine } from "./PaidOrderSwitchLine.js";
 import { listSeparator, t, saidTable } from "./i18n/i18n.js";
 import { createTableCheckoutClient } from "./table-checkout-client.js";
-import { clearLastBills, saveLastBills } from "./table-last-bills.js";
+import { clearLastBills, loadLastBills, saveLastBills } from "./table-last-bills.js";
 import { UnpaidRoundCancelAction, isPaymentUnconfirmed } from "./UnpaidRoundCancelAction.js";
 import { paidRoundWait, tableRoundWaitText, type PaidRoundWaitTier } from "./paid-round-wait.js";
 import { DiningHostTransferAction } from "./DiningHostTransferAction.js";
@@ -108,7 +108,11 @@ export function listFactsOf(
   const own = billFacts.get(order);
   if (own === undefined) return queued;
   if (queued === null) return own.facts;
-  return own.read > queueRead ? { ...queued, bill: own.facts.bill } : queued;
+  // b13: an Order read from its serving progress alone has no bill of the queue's: the table's
+  // own bill says it.
+  return own.read > queueRead || queued.bill === null
+    ? { ...queued, bill: own.facts.bill }
+    : queued;
 }
 /** WP-2423 follow-up: how long a session has been open, in words staff read at a glance. */
 export function elapsedText(minutes: number): string {
@@ -606,6 +610,20 @@ export function DiningSessionWorkspace({
   // Owner 2026-11-03 (operating continuity): each open table's bill stays on this device, so staff
   // can still see what a table owes when the connection drops. Read again only when it changed.
   const lastBills = useRef(new Map<string, ListBill>());
+  // b13: the bills this device kept from its last reads (by table), said while they are read again.
+  const deviceBills = useMemo(() => {
+    const saved = loadLastBills();
+    return {
+      savedAt: saved === null ? 0 : Date.parse(saved.savedAt),
+      byLabel: new Map((saved?.tables ?? []).map((bill) => [bill.label, bill] as const)),
+    };
+  }, []);
+  /** Only a bill saved while this party sat at the table (never a party before it). */
+  const deviceBillOf = (table: StaffDiningTable) =>
+    table.elapsedMinutes !== null &&
+    deviceBills.savedAt >= Date.now() - table.elapsedMinutes * 60_000
+      ? (deviceBills.byLabel.get(table.stableLabel) ?? null)
+      : null;
   const billsInFlight = useRef(new Set<string>());
   // v15 b12: tables whose own bill read failed (by Dining Session), and their Orders as shown.
   const billsFailed = useRef(new Set<string>());
@@ -670,7 +688,16 @@ export function DiningSessionWorkspace({
     const bills = keepLastBills(items, orderFactsNow.current, poll, closing);
     const read = nextRead();
     try {
-      const facts = await loadTableOrderFacts(orders, signal);
+      // b13: a table checking out is read from its own serving progress too, so dishes at the
+      // pass offer Serve all on its row whatever its bill says.
+      const facts = await loadTableOrderFacts(orders, signal, undefined, {
+        csrf,
+        closing: new Set(
+          items.flatMap((table) =>
+            closing(table) && table.session?.orderReference ? [table.session.orderReference] : [],
+          ),
+        ),
+      });
       // A queue read that started before the one already shown is not shown over it.
       if (!signal.aborted && read > queueReadNow.current) {
         queueReadNow.current = read;
@@ -1051,6 +1078,7 @@ export function DiningSessionWorkspace({
             listFactsOf(table, orderFacts, billFacts, queueRead),
             now,
             table.session?.orderReference != null && billUnread.has(table.session.orderReference),
+            deviceBillOf(table),
           ),
         }))
         .sort(compareTables),

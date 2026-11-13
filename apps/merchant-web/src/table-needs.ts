@@ -112,6 +112,11 @@ export function tableNeed(
    * else said what it owes. Only "not read yet" while a read is still on its way.
    */
   billUnread = false,
+  /**
+   * b13: what this device last read of the table's bill (kept for outages), said beside
+   * "Checking the bill" while the bill is read again, so staff see an amount at once.
+   */
+  lastRead: { readonly owedMinor: string; readonly settled: boolean } | null = null,
 ): TableNeed {
   const seated = table.currentDiningSessionReference !== null;
   if (!seated) {
@@ -278,7 +283,15 @@ export function tableNeed(
         tone: "progress",
         rank: 55,
         words: t("Checking the bill"),
-        detail: null,
+        // b13 (v15 b12 live: 6–10 s with no amount on a busy evening): what this device read last.
+        detail:
+          lastRead === null
+            ? null
+            : lastRead.settled
+              ? t("last read: paid")
+              : lastRead.owedMinor === "0"
+                ? t("last read: nothing to pay")
+                : t("last read: {amount} to pay", { amount: cad(lastRead.owedMinor) }),
         step: null,
       };
     if (order?.bill?.paid)
