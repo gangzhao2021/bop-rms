@@ -22,12 +22,18 @@ is taken and no statement is sent after it. In the burst, 220 answers of 200 sti
 **Decision.**
 
 - A read (GET/HEAD) that has not started its answer by its answer time plus 1 s is answered
-  "busy, try again" at once: 503, `Retry-After: 5`, `Cache-Control: no-store`, body
-  `{ schemaVersion: 1, error: { code: "service_busy" }, code: "SERVICE_BUSY" }`. The clients
-  already read an unknown 503 as busy. The entry in front of the API does the same 1 s later, and
-  then also drops the API request.
-- The read is then **cut**: nothing more of it reaches the database. A later answer from its
-  handler goes nowhere. A read whose client went away before its answer is cut in the same way.
+  "busy, try again" at once: 503, `Retry-After: 5`, `Cache-Control: no-store`, in the body each
+  surface already reads as busy. A staff read (`/merchant/...`) gets `{ error: "retry_later" }`,
+  the body of every other staff "busy" answer, so the workspace asks for its session again
+  (Owner 2026-11-04) and staff screens read again. A guest read gets
+  `{ schemaVersion: 1, error: { code: "service_busy" }, code: "SERVICE_BUSY" }`, and the phones
+  read an unknown 503 with Retry-After as busy. The entry in front of the API does the same 1 s
+  later, and then also drops the API request.
+- The read is then **cut**: nothing more of it reaches the database while its phone or screen
+  could still be waiting (15 s from its start). A later answer from its handler goes nowhere. A
+  read whose client went away before its answer is cut in the same way. After those 15 s, what
+  it started and still runs (a timer, set-up shared with later requests) is unbounded like any
+  request's work, never starved for good.
 - A read that already committed a write, an answer already under way and every command are never
   cut. A command's work is never stopped by the clock (b10 §4 stands).
 - Staff reads with longer screens (reports 27 s, approvals 17 s) get their own time plus the same
@@ -36,8 +42,13 @@ is taken and no statement is sent after it. In the burst, 220 answers of 200 sti
 ## 2. Busy cart reads logged at level 50
 
 **Decision.** The request records when the rush itself turned it away: no connection came within
-its wait (the pool was full or its own wait ran out), or its answer time ran out (the statement
-limit was narrowed and cut it, or nothing more could be sent). Such a cart read answers
+its wait while every connection the pool may open was open and out with other work, or the server
+had too many connections (53300), or its answer time ran out (the statement limit was narrowed and
+cut it, or nothing more could be sent). A new connection that timed out ("Connection terminated due
+to connection timeout": the database host hung or cannot be reached), a connect that hangs while
+the pool has room or idle connections, and a refusal are **faults**, and a request a fault met
+stays a fault even if a later step of it was turned away. The pool's handed-out clients are
+counted from its own `acquire`/`release` events from the moment it is made. Such a cart read answers
 503 + Retry-After as before and logs `CUSTOMER_CART_READ_UNAVAILABLE` at **level 40**. It is not
 read again inside the request. A real fault (a database that refuses, a broken statement, an owner
 read that fails for another reason) stays at **level 50**. The completion line of a 503 the rush
@@ -67,6 +78,9 @@ section) at the same moment share one read. A menu found in the last **3 s** is 
 and serialized once. Commercially: a dish staff mark sold out shows so on a menu opened up to 3 s
 later. Adding it is refused by the cart with its usual words, as for any menu already open on a
 phone. Only a found menu is given again; "busy", "not found" and a stale menu are always asked anew.
+Only menus without a search term are kept (a search is one guest's typing; phones asking the same
+search together still share its read), expired menus are dropped as each new one is kept, and at
+most 100 are kept.
 The shared read works within its own answer time, so the phone that started it going away does not
 cut it for the others.
 
@@ -92,9 +106,16 @@ In a rush it ran long or answered busy, and the next try came 10 s later. Two bu
 make 30–70 s.
 
 **Decision.** Orders asks every **3 s** whether anything changed among the Store's Orders. This is
-one light read (`GET /merchant/orders/changes`): the newest record of each kind of Order fact (a new
-Order or round, a payment waiting for staff, an acceptance, a confirmed or refused payment, a
-termination, a staff cancellation, a completion, a closure). It needs the same permission as the
+one light read (`GET /merchant/orders/changes`) over each kind of Order fact (a new Order or round,
+a payment waiting for staff, an acceptance, a confirmed or refused payment, a termination, a staff
+cancellation, a completion, a closure): its latest recorded time and how many were recorded since
+the start of the previous clock hour. Both come from the Store's own time index
+(`brand_id, store_id, <time>`, migration `2000_980`; Orders already had one), so a look reads one
+row from the end of each index and only the last one to two hours' rows, never the Store's whole
+history. Records are append-only, so any new one raises a count, also one whose transaction
+committed after a later one (v15 has such pairs). The window moving on each hour changes the mark
+once an hour (one extra list read). A record committed more than an hour after its recorded time
+would be seen only by the 10 s full read. It needs the same permission as the
 list and names no Order: the screen gets a digest. When it changes, Orders reads its list at once.
 A change seen while a list read is on its way is read once more after it. The full read every 10 s
 stays, for the kitchen's progress. The look runs only while the list is on screen and signed in.
@@ -114,3 +135,19 @@ None of this adds a staff step.
 - **Orders.** If the light look fails, the 10 s list read and its "could not be refreshed" notice
   carry on as before. Staff can always press Refresh.
 - **Network or host down.** Nothing changes: the same offline and outage paths apply.
+
+## Review of b12 (2026-11-13)
+
+Fixed on the same branch: the change mark sorted every record the Store ever wrote (its first
+probe ordered by the id's text) and could miss a record committed late (§6); staff reads cut by
+the answer time got a body the staff screens did not read as busy (§1); a database that cannot
+be reached was logged as the rush (§2); a cut read stayed cut after its 15 s (§1); the menu reuse
+kept up to 500 menus keyed by every search (§4). Tests now cover a staff member without the Orders
+permission (refused, 403), another Store's new Order (mark unchanged), an outage (503, not a
+refusal) and the mark's index plan.
+
+What only the live run can show (v15): whether the Orders delay of 30–70 s is gone in a rush (the
+cause found is inferred from the records; a list read after a change can still answer busy, and
+its next try is the next change or the 10 s read); how much of the 20–26 s phones saw was spent
+before the request reached Node (TLS and proxy accept queue, which the answer timer does not
+bound); and the process's memory while menus are reused.
