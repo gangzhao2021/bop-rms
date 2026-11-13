@@ -266,6 +266,24 @@ test("@production a manager discounts a started dish from the Tables page; only 
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);
+    // v15 b11: each amount stays on one line ("−$1.70", never "−" alone over "$1.70"), even
+    // beside a comp line as long as v15's ("Beef noodles (TEST) · 10% off · Goodwill · by You,
+    // 18:34"): the words wrap, the amount does not.
+    const amountLines = await comps.locator("li").evaluateAll((items) =>
+      items.map((item) => {
+        const [label, amount] = item.querySelectorAll(":scope > span");
+        if (label === undefined || amount === undefined) return 0;
+        const saved = label.textContent;
+        label.textContent =
+          "Synthetic boiled fish with chilli oil (TEST) · 15% off · Goodwill · by You, 18:34";
+        const range = document.createRange();
+        range.selectNodeContents(amount);
+        const lines = new Set([...range.getClientRects()].map((rect) => Math.round(rect.top)));
+        label.textContent = saved;
+        return lines.size;
+      }),
+    );
+    expect(amountLines).toEqual([1, 1, 1]);
     await page.screenshot({
       path: `test-results/dining-item-comp-rounding-${width}.png`,
       fullPage: true,

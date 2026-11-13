@@ -1029,6 +1029,15 @@
   gap: 16px;
   color: var(--bop-color-text-muted);
 }
+/* v15 b11: the amount never wraps ("−" alone on one line, "$2.83" on the next at 1024 and 390);
+   the dish and the comp's words take the wrapping instead. */
+.workspace-page.tables-v3 .table-order-rounds__comps li > span:last-child {
+  flex: none;
+  white-space: nowrap;
+}
+.workspace-page.tables-v3 .table-checkout__comp-amount {
+  white-space: nowrap;
+}
 .workspace-page.tables-v3 .table-order-rounds__comp {
   margin: 0;
   padding: 0;
