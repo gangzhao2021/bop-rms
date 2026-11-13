@@ -1,7 +1,11 @@
 import console from "node:console";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { logUnexpected, reportUnexpected } from "./pilot-merchant-pickup.mjs";
-import { createMerchantRequestReporter, storeOfDirectory } from "./pilot-unexpected.mjs";
+import {
+  createMerchantRequestReporter,
+  reportUnexpected as reportPilotUnexpected,
+  storeOfDirectory,
+} from "./pilot-unexpected.mjs";
 
 /**
  * v15 2026-10-31: opening a Store answered 503 and the pilot logged nothing; the database had
@@ -287,4 +291,22 @@ it("v15 b12: a staff send that failed is logged with its level, time and the own
       causes: ["VersionConflict"],
     }),
   ]);
+});
+
+it("v15 b12: a failure carrying a guest's visit cookies or CSRF value logs none of them", () => {
+  const lines = logged();
+  const guest = "__Host-bop-guest=" + "g".repeat(43),
+    visits = "__Host-bop-visits=" + "v".repeat(43),
+    csrf = "c".repeat(43);
+  const leaky = () =>
+    Object.assign(new Error(`cookie ${guest}; ${visits} x-bop-csrf ${csrf}`), {
+      headers: { cookie: `${guest}; ${visits}`, "x-bop-csrf": csrf },
+      cause: Object.assign(new Error(csrf), { csrf }),
+    });
+  reportPilotUnexpected("CUSTOMER_CONTACT_REMOVAL_UNAVAILABLE", leaky());
+  createMerchantRequestReporter({ store: "stores/demo-2" })("/orders/:orderReference", leaky());
+  const text = JSON.stringify(lines());
+  expect(lines()).toHaveLength(2);
+  for (const canary of [guest, visits, csrf, "__Host-bop", "x-bop-csrf", "cookie"])
+    expect(text).not.toContain(canary);
 });
