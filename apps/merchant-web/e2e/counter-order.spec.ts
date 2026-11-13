@@ -1737,10 +1737,11 @@ test("@production a paper send with no answer stays the same order after the pai
   await page.getByRole("button", { name: "Add Banana Bread" }).click();
   await send.click();
   // b11: the paper slip went with order 77, so it is cleared here: sending again never records the
-  // same slip twice.
+  // same slip twice. b11 review: the Banana Bread already in order 77 is taken off the list, so
+  // only the one added after it is sent (and charged) next.
   await expect(
     page.getByText(
-      "Already ordered as order 77; this paper slip goes with that order. Nothing new was charged or recorded. The slip was cleared here so it is never recorded twice. To send dishes that aren't in order 77, take their own payment. Open it in Orders.",
+      "Already ordered as order 77. The dishes already in it were taken off this list; what is left isn't in any order yet: send it as a new order and take its own payment. Nothing new was charged or recorded. The paper slip goes with that order and was cleared here, so it is never recorded twice. If the same slip also paid for what is left, tick the paper order again and answer when asked.",
     ),
   ).toBeVisible();
   await expect(
@@ -1772,6 +1773,8 @@ test("@production a paper send with no answer stays the same order after the pai
   expect(sent[3]?.operationReference).not.toBe(operation);
   expect(sent[3]?.paperPayment).toBeUndefined();
   expect(sent[3]?.recordedAfterOutage).toBe(false);
+  expect(sent[2]?.lines).toMatchObject([{ quantity: 2 }]);
+  expect(sent[3]?.lines).toMatchObject([{ quantity: 1 }]);
 });
 
 // DEC-PAPER-SEND-IDEMPOTENT (review): staff reload a tablet that looks stuck after a paper send got

@@ -8,7 +8,9 @@ import {
   CounterOrderClientError,
   createCounterOrderClient,
   type RecordedCardPayment,
+  type SlipConfirmation,
 } from "./staff-order-entry.js";
+import { PaperSlipConfirm } from "./PaperSlipConfirm.js";
 import {
   paidAtDayNote,
   paidAtInstant,
@@ -119,6 +121,10 @@ export function StaffRoundPaymentAction({
   // with the same details is the same command (never counted twice), and a corrected paid-at or
   // slip is a new one rather than a conflict with the first.
   const operation = useRef<{ key: string; reference: string } | null>(null);
+  // b11 review: a paper slip already recorded with another order (named), and what staff
+  // confirmed about it for the next record (recorded with their name).
+  const [slipHeld, setSlipHeld] = useState<{ readonly orderNumber: string | null } | null>(null);
+  const slipConfirmation = useRef<SlipConfirmation | null>(null);
   const read = useRef<AbortController | null>(null);
   useEffect(() => () => read.current?.abort(), []);
   useEffect(() => {
@@ -226,9 +232,12 @@ export function StaffRoundPaymentAction({
     ]);
     if (operation.current?.key !== intent)
       operation.current = { key: intent, reference: serviceOperationReference() };
+    const confirmed =
+      recordedAfterOutage && !inCash && slip.trim() !== "" ? slipConfirmation.current : null;
     setBusy(true);
     setMessage(null);
     setPaidAtRefused(false);
+    setSlipHeld(null);
     try {
       const result = await createCounterOrderClient(csrf, fetcher ?? fetch).recordPayment({
         operationReference: operation.current.reference,
@@ -238,7 +247,9 @@ export function StaffRoundPaymentAction({
         slipReference: inCash || slip.trim() === "" ? null : slip.trim(),
         takenAt: recordedAfterOutage ? paperInstant : null,
         ...(tenderedMinor === null ? {} : { tenderedMinor }),
+        ...(confirmed === null ? {} : { slipConfirmation: confirmed }),
       });
+      slipConfirmation.current = null;
       setMessage(
         result.cash !== null || recordedAfterOutage
           ? paidNoteText({
@@ -272,11 +283,14 @@ export function StaffRoundPaymentAction({
       // A cash Record with no answer says so beside the cash received it keeps.
       setMessage(
         recordedAfterOutage
-          ? paperPaymentProblem(failure, inCash)
+          ? paperPaymentProblem(failure, inCash, subject === "round")
           : cash !== null && failure.code === "OutcomeUnknown"
             ? null
             : payErrorText(failure, inCash),
       );
+      if (failure.code === "SlipAlreadyRecorded")
+        setSlipHeld({ orderNumber: failure.placedOrderNumber });
+      else slipConfirmation.current = null;
       if (recordedAfterOutage && paidAtRefusal(failure)) {
         setPaidAtRefused(true);
         setFocusPaidAt((value) => value + 1);
@@ -379,7 +393,11 @@ export function StaffRoundPaymentAction({
             maxLength={40}
             autoComplete="off"
             aria-invalid={!validSlipReference(slip.trim())}
-            onChange={(event) => setSlip(event.currentTarget.value)}
+            onChange={(event) => {
+              setSlip(event.currentTarget.value);
+              setSlipHeld(null);
+              slipConfirmation.current = null;
+            }}
           />
         </label>
       )}
@@ -415,6 +433,16 @@ export function StaffRoundPaymentAction({
         </>
       ) : null}
       {message !== null && !paidAtRefused ? <p role="status">{message}</p> : null}
+      {slipHeld !== null && recordedAfterOutage && !inCash ? (
+        <PaperSlipConfirm
+          orderNumber={slipHeld.orderNumber}
+          disabled={busy}
+          onConfirm={(confirmation) => {
+            slipConfirmation.current = confirmation;
+            void record();
+          }}
+        />
+      ) : null}
       <div className="card-actions">
         <button type="submit" disabled={busy || !ready}>
           {busy

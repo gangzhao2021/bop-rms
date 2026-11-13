@@ -3,6 +3,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { describe, expect, it, vi } from "vitest";
 import {
+  alreadyOrderedCartText,
+  sentDishesKey,
+  withoutDishesSent,
   choicesComplete,
   counterOrderLines,
   estimatedLineMinor,
@@ -29,6 +32,7 @@ import {
   parsePlacedCounterOrder,
 } from "./staff-order-entry.js";
 import { validSlipReference } from "./CardMachineRefundAction.js";
+import { paperPaymentProblem } from "./counter-payment.js";
 
 const id = (n: number) => `018fa700-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 const price = (amount: string | null) =>
@@ -441,13 +445,58 @@ describe("counter order (OPS-ORDER-ENTRY) — WP-2423 Q7", () => {
     const named = await client.placeOrder(command).catch((error: unknown) => error);
     expect(named).toMatchObject({ code: "SlipAlreadyRecorded", placedOrderNumber: "29" });
     expect(placeErrorText(named as CounterOrderClientError, [])).toBe(
-      "This paper slip is already recorded with order 29. Nothing was sent or recorded. Open order 29 in Orders. If this is a different slip, check the reference printed on it.",
+      "This paper slip is already recorded with order 29. Nothing was sent or recorded. If this is the same sale, it is already in order 29: don't send it again. If the same slip also paid for this order, or it's another slip with the same reference, answer below and it is sent.",
     );
     const unnamed = await client.placeOrder(command).catch((error: unknown) => error);
     expect(unnamed).toMatchObject({ code: "SlipAlreadyRecorded", placedOrderNumber: null });
     expect(placeErrorText(unnamed as CounterOrderClientError, [])).toContain(
-      "already recorded with another paper order",
+      "already recorded with another order",
     );
+  });
+
+  // b11 review: after "Already ordered as order N" the dishes already in order N were sent (and
+  // charged) again with the whole cart. They come off the cart, choice by choice and note by note.
+  it("takes the dishes an unanswered send placed off the cart, and names what happened", () => {
+    const item = parseCounterMenu(counterMenuResponse()).sections[0]?.items[0];
+    if (!item) throw new Error("fixture");
+    const oat = [{ optionReference: id(10), name: "Oat milk", quantity: 1 }];
+    const sent = [{ key: "a", item, quantity: 1, options: [] }];
+    const cart = [
+      { key: "a", item, quantity: 2, options: [] },
+      { key: "b", item, quantity: 1, options: oat },
+    ];
+    expect(withoutDishesSent(cart, sent).map((line) => [line.key, line.quantity])).toEqual([
+      ["a", 1],
+      ["b", 1],
+    ]);
+    expect(withoutDishesSent(sent, sent)).toEqual([]);
+    // Another choice or note is another dish: never taken off.
+    expect(
+      withoutDishesSent([{ key: "c", item, quantity: 1, options: [], note: "No ice" }], sent),
+    ).toHaveLength(1);
+    expect(sentDishesKey([...sent, ...sent])).toBe(
+      sentDishesKey([{ key: "z", item, quantity: 2, options: [] }]),
+    );
+    expect(sentDishesKey(sent)).not.toBe(sentDishesKey(cart));
+    expect(alreadyOrderedCartText("77", "SomeLeft", true)).toBe(
+      "Already ordered as order 77. The dishes already in it were taken off this list; what is left isn't in any order yet: send it as a new order and take its own payment. Nothing new was charged or recorded. The paper slip goes with that order and was cleared here, so it is never recorded twice. If the same slip also paid for what is left, tick the paper order again and answer when asked.",
+    );
+    expect(alreadyOrderedCartText("77", "Unknown", false)).toContain(
+      "this tablet can't tell which dishes on this list are in it",
+    );
+    expect(alreadyOrderedCartText(null, "AllInOrder", false)).toContain("taken off this list");
+  });
+
+  // b11 review: a paper order placed whose payment was refused for a slip recorded elsewhere says
+  // the order is in and what to do with it, never that nothing happened.
+  it("tells staff a placed paper order whose slip is recorded elsewhere is in, and how to close it", () => {
+    const refused = new CounterOrderClientError("SlipAlreadyRecorded");
+    refused.placedOrderNumber = "29";
+    expect(paperPaymentProblem(refused)).toBe(
+      "This order is in, but its payment wasn't recorded: this paper slip is already recorded with order 29. If this order is the same sale entered twice, don't record it: tell a manager, who closes it on Orders as entered again, linked to order 29, once its time to record ends. If the same slip also paid for this order, or it's another slip with the same reference, answer below and record it.",
+    );
+    expect(paperPaymentProblem(refused, false, true)).toContain("take this round off on Orders");
+    expect(paperPaymentProblem(refused)).not.toContain("not recorded again");
   });
 
   it("accepts a paper order's paid time only within the last three days", () => {

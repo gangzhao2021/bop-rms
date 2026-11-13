@@ -1018,3 +1018,181 @@ test("@production an owner records a cashier's card-machine refund from one plac
     [],
   );
 });
+
+// b11 review: a table that pays each round paid two rounds on the card machine, and one refund
+// request covers a dish of each. On payment 1's page only payment 1's refund is recorded above;
+// payment 2's keeps its own record form in the request list (never "record it above" with
+// nothing above). Nothing is recorded by opening the page.
+test("@production a refund request of another payment of the order keeps its own record form on this payment's page", async ({
+  page,
+}) => {
+  const records: string[] = [];
+  await page.route("**/merchant/session", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        authenticated: true,
+        csrf: "a".repeat(43),
+        workspace: {
+          screenId: "HOME-OVERVIEW",
+          selectedScope: scope,
+          authorizedStores: [scope],
+          businessDate: "2026-10-15",
+          storeStatus: "Open",
+          freshness: "Current",
+          dashboardAvailability: "UnavailableUntilWP1905",
+          navigation: [
+            {
+              screenId: "OPS-ORDER-QUEUE",
+              label: "Orders",
+              href: "/operations/orders",
+              permission: "ordering.operate",
+            },
+          ],
+        },
+      },
+    }),
+  );
+  await page.route("**/merchant/payments/refunds/approvals", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        observedAt: new Date().toISOString(),
+        canApprove: true,
+        canSend: true,
+        soleOperator: null,
+        entries: [],
+      },
+    }),
+  );
+  await page.route("**/merchant/payments/refunds/context", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        paymentIntentReference: id(31),
+        paymentAttemptReference: id(32),
+        orderReference: id(1),
+        orderBatchReference: id(90),
+        observedAt: new Date().toISOString(),
+        paymentState: "Captured",
+        paymentMethod: "CardMachine",
+        currencyCode: "CAD",
+        capturedAmountMinor: "2486",
+        confirmedRefundMinor: "0",
+        pendingRefundMinor: "283",
+        canRequest: false,
+        requestBlocked: "SoleOperatorOff",
+        canSend: true,
+      },
+    }),
+  );
+  await page.route("**/merchant/payments/refunds/items", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        orderReference: id(1),
+        orderNumber: "43",
+        canRequest: false,
+        claimVersion: 1,
+        recentRequests: [
+          {
+            requestReference: id(41),
+            operationReference: id(51),
+            claimVersion: 1,
+            requestedAt: "2026-10-15T15:00:00.000Z",
+            reasonCode: "QUALITY_ISSUE",
+            currencyCode: "CAD",
+            amountMinor: "433",
+            decline: null,
+            progress: "Recorded",
+            paymentMethod: "CardMachine",
+          },
+        ],
+        items: [
+          {
+            orderBatchReference: id(90),
+            orderItemReference: id(3),
+            label: "Rice",
+            quantity: 2,
+            unclaimedQuantity: 1,
+            paymentCaptured: true,
+            refundedByCancellation: false,
+            paymentIntentReference: id(31),
+            paymentMethod: "CardMachine",
+          },
+          {
+            orderBatchReference: id(91),
+            orderItemReference: id(4),
+            label: "Tea",
+            quantity: 1,
+            unclaimedQuantity: 0,
+            paymentCaptured: true,
+            refundedByCancellation: false,
+            paymentIntentReference: id(33),
+            paymentMethod: "CardMachine",
+          },
+        ],
+      },
+    }),
+  );
+  const machinePayment = (intent: number, attempt: number, amountMinor: string) => ({
+    paymentAttemptReference: id(attempt),
+    paymentIntentReference: id(intent),
+    state: "NotDispatched",
+    method: "CardMachine",
+    refundedOnCardMachineAt: null,
+    cardMachineSlipReference: null,
+    executionOperationReference: null,
+    executionApprovalReference: null,
+    amountMinor,
+    confirmedMinor: "0",
+    pendingMinor: amountMinor,
+  });
+  await page.route("**/merchant/payments/refunds/status", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        orderReference: id(1),
+        requestReference: id(41),
+        operationReference: id(51),
+        observedAt: new Date().toISOString(),
+        currencyCode: "CAD",
+        amountMinor: "433",
+        payments: [machinePayment(31, 32, "283"), machinePayment(33, 34, "150")],
+      },
+    }),
+  );
+  await page.route("**/merchant/payments/refunds/card-machine-record", (route) => {
+    records.push(route.request().postData() ?? "");
+    return route.abort();
+  });
+
+  await page.goto("/app/operations/payments/" + id(31));
+  const pending = page.getByRole("region", { name: "Refunds to make on the card machine" });
+  await expect(
+    pending.getByRole("button", { name: "Record the $2.83 card-machine refund" }),
+  ).toBeVisible();
+  const requests = page.getByRole("region", { name: "Refunds on this order" });
+  await expect(requests).toContainText(
+    "Refund $2.83 on the card machine, then record it above, under Refunds to make on the card machine.",
+  );
+  // Payment 2's refund is not listed above: it keeps its own record form here.
+  await expect(requests).not.toContainText(
+    "Refund $1.50 on the card machine, then record it above",
+  );
+  await expect(
+    requests.getByRole("button", { name: "Refunded $1.50 on card machine" }),
+  ).toBeVisible();
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.screenshot({
+      path: test.info().outputPath("other-payment-refund-form-" + width + ".png"),
+      fullPage: true,
+    });
+  }
+  expect(records).toEqual([]);
+  await expectNoInternalText(page);
+});

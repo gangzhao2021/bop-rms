@@ -88,8 +88,35 @@ export function payIntentKey(
  * DEC-PAPER-ORDER-PAID-AT-SEND: why a paper order's payment (taken during the outage) was not
  * recorded with it, in words that never ask staff to charge the guest again.
  */
-export function paperPaymentProblem(error: CounterOrderClientError, inCash = false): string {
+export function paperPaymentProblem(
+  error: CounterOrderClientError,
+  inCash = false,
+  /** A table round (taken off on Orders), not a counter order (closed by a manager). */
+  round = false,
+): string {
   switch (error.code) {
+    // b11 review: the order is in, but this slip is recorded with another order. Either the same
+    // sale was entered twice (this one must not stay open) or staff confirm the slip below.
+    case "SlipAlreadyRecorded": {
+      const number = error.placedOrderNumber;
+      if (round)
+        return number === null
+          ? t(
+              "This round is in, but its payment wasn't recorded: this paper slip is already recorded with another order. If this round is the same sale entered twice, don't record it: take this round off on Orders. If the same slip also paid for this round, or it's another slip with the same reference, answer below and record it.",
+            )
+          : t(
+              "This round is in, but its payment wasn't recorded: this paper slip is already recorded with order {number}. If this round is the same sale entered twice, don't record it: take this round off on Orders. If the same slip also paid for this round, or it's another slip with the same reference, answer below and record it.",
+              { number },
+            );
+      return number === null
+        ? t(
+            "This order is in, but its payment wasn't recorded: this paper slip is already recorded with another order. If this order is the same sale entered twice, don't record it: tell a manager, who closes it on Orders as entered again, linked to that order, once its time to record ends. If the same slip also paid for this order, or it's another slip with the same reference, answer below and record it.",
+          )
+        : t(
+            "This order is in, but its payment wasn't recorded: this paper slip is already recorded with order {number}. If this order is the same sale entered twice, don't record it: tell a manager, who closes it on Orders as entered again, linked to order {number2}, once its time to record ends. If the same slip also paid for this order, or it's another slip with the same reference, answer below and record it.",
+            { number, number2: number },
+          );
+    }
     case "AmountChanged":
       return error.totalMinor === null
         ? t("The total changed. Check it against the paper slip, then record the payment.")

@@ -9711,13 +9711,47 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "这张纸质签购单已经录入在订单 {number} 里，这次没有再录入。请在“订单”中打开订单 {number2}。如果这是另一张签购单，请核对上面印的参考号。",
   "This paper slip is already recorded with another paper order, so it was not recorded again. Find it in Orders. If this is a different slip, check the reference printed on it.":
     "这张纸质签购单已经录入在另一张纸质订单里，这次没有再录入。请在“订单”中查找。如果这是另一张签购单，请核对上面印的参考号。",
-  "Already ordered as order {number}; this paper slip goes with that order. Nothing new was charged or recorded. The slip was cleared here so it is never recorded twice. To send dishes that aren't in order {number2}, take their own payment. Open it in Orders.":
-    "已下单，订单 {number}，这张纸质签购单属于这笔订单。这次没有新的扣款，也没有新的录入。为了不重复录入，这里已清空签购单。订单 {number2} 里没有的菜要另外收款后再发送。请在“订单”中查看。",
-  "These items are already in an order, and this paper slip goes with it. Nothing new was charged or recorded. The slip was cleared here so it is never recorded twice. To send other dishes, take their own payment. Open it in Orders.":
-    "这些菜已经在一笔订单里，这张纸质签购单属于那笔订单。这次没有新的扣款，也没有新的录入。为了不重复录入，这里已清空签购单。其他菜要另外收款后再发送。请在“订单”中查看。",
   "Amount paid": "已付金额",
   "Refund {amount} on the card machine, then record it above, under Refunds to make on the card machine.":
     "请先在刷卡机上退款 {amount}，再在上方“需要在刷卡机上办理的退款”里录入。",
   "Give back {amount} in cash, then record it above, under Cash to give back.":
     "请先退还现金 {amount}，再在上方“需要退还的现金”里录入。",
+  "This paper slip is already recorded with order {number}. Nothing was sent or recorded. If this is the same sale, it is already in order {number2}: don't send it again. If the same slip also paid for this order, or it's another slip with the same reference, answer below and it is sent.":
+    "这张纸质签购单已经录入在订单 {number} 里。这次没有发送，也没有录入。如果是同一笔销售，它已经在订单 {number2} 里，请不要再发送。如果同一张签购单也付了这单，或者是另一张参考号相同的签购单，请在下方回答，回答后即发送。",
+  "This paper slip is already recorded with another order. Nothing was sent or recorded. If this is the same sale, find it in Orders and don't send it again. If the same slip also paid for this order, or it's another slip with the same reference, answer below and it is sent.":
+    "这张纸质签购单已经录入在另一张订单里。这次没有发送，也没有录入。如果是同一笔销售，请在“订单”中找到它，不要再发送。如果同一张签购单也付了这单，或者是另一张参考号相同的签购单，请在下方回答，回答后即发送。",
+  "These dishes are already in an order, so they were taken off this list. Nothing new was charged or recorded. Open it in Orders.":
+    "这些菜已经在一张订单里，已从这份清单中拿掉。这次没有新的扣款，也没有新的录入。请在“订单”中查看。",
+  "Some of these dishes are already in an order; they were taken off this list. What is left isn't in any order yet: send it as a new order and take its own payment. Nothing new was charged or recorded.":
+    "其中一些菜已经在一张订单里，已从这份清单中拿掉。剩下的菜还不在任何订单里：请作为新订单发送，并另外收款。这次没有新的扣款，也没有新的录入。",
+  "Some of these dishes are already in an order, and this tablet can't tell which. Nothing new was charged or recorded. Find that order in Orders and take its dishes off this list before sending again.":
+    "其中一些菜已经在一张订单里，这台平板分不清是哪些。这次没有新的扣款，也没有新的录入。请先在“订单”中找到那张订单，把其中的菜从这份清单中拿掉，再发送。",
+  "Already ordered as order {number}: every dish on this list is in it, so they were taken off the list. Nothing new was charged or recorded. Open it in Orders.":
+    "已下单，订单 {number}：这份清单上的菜都在里面，已从清单中拿掉。这次没有新的扣款，也没有新的录入。请在“订单”中查看。",
+  "Already ordered as order {number}. The dishes already in it were taken off this list; what is left isn't in any order yet: send it as a new order and take its own payment. Nothing new was charged or recorded.":
+    "已下单，订单 {number}。已在其中的菜已从这份清单中拿掉；剩下的菜还不在任何订单里：请作为新订单发送，并另外收款。这次没有新的扣款，也没有新的录入。",
+  "Already ordered as order {number}, and this tablet can't tell which dishes on this list are in it. Nothing new was charged or recorded. Open order {number2} in Orders and take its dishes off this list before sending again.":
+    "已下单，订单 {number}，这台平板分不清清单上哪些菜在里面。这次没有新的扣款，也没有新的录入。请先在“订单”中打开订单 {number2}，把其中的菜从这份清单中拿掉，再发送。",
+  "The paper slip goes with that order and was cleared here, so it is never recorded twice. If the same slip also paid for what is left, tick the paper order again and answer when asked.":
+    "这张纸质签购单属于那张订单，这里已清空，不会重复录入。如果同一张签购单也付了剩下的菜，请重新勾选纸质订单，并在询问时回答。",
+  "This round is in, but its payment wasn't recorded: this paper slip is already recorded with another order. If this round is the same sale entered twice, don't record it: take this round off on Orders. If the same slip also paid for this round, or it's another slip with the same reference, answer below and record it.":
+    "这一轮已经发送，但付款没有录入：这张纸质签购单已经录入在另一张订单里。如果这一轮是同一笔销售录了两次，请不要录入，在“订单”中撤下这一轮。如果同一张签购单也付了这一轮，或者是另一张参考号相同的签购单，请在下方回答并录入。",
+  "This round is in, but its payment wasn't recorded: this paper slip is already recorded with order {number}. If this round is the same sale entered twice, don't record it: take this round off on Orders. If the same slip also paid for this round, or it's another slip with the same reference, answer below and record it.":
+    "这一轮已经发送，但付款没有录入：这张纸质签购单已经录入在订单 {number} 里。如果这一轮是同一笔销售录了两次，请不要录入，在“订单”中撤下这一轮。如果同一张签购单也付了这一轮，或者是另一张参考号相同的签购单，请在下方回答并录入。",
+  "This order is in, but its payment wasn't recorded: this paper slip is already recorded with another order. If this order is the same sale entered twice, don't record it: tell a manager, who closes it on Orders as entered again, linked to that order, once its time to record ends. If the same slip also paid for this order, or it's another slip with the same reference, answer below and record it.":
+    "这张订单已经下单，但付款没有录入：这张纸质签购单已经录入在另一张订单里。如果这张订单是同一笔销售录了两次，请不要录入：告诉店长，等这单的录入时限过后，由店长在“订单”中把它按“已重新录入”关闭，关联到那张订单。如果同一张签购单也付了这单，或者是另一张参考号相同的签购单，请在下方回答并录入。",
+  "This order is in, but its payment wasn't recorded: this paper slip is already recorded with order {number}. If this order is the same sale entered twice, don't record it: tell a manager, who closes it on Orders as entered again, linked to order {number2}, once its time to record ends. If the same slip also paid for this order, or it's another slip with the same reference, answer below and record it.":
+    "这张订单已经下单，但付款没有录入：这张纸质签购单已经录入在订单 {number} 里。如果这张订单是同一笔销售录了两次，请不要录入：告诉店长，等这单的录入时限过后，由店长在“订单”中把它按“已重新录入”关闭，关联到订单 {number2}。如果同一张签购单也付了这单，或者是另一张参考号相同的签购单，请在下方回答并录入。",
+  "I took the dishes already in order {number} off this list":
+    "我已把订单 {number} 里已有的菜从这份清单中拿掉",
+  "I took the dishes already in that order off this list":
+    "我已把那张订单里已有的菜从这份清单中拿掉",
+  "Is this the slip already recorded with order {number}?":
+    "这是已经录入在订单 {number} 里的那张签购单吗？",
+  "Is this the slip already recorded with another order?":
+    "这是已经录入在另一张订单里的那张签购单吗？",
+  "Check the paper slip first. Your name is recorded with your answer. If this sale is already in that order, don't record it again.":
+    "请先核对纸质签购单。你的回答会和你的名字一起记录。如果这笔销售已经在那张订单里，请不要再录入。",
+  "Same slip, it also paid for this order": "同一张签购单，也付了这单",
+  "Another slip with the same reference": "另一张签购单，参考号相同",
 });

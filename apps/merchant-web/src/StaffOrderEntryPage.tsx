@@ -46,8 +46,10 @@ import {
   type CounterMenuRule,
   type CounterTip,
   type PlacedCounterOrder,
+  type SlipConfirmation,
   type TableCartItem,
 } from "./staff-order-entry.js";
+import { PaperSlipConfirm } from "./PaperSlipConfirm.js";
 
 export { paidAtInstant, payErrorText, paymentUrgentMinutes, paymentWindowNotice };
 
@@ -79,6 +81,88 @@ export function counterOrderLines(lines: readonly Line[]) {
     const note = line.note ?? null;
     return note === null ? sent : { ...sent, customerNote: note };
   });
+}
+
+/** The same dish as sent: its sellable, its choices and its kitchen note. */
+function sameDishKey(line: Line): string {
+  return JSON.stringify([
+    line.item.sellableReference,
+    [...line.options]
+      .map((option) => [option.optionReference, option.quantity] as const)
+      .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : a[1] - b[1])),
+    line.note ?? null,
+  ]);
+}
+/** A cart as sent: its dishes and their quantities, in any order. */
+export function sentDishesKey(lines: readonly Line[]): string {
+  const totals = new Map<string, number>();
+  for (const line of lines)
+    totals.set(sameDishKey(line), (totals.get(sameDishKey(line)) ?? 0) + line.quantity);
+  return JSON.stringify([...totals].sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)));
+}
+/**
+ * b11 review: the cart without the dishes already in the order an earlier send of it placed (that
+ * send's lines, quantity by quantity), so sending again never orders or charges them twice.
+ */
+export function withoutDishesSent(lines: readonly Line[], sent: readonly Line[]): readonly Line[] {
+  const left = new Map<string, number>();
+  for (const line of sent)
+    left.set(sameDishKey(line), (left.get(sameDishKey(line)) ?? 0) + line.quantity);
+  const kept: Line[] = [];
+  for (const line of lines) {
+    const key = sameDishKey(line);
+    const taken = Math.min(left.get(key) ?? 0, line.quantity);
+    left.set(key, (left.get(key) ?? 0) - taken);
+    if (line.quantity > taken) kept.push({ ...line, quantity: line.quantity - taken });
+  }
+  return kept;
+}
+
+/**
+ * b11 review: "Already ordered as order N" at the counter, with what happened to the cart: every
+ * dish was in order N (taken off), some were (taken off, the rest can be sent as a new order), or
+ * this tablet can't tell which (staff take them off before sending). A paper send also says its
+ * slip was cleared, so it is never recorded twice.
+ */
+export function alreadyOrderedCartText(
+  orderNumber: string | null,
+  cart: "AllInOrder" | "SomeLeft" | "Unknown",
+  paperCleared: boolean,
+): string {
+  const main =
+    orderNumber === null
+      ? cart === "AllInOrder"
+        ? t(
+            "These dishes are already in an order, so they were taken off this list. Nothing new was charged or recorded. Open it in Orders.",
+          )
+        : cart === "SomeLeft"
+          ? t(
+              "Some of these dishes are already in an order; they were taken off this list. What is left isn't in any order yet: send it as a new order and take its own payment. Nothing new was charged or recorded.",
+            )
+          : t(
+              "Some of these dishes are already in an order, and this tablet can't tell which. Nothing new was charged or recorded. Find that order in Orders and take its dishes off this list before sending again.",
+            )
+      : cart === "AllInOrder"
+        ? t(
+            "Already ordered as order {number}: every dish on this list is in it, so they were taken off the list. Nothing new was charged or recorded. Open it in Orders.",
+            { number: orderNumber },
+          )
+        : cart === "SomeLeft"
+          ? t(
+              "Already ordered as order {number}. The dishes already in it were taken off this list; what is left isn't in any order yet: send it as a new order and take its own payment. Nothing new was charged or recorded.",
+              { number: orderNumber },
+            )
+          : t(
+              "Already ordered as order {number}, and this tablet can't tell which dishes on this list are in it. Nothing new was charged or recorded. Open order {number2} in Orders and take its dishes off this list before sending again.",
+              { number: orderNumber, number2: orderNumber },
+            );
+  return paperCleared
+    ? main +
+        " " +
+        t(
+          "The paper slip goes with that order and was cleared here, so it is never recorded twice. If the same slip also paid for what is left, tick the paper order again and answer when asked.",
+        )
+    : main;
 }
 
 /** What staff see for an item: about its base price plus chosen options (the order total decides). */
@@ -549,11 +633,11 @@ export function placeErrorText(
     case "SlipAlreadyRecorded":
       return error.placedOrderNumber !== null
         ? t(
-            "This paper slip is already recorded with order {number}. Nothing was sent or recorded. Open order {number2} in Orders. If this is a different slip, check the reference printed on it.",
+            "This paper slip is already recorded with order {number}. Nothing was sent or recorded. If this is the same sale, it is already in order {number2}: don't send it again. If the same slip also paid for this order, or it's another slip with the same reference, answer below and it is sent.",
             { number: error.placedOrderNumber, number2: error.placedOrderNumber },
           )
         : t(
-            "This paper slip is already recorded with another paper order. Nothing was sent or recorded. Find it in Orders. If this is a different slip, check the reference printed on it.",
+            "This paper slip is already recorded with another order. Nothing was sent or recorded. If this is the same sale, find it in Orders and don't send it again. If the same slip also paid for this order, or it's another slip with the same reference, answer below and it is sent.",
           );
     case "StoreNotTakingOrders":
       return table !== null
@@ -808,6 +892,22 @@ export function StaffOrderEntryPage({
   const [paidNote, setPaidNote] = useState<string | null>(null);
   // WP-2423 (v15 751dd768): re-read the sent, unpaid counter orders after a send or a payment.
   const [awaitingKey, setAwaitingKey] = useState(0);
+  // b11 review: a paper slip refused as already recorded with another order (named), and what staff
+  // then confirmed about it for the next send or record (recorded with their name).
+  const [slipHeld, setSlipHeld] = useState<{ readonly orderNumber: string | null } | null>(null);
+  const slipConfirmation = useRef<SlipConfirmation | null>(null);
+  const clearSlipHeld = () => {
+    setSlipHeld(null);
+    slipConfirmation.current = null;
+  };
+  // b11 review: the carts of the sends of this order operation that got no answer. One of them may
+  // have placed the order; when they were all the same, "Already ordered" takes those dishes off
+  // the cart, otherwise staff are asked to before sending again (never ordered or charged twice).
+  const unansweredLines = useRef<(readonly Line[])[]>([]);
+  const [alreadyInOrder, setAlreadyInOrder] = useState<{
+    readonly orderNumber: string | null;
+  } | null>(null);
+  const [alreadyInOrderChecked, setAlreadyInOrderChecked] = useState(false);
   // b11: orders this page saw paid; the sent-not-paid list never offers payment for them again,
   // even when its read lags the payment by a few seconds.
   const [paidHere, setPaidHere] = useState<ReadonlySet<string>>(() => new Set());
@@ -1172,6 +1272,7 @@ export function StaffOrderEntryPage({
     withdrawn.length === 0 &&
     !(guestCart?.guestPaying === true && guestLines.length > 0) &&
     tipChoice() !== null &&
+    (alreadyInOrder === null || alreadyInOrderChecked) &&
     (!paper ||
       tablePaysLater ||
       (paperInstant !== null && (paperTender === "Cash" || validSlipReference(slip.trim()))));
@@ -1218,20 +1319,24 @@ export function StaffOrderEntryPage({
             );
             if (paperOperation.current?.key !== key)
               paperOperation.current = { key, reference: serviceOperationReference() };
+            const confirmed = slipReference === null ? null : slipConfirmation.current;
             return {
               operationReference: paperOperation.current.reference,
               tender: paperTender,
               slipReference,
               takenAt: paperInstant,
+              ...(confirmed === null ? {} : { slipConfirmation: confirmed }),
             };
           })()
         : undefined;
+    const sentLines = lines;
     setPhase("Sending");
     setProblem(null);
     setProblemNeedsTableCode(false);
     setPartyChanged(false);
     setTableCartOffer(null);
     setRemovedNote(null);
+    setSlipHeld(null);
     try {
       const chosen = lines.map((line) => ({
         sellableReference: line.item.sellableReference,
@@ -1276,6 +1381,10 @@ export function StaffOrderEntryPage({
               ...(paperPayment === undefined ? {} : { paperPayment }),
             });
       sendAnswered();
+      unansweredLines.current = [];
+      slipConfirmation.current = null;
+      setAlreadyInOrder(null);
+      setAlreadyInOrderChecked(false);
       setPlaced(order);
       setPlacedCancellable(null);
       if (decided !== null) setRemovedNote(guestRemovedNote(removedAtSend));
@@ -1339,7 +1448,11 @@ export function StaffOrderEntryPage({
           };
           if (failure.code === "AmountChanged" && failure.totalMinor !== null)
             setPlaced({ ...order, totalMinor: failure.totalMinor });
-          setProblem(paperPaymentProblem(failure, paperPayment.tender === "Cash"));
+          setProblem(paperPaymentProblem(failure, paperPayment.tender === "Cash", tableMode));
+          // b11 review: the slip is recorded with another order; staff say whether it also paid
+          // this one (or is another slip), or leave this duplicate to be closed.
+          if (failure.code === "SlipAlreadyRecorded")
+            setSlipHeld({ orderNumber: failure.placedOrderNumber });
           if (paidAtRefusal(failure)) {
             setPaidAtRefused(true);
             setFocusPaidAt((value) => value + 1);
@@ -1357,6 +1470,7 @@ export function StaffOrderEntryPage({
       // An unknown or still-running outcome keeps the same operation (a retry returns the same
       // order); anything else starts over as a new order.
       const unanswered = failure.code === "OutcomeUnknown" || failure.code === "InProgress";
+      if (unanswered) unansweredLines.current = [...unansweredLines.current, sentLines];
       if (unanswered && !tableMode && placeOperation.current !== null) {
         // Kept for the Store, so a reload (a tablet that looks stuck) sends the same order again.
         sendUnanswered.current = true;
@@ -1386,23 +1500,41 @@ export function StaffOrderEntryPage({
       );
       // DEC-PAPER-SEND-IDEMPOTENT (b11): the paper slip went with the order already placed; it is
       // cleared here, so sending again (with dishes added) never records the same slip twice.
-      if (failure.code === "AlreadyOrdered" && paperPayment !== undefined) {
+      const paperCleared = failure.code === "AlreadyOrdered" && paperPayment !== undefined;
+      if (paperCleared) {
         setPaper(false);
         setPaidAt("");
         setSlip("");
         setPaidAtRefused(false);
         paperOperation.current = null;
+        slipConfirmation.current = null;
+      }
+      if (failure.code === "SlipAlreadyRecorded")
+        setSlipHeld({ orderNumber: failure.placedOrderNumber });
+      // b11 review: the dishes already in order N are never sent (and charged) again. When every
+      // unanswered send of this order had the same cart, those dishes are taken off it; otherwise
+      // staff take them off, checking order N, before Send works again.
+      if (failure.code === "AlreadyOrdered" && !tableMode) {
+        const earlier = unansweredLines.current;
+        const first = earlier[0];
+        const known =
+          first !== undefined &&
+          earlier.every((sent) => sentDishesKey(sent) === sentDishesKey(first));
+        const left = first !== undefined && known ? withoutDishesSent(sentLines, first) : null;
+        if (left !== null) setLines(left);
+        setAlreadyInOrder(
+          left === null && sentLines.length > 0 ? { orderNumber: failure.placedOrderNumber } : null,
+        );
+        setAlreadyInOrderChecked(false);
         setProblem(
-          failure.placedOrderNumber !== null
-            ? t(
-                "Already ordered as order {number}; this paper slip goes with that order. Nothing new was charged or recorded. The slip was cleared here so it is never recorded twice. To send dishes that aren't in order {number2}, take their own payment. Open it in Orders.",
-                { number: failure.placedOrderNumber, number2: failure.placedOrderNumber },
-              )
-            : t(
-                "These items are already in an order, and this paper slip goes with it. Nothing new was charged or recorded. The slip was cleared here so it is never recorded twice. To send other dishes, take their own payment. Open it in Orders.",
-              ),
+          alreadyOrderedCartText(
+            failure.placedOrderNumber,
+            left === null ? "Unknown" : left.length === 0 ? "AllInOrder" : "SomeLeft",
+            paperCleared,
+          ),
         );
       }
+      if (!unanswered) unansweredLines.current = [];
       setProblemNeedsTableCode(failure.code === "TableHasNoQr");
       setPartyChanged(failure.code === "TablePartyChanged");
       // v15 batch-5 review: the paper paid-at was refused before anything was placed; staff
@@ -1467,10 +1599,13 @@ export function StaffOrderEntryPage({
     );
     if (payOperation.current?.key !== intent)
       payOperation.current = { key: intent, reference: serviceOperationReference() };
+    const confirmed =
+      placed.recordedAfterOutage && !inCash && slip.trim() !== "" ? slipConfirmation.current : null;
     setPhase("Recording");
     setProblem(null);
     setProblemNeedsTableCode(false);
     setPaidAtRefused(false);
+    setSlipHeld(null);
     let recorded;
     try {
       recorded = await client.recordPayment({
@@ -1481,6 +1616,7 @@ export function StaffOrderEntryPage({
         slipReference: inCash || slip.trim() === "" ? null : slip.trim(),
         takenAt,
         ...(tenderedMinor === null ? {} : { tenderedMinor }),
+        ...(confirmed === null ? {} : { slipConfirmation: confirmed }),
       });
     } catch (error) {
       const failure =
@@ -1505,11 +1641,14 @@ export function StaffOrderEntryPage({
       // A cash Record with no answer says so beside the cash received it keeps.
       setProblem(
         placed.recordedAfterOutage
-          ? paperPaymentProblem(failure, inCash)
+          ? paperPaymentProblem(failure, inCash, tableMode)
           : inCash && failure.code === "OutcomeUnknown"
             ? null
             : payErrorText(failure, inCash),
       );
+      if (failure.code === "SlipAlreadyRecorded")
+        setSlipHeld({ orderNumber: failure.placedOrderNumber });
+      else slipConfirmation.current = null;
       setPhase("Charge");
       if (placed.recordedAfterOutage && paidAtRefusal(failure)) {
         setPaidAtRefused(true);
@@ -1518,6 +1657,7 @@ export function StaffOrderEntryPage({
       return;
     }
     setCashUnanswered(false);
+    slipConfirmation.current = null;
     refreshMenu();
     setAwaitingKey((value) => value + 1);
     // WP-2423 D1: the server accepts the paid order or round with the payment record (at the
@@ -1552,6 +1692,7 @@ export function StaffOrderEntryPage({
     placeOperation.current = null;
     payOperation.current = null;
     paperOperation.current = null;
+    clearSlipHeld();
     setPlacedCancellable(null);
     setAwaitingKey((value) => value + 1);
     setPhase("Building");
@@ -1578,6 +1719,10 @@ export function StaffOrderEntryPage({
     placeOperation.current = null;
     payOperation.current = null;
     paperOperation.current = null;
+    clearSlipHeld();
+    unansweredLines.current = [];
+    setAlreadyInOrder(null);
+    setAlreadyInOrderChecked(false);
     setPlacedCancellable(null);
     setPhase("Building");
   };
@@ -2334,7 +2479,10 @@ export function StaffOrderEntryPage({
                         autoComplete="off"
                         aria-invalid={!validSlipReference(slip.trim())}
                         aria-describedby="counter-paper-slip-hint"
-                        onChange={(event) => setSlip(event.currentTarget.value)}
+                        onChange={(event) => {
+                          setSlip(event.currentTarget.value);
+                          clearSlipHeld();
+                        }}
                       />
                     </label>
                   ) : null}
@@ -2358,6 +2506,30 @@ export function StaffOrderEntryPage({
               </p>
             ) : null}
             {problem !== null && ordering ? <p role="alert">{problem}</p> : null}
+            {slipHeld !== null && ordering && phase === "Building" && paper ? (
+              <PaperSlipConfirm
+                orderNumber={slipHeld.orderNumber}
+                disabled={!canSend}
+                onConfirm={(confirmation) => {
+                  slipConfirmation.current = confirmation;
+                  void send();
+                }}
+              />
+            ) : null}
+            {alreadyInOrder !== null && ordering ? (
+              <label className="counter-order__already-in-order">
+                <input
+                  type="checkbox"
+                  checked={alreadyInOrderChecked}
+                  onChange={(event) => setAlreadyInOrderChecked(event.currentTarget.checked)}
+                />
+                {alreadyInOrder.orderNumber !== null
+                  ? t("I took the dishes already in order {number} off this list", {
+                      number: alreadyInOrder.orderNumber,
+                    })
+                  : t("I took the dishes already in that order off this list")}
+              </label>
+            ) : null}
             {problem !== null && ordering && tableCartOffer !== null ? (
               <TableCartOfferActions
                 offer={tableCartOffer}
@@ -2670,7 +2842,10 @@ export function StaffOrderEntryPage({
                           autoComplete="off"
                           aria-invalid={!validSlipReference(slip.trim())}
                           aria-describedby="counter-slip-hint"
-                          onChange={(event) => setSlip(event.currentTarget.value)}
+                          onChange={(event) => {
+                            setSlip(event.currentTarget.value);
+                            clearSlipHeld();
+                          }}
                         />
                       </label>
                       <p id="counter-slip-hint" className="field-hint">
@@ -2722,6 +2897,16 @@ export function StaffOrderEntryPage({
                     </>
                   ) : null}
                   {problem !== null && !paidAtRefused ? <p role="alert">{problem}</p> : null}
+                  {slipHeld !== null && placed.recordedAfterOutage && !counterCash ? (
+                    <PaperSlipConfirm
+                      orderNumber={slipHeld.orderNumber}
+                      disabled={phase === "Recording"}
+                      onConfirm={(confirmation) => {
+                        slipConfirmation.current = confirmation;
+                        void recordPayment(placed.totalMinor);
+                      }}
+                    />
+                  ) : null}
                   <div className="card-actions">
                     <button
                       type="submit"

@@ -293,15 +293,17 @@ function RecordedRequestStatus({
   refreshSignal,
   canSend = true,
   paidInCash = false,
-  machineRecordedAbove = false,
+  recordedAbove = null,
 }: {
   orderReference: string;
   entry: Items["recentRequests"][number];
   /**
-   * b11: this page lists the card-machine refunds still to make, each with its one record form,
-   * above this list; a request here points there instead of offering a second form.
+   * b11: the card-machine refunds this payment page lists above, each with its one record form
+   * (this page's payment, and the requests shown there now). A refund of this request on that
+   * payment points there instead of offering a second form; one on another payment of the order,
+   * or one not shown above (hidden, still loading), keeps its own form here.
    */
-  machineRecordedAbove?: boolean;
+  recordedAbove?: RecordedAbove | null;
   /** v15 batch 8: the payment was taken in cash at the counter (given back in cash). */
   paidInCash?: boolean;
   /**
@@ -492,7 +494,9 @@ function RecordedRequestStatus({
                           : amount(payment.cashGivenBackMinor),
                       )}
                     </p>
-                  ) : machineRecordedAbove ? (
+                  ) : recordedAbove !== null &&
+                    payment.paymentIntentReference === recordedAbove.paymentIntentReference &&
+                    recordedAbove.requests.has(entry.requestReference) ? (
                     <p>
                       {payment.cashGivenBackMinor != null || paidInCash
                         ? t(
@@ -865,11 +869,11 @@ function RefundWizard({
   canSend = true,
   paidInCash = false,
   cashLeftMinor = null,
-  machineRecordedAbove = false,
+  recordedAbove = null,
   revision = 0,
 }: {
-  /** b11: the payment page lists the card-machine refunds to record above (one form each). */
-  readonly machineRecordedAbove?: boolean;
+  /** b11: the card-machine refunds the payment page lists above to record (one form each). */
+  readonly recordedAbove?: RecordedAbove | null;
   /** b11: changes after a refund or payment is recorded on this page: requests are read again. */
   readonly revision?: number;
   readonly orderReference: string;
@@ -1399,7 +1403,7 @@ function RefundWizard({
                 ) : (
                   <RecordedRequestStatus
                     paidInCash={paidInCash}
-                    machineRecordedAbove={machineRecordedAbove}
+                    recordedAbove={recordedAbove}
                     held={heldRequest === entry.requestReference}
                     approval={approvals.get(entry.requestReference) ?? null}
                     canSend={canSend}
@@ -1992,6 +1996,15 @@ export function cardMachineRefundToRecord(
   };
 }
 /**
+ * b11 review: the card-machine refunds the payment page shows above its request list with their
+ * record forms: the page's payment and the requests listed there now.
+ */
+export interface RecordedAbove {
+  readonly paymentIntentReference: string;
+  readonly requests: ReadonlySet<string>;
+}
+
+/**
  * WP-2423 item 4 (v15 2026-10-17): on the payment page itself, each recorded refund of this
  * card-machine payment that is still to be made on the machine, with its record action. Staff who
  * just refunded on the machine record it here without opening the refund wizard. Only a reader
@@ -2002,10 +2015,13 @@ export function PendingCardMachineRefunds({
   context,
   csrf,
   onFinancialChange,
+  onListed,
 }: {
   readonly context: Context;
   readonly csrf: string;
   readonly onFinancialChange: () => void;
+  /** b11 review: told which requests are listed here with a record form (none while hidden). */
+  readonly onListed?: (requests: ReadonlySet<string>) => void;
 }) {
   const pendingMinor = context.pendingRefundMinor ?? "0";
   const owed = context.paymentMethod === "CardMachine" && BigInt(pendingMinor) > 0n;
@@ -2070,6 +2086,11 @@ export function PendingCardMachineRefunds({
     })();
     return () => controller.abort();
   }, [owed, context.orderReference, context.paymentIntentReference, pendingMinor, csrf, reload]);
+  const listed =
+    hidden || refunds === null ? "" : refunds.map((r) => r.entry.requestReference).join(",");
+  useEffect(() => {
+    onListed?.(new Set(listed === "" ? [] : listed.split(",")));
+  }, [listed, onListed]);
   if (hidden || (notice === null && message === "" && (refunds === null || refunds.length === 0)))
     return null;
   return (
@@ -2177,6 +2198,8 @@ function PaymentContent({
 }) {
   const [financialRevision, setFinancialRevision] = useState(0);
   const refreshFinancial = useCallback(() => setFinancialRevision((value) => value + 1), []);
+  // b11 review: the requests whose card-machine refund of this payment is recorded above.
+  const [listedAbove, setListedAbove] = useState<ReadonlySet<string>>(() => new Set());
   const [context, setContext] = useState<Context | null>(null),
     [loading, setLoading] = useState(true),
     [failure, setFailure] = useState<PaymentLoadFailure>({ message: "", retry: true }),
@@ -2243,6 +2266,7 @@ function PaymentContent({
               context={context}
               csrf={csrf}
               onFinancialChange={refreshFinancial}
+              onListed={setListedAbove}
             />
           ) : null}
           {!wizard ? (
@@ -2272,7 +2296,7 @@ function PaymentContent({
               canSend={context.canSend}
               paidInCash={context.paidInCash}
               cashLeftMinor={context.cashLeftMinor}
-              machineRecordedAbove={!wizard}
+              recordedAbove={wizard ? null : { paymentIntentReference, requests: listedAbove }}
               revision={financialRevision}
             />
           )}

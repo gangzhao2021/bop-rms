@@ -485,7 +485,15 @@ export interface PaperPayment {
   readonly tender: "CardMachine" | "Cash";
   readonly slipReference: string | null;
   readonly takenAt: string;
+  /** b11 review: staff confirmed this slip, already recorded with another order (sent only then). */
+  readonly slipConfirmation?: SlipConfirmation;
 }
+/**
+ * DEC-PAPER-SEND-IDEMPOTENT (b11 review): what staff confirmed about a paper slip already recorded
+ * with another order: it also paid this one (one swipe for two orders), or it is another slip with
+ * the same reference (two card machines). The server records who confirmed it.
+ */
+export type SlipConfirmation = "SameSlipAlsoPaysThisOrder" | "DifferentSlipSameReference";
 export type PaperPaymentOutcome =
   | { readonly kind: "Recorded"; readonly payment: RecordedCardPayment }
   | { readonly kind: "NotRecorded"; readonly error: CounterOrderClientError };
@@ -917,6 +925,8 @@ export function createCounterOrderClient(csrf: string, fetcher: typeof fetch = f
       readonly takenAt: string | null;
       /** WP-2423 M52: the cash handed over (cents); absent when paid on the card machine. */
       readonly tenderedMinor?: string;
+      /** b11 review: a paper slip already recorded with another order, confirmed by staff. */
+      readonly slipConfirmation?: SlipConfirmation;
     }): Promise<RecordedCardPayment> {
       const response = await post("/merchant/orders/card-machine-payment", command);
       if (response.ok)
