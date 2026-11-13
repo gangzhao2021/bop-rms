@@ -2519,3 +2519,145 @@ for (const language of ["en", "zh-Hans"] as const)
     expect(records).toHaveLength(2);
     expect(records[1]?.operationReference).toBe(records[0]?.operationReference);
   });
+
+// WP-2423 (rush-logging-and-entry review): a card-machine record with no answer says "Record
+// again". When staff then use Back to edit (the unpaid order is cancelled) and send the lines as a
+// new order, its first record is a new payment: the button says "Paid on card machine" again and
+// carries a new operation, never "Record again".
+test("@production after Back to edit, a new order's first record is never labelled Record again", async ({
+  page,
+}) => {
+  await signIn(page);
+  await page.route("**/merchant/counter/menu", (route) => route.fulfill({ headers, json: menu }));
+  const payBy = new Date(Date.now() + 30 * 60_000).toISOString();
+  const placedOrders = [
+    { orderReference: id(20), orderBatchReference: id(21), orderNumber: "15" },
+    { orderReference: id(30), orderBatchReference: id(31), orderNumber: "16" },
+  ];
+  const sends: Record<string, unknown>[] = [];
+  await page.route("**/merchant/counter/orders", (route) => {
+    sends.push(route.request().postDataJSON() as Record<string, unknown>);
+    const placed = placedOrders[Math.min(sends.length, placedOrders.length) - 1];
+    return route.fulfill({
+      headers,
+      json: {
+        status: "Placed",
+        ...placed,
+        orderVersion: 1,
+        orderMinor: "450",
+        tipMinor: "0",
+        totalMinor: "450",
+        payBy,
+        recordedAfterOutage: false,
+      },
+    });
+  });
+  // The order being charged may be cancelled by this staff member (it is unpaid).
+  await page.route("**/merchant/orders", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        items:
+          sends.length === 0
+            ? []
+            : [
+                {
+                  orderReference: placedOrders[sends.length - 1]?.orderReference,
+                  orderNumber: placedOrders[sends.length - 1]?.orderNumber,
+                  orderType: "Pickup",
+                  sourceChannel: "Pos",
+                  submittedAt: new Date().toISOString(),
+                  observedAt: new Date().toISOString(),
+                  initialBatchReference: placedOrders[sends.length - 1]?.orderBatchReference,
+                  batches: [
+                    {
+                      orderBatchReference: placedOrders[sends.length - 1]?.orderBatchReference,
+                      sequence: 1,
+                      acceptanceStatus: "NotAccepted",
+                      canRequestAcceptance: false,
+                      canCancel: false,
+                      staffCancellation: null,
+                      canCancelItems: false,
+                    },
+                  ],
+                  canRequestAcceptance: false,
+                  unfulfillable: null,
+                  pickupNotCollected: false,
+                  acceptBy: null,
+                  awaitingPayment: true,
+                  currentPhase: "Submitted",
+                  currentVersion: 1,
+                  counter: {
+                    recordedAfterOutage: false,
+                    paidOnCardMachine: null,
+                    payBy,
+                    amountDueMinor: null,
+                    canCancelUnpaid: true,
+                    cancelledBeforePayment: null,
+                  },
+                  canRecordCardMachinePayment: true,
+                  canViewPayments: true,
+                },
+              ],
+        nextAfterOrderReference: null,
+      },
+    }),
+  );
+  const cancels: Record<string, unknown>[] = [];
+  await page.route("**/merchant/counter/orders/cancel-unpaid", (route) => {
+    cancels.push(route.request().postDataJSON() as Record<string, unknown>);
+    return route.fulfill({
+      headers,
+      json: { status: "Cancelled", cancelledAt: new Date().toISOString() },
+    });
+  });
+  const records: Record<string, unknown>[] = [];
+  await page.route("**/merchant/orders/card-machine-payment", (route) => {
+    records.push(route.request().postDataJSON() as Record<string, unknown>);
+    // The first order's record never gets an answer.
+    if (records.length === 1) return route.abort("failed");
+    return route.fulfill({
+      headers,
+      json: {
+        status: "Recorded",
+        orderReference: id(30),
+        orderBatchReference: id(31),
+        amountMinor: "450",
+        recordingReason: "AtCounter",
+        takenAt: new Date().toISOString(),
+        recordedAt: new Date().toISOString(),
+        acceptance: "Accepted",
+      },
+    });
+  });
+  await page.goto("/operations/order-entry");
+  await page.getByRole("button", { name: "Add Flat White" }).click();
+  await page.getByRole("button", { name: "Add to order" }).click();
+  await page.getByRole("button", { name: "Send order" }).click();
+  await page.getByRole("button", { name: "Paid on card machine · $4.50" }).click();
+  await expect(
+    page.getByRole("button", { name: "Record again · $4.50", exact: true }),
+  ).toBeVisible();
+
+  const charge = page.locator(".counter-order__charge");
+  await charge.getByRole("button", { name: "Back to edit" }).click();
+  await page.getByRole("button", { name: "Cancel order 15" }).click();
+  await expect(page.getByRole("button", { name: "Send order" })).toBeVisible();
+  expect(cancels).toHaveLength(1);
+  expect(cancels[0]?.orderReference).toBe(id(20));
+
+  await page.getByRole("button", { name: "Send order" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Charge $4.50 on the card machine" }),
+  ).toBeVisible();
+  expect(sends).toHaveLength(2);
+  expect(sends[1]?.operationReference).not.toBe(sends[0]?.operationReference);
+  await expect(page.getByRole("button", { name: /Record again/u })).toHaveCount(0);
+  await page.getByRole("button", { name: "Paid on card machine · $4.50" }).click();
+  await expect(
+    page.getByRole("status").filter({ hasText: "Paid and sent to the kitchen." }),
+  ).toBeVisible();
+  expect(records).toHaveLength(2);
+  expect(records[1]?.operationReference).not.toBe(records[0]?.operationReference);
+  expect(records[1]?.orderReference).toBe(id(30));
+});

@@ -1816,6 +1816,7 @@ export function StaffOrderEntryPage({
     setReceived("");
     setLargeChangeConfirmed(false);
     setCashUnanswered(false);
+    setRecordAgain(false);
     setChangeDue(null);
     setProblem(null);
     setPaidNote(null);
@@ -1842,6 +1843,7 @@ export function StaffOrderEntryPage({
     setReceived("");
     setLargeChangeConfirmed(false);
     setCashUnanswered(false);
+    setRecordAgain(false);
     setChangeDue(null);
     setProblem(null);
     setProblemNeedsTableCode(false);
