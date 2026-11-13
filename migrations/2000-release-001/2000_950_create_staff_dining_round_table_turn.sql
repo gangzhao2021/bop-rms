@@ -15,7 +15,8 @@
 -- is placed or taken back out, and a second staff member's round waits for it (or is told the
 -- table is busy, with nothing sent). The turn is held for at most two minutes, so a tablet that
 -- loses its connection mid-send never blocks the table for longer. Who held the table and how
--- each turn ended is kept: one row per turn, one row when it ended. Append-only, Store RLS.
+-- each turn ended is kept: one row per turn, one row when it ended (placed, not sent, dishes left
+-- at the table, or not known). Append-only, Store RLS.
 -- Grants: api SELECT, INSERT on both tables (Owner standing approval 2026-10-14
 -- 「我都批准，之后不需要问我」; DEC-STAFF-ROUND-ONE-AT-A-TIME).
 CREATE TABLE rms_ordering.staff_dining_round_table_turn (
@@ -32,6 +33,13 @@ CREATE TABLE rms_ordering.staff_dining_round_table_turn (
 );
 CREATE INDEX staff_dining_round_table_turn_table_idx
  ON rms_ordering.staff_dining_round_table_turn (brand_id,store_id,table_id,begun_at DESC);
+-- The turns of one staff round command (the same command sent again reads how they ended).
+CREATE INDEX staff_dining_round_table_turn_operation_idx
+ ON rms_ordering.staff_dining_round_table_turn (brand_id,store_id,operation_id);
+-- A turn not ended (its end could not be written) is over once its round exists: the round is
+-- found by its table guest, so the check reads one batch, never the Store's whole history.
+CREATE INDEX order_batch_submitted_by_actor_idx
+ ON rms_ordering.order_batch (brand_id,store_id,submitted_by_actor_id);
 
 CREATE TABLE rms_ordering.staff_dining_round_table_turn_end (
  turn_id platform_helpers.uuid_v7 PRIMARY KEY,

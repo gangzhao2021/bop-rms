@@ -58,7 +58,8 @@ export function createPostgresStaffDiningRoundTableTurnStore(options: {
   return Object.freeze({
     /**
      * Takes the table's turn for this staff round command, unless another round holds it: a turn
-     * begun within the lease that was not ended and whose round was not placed. The database's
+     * begun within the lease that was not ended and whose round was not placed (a placed round ends its
+     * turn with a row; a turn whose end could not be written is still over once its round exists). The database's
      * clock times every turn, whichever server sends the round.
      */
     async take(
@@ -117,6 +118,39 @@ export function createPostgresStaffDiningRoundTableTurnStore(options: {
         status: "Taken" as const,
         heldUntil: instantOf(taken[0]?.held_until),
       });
+    },
+    /**
+     * v15 b12 review: how the turns of one staff round command ended, for the same command sent
+     * again (its answer was lost) with no round behind it. `DishesLeftAtTable`: some turn ended
+     * with its dishes left in the table's cart. `Placed`: a turn ended with the round placed.
+     * `Undecided`: a turn ended without knowing, or was never ended (its dishes may still be in the
+     * table's cart). `NotSent`: every turn ended with nothing sent. `None`: no turn (a command
+     * recorded before turns were kept).
+     */
+    async outcomeOf(
+      tx: AuditTransaction,
+      operationReference: string,
+    ): Promise<"None" | "NotSent" | "Undecided" | "DishesLeftAtTable" | "Placed"> {
+      const operation = parseOrderingReference(operationReference);
+      await context(tx);
+      const row = rowsOf(
+        await tx.query(
+          `SELECT count(*)::int AS turns,
+ coalesce(bool_or(e.outcome='DishesLeftAtTable'),false) AS left_at_table,
+ coalesce(bool_or(e.outcome='Placed'),false) AS placed,
+ coalesce(bool_or(e.outcome IS NULL OR e.outcome='Unknown'),false) AS undecided
+ FROM rms_ordering.staff_dining_round_table_turn t
+ LEFT JOIN rms_ordering.staff_dining_round_table_turn_end e
+  ON e.brand_id=t.brand_id AND e.store_id=t.store_id AND e.turn_id=t.turn_id
+ WHERE t.brand_id=$1 AND t.store_id=$2 AND t.operation_id=$3`,
+          [brand, store, operation],
+        ),
+      )[0];
+      if (row === undefined || typeof row.turns !== "number") return fail();
+      if (row.left_at_table === true) return "DishesLeftAtTable";
+      if (row.placed === true) return "Placed";
+      if (row.undecided === true) return "Undecided";
+      return row.turns > 0 ? "NotSent" : "None";
     },
     /** Ends this round's turn with how it ended (once; a repeat changes nothing). */
     async end(

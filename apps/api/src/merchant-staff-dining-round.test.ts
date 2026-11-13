@@ -33,6 +33,8 @@ const state = vi.hoisted(() => ({
    */
   turnBusy: 0,
   turnLog: [] as string[],
+  /** Each turn taken: its command and how it ended (null: not ended). */
+  turns: [] as { turn: string; operation: string; outcome: string | null }[],
   /** What the table's cart does with a staff removal (the shared-cart double below). */
   onStaffRemoval: null as
     | null
@@ -131,17 +133,32 @@ vi.mock("@rms/ordering", async (importOriginal) => {
       isTakenOff: async () => state.takenOff,
     }),
     createPostgresStaffDiningRoundTableTurnStore: () => ({
-      take: async () => {
+      take: async (_tx: unknown, input: { turnReference: string; operationReference: string }) => {
         if (state.turnBusy > 0) {
           state.turnBusy -= 1;
           state.turnLog.push("busy");
           return { status: "Busy", heldUntil: "2026-10-15T18:02:00.000Z" };
         }
         state.turnLog.push("taken");
+        state.turns.push({
+          turn: input.turnReference,
+          operation: input.operationReference,
+          outcome: null,
+        });
         return { status: "Taken", heldUntil: "2026-10-15T18:02:00.000Z" };
       },
-      end: async (_tx: unknown, input: { outcome: string }) => {
+      end: async (_tx: unknown, input: { turnReference: string; outcome: string }) => {
         state.turnLog.push("end:" + input.outcome);
+        const turn = state.turns.find((entry) => entry.turn === input.turnReference);
+        if (turn !== undefined && turn.outcome === null) turn.outcome = input.outcome;
+      },
+      outcomeOf: async (_tx: unknown, operation: string) => {
+        const own = state.turns.filter((entry) => entry.operation === operation);
+        if (own.some((entry) => entry.outcome === "DishesLeftAtTable")) return "DishesLeftAtTable";
+        if (own.some((entry) => entry.outcome === "Placed")) return "Placed";
+        if (own.some((entry) => entry.outcome === null || entry.outcome === "Unknown"))
+          return "Undecided";
+        return own.length > 0 ? "NotSent" : "None";
       },
     }),
     // WP-2423 D1: a later round's table Order is at the version its rounds moved it to (7), not
@@ -370,6 +387,7 @@ describe("staff dine-in round command — WP-2423 Q7 slice 2", () => {
     state.takenOff = false;
     state.turnBusy = 0;
     state.turnLog = [];
+    state.turns = [];
     state.tableSession = undefined;
   });
 
@@ -940,9 +958,10 @@ describe("staff dine-in round command — WP-2423 Q7 slice 2", () => {
       generation: 1,
     });
     submitted.pipeline.preparePayment.mockRejectedValueOnce(new Error("connection reset"));
-    // WP-2423: the round may exist, so it is "still being sent" (the same command recovers it),
-    // never the definite "could not send" that makes the next send a new attempt.
-    await expect(submitted.send()).rejects.toMatchObject({ code: "STAFF_ROUND_IN_PROGRESS" });
+    // WP-2423: never the definite "could not send" that makes the next send a new attempt. No
+    // round was found and its dish (whose cart line the cart did not name) could not be taken
+    // back out, so staff are told its dishes are still at the table (v15 b12 review).
+    await expect(submitted.send()).rejects.toMatchObject({ code: "STAFF_ROUND_NOT_WITHDRAWN" });
     expect(submitted.pipeline.abandonTable).not.toHaveBeenCalled();
     // A round placed at a table this request opened keeps its session.
     state.entries.clear();
@@ -1810,6 +1829,7 @@ describe("two staff send a round for the same table — v15 b12 staff-round-conc
     state.takenOff = false;
     state.turnBusy = 0;
     state.turnLog = [];
+    state.turns = [];
   });
   const withOwnLine = (f: ReturnType<typeof setup>) =>
     f.pipeline.addItem.mockResolvedValue({
@@ -1823,7 +1843,8 @@ describe("two staff send a round for the same table — v15 b12 staff-round-conc
     state.turnBusy = 2;
     const placed = await f.send();
     expect(placed.status).toBe("Placed");
-    expect(state.turnLog).toEqual(["busy", "busy", "taken"]);
+    // v15 b12 review: placed, the turn ends with a row of its own.
+    expect(state.turnLog).toEqual(["busy", "busy", "taken", "end:Placed"]);
     expect(f.calls.indexOf("openTable")).toBeGreaterThan(-1);
   });
 
@@ -1940,6 +1961,107 @@ describe("two staff send a round for the same table — v15 b12 staff-round-conc
       tableCart: { cartVersion: 4 },
     });
     expect(f.calls).not.toContain("quote");
+    expect(state.turnLog).toEqual(["taken", "end:NotSent"]);
+  });
+
+  // v15 b12 review: from the checkout on, an unexpected failure with no round behind it.
+  const cartAfterFailure = (
+    f: ReturnType<typeof setup>,
+    after: { cartVersion: number; pendingItems: { cartItemReference: string; quantity: number }[] },
+  ) =>
+    f.pipeline.selectCart
+      .mockResolvedValueOnce({
+        status: "Selected",
+        cartReference: id(6),
+        cartVersion: 3,
+        pendingItems: [],
+      })
+      .mockResolvedValueOnce({
+        status: "Selected",
+        cartReference: id(6),
+        cartVersion: after.cartVersion,
+        pendingItems: after.pendingItems.map((item) => ({
+          ...item,
+          name: "Rice",
+          standing: "Available" as const,
+        })),
+      });
+
+  it("after its checkout, a dish that could not be taken back out: dishes left at the table, also when sent again later", async () => {
+    const f = setup();
+    withOwnLine(f);
+    const removeItems = vi.fn(async () => "Kept" as const);
+    Object.assign(f.pipeline, { removeItems });
+    f.pipeline.preparePayment.mockRejectedValueOnce(new Error("connection reset"));
+    cartAfterFailure(f, {
+      cartVersion: 4,
+      pendingItems: [{ cartItemReference: id(40), quantity: 2 }],
+    });
+    await expect(f.send()).rejects.toMatchObject({ code: "STAFF_ROUND_NOT_WITHDRAWN" });
+    expect(f.calls).toContain("startCheckout");
+    expect(removeItems).toHaveBeenCalledTimes(1);
+    expect(state.turnLog).toEqual(["taken", "end:DishesLeftAtTable"]);
+    // The same command sent again (its answer was lost), at once and after the sending window:
+    // never "didn't go through, send it again" while its dish is in the table's cart.
+    await expect(f.send()).rejects.toMatchObject({ code: "STAFF_ROUND_NOT_WITHDRAWN" });
+    f.clock.at = "2026-10-15T18:05:00.000Z";
+    await expect(f.send()).rejects.toMatchObject({ code: "STAFF_ROUND_NOT_WITHDRAWN" });
+    expect(f.pipeline.preparePayment).toHaveBeenCalledTimes(1);
+  });
+
+  it("after its checkout, a dish that left the cart some other way: dishes left at the table", async () => {
+    const f = setup();
+    withOwnLine(f);
+    Object.assign(f.pipeline, { removeItems: vi.fn(async () => "Kept" as const) });
+    f.pipeline.preparePayment.mockRejectedValueOnce(new Error("connection reset"));
+    // Read again: the cart moved on and the round's line is gone (it went with another round).
+    cartAfterFailure(f, { cartVersion: 5, pendingItems: [] });
+    await expect(f.send()).rejects.toMatchObject({ code: "STAFF_ROUND_NOT_WITHDRAWN" });
+    expect(state.turnLog).toEqual(["taken", "end:DishesLeftAtTable"]);
+  });
+
+  it("after its checkout, its dish taken back out: nothing was sent, as before", async () => {
+    const f = setup();
+    withOwnLine(f);
+    Object.assign(f.pipeline, { removeItems: vi.fn(async () => "Removed" as const) });
+    f.pipeline.preparePayment.mockRejectedValueOnce(new Error("connection reset"));
+    await expect(f.send()).rejects.toMatchObject({ code: "STAFF_ROUND_UNAVAILABLE" });
+    expect(state.turnLog).toEqual(["taken", "end:NotSent"]);
+  });
+
+  it("an attempt that ended without knowing is never answered 'send it again' after the window", async () => {
+    const f = setup();
+    withOwnLine(f);
+    // Submitted with another tip and no round read back: still being sent.
+    f.pipeline.preparePayment.mockResolvedValueOnce({ tip: { amountMinor: 1n } } as never);
+    await expect(f.send()).rejects.toMatchObject({ code: "STAFF_ROUND_IN_PROGRESS" });
+    expect(state.turnLog).toEqual(["taken", "end:Unknown"]);
+    await expect(f.send()).rejects.toMatchObject({ code: "STAFF_ROUND_IN_PROGRESS" });
+    f.clock.at = "2026-10-15T18:05:00.000Z";
+    await expect(f.send()).rejects.toMatchObject({ code: "STAFF_ROUND_NOT_WITHDRAWN" });
+  });
+
+  it("a dish whose adding was not answered and is in the cart: dishes left at the table", async () => {
+    const f = setup();
+    // The add committed, then its answer was lost.
+    f.pipeline.addItem.mockRejectedValueOnce(new Error("socket hang up"));
+    const removeItems = vi.fn(async () => "Removed" as const);
+    Object.assign(f.pipeline, { removeItems });
+    cartAfterFailure(f, {
+      cartVersion: 4,
+      pendingItems: [{ cartItemReference: id(40), quantity: 2 }],
+    });
+    await expect(f.send()).rejects.toMatchObject({ code: "STAFF_ROUND_NOT_WITHDRAWN" });
+    // A line it can't tell from a guest's is never taken out.
+    expect(removeItems).not.toHaveBeenCalled();
+    expect(state.turnLog).toEqual(["taken", "end:DishesLeftAtTable"]);
+  });
+
+  it("a dish whose adding was not answered and is not in the cart: nothing was sent", async () => {
+    const f = setup();
+    f.pipeline.addItem.mockRejectedValueOnce(new Error("socket hang up"));
+    cartAfterFailure(f, { cartVersion: 3, pendingItems: [] });
+    await expect(f.send()).rejects.toMatchObject({ code: "STAFF_ROUND_UNAVAILABLE" });
     expect(state.turnLog).toEqual(["taken", "end:NotSent"]);
   });
 });

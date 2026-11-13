@@ -887,177 +887,234 @@ export function createMerchantStaffDiningRound(options: {
         storeReference: scope.selected.storeReference,
         authorize: allowed,
       });
+    // DEC-STAFF-ROUND-ONE-AT-A-TIME: this round's turn at the table, once taken.
+    let turnReference: string | null = null;
     /** The round of a recorded staff entry, from owner records only. */
     const finished = async (
       status: StaffDiningRoundResult["status"],
       entry: StaffDiningRoundEntryRecord,
     ): Promise<StaffDiningRoundResult> =>
       inScope(async (tx, scope, allowed) => {
-        const batch = await entries(scope, allowed).loadBatch(
-          tx,
-          String(entry.guestSessionReference),
-        );
-        if (batch === null) return fail("STAFF_ROUND_NOT_FINISHED");
-        const labels = await listDiningSessionTableLabels(tx as never, scope.selected, [
-          String(entry.diningSessionReference),
-        ]);
-        const payLater = options.payLater?.(scope.selected);
-        if (
-          payLater !== undefined &&
-          (await payLater.isPayLater(tx, String(entry.diningSessionReference)))
-        ) {
-          // Sent to the kitchen in the same transaction that reads it back, so a retry of a round
-          // whose sending was cut off finishes it (an already-sent round is returned as it is).
-          const sent = await payLater.confirm(tx, {
-            submissionReference: String(batch.submissionReference),
-            actorReference: scope.actorReference,
-            operationReference: String(entry.operationReference),
-            correlationReference: String(entry.operationReference),
-            authorize: async () => allowed(),
-          });
-          const roundMinor = await payLater.roundTotalMinor(tx, {
-            orderReference: String(batch.orderReference),
-            orderBatchReference: String(batch.orderBatchReference),
-            authorize: async () => allowed(),
-          });
-          return Object.freeze({
-            status,
-            orderReference: String(batch.orderReference),
-            orderBatchReference: String(batch.orderBatchReference),
-            orderNumber: batch.orderNumber,
-            orderVersion: sent.confirmation.acceptedOrderVersion,
-            tableLabel: labels.get(String(entry.diningSessionReference)) ?? null,
-            orderMinor: roundMinor.toString(),
-            tipMinor: "0",
-            totalMinor: roundMinor.toString(),
-            payBy: null,
-            payLater: true,
-            recordedAfterOutage: entry.recordedAfterOutage,
-          });
-        }
-        const current = await readStaffDiningRoundPaymentPreparation(
-          tx,
-          {
-            scope: scope.selected,
-            now,
-            nextPreparationReference: options.nextReference,
-            authorize: allowed,
-          },
-          {
-            submissionReference: String(batch.submissionReference),
-            guestSessionReference: String(entry.guestSessionReference),
-            tipSelectionReference: String(entry.tipSelectionReference),
-          },
-        );
-        // DEC-PAPER-SEND-IDEMPOTENT: the round's card-machine (or paper) payment record, read only
-        // for a round sent again (a first send has none). Cash is not taken for a table round here.
-        const paymentRecord = () =>
-          createPostgresCardMachinePaymentStore({
-            scope: scope.selected,
-            authorize: async (_tx, value) =>
-              value.orderReference === String(batch.orderReference) && (await allowed()),
-          }).loadByBatch(tx, String(batch.orderReference), String(batch.orderBatchReference));
-        if (current === null) {
-          // Paid already (a paper round the table pays now is paid with its send): the same round
-          // at the amounts its payment record holds, so a lost answer is recovered and the round
-          // is never sent and paid twice.
-          const paid = await paymentRecord();
-          if (paid === null) {
-            // The round exists but neither waits for payment nor was paid: its time to pay ended
-            // and it was taken off. Named when sent again (after the still-sending window).
-            const ended = new StaffDiningRoundError("STAFF_ROUND_NOT_FINISHED");
-            ended.placedOrderNumber = batch.orderNumber;
-            ended.placedTableLabel = labels.get(String(entry.diningSessionReference)) ?? null;
-            throw ended;
+        const result = await readFinished(tx, scope, allowed, status, entry);
+        // v15 b12 review: placed, so this round's turn ends with a row, in the transaction that
+        // read the round back (no extra round trip): the next round's check never looks for it
+        // among the Store's sent rounds. When the row can't be written, the answer stands and the
+        // turn is still over, found by its round.
+        const held = turnReference;
+        if (status === "Placed" && held !== null) {
+          await tx.query("SAVEPOINT staff_round_turn_end", []);
+          try {
+            await turns(scope, allowed).end(tx, { turnReference: held, outcome: "Placed" });
+            await tx.query("RELEASE SAVEPOINT staff_round_turn_end", []);
+            turnReference = null;
+          } catch (ending) {
+            await tx.query("ROLLBACK TO SAVEPOINT staff_round_turn_end", []);
+            await tx.query("RELEASE SAVEPOINT staff_round_turn_end", []);
+            try {
+              options.onUnexpected?.(ending);
+            } catch {
+              // Reporting never changes the answer.
+            }
           }
-          const p = paid.preparation;
-          return Object.freeze({
-            paid: true as const,
-            status,
-            orderReference: String(batch.orderReference),
-            orderBatchReference: String(batch.orderBatchReference),
-            orderNumber: batch.orderNumber,
-            orderVersion: batch.orderVersion,
-            tableLabel: labels.get(String(entry.diningSessionReference)) ?? null,
-            orderMinor: p.orderAllocation.amountMinor.toString(),
-            tipMinor: p.tip.amountMinor.toString(),
-            totalMinor: p.total.amountMinor.toString(),
-            payBy: String(p.capacityExpiresAt),
-            payLater: false,
-            recordedAfterOutage: entry.recordedAfterOutage,
-          });
         }
-        // WP-2423 D1: a later round's table Order is at the version its other rounds moved it to
-        // (the Order header keeps the first round's version).
-        const execution = current.additional
-          ? await createPostgresAdditionalDiningExecutionReader({
-              brandReference: scope.selected.brandReference,
-              storeReference: scope.selected.storeReference,
-              authorize: async () => allowed(),
-            }).loadBySubmission({
-              transaction: tx,
-              submissionReference: String(batch.submissionReference),
-              observedAt: now(),
-            })
-          : null;
-        if (current.additional && execution === null) return fail("STAFF_ROUND_NOT_FINISHED");
-        const p = current.preparation;
-        // v15 batch-5: the time staff are told is the one the round is cancelled at (Ordering's
-        // payment window of the round), never a later minute read from the payment clock.
-        const windowEnd = (
-          await listStoreDiningBatchPaymentDeadlines(tx as never, scope.selected, [
-            String(batch.orderReference),
-          ])
-        ).find(
-          (entry) => entry.orderBatchReference === String(batch.orderBatchReference),
-        )?.paymentDeadline;
-        const payBy =
-          windowEnd !== undefined && Date.parse(windowEnd) < Date.parse(String(p.capacityExpiresAt))
-            ? windowEnd
-            : String(p.capacityExpiresAt);
-        // A round's payment clock stays open once it is paid: a round sent again is read as paid
-        // from its payment record, so staff are never asked to charge it a second time.
-        const paidAlready = status === "AlreadyPlaced" && (await paymentRecord()) !== null;
-        // DEC-PAPER-SEND-IDEMPOTENT (b11): the clock also stays open after the System (or staff)
-        // took an unpaid round off. Sent again, such a round, or one whose time to pay has ended,
-        // is named by its order and table, never offered for a card-machine charge.
-        if (
-          status === "AlreadyPlaced" &&
-          !paidAlready &&
-          (Date.parse(payBy) <= Date.parse(now()) ||
-            (await entries(scope, allowed).isTakenOff(tx, String(batch.orderBatchReference))))
-        ) {
-          // Placed for certain (it has a payment clock), so never answered as still sending.
-          const named = new StaffDiningRoundError("STAFF_ROUND_ALREADY_SENT");
-          named.placedOrderNumber = batch.orderNumber;
-          named.placedTableLabel = labels.get(String(entry.diningSessionReference)) ?? null;
-          throw named;
-        }
+        return result;
+      });
+    const readFinished = async (
+      tx: ConsumerTransaction,
+      scope: StaffScope,
+      allowed: () => Promise<boolean>,
+      status: StaffDiningRoundResult["status"],
+      entry: StaffDiningRoundEntryRecord,
+    ): Promise<StaffDiningRoundResult> => {
+      const batch = await entries(scope, allowed).loadBatch(
+        tx,
+        String(entry.guestSessionReference),
+      );
+      if (batch === null) return fail("STAFF_ROUND_NOT_FINISHED");
+      const labels = await listDiningSessionTableLabels(tx as never, scope.selected, [
+        String(entry.diningSessionReference),
+      ]);
+      const payLater = options.payLater?.(scope.selected);
+      if (
+        payLater !== undefined &&
+        (await payLater.isPayLater(tx, String(entry.diningSessionReference)))
+      ) {
+        // Sent to the kitchen in the same transaction that reads it back, so a retry of a round
+        // whose sending was cut off finishes it (an already-sent round is returned as it is).
+        const sent = await payLater.confirm(tx, {
+          submissionReference: String(batch.submissionReference),
+          actorReference: scope.actorReference,
+          operationReference: String(entry.operationReference),
+          correlationReference: String(entry.operationReference),
+          authorize: async () => allowed(),
+        });
+        const roundMinor = await payLater.roundTotalMinor(tx, {
+          orderReference: String(batch.orderReference),
+          orderBatchReference: String(batch.orderBatchReference),
+          authorize: async () => allowed(),
+        });
         return Object.freeze({
-          ...(paidAlready ? { paid: true as const } : {}),
           status,
           orderReference: String(batch.orderReference),
           orderBatchReference: String(batch.orderBatchReference),
           orderNumber: batch.orderNumber,
-          orderVersion: execution?.orderVersion ?? batch.orderVersion,
+          orderVersion: sent.confirmation.acceptedOrderVersion,
+          tableLabel: labels.get(String(entry.diningSessionReference)) ?? null,
+          orderMinor: roundMinor.toString(),
+          tipMinor: "0",
+          totalMinor: roundMinor.toString(),
+          payBy: null,
+          payLater: true,
+          recordedAfterOutage: entry.recordedAfterOutage,
+        });
+      }
+      const current = await readStaffDiningRoundPaymentPreparation(
+        tx,
+        {
+          scope: scope.selected,
+          now,
+          nextPreparationReference: options.nextReference,
+          authorize: allowed,
+        },
+        {
+          submissionReference: String(batch.submissionReference),
+          guestSessionReference: String(entry.guestSessionReference),
+          tipSelectionReference: String(entry.tipSelectionReference),
+        },
+      );
+      // DEC-PAPER-SEND-IDEMPOTENT: the round's card-machine (or paper) payment record, read only
+      // for a round sent again (a first send has none). Cash is not taken for a table round here.
+      const paymentRecord = () =>
+        createPostgresCardMachinePaymentStore({
+          scope: scope.selected,
+          authorize: async (_tx, value) =>
+            value.orderReference === String(batch.orderReference) && (await allowed()),
+        }).loadByBatch(tx, String(batch.orderReference), String(batch.orderBatchReference));
+      if (current === null) {
+        // Paid already (a paper round the table pays now is paid with its send): the same round
+        // at the amounts its payment record holds, so a lost answer is recovered and the round
+        // is never sent and paid twice.
+        const paid = await paymentRecord();
+        if (paid === null) {
+          // The round exists but neither waits for payment nor was paid: its time to pay ended
+          // and it was taken off. Named when sent again (after the still-sending window).
+          const ended = new StaffDiningRoundError("STAFF_ROUND_NOT_FINISHED");
+          ended.placedOrderNumber = batch.orderNumber;
+          ended.placedTableLabel = labels.get(String(entry.diningSessionReference)) ?? null;
+          throw ended;
+        }
+        const p = paid.preparation;
+        return Object.freeze({
+          paid: true as const,
+          status,
+          orderReference: String(batch.orderReference),
+          orderBatchReference: String(batch.orderBatchReference),
+          orderNumber: batch.orderNumber,
+          orderVersion: batch.orderVersion,
           tableLabel: labels.get(String(entry.diningSessionReference)) ?? null,
           orderMinor: p.orderAllocation.amountMinor.toString(),
           tipMinor: p.tip.amountMinor.toString(),
           totalMinor: p.total.amountMinor.toString(),
-          payBy,
+          payBy: String(p.capacityExpiresAt),
           payLater: false,
           recordedAfterOutage: entry.recordedAfterOutage,
         });
+      }
+      // WP-2423 D1: a later round's table Order is at the version its other rounds moved it to
+      // (the Order header keeps the first round's version).
+      const execution = current.additional
+        ? await createPostgresAdditionalDiningExecutionReader({
+            brandReference: scope.selected.brandReference,
+            storeReference: scope.selected.storeReference,
+            authorize: async () => allowed(),
+          }).loadBySubmission({
+            transaction: tx,
+            submissionReference: String(batch.submissionReference),
+            observedAt: now(),
+          })
+        : null;
+      if (current.additional && execution === null) return fail("STAFF_ROUND_NOT_FINISHED");
+      const p = current.preparation;
+      // v15 batch-5: the time staff are told is the one the round is cancelled at (Ordering's
+      // payment window of the round), never a later minute read from the payment clock.
+      const windowEnd = (
+        await listStoreDiningBatchPaymentDeadlines(tx as never, scope.selected, [
+          String(batch.orderReference),
+        ])
+      ).find(
+        (entry) => entry.orderBatchReference === String(batch.orderBatchReference),
+      )?.paymentDeadline;
+      const payBy =
+        windowEnd !== undefined && Date.parse(windowEnd) < Date.parse(String(p.capacityExpiresAt))
+          ? windowEnd
+          : String(p.capacityExpiresAt);
+      // A round's payment clock stays open once it is paid: a round sent again is read as paid
+      // from its payment record, so staff are never asked to charge it a second time.
+      const paidAlready = status === "AlreadyPlaced" && (await paymentRecord()) !== null;
+      // DEC-PAPER-SEND-IDEMPOTENT (b11): the clock also stays open after the System (or staff)
+      // took an unpaid round off. Sent again, such a round, or one whose time to pay has ended,
+      // is named by its order and table, never offered for a card-machine charge.
+      if (
+        status === "AlreadyPlaced" &&
+        !paidAlready &&
+        (Date.parse(payBy) <= Date.parse(now()) ||
+          (await entries(scope, allowed).isTakenOff(tx, String(batch.orderBatchReference))))
+      ) {
+        // Placed for certain (it has a payment clock), so never answered as still sending.
+        const named = new StaffDiningRoundError("STAFF_ROUND_ALREADY_SENT");
+        named.placedOrderNumber = batch.orderNumber;
+        named.placedTableLabel = labels.get(String(entry.diningSessionReference)) ?? null;
+        throw named;
+      }
+      return Object.freeze({
+        ...(paidAlready ? { paid: true as const } : {}),
+        status,
+        orderReference: String(batch.orderReference),
+        orderBatchReference: String(batch.orderBatchReference),
+        orderNumber: batch.orderNumber,
+        orderVersion: execution?.orderVersion ?? batch.orderVersion,
+        tableLabel: labels.get(String(entry.diningSessionReference)) ?? null,
+        orderMinor: p.orderAllocation.amountMinor.toString(),
+        tipMinor: p.tip.amountMinor.toString(),
+        totalMinor: p.total.amountMinor.toString(),
+        payBy,
+        payLater: false,
+        recordedAfterOutage: entry.recordedAfterOutage,
       });
+    };
     const earlier = async (record: StaffDiningRoundEntryRecord) => {
       try {
         return await finished("AlreadyPlaced", record);
       } catch (error) {
+        const sending =
+          Date.parse(now()) - Date.parse(String(record.createdAt)) <
+          (options.inProgressMs ?? 120_000);
+        // v15 b12 review: no round behind the command. Its turn says whether its dishes may still
+        // be in the table's cart (left there, or the attempt ended without knowing): then staff
+        // are told so, never "didn't go through, send it again", which would send them twice.
         if (
           error instanceof StaffDiningRoundError &&
           error.code === "STAFF_ROUND_NOT_FINISHED" &&
-          Date.parse(now()) - Date.parse(String(record.createdAt)) <
-            (options.inProgressMs ?? 120_000)
+          error.placedOrderNumber === null
+        ) {
+          let ended: Awaited<ReturnType<ReturnType<typeof turns>["outcomeOf"]>>;
+          try {
+            ended = await inScope((tx, scope, allowed) =>
+              turns(scope, allowed).outcomeOf(tx, String(record.operationReference)),
+            );
+          } catch (reading) {
+            // Where it stands can't be read now: the same command is sent again to recover it.
+            return keepingCause(() => fail("STAFF_ROUND_IN_PROGRESS"))(reading);
+          }
+          if (ended === "DishesLeftAtTable") return fail("STAFF_ROUND_NOT_WITHDRAWN");
+          if (sending) return fail("STAFF_ROUND_IN_PROGRESS");
+          if (ended === "Undecided") return fail("STAFF_ROUND_NOT_WITHDRAWN");
+          throw error;
+        }
+        if (
+          error instanceof StaffDiningRoundError &&
+          error.code === "STAFF_ROUND_NOT_FINISHED" &&
+          sending
         )
           return fail("STAFF_ROUND_IN_PROGRESS");
         // DEC-PAPER-SEND-IDEMPOTENT: the round was placed (its time to pay has since ended), so
@@ -1120,8 +1177,6 @@ export function createMerchantStaffDiningRound(options: {
       refusal: () => StaffDiningRoundError,
     ): StaffDiningRoundError =>
       removed === "Removed" ? refusal() : new StaffDiningRoundError("STAFF_ROUND_NOT_WITHDRAWN");
-    // DEC-STAFF-ROUND-ONE-AT-A-TIME: this round's turn at the table, once taken.
-    let turnReference: string | null = null;
     const send = async (): Promise<StaffDiningRoundResult> => {
       try {
         // A retry of the same staff command returns the round it created, never a second one.
@@ -1369,6 +1424,15 @@ export function createMerchantStaffDiningRound(options: {
           throw await tableCartRefusal(pending, cartVersion);
         /** The guests' lines this round takes in (never removed when the round fails). */
         const guestLines = new Set(pending.map((item) => item.cartItemReference));
+        /** The guests' lines as the round took them in, to tell a line it may have added. */
+        const guestQuantities = new Map(
+          pending.map((item) => [item.cartItemReference, item.quantity] as const),
+        );
+        /**
+         * v15 b12 review: an addItem that failed without an answer may still have put its dish in
+         * the cart (the answer was lost after it committed), so that line is not known.
+         */
+        let addUnanswered = false;
         // The Cart line each round line went to, to name a line the checkout finds short.
         const cartLines: (string | undefined)[] = [];
         // The Cart as it stands before this round's lines (the guests' lines it takes in), so each
@@ -1382,7 +1446,7 @@ export function createMerchantStaffDiningRound(options: {
             (reference): reference is string => reference !== undefined,
           );
         // The round's own lines, never a guest's.
-        removeRoundItems = async () => {
+        const removeKnownItems = async (): Promise<"Removed" | "Kept" | "Gone"> => {
           const references = ownLines();
           const removeItems = options.pipeline.removeItems;
           // A round of only the guests' lines put nothing of its own in the cart, and nor did a
@@ -1435,6 +1499,26 @@ export function createMerchantStaffDiningRound(options: {
           }
           return "Kept";
         };
+        removeRoundItems = async () => {
+          const removed = await removeKnownItems();
+          if (removed !== "Removed" || !addUnanswered) return removed;
+          // v15 b12 review: a dish whose adding was not answered may be in the cart. Only a cart
+          // holding nothing but the guests' lines as the round took them in says it is not; any
+          // other line (it can't be told from a guest's new one, so it is never taken out) means
+          // staff are told the round's dishes may still be at the table.
+          try {
+            const fresh = await selectAgain();
+            if (fresh.status !== "Selected") return "Kept";
+            return fresh.pendingItems.every(
+              (item) => item.quantity <= (guestQuantities.get(item.cartItemReference) ?? 0),
+            )
+              ? "Removed"
+              : "Kept";
+          } catch (error) {
+            report(error);
+            return "Kept";
+          }
+        };
         /**
          * WP-2423 (staff-round-soldout): the quote or checkout found one of the guests' lines can't
          * be sold (it sold out a moment ago, or the Cart's marks could not be read). Once this
@@ -1470,16 +1554,22 @@ export function createMerchantStaffDiningRound(options: {
           );
         };
         for (const [index, line] of command.lines.entries()) {
-          const added = await options.pipeline.addItem(credentials, {
-            operationReference: options.nextReference(),
-            cartReference: cart.cartReference,
-            expectedCartVersion: cartVersion,
-            sellableReference: line.sellableReference,
-            quantity: line.quantity,
-            optionSelections: line.optionSelections,
-            customerNote: line.note,
-            requestedAt: now(),
-          });
+          let added: Awaited<ReturnType<CounterGuestPipeline["addItem"]>>;
+          try {
+            added = await options.pipeline.addItem(credentials, {
+              operationReference: options.nextReference(),
+              cartReference: cart.cartReference,
+              expectedCartVersion: cartVersion,
+              sellableReference: line.sellableReference,
+              quantity: line.quantity,
+              optionSelections: line.optionSelections,
+              customerNote: line.note,
+              requestedAt: now(),
+            });
+          } catch (error) {
+            addUnanswered = true;
+            throw error;
+          }
           if (added.status === "CheckoutInProgress")
             return fail("STAFF_ROUND_TABLE_CHECKOUT_IN_PROGRESS");
           if (added.status === "CartChanged") {
@@ -1537,14 +1627,12 @@ export function createMerchantStaffDiningRound(options: {
           if (await roundExists()) return finished("Placed", entry.record);
           const removed = await withdraw();
           if (await roundExists()) return finished("Placed", entry.record);
-          // Items that could not be taken out prove nothing: the same command is sent again. Items
-          // gone from the cart some other way went out (or were taken out) with someone else's.
+          // v15 b12 review: no round exists. Items gone from the cart some other way went out (or
+          // were taken out) with someone else's; items that could not be taken out are still in
+          // the table's cart. Either way staff are told so and the order is cleared: never "still
+          // being sent", whose retry would later answer "didn't go through, send it again".
           return fail(
-            removed === "Removed"
-              ? "STAFF_ROUND_UNAVAILABLE"
-              : removed === "Gone"
-                ? "STAFF_ROUND_NOT_WITHDRAWN"
-                : "STAFF_ROUND_IN_PROGRESS",
+            removed === "Removed" ? "STAFF_ROUND_UNAVAILABLE" : "STAFF_ROUND_NOT_WITHDRAWN",
           );
         };
         const quoted = await options.pipeline.quote(credentials, {
@@ -1736,7 +1824,8 @@ export function createMerchantStaffDiningRound(options: {
             if (
               settling instanceof StaffDiningRoundError &&
               (settling.code === "STAFF_ROUND_UNAVAILABLE" ||
-                settling.code === "STAFF_ROUND_IN_PROGRESS")
+                settling.code === "STAFF_ROUND_IN_PROGRESS" ||
+                settling.code === "STAFF_ROUND_NOT_WITHDRAWN")
             )
               throw settling;
             // Where it stands can't be read now: the same command is sent again to recover it.
@@ -1749,37 +1838,44 @@ export function createMerchantStaffDiningRound(options: {
         )(error);
       }
     };
-    try {
-      // Placed (or this command's round, sent before): the turn ended with the round itself.
-      return await send();
-    } catch (error) {
-      // DEC-STAFF-ROUND-ONE-AT-A-TIME: the next staff round for the table can go now. When this
-      // can't be written, the turn ends by itself after its lease.
+    // DEC-STAFF-ROUND-ONE-AT-A-TIME: ends this round's turn, so the next staff round for the table
+    // can go now. When this can't be written, the turn ends by itself after its lease (or once its
+    // round is found), and the answer is never changed for it.
+    const endTurn = async (
+      outcome: "Placed" | "NotSent" | "DishesLeftAtTable" | "Unknown",
+    ): Promise<void> => {
       const held: string | null = turnReference;
-      if (held !== null) {
-        const code = error instanceof StaffDiningRoundError ? error.code : null;
-        const outcome =
-          code === "STAFF_ROUND_NOT_WITHDRAWN"
-            ? ("DishesLeftAtTable" as const)
-            : code === null ||
-                code === "STAFF_ROUND_IN_PROGRESS" ||
-                code === "STAFF_ROUND_NOT_FINISHED" ||
-                code === "STAFF_ROUND_ALREADY_SENT"
-              ? ("Unknown" as const)
-              : ("NotSent" as const);
+      if (held === null) return;
+      try {
+        await inScope((tx, scope, allowed) =>
+          turns(scope, allowed).end(tx, { turnReference: held, outcome }),
+        );
+      } catch (ending) {
         try {
-          await inScope((tx, scope, allowed) =>
-            turns(scope, allowed).end(tx, { turnReference: held, outcome }),
-          );
-        } catch (ending) {
-          try {
-            options.onUnexpected?.(ending);
-          } catch {
-            // Reporting never changes the answer.
-          }
+          options.onUnexpected?.(ending);
+        } catch {
+          // Reporting never changes the answer.
         }
       }
+    };
+    let result: StaffDiningRoundResult;
+    try {
+      result = await send();
+    } catch (error) {
+      const code = error instanceof StaffDiningRoundError ? error.code : null;
+      await endTurn(
+        code === "STAFF_ROUND_NOT_WITHDRAWN"
+          ? "DishesLeftAtTable"
+          : code === null ||
+              code === "STAFF_ROUND_IN_PROGRESS" ||
+              code === "STAFF_ROUND_NOT_FINISHED" ||
+              code === "STAFF_ROUND_ALREADY_SENT"
+            ? "Unknown"
+            : "NotSent",
+      );
       throw error;
     }
+    // Placed (or this command's round, sent before): the turn ended with the round itself.
+    return result;
   };
 }

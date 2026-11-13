@@ -5,6 +5,7 @@ import { it, vi } from "vitest";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 import { prepareRealStaffRoundStore } from "../test-support/real-staff-round-store.mjs";
 import { createPilotApiRole } from "../test-support/sole-operator-brand-gate.mjs";
+import { createPostgresStaffDiningRoundTableTurnStore } from "../../rms/ordering/src/index.ts";
 
 const { Client } = pg;
 const id = (n) => "01a0fd00-0000-7000-8000-" + n.toString(16).padStart(12, "0");
@@ -173,11 +174,12 @@ it("two staff send a round for one table at once: each dish goes out once, every
         )
       ).rows;
       assert.equal(left, 0);
-      // The rounds took turns at the table: two turns, each ended by its own placed round.
+      // The rounds took turns at the table: two turns, each ended with a row by its own placed
+      // round (v15 b12 review: the next round's check never looks for it among sent rounds).
       const turns = (
         await admin.query(
           `SELECT t.actor_id::text AS actor,
-             (SELECT count(*)::int FROM rms_ordering.staff_dining_round_table_turn_end e
+             (SELECT string_agg(e.outcome,',') FROM rms_ordering.staff_dining_round_table_turn_end e
                WHERE e.turn_id=t.turn_id) AS ended
            FROM rms_ordering.staff_dining_round_table_turn t WHERE t.table_id=$1 ORDER BY t.begun_at`,
           [tableReference],
@@ -187,8 +189,17 @@ it("two staff send a round for one table at once: each dish goes out once, every
       assert.deepEqual(new Set(turns.map((turn) => turn.actor)), new Set([id(0x710), id(0x711)]));
       assert.deepEqual(
         turns.map((turn) => turn.ended),
-        [0, 0],
+        ["Placed", "Placed"],
       );
+      // A turn whose end could not be written is over once its round exists: the round is found
+      // by its table guest through an index, never by reading the Store's sent rounds.
+      const [{ indexed }] = (
+        await admin.query(
+          `SELECT count(*)::int AS indexed FROM pg_indexes WHERE schemaname='rms_ordering'
+            AND indexname IN ('order_batch_submitted_by_actor_idx','staff_dining_round_table_turn_operation_idx')`,
+        )
+      ).rows;
+      assert.equal(indexed, 2);
 
       // The later round (a further round of the table's order) locks the stock it uses before
       // the Store's audit chain, as the opening round does: a round taking them in the other order
@@ -235,6 +246,7 @@ it("two staff send a round for one table at once: each dish goes out once, every
       // A third tablet's round while the table's turn is held by a round that never finished
       // (its tablet lost the connection): refused as busy at once, nothing put in the cart.
       const held = reference();
+      const heldOperation = reference();
       await store.asApi((tx) =>
         tx.query(
           `INSERT INTO rms_ordering.staff_dining_round_table_turn
@@ -246,7 +258,7 @@ it("two staff send a round for one table at once: each dish goes out once, every
             store.ownerScope.brandReference,
             store.ownerScope.storeReference,
             tableReference,
-            reference(),
+            heldOperation,
             id(0x710),
           ],
         ),
@@ -277,6 +289,20 @@ it("two staff send a round for one table at once: each dish goes out once, every
       );
       const next = await round(c, third);
       assert.deepEqual([next.status, next.totalMinor], ["Placed", "735"]);
+      // v15 b12 review: the same command sent again reads how its turns ended, as the pilot API
+      // role: one that ended without knowing is never answered "send it again".
+      const turnStore = createPostgresStaffDiningRoundTableTurnStore({
+        brandReference: store.ownerScope.brandReference,
+        storeReference: store.ownerScope.storeReference,
+        authorize: async () => true,
+      });
+      assert.deepEqual(
+        await store.asApi(async (tx) => [
+          await turnStore.outcomeOf(tx, heldOperation),
+          await turnStore.outcomeOf(tx, reference()),
+        ]),
+        ["Undecided", "None"],
+      );
       // The turn records are append-only, also for the pilot API role.
       await assert.rejects(
         store.asApi((tx) =>
