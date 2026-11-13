@@ -237,6 +237,44 @@ describe("v15 2026-10-16: a server error logs its safe cause code", () => {
     ]);
   });
 
+  it("WP-2423 (rush-logging-and-entry): each completion line names the route template it matched, never the path", async () => {
+    // v15 2026-11-13: busy answers (503) could not be counted by route, because the completion
+    // line carried no route or path.
+    const entries: unknown[] = [];
+    const app = express();
+    app.use(
+      createRequestCorrelationMiddleware({
+        logger: { info: (entry) => entries.push(entry) },
+        routeTemplates: ["/bff/customer/carts/:cart_id"],
+      }),
+    );
+    app.get("/bff/customer/carts/:cart_id", (_request, response) => {
+      response.status(503).end();
+    });
+    app.get("/not-registered", (_request, response) => {
+      response.status(200).end();
+    });
+    const base = await listen(app);
+    for (const path of [
+      "/bff/customer/carts/018f1f48-7b5d-7a04-8a1b-123456789abc",
+      "/not-registered",
+      "/nowhere",
+    ])
+      await fetch(base + path);
+    await expect.poll(() => entries.length).toBe(3);
+    expect(
+      entries.map((entry) => {
+        const { route, statusCode } = entry as { route: string; statusCode: number };
+        return { route, statusCode };
+      }),
+    ).toEqual([
+      { route: "/bff/customer/carts/:cart_id", statusCode: 503 },
+      { route: "unmatched", statusCode: 200 },
+      { route: "unmatched", statusCode: 404 },
+    ]);
+    expect(JSON.stringify(entries)).not.toContain("018f1f48-7b5d");
+  });
+
   it("names the innermost safe code and SQLSTATE behind a customer error", () => {
     const conflict = Object.assign(new Error("x"), {
       code: "TENANT_DATABASE_TRANSACTION_CONFLICT",

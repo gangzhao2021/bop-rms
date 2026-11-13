@@ -3,6 +3,13 @@ import pino, { type DestinationStream, type Logger } from "pino";
 const safeName = /^[a-z][a-z0-9-]{0,62}$/u;
 const safeEvent = /^[a-z][a-z0-9_]{0,62}$/u;
 const safeCode = /^[A-Z][A-Z0-9_]{0,63}$/u;
+/**
+ * WP-2423 (rush-logging-and-entry): a route template as registered (`/api/v1/customer/cart`,
+ * `/orders/:orderReference`) or `unmatched`; never a concrete path, so no reference or object
+ * identifier can reach a log through it.
+ */
+const safeRoute = /^(?:unmatched|\/[A-Za-z0-9_:./-]{0,199})$/u;
+const routeIdentifier = /[0-9a-f]{8}-[0-9a-f]{4}|[0-9]{5,}|[A-Za-z0-9_-]{32,}/iu;
 const uuidV7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const inputFields = new Set([
   "durationMs",
@@ -11,6 +18,7 @@ const inputFields = new Set([
   "port",
   "requestId",
   "resultCode",
+  "route",
   "signal",
   "statusCode",
   "trustedContext",
@@ -61,6 +69,8 @@ export interface StructuredLogInput<EventName extends string = string> {
   readonly port?: number;
   readonly requestId?: string;
   readonly resultCode?: string;
+  /** The request's route template (or `unmatched`), never its concrete path. */
+  readonly route?: string;
   readonly signal?: "SIGINT" | "SIGTERM";
   readonly statusCode?: number;
   /**
@@ -89,6 +99,7 @@ interface SerializedRecord {
   port?: number;
   requestId?: string;
   resultCode?: string;
+  route?: string;
   signal?: "SIGINT" | "SIGTERM";
   statusCode?: number;
 }
@@ -174,6 +185,12 @@ function serializeRecord(input: unknown, allowedEvents: ReadonlySet<string>): Se
   if (resultCode !== undefined) {
     requireSafeCode(resultCode);
     record.resultCode = resultCode;
+  }
+  const route = input.route;
+  if (route !== undefined) {
+    if (typeof route !== "string" || !safeRoute.test(route) || routeIdentifier.test(route))
+      throw new TypeError("structured log route rejected");
+    record.route = route;
   }
   const signal = input.signal;
   if (signal !== undefined) {

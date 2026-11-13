@@ -48,6 +48,11 @@ export interface RequestCompletionLogger {
     readonly resultCode:
       "HTTP_CLIENT_ERROR" | "HTTP_RETRY_LATER" | "HTTP_SERVER_ERROR" | "HTTP_SUCCESS";
     readonly statusCode: number;
+    /**
+     * WP-2423 (rush-logging-and-entry): the route template the request matched (or `unmatched`),
+     * so busy answers (503) can be counted by route; never the concrete path.
+     */
+    readonly route: string;
     readonly trustedContext: CorrelationContext;
     /** A server error's safe cause code (and SQLSTATE), when the route recorded one. */
     readonly error?: { readonly code: string; readonly value: undefined };
@@ -188,13 +193,14 @@ export function createRequestCorrelationMiddleware({
         (localRequest[requestRetryLaterKey] === true || requestShedFor(response))
           ? ("HTTP_RETRY_LATER" as const)
           : resultCode(response.statusCode);
+      const route = routeTemplate(request, registeredRoutes);
       telemetryOperation?.complete({
         durationMs,
         ...(localRequest[requestErrorCodeKey] === undefined
           ? {}
           : { errorCode: localRequest[requestErrorCodeKey] }),
         resultCode: completionResult,
-        routeTemplate: routeTemplate(request, registeredRoutes),
+        routeTemplate: route,
       });
       const failureCode =
         completionResult === "HTTP_SERVER_ERROR" ? localRequest[requestFailureCodeKey] : undefined;
@@ -208,6 +214,7 @@ export function createRequestCorrelationMiddleware({
           event: "http_request_completed",
           requestId,
           resultCode: completionResult,
+          route,
           statusCode: response.statusCode,
           trustedContext: correlation,
           ...(failureCode === undefined ? {} : { error: { code: failureCode, value: undefined } }),

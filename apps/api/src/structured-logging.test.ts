@@ -82,6 +82,7 @@ describe("WP-0040 API composition-root logging", () => {
       module: "api-runtime",
       requestId: response.headers.get("x-request-id"),
       resultCode: "HTTP_CLIENT_ERROR",
+      route: "unmatched",
       service: "bop-rms-api",
       statusCode: 404,
     });
@@ -95,6 +96,7 @@ describe("WP-0040 API composition-root logging", () => {
         "module",
         "requestId",
         "resultCode",
+        "route",
         "service",
         "statusCode",
         "time",
