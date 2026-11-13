@@ -9800,4 +9800,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "请输入收回的金额，必须大于 $0.00。没有记录。",
   "I confirm the guests have left and the table can be closed": "我确认顾客已离开，可以关台",
   "Signed in again. Opening this page with that sign-in…": "已重新登录。正在用这个登录打开本页…",
+  "last read: paid": "上次读到：已付",
+  "last read: nothing to pay": "上次读到：无需付款",
+  "last read: {amount} to pay": "上次读到：待付 {amount}",
+  "The bill changed after it was split: it is now {amount} for the whole table. Split it again before taking payments.":
+    "分单以后账单有变化：现在整桌是 {amount}。请重新分单再收款。",
 });
