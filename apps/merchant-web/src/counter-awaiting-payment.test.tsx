@@ -4,6 +4,7 @@ import {
   CurrentOrderDetails,
   CurrentOrderQueueRows,
   cancelledUnpaid,
+  filterCurrentOrderItems,
   orderCountText,
 } from "./CurrentOrderQueuePage.js";
 import { parseCurrentOrderQueue } from "./current-order-queue-client.js";
@@ -300,6 +301,55 @@ it("DEC-PAPER-ORDER-NEVER-RELEASED: a paper order closed as entered again names 
         ),
       ),
     ).toThrow();
+});
+
+it("v15 b12: a paper order entered again reads paid on paper with its sale's order in the money column, and is not under Cancelled", () => {
+  const closed = parse({
+    ...counterItem(
+      {},
+      {
+        recordedAfterOutage: true,
+        canCancelUnpaid: false,
+        canCloseAsReentered: false,
+        cancelledBeforePayment: {
+          reasonCode: "COUNTER_PAPER_REENTERED",
+          cancelledAt: "2026-10-21T17:30:00.000Z",
+          reenteredOrderNumber: "34",
+        },
+      },
+    ),
+    awaitingPayment: false,
+    currentPhase: "Cancelled",
+  });
+  const html = renderToStaticMarkup(
+    <CurrentOrderQueueRows
+      view={{ items: [closed], nextAfterOrderReference: null, unreadable: [] }}
+      timeZone="America/Toronto"
+    />,
+  );
+  expect(html).toContain("Paid on paper · its sale is on order 34");
+  expect(html).not.toContain("No payment recorded");
+  const filtered = (phase: string) =>
+    filterCurrentOrderItems([closed], { orderNumber: "", type: "All", channel: "All", phase }).map(
+      (order) => order.orderNumber,
+    );
+  expect(filtered("Cancelled")).toEqual([]);
+  expect(filtered("ReEntered")).toEqual(["7"]);
+  // A counter order cancelled before payment still is one of the Cancelled.
+  const cancelled = parse({
+    ...counterItem({ counter: null, sourceChannel: "Qr", orderType: "DineIn" }),
+    awaitingPayment: false,
+    currentPhase: "Cancelled",
+    batches: [],
+  });
+  expect(
+    filterCurrentOrderItems([cancelled], {
+      orderNumber: "",
+      type: "All",
+      channel: "All",
+      phase: "Cancelled",
+    }),
+  ).toHaveLength(1);
 });
 
 it("says how many orders the list shows without page jargon", () => {

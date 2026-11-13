@@ -7,7 +7,9 @@ import { createMerchantPickupContactRemoval } from "../../../apps/api/src/mercha
 import { renderPilotAclSql } from "../../../tooling/environment/pilot-acl-render.mjs";
 import { storeRoleTemplateActions } from "../../bop/permission/src/index.ts";
 import {
+  loadOrderPickupContact,
   readCheckoutContactPresence,
+  removeCheckoutContactOnCustomerRequest,
   removeCheckoutContactOnStaffRequest,
 } from "../../rms/ordering/src/index.ts";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
@@ -144,6 +146,34 @@ it("M108: staff remove a guest's pickup contact once, attributed, for this Store
           }),
         ),
         "Removed",
+      );
+      // v15 b12: the staff order detail reads why it was removed, as the api role: staff removed it
+      // at the guest's request, never "kept only for a limited time".
+      const staffRead = await api((tx) => loadOrderPickupContact(tx, scope, order));
+      assert.equal(staffRead.status, "Removed");
+      assert.equal(staffRead.because, "StaffOnGuestRequest");
+      // A guest who removed it from their own order page: the guest asked.
+      const own = await seedPickupOrderWithContact(admin, scope, 0x70);
+      assert.deepEqual(
+        await api((tx) =>
+          removeCheckoutContactOnCustomerRequest(tx, scope, {
+            orderReference: own.order,
+            guestSessionReference: id(0x70 + 4),
+            observedAt: new Date().toISOString(),
+            redactionReference: id(0x80),
+          }),
+        ),
+        { status: "Removed" },
+      );
+      const guestRead = await api((tx) => loadOrderPickupContact(tx, scope, own.order));
+      assert.equal(guestRead.status, "Removed");
+      assert.equal(guestRead.because, "GuestAsked");
+      assert.equal(JSON.stringify(guestRead).includes("4165550123"), false);
+      // An order whose contact is still kept reads it, with no reason.
+      const kept = await seedPickupOrderWithContact(admin, scope, 0x90);
+      assert.equal(
+        (await api((tx) => loadOrderPickupContact(tx, scope, kept.order))).status,
+        "Available",
       );
       const evidence = await admin.query(
         "SELECT policy_code,retention_days,removed_by_actor_id::text AS actor,row_to_json(r)::text AS text FROM rms_ordering.checkout_contact_redaction r WHERE details_id=$1",

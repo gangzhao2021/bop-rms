@@ -8,7 +8,8 @@ import {
 
 /**
  * WP-2423 Q10: the contact a pickup customer gave "so the store can reach you about this order".
- * `Removed` once the retention period deleted it (the evidence row says so; the value is gone).
+ * `Removed` once the retention period, the guest or staff at the guest's request removed it (the
+ * evidence row says when and why; the value is gone).
  */
 export type OrderPickupContact =
   | {
@@ -20,8 +21,22 @@ export type OrderPickupContact =
       readonly detailsReference: string;
       readonly detailsVersion: number;
     }
-  | { readonly status: "Removed"; readonly removedAt: string }
+  | {
+      readonly status: "Removed";
+      readonly removedAt: string;
+      /**
+       * v15 b12: why, from the evidence row's policy, so staff tell the guest the true reason:
+       * the retention period, the guest's own request, or staff at the guest's request.
+       */
+      readonly because: OrderPickupContactRemovedBecause;
+    }
   | { readonly status: "NotGiven" };
+export type OrderPickupContactRemovedBecause = "Retention" | "GuestAsked" | "StaffOnGuestRequest";
+const removedBecause: Readonly<Record<string, OrderPickupContactRemovedBecause>> = Object.freeze({
+  CHECKOUT_CONTACT_RETENTION: "Retention",
+  CUSTOMER_REQUEST: "GuestAsked",
+  STAFF_ON_CUSTOMER_REQUEST: "StaffOnGuestRequest",
+});
 
 const fail = (): never => {
   throw new Error("ORDER_PICKUP_CONTACT_UNAVAILABLE");
@@ -45,11 +60,12 @@ export async function loadOrderPickupContact(
   );
   const result = (await transaction.query(
     "SELECT d.snapshot_json AS snapshot," +
-      "(SELECT to_char(r.redacted_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') FROM rms_ordering.checkout_contact_redaction r " +
-      "WHERE r.brand_id=d.brand_id AND r.store_id=d.store_id AND r.details_id=d.details_id AND r.details_version=d.details_version) AS removed_at " +
+      "to_char(r.redacted_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') AS removed_at," +
+      "r.policy_code AS removed_policy " +
       "FROM rms_ordering.order_submission_record s " +
       "JOIN rms_ordering.order_checkout_details_link l ON l.brand_id=s.brand_id AND l.store_id=s.store_id AND l.submission_id=s.submission_id " +
       "JOIN rms_ordering.checkout_details_record d ON d.brand_id=l.brand_id AND d.store_id=l.store_id AND d.details_id=l.details_id AND d.details_version=l.details_version " +
+      "LEFT JOIN rms_ordering.checkout_contact_redaction r ON r.brand_id=d.brand_id AND r.store_id=d.store_id AND r.details_id=d.details_id AND r.details_version=d.details_version " +
       "WHERE s.brand_id=$1 AND s.store_id=$2 AND s.order_id=$3 AND s.submission_kind='Initial' LIMIT 2",
     [brand, store, order],
   )) as { readonly rows?: unknown } | null;
@@ -57,12 +73,18 @@ export async function loadOrderPickupContact(
   if (!Array.isArray(rows) || rows.length > 1) return fail();
   const row = rows[0] as Record<string, unknown> | undefined;
   if (row === undefined) return Object.freeze({ status: "NotGiven" });
-  if (Object.keys(row).length !== 2) return fail();
+  if (Object.keys(row).length !== 3) return fail();
   const snapshot = parseCheckoutDetailsSnapshot(row.snapshot);
   if (snapshot.brandReference !== brand || snapshot.storeReference !== store) return fail();
-  if (typeof row.removed_at === "string")
-    return Object.freeze({ status: "Removed", removedAt: row.removed_at });
-  if (row.removed_at !== null) return fail();
+  if (typeof row.removed_at === "string") {
+    const because =
+      typeof row.removed_policy === "string" && Object.hasOwn(removedBecause, row.removed_policy)
+        ? removedBecause[row.removed_policy]
+        : undefined;
+    if (because === undefined) return fail();
+    return Object.freeze({ status: "Removed", removedAt: row.removed_at, because });
+  }
+  if (row.removed_at !== null || row.removed_policy !== null) return fail();
   const contact = snapshot.pickupContact;
   return contact === null
     ? Object.freeze({ status: "NotGiven" })

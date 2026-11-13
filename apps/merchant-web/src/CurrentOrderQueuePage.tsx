@@ -176,25 +176,29 @@ export function filterCurrentOrderItems(
           ? isAwaitingAcceptance(order)
           : filters.phase === "OutageHeld"
             ? order.acceptanceHold !== null
-            : filters.phase === "Expired"
-              ? order.unfulfillable !== null
-              : filters.phase === "NotCollected"
-                ? order.pickupNotCollected
-                : filters.phase === "AwaitingPayment"
-                  ? order.awaitingPayment
-                  : order.unfulfillable === null &&
-                    !order.pickupNotCollected &&
-                    !order.awaitingPayment &&
-                    // Orders v3: an accepted pickup counts where the kitchen has it (being made,
-                    // ready), as its row says.
-                    ((order.currentPhase === "Accepted" && order.kitchenPhase !== null
-                      ? order.kitchenPhase
-                      : (order.currentPhase ?? "Unavailable")) === filters.phase ||
-                      // An accepted order the kitchen shows nothing for yet (every table order, whose
-                      // kitchen state is per round) is still being worked on: no tab may lose it.
-                      (filters.phase === "InProgress" &&
-                        order.currentPhase === "Accepted" &&
-                        order.kitchenPhase === null)))),
+            : filters.phase === "ReEntered"
+              ? reenteredAs(order) !== null
+              : filters.phase === "Expired"
+                ? order.unfulfillable !== null
+                : filters.phase === "NotCollected"
+                  ? order.pickupNotCollected
+                  : filters.phase === "AwaitingPayment"
+                    ? order.awaitingPayment
+                    : order.unfulfillable === null &&
+                      !order.pickupNotCollected &&
+                      !order.awaitingPayment &&
+                      // v15 b12: paid on paper and entered again is never one of the "Cancelled".
+                      reenteredAs(order) === null &&
+                      // Orders v3: an accepted pickup counts where the kitchen has it (being made,
+                      // ready), as its row says.
+                      ((order.currentPhase === "Accepted" && order.kitchenPhase !== null
+                        ? order.kitchenPhase
+                        : (order.currentPhase ?? "Unavailable")) === filters.phase ||
+                        // An accepted order the kitchen shows nothing for yet (every table order, whose
+                        // kitchen state is per round) is still being worked on: no tab may lose it.
+                        (filters.phase === "InProgress" &&
+                          order.currentPhase === "Accepted" &&
+                          order.kitchenPhase === null)))),
   );
 }
 const ordersListPhases: ReadonlySet<string> = new Set([
@@ -210,6 +214,7 @@ const ordersListPhases: ReadonlySet<string> = new Set([
   "Expired",
   "AwaitingPayment",
   "NotCollected",
+  "ReEntered",
 ]);
 const ordersListChannels: ReadonlySet<string> = new Set(
   orderChannelFilterOptions.map((option) => option.value),
@@ -1460,6 +1465,29 @@ export function orderAmountRefunded(
  * rounds were never paid, or a counter order released unpaid); its row says so instead of a dash.
  */
 /**
+ * v15 b12: when and why a pickup contact was removed, as staff tell the guest: the guest asked (on
+ * their phone, or staff for them), or the retention period ended. Never a retention reason for a
+ * removal the guest asked for.
+ */
+export function pickupContactRemovedText(
+  contact: { readonly removedAt: string; readonly because: string },
+  timeZone: string | undefined,
+): string {
+  const value = new Date(contact.removedAt).toLocaleDateString(displayLocale(), {
+    ...(timeZone ? { timeZone } : {}),
+    dateStyle: "medium",
+  });
+  return contact.because === "GuestAsked"
+    ? t("The customer removed their contact on {value}, from their order page.", { value })
+    : contact.because === "StaffOnGuestRequest"
+      ? t("Staff removed the customer's contact on {value}, at the customer's request.", { value })
+      : t(
+          "The customer's contact was removed on {value} (contacts are kept only for a limited time).",
+          { value },
+        );
+}
+
+/**
  * v15 2026-11-11 b10 (DEC-PAPER-ORDER-NEVER-RELEASED): a paper order paid during the outage and
  * entered again: the new order's number, which carries its sale. Its badge and note say so, never
  * "Cancelled" or "Not paid" (the guest paid; the sale is on the new order).
@@ -1753,17 +1781,7 @@ export function PickupContactPanel({
           )}
         </p>
       ) : contact.status === "Removed" ? (
-        <p>
-          {t(
-            "The customer's contact was removed on {value} (contacts are kept only for a limited time).",
-            {
-              value: new Date(contact.removedAt).toLocaleDateString(displayLocale(), {
-                ...(timeZone ? { timeZone } : {}),
-                dateStyle: "medium",
-              }),
-            },
-          )}
-        </p>
+        <p>{pickupContactRemovedText(contact, timeZone)}</p>
       ) : (
         <p>{t("No contact was given. Call out the order number at the counter.")}</p>
       )}
@@ -2245,6 +2263,11 @@ export function orderAmountNote(
             amount: orderMoney({ amountMinor: paid.refundedMinor, currencyCode: "CAD" }),
           });
   }
+  // v15 b12 (DEC-PAPER-ORDER-NEVER-RELEASED): paid on paper and entered again: its money is on the
+  // new order, never read as an unpaid sale or "No payment recorded".
+  const reentered = reenteredAs(order);
+  if (reentered !== null && orderAmountTaken(order) === null)
+    return t("Paid on paper · its sale is on order {orderNumber}", { orderNumber: reentered });
   // Only an order known to be waiting for its payment says "Not paid"; no payment on the list is
   // otherwise just not known here.
   if (orderAmountTaken(order) === null)
@@ -2416,6 +2439,12 @@ export function orderRecordRows(
   today: string | null,
   /** v15 batch 7: a table that pays at the end; its rounds go to the kitchen unpaid when sent. */
   payLater = false,
+  /**
+   * v15 b12 (DEC-PAPER-ORDER-NEVER-RELEASED): a paper order paid during the outage and entered
+   * again as this order number. Its closing is never recorded as "Cancelled": the guest paid and the
+   * sale is on the new order.
+   */
+  reenteredAsOrder: string | null = null,
 ): readonly { readonly key: string; readonly label: string; readonly text: string }[] {
   const when = (at: string) => orderWhen(at, timeZone, today);
   const rows: { key: string; label: string; text: string }[] = [];
@@ -2473,7 +2502,11 @@ export function orderRecordRows(
           ? t("Items cancelled")
           : cancellation.what === "Round"
             ? t("Round cancelled")
-            : t("Cancelled"),
+            : reenteredAsOrder !== null
+              ? t("Closed · entered again as order {orderNumber}", {
+                  orderNumber: reenteredAsOrder,
+                })
+              : t("Cancelled"),
       text: t("{name} · {at}", { name: personLabel(cancellation.by), at: when(cancellation.at) }),
     });
   for (const [index, refund] of record.refunds.entries())
@@ -2921,6 +2954,7 @@ function OrderDetailBody({
                 timeZone,
                 today,
                 order.tableBill !== null,
+                reenteredAs(order),
               ).map((row) => (
                 <div key={row.key}>
                   <dt>{row.label}</dt>
@@ -4567,6 +4601,7 @@ export function CurrentOrderQueuePage({
                               ["Expired", t("Expired · refunded")],
                               ["AwaitingPayment", t("Awaiting payment")],
                               ["NotCollected", t("Not collected")],
+                              ["ReEntered", t("Paid on paper · entered again")],
                             ])}
                             <p className="order-filter__scope">
                               {t("Filters look only at the orders loaded on this page.")}

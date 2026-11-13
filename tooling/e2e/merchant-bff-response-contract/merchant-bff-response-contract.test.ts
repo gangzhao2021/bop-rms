@@ -1130,7 +1130,12 @@ describe("merchant BFF responses carry every read-model field the browser parses
   });
 
   it("order detail", async () => {
-    for (const model of [detailView, pickupDetailView]) {
+    // v15 b12: a removed contact says why (the guest asked), through the route to the browser.
+    const removedContactView = {
+      ...pickupDetailView,
+      pickupContact: { status: "Removed", removedAt: at(30), because: "GuestAsked" },
+    } satisfies Queue;
+    for (const model of [detailView, pickupDetailView, removedContactView]) {
       stub("orderQueue").mockResolvedValue(model);
       const order = (model.items[0] ?? dineIn).orderReference;
       const detail = await throughClient(() =>

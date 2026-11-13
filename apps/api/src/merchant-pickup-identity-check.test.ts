@@ -161,7 +161,11 @@ it("reads nothing while the pickup code can still be used, or the order is not r
 
 it("says when the contact was removed, never given, or was an email", async () => {
   const f = setup();
-  doubles.contact.mockResolvedValue({ status: "Removed", removedAt: "2026-09-01T00:00:00.000Z" });
+  doubles.contact.mockResolvedValue({
+    status: "Removed",
+    removedAt: "2026-09-01T00:00:00.000Z",
+    because: "Retention",
+  });
   expect(await f.operation(f.input)).toEqual({ status: "Removed" });
   doubles.contact.mockResolvedValue({ status: "NotGiven" });
   expect(await f.operation(f.input)).toEqual({ status: "NotGiven" });

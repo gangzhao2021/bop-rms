@@ -1910,13 +1910,25 @@ it("WP-2423 Q10: shows who the pickup is for and how to reach them, only from th
     />,
   );
   expect(email).toContain('href="mailto:guest@example.test"');
-  const removed = renderToStaticMarkup(
-    <PickupContactPanel
-      contact={{ status: "Removed", removedAt: "2026-11-10T12:00:00.000Z" }}
-      timeZone="America/Toronto"
-    />,
+  const removed = (because: "Retention" | "GuestAsked" | "StaffOnGuestRequest") =>
+    renderToStaticMarkup(
+      <PickupContactPanel
+        contact={{ status: "Removed", removedAt: "2026-11-10T12:00:00.000Z", because }}
+        timeZone="America/Toronto"
+      />,
+    );
+  expect(removed("Retention")).toContain(
+    "contact was removed on Nov 10, 2026 (contacts are kept only for a limited time)",
   );
-  expect(removed).toContain("contact was removed on Nov 10, 2026");
+  // v15 b12: a removal the guest asked for never gives the retention period as its reason.
+  expect(removed("GuestAsked")).toContain(
+    "The customer removed their contact on Nov 10, 2026, from their order page.",
+  );
+  expect(removed("GuestAsked")).not.toContain("limited time");
+  expect(removed("StaffOnGuestRequest")).toContain(
+    "Staff removed the customer&#x27;s contact on Nov 10, 2026, at the customer&#x27;s request.",
+  );
+  expect(removed("StaffOnGuestRequest")).not.toContain("limited time");
   expect(renderToStaticMarkup(<PickupContactPanel contact={{ status: "NotGiven" }} />)).toContain(
     "No contact was given",
   );

@@ -964,10 +964,17 @@ it("WP-2423 Q10: admits the pickup customer's contact on the detail and refuses 
   ).toEqual(contact);
   expect(
     parseCurrentOrderDetail(
-      { ...pickup, pickupContact: { status: "Removed", removedAt: "2026-11-10T08:00:00.000Z" } },
+      {
+        ...pickup,
+        pickupContact: {
+          status: "Removed",
+          removedAt: "2026-11-10T08:00:00.000Z",
+          because: "GuestAsked",
+        },
+      },
       id(1),
     ).pickupContact,
-  ).toEqual({ status: "Removed", removedAt: "2026-11-10T08:00:00.000Z" });
+  ).toEqual({ status: "Removed", removedAt: "2026-11-10T08:00:00.000Z", because: "GuestAsked" });
   expect(
     parseCurrentOrderDetail({ ...pickup, pickupContact: { status: "NotGiven" } }, id(1))
       .pickupContact,
@@ -976,7 +983,10 @@ it("WP-2423 Q10: admits the pickup customer's contact on the detail and refuses 
     { ...contact, value: "416-555-0123" },
     { ...contact, channel: "Email", value: "not-an-email" },
     { ...contact, guestSessionReference: id(9) },
-    { status: "Removed", removedAt: "yesterday" },
+    { status: "Removed", removedAt: "yesterday", because: "Retention" },
+    // v15 b12: why it was removed is always said, and only as one of the three reasons.
+    { status: "Removed", removedAt: "2026-11-10T08:00:00.000Z" },
+    { status: "Removed", removedAt: "2026-11-10T08:00:00.000Z", because: "CUSTOMER_REQUEST" },
     { status: "NotGiven", name: "x" },
   ])
     expect(() => parseCurrentOrderDetail({ ...pickup, pickupContact: invalid }, id(1))).toThrow();

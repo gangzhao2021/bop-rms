@@ -499,6 +499,8 @@ it("WP-2423 Q10: order continuity reads, staff contact, retention removal and pa
       const removed = await runAs(apiRole, (tx) => loadOrderPickupContact(tx, scope, id(0x101)));
       assert.equal(removed.status, "Removed");
       assert.equal(Date.parse(removed.removedAt), Date.parse(now));
+      // v15 b12: staff read why: the retention period ended.
+      assert.equal(removed.because, "Retention");
       // Idempotent: nothing left to clear.
       assert.deepEqual(await redact(apiRole), { redacted: 0 });
 

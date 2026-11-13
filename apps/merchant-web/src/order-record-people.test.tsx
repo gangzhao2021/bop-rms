@@ -120,4 +120,27 @@ describe("M61: the order record says who did what", () => {
       ["退款 $12.50", "刷卡机 · Mia 申请，你 批准 · 20:30"],
     ]);
   });
+
+  it("v15 b12: a paper order entered again is recorded as closed and entered again, never Cancelled (en and zh)", () => {
+    const parsed = parseOrderRecordPeople({
+      ...record,
+      accepted: [],
+      handedOver: [],
+      payments: [],
+      refunds: [],
+      cancellations: [{ what: "Order", by: "You", at: "2026-11-06T01:12:00.000Z" }],
+    });
+    expect(
+      orderRecordRows(parsed, "Pickup", tz, "2026-11-05", false, "85").map((row) => [
+        row.label,
+        row.text,
+      ]),
+    ).toEqual([["Closed · entered again as order 85", "You · 20:12"]]);
+    // Any other whole-order cancellation still reads Cancelled.
+    expect(orderRecordRows(parsed, "Pickup", tz, "2026-11-05")[0]?.label).toBe("Cancelled");
+    setLanguageForTest("zh-Hans");
+    expect(orderRecordRows(parsed, "Pickup", tz, "2026-11-05", false, "85")[0]?.label).toBe(
+      "已关闭 · 已重新录入为订单 85",
+    );
+  });
 });

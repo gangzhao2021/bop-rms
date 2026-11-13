@@ -4564,6 +4564,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "顾客会获得全额退款 {refundMinor}，包括小费。",
   "The customer's contact was removed on {value} (contacts are kept only for a limited time).":
     "顾客的联系方式已于 {value} 删除（联系方式只保留有限时间）。",
+  "The customer removed their contact on {value}, from their order page.":
+    "顾客已于 {value} 在自己的订单页删除了联系方式。",
+  "Staff removed the customer's contact on {value}, at the customer's request.":
+    "员工已于 {value} 应顾客要求删除了联系方式。",
   "The customer's name and phone were deleted after the retention period.":
     "顾客的名字和手机号已在保留期满后删除。",
   "The customer's pickup code has expired.": "顾客的取餐码已过期。",
@@ -7044,8 +7048,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Sold out today: {item}": "今日售罄：{item}",
   "Listing… New prices go live first, then the menu. This usually takes under a minute, up to two when the system is busy. Guests keep ordering throughout.":
     "正在上架… 新价格先生效，菜单随后生效，通常不到一分钟，系统忙时最多两分钟。客人可以一直点单。",
-  "Saving… List it once the menu shows what you saved.":
-    "正在保存… 菜单显示刚保存的内容后再上架。",
+  "Saving… List it once the menu shows what you saved.": "正在保存… 菜单显示刚保存的内容后再上架。",
   "Reading the menu again to show what you saved. List it once it shows.":
     "正在重新读取菜单，以显示刚保存的内容。显示后再上架。",
   "List it once the menu is read again and shows what you saved.":
@@ -9544,6 +9547,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Paid during the outage · record it by {at}": "停电/断网时已付款 · 请在 {at} 前录入",
   "Paid on paper · payment not recorded": "纸单已付款 · 付款还没录入",
   "Paid on paper · entered again": "纸单已付款 · 已重新录入",
+  "Paid on paper · its sale is on order {orderNumber}":
+    "纸单已付款 · 这笔销售记在订单 {orderNumber} 上",
+  "Closed · entered again as order {orderNumber}": "已关闭 · 已重新录入为订单 {orderNumber}",
   "Paid on paper during the outage. Its sale is on order {orderNumber}; don't charge again.":
     "断网期间已按纸单付款。这笔销售记在订单 {orderNumber} 上，不要再收款。",
   "Payment not recorded": "付款未录入",

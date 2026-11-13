@@ -1489,7 +1489,12 @@ export type OrderPickupContact =
       readonly channel: "Phone" | "Email";
       readonly value: string;
     }
-  | { readonly status: "Removed"; readonly removedAt: string }
+  | {
+      readonly status: "Removed";
+      readonly removedAt: string;
+      /** v15 b12: the retention period, the guest's own request, or staff at their request. */
+      readonly because: "Retention" | "GuestAsked" | "StaffOnGuestRequest";
+    }
   | { readonly status: "NotGiven" };
 function parsePickupContact(value: unknown, orderType: string): OrderPickupContact | null {
   if (value === null) return null;
@@ -1501,10 +1506,16 @@ function parsePickupContact(value: unknown, orderType: string): OrderPickupConta
     return Object.freeze({ status: "NotGiven" });
   }
   if (status === "Removed") {
-    const raw = exact(value, ["status", "removedAt"]);
+    const raw = exact(value, ["status", "removedAt", "because"]);
     if (typeof raw.removedAt !== "string" || !Number.isFinite(Date.parse(raw.removedAt)))
       return fail();
-    return Object.freeze({ status: "Removed", removedAt: raw.removedAt });
+    if (
+      raw.because !== "Retention" &&
+      raw.because !== "GuestAsked" &&
+      raw.because !== "StaffOnGuestRequest"
+    )
+      return fail();
+    return Object.freeze({ status: "Removed", removedAt: raw.removedAt, because: raw.because });
   }
   const raw = exact(value, ["status", "name", "channel", "value"]);
   if (raw.status !== "Available" || (raw.channel !== "Phone" && raw.channel !== "Email"))

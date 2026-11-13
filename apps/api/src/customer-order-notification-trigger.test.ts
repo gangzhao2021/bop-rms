@@ -74,7 +74,11 @@ it("skips dine-in, missing or removed contacts and a channel without a provider"
     status: "Skipped",
     reason: "ChannelInactive",
   });
-  f.contact.mockResolvedValueOnce({ status: "Removed", removedAt: "2026-11-01T00:00:00.000Z" });
+  f.contact.mockResolvedValueOnce({
+    status: "Removed",
+    removedAt: "2026-11-01T00:00:00.000Z",
+    because: "Retention",
+  });
   expect((await t.handlers.onKitchenOrderReady({ orderReference: ref(3) })).status).toBe("Skipped");
   f.contact.mockResolvedValueOnce({ status: "NotGiven" });
   expect(await t.handlers.onKitchenOrderReady({ orderReference: ref(3) })).toEqual({
