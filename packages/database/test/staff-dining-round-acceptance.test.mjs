@@ -1909,6 +1909,20 @@ it("the real staff round command takes a round from table entry to the card mach
         code: "CARD_MACHINE_SLIP_ALREADY_RECORDED",
         slipOrderNumber: second.orderNumber,
       });
+      // b12: the paper round sent again after its paid-at passed the 3-day window is let through
+      // to its own replay (which names its order); a new send with that paid-at is refused.
+      const pastWindow = (orderOperationReference) =>
+        paperPaidAtCheck({
+          ...as(server),
+          takenAt: new Date(Date.now() - 73 * 3_600_000).toISOString(),
+          paperSlip: {
+            slipReference: null,
+            paymentOperationReference: reference(),
+            orderOperationReference,
+          },
+        });
+      await pastWindow(secondOperation);
+      await assert.rejects(pastWindow(reference()), { code: "CARD_MACHINE_INPUT_INVALID" });
       await slipCheck({ tableReference, slipConfirmation: "DifferentSlipSameReference" });
       await assert.rejects(
         slipCheck({

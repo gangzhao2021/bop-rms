@@ -714,13 +714,36 @@ export function createMerchantPaperPaidAtCheck(options: {
             denied: () => fail("CARD_MACHINE_PERMISSION_DENIED"),
           },
           async (authority) => {
+            const resolved = authority.scope;
+            const owners = {
+              brandReference: String(resolved.context.brand.brandReference),
+              storeReference: String(resolved.store.storeReference),
+            };
+            const allowed = () => authority.guard();
+            const tx = transaction as unknown as ConsumerTransaction;
+            const paper = input.paperSlip;
+            // b12: the same send again (its order or round was placed before) is answered by its
+            // own replay with the order's number, even once its paid-at has passed the window.
+            const operation = paper?.orderOperationReference;
+            if (
+              typeof operation === "string" &&
+              /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u.test(operation) &&
+              ((await createPostgresCounterOrderEntryStore({
+                ...owners,
+                authorize: allowed,
+              }).loadByOperation(tx as never, operation)) !== null ||
+                (await createPostgresStaffDiningRoundEntryStore({
+                  ...owners,
+                  authorize: allowed,
+                }).loadByOperation(tx as never, operation)) !== null)
+            )
+              return;
             const now = String(parsePaymentInstant(options.persistence.now()));
             if (
               takenAt > now ||
               Date.parse(now) - Date.parse(takenAt) > cardMachineBackEntryWindowMs
             )
               return fail("CARD_MACHINE_INPUT_INVALID");
-            const resolved = authority.scope;
             const opening = await readStoreFirstConfigurationGoverningFrom(
               transaction as unknown as ConsumerTransaction,
               {
@@ -731,30 +754,7 @@ export function createMerchantPaperPaidAtCheck(options: {
             ).catch(keepingCause(() => fail("CARD_MACHINE_UNAVAILABLE")));
             if (opening !== null && takenAt < opening)
               return fail("CARD_MACHINE_TAKEN_BEFORE_RECORDS");
-            const paper = input.paperSlip;
             if (paper === undefined || paper.slipReference === null) return;
-            const owners = {
-              brandReference: String(resolved.context.brand.brandReference),
-              storeReference: String(resolved.store.storeReference),
-            };
-            const allowed = () => authority.guard();
-            const tx = transaction as unknown as ConsumerTransaction;
-            const operation = paper.orderOperationReference;
-            if (
-              typeof operation === "string" &&
-              /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u.test(operation)
-            ) {
-              const sentBefore =
-                (await createPostgresCounterOrderEntryStore({
-                  ...owners,
-                  authorize: allowed,
-                }).loadByOperation(tx as never, operation)) !== null ||
-                (await createPostgresStaffDiningRoundEntryStore({
-                  ...owners,
-                  authorize: allowed,
-                }).loadByOperation(tx as never, operation)) !== null;
-              if (sentBefore) return;
-            }
             const table = paper.tableReference;
             // b12 (DEC-PAPER-SLIP-SAME-TABLE): a table that pays each round on one slip is normal.
             // The seating is the one the send names, or else the table's current seating (staff
