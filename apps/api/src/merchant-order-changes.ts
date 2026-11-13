@@ -38,10 +38,14 @@ export function createPersistentMerchantOrderChanges(options: {
       const decisions = await resolved.authorizeActions(["ordering.operate"]);
       if (decisions.get("ordering.operate")?.effect !== "Allow")
         throw new Error("MERCHANT_ORDER_QUEUE_DENIED");
-      const raw = await readStoreOrderChangeMark(transaction as unknown as ConsumerTransaction, {
-        brandReference: String(resolved.context.brand.brandReference),
-        storeReference: String(resolved.store.storeReference),
-      });
+      const raw = await readStoreOrderChangeMark(
+        transaction as unknown as ConsumerTransaction,
+        {
+          brandReference: String(resolved.context.brand.brandReference),
+          storeReference: String(resolved.store.storeReference),
+        },
+        source.now(),
+      );
       const mark = createHash("sha256")
         .update(String(resolved.store.storeReference) + "|" + raw)
         .digest("hex")

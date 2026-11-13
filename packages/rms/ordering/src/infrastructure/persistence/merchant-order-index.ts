@@ -155,57 +155,79 @@ export function createPostgresMerchantOrderIndex(options: {
 }
 
 /**
- * WP-2423 (reads-under-burst, v15 2026-11-13): what changed last among the Store's Orders, as one
+ * WP-2423 (reads-under-burst, v15 2026-11-13): what changed among the Store's Orders, as one
  * comparable mark, so a staff screen can ask every few seconds whether its Orders list is out of
- * date without reading the whole list. Each part is the newest record of a kind (new Order, new
- * round, a payment that arrived and waits for staff, an acceptance, a confirmed or refused payment,
- * a termination, a staff cancellation, a completion, a closure): records are append-only with
- * time-ordered ids, so any new one changes the mark. One indexed newest-row probe per kind; it
- * never reads an Order's content. Caller authorizes and owns the transaction.
+ * date without reading the whole list. Each kind of Order record (new Order, new round, a payment
+ * that arrived and waits for staff, an acceptance, a confirmed or refused payment, a termination,
+ * a staff cancellation, a completion, a closure) gives two parts, both read from the Store's own
+ * time index (brand_id, store_id, <recorded time>), so the cost follows the recent rows of the
+ * Store, never its whole history:
+ *  - the latest recorded time of the kind (one row read from the end of the index);
+ *  - how many of its records were recorded since the start of the previous clock hour.
+ * The records are append-only, so a new one always raises the count, even when its transaction
+ * committed after a later one (a time or id taken before another's is not "newest"; the review of
+ * b12 found such pairs on v15). The count's window moves on each hour, which changes the mark once
+ * an hour (one extra list read). A record committed more than an hour after its recorded time
+ * would only be seen by the screen's full read every 10 s. It never reads an Order's content.
+ * Caller authorizes and owns the transaction.
  */
-const orderChangeKinds = Object.freeze([
-  ["order_header", "order_id"],
-  ["order_batch", "order_batch_id"],
-  ["order_payment_acceptance_wait", "wait_id"],
-  ["order_acceptance_record", "acceptance_id"],
-  ["order_payment_disposition_record", "disposition_id"],
-  ["order_termination_record", "termination_id"],
-  ["order_staff_cancellation", "cancellation_id"],
-  ["order_fulfillment_completion_record", "completion_id"],
-  ["order_closure_version", "closure_id"],
+export const orderChangeKinds = Object.freeze([
+  ["order_header", "created_at"],
+  ["order_batch", "submitted_at"],
+  ["order_payment_acceptance_wait", "evaluated_at"],
+  ["order_acceptance_record", "accepted_at"],
+  ["order_payment_disposition_record", "evaluated_at"],
+  ["order_termination_record", "terminated_at"],
+  ["order_staff_cancellation", "cancelled_at"],
+  ["order_fulfillment_completion_record", "recorded_at"],
+  ["order_closure_version", "occurred_at"],
 ] as const);
-const orderChangeMarkSql =
+/** The mark's statement ($1 brand, $2 store, $3 the count window's start); exported for its plan test. */
+export const orderChangeMarkSql =
   "SELECT " +
   orderChangeKinds
     .map(
-      ([table, key], index) =>
-        `(SELECT ${key}::text FROM rms_ordering.${table} WHERE brand_id=$1 AND store_id=$2 ` +
-        `ORDER BY ${key} DESC LIMIT 1) AS k${index}`,
+      ([table, at], index) =>
+        `concat_ws(':',floor(extract(epoch FROM (SELECT max(t.${at}) FROM rms_ordering.${table} t ` +
+        `WHERE t.brand_id=$1 AND t.store_id=$2))*1000000)::bigint,(SELECT count(*) FROM ` +
+        `rms_ordering.${table} t WHERE t.brand_id=$1 AND t.store_id=$2 AND t.${at}>=$3::timestamptz)) AS k${index}`,
     )
     .join(",");
+/** The start of the previous clock hour (UTC) before `now`: where the mark's counts begin. */
+export function orderChangeWindowStart(now: string): string {
+  const at = Date.parse(parseOrderingInstant(now));
+  if (!Number.isFinite(at)) throw new Error("MERCHANT_ORDER_INDEX_UNAVAILABLE");
+  const hour = 3_600_000;
+  return new Date(Math.floor(at / hour) * hour - hour).toISOString();
+}
 export async function readStoreOrderChangeMark(
   transaction: ConsumerTransaction,
   scope: { readonly brandReference: string; readonly storeReference: string },
+  now: string,
 ): Promise<string> {
   const brand = parseOrderingReference(scope.brandReference);
   const store = parseOrderingReference(scope.storeReference);
+  const since = orderChangeWindowStart(now);
   await transaction.query(
     "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
     [brand, store],
   );
-  const rows = (await transaction.query(orderChangeMarkSql, [brand, store]))
+  const rows = (await transaction.query(orderChangeMarkSql, [brand, store, since]))
     .rows as readonly Record<string, unknown>[];
   const row = rows.length === 1 ? rows[0] : undefined;
   if (row === undefined) throw new Error("MERCHANT_ORDER_INDEX_UNAVAILABLE");
-  return orderChangeKinds
-    .map((_, index) => {
-      const value = row["k" + index];
-      if (value === null) return "-";
-      if (typeof value !== "string" || !/^[0-9a-f-]{36}$/u.test(value))
-        throw new Error("MERCHANT_ORDER_INDEX_UNAVAILABLE");
-      return value;
-    })
-    .join(".");
+  return (
+    since +
+    "|" +
+    orderChangeKinds
+      .map((_, index) => {
+        const value = row["k" + index];
+        if (typeof value !== "string" || !/^(?:-?[0-9]{1,20}:)?[0-9]{1,12}$/u.test(value))
+          throw new Error("MERCHANT_ORDER_INDEX_UNAVAILABLE");
+        return value;
+      })
+      .join(".")
+  );
 }
 
 /**

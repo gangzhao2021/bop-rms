@@ -371,6 +371,9 @@ export {
   type MerchantOrderLine,
   type MerchantOrderLineMoney,
   readStoreOrderChangeMark,
+  orderChangeKinds,
+  orderChangeMarkSql,
+  orderChangeWindowStart,
 } from "./infrastructure/persistence/merchant-order-index.js";
 
 export { createPostgresOrderBatchIdentitySource } from "./infrastructure/persistence/order-batch-identity-source.js";

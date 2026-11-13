@@ -852,6 +852,7 @@ describe("migration catalog", () => {
       "2000_780_create_capacity_asap_refusal",
       "2000_800_alter_order_tax_rounding_rule_carrier",
       "2000_950_create_staff_dining_round_table_turn",
+      "2000_980_create_order_change_mark_index",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),
@@ -2547,7 +2548,7 @@ $unsafe$;
       ),
     );
     await writeFile(
-      path.join(root, "migrations/2000-release-001/2000_900_create_permission_catalog_probe.sql"),
+      path.join(root, "migrations/2000-release-001/2000_999_create_permission_catalog_probe.sql"),
       sql,
     );
     const catalog = await readMigrationCatalog(root);
@@ -2555,6 +2556,7 @@ $unsafe$;
     expect(catalog.migrations.map((migration) => migration.id)).toContain(
       "2000_900_create_permission_catalog_probe",
     );
+    expect(catalog.migrations.at(-1)?.id).toBe("2000_999_create_permission_catalog_probe");
   });
 
   it("rejects a symbolic namespace registry", async () => {
