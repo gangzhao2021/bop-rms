@@ -559,7 +559,8 @@ async function createInternalStaffDiningRound(
         ? async () => "Kept"
         : createStaffTableAbandonment({
             loadJoinState,
-            close: (staff, command) => diningClosing({ ...staff, command }),
+            // v15 b17 review: nothing was ordered, so the table is not blocked for cleaning.
+            close: (staff, command) => diningClosing({ ...staff, command, nothingOrdered: true }),
             nextReference: reference,
           }),
     // The table's printed QR, as a guest scanning it would enter; null when it has none (the

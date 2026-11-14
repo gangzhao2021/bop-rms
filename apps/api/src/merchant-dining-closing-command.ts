@@ -54,7 +54,18 @@ export function createMerchantDiningClosingCommand(options: {
   exceptionTaskPolicy?: unknown;
 }) {
   const resolve = createMerchantStoreScope(options.persistence);
-  return async (input: { sessionCookie: unknown; csrf: unknown; command: unknown }) => {
+  return async (input: {
+    sessionCookie: unknown;
+    csrf: unknown;
+    command: unknown;
+    /**
+     * v15 b17 review: set only in-process by a staff round that opened this table and was refused
+     * before anything was ordered (createStaffTableAbandonment, never the HTTP route). The party
+     * is still seated and nothing was served, so the freed table is not blocked for cleaning: the
+     * staff member changes the round and sends it again at once.
+     */
+    nothingOrdered?: true;
+  }) => {
     const authenticated = await options.authentication.authorize(input).catch(onlyRefusal(denied));
     const raw = readClosedRecord(input.command, [
       "action",
@@ -177,6 +188,8 @@ export function createMerchantDiningClosingCommand(options: {
           // WP-2423 DEC-DINING-GUEST-TABLE-START: at a Store where guests start tables, closing one
           // a guest started ends as the System's close does: no step nobody would take at 8 pm.
           if (await guestStartedAtSwitchOnStore(tx, scope, command.diningSessionReference)) return;
+          // v15 b17 review: a staff round's refused opening: nothing served, the party still there.
+          if (input.nothingOrdered === true) return;
           // Handoff §25.3: the freed table waits for cleaning before it is seated again.
           await markDiningTableNeedsCleaning(tx, {
             scope,

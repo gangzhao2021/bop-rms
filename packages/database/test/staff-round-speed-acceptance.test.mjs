@@ -5,6 +5,7 @@ import process from "node:process";
 import pg from "pg";
 import { it, vi } from "vitest";
 import { withPaidBatchAcceptance } from "../../../apps/api/src/merchant-card-machine-payment.ts";
+import { createMerchantDiningClosingCommand } from "../../../apps/api/src/merchant-dining-closing-command.ts";
 import { appendAuditRecordInTransaction } from "../../bop/audit/src/index.ts";
 import { currentRequestChecks, withVerifiedChecks } from "../src/request-check-memo.ts";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
@@ -647,7 +648,8 @@ it("a dish sold out or run out between a later round's pre-check and its write i
  * sold-out mark made between that check and the write was only fenced by the stock reservation, so
  * a dish marked sold out with stock left was ordered. The write now re-checks Catalog on its own
  * connection, as later rounds do since batch 16: refused as a dish that can't be sold now, no Order,
- * no stock held, the table not left open; back in stock, the same table's opening round is placed.
+ * no stock held, the table not left open (closed again with the pilot's own closing command, as
+ * pilot-merchant composes it); back in stock, the same table's opening round is placed.
  */
 it("a dish marked sold out between an opening round's check and its write is refused, never ordered", async () => {
   await withIsolatedDatabase({ caseId: "wp2423_round_orace" }, async (context) => {
@@ -664,7 +666,19 @@ it("a dish marked sold out between an opening round's check and its write is ref
         "dining.operate",
         "dining.session.close",
       ]);
-      const counter = await store.counterFor(server);
+      // v15 b17 review: the table a refused opening round started is closed again with the
+      // pilot's own closing command, composed for the staff member as pilot-merchant does.
+      const counter = await store.counterFor(server, {
+        diningClosing: createMerchantDiningClosingCommand({
+          persistence: store.persistenceOf(server),
+          authentication: server.authentication,
+          providerAccountReference: store.providerAccountReference,
+          environment: "Test",
+          newReference: reference,
+          retentionPolicyCode: "AUDIT_DEFAULT",
+          retentionPolicyVersion: 1,
+        }),
+      });
       const as = { sessionCookie: server.sessionCookie, csrf: server.csrf };
       const round = () =>
         counter.staffDiningRound({
@@ -711,6 +725,22 @@ it("a dish marked sold out between an opening round's check and its write is ref
       }
       assert.equal(await orders(), 0, "a sold-out dish was ordered");
       assert.equal(await reserved(), heldBefore, "the refused round held stock");
+      // v15 b17 review: the refused opening round left the table as it was: no dining open on it.
+      const open = await admin.query(
+        "SELECT count(*)::int AS n FROM rms_dining.dining_session WHERE table_id=$1 AND phase='Active'",
+        [tableReference],
+      );
+      assert.equal(open.rows[0].n, 0, "the refused opening round left the table open");
+      // Nothing was served and the party is still seated: the table is free, not blocked for cleaning.
+      const table = await admin.query(
+        "SELECT table_snapshot->>'operationalState' AS state FROM rms_dining.dining_table WHERE table_id=$1",
+        [tableReference],
+      );
+      assert.notEqual(
+        table.rows[0].state,
+        "TemporarilyBlocked",
+        "the table was blocked for cleaning",
+      );
       // Back in stock: the table's opening round is placed as usual.
       await store.owner.markBackInStock(soup.skuReference);
       const placed = await round();

@@ -537,6 +537,8 @@ export async function prepareRealStaffRoundStore({
     restricted,
     persistenceOf,
     counterFor,
+    /** The Store's provider account, for composing a staff member's own commands as the pilot does. */
+    providerAccountReference: config.providerAccountReference,
     apiApplicationName,
     /** The pilot's customer runtime dependencies for this staff member (pilot-api createRuntime). */
     customerDependenciesFor: customerFor,

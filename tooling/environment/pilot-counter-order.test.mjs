@@ -446,6 +446,8 @@ it("composes the staff table round from the dine-in customer path, without the g
     sessionCookie: "c",
     csrf: "x",
     command: { action: "Begin", diningSessionReference: "session-1" },
+    // v15 b17 review: the party is still seated and nothing was served: no cleaning block.
+    nothingOrdered: true,
   });
   expect(await p.tableQrToken("table-1")).toBe("table-qr");
   // No current code: null, so the staff command refuses before opening the table.
