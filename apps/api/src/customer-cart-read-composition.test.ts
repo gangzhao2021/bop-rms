@@ -4,7 +4,9 @@ import {
   CartParticipationEndedError,
   type CustomerCartDisplayView,
 } from "@rms/ordering";
+import { EventEmitter } from "node:events";
 import { createCustomerCartReadPort } from "./customer-cart-read-composition.js";
+import { withRequestAcquireBudget } from "./request-acquire-budget.js";
 const credential = "a".repeat(43);
 const reference = "018f5500-0000-7000-8000-000000000001";
 const input = { guestCredential: credential, requestedAt: "2026-09-08T12:00:00.000Z" };
@@ -185,7 +187,7 @@ describe("Customer Cart read bridge", () => {
       }),
     });
     const lines: { level: number; event: string; causes?: string[] }[] = [];
-    const log = (event: string, error: unknown, _write: unknown, level: 40 | 50 = 50) => {
+    const log = (event: string, error: unknown, _write: unknown, level: 30 | 40 | 50 = 50) => {
       const causes: string[] = [];
       for (
         let at = (error as { cause?: unknown }).cause;
@@ -236,7 +238,7 @@ describe("Customer Cart read bridge", () => {
   });
   it("WP-2423 (rush-reads-and-orders-changes review): a read turned away once that then meets a real fault logs level 50", async () => {
     const levels: number[] = [];
-    const log = (_event: string, _error: unknown, _write: unknown, level: 40 | 50 = 50) => {
+    const log = (_event: string, _error: unknown, _write: unknown, level: 30 | 40 | 50 = 50) => {
       levels.push(level);
     };
     for (const error of [
@@ -298,4 +300,57 @@ describe("Customer Cart read bridge", () => {
       expect(read).not.toHaveBeenCalled();
     },
   );
+});
+
+// WP-2423 (logs-and-transaction-time, v15 2026-11-14): on quiet tables, right after a guest added a
+// dish, the phone stopped the cart read it had started; the read was cut and its next connection
+// refused at once, and a level-40 CUSTOMER_CART_READ_UNAVAILABLE [TENANT_DATABASE_ACQUIRE_FAILED]
+// line followed a completion line that said 200.
+describe("logs-and-transaction-time: a cart read whose phone went away", () => {
+  const cut = () =>
+    Object.assign(new CartError("CART_DEPENDENCY_UNAVAILABLE"), {
+      cause: Object.assign(new Error("TENANT_DATABASE_ACQUIRE_FAILED"), {
+        code: "TENANT_DATABASE_ACQUIRE_FAILED",
+      }),
+    });
+  const levels = async (leave: boolean, failure: unknown) => {
+    const lines: { event: string; level: number }[] = [];
+    const log = (event: string, _error: unknown, _write: unknown, level = 50) => {
+      lines.push({ event, level });
+    };
+    const response = Object.assign(new EventEmitter(), { writableFinished: false });
+    const result = await withRequestAcquireBudget(
+      async () => {
+        if (leave) response.emit("close");
+        return createCustomerCartReadPort(
+          {
+            read: async () => {
+              throw failure;
+            },
+          },
+          // The database notes the refused connection as the rush (connection-acquire).
+          { pause: async () => undefined, shed: () => true, log },
+        ).getCurrentCart(input);
+      },
+      { response, answerWithinMs: 12_000 },
+    );
+    expect(result).toEqual({ status: "Unavailable" });
+    return lines;
+  };
+  it("is information (level 30): nobody waits for its answer", async () => {
+    expect(await levels(true, cut())).toEqual([
+      { event: "CUSTOMER_CART_READ_UNAVAILABLE", level: 30 },
+    ]);
+    // Still listening and turned away by the rush: the wait it is (level 40).
+    expect(await levels(false, cut())).toEqual([
+      { event: "CUSTOMER_CART_READ_UNAVAILABLE", level: 40 },
+    ]);
+  });
+  it("a real fault it met stays level 50", async () => {
+    const denied = Object.assign(new Error("TENANT_DATABASE_TRANSACTION_FAILED"), {
+      code: "TENANT_DATABASE_TRANSACTION_FAILED",
+      diagnostic: { sqlState: "42501" },
+    });
+    expect((await levels(true, denied)).map(({ level }) => level)).toEqual([50]);
+  });
 });

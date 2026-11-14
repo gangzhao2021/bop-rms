@@ -66,6 +66,8 @@ interface RequestAcquireBudget {
   cut?: boolean;
   /** A real fault met the request: it is logged as a fault even if it was later turned away. */
   faulted?: boolean;
+  /** Its client went away before its answer was written (nobody is waiting for it). */
+  left?: boolean;
 }
 /**
  * WP-2423 (reads-under-burst, v15 2026-11-13): the whole answer of a read, not only its database
@@ -157,6 +159,15 @@ export function requestShedFor(response: object): boolean {
 export function requestWasShed(): boolean {
   const budget = requestBudgets().getStore();
   return budget?.shed === true && budget.faulted !== true;
+}
+
+/**
+ * WP-2423 (logs-and-transaction-time, v15 2026-11-14): whether the current request's client went
+ * away before its answer was written (a phone that stopped a cart read it no longer needed). Its
+ * read is cut, so its next connection is refused at once; that is no outage anyone saw.
+ */
+export function requestClientLeft(): boolean {
+  return requestBudgets().getStore()?.left === true;
 }
 
 const programmingErrorNames = new Set([
@@ -315,6 +326,7 @@ export function withRequestAcquireBudget<T>(
   });
   response?.once("close", () => {
     timer?.cancel();
+    if (response.writableFinished !== true) budget.left = true;
     // A read whose client left before its answer: nothing more of it is worth a connection.
     if (read && response.writableFinished !== true && !budget.committedWrite) budget.cut = true;
     else budget.ended = true;

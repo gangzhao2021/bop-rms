@@ -8,6 +8,7 @@ import type { CustomerCartPort, CustomerCartPortResult } from "./customer-cart.j
 import {
   noteRequestRealFault,
   requestAnswerTimeLeftMs,
+  requestClientLeft,
   requestWasShed,
 } from "./request-acquire-budget.js";
 
@@ -104,6 +105,8 @@ export function createCustomerCartReadPort(
     readonly timeLeftMs?: () => number | undefined;
     /** Whether the rush turned this request away (no connection in time, its time spent). */
     readonly shed?: () => boolean;
+    /** Whether the guest's phone went away before the read answered. */
+    readonly left?: () => boolean;
     readonly log?: typeof logGuestFailure;
   } = {},
 ): CustomerCartPort {
@@ -112,6 +115,7 @@ export function createCustomerCartReadPort(
     options.pause ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const timeLeftMs = options.timeLeftMs ?? requestAnswerTimeLeftMs;
   const shed = options.shed ?? requestWasShed;
+  const clientLeft = options.left ?? requestClientLeft;
   const log = options.log ?? logGuestFailure;
   const read = async (
     input: unknown,
@@ -130,6 +134,7 @@ export function createCustomerCartReadPort(
           attempt === 0 &&
           passingFault(error) &&
           !rushed &&
+          !clientLeft() &&
           !noConnection(error) &&
           (left === undefined || left >= cartReadAgainNeedsMs)
         ) {
@@ -144,7 +149,17 @@ export function createCustomerCartReadPort(
         // Retry-After) the phone sits out: a level-40 line. A real fault stays level 50.
         // Review: a request turned away once that then met a real fault logs the fault.
         const faulted = noteRequestRealFault(error);
-        log("CUSTOMER_CART_READ_UNAVAILABLE", error, undefined, rushed && !faulted ? 40 : 50);
+        // WP-2423 (logs-and-transaction-time, v15 2026-11-14): on quiet tables, right after a guest
+        // added a dish, the phone stopped the cart read it had started (a newer one replaced it).
+        // The read was cut and its next connection refused at once: a level-40 line with
+        // TENANT_DATABASE_ACQUIRE_FAILED beside a "200" that was never sent. Nobody waits for
+        // that answer: it is information (level 30). A real fault it met stays level 50.
+        log(
+          "CUSTOMER_CART_READ_UNAVAILABLE",
+          error,
+          undefined,
+          faulted ? 50 : clientLeft() ? 30 : rushed ? 40 : 50,
+        );
         return unavailable;
       }
     }

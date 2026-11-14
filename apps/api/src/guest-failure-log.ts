@@ -14,8 +14,11 @@ export function logGuestFailure(
   event: string,
   error: unknown,
   write: (line: string) => void = (line) => process.stderr.write(line),
-  /** 50: the guest was told it failed; 40: a failure the guest never saw (read again and worked). */
-  level: 40 | 50 = 50,
+  /**
+   * 50: the guest was told it failed; 40: a failure the guest never saw (read again and worked);
+   * 30: nobody was waiting for the answer (the phone had gone away).
+   */
+  level: 30 | 40 | 50 = 50,
 ): void {
   try {
     const causes: string[] = [];
