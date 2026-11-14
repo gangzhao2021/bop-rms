@@ -42,8 +42,13 @@ export interface DiningCartReadResult {
   readonly observedAt: OrderingInstant;
 }
 
-function unavailable(): never {
-  throw new CartError("CART_DEPENDENCY_UNAVAILABLE");
+const failureCauseKey = Symbol.for("bop.failure.cause");
+/** Keeps what the read met (`cause`) for the log at the edge (WP-2423 rush-connection-hold). */
+function unavailable(cause?: unknown): never {
+  const error = new CartError("CART_DEPENDENCY_UNAVAILABLE");
+  // Never as `cause` (an owner's failure never crosses as it is): under the key the log follows.
+  if (cause !== undefined) Object.defineProperty(error, failureCauseKey, { value: cause });
+  throw error;
 }
 
 /** Restricted internal snapshot only. Shared reads do not transfer creator or item ownership. */
@@ -80,8 +85,8 @@ export function createDiningCartReadService(ports: DiningCartReadPorts) {
               }),
             );
             return source === null ? null : parseCartAggregate(source);
-          } catch {
-            return unavailable();
+          } catch (error) {
+            return unavailable(error);
           }
         },
       );

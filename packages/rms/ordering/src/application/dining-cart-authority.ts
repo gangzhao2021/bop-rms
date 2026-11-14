@@ -54,8 +54,17 @@ const participationFields = [
 function denied(): never {
   throw new CartError("CART_PERMISSION_DENIED");
 }
-function unavailable(): never {
-  throw new CartError("CART_DEPENDENCY_UNAVAILABLE");
+const failureCauseKey = Symbol.for("bop.failure.cause");
+/**
+ * WP-2423 (rush-connection-hold): "couldn't read what the guest's place needs", keeping what it met
+ * (`cause`) for the log at the edge: in rush waves bare [CART_DEPENDENCY_UNAVAILABLE] lines said
+ * nothing of the Guest Session or table read that could not answer.
+ */
+function unavailable(cause?: unknown): never {
+  const error = new CartError("CART_DEPENDENCY_UNAVAILABLE");
+  // Never as `cause` (an owner's failure never crosses as it is): under the key the log follows.
+  if (cause !== undefined) Object.defineProperty(error, failureCauseKey, { value: cause });
+  throw error;
 }
 function version(value: unknown): number {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) return unavailable();
@@ -188,7 +197,7 @@ export function createDiningCartAuthority(ports: DiningCartAuthorityPorts) {
         (error as { dependencyFailure?: unknown } | null)?.dependencyFailure === true ||
         (error instanceof CartError && error.code === "CART_DEPENDENCY_UNAVAILABLE")
       )
-        return unavailable();
+        return unavailable(error);
       return denied();
     }
   }
@@ -243,7 +252,7 @@ export function createDiningCartAuthority(ports: DiningCartAuthorityPorts) {
           if (error instanceof CartError && error.code === "CART_TABLE_CHECKING_OUT") throw error;
           // M126 I.2: the phone's place ended (left, table closed, changed): said as such.
           if (readCartParticipationEnded(error) !== null) throw error;
-          return unavailable();
+          return unavailable(error);
         }
         const checkedAt = tick();
         if (receipt.observedAt < from || receipt.observedAt > checkedAt) return unavailable();

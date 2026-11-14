@@ -521,6 +521,42 @@ describe("current-authorized shared Dining Cart read", () => {
     });
     expect(f.current).not.toHaveBeenCalled();
   });
+  it("WP-2423 (rush-connection-hold): a read that could not answer keeps what it met, for the log", async () => {
+    const acquire = Object.assign(new Error("TENANT_DATABASE_ACQUIRE_FAILED"), {
+      code: "TENANT_DATABASE_ACQUIRE_FAILED",
+    });
+    const chain = (error: unknown) => {
+      const codes: unknown[] = [];
+      for (
+        let at = error;
+        at instanceof Error;
+        at =
+          (at as { cause?: unknown }).cause ??
+          Object.getOwnPropertyDescriptor(at, Symbol.for("bop.failure.cause"))?.value
+      )
+        codes.push((at as { code?: unknown }).code ?? at.message);
+      return codes;
+    };
+    const f = fixture();
+    f.resolve.mockRejectedValue(
+      Object.assign(new Error("GUEST_SESSION_UNAVAILABLE"), {
+        dependencyFailure: true,
+        cause: acquire,
+      }),
+    );
+    expect(chain(await f.service.read({ sessionCredential: credential }).catch((e) => e))).toEqual([
+      "CART_DEPENDENCY_UNAVAILABLE",
+      "GUEST_SESSION_UNAVAILABLE",
+      "TENANT_DATABASE_ACQUIRE_FAILED",
+    ]);
+    for (const key of ["participate", "current"] as const) {
+      const g = fixture();
+      g[key].mockRejectedValue(acquire);
+      expect(
+        chain(await g.service.read({ sessionCredential: credential }).catch((e) => e)),
+      ).toEqual(["CART_DEPENDENCY_UNAVAILABLE", "TENANT_DATABASE_ACQUIRE_FAILED"]);
+    }
+  });
   it.each(["participate", "current"] as const)("bounds %s dependency errors", async (key) => {
     const f = fixture();
     f[key].mockRejectedValue(new Error("private source detail"));
