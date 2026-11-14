@@ -124,7 +124,7 @@ describe("WP-2423 Q15/Q16 receipt and privacy details client", () => {
     const both = render({ taxRegistrationMissing: true, privacyNoticeMissing: true });
     expect(both).toContain("Customer receipts show no GST/HST registration number");
     expect(both).toContain("Add your privacy notice link before going live");
-    expect(both).toContain("Store setup → Receipts and privacy");
+    expect(both).toContain("Store setup → Receipts and tax numbers");
     expect(render({ taxRegistrationMissing: false, privacyNoticeMissing: false })).toBe("");
   });
 

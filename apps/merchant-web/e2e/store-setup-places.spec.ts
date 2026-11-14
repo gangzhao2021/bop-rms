@@ -74,6 +74,12 @@ async function install(page: Page, options: { readonly manager?: boolean } = {})
               href: setupHref,
               permission: "organization.manage",
             },
+            {
+              screenId: "IAM-ROLE-LIST",
+              label: "Roles",
+              href: "/app/organization/roles",
+              permission: "identity.role.read",
+            },
             ...(options.manager
               ? []
               : [
@@ -238,7 +244,9 @@ test("@production an open Store's setup is a few places, each saying whether a c
   await expect(page.getByRole("heading", { name: "Receipts and privacy" })).toBeHidden();
   await expect(page.getByRole("heading", { name: "Platform support" })).toBeHidden();
   await expect(page.getByRole("navigation", { name: "Setup steps" })).toHaveCount(0);
-  await expect(page.getByText("What kind of store is this?")).toHaveCount(0);
+  // The store-type question is asked while a Store is being opened, not on an open Store's setup.
+  await expect(page.getByText("What kind of shop is this?")).toHaveCount(0);
+  await expect(page.locator("section.starter-roles")).toHaveCount(0);
   await expect(page.getByText("Saving a draft does not change the live Store.")).toHaveCount(0);
 
   // Receipts: one save, live for receipts issued from then on.

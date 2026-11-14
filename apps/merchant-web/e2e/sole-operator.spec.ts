@@ -1,3 +1,4 @@
+import { openStoreSetupPlace } from "./workspace-navigation";
 import { expect, test } from "@playwright/test";
 
 // WP-2423 Q19 (DEC-SOLE-OPERATOR-APPROVAL): a Brand Owner running the business alone turns sole
@@ -186,14 +187,16 @@ test("@production a sole operator turns it on and approves their own refund afte
   await expect(page.getByRole("region", { name: "Sole operator" })).toHaveCount(0);
   await page.getByRole("link", { name: "Store setup" }).click();
   await expect(page).toHaveURL(new RegExp(`/app/organization/stores/${id(99)}/setup$`, "u"));
+  // b18: the setting sits in Store setup's "Permissions and safety".
+  await openStoreSetupPlace(page, "Permissions and safety");
   const section = page.getByRole("region", { name: "Sole operator" });
   await expect(section).toContainText("Off. Refunds that need approval are approved by a second");
   // WP-2423 (2026-10-16 v15): the setting's change number and who changed it, when and why.
-  await expect(section).toContainText("Off · setting change 2");
+  await expect(section).not.toContainText("setting change");
   const history = section.getByRole("region", { name: "Recent changes" });
   await expect(history.getByRole("listitem")).toHaveText([
-    /^Change 2: Turned off by you · Someone else can now approve · /u,
-    /^Change 1: Turned on by you · I run this business on my own · /u,
+    /^Turned off by you · Someone else can now approve · /u,
+    /^Turned on by you · I run this business on my own · /u,
   ]);
   const turnOn = section.getByRole("button", { name: "Turn on sole operator" });
   await expect(turnOn).toBeDisabled();
@@ -215,9 +218,9 @@ test("@production a sole operator turns it on and approves their own refund afte
     reasonCode: "OWNER_RUNS_STORE_ALONE",
     expectedVersion: 2,
   });
-  await expect(section).toContainText("On · setting change 3");
+  await expect(section).not.toContainText("setting change");
   await expect(history.getByRole("listitem").first()).toHaveText(
-    /^Change 3: Turned on by you · I run this business on my own · /u,
+    /^Turned on by you · I run this business on my own · /u,
   );
 
   // Back on Approvals: the owner may now approve their own request after confirming it.
@@ -318,7 +321,7 @@ test("@production sole operator not in effect names the other approver", async (
       },
     }),
   );
-  await page.goto(`/app/organization/stores/${id(99)}/setup`);
+  await page.goto(`/app/organization/stores/${id(99)}/setup?section=access`);
   const section = page.getByRole("region", { name: "Sole operator" });
   await expect(section).toContainText(
     "On, but not in effect: Mia also holds refund approval at this store, so a second person is required.",

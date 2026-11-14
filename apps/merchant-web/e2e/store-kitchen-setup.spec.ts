@@ -140,7 +140,7 @@ test("@production staff who can't change the kitchen see what's missing and who 
   await session(page);
   const { route } = kitchen(page, { canChange: false });
   await route;
-  await page.goto(setupHref);
+  await page.goto(setupHref + "?section=kitchen");
   const panel = page.locator("#kitchen-setup");
   await expect(panel).toContainText("Guests can't order at this Store");
   await expect(panel).toContainText("Ask the Owner or Store Manager to set this up.");
@@ -175,7 +175,7 @@ test("@production a stale kitchen says so and shows what it is now; a failed rea
             },
     });
   });
-  await page.goto(setupHref);
+  await page.goto(setupHref + "?section=kitchen");
   const panel = page.locator("#kitchen-setup");
   await expect(panel.getByRole("status")).toContainText("Nothing was changed");
   // One failed read on this page never adds a second alert, and staff words only.

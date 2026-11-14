@@ -275,11 +275,7 @@ function Preset({
               "Issuer, Store, order number, issue time, items, subtotal, discount, fee, tax, tip, total, payment status and refunded total. Professional and legal review have not been evaluated.",
             )}
       </p>
-      {saved ? (
-        <p>{t("Saved revision {revision}.", { revision: saved.revision })}</p>
-      ) : ready ? (
-        <p>{t("No saved preset yet.")}</p>
-      ) : null}
+      {saved ? <p>{t("Saved.")}</p> : ready ? <p>{t("No saved preset yet.")}</p> : null}
       {busy && <p role="status">{t("Loading {label}…", { label: label })}</p>}
       {notice && <p role="status">{notice}</p>}
       {error && (

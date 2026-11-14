@@ -174,7 +174,9 @@ export function ReceiptSetupNotice({
       </ul>
       {storeSetupHref ? (
         <p>
-          <Link to={storeSetupHref}>{t("Enter them in Store setup → Receipts and privacy")}</Link>
+          <Link to={storeSetupHref}>
+            {t("Enter them in Store setup → Receipts and tax numbers")}
+          </Link>
         </p>
       ) : null}
     </StatePanel>

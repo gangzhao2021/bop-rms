@@ -1,5 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
 import { serveStoreSetupPanels } from "./store-setup-panels";
+import { openStoreSetupPlace } from "./workspace-navigation";
 import { expect, test, type Page } from "@playwright/test";
 import { expectNoInternalText } from "./internal-text-guard";
 
@@ -116,7 +117,7 @@ test("@production the Owner publishes the store name, address and phone customer
     panel.getByLabel("Phone number (needed while the store takes pickup orders)"),
   ).toHaveValue("(416) 555-0100");
   await expect(panel.getByLabel("Province or territory")).toHaveValue("ON");
-  await expect(panel.getByText(/Last published/u)).toBeVisible();
+  await expect(panel.getByText(/Live since/u)).toBeVisible();
 
   for (const width of [1440, 1024, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
@@ -143,7 +144,7 @@ test("@production the Owner publishes the store name, address and phone customer
   await panel
     .getByLabel("Phone number (needed while the store takes pickup orders)")
     .fill("555-0100");
-  await panel.getByRole("button", { name: "Publish name and contact details" }).click();
+  await panel.getByRole("button", { name: "Save and make live" }).click();
   await expect(panel.getByText(/no # \* _ < >/u)).toBeVisible();
   await expect(panel.getByText(/Canadian postal code/u)).toBeVisible();
   await expect(panel.getByText(/10-digit phone number/u)).toBeVisible();
@@ -154,8 +155,8 @@ test("@production the Owner publishes the store name, address and phone customer
   await panel
     .getByLabel("Phone number (needed while the store takes pickup orders)")
     .fill("416-555-0199");
-  await panel.getByRole("button", { name: "Publish name and contact details" }).click();
-  await expect(panel.getByText(/Published\. Customers see these details/u)).toBeVisible();
+  await panel.getByRole("button", { name: "Save and make live" }).click();
+  await expect(panel.getByText(/Saved and live\. Customers see these details/u)).toBeVisible();
   await expect(panel.getByText(/Receipts already issued keep the name/u).first()).toBeVisible();
   expect(saves).toHaveLength(1);
   expect(saves[0]).toMatchObject({
@@ -198,9 +199,7 @@ test("@production staff who cannot change the store name see it read-only", asyn
   await expect(panel.getByLabel("Store name customers see")).toHaveValue("Maple Noodle House");
   await expect(panel.getByLabel("Store name customers see")).toHaveAttribute("readonly", "");
   await expect(panel.getByLabel("Province or territory")).toBeDisabled();
-  await expect(panel.getByRole("button", { name: "Publish name and contact details" })).toHaveCount(
-    0,
-  );
+  await expect(panel.getByRole("button", { name: "Save and make live" })).toHaveCount(0);
 });
 
 test("@production a store that never published is told customers cannot open its menu yet", async ({
@@ -282,10 +281,11 @@ test("@production the Store Manager opens Store setup from the navigation and se
   await expect(page.getByText("Only the Owner can change Store setup.")).toBeVisible();
   await expect(page.getByText("does not allow this action", { exact: false })).toHaveCount(0);
   await expect(page.getByText("could not be loaded", { exact: false })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Refresh saved setup" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Reload the saved draft" })).toHaveCount(0);
   const profile = page.getByRole("region", { name: heading });
   await expect(profile.getByLabel("Store name customers see")).toHaveValue("Maple Noodle House");
   await expect(profile.getByText("Only the Owner can change these details.")).toBeVisible();
+  await openStoreSetupPlace(page, "Receipts and tax numbers");
   const receipts = page.getByRole("region", { name: "Receipts and privacy" });
   await expect(receipts.getByLabel("GST/HST registration number")).toHaveValue("000000000RT0001");
   await expectNoInternalText(page);

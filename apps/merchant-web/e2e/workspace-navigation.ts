@@ -20,3 +20,14 @@ export async function followWorkspaceLink(page: Page, name: string) {
     await closedGroup.first().locator(".workspace-nav__group-toggle").click();
   await scope.getByRole("link", { name, exact: true }).first().click();
 }
+
+/**
+ * b18: open one place of an open Store's setup (Store details, Receipts and tax numbers, Kitchen
+ * setup, Permissions and safety, Settings that need approval) from its links, as staff do.
+ */
+export async function openStoreSetupPlace(page: Page, name: string) {
+  await page
+    .getByRole("navigation", { name: "Store setup sections" })
+    .getByRole("link", { name, exact: true })
+    .click();
+}

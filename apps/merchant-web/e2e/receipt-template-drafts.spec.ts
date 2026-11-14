@@ -38,7 +38,7 @@ import {
 import { createDigitalReceiptTemplateDraftContent } from "../../../packages/rms/printing-device/src/contracts/digital-receipt-template-draft-fields.js";
 import { digitalReceiptRequiredFields } from "../../../packages/rms/printing-device/src/contracts/digital-receipt-template.js";
 import { canonicalPublicationValue } from "../src/product-publication-command-client-v2.js";
-import { followWorkspaceLink } from "./workspace-navigation";
+import { followWorkspaceLink, openStoreSetupPlace } from "./workspace-navigation";
 // Production App/client and real IndexedDB. HTTP facts are synthetic; no native
 // IAM, PostgreSQL, template publication or professional review is claimed.
 const id = (n: number) => `01902501-0000-7000-8000-${n.toString(16).padStart(12, "0")}`,
@@ -808,7 +808,8 @@ async function open(page: Page) {
   await page.goto("/app");
   // The Menu drawer on phones, the closed navigation group on wider screens (UI refresh 2026-10-21).
   await followWorkspaceLink(page, "Store setup");
-  await expect(page.getByRole("button", { name: "Save setup draft", exact: true })).toBeEnabled();
+  await openStoreSetupPlace(page, "Settings that need approval");
+  await expect(page.getByRole("button", { name: "Save as draft", exact: true })).toBeEnabled();
   await page.getByRole("button", { name: "5. Tax and payment", exact: true }).click();
   const region = page.getByRole("region", { name: "Receipt template drafts", exact: true });
   await expect(
@@ -1262,7 +1263,7 @@ test("@production published receipt template selection saves stable Store refere
   );
   await use.click();
   expect(state.setupPosts).toEqual([]);
-  await page.getByRole("button", { name: "Save setup draft", exact: true }).click();
+  await page.getByRole("button", { name: "Save as draft", exact: true }).click();
   await expect(
     page.getByText("Setup draft saved. These settings have not been validated or published.", {
       exact: true,
@@ -1287,9 +1288,9 @@ test("@production published receipt template selection saves stable Store refere
       .getByRole("heading", { name: "Receipt settings", exact: true })
       .locator("xpath=following-sibling::p[1]"),
   ).toHaveText("Already configured.");
-  await expect(page.getByRole("button", { name: "Save setup draft", exact: true })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Save as draft", exact: true })).toBeEnabled();
   state.loseSetup = true;
-  await page.getByRole("button", { name: "Save setup draft", exact: true }).click();
+  await page.getByRole("button", { name: "Save as draft", exact: true }).click();
   const recover = page.getByRole("button", { name: "Recover original save", exact: true });
   await expect(recover).toBeEnabled();
   const original = await cursors(page, "Setup");
@@ -1312,7 +1313,7 @@ test("@production published receipt template selection saves stable Store refere
   await recover.click();
   await expect(page.getByRole("alert")).toBeVisible();
   expect(await cursors(page, "Setup")).toEqual(original);
-  await expect(page.getByRole("button", { name: "Save setup draft", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Save as draft", exact: true })).toBeDisabled();
   await page.getByRole("button", { name: "5. Tax and payment", exact: true }).click();
   await expect(
     picker.getByRole("combobox", { name: "Saved templates", exact: true }),

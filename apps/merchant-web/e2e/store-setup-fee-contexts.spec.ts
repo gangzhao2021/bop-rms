@@ -14,7 +14,7 @@ import {
 } from "../../../packages/rms/store/src/contracts/store-setup-operation.js";
 import { parseTaxConfigClassificationChoices } from "../../api/src/merchant-tax-config-workbench-values.js";
 import { canonicalPublicationValue } from "../src/product-publication-command-client-v2.js";
-import { followWorkspaceLink } from "./workspace-navigation";
+import { followWorkspaceLink, openStoreSetupPlace } from "./workspace-navigation";
 // Production-built React, actual browser client/IndexedDB and public owning
 // parsers. Session, IAM and HTTP persistence below are controlled synthetic
 // fixtures; these cases do not prove PostgreSQL or actual permission authority.
@@ -357,7 +357,8 @@ async function open(page: Page) {
   // The Menu drawer on phones, the closed navigation group on wider screens (UI refresh 2026-10-21).
   await followWorkspaceLink(page, "Store setup");
   await expect(page).toHaveURL(new RegExp(`/app/organization/stores/${id(3)}/setup$`));
-  await expect(page.getByRole("button", { name: "Save setup draft", exact: true })).toBeEnabled();
+  await openStoreSetupPlace(page, "Settings that need approval");
+  await expect(page.getByRole("button", { name: "Save as draft", exact: true })).toBeEnabled();
 }
 async function journalRecords(page: Page) {
   return page.evaluate(
@@ -411,7 +412,7 @@ async function enabledFee(page: Page) {
   await panel.getByRole("combobox", { name: "Tip", exact: true }).selectOption("Disabled");
   return panel;
 }
-const save = (page: Page) => page.getByRole("button", { name: "Save setup draft", exact: true });
+const save = (page: Page) => page.getByRole("button", { name: "Save as draft", exact: true });
 const recover = (page: Page) =>
   page.getByRole("button", { name: "Recover original save", exact: true });
 test("@production WP-2423 v15 D5/D7: classification choices load on entry and stay choosable; a Tip is On without one", async ({
@@ -515,7 +516,7 @@ test("@production Store fee contexts ordinary entry explicit selections V2 curre
   const first = f.history[0];
   if (!first) throw new Error("Actual saved fixture revision missing");
   await page.reload();
-  await expect(page.getByText("Revision 1", { exact: true })).toBeVisible();
+  await expect(page.getByText("A draft is saved", { exact: true })).toBeVisible();
   const restored = await feeStep(page);
   await expect(restored.getByRole("combobox", { name: "Service charge", exact: true })).toHaveValue(
     "Enabled",
@@ -532,7 +533,7 @@ test("@production Store fee contexts ordinary entry explicit selections V2 curre
   ).toBeVisible();
   await expect.poll(() => f.snapshot()?.revision).toBe(2);
   await page.getByRole("button", { name: "1. Identity", exact: true }).click();
-  await expect(page.getByText("Revision 2", { exact: true })).toBeVisible();
+  await expect(page.getByText("A draft is saved", { exact: true })).toBeVisible();
   expect(f.history[0]).toEqual(first);
   expect(f.history[0]?.content.feeContexts).toEqual(first.content.feeContexts);
   expect(f.control.errors).toEqual([]);
@@ -564,7 +565,7 @@ test("@production Store fee context lost reply old original recovery retains new
       exact: true,
     }),
   ).toBeVisible();
-  await expect(page.getByText("Revision 2", { exact: true })).toBeVisible();
+  await expect(page.getByText("A draft is saved", { exact: true })).toBeVisible();
   const panel = await feeStep(page);
   await expect(panel.getByRole("combobox", { name: "Service charge", exact: true })).toHaveValue(
     "Disabled",

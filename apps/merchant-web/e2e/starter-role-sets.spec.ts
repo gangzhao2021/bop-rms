@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page, type Route } from "@playwright/test";
 import { expectNoInternalText } from "./internal-text-guard";
-import { serveStoreSetupPanels } from "./store-setup-panels";
+import { establishedOpeningList, serveStoreSetupPanels } from "./store-setup-panels";
 
 // WP-2423 store-type starter roles (Owner 2026-11-06 "预设一些角色与权限，另外允许店家自定义；店家也可以
 // 对预设进行增删改", DEC-STORE-TYPE-STARTER-ROLES): a one-owner tea shop picks its kind of shop on
@@ -422,6 +422,10 @@ test("@production Store setup offers who does what, in Chinese, and links to Rol
   await page.route("**/merchant/store/receipt-profile", (route) =>
     route.fulfill({ status: 503, headers, json: { error: "unavailable" } }),
   );
+  // b18: the store-type question is asked while the Store is being opened.
+  await page.route("**/merchant/store/opening-list", (route) =>
+    route.fulfill({ headers, json: { ...establishedOpeningList, setupPublished: false } }),
+  );
   const state = teaShop();
   await state.install(page);
   await page.addInitScript(() => localStorage.setItem("bop.merchant.language", "zh-Hans"));
@@ -465,6 +469,10 @@ test("@production Store setup says withdrawn starter roles are not on and sends 
   );
   await page.route("**/merchant/store/receipt-profile", (route) =>
     route.fulfill({ status: 503, headers, json: { error: "unavailable" } }),
+  );
+  // b18: the store-type question is asked while the Store is being opened.
+  await page.route("**/merchant/store/opening-list", (route) =>
+    route.fulfill({ headers, json: { ...establishedOpeningList, setupPublished: false } }),
   );
   const state = teaShop();
   await state.install(page);

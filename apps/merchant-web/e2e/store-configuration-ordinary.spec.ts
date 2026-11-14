@@ -20,7 +20,7 @@ import {
   parseMerchantStoreConfigurationOrdinaryWorkspace,
 } from "../../api/src/merchant-store-configuration-ordinary-values.js";
 import { canonicalPublicationValue as canonical } from "../src/product-publication-command-client-v2.js";
-import { followWorkspaceLink } from "./workspace-navigation";
+import { followWorkspaceLink, openStoreSetupPlace } from "./workspace-navigation";
 // Actual production React/router/HTTP client/IndexedDB. HTTP, Session, eligibility,
 // approvals and persistence below are explicitly synthetic controlled facts,
 // not evidence of native IAM, professional qualification or live Store readiness.
@@ -593,6 +593,7 @@ async function enter(page: Page) {
   await page.goto("/app");
   // The Menu drawer on phones, the closed navigation group on wider screens (UI refresh 2026-10-21).
   await followWorkspaceLink(page, "Store setup");
+  await openStoreSetupPlace(page, "Settings that need approval");
   await page.getByRole("button", { name: /^8\. Review$/u }).click();
   await expect(
     panel(page).getByRole("button", { name: "Create configuration from saved setup" }),
@@ -810,6 +811,7 @@ test("a deployment without configuration publication hides the panel instead of 
   await page.goto("/app");
   // The Menu drawer on phones, the closed navigation group on wider screens (UI refresh 2026-10-21).
   await followWorkspaceLink(page, "Store setup");
+  await openStoreSetupPlace(page, "Settings that need approval");
   await page.getByRole("button", { name: /^8\. Review$/u }).click();
   await expect(page.getByRole("heading", { name: "Review", exact: true })).toBeVisible();
   await expect(panel(page)).toHaveCount(0);
@@ -1089,6 +1091,7 @@ test("WP-2423 v15: 'Use the live Store's settings' fills time zone, business day
   await page.goto("/app");
   // The Menu drawer on phones, the closed navigation group on wider screens (UI refresh 2026-10-21).
   await followWorkspaceLink(page, "Store setup");
+  await openStoreSetupPlace(page, "Settings that need approval");
   await page.getByRole("button", { name: /^8\. Review$/u }).click();
   const missing = page.getByRole("region", { name: "Settings not set yet" });
   await expect(missing).toContainText("Time zone: set it in step 2, Address and timezone");

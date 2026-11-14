@@ -12,7 +12,7 @@ import {
   parseStoreSetupOperationReceipt,
 } from "../../../packages/rms/store/src/contracts/store-setup-operation.js";
 import { canonicalPublicationValue } from "../src/product-publication-command-client-v2.js";
-import { followWorkspaceLink } from "./workspace-navigation";
+import { followWorkspaceLink, openStoreSetupPlace } from "./workspace-navigation";
 // Production-built React, actual browser client/IndexedDB and public owning
 // parsers. Session, IAM and HTTP persistence below are controlled synthetic
 // fixtures; these cases do not prove PostgreSQL or actual permission authority.
@@ -224,7 +224,8 @@ async function open(page: Page) {
   // The Menu drawer on phones, the closed navigation group on wider screens (UI refresh 2026-10-21).
   await followWorkspaceLink(page, "Store setup");
   await expect(page).toHaveURL(new RegExp(`/app/organization/stores/${id(3)}/setup$`));
-  await expect(page.getByRole("button", { name: "Save setup draft", exact: true })).toBeEnabled();
+  await openStoreSetupPlace(page, "Settings that need approval");
+  await expect(page.getByRole("button", { name: "Save as draft", exact: true })).toBeEnabled();
 }
 async function journalRecords(page: Page) {
   return page.evaluate(
@@ -298,7 +299,7 @@ test("@production Store Setup ordinary entry eight steps partial save refresh an
   ).toBeVisible();
   await page.getByLabel("Last orders (minutes before closing)", { exact: true }).fill("10");
   await page.getByLabel("Preparation time (minutes)", { exact: true }).fill("15");
-  await page.getByRole("button", { name: "Save setup draft", exact: true }).click();
+  await page.getByRole("button", { name: "Save as draft", exact: true }).click();
   await expect(
     page.getByText("Setup draft saved. These settings have not been validated or published.", {
       exact: true,
@@ -315,7 +316,7 @@ test("@production Store Setup ordinary entry eight steps partial save refresh an
     leadTimeSeconds: 900,
   });
   await page.reload();
-  await expect(page.getByText("Revision 1", { exact: true })).toBeVisible();
+  await expect(page.getByText("A draft is saved", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "2. Address and timezone", exact: true }).click();
   await expect(page.getByRole("combobox", { name: "Draft timezone", exact: true })).toHaveValue(
     "America/Toronto",
@@ -335,11 +336,11 @@ test("@production Store Setup lost committed reply survives reload and denied re
   await open(page);
   await timezone(page);
   fixture.control.loseNext = true;
-  await page.getByRole("button", { name: "Save setup draft", exact: true }).click();
+  await page.getByRole("button", { name: "Save as draft", exact: true }).click();
   await expect(
     page.getByRole("button", { name: "Recover original save", exact: true }),
   ).toBeVisible();
-  await expect(page.getByRole("button", { name: "Save setup draft", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Save as draft", exact: true })).toBeDisabled();
   await page.reload();
   await expect(
     page.getByRole("button", { name: "Recover original save", exact: true }),
@@ -357,7 +358,7 @@ test("@production Store Setup lost committed reply survives reload and denied re
   fixture.control.denyResolve = true;
   await page.getByRole("button", { name: "Recover original save", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("does not allow this action");
-  await expect(page.getByRole("button", { name: "Save setup draft", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Save as draft", exact: true })).toBeDisabled();
   await page.reload();
   await expect(
     page.getByRole("button", { name: "Recover original save", exact: true }),
@@ -375,7 +376,7 @@ test("@production Store Setup lost committed reply survives reload and denied re
   for (const resolved of fixture.control.resolves)
     expect(resolved.operationReference).toBe(fixture.control.writes[0]?.operationReference);
   await page.reload();
-  await expect(page.getByRole("button", { name: "Save setup draft", exact: true })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Save as draft", exact: true })).toBeEnabled();
   await expect(
     page.getByRole("button", { name: "Recover original save", exact: true }),
   ).toHaveCount(0);
@@ -398,7 +399,7 @@ test("@production Store Setup mismatched selected scope refuses editing and narr
   );
   expect(
     await page
-      .getByRole("button", { name: "Save setup draft", exact: true })
+      .getByRole("button", { name: "Save as draft", exact: true })
       .evaluate((element) => element.getBoundingClientRect().height),
   ).toBeGreaterThanOrEqual(44);
   expect(
@@ -419,7 +420,7 @@ test("@production Store Setup mismatched selected scope refuses editing and narr
   await expect(page.getByRole("alert")).toContainText(
     "selected Store or signed-in session changed",
   );
-  await expect(page.getByRole("button", { name: "Save setup draft", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Save as draft", exact: true })).toHaveCount(0);
   expect(fixture.control.writes).toHaveLength(0);
   expect(fixture.control.errors).toEqual([]);
 });

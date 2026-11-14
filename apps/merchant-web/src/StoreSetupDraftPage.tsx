@@ -1671,7 +1671,7 @@ export function StoreSetupDraftPage({
       )}
       {/* b18: the store-type question ("What kind of store is this?") is an opening question:
           asked on a first Store only. An open Store's owner finds the same starter roles on Roles. */}
-      {id === storeReference && firstStore && staffRoles !== undefined ? (
+      {id === storeReference && opening === "First" && staffRoles !== undefined ? (
         <Suspense fallback={null}>{staffRoles}</Suspense>
       ) : null}
     </AppFrame>
@@ -2124,9 +2124,8 @@ export function StoreSetupReferenceEditor({
       {selected && (
         <>
           <p>
-            {t("Saved revision {revision}. Business validation has not been completed.", {
-              revision: selected.revision,
-            })}
+            {/* b18: no revision numbers on the page; what matters is that it is saved. */}
+            {t("Saved. It is checked when the setup is submitted for approval.")}
           </p>
           <button
             type="button"

@@ -19,7 +19,7 @@ import {
   type StorePaymentConfigurationVersion,
 } from "../../../packages/rms/payment/src/contracts/store-payment-configuration.js";
 import { canonicalPublicationValue } from "../src/product-publication-command-client-v2.js";
-import { followWorkspaceLink } from "./workspace-navigation";
+import { followWorkspaceLink, openStoreSetupPlace } from "./workspace-navigation";
 
 // Built App, real browser clients and IndexedDB. HTTP identities, persistence and
 // business inputs are synthetic; public owning parsers do not confer native IAM.
@@ -352,7 +352,8 @@ async function open(page: Page) {
   await page.goto("/app");
   // The Menu drawer on phones, the closed navigation group on wider screens (UI refresh 2026-10-21).
   await followWorkspaceLink(page, "Store setup");
-  await expect(page.getByRole("button", { name: "Save setup draft", exact: true })).toBeEnabled();
+  await openStoreSetupPlace(page, "Settings that need approval");
+  await expect(page.getByRole("button", { name: "Save as draft", exact: true })).toBeEnabled();
   await page.getByRole("button", { name: "5. Tax and payment", exact: true }).click();
   await expect(
     page.getByRole("button", { name: "Save payment configuration", exact: true }),
@@ -377,7 +378,7 @@ test("@production Store payment rules save, explicit selection, setup resume ret
   });
   expect(f.draft()).toBeNull();
   await page.getByRole("button", { name: "Use saved payment configuration", exact: true }).click();
-  await page.getByRole("button", { name: "Save setup draft", exact: true }).click();
+  await page.getByRole("button", { name: "Save as draft", exact: true }).click();
   await expect.poll(() => f.draft()?.revision).toBe(1);
   const selected = f.payment()?.configurationReference;
   expect(f.draft()?.content.paymentConfigurationReference).toEqual({

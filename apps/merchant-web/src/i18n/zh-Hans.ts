@@ -1805,7 +1805,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Enter the store name customers will see.": "请输入顾客将看到的门店名称。",
   "Enter the street address.": "请输入街道地址。",
   "Enter their work email again to send a new invitation": "再次输入其工作邮箱以发送新邀请",
-  "Enter them in Store setup → Receipts and privacy": '请在"门店设置 → 收据与隐私"中填写',
+  "Enter them in Store setup → Receipts and tax numbers": '请在"门店设置 → 收据与税号"中填写',
   "Enter your name.": "请输入你的名字。",
   "Enter {name}'s PIN": "输入 {name} 的 PIN",
   "Entered by mistake": "录入错误",
@@ -9860,4 +9860,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Live since": "生效于",
   "Saved and live. Receipts issued from now on show these details; receipts already issued are not changed.":
     "已保存并生效。从现在起开出的收据会显示这些信息；已开出的收据不会更改。",
+  "Saved. It is checked when the setup is submitted for approval.":
+    "已保存。提交审批时会一并检查。",
 });

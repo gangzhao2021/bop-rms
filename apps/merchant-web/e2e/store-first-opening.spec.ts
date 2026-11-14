@@ -1255,8 +1255,8 @@ test("@production a first Store's Owner answers one page, ticks once, enters one
   await dialog.getByRole("button", { name: "Verify", exact: true }).click();
   await expect(page.getByText("Your store setup is published.")).toBeVisible();
   await expect(panel(page)).toHaveCount(0);
-  // The page as it always was, for a Store that is open.
-  await expect(page.getByRole("navigation", { name: "Setup steps" })).toBeVisible();
+  // b18: an open Store's setup, in its places.
+  await expect(page.getByRole("navigation", { name: "Store setup sections" })).toBeVisible();
   // One code, recorded for what it was asked for, and every approval recorded as given alone.
   expect(state.stepUpPurposes).toEqual(["SoleOperatorSetting"]);
   expect(state.approvals).toEqual([
@@ -1346,14 +1346,20 @@ test("@production a press that stops says where, keeps what was done, and Contin
   expect(state.errors).toEqual([]);
 });
 
-test("@production an established Store sees the page as it always was", async ({ page }) => {
+test("@production an established Store sees its setup in places, the steps in the approval place", async ({
+  page,
+}) => {
   await install(page, { setupPublished: true });
   await page.goto(href);
-  await expect(page.getByRole("navigation", { name: "Setup steps" })).toBeVisible();
-  await expect(page.getByText("Saving a draft does not change the live Store.")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Refresh saved setup" })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Store setup sections" })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Setup steps" })).toHaveCount(0);
+  await expect(page.getByText("Saving a draft does not change the live Store.")).toHaveCount(0);
   await expect(panel(page)).toHaveCount(0);
   await expect(page.getByText("All settings, step by step")).toHaveCount(0);
+  await page.goto(href + "?section=changes");
+  await expect(page.getByRole("navigation", { name: "Setup steps" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Reload the saved draft" })).toBeVisible();
+  await page.goto(href + "?section=kitchen");
   await expect(page.getByRole("heading", { name: "Kitchen", exact: true })).toBeVisible();
 });
 
@@ -1362,11 +1368,11 @@ test("@production a failed read shows the page as it always was, for an establis
 }) => {
   for (const setupPublished of [true, false]) {
     const state = await install(page, { setupPublished, openingListFails: true });
-    await page.goto(href);
-    // Nothing about the Store is swapped for an error: every step and section is there.
+    await page.goto(href + "?section=changes");
+    // Nothing about the Store is swapped for an error: every step and place is there.
     await expect(page.getByRole("navigation", { name: "Setup steps" })).toBeVisible();
-    await expect(page.getByText("Saving a draft does not change the live Store.")).toBeVisible();
-    await expect(page.getByRole("button", { name: "Refresh saved setup" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Reload the saved draft" })).toBeVisible();
+    await page.goto(href + "?section=kitchen");
     await expect(page.getByRole("heading", { name: "Kitchen", exact: true })).toBeVisible();
     await expect(panel(page)).toHaveCount(0);
     await expect(page.getByText("All settings, step by step")).toHaveCount(0);
@@ -1417,7 +1423,7 @@ test("@production a name and address published from the fold reach the page and 
   await profile
     .getByLabel("Phone number (needed while the store takes pickup orders)")
     .fill("(416) 555-0100");
-  await profile.getByRole("button", { name: "Publish name and contact details" }).click();
+  await profile.getByRole("button", { name: "Save and make live" }).click();
   // Nobody types the address twice: the page and Store setup's own records follow it.
   await expect(panel(page).getByLabel("Street address")).toHaveValue("2 Queen Street East");
   await expect.poll(() => state.writes).toEqual(["PublishProfile", "SaveAddress", "SaveContact"]);

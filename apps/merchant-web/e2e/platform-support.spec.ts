@@ -298,14 +298,16 @@ test("@production the Owner allows, limits and stops support, and reads the log"
     }
     await route.fulfill({ headers, json: state });
   });
-  await page.goto("/app/organization/stores/" + store + "/setup");
+  await page.goto("/app/organization/stores/" + store + "/setup?section=access");
   const panel = page.locator("#support-access");
   await expect(panel).toContainText("Platform support can't change your settings.");
   await expect(panel).toContainText("TEST ONLY");
   await expect(
-    panel.getByRole("cell", { name: "Changed whether guests can order pickup" }),
+    panel.getByRole("cell", { name: "Changed whether guests can order pickup" }).first(),
   ).toBeVisible();
-  await expect(panel.getByRole("cell", { name: "Tried something that was refused" })).toBeVisible();
+  await expect(
+    panel.getByRole("cell", { name: "Tried something that was refused" }).first(),
+  ).toBeVisible();
   await noOverflow(page, "support-owner-off", "#support-access");
   await axe(page, "#support-access");
 

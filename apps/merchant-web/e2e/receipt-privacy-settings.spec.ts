@@ -146,7 +146,7 @@ test("@production the Owner enters receipt registrations and the privacy link; s
   ).toBeVisible();
   await expect(page.getByText("Add your privacy notice link before going live")).toBeVisible();
   await page
-    .getByRole("link", { name: "Enter them in Store setup → Receipts and privacy" })
+    .getByRole("link", { name: "Enter them in Store setup → Receipts and tax numbers" })
     .click();
   await expect(page).toHaveURL(new RegExp("/app/organization/stores/" + store + "/setup"));
 
@@ -159,7 +159,7 @@ test("@production the Owner enters receipt registrations and the privacy link; s
   // Mistakes are explained next to the field before anything is sent.
   await panel.getByLabel("GST/HST registration number").fill("12345");
   await panel.getByLabel("Privacy notice link").fill("http://example.test/privacy");
-  await panel.getByRole("button", { name: "Save receipt and privacy details" }).click();
+  await panel.getByRole("button", { name: "Save and make live" }).click();
   await expect(panel.getByText(/9 digits, RT, 4 digits/u)).toBeVisible();
   await expect(panel.getByText(/starting with https:\/\//u)).toBeVisible();
   expect(saves).toHaveLength(0);
@@ -167,9 +167,9 @@ test("@production the Owner enters receipt registrations and the privacy link; s
   // TEST-ONLY number and link (shaped like real ones, not a real registration).
   await panel.getByLabel("GST/HST registration number").fill("000000000 RT 0001");
   await panel.getByLabel("Privacy notice link").fill("https://example.test/privacy");
-  await panel.getByRole("button", { name: "Save receipt and privacy details" }).click();
+  await panel.getByRole("button", { name: "Save and make live" }).click();
   await expect(
-    panel.getByText(/Saved\. Receipts issued from now on show these details/u),
+    panel.getByText(/Saved and live\. Receipts issued from now on show these details/u),
   ).toBeVisible();
   expect(saves).toHaveLength(1);
   expect(saves[0]).toMatchObject({
@@ -184,7 +184,7 @@ test("@production the Owner enters receipt registrations and the privacy link; s
   });
   await expect(panel.getByText("Add your privacy notice link before going live")).toHaveCount(0);
   await expect(panel.getByText(/Receipts cannot be issued at this store until/u)).toHaveCount(0);
-  await expect(panel.getByText("Last saved", { exact: false })).toBeVisible();
+  await expect(panel.getByText("Live since", { exact: false })).toBeVisible();
 
   // Tax review no longer warns.
   await page.goto("/app/commerce/tax-review");
@@ -218,13 +218,11 @@ test("@production staff who cannot change the details see them read-only", async
       },
     }),
   );
-  await page.goto("/app/organization/stores/" + store + "/setup");
+  await page.goto("/app/organization/stores/" + store + "/setup?section=receipts");
   const panel = page.getByRole("region", { name: "Receipts and privacy" });
   await expect(panel.getByText("Only the Owner can change these details.")).toBeVisible();
   await expect(panel.getByLabel("GST/HST registration number")).toHaveValue("000000000RT0001");
   await expect(panel.getByLabel("GST/HST registration number")).toHaveAttribute("readonly", "");
-  await expect(panel.getByRole("button", { name: "Save receipt and privacy details" })).toHaveCount(
-    0,
-  );
+  await expect(panel.getByRole("button", { name: "Save and make live" })).toHaveCount(0);
   await expect(panel.getByText("Add your privacy notice link before going live")).toBeVisible();
 });

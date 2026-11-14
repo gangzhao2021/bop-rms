@@ -20,7 +20,7 @@ import {
   type StoreSetupReferenceVersion,
 } from "../../../packages/rms/store/src/contracts/store-setup-reference.js";
 import { canonicalPublicationValue } from "../src/product-publication-command-client-v2.js";
-import { followWorkspaceLink } from "./workspace-navigation";
+import { followWorkspaceLink, openStoreSetupPlace } from "./workspace-navigation";
 
 // Built App, real browser clients and IndexedDB. HTTP identities, persistence and
 // business inputs are synthetic; public owning parsers do not confer native IAM.
@@ -343,7 +343,8 @@ async function open(page: Page) {
   // The Menu drawer on phones, the closed navigation group on wider screens (UI refresh 2026-10-21).
   await followWorkspaceLink(page, "Store setup");
   await expect(page).toHaveURL(new RegExp(`${href}$`));
-  await expect(page.getByRole("button", { name: "Save setup draft", exact: true })).toBeEnabled();
+  await openStoreSetupPlace(page, "Settings that need approval");
+  await expect(page.getByRole("button", { name: "Save as draft", exact: true })).toBeEnabled();
 }
 async function addressStep(page: Page) {
   await page.getByRole("button", { name: "2. Address and timezone", exact: true }).click();
@@ -390,7 +391,7 @@ test("@production Store Setup saves Address and Contact references then binds se
   await page.getByRole("button", { name: "Save contact configuration", exact: true }).click();
   await expect(page.getByRole("button", { name: "Use saved contact", exact: true })).toBeEnabled();
   await page.getByRole("button", { name: "Use saved contact", exact: true }).click();
-  await page.getByRole("button", { name: "Save setup draft", exact: true }).click();
+  await page.getByRole("button", { name: "Save as draft", exact: true }).click();
   await expect(
     page.getByText("Setup draft saved. These settings have not been validated or published.", {
       exact: true,
@@ -408,7 +409,7 @@ test("@production Store Setup saves Address and Contact references then binds se
   });
   expect(await records(page)).toEqual([]);
   await page.reload();
-  await expect(page.getByText("Revision 1", { exact: true })).toBeVisible();
+  await expect(page.getByText("A draft is saved", { exact: true })).toBeVisible();
   await addressStep(page);
   await expect(page.getByLabel("Address line 1", { exact: true })).toHaveValue(
     "Synthetic fixture address",
@@ -485,7 +486,7 @@ test("@production Contact committed response loss retains payload-free original 
   expect(f.control.resolves).toHaveLength(2);
   expect(f.control.resolves[0]).toEqual(f.control.resolves[1]);
   await page.getByRole("button", { name: "Use saved contact", exact: true }).click();
-  await page.getByRole("button", { name: "Save setup draft", exact: true }).click();
+  await page.getByRole("button", { name: "Save as draft", exact: true }).click();
   await expect(
     page.getByText("Setup draft saved. These settings have not been validated or published.", {
       exact: true,
