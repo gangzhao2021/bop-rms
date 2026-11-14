@@ -100,6 +100,7 @@ async function fixture() {
   mocks.link.mockReset().mockResolvedValue(diningOrderCapacityLinkFromHistory(clock));
   mocks.clock.mockReset().mockResolvedValue(clock);
   const tx: ConsumerTransaction = { query: async () => ({ rows: [], rowCount: 0 }) };
+  const open = { now: false };
   const authorize = vi.fn(async () => true);
   const scope = {
     tenantReference: r.order.brandReference,
@@ -110,12 +111,31 @@ async function fixture() {
     scope,
     // Authorization implementation is mocked; only its configured scope is read here.
     access: { scope } as unknown as CustomerCheckoutSessionAuthorizationOptions,
-    transactions: { run: async (work) => work(tx) },
+    transactions: {
+      run: async (work) => {
+        open.now = true;
+        try {
+          return await work(tx);
+        } finally {
+          open.now = false;
+        }
+      },
+    },
     authorizeHistory: authorize,
     now: () => "2026-09-11T11:00:00.000Z",
   });
-  return { service, session, clock, authorize };
+  return { service, session, clock, authorize, open };
 }
+it("WP-2423 (rush-connection-hold): reads the session again only once its transaction gave its connection back", async () => {
+  const f = await fixture();
+  const openAtRead: boolean[] = [];
+  mocks.read.mockImplementation(async () => {
+    openAtRead.push(f.open.now);
+    return f.session;
+  });
+  await f.service.preparePaymentClock({});
+  expect(openAtRead).toEqual([false, false]);
+});
 it("returns the original sealed clock even after expiry without restarting it", async () => {
   const f = await fixture();
   const first = await f.service.preparePaymentClock({});

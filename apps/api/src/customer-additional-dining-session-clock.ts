@@ -46,7 +46,7 @@ export function createCustomerAdditionalDiningSessionClock(options: {
         String(session.validation.storeReference) !== scope.storeReference
       )
         throw new CheckoutSessionServiceError("INTENT_CONFLICT");
-      return retryTransactionConflict(() =>
+      const prepared = await retryTransactionConflict(() =>
         options.transactions.run(async (transaction) => {
           const bound = {
             run: async <T>(work: (tx: ConsumerTransaction) => Promise<T>) => work(transaction),
@@ -88,8 +88,6 @@ export function createCustomerAdditionalDiningSessionClock(options: {
           )
             throw new CheckoutSessionServiceError("INTENT_CONFLICT");
           if (
-            JSON.stringify(parseCheckoutSession(await access.read(input))) !==
-              JSON.stringify(session) ||
             (await options.authorizeHistory(transaction, {
               ...scope,
               submissionReference: session.submissionReference,
@@ -99,6 +97,14 @@ export function createCustomerAdditionalDiningSessionClock(options: {
           return Object.freeze({ order, clock, session });
         }),
       );
+      // WP-2423 (rush-connection-hold): the session is read again once this transaction has given
+      // its connection back. Read inside it, it took a second connection of the same pool while
+      // holding one: in a rush every holder waited for what only the holders could give back.
+      if (
+        JSON.stringify(parseCheckoutSession(await access.read(input))) !== JSON.stringify(session)
+      )
+        throw new CheckoutSessionServiceError("PERMISSION_DENIED");
+      return prepared;
     },
   });
 }
