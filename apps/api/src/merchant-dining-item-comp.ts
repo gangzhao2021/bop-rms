@@ -176,7 +176,8 @@ interface ItemCompOptions {
 
 export function createMerchantDiningItemComp(options: ItemCompOptions) {
   const run = itemCompRun(options);
-  return (input: { sessionCookie: unknown; csrf: unknown; command: unknown }) =>
+  // A body it can't read is a refused promise (400), never a throw out of the route (an HTML 500).
+  return async (input: { sessionCookie: unknown; csrf: unknown; command: unknown }) =>
     run(input, parseItemCompCommand(input.command)) as Promise<{
       readonly status: "Recorded" | "AlreadyRecorded";
       readonly reductions: ReturnType<typeof publicRecords>;
@@ -191,7 +192,7 @@ export function createMerchantDiningItemComp(options: ItemCompOptions) {
  */
 export function createMerchantDiningItemCompPreview(options: ItemCompOptions) {
   const run = itemCompRun(options);
-  return (input: { sessionCookie: unknown; csrf: unknown; command: unknown }) =>
+  return async (input: { sessionCookie: unknown; csrf: unknown; command: unknown }) =>
     run(input, parseItemCompPreview(input.command)) as Promise<{
       readonly status: "Preview";
       readonly totalMinor: string;
