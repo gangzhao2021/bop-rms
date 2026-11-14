@@ -13,19 +13,45 @@ The sidebar entry is unchanged (Store setup / 门店设置, Section 88 `STORE-SE
 `organization.store.read`). Inside it, an open Store's setup is five places, shown as text links
 under the page title (accent colour, the current one marked by weight and a line under it):
 
-| Place (en / zh-Hans)                       | Address                    | What it holds                                                                                                                                                         | When a change takes effect                                                                       | Button                                                                            |
-| ------------------------------------------ | -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------- |
-| Store details / 门店资料                   | `…/setup`                  | Store name customers see (per language), street address, phone                                                                                                        | Live as soon as it is saved                                                                      | Save and make live / 保存并生效                                                   |
-| Receipts and tax numbers / 收据与税号      | `…/setup?section=receipts` | Business name on receipts, GST/HST, QST, PST, privacy notice link                                                                                                     | Live as soon as saved, for receipts issued from then on                                          | Save and make live / 保存并生效                                                   |
-| Kitchen setup / 后厨                       | `…/setup?section=kitchen`  | Whether every dish reaches the Kitchen screen; the one-step fix                                                                                                       | Live at once, for orders confirmed from then on                                                  | the action itself                                                                 |
-| Permissions and safety / 权限与安全        | `…/setup?section=access`   | Platform support access and its log; sole operator and its history                                                                                                    | Live at once, each change recorded                                                               | the action itself (sole operator still needs a reason and the authenticator code) |
-| Settings that need approval / 需审批的设置 | `…/setup?section=changes`  | The eight setup steps (time zone, business day, service, hours, fees, tax/payment, receipt layout, capacity, contacts) and the publication of the Store configuration | Saved as a draft first; live only after it is submitted, approved and published in the last step | Save as draft / 存为草稿, then Submit for review and Publish in step 8            |
+| Place (en / zh-Hans)                       | Address                    | What it holds                                                                                                                                                             | When a change takes effect                                                                       | Button                                                                            |
+| ------------------------------------------ | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------- |
+| Store details / 门店资料                   | `…/setup`                  | Store name customers see (per language), street address, phone                                                                                                            | Live as soon as it is saved                                                                      | Save and make live / 保存并生效                                                   |
+| Receipts and tax numbers / 收据与税号      | `…/setup?section=receipts` | Business name on receipts, GST/HST, QST, PST, privacy notice link                                                                                                         | Live as soon as saved, for receipts issued from then on                                          | Save and make live / 保存并生效                                                   |
+| Kitchen setup / 后厨                       | `…/setup?section=kitchen`  | Whether every dish reaches the Kitchen screen; the one-step fix                                                                                                           | Live at once, for orders confirmed from then on                                                  | the action itself                                                                 |
+| Permissions and safety / 权限与安全        | `…/setup?section=access`   | Platform support access and its log; sole operator and its history                                                                                                        | Live at once, each change recorded                                                               | the action itself (sole operator still needs a reason and the authenticator code) |
+| Settings that need approval / 需审批的设置 | `…/setup?section=changes`  | Four steps: time zone and business day; services and order limits; fees, tax, payment and receipt layout; review and publish (the publication of the Store configuration) | Saved as a draft first; live only after it is submitted, approved and published in the last step | Save as draft / 存为草稿, then Submit for review and Publish in step 4            |
 
-Each place opens with one line saying what it holds and when a change there takes effect. Only the
+Each place opens with one line saying what it holds and when a change there takes effect, and its
+section heading is the place's own name (Store details, Receipts and tax numbers, Kitchen setup). Only the
 last place talks about drafts; the old header line "Saving a draft does not change the live Store"
 and the page-wide "Refresh saved setup" are gone from the other four ("Reload the saved draft" /
 重新读取已存的草稿 sits in the draft place only). No button means two things: "保存并生效" always
 means live now; "存为草稿" / "提交审批" always mean a draft that needs approval.
+
+### The opening steps only while a Store is opened (b18 review)
+
+The eight-step wizard (身份/地址和时区/服务方式/营业时间/税务和付款/座位数/联系方式/审核) is an
+opening wizard. An open Store's approval place shows only the four steps whose settings need approval
+there (step indices 1, 2, 4, 7 of the eight, renumbered 1–4):
+
+- Identity is not a step: it only showed facts that are not changed here; the time-zone step says
+  which time zone the Store runs on today.
+- Opening hours are not a step: they are changed in Hours & ordering (`/service`, its own hours
+  editor and approval, already saving an hours-only Store setup change). The place's lead links
+  there, and the Hours & ordering editor says "Opening hours are changed here". One place, one
+  save model for hours.
+- Address (step 2) and Contacts (step 7) are not asked again. The configuration still carries an
+  address and contact record; while the saved setup has none (a Store installed before Store setup
+  existed), step 4 shows them under "Still needed", already filled in from Store details (the same
+  values the first opening page copies, `StoreSetupReferenceEditor` `suggested`), to check, save and
+  choose. Once chosen, nothing asks for them again.
+- Order limits (Capacity) are asked with the services (step 2).
+- Services stay: they are what the Store's configuration offers (needs approval). Turning pickup off
+  for a while or pausing ordering are live switches in Store features and Hours & ordering; step 2
+  says so with links, so the two are not the same fact edited twice.
+
+Where-to-set texts follow the layout (`storeSetupWhere`), e.g. "Weekly hours: set it in Hours &
+ordering", "Order limits: step 2, Services"; a Store being opened keeps the eight step names.
 
 A first Store (setup never published) keeps its one opening page (WP-2423 item 14,
 DEC-STORE-FIRST-OPENING) with the eight steps and every section folded under "All settings, step
@@ -57,27 +83,36 @@ nor loses an unsaved edit, and the reads are the ones the one page made before.
 
 ## Logs
 
-- Platform support: the place leads with "What support changed or tried" (the Changed and Refused
-  records), then one line "Support looked at your Store 46 times, last …", then the access log with
-  the newest five records and "Show all 49 records" / 显示全部 49 条记录 listing every record the
-  read returned. Collapsed on screen only; nothing is removed or filtered out of the record.
-- Sole operator: the newest five changes, "Show 5 more" for the rest the read returned, and the
-  existing "N earlier changes are kept in the record" for changes beyond it. The "setting change
-  36" and "Change 36:" numbers are no longer shown.
-- Remaining (not changed in b18, needs a read change): the server returns the latest 10
-  sole-operator changes (`historyLimit: 10`) and the latest 100 support log records
-  (`listStoreSupportAccess` limit 100); the page says how many more are kept but cannot list them.
+- Platform support: what the place says about the log is read from the whole log on the server
+  (`summarizeStoreSupportAccess`: how many records, how many looks and the last one, and every
+  Changed/Refused record, newest 50 with their count), never from the records on screen, so a change
+  older than the newest page is still listed ("What support changed or tried") and counted. Then
+  "Support looked at your Store N times, last …", then the access log: the newest five, "Show all N
+  records", then "Show earlier records" a page of 50 at a time until the first record
+  (`GET /merchant/store/support-access?before=<instant to the microsecond>&skip=<n>`,
+  `pageStoreSupportAccess`; the log is append-only so a page once read stays the same).
+- Sole operator: the newest five changes, "Show all N changes", then "Show earlier changes" 20 at a
+  time down to the first (`GET /merchant/organization/sole-operator?before=<change number>`; the
+  setting itself is still the latest). "Showing x of N" while not all are on screen. No change
+  numbers on screen.
 
 ## Wording
 
 - Name fields: "店名（英文）" / "店名（中文）" (en: "Store name customers see (English)"), never the
   browser's "加拿大英语"; each field's example is in its own language ("Maple Noodle House – King
   Street" for English, "枫叶面馆 国王街店" for Chinese). Step 1 shows the Store language as "英语".
-- "修订版 26" is gone: step 1 says "已存草稿" or "还没有保存草稿".
+- "修订版 26" is gone, and so are "saved Store setup draft 26" on Hours & ordering and "Version N,
+  created from saved setup revision 26" on self-approval.
 - 厨房线 / 后厨线 are gone from Chinese: "让所有菜都送到后厨", "本店的菜都送到后厨，开始于".
 - Save wording: 保存并生效 (live now) and 存为草稿 / 提交审批 (approval), "放弃未保存的修改",
   "已保存并生效。" success lines; every sentence that named the old "保存设置草稿" button now names
   "存为草稿".
+
+## Links into the places
+
+Approvals' sole-operator line opens Permissions and safety (`?section=access#sole-operator`); the
+fee basis on Hours & ordering ("Change them in Settings that need approval") opens
+`?section=changes`; Store features' "Add phone number" opens Store details.
 
 ## Visual rules
 
@@ -85,18 +120,26 @@ White surfaces, no boxes: the places are accent text links; sections inside a pl
 border; fields are single bottom lines; buttons are accent text except the one solid accent button
 for the step that saves; the support log and sole-operator history use hairlines between rows only;
 type 28 (page title) / 20 (section) / 16 (place links, sub-headings) / 14 (text), weights 600/400.
+The title row ends with the language switch, as on Orders (AppFrame pages hide the shell's own
+header in the workspace, so Store setup draws it in its header); "Reload the saved draft" sits with
+the draft under the approval place's lead. Sole operator's change is a reason field, then one action
+on one line: "Verify to turn it on/off" until the authenticator code is confirmed, then the one
+solid button.
 The wizard's step buttons and footer follow the same rules (they were boxed, with a black save
 button). Checked at 1440, 1024 and 390 in en and zh-Hans (`e2e/store-setup-places.spec.ts`,
 screenshots in `.local/sim-kit/b18-shots/`).
 
-## Why kitchen setup stays under Store setup
+## Kitchen setup and the Kitchen pages
 
 The Owner asked for 后厨 "with the kitchen pages". Section 88 has no kitchen-setup screen, and the
 only kitchen page (`KIT-KITCHEN-QUEUE` `/operations/kitchen`) is the cooks' live board, also shown on
 the kitchen display; adding setup there would put an Owner's form in front of cooks during service.
 So 后厨 is its own place in Store setup, and every page that finds a kitchen problem (Home's
-checklist, the menu listing refusal) links straight to it (`#kitchen-setup`). A link from the
-Kitchen board for owners is left as a follow-up if the Owner still wants it there.
+checklist, the menu listing refusal) links straight to it (`#kitchen-setup`). The Kitchen board in
+the workspace now has the link "Kitchen setup in Store setup" (`?section=kitchen`) for people whose
+menu has Store setup (the Owner; a Store Manager reads it); never on the kitchen display. Whether the
+Owner wants the setup itself moved onto a kitchen page is for the Owner to decide (deviation recorded
+in WP-2423).
 
 ## Continuity
 
