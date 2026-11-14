@@ -43,6 +43,20 @@ export function installMerchantBffBodyParsers(
   const taxDraftJson = express.json({ limit: 98_304, strict: true });
   const taxSimulationJson = express.json({ limit: 196_608, strict: true });
   const taxMaterialJson = express.json({ limit: 1_056_768, strict: true });
+  // WP-2423 (logs-and-transaction-time, v15 2026-11-14): a staff screen that closes a dialog or
+  // reloads stops its request; when the connection was already gone by the time the request
+  // reached here, the body parser read nothing and handed the route an empty body, which the table
+  // close plan then logged as a level-50 IDENTITY_INPUT_INVALID fault (39 times on v15). A request
+  // whose client left before its body was read is answered by nobody: no route runs for it.
+  router.use((request, response, next) => {
+    if (
+      request.method !== "GET" &&
+      request.method !== "HEAD" &&
+      (response.destroyed || request.socket?.destroyed === true)
+    )
+      return;
+    next();
+  });
   router.use((request, response, next) => {
     if (
       request.method === "POST" &&

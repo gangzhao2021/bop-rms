@@ -1160,8 +1160,25 @@ export function installMerchantDiningRoutes(
       response.status(503).json({ error: "dining_table_close_plan_unavailable" });
       return;
     }
+    // A body that is not the two references is the request's own fault (400), never a 503 "try
+    // again" logged as a fault; the service checks the references themselves.
+    const body: unknown = request.body;
+    if (
+      body === null ||
+      typeof body !== "object" ||
+      Array.isArray(body) ||
+      Object.keys(body).length !== 2 ||
+      typeof (body as Record<string, unknown>).orderReference !== "string" ||
+      typeof (body as Record<string, unknown>).diningSessionReference !== "string"
+    ) {
+      response
+        .status(400)
+        .set("Cache-Control", NO_STORE)
+        .json({ error: "dining_table_close_plan_invalid" });
+      return;
+    }
     void options
-      .diningTableClosePlan({ sessionCookie, csrf, query: request.body })
+      .diningTableClosePlan({ sessionCookie, csrf, query: body })
       .then((plan) => {
         if (!plan) {
           response.status(404).json({ error: "dining_table_close_plan_not_found" });

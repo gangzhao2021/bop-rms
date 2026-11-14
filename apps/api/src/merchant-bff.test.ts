@@ -2597,6 +2597,78 @@ it("protects the table close plan and returns every round field the panel reads"
   expect(JSON.stringify(await failed.json())).not.toContain("private");
 });
 
+// WP-2423 (logs-and-transaction-time, v15 2026-11-14): closing the guests-left dialog stopped its
+// table close plan read; when the connection was gone before the body was read, the route ran on
+// an empty body and logged a level-50 IDENTITY_INPUT_INVALID fault (39 times on v15).
+it("runs no route for a staff request whose screen left before its body was read, and answers a malformed close plan 400", async () => {
+  type Reader = NonNullable<MerchantBffRouterOptions["diningTableClosePlan"]>;
+  const read = vi.fn<Reader>().mockResolvedValue(null);
+  let slow!: () => void;
+  const reachedSlow = new Promise<void>((resolve) => (slow = resolve));
+  const app = express();
+  // What sits in front of the router in the pilot (store selection, the staff entry) takes time.
+  app.use((request, _response, next) => {
+    if (request.headers["x-test-slow"] === "1") {
+      slow();
+      setTimeout(next, 150);
+    } else next();
+  });
+  app.use(
+    "/merchant",
+    createMerchantBffRouter({
+      service: fakeService(),
+      diningTableClosePlan: read,
+      exactOrigin: "https://merchant.invalid",
+      acceptedHost: "merchant.invalid",
+    }),
+  );
+  const server = app.listen(0, "127.0.0.1");
+  servers.push(server);
+  await new Promise<void>((resolve) => server.once("listening", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("listener unavailable");
+  const root = `http://127.0.0.1:${address.port}`;
+  const headers = {
+    ...safeHeaders,
+    Cookie: "__Host-bop-merchant=" + sessionCookie,
+    "X-BOP-CSRF": csrf,
+    "Content-Type": "application/json",
+  };
+  const body = JSON.stringify({
+    orderReference: storeReference,
+    diningSessionReference: "018f7f9a-ad3e-7a11-8d01-000000000013",
+  });
+  // The screen sends its request and goes away while it is still on its way to the route.
+  const outgoing = httpRequest(new URL("/merchant/dining/table-close-plan", root), {
+    method: "POST",
+    headers: { ...headers, "X-Test-Slow": "1", "Content-Length": String(body.length) },
+  });
+  outgoing.on("error", () => undefined);
+  outgoing.end(body);
+  await reachedSlow;
+  outgoing.destroy();
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  expect(read).not.toHaveBeenCalled();
+  // A body that is not the two references is the request's own fault, never "try again".
+  for (const wrong of ["{}", JSON.stringify({ orderReference: storeReference }), "[]"]) {
+    const answered = await request(root, "/merchant/dining/table-close-plan", {
+      method: "POST",
+      body: wrong,
+      headers,
+    });
+    expect(answered.status).toBe(400);
+    expect(await answered.json()).toEqual({ error: "dining_table_close_plan_invalid" });
+  }
+  expect(read).not.toHaveBeenCalled();
+  const answered = await request(root, "/merchant/dining/table-close-plan", {
+    method: "POST",
+    body,
+    headers,
+  });
+  expect(answered.status).toBe(404);
+  expect(read).toHaveBeenCalledOnce();
+});
+
 it("protects the minimal Dining serve command and keeps private facts out of responses", async () => {
   const command = vi
     .fn<NonNullable<MerchantBffRouterOptions["diningServe"]>>()
