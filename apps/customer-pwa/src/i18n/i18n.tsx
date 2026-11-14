@@ -71,6 +71,10 @@ export function clauseSeparator(): string {
 export function sentenceEnd(): string {
   return current === "zh-Hans" ? "。" : ".";
 }
+/** After a label's colon or between sentences built from parts: a space in English, none in Chinese. */
+export function wordGap(): string {
+  return current === "zh-Hans" ? "" : " ";
+}
 /** The locale times and dates are written in for the chosen language. */
 export function dateLocale(): string {
   return current === "zh-Hans" ? "zh-CN" : "en-CA";

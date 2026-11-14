@@ -1,4 +1,4 @@
-import { t } from "../i18n/i18n.js";
+import { t, wordGap } from "../i18n/i18n.js";
 import { useRef, useState } from "react";
 import { formatCartMoney } from "../cart/format-money.js";
 import {
@@ -131,7 +131,9 @@ export function RetryCardPanel({
       <h3 id="payment-retry-heading">{t("Pay with another card")}</h3>
       {total ? (
         <p>
-          {t("Amount to pay:")} <strong>{formatCartMoney(total)}</strong>
+          {t("Amount to pay:")}
+          {wordGap()}
+          <strong>{formatCartMoney(total)}</strong>
         </p>
       ) : null}
       {state.step === "offer" ? (

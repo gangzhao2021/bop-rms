@@ -1,4 +1,4 @@
-import { t } from "../i18n/i18n.js";
+import { sentenceEnd, t, wordGap } from "../i18n/i18n.js";
 import { useRef, useState } from "react";
 import { formatCartMoney } from "../cart/format-money.js";
 import { formatClockTime } from "../journey/format.js";
@@ -124,7 +124,11 @@ export function ResumePaymentPanel({
       <p>
         {total ? (
           <>
-            {t("Amount to pay:")} <strong>{formatCartMoney(total)}</strong>.{" "}
+            {t("Amount to pay:")}
+            {wordGap()}
+            <strong>{formatCartMoney(total)}</strong>
+            {sentenceEnd()}
+            {wordGap()}
           </>
         ) : null}
         {payBy
