@@ -54,7 +54,7 @@ import {
 } from "@rms/payment";
 import { retryTransactionConflict } from "./transaction-conflict-retry.js";
 import { withFailureCause } from "./customer-failure-diagnostic.js";
-import { isDatabaseContention } from "./merchant-failure.js";
+import { isExpectedContention } from "./merchant-failure.js";
 import type { createCustomerOrderStatusRead } from "./customer-order-status-read.js";
 import { createDiningOrderDeliveryProgress } from "./dining-order-delivery-progress.js";
 import { readItemCancellationRefundStatus } from "./merchant-order-item-staff-cancellation.js";
@@ -397,9 +397,9 @@ export class DiningOrderStillProcessingError extends Error {
   }
 }
 /**
- * v15 b17: the table changed while this read was under way (a round being written, the kitchen
- * moving it on, its status view catching up, or the database busy with it), so its parts did not
- * agree. Nothing is wrong with the table: the page keeps what it shows and reads again shortly.
+ * v15 b17: the table changed while this read was under way (the kitchen moving a round on, its
+ * status view catching up with a newer Order version within its catch-up time, or a write conflict
+ * that outlasted its reruns), so its parts did not agree. Never an outage or a lasting contradiction. Nothing is wrong with the table: the page keeps what it shows and reads again shortly.
  * `cause` keeps what disagreed, as a safe code, for the one warning line.
  */
 export class DiningSessionReadBusyError extends Error {
@@ -412,6 +412,34 @@ export class DiningSessionReadBusyError extends Error {
 /** The kitchen moved a round on after this read began (dining-order-preparation-progress). */
 const progressChangedWhileReading = (error: unknown) =>
   error instanceof Error && error.message === "ORDER_PROGRESS_CHANGED_WHILE_READING";
+/**
+ * v15 b17 review: how long Ordering's status view may stay behind one Order version before that is
+ * a fault, not a change being caught up. Its event consumer catches up within seconds; a staff
+ * round written in a burst took 13 s. Past this the read answers unavailable (logged level 50).
+ */
+const PROJECTION_CATCH_UP_MS = 30_000;
+/**
+ * When each Order version was first seen with its status view behind it, per read service (kept
+ * small: the oldest is dropped). Only says whether a lag is new or has outlasted its catch-up.
+ */
+export function createProjectionLagWindow(limitMs = PROJECTION_CATCH_UP_MS, capacity = 256) {
+  const firstSeen = new Map<string, number>();
+  return Object.freeze({
+    /** True while this Order version's view has been behind for less than the catch-up time. */
+    catchingUp(orderReference: string, orderVersion: number, at: string): boolean {
+      const key = `${orderReference}:${orderVersion}`,
+        now = Date.parse(at);
+      const since = firstSeen.get(key);
+      if (since === undefined) {
+        if (firstSeen.size >= capacity) firstSeen.delete(firstSeen.keys().next().value as string);
+        firstSeen.set(key, now);
+        return true;
+      }
+      return now - since < limitMs;
+    },
+  });
+}
+type ProjectionLagWindow = ReturnType<typeof createProjectionLagWindow>;
 const denied = (): never => {
   throw new OrderStatusProjectionError("ORDER_STATUS_PERMISSION_DENIED");
 };
@@ -894,6 +922,7 @@ export interface CustomerDiningSessionDependencies {
 function postgresDependencies(
   options: Options,
   credentials: { sessionCredential: string; csrfCredential: string },
+  lag: ProjectionLagWindow,
 ): CustomerDiningSessionDependencies {
   const scope = options.scope;
   return {
@@ -1017,6 +1046,8 @@ function postgresDependencies(
             (await stillAuthorized()),
           validateCurrentSource: async () => false,
         });
+        // The Order version the status view was built from (compared with the delivery read below).
+        let viewVersion: number | undefined;
         const status = await createOrderStatusQueryService({
           authorization: {
             authorizeCustomer: async () => null,
@@ -1028,7 +1059,11 @@ function postgresDependencies(
             authorizeMerchant: async () => null,
           },
           projections: {
-            load: (reference) => projections.load({ transaction, orderReference: reference }),
+            load: (reference) =>
+              projections.load({ transaction, orderReference: reference }).then((found) => {
+                viewVersion = found?.snapshot.sourceVersion;
+                return found;
+              }),
             list: async () => denied(),
           },
         })
@@ -1068,7 +1103,7 @@ function postgresDependencies(
         // v15 2026-10-28 a: a round Ordering already has (just sent, or held for staff) is added to
         // the status view by its event consumer within seconds. Until then the view lacks whole
         // rounds the delivery read has: the table's order is still being prepared (the page reads
-        // again), not unavailable. Anything else that disagrees stays unavailable.
+        // again), not unavailable. Anything else that disagrees is handled below.
         const projected = new Set(members.map((member) => member.orderBatchReference));
         if (
           delivery &&
@@ -1097,12 +1132,21 @@ function postgresDependencies(
                   member.quantity === item.orderedQuantity,
               ),
           )
-        )
-          // v15 b17: the status view and the table's dishes disagree, but not by whole rounds: the
-          // view is catching up with a change made while this was read. Read again shortly.
-          throw new DiningSessionReadBusyError(
-            new OrderStatusProjectionError("ORDER_STATUS_DEPENDENCY_UNAVAILABLE"),
-          );
+        ) {
+          // v15 b17: the status view and the table's dishes disagree, but not by whole rounds. That
+          // is a change being caught up only when the view was built from an older Order version
+          // than the one just read, and only for its catch-up time: busy, read again shortly.
+          // Anything else (no delivery read, the view as new as the Order, or a lag that outlasted
+          // its catch-up) is a real contradiction and stays unavailable.
+          if (
+            delivery &&
+            viewVersion !== undefined &&
+            viewVersion < delivery.orderVersion &&
+            lag.catchingUp(orderReference, delivery.orderVersion, now())
+          )
+            throw new DiningSessionReadBusyError(new Error("ORDER_STATUS_VIEW_CATCHING_UP"));
+          return unavailable();
+        }
         const authorship = own
           ? await listDiningOrderBatchAuthorship(transaction, scope, {
               orderReference,
@@ -1699,6 +1743,7 @@ export function createCustomerDiningSessionRead(
     csrfCredential: string;
   }) => CustomerDiningSessionDependencies,
 ) {
+  const lag = createProjectionLagWindow();
   return Object.freeze({
     /** `displayLocale` (Owner 2026-10-23): the guest's chosen language for item names. */
     async read(value: unknown, displayLocale?: string): Promise<CustomerDiningSessionView> {
@@ -1712,7 +1757,7 @@ export function createCustomerDiningSessionRead(
       } catch {
         throw new OrderStatusProjectionError("ORDER_STATUS_INPUT_INVALID");
       }
-      const deps = (dependencies ?? ((c) => postgresDependencies(options, c)))(credentials);
+      const deps = (dependencies ?? ((c) => postgresDependencies(options, c, lag)))(credentials);
       // v15 2026-10-16: this read authorizes before it knows the order, so it cannot take the
       // Order fence first (since M68 the authorization's table read takes no row lock); a lock
       // wait or deadlock with a payment outcome or acceptance is rerun instead of answering 503.
@@ -1780,9 +1825,11 @@ export function createCustomerDiningSessionRead(
         if (error instanceof OrderStatusProjectionError) throw error;
         if (error instanceof DiningOrderStillProcessingError) throw error;
         if (error instanceof DiningSessionReadBusyError) throw error;
-        // v15 b17: a change made while this was read, or the database busy with a round being
-        // written: the table is fine, the page reads again shortly.
-        if (progressChangedWhileReading(error) || isDatabaseContention(error))
+        // v15 b17: a change made while this was read (the kitchen moved a round on, or a write
+        // conflict that outlasted its reruns): the table is fine, the page reads again shortly.
+        // No connection in time, a lost connection or a statement timeout is an outage: it stays
+        // unavailable below and is logged as a failure (merchant-failure's isExpectedContention).
+        if (progressChangedWhileReading(error) || isExpectedContention(error))
           throw new DiningSessionReadBusyError(error);
         if (error instanceof GuestSessionError && !isGuestSessionOutage(error))
           throw new OrderStatusProjectionError("ORDER_STATUS_PERMISSION_DENIED");

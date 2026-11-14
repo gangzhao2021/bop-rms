@@ -249,8 +249,8 @@ export class CustomerDiningSessionHandler {
           });
           return;
         }
-        // v15 b17: the table changed while it was read (a round being written, the kitchen or
-        // the status view catching up, the database busy): still being processed, never an
+        // v15 b17: the table changed while it was read (the kitchen moved a round on, the status
+        // view catching up within its time, a write conflict): still being processed, never an
         // error. The page keeps what it shows and reads again; one warning line says what.
         if (error instanceof DiningSessionReadBusyError) {
           markRequestRetryLater(request);
@@ -272,7 +272,11 @@ export class CustomerDiningSessionHandler {
             ["ORDER_STATUS_PERMISSION_DENIED", "ORDER_STATUS_NOT_FOUND"].includes(error.code))
             ? 404
             : 503;
-        if (status === 503) markRequestFailure(request, customerFailureCode(error));
+        if (status === 503) {
+          markRequestFailure(request, customerFailureCode(error));
+          // v15 b17 review: an outage or a real contradiction says why, at failure level.
+          logGuestFailure("CUSTOMER_DINING_SESSION_READ_FAILED", error);
+        }
         reject(response, status);
       }
     };

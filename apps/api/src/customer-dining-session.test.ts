@@ -342,6 +342,32 @@ it("v15 b17: a table read busy with a round being written answers still processi
   });
 });
 
+// v15 b17 review: an outage or a real contradiction is unavailable, with a failure-level line.
+it("v15 b17 review: an unavailable table read answers 503 and logs one level-50 line", async () => {
+  const f = await setup();
+  const lines: string[] = [];
+  const write = vi
+    .spyOn(process.stderr, "write")
+    .mockImplementation((line: string | Uint8Array) => {
+      lines.push(String(line));
+      return true;
+    });
+  try {
+    f.read.mockRejectedValue(new OrderStatusProjectionError("ORDER_STATUS_DEPENDENCY_UNAVAILABLE"));
+    const response = await f.send();
+    expect(response.status).toBe(503);
+    expect(((await response.json()) as { error: { code: string } }).error.code).not.toBe(
+      "dining_session_order_processing",
+    );
+  } finally {
+    write.mockRestore();
+  }
+  const failure = lines
+    .filter((line) => line.includes("CUSTOMER_DINING_SESSION_READ_FAILED"))
+    .map((line) => JSON.parse(line) as Record<string, unknown>)[0];
+  expect(failure).toMatchObject({ level: 50, code: "ORDER_STATUS_DEPENDENCY_UNAVAILABLE" });
+});
+
 it("DEC-DINE-IN-PAY-LATER: a paid table's summary carries its tip and cash rounding", async () => {
   const f = await setup();
   const paid = view();

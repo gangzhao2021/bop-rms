@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   composeCustomerDiningSession,
   createCustomerDiningSessionRead,
+  createProjectionLagWindow,
   customerSplitParts,
   customerTableBillLines,
   mergeBillOrderFacts,
@@ -738,12 +739,16 @@ describe("WP-2423 Q8 createCustomerDiningSessionRead authorization", () => {
   });
 
   // v15 b17: a staff round being written while the guest's table page reads: the kitchen moved
-  // a round on meanwhile, or the database was busy with it. The table is fine: busy, read again.
+  // a round on meanwhile, or a write conflict outlasted its reruns. The table is fine: busy.
   it.each([
     ["the kitchen moved a round on meanwhile", new Error("ORDER_PROGRESS_CHANGED_WHILE_READING")],
     [
-      "no database connection in time",
-      Object.assign(new Error("busy"), { code: "TENANT_DATABASE_ACQUIRE_FAILED" }),
+      "a write conflict behind a rewrite",
+      new Error("ORDER_STATUS_DEPENDENCY_UNAVAILABLE", {
+        cause: Object.assign(new Error("conflict"), {
+          code: "TENANT_DATABASE_TRANSACTION_CONFLICT",
+        }),
+      }),
     ],
   ])("v15 b17: %s is busy, never unavailable", async (_name, cause) => {
     const busy = setup(
@@ -757,6 +762,45 @@ describe("WP-2423 Q8 createCustomerDiningSessionRead authorization", () => {
       code: "DINING_SESSION_READ_BUSY",
       cause,
     });
+  });
+
+  // v15 b17 review: an outage is not "still processing": no connection in time (pool exhausted),
+  // a lost or refused connection, or a statement timeout stays unavailable and is logged as such.
+  it.each([
+    [
+      "no database connection in time",
+      Object.assign(new Error("busy"), { code: "TENANT_DATABASE_ACQUIRE_FAILED" }),
+    ],
+    ["a lost connection", Object.assign(new Error("lost"), { diagnostic: { sqlState: "08006" } })],
+    [
+      "a statement timeout",
+      Object.assign(new Error("slow"), { diagnostic: { sqlState: "57014" } }),
+    ],
+  ])("v15 b17 review: %s is unavailable, never busy", async (_name, cause) => {
+    const outage = setup(
+      () => guest(),
+      () => {
+        throw cause;
+      },
+    );
+    await expect(outage.read.read(credentials)).rejects.toMatchObject({
+      name: "OrderStatusProjectionError",
+      code: "ORDER_STATUS_DEPENDENCY_UNAVAILABLE",
+    });
+  });
+
+  // v15 b17 review: the status view behind a newer Order version is caught up within its time;
+  // the same version still behind after that is a fault (unavailable), never busy for ever.
+  it("v15 b17 review: a status view lag is busy only for its catch-up time", () => {
+    const lag = createProjectionLagWindow(30_000, 2);
+    expect(lag.catchingUp(id(1), 4, "2026-11-14T10:00:00.000Z")).toBe(true);
+    expect(lag.catchingUp(id(1), 4, "2026-11-14T10:00:29.999Z")).toBe(true);
+    expect(lag.catchingUp(id(1), 4, "2026-11-14T10:00:30.000Z")).toBe(false);
+    // A newer Order version is a new change being caught up.
+    expect(lag.catchingUp(id(1), 5, "2026-11-14T10:00:31.000Z")).toBe(true);
+    // Kept small: the oldest entry is dropped, so a later sighting starts again.
+    expect(lag.catchingUp(id(2), 1, "2026-11-14T10:00:32.000Z")).toBe(true);
+    expect(lag.catchingUp(id(1), 4, "2026-11-14T10:01:00.000Z")).toBe(true);
   });
 
   it("rejects malformed credentials and maps owner failures to unavailable", async () => {
