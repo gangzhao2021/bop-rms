@@ -1039,6 +1039,21 @@ it("sole operator: set by the Brand Owner, self-approval with MFA, lapse on a se
       // says 7 earlier changes beyond the 5 it shows, not 5).
       assert.equal(longOff.changeCount, 12);
       assert.equal(longOff.refundApproval.status, "NotSet");
+      // b18 (Owner 2026-11-14 "show all must reach every record"): the earlier changes are read a
+      // page at a time below the oldest one shown, down to the first; the setting stays the latest.
+      const earlier = await soleOperator.read({ sessionCookie: "owner", historyBefore: 3 });
+      assert.deepEqual([earlier.state, earlier.version, earlier.changeCount], ["Off", 12, 12]);
+      assert.deepEqual(
+        earlier.history.map((entry) => [entry.version, entry.state]),
+        [
+          [2, "Off"],
+          [1, "On"],
+        ],
+      );
+      assert.deepEqual(
+        (await soleOperator.read({ sessionCookie: "owner", historyBefore: 1 })).history,
+        [],
+      );
       // Turning it on and off again names the real latest version.
       await assert.rejects(
         soleOperator({

@@ -594,14 +594,14 @@ async function enter(page: Page) {
   // The Menu drawer on phones, the closed navigation group on wider screens (UI refresh 2026-10-21).
   await followWorkspaceLink(page, "Store setup");
   await openStoreSetupPlace(page, "Settings that need approval");
-  await page.getByRole("button", { name: /^8\. Review$/u }).click();
+  await page.getByRole("button", { name: /^4\. Review and publish$/u }).click();
   await expect(
     panel(page).getByRole("button", { name: "Create configuration from saved setup" }),
   ).toBeEnabled();
 }
 async function reloadReview(page: Page) {
   await page.reload();
-  await page.getByRole("button", { name: /^8\. Review$/u }).click();
+  await page.getByRole("button", { name: /^4\. Review and publish$/u }).click();
 }
 async function cursor(page: Page) {
   return page.evaluate(
@@ -812,8 +812,10 @@ test("a deployment without configuration publication hides the panel instead of 
   // The Menu drawer on phones, the closed navigation group on wider screens (UI refresh 2026-10-21).
   await followWorkspaceLink(page, "Store setup");
   await openStoreSetupPlace(page, "Settings that need approval");
-  await page.getByRole("button", { name: /^8\. Review$/u }).click();
-  await expect(page.getByRole("heading", { name: "Review", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: /^4\. Review and publish$/u }).click();
+  await expect(
+    page.getByRole("heading", { name: "Review and publish", exact: true }),
+  ).toBeVisible();
   await expect(panel(page)).toHaveCount(0);
   await expect(page.getByRole("alert")).toHaveCount(0);
   expect(state.errors).toEqual([]);
@@ -1092,16 +1094,18 @@ test("WP-2423 v15: 'Use the live Store's settings' fills time zone, business day
   // The Menu drawer on phones, the closed navigation group on wider screens (UI refresh 2026-10-21).
   await followWorkspaceLink(page, "Store setup");
   await openStoreSetupPlace(page, "Settings that need approval");
-  await page.getByRole("button", { name: /^8\. Review$/u }).click();
+  await page.getByRole("button", { name: /^4\. Review and publish$/u }).click();
   const missing = page.getByRole("region", { name: "Settings not set yet" });
-  await expect(missing).toContainText("Time zone: set it in step 2, Address and timezone");
-  await expect(missing).toContainText("Business day start: set it in step 2, Address and timezone");
-  await expect(missing).toContainText("Service modes: set it in step 3, Service modes");
-  await expect(missing).toContainText("Receipt template: set it in step 5, Tax and payment");
+  await expect(missing).toContainText("Time zone: set it in step 1, Time zone and business day");
+  await expect(missing).toContainText(
+    "Business day start: set it in step 1, Time zone and business day",
+  );
+  await expect(missing).toContainText("Service modes: set it in step 2, Services");
+  await expect(missing).toContainText("Receipt template: set it in step 3, Fees, tax and payment");
   await expect(page.getByText("4 settings are not set yet.", { exact: false })).toBeVisible();
   // The publication panel names what is missing instead of only disabling Create.
   await expect(panel(page)).toContainText(
-    "Time zone (step 2, Address and timezone); Business day start (step 2, Address and timezone)",
+    "Time zone (step 1, Time zone and business day); Business day start (step 1, Time zone and business day)",
   );
   await expect(
     panel(page).getByRole("button", { name: "Create configuration from saved setup" }),
@@ -1111,7 +1115,7 @@ test("WP-2423 v15: 'Use the live Store's settings' fills time zone, business day
   await expect(page.getByText("Every setting is set.")).toBeVisible();
   await expect(page.getByText("Business day start: 04:00:00")).toBeVisible();
   await expect(page.getByText("Service modes: Pickup", { exact: true })).toBeVisible();
-  await expect(page.getByText("Receipt: Already configured")).toBeVisible();
+  await expect(page.getByText("Receipt template: Already configured")).toBeVisible();
   for (const [width, height] of [
     [1440, 900],
     [1024, 768],
@@ -1128,8 +1132,8 @@ test("WP-2423 v15: 'Use the live Store's settings' fills time zone, business day
     });
   }
   await page.setViewportSize({ width: 1440, height: 900 });
-  // Step 2 now holds the live Store's time zone (the inputs Save reads).
-  await page.getByRole("button", { name: /^2\. Address and timezone$/u }).click();
+  // Step 1 now holds the live Store's time zone (the inputs Save reads).
+  await page.getByRole("button", { name: /^1\. Time zone and business day$/u }).click();
   await expect(page.getByLabel("Draft timezone")).toHaveValue("America/Toronto");
   await expect(page.getByLabel("Business day starts at (local time)")).toHaveValue("04:00:00");
   await expectNoInternalText(page);

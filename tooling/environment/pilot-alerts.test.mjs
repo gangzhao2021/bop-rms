@@ -168,7 +168,7 @@ describe("WP-2423 Q13 alert rules", () => {
     const text = renderAlert("receipts.template", c.get("receipts.template").params);
     expect(text.title).toBe("Receipts are not being issued");
     expect(text.summary).toContain("The receipt template chosen in Store setup cannot be used");
-    expect(text.action).toContain("step 5");
+    expect(text.action).toContain("Settings that need approval");
     expect(text.runbook).toBe("alert-receipts-template");
     expect(text.summary.length).toBeLessThanOrEqual(600);
     expect(text.action.length).toBeLessThanOrEqual(400);
@@ -210,7 +210,7 @@ describe("WP-2423 Q13 alert rules", () => {
     expect(text.title).toBe("Orders cannot be priced");
     expect(text.summary).toContain("tax settings published in Store setup");
     expect(text.action).toContain("on paper");
-    expect(text.action).toContain("step 8");
+    expect(text.action).toContain("Review and publish");
     expect(text.runbook).toBe("alert-pricing-tax-configuration");
     expect(text.summary.length).toBeLessThanOrEqual(600);
     expect(text.action.length).toBeLessThanOrEqual(400);

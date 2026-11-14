@@ -99,18 +99,20 @@ const checkText: Record<StoreConfigurationPublicationCheckCode, { pass: string; 
   },
   TimeZone: {
     pass: t("The time zone is the Store's own time zone."),
-    fail: t("The time zone must be the Store's own time zone. Change it in step 2."),
+    fail: t(
+      "The time zone must be the Store's own time zone. Change it in the time zone and business day step.",
+    ),
   },
   BusinessDayStart: {
     pass: t("The business day starts at the same time as now."),
     fail: t(
-      "The business day must start at the same time as it does now, so past days and reports keep their boundaries. Change it back in step 2.",
+      "The business day must start at the same time as it does now, so past days and reports keep their boundaries. Change it back in the time zone and business day step.",
     ),
   },
   Hours: {
     pass: t("Opening hours are complete."),
     fail: t(
-      "Opening hours need at least one opening period, and each period may only use service modes this Store offers. Check steps 3 and 4.",
+      "Opening hours need at least one opening period, and each period may only use service modes this Store offers. Check the services and the opening hours.",
     ),
   },
   EffectiveDate: {
@@ -121,7 +123,9 @@ const checkText: Record<StoreConfigurationPublicationCheckCode, { pass: string; 
   },
   Fees: {
     pass: t("Fees are set."),
-    fail: t("A fee that is On may only apply to service modes this Store offers. Check step 5."),
+    fail: t(
+      "A fee that is On may only apply to service modes this Store offers. Check the fees, tax and payment step.",
+    ),
   },
   GoLive: {
     pass: t("This Store's go-live check is approved."),
@@ -347,7 +351,7 @@ const messages: Record<StoreSetupClientError["code"], string> = {
     "The result is unknown. Recover the original request before sending another command.",
   ),
   ReceiptTemplateUnavailable: t(
-    "This Store has no receipt template in use yet, so nothing was created. In step 5, choose or create this Store's receipt template and save the setup, then create the configuration again.",
+    "This Store has no receipt template in use yet, so nothing was created. In the fees, tax and payment step, choose or create this Store's receipt template and save the setup, then create the configuration again.",
   ),
   StorePhoneRequired: t(
     "This setup offers pickup, and pickup guests call the store about allergies or their order, so it was not sent. Add the store's phone number in Store details, or take pickup out of the services this setup offers, then send it again.",

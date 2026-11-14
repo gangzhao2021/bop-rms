@@ -296,7 +296,24 @@ test("@production the Owner allows, limits and stops support, and reads the log"
       state.mode = body.mode;
       state.allowedUntil = body.mode === "Limited" ? "2026-11-01T19:00:00.000Z" : null;
     }
-    await route.fulfill({ headers, json: state });
+    // b18 review: what the page says about the log comes from the server's whole-log summary.
+    const newestFirst = [...state.log].reverse();
+    const acted = newestFirst.filter((entry) => entry.kind !== "Viewed");
+    await route.fulfill({
+      headers,
+      json: {
+        ...state,
+        log: newestFirst,
+        logNext: null,
+        summary: {
+          total: newestFirst.length,
+          looks: newestFirst.length - acted.length,
+          lastLookAt: newestFirst.find((entry) => entry.kind === "Viewed")?.occurredAt ?? null,
+          actedCount: acted.length,
+          acted,
+        },
+      },
+    });
   });
   await page.goto("/app/organization/stores/" + store + "/setup?section=access");
   const panel = page.locator("#support-access");

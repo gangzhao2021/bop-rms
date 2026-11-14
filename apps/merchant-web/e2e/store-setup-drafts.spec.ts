@@ -254,20 +254,29 @@ async function journalRecords(page: Page) {
   );
 }
 async function timezone(page: Page) {
-  await page.getByRole("button", { name: "2. Address and timezone", exact: true }).click();
+  await page.getByRole("button", { name: "1. Time zone and business day", exact: true }).click();
   await page
     .getByRole("combobox", { name: "Draft timezone", exact: true })
     .selectOption("America/Toronto");
   await page.getByLabel("Business day starts at (local time)", { exact: true }).fill("04:00:00");
 }
-test("@production Store Setup ordinary entry eight steps partial save refresh and reload", async ({
+test("@production Store Setup ordinary entry approval steps partial save refresh and reload", async ({
   page,
 }) => {
   const fixture = await install(page);
   await open(page);
   await expect(
     page.getByRole("navigation", { name: "Setup steps" }).getByRole("button"),
-  ).toHaveCount(8);
+  ).toHaveCount(4);
+  // b18 review: an open Store's approval place has no opening steps; hours live in Hours & ordering.
+  await expect(
+    page.getByRole("navigation", { name: "Setup steps" }).getByRole("button"),
+  ).toHaveText([
+    "1. Time zone and business day",
+    "2. Services",
+    "3. Fees, tax and payment",
+    "4. Review and publish",
+  ]);
   // WP-2423: every step reads in staff language (no store codes, enum names, UTC or stubs).
   for (const step of await page
     .getByRole("navigation", { name: "Setup steps" })
@@ -278,27 +287,12 @@ test("@production Store Setup ordinary entry eight steps partial save refresh an
     await expectNoInternalText(page);
   }
   await timezone(page);
-  await page.getByRole("button", { name: "3. Service modes", exact: true }).click();
+  await page.getByRole("button", { name: "2. Services", exact: true }).click();
   await page
     .getByRole("combobox", { name: "Use service settings from", exact: true })
     .selectOption("StoreOverride");
   await page.getByLabel("Pickup", { exact: true }).check();
-  await page.getByRole("button", { name: "4. Hours", exact: true }).click();
-  await page.getByRole("button", { name: "Configure weekly hours", exact: true }).click();
-  await page.getByRole("button", { name: "Add Monday interval", exact: true }).click();
-  await page.getByLabel("Monday interval 1 start", { exact: true }).fill("09:00:00");
-  await page.getByLabel("Monday interval 1 end", { exact: true }).fill("17:00:00");
-  await page
-    .getByRole("group", { name: "Monday interval 1 service modes", exact: true })
-    .getByLabel("Pickup", { exact: true })
-    .check();
-  await expect(
-    page.getByText("Wait times are in whole minutes, up to 24 hours (1,440 minutes).", {
-      exact: false,
-    }),
-  ).toBeVisible();
-  await page.getByLabel("Last orders (minutes before closing)", { exact: true }).fill("10");
-  await page.getByLabel("Preparation time (minutes)", { exact: true }).fill("15");
+  await page.getByLabel("Order limits").selectOption("none");
   await page.getByRole("button", { name: "Save as draft", exact: true }).click();
   await expect(
     page.getByText("Setup draft saved. These settings have not been validated or published.", {
@@ -308,16 +302,14 @@ test("@production Store Setup ordinary entry eight steps partial save refresh an
   expect(fixture.control.writes).toHaveLength(1);
   expect(fixture.control.reads).toBeGreaterThanOrEqual(3);
   expect(fixture.snapshot()?.content.addressReference).toEqual({ state: "Unconfigured" });
-  expect(fixture.snapshot()?.content.weeklySchedule.state).toBe("Configured");
-  // Staff typed minutes; the saved contract keeps seconds.
-  const saved = fixture.snapshot()?.content.weeklySchedule;
-  expect(saved?.state === "Configured" ? saved.value[0]?.intervals[0] : undefined).toMatchObject({
-    orderCutoffSeconds: 600,
-    leadTimeSeconds: 900,
+  expect(fixture.snapshot()?.content.capacityConfigurationReference).toEqual({
+    state: "Configured",
+    value: null,
   });
+  // Weekly hours (minutes typed, seconds saved) are covered where they are edited: a Store being
+  // opened (store-first-opening.spec.ts) and Hours & ordering (StoreConfigurationEditor tests).
   await page.reload();
-  await expect(page.getByText("A draft is saved", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "2. Address and timezone", exact: true }).click();
+  await page.getByRole("button", { name: "1. Time zone and business day", exact: true }).click();
   await expect(page.getByRole("combobox", { name: "Draft timezone", exact: true })).toHaveValue(
     "America/Toronto",
   );
@@ -388,10 +380,10 @@ test("@production Store Setup mismatched selected scope refuses editing and narr
   await page.setViewportSize({ width: 390, height: 844 });
   const fixture = await install(page);
   await open(page);
-  await page.getByRole("button", { name: "2. Address and timezone", exact: true }).focus();
+  await page.getByRole("button", { name: "1. Time zone and business day", exact: true }).focus();
   await page.keyboard.press("Enter");
   await expect(
-    page.getByRole("heading", { name: "Address and timezone", exact: true }),
+    page.getByRole("heading", { name: "Time zone and business day", exact: true }),
   ).toBeVisible();
   await expect(page.getByRole("combobox", { name: "Draft timezone", exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
@@ -409,8 +401,8 @@ test("@production Store Setup mismatched selected scope refuses editing and narr
   ).toBeGreaterThanOrEqual(44);
   await page.screenshot({ path: "/tmp/wp2421-store-setup-mobile.png", fullPage: true });
   // WP-2423: tapping a step moves to its heading; the skip link never covers the page.
-  await page.getByRole("button", { name: "3. Service modes", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Service modes", exact: true })).toBeFocused();
+  await page.getByRole("button", { name: "2. Services", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Services", exact: true })).toBeFocused();
   for (const skip of await page.locator(".bop-skip-link").all())
     expect(await skip.evaluate((link) => link.getBoundingClientRect().bottom)).toBeLessThanOrEqual(
       0,

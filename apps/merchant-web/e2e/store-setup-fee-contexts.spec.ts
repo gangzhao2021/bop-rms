@@ -388,7 +388,7 @@ async function journalRecords(page: Page) {
 }
 
 async function feeStep(page: Page) {
-  await page.getByRole("button", { name: "5. Tax and payment", exact: true }).click();
+  await page.getByRole("button", { name: "3. Fees, tax and payment", exact: true }).click();
   return page.getByRole("region", { name: "Fees", exact: true });
 }
 async function enabledFee(page: Page) {
@@ -516,7 +516,7 @@ test("@production Store fee contexts ordinary entry explicit selections V2 curre
   const first = f.history[0];
   if (!first) throw new Error("Actual saved fixture revision missing");
   await page.reload();
-  await expect(page.getByText("A draft is saved", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Save as draft", exact: true })).toBeEnabled();
   const restored = await feeStep(page);
   await expect(restored.getByRole("combobox", { name: "Service charge", exact: true })).toHaveValue(
     "Enabled",
@@ -532,8 +532,6 @@ test("@production Store fee contexts ordinary entry explicit selections V2 curre
     }),
   ).toBeVisible();
   await expect.poll(() => f.snapshot()?.revision).toBe(2);
-  await page.getByRole("button", { name: "1. Identity", exact: true }).click();
-  await expect(page.getByText("A draft is saved", { exact: true })).toBeVisible();
   expect(f.history[0]).toEqual(first);
   expect(f.history[0]?.content.feeContexts).toEqual(first.content.feeContexts);
   expect(f.control.errors).toEqual([]);
@@ -565,7 +563,7 @@ test("@production Store fee context lost reply old original recovery retains new
       exact: true,
     }),
   ).toBeVisible();
-  await expect(page.getByText("A draft is saved", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Save as draft", exact: true })).toBeEnabled();
   const panel = await feeStep(page);
   await expect(panel.getByRole("combobox", { name: "Service charge", exact: true })).toHaveValue(
     "Disabled",

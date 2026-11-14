@@ -61,9 +61,9 @@ export function alertAction(english: string): string {
       t(
         "Nothing changes for guests yet. Ask BOP support to check the pickup times today; if it reaches the last hour, take pickup orders on paper.",
       ),
-    "Tell guests who ask that their receipt will appear on their order page once this is fixed. Owner: in Store setup choose a receipt template that is published (step 5), then send, approve and publish the setup (step 8). Receipts for orders paid meanwhile then follow automatically; if this lasted over 30 minutes, ask BOP support to send stuck updates again.":
+    "Tell guests who ask that their receipt will appear on their order page once this is fixed. Owner: in Store setup, Settings that need approval, choose a published receipt template, then send, approve and publish the setup. Receipts for orders paid meanwhile then follow automatically; if this lasted over 30 minutes, ask BOP support to send stuck updates again.":
       t(
-        "Tell guests who ask that their receipt will appear on their order page once this is fixed. Owner: in Store setup choose a receipt template that is published (step 5), then send, approve and publish the setup (step 8). Receipts for orders paid meanwhile then follow automatically; if this lasted over 30 minutes, ask BOP support to send stuck updates again.",
+        "Tell guests who ask that their receipt will appear on their order page once this is fixed. Owner: in Store setup, Settings that need approval, choose a published receipt template, then send, approve and publish the setup. Receipts for orders paid meanwhile then follow automatically; if this lasted over 30 minutes, ask BOP support to send stuck updates again.",
       ),
     "Pause all services in Hours & ordering until closing (can resume early). Tell seated tables to order with staff. New orders: paper slip, card machine. A guest who paid: no second payment; kitchen slip with order number. Call BOP support now; stay on paper until they say it is fixed. Then enter paper orders, refunded ones too; a slip whose order is open: accept it, mark it ready, don't remake it.":
       t(
@@ -91,9 +91,9 @@ export function alertAction(english: string): string {
     "Nothing to do in the store today. Ask BOP support to fix this before you turn dine-in on.": t(
       "Nothing to do in the store today. Ask BOP support to fix this before you turn dine-in on.",
     ),
-    'Take new orders on paper (items, name, table or pickup time) and take payment on the card machine, then enter them once this clears. Owner: Store setup step 8, choose "Use the live Store\'s settings" for tax, then send, approve and publish. Otherwise ask BOP support.':
+    'Take new orders on paper (items, name, table or pickup time) and take payment on the card machine, then enter them once this clears. Owner: in Store setup, Settings that need approval, Review and publish, choose "Use the live Store\'s settings" for tax, then send, approve and publish. Otherwise ask BOP support.':
       t(
-        'Take new orders on paper (items, name, table or pickup time) and take payment on the card machine, then enter them once this clears. Owner: Store setup step 8, choose "Use the live Store\'s settings" for tax, then send, approve and publish. Otherwise ask BOP support.',
+        'Take new orders on paper (items, name, table or pickup time) and take payment on the card machine, then enter them once this clears. Owner: in Store setup, Settings that need approval, Review and publish, choose "Use the live Store\'s settings" for tax, then send, approve and publish. Otherwise ask BOP support.',
       ),
     "Open Exceptions to see each difference. For a business day's totals, open Settlement and choose that day; it explains the difference and what to do.":
       t(

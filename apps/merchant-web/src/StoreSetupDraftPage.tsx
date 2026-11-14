@@ -323,7 +323,7 @@ const messages: Record<StoreSetupClientError["code"], string> = {
     "This configuration was approved by you alone while Sole operator was off, so it cannot be published. Withdraw it, then send a new change for approval.",
   ),
   ReceiptTemplateUnavailable: t(
-    "This Store has no receipt template in use yet, so nothing was created. In step 5, choose or create this Store's receipt template and save the setup, then create the configuration again.",
+    "This Store has no receipt template in use yet, so nothing was created. In the fees, tax and payment step, choose or create this Store's receipt template and save the setup, then create the configuration again.",
   ),
   StorePhoneRequired: t(
     "This setup offers pickup, and pickup guests call the store about allergies or their order, so it was not sent. Add the store's phone number in Store details, or take pickup out of the services this setup offers, then send it again.",

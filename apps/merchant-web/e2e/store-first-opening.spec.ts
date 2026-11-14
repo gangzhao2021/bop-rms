@@ -1360,7 +1360,7 @@ test("@production an established Store sees its setup in places, the steps in th
   await expect(page.getByRole("navigation", { name: "Setup steps" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Reload the saved draft" })).toBeVisible();
   await page.goto(href + "?section=kitchen");
-  await expect(page.getByRole("heading", { name: "Kitchen", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Kitchen setup", exact: true })).toBeVisible();
 });
 
 test("@production a failed read shows the page as it always was, for an established Store or a first one", async ({
@@ -1373,7 +1373,7 @@ test("@production a failed read shows the page as it always was, for an establis
     await expect(page.getByRole("navigation", { name: "Setup steps" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Reload the saved draft" })).toBeVisible();
     await page.goto(href + "?section=kitchen");
-    await expect(page.getByRole("heading", { name: "Kitchen", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Kitchen setup", exact: true })).toBeVisible();
     await expect(panel(page)).toHaveCount(0);
     await expect(page.getByText("All settings, step by step")).toHaveCount(0);
     // A first Store gets its one page back once the read answers.
@@ -1393,13 +1393,13 @@ test("@production the step-by-step settings stay usable under the fold", async (
   await expect(fold.getByRole("navigation", { name: "Setup steps" })).toHaveCount(0);
   await fold.locator("summary").click();
   await expect(fold.getByRole("navigation", { name: "Setup steps" })).toBeVisible();
-  await expect(fold.getByRole("heading", { name: "Kitchen", exact: true })).toBeVisible();
+  await expect(fold.getByRole("heading", { name: "Kitchen setup", exact: true })).toBeVisible();
   // A link to one of its sections opens it.
   await page.goto(href + "#kitchen-setup");
   await expect(
     page
       .locator("details.store-opening__all")
-      .getByRole("heading", { name: "Kitchen", exact: true }),
+      .getByRole("heading", { name: "Kitchen setup", exact: true }),
   ).toBeVisible();
 });
 
@@ -1414,7 +1414,7 @@ test("@production a name and address published from the fold reach the page and 
   await tick.check();
   const fold = page.locator("details.store-opening__all");
   await fold.locator("summary").click();
-  const profile = fold.getByRole("region", { name: "Name and contact shown to customers" });
+  const profile = fold.getByRole("region", { name: "Store details" });
   await profile.getByLabel("Store name customers see").fill("Birch Noodle House");
   await profile.getByLabel("Street address").fill("2 Queen Street East");
   await profile.getByLabel("City or town").fill("Toronto");

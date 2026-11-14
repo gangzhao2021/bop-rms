@@ -347,7 +347,7 @@ async function open(page: Page) {
   await expect(page.getByRole("button", { name: "Save as draft", exact: true })).toBeEnabled();
 }
 async function addressStep(page: Page) {
-  await page.getByRole("button", { name: "2. Address and timezone", exact: true }).click();
+  await page.getByRole("button", { name: "4. Review and publish", exact: true }).click();
   await expect(
     page.getByRole("button", { name: "Save address configuration", exact: true }),
   ).toBeEnabled();
@@ -364,7 +364,7 @@ async function fillAddress(page: Page) {
     await region.getByLabel(label, { exact: true }).fill(value);
 }
 async function contactStep(page: Page) {
-  await page.getByRole("button", { name: "7. Contacts", exact: true }).click();
+  await page.getByRole("button", { name: "4. Review and publish", exact: true }).click();
   await expect(
     page.getByRole("button", { name: "Save contact configuration", exact: true }),
   ).toBeEnabled();
@@ -408,16 +408,18 @@ test("@production Store Setup saves Address and Contact references then binds se
     value: f.versions.get("Contact")?.reference,
   });
   expect(await records(page)).toEqual([]);
+  // b18 review: on an open Store the address and contact are asked under "Still needed" only
+  // while the saved setup has none; once chosen and saved, Review says so and asks no more.
   await page.reload();
-  await expect(page.getByText("A draft is saved", { exact: true })).toBeVisible();
-  await addressStep(page);
-  await expect(page.getByLabel("Address line 1", { exact: true })).toHaveValue(
-    "Synthetic fixture address",
-  );
-  await contactStep(page);
-  await expect(page.getByLabel("Contact name", { exact: true })).toHaveValue(
-    "Synthetic business contact",
-  );
+  await page.getByRole("button", { name: "4. Review and publish", exact: true }).click();
+  await expect(page.getByText("Address: Already configured", { exact: true })).toBeVisible();
+  await expect(
+    page.getByText("Contact details: Already configured", { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Still needed" })).toHaveCount(0);
+  await expect(
+    page.getByRole("region", { name: "Address configuration", exact: true }),
+  ).toBeHidden();
   expect(f.control.errors).toEqual([]);
 });
 test("@production Contact committed response loss retains payload-free original across reload and denied recovery", async ({
@@ -453,7 +455,7 @@ test("@production Contact committed response loss retains payload-free original 
   ])
     expect(JSON.stringify(original)).not.toContain(disallowed);
   await page.reload();
-  await page.getByRole("button", { name: "7. Contacts", exact: true }).click();
+  await page.getByRole("button", { name: "4. Review and publish", exact: true }).click();
   await expect(
     page.getByRole("button", { name: "Recover original contact save", exact: true }),
   ).toBeEnabled();
@@ -469,7 +471,7 @@ test("@production Contact committed response loss retains payload-free original 
     page.getByRole("button", { name: "Save contact configuration", exact: true }),
   ).toBeDisabled();
   await page.reload();
-  await page.getByRole("button", { name: "7. Contacts", exact: true }).click();
+  await page.getByRole("button", { name: "4. Review and publish", exact: true }).click();
   await expect(
     page.getByRole("button", { name: "Recover original contact save", exact: true }),
   ).toBeEnabled();
@@ -504,7 +506,7 @@ test("@production Reference controls reflow at 390px and scope or CSRF denial ca
   await page.setViewportSize({ width: 390, height: 844 });
   const f = await install(page);
   await open(page);
-  await page.getByRole("button", { name: "2. Address and timezone", exact: true }).focus();
+  await page.getByRole("button", { name: "4. Review and publish", exact: true }).focus();
   await page.keyboard.press("Enter");
   await expect(
     page.getByRole("region", { name: "Address configuration", exact: true }),
@@ -526,7 +528,7 @@ test("@production Reference controls reflow at 390px and scope or CSRF denial ca
   expect(await records(page)).toHaveLength(1);
   f.control.wrongReferenceScope = true;
   await page.reload();
-  await page.getByRole("button", { name: "2. Address and timezone", exact: true }).click();
+  await page.getByRole("button", { name: "4. Review and publish", exact: true }).click();
   await expect(
     page.getByRole("region", { name: "Address configuration", exact: true }).getByRole("alert"),
   ).toContainText("These details could not be loaded");

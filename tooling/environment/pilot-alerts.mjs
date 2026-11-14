@@ -445,7 +445,7 @@ export const ALERT_CATALOG = Object.freeze({
         ? "The Store's published settings could not be read, so guests who pay now do not get a receipt yet."
         : "The receipt template chosen in Store setup cannot be used, so guests who pay now do not get a receipt. Orders, payments and the kitchen are not affected.",
     action: () =>
-      "Tell guests who ask that their receipt will appear on their order page once this is fixed. Owner: in Store setup choose a receipt template that is published (step 5), then send, approve and publish the setup (step 8). Receipts for orders paid meanwhile then follow automatically; if this lasted over 30 minutes, ask BOP support to send stuck updates again.",
+      "Tell guests who ask that their receipt will appear on their order page once this is fixed. Owner: in Store setup, Settings that need approval, choose a published receipt template, then send, approve and publish the setup. Receipts for orders paid meanwhile then follow automatically; if this lasted over 30 minutes, ask BOP support to send stuck updates again.",
     runbook: "alert-receipts-template",
   },
   // WP-2423 DEC-STORE-SETUP-PUBLICATION: quotes take the tax configuration the Store's published
@@ -460,7 +460,7 @@ export const ALERT_CATALOG = Object.freeze({
         ? "The Store's published settings could not be read, so no new order can be priced, online or at the counter. Orders already paid are not affected."
         : "The tax settings published in Store setup are not the ones this store is set up to charge, so no new order can be priced, online or at the counter. Orders already paid are not affected.",
     action: () =>
-      'Take new orders on paper (items, name, table or pickup time) and take payment on the card machine, then enter them once this clears. Owner: Store setup step 8, choose "Use the live Store\'s settings" for tax, then send, approve and publish. Otherwise ask BOP support.',
+      'Take new orders on paper (items, name, table or pickup time) and take payment on the card machine, then enter them once this clears. Owner: in Store setup, Settings that need approval, Review and publish, choose "Use the live Store\'s settings" for tax, then send, approve and publish. Otherwise ask BOP support.',
     runbook: "alert-pricing-tax-configuration",
   },
   // WP-2423 item 9: an order Workflow the resolver refuses, in the words of what it stops. Worded by

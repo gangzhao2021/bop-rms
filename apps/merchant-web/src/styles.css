@@ -10695,3 +10695,25 @@ tr[data-drop-target="true"] {
 .sole-operator__action .step-up-verification p {
   margin: 0;
 }
+/* The shell's own (visually hidden) header also holds a language switch; Store setup draws the
+   visible one on its title row, so the hidden copy is removed rather than read out twice. */
+.store-setup-draft-page .bop-shell__header--in-workspace .bop-shell__header-extra {
+  display: none;
+}
+/* A save's answer is scrolled into view whole, with a little room under it (never cut by a
+   fraction of a pixel at the bottom of the screen). */
+.store-features__message {
+  scroll-margin-block: var(--bop-space-2);
+}
+/* b18 review: the steps read as one row of accent text links, left-aligned like the places above
+   (they wrap on a phone instead of sitting centred in a grid). */
+.store-setup-draft-page .store-setup-steps ol {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 var(--bop-space-6);
+}
+.store-setup-draft-page .store-setup-steps button {
+  width: auto;
+  min-height: 44px;
+  text-align: start;
+}

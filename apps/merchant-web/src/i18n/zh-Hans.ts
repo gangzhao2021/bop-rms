@@ -160,8 +160,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "This Store has no tables yet. Add its tables, then create and print their codes.":
     "本店还没有餐桌。请添加餐桌，然后生成并打印它们的二维码。",
   "Guests are seated here; close their table first.": "这里有客人在座，请先结桌。",
-  "This Store has no receipt template in use yet, so nothing was created. In step 5, choose or create this Store's receipt template and save the setup, then create the configuration again.":
-    "这家店还没有在用的小票模板，所以没有创建任何配置。请在第 5 步为这家店选择或新建小票模板并保存设置，然后再创建配置。",
+  "This Store has no receipt template in use yet, so nothing was created. In the fees, tax and payment step, choose or create this Store's receipt template and save the setup, then create the configuration again.":
+    "这家店还没有在用的小票模板，所以没有创建任何配置。请在“费用、税务和付款”这一步为这家店选择或新建小票模板并保存设置，然后再创建配置。",
   "{item} has no tax rate for one of this menu's order types at {store}, so guests there could not be quoted. Check {store}'s Tax review, or the product's tax class, then list it again.":
     "{item} 在 {store} 的某个用餐方式下没有税率，那里的客人无法报价。请检查 {store} 的税务审核或商品的税类，然后重新上架。",
   "{item} has no tax rate for one of this menu's order types at one of its Stores. Check that Store's Tax review, or the product's tax class, then list it again.":
@@ -406,8 +406,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "A current merchant session and selected Store are required.":
     "需要当前有效的商户登录并已选择门店。",
   "A dining session can't be started for table": "无法为此桌台开始堂食会话：",
-  "A fee that is On may only apply to service modes this Store offers. Check step 5.":
-    "开启的费用只能适用于本店提供的服务方式。请检查第 5 步。",
+  "A fee that is On may only apply to service modes this Store offers. Check the fees, tax and payment step.":
+    "开启的费用只能适用于本店提供的服务方式。请检查“费用、税务和付款”这一步。",
   "A guest at this table is ordering or paying on their phone. Wait a minute, then send again.":
     "这张桌台的一位顾客正在手机上下单或付款。请等一分钟，再重新发送。",
   "A guest's online payment has no result yet. Check again in a few minutes.":
@@ -2862,8 +2862,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Opening count · waiting to be posted": "期初盘点 · 等待过账",
   "Opening hours are complete.": "营业时间已完整。",
   "Opening hours change": "营业时间更改",
-  "Opening hours need at least one opening period, and each period may only use service modes this Store offers. Check steps 3 and 4.":
-    "营业时间至少需要一个营业时段，且每个时段只能使用本店提供的服务方式。请检查第 3 步和第 4 步。",
+  "Opening hours need at least one opening period, and each period may only use service modes this Store offers. Check the services and the opening hours.":
+    "营业时间至少需要一个营业时段，且每个时段只能使用本店提供的服务方式。请检查服务方式和营业时间。",
   "Opening hours: {value}": "营业时间：{value}",
   "Opening stock count": "期初库存盘点",
   "Opening stock posted": "期初库存已过账",
@@ -4514,8 +4514,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "The board now shows the remake's current state.": "看板现在显示重做的当前状态。",
   "The board was hidden while this device was away. Resume reloads the board and rechecks the current operator Session.":
     "设备离开期间看板已隐藏。继续会重新加载看板并重新核对当前操作员的登录状态。",
-  "The business day must start at the same time as it does now, so past days and reports keep their boundaries. Change it back in step 2.":
-    "营业日开始时间必须与现在相同，这样过去的营业日和报表才能保持界限。请在第 2 步改回来。",
+  "The business day must start at the same time as it does now, so past days and reports keep their boundaries. Change it back in the time zone and business day step.":
+    "营业日开始时间必须与现在相同，这样过去的营业日和报表才能保持界限。请在“时区和营业日”这一步改回来。",
   "The business day starts at the same time as now.": "营业日开始时间与现在相同。",
   "The card provider couldn't confirm the guest's payment for this round. Ask the guest whether their card was charged for it.":
     "发卡方无法确认顾客为这一轮的付款。请问顾客卡上是否已为此扣款。",
@@ -4877,8 +4877,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "The time to pay this round ended at {at}. It was not sent to the kitchen and is cancelled automatically; nothing was charged in the system. If you charged the card machine, refund it on the machine.":
     "这一轮的付款时间已于 {at} 结束。它没有发送到后厨，会被自动取消；系统中未收取任何费用。如果已在刷卡机上收款，请在刷卡机上退款。",
   "The time zone is the Store's own time zone.": "时区是门店自己的时区。",
-  "The time zone must be the Store's own time zone. Change it in step 2.":
-    "时区必须是门店自己的时区。请在第 2 步更改。",
+  "The time zone must be the Store's own time zone. Change it in the time zone and business day step.":
+    "时区必须是门店自己的时区。请在“时区和营业日”这一步更改。",
   "The tip or service charge was changed by hand": "小费或服务费被手动修改",
   "The two PINs don't match.": "两次输入的 PIN 不一致。",
   "The waste record is not valid.": "报损记录无效。",
@@ -8067,8 +8067,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "自取订单先记在纸上（点单纸、菜品、姓名、时间），在刷卡机上收款，等这条提醒消失后再录入系统。现在就请 BOP 技术支持检查自取时间。",
   "Nothing changes for guests yet. Ask BOP support to check the pickup times today; if it reaches the last hour, take pickup orders on paper.":
     "客人暂时不受影响。今天内请 BOP 技术支持检查自取时间；如果只剩最后一小时，自取订单改记在纸上。",
-  "Tell guests who ask that their receipt will appear on their order page once this is fixed. Owner: in Store setup choose a receipt template that is published (step 5), then send, approve and publish the setup (step 8). Receipts for orders paid meanwhile then follow automatically; if this lasted over 30 minutes, ask BOP support to send stuck updates again.":
-    "有客人问起，告诉他们修好后收据会显示在订单页面上。店主：在“门店设置”里选择一个已发布的收据模板（第 5 步），然后发送、批准并发布设置（第 8 步）。这段时间已付款订单的收据之后会自动补上；如果持续超过 30 分钟，请 BOP 技术支持重新发送卡住的更新。",
+  "Tell guests who ask that their receipt will appear on their order page once this is fixed. Owner: in Store setup, Settings that need approval, choose a published receipt template, then send, approve and publish the setup. Receipts for orders paid meanwhile then follow automatically; if this lasted over 30 minutes, ask BOP support to send stuck updates again.":
+    "有客人问起，告诉他们修好后收据会显示在订单页面上。店主：在“门店设置”的“需审批的设置”里选择一个已发布的收据模板，然后发送、批准并发布设置。这段时间已付款订单的收据之后会自动补上；如果持续超过 30 分钟，请 BOP 技术支持重新发送卡住的更新。",
   "Pause all services in Hours & ordering until closing (can resume early). Tell seated tables to order with staff. New orders: paper slip, card machine. A guest who paid: no second payment; kitchen slip with order number. Call BOP support now; stay on paper until they say it is fixed. Then enter paper orders, refunded ones too; a slip whose order is open: accept it, mark it ready, don't remake it.":
     "请在“营业时间与点单”里暂停所有服务，一直到打烊（可以提前恢复）；已入座的客人请找员工点单。新订单：写纸条，用刷卡机收款。客人已经付过款的，不要再收一次；写一张给后厨的纸条，注明订单号。请立即联系 BOP 技术支持，在他们确认修好之前继续用纸质点单。之后把纸质订单录入系统，已自动退款的也要录入；纸条上的订单没有退款的，不要录入，在系统里接单并标记做好，不要重做。",
   "Pause pickup in Hours & ordering until closing (can resume early). New pickup orders: paper slip, card machine. A guest who paid: no second payment; kitchen slip with order number. An unaccepted order refunds itself. Call BOP support now; stay on paper until they say it is fixed. Then enter paper orders, refunded ones too; a slip whose order is open: accept it, mark it ready, don't remake it.":
@@ -8083,8 +8083,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "今天店里不用做什么。开启自取之前，请先让 BOP 技术支持处理好这个问题。",
   "Nothing to do in the store today. Ask BOP support to fix this before you turn dine-in on.":
     "今天店里不用做什么。开启堂食之前，请先让 BOP 技术支持处理好这个问题。",
-  'Take new orders on paper (items, name, table or pickup time) and take payment on the card machine, then enter them once this clears. Owner: Store setup step 8, choose "Use the live Store\'s settings" for tax, then send, approve and publish. Otherwise ask BOP support.':
-    "新订单先记在纸上（菜品、姓名、桌号或自取时间），在刷卡机上收款，等这条提醒消失后再录入系统。店主：在“门店设置”第 8 步，税务选择“使用当前门店的设置”，然后发送、批准并发布。否则请联系 BOP 技术支持。",
+  'Take new orders on paper (items, name, table or pickup time) and take payment on the card machine, then enter them once this clears. Owner: in Store setup, Settings that need approval, Review and publish, choose "Use the live Store\'s settings" for tax, then send, approve and publish. Otherwise ask BOP support.':
+    "新订单先记在纸上（菜品、姓名、桌号或自取时间），在刷卡机上收款，等这条提醒消失后再录入系统。店主：在“门店设置”的“需审批的设置”里“核对并发布”这一步，税务选择“使用当前门店的设置”，然后发送、批准并发布。否则请联系 BOP 技术支持。",
   "Open Exceptions to see each difference. For a business day's totals, open Settlement and choose that day; it explains the difference and what to do.":
     "打开“异常”查看每一项差异。如果是某个营业日的总额差异，打开“结算”并选择那一天，页面会说明差异和处理办法。",
   "Open Settlement, review the listed business day and resolve each item.":

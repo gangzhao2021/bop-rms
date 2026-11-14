@@ -1,4 +1,3 @@
-import { openStoreSetupPlace } from "./workspace-navigation";
 import { expect, test } from "@playwright/test";
 
 // WP-2423 Q19 (DEC-SOLE-OPERATOR-APPROVAL): a Brand Owner running the business alone turns sole
@@ -185,10 +184,16 @@ test("@production a sole operator turns it on and approves their own refund afte
   const card = page.getByRole("listitem").filter({ hasText: "Order A-0051" });
   await expect(card).toContainText("An owner or finance member who did not ask for this refund");
   await expect(page.getByRole("region", { name: "Sole operator" })).toHaveCount(0);
-  await page.getByRole("link", { name: "Store setup" }).click();
-  await expect(page).toHaveURL(new RegExp(`/app/organization/stores/${id(99)}/setup$`, "u"));
-  // b18: the setting sits in Store setup's "Permissions and safety".
-  await openStoreSetupPlace(page, "Permissions and safety");
+  // b18 review: the link opens Store setup's "Permissions and safety", where the setting sits.
+  await page.getByRole("link", { name: "Store setup, Permissions and safety" }).click();
+  await expect(page).toHaveURL(
+    new RegExp(`/app/organization/stores/${id(99)}/setup\\?section=access#sole-operator$`, "u"),
+  );
+  await expect(
+    page
+      .getByRole("navigation", { name: "Store setup sections" })
+      .getByRole("link", { name: "Permissions and safety" }),
+  ).toHaveAttribute("aria-current", "page");
   const section = page.getByRole("region", { name: "Sole operator" });
   await expect(section).toContainText("Off. Refunds that need approval are approved by a second");
   // WP-2423 (2026-10-16 v15): the setting's change number and who changed it, when and why.

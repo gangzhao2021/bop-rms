@@ -853,10 +853,14 @@ describe("WP-2423 kitchen display search and chrome", () => {
           workspaceFrame={frame}
           headerStatus={<span>Screen kept on</span>}
           soldOutHref="/app/commerce/availability"
+          setupHref="/app/organization/stores/s/setup?section=kitchen"
         />
       </MemoryRouter>,
     );
     expect(html.startsWith('<div data-frame="workspace">')).toBe(true);
+    // b18 review: people who see Store setup reach its kitchen place from the board (a link only).
+    expect(html).toContain('href="/app/organization/stores/s/setup?section=kitchen"');
+    expect(html).toContain("Kitchen setup in Store setup");
     expect(html).toContain('<main class="bop-shell__main" id="main-content" tabindex="-1">');
     expect(html).toContain('<h1 id="kitchen-board-title" tabindex="-1">Kitchen</h1>');
     // Owner 2026-11-03: this sign-in only reads the board; no keep-awake line over the language switch.
@@ -875,6 +879,7 @@ describe("WP-2423 kitchen display search and chrome", () => {
     );
     expect(display).toContain("bop-shell__header");
     expect(display).toContain('<h2 id="kitchen-board-title" tabindex="-1">Kitchen</h2>');
+    expect(display).not.toContain("Kitchen setup in Store setup");
   });
   it("2026-10-21 live check: frames a work item by who the board says is using it", () => {
     const frame = (content: ReactNode) => <div data-frame="workspace">{content}</div>;

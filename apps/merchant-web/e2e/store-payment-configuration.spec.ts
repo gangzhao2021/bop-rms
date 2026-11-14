@@ -354,7 +354,7 @@ async function open(page: Page) {
   await followWorkspaceLink(page, "Store setup");
   await openStoreSetupPlace(page, "Settings that need approval");
   await expect(page.getByRole("button", { name: "Save as draft", exact: true })).toBeEnabled();
-  await page.getByRole("button", { name: "5. Tax and payment", exact: true }).click();
+  await page.getByRole("button", { name: "3. Fees, tax and payment", exact: true }).click();
   await expect(
     page.getByRole("button", { name: "Save payment configuration", exact: true }),
   ).toBeEnabled();
@@ -399,7 +399,7 @@ test("@production Store payment rules save, explicit selection, setup resume ret
     value: selected,
   });
   await page.reload();
-  await page.getByRole("button", { name: "5. Tax and payment", exact: true }).click();
+  await page.getByRole("button", { name: "3. Fees, tax and payment", exact: true }).click();
   await expect(
     page.getByRole("button", { name: "Save payment configuration", exact: true }),
   ).toBeEnabled();
@@ -435,7 +435,7 @@ test("@production payment committed reply loss reload denies recovery then clear
     expect(encoded).not.toContain(key);
   const op = f.control.paymentWrites[0]?.operationReference;
   await page.reload();
-  await page.getByRole("button", { name: "5. Tax and payment", exact: true }).click();
+  await page.getByRole("button", { name: "3. Fees, tax and payment", exact: true }).click();
   await expect(
     page.getByRole("button", { name: "Save payment configuration", exact: true }),
   ).toBeDisabled();

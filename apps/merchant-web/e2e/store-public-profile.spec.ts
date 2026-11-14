@@ -69,7 +69,7 @@ async function session(page: Page) {
     route.fulfill({ status: 403, headers, json: { error: "forbidden" } }),
   );
 }
-const heading = "Name and contact shown to customers";
+const heading = "Store details";
 
 test.beforeEach(({ page }) => serveStoreSetupPanels(page));
 
@@ -286,7 +286,7 @@ test("@production the Store Manager opens Store setup from the navigation and se
   await expect(profile.getByLabel("Store name customers see")).toHaveValue("Maple Noodle House");
   await expect(profile.getByText("Only the Owner can change these details.")).toBeVisible();
   await openStoreSetupPlace(page, "Receipts and tax numbers");
-  const receipts = page.getByRole("region", { name: "Receipts and privacy" });
+  const receipts = page.getByRole("region", { name: "Receipts and tax numbers" });
   await expect(receipts.getByLabel("GST/HST registration number")).toHaveValue("000000000RT0001");
   await expectNoInternalText(page);
 });

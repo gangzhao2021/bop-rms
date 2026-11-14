@@ -58,7 +58,7 @@ async function noOverflowOrBlockingAxe(page: Page) {
   for (const width of [1440, 1024, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
     await expect(
-      page.getByRole("heading", { name: "Receipts and privacy", exact: true }),
+      page.getByRole("heading", { name: "Receipts and tax numbers", exact: true }),
     ).toBeVisible();
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1),
@@ -150,7 +150,7 @@ test("@production the Owner enters receipt registrations and the privacy link; s
     .click();
   await expect(page).toHaveURL(new RegExp("/app/organization/stores/" + store + "/setup"));
 
-  const panel = page.getByRole("region", { name: "Receipts and privacy" });
+  const panel = page.getByRole("region", { name: "Receipts and tax numbers" });
   await expect(panel.getByText("Add your privacy notice link before going live")).toBeVisible();
   await expect(panel.getByText(/Receipts cannot be issued at this store until/u)).toBeVisible();
   await expect(panel.getByLabel("Business name on receipts")).toHaveValue("Synthetic Brand");
@@ -219,7 +219,7 @@ test("@production staff who cannot change the details see them read-only", async
     }),
   );
   await page.goto("/app/organization/stores/" + store + "/setup?section=receipts");
-  const panel = page.getByRole("region", { name: "Receipts and privacy" });
+  const panel = page.getByRole("region", { name: "Receipts and tax numbers" });
   await expect(panel.getByText("Only the Owner can change these details.")).toBeVisible();
   await expect(panel.getByLabel("GST/HST registration number")).toHaveValue("000000000RT0001");
   await expect(panel.getByLabel("GST/HST registration number")).toHaveAttribute("readonly", "");
