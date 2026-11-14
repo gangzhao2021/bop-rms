@@ -2,8 +2,22 @@
 import express, { type Router } from "express";
 import { httpRequestLimits } from "./http-security.js";
 import { productPhotoBytesMaximum } from "./merchant-products.js";
-import { NO_STORE, sameOriginMutation } from "./merchant-bff-http.js";
+import { failed, NO_STORE, sameOriginMutation } from "./merchant-bff-http.js";
 import type { MerchantBffRouterOptions } from "./merchant-bff-contract.js";
+
+/**
+ * v15 b17 review: the client's own fault a body parser found (its status, 400 to 499: unreadable
+ * JSON 400, too large 413, an unsupported charset or encoding 415), or null when the parser failed
+ * for any other reason, which is the service's failure, not the client's input.
+ */
+export function bodyParserClientStatus(error: unknown): number | null {
+  if (typeof error !== "object" || error === null) return null;
+  const raw = error as { status?: unknown; statusCode?: unknown };
+  const status = typeof raw.status === "number" ? raw.status : raw.statusCode;
+  return typeof status === "number" && Number.isInteger(status) && status >= 400 && status < 500
+    ? status
+    : null;
+}
 
 export function installMerchantBffBodyParsers(
   router: Router,
@@ -309,15 +323,14 @@ export function installMerchantBffBodyParsers(
           next();
           return;
         }
-        const tooLarge =
-          typeof error === "object" &&
-          error !== null &&
-          "type" in error &&
-          error.type === "entity.too.large";
-        response
-          .status(tooLarge ? 413 : 400)
-          .set("Cache-Control", NO_STORE)
-          .json({ error: "input_invalid" });
+        // v15 b17 review: answered by the parser's own client status (400, 413, 415, ...); a parser
+        // failure that is not the client's is reported and answered 503 retry later.
+        const status = bodyParserClientStatus(error);
+        if (status === null) {
+          failed(response, error);
+          return;
+        }
+        response.status(status).set("Cache-Control", NO_STORE).json({ error: "input_invalid" });
       });
       return;
     }

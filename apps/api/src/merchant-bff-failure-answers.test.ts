@@ -4,6 +4,7 @@ import { BrowserSessionError } from "@bop/identity";
 import express from "express";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createMerchantBffRouter, type MerchantBffRouterOptions } from "./merchant-bff.js";
+import { bodyParserClientStatus } from "./merchant-bff-body-parsers.js";
 import { withCause } from "./merchant-failure.js";
 import { MerchantMenuError } from "./merchant-menus.js";
 import { DiningTableCheckoutError } from "./merchant-dining-table-checkout.js";
@@ -52,7 +53,7 @@ async function serve(options: Partial<MerchantBffRouterOptions>) {
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("listener unavailable");
   const root = `http://127.0.0.1:${address.port}/merchant`;
-  const send = (method: string, path: string, body?: string) =>
+  const send = (method: string, path: string, body?: string, extra: Record<string, string> = {}) =>
     new Promise<{
       readonly status: number;
       readonly headers: { get(name: string): string | null };
@@ -63,7 +64,7 @@ async function serve(options: Partial<MerchantBffRouterOptions>) {
         root + path,
         {
           method,
-          headers: body === undefined ? readHeaders : headers,
+          headers: body === undefined ? readHeaders : { ...headers, ...extra },
         },
         (incoming) => {
           const chunks: Buffer[] = [];
@@ -91,7 +92,8 @@ async function serve(options: Partial<MerchantBffRouterOptions>) {
   return {
     reported,
     post: (path: string, body: unknown = {}) => send("POST", path, JSON.stringify(body)),
-    raw: (path: string, body: string) => send("POST", path, body),
+    raw: (path: string, body: string, extra?: Record<string, string>) =>
+      send("POST", path, body, extra),
     get: (path: string) => send("GET", path),
     /** A top-level page load (the sign-in callback, as the identity provider redirects to it). */
     navigate: (path: string) =>
@@ -556,4 +558,27 @@ it.each([
   expect(response.headers.get("cache-control")).toBe("no-store");
   expect(await response.json()).toEqual({ error: "input_invalid" });
   expect(reported.reported).toEqual([]);
+});
+
+// v15 b17 review: the parser's own client status is the answer (an unsupported charset or encoding
+// is 415, not 400), and a parser failure that is not the client's is reported and answered 503.
+it.each([
+  ["an unsupported charset", 415, { "content-type": "application/json; charset=latin1" }],
+  ["an unsupported encoding", 415, { "content-encoding": "x-unknown" }],
+])("POST /orders/comp-items with %s answers %d input_invalid", async (_name, status, extra) => {
+  const reported = await serve({ itemComp: () => Promise.resolve({}) } as never);
+  const response = await reported.raw("/orders/comp-items", "{}", extra);
+  expect(response.status).toBe(status);
+  expect(response.headers.get("cache-control")).toBe("no-store");
+  expect(await response.json()).toEqual({ error: "input_invalid" });
+  expect(reported.reported).toEqual([]);
+});
+
+it("v15 b17 review: a body parser failure is the client's only with its own 4xx status", () => {
+  expect(bodyParserClientStatus(Object.assign(new Error("x"), { status: 400 }))).toBe(400);
+  expect(bodyParserClientStatus(Object.assign(new Error("x"), { statusCode: 413 }))).toBe(413);
+  expect(bodyParserClientStatus(Object.assign(new Error("x"), { status: 415 }))).toBe(415);
+  expect(bodyParserClientStatus(Object.assign(new Error("x"), { status: 500 }))).toBeNull();
+  expect(bodyParserClientStatus(new Error("stream not readable"))).toBeNull();
+  expect(bodyParserClientStatus("broken")).toBeNull();
 });
