@@ -261,6 +261,12 @@ export function ItemCompAction({
       const next = failureOf(response.status, payload);
       if (next !== "FullSignInRequired" && next !== "Unknown") attempt.current = null;
       setFailure(next);
+      // v15 b16: the amount may have changed with the table: work it out again before the
+      // manager can confirm, never the old button amount.
+      if (next === "Changed") {
+        setPreview(null);
+        setPreviewRun((value) => value + 1);
+      }
       if (next !== "FullSignInRequired" && next !== "Unknown" && next !== "Denied") onSettled();
     } catch {
       setFailure("Unknown");

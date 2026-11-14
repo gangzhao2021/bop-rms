@@ -165,9 +165,12 @@ test("@production a manager discounts a started dish from the Tables page; only 
   );
   const sent: Record<string, unknown>[] = [];
   // v15 b16 (DEC-COMP-BILL-CENT): the button names what the server will take off the bill, the
-  // whole bill's tax cent included (here $1.69, while the dish's own share would be $1.70).
+  // whole bill's tax cent included ($1.70, then $1.69 once the bill changed).
   const previews: Record<string, unknown>[] = [];
   let previewDown = false;
+  let previewTotal = "170";
+  // The first confirm finds the table changed (another comp, a dish taken off meanwhile).
+  let refuseOnce = true;
   await page.route("**/merchant/orders/comp-items/preview", (route) => {
     previews.push(route.request().postDataJSON() as Record<string, unknown>);
     if (previewDown) return route.fulfill({ status: 503, headers, json: { error: "unavailable" } });
@@ -175,13 +178,18 @@ test("@production a manager discounts a started dish from the Tables page; only 
       headers,
       json: {
         status: "Preview",
-        totalMinor: "169",
-        lines: [{ orderItemReference: id(202), amountMinor: "169" }],
+        totalMinor: previewTotal,
+        lines: [{ orderItemReference: id(202), amountMinor: previewTotal }],
       },
     });
   });
   await page.route("**/merchant/orders/comp-items", (route) => {
     sent.push(route.request().postDataJSON() as Record<string, unknown>);
+    if (refuseOnce) {
+      refuseOnce = false;
+      previewTotal = "169";
+      return route.fulfill({ status: 409, headers, json: { error: "conflict" } });
+    }
     discounted = true;
     return route.fulfill({
       headers,
@@ -228,11 +236,12 @@ test("@production a manager discounts a started dish from the Tables page; only 
   await expect(group.getByRole("button", { name: /Take .* off/u })).toHaveCount(0);
   previewDown = false;
   await group.getByRole("button", { name: "Work out the amount again" }).click();
-  await expect(group.getByRole("button", { name: "Take $1.69 off" })).toBeDisabled();
+  await expect(group.getByRole("button", { name: "Take $1.70 off" })).toBeDisabled();
   await group.getByRole("radio", { name: "Waited too long" }).check();
-  // 15 % of 10.00 = 1.50 and its tax, as the server works it out on the whole bill: 1.69 off.
+  // 15 % of 10.00 = 1.50 and its tax, as the server works it out on the whole bill.
+  const first = group.getByRole("button", { name: "Take $1.70 off" });
+  await expect(first).toBeEnabled();
   const confirm = group.getByRole("button", { name: "Take $1.69 off" });
-  await expect(confirm).toBeEnabled();
   // The preview asks with the choice only: no reason, no reference, no amount.
   expect(previews.at(-1)).toEqual({
     orderReference: id(1),
@@ -258,21 +267,30 @@ test("@production a manager discounts a started dish from the Tables page; only 
       .filter((v) => v.impact === "serious" || v.impact === "critical")
       .map((v) => v.id),
   ).toEqual([]);
+  await first.click();
+  // The bill changed meanwhile (the whole bill's tax cent now falls on this dish): refused,
+  // nothing recorded, and the button is worked out again before the manager can confirm.
+  await expect(group.getByRole("alert")).toHaveText(
+    "This table changed since it was shown. Refresh it, then try again.",
+  );
+  await expect(confirm).toBeEnabled();
   await confirm.click();
-  // The browser sends the choice and the reason only — never an amount owed.
+  // The browser sends the choice, the reason and what the button showed — never an amount owed:
+  // the server refuses a different amount as a changed table.
+  const asked = {
+    orderReference: id(1),
+    orderItemReferences: [id(202)],
+    kind: "Percent",
+    percent: 15,
+    amountOffMinor: null,
+    reasonCode: "LONG_WAIT",
+    operationReference: expect.stringMatching(/^[0-9a-f-]{36}$/u),
+  };
   expect(sent).toEqual([
-    {
-      orderReference: id(1),
-      orderItemReferences: [id(202)],
-      kind: "Percent",
-      percent: 15,
-      amountOffMinor: null,
-      reasonCode: "LONG_WAIT",
-      // What the button showed: the server refuses a different amount as a changed table.
-      expectedTotalMinor: "169",
-      operationReference: expect.stringMatching(/^[0-9a-f-]{36}$/u),
-    },
+    { ...asked, expectedTotalMinor: "170" },
+    { ...asked, expectedTotalMinor: "169" },
   ]);
+  expect(sent[1]?.operationReference).not.toBe(sent[0]?.operationReference);
   // The discount stays on the table's order, with what came off.
   await expect(details.getByRole("list", { name: "Comps and discounts" })).toContainText(
     "Synthetic boiled fish · 15% off−$1.69",
