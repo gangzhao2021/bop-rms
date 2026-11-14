@@ -194,13 +194,34 @@ const expectedRefusal = (error) =>
   error?.name === "RefundRecoveryError" &&
   typeof error.code === "string" &&
   error.code !== "REFUND_RECOVERY_UNAVAILABLE";
+/**
+ * WP-2423 (logs-and-transaction-time, v15 2026-11-14): a staff sign-in that is no longer good (the
+ * account signed in on too many screens and this one was signed out, or it was signed out or ran
+ * out) is refused, and the screen says to sign in again. The order queue logged it as a level-50
+ * INTERNAL_ORDER_QUEUE_UNAVAILABLE line, 437 times on v15: it is information (level 30). A sign-in
+ * that could not be read (the database did not answer) is not this, and stays a fault.
+ */
+const signedOutCodes = new Set([
+  "BROWSER_SESSION_DENIED",
+  "BROWSER_SESSION_ENDED",
+  "SESSION_REVOKED",
+  "SESSION_EXPIRED",
+  "SESSION_UNKNOWN",
+  "SESSION_ROTATED",
+]);
+const databaseFailure = Symbol.for("bop.database.failure");
+export const signInEnded = (error) =>
+  (error?.name === "BrowserSessionError" || error?.name === "IdentityContractError") &&
+  signedOutCodes.has(error.code) &&
+  Object.getOwnPropertyDescriptor(error, databaseFailure) === undefined;
 export function logUnexpected(event, call) {
   return async (input) => {
     try {
       return await call(input);
     } catch (error) {
       // Expected business refusals are answered to the caller, not logged as faults.
-      if (expectedRefusal(error)) reportUnexpected(event, error, { level: 30 });
+      if (expectedRefusal(error) || signInEnded(error))
+        reportUnexpected(event, error, { level: 30 });
       else if (
         error?.name !== "FulfillmentReadinessError" &&
         !/^Merchant[A-Za-z]*Error$/.test(error?.name ?? "")

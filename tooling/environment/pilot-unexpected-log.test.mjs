@@ -415,3 +415,33 @@ describe("WP-2423 (rush-reads-and-orders-changes): a staff request the rush turn
     ]);
   });
 });
+
+// WP-2423 (logs-and-transaction-time, v15 2026-11-14): a staff screen signed out because the
+// account signed in on too many screens was logged as a level-50 INTERNAL_ORDER_QUEUE_UNAVAILABLE
+// (BROWSER_SESSION_DENIED) line, 437 times; the screen itself said to sign in again.
+it("logs a sign-in that is no longer good as information (level 30); one not read stays level 50", async () => {
+  const lines = logged();
+  class BrowserSessionError extends Error {
+    constructor(code) {
+      super("browser session is not active");
+      this.code = code;
+      this.name = "BrowserSessionError";
+    }
+  }
+  const queue = (error) =>
+    logUnexpected("INTERNAL_ORDER_QUEUE_UNAVAILABLE", async () => Promise.reject(error))({});
+  await expect(queue(new BrowserSessionError("BROWSER_SESSION_DENIED"))).rejects.toThrow();
+  await expect(queue(new BrowserSessionError("BROWSER_SESSION_ENDED"))).rejects.toThrow();
+  const unread = new BrowserSessionError("BROWSER_SESSION_DENIED");
+  Object.defineProperty(unread, Symbol.for("bop.database.failure"), {
+    value: { sqlState: "57014" },
+  });
+  await expect(queue(unread)).rejects.toThrow();
+  await expect(queue(new BrowserSessionError("BROWSER_SESSION_UNAVAILABLE"))).rejects.toThrow();
+  expect(lines().map(({ level, code, resultCode }) => ({ level, code, resultCode }))).toEqual([
+    { level: 30, code: "BROWSER_SESSION_DENIED", resultCode: "REFUSED" },
+    { level: 30, code: "BROWSER_SESSION_ENDED", resultCode: "REFUSED" },
+    { level: 50, code: "BROWSER_SESSION_DENIED", resultCode: undefined },
+    { level: 50, code: "BROWSER_SESSION_UNAVAILABLE", resultCode: undefined },
+  ]);
+});
