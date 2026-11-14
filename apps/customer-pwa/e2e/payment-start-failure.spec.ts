@@ -1061,5 +1061,16 @@ test("@production a round the restaurant cancels while its card is offered says 
     ).toBe(true);
     await page.screenshot({ path: `test-results/payment-round-cancelled-${width}.png` });
   }
+  // v15 b16: it says the round, not "it" (an item): in English and in Chinese.
+  await expect(
+    page.getByText("This round wasn’t sent to the kitchen. Ask staff if you still want it.", {
+      exact: true,
+    }),
+  ).toBeVisible();
   await expectNoInternalText(page);
+  await page.getByRole("button", { name: "切换到中文" }).click();
+  await expect(
+    page.getByText("这一轮没有送到厨房。如果仍需要，请询问店员。", { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText("这件", { exact: false })).toHaveCount(0);
 });

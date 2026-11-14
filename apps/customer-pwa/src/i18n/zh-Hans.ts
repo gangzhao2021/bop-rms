@@ -324,8 +324,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Invite someone at your table": "邀请同桌的人",
   Issued: "签发时间",
   "It was a duplicate of another order.": "这是另一笔订单的重复订单。",
-  "It wasn’t sent to the kitchen. Ask staff if you still want it.":
-    "这件没有送到厨房。如果仍需要，请询问店员。",
   "It will be cancelled at {time} Ask a staff member if you need help.":
     "将于 {time} 取消。需要帮助请问店员。",
   "Item amounts on this version already include tax and any fees or discounts.":
@@ -970,6 +968,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "This round was cancelled because its payment didn’t go through. You weren’t charged for it.":
     "这一轮因付款未成功已取消，你没有被扣款。",
   "This round was cancelled by the store. ": "这一轮已被门店取消。",
+  "This round wasn’t sent to the kitchen. Ask staff if you still want it.":
+    "这一轮没有送到厨房。如果仍需要，请询问店员。",
   "This round was stopped before anyone paid, and its dishes went back to your table’s cart. Nobody was charged for it.":
     "这一轮在付款前已停止，菜品已放回本桌购物车，没有向任何人收费。",
   "This round was cancelled by the store. Nobody was charged for it.":

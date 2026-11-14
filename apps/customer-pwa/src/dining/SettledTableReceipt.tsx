@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { t, saidTable, nameLocale } from "../i18n/i18n.js";
+import { t, saidTable, nameLocale, useReloadOnLanguageChange } from "../i18n/i18n.js";
 import { formatMoney } from "../journey/format.js";
 import { MemberJoinPanel } from "../member/MemberJoinPanel.js";
 import { boundedJsonFetch } from "../network/bounded-fetch.js";
@@ -302,6 +302,9 @@ export function SettledTableReceiptPanel({
   useEffect(() => {
     void load();
   }, [load]);
+  // v15 b16: dish names follow the language the guest switches to (the server writes them), as
+  // the staff's Chinese screens show the dish's Chinese name.
+  useReloadOnLanguageChange(() => void load());
   if (state.status === "none") return null;
   if (state.status === "loading") return <p role="status">{t("Loading receipt")}</p>;
   if (state.status === "unavailable")

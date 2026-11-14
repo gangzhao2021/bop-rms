@@ -954,7 +954,15 @@ test.describe("@production CUST-DINE-IN-SESSION table view", () => {
       if (!body.includes("SettledReceipt"))
         return route.fulfill({ status: 404, headers: { "cache-control": "no-store" }, json: {} });
       receiptReads.push(route.request().headers()["x-csrf-token"] + " " + body);
-      return route.fulfill({ ...receipt, headers: { "cache-control": "no-store" } });
+      // The server writes dish names in the language asked for (the dish's Chinese name).
+      const json = body.includes('"locale":"zh-Hans-CA"')
+        ? JSON.parse(JSON.stringify(receipt.json).replaceAll("Milk tea", "奶茶"))
+        : receipt.json;
+      return route.fulfill({
+        status: receipt.status,
+        json,
+        headers: { "cache-control": "no-store" },
+      });
     });
     await enterTable(page, () => ({ status: 200, json: session }));
     const main = page.getByRole("main");
@@ -992,6 +1000,13 @@ test.describe("@production CUST-DINE-IN-SESSION table view", () => {
     await expect(main).not.toContainText("关台");
     await expect(main).toContainText("新的一桌？扫桌台二维码");
     await expect(main.getByRole("region", { name: "收据" })).toContainText("现金");
+    // v15 b16: switching language reads the receipt again, so the dishes carry their Chinese
+    // names as staff screens do, never the English name under Chinese headings.
+    await expect(main.getByRole("region", { name: "收据" })).toContainText("奶茶");
+    await expect(main.getByRole("region", { name: "收据" })).not.toContainText("Milk tea");
+    expect(receiptReads.at(-1)).toBe(
+      "e".repeat(43) + ' {"action":"SettledReceipt","locale":"zh-Hans-CA"}',
+    );
     await page.screenshot({
       path: "test-results/customer-dining-settled-zh-390.png",
       fullPage: true,

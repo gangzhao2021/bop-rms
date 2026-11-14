@@ -260,11 +260,9 @@ export function SessionPaymentResultPage({
                 : t("Your payment is still being confirmed. Don’t start another payment.")}
             </p>
           ) : null}
-          {cancelled ? (
-            <p>{t("It wasn’t sent to the kitchen. Ask staff if you still want it.")}</p>
-          ) : null}
-          {notCompleted && !pickup ? (
-            <p>{t("It wasn’t sent to the kitchen. Ask staff if you still want it.")}</p>
+          {/* v15 b16: a table's payment is for a round, so the guest reads "this round". */}
+          {cancelled || (notCompleted && !pickup) ? (
+            <p>{t("This round wasn’t sent to the kitchen. Ask staff if you still want it.")}</p>
           ) : null}
           {notCompleted && pickup ? <p>{t("It wasn’t sent to the kitchen.")}</p> : null}
           {stopped ? (
