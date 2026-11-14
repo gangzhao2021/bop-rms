@@ -302,7 +302,23 @@ export function installMerchantBffBodyParsers(
       return;
     }
     if (request.method !== "POST" || request.path !== "/catalog/products/draft") {
-      ordinaryJson(request, response, next);
+      // WP-2423 b17: an unreadable body on any other merchant route is the BFF's own answer, never
+      // handed to the installation's outer handler (which named the payment simulator).
+      ordinaryJson(request, response, (error?: unknown) => {
+        if (!error) {
+          next();
+          return;
+        }
+        const tooLarge =
+          typeof error === "object" &&
+          error !== null &&
+          "type" in error &&
+          error.type === "entity.too.large";
+        response
+          .status(tooLarge ? 413 : 400)
+          .set("Cache-Control", NO_STORE)
+          .json({ error: "input_invalid" });
+      });
       return;
     }
     completeDraftJson(request, response, (error?: unknown) => {

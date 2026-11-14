@@ -91,6 +91,7 @@ async function serve(options: Partial<MerchantBffRouterOptions>) {
   return {
     reported,
     post: (path: string, body: unknown = {}) => send("POST", path, JSON.stringify(body)),
+    raw: (path: string, body: string) => send("POST", path, body),
     get: (path: string) => send("GET", path),
     /** A top-level page load (the sign-in callback, as the identity provider redirects to it). */
     navigate: (path: string) =>
@@ -536,3 +537,23 @@ it.each(["/payments/refunds/preview", "/payments/refunds/request"])(
     expect(refused.reported).toEqual([]);
   },
 );
+
+// WP-2423 b17: a merchant request whose JSON can't be read is the BFF's own answer, on every route,
+// never left to the installation's outer handler (which named the payment simulator).
+it.each([
+  "/orders/comp-items",
+  "/orders/comp-items/preview",
+  "/dining/staff-rounds",
+  "/payments/refunds/request",
+])("POST %s with broken JSON answers 400 input_invalid as JSON", async (path) => {
+  const reported = await serve({
+    itemComp: () => Promise.resolve({}),
+    itemCompPreview: () => Promise.resolve({}),
+  } as never);
+  const response = await reported.raw(path, "{bad");
+  expect(response.status).toBe(400);
+  expect(response.headers.get("content-type")).toMatch(/^application\/json/u);
+  expect(response.headers.get("cache-control")).toBe("no-store");
+  expect(await response.json()).toEqual({ error: "input_invalid" });
+  expect(reported.reported).toEqual([]);
+});
