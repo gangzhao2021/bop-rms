@@ -6691,6 +6691,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "An amount off is for one dish at a time.": "减金额一次只能用于一道菜。",
   "Recorded with your name and reason. It can't be deleted.": "会记录你的名字和原因，不能删除。",
   "Choose dishes, an amount and a reason": "请选菜、减多少和原因",
+  "Working out the amount…": "正在算减多少…",
+  "Work out the amount again": "重新算减多少",
+  "We couldn't work out the amount. Check the connection, then try again.":
+    "没能算出减多少。请检查网络，然后重试。",
   "Comp {amount}": "免单 {amount}",
   "Take {amount} off": "减 {amount}",
   Comped: "已免单",

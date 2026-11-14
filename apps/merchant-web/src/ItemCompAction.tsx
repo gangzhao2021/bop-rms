@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { listSeparator, t } from "./i18n/i18n.js";
 import type { CurrentOrderLine, CurrentOrderQueue } from "./current-order-queue-client.js";
 import { FullSignInPrompt } from "./FullSignInPrompt.js";
@@ -76,7 +76,9 @@ const failureOf = (status: number, payload: unknown): Failure => {
 
 /**
  * The money a choice takes off one dish — net off its price, tax and fee in proportion, half up to
- * the cent — the rule the server and the database apply (shown before it is recorded).
+ * the cent — the rule the server and the database apply to the dish's own share. v15 b16: the
+ * button names the server's preview instead (the whole bill's tax cent included); this says only
+ * whether the choice is one the server takes.
  */
 export function compAmountMinor(
   line: Pick<CurrentOrderLine, "subtotal" | "discount" | "tax" | "fee">,
@@ -140,9 +142,14 @@ export function ItemCompAction({
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<Failure | null>(null);
   const attempt = useRef<{ key: string; reference: string } | null>(null);
+  const [preview, setPreview] = useState<{
+    readonly key: string;
+    readonly totalMinor: string | null;
+    readonly failure: Failure | null;
+  } | null>(null);
+  const [previewRun, setPreviewRun] = useState(0);
   const compable = new Set(order.batches.flatMap((batch) => batch.compableItems));
   const offered = lines.filter((line) => compable.has(line.orderItemReference));
-  if (offered.length === 0) return null;
   const chosen = offered.filter((line) => selected.has(line.orderItemReference));
   // A dish that can still come off the bill (the kitchen has not marked it started) can't once it
   // is comped or discounted: say so before, while taking it off is still the better choice.
@@ -153,23 +160,76 @@ export function ItemCompAction({
   const amounts = chosen.map((line) =>
     compAmountMinor(line, choice, percentValue, choice === "Amount" ? amountOffMinor : null),
   );
-  const total =
-    chosen.length > 0 && amounts.every((value) => value !== null)
-      ? amounts.reduce<bigint>((sum, value) => sum + (value ?? 0n), 0n)
-      : null;
+  const valid =
+    chosen.length > 0 &&
+    amounts.every((value) => value !== null) &&
+    (choice !== "Amount" || chosen.length === 1);
   const currencyCode = offered[0]?.total.currencyCode ?? "CAD";
-  const ready =
-    total !== null && reason !== "" && (choice !== "Amount" || chosen.length === 1) && !busy;
+  const asked = {
+    orderReference: order.orderReference,
+    orderItemReferences: chosen.map((line) => line.orderItemReference).sort(),
+    kind: choice,
+    percent: choice === "Percent" ? percentValue : null,
+    amountOffMinor: choice === "Amount" ? String(amountOffMinor) : null,
+  };
+  const previewKey = valid ? JSON.stringify(asked) : null;
+  // v15 b16 (DEC-COMP-BILL-CENT): the server works out what really comes off the bill (the bill's
+  // tax is worked out once over the whole bill, so it can differ by a cent from the dishes' own).
+  const total =
+    preview !== null && preview.key === previewKey && preview.totalMinor !== null
+      ? BigInt(preview.totalMinor)
+      : null;
+  const previewFailure = preview !== null && preview.key === previewKey ? preview.failure : null;
+  useEffect(() => {
+    if (!open || previewKey === null) return;
+    const abort = new AbortController();
+    const timer = setTimeout(() => {
+      void (async () => {
+        try {
+          const response = await fetcher("/merchant/orders/comp-items/preview", {
+            method: "POST",
+            credentials: "same-origin",
+            cache: "no-store",
+            redirect: "error",
+            signal: abort.signal,
+            headers: {
+              "Content-Type": "application/json",
+              Accept: "application/json",
+              "X-BOP-CSRF": csrf,
+            },
+            body: previewKey,
+          });
+          const payload = (await response.json().catch(() => null)) as {
+            totalMinor?: unknown;
+          } | null;
+          if (abort.signal.aborted) return;
+          if (response.ok && typeof payload?.totalMinor === "string")
+            setPreview({ key: previewKey, totalMinor: payload.totalMinor, failure: null });
+          else
+            setPreview({
+              key: previewKey,
+              totalMinor: null,
+              failure: response.ok ? "Unknown" : failureOf(response.status, payload),
+            });
+        } catch {
+          if (!abort.signal.aborted)
+            setPreview({ key: previewKey, totalMinor: null, failure: "Unknown" });
+        }
+      })();
+    }, 200);
+    return () => {
+      clearTimeout(timer);
+      abort.abort();
+    };
+  }, [open, previewKey, csrf, fetcher, previewRun]);
+  if (offered.length === 0) return null;
+  const ready = total !== null && reason !== "" && !busy;
   const send = async () => {
     if (!ready) return;
-    const items = chosen.map((line) => line.orderItemReference).sort();
     const body = {
-      orderReference: order.orderReference,
-      orderItemReferences: items,
-      kind: choice,
-      percent: choice === "Percent" ? percentValue : null,
-      amountOffMinor: choice === "Amount" ? String(amountOffMinor) : null,
+      ...asked,
       reasonCode: reason,
+      expectedTotalMinor: String(total),
     };
     const key = JSON.stringify(body);
     if (attempt.current?.key !== key)
@@ -310,24 +370,42 @@ export function ItemCompAction({
       <button
         type="button"
         className="table-checkout__primary"
-        disabled={!ready}
-        onClick={() => void send()}
+        disabled={previewFailure !== null ? busy : !ready}
+        onClick={() => {
+          if (previewFailure !== null) {
+            setPreview(null);
+            setPreviewRun((value) => value + 1);
+            return;
+          }
+          void send();
+        }}
       >
         {busy
           ? t("Recording…")
-          : total === null
-            ? t("Choose dishes, an amount and a reason")
-            : choice === "Comp"
-              ? t("Comp {amount}", {
-                  amount: orderMoney({ amountMinor: String(total), currencyCode }),
-                })
-              : t("Take {amount} off", {
-                  amount: orderMoney({ amountMinor: String(total), currencyCode }),
-                })}
+          : previewFailure !== null
+            ? t("Work out the amount again")
+            : !valid
+              ? t("Choose dishes, an amount and a reason")
+              : total === null
+                ? t("Working out the amount…")
+                : choice === "Comp"
+                  ? t("Comp {amount}", {
+                      amount: orderMoney({ amountMinor: String(total), currencyCode }),
+                    })
+                  : t("Take {amount} off", {
+                      amount: orderMoney({ amountMinor: String(total), currencyCode }),
+                    })}
       </button>{" "}
       <button type="button" disabled={busy} onClick={() => setOpen(false)}>
         {t("Cancel")}
       </button>
+      {previewFailure !== null && failure === null ? (
+        <p role="alert">
+          {previewFailure === "Unknown"
+            ? t("We couldn't work out the amount. Check the connection, then try again.")
+            : itemCompFailureText(previewFailure)}
+        </p>
+      ) : null}
       {failure === "FullSignInRequired" ? (
         <FullSignInPrompt csrf={csrf} fetcher={fetcher} />
       ) : failure !== null ? (

@@ -120,15 +120,15 @@ test("@production a manager discounts a started dish from the Tables page; only 
         unpaidRemovedItems: [],
         compableItems: discounted ? [id(201)] : [id(201), id(202)],
         compedItems: discounted
-          ? [{ orderItemReference: id(202), kind: "Percent", percent: 15, amountMinor: "170" }]
+          ? [{ orderItemReference: id(202), kind: "Percent", percent: 15, amountMinor: "169" }]
           : [],
       },
     ],
     canRequestAcceptance: false,
-    // The table's bill (Payment's figure): 22.60, then 1.70 off and the bill's tax rounded once
-    // (DEC-TAX-WHOLE-RECEIPT: 18.50 × 13% = 2.405 → 2.41, the rounds charged 2.40): 20.91.
-    // v15 batch 9: on the order's detail, that rounding is said under the comps (its Total stays
-    // as ordered); the order list has no detail, so no rounding.
+    // The table's bill (Payment's figure): 22.60, then 15 % off the fish. The whole bill's tax
+    // (DEC-TAX-WHOLE-RECEIPT: 18.50 × 13% = 2.405 → 2.41) is a cent more than the dishes' own
+    // (2.40), so v15 b16 (DEC-COMP-BILL-CENT): the discount takes off 1.69, exactly what the
+    // bill goes down by, and the bill has no tax rounding left to say: 20.91.
     tableBill: discounted ? { totalMinor: "2091", paid: null } : { totalMinor: "2260", paid: null },
     currentPhase: "InProgress",
     currentVersion: 3,
@@ -146,9 +146,7 @@ test("@production a manager discounts a started dish from the Tables page; only 
       json: {
         screenId: "OPS-ORDER-DETAIL",
         pickupContact: null,
-        order: discounted
-          ? { ...order(), tableBill: { totalMinor: "2091", paid: null, taxRoundingMinor: "1" } }
-          : order(),
+        order: discounted ? { ...order(), tableBill: { totalMinor: "2091", paid: null } } : order(),
         lines: {
           items: [line(1, "Synthetic mapo tofu"), line(2, "Synthetic boiled fish")],
           totals: {
@@ -166,6 +164,22 @@ test("@production a manager discounts a started dish from the Tables page; only 
     }),
   );
   const sent: Record<string, unknown>[] = [];
+  // v15 b16 (DEC-COMP-BILL-CENT): the button names what the server will take off the bill, the
+  // whole bill's tax cent included (here $1.69, while the dish's own share would be $1.70).
+  const previews: Record<string, unknown>[] = [];
+  let previewDown = false;
+  await page.route("**/merchant/orders/comp-items/preview", (route) => {
+    previews.push(route.request().postDataJSON() as Record<string, unknown>);
+    if (previewDown) return route.fulfill({ status: 503, headers, json: { error: "unavailable" } });
+    return route.fulfill({
+      headers,
+      json: {
+        status: "Preview",
+        totalMinor: "169",
+        lines: [{ orderItemReference: id(202), amountMinor: "169" }],
+      },
+    });
+  });
   await page.route("**/merchant/orders/comp-items", (route) => {
     sent.push(route.request().postDataJSON() as Record<string, unknown>);
     discounted = true;
@@ -178,7 +192,7 @@ test("@production a manager discounts a started dish from the Tables page; only 
             orderItemReference: id(202),
             kind: "Percent",
             percent: 15,
-            amountMinor: "170",
+            amountMinor: "169",
             reasonCode: "LONG_WAIT",
             decidedAt: "2026-10-27T23:41:00.000Z",
           },
@@ -202,14 +216,31 @@ test("@production a manager discounts a started dish from the Tables page; only 
   );
   await group.getByLabel(/Synthetic mapo tofu/u).uncheck();
   await expect(removableNote).toHaveCount(0);
-  // Nothing is sent without a reason; the amount is shown exactly before it is recorded.
+  // Nothing is sent without a reason; the amount is shown exactly before it is recorded. While
+  // the amount can't be worked out (the connection dropped) nothing can be confirmed: staff are
+  // told and work it out again, never shown a guess.
+  previewDown = true;
   await group.getByRole("radio", { name: "Percent off" }).check();
   await group.getByRole("textbox", { name: "Percent off (1–99)" }).fill("15");
-  await expect(group.getByRole("button", { name: "Take $1.70 off" })).toBeDisabled();
+  await expect(group.getByRole("alert")).toHaveText(
+    "We couldn't work out the amount. Check the connection, then try again.",
+  );
+  await expect(group.getByRole("button", { name: /Take .* off/u })).toHaveCount(0);
+  previewDown = false;
+  await group.getByRole("button", { name: "Work out the amount again" }).click();
+  await expect(group.getByRole("button", { name: "Take $1.69 off" })).toBeDisabled();
   await group.getByRole("radio", { name: "Waited too long" }).check();
-  // 15 % of 10.00 = 1.50, tax 1.30 × 15 % = 0.195 → 0.20: 1.70 off.
-  const confirm = group.getByRole("button", { name: "Take $1.70 off" });
+  // 15 % of 10.00 = 1.50 and its tax, as the server works it out on the whole bill: 1.69 off.
+  const confirm = group.getByRole("button", { name: "Take $1.69 off" });
   await expect(confirm).toBeEnabled();
+  // The preview asks with the choice only: no reason, no reference, no amount.
+  expect(previews.at(-1)).toEqual({
+    orderReference: id(1),
+    orderItemReferences: [id(202)],
+    kind: "Percent",
+    percent: 15,
+    amountOffMinor: null,
+  });
   await expect(group).toContainText("It can't be deleted.");
   for (const width of [1440, 1024, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
@@ -237,26 +268,26 @@ test("@production a manager discounts a started dish from the Tables page; only 
       percent: 15,
       amountOffMinor: null,
       reasonCode: "LONG_WAIT",
+      // What the button showed: the server refuses a different amount as a changed table.
+      expectedTotalMinor: "169",
       operationReference: expect.stringMatching(/^[0-9a-f-]{36}$/u),
     },
   ]);
   // The discount stays on the table's order, with what came off.
   await expect(details.getByRole("list", { name: "Comps and discounts" })).toContainText(
-    "Synthetic boiled fish · 15% off−$1.70",
+    "Synthetic boiled fish · 15% off−$1.69",
   );
   // What is left to pay shows under it at once, before checkout.
   await expect(details.getByRole("list", { name: "Comps and discounts" })).toContainText(
     "Whole bill to pay after comps$20.91",
   );
   // v15 batch 9 (DEC-TAX-WHOLE-RECEIPT): the order's Total stays what was ordered ($22.60).
-  // b13: the whole bill after the comps carries its tax worked out once, as checkout and the paid
-  // bill print it. b13 review: $22.60 − $1.70 is $20.90, so the cent the tax moved by when worked
-  // out again on the whole bill is one line here, and the list adds up to the bill.
+  // v15 b16 (DEC-COMP-BILL-CENT): $22.60 − $1.69 is the bill, $20.91: the discount took off
+  // exactly what the bill went down by, so there is no separate "tax worked out again" cent.
   const tableOrder = details.getByRole("region", { name: "This table's order" });
   const comps = details.getByRole("list", { name: "Comps and discounts" });
   await expect(comps.getByRole("listitem")).toHaveText([
-    "Synthetic boiled fish · 15% off−$1.70",
-    "Tax worked out again after comps+$0.01",
+    "Synthetic boiled fish · 15% off−$1.69",
     "Whole bill to pay after comps$20.91",
   ]);
   await expect(tableOrder.locator(".order-lines-totals").first()).toContainText("Total$22.60");
@@ -284,7 +315,7 @@ test("@production a manager discounts a started dish from the Tables page; only 
         return lines.size;
       }),
     );
-    expect(amountLines).toEqual([1, 1, 1]);
+    expect(amountLines).toEqual([1, 1]);
     await page.screenshot({
       path: `test-results/dining-item-comp-rounding-${width}.png`,
       fullPage: true,

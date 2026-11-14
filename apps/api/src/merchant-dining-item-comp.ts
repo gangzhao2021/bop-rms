@@ -10,6 +10,7 @@ import {
   OrderPriceReductionError,
   parseOrderingInstant,
   parseOrderingReference,
+  withBillTaxRoundingShares,
   type OrderPriceReductionChoice,
   type OrderPriceReductionReasonCode,
   type OrderPriceReductionRecord,
@@ -22,6 +23,7 @@ import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js"
 import { keepingCause, onlyRefusal } from "./merchant-failure.js";
 import { fenceTableBill } from "./dining-waiting-rounds.js";
 import {
+  billReductionTaxShares,
   refreshBillTaxRounding,
   splitAgainAfterBillChange,
 } from "./merchant-dining-table-checkout.js";
@@ -62,24 +64,50 @@ const databaseCode = (error: unknown) => {
   return typeof code === "string" ? code : null;
 };
 
-/** The browser's intent: the dishes, comp / percent / amount off, and a reason. Never totals. */
+/**
+ * The browser's intent: the dishes, comp / percent / amount off, and a reason. Never totals: v15 b16
+ * `expectedTotalMinor` (optional) is only what the button showed, from the preview; a different
+ * amount now is refused as a changed table, so the manager confirms the money taken off.
+ */
 export function parseItemCompCommand(value: unknown) {
+  return parseItemComp(value, "Command");
+}
+
+/** v15 b16: what the comp would take off, before the manager confirms (no reason or reference). */
+export function parseItemCompPreview(value: unknown) {
+  return parseItemComp(value, "Preview");
+}
+
+function parseItemComp(value: unknown, mode: "Command" | "Preview") {
   try {
-    const raw = readClosedRecord(value, [
-      "orderReference",
-      "orderItemReferences",
-      "kind",
-      "percent",
-      "amountOffMinor",
-      "reasonCode",
-      "operationReference",
-    ]);
+    const keys =
+      mode === "Preview"
+        ? ["orderReference", "orderItemReferences", "kind", "percent", "amountOffMinor"]
+        : [
+            "orderReference",
+            "orderItemReferences",
+            "kind",
+            "percent",
+            "amountOffMinor",
+            "reasonCode",
+            "operationReference",
+            ...(value !== null &&
+            typeof value === "object" &&
+            Object.hasOwn(value, "expectedTotalMinor")
+              ? ["expectedTotalMinor"]
+              : []),
+          ];
+    const raw = readClosedRecord(value, keys);
     if (
       !Array.isArray(raw.orderItemReferences) ||
       raw.orderItemReferences.length < 1 ||
       raw.orderItemReferences.length > 50 ||
-      typeof raw.reasonCode !== "string" ||
-      !(orderPriceReductionReasonCodes as readonly string[]).includes(raw.reasonCode)
+      (mode === "Command" &&
+        (typeof raw.reasonCode !== "string" ||
+          !(orderPriceReductionReasonCodes as readonly string[]).includes(raw.reasonCode))) ||
+      (raw.expectedTotalMinor !== undefined &&
+        (typeof raw.expectedTotalMinor !== "string" ||
+          !/^[1-9][0-9]{0,11}$/u.test(raw.expectedTotalMinor)))
     )
       throw new Error();
     let choice: OrderPriceReductionChoice;
@@ -109,8 +137,13 @@ export function parseItemCompCommand(value: unknown) {
       orderReference: String(parseOrderingReference(raw.orderReference)),
       orderItemReferences: Object.freeze(items.sort()),
       choice,
-      reasonCode: raw.reasonCode as OrderPriceReductionReasonCode,
-      operationReference: String(parseOrderingReference(raw.operationReference)),
+      reasonCode: (mode === "Command"
+        ? raw.reasonCode
+        : "GOODWILL") as OrderPriceReductionReasonCode,
+      operationReference:
+        mode === "Command" ? String(parseOrderingReference(raw.operationReference)) : null,
+      expectedTotalMinor:
+        typeof raw.expectedTotalMinor === "string" ? BigInt(raw.expectedTotalMinor) : null,
     });
   } catch {
     return fail("ITEM_COMP_INPUT_INVALID");
@@ -131,7 +164,7 @@ const publicRecords = (records: readonly OrderPriceReductionRecord[]) =>
     ),
   );
 
-export function createMerchantDiningItemComp(options: {
+interface ItemCompOptions {
   persistence: PersistentMerchantBffOptions;
   authentication: Pick<MerchantBffService, "authorize">;
   installContext(
@@ -139,11 +172,43 @@ export function createMerchantDiningItemComp(options: {
     scope: { tenantReference: string; brandReference: string; storeReference: string },
   ): Promise<void>;
   nextReference(): string;
-}) {
+}
+
+export function createMerchantDiningItemComp(options: ItemCompOptions) {
+  const run = itemCompRun(options);
+  return (input: { sessionCookie: unknown; csrf: unknown; command: unknown }) =>
+    run(input, parseItemCompCommand(input.command)) as Promise<{
+      readonly status: "Recorded" | "AlreadyRecorded";
+      readonly reductions: ReturnType<typeof publicRecords>;
+    }>;
+}
+
+/**
+ * v15 b16 (DEC-COMP-BILL-CENT): what the chosen comp or discount would take off the bill — the
+ * amount the confirm button names — worked out exactly as the command records it (the whole
+ * bill's tax cent included), with the command's checks and permission. Nothing is recorded, and
+ * no staff PIN is asked (the PIN confirms the command).
+ */
+export function createMerchantDiningItemCompPreview(options: ItemCompOptions) {
+  const run = itemCompRun(options);
+  return (input: { sessionCookie: unknown; csrf: unknown; command: unknown }) =>
+    run(input, parseItemCompPreview(input.command)) as Promise<{
+      readonly status: "Preview";
+      readonly totalMinor: string;
+      readonly lines: readonly {
+        readonly orderItemReference: string;
+        readonly amountMinor: string;
+      }[];
+    }>;
+}
+
+function itemCompRun(options: ItemCompOptions) {
   const resolveScope = createMerchantStoreScope(options.persistence);
-  return async (input: { sessionCookie: unknown; csrf: unknown; command: unknown }) => {
+  return async (
+    input: { sessionCookie: unknown; csrf: unknown },
+    intent: ReturnType<typeof parseItemComp>,
+  ) => {
     const session = await options.authentication.authorize(input);
-    const intent = parseItemCompCommand(input.command);
     try {
       return await options.persistence.transactions.run((transaction) =>
         withMerchantTransactionAuthorization(
@@ -179,7 +244,10 @@ export function createMerchantDiningItemComp(options: {
               authorize: async (t, value) =>
                 t === tx && value.orderReference === intent.orderReference && (await guard()),
             });
-            const prior = await ordering.loadByOperation(tx, intent.operationReference);
+            const prior =
+              intent.operationReference === null
+                ? []
+                : await ordering.loadByOperation(tx, intent.operationReference);
             if (prior.length > 0) {
               // The same request again (a lost answer): its result, never a second reduction.
               if (
@@ -191,7 +259,10 @@ export function createMerchantDiningItemComp(options: {
                 prior[0]?.actorReference !== actorReference
               )
                 return fail("ITEM_COMP_CONFLICT");
-              return Object.freeze({ status: "AlreadyRecorded", reductions: publicRecords(prior) });
+              return Object.freeze({
+                status: "AlreadyRecorded" as const,
+                reductions: publicRecords(prior),
+              });
             }
             // Ordering's fence is taken first and held to commit: a table payment, write-off or
             // phone payment for this Order either committed before (seen below) or waits. v15 b11:
@@ -256,8 +327,36 @@ export function createMerchantDiningItemComp(options: {
               if (state === undefined) return fail("ITEM_COMP_NOT_STARTED");
             }
             const decidedAt = String(parseOrderingInstant(options.persistence.now()));
+            // v15 b16 (DEC-COMP-BILL-CENT): the whole bill's tax cent on these dishes, so the
+            // records take off exactly what the bill goes down by.
+            const plan = withBillTaxRoundingShares(
+              prepared.plan,
+              await billReductionTaxShares(tx, selected, {
+                orderReference: intent.orderReference,
+                observedAt: decidedAt,
+                authorize: async () => (await guard()) === true,
+                lines: prepared.plan.lines,
+              }),
+            );
+            if (!(await guard())) return fail("ITEM_COMP_PERMISSION_DENIED");
+            if (intent.operationReference === null)
+              return Object.freeze({
+                status: "Preview" as const,
+                totalMinor: plan.totalMinor.toString(),
+                lines: Object.freeze(
+                  plan.lines.map((line) =>
+                    Object.freeze({
+                      orderItemReference: line.orderItemReference,
+                      amountMinor: line.totalMinor.toString(),
+                    }),
+                  ),
+                ),
+              });
+            // What the button showed: a different amount now means the table changed meanwhile.
+            if (intent.expectedTotalMinor !== null && intent.expectedTotalMinor !== plan.totalMinor)
+              return fail("ITEM_COMP_CONFLICT");
             const records = await ordering.commit(tx, {
-              plan: prepared.plan,
+              plan,
               operationReference: intent.operationReference,
               actorReference,
               reasonCode: intent.reasonCode,
@@ -266,11 +365,15 @@ export function createMerchantDiningItemComp(options: {
             });
             // v15 b11 (DEC-TAX-WHOLE-RECEIPT): the bill changed, so a tax rounding recorded for it
             // (at a split or a started payment) is recorded again for the bill as it now stands.
+            // v15 b16: a comp that took the whole bill's tax cent records the rounding it leaves
+            // even on a bill that had none recorded yet, so a table comped to nothing closes with
+            // reports that read that cent where the bill has it (no payment would record it).
             await refreshBillTaxRounding(tx, selected, {
               orderReference: intent.orderReference,
               observedAt: decidedAt,
               authorize: async () => (await guard()) === true,
               nextReference: options.nextReference,
+              whenNeverRecorded: plan.lines.some((line) => line.taxRoundingMinor !== 0n),
             });
             // v15 b12 (DEC-DINE-IN-SPLIT-BILL rule 7): a split bill is split again the same way, so
             // no guest is asked to pay a share of the bill as it was before.
@@ -282,7 +385,10 @@ export function createMerchantDiningItemComp(options: {
               actorReference,
               correlationReference: intent.operationReference,
             });
-            return Object.freeze({ status: "Recorded", reductions: publicRecords(records) });
+            return Object.freeze({
+              status: "Recorded" as const,
+              reductions: publicRecords(records),
+            });
           },
         ),
       );

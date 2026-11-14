@@ -18,7 +18,10 @@ import type {
 } from "./merchant-dining-payment-timing.js";
 import type { createMerchantDiningUnpaidDeparture } from "./merchant-dining-unpaid-departure.js";
 import type { createMerchantDiningUnpaidItemRemoval } from "./merchant-dining-unpaid-item-removal.js";
-import type { createMerchantDiningItemComp } from "./merchant-dining-item-comp.js";
+import type {
+  createMerchantDiningItemComp,
+  createMerchantDiningItemCompPreview,
+} from "./merchant-dining-item-comp.js";
 import type {
   createMerchantDiningTableCashRefund,
   createMerchantDiningTableOnlineRefund,
@@ -745,6 +748,8 @@ export interface MerchantBffRouterOptions {
   readonly unpaidItemRemoval?: ReturnType<typeof createMerchantDiningUnpaidItemRemoval>;
   /** WP-2423 item 8 ① segment 2: a manager comps or discounts dishes before the table pays. */
   readonly itemComp?: ReturnType<typeof createMerchantDiningItemComp>;
+  /** v15 b16 DEC-COMP-BILL-CENT: what that comp or discount would take off (no PIN, no record). */
+  readonly itemCompPreview?: ReturnType<typeof createMerchantDiningItemCompPreview>;
   readonly diningTableCommand?: ReturnType<typeof createMerchantDiningTableCommand>;
   /** WP-2423 item 8 ⑧ (Owner decision 3): move a table's party to another free table. */
   readonly diningTableMove?: ReturnType<typeof createMerchantDiningTableMove>;

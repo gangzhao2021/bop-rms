@@ -179,7 +179,15 @@ export function createPostgresStoreSalesOrderSource(options: {
             amountMinor: component.taxAmount.amountMinor - share,
           });
         });
-        if (off !== null && (components.some((c) => c.amountMinor < 0n) || spread !== taxOff))
+        // v15 b16 (DEC-COMP-BILL-CENT): a reduction's tax may hold the whole bill's cent beyond
+        // the dish's own tax (a cent or two below nothing on a fully comped dish); its round's
+        // tax rounding gives it back.
+        if (
+          off !== null &&
+          (components.some((c) => c.amountMinor < -99n) ||
+            spread !== taxOff ||
+            pricing.tax.amountMinor - taxOff < -99n)
+        )
           return fail();
         lines.push(
           Object.freeze({

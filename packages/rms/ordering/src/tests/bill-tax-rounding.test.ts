@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  billReductionTaxRoundingShares,
   computeBillTaxRounding,
   type BillTaxRoundingRound,
 } from "../application/bill-tax-rounding.js";
@@ -230,5 +231,159 @@ describe("WP-2423 DEC-TAX-WHOLE-RECEIPT: the bill's tax rounding", () => {
                 .reduce((sum, line) => sum + line.amountMinor, 0n),
           ).toBeGreaterThanOrEqual(0n);
       }
+  });
+});
+
+describe("v15 b16 DEC-COMP-BILL-CENT: a reduction takes off exactly what the bill goes down by", () => {
+  /** The dish's own share of its tax (half up), the rule the store and the database apply. */
+  const dishShare = (taxMinor: bigint, netMinor: bigint, offMinor: bigint) =>
+    offMinor === netMinor ? taxMinor : (taxMinor * offMinor * 2n + netMinor) / (2n * netMinor);
+  const billOf = (rounds: readonly BillTaxRoundingRound[]) =>
+    rounds
+      .flatMap((r) => r.items)
+      .reduce(
+        (sum, item) =>
+          sum +
+          item.netMinor +
+          (item.taxComponents[0]?.taxAmountMinor ?? 0n) -
+          (item.reduction === null ? 0n : item.reduction.netMinor + item.reduction.taxMinor),
+        0n,
+      ) + computeBillTaxRounding(rounds).totalMinor;
+  /** Takes `off` (dish index → net off) off the bill as one operation; what each record holds. */
+  const reduce = (rounds: BillTaxRoundingRound[], off: ReadonlyMap<number, bigint>) => {
+    const planned = [...off].map(([index, netOff]) => {
+      const item = (rounds[index] as BillTaxRoundingRound).items[0] as BillTaxRoundingItemLike;
+      return {
+        orderItemReference: item.orderItemReference,
+        netMinor: netOff,
+        taxMinor: dishShare(item.taxComponents[0]?.taxAmountMinor ?? 0n, item.netMinor, netOff),
+      };
+    });
+    const shares = billReductionTaxRoundingShares(rounds, planned);
+    const records = planned.map((line) => ({
+      ...line,
+      taxMinor: line.taxMinor + (shares.get(line.orderItemReference) ?? 0n),
+    }));
+    const next = rounds.map((r) => ({
+      ...r,
+      items: r.items.map((item) => {
+        const record = records.find((line) => line.orderItemReference === item.orderItemReference);
+        return record === undefined
+          ? item
+          : { ...item, reduction: { netMinor: record.netMinor, taxMinor: record.taxMinor } };
+      }),
+    }));
+    return { records, next };
+  };
+  type BillTaxRoundingItemLike = BillTaxRoundingRound["items"][number];
+  const total = (records: readonly { netMinor: bigint; taxMinor: bigint }[]) =>
+    records.reduce((sum, line) => sum + line.netMinor + line.taxMinor, 0n);
+
+  it("comps both $12.50 dishes of a $28.25 table for $28.25, never $28.26 (v15 L15 MDF 2)", () => {
+    const rounds = [round(1, 1250n, 163n), round(2, 1250n, 163n)];
+    expect(billOf(rounds)).toBe(2825n);
+    const { records, next } = reduce(
+      rounds,
+      new Map([
+        [0, 1250n],
+        [1, 1250n],
+      ]),
+    );
+    expect(total(records)).toBe(2825n);
+    expect(records.map((line) => line.taxMinor)).toEqual([163n, 162n]);
+    expect(billOf(next)).toBe(0n);
+  });
+
+  it("comps one dish, then the other: $14.12 and $14.13, the bill $14.13 then $0.00", () => {
+    const rounds = [round(1, 1250n, 163n), round(2, 1250n, 163n)];
+    const first = reduce(rounds, new Map([[0, 1250n]]));
+    expect(total(first.records)).toBe(1412n);
+    expect(billOf(first.next)).toBe(1413n);
+    const second = reduce(first.next, new Map([[1, 1250n]]));
+    expect(total(second.records)).toBe(1413n);
+    expect(billOf(second.next)).toBe(0n);
+  });
+
+  it("takes the whole bill's extra cent off when the bill had been charged one more", () => {
+    // Three $3.80 rounds: 49¢ tax each (147¢); the whole bill's tax is 11.40 × 13% = 148¢.
+    const rounds = [round(1, 380n, 49n), round(2, 380n, 49n), round(3, 380n, 49n)];
+    expect(billOf(rounds)).toBe(1288n);
+    const { records, next } = reduce(
+      rounds,
+      new Map([
+        [0, 380n],
+        [1, 380n],
+        [2, 380n],
+      ]),
+    );
+    expect(total(records)).toBe(1288n);
+    expect(billOf(next)).toBe(0n);
+    const two = reduce(
+      rounds,
+      new Map([
+        [0, 380n],
+        [1, 380n],
+      ]),
+    );
+    expect(total(two.records) + billOf(two.next)).toBe(1288n);
+    expect(billOf(two.next)).toBe(429n);
+  });
+
+  it("reconciles every comp, percentage and amount off over many bills", () => {
+    let seed = 7;
+    const random = (n: number) => {
+      seed = (seed * 1103515245 + 12345) % 2147483648;
+      return seed % n;
+    };
+    for (let bill = 0; bill < 400; bill += 1) {
+      const count = 1 + random(5);
+      let rounds: BillTaxRoundingRound[] = Array.from({ length: count }, (_, n) => {
+        const net = BigInt(1 + random(4000));
+        return round(n + 1, net, (net * 13n + 50n) / 100n);
+      });
+      const original = billOf(rounds);
+      let taken = 0n;
+      // Up to three operations, each on dishes not reduced yet.
+      const left = rounds.map((_, index) => index);
+      for (let step = 0; step < 3 && left.length > 0; step += 1) {
+        const pick = left.splice(0, 1 + random(left.length));
+        const off = new Map(
+          pick.map((index) => {
+            const net = (
+              (rounds[index] as BillTaxRoundingRound).items[0] as BillTaxRoundingItemLike
+            ).netMinor;
+            const kind = random(3);
+            const value =
+              kind === 0 ? net : kind === 1 ? (net * BigInt(1 + random(99)) + 50n) / 100n : 1n;
+            return [index, value < 1n ? 1n : value] as const;
+          }),
+        );
+        const before = billOf(rounds);
+        const { records, next } = reduce(rounds, off);
+        expect(total(records)).toBe(before - billOf(next));
+        expect(records.every((line) => line.taxMinor >= 0n)).toBe(true);
+        taken += total(records);
+        rounds = next;
+      }
+      expect(taken + billOf(rounds)).toBe(original);
+    }
+  });
+
+  it("gives a dish exempt from tax no share", () => {
+    const exempt = round(2, 1250n, 0n);
+    const rounds = [
+      round(1, 1250n, 163n),
+      {
+        ...exempt,
+        items: exempt.items.map((item) => ({
+          ...item,
+          taxComponents: [{ ...hst(0n), treatment: "Exempt" as const }],
+        })),
+      },
+    ];
+    const shares = billReductionTaxRoundingShares(rounds, [
+      { orderItemReference: id(202), netMinor: 1250n, taxMinor: 0n },
+    ]);
+    expect(shares.get(id(202))).toBe(0n);
   });
 });

@@ -26,7 +26,7 @@ import {
   createPostgresStoreSalesPaymentLedger,
 } from "@rms/payment";
 import type { createCustomerOrderStatusRead } from "./customer-order-status-read.js";
-import { readDiningTableBill } from "./merchant-dining-table-checkout.js";
+import { billReductionTaxShares, readDiningTableBill } from "./merchant-dining-table-checkout.js";
 import { storeOffersPoints } from "./merchant-store-features.js";
 import {
   createMemberPointsOrderSettler,
@@ -803,12 +803,21 @@ export function createCustomerMember(options: {
             storeReference: scope.storeReference,
             authorize: async () => true,
           });
+          const decidedAt = now();
           const records = await ordering.commitPointsRedemption(tx, {
             lines,
             operationReference: input.operationReference,
             accountReference: account as string,
-            decidedAt: now(),
+            decidedAt,
             nextReference: options.nextReference,
+            // v15 b16 (DEC-COMP-BILL-CENT): the points take off exactly what the bill goes down by.
+            billTaxRoundingShares: (planned) =>
+              billReductionTaxShares(tx, scope, {
+                orderReference: bill.orderReference as string,
+                observedAt: decidedAt,
+                authorize: async () => true,
+                lines: planned,
+              }),
           });
           await points.redeem(tx as never, {
             accountReference: account as string,

@@ -45,6 +45,11 @@ export interface OrderPriceReductionRecord {
   readonly taxMinor: bigint;
   readonly feeMinor: bigint;
   readonly totalMinor: bigint;
+  /**
+   * v15 b16 (DEC-COMP-BILL-CENT): the part of `taxMinor` that is the whole bill's tax cent this
+   * reduction took off beyond the dish's own tax share (0 for most; signed).
+   */
+  readonly taxRoundingMinor: bigint;
   readonly reasonCode: OrderPriceReductionReasonCode | typeof orderPointsRedemptionReason;
   readonly actorReference: string;
   readonly decidedAt: string;
@@ -56,12 +61,16 @@ export interface OrderPriceReductionPlan {
     readonly orderBatchReference: string;
     readonly orderItemReference: string;
     readonly netMinor: bigint;
+    /** The dish's share of its tax plus `taxRoundingMinor`. */
     readonly taxMinor: bigint;
     readonly feeMinor: bigint;
     readonly totalMinor: bigint;
+    /** v15 b16: the whole bill's tax cent on this dish (see {@link withBillTaxRoundingShares}). */
+    readonly taxRoundingMinor: bigint;
   }[];
   readonly totalMinor: bigint;
 }
+
 export type OrderPriceReductionNotEligibleReason =
   "NotFound" | "NotPayLater" | "Closed" | "ItemCancelled" | "AlreadyReduced" | "InvalidAmount";
 
@@ -86,6 +95,11 @@ const minor = (value: unknown) => {
   if (!/^(0|[1-9][0-9]{0,18})$/u.test(text)) return unavailable();
   return BigInt(text);
 };
+const signedCents = (value: unknown) => {
+  const text = String(value);
+  if (!/^-?(0|[1-9][0-9]?)$/u.test(text)) return unavailable();
+  return BigInt(text);
+};
 /** Half up to the cent: share of `amount` in proportion `part / whole` (whole > 0). */
 const proportion = (amount: bigint, part: bigint, whole: bigint) =>
   (amount * part * 2n + whole) / (2n * whole);
@@ -94,7 +108,13 @@ const proportion = (amount: bigint, part: bigint, whole: bigint) =>
 export function orderPriceReductionAmounts(
   price: { readonly netMinor: bigint; readonly taxMinor: bigint; readonly feeMinor: bigint },
   choice: OrderPriceReductionChoice,
-): { netMinor: bigint; taxMinor: bigint; feeMinor: bigint; totalMinor: bigint } | null {
+): {
+  netMinor: bigint;
+  taxMinor: bigint;
+  feeMinor: bigint;
+  totalMinor: bigint;
+  taxRoundingMinor: bigint;
+} | null {
   const whole = price.netMinor;
   if (whole <= 0n) return null;
   const net =
@@ -108,12 +128,44 @@ export function orderPriceReductionAmounts(
   if (net < 1n || net > whole || (choice.kind === "Amount" && net >= whole)) return null;
   const tax = net === whole ? price.taxMinor : proportion(price.taxMinor, net, whole);
   const fee = net === whole ? price.feeMinor : proportion(price.feeMinor, net, whole);
-  return { netMinor: net, taxMinor: tax, feeMinor: fee, totalMinor: net + tax + fee };
+  return {
+    netMinor: net,
+    taxMinor: tax,
+    feeMinor: fee,
+    totalMinor: net + tax + fee,
+    taxRoundingMinor: 0n,
+  };
 }
 
+/**
+ * v15 b16 (DEC-COMP-BILL-CENT, docs/spec/design/comp-bill-cent-b16.md): the plan with the whole
+ * bill's tax cent on its dishes (from `billReductionTaxRoundingShares`), so what it records is what
+ * the bill goes down by. A share is a few cents at most and never makes a dish's tax negative.
+ */
+export function withBillTaxRoundingShares(
+  plan: OrderPriceReductionPlan,
+  shares: ReadonlyMap<string, bigint>,
+): OrderPriceReductionPlan {
+  const lines = plan.lines.map((line) => {
+    const base = line.taxMinor - line.taxRoundingMinor;
+    const share = shares.get(line.orderItemReference) ?? 0n;
+    if (share < -99n || share > 99n || base + share < 0n) return unavailable();
+    return Object.freeze({
+      ...line,
+      taxMinor: base + share,
+      totalMinor: line.netMinor + base + share + line.feeMinor,
+      taxRoundingMinor: share,
+    });
+  });
+  return Object.freeze({
+    ...plan,
+    lines: Object.freeze(lines),
+    totalMinor: lines.reduce((sum, line) => sum + line.totalMinor, 0n),
+  });
+}
 const recordSelect = `SELECT reduction_id::text AS reduction,operation_id::text AS operation,order_id::text AS "order",
  order_batch_id::text AS batch,order_item_id::text AS item,kind,percent,net_minor::text AS net,tax_minor::text AS tax,
- fee_minor::text AS fee,total_minor::text AS total,reason_code,actor_id::text AS actor,decided_at
+ fee_minor::text AS fee,total_minor::text AS total,tax_rounding_minor::text AS tax_rounding,reason_code,actor_id::text AS actor,decided_at
  FROM rms_ordering.order_item_price_reduction WHERE brand_id=$1 AND store_id=$2`;
 function recordFrom(row: Record<string, unknown>): OrderPriceReductionRecord {
   const kind = row.kind;
@@ -138,6 +190,7 @@ function recordFrom(row: Record<string, unknown>): OrderPriceReductionRecord {
     taxMinor: minor(row.tax),
     feeMinor: minor(row.fee),
     totalMinor: minor(row.total),
+    taxRoundingMinor: signedCents(row.tax_rounding),
     reasonCode: reason as OrderPriceReductionRecord["reasonCode"],
     actorReference: String(parseOrderingReference(row.actor)),
     decidedAt: instant(row.decided_at),
@@ -417,6 +470,10 @@ export function createPostgresOrderPriceReductionStore(options: {
         accountReference: string;
         decidedAt: string;
         nextReference(): string;
+        /** v15 b16: the whole bill's tax cent on these dishes (absent: none). */
+        billTaxRoundingShares?: (
+          lines: readonly OrderPriceReductionPlan["lines"][number][],
+        ) => Promise<ReadonlyMap<string, bigint>>;
       },
     ): Promise<readonly OrderPriceReductionRecord[]> {
       const operation = String(parseOrderingReference(input.operationReference)),
@@ -425,6 +482,11 @@ export function createPostgresOrderPriceReductionStore(options: {
       const records: OrderPriceReductionRecord[] = [];
       await tx.query("SAVEPOINT ordering_points_redemption", []);
       try {
+        const planned: {
+          orderReference: string;
+          choice: OrderPriceReductionChoice;
+          line: OrderPriceReductionPlan["lines"][number];
+        }[] = [];
         for (const wanted of input.lines) {
           await allowed(tx, wanted.orderReference);
           await fence(tx, wanted.orderReference);
@@ -447,12 +509,33 @@ export function createPostgresOrderPriceReductionStore(options: {
           if (checked.status !== "Ready") return conflict();
           const line = checked.plan.lines[0];
           if (line === undefined) return conflict();
+          planned.push({ orderReference: wanted.orderReference, choice, line });
+        }
+        // v15 b16 (DEC-COMP-BILL-CENT): the whole bill's tax cent, so the points take off exactly
+        // what the bill goes down by.
+        const shares =
+          input.billTaxRoundingShares === undefined
+            ? new Map<string, bigint>()
+            : await input.billTaxRoundingShares(planned.map((entry) => entry.line));
+        for (const entry of planned) {
+          const [line] = withBillTaxRoundingShares(
+            {
+              orderReference: entry.orderReference,
+              choice: { kind: entry.choice.kind, percent: null },
+              lines: [entry.line],
+              totalMinor: entry.line.totalMinor,
+            },
+            shares,
+          ).lines;
+          if (line === undefined) return conflict();
+          const choice = entry.choice;
+          const wanted = { orderReference: entry.orderReference };
           const reduction = String(parseOrderingReference(input.nextReference()));
           const audit = String(parseOrderingReference(input.nextReference()));
           await tx.query(
             "INSERT INTO rms_ordering.order_item_price_reduction (reduction_id,operation_id,brand_id,store_id,order_id,order_batch_id,order_item_id," +
-              "kind,percent,net_minor,tax_minor,fee_minor,total_minor,currency_code,reason_code,actor_id,permission_code,audit_id,decided_at) " +
-              "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NULL,$9,$10,$11,$12,'CAD',$13,$14,$15,$16,$17)",
+              "kind,percent,net_minor,tax_minor,fee_minor,total_minor,currency_code,reason_code,actor_id,permission_code,audit_id,decided_at,tax_rounding_minor) " +
+              "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NULL,$9,$10,$11,$12,'CAD',$13,$14,$15,$16,$17,$18)",
             [
               reduction,
               operation,
@@ -471,6 +554,7 @@ export function createPostgresOrderPriceReductionStore(options: {
               orderPointsRedemptionPermission,
               audit,
               decidedAt,
+              line.taxRoundingMinor.toString(),
             ],
           );
           await appendAuditRecordInTransaction(
@@ -509,6 +593,7 @@ export function createPostgresOrderPriceReductionStore(options: {
               taxMinor: line.taxMinor,
               feeMinor: line.feeMinor,
               totalMinor: line.totalMinor,
+              taxRoundingMinor: line.taxRoundingMinor,
               reasonCode: orderPointsRedemptionReason,
               actorReference: actor,
               decidedAt,
@@ -579,7 +664,14 @@ export function createPostgresOrderPriceReductionStore(options: {
         JSON.stringify(value, (_key, entry: unknown) =>
           typeof entry === "bigint" ? entry.toString() : entry,
         );
-      if (current.status !== "Ready" || digest(current.plan) !== digest(plan)) return conflict();
+      // v15 b16: the plan may carry the whole bill's tax cent on its dishes (worked out by the
+      // caller from the bill); everything else must be what the dishes give now.
+      if (current.status !== "Ready") return conflict();
+      const settled = withBillTaxRoundingShares(
+        current.plan,
+        new Map(plan.lines.map((line) => [line.orderItemReference, line.taxRoundingMinor])),
+      );
+      if (digest(settled) !== digest(plan)) return conflict();
       await tx.query("SAVEPOINT ordering_price_reduction", []);
       try {
         for (const line of plan.lines) {
@@ -587,8 +679,8 @@ export function createPostgresOrderPriceReductionStore(options: {
           const audit = String(parseOrderingReference(input.nextReference()));
           const inserted = await tx.query(
             "INSERT INTO rms_ordering.order_item_price_reduction (reduction_id,operation_id,brand_id,store_id,order_id,order_batch_id,order_item_id," +
-              "kind,percent,net_minor,tax_minor,fee_minor,total_minor,currency_code,reason_code,actor_id,permission_code,audit_id,decided_at) " +
-              "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'CAD',$14,$15,$16,$17,$18)",
+              "kind,percent,net_minor,tax_minor,fee_minor,total_minor,currency_code,reason_code,actor_id,permission_code,audit_id,decided_at,tax_rounding_minor) " +
+              "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'CAD',$14,$15,$16,$17,$18,$19)",
             [
               reduction,
               operation,
@@ -608,6 +700,7 @@ export function createPostgresOrderPriceReductionStore(options: {
               orderPriceReductionPermission,
               audit,
               decidedAt,
+              line.taxRoundingMinor.toString(),
             ],
           );
           if (inserted.rowCount !== 1) return conflict();

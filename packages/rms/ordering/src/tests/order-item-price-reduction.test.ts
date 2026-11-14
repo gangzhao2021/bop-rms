@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { orderPriceReductionAmounts } from "../infrastructure/persistence/order-item-price-reduction-store.js";
+import {
+  orderPriceReductionAmounts,
+  withBillTaxRoundingShares,
+} from "../infrastructure/persistence/order-item-price-reduction-store.js";
 
 describe("WP-2423 item 8 ① segment 2: a manager's comp or discount on one dish", () => {
   const dish = { netMinor: 2800n, taxMinor: 364n, feeMinor: 0n };
@@ -9,6 +12,7 @@ describe("WP-2423 item 8 ① segment 2: a manager's comp or discount on one dish
       taxMinor: 364n,
       feeMinor: 0n,
       totalMinor: 3164n,
+      taxRoundingMinor: 0n,
     });
   });
   it("takes a percentage or an amount off the net and tax in proportion, half up", () => {
@@ -17,12 +21,14 @@ describe("WP-2423 item 8 ① segment 2: a manager's comp or discount on one dish
       taxMinor: 55n,
       feeMinor: 0n,
       totalMinor: 475n,
+      taxRoundingMinor: 0n,
     });
     expect(orderPriceReductionAmounts(dish, { kind: "Amount", netMinor: 500n })).toEqual({
       netMinor: 500n,
       taxMinor: 65n,
       feeMinor: 0n,
       totalMinor: 565n,
+      taxRoundingMinor: 0n,
     });
     expect(
       orderPriceReductionAmounts({ ...dish, feeMinor: 100n }, { kind: "Percent", percent: 50 }),
@@ -39,5 +45,37 @@ describe("WP-2423 item 8 ① segment 2: a manager's comp or discount on one dish
     ] as const)
       expect(orderPriceReductionAmounts(dish, choice)).toBeNull();
     expect(orderPriceReductionAmounts({ ...dish, netMinor: 0n }, { kind: "Comp" })).toBeNull();
+  });
+});
+
+describe("v15 b16 DEC-COMP-BILL-CENT: the whole bill's tax cent on a reduction", () => {
+  const line = (item: string, taxMinor: bigint) => ({
+    orderBatchReference: "b",
+    orderItemReference: item,
+    netMinor: 1250n,
+    taxMinor,
+    feeMinor: 0n,
+    totalMinor: 1250n + taxMinor,
+    taxRoundingMinor: 0n,
+  });
+  const plan = {
+    orderReference: "o",
+    choice: { kind: "Comp" as const, percent: null },
+    lines: [line("i1", 163n), line("i2", 163n)],
+    totalMinor: 2826n,
+  };
+  it("puts the cent on the dish's tax and says so, so the records add up to the bill", () => {
+    const settled = withBillTaxRoundingShares(plan, new Map([["i2", -1n]]));
+    expect(settled.totalMinor).toBe(2825n);
+    expect(settled.lines.map((l) => [l.taxMinor, l.totalMinor, l.taxRoundingMinor])).toEqual([
+      [163n, 1413n, 0n],
+      [162n, 1412n, -1n],
+    ]);
+    // Applied again with other shares, it starts from the dish's own share, never twice.
+    expect(withBillTaxRoundingShares(settled, new Map()).totalMinor).toBe(2826n);
+  });
+  it("never takes a dish's tax below nothing nor a share beyond a dollar", () => {
+    expect(() => withBillTaxRoundingShares(plan, new Map([["i1", -164n]]))).toThrow();
+    expect(() => withBillTaxRoundingShares(plan, new Map([["i1", 100n]]))).toThrow();
   });
 });

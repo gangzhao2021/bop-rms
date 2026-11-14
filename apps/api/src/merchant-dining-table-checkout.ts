@@ -25,8 +25,10 @@ import {
   listOrderMergedInto,
   listStoreDiningSessionOrders,
   createPostgresStaffDiningRoundEntryStore,
+  billReductionTaxRoundingShares,
   computeBillTaxRounding,
   loadBillTaxRounding,
+  type BillTaxRoundingRound,
   recordBillTaxRounding,
   parseOrderingReference,
 } from "@rms/ordering";
@@ -415,6 +417,102 @@ function billRoundFigures(
   };
 }
 
+/** The bill's rounds as DEC-TAX-WHOLE-RECEIPT computes its tax rounding (one reading for all). */
+function billTaxRoundingRoundsOf(
+  confirmations: readonly { orderReference: unknown; orderBatchReference: unknown }[],
+  prices: readonly {
+    orderItemReference: unknown;
+    orderBatchReference: unknown;
+    subtotal: { amountMinor: bigint };
+    discountMinor: bigint;
+    taxComponents: BillTaxRoundingRound["items"][number]["taxComponents"];
+  }[],
+  reductions: ReadonlyMap<string, { netMinor: bigint; taxMinor: bigint }>,
+): BillTaxRoundingRound[] {
+  return confirmations.map((confirmation) => ({
+    orderReference: String(confirmation.orderReference),
+    orderBatchReference: String(confirmation.orderBatchReference),
+    items: prices
+      .filter(
+        (item) => String(item.orderBatchReference) === String(confirmation.orderBatchReference),
+      )
+      .map((item) => {
+        const reduction = reductions.get(String(item.orderItemReference)) ?? null;
+        return {
+          orderItemReference: String(item.orderItemReference),
+          netMinor: item.subtotal.amountMinor - item.discountMinor,
+          taxComponents: item.taxComponents,
+          reduction:
+            reduction === null
+              ? null
+              : { netMinor: reduction.netMinor, taxMinor: reduction.taxMinor },
+        };
+      }),
+  }));
+}
+
+/**
+ * v15 b16 (DEC-COMP-BILL-CENT, docs/spec/design/comp-bill-cent-b16.md): the whole bill's tax cent
+ * each of these new reductions takes, so a comp, discount or points redemption takes off exactly
+ * what the bill goes down by (the bill's tax rounding is the same before and after). The bill is
+ * the one holding this Order (a merged table's too), as it stands now with its earlier reductions.
+ * A read: nothing is recorded. The caller holds the bill's fence and checked nothing was paid.
+ */
+export async function billReductionTaxShares(
+  tx: ConsumerTransaction,
+  scope: Pick<Scope, "brandReference" | "storeReference">,
+  input: {
+    readonly orderReference: string;
+    readonly observedAt: string;
+    authorize(): Promise<boolean>;
+    readonly lines: readonly {
+      readonly orderItemReference: string;
+      readonly netMinor: bigint;
+      readonly taxMinor: bigint;
+    }[];
+  },
+): Promise<ReadonlyMap<string, bigint>> {
+  const owner = { brandReference: scope.brandReference, storeReference: scope.storeReference };
+  const order = String(parseOrderingReference(input.orderReference));
+  const holder = (await listOrderMergedInto(tx, owner, [order])).get(order) ?? order;
+  const billOrders = await listOrderBillOrders(tx, owner, holder);
+  const allowed = async () => (await input.authorize()) === true;
+  const confirmations = await createPostgresOrderPayLaterConfirmationStore({
+    ...owner,
+    quoteVersion: 2,
+    sha256,
+    authorize: allowed,
+  }).listByOrders({ transaction: tx, orderReferences: billOrders });
+  const removed = new Set(
+    (
+      await createPostgresPayLaterItemCancellationStore({
+        ...owner,
+        authorize: async (_tx, value) =>
+          billOrders.includes(String(value.orderReference)) && (await allowed()),
+      }).listByOrders(tx, billOrders)
+    ).flatMap((record) => record.orderItemReferences),
+  );
+  const prices = [];
+  for (const billOrder of billOrders)
+    prices.push(...(await listOrderItemPrices(tx, owner, billOrder, "")));
+  const reductions = new Map(
+    (await listOrderPriceReductions(tx, owner, billOrders, input.observedAt)).map((record) => [
+      record.orderItemReference,
+      record,
+    ]),
+  );
+  if (!(await allowed())) return fail("TABLE_CHECKOUT_PERMISSION_DENIED");
+  return billReductionTaxRoundingShares(
+    billTaxRoundingRoundsOf(
+      confirmations,
+      prices.filter((item) => !removed.has(String(item.orderItemReference))),
+      reductions,
+    ),
+    input.lines,
+    { carrierOrderReference: holder },
+  );
+}
+
 export async function readDiningTableBill(
   tx: ConsumerTransaction,
   scope: Scope,
@@ -620,26 +718,7 @@ export async function readDiningTableBill(
     recordedRounding?.lines ?? [];
   if (!anyPayment) {
     const computed = computeBillTaxRounding(
-      confirmations.map((confirmation) => ({
-        orderReference: String(confirmation.orderReference),
-        orderBatchReference: String(confirmation.orderBatchReference),
-        items: prices
-          .filter(
-            (item) => String(item.orderBatchReference) === String(confirmation.orderBatchReference),
-          )
-          .map((item) => {
-            const reduction = reductions.get(String(item.orderItemReference)) ?? null;
-            return {
-              orderItemReference: String(item.orderItemReference),
-              netMinor: item.subtotal.amountMinor - item.discountMinor,
-              taxComponents: item.taxComponents,
-              reduction:
-                reduction === null
-                  ? null
-                  : { netMinor: reduction.netMinor, taxMinor: reduction.taxMinor },
-            };
-          }),
-      })),
+      billTaxRoundingRoundsOf(confirmations, prices, reductions),
       // Rule version 2: a merged bill's rounding is on the rounds of the Order holding it.
       { carrierOrderReference: orderReference },
     );

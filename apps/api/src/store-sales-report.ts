@@ -601,11 +601,15 @@ function computeSales(
     if (paidBatches.has(orderBatchReference)) continue;
     const order = orders.get(round.orderReference);
     const items = batchItems(round.orderReference, orderBatchReference);
+    // v15 b16 (DEC-COMP-BILL-CENT): a round comped in full owes nothing with its share of the
+    // bill's tax rounding (a comp may have taken the whole bill's cent on this round's dish).
+    const rounding = batchRounding(round.orderReference, orderBatchReference);
+    const roundingMinor = rounding.reduce((sum, line) => sum + line.amountMinor, 0n);
     if (
       order === undefined ||
       items === null ||
       items.length === 0 ||
-      items.reduce((sum, item) => sum + item.totalMinor, 0n) !== 0n
+      items.reduce((sum, item) => sum + item.totalMinor, 0n) + roundingMinor !== 0n
     )
       continue;
     const day = dayOf(round.decidedAt);
@@ -624,6 +628,7 @@ function computeSales(
         t.serviceChargeMinor += item.feeMinor;
         t.taxMinor += item.taxMinor;
       }
+      t.taxMinor += roundingMinor;
     }
     for (const item of items) {
       const key = itemKey(item);

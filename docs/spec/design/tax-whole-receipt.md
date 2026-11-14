@@ -21,6 +21,8 @@ v2（2026-11-11 v15 batch 9，迁移 `2000_800_alter_order_tax_rounding_rule_car
    b11（[bill-comp-split-and-close-b11](bill-comp-split-and-close-b11.md)）：免单/折让、付款前删菜、开始/取消/完成结账在同一事务
    里重新记取整（已记过且未付款时）；核销前按账单现状记下；未付款的账单读取用现在算出的取整，不读可能过期的已记版本。
 4. 一次读取从不记录。
+5. b16（[comp-bill-cent-b16](comp-bill-cent-b16.md)，DEC-COMP-BILL-CENT）：免单、折让和积分抵扣不改变账单的税额取整。整单的税因减免
+   多变或少变的那一分记在这次减免的菜的税上（`tax_rounding_minor`），所以减免记录合计 = 账单减少的钱，减免合计 + 还欠的 = 原账单，到分。
 
 ## 各处显示什么（2026-11-06 修正后）
 

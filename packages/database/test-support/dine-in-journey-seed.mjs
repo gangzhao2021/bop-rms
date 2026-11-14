@@ -38,8 +38,15 @@ export function journeyRound({
   party = null,
   dineIn = true,
   quantity,
+  unitPriceMinor,
 }) {
-  const f = orderWriteFixture({ at, dineIn, ...(quantity === undefined ? {} : { quantity }) });
+  const f = orderWriteFixture({
+    at,
+    dineIn,
+    ...(quantity === undefined ? {} : { quantity }),
+    // v15 b16: a price each other than 10.00 (its tax at the line's rate, half up).
+    ...(unitPriceMinor === undefined ? {} : { unitPriceMinor }),
+  });
   const record = f.request.record,
     batch = record.order.batches[0],
     evidence = f.request.checkoutValidationEvidence;

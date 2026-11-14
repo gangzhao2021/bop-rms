@@ -83,6 +83,9 @@ function allocate(total: bigint, weights: readonly bigint[]): readonly bigint[] 
 const fail = (): never => {
   throw new Error("BILL_TAX_ROUNDING_INVALID");
 };
+/** A tax type the dish is taxed at (Taxable, at a rate above nothing). */
+const taxedComponent = (component: BillTaxRoundingItem["taxComponents"][number]) =>
+  component.treatment === "Taxable" && taxRateRatio(component.rate as never).numerator !== 0n;
 
 export function computeBillTaxRounding(
   rounds: readonly BillTaxRoundingRound[],
@@ -111,15 +114,23 @@ export function computeBillTaxRounding(
       const components = [...item.taxComponents].sort(
         (a, b) => a.calculationOrder - b.calculationOrder,
       );
-      // The comp's tax, shared across the dish's tax types by largest remainder.
+      // The comp's tax, shared across the dish's tax types by largest remainder. v15 b16: a dish
+      // too cheap to have been charged tax (a few cents) can still take the whole bill's cent;
+      // it goes to its taxed tax types.
+      const weights = components.map((component) => component.taxAmountMinor);
       const compTax = allocate(
         reduction.taxMinor,
-        components.map((component) => component.taxAmountMinor),
+        weights.some((weight) => weight > 0n)
+          ? weights
+          : components.map((component) => (taxedComponent(component) ? 1n : 0n)),
       );
       let priorCharged = 0n;
       components.forEach((component, index) => {
+        // v15 b16 (DEC-COMP-BILL-CENT): a reduction's tax may hold the whole bill's cent beyond
+        // the dish's own tax, so a fully comped dish can be charged a cent or two below nothing;
+        // the bill's tax rounding gives it back (the bill never goes below its whole tax).
         const charged = component.taxAmountMinor - (compTax[index] ?? 0n);
-        if (charged < 0n) fail();
+        if (charged < -99n) fail();
         const ratio: { readonly numerator: bigint; readonly denominator: bigint } = taxRateRatio(
           component.rate as never,
         );
@@ -253,4 +264,87 @@ export function computeBillTaxRounding(
     lines: Object.freeze(lines),
     basisDigest,
   });
+}
+
+/**
+ * v15 b16 (DEC-COMP-BILL-CENT, docs/spec/design/comp-bill-cent-b16.md): what one comp, discount or
+ * points redemption takes off a table's bill is exactly what the bill goes down by. Each dish's
+ * reduction first takes its own share of the dish's tax (half up); the whole bill's tax, worked
+ * out once over the bill, can then move by a cent more or less than those shares. That difference
+ * is put on the reductions' tax, a cent at a time from the last dish (by reference) backwards, so
+ * the bill's tax rounding is the same after the reductions as before them, and
+ * Σ reductions + what is still owed = the bill before, to the cent.
+ *
+ * `rounds` is the bill as it stands (earlier reductions included); `planned` are the new
+ * reductions with their dish shares. Returns each planned dish's cent share (0 for most). Only a
+ * dish that is taxed (Taxable at a rate) takes a share, and a share never makes a reduction's tax
+ * negative.
+ */
+export function billReductionTaxRoundingShares(
+  rounds: readonly BillTaxRoundingRound[],
+  planned: readonly {
+    readonly orderItemReference: string;
+    readonly netMinor: bigint;
+    readonly taxMinor: bigint;
+  }[],
+  options: { readonly carrierOrderReference?: string } = {},
+): ReadonlyMap<string, bigint> {
+  const shares = new Map<string, bigint>(planned.map((line) => [line.orderItemReference, 0n]));
+  if (planned.length === 0) return shares;
+  const itemOf = new Map<string, BillTaxRoundingItem>();
+  for (const round of rounds)
+    for (const item of round.items) itemOf.set(item.orderItemReference, item);
+  const before = computeBillTaxRounding(rounds, options).totalMinor;
+  const taxed = [...planned]
+    .filter((line) => {
+      const item = itemOf.get(line.orderItemReference);
+      return (
+        item !== undefined && item.reduction === null && item.taxComponents.some(taxedComponent)
+      );
+    })
+    .sort((a, b) => (a.orderItemReference < b.orderItemReference ? -1 : 1));
+  if (taxed.length === 0) return shares;
+  const plannedOf = new Map(planned.map((line) => [line.orderItemReference, line]));
+  const after = () =>
+    computeBillTaxRounding(
+      rounds.map((round) => ({
+        ...round,
+        items: round.items.map((item) => {
+          const line = plannedOf.get(item.orderItemReference);
+          if (line === undefined || item.reduction !== null) return item;
+          return {
+            ...item,
+            reduction: {
+              netMinor: line.netMinor,
+              taxMinor: line.taxMinor + (shares.get(item.orderItemReference) ?? 0n),
+            },
+          };
+        }),
+      })),
+      options,
+    ).totalMinor;
+  // Raising a reduction's tax by a cent lowers what the bill charged its dishes by a cent and
+  // raises the rounding by one (a compound tax can move once more: a few passes settle it).
+  for (let pass = 0; pass < 4; pass += 1) {
+    let left = before - after();
+    if (left === 0n) break;
+    let moved = true;
+    while (left !== 0n && moved) {
+      moved = false;
+      for (let index = taxed.length - 1; index >= 0 && left !== 0n; index -= 1) {
+        const line = taxed[index] as (typeof taxed)[number];
+        const share = shares.get(line.orderItemReference) ?? 0n;
+        if (left > 0n && share < 99n) {
+          shares.set(line.orderItemReference, share + 1n);
+          left -= 1n;
+          moved = true;
+        } else if (left < 0n && line.taxMinor + share > 0n && share > -99n) {
+          shares.set(line.orderItemReference, share - 1n);
+          left += 1n;
+          moved = true;
+        }
+      }
+    }
+  }
+  return shares;
 }

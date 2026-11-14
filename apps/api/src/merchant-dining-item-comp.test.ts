@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { parseItemCompCommand } from "./merchant-dining-item-comp.js";
+import { parseItemCompCommand, parseItemCompPreview } from "./merchant-dining-item-comp.js";
 
 const id = (n: number) => "01a0fe00-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 const base = {
@@ -41,6 +41,35 @@ it("WP-2423 item 8 ① segment 2: reads only the manager's choice, never an amou
     { ...base, totalMinor: "0" },
   ])
     expect(() => parseItemCompCommand(bad)).toThrow(
+      expect.objectContaining({ code: "ITEM_COMP_INPUT_INVALID" }),
+    );
+});
+
+it("v15 b16 DEC-COMP-BILL-CENT: the command may carry the amount its button showed; the preview the choice only", () => {
+  expect(parseItemCompCommand(base).expectedTotalMinor).toBeNull();
+  expect(parseItemCompCommand({ ...base, expectedTotalMinor: "2825" }).expectedTotalMinor).toBe(
+    2825n,
+  );
+  for (const bad of ["0", "-1", "28.25", 2825, null])
+    expect(() => parseItemCompCommand({ ...base, expectedTotalMinor: bad })).toThrow(
+      expect.objectContaining({ code: "ITEM_COMP_INPUT_INVALID" }),
+    );
+  const choice = {
+    orderReference: base.orderReference,
+    orderItemReferences: base.orderItemReferences,
+    kind: base.kind,
+    percent: base.percent,
+    amountOffMinor: base.amountOffMinor,
+  };
+  expect(parseItemCompPreview(choice)).toMatchObject({
+    orderItemReferences: [id(2), id(3)],
+    choice: { kind: "Comp" },
+    operationReference: null,
+    expectedTotalMinor: null,
+  });
+  // A preview never takes a reason, a reference or an amount: it records nothing.
+  for (const bad of [base, { ...choice, expectedTotalMinor: "2825" }])
+    expect(() => parseItemCompPreview(bad)).toThrow(
       expect.objectContaining({ code: "ITEM_COMP_INPUT_INVALID" }),
     );
 });

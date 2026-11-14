@@ -91,7 +91,10 @@ import { createMerchantDiningOrderCloseCommand } from "../../apps/api/dist/merch
 import { createMerchantGuestTableStartOff } from "../../apps/api/dist/merchant-dining-guest-table-start.js";
 import { createMerchantDiningUnpaidDeparture } from "../../apps/api/dist/merchant-dining-unpaid-departure.js";
 import { createMerchantDiningUnpaidItemRemoval } from "../../apps/api/dist/merchant-dining-unpaid-item-removal.js";
-import { createMerchantDiningItemComp } from "../../apps/api/dist/merchant-dining-item-comp.js";
+import {
+  createMerchantDiningItemComp,
+  createMerchantDiningItemCompPreview,
+} from "../../apps/api/dist/merchant-dining-item-comp.js";
 import { createMerchantDiningTableOnlinePaymentStop } from "../../apps/api/dist/merchant-dining-table-online-payment.js";
 import { createInternalDiningTablePayments } from "./pilot-dining-table-payment.mjs";
 import {
@@ -998,7 +1001,7 @@ export async function createInternalMerchant(
     },
   });
   // WP-2423 item 8 ① segment 2: a manager comps or discounts dishes before the table pays.
-  const itemComp = createMerchantDiningItemComp({
+  const itemCompOptions = {
     persistence,
     authentication: service,
     nextReference: () => resources.credentials.reference(),
@@ -1011,7 +1014,10 @@ export async function createInternalMerchant(
         [scope.tenantReference, scope.brandReference, scope.storeReference],
       );
     },
-  });
+  };
+  const itemComp = createMerchantDiningItemComp(itemCompOptions);
+  // v15 b16 (DEC-COMP-BILL-CENT): the amount the comp's confirm button names.
+  const itemCompPreview = createMerchantDiningItemCompPreview(itemCompOptions);
   const tableCashRefund = createMerchantDiningTableCashRefund({
     persistence,
     authentication: service,
@@ -1906,6 +1912,7 @@ export async function createInternalMerchant(
       ...(tableOnlineRefund === undefined ? {} : { tableOnlineRefund }),
       unpaidItemRemoval,
       itemComp,
+      itemCompPreview,
       diningOrderProgress,
       diningTableClosePlan,
       diningItemService,

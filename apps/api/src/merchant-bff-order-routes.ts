@@ -969,6 +969,34 @@ export function installMerchantOrderRoutes(
           .json({ error: error.code.replace(/^UNPAID_ITEM_REMOVAL_/u, "").toLowerCase() });
       });
   });
+  // v15 b16 (DEC-COMP-BILL-CENT): what a comp or discount would take off, for its confirm button.
+  // A read with the command's checks: same origin and CSRF, no staff PIN, nothing recorded.
+  router.post("/orders/comp-items/preview", sameOriginMutation(options), (request, response) => {
+    const auth = mutation(request, response);
+    if (auth === null) return;
+    if (!options.itemCompPreview) {
+      response.status(503).json({ error: "item_comp_unavailable" });
+      return;
+    }
+    void options
+      .itemCompPreview({ ...auth, command: request.body })
+      .then((result) => response.set("Cache-Control", NO_STORE).json(result))
+      .catch((error: unknown) => {
+        noteFailure(response, error);
+        if (!(error instanceof ItemCompError) || error.code === "ITEM_COMP_UNAVAILABLE") {
+          response.status(503).set("Cache-Control", NO_STORE).json({ error: "unavailable" });
+          return;
+        }
+        if (error.code === "ITEM_COMP_PERMISSION_DENIED") {
+          denied(response);
+          return;
+        }
+        response
+          .status(error.code === "ITEM_COMP_INPUT_INVALID" ? 400 : 409)
+          .set("Cache-Control", NO_STORE)
+          .json({ error: error.code.replace(/^ITEM_COMP_/u, "").toLowerCase() });
+      });
+  });
   // WP-2423 item 8 ① segment 2: a manager comps or discounts dishes before the table pays.
   router.post("/orders/comp-items", sameOriginMutation(options), (request, response) => {
     const auth = mutation(request, response);

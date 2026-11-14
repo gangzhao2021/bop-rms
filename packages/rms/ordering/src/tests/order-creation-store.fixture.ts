@@ -21,6 +21,11 @@ export function orderWriteFixture(
     /** Portions of the one line (default 2), its amounts following. */
     quantity?: number;
     /**
+     * v15 b16: the line's price each (default 10.00), its tax worked out for the line at its
+     * rate, half up (the quote's rule), e.g. 1250n → 12.50 + 1.63 at 13 % for one portion.
+     */
+    unitPriceMinor?: bigint;
+    /**
      * WP-2423 M03: another, different submission of the same Cart (second tab, stale page): its
      * own Order, batch, item, submission, audit and event references (offset by this number).
      */
@@ -45,8 +50,9 @@ export function orderWriteFixture(
     return value;
   }
   const portions = (input: typeof original): typeof original => {
-    if (options.quantity === undefined) return input;
-    const count = BigInt(options.quantity);
+    if (options.quantity === undefined && options.unitPriceMinor === undefined) return input;
+    if (options.unitPriceMinor !== undefined) return priced(input, options.unitPriceMinor);
+    const count = BigInt(options.quantity as number);
     const times = <T extends { amountMinor: bigint }>(money: T, each: bigint): T => ({
       ...money,
       amountMinor: each * count,
@@ -77,6 +83,48 @@ export function orderWriteFixture(
       }),
     };
   };
+  /** The line at `unit` each, its tax at the component's rate for the whole line (half up). */
+  const priced = (input: typeof original, unit: bigint): typeof original => ({
+    ...input,
+    cart: {
+      ...input.cart,
+      items: input.cart.items.map((item) => ({
+        ...item,
+        quantity: options.quantity ?? item.quantity,
+      })),
+    },
+    lines: input.lines.map((line) => {
+      const quantity = options.quantity ?? line.pricing.quantity;
+      const subtotal = unit * BigInt(quantity);
+      const [whole = "0", fraction = ""] = String(line.pricing.taxComponents[0]?.rate).split(".");
+      const denominator = 10n ** BigInt(fraction.length);
+      const numerator = BigInt(whole) * denominator + BigInt(fraction === "" ? "0" : fraction);
+      const tax = (subtotal * numerator * 2n + denominator) / (2n * denominator);
+      const money = <T extends { amountMinor: bigint }>(value: T, amountMinor: bigint): T => ({
+        ...value,
+        amountMinor,
+      });
+      return {
+        ...line,
+        pricing: {
+          ...line.pricing,
+          quantity,
+          unitPrice: money(line.pricing.unitPrice, unit),
+          priceResolution: {
+            ...line.pricing.priceResolution,
+            unitPrice: money(line.pricing.priceResolution.unitPrice, unit),
+          },
+          subtotal: money(line.pricing.subtotal, subtotal),
+          tax: money(line.pricing.tax, tax),
+          total: money(line.pricing.total, subtotal + tax),
+          taxComponents: line.pricing.taxComponents.map((component) => ({
+            ...component,
+            taxAmount: money(component.taxAmount, tax),
+          })),
+        },
+      };
+    }),
+  });
   const id = (n: number) => namespace + "-0000-7000-8000-" + n.toString(16).padStart(12, "0");
   const other = options.submission ?? 0;
   const own = (n: number) => id(n + other * 0x10000);
