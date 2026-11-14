@@ -1,5 +1,5 @@
 import { ClosedStoreNotice } from "./ClosedStoreNotice.js";
-import { clauseSeparator, listSeparator, sentenceEnd, t } from "../i18n/i18n.js";
+import { clauseSeparator, listSeparator, sentenceEnd, t, wordGap } from "../i18n/i18n.js";
 import {
   activeMenuOptionRules,
   defaultMenuOptionSelections,
@@ -41,7 +41,10 @@ import {
   type ConfigureState,
 } from "./configure-state.js";
 import { createCustomerMenuClient, normalizeMenuSearch } from "./menu-client.js";
-import { isUnseatedTableScan } from "../session/customer-transaction-context.js";
+import {
+  getTablePaymentTiming,
+  isUnseatedTableScan,
+} from "../session/customer-transaction-context.js";
 import {
   allergensForChoice,
   comboDishAllergens,
@@ -482,15 +485,17 @@ export function MenuScreen({
   const withCart = context !== undefined && mode !== "detail" && closed === undefined;
   const justAdded = useBackOnMenu(browseFound);
   const [quickMessage, setQuickMessage] = useState<string | null>(null);
+  // v15 b17: a one-tap add that didn't go in stays long enough to read.
+  const [quickLasting, setQuickLasting] = useState(false);
   // Live v15 2026-11-10: a one-tap add still waiting after 3 s says so, as the dish page does.
   const [quickAdding, setQuickAdding] = useState(0);
   const quickSlow = useSlowWait(quickAdding > 0);
   const [cartReads, setCartReads] = useState(0);
   useEffect(() => {
     if (quickMessage === null) return;
-    const timer = window.setTimeout(() => setQuickMessage(null), 3000);
+    const timer = window.setTimeout(() => setQuickMessage(null), quickLasting ? 8000 : 3000);
     return () => window.clearTimeout(timer);
-  }, [quickMessage]);
+  }, [quickMessage, quickLasting]);
   const channel = context?.channel;
   // WP-2423 store-service-controls (v15 M34): read live, so a menu left open across last orders
   // or into a pause stops offering the one-tap add by itself (the dish page still explains).
@@ -504,8 +509,9 @@ export function MenuScreen({
         ? null
         : {
             channel,
-            onAdded: (message: string) => {
+            onAdded: (message: string, lasting = false) => {
               setQuickMessage(message);
+              setQuickLasting(lasting);
               setCartReads((value) => value + 1);
             },
             onBusy: (busy: boolean) =>
@@ -1039,10 +1045,35 @@ function useBackOnMenu(found: boolean): boolean {
  */
 const MenuQuickAdd = createContext<{
   readonly channel: MenuJourneyContext["channel"];
-  readonly onAdded: (message: string) => void;
+  /** `lasting`: the add didn't go in; the message stays long enough to read. */
+  readonly onAdded: (message: string, lasting?: boolean) => void;
   /** A one-tap add started (true) or ended (false). */
   readonly onBusy: (busy: boolean) => void;
 } | null>(null);
+
+/**
+ * v15 b17: why a one-tap add didn't go in when the table's cart was busy or changed (another
+ * guest placing or paying for an order, someone changing the cart, the table checking out), or
+ * null when the dish page should explain instead (choices, a dish not on sale, anything else).
+ */
+export function quickAddHeldText(state: ConfigureState): string | null {
+  switch (state.status) {
+    case "order-processing":
+      return t("Your table’s last order is still being processed.");
+    case "checkout-in-progress":
+      return getTablePaymentTiming() === "PayLater"
+        ? t("Someone at your table is placing an order.")
+        : t("Another guest at your table is paying for this order.");
+    case "conflict":
+      return t("Someone at your table just changed the cart.");
+    case "table-checking-out":
+      return t(
+        "Your table is checking out, so new dishes can’t be sent. To add more, ask a staff member.",
+      );
+    default:
+      return null;
+  }
+}
 
 export function quickAddable(family: MenuFamily): boolean {
   const { sellable } = primaryVariant(family);
@@ -1091,6 +1122,15 @@ function QuickAddButton({ family }: { readonly family: MenuFamily }) {
     else if (state.status === "outcome-unknown")
       quick.onAdded(t("We couldn't confirm that. Check your cart before adding it again."));
     else if (state.status === "offline") quick.onAdded(t("You’re offline. Nothing was added."));
+    else if (quickAddHeldText(state) !== null)
+      // v15 b17: the table's cart was busy with another guest's order (tried once more already),
+      // or changed meanwhile: said here, on the menu, never a silent jump to the dish page.
+      quick.onAdded(
+        (quickAddHeldText(state) as string) +
+          wordGap() +
+          t("{name} wasn’t added. Tap + again in a moment.", { name: family.name }),
+        true,
+      );
     else {
       menuScrollWhenLeft = window.scrollY;
       void navigate(`/menu/items/${sellable.sellableReference}`);

@@ -1531,6 +1531,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "同桌有人正在下单，请稍等再试。",
   "Someone at your table is placing an order": "同桌有人正在下单",
   "Someone at your table is placing an order.": "同桌有人正在下单。",
+  "Someone at your table just changed the cart.": "同桌有人刚改了购物车。",
+  "{name} wasn’t added. Tap + again in a moment.": "{name}还没加入购物车，请稍后再点 +。",
   "Order placed.": "已下单。",
   "Order placed. Staff confirm it first.": "已下单，店员确认后开始做。",
   // WP-2423 item 2: every wait ends in a state with a next action, and says what was charged only

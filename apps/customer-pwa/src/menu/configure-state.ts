@@ -57,6 +57,8 @@ interface AddPlan {
   earlierCartCleared?: boolean;
   /** WP-2423 M99: adds tried again after someone at the table changed the cart first. */
   conflictRetries?: number;
+  /** v15 b17: the one add tried again after another guest's order at the table held the cart. */
+  heldRetried?: boolean;
 }
 
 /** WP-2423: cart warning set once when the table's timed-out cart held unordered items. */
@@ -65,6 +67,11 @@ export const EARLIER_CART_ITEMS_CLEARED = "EARLIER_CART_ITEMS_CLEARED";
 const MAX_AUTOMATIC_RETRY_SECONDS = 10;
 /** WP-2423 M99: how many times an Add is tried again after a cart version conflict. */
 const MAX_CONFLICT_RETRIES = 2;
+/**
+ * v15 b17: longest wait for another guest's order at the table (being placed, or paid for) before
+ * the one automatic retry of an Add; a longer hold is said to the guest instead.
+ */
+const MAX_HELD_RETRY_SECONDS = 5;
 
 export interface ConfigureController {
   getState(): ConfigureState;
@@ -309,6 +316,34 @@ export function createConfigureController({
           cart: null,
           outcomeUnknown: false,
           conflictRetries: (plan.conflictRetries ?? 0) + 1,
+        });
+        return;
+      }
+      // v15 b17: another guest at the table was placing (or paying for) an order, so the table's
+      // cart was held for a moment. The refused add wrote nothing; once the hold is over, the same
+      // dish goes into the table's fresh cart, once, with a new operation. A longer hold, or a
+      // second refusal, is said to the guest, who keeps what they chose.
+      if (
+        (parsed.code === "cart_order_processing" || parsed.code === "cart_checkout_in_progress") &&
+        plan.stage === "add" &&
+        !plan.outcomeUnknown &&
+        plan.heldRetried !== true &&
+        (parsed.retryAfterSeconds ?? 2) <= MAX_HELD_RETRY_SECONDS
+      ) {
+        await wait(Math.max(1, parsed.retryAfterSeconds ?? 2) * 1000);
+        if (!online) {
+          pending = null;
+          publish({ status: "offline", canRetry: false });
+          return;
+        }
+        await execute({
+          ...plan,
+          createOperationReference: keyFactory(),
+          addOperationReference: keyFactory(),
+          stage: "locate",
+          cart: null,
+          outcomeUnknown: false,
+          heldRetried: true,
         });
         return;
       }

@@ -627,6 +627,34 @@ describe("WP-2423: continuing past a timed-out table cart", () => {
     expect(f.waits[0]).toBeLessThanOrEqual(400);
     expect(f.controller.getState().status).toBe("added");
   });
+  // v15 b17: another guest at the table placing a round held the table's cart for a moment (409
+  // order still processing / checkout in progress): the same dish goes into the fresh cart once.
+  it.each(["cart_order_processing", "cart_checkout_in_progress"] as const)(
+    "v15 b17: an add refused with %s while another guest's round is placed is tried once more",
+    async (code) => {
+      const f = client({
+        current: cart(4),
+        create: [],
+        add: [() => new CartClientError(code, { retryAfterSeconds: 2 })],
+      });
+      await f.controller.submit(id(3), draft);
+      expect(f.calls.map((call) => call.name)).toEqual(["load", "add", "load", "add"]);
+      const adds = f.calls.filter((call) => call.name === "add");
+      expect(adds[0]?.key).not.toBe(adds[1]?.key);
+      expect(f.waits).toEqual([2000]);
+      expect(f.controller.getState().status).toBe("added");
+    },
+  );
+  it("v15 b17: refused again after the one retry, the guest is told the table's order holds it", async () => {
+    const held = () => new CartClientError("cart_checkout_in_progress");
+    const f = client({ current: cart(4), create: [], add: [held, held] });
+    await f.controller.submit(id(3), draft);
+    expect(f.calls.filter((call) => call.name === "add")).toHaveLength(2);
+    expect(f.controller.getState()).toMatchObject({
+      status: "checkout-in-progress",
+      canRetry: false,
+    });
+  });
   it("M99: tries at most twice more, then says the cart changed", async () => {
     const conflict = () => new CartClientError("cart_version_conflict");
     const f = client({ current: cart(4), create: [], add: [conflict, conflict, conflict] });
