@@ -103,6 +103,22 @@ export function compAmountMinor(
 }
 
 /**
+ * v15 b17 (DEC-COMP-BILL-CENT): what a dish's choice shows. A ticked dish shows what will really
+ * come off it, from the server's preview (the whole bill's tax cent included), so the ticked dishes
+ * add up to the button; any other dish, or one whose preview is not back yet, shows its own price.
+ */
+export function compChoiceMoney(
+  line: Pick<CurrentOrderLine, "orderItemReference" | "total">,
+  ticked: boolean,
+  previewLines: ReadonlyMap<string, string> | null,
+): string {
+  const off = ticked ? previewLines?.get(line.orderItemReference) : undefined;
+  return off === undefined
+    ? orderMoney(line.total)
+    : "−" + orderMoney({ amountMinor: off, currencyCode: line.total.currencyCode });
+}
+
+/**
  * WP-2423 item 8 ① segment 2 (Owner decision 2, Figma 45:315; DEC-KITCHEN-ONE-TAP): a manager comps
  * or discounts any dish that reached the kitchen, before the table pays; the kitchen still makes it. Money, so it is confirmed:
  * the dishes, how much (shown exactly), and a reason; recorded as a compensating record that stays
@@ -145,6 +161,7 @@ export function ItemCompAction({
   const [preview, setPreview] = useState<{
     readonly key: string;
     readonly totalMinor: string | null;
+    readonly lines: ReadonlyMap<string, string> | null;
     readonly failure: Failure | null;
   } | null>(null);
   const [previewRun, setPreviewRun] = useState(0);
@@ -180,6 +197,10 @@ export function ItemCompAction({
       ? BigInt(preview.totalMinor)
       : null;
   const previewFailure = preview !== null && preview.key === previewKey ? preview.failure : null;
+  const previewLines =
+    preview !== null && preview.key === previewKey && preview.totalMinor !== null
+      ? preview.lines
+      : null;
   useEffect(() => {
     if (!open || previewKey === null) return;
     const abort = new AbortController();
@@ -201,19 +222,26 @@ export function ItemCompAction({
           });
           const payload = (await response.json().catch(() => null)) as {
             totalMinor?: unknown;
+            lines?: unknown;
           } | null;
           if (abort.signal.aborted) return;
           if (response.ok && typeof payload?.totalMinor === "string")
-            setPreview({ key: previewKey, totalMinor: payload.totalMinor, failure: null });
+            setPreview({
+              key: previewKey,
+              totalMinor: payload.totalMinor,
+              lines: previewLineAmounts(payload.lines),
+              failure: null,
+            });
           else
             setPreview({
               key: previewKey,
               totalMinor: null,
+              lines: null,
               failure: response.ok ? "Unknown" : failureOf(response.status, payload),
             });
         } catch {
           if (!abort.signal.aborted)
-            setPreview({ key: previewKey, totalMinor: null, failure: "Unknown" });
+            setPreview({ key: previewKey, totalMinor: null, lines: null, failure: "Unknown" });
         }
       })();
     }, 200);
@@ -298,7 +326,8 @@ export function ItemCompAction({
                   setSelected(next);
                 }}
               />{" "}
-              {line.quantity} × {line.name} · {orderMoney(line.total)}
+              {line.quantity} × {line.name} ·{" "}
+              {compChoiceMoney(line, selected.has(line.orderItemReference), previewLines)}
             </label>
           </li>
         ))}
@@ -421,7 +450,22 @@ export function ItemCompAction({
   );
 }
 
-/** What came off the table's dishes so far, in staff words. */
+/** The preview's amount per dish, or null when the answer doesn't name them (an older server). */
+function previewLineAmounts(value: unknown): ReadonlyMap<string, string> | null {
+  if (!Array.isArray(value)) return null;
+  const amounts = new Map<string, string>();
+  for (const entry of value as unknown[]) {
+    const { orderItemReference, amountMinor } = (entry ?? {}) as {
+      orderItemReference?: unknown;
+      amountMinor?: unknown;
+    };
+    if (typeof orderItemReference !== "string" || typeof amountMinor !== "string") return null;
+    if (!/^(0|[1-9][0-9]*)$/u.test(amountMinor)) return null;
+    amounts.set(orderItemReference, amountMinor);
+  }
+  return amounts;
+}
+
 /**
  * WP-2423 live minor 10: what the panel is for. Any dish still on the table's bill is offered
  * (one the kitchen hasn't started with its own warning), so the intro names no kitchen state.

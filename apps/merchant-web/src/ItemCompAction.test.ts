@@ -1,5 +1,10 @@
 import { expect, it } from "vitest";
-import { compAmountMinor, compIntroText, compRecordText } from "./ItemCompAction.js";
+import {
+  compAmountMinor,
+  compChoiceMoney,
+  compIntroText,
+  compRecordText,
+} from "./ItemCompAction.js";
 import { setLanguageForTest } from "./i18n/i18n.js";
 
 const money = (amountMinor: string) => ({ amountMinor, currencyCode: "CAD" });
@@ -58,4 +63,21 @@ it("v15 M87/M161: a comp says why, who and when; points say they were the guest'
   ).toBe("Points used");
   // An older answer without the record says what it was, nothing invented.
   expect(compRecordText({ kind: "Percent", percent: 20 }, "America/Toronto")).toBe("20% off");
+});
+
+it("v15 b17: a ticked dish shows what really comes off it, so the ticked dishes add up to the button", () => {
+  // Two $12.50 Beef noodles at 13 %: each $14.13 alone, $28.25 on the whole bill (−$14.13/−$14.12).
+  const noodles = (n: number) => ({
+    orderItemReference: "item-" + String(n),
+    total: money("1413"),
+  });
+  const preview = new Map([
+    ["item-1", "1413"],
+    ["item-2", "1412"],
+  ]);
+  expect(compChoiceMoney(noodles(1), true, preview)).toBe("−$14.13");
+  expect(compChoiceMoney(noodles(2), true, preview)).toBe("−$14.12");
+  // Not ticked, or no preview back yet: the dish's own price.
+  expect(compChoiceMoney(noodles(2), false, preview)).toBe("$14.13");
+  expect(compChoiceMoney(noodles(2), true, null)).toBe("$14.13");
 });

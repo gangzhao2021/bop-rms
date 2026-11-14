@@ -341,3 +341,209 @@ test("@production a manager discounts a started dish from the Tables page; only 
   }
   await expectNoInternalText(page, ["Temporarily unavailable"]);
 });
+
+// v15 b17 (DEC-COMP-BILL-CENT): two $12.50 Beef noodles at 13 % are $14.13 each alone, but the
+// whole bill's tax makes the comp $28.25. Each ticked dish shows what really comes off it, so the
+// ticked dishes add up to the button, in English and Chinese.
+for (const language of ["en", "zh-Hans"] as const)
+  test(`@production the comp's ticked dishes add up to the button (${language})`, async ({
+    page,
+  }) => {
+    const zh = language === "zh-Hans";
+    if (zh)
+      await page.addInitScript(() => {
+        window.localStorage.setItem("bop.merchant.language", "zh-Hans");
+      });
+    const scope = {
+      brandLabel: "Synthetic Brand",
+      storeLabel: "Synthetic Store",
+      storeReference: id(99),
+    };
+    await page.route("**/merchant/session", (route) =>
+      route.fulfill({
+        headers,
+        json: {
+          authenticated: true,
+          csrf,
+          workspace: {
+            screenId: "HOME-OVERVIEW",
+            selectedScope: scope,
+            authorizedStores: [scope],
+            businessDate: "2026-10-27",
+            storeStatus: "Open",
+            freshness: "Current",
+            dashboardAvailability: "UnavailableUntilWP1905",
+            navigation: [
+              {
+                screenId: "DIN-FLOOR-BOARD",
+                label: "Tables",
+                href: "/operations/dining",
+                permission: "dining.operate",
+              },
+            ],
+          },
+        },
+      }),
+    );
+    await page.route("**/merchant/dining/tables", (route) =>
+      route.fulfill({
+        headers,
+        json: {
+          canOperateTables: false,
+          canCloseSessions: true,
+          canTransferHost: false,
+          canCancelUnpaidRounds: true,
+          canWriteOff: true,
+          items: [
+            {
+              tableReference: id(70),
+              stableLabel: "T3",
+              areaCode: "MAIN",
+              capacity: 4,
+              lifecycle: "Published",
+              operationalState: "Available",
+              blockReasonCode: null,
+              aggregateVersion: 2,
+              currentDiningSessionReference: id(71),
+              elapsedMinutes: 48,
+              qrCodeValidUntil: "2027-04-12T13:00:00.000Z",
+              paymentTiming: "PayLater",
+              session: { phase: "Active", version: 3, orderReference: id(1) },
+              staffRoundsAwaitingPayment: [],
+              guestRoundsAwaitingPayment: [],
+              roundsAwaitingAcceptance: [],
+              staffCall: null,
+            },
+          ],
+          nextAfterTableReference: null,
+        },
+      }),
+    );
+    const money = (amountMinor: string) => ({ amountMinor, currencyCode: "CAD" });
+    const line = (n: number) => ({
+      orderItemReference: id(200 + n),
+      orderBatchReference: id(50 + n),
+      name: "Synthetic beef noodles",
+      options: [],
+      quantity: 1,
+      customerNote: null,
+      unitPrice: money("1250"),
+      subtotal: money("1250"),
+      discount: money("0"),
+      tax: money("163"),
+      fee: money("0"),
+      total: money("1413"),
+      canCancel: false,
+      cancellation: null,
+    });
+    const batch = (n: number) => ({
+      orderBatchReference: id(50 + n),
+      sequence: n,
+      acceptanceStatus: "Accepted",
+      canRequestAcceptance: false,
+      canCancel: false,
+      staffCancellation: null,
+      canCancelItems: false,
+      unpaidRemovableItems: [],
+      unpaidRemovedItems: [],
+      compableItems: [id(200 + n)],
+      compedItems: [],
+    });
+    const order = {
+      orderReference: id(1),
+      orderNumber: "T-1",
+      orderType: "DineIn",
+      sourceChannel: "Qr",
+      submittedAt: "2026-10-27T23:00:00.000Z",
+      observedAt: "2026-10-27T23:40:00.000Z",
+      initialBatchReference: id(51),
+      batches: [batch(1), batch(2)],
+      canRequestAcceptance: false,
+      // DEC-TAX-WHOLE-RECEIPT: 25.00 × 13 % = 3.25 on the whole bill, a cent under the dishes' own.
+      tableBill: { totalMinor: "2825", paid: null },
+      currentPhase: "InProgress",
+      currentVersion: 3,
+      unfulfillable: null,
+      pickupNotCollected: false,
+      acceptBy: null,
+      awaitingPayment: false,
+    };
+    await page.route("**/merchant/orders*", (route) =>
+      route.fulfill({ headers, json: { items: [order], nextAfterOrderReference: null } }),
+    );
+    await page.route("**/merchant/orders/detail*", (route) =>
+      route.fulfill({
+        headers,
+        json: {
+          screenId: "OPS-ORDER-DETAIL",
+          pickupContact: null,
+          order,
+          lines: {
+            items: [line(1), line(2)],
+            totals: {
+              subtotal: money("2500"),
+              discount: money("0"),
+              tax: money("326"),
+              fee: money("0"),
+              taxRounding: money("-1"),
+              total: money("2825"),
+            },
+          },
+        },
+      }),
+    );
+    await page.route("**/merchant/orders/comp-items/preview", (route) => {
+      const asked = route.request().postDataJSON() as { orderItemReferences: string[] };
+      const both = asked.orderItemReferences.length === 2;
+      return route.fulfill({
+        headers,
+        json: {
+          status: "Preview",
+          totalMinor: both ? "2825" : "1413",
+          lines: both
+            ? [
+                { orderItemReference: id(201), amountMinor: "1413" },
+                { orderItemReference: id(202), amountMinor: "1412" },
+              ]
+            : asked.orderItemReferences.map((item) => ({
+                orderItemReference: item,
+                amountMinor: "1413",
+              })),
+        },
+      });
+    });
+
+    await page.goto("/operations/dining");
+    await page.getByRole("button", { name: zh ? "选择 T3" : "Select T3", exact: true }).click();
+    const details = page.getByRole("complementary", {
+      name: zh ? "所选桌台详情" : "Selected table details",
+    });
+    const title = zh ? "免单或折让" : "Comp or discount";
+    await details.getByRole("button", { name: title }).click();
+    const group = details.getByRole("group", { name: title });
+    const choices = group.locator(".pay-later-remove__lines label");
+    await expect(choices).toHaveText([
+      "1 × Synthetic beef noodles · $14.13",
+      "1 × Synthetic beef noodles · $14.13",
+    ]);
+    await choices.nth(0).getByRole("checkbox").check();
+    await choices.nth(1).getByRole("checkbox").check();
+    // What comes off each ticked dish, from the server: −$14.13 and −$14.12, the button's $28.25.
+    await expect(choices).toHaveText([
+      "1 × Synthetic beef noodles · −$14.13",
+      "1 × Synthetic beef noodles · −$14.12",
+    ]);
+    await expect(
+      group.getByRole("button", { name: zh ? "免单 $28.25" : "Comp $28.25" }),
+    ).toBeVisible();
+    // Unticked again: the dish's own price.
+    await choices.nth(1).getByRole("checkbox").uncheck();
+    await expect(choices).toHaveText([
+      "1 × Synthetic beef noodles · −$14.13",
+      "1 × Synthetic beef noodles · $14.13",
+    ]);
+    await expect(
+      group.getByRole("button", { name: zh ? "免单 $14.13" : "Comp $14.13" }),
+    ).toBeVisible();
+    await expectNoInternalText(page, ["Temporarily unavailable"]);
+  });
