@@ -5,6 +5,7 @@ import process from "node:process";
 import pg from "pg";
 import { it, vi } from "vitest";
 import { withPaidBatchAcceptance } from "../../../apps/api/src/merchant-card-machine-payment.ts";
+import { appendAuditRecordInTransaction } from "../../bop/audit/src/index.ts";
 import { currentRequestChecks, withVerifiedChecks } from "../src/request-check-memo.ts";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 import { prepareRealStaffRoundStore } from "../test-support/real-staff-round-store.mjs";
@@ -18,11 +19,51 @@ const id = (n) => "01a0ff00-0000-7000-8000-" + n.toString(16).padStart(12, "0");
  * per-connection SET ROLE this test's pool adds is not counted: the pilot logs in as its role).
  */
 const counting = { on: false, count: 0 };
+/**
+ * A test's step run once inside a later round's write transaction, before that transaction's own
+ * current checks: it is the transaction that takes the Order's disposition fence and then reads the
+ * round's saved tip choice (createCustomerAdditionalDiningSubmissionRuntime), and the step runs right
+ * before that read, so after the round's pre-check and before the write's re-check reads the clock.
+ * The write is READ COMMITTED: what the step commits is what a staff member or another table did
+ * in that moment. `snapshots` counts the read-only snapshot checks Catalog makes from then until
+ * that write transaction ends (the step's own statements are not counted).
+ */
+const beforeWrite = { step: null, fired: false, writer: null, snapshots: 0 };
+const fenced = new WeakMap();
 const clientQuery = pg.Client.prototype.query;
 pg.Client.prototype.query = function (config, ...rest) {
   const text = typeof config === "string" ? config : config?.text;
   if (counting.on && !(typeof text === "string" && text.startsWith("SET ROLE ")))
     counting.count += 1;
+  const values = Array.isArray(rest[0]) ? rest[0] : config?.values;
+  if (typeof text === "string") {
+    if (/^\s*BEGIN\b/u.test(text)) fenced.set(this, false);
+    else if (
+      text.startsWith("SELECT pg_advisory_xact_lock") &&
+      String(values?.[0] ?? "").startsWith("OrderingOrderDisposition:")
+    )
+      fenced.set(this, true);
+  }
+  if (beforeWrite.writer !== null && typeof text === "string") {
+    if (text.includes("transaction_isolation")) beforeWrite.snapshots += 1;
+    if (this === beforeWrite.writer && /^\s*(COMMIT|ROLLBACK)\b/u.test(text))
+      beforeWrite.writer = null;
+  }
+  if (
+    beforeWrite.step !== null &&
+    !beforeWrite.fired &&
+    fenced.get(this) === true &&
+    typeof text === "string" &&
+    text.includes("rms_payment.payment_tip_selection")
+  ) {
+    beforeWrite.fired = true;
+    const step = beforeWrite.step;
+    beforeWrite.step = null;
+    return step().then(() => {
+      beforeWrite.writer = this;
+      return clientQuery.call(this, config, ...rest);
+    });
+  }
   return clientQuery.call(this, config, ...rest);
 };
 
@@ -273,17 +314,20 @@ it("the opening round on a free table reaches the card machine's amount under th
 });
 
 /**
- * WP-2423 (rush-connection-hold, integration of batch 16): no step of a table's opening staff round
- * holds one of the API pool's connections while it takes a second. Since batch 16 such a second acquire is
- * answered busy at once when no connection is free, so in a rush any nested one fails the round
- * ("couldn't send, try again") however long the pool would have taken. The checkout's stock check
- * used to open the guest's access transaction from inside the stock read's snapshot. On a pool of
- * one connection, every second acquire made while holding one is refused, so the round only
- * completes when each step gives its connection back before the next takes one. (A later round's
- * current checks still read the menu in their own snapshots inside the round's write transaction:
- * open in WP-2423, rush-connection-hold integration.)
+ * WP-2423 (rush-connection-hold, integration of batch 16): no step of a staff round, the opening
+ * one or a later one, holds one of the API pool's connections while it takes a second. Since batch
+ * 16 such a second acquire is answered busy at once when no connection is free, so in a rush any
+ * nested one fails the round ("couldn't send, try again") however long the pool would have taken.
+ * The checkout's stock check used to open the guest's access transaction from inside the stock
+ * read's snapshot (fixed for the opening round); a later round ran its whole current check (menu,
+ * availability, stock: about 11 snapshots a dish) inside its write transaction, so on v15 in a rush
+ * rounds 2 and on failed (ADDITIONAL_DINING_BATCH_STORE_UNAVAILABLE). Now that check runs before
+ * the write transaction, and the write only confirms on its own connection that what it read is
+ * still in effect (docs/spec/design/later-round-current-checks.md). On a pool of one connection,
+ * every second acquire made while holding one is refused, so the rounds only complete when each
+ * step gives its connection back before the next takes one. Before the change round 2 failed here.
  */
-it("an opening staff round is sent on a pool of one connection: no step takes a second while it holds one", async () => {
+it("three staff rounds on one table are sent on a pool of one connection: no step takes a second while it holds one", async () => {
   await withIsolatedDatabase({ caseId: "wp2423_round_one" }, async (context) => {
     const admin = new Client(context.clientConfig);
     await admin.connect();
@@ -306,20 +350,267 @@ it("an opening staff round is sent on a pool of one connection: no step takes a 
       ]);
       const counter = await store.counterFor(server);
       const as = { sessionCookie: server.sessionCookie, csrf: server.csrf };
-      // The opening round: it seats the party and checks two dishes' stock, one at a time.
-      const { result } = await timedRound(counter, as, {
-        operationReference: reference(),
-        tableReference,
-        tip: { kind: "None" },
-        recordedAfterOutage: false,
-        lines: [
-          { sellableReference: soup.skuReference, quantity: 1, optionSelections: [], note: null },
-          { sellableReference: soup.skuReference, quantity: 1, optionSelections: [], note: null },
-        ],
+      const pay = withPaidBatchAcceptance(counter.cardMachinePayment, {
+        accept: await store.acceptanceFor(server),
+        nextReference: reference,
       });
-      assert.deepEqual([result.status, result.totalMinor], ["Placed", "1469"]);
+      // Three rounds on one table, each charged on the card machine: the first opens the table's
+      // Order (it seats the party), the later ones go through the round's own write transaction.
+      for (let round = 1; round <= 3; round += 1) {
+        const { result } = await timedRound(counter, as, {
+          operationReference: reference(),
+          tableReference,
+          tip: { kind: "None" },
+          recordedAfterOutage: false,
+          lines: [
+            { sellableReference: soup.skuReference, quantity: 1, optionSelections: [], note: null },
+            { sellableReference: soup.skuReference, quantity: 1, optionSelections: [], note: null },
+          ],
+        });
+        assert.deepEqual([result.status, result.totalMinor], ["Placed", "1469"], "round " + round);
+        const paid = await pay({
+          ...as,
+          command: {
+            operationReference: reference(),
+            orderReference: result.orderReference,
+            orderBatchReference: result.orderBatchReference,
+            expectedTotalMinor: result.totalMinor,
+            slipReference: "AUTH 771205",
+            takenAt: null,
+          },
+        });
+        assert.deepEqual(
+          [paid.status, paid.acceptance],
+          ["Recorded", "Accepted"],
+          "round " + round,
+        );
+      }
     } finally {
       vi.unstubAllEnvs();
+      if (store !== null) await store.close();
+      for (const name of [api, api + "_w"]) {
+        await admin.query("DROP OWNED BY " + name).catch(() => undefined);
+        await admin.query("DROP ROLE " + name).catch(() => undefined);
+      }
+      await admin.end();
+    }
+  });
+});
+
+/** Another table's rounds hold all the soup's stock left (a Reserve movement on its ledger). */
+async function holdAllStock(admin, store) {
+  const { tenantReference, brandReference, storeReference } = store.ownerScope;
+  const account = store.stock.accountReference;
+  const row = (
+    await admin.query(
+      "SELECT a.location_id::text AS location,b.ledger_version::int AS version,b.on_hand::numeric::text AS on_hand,b.reserved::numeric::text AS reserved FROM rms_inventory.stock_account a JOIN rms_inventory.stock_balance b USING (tenant_id,brand_id,store_id,account_id) WHERE a.account_id=$1",
+      [account],
+    )
+  ).rows[0];
+  const onHand = Number(row.on_hand),
+    held = Number(row.reserved),
+    quantity = String(onHand - held);
+  const balance = (r, v) => ({
+    onHand: String(onHand),
+    reserved: String(r),
+    available: String(onHand - r),
+    inTransit: "0",
+    unitCode: "KG",
+    ledgerVersion: v,
+  });
+  const movement = id(0x7a0),
+    audit = id(0x7a1),
+    at = new Date().toISOString();
+  const record = {
+    movementReference: movement,
+    tenantReference,
+    brandReference,
+    itemReference: store.stock.itemReference,
+    movementType: "Reserve",
+    quantityDelta: quantity,
+    unitCode: "KG",
+    baseQuantityDelta: quantity,
+    baseUnitCode: "KG",
+    conversionMultiplier: "1",
+    sourceScope: null,
+    destinationScope: { scopeType: "Location", scopeReference: row.location },
+    lotReference: null,
+    expiryDate: null,
+    businessSourceType: "SYNTHETIC_RESERVE",
+    businessSourceReference: id(0x7a2),
+    reasonCode: "SYNTHETIC_TEST",
+    performedBy: id(9),
+    occurredAt: at,
+    before: balance(held, row.version),
+    after: balance(onHand, row.version + 1),
+    auditReference: audit,
+    correctsMovementReference: null,
+  };
+  await admin.query("BEGIN");
+  try {
+    await admin.query(
+      "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id',$3,true)",
+      [tenantReference, brandReference, storeReference],
+    );
+    await admin.query(
+      "INSERT INTO rms_inventory.stock_movement (tenant_id,brand_id,store_id,account_id,movement_id,ledger_version,movement_type,base_quantity_delta,record_json,audit_id,occurred_at) VALUES ($1,$2,$3,$4,$5,$6,'Reserve',$7,$8,$9,$10)",
+      [
+        tenantReference,
+        brandReference,
+        storeReference,
+        account,
+        movement,
+        row.version + 1,
+        quantity,
+        record,
+        audit,
+        at,
+      ],
+    );
+    await appendAuditRecordInTransaction(
+      { query: (sql, values) => admin.query(sql, [...values]) },
+      {
+        auditId: audit,
+        brandId: brandReference,
+        storeId: storeReference,
+        actor: { type: "User", reference: id(9) },
+        actionCode: "INVENTORY_RESERVE",
+        targetType: "StockMovement",
+        targetId: movement,
+        reasonCode: "SYNTHETIC_TEST",
+        correlationId: id(0x7a3),
+        occurredAt: at,
+        sourceChannel: "MERCHANT_WEB",
+        dataClassification: "Internal",
+        retentionPolicyCode: "SYNTHETIC_AUDIT",
+        retentionPolicyVersion: 1,
+      },
+    );
+    await admin.query("COMMIT");
+  } catch (error) {
+    await admin.query("ROLLBACK");
+    throw error;
+  }
+}
+
+/**
+ * WP-2423 (rush-connection-hold, later rounds): a later round's menu, availability and stock are
+ * checked before its write transaction, so a dish can sell out in between. It is still never
+ * ordered: the write re-checks on its own connection that the dish is still on sale (a staff
+ * sold-out mark made since), and the round's stock reservation in the same transaction refuses
+ * stock that ran out since. Each time the round is refused as "can't be sold now", nothing is
+ * ordered or charged, the round's dishes leave the table's Cart, and the table can order again.
+ * The race is made deterministic: the sold-out mark, or another table's hold on the last stock,
+ * lands after the round's pre-check, inside its write transaction before that transaction's own
+ * checks; and once it did, no read-only snapshot is opened for that round's write.
+ */
+it("a dish sold out or run out between a later round's pre-check and its write is refused, never ordered", async () => {
+  await withIsolatedDatabase({ caseId: "wp2423_round_race" }, async (context) => {
+    const admin = new Client(context.clientConfig);
+    await admin.connect();
+    vi.stubEnv("NODE_ENV", "development");
+    const api = await createPilotApiRole(admin, context, "wp2423_rsr");
+    let store = null;
+    try {
+      store = await prepareRealStaffRoundStore({ admin, context, api, paymentTiming: "PayFirst" });
+      const { soup, tableReference, reference } = store;
+      const server = await store.staff(id(0x740), [
+        "ordering.order.create_staff",
+        "dining.operate",
+        "dining.session.close",
+      ]);
+      const counter = await store.counterFor(server);
+      const as = { sessionCookie: server.sessionCookie, csrf: server.csrf };
+      const pay = withPaidBatchAcceptance(counter.cardMachinePayment, {
+        accept: await store.acceptanceFor(server),
+        nextReference: reference,
+      });
+      const round = () =>
+        counter.staffDiningRound({
+          ...as,
+          command: {
+            operationReference: reference(),
+            tableReference,
+            tip: { kind: "None" },
+            recordedAfterOutage: false,
+            lines: [
+              {
+                sellableReference: soup.skuReference,
+                quantity: 1,
+                optionSelections: [],
+                note: null,
+              },
+            ],
+          },
+        });
+      const charge = async (result) => {
+        const paid = await pay({
+          ...as,
+          command: {
+            operationReference: reference(),
+            orderReference: result.orderReference,
+            orderBatchReference: result.orderBatchReference,
+            expectedTotalMinor: result.totalMinor,
+            slipReference: "AUTH 771206",
+            takenAt: null,
+          },
+        });
+        assert.deepEqual([paid.status, paid.acceptance], ["Recorded", "Accepted"]);
+      };
+      const batches = async (orderReference) =>
+        (
+          await admin.query(
+            "SELECT count(*)::int AS n FROM rms_ordering.order_batch WHERE order_id=$1",
+            [orderReference],
+          )
+        ).rows[0].n;
+      const reserved = async () =>
+        (
+          await admin.query(
+            "SELECT reserved::numeric::text AS reserved FROM rms_inventory.stock_balance WHERE account_id=$1",
+            [store.stock.accountReference],
+          )
+        ).rows[0].reserved;
+      const refusedWhen = async (step) => {
+        beforeWrite.fired = false;
+        beforeWrite.snapshots = 0;
+        beforeWrite.step = step;
+        try {
+          await assert.rejects(round(), { code: "STAFF_ROUND_ITEM_UNAVAILABLE" });
+          assert.equal(beforeWrite.fired, true, "the step ran before the round's write");
+          assert.equal(beforeWrite.snapshots, 0, "the round's write opened a snapshot");
+        } finally {
+          beforeWrite.step = null;
+          beforeWrite.fired = false;
+          beforeWrite.writer = null;
+        }
+      };
+
+      // Round 1 opens the table's Order and is charged.
+      const first = await round();
+      assert.equal(first.status, "Placed");
+      await charge(first);
+      const orderReference = first.orderReference;
+
+      // Round 2: the kitchen marks the soup sold out after the round's pre-check found it on sale.
+      const heldBefore = await reserved();
+      await refusedWhen(() => store.owner.markSoldOut(soup.skuReference));
+      assert.equal(await batches(orderReference), 1, "a sold-out dish was ordered");
+      assert.equal(await reserved(), heldBefore, "the refused round held stock");
+
+      // Back in stock: the next round is placed as usual.
+      await store.owner.markBackInStock(soup.skuReference);
+      const third = await round();
+      assert.equal(third.status, "Placed");
+      await charge(third);
+      assert.equal(await batches(orderReference), 2);
+
+      // Round 4: another table's rounds take the last of the soup's stock after the pre-check.
+      await refusedWhen(() => holdAllStock(admin, store));
+      assert.equal(await batches(orderReference), 2, "a dish with no stock left was ordered");
+    } finally {
+      vi.unstubAllEnvs();
+      beforeWrite.step = null;
       if (store !== null) await store.close();
       for (const name of [api, api + "_w"]) {
         await admin.query("DROP OWNED BY " + name).catch(() => undefined);

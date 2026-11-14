@@ -38,6 +38,7 @@ import {
 import { resolveCurrentCatalogSelectionRules } from "../../application/current-selection-rules.js";
 import { withOptionsOffNow } from "../../application/options-off-now.js";
 import { listOptionsOffNow, type OptionOffNow } from "./store-option-sold-out-store.js";
+import { resolveStoreAvailability } from "../../domain/availability.js";
 
 /**
  * WP-2423 (guest-cart-503): one cart line's standing now. Only `Available` sells; `Indeterminate`
@@ -625,4 +626,101 @@ function requiredGroupOffNow(
     ),
   );
   return soldOut ? "SoldOut" : "Unavailable";
+}
+
+/**
+ * WP-2423 (rush-connection-hold, later rounds): whether the dishes a round's pre-check found on
+ * sale are still on sale, asked on the round's own write transaction. The full check (menu, dish,
+ * choices, availability, stock) runs before that transaction in its own read-only snapshots; this
+ * is the cheap re-check that the facts it read are still the ones in effect, so a round never
+ * holds its write connection while it opens a snapshot of its own (that second connection is
+ * refused in a rush). Three questions, a handful of statements per round:
+ * - the menu release in effect now is the one the pre-check read (`menuVersionReference`); a
+ *   newer listing answers `MenuChanged`;
+ * - every dish's Store availability now is Available (a sold-out or "stop offering" mark made since
+ *   answers `SoldOut` or `Unavailable`);
+ * - none of the chosen choices is off now (a choice marked sold out since answers `SoldOut`).
+ * Stock is not read here: the round's stock reservation in the same transaction refuses a dish its
+ * stock can no longer make. Brand-scoped reads switch `bop.store_id` off; the Store scope the
+ * caller's transaction had is set again before this returns, whatever the answer.
+ */
+export async function confirmCatalogSaleStillCurrent(
+  tx: FactsTransaction,
+  input: Readonly<{
+    brandReference: string;
+    storeReference: string;
+    menuReference: string;
+    channelCode: string;
+    orderTypeCode: string;
+    observedAt: string;
+    menuVersionReferences: readonly string[];
+    sellableReferences: readonly string[];
+    optionReferences: readonly string[];
+  }>,
+): Promise<"Current" | "MenuChanged" | "SoldOut" | "Unavailable"> {
+  const brand = parseCatalogReference(input.brandReference),
+    store = parseCatalogReference(input.storeReference);
+  const menuReference = parseCatalogReference(input.menuReference),
+    channelCode = parseCatalogCode(input.channelCode),
+    orderTypeCode = parseCatalogCode(input.orderTypeCode),
+    observedAt = parseCatalogInstant(input.observedAt);
+  const expected = [...new Set(input.menuVersionReferences.map(parseCatalogReference))];
+  const sellables = [...new Set(input.sellableReferences.map(parseCatalogReference))];
+  if (expected.length === 0 || sellables.length === 0)
+    throw new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE");
+  const shared: AvailabilityQueryTransactionRunner = { run: (action) => action(tx) };
+  const scope = { brandReference: brand, storeReference: store };
+  try {
+    const release = await createPostgresCurrentMenuReleaseStore(shared, scope).load({
+      menuReference,
+      channelCode,
+      orderTypeCode,
+      observedAt,
+    });
+    if (release === null || expected.some((v) => v !== release.menuVersionReference))
+      return "MenuChanged";
+    const rules = createPostgresAvailabilityQueryStore(shared, scope);
+    for (const sellableReference of sellables) {
+      const own = await rules.loadCurrentRules({
+        ...scope,
+        sellableReference,
+        channelCode,
+        orderTypeCode,
+        observedAt,
+      });
+      const resolved = resolveStoreAvailability({
+        ...scope,
+        sellableReference,
+        channelCode,
+        orderTypeCode,
+        at: observedAt,
+        rules: own,
+        safetyEvidence: [],
+      });
+      if (resolved.status !== "Available")
+        return own.some(
+          (rule) => rule.ruleReference === resolved.ruleReference && rule.reasonCode === "SOLD_OUT",
+        )
+          ? "SoldOut"
+          : "Unavailable";
+    }
+    const offNow =
+      input.optionReferences.length === 0
+        ? new Map<string, OptionOffNow>()
+        : await listOptionsOffNow(tx as never, {
+            ...scope,
+            channelCode,
+            orderTypeCode,
+            observedAt,
+            optionReferences: input.optionReferences,
+          });
+    if (offNow.size > 0)
+      return [...offNow.values()].includes("SoldOut") ? "SoldOut" : "Unavailable";
+    return "Current";
+  } finally {
+    await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+      brand,
+      store,
+    ]);
+  }
 }

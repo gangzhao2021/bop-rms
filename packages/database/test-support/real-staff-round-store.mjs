@@ -793,6 +793,7 @@ async function listRealMenu({
     const dishAllergens = createMerchantDishAllergens({ ...common, references: { next: op } });
     const optionSets = createMerchantOptionSets(common);
     const optionRecipes = createMerchantOptionRecipes(common);
+    const availability = createMerchantAvailability(common);
     const commands = createMerchantOneStoreDishes({
       products: createMerchantProducts(common),
       prices: menuPrices,
@@ -800,7 +801,7 @@ async function listRealMenu({
       menus,
       dishAllergens,
       optionRecipes,
-      availability: createMerchantAvailability(common),
+      availability,
       combos: createMerchantCombos(common),
       optionSets,
       now: () => new Date().toISOString(),
@@ -901,6 +902,20 @@ async function listRealMenu({
         optionRecipes,
         /** The Store's stock item (staff declared, no allergens), for a choice that adds it. */
         stockItemReference: stock.itemReference,
+        /**
+         * The Owner marks a dish sold out until further notice, or back in stock, on the
+         * availability page's own command.
+         */
+        markSoldOut: (skuReference) =>
+          availability.command({
+            ...session,
+            body: { action: "SoldOut", operationReference: op(), skuReference, until: "UntilBack" },
+          }),
+        markBackInStock: (skuReference) =>
+          availability.command({
+            ...session,
+            body: { action: "BackInStock", operationReference: op(), skuReference },
+          }),
         /** The connection the Owner's commands run on, for a test watching what waits on them. */
         backendPid: () => authoring.processID,
         close: () => authoring.end(),

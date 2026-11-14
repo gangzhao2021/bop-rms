@@ -3,8 +3,10 @@ import console from "node:console";
 import { GuestSessionService } from "../../packages/bop/identity/src/index.ts";
 import {
   CheckoutValidationError,
+  OrderCreationError,
   createConfiguredCheckoutValidationService,
 } from "../../packages/rms/ordering/src/index.ts";
+import { confirmCatalogSaleStillCurrent } from "../../packages/rms/catalog/src/index.ts";
 import { createPostgresPaymentTipSelectionStore } from "../../packages/rms/payment/src/index.ts";
 import { createCustomerCheckoutSessionAuthorization } from "../../apps/api/dist/customer-checkout-session-authorization.js";
 import { createCustomerAdditionalDiningHistoryAuthorization } from "../../apps/api/dist/customer-additional-dining-history-authorization.js";
@@ -110,6 +112,33 @@ export async function createInternalAdditionalSubmission(
         }),
       ),
   };
+  // The current check's error handling, before and inside the write transaction alike.
+  const reported = async (work) => {
+    try {
+      return await work();
+    } catch (error) {
+      // WP-2423 expected refusals (a dish ran out, came off the menu, the menu moved on): the
+      // batch store answers them as themselves and the payment's catch logs the one information
+      // line for the attempt; only an unexpected failure is logged here.
+      if (customerRoundRefusal(error) !== null) throw error;
+      const code = error?.code ?? error?.message;
+      console.error(
+        JSON.stringify({
+          event: "INTERNAL_ADDITIONAL_CURRENT_UNAVAILABLE",
+          code: /^[A-Z0-9_]{1,80}$/.test(code ?? "") ? code : "UNAVAILABLE",
+          frames:
+            String(error?.stack ?? "")
+              .match(
+                /(?:apps\/api\/dist|packages\/[a-z]+\/[a-z-]+\/src|\.local\/pilot-v4)\/[a-zA-Z0-9_./-]+:\d+:\d+/g,
+              )
+              ?.slice(0, 4) ?? [],
+        }),
+      );
+      throw error;
+    }
+  };
+  /** What this round's pre-check found current (per attempt), for the write's re-check. */
+  let prepared = null;
   const runtime = {
     ...scope,
     transactions: submissionTransactions,
@@ -135,25 +164,25 @@ export async function createInternalAdditionalSubmission(
     }),
     diningSealAudit: (record) =>
       options.clock.audit.create({ record, observedAt: record.paymentRequestedAt }),
-    validateCurrent: async (tx, snapshot, link, context) => {
-      try {
-        if (
-          snapshot.orderReference !== selected.orderReference ||
-          !(await access.authorizeInTransaction(tx, authority, now()))
-        )
+    // WP-2423 (rush-connection-hold, later rounds): the full current check of the round's dishes
+    // (menu, availability, choices, stock, prices) runs before the round's write transaction, each
+    // read in its own snapshot, as the table's opening round does. The write transaction then only
+    // confirms what it can fence: the guest, the Order, the Cart version, the windows, and that the
+    // menu release and the dishes' and choices' sale state the pre-check read are still in effect
+    // (Catalog's re-check on the write connection). Stock it does not re-read: the round's stock
+    // reservation in the same transaction refuses a dish that ran out after the pre-check.
+    prepareCurrent: async ({ snapshot, capacityLink: link }) =>
+      reported(async () => {
+        prepared = null;
+        if (snapshot.orderReference !== selected.orderReference)
           throw new Error("ADDITIONAL_CURRENT_DENIED");
-        const bound = { run: (work) => work(tx) },
-          identityOptions = diningCheckout.identity(tx),
-          identity = new GuestSessionService({
-            ...identityOptions.session,
-            now,
-            admission: { consume: async () => null },
-          });
         const currentCheckout = createInternalCheckout(
-          { ...resources, transactions: bound },
+          resources,
           {
-            entry: { session: identityOptions.session },
-            binding: () => checkout.accessOptions.binding(tx),
+            // Only the checkout ports are used (their reads each in a transaction of their own);
+            // the Cart's table binding is read as the guest's access reads it.
+            entry: { session: {} },
+            binding: (runner) => runner.run((tx) => checkout.accessOptions.binding(tx)),
           },
           catalogOptions,
         );
@@ -167,7 +196,16 @@ export async function createInternalAdditionalSubmission(
           ...ports,
           now,
           authorization: {
-            authorize: async () => ({ guestSession: await identity.authorize(credentials) }),
+            // The guest's session, in a transaction of its own (no connection is held meanwhile).
+            authorize: async () => ({
+              guestSession: await transactions.run((tx) =>
+                new GuestSessionService({
+                  ...diningCheckout.identity(tx).session,
+                  now,
+                  admission: { consume: async () => null },
+                }).authorize(credentials),
+              ),
+            }),
           },
           fulfillment: {
             validate: async (q) => {
@@ -232,29 +270,55 @@ export async function createInternalAdditionalSubmission(
         // cart prices again (the guest's plain "the menu changed"), not "unavailable, try again".
         if (JSON.stringify(lines(fresh)) !== JSON.stringify(lines(v)) || now() >= fresh.validUntil)
           throw new CheckoutValidationError("CHECKOUT_REQUOTE_REQUIRED");
+        prepared = {
+          submissionReference: snapshot.batch.submissionReference,
+          link,
+          validUntil: fresh.validUntil,
+          menuVersionReferences: fresh.catalogLines.map((line) => line.menuVersionReference),
+          sellableReferences: fresh.catalogLines.map((line) => line.sellableReference),
+        };
+      }),
+    validateCurrent: async (tx, snapshot, link, context) =>
+      reported(async () => {
+        const before = prepared;
+        if (
+          before === null ||
+          before.submissionReference !== snapshot.batch.submissionReference ||
+          snapshot.orderReference !== selected.orderReference ||
+          JSON.stringify(before.link) !== JSON.stringify(link) ||
+          context.cart.aggregateVersion !== v.cartVersion ||
+          context.cart.cartReference !== v.cartReference ||
+          !(await access.authorizeInTransaction(tx, authority, now()))
+        )
+          throw new Error("ADDITIONAL_CURRENT_DENIED");
+        if (now() >= link.validUntil) throw new Error("ADDITIONAL_CAPACITY_CHANGED");
+        // The checkout window lapsed between the pre-check and the write: the cart prices again.
+        if (now() >= before.validUntil)
+          throw new CheckoutValidationError("CHECKOUT_REQUOTE_REQUIRED");
         // The round's own time ahead of the server clock: no moment of service does that.
         if (context.observedAt > now()) throw new Error("ADDITIONAL_CLOCK_AHEAD");
-      } catch (error) {
-        // WP-2423 expected refusals (a dish ran out, came off the menu, the menu moved on): the
-        // batch store answers them as themselves and the payment's catch logs the one information
-        // line for the attempt; only an unexpected failure is logged here.
-        if (customerRoundRefusal(error) !== null) throw error;
-        const code = error?.code ?? error?.message;
-        console.error(
-          JSON.stringify({
-            event: "INTERNAL_ADDITIONAL_CURRENT_UNAVAILABLE",
-            code: /^[A-Z0-9_]{1,80}$/.test(code ?? "") ? code : "UNAVAILABLE",
-            frames:
-              String(error?.stack ?? "")
-                .match(
-                  /(?:apps\/api\/dist|packages\/[a-z]+\/[a-z-]+\/src|\.local\/pilot-v4)\/[a-zA-Z0-9_./-]+:\d+:\d+/g,
-                )
-                ?.slice(0, 4) ?? [],
-          }),
-        );
-        throw error;
-      }
-    },
+        // What the pre-check read is still in effect: the same menu release, every dish and every
+        // chosen choice still on sale (a staff sold-out mark made since is caught here).
+        const standing = await confirmCatalogSaleStillCurrent(tx, {
+          brandReference: scope.brandReference,
+          storeReference: scope.storeReference,
+          menuReference: catalogOptions.catalogScope.menuReference,
+          channelCode: catalogOptions.catalogScope.channelCode,
+          orderTypeCode: "DINE_IN",
+          observedAt: now(),
+          menuVersionReferences: before.menuVersionReferences,
+          sellableReferences: before.sellableReferences,
+          optionReferences: context.cart.items.flatMap((item) =>
+            item.optionSelections.map((option) => option.optionReference),
+          ),
+        });
+        if (standing === "MenuChanged")
+          throw new CheckoutValidationError("CHECKOUT_REQUOTE_REQUIRED");
+        // A dish or choice marked sold out (or no longer offered) since the pre-check: answered as
+        // stock running out at the write is (the guest's "a dish ran out", staff's "can't be
+        // sold now"; the round's dishes leave the Cart and nothing is ordered or charged).
+        if (standing !== "Current") throw new OrderCreationError("ORDER_CREATE_STOCK_SHORT");
+      }),
   };
   const tip = {
     preparation: diningCheckout.preparation,

@@ -32,7 +32,7 @@ vi.mock("@rms/payment", async (original) => ({
   createPostgresPaymentTipSelectionStore: mocks.tipStore,
 }));
 beforeEach(() => vi.resetAllMocks());
-function setup() {
+function setup(prepareCurrent?: (input: unknown) => Promise<void>) {
   const f = orderWriteFixture({ dineIn: true });
   const identity = identityFixture();
   const r = f.request.record;
@@ -124,6 +124,7 @@ function setup() {
     diningSealAudit: vi.fn(),
     validateCurrent: vi.fn(),
     eventReference: vi.fn(),
+    ...(prepareCurrent === undefined ? {} : { prepareCurrent }),
   });
   const input = {
     sessionCredential: identity.input.sessionCredential,
@@ -162,6 +163,33 @@ it("uses one transaction for stores and append and returns after commit", async 
   expect(mocks.append.mock.calls[0]?.[0].transaction).toBe(f.transaction);
   for (const store of [mocks.identityStore, mocks.diningStore, mocks.tipStore])
     expect(await store.mock.calls[0]?.[0].run(async (tx: unknown) => tx)).toBe(f.transaction);
+});
+/**
+ * WP-2423 (rush-connection-hold, later rounds): the round's own-snapshot current checks run before
+ * the write transaction takes its connection, never inside it; a refusal there starts no write.
+ */
+it("runs the round's pre-check before the write transaction, with the round's facts", async () => {
+  const seen: unknown[] = [];
+  const f = setup(async (input) => {
+    seen.push(input);
+    f.events.push("precheck");
+  });
+  expect((await f.runtime.submit(f.input)).status).toBe("Created");
+  expect(f.events).toEqual(["precheck", "begin", "authorize", "append", "authorize", "commit"]);
+  expect(seen).toMatchObject([
+    {
+      snapshot: { orderReference: f.input.snapshot.orderReference },
+      capacityLink: { cartReference: f.input.capacityLink.cartReference },
+    },
+  ]);
+});
+it("a refused pre-check starts no write transaction", async () => {
+  const f = setup(async () => {
+    throw new Error("synthetic refusal");
+  });
+  await expect(f.runtime.submit(f.input)).rejects.toThrow("synthetic refusal");
+  expect(f.events).toEqual([]);
+  expect(mocks.append).not.toHaveBeenCalled();
 });
 it("rolls back when final authorization is revoked", async () => {
   const f = setup();

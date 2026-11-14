@@ -70,6 +70,7 @@ export {
   createPostgresCatalogSelectionService,
   createPostgresCatalogOrderSnapshotSource,
   createPostgresCatalogLineStandingSource,
+  confirmCatalogSaleStillCurrent,
   type CatalogLineStanding,
 } from "./infrastructure/persistence/current-selection-facts-store.js";
 

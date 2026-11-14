@@ -33,6 +33,19 @@ export interface CustomerAdditionalDiningSubmissionRuntimeOptions extends Omit<
    * always constructed by this runtime on that same transaction.
    */
   identity(transaction: ConsumerTransaction): CustomerDiningCheckoutCompositionOptions;
+  /**
+   * WP-2423 (rush-connection-hold, later rounds): the round's current checks that read the menu,
+   * availability and stock in snapshots of their own, run before the round's write transaction
+   * takes its connection (each attempt again). `validateCurrent` then only confirms, on the write
+   * transaction, that what they read is still in effect; the stock reservation there refuses a dish
+   * that ran out in between. A composition without it does all its checks in `validateCurrent`.
+   */
+  prepareCurrent?(
+    input: Readonly<{
+      snapshot: ReturnType<typeof parseAdditionalDiningBatchSnapshot>;
+      capacityLink: ReturnType<typeof parseOrderCapacityLink>;
+    }>,
+  ): Promise<void>;
 }
 
 /** Internal server entry. Resolves only after runner commits; no route,
@@ -65,8 +78,10 @@ export function createCustomerAdditionalDiningSubmissionRuntime(
         snapshot.storeReference !== options.storeReference
       )
         throw new AdditionalDiningBatchStoreError();
-      return retryTransactionConflict(() =>
-        options.transactions.run(async (transaction) => {
+      return retryTransactionConflict(async () => {
+        // Before the write transaction: it holds no connection while these open their own.
+        await options.prepareCurrent?.({ snapshot, capacityLink });
+        return options.transactions.run(async (transaction) => {
           // WP-2423 lock order: the Order's disposition fence comes before the guest identity
           // check below (acceptance and payment outcomes take the fence, then lock the Dining
           // table row FOR UPDATE). Since M68 that check reads the table row without a lock.
@@ -129,8 +144,8 @@ export function createCustomerAdditionalDiningSubmissionRuntime(
           if (!(await authorize(transaction, snapshot)))
             throw new AdditionalDiningBatchStoreError();
           return result;
-        }),
-      );
+        });
+      });
     },
   });
 
