@@ -45,3 +45,26 @@ test("@production a staff page reloaded while offline shows the steps and the la
   await context.setOffline(false);
   await expect(page.getByRole("heading", { name: "While the connection is down" })).toHaveCount(0);
 });
+
+// b18: with the offline page gone from the cache (cleared storage, an unfinished install) the
+// tablet still shows what to do, never a blank page.
+test("@production a staff page reloaded offline without its cached offline page still says what to do", async ({
+  page,
+  context,
+}) => {
+  await page.goto("/operations/dining");
+  await page.evaluate(async () => {
+    await navigator.serviceWorker.ready;
+  });
+  await page.waitForFunction(() => navigator.serviceWorker.controller !== null);
+  await page.evaluate(async () => {
+    for (const name of await caches.keys()) await caches.delete(name);
+  });
+  await context.setOffline(true);
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "无法连接门店系统" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "The store system can't be reached" }),
+  ).toBeVisible();
+  await context.setOffline(false);
+});
